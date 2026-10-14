@@ -10,6 +10,7 @@ pub mod notify;
 pub mod platform;
 pub mod playlists;
 pub mod plex;
+pub mod remote;
 pub mod settings;
 pub mod tracking;
 pub mod updates;
@@ -215,6 +216,31 @@ pub fn run() {
             likes::spawn(likes.clone());
             app.manage(likes);
 
+            // Listen on: other Plex players, and Platter as one (setting).
+            let remote = remote::RemoteService::new(
+                Arc::new(remote::commands::PlexRemoteEnv(plex.clone())),
+                Arc::new(player.clone()),
+                Arc::new(plex::state::TauriSink(app.handle().clone())),
+                plex.identity(),
+                live.remote.clone(),
+                remote::RemoteConfig::default(),
+            )?;
+            {
+                let id = plex.identity();
+                remote::commands::spawn_target(
+                    &remote,
+                    remote::target::TargetInfo {
+                        client_id: id.client_id.clone(),
+                        name: id.device_name.clone(),
+                        product: id.product.clone(),
+                        version: id.version.clone(),
+                        platform: id.platform.clone(),
+                        platform_version: id.platform_version.clone(),
+                    },
+                );
+            }
+            app.manage(remote);
+
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
             monitor::files::spawn(plex.clone(), db.clone(), player.clone());
@@ -270,6 +296,11 @@ pub fn run() {
             likes::liked_ids,
             likes::liked_page,
             likes::playlists_with_track,
+            remote::commands::remote_players,
+            remote::commands::remote_state,
+            remote::commands::remote_move,
+            remote::commands::remote_return,
+            remote::commands::remote_command,
             db::commands::search,
             db::commands::search_completions,
             db::commands::search_recents,

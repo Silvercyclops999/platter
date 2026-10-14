@@ -321,6 +321,17 @@ impl PlexState {
         s.current.as_ref().map(|c| c.server.machine_id.clone())
     }
 
+    /// The signed-in account's token (plex.tv calls such as the player
+    /// list). Never logged or shown.
+    pub async fn account_token(&self) -> Option<Token> {
+        self.inner.session.read().await.account.clone()
+    }
+
+    /// The plex.tv client (same identity headers as the server client).
+    pub fn plex_tv(&self) -> &PlexTv {
+        &self.inner.tv
+    }
+
     /// Like `client`, but first waits (up to `wait`) for the saved session to
     /// finish restoring at startup, so early requests such as artwork don't
     /// fail just because they arrived before the keychain was read.

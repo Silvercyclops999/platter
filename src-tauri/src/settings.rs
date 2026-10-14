@@ -179,6 +179,13 @@ pub struct Settings {
     pub liked_means: LikedMeans,
     /// When track rows show the like control.
     pub like_control_rows: LikeControlRows,
+    /// List Plex players in the device picker (Listen on).
+    pub show_plex_players: bool,
+    /// Answer as a Plex player so other Plex apps can play here (this
+    /// device only; opens a local port).
+    pub act_as_plex_player: bool,
+    /// Moving playback to or from a player stops it on the device it leaves.
+    pub move_stops_old_device: bool,
 }
 
 impl Default for Settings {
@@ -218,6 +225,9 @@ impl Default for Settings {
             info_audiodb: false,
             liked_means: LikedMeans::Five,
             like_control_rows: LikeControlRows::Hover,
+            show_plex_players: true,
+            act_as_plex_player: false,
+            move_stops_old_device: true,
         }
     }
 }
@@ -259,6 +269,9 @@ pub struct SettingsPatch {
     pub info_audiodb: Option<bool>,
     pub liked_means: Option<LikedMeans>,
     pub like_control_rows: Option<LikeControlRows>,
+    pub show_plex_players: Option<bool>,
+    pub act_as_plex_player: Option<bool>,
+    pub move_stops_old_device: Option<bool>,
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -306,6 +319,9 @@ impl Settings {
         set(&mut self.info_audiodb, p.info_audiodb);
         set(&mut self.liked_means, p.liked_means);
         set(&mut self.like_control_rows, p.like_control_rows);
+        set(&mut self.show_plex_players, p.show_plex_players);
+        set(&mut self.act_as_plex_player, p.act_as_plex_player);
+        set(&mut self.move_stops_old_device, p.move_stops_old_device);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -373,6 +389,8 @@ pub struct Live {
     pub notify_track_change: Arc<AtomicBool>,
     /// Which artist info sources are on.
     pub artist_info: crate::artistinfo::Switches,
+    /// Listen on: players in the picker, Platter as a player, stop on move.
+    pub remote: crate::remote::RemoteSwitches,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -391,6 +409,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         ai.set(Src::Audiodb, s.info_audiodb);
     }
     live.platform.set(s.platform());
+    live.remote.set(s.show_plex_players, s.move_stops_old_device, s.act_as_plex_player);
     let cap = s.art_cache_bytes();
     let old = live.art_cap.swap(cap, Ordering::Relaxed);
     if let Some(art) = &live.art
@@ -665,6 +684,9 @@ mod tests {
             info_audiodb: Some(true),
             liked_means: Some(LikedMeans::FourUp),
             like_control_rows: Some(LikeControlRows::Always),
+            show_plex_players: Some(false),
+            act_as_plex_player: Some(true),
+            move_stops_old_device: Some(false),
         })
         .await
         .unwrap();
@@ -695,6 +717,8 @@ mod tests {
         assert!(s.report_to_plex);
         assert!(!s.info_wikipedia && s.info_lastfm && s.info_fanart && s.info_audiodb);
         assert!(fresh.artist_info.get(crate::artistinfo::InfoSource::Lastfm));
+        assert!(!s.show_plex_players && s.act_as_plex_player && !s.move_stops_old_device);
+        assert!(!fresh.remote.show_players() && *fresh.remote.allow_casting.borrow());
         assert_eq!(s.volume, 0.25);
         assert_eq!(s.shuffle_style, ShuffleStyle::Standard);
         assert_eq!((s.quality_home, s.quality_away), (StreamQuality::Kbps256, StreamQuality::Original));
@@ -835,5 +859,26 @@ mod tests {
         assert_eq!(cache.size(), 0);
         assert!(cache.lookup("/a", 64, 64).unwrap().is_none());
         assert_eq!(clear_art(&cache).unwrap(), 0);
+    }
+
+    #[test]
+    fn listen_on_settings_default_and_reach_the_switches() {
+        let s = Settings::default();
+        assert!(s.show_plex_players && !s.act_as_plex_player && s.move_stops_old_device);
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut rx = live.remote.allow_casting.subscribe();
+        let mut s = load(&db);
+        s.apply(&SettingsPatch {
+            show_plex_players: Some(false),
+            act_as_plex_player: Some(true),
+            move_stops_old_device: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        publish(&s, &live, &db);
+        assert!(!live.remote.show_players() && !live.remote.stop_old());
+        assert!(rx.has_changed().unwrap());
+        assert!(*rx.borrow_and_update());
     }
 }
