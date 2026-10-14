@@ -1,35 +1,28 @@
-import { Maximize, MicVocal, Minimize, PenLine, X } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import { Disc3, Maximize, MicVocal, Minimize, PenLine, UserRound, X } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { Art } from "../components/Art";
 import { ArtistLinks, TextLink } from "../components/ArtistLinks";
 import { IconButton } from "../components/Button";
-import { useLyricsBackground } from "../pages/LyricsPage";
-import { fullWindow, FULL_WINDOW_WIDE, useFullWindow } from "../stores/fullWindow";
+import type { Track } from "../lib/types";
+import { fullWindow, useFullWindow, type FullWindowMode } from "../stores/fullWindow";
 import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
 import { nav, useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
-import { timedLines, useLyrics } from "./lyrics";
-import { LyricsView } from "./LyricsView";
-import { PlayControls, SeekBar, SEEK_KEY_STEP, Volume } from "./PlayerBar";
+import { useLyrics } from "./lyrics";
+import { LyricsPane, useLyricsBackground } from "./LyricsView";
+import { useNowPlayingDetails } from "./nowPlaying";
+import { SEEK_KEY_STEP } from "./PlayerBar";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
 import "./full-window.css";
 
-/** Controls fade after this long without the mouse moving or a key. */
+/** The header fades after this long without the mouse moving or a key. */
 export const CONTROLS_HIDE_MS = 3_000;
 /** Requested size of the big cover. */
 const COVER_ART = 640;
-
-function useWindowWidth() {
-  const [w, setW] = useState(() => window.innerWidth);
-  useEffect(() => {
-    const on = () => setW(window.innerWidth);
-    window.addEventListener("resize", on);
-    return () => window.removeEventListener("resize", on);
-  }, []);
-  return w;
-}
+/** Requested size of the artist image. */
+const ARTIST_ART = 1280;
 
 /** True after `ms` without mouse movement, a press or a key (never while `enabled` is off). */
 function useIdle(enabled: boolean, ms: number): boolean {
@@ -67,9 +60,9 @@ const inButton = (t: EventTarget | null) => t instanceof Element && !!t.closest(
 const modified = (e: KeyboardEvent) => e.ctrlKey || e.metaKey || e.altKey || e.shiftKey;
 
 /**
- * Full-window keys, ahead of the app's own shortcuts: Space play/pause,
- * ←/→ seek 5 s, ↑/↓ volume, L lyrics, F OS full screen, Esc leave (full
- * screen first).
+ * Keys while the view is open, ahead of the app's own shortcuts: Space
+ * play/pause, ←/→ seek 5 s, ↑/↓ volume, L lyrics (like the lyrics button),
+ * F OS full screen, Esc leave (full screen first).
  */
 function onFullWindowKey(e: KeyboardEvent) {
   if (e.defaultPrevented || useUi.getState().menu || document.querySelector("dialog[open], .dialog-backdrop")) return;
@@ -90,15 +83,45 @@ function onFullWindowKey(e: KeyboardEvent) {
   }
 }
 
+/** Title, artists and album; links go to their pages. */
+function Meta({ track, className = "" }: { track: Track; className?: string }) {
+  return (
+    <div className={`fw__meta ${className}`}>
+      <div className="fw__title truncate">
+        <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.title}</TextLink>
+      </div>
+      <ArtistLinks track={track} className="fw__artists truncate" />
+      <div className="fw__album truncate">
+        <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.albumTitle}</TextLink>
+      </div>
+    </div>
+  );
+}
+
+function ModeToggle({ mode, current, label, off, offTip, icon }: { mode: FullWindowMode; current: FullWindowMode; label: string; off?: boolean; offTip?: string; icon: ReactNode }) {
+  const on = mode === current;
+  return (
+    <IconButton
+      label={label}
+      tooltip={off && !on ? offTip : mode === "lyrics" ? `${label} (L)` : label}
+      tooltipPlacement="bottom"
+      pressed={on}
+      softDisabled={off && !on}
+      icon={icon}
+      onClick={() => fullWindow.setMode(mode)}
+    />
+  );
+}
+
 function FullWindowView() {
   const track = usePlayer((s) => s.state?.track);
   const ctx = usePlayer((s) => s.state?.queue.context);
-  const { lyrics } = useLyrics(track?.id);
-  const lyricsOn = useFullWindow((s) => s.lyrics);
+  const { lyrics, loading: lyricsLoading } = useLyrics(track?.id);
+  const { details } = useNowPlayingDetails(track?.id);
+  const mode = useFullWindow((s) => s.mode);
   const osFull = useFullWindow((s) => s.osFullscreen);
   const hideControls = useSettings((s) => s.settings?.fullWindowHideControls ?? true);
   const idle = useIdle(hideControls, CONTROLS_HIDE_MS);
-  const wide = useWindowWidth() >= FULL_WINDOW_WIDE;
   const tint = useLyricsBackground(track?.thumb);
   const root = useRef<HTMLDivElement>(null);
 
@@ -123,25 +146,66 @@ function FullWindowView() {
   useEffect(() => useRouter.subscribe((s, p) => s.index !== p.index && void fullWindow.close()), []);
 
   const hasLyrics = !!lyrics;
+  const noLyrics = !!track && !lyricsLoading && !hasLyrics;
   const ownLyrics = useLyricsEditor((s) => !!track && s.ownIds.has(track.id));
-  const showAdd = useSettings((s) => s.settings?.lyricsShowAdd ?? true);
-  const showLyrics = hasLyrics && lyricsOn;
-  // Narrow windows: lyrics take the cover's place, with a small cover beside the title.
-  const compact = showLyrics && !wide;
+  const artistPhoto = details?.artist ? details.artist.art || details.artist.thumb : null;
+  // A song whose artist has no image shows its artwork; the mode stays for the next song.
+  const shown: FullWindowMode = mode === "artist" && !artistPhoto ? "artwork" : mode;
 
   const onDoubleClick = (e: MouseEvent) => {
     const t = e.target as Element;
-    if (t.closest("button, a, [role=slider], .lyrics, .fw__controls, .fw__top")) return;
+    if (t.closest("button, a, [role=slider], .lyrics, .fw__top, .lyrics-page__empty-wrap")) return;
     void fullWindow.close();
   };
+
+  let stage;
+  if (!track) stage = <p className="fw__empty">Nothing playing.</p>;
+  else if (shown === "lyrics")
+    stage = (
+      <div className="fw__lyrics-mode" key={track.id}>
+        <div className="fw__now fw__now--row">
+          <div className="fw__cover">
+            <Art path={track.thumb} fluid requestSize={COVER_ART} />
+          </div>
+          <Meta track={track} />
+        </div>
+        <div className="fw__lyrics">
+          <LyricsPane />
+        </div>
+      </div>
+    );
+  else if (shown === "artist" && artistPhoto)
+    stage = (
+      <div className="fw__artist" key={`${track.id}-artist`}>
+        <div className="fw__artist-photo">
+          <Art path={artistPhoto} fluid requestSize={ARTIST_ART} kind="artist" />
+        </div>
+        <div className="fw__artist-meta">
+          {details?.artist && (
+            <TextLink className="fw__artist-name truncate" onActivate={() => nav.go({ name: "artist", id: details.artist!.id })}>
+              {details.artist.title}
+            </TextLink>
+          )}
+          <Meta track={track} />
+        </div>
+      </div>
+    );
+  else
+    stage = (
+      <div className="fw__now" key={track.id}>
+        <div className="fw__cover">
+          <Art path={track.thumb} fluid requestSize={COVER_ART} />
+        </div>
+        <Meta track={track} />
+      </div>
+    );
 
   return (
     <div
       ref={root}
-      className={`fw ${idle ? "is-idle" : ""} ${showLyrics ? "has-lyrics" : ""} ${compact ? "is-compact" : ""} ${wide ? "is-wide" : ""}`}
+      className={`fw fw--${shown} ${idle ? "is-idle" : ""}`}
       role="dialog"
-      aria-modal="true"
-      aria-label="Now playing, full window"
+      aria-label="Expanded now playing"
       tabIndex={-1}
       style={{ "--fw-tint": tint } as CSSProperties}
       onDoubleClick={onDoubleClick}
@@ -154,23 +218,20 @@ function FullWindowView() {
       <header className="fw__top fw__chrome">
         <span className="fw__context truncate">{ctx?.title || track?.albumTitle || "Now playing"}</span>
         <div className="fw__actions">
-          {track && (ownLyrics || (!hasLyrics && showAdd)) && (
+          {/* Add lyrics lives in the empty state; the pencil edits lyrics you wrote. */}
+          {track && shown === "lyrics" && ownLyrics && (
             <IconButton
-              label={ownLyrics ? "Edit lyrics" : "Add lyrics"}
+              label="Edit lyrics"
               tooltipPlacement="bottom"
               icon={<PenLine size={18} />}
               onClick={() => openLyricsEditor(track)}
             />
           )}
-          <IconButton
-            label="Lyrics"
-            tooltip={hasLyrics ? "Lyrics (L)" : "No lyrics for this song"}
-            tooltipPlacement="bottom"
-            pressed={showLyrics}
-            softDisabled={!hasLyrics}
-            icon={<MicVocal size={18} />}
-            onClick={() => fullWindow.toggleLyrics()}
-          />
+          <div className="fw__modes" role="group" aria-label="Show">
+            <ModeToggle mode="artwork" current={mode} label="Artwork" icon={<Disc3 size={18} />} />
+            <ModeToggle mode="artist" current={mode} label="Artist image" off={!artistPhoto} offTip="No artist image" icon={<UserRound size={18} />} />
+            <ModeToggle mode="lyrics" current={mode} label="Lyrics" off={noLyrics || !track} offTip="No lyrics for this song" icon={<MicVocal size={18} />} />
+          </div>
           <IconButton
             label={osFull ? "Exit full screen" : "Enter full screen"}
             tooltip={`${osFull ? "Exit full screen" : "Enter full screen"} (F)`}
@@ -179,7 +240,7 @@ function FullWindowView() {
             onClick={() => void fullWindow.toggleOsFullscreen()}
           />
           <IconButton
-            label="Close full-window view"
+            label="Close expanded view"
             tooltip="Close (Esc)"
             tooltipPlacement="bottom"
             icon={<X size={20} />}
@@ -188,49 +249,16 @@ function FullWindowView() {
         </div>
       </header>
 
-      <div className="fw__stage">
-        {track ? (
-          <>
-            <div className="fw__now" key={track.id}>
-              <div className="fw__cover">
-                <Art path={track.thumb} fluid requestSize={COVER_ART} />
-              </div>
-              <div className="fw__meta">
-                <div className="fw__title truncate">
-                  <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.title}</TextLink>
-                </div>
-                <ArtistLinks track={track} className="fw__artists truncate" />
-                <div className="fw__album truncate">
-                  <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.albumTitle}</TextLink>
-                </div>
-              </div>
-            </div>
-            {showLyrics && lyrics && (
-              <div className={`fw__lyrics ${timedLines(lyrics) ? "" : "is-plain"}`}>
-                <LyricsView lyrics={lyrics} size="full" track={track} />
-              </div>
-            )}
-          </>
-        ) : (
-          <p className="fw__empty">Nothing playing.</p>
-        )}
-      </div>
-
-      <footer className="fw__controls fw__chrome">
-        <SeekBar />
-        <div className="fw__buttons">
-          <div className="fw__spacer" />
-          <PlayControls />
-          <div className="fw__volume">
-            <Volume />
-          </div>
-        </div>
-      </footer>
+      <div className="fw__stage">{stage}</div>
     </div>
   );
 }
 
-/** Large art over a blurred, tinted copy, with title, controls and lyrics; covers the whole window. */
+/**
+ * The expanded now-playing view: fills the window above the player bar
+ * (the sidebar and panels go under it) with the artwork, the artist's image
+ * or the lyrics, picked in its header.
+ */
 export function FullWindow() {
   const open = useFullWindow((s) => s.open);
   return open ? <FullWindowView /> : null;

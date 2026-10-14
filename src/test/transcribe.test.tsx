@@ -12,7 +12,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { mockLyricsKind } from "../lib/mock/details";
 import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
-import { LyricsPage } from "../pages/LyricsPage";
+import { LyricsPane } from "../shell/LyricsView";
 import { SettingsPage } from "../pages/SettingsPage";
 import { batchNote, transcribeNote } from "../pages/TranscribeSettings";
 import { clearLyricsCache, lyricsSourceLabel } from "../shell/lyrics";
@@ -132,7 +132,7 @@ describe("Lyrics view", () => {
   function page() {
     return render(
       <>
-        <LyricsPage />
+        <LyricsPane />
         <LyricsEditorHost />
       </>,
     );

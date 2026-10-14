@@ -23,6 +23,7 @@ import type {
   UpdateInfo,
 } from "../lib/types";
 import { useApp } from "../stores/app";
+import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { reloadLikes } from "../stores/likes";
@@ -401,6 +402,7 @@ function matches(row: RowDef, q: string): boolean {
 export function SettingsPage() {
   const s = useSettings((x) => x.settings);
   const [sidebarArt, setSidebarArt] = useSidebarArt();
+  const rememberMode = useFullWindow((x) => x.prefs.remember);
   const auth = useApp((x) => x.auth);
   const healthConn = useApp((x) => x.health?.connection);
   const syncing = useApp((x) => !!x.sync && x.sync.phase !== "idle");
@@ -1090,7 +1092,8 @@ export function SettingsPage() {
       key: "lyricsMode",
       section: "Appearance",
       title: "Lyrics",
-      description: "Auto-show opens the lyrics view when a song with synced lyrics starts while now playing is open. Off opens it only from the lyrics button.",
+      description:
+        "Auto-show opens the expanded view on lyrics when a song with synced lyrics starts while now playing is open. Off shows lyrics only from the lyrics button.",
       control: (ids) => select(s, (x) => x.lyricsMode, LYRICS_MODE, ids, (v) => updateSettings({ lyricsMode: v })),
     },
     {
@@ -1119,9 +1122,19 @@ export function SettingsPage() {
     {
       key: "fullWindowHideControls",
       section: "Appearance",
-      title: "Full-window view hides controls",
-      description: "After 3 seconds without moving the mouse, the full-window view fades its controls. Moving the mouse or pressing a key brings them back.",
+      title: "Expanded view hides controls",
+      description: "After 3 seconds without moving the mouse, the expanded now-playing view fades its header. Moving the mouse or pressing a key brings it back.",
       control: (ids) => toggle(s, "fullWindowHideControls", ids),
+    },
+    {
+      key: "fullWindowRememberMode",
+      section: "Appearance",
+      title: "Remember the expanded view's mode",
+      description:
+        "The expand button opens the expanded view showing what it showed last: artwork, the artist's image or lyrics. Off always starts on the artwork. This device only.",
+      control: (ids) => (
+        <Switch checked={rememberMode} onChange={fullWindow.setRemember} labelledBy={ids.title} describedBy={ids.desc} />
+      ),
     },
     // Library: tags read from the files
     {

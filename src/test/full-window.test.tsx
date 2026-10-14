@@ -1,6 +1,7 @@
 /**
- * The full-window now-playing view: ways in and out (including OS full
- * screen and its Esc order), the controls fading, keys, and the lyrics side.
+ * The expanded now-playing view: ways in and out (including OS full screen
+ * and its Esc order), the header fading, keys, and its modes (artwork, the
+ * artist's image, lyrics).
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,9 +11,11 @@ import { mockLyricsKind } from "../lib/mock/details";
 import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { CONTROLS_HIDE_MS, FullWindow } from "../shell/FullWindow";
 import { clearLyricsCache } from "../shell/lyrics";
+import { UNSYNCED_NOTE } from "../shell/LyricsView";
+import { clearNowPlayingCache } from "../shell/nowPlaying";
 import { PlayerBar } from "../shell/PlayerBar";
 import { VOLUME_KEY_STEP } from "../shell/useShortcuts";
-import { fullWindow, setOsFullscreenImpl, useFullWindow } from "../stores/fullWindow";
+import { FULL_WINDOW_PREFS_DEFAULT, fullWindow, setOsFullscreenImpl, useFullWindow } from "../stores/fullWindow";
 import { player, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
@@ -21,6 +24,7 @@ import { useUi } from "../stores/ui";
 const mock = backend as MockBackend;
 const byKind = (k: ReturnType<typeof mockLyricsKind>) => mock.fx.tracks.find((t) => mockLyricsKind(t.id) === k && t.durationMs > 120_000)!;
 const synced = byKind("words");
+const plain = byKind("plain");
 const none = byKind("none");
 
 function play(track: Track, positionMs = 60_000) {
@@ -42,19 +46,21 @@ function play(track: Track, positionMs = 60_000) {
 /** A fake window full screen. */
 const os = { on: false, set: vi.fn(async (v: boolean) => void (os.on = v)), get: async () => os.on };
 
-const view = () => screen.queryByRole("dialog", { name: "Now playing, full window" });
+const view = () => screen.queryByRole("dialog", { name: "Expanded now playing" });
 const key = (k: string, target: Element | Window = window) => act(() => void fireEvent.keyDown(target, { key: k }));
+const toggle = (name: string) => screen.getByRole("group", { name: "Show" }).querySelector<HTMLElement>(`[aria-label="${name}"]`)!;
 
 beforeEach(() => {
   clearLyricsCache();
+  clearNowPlayingCache();
+  localStorage.clear();
   os.on = false;
   os.set.mockClear();
   setOsFullscreenImpl(os);
-  useFullWindow.setState({ open: false, lyrics: true, osFullscreen: false });
+  useFullWindow.setState({ open: false, mode: "artwork", osFullscreen: false, prefs: { ...FULL_WINDOW_PREFS_DEFAULT } });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useUi.setState({ nowPlayingOpen: false, nowPlayingExpanded: false, queueOpen: false, menu: null });
   useRouter.getState().reset();
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
   play(synced);
 });
 afterEach(() => {
@@ -63,7 +69,7 @@ afterEach(() => {
 });
 
 describe("opening and closing", () => {
-  it("opens from the expand button at the far right of the player bar", () => {
+  it("opens from the expand button at the far right of the player bar, which closes it again", async () => {
     render(
       <>
         <PlayerBar />
@@ -72,10 +78,27 @@ describe("opening and closing", () => {
     );
     const extras = document.querySelector(".player-bar__extras")!;
     const buttons = extras.querySelectorAll("button");
-    expect(buttons[buttons.length - 1]).toHaveAccessibleName("Full-window view");
-    fireEvent.click(screen.getByRole("button", { name: "Full-window view" }));
+    const expand = screen.getByRole("button", { name: "Expanded view" });
+    expect(buttons[buttons.length - 1]).toBe(expand);
+    fireEvent.click(expand);
     expect(view()).toBeInTheDocument();
     expect(view()).toHaveFocus();
+    expect(view()).toHaveClass("fw--artwork");
+    expect(expand).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(expand);
+    await waitFor(() => expect(view()).toBeNull());
+  });
+
+  it("leaves the player bar in view", () => {
+    render(
+      <>
+        <PlayerBar />
+        <FullWindow />
+      </>,
+    );
+    act(() => fullWindow.open());
+    expect(view()!.contains(document.querySelector(".player-bar"))).toBe(false);
+    expect(view()!.querySelector("[role=slider]")).toBeNull();
   });
 
   it("opens on a double-click on the player bar cover, leaving the now-playing panel as it was", () => {
@@ -100,7 +123,7 @@ describe("opening and closing", () => {
     await waitFor(() => expect(view()).toBeNull());
 
     act(() => fullWindow.open());
-    fireEvent.click(screen.getByRole("button", { name: "Close full-window view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close expanded view" }));
     await waitFor(() => expect(view()).toBeNull());
 
     act(() => fullWindow.open());
@@ -130,7 +153,7 @@ describe("opening and closing", () => {
     act(() => fullWindow.open());
     key("f");
     await waitFor(() => expect(os.on).toBe(true));
-    fireEvent.click(screen.getByRole("button", { name: "Close full-window view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close expanded view" }));
     await waitFor(() => expect(view()).toBeNull());
     expect(os.on).toBe(false);
   });
@@ -143,8 +166,8 @@ describe("opening and closing", () => {
   });
 });
 
-describe("controls fade", () => {
-  it("after 3 s without movement, and come back on movement or a key", () => {
+describe("header fade", () => {
+  it("after 3 s without movement, and comes back on movement or a key", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     render(<FullWindow />);
     act(() => fullWindow.open());
@@ -172,12 +195,12 @@ describe("controls fade", () => {
 
 describe("keys", () => {
   it("Space plays or pauses, arrows seek and change volume", () => {
-    const toggle = vi.spyOn(backend, "playToggle").mockResolvedValue();
+    const playToggle = vi.spyOn(backend, "playToggle").mockResolvedValue();
     const seek = vi.spyOn(backend, "playSeek").mockResolvedValue();
     render(<FullWindow />);
     act(() => fullWindow.open());
     key(" ", view()!);
-    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(playToggle).toHaveBeenCalledTimes(1);
     key("ArrowRight", view()!);
     expect(seek).toHaveBeenLastCalledWith(65_000);
     key("ArrowLeft", view()!);
@@ -189,48 +212,82 @@ describe("keys", () => {
     expect(nudge).toHaveBeenLastCalledWith(-VOLUME_KEY_STEP);
   });
 
-  it("L toggles the lyrics side and F toggles OS full screen", async () => {
+  it("L works like the lyrics button and F toggles OS full screen", async () => {
     render(<FullWindow />);
     act(() => fullWindow.open());
-    await waitFor(() => expect(document.querySelector(".fw__lyrics")).not.toBeNull());
     key("l");
-    expect(document.querySelector(".fw__lyrics")).toBeNull();
-    key("L");
-    expect(document.querySelector(".fw__lyrics")).not.toBeNull();
+    expect(useFullWindow.getState().mode).toBe("lyrics");
+    await waitFor(() => expect(document.querySelector(".fw__lyrics .lyrics")).not.toBeNull());
     key("f");
     await waitFor(() => expect(useFullWindow.getState().osFullscreen).toBe(true));
     key("F");
     await waitFor(() => expect(useFullWindow.getState().osFullscreen).toBe(false));
+    key("L");
+    await waitFor(() => expect(view()).toBeNull());
   });
 });
 
-describe("lyrics side", () => {
-  it("sits beside the cover on wide windows", async () => {
+describe("modes", () => {
+  it("the header toggles pick artwork, the artist's image or lyrics, the active one pressed", async () => {
     render(<FullWindow />);
     act(() => fullWindow.open());
-    await waitFor(() => expect(document.querySelector(".fw__lyrics")).not.toBeNull());
-    expect(view()).toHaveClass("is-wide", "has-lyrics");
-    expect(view()).not.toHaveClass("is-compact");
-    expect(screen.getByRole("button", { name: "Lyrics" })).toHaveAttribute("aria-pressed", "true");
+    expect(toggle("Artwork")).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelector(".fw__now .fw__cover")).not.toBeNull();
+
+    await waitFor(() => expect(toggle("Artist image")).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(toggle("Artist image"));
+    expect(view()).toHaveClass("fw--artist");
+    expect(toggle("Artist image")).toHaveAttribute("aria-pressed", "true");
+    expect(toggle("Artwork")).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelector(".fw__artist-photo")).not.toBeNull();
+    expect(screen.getByText(synced.artistTitle, { selector: ".fw__artist-name, .fw__artist-name *" })).toBeInTheDocument();
+
+    fireEvent.click(toggle("Lyrics"));
+    expect(view()).toHaveClass("fw--lyrics");
+    await waitFor(() => expect(screen.getByRole("button", { current: true })).toBeInTheDocument());
   });
 
-  it("starts hidden on narrow windows and swaps in for the cover", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+  it("an artist with no image: the toggle is off and the artwork shows", async () => {
+    vi.spyOn(backend, "nowPlayingDetails").mockResolvedValue({ trackId: synced.id, artist: { id: synced.artistId, title: synced.artistTitle }, credits: [] });
+    act(() => useFullWindow.setState({ prefs: { remember: true, mode: "artist" } }));
     render(<FullWindow />);
     act(() => fullWindow.open());
-    await act(() => new Promise((r) => setTimeout(r, 0)));
-    expect(document.querySelector(".fw__lyrics")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Lyrics" }));
-    await waitFor(() => expect(view()).toHaveClass("is-compact"));
+    await waitFor(() => expect(toggle("Artist image")).toHaveAttribute("aria-pressed", "true"));
+    expect(view()).toHaveClass("fw--artwork");
+    expect(document.querySelector(".fw__now .fw__cover")).not.toBeNull();
   });
 
-  it("isn't offered for a song without lyrics", async () => {
+  it("synced lyrics follow playback and seek on a click", async () => {
+    const seek = vi.spyOn(backend, "playSeek").mockResolvedValue();
+    render(<FullWindow />);
+    act(() => fullWindow.open("lyrics"));
+    const current = await screen.findByRole("button", { current: true });
+    expect(current).toHaveClass("is-current");
+    expect(screen.queryByText(UNSYNCED_NOTE)).toBeNull();
+    const lines = document.querySelectorAll<HTMLElement>(".lyrics__line");
+    fireEvent.click(lines[2]);
+    expect(seek).toHaveBeenCalled();
+  });
+
+  it("unsynced lyrics carry the note and one tint", async () => {
+    play(plain);
+    render(<FullWindow />);
+    act(() => fullWindow.open("lyrics"));
+    expect(await screen.findByText(UNSYNCED_NOTE)).toBeInTheDocument();
+    expect(document.querySelector(".lyrics--plain")).not.toBeNull();
+    expect(document.querySelector(".lyrics__line.is-current, [aria-current]")).toBeNull();
+  });
+
+  it("a song without lyrics: the toggle is off, and lyrics mode offers Add lyrics", async () => {
     play(none);
     render(<FullWindow />);
     act(() => fullWindow.open());
-    const btn = screen.getByRole("button", { name: "Lyrics" });
-    await waitFor(() => expect(btn).toHaveAttribute("aria-disabled", "true"));
-    expect(document.querySelector(".fw__lyrics")).toBeNull();
+    await waitFor(() => expect(toggle("Lyrics")).toHaveAttribute("aria-disabled", "true"));
     expect(screen.getByText(none.title)).toBeInTheDocument();
+    act(() => fullWindow.setMode("lyrics"));
+    expect(await screen.findByText("No lyrics for this song")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add lyrics" })).toBeInTheDocument();
+    // Live while lyrics show, so it isn't a dead end.
+    expect(toggle("Lyrics")).not.toHaveAttribute("aria-disabled");
   });
 });

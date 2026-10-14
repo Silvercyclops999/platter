@@ -30,12 +30,12 @@ import { formatDuration } from "../lib/format";
 import { modKey } from "../lib/platform";
 import { dropOnQueue, endSongDrag, startSongDrag, tracksDrag, useSongDrop } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
-import { fullWindow } from "../stores/fullWindow";
-import { nav, useCurrentEntry } from "../stores/router";
+import { fullWindow, useFullWindow } from "../stores/fullWindow";
+import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtras";
-import { toggleLyricsView, useLyrics } from "./lyrics";
+import { useLyrics } from "./lyrics";
 import { normalizeLoop } from "./playerRules";
 
 /** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
@@ -244,22 +244,40 @@ export function PlayControls() {
   );
 }
 
-/** Opens the lyrics view (or goes back from it). Off with a tooltip when the song has none. */
+/**
+ * Opens the expanded view in lyrics mode, or leaves it when lyrics show. Off
+ * with a tooltip when the song has none (but live while lyrics show, so
+ * there's always a way out).
+ */
 function LyricsButton() {
   const trackId = usePlayer((s) => s.state?.track?.id ?? null);
   const { lyrics, loading } = useLyrics(trackId);
-  const onPage = useCurrentEntry().route.name === "lyrics";
+  const on = useFullWindow((s) => s.open && s.mode === "lyrics");
   const none = !trackId || (!loading && !lyrics);
-  // On the lyrics page it stays live, so there's always a way back.
-  const off = none && !onPage;
+  const off = none && !on;
   return (
     <IconButton
       label="Lyrics"
       tooltip={off ? (trackId ? "No lyrics for this song" : "Lyrics") : "Lyrics"}
-      pressed={onPage}
+      pressed={on}
       softDisabled={off}
       icon={<MicVocal size={18} />}
-      onClick={toggleLyricsView}
+      onClick={fullWindow.toggleLyrics}
+    />
+  );
+}
+
+/** Opens the expanded view in the mode last used, or closes it. */
+function ExpandButton({ disabled }: { disabled: boolean }) {
+  const open = useFullWindow((s) => s.open);
+  return (
+    <IconButton
+      label="Expanded view"
+      tooltip={open ? "Close expanded view" : "Expanded view"}
+      pressed={open}
+      disabled={disabled && !open}
+      icon={<Maximize2 size={16} />}
+      onClick={fullWindow.toggle}
     />
   );
 }
@@ -300,7 +318,7 @@ export function PlayerBar() {
               className="player-bar__art"
               aria-label="Now playing view"
               aria-pressed={nowPlayingOpen}
-              // A double-click opens the full-window view; its second click
+              // A double-click opens the expanded view; its second click
               // mustn't toggle the panel back.
               onClick={(e) => e.detail < 2 && useUi.getState().toggleNowPlaying()}
               onDoubleClick={() => {
@@ -350,13 +368,7 @@ export function PlayerBar() {
         <QueueButton />
         <IconButton label="Connect to a device" pressed={outputOpen} icon={<MonitorSpeaker size={18} />} onClick={toggleOutput} />
         <Volume />
-        <IconButton
-          label="Full-window view"
-          tooltip="Full-window view"
-          disabled={!track}
-          icon={<Maximize2 size={16} />}
-          onClick={() => fullWindow.open()}
-        />
+        <ExpandButton disabled={!track} />
       </div>
     </footer>
   );

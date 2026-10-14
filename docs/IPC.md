@@ -403,7 +403,7 @@ the call: when the artist or lyrics request fails, that part is just left out.
 | `lyrics_own_ids` | – | `string[]` |
 | `lyrics_export` | `{ text, fileName }` | `string \| null` |
 
-The lyrics view and the full-window view use `lyrics_get`. Sources in order:
+The expanded now-playing view's lyrics mode and the lyrics button use `lyrics_get`. Sources in order:
 the track's Plex lyrics stream (a sidecar `.lrc` or `.txt` file, or Plex's
 own lyrics), then lyrics the user wrote in the app, then LRCLIB when
 `lyricsLrclib` is on. The user's own lyrics go first instead when they were
@@ -883,14 +883,14 @@ The rest of the fields, with their defaults:
 | `discordUploadCatbox` | bool, false | Upload covers Cover Art Archive lacks to catbox.moe (no key) when Imgur isn't used. Uploads are public and can't be deleted. |
 | `discordStatusLine` | `"app"\|"artist"\|"song"`, `"app"` | What the member list shows after "Listening to" (`status_display_type`). |
 | `showPlexAvatar` | bool, true | The app menu button shows the Plex profile picture (`AuthStatus.avatar`). Off shows the first letter of the username. This device only. |
-| `lyricsMode` | `"autoShow"\|"off"`, `"autoShow"` | Auto-show opens the lyrics view when a song with synced lyrics starts while now playing is open. Off opens it only from its button. |
+| `lyricsMode` | `"autoShow"\|"off"`, `"autoShow"` | Auto-show opens the expanded view in lyrics mode when a song with synced lyrics starts while now playing is open. Off shows lyrics only from the lyrics button. |
 | `lyricsLrclib` | bool, false | `lyrics_get` asks LRCLIB when Plex has no lyrics (sends artist, title, album and length; the search sends artist and title). Off sends nothing. |
 | `lyricsPreferOwn` | bool, false | Lyrics written in the app show ahead of Plex's for every song that has them. Off shows them only when Plex has none, or for songs saved with `prefer`. |
-| `lyricsShowAdd` | bool, true | The lyrics view and the full-window view offer Add lyrics for a song with none. The track menu keeps Add lyrics either way. |
+| `lyricsShowAdd` | bool, true | The expanded view's lyrics mode offers Add lyrics for a song with none. The track menu keeps Add lyrics either way. |
 | `transcribeLyrics` | bool, false | Transcribe songs without lyrics on this computer (Transcribe this song, the album menu, the unreleased batch). See Lyrics transcription. This device only. |
 | `transcribeModel` | `"small"` or `"medium"`, `"small"` | The speech model. Medium is more accurate and about three times slower. This device only. |
 | `showAutoLyrics` | bool, true | `lyrics_get` returns transcriptions the user hasn't edited. Off hides them; they stay saved. |
-| `fullWindowHideControls` | bool, true | The full-window view fades its controls after 3 s without mouse movement or a key. |
+| `fullWindowHideControls` | bool, true | The expanded view fades its header after 3 s without mouse movement or a key. |
 | `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |
 | `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |

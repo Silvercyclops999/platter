@@ -1,5 +1,5 @@
 /**
- * Lyrics data and timing rules for the lyrics view and the full-window view,
+ * Lyrics data and timing rules for the expanded view's lyrics mode,
  * kept apart from the components so they can be tested on their own: the
  * fetch (with a small cache), which line and word are current, the
  * auto-follow pause, and auto-show.
@@ -9,7 +9,7 @@ import { backend } from "../lib/backend";
 import type { LyricLine, LyricWord, Lyrics } from "../lib/types";
 import { useLyricsEditor } from "../stores/lyricsEditor";
 import { usePlayer } from "../stores/player";
-import { nav, useRouter } from "../stores/router";
+import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 
@@ -172,8 +172,9 @@ const isPlaying = (s: string | undefined) => s === "playing" || s === "loading" 
 
 /**
  * "Lyrics: Auto-show when available": a new song with synced lyrics that
- * starts while the now-playing view is open opens the lyrics view. The
- * session restored at launch doesn't count, and Off never opens it.
+ * starts while the now-playing panel is open opens the expanded view in
+ * lyrics mode. An expanded view that's already open keeps the mode the user
+ * picked. The session restored at launch doesn't count, and Off never opens it.
  */
 export function useLyricsAutoShow() {
   useEffect(
@@ -182,28 +183,14 @@ export function useLyricsAutoShow() {
         const id = s.state?.track?.id;
         if (!id || !prev.state || id === prev.state.track?.id || !isPlaying(s.state?.status)) return;
         if (useSettings.getState().settings?.lyricsMode !== "autoShow") return;
-        if (!useUi.getState().nowPlayingOpen) return;
+        if (!useUi.getState().nowPlayingOpen || useFullWindow.getState().open) return;
         void loadLyrics(id).then((l) => {
-          // Still the same song, the view still open, and not there already.
+          // Still the same song, the panel still open, and the view not opened meanwhile.
           if (!timedLines(l) || usePlayer.getState().state?.track?.id !== id || !useUi.getState().nowPlayingOpen) return;
-          const r = useRouter.getState();
-          if (r.entries[r.index].route.name === "lyrics") return;
-          useUi.getState().setNowPlayingExpanded(false);
-          nav.go({ name: "lyrics" });
+          if (useFullWindow.getState().open) return;
+          fullWindow.open("lyrics");
         });
       }),
     [],
   );
-}
-
-/** The lyrics button: open the lyrics view, or go back from it. */
-export function toggleLyricsView() {
-  const r = useRouter.getState();
-  if (r.entries[r.index].route.name === "lyrics") {
-    if (r.index > 0) r.back();
-    else r.replace({ name: "home" });
-  } else {
-    useUi.getState().setNowPlayingExpanded(false);
-    r.navigate({ name: "lyrics" });
-  }
 }

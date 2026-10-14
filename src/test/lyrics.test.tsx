@@ -10,7 +10,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { mockLyrics, mockLyricsKind } from "../lib/mock/details";
 import { DEFAULT_SETTINGS, type Lyrics, type PlayerState, type Track } from "../lib/types";
-import { LyricsPage } from "../pages/LyricsPage";
+import { LyricsPane, UNSYNCED_NOTE } from "../shell/LyricsView";
 import { SettingsPage, SOURCE_NOTICES } from "../pages/SettingsPage";
 import {
   clearLyricsCache,
@@ -25,6 +25,7 @@ import {
   useLyricsAutoShow,
 } from "../shell/lyrics";
 import { PlayerBar } from "../shell/PlayerBar";
+import { FULL_WINDOW_PREFS_DEFAULT, fullWindow, loadFullWindowPrefs, useFullWindow } from "../stores/fullWindow";
 import { usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -67,6 +68,7 @@ beforeEach(() => {
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useRouter.getState().reset();
   useUi.setState({ nowPlayingOpen: false, nowPlayingExpanded: false, queueOpen: false });
+  useFullWindow.setState({ open: false, mode: "artwork", osFullscreen: false, prefs: { ...FULL_WINDOW_PREFS_DEFAULT } });
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -145,7 +147,7 @@ describe("synced lyrics", () => {
     const t = timed();
     const line = t.findIndex((l, i) => i > 0 && (l.words?.length ?? 0) > 3);
     at(words, t[line].words![1].startMs + 10);
-    render(<LyricsPage />);
+    render(<LyricsPane />);
     const current = await screen.findByRole("button", { current: true });
     expect(current).toHaveAccessibleName(t[line].text);
     const sung = current.querySelectorAll(".lyrics__word.is-sung");
@@ -162,7 +164,7 @@ describe("synced lyrics", () => {
     const t = timed();
     at(words, 0);
     const seek = vi.spyOn(backend, "playSeek");
-    render(<LyricsPage />);
+    render(<LyricsPane />);
     const target = t.findIndex((l, i) => i > 3 && l.text);
     await screen.findAllByRole("button", { name: t[target].text });
     const btn = document.querySelectorAll<HTMLElement>(".lyrics__line")[target];
@@ -173,7 +175,7 @@ describe("synced lyrics", () => {
 
   it("pauses following on a hand scroll, until 5 s pass or Back to current line", async () => {
     at(words, 30_000);
-    render(<LyricsPage />);
+    render(<LyricsPane />);
     const scroller = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fireEvent.wheel(scroller, { deltaY: 400 });
@@ -193,31 +195,46 @@ describe("synced lyrics", () => {
 
   it("shows the credit line under the lyrics", async () => {
     at(words, 0);
-    render(<LyricsPage />);
+    render(<LyricsPane />);
     expect(await screen.findByText(/Lyrics licensed and provided by LyricFind/)).toBeInTheDocument();
   });
 });
 
 describe("plain and missing lyrics", () => {
-  it("shows plain lyrics as text with no highlighting", async () => {
+  it("shows unsynced lyrics as text in one tint, with a note, no highlighting and no seeking", async () => {
     at(plain, 40_000);
-    render(<LyricsPage />);
+    const seek = vi.spyOn(backend, "playSeek");
+    render(<LyricsPane />);
     const view = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    const note = within(view).getByText(UNSYNCED_NOTE);
+    expect(note).toBe(view.querySelector(".lyrics__lines")!.firstElementChild);
     expect(within(view).queryAllByRole("button")).toHaveLength(0);
-    expect(view.querySelectorAll("p.lyrics__line").length).toBeGreaterThan(5);
+    const ls = view.querySelectorAll("p.lyrics__line");
+    expect(ls.length).toBeGreaterThan(5);
+    expect([...ls].every((l) => !/is-(past|current|future)/.test(l.className))).toBe(true);
     expect(view.querySelector("[aria-current]")).toBeNull();
+    fireEvent.click(ls[3]);
+    expect(seek).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Back to current line" })).toBeNull();
+  });
+
+  it("synced lyrics have no unsynced note", async () => {
+    at(words, 0);
+    render(<LyricsPane />);
+    await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    expect(screen.queryByText(UNSYNCED_NOTE)).toBeNull();
   });
 
   it("says so when the song has none", async () => {
     at(none, 0);
-    render(<LyricsPage />);
+    render(<LyricsPane />);
     expect(await screen.findByText("No lyrics for this song")).toBeInTheDocument();
   });
 
   it("lyrics source down: silent, the view says there are none", async () => {
     mock.lyricsDown = true;
     at(words, 0);
-    render(<LyricsPage />);
+    render(<LyricsPane />);
     expect(await screen.findByText("No lyrics for this song")).toBeInTheDocument();
   });
 
@@ -232,28 +249,54 @@ describe("plain and missing lyrics", () => {
 // ---------------------------------------------------------------- button and auto-show
 
 describe("player bar lyrics button", () => {
-  it("opens the lyrics view and goes back from it", async () => {
+  it("opens the expanded view in lyrics mode and leaves it", async () => {
     useRouter.getState().navigate({ name: "liked" });
     at(words, 0);
     render(<PlayerBar />);
     const btn = screen.getByRole("button", { name: "Lyrics" });
     await waitFor(() => expect(btn).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(btn);
-    expect(route()).toEqual({ name: "lyrics" });
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "lyrics" });
+    expect(route()).toEqual({ name: "liked" });
     expect(btn).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(btn);
-    expect(route()).toEqual({ name: "liked" });
+    await waitFor(() => expect(useFullWindow.getState().open).toBe(false));
+    expect(btn).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("is off for a song without lyrics, but stays live on the lyrics page", async () => {
+  it("switches an open view to lyrics instead of closing it", async () => {
+    at(words, 0);
+    render(<PlayerBar />);
+    act(() => fullWindow.open("artwork"));
+    const btn = screen.getByRole("button", { name: "Lyrics" });
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(btn);
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "lyrics" });
+  });
+
+  it("is off for a song without lyrics, but stays live while lyrics show", async () => {
     at(none, 0);
     render(<PlayerBar />);
     const btn = screen.getByRole("button", { name: "Lyrics" });
     await waitFor(() => expect(btn).toHaveAttribute("aria-disabled", "true"));
     fireEvent.click(btn);
-    expect(route()).toEqual({ name: "home" });
-    act(() => useRouter.getState().navigate({ name: "lyrics" }));
+    expect(useFullWindow.getState().open).toBe(false);
+    act(() => fullWindow.open("lyrics"));
     expect(btn).not.toHaveAttribute("aria-disabled");
+  });
+});
+
+describe("the old lyrics route", () => {
+  it("opens the expanded view in lyrics mode instead of a page", () => {
+    useRouter.getState().navigate({ name: "liked" });
+    act(() => useRouter.getState().navigate({ name: "lyrics" }));
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "lyrics" });
+    expect(route()).toEqual({ name: "liked" });
+    expect(useRouter.getState().entries).toHaveLength(2);
+    act(() => void fullWindow.close());
+    act(() => useRouter.getState().reset({ name: "lyrics" }));
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "lyrics" });
+    expect(route()).toEqual({ name: "home" });
   });
 });
 
@@ -272,35 +315,45 @@ describe("auto-show", () => {
     await act(() => new Promise((r) => setTimeout(r, 0)));
   }
 
-  it("opens the lyrics view for a synced song while now playing is open", async () => {
+  const fw = () => useFullWindow.getState();
+
+  it("opens the expanded view in lyrics mode for a synced song while now playing is open", async () => {
     useUi.getState().setNowPlayingOpen(true);
     await startSong(words);
-    expect(route()).toEqual({ name: "lyrics" });
+    expect(fw()).toMatchObject({ open: true, mode: "lyrics" });
+    expect(route()).toEqual({ name: "home" });
+  });
+
+  it("leaves an open view on the mode the user picked", async () => {
+    useUi.getState().setNowPlayingOpen(true);
+    act(() => fullWindow.open("artist"));
+    await startSong(words);
+    expect(fw()).toMatchObject({ open: true, mode: "artist" });
   });
 
   it("not for plain lyrics", async () => {
     useUi.getState().setNowPlayingOpen(true);
     await startSong(plain);
-    expect(route()).toEqual({ name: "home" });
+    expect(fw().open).toBe(false);
   });
 
   it("not with now playing closed", async () => {
     await startSong(lines);
-    expect(route()).toEqual({ name: "home" });
+    expect(fw().open).toBe(false);
   });
 
   it("never when the setting is Off", async () => {
     useSettings.setState({ settings: { ...DEFAULT_SETTINGS, lyricsMode: "off" } });
     useUi.getState().setNowPlayingOpen(true);
     await startSong(words);
-    expect(route()).toEqual({ name: "home" });
+    expect(fw().open).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------- settings
 
 describe("lyrics settings", () => {
-  it("list Lyrics, LRCLIB and the full-window fade with their defaults, and save changes", async () => {
+  it("list Lyrics, LRCLIB and the expanded view's fade with their defaults, and save changes", async () => {
     const user = userEvent.setup();
     await backend.settingsSet({ ...DEFAULT_SETTINGS });
     useSettings.setState({ settings: null });
@@ -311,7 +364,7 @@ describe("lyrics settings", () => {
     expect(mode).toHaveValue("autoShow");
     const lrclib = screen.getByRole("switch", { name: "Lyrics from LRCLIB when Plex has none" });
     expect(lrclib).not.toBeChecked();
-    const fade = screen.getByRole("switch", { name: "Full-window view hides controls" });
+    const fade = screen.getByRole("switch", { name: "Expanded view hides controls" });
     expect(fade).toBeChecked();
     await user.selectOptions(mode, "off");
     expect(set).toHaveBeenCalledWith({ lyricsMode: "off" });
@@ -321,6 +374,54 @@ describe("lyrics settings", () => {
     expect(set).toHaveBeenCalledWith({ fullWindowHideControls: false });
     expect(SOURCE_NOTICES.some((n) => n.name.startsWith("LRCLIB"))).toBe(true);
     await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  });
+
+  it("Remember the expanded view's mode: on by default, after the fade, this device only", async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    await loadSettings();
+    const set = vi.spyOn(backend, "settingsSet");
+    render(<SettingsPage />);
+    const remember = screen.getByRole("switch", { name: "Remember the expanded view's mode" });
+    expect(remember).toBeChecked();
+    const rows = [...document.querySelectorAll("[data-setting]")].map((r) => r.getAttribute("data-setting"));
+    expect(rows.indexOf("fullWindowRememberMode")).toBe(rows.indexOf("fullWindowHideControls") + 1);
+    await user.click(remember);
+    expect(remember).not.toBeChecked();
+    expect(useFullWindow.getState().prefs.remember).toBe(false);
+    expect(JSON.parse(localStorage.getItem("platter.expandedView.v1")!)).toMatchObject({ remember: false });
+    expect(set).not.toHaveBeenCalled();
+    localStorage.clear();
+  });
+});
+
+describe("expanded view mode", () => {
+  it("the expand button reopens the mode last used, artwork the first time", () => {
+    localStorage.clear();
+    fullWindow.toggle();
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "artwork" });
+    fullWindow.setMode("artist");
+    act(() => void fullWindow.close());
+    fullWindow.toggle();
+    expect(useFullWindow.getState().mode).toBe("artist");
+    fullWindow.toggleLyrics();
+    act(() => void fullWindow.close());
+    fullWindow.toggle();
+    expect(useFullWindow.getState().mode).toBe("lyrics");
+    // Kept across launches on this device.
+    expect(loadFullWindowPrefs()).toEqual({ remember: true, mode: "lyrics" });
+    localStorage.clear();
+  });
+
+  it("with Remember off, the expand button always starts on the artwork", () => {
+    localStorage.clear();
+    fullWindow.setRemember(false);
+    fullWindow.open("lyrics");
+    act(() => void fullWindow.close());
+    fullWindow.toggle();
+    expect(useFullWindow.getState().mode).toBe("artwork");
+    expect(loadFullWindowPrefs().remember).toBe(false);
+    localStorage.clear();
   });
 
   it("turning LRCLIB on asks for lyrics again", async () => {

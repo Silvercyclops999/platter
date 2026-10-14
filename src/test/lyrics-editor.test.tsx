@@ -13,7 +13,7 @@ import { clockTenths, isSynced, linesFromText, lrcTag, lyricsFromText, parseLrc,
 import type { MockBackend } from "../lib/mock";
 import { mockLyricsKind } from "../lib/mock/details";
 import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
-import { LyricsPage } from "../pages/LyricsPage";
+import { LyricsPane } from "../shell/LyricsView";
 import { SettingsPage } from "../pages/SettingsPage";
 import { FullWindow } from "../shell/FullWindow";
 import { clearLyricsCache, lyricsSourceLabel } from "../shell/lyrics";
@@ -59,7 +59,7 @@ const L = (text: string, startMs: number | null = null): EditLine => ({ text, st
 function page() {
   return render(
     <>
-      <LyricsPage />
+      <LyricsPane />
       <LyricsEditorHost />
     </>,
   );
@@ -394,7 +394,7 @@ describe("lyrics editor", () => {
     expect(item().label).toBe("Edit lyrics");
   });
 
-  it("opens from the full-window view", async () => {
+  it("opens from the expanded view's lyrics mode", async () => {
     const user = userEvent.setup();
     at(none, 0);
     render(
@@ -403,10 +403,10 @@ describe("lyrics editor", () => {
         <LyricsEditorHost />
       </>,
     );
-    act(() => void fullWindow.open());
+    act(() => void fullWindow.open("lyrics"));
     await user.click(await screen.findByRole("button", { name: "Add lyrics" }));
     expect(await screen.findByRole("dialog", { name: `Add lyrics: ${none.title}` })).toBeInTheDocument();
-    // Space in the editor isn't play/pause for the full-window view.
+    // Space in the editor isn't play/pause for the expanded view.
     const toggle = vi.spyOn(player, "toggle").mockResolvedValue(undefined);
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Lyrics" }), { key: " " });
     expect(toggle).not.toHaveBeenCalled();

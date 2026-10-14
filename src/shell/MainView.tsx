@@ -9,7 +9,6 @@ import { HomePage } from "../pages/HomePage";
 import { HomeShelfPage } from "../pages/HomeShelfPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { LikedPage } from "../pages/LikedPage";
-import { LyricsPage } from "../pages/LyricsPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { SearchPage } from "../pages/SearchPage";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -110,7 +109,8 @@ function Page({ route }: { route: Route }) {
     case "homeShelf":
       return <HomeShelfPage shelf={route.shelf} />;
     case "lyrics":
-      return <LyricsPage />;
+      // Never pushed: the router opens the expanded view in lyrics mode instead.
+      return null;
   }
 }
 

@@ -4,6 +4,7 @@
  */
 import { create } from "zustand";
 import type { HomeShelfId } from "../lib/types";
+import { fullWindow } from "./fullWindow";
 
 export type LibraryTab = "artists" | "albums" | "playlists";
 
@@ -18,7 +19,7 @@ export type Route =
   /** Liked Songs. */
   | { name: "liked" }
   | { name: "settings" }
-  /** Lyrics for the playing song. */
+  /** Lyrics for the playing song: never a page, it opens the expanded view in lyrics mode. */
   | { name: "lyrics" }
   /** A Home shelf's "Show all" grid. */
   | { name: "homeShelf"; shelf: HomeShelfId };
@@ -50,6 +51,7 @@ export const useRouter = create<RouterState>()((set, get) => ({
   entries: [entry({ name: "home" })],
   index: 0,
   navigate: (route) => {
+    if (route.name === "lyrics") return fullWindow.open("lyrics");
     const { entries, index } = get();
     if (sameRoute(entries[index].route, route)) return;
     const next = entries.slice(0, index + 1);
@@ -59,6 +61,7 @@ export const useRouter = create<RouterState>()((set, get) => ({
     set({ entries: trimmed, index: trimmed.length - 1 });
   },
   replace: (route) => {
+    if (route.name === "lyrics") return fullWindow.open("lyrics");
     const { entries, index } = get();
     const next = [...entries];
     next[index] = { ...next[index], route };
@@ -72,7 +75,13 @@ export const useRouter = create<RouterState>()((set, get) => ({
     const { index, entries } = get();
     if (index < entries.length - 1) set({ index: index + 1 });
   },
-  reset: (route = { name: "home" }) => set({ entries: [entry(route)], index: 0 }),
+  reset: (route = { name: "home" }) => {
+    if (route.name === "lyrics") {
+      fullWindow.open("lyrics");
+      route = { name: "home" };
+    }
+    set({ entries: [entry(route)], index: 0 });
+  },
 }));
 
 export const useCurrentEntry = () => useRouter((s) => s.entries[s.index]);

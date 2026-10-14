@@ -28,11 +28,17 @@
   margin: 0 auto;
   padding: 0 var(--space-8);
 }
-.lyrics--page .lyrics__lines { padding-top: calc(64px + var(--space-6)); padding-bottom: 40vh; }
-.lyrics--full .lyrics__lines { padding-top: 28vh; padding-bottom: 50vh; max-width: none; padding-inline: 0; }
-.lyrics--plain.lyrics--page .lyrics__lines,
-.lyrics--plain.lyrics--full .lyrics__lines { padding-bottom: var(--space-12); }
-.lyrics--plain.lyrics--full .lyrics__lines { padding-top: var(--space-8); }
+.lyrics--full .lyrics__lines { padding-top: 18vh; padding-bottom: 50vh; max-width: none; padding-inline: 0; }
+.lyrics--plain.lyrics--full .lyrics__lines { padding-top: var(--space-4); padding-bottom: var(--space-12); }
+
+/* Unsynced lyrics: a small note at the top, then every line in the same tint. */
+.lyrics__unsynced {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+}
+.lyrics--plain .lyrics__line { color: var(--lyrics-future); }
 
 .lyrics__line {
   display: block;
@@ -79,7 +85,6 @@
 }
 .lyrics--full .lyrics__credit { max-width: none; padding-inline: 0; }
 .lyrics--synced .lyrics__credit { margin-top: calc(-50vh + var(--space-8)); }
-.lyrics--page.lyrics--synced .lyrics__credit { margin-top: calc(-40vh + var(--space-8)); }
 
 .lyrics__back {
   position: absolute;
@@ -107,16 +112,10 @@
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
-/* ---------------------------------------------------------------- Lyrics page */
-.lyrics-page {
-  position: absolute;
-  inset: 0;
-  background: var(--lyrics-bg, #2a2520);
-  transition: background-color var(--motion-long) var(--motion-easing-in-out);
-}
+/* ---------------------------------------------------------------- Empty and loading */
 .lyrics-page__empty {
   margin: 0;
-  padding: calc(64px + var(--space-12)) var(--space-8) 0;
+  padding: var(--space-12) var(--space-8) 0;
   text-align: center;
   font-size: var(--font-size-2xl);
   font-weight: 700;
@@ -128,7 +127,7 @@
   gap: var(--space-4);
   max-width: 880px;
   margin: 0 auto;
-  padding: calc(64px + var(--space-6)) var(--space-8) 0;
+  padding: var(--space-8) var(--space-8) 0;
 }
 
 /* Transcribe offer under an empty lyrics view. */

@@ -1,12 +1,28 @@
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, PenLine } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Button } from "../components/Button";
+import { Skeleton } from "../components/Skeleton";
 import { prefersReducedMotion } from "../design/motion";
+import { NEUTRAL_HEADER } from "../lib/color";
 import type { LyricLine, Lyrics, Track } from "../lib/types";
 import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
-import { currentLineIndex, currentWordIndex, followTarget, FOLLOW_RESUME_MS, interpolate, lineState, lyricsSourceLabel, timedLines } from "./lyrics";
+import { useSettings } from "../stores/settings";
+import { currentLineIndex, currentWordIndex, followTarget, FOLLOW_RESUME_MS, interpolate, lineState, lyricsSourceLabel, timedLines, useLyrics } from "./lyrics";
+import { useCoverColors } from "./nowPlaying";
+import { TranscribeOffer } from "./TranscribeOffer";
 import "./lyrics.css";
 import "./lyrics-editor.css";
+
+/** Said above lyrics that have no timing. */
+export const UNSYNCED_NOTE = "These lyrics aren't synced to the song yet";
+
+/** Colour behind the lyrics: from the cover, or neutral when Artwork colours is off. */
+export function useLyricsBackground(thumb: string | null | undefined): string {
+  const colours = useSettings((s) => s.settings?.artworkColours !== false);
+  const c = useCoverColors(colours ? thumb : null);
+  return (colours && c?.vivid) || NEUTRAL_HEADER.vivid;
+}
 
 /** Keys that scroll a focused scroller by hand. */
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
@@ -168,6 +184,7 @@ function PlainLyrics({ lines, credit, className, footer }: { lines: string[]; cr
     <div className={`lyrics lyrics--plain ${className}`}>
       <div className="lyrics__scroll" tabIndex={0} aria-label="Lyrics">
         <div className="lyrics__lines">
+          <p className="lyrics__unsynced">{UNSYNCED_NOTE}</p>
           {lines.map((l, i) =>
             l ? (
               <p key={i} className="lyrics__line">
@@ -187,19 +204,53 @@ function PlainLyrics({ lines, credit, className, footer }: { lines: string[]; cr
 
 /**
  * Lyrics for the playing song: synced lyrics follow playback (current line
- * bright, a third from the top; click a line to seek there), plain lyrics are
- * just text. `size` picks the type scale (page or full window). Under them:
- * where they came from, and Edit for lyrics the user wrote.
+ * bright, a third from the top; click a line to seek there). Unsynced lyrics
+ * say so at the top and are plain text in one tint: no follow, no seeking.
+ * Under them: where they came from, and Edit for lyrics the user wrote.
  */
-export function LyricsView({ lyrics, size = "page", track }: { lyrics: Lyrics; size?: "page" | "full"; track: Track }) {
+export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
   const timed = timedLines(lyrics);
-  const cls = `lyrics--${size}`;
+  const cls = "lyrics--full";
   const footer = <LyricsSourceLine lyrics={lyrics} track={track} />;
   return timed ? (
     <SyncedLyrics key={track.id} lines={timed} credit={lyrics.credit} className={cls} footer={footer} />
   ) : (
     <PlainLyrics key={track.id} lines={lyrics.lines} credit={lyrics.credit} className={cls} footer={footer} />
   );
+}
+
+/**
+ * The expanded view's lyrics mode for whatever is playing: the lyrics, a
+ * loading placeholder, or "No lyrics for this song" with Add lyrics and the
+ * transcribe offer.
+ */
+export function LyricsPane() {
+  const track = usePlayer((s) => s.state?.track);
+  const { lyrics, loading } = useLyrics(track?.id);
+  const showAdd = useSettings((s) => s.settings?.lyricsShowAdd ?? true);
+
+  if (!track) return <p className="lyrics-page__empty">Nothing playing.</p>;
+  if (loading)
+    return (
+      <div className="lyrics-page__loading" aria-label="Loading lyrics">
+        {[70, 55, 80, 45].map((w, i) => (
+          <Skeleton key={i} width={`${w}%`} height={32} />
+        ))}
+      </div>
+    );
+  if (!lyrics)
+    return (
+      <div className="lyrics-page__empty-wrap">
+        <p className="lyrics-page__empty">No lyrics for this song</p>
+        {showAdd && (
+          <Button variant="primary" icon={<PenLine size={16} />} onClick={() => openLyricsEditor(track)}>
+            Add lyrics
+          </Button>
+        )}
+        <TranscribeOffer trackId={track.id} />
+      </div>
+    );
+  return <LyricsView lyrics={lyrics} track={track} />;
 }
 
 function LyricsSourceLine({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
