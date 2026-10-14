@@ -376,7 +376,7 @@ async fn artist_page_groups_release_types_in_fixed_order() {
     assert!(t.db.read(|c| queries::artist_page(c, "nope")).unwrap_err().kind() == "notFound");
 }
 
-/// Track spec for the popular fixtures: (id, title, rating count, plays,
+/// One track in the popular fixtures: (id, title, rating count, plays,
 /// last played, track artist line, length in seconds).
 type Pop<'a> = (&'a str, &'a str, Option<u32>, u32, Option<i64>, Option<&'a str>, u64);
 
