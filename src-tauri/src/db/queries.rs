@@ -511,7 +511,14 @@ pub fn album_page(c: &Connection, id: &str) -> AppResult<AlbumPage> {
         st.query_map(params![album.artist_id, id, MORE_BY_N as i64], row_album)?
             .collect::<Result<Vec<_>, _>>()?
     };
-    Ok(AlbumPage { album, tracks, total_duration_ms, more_by_artist })
+    let (released, studio) = c.query_row("SELECT released, studio FROM albums WHERE id = ?1", [id], |r| {
+        Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))
+    })?;
+    let artist_thumb = c
+        .query_row("SELECT thumb FROM artists WHERE id = ?1", [&album.artist_id], |r| r.get::<_, Option<String>>(0))
+        .optional()?
+        .flatten();
+    Ok(AlbumPage { album, tracks, total_duration_ms, more_by_artist, artist_thumb, released, studio })
 }
 
 pub fn album_tracks(c: &Connection, album_id: &str) -> AppResult<Vec<Track>> {
@@ -539,6 +546,19 @@ pub fn playlist_page(c: &Connection, id: &str) -> AppResult<PlaylistPage> {
         .collect::<Result<Vec<_>, _>>()?;
     let (tracks, item_ids) = rows.into_iter().map(|(t, item)| (t, item.unwrap_or_default())).unzip();
     Ok(PlaylistPage { playlist, tracks, item_ids })
+}
+
+/// Songs played on this device (the listen log), newest first, each once.
+/// Songs no longer in the library are skipped. For the queue panel's
+/// Recently played tab.
+pub fn recent_tracks(c: &Connection, limit: usize) -> AppResult<Vec<Track>> {
+    let mut st = c.prepare_cached(&format!(
+        "SELECT {TRACK_COLS} FROM (
+             SELECT rating_key, max(started_at) AS at, max(id) AS seq FROM listen_log GROUP BY rating_key
+         ) l JOIN tracks t ON t.id = l.rating_key
+         ORDER BY l.at DESC, l.seq DESC LIMIT ?1"
+    ))?;
+    Ok(st.query_map([limit as i64], row_track)?.collect::<Result<Vec<_>, _>>()?)
 }
 
 /// Tracks by id, in the given order (missing ids skipped). For the player.

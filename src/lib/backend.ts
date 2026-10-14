@@ -68,6 +68,7 @@ import type {
   TranscribeModel,
   TranscribeStatus,
   QueueAt,
+  Track,
 } from "./types";
 
 export type Unlisten = () => void;
@@ -99,6 +100,8 @@ export interface Backend {
   artistPage(id: string): Promise<ArtistPage>;
   albumPage(id: string): Promise<AlbumPage>;
   playlistPage(id: string): Promise<PlaylistPage>;
+  /** Songs played on this device, newest first, each once (the queue panel's Recently played). */
+  recentTracks(limit?: number): Promise<Track[]>;
 
   // Playlist editing (docs/IPC.md "Playlist editing")
   /** A new playlist, named from Settings unless `title` is given, holding `trackIds`. */
@@ -315,6 +318,7 @@ export function createTauriBackend(): Backend {
     artistPage: (id) => call("artist_page", { id }),
     albumPage: (id) => call("album_page", { id }),
     playlistPage: (id) => call("playlist_page", { id }),
+    recentTracks: (limit) => call("recent_tracks", { limit }),
     playlistCreate: (title, trackIds) => call("playlist_create", { title, trackIds }),
     playlistAdd: (id, trackIds, place) => call("playlist_add", { id, trackIds, after: place?.after, top: place?.top }),
     playlistDuplicates: (id, trackIds) => call("playlist_duplicates", { id, trackIds }),

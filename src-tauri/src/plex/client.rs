@@ -638,7 +638,17 @@ impl PlexMetadata {
                 .ultra_blur_colors
                 .as_ref()
                 .and_then(|c| non_empty(&c.top_left)),
+            released: self.released(),
+            studio: non_empty(&self.studio),
         }
+    }
+
+    /// `originallyAvailableAt` as YYYY-MM-DD (Plex sends a date, sometimes
+    /// with a time after it).
+    fn released(&self) -> Option<String> {
+        let d = self.originally_available_at.as_deref()?.trim();
+        let day = d.get(..10).unwrap_or(d);
+        (day.len() == 10 && day.as_bytes()[4] == b'-' && day.as_bytes()[7] == b'-').then(|| day.to_string())
     }
 
     pub fn audio_stream(&self) -> Option<AudioStreamInfo> {
@@ -1582,6 +1592,23 @@ mod tests {
         assert_eq!(a.track_count, 12);
         assert_eq!(a.tint.as_deref(), Some("5b3a2c"));
         assert_eq!(a.genres, vec!["Rock"]);
+        assert_eq!((a.released, a.studio), (None, None));
+    }
+
+    #[test]
+    fn album_release_date_and_label() {
+        let album = |extra: serde_json::Value| {
+            let mut v = serde_json::json!({ "ratingKey": "1", "type": "album", "title": "LP" });
+            v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            serde_json::from_value::<PlexMetadata>(v).unwrap().to_album()
+        };
+        let a = album(serde_json::json!({ "originallyAvailableAt": "2013-06-18", "studio": "Night Records" }));
+        assert_eq!(a.released.as_deref(), Some("2013-06-18"));
+        assert_eq!(a.studio.as_deref(), Some("Night Records"));
+        let a = album(serde_json::json!({ "originallyAvailableAt": "2013-06-18T00:00:00Z", "studio": "" }));
+        assert_eq!(a.released.as_deref(), Some("2013-06-18"));
+        assert_eq!(a.studio, None);
+        assert_eq!(album(serde_json::json!({ "originallyAvailableAt": "June" })).released, None);
     }
 
     #[test]

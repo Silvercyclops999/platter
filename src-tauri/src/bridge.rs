@@ -543,6 +543,8 @@ mod tests {
             view_count: 0,
             last_viewed_at: None,
             tint: None,
+            released: None,
+            studio: None,
         }
     }
 

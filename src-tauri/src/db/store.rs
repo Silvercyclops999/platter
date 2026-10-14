@@ -59,6 +59,8 @@ pub fn row_album(r: &Row<'_>) -> rusqlite::Result<Album> {
         view_count: r.get(13)?,
         last_viewed_at: r.get(14)?,
         tint: r.get(15)?,
+        released: None,
+        studio: None,
     })
 }
 
@@ -126,15 +128,16 @@ pub fn upsert_albums(tx: &Transaction<'_>, items: &[Album], gen_: i64) -> AppRes
     let mut st = tx.prepare_cached(
         "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, year, thumb, format,
            subformats, section, section_rank, genres, track_count, added_at, view_count,
-           last_viewed_at, tint, seen_gen)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+           last_viewed_at, tint, seen_gen, released, studio)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, sort_title = excluded.sort_title,
            artist_id = excluded.artist_id, artist_title = excluded.artist_title, year = excluded.year,
            thumb = excluded.thumb, format = excluded.format, subformats = excluded.subformats,
            section = excluded.section, section_rank = excluded.section_rank, genres = excluded.genres,
            track_count = excluded.track_count, added_at = excluded.added_at,
            view_count = excluded.view_count, last_viewed_at = excluded.last_viewed_at,
-           tint = excluded.tint, seen_gen = excluded.seen_gen",
+           tint = excluded.tint, seen_gen = excluded.seen_gen,
+           released = excluded.released, studio = excluded.studio",
     )?;
     for a in items {
         st.execute(params![
@@ -155,7 +158,9 @@ pub fn upsert_albums(tx: &Transaction<'_>, items: &[Album], gen_: i64) -> AppRes
             a.view_count,
             a.last_viewed_at,
             a.tint,
-            gen_
+            gen_,
+            a.released,
+            a.studio
         ])?;
     }
     Ok(())

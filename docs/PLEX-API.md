@@ -487,3 +487,11 @@ needed only that read; all three MP4s needed one more (the `moov` atom, or its
 `ARCHIVE_*` tags or an explicit flag yet, so the scan finds nothing to show
 until the library is tagged. Not checked yet: that the part key's middle number
 changes when a file is retagged (the tag cache relies on it to read again).
+
+### 2026-10-14: album release date and label
+
+The album list (`/library/sections/{id}/all?type=9`) carries
+`originallyAvailableAt` as a plain `YYYY-MM-DD` date and `studio` (the label).
+Here every one of 86 albums had a date and 44 had a studio. The app stores both
+for the album page footer and takes the first ten characters of the date, in
+case a time follows it.

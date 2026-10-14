@@ -415,6 +415,7 @@ pub fn run() {
             db::commands::library_items,
             db::commands::artist_page,
             db::commands::album_page,
+            db::commands::recent_tracks,
             db::commands::playlist_page,
             playlists::playlist_create,
             playlists::playlist_add,

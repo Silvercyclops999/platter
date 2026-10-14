@@ -244,6 +244,12 @@ export interface AlbumPage {
   tracks: Track[];
   totalDurationMs: number;
   moreByArtist: Album[];
+  /** The album artist's photo, for the header. */
+  artistThumb?: string | null;
+  /** Release date from Plex, YYYY-MM-DD, when it has one. */
+  released?: string | null;
+  /** Record label from Plex (its studio field), when it has one. */
+  studio?: string | null;
 }
 
 export interface PlaylistPage {

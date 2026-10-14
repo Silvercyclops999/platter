@@ -64,7 +64,8 @@ Event `auth://changed` → `AuthStatus`.
 | `playlists` | – | `Playlist[]` |
 | `library_items` | – | `LibraryItem[]` (every playlist, album and artist, unordered) |
 | `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[], appearsOn: Album[] }` |
-| `album_page` | `{ id }` | `AlbumPage { album, tracks: Track[], totalDurationMs, moreByArtist: Album[] }` |
+| `album_page` | `{ id }` | `AlbumPage { album, tracks: Track[], totalDurationMs, moreByArtist: Album[], artistThumb?, released?, studio? }` (`released` is YYYY-MM-DD and `studio` the label, both from Plex when it has them) |
+| `recent_tracks` | `{ limit?: number }` | `Track[]` played on this device (the listen log), newest first, each once; limit defaults to 50 and caps at 200 |
 | `playlist_page` | `{ id }` | `{ playlist, tracks: Track[] }` |
 
 `Page<T> = { items: T[], total }`.

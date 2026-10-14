@@ -174,6 +174,8 @@ pub fn album(id: &str, title: &str, artist: &Artist, year: i32, format: Option<&
         view_count: 0,
         last_viewed_at: None,
         tint: None,
+        released: None,
+        studio: None,
     }
 }
 

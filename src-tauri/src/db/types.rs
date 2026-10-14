@@ -203,6 +203,14 @@ pub struct AlbumPage {
     pub tracks: Vec<Track>,
     pub total_duration_ms: u64,
     pub more_by_artist: Vec<Album>,
+    /// The album artist's photo, for the header.
+    #[serde(default)]
+    pub artist_thumb: Option<String>,
+    /// Release date (YYYY-MM-DD) and label from Plex, for the footer.
+    #[serde(default)]
+    pub released: Option<String>,
+    #[serde(default)]
+    pub studio: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

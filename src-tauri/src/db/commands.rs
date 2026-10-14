@@ -7,6 +7,7 @@
 //! .invoke_handler(tauri::generate_handler![
 //!     dbc::sync_status, dbc::sync_now, dbc::home, dbc::home_shelf, dbc::artists, dbc::artist_names, dbc::albums,
 //!     dbc::playlists, dbc::library_items, dbc::artist_page, dbc::album_page, dbc::playlist_page,
+//!     dbc::recent_tracks,
 //!     dbc::search, dbc::search_completions, dbc::search_recents,
 //!     dbc::search_recent_add, dbc::search_recent_remove, dbc::search_recents_clear,
 //! ])
@@ -157,6 +158,15 @@ pub async fn search(
 pub async fn search_completions(db: State<'_, DbHandle>, query: String, limit: Option<u32>) -> AppResult<Vec<String>> {
     let n = limit.map_or(search::COMPLETIONS_MAX, |l| (l as usize).min(10));
     db.read_async(move |c| search::completions(c, &query, n)).await
+}
+
+/// Most songs `recent_tracks` returns.
+const RECENT_TRACKS_MAX: usize = 200;
+
+#[tauri::command]
+pub async fn recent_tracks(db: State<'_, DbHandle>, limit: Option<usize>) -> AppResult<Vec<crate::model::Track>> {
+    let n = limit.unwrap_or(50).clamp(1, RECENT_TRACKS_MAX);
+    db.read_async(move |c| queries::recent_tracks(c, n)).await
 }
 
 #[tauri::command]

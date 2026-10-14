@@ -477,6 +477,14 @@ CREATE TABLE IF NOT EXISTS lyrics_auto_empty (
     created_at INTEGER NOT NULL
 );
 "#,
+    // v16: album release date (Plex originallyAvailableAt) and label (studio)
+    // for the album page footer. Both are on list items; the next sync runs as
+    // a full pass to fill them.
+    r#"
+ALTER TABLE albums ADD COLUMN released TEXT;
+ALTER TABLE albums ADD COLUMN studio TEXT;
+UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
 ];
 
 #[cfg(test)]

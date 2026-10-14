@@ -866,6 +866,47 @@ async fn album_page_orders_tracks_and_totals_duration() {
 }
 
 #[tokio::test]
+async fn album_page_has_release_date_label_and_artist_photo() {
+    let t = open();
+    let mut lib = sectioned_library();
+    lib.albums[1].released = Some("2019-06-18".into());
+    lib.albums[1].studio = Some("Night Records".into());
+    lib.artists[0].thumb = Some("/library/metadata/1/thumb/9".into());
+    sync(&t.db, &Arc::new(FakeSource::new(lib.clone())), false).await;
+    let page = t.db.read(|c| queries::album_page(c, "11")).unwrap();
+    assert_eq!(page.released.as_deref(), Some("2019-06-18"));
+    assert_eq!(page.studio.as_deref(), Some("Night Records"));
+    assert_eq!(page.artist_thumb.as_deref(), Some("/library/metadata/1/thumb/9"));
+    // None when Plex has nothing, and a later sync can clear them.
+    let other = t.db.read(|c| queries::album_page(c, "12")).unwrap();
+    assert_eq!((other.released, other.studio), (None, None));
+    lib.albums[1].studio = None;
+    sync(&t.db, &Arc::new(FakeSource::new(lib)), true).await;
+    let page = t.db.read(|c| queries::album_page(c, "11")).unwrap();
+    assert_eq!(page.studio, None);
+    // Not sent with every album: only the page carries them.
+    let json = serde_json::to_value(&page.album).unwrap();
+    assert!(json.get("released").is_none() && json.get("studio").is_none());
+}
+
+#[tokio::test]
+async fn recent_tracks_are_newest_first_once_each() {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(sectioned_library())), false).await;
+    t.db.write(|c| {
+        for (key, at) in [("111", 1_000), ("121", 2_000), ("111", 3_000), ("gone", 4_000), ("131", 5_000)] {
+            listens::start_play(c, &play(key, at, 200_000, false))?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let ids: Vec<_> = t.db.read(|c| queries::recent_tracks(c, 10)).unwrap().into_iter().map(|t| t.id).collect();
+    assert_eq!(ids, vec!["131", "111", "121"], "deduped, newest first, missing songs skipped");
+    let ids: Vec<_> = t.db.read(|c| queries::recent_tracks(c, 2)).unwrap().into_iter().map(|t| t.id).collect();
+    assert_eq!(ids, vec!["131", "111"]);
+}
+
+#[tokio::test]
 async fn library_lists_page_sort_and_filter() {
     let t = open();
     let src = Arc::new(FakeSource::new(sectioned_library()));

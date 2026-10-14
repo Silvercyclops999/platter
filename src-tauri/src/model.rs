@@ -60,6 +60,13 @@ pub struct Album {
     pub last_viewed_at: Option<i64>,
     /// Server-computed colors for header tint (hex without '#'), if present.
     pub tint: Option<String>,
+    /// Release date as Plex has it (`originallyAvailableAt`, YYYY-MM-DD).
+    /// Stored for the album page footer; not sent with every album.
+    #[serde(skip)]
+    pub released: Option<String>,
+    /// Record label (Plex `studio`). Album page footer only, like `released`.
+    #[serde(skip)]
+    pub studio: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

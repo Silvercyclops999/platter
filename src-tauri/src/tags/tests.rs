@@ -508,6 +508,8 @@ fn album(id: &str, artist: &str, year: Option<i32>, added: i64, subformats: &[&s
         view_count: 0,
         last_viewed_at: None,
         tint: None,
+        released: None,
+        studio: None,
     }
 }
 
