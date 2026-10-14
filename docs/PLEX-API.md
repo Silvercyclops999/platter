@@ -203,3 +203,13 @@ Read-only tests in `src-tauri/src/plex/live_tests.rs`. The write endpoints
   arrived within seconds.
 - History paged with container headers → `totalSize` 1,232, same as the
   earlier count. Playlists: 8, all smart.
+
+### 2026-10-13: concurrent file transfers get cut
+
+Opening a second `/library/parts/...` transfer while another is still in
+progress makes the server close the older socket after roughly 0.3 to 2 MB
+(seen with Node fetch and reqwest alike). Distinct `X-Plex-Client-Identifier`
+or `X-Plex-Session-Identifier` values don't change it; the newest transfer
+always survives. A single transfer runs at full LAN speed (44 MB FLAC in under
+3 s), so the client must download one file at a time: the playing track first,
+then the next track, then pre-cache, each resuming by Range when preempted.

@@ -52,10 +52,20 @@ export function SignInPage() {
           </>
         ) : (
           <>
-            <p className="welcome__lead">We opened plex.tv in your browser. If it asks for a code, enter:</p>
-            <div className="welcome__code" aria-label={pin ? `Code ${pin.code.split("").join(" ")}` : "Code loading"}>
-              {pin ? pin.code : <Skeleton width={180} height={48} />}
-            </div>
+            {/* Secure PINs are long and already in the sign-in link; only
+                short codes are meant to be typed at plex.tv/link. */}
+            {pin && pin.code.length > 8 ? (
+              <p className="welcome__lead">
+                We opened plex.tv in your browser. Sign in there and approve Platter.
+              </p>
+            ) : (
+              <>
+                <p className="welcome__lead">We opened plex.tv in your browser. If it asks for a code, enter:</p>
+                <div className="welcome__code" aria-label={pin ? `Code ${pin.code.split("").join(" ")}` : "Code loading"}>
+                  {pin ? pin.code : <Skeleton width={180} height={48} />}
+                </div>
+              </>
+            )}
             <p className="welcome__waiting" role="status">
               <span className="welcome__pulse" aria-hidden="true" />
               Waiting for you to approve Platter on plex.tv…
