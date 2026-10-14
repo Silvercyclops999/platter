@@ -160,6 +160,7 @@ export function PlayerBar() {
   const state = usePlayer((s) => s.state);
   const queueOpen = useUi((s) => s.queueOpen);
   const toggleQueue = useUi((s) => s.toggleQueue);
+  const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const track = state?.track;
   const playing = state?.status === "playing" || state?.status === "buffering" || state?.status === "loading";
   const repeat = state?.repeat ?? "off";
@@ -173,8 +174,9 @@ export function PlayerBar() {
             <button
               type="button"
               className="player-bar__art"
-              aria-label={`Open album ${track.albumTitle}`}
-              onClick={() => nav.go({ name: "album", id: track.albumId })}
+              aria-label="Now playing view"
+              aria-pressed={nowPlayingOpen}
+              onClick={() => useUi.getState().toggleNowPlaying()}
             >
               <Art path={track.thumb} size={56} />
             </button>

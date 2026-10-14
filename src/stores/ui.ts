@@ -35,6 +35,40 @@ function savePanels(p: PanelWidths) {
   }
 }
 
+/** Now-playing panel settings. App-only and per device (localStorage). */
+export interface NowPlayingPrefs {
+  /** Open the now-playing panel when a song starts (when the right slot is free). */
+  openOnStart: boolean;
+  /** Show the lyrics card in the panel when the song has lyrics. */
+  lyricsCard: boolean;
+}
+
+export const NOW_PLAYING_PREFS_DEFAULT: NowPlayingPrefs = { openOnStart: false, lyricsCard: true };
+const NOW_PLAYING_KEY = "platter.nowPlaying.v1"; // gitleaks:allow (localStorage key name, not a secret)
+
+export function loadNowPlayingPrefs(): NowPlayingPrefs {
+  const d = NOW_PLAYING_PREFS_DEFAULT;
+  try {
+    const raw = localStorage.getItem(NOW_PLAYING_KEY);
+    if (!raw) return { ...d };
+    const p = JSON.parse(raw) as Partial<NowPlayingPrefs>;
+    return {
+      openOnStart: typeof p.openOnStart === "boolean" ? p.openOnStart : d.openOnStart,
+      lyricsCard: typeof p.lyricsCard === "boolean" ? p.lyricsCard : d.lyricsCard,
+    };
+  } catch {
+    return { ...d };
+  }
+}
+
+function saveNowPlayingPrefs(p: NowPlayingPrefs) {
+  try {
+    localStorage.setItem(NOW_PLAYING_KEY, JSON.stringify(p));
+  } catch {
+    /* storage unavailable: this session only */
+  }
+}
+
 export interface MenuItem {
   label: string;
   onSelect?: () => void;
@@ -71,7 +105,17 @@ export interface ContextMenuState {
 }
 
 interface UiState extends PanelWidths {
+  /** The right slot shows the queue. At most one of queueOpen / nowPlayingOpen is true. */
   queueOpen: boolean;
+  /** The right slot shows the now-playing panel. */
+  nowPlayingOpen: boolean;
+  /** The now-playing view fills the main area (only while nowPlayingOpen). */
+  nowPlayingExpanded: boolean;
+  nowPlayingPrefs: NowPlayingPrefs;
+  toggleNowPlaying: () => void;
+  setNowPlayingOpen: (v: boolean) => void;
+  setNowPlayingExpanded: (v: boolean) => void;
+  setNowPlayingPrefs: (p: Partial<NowPlayingPrefs>) => void;
   paletteOpen: boolean;
   /** Bumped to ask the search field to take focus (Ctrl/⌘+L). */
   searchFocusTick: number;
@@ -102,6 +146,17 @@ const panels = (s: UiState): PanelWidths => ({ sidebarWidth: s.sidebarWidth, sid
 export const useUi = create<UiState>()((set, get) => ({
   ...loadPanels(),
   queueOpen: false,
+  nowPlayingOpen: false,
+  nowPlayingExpanded: false,
+  nowPlayingPrefs: loadNowPlayingPrefs(),
+  toggleNowPlaying: () => get().setNowPlayingOpen(!get().nowPlayingOpen),
+  setNowPlayingOpen: (v) => set(v ? { nowPlayingOpen: true, queueOpen: false } : { nowPlayingOpen: false, nowPlayingExpanded: false }),
+  setNowPlayingExpanded: (v) => set(v ? { nowPlayingExpanded: true, nowPlayingOpen: true, queueOpen: false } : { nowPlayingExpanded: false }),
+  setNowPlayingPrefs: (p) => {
+    const nowPlayingPrefs = { ...get().nowPlayingPrefs, ...p };
+    set({ nowPlayingPrefs });
+    saveNowPlayingPrefs(nowPlayingPrefs);
+  },
   paletteOpen: false,
   searchFocusTick: 0,
   menu: null,
@@ -114,8 +169,9 @@ export const useUi = create<UiState>()((set, get) => ({
     const cur = get().tint;
     if (cur?.vivid !== tint?.vivid || cur?.shade !== tint?.shade) set({ tint });
   },
-  toggleQueue: () => set({ queueOpen: !get().queueOpen }),
-  setQueueOpen: (v) => set({ queueOpen: v }),
+  toggleQueue: () => get().setQueueOpen(!get().queueOpen),
+  // The queue takes the right slot from the now-playing panel (and its expanded view).
+  setQueueOpen: (v) => set(v ? { queueOpen: true, nowPlayingOpen: false, nowPlayingExpanded: false } : { queueOpen: false }),
   setPaletteOpen: (v) => set({ paletteOpen: v }),
   focusSearch: () => set({ searchFocusTick: get().searchFocusTick + 1 }),
   openMenu: (m) =>

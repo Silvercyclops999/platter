@@ -21,6 +21,7 @@ import {
   type SidebarDrag,
 } from "./layout";
 import { MainView } from "./MainView";
+import { NowPlayingExpanded, NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
 import { PlayerBar } from "./PlayerBar";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
@@ -41,13 +42,22 @@ function useWindowWidth() {
 /** Sidebar | main | right panel, over the player bar; custom title bar on Windows. */
 export function AppShell() {
   useShortcuts();
+  useOpenNowPlayingOnStart();
   const queueOpen = useUi((s) => s.queueOpen);
+  const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
+  const expanded = useUi((s) => s.nowPlayingExpanded);
+  // The queue and the now-playing panel share the right slot, one at a time.
+  const rightView = queueOpen ? "queue" : nowPlayingOpen ? "nowPlaying" : null;
+  const rightOpen = rightView !== null;
+  // One panel replacing the other rises in place of sliding in from the edge.
+  const [slot, setSlot] = useState<{ view: typeof rightView; swap: boolean }>({ view: rightView, swap: false });
+  if (slot.view !== rightView) setSlot({ view: rightView, swap: slot.view !== null && rightView !== null });
   const sidebarWidth = useUi((s) => s.sidebarWidth);
   const sidebarCollapsed = useUi((s) => s.sidebarCollapsed);
   const rightWidth = useUi((s) => s.rightWidth);
   const width = useWindowWidth();
   const shell = useRef<HTMLDivElement>(null);
-  const layout = solveLayout({ windowWidth: width, sidebarWidth, rightWidth, rightOpen: queueOpen, sidebarCollapsed });
+  const layout = solveLayout({ windowWidth: width, sidebarWidth, rightWidth, rightOpen, sidebarCollapsed });
   const rail = layout.sidebarMode === "rail";
 
   // While dragging, widths go straight to CSS variables on the shell; the
@@ -88,7 +98,7 @@ export function AppShell() {
   const style = { "--sidebar-w": `${layout.sidebar}px`, "--right-w": `${layout.right}px` } as CSSProperties;
 
   return (
-    <div ref={shell} className={`app app--chrome-${chrome} ${queueOpen ? "has-queue" : ""} ${rail ? "sidebar-collapsed" : ""}`} style={style}>
+    <div ref={shell} className={`app app--chrome-${chrome} ${queueOpen ? "has-queue" : ""} ${nowPlayingOpen ? "has-now-playing" : ""} ${slot.swap ? "right-swap" : ""} ${rail ? "sidebar-collapsed" : ""}`} style={style}>
       <TitleBar />
       <div className="app__body">
         <Sidebar collapsed={rail} />
@@ -111,11 +121,11 @@ export function AppShell() {
           />
         )}
         <MainView />
-        {queueOpen ? (
+        {rightOpen ? (
           <>
             <ResizeHandle
               className="resize-handle--right"
-              label="Resize queue"
+              label={queueOpen ? "Resize queue" : "Resize now playing view"}
               value={layout.right}
               min={RIGHT_MIN}
               max={RIGHT_MAX}
@@ -128,7 +138,7 @@ export function AppShell() {
                 return true;
               }}
             />
-            <QueuePanel />
+            {queueOpen ? <QueuePanel /> : <NowPlayingPanel />}
           </>
         ) : (
           <div className="right-strip">
@@ -139,6 +149,7 @@ export function AppShell() {
             </Tooltip>
           </div>
         )}
+        {expanded && nowPlayingOpen && <NowPlayingExpanded />}
       </div>
       <PlayerBar />
       <CommandPalette />
