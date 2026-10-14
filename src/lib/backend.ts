@@ -4,9 +4,11 @@
  * Inside the Tauri app every call is a Tauri command / event. In a plain
  * browser (Vite dev server, Playwright, Vitest) an in-memory mock with fixture
  * data stands in, so every screen is demoable and testable without a server.
+ * Production builds never use the mock, so it is left out of the bundle.
  */
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { artPixelSize } from "./artSize";
 import { createMockBackend } from "./mock";
 import type {
   Album,
@@ -101,7 +103,7 @@ export interface Backend {
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
-  /** URL for a Plex image path at a display size (CSS px). */
+  /** URL for a Plex image path at a size in device pixels (see ./artSize). */
   artUrl(path: string, w: number, h: number): string;
 }
 
@@ -118,12 +120,6 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   } catch (e) {
     throw toAppError(e);
   }
-}
-
-/** Art is requested at 2× the display size, rounded to 8px buckets
- *  so nearby sizes share cache entries. */
-export function artPixelSize(css: number): number {
-  return Math.max(8, Math.ceil((css * 2) / 8) * 8);
 }
 
 export function createTauriBackend(): Backend {
@@ -185,7 +181,7 @@ export function createTauriBackend(): Backend {
       // convertFileSrc yields art://localhost/<enc> (macOS) or
       // http://art.localhost/<enc> (Windows WebView2).
       const base = convertFileSrc(path, "art");
-      return `${base}?w=${artPixelSize(w)}&h=${artPixelSize(h)}`;
+      return `${base}?w=${Math.round(w)}&h=${Math.round(h)}`;
     },
   };
 }
@@ -197,6 +193,8 @@ export function isTauri(win: unknown = typeof window !== "undefined" ? window : 
 }
 
 export function selectBackend(win?: unknown): Backend {
+  // PROD is a build-time constant, so the mock is tree-shaken out of releases.
+  if (import.meta.env.PROD) return createTauriBackend();
   return isTauri(win ?? (typeof window !== "undefined" ? window : undefined))
     ? createTauriBackend()
     : createMockBackend();
@@ -204,8 +202,8 @@ export function selectBackend(win?: unknown): Backend {
 
 export const backend: Backend = selectBackend();
 
-/** Image URL for a Plex art path at a display size (CSS px). */
+/** Image URL for a Plex art path shown at a size in CSS px (scaled for the display). */
 export function artUrl(path: string | null | undefined, w: number, h: number = w): string | undefined {
   if (!path) return undefined;
-  return backend.artUrl(path, w, h);
+  return backend.artUrl(path, artPixelSize(w), artPixelSize(h));
 }

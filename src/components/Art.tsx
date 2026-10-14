@@ -1,13 +1,19 @@
 import { Disc3, ListMusic, User } from "lucide-react";
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { artUrl } from "../lib/backend";
+
+/**
+ * Rendered width (CSS px) of fluid art inside a layout that knows it, such as
+ * the virtual grid's columns. Fluid art outside one uses its `requestSize`.
+ */
+export const FluidArtSize = createContext<number | null>(null);
 
 export interface ArtProps {
   path: string | null | undefined;
   /** Display size in CSS px (the box is square). Use `fluid` to fill the parent width. */
   size?: number;
   fluid?: boolean;
-  /** Requested image size when fluid. */
+  /** Expected display size in CSS px when fluid and no `FluidArtSize` is provided. */
   requestSize?: number;
   round?: boolean;
   kind?: "album" | "artist" | "playlist";
@@ -19,9 +25,15 @@ export interface ArtProps {
 /**
  * Fixed-aspect artwork box: reserves its square before the image arrives (no
  * layout shift), shows a skeleton until loaded, then fades the image in.
+ *
+ * Images are requested at the rendered size times the display's pixel ratio,
+ * rounded up to a shared step (see lib/artSize), since decoded art is most of
+ * the WebView's memory.
  */
 export function Art({ path, size = 48, fluid, requestSize, round, kind = "album", alt = "", className = "", onLoad }: ArtProps) {
-  const src = artUrl(path, requestSize ?? size);
+  const fluidSize = useContext(FluidArtSize);
+  const cssSize = fluid ? (fluidSize ?? requestSize ?? 200) : size;
+  const src = artUrl(path, cssSize);
   // Track which src loaded/failed so a new src starts fresh without an effect.
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
@@ -30,6 +42,7 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
 
   const style = fluid ? undefined : { width: size, height: size };
   const Fallback = kind === "artist" ? User : kind === "playlist" ? ListMusic : Disc3;
+  const box = Math.round(cssSize);
 
   return (
     <span className={`art ${round ? "art--round" : ""} ${loaded ? "is-loaded" : ""} ${className}`} style={style}>
@@ -42,6 +55,8 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
       {src && !failed && (
         <img
           src={src}
+          width={box}
+          height={box}
           alt={alt}
           draggable={false}
           loading="lazy"

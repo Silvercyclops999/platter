@@ -17,7 +17,10 @@ Errors: commands return `Result<T, AppError>`; `AppError` serializes as
 A custom URI scheme, served by Rust from the disk cache (LRU, 2 GB default):
 `art://localhost/<urlencoded plex image path>?w=<px>&h=<px>`
 On Windows (WebView2) the URL form is `http://art.localhost/...`, so always use
-`artUrl()` in `backend.ts` instead of building it by hand. On a cache miss Rust
+`artUrl()` in `backend.ts` instead of building it by hand. It takes the
+rendered size in CSS px and asks for that times the display's pixel ratio,
+rounded up to a fixed set of sizes (`src/lib/artSize.ts`) so nearby sizes
+share cache entries. On a cache miss Rust
 fetches `/photo/:/transcode` at the requested size. The token never appears in
 the URL.
 

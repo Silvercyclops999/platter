@@ -8,7 +8,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: (...a: unknown[]) => listen(...a) }));
 
-const { backend, createTauriBackend, selectBackend, isTauri, artPixelSize } = await import("../lib/backend");
+const { backend, createTauriBackend, selectBackend, isTauri, artUrl } = await import("../lib/backend");
+const { artBucket, artPixelSize, devicePixelRatio } = await import("../lib/artSize");
 const { MockBackend } = await import("../lib/mock");
 
 describe("backend selection", () => {
@@ -111,10 +112,43 @@ describe("Tauri bridge matches docs/IPC.md", () => {
     await expect(createTauriBackend().home()).rejects.toEqual({ kind: "network", message: "offline" });
   });
 
-  it("builds art URLs through the art scheme at 2× size", () => {
-    const url = createTauriBackend().artUrl("/library/metadata/1/thumb/2", 100, 100);
+  it("builds art URLs through the art scheme at a pixel size", () => {
+    const url = createTauriBackend().artUrl("/library/metadata/1/thumb/2", 200, 200);
     expect(url).toBe(`http://art.localhost/${encodeURIComponent("/library/metadata/1/thumb/2")}?w=200&h=200`);
-    expect(artPixelSize(41)).toBe(88);
+  });
+});
+
+describe("art sizes", () => {
+  it("requests rendered size × pixel ratio, rounded up to a shared step", () => {
+    expect(artPixelSize(40, 1)).toBe(40);
+    expect(artPixelSize(41, 1)).toBe(48);
+    expect(artPixelSize(40, 1.5)).toBe(64);
+    expect(artPixelSize(56, 1.25)).toBe(80);
+    expect(artPixelSize(232, 1)).toBe(240);
+    expect(artPixelSize(232, 2)).toBe(480);
+    expect(artPixelSize(232, 1.5)).toBe(400);
+    expect(artBucket(2000)).toBe(2560);
+    expect(artBucket(99999)).toBe(4096);
+  });
+
+  it("reads the display's pixel ratio, clamped", () => {
+    expect(devicePixelRatio({ devicePixelRatio: 1.5 })).toBe(1.5);
+    expect(devicePixelRatio({ devicePixelRatio: 0 })).toBe(1);
+    expect(devicePixelRatio({ devicePixelRatio: 9 })).toBe(4);
+    expect(devicePixelRatio({})).toBe(1);
+  });
+
+  it("uses the display's pixel ratio for UI art URLs", () => {
+    const prev = window.devicePixelRatio;
+    Object.defineProperty(window, "devicePixelRatio", { value: 1, configurable: true });
+    const spy = vi.spyOn(backend, "artUrl");
+    artUrl("/a", 56);
+    expect(spy).toHaveBeenLastCalledWith("/a", 64, 64);
+    Object.defineProperty(window, "devicePixelRatio", { value: 2, configurable: true });
+    artUrl("/a", 56);
+    expect(spy).toHaveBeenLastCalledWith("/a", 128, 128);
+    spy.mockRestore();
+    Object.defineProperty(window, "devicePixelRatio", { value: prev, configurable: true });
   });
 });
 
