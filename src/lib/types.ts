@@ -658,6 +658,12 @@ export interface Settings {
   transcribeModel: TranscribeModel;
   /** Show lyrics transcribed on this computer. */
   showAutoLyrics: boolean;
+  /** Announce this computer to your other Platter devices and let them play here. This device only. */
+  showToMyDevices: boolean;
+  /** The name your other devices see; empty uses the computer's name. This device only. */
+  computerName: string;
+  /** List AirPlay devices that need a password or pairing. */
+  showAirplayLocked: boolean;
   [key: string]: unknown;
 }
 
@@ -765,6 +771,9 @@ export const DEFAULT_SETTINGS: Settings = {
   transcribeLyrics: false,
   transcribeModel: "small",
   showAutoLyrics: true,
+  showToMyDevices: true,
+  computerName: "",
+  showAirplayLocked: false,
 };
 
 // ---------------------------------------------------------------- transcription
@@ -962,8 +971,8 @@ export interface OutputState {
 /** What a player is, for its icon. "group" is a Cast speaker group. */
 export type PlayerKind = "computer" | "phone" | "speaker" | "browser" | "tv" | "group";
 
-/** How Platter reaches a device: a Plex player, a Cast device, or an AirPlay receiver. */
-export type PlayerVia = "plex" | "cast" | "airplay";
+/** How Platter reaches a device: another Platter computer, a Plex player, a Cast device, or an AirPlay receiver. */
+export type PlayerVia = "platter" | "plex" | "cast" | "airplay";
 
 /** A Plex player in the device picker. */
 export interface RemotePlayer {
@@ -982,6 +991,9 @@ export interface RemotePlayer {
   needsPassword: boolean;
   /** Listed but can't be played on, and why. */
   unsupported: string | null;
+  /** A Platter computer Plex says is on that doesn't answer directly
+   * (another network, or a firewall on that computer). */
+  unreachable: boolean;
 }
 
 export type RemoteStatus = "connecting" | "playing" | "paused" | "buffering";

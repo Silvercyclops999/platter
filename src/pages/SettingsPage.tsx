@@ -27,6 +27,7 @@ import { NowPlayingSettings } from "../shell/NowPlayingSettings";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { reloadLikes } from "../stores/likes";
 import { updateSettings, useSettings } from "../stores/settings";
+import { ComputerNameSetting } from "./DeviceSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
@@ -918,6 +919,27 @@ export function SettingsPage() {
       title: "Show Chromecast and AirPlay devices",
       description: "Lists Chromecasts, Google speakers and groups, and AirPlay speakers on your network under Listen on. Off stops Platter looking for them.",
       control: (ids) => toggle(s, "showCastDevices", ids),
+    },
+    {
+      key: "showToMyDevices",
+      section: "Playback",
+      title: "Show this computer to my other devices",
+      description: "Your other computers running Platter on this network, signed in to the same Plex account, can see this one and play on it. Opens a network port, so your computer may ask to allow it. This device only.",
+      control: (ids) => toggle(s, "showToMyDevices", ids),
+    },
+    {
+      key: "computerName",
+      section: "Playback",
+      title: "This computer's name",
+      description: "What your other devices call this computer. Leave it empty to use the computer's own name. This device only.",
+      control: (ids) => <ComputerNameSetting ids={ids} />,
+    },
+    {
+      key: "showAirplayLocked",
+      section: "Playback",
+      title: "Show AirPlay devices that need a password",
+      description: "Lists AirPlay speakers that ask for a password or a pairing code. Platter asks for the password when you pick one.",
+      control: (ids) => toggle(s, "showAirplayLocked", ids),
     },
     // Transitions
     {

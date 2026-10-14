@@ -101,6 +101,8 @@ export interface MockOptions {
   discord?: DiscordDemo;
   /** Start the file tag scan from nothing read (shows its progress in Settings). */
   tagScan?: boolean;
+  /** The other Platter computer is seen through Plex but doesn't answer. */
+  platterUnreachable?: boolean;
 }
 
 const isTestEnv = (() => {
@@ -136,6 +138,7 @@ export function optionsFromUrl(search: string): MockOptions {
     link: p.get("link") ?? undefined,
     discord: isDiscordDemo(p.get("discord")) ? (p.get("discord") as DiscordDemo) : undefined,
     tagScan: p.get("tagScan") === "1",
+    platterUnreachable: p.get("platter") === "unreachable",
   };
 }
 
@@ -296,6 +299,7 @@ export class MockBackend implements Backend {
         later: (ms, fn) => this.later(ms, fn),
       },
       this.fx.tracks[7],
+      this.opts.platterUnreachable,
     );
     this.auth = this.opts.signedOut
       ? { state: "signedOut", needsServerPick: false }

@@ -1,5 +1,6 @@
 import { Globe, Laptop, Layers, Lock, Smartphone, Speaker, Tv } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import type { PlayerKind, RemotePlayer, RemoteSession } from "../lib/types";
 import { usePlayer } from "../stores/player";
@@ -30,6 +31,7 @@ export function PlayerIcon({ kind, size = 20 }: { kind: PlayerKind; size?: numbe
 /** The grey line under a player's name. */
 export function playerSub(p: RemotePlayer): string {
   if (p.unsupported) return `${p.product} • ${p.unsupported}`;
+  if (p.unreachable) return `${p.product} • Can't reach it on this network`;
   if (p.playing) return p.playing;
   return p.online ? p.product : `${p.product} • Not active`;
 }
@@ -99,30 +101,72 @@ function Row({
 
 function rowLabel(p: RemotePlayer): string {
   if (p.unsupported) return `${p.name}, can't play here: ${p.unsupported}`;
+  if (p.unreachable) return `Play on ${p.name} (not reachable on this network)`;
   if (p.needsPassword) return `Play on ${p.name} (asks for its password)`;
   return `Play on ${p.name}`;
 }
 
-/** "Listen on": Plex players, Cast devices and AirPlay speakers to move
- * playback to, and this computer while remote. */
+/** Remembers that the firewall note was read (it shows once). */
+export const FIREWALL_NOTE_KEY = "platter.firewallNoteRead";
+
+function noteRead(): boolean {
+  try {
+    return localStorage.getItem(FIREWALL_NOTE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Once: why another Platter computer is listed but can't be reached. */
+function FirewallNote({ name }: { name: string }) {
+  const [read, setRead] = useState(noteRead);
+  if (read) return null;
+  const done = () => {
+    try {
+      localStorage.setItem(FIREWALL_NOTE_KEY, "1");
+    } catch {
+      // Private window: it shows again next time.
+    }
+    setRead(true);
+  };
+  return (
+    <div className="listen-note" role="note" aria-label="Can't reach a computer">
+      <p>
+        {name} is on, but Platter can't reach it on this network. If it's on the same network, allow Platter through the
+        firewall on {name}. Windows asks the first time Platter opens, or allow it later in Windows Security.
+      </p>
+      <Button size="sm" onClick={done}>
+        Got it
+      </Button>
+    </div>
+  );
+}
+
+/** "Listen on": your other Platter computers, Plex players, Cast devices and
+ * AirPlay speakers to move playback to, and this computer while remote. */
 export function ListenOn() {
   const showPlex = useSettings((s) => s.settings?.showPlexPlayers ?? true);
   const showCast = useSettings((s) => s.settings?.showCastDevices ?? true);
-  const show = showPlex || showCast;
+  const showLocked = useSettings((s) => s.settings?.showAirplayLocked ?? false);
   const players = useRemote((s) => s.players);
   const busy = useRemote((s) => s.busy);
   const session = usePlayer((s) => s.remote);
 
-  useEffect(() => (show ? watchPlayers() : undefined), [show, showPlex, showCast]);
+  // Platter computers are always looked for; the settings add the rest.
+  useEffect(() => watchPlayers(), [showPlex, showCast, showLocked]);
 
-  if (!show && !session) return null;
   const others = (players ?? []).filter((p) => p.id !== session?.playerId);
+  const platters = others.filter((p) => p.via === "platter");
+  const show = showPlex || showCast || platters.length > 0;
+  if (!show && !session) return null;
+  const unreachable = platters.find((p) => p.unreachable);
 
   return (
     <section className="output-section" aria-labelledby="output-listen-on">
       <h3 id="output-listen-on" className="output-section__title">
         Listen on
       </h3>
+      {unreachable && <FirewallNote name={unreachable.name} />}
       <ul className="output-list">
         {session && (
           <Row
@@ -142,7 +186,7 @@ export function ListenOn() {
               name={p.name}
               sub={playerSub(p)}
               label={rowLabel(p)}
-              muted={!p.online}
+              muted={!p.online || p.unreachable}
               unsupported={!!p.unsupported}
               locked={p.needsPassword}
               busy={busy === p.id}
@@ -154,8 +198,8 @@ export function ListenOn() {
       {show && players !== null && others.length === 0 && (
         <p className="output-empty">
           {showCast
-            ? "No devices found. Open Plexamp or another Plex app, or turn on a Chromecast or AirPlay speaker on this network."
-            : "No Plex players found. Open Plexamp or another Plex app on a device signed in to your account."}
+            ? "No devices found. Open Platter on your other computers, Plexamp or another Plex app, or turn on a Chromecast or AirPlay speaker on this network."
+            : "No devices found. Open Platter on your other computers, or Plexamp or another Plex app on a device signed in to your account."}
         </p>
       )}
       <AirPlayPassword />

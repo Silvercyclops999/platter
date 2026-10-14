@@ -395,6 +395,26 @@ anything that plays on a real device needs an OK first). Check once:
   they need `timeline/subscribe` pushes (Platter accepts subscribe but only
   answers polls).
 
+### 2026-10-14: Platter devices in plex.tv
+
+Read-only checks with the probe script (booleans and counts only):
+- Running Platter installs are not in `/api/v2/resources` at all (they
+  publish no connections), but `/devices.xml` lists them with
+  `provides="player"`, `product="Platter"` and `lastSeenAt`.
+- The account token matches `authToken` from `/api/v2/user`, and the
+  `accessToken` plex.tv gives for the owned server and for an owned TV
+  player is that same token. So the token looks account-wide, which is what
+  the Platter-to-Platter key relies on.
+
+Not tried yet (needs Platter running on two computers):
+- `PUT /devices/<client id>?Connection[][uri]=http://<lan address>:32520`
+  (what Platter now sends every 5 minutes while showing itself): the
+  computer then shows in `/api/v2/resources` with those connections and a
+  fresh `lastSeenAt`.
+- Whether a second computer signed in with the PIN flow gets the same token.
+  If not, the picker lists it greyed with "Couldn't confirm it's signed in
+  to your Plex account".
+
 ### 2026-10-14: loudness fields
 - Track detail `Media[0].Part[0].Stream[]` with `streamType: 2` carries
   `gain`, `albumGain`, `peak`, `albumPeak`, `loudness` and `lra`, all as

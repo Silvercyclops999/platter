@@ -1,11 +1,14 @@
 /**
- * Listen on in the mock: a few invented Plex players with sessions, a
- * Chromecast, a Cast speaker group and AirPlay speakers (one with a
- * password, one Platter can't play on), and a pretend remote session that
- * ticks like a real player's timeline.
+ * Listen on in the mock: another Platter computer of the same account, a
+ * few invented Plex players with sessions, a Chromecast, a Cast speaker
+ * group and AirPlay speakers (one with a password, one Platter can't play
+ * on), and a pretend remote session that ticks like a real player's
+ * timeline.
  *
  * Test/demo hooks: `stopElsewhere()` (someone stops the player there),
- * `loseRemote()` (the player stops answering), `setPlayers()`.
+ * `loseRemote()` (the player stops answering), `setPlayers()`,
+ * `setPlatterDevices()`. `?platter=unreachable` in the URL shows the other
+ * Platter as seen through Plex but not answering (the firewall note).
  */
 import type { PlayerState, RemoteCommand, RemotePlayer, RemoteSession, RemoteState, Settings, Track } from "../types";
 
@@ -29,8 +32,26 @@ export const MOCK_AIRPLAY_PASSWORD = "1234";
 export const NEEDS_PASSWORD = "This speaker needs its AirPlay password.";
 export const WRONG_PASSWORD = "That AirPlay password didn't work.";
 
-const plex = { via: "plex" as const, needsPassword: false, unsupported: null };
-const lan = (via: "cast" | "airplay") => ({ via, needsPassword: false, unsupported: null, playing: null, online: true });
+const plex = { via: "plex" as const, needsPassword: false, unsupported: null, unreachable: false };
+const lan = (via: "cast" | "airplay") => ({ via, needsPassword: false, unsupported: null, playing: null, online: true, unreachable: false });
+
+/** Other Platter computers signed in to the same account. */
+export function mockPlatterDevices(unreachable = false): RemotePlayer[] {
+  return [
+    {
+      id: "mock-platter-mac",
+      name: "Studio MacBook",
+      product: "Platter",
+      kind: "computer",
+      playing: null,
+      online: true,
+      via: "platter",
+      needsPassword: false,
+      unsupported: null,
+      unreachable,
+    },
+  ];
+}
 
 /** Cast devices and AirPlay receivers "on the network". */
 export function mockLanDevices(): RemotePlayer[] {
@@ -69,6 +90,7 @@ export function mockPlayers(sample: Track | undefined): RemotePlayer[] {
 export class MockRemote {
   private list: RemotePlayer[];
   private lanList: RemotePlayer[] = mockLanDevices();
+  private platterList: RemotePlayer[];
   /** AirPlay passwords "in the keychain". */
   private passwords = new Map<string, string>();
   private session: RemoteSession | null = null;
@@ -80,8 +102,10 @@ export class MockRemote {
   constructor(
     private host: RemoteHost,
     sample: Track | undefined,
+    platterUnreachable = false,
   ) {
     this.list = mockPlayers(sample);
+    this.platterList = mockPlatterDevices(platterUnreachable);
   }
 
   dispose() {
@@ -98,10 +122,11 @@ export class MockRemote {
 
   private all(): RemotePlayer[] {
     const s = this.host.settings();
-    return [
-      ...(s.showPlexPlayers ? this.list : []),
-      ...(s.showCastDevices ? this.lanList.map((p) => ({ ...p, needsPassword: p.needsPassword && !this.passwords.has(p.id) })) : []),
-    ];
+    const lan = this.lanList
+      .map((p) => ({ ...p, needsPassword: p.needsPassword && !this.passwords.has(p.id) }))
+      // Receivers that ask for a password are hidden unless the setting shows them.
+      .filter((p) => s.showAirplayLocked || !p.needsPassword);
+    return [...this.platterList, ...(s.showPlexPlayers ? this.list : []), ...(s.showCastDevices ? lan : [])];
   }
 
   players(): RemotePlayer[] {
@@ -113,6 +138,11 @@ export class MockRemote {
   /** Test hook: replace the Plex player list. */
   setPlayers(list: RemotePlayer[]) {
     this.list = list;
+  }
+
+  /** Test hook: replace the other Platter computers. */
+  setPlatterDevices(list: RemotePlayer[]) {
+    this.platterList = list;
   }
 
   /** Test hook: replace the Cast and AirPlay devices. */
@@ -145,7 +175,7 @@ export class MockRemote {
     if (this.session) this.returnHere(false);
     const local = this.host.local();
     if (!local.track) throw { kind: "invalid", message: "Play something first, then move it." };
-    if (UNREACHABLE.has(id)) throw { kind: "network", message: `Couldn't reach ${p.name}` };
+    if (UNREACHABLE.has(id) || p.unreachable) throw { kind: "network", message: `Couldn't reach ${p.name}` };
     this.queue = [local.track, ...local.queue.userQueue.map((i) => i.track), ...local.queue.nextUp.map((i) => i.track)];
     if (this.host.settings().moveStopsOldDevice) this.host.pauseLocal();
     this.stoppedOn = null;

@@ -7,8 +7,9 @@ and your own Plex server.
 
 - Your Plex server, for browsing, streaming, artwork, and reporting plays and
   progress (so your other Plex apps stay in sync).
-- plex.tv, to sign in (a PIN flow in your browser) and to look up your
-  server's addresses.
+- plex.tv, to sign in (a PIN flow in your browser), to look up your
+  server's addresses, to list your other Plex players, and to publish this
+  computer's local addresses for your other Platter computers (see below).
 - GitHub, to check for and download app updates.
 - Wikipedia and Wikidata, for artist bios and facts (on by default, can be
   turned off in Settings). The request carries the artist's name or
@@ -35,6 +36,20 @@ and your own Plex server.
   Chromecast, it gets the songs from your Plex server with a short-lived
   token your server hands out for this. When you play on an AirPlay speaker,
   the app sends it the audio.
+- Your other computers running Platter. While "Show this computer to my
+  other devices" is on (it is by default), the app announces itself on your
+  local network with multicast DNS. The announcement holds an id for this
+  install, the name you give the computer (its own computer name until you
+  change it), whether it's Windows or macOS, the app version, and a short
+  one-way hash of your Plex account id so your own computers recognise each
+  other. It holds no token and nothing about your library or what's playing.
+  The app also opens a port on its local network addresses (32520, or the
+  next free one up to 32529) so your other Platter computers can start and
+  control playback here. A request is only accepted when it's signed with a
+  key made from your Plex sign-in, and the request never contains the token
+  itself. The app tells plex.tv those local addresses, the way Plex players
+  do, so your other computers can find this one through Plex. Turning the
+  setting off stops the announcement and closes the port.
 - Discord, when Discord status is on (it is by default) and the Discord app
   is open on your computer. Platter talks only to that local app, which shows
   the song title, artist, album, how far into the song you are, a cover image

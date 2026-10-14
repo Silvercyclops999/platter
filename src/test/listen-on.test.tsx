@@ -8,7 +8,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { mockPlayers } from "../lib/mock/remote";
+import { mockPlatterDevices, mockPlayers } from "../lib/mock/remote";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
 import { AppShell } from "../shell/AppShell";
@@ -42,6 +42,7 @@ beforeEach(async () => {
   act(() => usePlayer.getState().setRemote({ session: null, stoppedOn: null }));
   await act(() => mock.playPause());
   mock.remote.setPlayers(mockPlayers(mock.fx.tracks[7]));
+  mock.remote.setPlatterDevices(mockPlatterDevices());
   await mock.settingsSet({ showPlexPlayers: true, moveStopsOldDevice: true });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useRemote.setState({ players: null, busy: undefined });
@@ -78,12 +79,14 @@ describe("the Listen on section", () => {
   it("says when no players are found", async () => {
     mock.remote.setPlayers([]);
     mock.remote.setLanDevices([]);
+    mock.remote.setPlatterDevices([]);
     render(<AppShell />);
     expect(await within(await findListenOn()).findByText(/No devices found/)).toBeInTheDocument();
     mock.remote.resetLan();
   });
 
   it("is hidden when the setting is off", async () => {
+    mock.remote.setPlatterDevices([]);
     act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false, showCastDevices: false } }));
     render(<AppShell />);
     await within(picker()).findByRole("heading", { name: "This computer" });
@@ -252,7 +255,7 @@ describe("settings", () => {
     ]) {
       expect(await screen.findByText(title)).toBeInTheDocument();
     }
-    expect(screen.getByText(/Opens a network port/)).toHaveTextContent("This device only.");
+    expect(screen.getAllByText(/Opens a network port/)[0]).toHaveTextContent("This device only.");
     expect(DEFAULT_SETTINGS.showPlexPlayers && !DEFAULT_SETTINGS.actAsPlexPlayer && DEFAULT_SETTINGS.moveStopsOldDevice).toBe(true);
   });
 });

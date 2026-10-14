@@ -40,8 +40,9 @@ beforeEach(async () => {
   act(() => usePlayer.getState().setRemote({ session: null, stoppedOn: null }));
   mock.remote.setPlayers(mockPlayers(mock.fx.tracks[7]));
   mock.remote.resetLan();
-  await mock.settingsSet({ showPlexPlayers: true, showCastDevices: true, moveStopsOldDevice: true });
-  useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
+  // The password prompt is covered here, so receivers with a password are listed.
+  await mock.settingsSet({ showPlexPlayers: true, showCastDevices: true, moveStopsOldDevice: true, showAirplayLocked: true });
+  useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showAirplayLocked: true } });
   useRemote.setState({ players: null, busy: undefined, password: null });
   useUi.setState({ queueOpen: false, nowPlayingOpen: false, nowPlayingExpanded: false, outputOpen: true, outputReturn: null, menu: null });
   useToasts.setState({ toasts: [] });
@@ -51,6 +52,16 @@ const picker = () => screen.getByRole("complementary", { name: "Connect to a dev
 const findListenOn = () => within(picker()).findByRole("region", { name: "Listen on" });
 
 describe("Cast and AirPlay rows", () => {
+  it("leave out speakers that need a password unless the setting shows them", async () => {
+    await mock.settingsSet({ showAirplayLocked: false });
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS } }));
+    render(<AppShell />);
+    const section = await findListenOn();
+    await within(section).findByRole("button", { name: "Play on Den TV" });
+    expect(within(section).queryByRole("button", { name: /Patio/ })).toBeNull();
+    expect(DEFAULT_SETTINGS.showAirplayLocked).toBe(false);
+  });
+
   it("list next to Plex players with their kind and product", async () => {
     render(<AppShell />);
     const section = await findListenOn();

@@ -631,13 +631,13 @@ Events:
 - `output://lost` → `{ device }` (name of the chosen device that went away)
 
 ## Listen on
-Plex players Platter can move playback to (Plexamp, Plex apps, Sonos linked
-to Plex), Chromecasts and AirPlay speakers on the local network, and remote
-mode while one plays.
+The user's other computers running Platter, Plex players Platter can move
+playback to (Plexamp, Plex apps, Sonos linked to Plex), Chromecasts and
+AirPlay speakers on the local network, and remote mode while one plays.
 
 | Command | Args |
 | --- | --- |
-| `remote_players` | – → `RemotePlayer[]` (finds them now; Plex players only with `showPlexPlayers`, Cast and AirPlay devices only with `showCastDevices`) |
+| `remote_players` | – → `RemotePlayer[]` (finds them now; other Platter computers always, Plex players only with `showPlexPlayers`, Cast and AirPlay devices only with `showCastDevices`) |
 | `remote_move_with_password` | `{ playerId, password }` → `RemoteState` (AirPlay speakers with a password; the password goes to the keychain once it works) |
 | `remote_state` | – → `RemoteState` |
 | `remote_move` | `{ playerId }` → `RemoteState` |
@@ -646,10 +646,15 @@ mode while one plays.
 | `remote_play_context` | `{ context, startTrackId? }` → `RemoteState` (same `context` as `play_context`) |
 | `remote_queue_jump` | `{ itemId }` → `RemoteState` |
 
-`RemotePlayer = { id, name, product, kind, playing: string | null, online, via, needsPassword, unsupported: string | null }`
+`RemotePlayer = { id, name, product, kind, playing: string | null, online, via, needsPassword, unsupported: string | null, unreachable }`
 with `kind` one of `"computer" | "phone" | "speaker" | "browser" | "tv" | "group"`
-and `via` one of `"plex" | "cast" | "airplay"`. Cast ids start with `cast:`,
-AirPlay ids with `airplay:`. `needsPassword` is set for an AirPlay speaker
+and `via` one of `"platter" | "plex" | "cast" | "airplay"`. Cast ids start with `cast:`,
+AirPlay ids with `airplay:`; Platter computers use their Plex client id.
+The list comes in this order: Platter computers (reachable first), then Plex
+players, then Cast and AirPlay devices. `unreachable` is set on a Platter
+computer that announces itself or that Plex lists as on, but that doesn't
+answer directly (another network, or a firewall on that computer); the
+picker explains that once. `needsPassword` is set for an AirPlay speaker
 with a password that isn't in the keychain yet; the picker asks for it and
 calls `remote_move_with_password`. `unsupported` says why a listed device
 can't be played on (for example an AirPlay speaker that only takes encrypted
@@ -713,6 +718,59 @@ work."); a speaker that only takes paired AirPlay 2 senders is an `auth`
 error saying so. Coming back puts the output and volume back. If the
 speaker drops off, the output falls back to this computer paused (the usual
 lost-device path) and `stoppedOn` names it.
+
+AirPlay receivers that belong to a computer are never listed: a Mac model in
+the `am` TXT key, no model with video and screen mirroring in `ft`, or a
+receiver at the address of one of the user's Platter computers. Receivers
+that need a password or a pairing code are listed only with
+`showAirplayLocked` on (one whose password is already in the keychain still
+shows).
+
+### Platter to Platter
+
+With `showToMyDevices` on (the default) and Plex signed in, each Platter:
+- announces `_platter._tcp` over mDNS with the TXT keys `id` (its Plex client
+  id), `name` (`computerName`, or the OS computer name when empty),
+  `platform`, `version` and `acct` (16 hex digits of
+  SHA-256("platter-account-v1\n" + the Plex account uuid));
+- listens on TCP port 32520 (or the next free one up to 32529) on its
+  private LAN IPv4 addresses only (RFC 1918 and link-local; never loopback,
+  100.64/10 or public addresses);
+- publishes those addresses to plex.tv every 5 minutes
+  (`PUT /devices/<client id>?Connection[][uri]=http://<address>:<port>`), so
+  plex.tv resources list it with `lastSeenAt`.
+
+Devices are listed only when `acct` matches. A Platter that plex.tv lists
+(seen in the last 15 minutes, or online) but that doesn't answer is shown
+with `unreachable`. One plex.tv has an old address for and hasn't seen
+lately is left out.
+
+The control API is JSON over HTTP, one request per connection:
+`GET /platter/v1/hello` (id, name, platform, version, playing),
+`GET /platter/v1/state` (state, timeMs, durationMs, trackId, volume 0..1,
+shuffle, repeat), `POST /platter/v1/play` (serverId, current, userQueue,
+nextUp, context, positionMs, shuffle, repeat, play), `POST
+/platter/v1/command` (a `RemoteCommand`) and `POST /platter/v1/stop`
+(pauses). Every request carries
+`X-Platter-Auth: v1 from=<sender id>;ts=<unix ms>;nonce=<hex>;sig=<hex>`,
+where `sig` is HMAC-SHA256 with the key SHA-256("platter-peer-key-v1\n" +
+the Plex account token) over the method, path, sender id, receiver id,
+time, nonce and the SHA-256 of the body. The receiver refuses (401) a
+missing or wrong signature, a time more than 30 s from its clock, and a
+nonce it has seen. The token itself is never sent.
+
+`remote_move` to a Platter computer sends its queue as it is (the current
+song, the user queue and next up in play order, the context, shuffle,
+repeat and position) to `/platter/v1/play`; the receiver plays from its own
+connection to the same server and refuses a different one ("That computer
+plays from a different Plex server."). No server play queue is made. From
+there it works like a Plex player: the sender pauses, shows "Playing on
+<name>", follows `/state` once a second, sends controls to `/command`, and
+`remote_return` reads the position and sends `/stop`. When the computer
+doesn't answer directly but is registered with the server as a Plex player
+(its `actAsPlexPlayer` is on), the move goes through the Plex companion path
+instead. A refused signature is an `auth` error ("Couldn't reach <name>:
+Couldn't confirm it's signed in to your Plex account.").
 
 Events:
 - `remote://state` → `RemoteState` (on every change and every poll while remote)
@@ -838,6 +896,9 @@ The rest of the fields, with their defaults:
 | `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |
 | `groupEditions` | bool, true | Albums sharing `ARCHIVE_GROUP` list as one album (the face) in the library, artist pages and Home's album shelves. |
 | `dragAndDrop` | bool, true | Songs, albums and playlists can be dragged onto playlists, Liked Songs and the queue. Off stops those drags; reordering inside a playlist or the queue still works. |
+| `showToMyDevices` | bool, true | Announce this computer to the user's other Platter computers, open the control port and publish its addresses to plex.tv. Off withdraws the announcement and closes the port. Independent of `actAsPlexPlayer`. This device only. |
+| `computerName` | string, `""` | The name other devices see, up to 60 characters, trimmed. Empty uses the OS computer name. This device only. |
+| `showAirplayLocked` | bool, false | List AirPlay receivers that need a password or a pairing code. Computers' own receivers are never listed. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
