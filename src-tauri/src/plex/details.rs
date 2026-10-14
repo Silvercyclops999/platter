@@ -54,14 +54,53 @@ pub struct Contributor {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Lyrics {
-    /// The source had timestamps (shown as plain text for now).
+    /// The source had timestamps; `timed` holds them.
     pub synced: bool,
-    /// Lines without timestamps; "" marks a break between verses.
+    /// Lines without timestamps, in the file's order; "" marks a break
+    /// between verses.
     pub lines: Vec<String>,
+    /// Timed lines in play order (a line with several time tags appears once
+    /// per tag). Empty when the lyrics aren't synced. A line with empty text
+    /// is an instrumental gap.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub timed: Vec<LyricLine>,
     /// Who wrote and who supplied the lyrics, shown under them (licensed
     /// lyrics ask for this). None when the source names neither.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credit: Option<String>,
+    /// Where the lyrics came from.
+    pub source: LyricsSource,
+}
+
+/// Where lyrics came from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LyricsSource {
+    /// The Plex server (a sidecar file or Plex's own lyrics).
+    #[default]
+    Plex,
+    /// LRCLIB, when its setting is on and Plex had none.
+    Lrclib,
+}
+
+/// One timed line.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricLine {
+    pub start_ms: u32,
+    pub text: String,
+    /// Word timing (enhanced LRC), joined they make `text`. Empty when the
+    /// source times whole lines only.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<LyricWord>,
+}
+
+/// One timed word (with its trailing space, if any).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricWord {
+    pub start_ms: u32,
+    pub text: String,
 }
 
 // ---------------------------------------------------------------- wire shapes
@@ -228,38 +267,64 @@ fn artist_about(m: Meta) -> ArtistAbout {
     }
 }
 
-/// True for an LRC time tag body such as `01:23.45` or `1:02`.
-fn is_time_tag(s: &str) -> bool {
-    let mut parts = s.splitn(2, ':');
-    let (Some(min), Some(rest)) = (parts.next(), parts.next()) else {
-        return false;
+/// An LRC time tag body (`01:23.45`, `1:02`, `01:23.456`, `01:23:45`) in ms.
+pub fn time_ms(s: &str) -> Option<u32> {
+    let (min, rest) = s.split_once(':')?;
+    if min.is_empty() || min.len() > 4 || !min.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let (sec, frac) = match rest.find(['.', ':']) {
+        Some(i) => (&rest[..i], &rest[i + 1..]),
+        None => (rest, ""),
     };
-    !min.is_empty()
-        && min.chars().all(|c| c.is_ascii_digit())
-        && !rest.is_empty()
-        && rest
-            .chars()
-            .all(|c| c.is_ascii_digit() || c == '.' || c == ':')
+    if sec.is_empty() || sec.len() > 2 || !sec.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let frac_ms = match frac.len() {
+        0 => 0,
+        1 => frac.parse::<u32>().ok()? * 100,
+        2 => frac.parse::<u32>().ok()? * 10,
+        _ => frac[..3].parse::<u32>().ok()?,
+    };
+    let min: u32 = min.parse().ok()?;
+    let sec: u32 = sec.parse().ok()?;
+    Some(min * 60_000 + sec * 1000 + frac_ms)
 }
 
-/// Remove `<mm:ss.xx>` word timings from an enhanced LRC line.
-fn strip_word_times(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
+/// Split an enhanced LRC line into its plain text and its timed words
+/// (`<mm:ss.xx>` tags). Words are empty when the line has no word tags; the
+/// first word has no time of its own when text comes before the first tag.
+fn split_words(line: &str) -> (String, Vec<(Option<u32>, String)>) {
+    let mut segs: Vec<(Option<u32>, String)> = vec![(None, String::new())];
     let mut rest = line;
+    let mut any = false;
     while let Some(start) = rest.find('<') {
-        match rest[start..].find('>') {
-            Some(end) if is_time_tag(&rest[start + 1..start + end]) => {
-                out.push_str(&rest[..start]);
+        let tag = rest[start..].find('>').and_then(|end| Some((end, time_ms(&rest[start + 1..start + end])?)));
+        let last = segs.last_mut().expect("never empty");
+        match tag {
+            Some((end, t)) => {
+                last.1.push_str(&rest[..start]);
+                segs.push((Some(t), String::new()));
+                any = true;
                 rest = &rest[start + end + 1..];
             }
-            _ => {
-                out.push_str(&rest[..=start]);
+            None => {
+                last.1.push_str(&rest[..=start]);
                 rest = &rest[start + 1..];
             }
         }
     }
-    out.push_str(rest);
-    out
+    segs.last_mut().expect("never empty").1.push_str(rest);
+    let plain: String = segs.iter().map(|s| s.1.as_str()).collect();
+    let words = if any {
+        segs.into_iter().filter(|s| !s.1.trim().is_empty()).collect()
+    } else {
+        Vec::new()
+    };
+    (plain, words)
 }
 
 /// Tidy lines: collapse runs of blank lines, trim blanks at both ends, cap.
@@ -280,21 +345,67 @@ fn tidy(lines: Vec<String>) -> Vec<String> {
     out
 }
 
-/// Plain or LRC lyrics text to lines. Time tags are dropped (and mark the
-/// lyrics as synced); LRC header tags such as `[ar:...]` are left out.
+/// Timed lines in play order: sorted by time (stable, so lines sharing a
+/// time keep file order), runs of gaps collapsed, no leading or trailing
+/// gap, capped.
+fn tidy_timed(mut timed: Vec<LyricLine>) -> Vec<LyricLine> {
+    timed.sort_by_key(|l| l.start_ms);
+    let mut out: Vec<LyricLine> = Vec::new();
+    for l in timed {
+        if l.text.is_empty() && out.last().is_none_or(|p| p.text.is_empty()) {
+            continue;
+        }
+        out.push(l);
+        if out.len() >= MAX_LYRIC_LINES {
+            break;
+        }
+    }
+    while out.last().is_some_and(|l| l.text.is_empty()) {
+        out.pop();
+    }
+    out
+}
+
+/// A timed line from its start, plain text and word segments.
+fn timed_line(start_ms: u32, text: &str, words: &[(Option<u32>, String)]) -> LyricLine {
+    let words = words
+        .iter()
+        .enumerate()
+        .map(|(i, (t, w))| LyricWord {
+            start_ms: t.unwrap_or(start_ms),
+            text: if i == 0 { w.trim_start().to_owned() } else { w.clone() },
+        })
+        .collect::<Vec<_>>();
+    // A trailing space on the last word would only add width.
+    let mut words = words;
+    if let Some(last) = words.last_mut() {
+        last.text = last.text.trim_end().to_owned();
+    }
+    LyricLine { start_ms, text: text.to_owned(), words }
+}
+
+/// Plain or LRC lyrics text. Time tags mark the lyrics as synced and give
+/// the timed lines; `<mm:ss.xx>` tags give word timing; `[offset:±ms]` moves
+/// every time (positive shows lyrics sooner); other header tags such as
+/// `[ar:...]` are left out.
 pub fn parse_lyrics_text(text: &str) -> Lyrics {
-    let mut synced = false;
     let mut lines = Vec::new();
+    let mut timed = Vec::new();
+    let mut offset: i64 = 0;
     for raw in text.trim_start_matches('\u{feff}').lines() {
         let mut line = raw.trim();
         let mut header = false;
+        let mut times = Vec::new();
         while let Some(rest) = line.strip_prefix('[') {
             let Some(end) = rest.find(']') else { break };
             let tag = &rest[..end];
-            if is_time_tag(tag) {
-                synced = true;
-            } else if tag.contains(':') {
+            if let Some(t) = time_ms(tag) {
+                times.push(t);
+            } else if let Some((k, v)) = tag.split_once(':') {
                 header = true;
+                if k.trim().eq_ignore_ascii_case("offset") {
+                    offset = v.trim().trim_start_matches('+').parse().unwrap_or(0);
+                }
             } else {
                 break;
             }
@@ -303,46 +414,79 @@ pub fn parse_lyrics_text(text: &str) -> Lyrics {
         if header && line.is_empty() {
             continue;
         }
-        lines.push(strip_word_times(line).trim().to_owned());
+        let (plain, words) = split_words(line);
+        let plain = plain.trim().to_owned();
+        for t in times {
+            timed.push(timed_line(t, &plain, &words));
+        }
+        lines.push(plain);
     }
+    if offset != 0 {
+        let shift = |t: u32| (t as i64 - offset).clamp(0, u32::MAX as i64) as u32;
+        for l in &mut timed {
+            l.start_ms = shift(l.start_ms);
+            for w in &mut l.words {
+                w.start_ms = shift(w.start_ms);
+            }
+        }
+    }
+    let timed = tidy_timed(timed);
     Lyrics {
-        synced,
+        synced: !timed.is_empty(),
         lines: tidy(lines),
+        timed,
         credit: None,
+        source: LyricsSource::Plex,
     }
 }
 
+/// A JSON number or numeric string as milliseconds.
+fn ms_value(v: Option<&Value>) -> Option<u32> {
+    let v = v?;
+    let n = v.as_u64().or_else(|| v.as_str()?.trim().parse().ok())?;
+    u32::try_from(n).ok()
+}
+
 /// Lyrics in Plex's JSON form: `Lyrics[].Line[]`, each line a list of
-/// `Span` with `text` (or a `text` of its own), timed lines carry
-/// `startOffset`.
+/// `Span` with `text` (or a `text` of its own); timed lines carry
+/// `startOffset` in ms, and spans may carry their own (word timing).
 fn parse_lyrics_json(v: &Value) -> Option<Lyrics> {
     let lyrics = v.get("MediaContainer")?.get("Lyrics")?.as_array()?;
     let credit = lyrics.first().and_then(lyrics_credit);
-    let mut synced = false;
     let mut lines = Vec::new();
+    let mut timed = Vec::new();
     for l in lyrics.iter().filter_map(|l| l.get("Line")?.as_array()) {
         for line in l {
-            if line.get("startOffset").is_some() {
-                synced = true;
-            }
-            let text = match line.get("Span").and_then(Value::as_array) {
-                Some(spans) => spans
-                    .iter()
-                    .filter_map(|s| s.get("text")?.as_str())
-                    .collect::<String>(),
-                None => line
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
+            let spans = line.get("Span").and_then(Value::as_array);
+            let text = match spans {
+                Some(spans) => spans.iter().filter_map(|s| s.get("text")?.as_str()).collect::<String>(),
+                None => line.get("text").and_then(Value::as_str).unwrap_or_default().to_owned(),
             };
-            lines.push(text.trim().to_owned());
+            let text = text.trim().to_owned();
+            if let Some(start) = ms_value(line.get("startOffset")) {
+                let words: Vec<(Option<u32>, String)> = match spans {
+                    Some(spans) if spans.len() > 1 && spans.iter().all(|s| s.get("startOffset").is_some()) => spans
+                        .iter()
+                        .map(|s| {
+                            let t = ms_value(s.get("startOffset"));
+                            (t, s.get("text").and_then(Value::as_str).unwrap_or_default().to_owned())
+                        })
+                        .filter(|(_, w)| !w.trim().is_empty())
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                timed.push(timed_line(start, &text, &words));
+            }
+            lines.push(text);
         }
     }
+    let timed = tidy_timed(timed);
     Some(Lyrics {
-        synced,
+        synced: !timed.is_empty(),
         lines: tidy(lines),
+        timed,
         credit,
+        source: LyricsSource::Plex,
     })
 }
 
@@ -426,6 +570,27 @@ pub async fn fetch(client: &PlexClient, track_id: &str) -> AppResult<NowPlayingD
         credits: extras.credits,
         lyrics,
     })
+}
+
+/// Only the track's lyrics from Plex: None when the track has no lyrics
+/// stream or the stream can't be read or has no words. Errors only when the
+/// track itself can't be read.
+pub async fn fetch_lyrics(client: &PlexClient, track_id: &str) -> AppResult<Option<Lyrics>> {
+    if !valid_id(track_id) {
+        return Err(AppError::Invalid("track id".into()));
+    }
+    let body = client
+        .get_bytes(&format!("/library/metadata/{track_id}"), &[])
+        .await?;
+    let Some(path) = track_extras(first_meta(&body)?).lyrics_path else {
+        return Ok(None);
+    };
+    Ok(client
+        .get_bytes(&path, &[])
+        .await
+        .map_err(|e| tracing::debug!(kind = e.kind(), "lyrics unavailable"))
+        .ok()
+        .and_then(|b| parse_lyrics(&b)))
 }
 
 /// docs/IPC.md `now_playing_details`.
@@ -526,6 +691,64 @@ mod tests {
         .unwrap();
         assert!(l.synced);
         assert_eq!(l.lines, vec!["First line", "Chorus line", "", "Last line"]);
+        // The offset (+100 ms) shows every line sooner; the chorus plays
+        // twice; the empty timed line is a gap.
+        let times: Vec<(u32, &str)> = l.timed.iter().map(|t| (t.start_ms, t.text.as_str())).collect();
+        assert_eq!(
+            times,
+            vec![(12_200, "First line"), (14_900, "Chorus line"), (19_900, ""), (25_000, "Last line"), (74_900, "Chorus line")]
+        );
+        assert_eq!(
+            l.timed[0].words,
+            vec![
+                LyricWord { start_ms: 12_200, text: "First ".into() },
+                LyricWord { start_ms: 12_700, text: "line".into() }
+            ]
+        );
+        assert!(l.timed[1].words.is_empty());
+    }
+
+    #[test]
+    fn time_tags_in_every_form() {
+        assert_eq!(time_ms("01:23.45"), Some(83_450));
+        assert_eq!(time_ms("1:02"), Some(62_000));
+        assert_eq!(time_ms("00:01.5"), Some(1_500));
+        assert_eq!(time_ms("00:01.234"), Some(1_234));
+        assert_eq!(time_ms("00:01:20"), Some(1_200));
+        assert_eq!(time_ms("ar:Someone"), None);
+        assert_eq!(time_ms("00:1x"), None);
+        assert_eq!(time_ms(":12"), None);
+    }
+
+    #[test]
+    fn bad_lines_and_negative_offsets() {
+        let l = parse_lyrics_text("[offset:-500]\n[bad tag\n[00:01.00]One <oops> two\n[99:xx]Not timed\n[00:00.20]Zero");
+        // A broken tag is text; an unknown tag is dropped like a header.
+        assert_eq!(l.lines, vec!["[bad tag", "One <oops> two", "Not timed", "Zero"]);
+        let times: Vec<u32> = l.timed.iter().map(|t| t.start_ms).collect();
+        assert_eq!(times, vec![700, 1_500]);
+        assert_eq!(l.timed[1].text, "One <oops> two");
+    }
+
+    #[test]
+    fn word_timing_before_the_first_tag_takes_the_line_start() {
+        let l = parse_lyrics_text("[00:10.00]Hold <00:10.50>on <00:11.00>tight <00:12.00>");
+        let w: Vec<(u32, &str)> = l.timed[0].words.iter().map(|w| (w.start_ms, w.text.as_str())).collect();
+        assert_eq!(w, vec![(10_000, "Hold "), (10_500, "on "), (11_000, "tight")]);
+        assert_eq!(l.timed[0].text, "Hold on tight");
+    }
+
+    #[test]
+    fn structured_timed_spans_give_word_timing() {
+        let body = json!({"MediaContainer": {"Lyrics": [{"timed": true, "Line": [
+            {"startOffset": 24960, "endOffset": 29100, "Span": [{"text": "one line", "startOffset": 24960, "endOffset": 29100}]},
+            {"startOffset": "30000", "Span": [{"text": "two ", "startOffset": 30000}, {"text": "words", "startOffset": 30400}]}
+        ]}]}});
+        let l = parse_lyrics(&serde_json::to_vec(&body).unwrap()).unwrap();
+        assert_eq!(l.timed.len(), 2);
+        assert!(l.timed[0].words.is_empty(), "one span is a whole line");
+        assert_eq!(l.timed[1].words[1], LyricWord { start_ms: 30_400, text: "words".into() });
+        assert_eq!(l.source, LyricsSource::Plex);
     }
 
     #[test]
@@ -655,9 +878,8 @@ mod tests {
             artist: None,
             credits: vec![],
             lyrics: Some(Lyrics {
-                synced: false,
                 lines: vec!["a".into()],
-                credit: None,
+                ..Default::default()
             }),
         };
         let v = serde_json::to_value(d).unwrap();

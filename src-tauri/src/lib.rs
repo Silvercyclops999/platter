@@ -4,6 +4,7 @@ pub mod bridge;
 pub mod db;
 pub mod error;
 pub mod likes;
+pub mod lyrics;
 pub mod model;
 pub mod monitor;
 pub mod notify;
@@ -144,6 +145,7 @@ pub fn run() {
             // which also serves their images.
             let info_http: Arc<dyn artistinfo::http::InfoHttp> = Arc::new(artistinfo::http::ReqwestHttp::new()?);
             let share_http = info_http.clone();
+            let lyrics_http = info_http.clone();
             let discord_http = info_http.clone();
             let art = ArtCache::open(
                 cache_dir.join("art"),
@@ -285,6 +287,14 @@ pub fn run() {
             )?;
             app.manage(share);
 
+            // Lyrics: Plex first, then LRCLIB when its setting is on.
+            app.manage(lyrics::LyricsService::new(
+                db.clone(),
+                lyrics_http,
+                Arc::new(lyrics::commands::PlexSource(plex.clone())),
+                live.lyrics_lrclib.clone(),
+            ));
+
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
             monitor::files::spawn(plex.clone(), db.clone(), player.clone());
@@ -316,6 +326,7 @@ pub fn run() {
             plex::commands::server_select,
             plex::commands::health,
             plex::details::now_playing_details,
+            lyrics::commands::lyrics_get,
             db::commands::sync_status,
             db::commands::sync_now,
             db::commands::home,

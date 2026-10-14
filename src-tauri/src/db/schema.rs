@@ -412,6 +412,17 @@ CREATE TABLE IF NOT EXISTS credit_names (
     name TEXT NOT NULL
 ) WITHOUT ROWID;
 "#,
+    // v12: LRCLIB lyrics (lyrics::cache). One row per lookup, keyed by the
+    // folded artist, title, album and duration; body NULL = none found.
+    r#"
+CREATE TABLE IF NOT EXISTS lyrics_cache (
+    key        TEXT PRIMARY KEY,
+    body       TEXT,
+    matched    INTEGER NOT NULL DEFAULT 0,
+    fetched_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+"#,
 ];
 
 #[cfg(test)]
@@ -604,6 +615,19 @@ mod tests {
         migrate(&mut c).unwrap();
         c.execute("INSERT INTO credit_names (key, name) VALUES ('a, b', 'A, B')", []).unwrap();
         assert!(c.execute("INSERT INTO credit_names (key, name) VALUES ('a, b', 'a, B')", []).is_err(), "one row per name");
+    }
+
+    #[test]
+    fn v12_adds_the_lyrics_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        migrate(&mut c).unwrap();
+        const { assert!(SCHEMA_VERSION >= 12) };
+        c.execute("INSERT INTO lyrics_cache (key, body, fetched_at, expires_at) VALUES ('k', NULL, 1, 2)", []).unwrap();
+        assert!(
+            c.execute("INSERT INTO lyrics_cache (key, body, fetched_at, expires_at) VALUES ('k', 'x', 1, 2)", []).is_err(),
+            "one row per lookup"
+        );
     }
 
     #[test]

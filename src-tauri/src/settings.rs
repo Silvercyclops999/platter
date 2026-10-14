@@ -107,6 +107,18 @@ pub enum LikeControlRows {
     Off,
 }
 
+/// Whether the lyrics view opens by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LyricsMode {
+    /// A song with synced lyrics starting while now playing is open opens
+    /// the lyrics view.
+    #[default]
+    AutoShow,
+    /// The lyrics view only opens from its button.
+    Off,
+}
+
 /// Missing fields (settings saved by an older build) take their defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -243,6 +255,13 @@ pub struct Settings {
     pub discord_upload_art: bool,
     /// The top bar shows the Plex profile picture (this device only).
     pub show_plex_avatar: bool,
+    /// Whether the lyrics view opens by itself.
+    pub lyrics_mode: LyricsMode,
+    /// Look lyrics up on LRCLIB when Plex has none (sends artist, title,
+    /// album and length).
+    pub lyrics_lrclib: bool,
+    /// The full-window view hides its controls after 3 s without movement.
+    pub full_window_hide_controls: bool,
 }
 
 impl Default for Settings {
@@ -310,6 +329,9 @@ impl Default for Settings {
             discord_cover_archive: true,
             discord_upload_art: false,
             show_plex_avatar: true,
+            lyrics_mode: LyricsMode::AutoShow,
+            lyrics_lrclib: false,
+            full_window_hide_controls: true,
         }
     }
 }
@@ -377,6 +399,9 @@ pub struct SettingsPatch {
     pub discord_cover_archive: Option<bool>,
     pub discord_upload_art: Option<bool>,
     pub show_plex_avatar: Option<bool>,
+    pub lyrics_mode: Option<LyricsMode>,
+    pub lyrics_lrclib: Option<bool>,
+    pub full_window_hide_controls: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -454,6 +479,9 @@ impl Settings {
         set(&mut self.discord_cover_archive, p.discord_cover_archive);
         set(&mut self.discord_upload_art, p.discord_upload_art);
         set(&mut self.show_plex_avatar, p.show_plex_avatar);
+        set(&mut self.lyrics_mode, p.lyrics_mode);
+        set(&mut self.lyrics_lrclib, p.lyrics_lrclib);
+        set(&mut self.full_window_hide_controls, p.full_window_hide_controls);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -547,6 +575,8 @@ pub struct Live {
     pub share_public_links: Arc<AtomicBool>,
     /// Discord status.
     pub discord: DiscordSwitches,
+    /// Lyrics from LRCLIB when Plex has none.
+    pub lyrics_lrclib: Arc<AtomicBool>,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -556,6 +586,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links, Ordering::Relaxed);
+    live.lyrics_lrclib.store(s.lyrics_lrclib, Ordering::Relaxed);
     // Global with no source for it on quietly ranks by plays.
     db.set_popular_source(if s.info_listenbrainz || s.info_lastfm { s.popular_source } else { PopularSource::MyPlays });
     db.set_link_featured(s.link_featured);
@@ -913,6 +944,9 @@ mod tests {
             discord_cover_archive: Some(false),
             discord_upload_art: Some(true),
             show_plex_avatar: Some(false),
+            lyrics_mode: Some(LyricsMode::Off),
+            lyrics_lrclib: Some(true),
+            full_window_hide_controls: Some(false),
         })
         .await
         .unwrap();
@@ -1133,5 +1167,24 @@ mod tests {
         assert_eq!(db.popular_source(), PopularSource::Global);
         st.set(SettingsPatch { link_featured: Some(false), ..Default::default() }).await.unwrap();
         assert!(!db.link_featured());
+    }
+
+    #[test]
+    fn lyrics_settings_default_and_reach_the_switch() {
+        let s = Settings::default();
+        assert_eq!(s.lyrics_mode, LyricsMode::AutoShow);
+        assert!(!s.lyrics_lrclib, "LRCLIB is off until the user turns it on");
+        assert!(s.full_window_hide_controls);
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["lyricsMode"], "autoShow");
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = load(&db);
+        s.apply(&serde_json::from_str(r#"{"lyricsMode":"off","lyricsLrclib":true,"fullWindowHideControls":false}"#).unwrap())
+            .unwrap();
+        publish(&s, &live, &db);
+        assert!(live.lyrics_lrclib.load(Ordering::Relaxed));
+        assert_eq!(s.lyrics_mode, LyricsMode::Off);
+        assert!(!s.full_window_hide_controls);
     }
 }
