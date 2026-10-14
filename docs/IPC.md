@@ -431,6 +431,75 @@ lets menus say "Add lyrics" or "Edit lyrics".
 file systems, ending in `.lrc`) and writes `text` where the user picks.
 Returns the saved file's name, or `null` when the dialog was cancelled.
 
+## Lyrics transcription
+| Command | Args | Returns |
+| --- | --- | --- |
+| `transcribe_status` | – | `TranscribeStatus` |
+| `transcribe_model_download` | `{ model: "small"\|"medium" }` | – |
+| `transcribe_model_cancel` | – | – |
+| `transcribe_model_delete` | `{ model }` | – |
+| `transcribe_track` | `{ trackId }` | – |
+| `transcribe_album` | `{ albumId }` | songs queued (number) |
+| `transcribe_unreleased` | – | songs queued (number) |
+| `transcribe_cancel` | `{ trackId: string \| null }` | – |
+| `transcribe_found_nothing` | `{ trackId }` | bool |
+
+Events: `transcribe://status` → `TranscribeStatus` on every change (progress
+at most four times a second), and `transcribe://done` → `{ trackId, found }`
+when a song is finished (`found` false when no words came out).
+
+Opt-in with `transcribeLyrics`. Speech recognition runs on this computer with
+whisper.cpp; nothing about the song is sent anywhere. The only network use is
+the model download, from the whisper.cpp model repository on Hugging Face,
+pinned to one commit: `small` is `ggml-small.en-q5_1.bin` (190,098,681 bytes)
+and `medium` is `ggml-medium.en-q5_0.bin` (539,225,533 bytes), both
+English-only. The file goes to `<app data>/models/` as a `.part` file, is
+checked against its SHA-256, and is renamed into place only when it matches.
+Free space is checked first (the model plus 256 MB). Models never ship in the
+installer.
+
+`TranscribeStatus = { enabled, available, unavailableReason?, model, models,
+current?, queued, batch, paused?, error? }`. `available` is false in a build
+without the recognizer, or on an x86 processor without AVX2. `models` lists
+`{ kind, sizeBytes, installed, downloading, doneBytes }` for each model, so
+the size shows before downloading. `current = { trackId, stage, percent,
+background }`, stage one of `waitingForModel`, `reading`, `decoding`,
+`transcribing` (percent counts the last). `batch = { done, total }` counts
+songs since the queue was last empty. `paused` is `battery`,
+`slowConnection` or `offline` (background songs only). `error = { kind,
+message, trackId? }` with kind `download`, `checksum`, `disk` or
+`transcribe`; it clears when something new starts.
+
+`transcribe_track` puts the song first and runs it now, battery or not.
+`transcribe_album` queues the album's songs that have no lyrics in the app,
+and `transcribe_unreleased` every unreleased song (the same rule as sharing:
+demo release types or an unreleased `ARCHIVE_VERSION`) without them, in the
+background. Before transcribing those, the core asks Plex (and LRCLIB when
+it's on) and skips songs that already have lyrics. If the chosen model isn't
+there, these start its download and the songs wait for it. All three fail
+with `invalid` while `transcribeLyrics` is off; turning it off cancels the
+queue, the song in progress and a download.
+
+A song's file comes from the pre-cache when it's there; otherwise it's read
+like the tag scan reads, through the player's transfer gate at the lowest
+priority in 1 MB range requests, only while playback has nothing left to
+download, never over the relay. It's decoded with the player's decoder,
+mixed to mono and resampled to 16 kHz. Songs asked for now use about half
+the processor cores; the background batch a quarter, and it waits while the
+computer is on battery or music plays over remote access or the relay.
+
+Words found are saved as enhanced LRC (a time per line and per word) in the
+song's own lyrics (`lyrics_own_*`) with `auto` set to the model, so the
+editor opens them. A new line starts at each recognizer segment, at a pause
+of 0.7 s, or when a line runs long; sound descriptions such as `[Music]` and
+stock phrases the recognizer invents over silence are dropped. A
+transcription never replaces lyrics the user wrote or saved, and saving in
+the editor clears `auto`. `lyrics_get` returns transcriptions with `source:
+"auto"` after Plex's lyrics and before LRCLIB, never ahead of Plex even with
+`lyricsPreferOwn`, and not at all while `showAutoLyrics` is off. Songs with
+no words found are remembered (`transcribe_found_nothing`) so the batch
+skips them.
+
 ## Search
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -745,6 +814,9 @@ The rest of the fields, with their defaults:
 | `lyricsLrclib` | bool, false | `lyrics_get` asks LRCLIB when Plex has no lyrics (sends artist, title, album and length; the search sends artist and title). Off sends nothing. |
 | `lyricsPreferOwn` | bool, false | Lyrics written in the app show ahead of Plex's for every song that has them. Off shows them only when Plex has none, or for songs saved with `prefer`. |
 | `lyricsShowAdd` | bool, true | The lyrics view and the full-window view offer Add lyrics for a song with none. The track menu keeps Add lyrics either way. |
+| `transcribeLyrics` | bool, false | Transcribe songs without lyrics on this computer (Transcribe this song, the album menu, the unreleased batch). See Lyrics transcription. This device only. |
+| `transcribeModel` | `"small"` or `"medium"`, `"small"` | The speech model. Medium is more accurate and about three times slower. This device only. |
+| `showAutoLyrics` | bool, true | `lyrics_get` returns transcriptions the user hasn't edited. Off hides them; they stay saved. |
 | `fullWindowHideControls` | bool, true | The full-window view fades its controls after 3 s without mouse movement or a key. |
 | `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |

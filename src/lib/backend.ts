@@ -65,6 +65,8 @@ import type {
   UpdateInfo,
   TagIndex,
   TagScanStatus,
+  TranscribeModel,
+  TranscribeStatus,
   QueueAt,
 } from "./types";
 
@@ -251,6 +253,23 @@ export interface Backend {
   /** Progress of the background tag scan. */
   tagScanStatus(): Promise<TagScanStatus>;
 
+  // Lyrics transcription (docs/IPC.md "Lyrics transcription")
+  transcribeStatus(): Promise<TranscribeStatus>;
+  /** Start downloading a model; progress comes as `transcribe://status`. */
+  transcribeModelDownload(model: TranscribeModel): Promise<void>;
+  transcribeModelCancel(): Promise<void>;
+  transcribeModelDelete(model: TranscribeModel): Promise<void>;
+  /** Transcribe one song now (downloads the chosen model first if needed). */
+  transcribeTrack(trackId: string): Promise<void>;
+  /** Queue an album's songs without lyrics; answers how many. */
+  transcribeAlbum(albumId: string): Promise<number>;
+  /** Queue every unreleased song without lyrics in the background; answers how many. */
+  transcribeUnreleased(): Promise<number>;
+  /** Cancel one song, or everything (no id). */
+  transcribeCancel(trackId?: string): Promise<void>;
+  /** The song was transcribed and no words were found. */
+  transcribeFoundNothing(trackId: string): Promise<boolean>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -378,6 +397,15 @@ export function createTauriBackend(): Backend {
     discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
     tagsIndex: () => call("tags_index"),
     tagScanStatus: () => call("tag_scan_status"),
+    transcribeStatus: () => call("transcribe_status"),
+    transcribeModelDownload: (model) => call("transcribe_model_download", { model }),
+    transcribeModelCancel: () => call("transcribe_model_cancel"),
+    transcribeModelDelete: (model) => call("transcribe_model_delete", { model }),
+    transcribeTrack: (trackId) => call("transcribe_track", { trackId }),
+    transcribeAlbum: (albumId) => call("transcribe_album", { albumId }),
+    transcribeUnreleased: () => call("transcribe_unreleased"),
+    transcribeCancel: (trackId) => call("transcribe_cancel", { trackId: trackId ?? null }),
+    transcribeFoundNothing: (trackId) => call("transcribe_found_nothing", { trackId }),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

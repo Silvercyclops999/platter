@@ -28,6 +28,9 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+CI also checks the `transcribe` feature (lyrics transcription with
+whisper.cpp), which needs CMake and, on Windows, LLVM. See the README.
+
 To test against a real server while developing, copy `.env.example` to `.env`
 and add your token. That's only for development; the app itself signs in
 through Plex.

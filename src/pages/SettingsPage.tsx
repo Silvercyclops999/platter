@@ -32,6 +32,7 @@ import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
 import { discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
+import { BatchControl, BatchNote, ModelControl, TranscribeNote } from "./TranscribeSettings";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
@@ -120,6 +121,10 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "mdns-sd", licence: "MIT or Apache-2.0" },
   { name: "tokio-rustls", licence: "MIT or Apache-2.0" },
   { name: "RustCrypto MD5", licence: "MIT or Apache-2.0" },
+  { name: "RustCrypto SHA-2", licence: "MIT or Apache-2.0" },
+  { name: "whisper.cpp and ggml (transcription)", licence: "MIT" },
+  { name: "whisper-rs", licence: "Unlicense" },
+  { name: "Whisper speech models (downloaded when asked)", licence: "MIT" },
 ];
 
 /** Outside services (artist info, public share links), each under its own terms (shown under About). */
@@ -137,6 +142,7 @@ export const SOURCE_NOTICES: { name: string; licence: string }[] = [
   { name: "Cover Art Archive (covers on Discord)", licence: "Cover art owners' terms" },
   { name: "Imgur (covers on Discord, with your client ID)", licence: "Imgur API terms" },
   { name: "LRCLIB (lyrics, when turned on)", licence: "LRCLIB terms" },
+  { name: "Hugging Face (transcription model download, when asked)", licence: "Hugging Face terms" },
 ];
 
 // ------------------------------------------------------------------ rows
@@ -1113,6 +1119,43 @@ export function SettingsPage() {
       title: "Drag and drop to add to playlists and the queue",
       description: "Drag songs, albums and playlists onto a playlist or Liked Songs in Your Library, or into the queue. Reordering a playlist or the queue by dragging works either way.",
       control: (ids) => toggle(s, "dragAndDrop", ids),
+    },
+    // Lyrics transcribed on this computer
+    {
+      key: "transcribeLyrics",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Transcribe songs without lyrics on this computer",
+      description:
+        "Adds Transcribe this song to the lyrics view and the album menu. A speech model is downloaded once, and songs are transcribed on this computer only; the audio never leaves it. Results may be wrong and can be fixed in the lyrics editor. This device only.",
+      note: <TranscribeNote />,
+      control: (ids) => toggle(s, "transcribeLyrics", ids),
+    },
+    {
+      key: "transcribeModel",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Transcription model",
+      description: "Small is faster. Medium is more accurate and takes about three times as long. The size is the download. This device only.",
+      control: (ids) => <ModelControl s={s} ids={ids} />,
+    },
+    {
+      key: "transcribeUnreleased",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Transcribe all unreleased songs without lyrics",
+      description:
+        "Works through them in the background with fewer processor cores. It pauses on battery power and while music plays over a slow connection, and always gives way to playback.",
+      note: <BatchNote />,
+      control: () => <BatchControl />,
+    },
+    {
+      key: "showAutoLyrics",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Show auto-transcribed lyrics",
+      description: "Off hides transcribed lyrics you haven't edited. They stay saved.",
+      control: (ids) => toggle(s, "showAutoLyrics", ids),
     },
   ];
 

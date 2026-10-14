@@ -8,6 +8,7 @@ import { usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
 import { useLyrics } from "../shell/lyrics";
 import { LyricsView } from "../shell/LyricsView";
+import { TranscribeOffer } from "../shell/TranscribeOffer";
 import { useCoverColors } from "../shell/nowPlaying";
 import "../shell/lyrics.css";
 
@@ -44,6 +45,7 @@ export function LyricsPage() {
             Add lyrics
           </Button>
         )}
+        <TranscribeOffer trackId={track.id} />
       </div>
     );
   else body = <LyricsView lyrics={lyrics} track={track} />;

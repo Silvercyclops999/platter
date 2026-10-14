@@ -37,9 +37,19 @@ jobs:
       - name: cargo clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
+      # With transcription (whisper.cpp, built with the runner's CMake). The
+      # bindings shipped with whisper-rs are generated on Linux, so they fit
+      # here and libclang isn't needed.
+      - name: cargo clippy (transcribe)
+        working-directory: src-tauri
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: 1
+        run: cargo clippy --all-targets --features transcribe -- -D warnings
       - name: cargo test
         working-directory: src-tauri
-        run: cargo test
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: 1
+        run: cargo test --features transcribe
 
   secrets:
     runs-on: ubuntu-latest

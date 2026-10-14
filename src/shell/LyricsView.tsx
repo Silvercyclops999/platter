@@ -205,15 +205,16 @@ export function LyricsView({ lyrics, size = "page", track }: { lyrics: Lyrics; s
 function LyricsSourceLine({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
   const label = lyricsSourceLabel(lyrics);
   const own = useLyricsEditor((s) => s.ownIds.has(track.id));
-  // Your own lyrics, or ones you wrote that Plex's are showing over.
-  const edit = lyrics.source === "user" || own;
+  // Your own lyrics or a transcription to fix, or ones you wrote that Plex's are showing over.
+  const mine = lyrics.source === "user" || lyrics.source === "auto";
+  const edit = mine || own;
   if (!label && !edit) return null;
   return (
     <p className="lyrics__source">
       {label && <span>{label}</span>}
       {edit && (
         <button type="button" className="lyrics__source-edit" onClick={() => openLyricsEditor(track)}>
-          {lyrics.source === "user" ? "Edit" : "Edit your lyrics"}
+          {mine ? "Edit" : "Edit your lyrics"}
         </button>
       )}
     </p>

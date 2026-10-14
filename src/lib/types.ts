@@ -302,8 +302,12 @@ export interface Lyrics {
   source?: LyricsSource;
 }
 
-/** plex: Plex's own (an agent such as LyricFind); file: a .lrc or .txt next to the song; user: written in Platter. */
-export type LyricsSource = "plex" | "file" | "user" | "lrclib";
+/**
+ * plex: Plex's own (an agent such as LyricFind); file: a .lrc or .txt next to
+ * the song; user: written in Platter; auto: transcribed on this computer and
+ * not edited yet (may be wrong).
+ */
+export type LyricsSource = "plex" | "file" | "user" | "lrclib" | "auto";
 
 /** `lyrics_own_get`: lyrics the user wrote for a song. */
 export interface OwnLyrics {
@@ -313,6 +317,8 @@ export interface OwnLyrics {
   /** Shown ahead of Plex's lyrics for this song. */
   prefer: boolean;
   updatedAt: number;
+  /** Transcribed on this computer by this model and not edited yet. Saving clears it. */
+  auto?: TranscribeModel;
 }
 
 export interface LyricLine {
@@ -641,6 +647,12 @@ export interface Settings {
   groupEditions: boolean;
   /** Drag songs, albums and playlists onto playlists, Liked Songs and the queue. */
   dragAndDrop: boolean;
+  /** Transcribe songs without lyrics on this computer (this device only). */
+  transcribeLyrics: boolean;
+  /** The speech model transcription uses (this device only). */
+  transcribeModel: TranscribeModel;
+  /** Show lyrics transcribed on this computer. */
+  showAutoLyrics: boolean;
   [key: string]: unknown;
 }
 
@@ -743,7 +755,39 @@ export const DEFAULT_SETTINGS: Settings = {
   showFanEdits: false,
   groupEditions: true,
   dragAndDrop: true,
+  transcribeLyrics: false,
+  transcribeModel: "small",
+  showAutoLyrics: true,
 };
+
+// ---------------------------------------------------------------- transcription
+
+/** Speech models for lyrics transcription (docs/IPC.md "Lyrics transcription"). */
+export type TranscribeModel = "small" | "medium";
+
+export interface TranscribeModelInfo {
+  kind: TranscribeModel;
+  sizeBytes: number;
+  installed: boolean;
+  downloading: boolean;
+  doneBytes: number;
+}
+
+export type TranscribeStage = "waitingForModel" | "reading" | "decoding" | "transcribing";
+
+export interface TranscribeStatus {
+  enabled: boolean;
+  /** This build and this computer can transcribe. */
+  available: boolean;
+  unavailableReason?: string;
+  model: TranscribeModel;
+  models: TranscribeModelInfo[];
+  current?: { trackId: string; stage: TranscribeStage; percent: number; background: boolean };
+  queued: number;
+  batch: { done: number; total: number };
+  paused?: "battery" | "slowConnection" | "offline";
+  error?: { kind: "download" | "checksum" | "disk" | "transcribe"; message: string; trackId?: string };
+}
 
 // ---------------------------------------------------------------- file tags
 
@@ -1023,6 +1067,10 @@ export interface EventMap {
   "tags://progress": TagScanStatus;
   /** File tags changed: badges, editions and filters should be read again. */
   "tags://changed": null;
+  /** Transcription progress, model downloads and failures. */
+  "transcribe://status": TranscribeStatus;
+  /** A song was transcribed (`found`: words came out). */
+  "transcribe://done": { trackId: string; found: boolean };
 }
 
 export type EventName = keyof EventMap;

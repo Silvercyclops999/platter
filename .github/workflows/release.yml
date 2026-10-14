@@ -32,7 +32,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings && cargo test
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: 1
+        run: cargo clippy --all-targets --features transcribe -- -D warnings && cargo test --features transcribe
 
   build:
     needs: gate
@@ -43,9 +45,9 @@ jobs:
       matrix:
         include:
           - platform: windows-latest
-            args: ''
+            args: '--features transcribe'
           - platform: macos-latest
-            args: '--target universal-apple-darwin'
+            args: '--target universal-apple-darwin --features transcribe'
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +59,12 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with: { workspaces: src-tauri }
       - run: npm ci
+      # Transcription builds whisper.cpp with the runner's CMake. On Windows
+      # its bindings are generated with the runner's LLVM (the shipped ones
+      # are for 64-bit long, which Windows doesn't have); macOS can use the
+      # shipped ones.
+      - if: matrix.platform == 'macos-latest'
+        run: echo "WHISPER_DONT_GENERATE_BINDINGS=1" >> "$GITHUB_ENV"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ vars.RELEASES_REPO && secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}

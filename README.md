@@ -91,6 +91,13 @@ compiled. Create an application in the Discord Developer Portal and set
 `PLATTER_DISCORD_APP_ID=<your app id> npm run tauri build`. Without it the
 build works the same, and Settings says Discord status isn't available.
 
+Lyrics transcription (whisper.cpp) is the `transcribe` Cargo feature, which
+release builds turn on: `npm run tauri build -- --features transcribe`. It
+needs CMake, and on Windows also LLVM (for libclang). On macOS and Linux,
+setting `WHISPER_DONT_GENERATE_BINDINGS=1` skips the libclang step. Without
+the feature everything else builds the same, and Settings says transcription
+isn't in this build.
+
 Run the tests with `npm test`, and `cargo clippy -- -D warnings && cargo test`
 inside `src-tauri/`. There's a bit more in [CONTRIBUTING.md](CONTRIBUTING.md).
 

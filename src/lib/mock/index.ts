@@ -59,6 +59,7 @@ import type {
   SyncStatus,
   OwnLyrics,
   Track,
+  TranscribeModel,
   QueueAt,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
@@ -79,6 +80,7 @@ import { MockRemote } from "./remote";
 import { MockShare } from "./share";
 import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 import { MockFileTags } from "./fileTags";
+import { MockTranscribe } from "./transcribe";
 
 export interface MockOptions {
   latencyMs: number;
@@ -173,6 +175,8 @@ export class MockBackend implements Backend {
   readonly discord: MockDiscord;
   /** File tags: badges, editions, filters and the scan. */
   readonly tags: MockFileTags;
+  /** Lyrics transcription (test hooks: failNextDownload, failNextSong, silent, stepMs). */
+  readonly transcribe: MockTranscribe;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -255,6 +259,29 @@ export class MockBackend implements Backend {
       },
       !this.opts.tagScan,
     );
+    this.transcribe = new MockTranscribe({
+      settings: () => this.settings,
+      emitStatus: (s) => this.emit("transcribe://status", s),
+      emitDone: (trackId, found) => this.emit("transcribe://done", { trackId, found }),
+      later: (ms, fn) => this.later(ms, fn),
+      hasLyrics: (id) => {
+        const t = this.trackById(id);
+        const own = this.own.get(id);
+        return (!!own && !own.auto) || (!!t && !this.lyricsDown && !!mockLyrics(t));
+      },
+      save: (trackId, text, model) => {
+        const own = this.own.get(trackId);
+        if (own && !own.auto) return;
+        this.own.set(trackId, { trackId, text, prefer: false, updatedAt: Math.floor(Date.now() / 1000), auto: model });
+      },
+      albumTracks: (albumId) => (this.fx.tracksByAlbum.get(albumId) ?? []).map((t) => t.id).filter((id) => !this.own.has(id)),
+      unreleasedTracks: () =>
+        this.fx.albums
+          .filter((a) => a.format === null || a.subformats.includes("demo"))
+          .flatMap((a) => this.fx.tracksByAlbum.get(a.id) ?? [])
+          .map((t) => t.id)
+          .filter((id) => !this.own.has(id)),
+    });
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
     this.remote = new MockRemote(
@@ -728,9 +755,12 @@ export class MockBackend implements Backend {
   lyrics(trackId: string) {
     return this.delay(() => {
       const track = this.trackById(trackId) ?? this.notFound("Track");
-      const own = this.own.get(trackId);
+      let own = this.own.get(trackId);
+      // Transcriptions hide when turned off, and never go ahead of Plex's.
+      if (own?.auto && !this.settings.showAutoLyrics) own = undefined;
       const mine = own ? lyricsFromText(own.text) : null;
-      if (mine && (own!.prefer || this.settings.lyricsPreferOwn)) return mine;
+      if (mine && own?.auto) mine.source = "auto";
+      if (mine && !own?.auto && (own!.prefer || this.settings.lyricsPreferOwn)) return mine;
       const plex = this.lyricsDown ? null : mockLyrics(track);
       return plex ?? mine;
     });
@@ -1522,6 +1552,7 @@ export class MockBackend implements Backend {
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
       if (patch.readFileTags !== undefined) this.tags.settingsChanged();
+      if (patch.transcribeLyrics !== undefined || patch.transcribeModel !== undefined) this.transcribe.settingsChanged();
       if (patch.abLoopHandles === false && this.abLoop) {
         this.abLoop = null;
         this.emitState();
@@ -1653,6 +1684,37 @@ export class MockBackend implements Backend {
   }
   tagScanStatus() {
     return this.delay(() => this.tags.scanStatus());
+  }
+
+  transcribeStatus() {
+    return this.delay(() => this.transcribe.status());
+  }
+  transcribeModelDownload(model: TranscribeModel) {
+    return this.delay(() => this.transcribe.downloadModel(model));
+  }
+  transcribeModelCancel() {
+    return this.delay(() => this.transcribe.cancelDownload());
+  }
+  transcribeModelDelete(model: TranscribeModel) {
+    return this.delay(() => this.transcribe.deleteModel(model));
+  }
+  transcribeTrack(trackId: string) {
+    return this.delay(() => {
+      this.trackById(trackId) ?? this.notFound("Track");
+      this.transcribe.transcribeTrack(trackId);
+    });
+  }
+  transcribeAlbum(albumId: string) {
+    return this.delay(() => this.transcribe.transcribeAlbum(albumId));
+  }
+  transcribeUnreleased() {
+    return this.delay(() => this.transcribe.transcribeUnreleased());
+  }
+  transcribeCancel(trackId?: string) {
+    return this.delay(() => this.transcribe.cancel(trackId));
+  }
+  transcribeFoundNothing(trackId: string) {
+    return this.delay(() => this.transcribe.foundNothing(trackId));
   }
 }
 

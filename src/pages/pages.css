@@ -426,3 +426,6 @@
 .server-item__name { flex: 1; font-weight: var(--font-weight-semibold); }
 .server-item__state { font-size: var(--font-size-sm); color: var(--color-text-muted); }
 .server-item__state.is-online { color: var(--color-success); }
+
+/* Transcription model: picker and its download or delete button. */
+.transcribe-model { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; }

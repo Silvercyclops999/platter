@@ -55,8 +55,9 @@ export function loadLyrics(trackId: string): Promise<Lyrics | null> {
 export function useLyrics(trackId: string | null | undefined): { lyrics: Lyrics | null; loading: boolean } {
   const lrclib = useSettings((s) => s.settings?.lyricsLrclib ?? false);
   const preferOwn = useSettings((s) => s.settings?.lyricsPreferOwn ?? false);
+  const showAuto = useSettings((s) => s.settings?.showAutoLyrics ?? true);
   const version = useLyricsEditor((s) => s.version);
-  const sources = `${lrclib}|${preferOwn}|${version}`;
+  const sources = `${lrclib}|${preferOwn}|${showAuto}|${version}`;
   const [state, setState] = useState<{ key: string | null; lyrics: Lyrics | null; loading: boolean }>(() => ({
     key: null,
     lyrics: null,
@@ -83,7 +84,7 @@ export function useLyrics(trackId: string | null | undefined): { lyrics: Lyrics 
 let lastSources: string | undefined;
 useSettings.subscribe((s) => {
   if (!s.settings) return;
-  const v = `${s.settings.lyricsLrclib}|${s.settings.lyricsPreferOwn}`;
+  const v = `${s.settings.lyricsLrclib}|${s.settings.lyricsPreferOwn}|${s.settings.showAutoLyrics}`;
   if (lastSources !== undefined && v !== lastSources) clearLyricsCache();
   lastSources = v;
 });
@@ -98,6 +99,8 @@ export function lyricsSourceLabel(l: Lyrics): string | null {
   switch (l.source) {
     case "user":
       return "Your lyrics";
+    case "auto":
+      return "Auto-transcribed, may be wrong.";
     case "file":
       return "From the lyrics file next to this song";
     case "lrclib":

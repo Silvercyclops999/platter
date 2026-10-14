@@ -27,6 +27,7 @@ import {
 import { FullWindow } from "./FullWindow";
 import { useLyricsAutoShow } from "./lyrics";
 import { LyricsEditorHost } from "./LyricsEditor";
+import { startTranscribe } from "../stores/transcribe";
 import { loadOwnLyricsIds } from "../stores/lyricsEditor";
 import { MainView } from "./MainView";
 import { NowPlayingExpanded, NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
@@ -55,6 +56,7 @@ export function AppShell() {
   useOpenNowPlayingOnStart();
   useLyricsAutoShow();
   useEffect(() => void loadOwnLyricsIds(), []);
+  useEffect(() => void startTranscribe(), []);
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);

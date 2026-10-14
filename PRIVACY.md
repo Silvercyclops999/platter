@@ -59,6 +59,15 @@ and your own Plex server.
   song without lyrics, unreleased ones included. Answers are kept on your
   computer for 30 days (7 days when there were none).
 
+- Hugging Face (huggingface.co), only if you turn on "Transcribe songs
+  without lyrics on this computer" and download a speech model. The model
+  file is downloaded once from the whisper.cpp model repository there. The
+  request carries nothing about you or your music.
+
+Lyrics transcription runs entirely on your computer: songs are read from your
+own server (or the app's cache), turned into text on this machine, and saved
+in the app's data folder. No audio or text from it is sent anywhere.
+
 Some optional features planned for later will talk to other services, but
 only once you turn them on. Examples are Last.fm or ListenBrainz
 scrobbling, Lidarr and Tautulli. Each one is off until you set it up, and

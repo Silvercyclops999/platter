@@ -18,6 +18,7 @@ import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { copyText } from "../stores/toasts";
+import { transcribe, useTranscribe } from "../stores/transcribe";
 import { AlbumCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { EditionPicker } from "./EditionPicker";
@@ -31,6 +32,7 @@ export function AlbumPage({ id }: { id: string }) {
   const shuffle = usePlayer((s) => s.state?.shuffledContexts?.includes(id) ?? false);
   const { isContext, playing: isThisPlaying } = useContextState("album", id);
   const pinned = usePins((s) => s.isPinned("album", id));
+  const transcribeOn = useTranscribe((s) => !!s.status?.enabled && s.status.available);
   const play = () => (isContext ? player.toggle() : player.playAlbum(id));
   usePageBar(album?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(album?.title);
@@ -143,6 +145,9 @@ export function AlbumPage({ id }: { id: string }) {
                     label: "Copy album title",
                     onSelect: () => copyText(`${album.title} - ${album.artistTitle}`),
                   },
+                  ...(transcribeOn
+                    ? [{ label: "Transcribe songs without lyrics", onSelect: () => void transcribe.album(album.id) }]
+                    : []),
                 ],
                 e.currentTarget,
               )

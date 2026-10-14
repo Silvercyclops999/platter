@@ -9,6 +9,8 @@ on:
       - "src-tauri/src/platform/**"
       - "src-tauri/Cargo.toml"
       - "src-tauri/Cargo.lock"
+      - "src-tauri/.cargo/**"
+      - "src-tauri/src/lyrics/transcribe/**"
   workflow_dispatch:
 
 concurrency:
@@ -34,4 +36,15 @@ jobs:
       - run: npm run build
       - name: cargo clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: 1
+        run: cargo clippy --all-targets --features transcribe -- -D warnings
+      # The universal app's Intel half builds whisper.cpp for x86_64 on this
+      # ARM runner; check that cross build too.
+      - name: cargo check (Intel, transcribe)
+        working-directory: src-tauri
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: 1
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo check --target x86_64-apple-darwin --features transcribe
