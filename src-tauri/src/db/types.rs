@@ -32,6 +32,41 @@ pub enum PopularSource {
     MyPlays,
 }
 
+/// Kind of a row in the library sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LibraryKind {
+    Playlist,
+    Album,
+    Artist,
+}
+
+/// One playlist, album or artist in the library sidebar (`library_items`).
+/// Small on purpose: the sidebar lists the whole library at once.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryItem {
+    pub kind: LibraryKind,
+    pub id: String,
+    pub title: String,
+    /// Title without a leading article, for alphabetical order.
+    pub sort_title: String,
+    /// Album artist for albums; None for artists and playlists.
+    pub creator: Option<String>,
+    pub thumb: Option<String>,
+    /// Plex smart playlist.
+    pub smart: bool,
+    /// Lower-case Plex album format ("ep", "single"), albums only.
+    pub format: Option<String>,
+    /// Unix seconds it entered the library: Plex addedAt for albums, the
+    /// earliest of their albums for artists. None for playlists.
+    pub added_at: Option<i64>,
+    /// Unix seconds of the latest play: Plex history, the local listen log
+    /// and Plex lastViewedAt for albums; their newest album for artists;
+    /// local plays started from the playlist for playlists.
+    pub played_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncPhase {

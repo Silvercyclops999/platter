@@ -26,6 +26,7 @@ import type {
   EventName,
   Health,
   HomeData,
+  LibraryItem,
   NowPlayingDetails,
   Page,
   PinInfo,
@@ -64,6 +65,8 @@ export interface Backend {
   artistNames(): Promise<ArtistName[]>;
   albums(args: AlbumsArgs): Promise<Page<Album>>;
   playlists(): Promise<Playlist[]>;
+  /** Every playlist, album and artist, for the library sidebar. */
+  libraryItems(): Promise<LibraryItem[]>;
   artistPage(id: string): Promise<ArtistPage>;
   albumPage(id: string): Promise<AlbumPage>;
   playlistPage(id: string): Promise<PlaylistPage>;
@@ -159,6 +162,7 @@ export function createTauriBackend(): Backend {
     artistNames: () => call("artist_names"),
     albums: (args) => call("albums", { ...args }),
     playlists: () => call("playlists"),
+    libraryItems: () => call("library_items"),
     artistPage: (id) => call("artist_page", { id }),
     albumPage: (id) => call("album_page", { id }),
     playlistPage: (id) => call("playlist_page", { id }),

@@ -6,7 +6,7 @@
 //! .manage(db_handle)
 //! .invoke_handler(tauri::generate_handler![
 //!     dbc::sync_status, dbc::sync_now, dbc::home, dbc::artists, dbc::artist_names, dbc::albums,
-//!     dbc::playlists, dbc::artist_page, dbc::album_page, dbc::playlist_page,
+//!     dbc::playlists, dbc::library_items, dbc::artist_page, dbc::album_page, dbc::playlist_page,
 //!     dbc::search, dbc::recent_searches, dbc::recent_search_add,
 //!     dbc::recent_searches_clear,
 //! ])
@@ -77,6 +77,12 @@ pub async fn artist_names(db: State<'_, DbHandle>) -> AppResult<Vec<ArtistName>>
 #[tauri::command]
 pub async fn playlists(db: State<'_, DbHandle>) -> AppResult<Vec<Playlist>> {
     db.read_async(queries::playlists).await
+}
+
+/// Every playlist, album and artist for the library sidebar.
+#[tauri::command]
+pub async fn library_items(db: State<'_, DbHandle>) -> AppResult<Vec<LibraryItem>> {
+    db.read_async(queries::library_items).await
 }
 
 #[tauri::command]

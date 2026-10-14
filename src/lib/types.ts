@@ -90,6 +90,24 @@ export interface Playlist {
   thumb: string | null;
 }
 
+export type LibraryItemKind = "playlist" | "album" | "artist";
+
+/** One row of the library sidebar (`library_items`). Times are unix seconds. */
+export interface LibraryItem {
+  kind: LibraryItemKind;
+  id: string;
+  title: string;
+  sortTitle: string;
+  /** Album artist (albums only). */
+  creator?: string | null;
+  thumb?: string | null;
+  smart: boolean;
+  /** Lower-case Plex album format ("ep", "single"), albums only. */
+  format?: string | null;
+  addedAt?: number | null;
+  playedAt?: number | null;
+}
+
 // ---------------------------------------------------------------- errors
 
 export type AppErrorKind =

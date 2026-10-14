@@ -13,7 +13,7 @@
 //!   then most recent play. Albums already in the first 6 of "Recently
 //!   played" are left out so the two rows don't repeat each other.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -365,6 +365,124 @@ pub fn tracks_by_ids(c: &Connection, ids: &[String]) -> AppResult<Vec<Track>> {
     for id in ids {
         if let Some(t) = st.query_row([id], row_track).optional()? {
             out.push(t);
+        }
+    }
+    Ok(out)
+}
+
+/// Every playlist, album and artist with what the library sidebar sorts and
+/// shows by. Unordered; the UI sorts.
+pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
+    // Latest play per album: Plex history (all devices) and the local listen log.
+    let mut album_played: HashMap<String, i64> = HashMap::new();
+    {
+        let mut st = c.prepare_cached(
+            "WITH plays AS (
+                 SELECT rating_key, max(viewed_at) AS at FROM play_history GROUP BY rating_key
+                 UNION ALL
+                 SELECT rating_key, max(started_at) / 1000 AS at FROM listen_log GROUP BY rating_key
+             )
+             SELECT t.album_id, max(p.at) FROM plays p JOIN tracks t ON t.id = p.rating_key GROUP BY t.album_id",
+        )?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        for row in rows {
+            let (id, at) = row?;
+            album_played.insert(id, at);
+        }
+    }
+
+    let mut out = Vec::new();
+    // Per artist: earliest album added, latest album played.
+    let mut artist_dates: HashMap<String, (Option<i64>, Option<i64>)> = HashMap::new();
+    {
+        let mut st = c.prepare_cached(
+            "SELECT id, title, sort_title, artist_id, artist_title, thumb, format, added_at, last_viewed_at FROM albums",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, i64>(7)?,
+                r.get::<_, Option<i64>>(8)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, title, sort_title, artist_id, artist_title, thumb, format, added, viewed) = row?;
+            let played = match (viewed, album_played.get(&id).copied()) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (a, b) => a.or(b),
+            };
+            let added = (added > 0).then_some(added);
+            let e = artist_dates.entry(artist_id).or_insert((None, None));
+            e.0 = match (e.0, added) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            e.1 = e.1.max(played);
+            out.push(LibraryItem {
+                kind: LibraryKind::Album,
+                id,
+                title,
+                sort_title,
+                creator: Some(artist_title),
+                thumb,
+                smart: false,
+                format,
+                added_at: added,
+                played_at: played,
+            });
+        }
+    }
+    {
+        let mut st = c.prepare_cached("SELECT id, title, sort_title, thumb FROM artists")?;
+        let rows = st.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))
+        })?;
+        for row in rows {
+            let (id, title, sort_title, thumb) = row?;
+            let (added_at, played_at) = artist_dates.get(&id).copied().unwrap_or((None, None));
+            out.push(LibraryItem {
+                kind: LibraryKind::Artist,
+                id,
+                title,
+                sort_title,
+                creator: None,
+                thumb,
+                smart: false,
+                format: None,
+                added_at,
+                played_at,
+            });
+        }
+    }
+    {
+        let mut st = c.prepare_cached(
+            "SELECT p.id, p.title, p.thumb, p.smart,
+                    (SELECT max(l.started_at) / 1000 FROM listen_log l
+                      WHERE l.context_kind = 'playlist' AND l.context_id = p.id)
+             FROM playlists p",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(LibraryItem {
+                kind: LibraryKind::Playlist,
+                id: r.get(0)?,
+                sort_title: r.get(1)?,
+                title: r.get(1)?,
+                creator: None,
+                thumb: r.get(2)?,
+                smart: r.get(3)?,
+                format: None,
+                added_at: None,
+                played_at: r.get(4)?,
+            })
+        })?;
+        for row in rows {
+            out.push(row?);
         }
     }
     Ok(out)

@@ -53,6 +53,7 @@ Event `auth://changed` → `AuthStatus`.
 | `artist_names` | – | `{ id, title }[]` (every artist) |
 | `albums` | `{ sort: "name"|"artist"|"year"|"recent"|"plays", offset, limit, section?: ReleaseSection }` | `Page<Album>` |
 | `playlists` | – | `Playlist[]` |
+| `library_items` | – | `LibraryItem[]` (every playlist, album and artist, unordered) |
 | `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[] }` |
 | `album_page` | `{ id }` | `AlbumPage { album, tracks: Track[], totalDurationMs, moreByArtist: Album[] }` |
 | `playlist_page` | `{ id }` | `{ playlist, tracks: Track[] }` |
@@ -71,6 +72,14 @@ Plex's order. Artist lists never carry the biography. Similar artists come
 from the artist's detail, not from sync: `artist_page` answers with what's
 cached and, when that is missing or a week old, fetches it in the background
 and then emits `artist://changed` with `{ id }` so the page can ask again.
+
+`LibraryItem = { kind: "playlist"|"album"|"artist", id, title, sortTitle, creator?, thumb?, smart, format?, addedAt?, playedAt? }`
+feeds the library sidebar, which sorts and filters it in the UI. `creator` is
+the album artist (albums only). `addedAt` is Plex's addedAt for albums and the
+earliest of an artist's albums for artists; playlists have none. `playedAt` is
+the latest play in Plex history or the local listen log (and Plex's
+lastViewedAt) for albums, an artist's newest album play, and the latest local
+play started from a playlist. Times are unix seconds.
 `SyncStatus = { phase: "idle"|"artists"|"albums"|"tracks"|"incremental", done, total, lastSyncAt? }`
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.

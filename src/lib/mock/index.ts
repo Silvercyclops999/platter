@@ -28,6 +28,7 @@ import type {
   EventMap,
   EventName,
   Health,
+  LibraryItem,
   PinInfo,
   PlayContextArgs,
   PlayerState,
@@ -414,6 +415,38 @@ export class MockBackend implements Backend {
   }
   playlists() {
     return this.delay(() => this.fx.playlists);
+  }
+  libraryItems() {
+    return this.delay(() => {
+      const albums = this.allAlbums();
+      const byArtist = new Map<string, { added: number | null; played: number | null }>();
+      const items: LibraryItem[] = albums.map((a) => {
+        const d = byArtist.get(a.artistId) ?? { added: null, played: null };
+        d.added = d.added === null ? a.addedAt : Math.min(d.added, a.addedAt);
+        d.played = Math.max(d.played ?? 0, a.lastViewedAt ?? 0) || null;
+        byArtist.set(a.artistId, d);
+        return {
+          kind: "album",
+          id: a.id,
+          title: a.title,
+          sortTitle: a.sortTitle,
+          creator: a.artistTitle,
+          thumb: a.thumb,
+          smart: false,
+          format: a.format,
+          addedAt: a.addedAt,
+          playedAt: a.lastViewedAt,
+        };
+      });
+      for (const a of this.fx.artists) {
+        const d = byArtist.get(a.id);
+        items.push({ kind: "artist", id: a.id, title: a.title, sortTitle: a.sortTitle, thumb: a.thumb, smart: false, addedAt: d?.added ?? null, playedAt: d?.played ?? null });
+      }
+      for (const p of this.fx.playlists) {
+        items.push({ kind: "playlist", id: p.id, title: p.title, sortTitle: p.title, thumb: p.thumb, smart: p.smart, addedAt: null, playedAt: null });
+      }
+      return items;
+    });
   }
   artistPage(id: string) {
     return this.delay(() => {

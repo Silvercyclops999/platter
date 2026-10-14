@@ -317,6 +317,56 @@ async fn playlists_sync_and_refetch_only_changed_items() {
     assert_eq!(count(&t.db, "playlist_items"), 2, "items of the removed playlist cascade away");
 }
 
+#[tokio::test]
+async fn library_items_list_everything_with_added_and_played_dates() {
+    let t = open();
+    let mut lib = fake::generated(2, 2, 2);
+    let ids: Vec<String> = lib.tracks.iter().map(|t| t.id.clone()).collect();
+    let mut smart = fake::playlist("p2", "Most Played", 1);
+    smart.smart = true;
+    lib.playlists.push((fake::playlist("p1", "Road Trip", 1), vec![ids[0].clone()]));
+    lib.playlists.push((smart, vec![ids[1].clone()]));
+    let first = lib.albums[0].clone();
+    let second = lib.albums[1].clone();
+    let other_artist = lib.artists[1].id.clone();
+    let second_track = lib.tracks.iter().find(|t| t.album_id == second.id).unwrap().id.clone();
+    let src = Arc::new(FakeSource::new(lib));
+    sync(&t.db, &src, false).await;
+
+    // Plex history on the first album, a newer local play of the second
+    // album started from playlist p1.
+    t.db.write(|c| {
+        c.execute("INSERT INTO play_history (rating_key, viewed_at) VALUES (?1, 5000)", [&ids[0]])?;
+        listens::start_play(c, &play(&second_track, 9_000_000, 200_000, false))?;
+        Ok(())
+    })
+    .unwrap();
+
+    let items = t.db.read(queries::library_items).unwrap();
+    let n = |k: LibraryKind| items.iter().filter(|i| i.kind == k).count();
+    assert_eq!((n(LibraryKind::Album), n(LibraryKind::Artist), n(LibraryKind::Playlist)), (4, 2, 2));
+    let get = |k: LibraryKind, id: &str| items.iter().find(|i| i.kind == k && i.id == id).unwrap().clone();
+
+    let a1 = get(LibraryKind::Album, &first.id);
+    assert_eq!(a1.creator.as_deref(), Some(first.artist_title.as_str()));
+    assert_eq!(a1.added_at, Some(first.added_at));
+    assert_eq!(a1.played_at, Some(5000));
+    assert_eq!(get(LibraryKind::Album, &second.id).played_at, Some(9_000));
+
+    // An artist: earliest album added, newest album played.
+    let ar = get(LibraryKind::Artist, &first.artist_id);
+    assert_eq!(ar.added_at, Some(first.added_at.min(second.added_at)));
+    assert_eq!(ar.played_at, Some(9_000));
+    assert_eq!(get(LibraryKind::Artist, &other_artist).played_at, None);
+
+    let p1 = get(LibraryKind::Playlist, "p1");
+    assert!(!p1.smart);
+    assert_eq!(p1.played_at, Some(9_000), "played from the playlist");
+    let p2 = get(LibraryKind::Playlist, "p2");
+    assert!(p2.smart);
+    assert_eq!(p2.played_at, None);
+}
+
 // ---------------------------------------------------------------- browse
 
 fn sectioned_library() -> FakeLibrary {

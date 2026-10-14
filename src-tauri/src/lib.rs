@@ -193,6 +193,7 @@ pub fn run() {
             db::commands::artist_names,
             db::commands::albums,
             db::commands::playlists,
+            db::commands::library_items,
             db::commands::artist_page,
             db::commands::album_page,
             db::commands::playlist_page,
