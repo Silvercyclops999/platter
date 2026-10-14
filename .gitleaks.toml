@@ -18,3 +18,5 @@ keywords = ["plex.direct"]
 
 [allowlist]
 paths = ['''package-lock\.json''', '''Cargo\.lock''']
+# Storage key names such as "platter.pins.v1" look like keys to the generic rule.
+regexes = ['''platter\.[a-z]+\.v[0-9]+''']
