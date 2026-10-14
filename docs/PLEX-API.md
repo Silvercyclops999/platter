@@ -264,10 +264,29 @@ the format, so the app keeps the default JPEG.
 ### 2026-10-13: track ratingCount
 
 Track items from `/library/sections/{id}/all?type=10` can carry an integer
-`ratingCount`, the global listener count Plex gets from Last.fm. About 44% of
-tracks had one; unreleased tracks never do. The app stores it per track and
-ranks an artist's popular songs by it. Track artists other than the album
-artist come in `originalTitle`, as one string such as `A, B` or `A feat. B`.
+`ratingCount`. About 44% of tracks had one; unreleased tracks never do. Track
+artists other than the album artist come in `originalTitle`, as one string
+such as `A, B` or `A feat. B`.
+
+Correction (2026-10-14): `ratingCount` is not a global listener count and
+can't rank songs. See the entry below.
+
+### 2026-10-14: ratingCount and track MusicBrainz ids
+
+On one large artist (770 tracks), 63 tracks had `ratingCount`, and they are
+the same 63 that have a `Guid` `mbid://` entry (with `includeGuids=1` on the
+track list). The counts are not on one scale: a well-known single had about
+600 while every track of one recent album had between 130,000 and 320,000, so
+ranking by them put that one album at the top. Plex's own most popular
+tracks hub for the artist sorts the same way. The app no longer ranks by
+`ratingCount` (it only breaks ties between songs you've played equally);
+Popular uses the ListenBrainz top recordings for the artist instead,
+matched to library tracks by title.
+
+The track `mbid://` is a MusicBrainz track id, not a recording id: on 3
+sampled tracks the MusicBrainz recording lookup answered 404 and a search by
+track id found each one. None of the 63 matched a ListenBrainz recording id,
+so the app doesn't store them.
 
 ### 2026-10-14: artist list vs artist detail
 

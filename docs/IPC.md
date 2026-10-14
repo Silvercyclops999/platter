@@ -59,11 +59,11 @@ Event `auth://changed` → `AuthStatus`.
 | `home` | – | `HomeData { shortcuts: HomeItem[], recentlyPlayed: HomeItem[], jumpBackIn: Album[], playlists: Playlist[], recentlyAdded: Album[], topArtists: Artist[] }` |
 | `home_shelf` | `{ shelf: "recentlyPlayed"|"jumpBackIn"|"playlists"|"recentlyAdded"|"topArtists", limit?: number }` | `HomeItem[]` (the whole shelf, for Show all; limit defaults to and caps at 200) |
 | `artists` | `{ sort: "name"|"recent"|"plays", offset, limit }` | `Page<Artist>` |
-| `artist_names` | – | `{ id, title }[]` (every artist) |
+| `artist_names` | – | `{ id, title }[]` (every artist, then learned names with `credit:` ids) |
 | `albums` | `{ sort: "name"|"artist"|"year"|"recent"|"plays", offset, limit, section?: ReleaseSection }` | `Page<Album>` |
 | `playlists` | – | `Playlist[]` |
 | `library_items` | – | `LibraryItem[]` (every playlist, album and artist, unordered) |
-| `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[] }` |
+| `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[], appearsOn: Album[] }` |
 | `album_page` | `{ id }` | `AlbumPage { album, tracks: Track[], totalDurationMs, moreByArtist: Album[] }` |
 | `playlist_page` | `{ id }` | `{ playlist, tracks: Track[] }` |
 
@@ -78,11 +78,31 @@ with no repeats. `playlists` puts the ones played on this computer first,
 newest first, then the rest by title. `topArtists` is artists by play count,
 played ones only.
 `artist_names` feeds the artist links in track lines: the UI loads it once,
-keeps it, and loads it again after `library://changed`. A track's
-`ratingCount` (global listener count, absent when Plex has none) ranks the
-artist page's `popular` list: songs with a count first, highest first, then
-the rest by your own plays. `popular` also has songs where the artist is
-credited in the track artist line, at most 10, one copy per song.
+keeps it, and loads it again after `library://changed` (and shortly after
+`artistinfo://changed`, which can teach new names). It ends with names that
+contain a separator, like "Tyler, The Maker", learned from ListenBrainz
+artist credits, so a split keeps them whole; their ids are `credit:` ids.
+
+`popular` holds the artist's own songs and songs where the artist is
+credited as a whole name in the track artist line, at most 10, one copy per
+song. With `popularSource` "global", songs on the artist's global top list
+(see Artist info) come first in list order, matched by title folded for
+comparison (case, brackets, "feat.", version suffixes like "2011 Remaster" and
+punctuation ignored). The rest follow by your own plays, then most recent
+play; a track's `ratingCount` only breaks ties there. Until the list has
+arrived, or when there is none, the whole list is in plays order. `appearsOn`
+lists albums by others whose tracks credit the artist, newest first.
+
+Every name in a track line that has no library artist gets a credited
+artist page with the id `credit:<name in lower case>` (while the
+`linkFeatured` setting is on). `artist_page` with such an id builds the page
+from the tracks that credit the name: `artist` is made up (no thumb or art,
+title as written in the first credit), `popular` is ranked like above,
+`appearsOn` lists the albums of those tracks, `plays` sums their plays, and
+`sections` and `similar` are empty. A name nothing credits (or only as part
+of a longer name) is `NotFound`. Playing such a page with `play_context`
+kind `"artist"` plays Popular, then the other songs that credit the name.
+`search` lists credited artists among `artists` when their name matches.
 On the artist page, `plays` is the sum of play counts over the artist's own
 tracks, `about` is the Plex artist biography (null when empty), and `similar`
 holds the Plex similar artists that are in this library, at most 12, in
@@ -178,8 +198,8 @@ in that order (the page's sort or filter).
 | Command | Args | Returns |
 | --- | --- | --- |
 | `artist_info` | `{ id }` | `ArtistInfo` |
-| `artist_info_keys` | – | `{ lastfm, fanart, audiodb: { saved, rejected } }` |
-| `artist_info_key_set` | `{ source: "lastfm"|"fanart"|"audiodb", key: string|null }` | `{ saved, rejected }` |
+| `artist_info_keys` | – | `{ lastfm, fanart, audiodb, listenbrainz: { saved, rejected } }` |
+| `artist_info_key_set` | `{ source: "lastfm"|"fanart"|"audiodb"|"listenbrainz", key: string|null }` | `{ saved, rejected }` |
 | `artist_info_cache_clear` | – | number of artists that had cached info |
 | `open_info_link` | `{ url }` | – (opens a source or licence page in the default browser) |
 
@@ -200,6 +220,22 @@ when Plex has no background art. `photo`, `banner` and `logo` are art paths
 (`/ext/<image url>`) served by the `art` protocol and cached like Plex art.
 `members` link to library artists by name. `credits` lists one line per
 source whose data is shown, with its link and licence.
+
+The same background fetch gets the artist's global top list for Popular
+while `popularSource` is "global": ListenBrainz top recordings by the
+artist's MusicBrainz id (no key; an optional user token, sent as
+`Authorization: Token`, lets it answer artists it hasn't cached), and when
+ListenBrainz has nothing, Last.fm top tracks if Last.fm is on with a key.
+Copies of a song are merged and the top 100 are kept for 7 days, "none found"
+too. Offline, busy or a bad answer stores nothing and is tried again on a
+later page open. A new list emits `artistinfo://changed`, and the artist page
+then asks `artist_page` again.
+
+`artist_info` also takes `credit:` ids. Their name comes from the tracks that
+credit it, and their MusicBrainz id from a MusicBrainz artist search, taking
+only a result with score 100 whose name or alias equals the credited name;
+Plex is never asked about them. The other sources then work as for any
+artist, cached under the `credit:` id.
 
 Keys are kept in the OS keychain, never in settings. Saving a key checks it
 with one lookup; `rejected` means the service refused it, which turns that
@@ -557,7 +593,7 @@ The rest of the fields, with their defaults:
 | `showFormatBadge` | bool, true | Shows the codec and sample rate badge in track lists and album headers. |
 | `resumeContexts` | bool, true | Albums and playlists start where they were left. Off starts at track 1; points are still saved. |
 | `precacheCount` | 1 to 50, 5 | Upcoming tracks kept on disk. Out of range values are clamped. |
-| `popularSource` | `"global"`, `"myPlays"` | Ranks the artist page's Popular by listener counts or by your own plays. |
+| `popularSource` | `"global"`, `"myPlays"` | Ranks the artist page's Popular by the global top list (ListenBrainz or Last.fm) or by your own plays. |
 | `artCacheMb` | 128 to 51200, 2048 | Artwork cache size. Shrinking it removes the oldest images at once. |
 | `artworkColours` | bool, true | Headers tint from artwork. Off gives every header the same neutral colour. |
 | `reduceMotion` | `"system"`, `"on"`, `"off"` | Follow the OS setting, or force reduced motion on or off. |
@@ -580,6 +616,8 @@ The rest of the fields, with their defaults:
 | `infoLastfm` | bool, false | Artist info from Last.fm. Only used while a key is saved and wasn't refused. |
 | `infoFanart` | bool, false | Artist images from Fanart.tv. Same key rule. |
 | `infoAudiodb` | bool, false | Artist photo and bio from TheAudioDB. Same key rule. |
+| `infoListenbrainz` | bool, true | Popular's global list from ListenBrainz (Last.fm top tracks fill in when it has none and Last.fm is on). With this and `infoLastfm` both off, Popular ranks by your plays. The optional token is kept in the keychain. |
+| `linkFeatured` | bool, true | Every name in a track's artist line links to a page, featured artists without a library entry included, and search lists them. Off leaves those names as plain text. |
 | `likedMeans` | `"five"` or `"fourUp"`, `"five"` | Which Plex ratings count as liked: five stars (10), or four stars and up (8 or more). Liking always writes five stars. |
 | `likeControlRows` | `"hover"`, `"always"` or `"off"`, `"hover"` | When song rows show the like control. Liked songs always show their tick unless it's `"off"`; the player bar and now playing always show it. |
 | `showPlexPlayers` | bool, true | List Plex players under Listen on in the device picker. Off makes `remote_players` return an empty list. |

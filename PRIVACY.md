@@ -16,6 +16,13 @@ and your own Plex server.
 - Last.fm, Fanart.tv and TheAudioDB, only if you enter your own API key for
   them in Settings. They get the artist's name or MusicBrainz id and your key.
   Their images are fetched from their own image servers.
+- ListenBrainz, for an artist's most played songs worldwide (the Popular
+  list; on by default, can be turned off in Settings). The request carries
+  the artist's MusicBrainz id, and your ListenBrainz user token if you choose
+  to enter one.
+- MusicBrainz, to find the MusicBrainz id of a featured artist who has no
+  albums in your library, when you open their page. The request carries the
+  artist's name, nothing else.
 - Apple's iTunes Search, only when you copy a public link for a song or album
   from a Share menu (on by default, can be turned off in Settings). The search
   carries the artist and the song or album title, nothing else. Unreleased
@@ -55,7 +62,7 @@ this file will list exactly what each one sends.
 
 Your Plex token is kept in the OS keychain (Windows Credential Manager or
 macOS Keychain). It's never written to a plain file or to the logs. API keys
-you enter for artist info sources, AirPlay speaker passwords and the Imgur
+and the ListenBrainz token you enter for artist info sources, AirPlay speaker passwords and the Imgur
 client ID are kept the same way.
 
 The library cache, artwork cache, search history and listen log live in the
