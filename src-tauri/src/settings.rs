@@ -119,6 +119,16 @@ pub enum LyricsMode {
     Off,
 }
 
+/// Whether songs tagged explicit play.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExplicitContent {
+    #[default]
+    Allowed,
+    /// Left out of albums, playlists and anything else that plays, with a toast.
+    Filtered,
+}
+
 /// Missing fields (settings saved by an older build) take their defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -262,6 +272,14 @@ pub struct Settings {
     pub lyrics_lrclib: bool,
     /// The full-window view hides its controls after 3 s without movement.
     pub full_window_hide_controls: bool,
+    /// Read explicit, version and edition tags from the files (this device only).
+    pub read_file_tags: bool,
+    /// Explicit songs play, or are left out of what plays.
+    pub explicit_content: ExplicitContent,
+    /// Show fan and AI edits (ARCHIVE_FLAGS).
+    pub show_fan_edits: bool,
+    /// Albums sharing ARCHIVE_GROUP show as one card with an edition picker.
+    pub group_editions: bool,
 }
 
 impl Default for Settings {
@@ -332,6 +350,10 @@ impl Default for Settings {
             lyrics_mode: LyricsMode::AutoShow,
             lyrics_lrclib: false,
             full_window_hide_controls: true,
+            read_file_tags: true,
+            explicit_content: ExplicitContent::Allowed,
+            show_fan_edits: false,
+            group_editions: true,
         }
     }
 }
@@ -402,6 +424,10 @@ pub struct SettingsPatch {
     pub lyrics_mode: Option<LyricsMode>,
     pub lyrics_lrclib: Option<bool>,
     pub full_window_hide_controls: Option<bool>,
+    pub read_file_tags: Option<bool>,
+    pub explicit_content: Option<ExplicitContent>,
+    pub show_fan_edits: Option<bool>,
+    pub group_editions: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -482,6 +508,10 @@ impl Settings {
         set(&mut self.lyrics_mode, p.lyrics_mode);
         set(&mut self.lyrics_lrclib, p.lyrics_lrclib);
         set(&mut self.full_window_hide_controls, p.full_window_hide_controls);
+        set(&mut self.read_file_tags, p.read_file_tags);
+        set(&mut self.explicit_content, p.explicit_content);
+        set(&mut self.show_fan_edits, p.show_fan_edits);
+        set(&mut self.group_editions, p.group_editions);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -521,6 +551,15 @@ impl Settings {
             media_session: self.media_session,
             close_to_tray: self.close_to_tray,
             launch_at_login: self.launch_at_login,
+        }
+    }
+
+    /// How file tags shape lists and play contexts.
+    pub fn tag_view(&self) -> crate::tags::TagView {
+        crate::tags::TagView {
+            group_editions: self.group_editions,
+            show_edits: self.show_fan_edits,
+            filter_explicit: self.explicit_content == ExplicitContent::Filtered,
         }
     }
 
@@ -577,6 +616,8 @@ pub struct Live {
     pub discord: DiscordSwitches,
     /// Lyrics from LRCLIB when Plex has none.
     pub lyrics_lrclib: Arc<AtomicBool>,
+    /// The file tag scan, once it exists (it starts after settings load).
+    pub tag_scanner: Arc<parking_lot::Mutex<Option<crate::tags::scan::TagScanner>>>,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -601,6 +642,10 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     }
     live.platform.set(s.platform());
     live.discord.set(s.discord());
+    db.set_tag_view(s.tag_view());
+    if let Some(scan) = live.tag_scanner.lock().as_ref() {
+        scan.set_enabled(s.read_file_tags);
+    }
     live.remote.set(s.show_plex_players, s.move_stops_old_device, s.act_as_plex_player);
     live.remote.set_show_cast(s.show_cast_devices);
     let cap = s.art_cache_bytes();
@@ -840,6 +885,30 @@ mod tests {
         assert!(s.discord_status && s.discord_show_unreleased && s.discord_unreleased_art && s.discord_clear_on_pause);
         assert!(s.discord_find_song && s.discord_cover_archive && !s.discord_upload_art);
         assert!(s.show_plex_avatar);
+        assert!(s.read_file_tags && s.group_editions && !s.show_fan_edits);
+        assert_eq!(s.explicit_content, ExplicitContent::Allowed);
+    }
+
+    #[test]
+    fn file_tag_settings_reach_the_library_view() {
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = Settings::default();
+        publish(&s, &live, &db);
+        assert_eq!(db.tag_view(), crate::tags::TagView::default());
+        s.apply(&SettingsPatch {
+            explicit_content: Some(ExplicitContent::Filtered),
+            show_fan_edits: Some(true),
+            group_editions: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        publish(&s, &live, &db);
+        let v = db.tag_view();
+        assert!(v.filter_explicit && v.show_edits && !v.group_editions);
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["explicitContent"], "filtered");
+        assert_eq!(json["readFileTags"], true);
     }
 
     #[test]
@@ -947,6 +1016,10 @@ mod tests {
             lyrics_mode: Some(LyricsMode::Off),
             lyrics_lrclib: Some(true),
             full_window_hide_controls: Some(false),
+            read_file_tags: Some(false),
+            explicit_content: Some(ExplicitContent::Filtered),
+            show_fan_edits: Some(true),
+            group_editions: Some(false),
         })
         .await
         .unwrap();
@@ -987,6 +1060,9 @@ mod tests {
         assert!(!s.share_public_links && !fresh.share_public_links.load(Ordering::Relaxed));
         assert!(!fresh.remote.show_players() && *fresh.remote.allow_casting.borrow());
         assert_eq!(s.volume, 0.25);
+        assert!(!s.read_file_tags && s.show_fan_edits && !s.group_editions);
+        assert_eq!(s.explicit_content, ExplicitContent::Filtered);
+        assert!(db2.tag_view().filter_explicit, "the library view follows at start");
         assert_eq!(s.shuffle_style, ShuffleStyle::Standard);
         assert_eq!((s.quality_home, s.quality_away), (StreamQuality::Kbps256, StreamQuality::Original));
         assert!(!s.show_format_badge && !s.resume_contexts && !s.artwork_colours);

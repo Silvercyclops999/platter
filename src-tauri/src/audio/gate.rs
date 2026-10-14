@@ -6,9 +6,10 @@
 //! [`Permit`] from the player's single [`TransferGate`].
 //!
 //! Priorities: the audible track's stream, then the decode-ahead next
-//! track, then pre-caching. When a better-priority request is waiting, the
-//! current holder is told to yield ([`Permit::preempted`]); it drops its
-//! connection and later resumes with a `Range` request.
+//! track, then pre-caching, then background reads (the file tag scan).
+//! When a better-priority request is waiting, the current holder is told to
+//! yield ([`Permit::preempted`]); it drops its connection and later resumes
+//! with a `Range` request.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -26,6 +27,8 @@ pub enum Priority {
     Next = 1,
     /// Background pre-cache downloads.
     Precache = 2,
+    /// Small background reads (the file tag scan). Yields to everything.
+    Background = 3,
 }
 
 impl Priority {

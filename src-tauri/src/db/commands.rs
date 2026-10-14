@@ -43,14 +43,27 @@ pub async fn sync_now(db: State<'_, DbHandle>, full: Option<bool>) -> AppResult<
 
 #[tauri::command]
 pub async fn home(db: State<'_, DbHandle>) -> AppResult<HomeData> {
-    db.read_async(|c| queries::home(c, now_s())).await
+    let view = db.tag_view();
+    db.read_async(move |c| {
+        let mut data = queries::home(c, now_s())?;
+        crate::tags::view::home(c, &mut data, view)?;
+        Ok(data)
+    })
+    .await
 }
 
 /// Everything in one Home shelf, for its "Show all" page.
 #[tauri::command]
 pub async fn home_shelf(db: State<'_, DbHandle>, shelf: HomeShelf, limit: Option<u32>) -> AppResult<Vec<HomeItem>> {
     let limit = limit.unwrap_or(queries::SHELF_ALL_MAX as u32);
-    db.read_async(move |c| queries::home_shelf(c, now_s(), shelf, limit)).await
+    let view = db.tag_view();
+    db.read_async(move |c| {
+        let mut items = queries::home_shelf(c, now_s(), shelf, limit)?;
+        let albums_shelf = matches!(shelf, HomeShelf::RecentlyAdded | HomeShelf::JumpBackIn);
+        crate::tags::view::home_items(c, &mut items, view, albums_shelf)?;
+        Ok(items)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -73,7 +86,8 @@ pub async fn albums(
     section: Option<ReleaseSection>,
 ) -> AppResult<Page<crate::model::Album>> {
     let (sort, offset, limit) = (sort.unwrap_or_default(), offset.unwrap_or(0), limit.unwrap_or(100));
-    db.read_async(move |c| queries::albums(c, sort, offset, limit, section)).await
+    let view = db.tag_view();
+    db.read_async(move |c| queries::albums_view(c, sort, offset, limit, section, view)).await
 }
 
 #[tauri::command]
@@ -96,7 +110,14 @@ pub async fn library_items(db: State<'_, DbHandle>) -> AppResult<Vec<LibraryItem
 pub async fn artist_page(db: State<'_, DbHandle>, id: String) -> AppResult<ArtistPage> {
     let source = db.popular_source();
     let key = id.clone();
-    let page = db.read_async(move |c| queries::artist_page_by(c, &key, source)).await?;
+    let view = db.tag_view();
+    let page = db
+        .read_async(move |c| {
+            let mut page = queries::artist_page_by(c, &key, source)?;
+            crate::tags::view::artist_page(c, &mut page, view)?;
+            Ok(page)
+        })
+        .await?;
     // Cached similar artists show at once; stale or missing ones refresh in
     // the background and `artist://changed` tells the page. Credited
     // artists have no Plex entry to ask.
@@ -108,7 +129,13 @@ pub async fn artist_page(db: State<'_, DbHandle>, id: String) -> AppResult<Artis
 
 #[tauri::command]
 pub async fn album_page(db: State<'_, DbHandle>, id: String) -> AppResult<AlbumPage> {
-    db.read_async(move |c| queries::album_page(c, &id)).await
+    let view = db.tag_view();
+    db.read_async(move |c| {
+        let mut page = queries::album_page(c, &id)?;
+        crate::tags::view::album_page(c, &mut page, view)?;
+        Ok(page)
+    })
+    .await
 }
 
 #[tauri::command]

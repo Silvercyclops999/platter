@@ -24,6 +24,8 @@ import type { MenuItem } from "../stores/ui";
 import { Art } from "./Art";
 import { ArtistLinks, TextLink, linkFeaturedNow } from "./ArtistLinks";
 import { QualityBadge } from "./Badge";
+import { ArchiveQualityBadge, ExplicitBadge, VersionBadge, versionLabel } from "./FileTagBadges";
+import { useTrackBadges } from "../stores/fileTags";
 import { openContextMenu } from "./ContextMenu";
 import { addToPlaylistItem } from "./PlaylistPicker";
 import { SaveButton } from "./SaveButton";
@@ -282,7 +284,8 @@ export function TrackRow({
   const items = menuItems ?? trackMenuItems(track);
   // Dimmed while only music on this computer can play and this isn't.
   const unavailable = useApp((s) => isUnavailable(track.id, s));
-  const label = `${track.title} by ${trackArtistLine(track)}${unavailable ? ", not available right now" : ""}`;
+  const badges = useTrackBadges(track.id);
+  const label = `${track.title}${badges.explicit ? ", explicit" : ""} by ${trackArtistLine(track)}${unavailable ? ", not available right now" : ""}`;
   // The hover button on the current track pauses / resumes instead of restarting.
   const playButton = () => (active ? player.toggle() : onPlay());
   const PlayIcon = active && playing ? Pause : Play;
@@ -418,8 +421,24 @@ export function TrackRow({
           </span>
         )}
         <div className="track-row__text">
-          <div className="track-row__title truncate">{track.title}</div>
-          {showArtist && <ArtistLinks track={track} className="track-row__artist truncate" />}
+          {versionLabel(badges.version) || (badges.explicit && !showArtist) ? (
+            <div className="track-row__title-line">
+              <div className="track-row__title truncate">{track.title}</div>
+              {badges.explicit && !showArtist && <ExplicitBadge />}
+              <VersionBadge version={badges.version} />
+            </div>
+          ) : (
+            <div className="track-row__title truncate">{track.title}</div>
+          )}
+          {showArtist &&
+            (badges.explicit ? (
+              <div className="track-row__sub">
+                <ExplicitBadge />
+                <ArtistLinks track={track} className="track-row__artist truncate" />
+              </div>
+            ) : (
+              <ArtistLinks track={track} className="track-row__artist truncate" />
+            ))}
         </div>
       </div>
       {showAlbum && !compact && (
@@ -439,6 +458,7 @@ export function TrackRow({
         ) : (
           <div className="track-row__badges">
             <QualityBadge track={track} />
+            <ArchiveQualityBadge track={track} />
           </div>
         ))}
       <div className="track-row__end">

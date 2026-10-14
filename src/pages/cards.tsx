@@ -4,7 +4,10 @@ import { Card } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { shareItem } from "../components/ShareMenu";
+import { ExplicitBadge } from "../components/FileTagBadges";
 import { releaseTypeLabel } from "../lib/format";
+import { useAlbumBadges, useEditions } from "../stores/fileTags";
+import { useSettings } from "../stores/settings";
 import type { Album, Artist, HomeItem, PlayContextKind, Playlist } from "../lib/types";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
@@ -122,13 +125,26 @@ export function playlistSubtitle(playlist: Playlist): string {
 
 export function AlbumCard({ album, subtitle = "artist", note }: { album: Album; subtitle?: "artist" | "year" | "type"; note?: string }) {
   const a = useAlbumActions(album);
-  const sub = note
+  const tags = useAlbumBadges(album.id);
+  const editions = useEditions(album.id).length;
+  const groupEditions = useSettings((s) => s.settings?.groupEditions !== false);
+  const text = note
     ? `${note} · ${releaseTypeLabel(album)}`
     : subtitle === "year"
       ? `${album.year ?? "Unreleased"} · ${releaseTypeLabel(album)}`
       : subtitle === "type"
         ? `${releaseTypeLabel(album)} · ${album.artistTitle}`
         : `${album.year ? album.year + " · " : ""}${album.artistTitle}`;
+  // A collapsed group says how many editions sit behind it.
+  const withEditions = groupEditions && editions > 1 ? `${text} · ${editions} editions` : text;
+  const sub = tags?.explicit ? (
+    <>
+      <ExplicitBadge />
+      {withEditions}
+    </>
+  ) : (
+    withEditions
+  );
   return (
     <Card
       kind="album"

@@ -46,7 +46,7 @@ mod tests;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 use rusqlite::Connection;
@@ -87,6 +87,8 @@ struct Inner {
     popular_by_plays: AtomicBool,
     /// Names in track lines without a library artist get pages (Settings).
     link_featured: AtomicBool,
+    /// How file tags shape the library (`tags::TagView` bits, Settings).
+    tag_view: AtomicU8,
     /// Artist ids with a similar-artists fetch in flight (db::similar).
     similar_in_flight: Mutex<HashSet<String>>,
 }
@@ -113,6 +115,7 @@ impl DbHandle {
                 vocab: search::VocabCache::default(),
                 popular_by_plays: AtomicBool::new(false),
                 link_featured: AtomicBool::new(true),
+                tag_view: AtomicU8::new(crate::tags::TagView::default().bits()),
                 similar_in_flight: Mutex::new(HashSet::new()),
             }),
         })
@@ -172,6 +175,15 @@ impl DbHandle {
 
     pub fn link_featured(&self) -> bool {
         self.inner.link_featured.load(Ordering::Acquire)
+    }
+
+    /// How file tags shape lists and play contexts (from Settings).
+    pub fn set_tag_view(&self, view: crate::tags::TagView) {
+        self.inner.tag_view.store(view.bits(), Ordering::Release);
+    }
+
+    pub fn tag_view(&self) -> crate::tags::TagView {
+        crate::tags::TagView::from_bits(self.inner.tag_view.load(Ordering::Acquire))
     }
 
     /// Mark a similar-artists fetch for `id` as running. False when one

@@ -426,7 +426,9 @@ fn unix_now() -> i64 {
 }
 
 /// Resolves play contexts from the local cache.
-pub struct CacheLookup(pub DbHandle);
+/// Contexts and tracks from the cache. With a `PlexState`, a toast says when
+/// the explicit filter or hidden fan edits left songs out of a context.
+pub struct CacheLookup(pub DbHandle, pub Option<PlexState>);
 
 #[async_trait]
 impl TrackLookup for CacheLookup {
@@ -436,13 +438,36 @@ impl TrackLookup for CacheLookup {
     }
 
     async fn context(&self, ctx: &PlayContext) -> AppResult<ResolvedContext> {
+        let view = self.0.tag_view();
+        let (resolved, skipped) = self.context_with(ctx, view).await?;
+        let message = crate::tags::commands::skipped_message(skipped);
+        if resolved.tracks.is_empty() && skipped != crate::tags::store::Skipped::default() {
+            return Err(crate::error::AppError::Invalid(
+                "Nothing here can play: every song is left out by your explicit content or fan edit settings.".into(),
+            ));
+        }
+        if let (Some(m), Some(plex)) = (message, &self.1) {
+            plex.toast("info", m);
+        }
+        Ok(resolved)
+    }
+}
+
+impl CacheLookup {
+    /// The context's songs with the tag view applied, and what it left out.
+    pub async fn context_with(
+        &self,
+        ctx: &PlayContext,
+        view: crate::tags::TagView,
+    ) -> AppResult<(ResolvedContext, crate::tags::store::Skipped)> {
         let ctx = ctx.clone();
         let popular = self.0.popular_source();
         let liked_min = crate::settings::load(&self.0).liked_min_rating();
         self.0
             .read_async(move |c| {
+                let hidden = crate::tags::store::hidden_albums(c, view)?;
                 let id = ctx.id.clone().unwrap_or_default();
-                Ok(match ctx.kind {
+                let mut resolved = match ctx.kind {
                     ContextKind::Album => {
                         let page = queries::album_page(c, &id)?;
                         ResolvedContext { tracks: page.tracks, title: Some(page.album.title) }
@@ -457,7 +482,8 @@ impl TrackLookup for CacheLookup {
                         let mut seen: std::collections::HashSet<String> =
                             tracks.iter().map(|t| t.id.clone()).collect();
                         for section in &page.sections {
-                            for album in &section.albums {
+                            // Editions behind their group's face play once, as the face.
+                            for album in section.albums.iter().filter(|a| !hidden.contains(&a.id)) {
                                 for t in queries::album_tracks(c, &album.id)? {
                                     if seen.insert(t.id.clone()) {
                                         tracks.push(t);
@@ -486,7 +512,9 @@ impl TrackLookup for CacheLookup {
                         tracks: queries::tracks_by_ids(c, &ctx.track_ids.clone().unwrap_or_default())?,
                         title: None,
                     },
-                })
+                };
+                let skipped = crate::tags::store::drop_hidden(c, &mut resolved.tracks, view)?;
+                Ok((resolved, skipped))
             })
             .await
     }

@@ -16,7 +16,7 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::Instant;
 
-use super::cache::{DiskCache, Precacher, cache_key};
+use super::cache::{DiskCache, PrecacheHost, Precacher, cache_key};
 use super::engine::{Engine, EngineConfig, EngineDeps, EngineEvent};
 use super::gate::TransferGate;
 use super::events::{
@@ -133,6 +133,10 @@ pub struct PlayerHandle {
     tracking: broadcast::Sender<TrackingEvent>,
     problems: Arc<Mutex<Vec<Problem>>>,
     outputs: broadcast::Sender<OutputState>,
+    /// The one-transfer-at-a-time gate, shared with background readers.
+    gate: Arc<TransferGate>,
+    /// Whether playback's own transfers are done for now.
+    host: Arc<dyn PrecacheHost>,
 }
 
 fn now_ms() -> i64 {
@@ -172,6 +176,7 @@ impl PlayerHandle {
             config: config.engine.clone(),
             gate: gate.clone(),
         });
+        let host = engine.precache_host();
         let precacher = cache.as_ref().map(|c| {
             Precacher::spawn(
                 &rt,
@@ -246,7 +251,20 @@ impl PlayerHandle {
             tracking,
             problems,
             outputs,
+            gate,
+            host,
         }
+    }
+
+    /// The transfer gate, for background readers that must queue behind
+    /// playback (the file tag scan).
+    pub fn transfer_gate(&self) -> Arc<TransferGate> {
+        self.gate.clone()
+    }
+
+    /// Tells background readers when playback's own transfers are done.
+    pub fn transfer_host(&self) -> Arc<dyn PrecacheHost> {
+        self.host.clone()
     }
 
     /// Applies crossfade, leveling, EQ and limiter settings (ramped).

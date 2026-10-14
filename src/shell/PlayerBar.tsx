@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { TextLink } from "../components/ArtistLinks";
+import { ExplicitMark } from "../components/FileTagBadges";
 import { openContextMenu } from "../components/ContextMenu";
 import { SaveButton } from "../components/SaveButton";
 import { trackMenuItems } from "../components/TrackRow";
@@ -301,6 +302,7 @@ export function PlayerBar() {
                 }}
               >
                 <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.title}</TextLink>
+                <ExplicitMark trackId={track.id} />
               </div>
               <PlayerSubline track={track} />
             </div>

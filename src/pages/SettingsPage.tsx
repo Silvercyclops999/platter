@@ -31,6 +31,7 @@ import { PlaylistNameSetting } from "./PlaylistSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
 import { discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
+import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
@@ -1051,6 +1052,43 @@ export function SettingsPage() {
       title: "Full-window view hides controls",
       description: "After 3 seconds without moving the mouse, the full-window view fades its controls. Moving the mouse or pressing a key brings them back.",
       control: (ids) => toggle(s, "fullWindowHideControls", ids),
+    },
+    // Library: tags read from the files
+    {
+      key: "readFileTags",
+      section: "Library",
+      group: "File tags",
+      title: "Read extra tags from files",
+      description:
+        "Reads explicit, version and edition tags from your music files through Plex, a few kilobytes at a time and only while nothing is downloading for playback. Your files are never changed. This device only.",
+      note: <TagScanNote />,
+      control: (ids) => toggle(s, "readFileTags", ids),
+    },
+    {
+      key: "explicitContent",
+      section: "Library",
+      group: "File tags",
+      title: "Explicit content",
+      description:
+        "Filtered leaves songs tagged explicit out of albums, playlists and anything else you play, and says how many were skipped. Applies the next time something starts.",
+      control: (ids) => select(s, (x) => x.explicitContent, EXPLICIT_OPTIONS, ids, (v) => updateSettings({ explicitContent: v })),
+    },
+    {
+      key: "showFanEdits",
+      section: "Library",
+      group: "File tags",
+      title: "Show fan and AI edits",
+      description: "Songs tagged as fan edits or AI edits show in albums and play. Off hides them, and albums made only of them.",
+      control: (ids) => toggle(s, "showFanEdits", ids),
+    },
+    {
+      key: "groupEditions",
+      section: "Library",
+      group: "File tags",
+      title: "Group album editions",
+      description:
+        "Albums that share a group tag, like a deluxe edition or builds of an unreleased album, show as one card. The album page gets an edition picker.",
+      control: (ids) => toggle(s, "groupEditions", ids),
     },
   ];
 

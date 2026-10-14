@@ -1,0 +1,65 @@
+/* Badges from file tags: the explicit "E", version badges in the title line,
+   edition counts on cards and the album page's edition picker. */
+
+.explicit-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--color-text-muted);
+  color: var(--color-bg-base);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+  user-select: none;
+}
+
+/* Title line with badges after the title. */
+.track-row__title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.track-row__title-line .track-row__title { min-width: 0; }
+.track-row__title-line .badge { flex: none; height: 16px; padding: 0 5px; font-size: 10px; }
+
+/* Explicit mark before the artist line. */
+.track-row__sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.track-row__sub .explicit-badge { width: 14px; height: 14px; font-size: 9px; }
+
+.card__subtitle .explicit-badge {
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+.player-bar__title .explicit-badge {
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+/* Album page: edition picker in the header. */
+.edition-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.edition-picker__label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}

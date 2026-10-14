@@ -14,6 +14,7 @@ pub mod plex;
 pub mod remote;
 pub mod settings;
 pub mod share;
+pub mod tags;
 pub mod tracking;
 pub mod updates;
 
@@ -176,7 +177,7 @@ pub fn run() {
             let player = PlayerHandle::spawn(
                 tauri::async_runtime::handle().inner().clone(),
                 Arc::new(bridge::PlexStreams(plex.clone(), live.streams.clone(), Some(db.clone()))),
-                Arc::new(bridge::CacheLookup(db.clone())),
+                Arc::new(bridge::CacheLookup(db.clone(), Some(plex.clone()))),
                 {
                     use audio::output::AudioOutput;
                     let mut out = audio::output::CpalOutput::new();
@@ -195,7 +196,24 @@ pub fn run() {
                     ..Default::default()
                 },
             );
+            // File tags (explicit, versions, editions), read behind playback.
+            let tag_scanner = tags::scan::TagScanner::new(
+                db.clone(),
+                Arc::new(tags::commands::PlexParts(plex.clone())),
+                tags::fetch::Reader::new(
+                    audio::http::http_client(),
+                    player.transfer_gate(),
+                    Some(player.transfer_host()),
+                ),
+                Some(Arc::new(app.handle().clone())),
+            );
+            *live.tag_scanner.lock() = Some(tag_scanner.clone());
             let app_settings = settings::SettingsState::new(db.clone(), live.clone());
+            tauri::async_runtime::spawn({
+                let s = tag_scanner.clone();
+                async move { s.spawn() }
+            });
+            app.manage(tag_scanner);
             tauri::async_runtime::spawn(audio::commands::follow_output(
                 app.handle().clone(),
                 player.clone(),
@@ -410,6 +428,8 @@ pub fn run() {
             share::commands::deep_link_take,
             platform::discord::commands::discord_status,
             platform::discord::commands::discord_imgur_key_set,
+            tags::commands::tags_index,
+            tags::commands::tag_scan_status,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event

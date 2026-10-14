@@ -52,11 +52,24 @@ pub fn release_section<S: AsRef<str>>(format: Option<&str>, subformats: &[S]) ->
 
 /// Whether an album counts as unreleased, so it never gets a public link.
 ///
-/// The one place that decides it: today a demo release type (format or any
-/// subformat). Archive tags will join here once tags are read.
-pub fn is_unreleased<S: AsRef<str>>(format: Option<&str>, subformats: &[S]) -> bool {
+/// The one place that decides it: a demo release type (format or any
+/// subformat), or an ARCHIVE_VERSION read from the files that isn't a
+/// released one (see [`version_is_unreleased`]). For an album, pass the
+/// version most of its files carry.
+pub fn is_unreleased<S: AsRef<str>>(format: Option<&str>, subformats: &[S], archive_version: Option<&str>) -> bool {
     let demo = |s: &str| s.to_ascii_lowercase().contains("demo");
-    format.is_some_and(demo) || subformats.iter().any(|s| demo(s.as_ref()))
+    format.is_some_and(demo)
+        || subformats.iter().any(|s| demo(s.as_ref()))
+        || archive_version.is_some_and(version_is_unreleased)
+}
+
+/// ARCHIVE_VERSION values that mean the music was never released. Remix and
+/// live versions can be released ones, so they don't count on their own.
+pub fn version_is_unreleased(v: &str) -> bool {
+    matches!(
+        v.trim().to_ascii_lowercase().as_str(),
+        "unreleased" | "leak" | "demo" | "snippet" | "session" | "build" | "alternate"
+    )
 }
 
 /// Stable string stored in SQLite.
@@ -110,11 +123,24 @@ mod tests {
     #[test]
     fn demos_are_unreleased() {
         let none: [&str; 0] = [];
-        assert!(!is_unreleased(None, &none));
-        assert!(!is_unreleased(Some("album"), &["live", "compilation"]));
-        assert!(is_unreleased(Some("album"), &["demo"]));
-        assert!(is_unreleased(None, &["Live", "Demo"]));
-        assert!(is_unreleased(Some("Demo"), &none));
+        assert!(!is_unreleased(None, &none, None));
+        assert!(!is_unreleased(Some("album"), &["live", "compilation"], None));
+        assert!(is_unreleased(Some("album"), &["demo"], None));
+        assert!(is_unreleased(None, &["Live", "Demo"], None));
+        assert!(is_unreleased(Some("Demo"), &none, None));
+    }
+
+    #[test]
+    fn archive_versions_join_the_unreleased_check() {
+        let none: [&str; 0] = [];
+        for v in ["leak", "Demo", "snippet", "session", "build", "alternate", "unreleased"] {
+            assert!(is_unreleased(Some("album"), &none, Some(v)), "{v}");
+        }
+        for v in ["released", "remix", "live", ""] {
+            assert!(!is_unreleased(Some("album"), &none, Some(v)), "{v}");
+        }
+        // A demo release type stays unreleased whatever the files say.
+        assert!(is_unreleased(Some("album"), &["demo"], Some("released")));
     }
 
     #[test]

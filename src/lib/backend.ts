@@ -62,6 +62,8 @@ import type {
   ShareKind,
   SyncStatus,
   UpdateInfo,
+  TagIndex,
+  TagScanStatus,
 } from "./types";
 
 export type Unlisten = () => void;
@@ -231,6 +233,12 @@ export interface Backend {
   /** Save the Imgur client ID in the keychain (null removes it); answers whether Imgur refused it. */
   discordImgurKeySet(key: string | null): Promise<InfoKeyState>;
 
+  // File tags (docs/IPC.md "File tags")
+  /** Badges, album tags and edition groups read from the files. */
+  tagsIndex(): Promise<TagIndex>;
+  /** Progress of the background tag scan. */
+  tagScanStatus(): Promise<TagScanStatus>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -351,6 +359,8 @@ export function createTauriBackend(): Backend {
     deepLinkTake: () => call("deep_link_take"),
     discordStatus: () => call("discord_status"),
     discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
+    tagsIndex: () => call("tags_index"),
+    tagScanStatus: () => call("tag_scan_status"),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

@@ -613,8 +613,18 @@ export interface Settings {
   lyricsLrclib: boolean;
   /** The full-window view hides its controls after 3 s without movement. */
   fullWindowHideControls: boolean;
+  /** Read explicit, version and edition tags from the files (this device only). */
+  readFileTags: boolean;
+  /** Explicit songs play, or are left out of what plays. */
+  explicitContent: ExplicitContent;
+  /** Show fan and AI edits. */
+  showFanEdits: boolean;
+  /** Albums sharing a group tag show as one card with an edition picker. */
+  groupEditions: boolean;
   [key: string]: unknown;
 }
+
+export type ExplicitContent = "allowed" | "filtered";
 
 export type CrossfadeMode = "smart" | "fixed" | "off";
 export type Leveling = "smart" | "track" | "album" | "off";
@@ -706,7 +716,60 @@ export const DEFAULT_SETTINGS: Settings = {
   lyricsMode: "autoShow",
   lyricsLrclib: false,
   fullWindowHideControls: true,
+  readFileTags: true,
+  explicitContent: "allowed",
+  showFanEdits: false,
+  groupEditions: true,
 };
+
+// ---------------------------------------------------------------- file tags
+
+/** Badges for one song from its file's tags (docs/IPC.md "File tags"). */
+export interface TrackBadges {
+  explicit?: boolean;
+  /** ARCHIVE_VERSION, lower case ("leak", "demo", "released"...). */
+  version?: string;
+  /** ARCHIVE_QUALITY, lower case ("lossless", "cdq", "lq", "snippet"). */
+  quality?: string;
+  /** A fan or AI edit. */
+  edit?: boolean;
+}
+
+/** What the file tags say about one album. */
+export interface AlbumBadges {
+  explicit?: boolean;
+  version?: string;
+  /** ARCHIVE_GROUP: albums sharing it are editions of one album. */
+  group?: string;
+  /** ARCHIVE_EDITION label ("Standard", "Deluxe", "Build v2"). */
+  edition?: string;
+}
+
+/** One edition in a group (the album page's picker). */
+export interface Edition {
+  albumId: string;
+  title: string;
+  label: string | null;
+  year: number | null;
+}
+
+/** `tags_index`: badges, album tags and edition groups (face first). */
+export interface TagIndex {
+  tracks: Record<string, TrackBadges>;
+  albums: Record<string, AlbumBadges>;
+  groups: Record<string, Edition[]>;
+}
+
+/** `tag_scan_status` and `tags://progress`. */
+export interface TagScanStatus {
+  enabled: boolean;
+  running: boolean;
+  done: number;
+  total: number;
+  failed: number;
+  /** Waiting after network or server trouble. */
+  paused: boolean;
+}
 
 // ---------------------------------------------------------------- discord
 
@@ -933,6 +996,10 @@ export interface EventMap {
   "deeplink://open": null;
   /** Discord connected or went away, or a cover upload failed. */
   "discord://status": DiscordStatus;
+  /** The file tag scan moved on, started, paused or finished. */
+  "tags://progress": TagScanStatus;
+  /** File tags changed: badges, editions and filters should be read again. */
+  "tags://changed": null;
 }
 
 export type EventName = keyof EventMap;

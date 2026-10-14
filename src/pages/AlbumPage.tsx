@@ -20,6 +20,7 @@ import { nav } from "../stores/router";
 import { copyText } from "../stores/toasts";
 import { AlbumCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
+import { EditionPicker } from "./EditionPicker";
 
 export function AlbumPage({ id }: { id: string }) {
   const { data, error } = useLoad(() => backend.albumPage(id), [id]);
@@ -84,6 +85,7 @@ export function AlbumPage({ id }: { id: string }) {
                   <Badge key={g}>{g}</Badge>
                 ))}
               </div>
+              <EditionPicker albumId={album.id} />
             </>
           ) : (
             <>

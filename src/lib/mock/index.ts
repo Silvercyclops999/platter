@@ -14,6 +14,7 @@
  *                   instead of generated SVGs, for memory checks that serve
  *                   real JPEGs at the requested size (scripts/measure-memory.mjs)
  *   ?update=1       "Check for updates" finds a new version (ready to install)
+ *   ?tagScan=1      the file tag scan starts from nothing read (progress in Settings)
  *   ?link=<url>     open a platter:// link a moment after start, as if the
  *                   OS had handed it over (url-encoded)
  *   ?health=offline start in a given app state (see HEALTH_DEMOS in ./health:
@@ -74,6 +75,7 @@ import { MockPlaylists } from "./playlists";
 import { MockRemote } from "./remote";
 import { MockShare } from "./share";
 import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
+import { MockFileTags } from "./fileTags";
 
 export interface MockOptions {
   latencyMs: number;
@@ -92,6 +94,8 @@ export interface MockOptions {
   link?: string;
   /** Discord status demo: no app id, Discord closed, or a failed upload. */
   discord?: DiscordDemo;
+  /** Start the file tag scan from nothing read (shows its progress in Settings). */
+  tagScan?: boolean;
 }
 
 const isTestEnv = (() => {
@@ -126,6 +130,7 @@ export function optionsFromUrl(search: string): MockOptions {
     updateAvailable: p.get("update") === "1",
     link: p.get("link") ?? undefined,
     discord: isDiscordDemo(p.get("discord")) ? (p.get("discord") as DiscordDemo) : undefined,
+    tagScan: p.get("tagScan") === "1",
   };
 }
 
@@ -163,6 +168,8 @@ export class MockBackend implements Backend {
   readonly share: MockShare;
   /** Discord status (test hooks: setConnected, setAvailable, failUpload). */
   readonly discord: MockDiscord;
+  /** File tags: badges, editions, filters and the scan. */
+  readonly tags: MockFileTags;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -235,6 +242,16 @@ export class MockBackend implements Backend {
       () => this.emit("deeplink://open", null),
     );
     this.discord = new MockDiscord(this.opts.discord, (s) => this.emit("discord://status", s));
+    this.tags = new MockFileTags(
+      this.fx,
+      () => this.settings,
+      {
+        emitProgress: (s) => this.emit("tags://progress", s),
+        emitChanged: () => this.emit("tags://changed", null),
+        later: (ms, fn) => this.later(ms, fn),
+      },
+      !this.opts.tagScan,
+    );
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
     this.remote = new MockRemote(
@@ -505,7 +522,7 @@ export class MockBackend implements Backend {
   }
   albums(args: { sort: AlbumSort; offset: number; limit: number; section?: ReleaseSection }) {
     return this.delay(() => {
-      let list = this.allAlbums();
+      let list = this.tags.visibleAlbums(this.allAlbums());
       if (args.section) list = list.filter((a) => a.section === args.section);
       list = [...list];
       const by: Record<AlbumSort, (a: Album, b: Album) => number> = {
@@ -570,8 +587,8 @@ export class MockBackend implements Backend {
       const lookup = this.nameLookup();
       if (isCreditId(id)) return this.creditedPage(id, lookup);
       const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
-      const albums = this.fx.albums.filter((a) => a.artistId === id);
       const popular = popularTracks(this.fx.tracks, artist, lookup, this.popularSource());
+      const albums = this.tags.visibleAlbums(this.fx.albums.filter((a) => a.artistId === id));
       const order: ReleaseSection[] = ["albums", "singlesEps", "live", "compilations", "soundtracks", "remixes", "demos", "mixtapes"];
       const sections = order
         .map((section) => ({
@@ -624,12 +641,15 @@ export class MockBackend implements Backend {
   albumPage(id: string) {
     return this.delay(() => {
       const album = this.fx.albums.find((a) => a.id === id) ?? this.notFound("Album");
-      const tracks = this.fx.tracksByAlbum.get(id) ?? [];
+      const tracks = this.tags.albumTracks(this.fx.tracksByAlbum.get(id) ?? []);
+      const editions = new Set(this.tags.index().groups[this.tags.index().albums[id]?.group ?? ""]?.map((e) => e.albumId) ?? []);
       return {
         album,
         tracks,
         totalDurationMs: tracks.reduce((s, t) => s + t.durationMs, 0),
-        moreByArtist: this.fx.albums.filter((a) => a.artistId === album.artistId && a.id !== id),
+        moreByArtist: this.tags
+          .visibleAlbums(this.fx.albums)
+          .filter((a) => a.artistId === album.artistId && a.id !== id && !editions.has(a.id)),
       };
     });
   }
@@ -952,8 +972,15 @@ export class MockBackend implements Backend {
   }
 
   private loadContext(args: PlayContextArgs, play: boolean) {
-    const { tracks, info } = this.contextTracks(args);
-    if (!tracks.length) return;
+    const resolved = this.contextTracks(args);
+    const info = resolved.info;
+    // Like the core: explicit songs (when filtered) and hidden edits leave, with one toast.
+    const { tracks, message } = this.tags.forPlay(resolved.tracks);
+    if (!tracks.length) {
+      if (message) this.emit("toast", { kind: "error", message: "Nothing here can play: every song is left out by your explicit content or fan edit settings." });
+      return;
+    }
+    if (message && play) this.emit("toast", { kind: "info", message });
     this.notePosition(); // where the outgoing context was left
     const id = info.id ?? null;
     const kind = args.context.kind;
@@ -1455,6 +1482,7 @@ export class MockBackend implements Backend {
       this.settings = next;
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
+      if (patch.readFileTags !== undefined) this.tags.settingsChanged();
       if (patch.abLoopHandles === false && this.abLoop) {
         this.abLoop = null;
         this.emitState();
@@ -1577,6 +1605,15 @@ export class MockBackend implements Backend {
   }
   discordImgurKeySet(key: string | null) {
     return this.delay(() => this.discord.setKey(key));
+  }
+
+  // ---------------------------------------------------------------- file tags
+
+  tagsIndex() {
+    return this.delay(() => this.tags.index());
+  }
+  tagScanStatus() {
+    return this.delay(() => this.tags.scanStatus());
   }
 }
 

@@ -4,6 +4,7 @@ import { installOverlayScrollbars } from "./design/scrollbars";
 import { SignInPage, ServerPickPage } from "./pages/SignInPage";
 import { AppShell } from "./shell/AppShell";
 import { connectApp, useApp } from "./stores/app";
+import { connectFileTags } from "./stores/fileTags";
 import { connectLikes } from "./stores/likes";
 import { connectPlayer } from "./stores/player";
 import { connectShare } from "./stores/share";
@@ -20,6 +21,7 @@ export default function App() {
   useEffect(() => connectPlayer(), []);
   useEffect(() => connectLikes(), []);
   useEffect(() => connectShare(), []);
+  useEffect(() => connectFileTags(), []);
   const auth = useApp((s) => s.auth);
   const signInOpen = useUi((s) => s.signInOpen);
   useEffect(() => {

@@ -423,6 +423,38 @@ CREATE TABLE IF NOT EXISTS lyrics_cache (
     expires_at INTEGER NOT NULL
 );
 "#,
+    // v13: tags read from the files themselves (tags::). One row per media
+    // part key; the key carries the part's update stamp, so a changed file
+    // gets a new key and is read again. status: ok, failed (read error, tried
+    // again when the file changes) or skipped (no Range support and too big).
+    // album_tags is derived from file_tags after each scan batch.
+    r#"
+CREATE TABLE IF NOT EXISTS file_tags (
+    part_key   TEXT PRIMARY KEY,
+    status     TEXT NOT NULL,
+    explicit   INTEGER,
+    version    TEXT,
+    era        TEXT,
+    quality    TEXT,
+    date       TEXT,
+    edition    TEXT,
+    grp        TEXT,
+    source     TEXT,
+    flags      TEXT,
+    scanned_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tracks_part_key ON tracks (part_key);
+CREATE TABLE IF NOT EXISTS album_tags (
+    album_id TEXT PRIMARY KEY,
+    explicit INTEGER NOT NULL DEFAULT 0,
+    version  TEXT,
+    edition  TEXT,
+    grp      TEXT,
+    flagged  INTEGER NOT NULL DEFAULT 0,
+    face_id  TEXT
+);
+CREATE INDEX IF NOT EXISTS album_tags_grp ON album_tags (grp);
+"#,
 ];
 
 #[cfg(test)]
@@ -628,6 +660,18 @@ mod tests {
             c.execute("INSERT INTO lyrics_cache (key, body, fetched_at, expires_at) VALUES ('k', 'x', 1, 2)", []).is_err(),
             "one row per lookup"
         );
+    }
+
+    #[test]
+    fn v13_adds_the_file_tag_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        migrate(&mut c).unwrap();
+        const { assert!(SCHEMA_VERSION >= 13) };
+        let row = "INSERT INTO file_tags (part_key, status, scanned_at) VALUES ('/library/parts/1/2/file.flac', 'ok', 1)";
+        c.execute(row, []).unwrap();
+        assert!(c.execute(row, []).is_err(), "one row per part key");
+        c.execute("INSERT INTO album_tags (album_id, grp, face_id) VALUES ('1', 'g', '1')", []).unwrap();
     }
 
     #[test]

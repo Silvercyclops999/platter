@@ -131,14 +131,16 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
         ShareKind::Track => c
             .query_row(
                 "SELECT t.title, t.album_id, t.album_title, t.artist_title, t.track_artist, t.duration_ms,
-                        al.format, al.subformats
-                 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id WHERE t.id = ?1",
+                        al.format, al.subformats, ft.version
+                 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+                 LEFT JOIN file_tags ft ON ft.part_key = t.part_key WHERE t.id = ?1",
                 params![id],
                 |r| {
                     let album_artist: String = r.get(3)?;
                     let track_artist: Option<String> = r.get(4)?;
                     let format: Option<String> = r.get(6)?;
                     let subs = json_vec(r.get::<_, Option<String>>(7)?.unwrap_or_default());
+                    let version: Option<String> = r.get(8)?;
                     Ok(Item::Track {
                         song: SongQuery {
                             artist: track_artist.filter(|a| !a.trim().is_empty()).unwrap_or_else(|| album_artist.clone()),
@@ -148,21 +150,23 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
                             duration_ms: r.get(5)?,
                         },
                         album_id: r.get(1)?,
-                        unreleased: is_unreleased(format.as_deref(), &subs),
+                        unreleased: is_unreleased(format.as_deref(), &subs, version.as_deref()),
                     })
                 },
             )
             .optional()?,
         ShareKind::Album => c
             .query_row(
-                "SELECT title, artist_title, track_count, format, subformats FROM albums WHERE id = ?1",
+                "SELECT al.title, al.artist_title, al.track_count, al.format, al.subformats, at.version
+                 FROM albums al LEFT JOIN album_tags at ON at.album_id = al.id WHERE al.id = ?1",
                 params![id],
                 |r| {
                     let format: Option<String> = r.get(3)?;
                     let subs = json_vec(r.get(4)?);
+                    let version: Option<String> = r.get(5)?;
                     Ok(Item::Album {
                         album: AlbumQuery { title: r.get(0)?, artist: r.get(1)?, track_count: r.get(2)? },
-                        unreleased: is_unreleased(format.as_deref(), &subs),
+                        unreleased: is_unreleased(format.as_deref(), &subs, version.as_deref()),
                     })
                 },
             )

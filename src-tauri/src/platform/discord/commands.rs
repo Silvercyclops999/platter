@@ -55,18 +55,27 @@ impl Library for AppLibrary {
         let row = self
             .db
             .read_async(move |c| {
-                Ok(c.query_row("SELECT format, subformats FROM albums WHERE id = ?1", params![id], |r| {
-                    Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))
-                })
+                Ok(c.query_row(
+                    "SELECT al.format, al.subformats, at.version FROM albums al
+                     LEFT JOIN album_tags at ON at.album_id = al.id WHERE al.id = ?1",
+                    params![id],
+                    |r| {
+                        Ok((
+                            r.get::<_, Option<String>>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
                 .optional()?)
             })
             .await
             .ok()
             .flatten();
         match row {
-            Some((format, subs)) => {
+            Some((format, subs, version)) => {
                 let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
-                is_unreleased(format.as_deref(), &subs)
+                is_unreleased(format.as_deref(), &subs, version.as_deref())
             }
             // Not in the cache: treat as unreleased, the cautious choice.
             None => true,
