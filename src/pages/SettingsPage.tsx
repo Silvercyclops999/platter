@@ -6,6 +6,7 @@ import { SearchField } from "../components/SearchField";
 import { Select, type SelectOption } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
+import { useSidebarArt } from "../stores/ui";
 import { backend } from "../lib/backend";
 import { formatBytes } from "../lib/format";
 import { modKey } from "../lib/platform";
@@ -313,6 +314,7 @@ function matches(row: RowDef, q: string): boolean {
 /** Settings (opened from the header or with Ctrl/Cmd+,). */
 export function SettingsPage() {
   const s = useSettings((x) => x.settings);
+  const [sidebarArt, setSidebarArt] = useSidebarArt();
   const auth = useApp((x) => x.auth);
   const healthConn = useApp((x) => x.health?.connection);
   const syncing = useApp((x) => !!x.sync && x.sync.phase !== "idle");
@@ -503,6 +505,18 @@ export function SettingsPage() {
       ),
     },
     // Appearance
+    {
+      key: "sidebarArt",
+      section: "Appearance",
+      title: "Show the library sidebar's art",
+      description: "Shows cover art next to each item in the library's list views. This device only.",
+      control: (ids) =>
+        s ? (
+          <Switch checked={sidebarArt} onChange={setSidebarArt} labelledBy={ids.title} describedBy={ids.desc} />
+        ) : (
+          <Skeleton width={40} height={24} radius="pill" />
+        ),
+    },
     {
       key: "artworkColours",
       section: "Appearance",
