@@ -1,6 +1,10 @@
 //! Lyrics the user wrote in the app: the `user_lyrics` table, one row per
 //! track, holding LRC text (synced) or plain lines, and whether the user
 //! wants them shown ahead of Plex's for that song.
+//!
+//! Lyrics transcribed on this computer (lyrics::transcribe) are stored here
+//! too, with `auto` naming the model, so the editor opens and fixes them like
+//! any others. Saving in the editor makes them the user's own (auto cleared).
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
@@ -22,6 +26,21 @@ pub struct OwnLyrics {
     pub prefer: bool,
     /// Unix seconds.
     pub updated_at: i64,
+    /// Transcribed on this computer by this model ("small" or "medium"), not
+    /// yet edited. None for lyrics the user wrote or saved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto: Option<String>,
+}
+
+impl OwnLyrics {
+    /// As lyrics for the views (source `auto` while not yet edited).
+    pub fn lyrics(&self) -> Option<Lyrics> {
+        let mut l = to_lyrics(&self.text)?;
+        if self.auto.is_some() {
+            l.source = LyricsSource::Auto;
+        }
+        Some(l)
+    }
 }
 
 /// Library track ids are Plex rating keys (numbers).
@@ -55,21 +74,42 @@ pub fn to_lyrics(text: &str) -> Option<Lyrics> {
 
 pub fn get(c: &Connection, track_id: &str) -> AppResult<Option<OwnLyrics>> {
     Ok(c.query_row(
-        "SELECT track_id, body, prefer, updated_at FROM user_lyrics WHERE track_id = ?1",
+        "SELECT track_id, body, prefer, updated_at, auto FROM user_lyrics WHERE track_id = ?1",
         params![track_id],
-        |r| Ok(OwnLyrics { track_id: r.get(0)?, text: r.get(1)?, prefer: r.get::<_, i64>(2)? != 0, updated_at: r.get(3)? }),
+        |r| {
+            Ok(OwnLyrics {
+                track_id: r.get(0)?,
+                text: r.get(1)?,
+                prefer: r.get::<_, i64>(2)? != 0,
+                updated_at: r.get(3)?,
+                auto: r.get(4)?,
+            })
+        },
     )
     .optional()?)
 }
 
+/// Save the user's lyrics. They become the user's own (no longer auto).
 pub fn put(c: &Connection, track_id: &str, text: &str, prefer: bool, now: i64) -> AppResult<()> {
     c.execute(
-        "INSERT INTO user_lyrics (track_id, body, prefer, updated_at) VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO user_lyrics (track_id, body, prefer, updated_at, auto) VALUES (?1, ?2, ?3, ?4, NULL)
          ON CONFLICT (track_id) DO UPDATE SET body = excluded.body, prefer = excluded.prefer,
-           updated_at = excluded.updated_at",
+           updated_at = excluded.updated_at, auto = NULL",
         params![track_id, text, prefer as i64, now],
     )?;
     Ok(())
+}
+
+/// Save a transcription. Never replaces lyrics the user wrote or edited;
+/// returns false when there were some.
+pub fn put_auto(c: &Connection, track_id: &str, text: &str, model: &str, now: i64) -> AppResult<bool> {
+    let n = c.execute(
+        "INSERT INTO user_lyrics (track_id, body, prefer, updated_at, auto) VALUES (?1, ?2, 0, ?3, ?4)
+         ON CONFLICT (track_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at,
+           auto = excluded.auto WHERE user_lyrics.auto IS NOT NULL",
+        params![track_id, text, now, model],
+    )?;
+    Ok(n > 0)
 }
 
 /// True when there was a row to remove.

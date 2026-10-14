@@ -85,6 +85,8 @@ pub enum LyricsSource {
     User,
     /// LRCLIB, when its setting is on and Plex had none.
     Lrclib,
+    /// Transcribed on this computer and not edited yet (may be wrong).
+    Auto,
 }
 
 /// One timed line.

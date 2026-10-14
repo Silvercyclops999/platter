@@ -465,6 +465,18 @@ CREATE TABLE IF NOT EXISTS user_lyrics (
     updated_at INTEGER NOT NULL
 );
 "#,
+    // v15: lyrics transcribed on this computer (lyrics::transcribe) go into
+    // user_lyrics with auto set to the model's name, so the editor opens them;
+    // saving in the editor clears it. lyrics_auto_empty remembers songs that
+    // were transcribed and had no words, so the batch doesn't redo them.
+    r#"
+ALTER TABLE user_lyrics ADD COLUMN auto TEXT;
+CREATE TABLE IF NOT EXISTS lyrics_auto_empty (
+    track_id   TEXT PRIMARY KEY,
+    model      TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+"#,
 ];
 
 #[cfg(test)]

@@ -307,12 +307,51 @@ pub fn run() {
             app.manage(share);
 
             // Lyrics: Plex first, then LRCLIB when its setting is on.
-            app.manage(lyrics::LyricsService::new(
+            let lyrics_service = lyrics::LyricsService::new(
                 db.clone(),
                 lyrics_http,
                 Arc::new(lyrics::commands::PlexSource(plex.clone())),
-                lyrics::Switches { lrclib: live.lyrics_lrclib.clone(), prefer_own: live.lyrics_prefer_own.clone() },
-            ));
+                lyrics::Switches {
+                    lrclib: live.lyrics_lrclib.clone(),
+                    prefer_own: live.lyrics_prefer_own.clone(),
+                    show_auto: live.lyrics_show_auto.clone(),
+                },
+            );
+            // Lyrics transcribed on this computer (opt-in, model downloaded on request).
+            {
+                use lyrics::transcribe::{self as tr, commands as trc};
+                let transcriber = tr::Transcriber::new(tr::Deps {
+                    db: db.clone(),
+                    models: tr::model::ModelStore::new(
+                        data_dir.join("models"),
+                        tr::model::catalogue(),
+                        tr::model::os_free_space(),
+                    ),
+                    fetch: Arc::new(tr::model::HttpFetch(reqwest::Client::new())),
+                    recognizer: tr::engine::default_recognizer(),
+                    songs: Arc::new(trc::AppSongs {
+                        player: player.clone(),
+                        audio_dir: audio_dir.clone(),
+                        parts: tags::commands::PlexParts(plex.clone()),
+                        reader: tags::fetch::Reader::new(
+                            audio::http::http_client(),
+                            player.transfer_gate(),
+                            Some(player.transfer_host()),
+                        ),
+                    }),
+                    other: Arc::new(trc::AppOther(lyrics_service.clone())),
+                    conditions: Arc::new(trc::AppConditions { player: player.clone(), plex: plex.clone() }),
+                    events: Arc::new(app.handle().clone()),
+                });
+                transcriber.set_options(initial.transcribe_lyrics, initial.transcribe_model);
+                *live.transcriber.lock() = Some(transcriber.clone());
+                tauri::async_runtime::spawn({
+                    let t = transcriber.clone();
+                    async move { t.spawn() }
+                });
+                app.manage(transcriber);
+            }
+            app.manage(lyrics_service);
 
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
@@ -351,6 +390,15 @@ pub fn run() {
             lyrics::commands::lyrics_own_delete,
             lyrics::commands::lyrics_own_ids,
             lyrics::commands::lyrics_export,
+            lyrics::transcribe::commands::transcribe_status,
+            lyrics::transcribe::commands::transcribe_model_download,
+            lyrics::transcribe::commands::transcribe_model_cancel,
+            lyrics::transcribe::commands::transcribe_model_delete,
+            lyrics::transcribe::commands::transcribe_track,
+            lyrics::transcribe::commands::transcribe_album,
+            lyrics::transcribe::commands::transcribe_unreleased,
+            lyrics::transcribe::commands::transcribe_cancel,
+            lyrics::transcribe::commands::transcribe_found_nothing,
             db::commands::sync_status,
             db::commands::sync_now,
             db::commands::home,

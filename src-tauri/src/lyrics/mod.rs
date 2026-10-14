@@ -19,6 +19,7 @@
 pub mod cache;
 pub mod commands;
 pub mod lrclib;
+pub mod transcribe;
 pub mod user;
 
 #[cfg(test)]
@@ -102,13 +103,22 @@ struct Inner {
     lrclib_on: Arc<AtomicBool>,
     /// "Prefer my own lyrics over Plex's" (Settings).
     prefer_own: Arc<AtomicBool>,
+    /// "Show auto-transcribed lyrics" (Settings).
+    show_auto: Arc<AtomicBool>,
 }
 
 /// The switches lyrics read from Settings.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Switches {
     pub lrclib: Arc<AtomicBool>,
     pub prefer_own: Arc<AtomicBool>,
+    pub show_auto: Arc<AtomicBool>,
+}
+
+impl Default for Switches {
+    fn default() -> Self {
+        Self { lrclib: Default::default(), prefer_own: Default::default(), show_auto: Arc::new(AtomicBool::new(true)) }
+    }
 }
 
 impl LyricsService {
@@ -125,6 +135,7 @@ impl LyricsService {
                 limiter: Limiter::with_gap(gap),
                 lrclib_on: switches.lrclib,
                 prefer_own: switches.prefer_own,
+                show_auto: switches.show_auto,
             }),
         }
     }
@@ -133,8 +144,11 @@ impl LyricsService {
     /// down: that's silent).
     pub async fn get(&self, track_id: &str) -> AppResult<Option<Lyrics>> {
         let own = self.own(track_id).await?;
-        let own_first = own.as_ref().is_some_and(|o| o.prefer) || self.inner.prefer_own.load(Ordering::Relaxed);
-        let own = own.and_then(|o| user::to_lyrics(&o.text));
+        // Transcriptions never go ahead of Plex's, and hide when turned off.
+        let own = own.filter(|o| o.auto.is_none() || self.inner.show_auto.load(Ordering::Relaxed));
+        let own_first = own.as_ref().is_some_and(|o| o.auto.is_none())
+            && (own.as_ref().is_some_and(|o| o.prefer) || self.inner.prefer_own.load(Ordering::Relaxed));
+        let own = own.and_then(|o| o.lyrics());
         if own_first && own.is_some() {
             return Ok(own);
         }
@@ -158,6 +172,16 @@ impl LyricsService {
             return Ok(None);
         }
         self.lrclib(&q).await
+    }
+
+    /// Whether a source other than transcription has lyrics for the track
+    /// (asked before transcribing an album or the background batch).
+    pub async fn has_other(&self, track_id: &str) -> bool {
+        if let Ok(Some(o)) = self.own(track_id).await {
+            return o.auto.is_none();
+        }
+        // No row of its own, so whatever get finds is Plex's or LRCLIB's.
+        matches!(self.get(track_id).await, Ok(Some(_)))
     }
 
     /// The track's own lyrics, as saved by the editor.

@@ -286,6 +286,12 @@ pub struct Settings {
     pub group_editions: bool,
     /// Drag songs, albums and playlists onto playlists, Liked Songs and the queue.
     pub drag_and_drop: bool,
+    /// Transcribe songs without lyrics on this computer (this device only).
+    pub transcribe_lyrics: bool,
+    /// The speech model transcription uses (this device only).
+    pub transcribe_model: crate::lyrics::transcribe::model::ModelKind,
+    /// Show lyrics transcribed on this computer.
+    pub show_auto_lyrics: bool,
 }
 
 impl Default for Settings {
@@ -363,6 +369,9 @@ impl Default for Settings {
             show_fan_edits: false,
             group_editions: true,
             drag_and_drop: true,
+            transcribe_lyrics: false,
+            transcribe_model: Default::default(),
+            show_auto_lyrics: true,
         }
     }
 }
@@ -440,6 +449,9 @@ pub struct SettingsPatch {
     pub show_fan_edits: Option<bool>,
     pub group_editions: Option<bool>,
     pub drag_and_drop: Option<bool>,
+    pub transcribe_lyrics: Option<bool>,
+    pub transcribe_model: Option<crate::lyrics::transcribe::model::ModelKind>,
+    pub show_auto_lyrics: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -527,6 +539,9 @@ impl Settings {
         set(&mut self.show_fan_edits, p.show_fan_edits);
         set(&mut self.group_editions, p.group_editions);
         set(&mut self.drag_and_drop, p.drag_and_drop);
+        set(&mut self.transcribe_lyrics, p.transcribe_lyrics);
+        set(&mut self.transcribe_model, p.transcribe_model);
+        set(&mut self.show_auto_lyrics, p.show_auto_lyrics);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -633,8 +648,12 @@ pub struct Live {
     pub lyrics_lrclib: Arc<AtomicBool>,
     /// The user's own lyrics ahead of Plex's.
     pub lyrics_prefer_own: Arc<AtomicBool>,
+    /// Show lyrics transcribed on this computer.
+    pub lyrics_show_auto: Arc<AtomicBool>,
     /// The file tag scan, once it exists (it starts after settings load).
     pub tag_scanner: Arc<parking_lot::Mutex<Option<crate::tags::scan::TagScanner>>>,
+    /// Lyrics transcription, once it exists.
+    pub transcriber: Arc<parking_lot::Mutex<Option<crate::lyrics::transcribe::Transcriber>>>,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -646,6 +665,10 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.share_public_links.store(s.share_public_links, Ordering::Relaxed);
     live.lyrics_lrclib.store(s.lyrics_lrclib, Ordering::Relaxed);
     live.lyrics_prefer_own.store(s.lyrics_prefer_own, Ordering::Relaxed);
+    live.lyrics_show_auto.store(s.show_auto_lyrics, Ordering::Relaxed);
+    if let Some(t) = live.transcriber.lock().as_ref() {
+        t.set_options(s.transcribe_lyrics, s.transcribe_model);
+    }
     // Global with no source for it on quietly ranks by plays.
     db.set_popular_source(if s.info_listenbrainz || s.info_lastfm { s.popular_source } else { PopularSource::MyPlays });
     db.set_link_featured(s.link_featured);
@@ -905,6 +928,9 @@ mod tests {
         assert!(s.show_plex_avatar);
         assert!(s.read_file_tags && s.group_editions && !s.show_fan_edits);
         assert!(s.drag_and_drop);
+        // Transcription is opt-in (it downloads a model); its results show.
+        assert!(!s.transcribe_lyrics && s.show_auto_lyrics);
+        assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Small);
         assert_eq!(s.explicit_content, ExplicitContent::Allowed);
     }
 
@@ -1042,9 +1068,13 @@ mod tests {
             show_fan_edits: Some(true),
             group_editions: Some(false),
             drag_and_drop: Some(false),
+            transcribe_lyrics: Some(true),
+            transcribe_model: Some(crate::lyrics::transcribe::model::ModelKind::Medium),
+            show_auto_lyrics: Some(false),
         })
         .await
         .unwrap();
+        assert!(!live.lyrics_show_auto.load(Ordering::Relaxed));
         assert!(!live.share_public_links.load(Ordering::Relaxed));
         assert!(!live.remote.show_cast());
         assert!(!live.discord.get().enabled && live.discord.get().upload_art && live.discord.get().private_session);
@@ -1075,6 +1105,9 @@ mod tests {
         let s = st2.get().await.unwrap();
         assert!(s.private_session);
         assert!(s.report_to_plex);
+        assert!(s.transcribe_lyrics && !s.show_auto_lyrics);
+        assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Medium);
+        assert!(!fresh.lyrics_show_auto.load(Ordering::Relaxed));
         assert!(!s.info_wikipedia && s.info_lastfm && s.info_fanart && s.info_audiodb);
         assert!(!s.info_listenbrainz && !s.link_featured);
         assert!(fresh.artist_info.get(crate::artistinfo::InfoSource::Lastfm));

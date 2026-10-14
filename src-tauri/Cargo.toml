@@ -14,6 +14,11 @@ edition = "2024"
 name = "platter_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# On-device lyrics transcription with whisper.cpp. Off in plain builds so they
+# don't need CMake; CI and release builds turn it on.
+transcribe = ["dep:whisper-rs"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -54,12 +59,20 @@ tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_
 md-5 = "0.10.6"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
+sha2 = "0.10"
+# On-device lyrics transcription (the `transcribe` feature). Builds whisper.cpp
+# from source, so it needs CMake and a C++ compiler.
+whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Transcription runs on the GPU through Metal on Macs.
+whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend", "metal"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.8.3", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

@@ -1,0 +1,14 @@
+# Settings for whisper.cpp, which the `transcribe` feature builds with CMake.
+# Its build reads GGML_* variables. Not native: on CI it would otherwise be
+# tuned for the build machine's CPU and crash on older ones. Instead every x86
+# build (Windows, and Intel Macs in the universal build) targets the AVX2
+# generation, and the app checks the CPU for it before offering
+# transcription. ARM builds ignore these.
+[env]
+GGML_NATIVE = "OFF"
+GGML_SSE42 = "ON"
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_BMI2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"

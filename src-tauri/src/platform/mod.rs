@@ -10,6 +10,7 @@ pub mod commands;
 pub mod discord;
 pub mod keys;
 pub mod media;
+pub mod power;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub mod session;
 #[cfg(target_os = "windows")]

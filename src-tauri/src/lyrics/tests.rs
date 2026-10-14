@@ -44,6 +44,7 @@ struct Fx {
     plex: Arc<FakePlex>,
     on: Arc<AtomicBool>,
     prefer: Arc<AtomicBool>,
+    show_auto: Arc<AtomicBool>,
     db: DbHandle,
     _dir: tempfile::TempDir,
 }
@@ -70,9 +71,10 @@ fn fx() -> Fx {
     let plex = Arc::new(FakePlex::default());
     let on = Arc::new(AtomicBool::new(true));
     let prefer = Arc::new(AtomicBool::new(false));
-    let switches = Switches { lrclib: on.clone(), prefer_own: prefer.clone() };
+    let show_auto = Arc::new(AtomicBool::new(true));
+    let switches = Switches { lrclib: on.clone(), prefer_own: prefer.clone(), show_auto: show_auto.clone() };
     let svc = LyricsService::with_gap(db.clone(), http.clone(), plex.clone(), switches, Duration::from_millis(1));
-    Fx { svc, http, plex, on, prefer, db, _dir: dir }
+    Fx { svc, http, plex, on, prefer, show_auto, db, _dir: dir }
 }
 
 const SYNCED: &str = "[00:01.00]Hello\n[00:02.00]World";
@@ -327,4 +329,44 @@ fn export_names_are_safe_file_names() {
     assert_eq!(user::export_file_name("  ...  "), "Lyrics.lrc");
     assert_eq!(user::export_file_name("song.LRC"), "song.LRC");
     assert!(user::export_file_name(&"x".repeat(500)).chars().count() <= 124);
+}
+
+const AUTO: &str = "[00:01.00]<00:01.00>Heard <00:01.40>words\n";
+
+#[tokio::test]
+async fn transcriptions_show_after_plex_and_never_replace_the_users_own() {
+    let f = fx();
+    f.on.store(false, Ordering::Relaxed);
+    f.prefer.store(true, Ordering::Relaxed);
+    let now = crate::db::queries::now_s();
+    assert!(f.db.write(|c| user::put_auto(c, "801", AUTO, "small", now)).unwrap());
+    let l = f.svc.get("801").await.unwrap().unwrap();
+    assert_eq!(l.source, LyricsSource::Auto);
+    assert!(l.synced && l.timed[0].words.len() == 2);
+    // The editor sees them, marked.
+    assert_eq!(f.svc.own("801").await.unwrap().unwrap().auto.as_deref(), Some("small"));
+    assert!(!f.svc.has_other("801").await, "a transcription isn't another source");
+    // Plex's lyrics win over a transcription even with "prefer my own" on.
+    f.plex.set("801", Ok(Some(plex_lyrics())));
+    assert_eq!(f.svc.get("801").await.unwrap().unwrap().source, LyricsSource::Plex);
+    // Saving in the editor makes them the user's own.
+    f.svc.save_own("801", "Fixed words", false).await.unwrap();
+    let own = f.svc.own("801").await.unwrap().unwrap();
+    assert_eq!(own.auto, None);
+    assert!(f.svc.has_other("801").await);
+    // A later transcription leaves the user's lyrics alone.
+    assert!(!f.db.write(|c| user::put_auto(c, "801", AUTO, "medium", now)).unwrap());
+    assert_eq!(f.svc.own("801").await.unwrap().unwrap().text, "Fixed words");
+}
+
+#[tokio::test]
+async fn hidden_transcriptions_leave_no_lyrics() {
+    let f = fx();
+    f.on.store(false, Ordering::Relaxed);
+    let now = crate::db::queries::now_s();
+    f.db.write(|c| user::put_auto(c, "501", AUTO, "small", now)).unwrap();
+    f.show_auto.store(false, Ordering::Relaxed);
+    assert_eq!(f.svc.get("501").await.unwrap(), None);
+    f.show_auto.store(true, Ordering::Relaxed);
+    assert_eq!(f.svc.get("501").await.unwrap().unwrap().source, LyricsSource::Auto);
 }
