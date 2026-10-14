@@ -57,6 +57,12 @@ export function SettingsPage() {
           checked={s?.reportToPlex}
           onChange={(v) => updateSettings({ reportToPlex: v })}
         />
+        <ToggleRow
+          title="Spread out shuffle"
+          description="Keeps songs by the same artist apart when shuffling. Turn it off for a plain random order."
+          checked={s ? s.shuffleStyle !== "standard" : undefined}
+          onChange={(v) => updateSettings({ shuffleStyle: v ? "spread" : "standard" })}
+        />
       </section>
       <p className="settings__hint">Shortcut: {modKey}+,</p>
     </div>

@@ -19,10 +19,10 @@ export function PlaylistPage({ id }: { id: string }) {
   useArtTint(null, pl?.thumb);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
-  const shuffle = usePlayer((s) => s.state?.shuffle ?? false);
+  const shuffle = usePlayer((s) => s.state?.shuffledContexts?.includes(id) ?? false);
   const { isContext: isThis, playing: isThisPlaying } = useContextState("playlist", id);
   const pinned = usePins((s) => s.isPinned("playlist", id));
-  const play = () => (isThis ? player.toggle() : player.playPlaylist(id, undefined, shuffle));
+  const play = () => (isThis ? player.toggle() : player.playPlaylist(id));
   usePageBar(pl?.title, isThisPlaying, play);
   const titleRef = useFitTitle<HTMLHeadingElement>(pl?.title);
   const empty = !!data && data.tracks.length === 0;
@@ -69,7 +69,7 @@ export function PlaylistPage({ id }: { id: string }) {
             size="lg"
             pressed={shuffle}
             icon={<Shuffle size={22} />}
-            onClick={() => player.setShuffle(!shuffle)}
+            onClick={() => player.setContextShuffle(id, !shuffle)}
           />
           <IconButton
             label={`More options for ${pl?.title ?? "playlist"}`}

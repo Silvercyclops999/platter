@@ -90,6 +90,7 @@ export const player = {
   setVolume: (v: number) => backend.setVolume(v).catch(report),
   setMuted: (m: boolean) => backend.setMuted(m).catch(report),
   setShuffle: (s: boolean) => backend.setShuffle(s).catch(report),
+  setContextShuffle: (id: string, s: boolean) => backend.setContextShuffle(id, s).catch(report),
   cycleRepeat: (r: RepeatMode) => backend.setRepeat(r === "off" ? "all" : r === "all" ? "one" : "off").catch(report),
   playAlbum: (id: string, startTrackId?: string, shuffle?: boolean) =>
     backend.playContext({ context: { kind: "album", id }, startTrackId, shuffle }).catch(report),

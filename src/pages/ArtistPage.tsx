@@ -23,10 +23,10 @@ export function ArtistPage({ id }: { id: string }) {
   const [showMore, setShowMore] = useState(false);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
-  const shuffle = usePlayer((s) => s.state?.shuffle ?? false);
+  const shuffle = usePlayer((s) => s.state?.shuffledContexts?.includes(id) ?? false);
   const { isContext: isThis, playing: isThisPlaying } = useContextState("artist", id);
   const pinned = usePins((s) => s.isPinned("artist", id));
-  const play = () => (isThis ? player.toggle() : player.playArtist(id, undefined, shuffle));
+  const play = () => (isThis ? player.toggle() : player.playArtist(id));
   usePageBar(artist?.title, isThisPlaying, play);
   const titleRef = useFitTitle<HTMLHeadingElement>(artist?.title);
 
@@ -76,7 +76,7 @@ export function ArtistPage({ id }: { id: string }) {
             size="lg"
             pressed={shuffle}
             icon={<Shuffle size={22} />}
-            onClick={() => player.setShuffle(!shuffle)}
+            onClick={() => player.setContextShuffle(id, !shuffle)}
           />
           <IconButton
             label={`More options for ${artist?.title ?? "artist"}`}
@@ -117,7 +117,7 @@ export function ArtistPage({ id }: { id: string }) {
                     showArtist={false}
                     active={t.id === nowTrackId}
                     playing={t.id === nowTrackId && status === "playing"}
-                    onPlay={() => player.playArtist(id, t.id, shuffle)}
+                    onPlay={() => player.playArtist(id, t.id)}
                   />
                 ))
               : Array.from({ length: 5 }, (_, i) => <TrackRowSkeleton key={i} showArt />)}

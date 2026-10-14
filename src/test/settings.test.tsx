@@ -46,6 +46,18 @@ describe("settings", () => {
     expect(useSettings.getState().settings).toMatchObject({ privateSession: true, reportToPlex: false });
   });
 
+  it("shuffle style switch maps to spread and standard", async () => {
+    const user = userEvent.setup();
+    const set = vi.spyOn(backend, "settingsSet");
+    render(<SettingsPage />);
+    const spread = screen.getByRole("switch", { name: "Spread out shuffle" });
+    expect(spread).toHaveAttribute("aria-checked", "true");
+    await user.click(spread);
+    expect(set).toHaveBeenCalledWith({ shuffleStyle: "standard" });
+    await user.click(spread);
+    expect(set).toHaveBeenCalledWith({ shuffleStyle: "spread" });
+  });
+
   it("shows skeletons until settings arrive", () => {
     useSettings.setState({ settings: null });
     render(<SettingsPage />);
