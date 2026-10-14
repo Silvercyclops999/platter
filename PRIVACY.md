@@ -72,7 +72,7 @@ and the ListenBrainz token you enter for artist info sources, AirPlay speaker pa
 client ID are kept the same way.
 
 The library cache, artwork cache, search history and listen log live in the
-app's data folder, as do the cover links found for Discord.
+app's data folder, as do the cover links found for Discord and lyrics found on LRCLIB.
 
 ## What is never collected
 
