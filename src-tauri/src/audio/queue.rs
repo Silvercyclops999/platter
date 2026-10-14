@@ -160,6 +160,10 @@ pub struct Queue {
     /// Comes from settings, so it isn't saved with the queue.
     #[serde(skip)]
     shuffle_style: ShuffleStyle,
+    /// Settings turned resuming off: contexts start at track 1. Points are
+    /// still recorded, so turning it back on picks up where things were.
+    #[serde(skip)]
+    ignore_resume: bool,
     #[serde(skip)]
     rng: QRng,
 }
@@ -210,6 +214,13 @@ impl Queue {
     }
     pub fn set_shuffle_style(&mut self, style: ShuffleStyle) {
         self.shuffle_style = style;
+    }
+    /// Whether contexts resume where they were left (the setting).
+    pub fn resume_contexts(&self) -> bool {
+        !self.ignore_resume
+    }
+    pub fn set_resume_contexts(&mut self, on: bool) {
+        self.ignore_resume = !on;
     }
 
     fn context_id(&self) -> Option<&str> {
@@ -366,7 +377,7 @@ impl Queue {
     /// otherwise the context's stored preference (off by default).
     ///
     /// Start: `start` when given; with shuffle on, a random track; else the
-    /// context's resume point; else track 1. Returns the new current item
+    /// context's resume point (unless resuming is turned off); else track 1. Returns the new current item
     /// and the position to start it at.
     pub fn set_context_at(
         &mut self,
@@ -406,7 +417,7 @@ impl Queue {
         let start = match start {
             Some(s) if s < n => s,
             _ if self.shuffle => self.rng.0.random_range(0..n),
-            _ => match id.as_deref().and_then(|id| self.resume_start(id)) {
+            _ => match id.as_deref().filter(|_| !self.ignore_resume).and_then(|id| self.resume_start(id)) {
                 Some((i, ms)) => {
                     offset = ms;
                     i
@@ -1252,6 +1263,27 @@ mod tests {
         assert_eq!(item.track.id, "t0");
         assert_eq!(ms, 0);
         assert!(!q.shuffle());
+    }
+
+    #[test]
+    fn resume_off_starts_at_track_one_but_keeps_the_point() {
+        let mut q = Queue::with_seed(1);
+        assert!(q.resume_contexts(), "on by default");
+        q.set_context(ctx_id("x"), tracks(5), Some(2), None);
+        q.note_position(42_000);
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+
+        q.set_resume_contexts(false);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(5), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t0", 0));
+        assert!(q.resume_point("x").is_some(), "points are still stored");
+
+        // Back on: the latest point for x is used again.
+        q.note_position(5_000);
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        q.set_resume_contexts(true);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(5), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t0", 5_000));
     }
 
     #[test]

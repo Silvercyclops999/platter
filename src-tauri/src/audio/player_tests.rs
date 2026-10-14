@@ -405,6 +405,53 @@ async fn one_transfer_server_plays_queue_with_precache() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn precache_count_setting_limits_how_far_ahead_is_fetched() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache_dir = dir.path().join("cache");
+    let mut r = rig(
+        &["a", "b", "c", "d", "e"],
+        8.0,
+        true,
+        PlayerConfig {
+            cache_dir: Some(cache_dir.clone()),
+            ..Default::default()
+        },
+    )
+    .await;
+    let cached = |id: &str| {
+        std::fs::read_dir(&cache_dir).into_iter().flatten().flatten().any(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.starts_with(&format!("{id}-")) && n.ends_with(".audio")
+        })
+    };
+    let wait_for = |ids: &'static [&'static str]| {
+        let cached = &cached;
+        async move {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while !ids.iter().all(|id| cached(id)) {
+                assert!(Instant::now() < deadline, "never cached {ids:?}");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    };
+
+    r.player.set_precache_count(1).await.unwrap();
+    r.player
+        .play_context(ctx(&["a", "b", "c", "d", "e"]), None, Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    wait_for(&["b"]).await;
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert!(!cached("c"), "only one track ahead");
+
+    r.player.set_precache_count(3).await.unwrap();
+    wait_for(&["c", "d"]).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!cached("e"), "three tracks ahead, not four");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn repeat_one_replays_the_same_entry() {
     let mut r = rig(&["a", "b"], 0.2, false, PlayerConfig::default()).await;
     r.player.set_repeat(Repeat::One).await.unwrap();

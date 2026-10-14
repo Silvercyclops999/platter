@@ -4,6 +4,8 @@
 //! cache cap goes back to normal once space recovers.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use crate::db::ArtCache;
@@ -64,12 +66,14 @@ fn available(dir: &Path) -> Option<u64> {
     fs4::available_space(dir).ok()
 }
 
-/// Background loop.
-pub fn spawn(plex: PlexState, audio_dir: PathBuf, art: ArtCache, art_cap: u64) {
+/// Background loop. `art_cap` is the user's art cache size (Settings); the
+/// cap goes back to it once space recovers.
+pub fn spawn(plex: PlexState, audio_dir: PathBuf, art: ArtCache, art_cap: Arc<AtomicU64>) {
     tauri::async_runtime::spawn(async move {
         loop {
             let dir = audio_dir.clone();
             let art2 = art.clone();
+            let art_cap = art_cap.load(Ordering::Relaxed);
             let low = tokio::task::spawn_blocking(move || {
                 let avail = available(&dir)?;
                 match plan(avail) {

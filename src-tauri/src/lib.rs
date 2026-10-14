@@ -125,29 +125,35 @@ pub fn run() {
                 plex: plex.clone(),
             }));
             db.set_remote_search(Arc::new(bridge::PlexSearch(plex.clone())));
+            let initial = settings::load(&db);
             let art = ArtCache::open(
                 cache_dir.join("art"),
-                db::artcache::DEFAULT_CAP_BYTES,
+                initial.art_cache_bytes(),
                 Arc::new(bridge::PlexArt(plex.clone())),
             )?;
+            let live = settings::Live {
+                art: Some(art.clone()),
+                ..Default::default()
+            };
 
             let player = PlayerHandle::spawn(
                 tauri::async_runtime::handle().inner().clone(),
-                Arc::new(bridge::PlexStreams(plex.clone())),
+                Arc::new(bridge::PlexStreams(plex.clone(), live.streams.clone())),
                 Arc::new(bridge::CacheLookup(db.clone())),
                 Box::new(audio::output::CpalOutput::new()),
                 Arc::new(audio::events::TauriSink(app.handle().clone())),
                 PlayerConfig {
                     persist_path: Some(data_dir.join("queue.json")),
                     cache_dir: Some(audio_dir.clone()),
-                    shuffle_style: settings::load(&db).shuffle_style,
+                    shuffle_style: initial.shuffle_style,
+                    resume_contexts: initial.resume_contexts,
+                    precache_count: initial.precache_count as usize,
                     ..Default::default()
                 },
             );
-            let tracking_settings = tracking::TrackingSettings::default();
-            let app_settings = settings::SettingsState::new(db.clone(), tracking_settings.clone());
+            let app_settings = settings::SettingsState::new(db.clone(), live.clone());
             tracking::spawn(
-                tracking::Tracker::new(plex.clone(), db.clone(), tracking_settings),
+                tracking::Tracker::new(plex.clone(), db.clone(), live.tracking.clone()),
                 player.subscribe_tracking(),
             );
 
@@ -159,7 +165,7 @@ pub fn run() {
                 plex.clone(),
                 audio_dir.clone(),
                 art.clone(),
-                db::artcache::DEFAULT_CAP_BYTES,
+                live.art_cap.clone(),
             );
             app.manage(monitor::cached::AudioCacheDir(audio_dir));
 
@@ -214,6 +220,10 @@ pub fn run() {
             audio::commands::player_problems,
             settings::settings_get,
             settings::settings_set,
+            settings::art_cache_info,
+            settings::art_cache_clear,
+            settings::app_info,
+            settings::open_project_page,
             monitor::cached::cached_tracks,
             updates::update_check,
             updates::update_install_on_restart,

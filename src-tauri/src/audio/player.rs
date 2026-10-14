@@ -50,6 +50,8 @@ pub struct PlayerConfig {
     pub seed: Option<u64>,
     /// Starting shuffle style (from settings).
     pub shuffle_style: ShuffleStyle,
+    /// Contexts resume where they were left (from settings).
+    pub resume_contexts: bool,
 }
 
 impl Default for PlayerConfig {
@@ -64,6 +66,7 @@ impl Default for PlayerConfig {
             engine: EngineConfig::default(),
             seed: None,
             shuffle_style: ShuffleStyle::default(),
+            resume_contexts: true,
         }
     }
 }
@@ -89,6 +92,8 @@ enum Cmd {
     SetShuffle(bool, Reply<()>),
     SetContextShuffle(String, bool, Reply<()>),
     SetShuffleStyle(ShuffleStyle, Reply<()>),
+    SetResumeContexts(bool, Reply<()>),
+    SetPrecacheCount(usize, Reply<()>),
     SetRepeat(Repeat, Reply<()>),
     QueueAdd(Vec<Track>, AddAt, Reply<()>),
     QueueRemove(String, Reply<()>),
@@ -177,6 +182,7 @@ impl PlayerHandle {
             muted = p.muted;
         }
         queue.set_shuffle_style(config.shuffle_style);
+        queue.set_resume_contexts(config.resume_contexts);
         let status = if queue.current().is_some() {
             PlayerStatus::Paused
         } else {
@@ -285,6 +291,14 @@ impl PlayerHandle {
     }
     pub async fn set_shuffle_style(&self, style: ShuffleStyle) -> AppResult<()> {
         self.call(|r| Cmd::SetShuffleStyle(style, r)).await
+    }
+    /// Whether albums and playlists resume where they were left.
+    pub async fn set_resume_contexts(&self, on: bool) -> AppResult<()> {
+        self.call(|r| Cmd::SetResumeContexts(on, r)).await
+    }
+    /// How many upcoming tracks to keep pre-cached (at least 1).
+    pub async fn set_precache_count(&self, n: usize) -> AppResult<()> {
+        self.call(|r| Cmd::SetPrecacheCount(n, r)).await
     }
     pub async fn set_repeat(&self, repeat: Repeat) -> AppResult<()> {
         self.call(|r| Cmd::SetRepeat(repeat, r)).await
@@ -692,6 +706,15 @@ impl Actor {
             }
             Cmd::SetShuffleStyle(style, reply) => {
                 self.queue.set_shuffle_style(style);
+                let _ = reply.send(Ok(()));
+            }
+            Cmd::SetResumeContexts(on, reply) => {
+                self.queue.set_resume_contexts(on);
+                let _ = reply.send(Ok(()));
+            }
+            Cmd::SetPrecacheCount(n, reply) => {
+                self.config.precache_count = n.max(1);
+                self.refresh_precache();
                 let _ = reply.send(Ok(()));
             }
             Cmd::SetRepeat(r, reply) => {
