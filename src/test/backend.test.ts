@@ -59,6 +59,7 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["set_volume", (b) => b.setVolume(0.5), { volume: 0.5 }],
   ["set_muted", (b) => b.setMuted(true), { muted: true }],
   ["set_shuffle", (b) => b.setShuffle(true), { shuffle: true }],
+  ["set_context_shuffle", (b) => b.setContextShuffle("12", true), { contextId: "12", shuffle: true }],
   ["set_repeat", (b) => b.setRepeat("one"), { repeat: "one" }],
   ["queue_add", (b) => b.queueAdd(["1", "2"], "next"), { trackIds: ["1", "2"], at: "next" }],
   ["queue_remove", (b) => b.queueRemove("q1"), { itemId: "q1" }],

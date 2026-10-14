@@ -231,6 +231,8 @@ export interface PlayContextArgs {
 }
 
 export type RepeatMode = "off" | "all" | "one";
+/** "spread" keeps an artist's songs apart; "standard" is plain random. */
+export type ShuffleStyle = "spread" | "standard";
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
 
 export interface QueueItem {
@@ -260,7 +262,10 @@ export interface PlayerState {
   durationMs: number;
   volume: number;
   muted: boolean;
+  /** Shuffle for the playing context. */
   shuffle: boolean;
+  /** Context ids (albums, playlists, artists) whose shuffle preference is on. */
+  shuffledContexts: string[];
   repeat: RepeatMode;
   queue: QueueView;
 }
@@ -333,6 +338,7 @@ export interface Settings {
   privateSession: boolean;
   reportToPlex: boolean;
   volume: number;
+  shuffleStyle: ShuffleStyle;
   [key: string]: unknown;
 }
 

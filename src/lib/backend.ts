@@ -79,6 +79,8 @@ export interface Backend {
   setVolume(volume: number): Promise<void>;
   setMuted(muted: boolean): Promise<void>;
   setShuffle(shuffle: boolean): Promise<void>;
+  /** Shuffle preference for a context by id (applies now if it's playing). */
+  setContextShuffle(contextId: string, shuffle: boolean): Promise<void>;
   setRepeat(repeat: RepeatMode): Promise<void>;
   queueAdd(trackIds: string[], at: "next" | "end"): Promise<void>;
   queueRemove(itemId: string): Promise<void>;
@@ -157,6 +159,7 @@ export function createTauriBackend(): Backend {
     setVolume: (volume) => call("set_volume", { volume }),
     setMuted: (muted) => call("set_muted", { muted }),
     setShuffle: (shuffle) => call("set_shuffle", { shuffle }),
+    setContextShuffle: (contextId, shuffle) => call("set_context_shuffle", { contextId, shuffle }),
     setRepeat: (repeat) => call("set_repeat", { repeat }),
     queueAdd: (trackIds, at) => call("queue_add", { trackIds, at }),
     queueRemove: (itemId) => call("queue_remove", { itemId }),

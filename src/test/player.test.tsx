@@ -108,7 +108,8 @@ describe("mock queue semantics", () => {
   it("previous restarts after 3 s, repeat one replays, clear only clears the user queue", async () => {
     const album = mock.fx.albums.find((a) => a.trackCount >= 4)!;
     const tracks = mock.fx.tracksByAlbum.get(album.id)!;
-    await mock.playContext({ context: { kind: "album", id: album.id } });
+    // An explicit start track (this album may have a resume point from above).
+    await mock.playContext({ context: { kind: "album", id: album.id }, startTrackId: tracks[0].id });
     await mock.playNext();
     let s = await mock.playerState();
     expect(s.track!.id).toBe(tracks[1].id);

@@ -1,8 +1,10 @@
 /**
  * In-memory mock of the Rust core, used outside Tauri (Vite dev server,
  * Playwright, Vitest). Implements every command and event in docs/IPC.md with
- * invented fixture data, simulated playback (position ticks 4×/s, queue rules
- * roughly like the real core), sync progress and health changes.
+ * invented fixture data, simulated playback (position ticks 4×/s, the same
+ * queue rules as the core: Previous by context position, resume points,
+ * per-context shuffle, context end rewinds, repeat-one drops), sync progress
+ * and health changes.
  *
  * URL switches (plain browser only):
  *   ?latency=ms     delay every command (default 120; 0 in tests)
@@ -64,6 +66,17 @@ const isTestEnv = (() => {
   }
 })();
 
+/** Same cap as the core's CONTEXT_MEMORY_CAP. */
+const CONTEXT_MEMORY_CAP = 200;
+/** Previous restarts the track at or past this point. */
+export const PREVIOUS_RESTART_MS = 3000;
+
+interface ResumePoint {
+  index: number;
+  trackId: string;
+  positionMs: number;
+}
+
 export function optionsFromUrl(search: string): MockOptions {
   const p = new URLSearchParams(search);
   return {
@@ -102,7 +115,7 @@ export class MockBackend implements Backend {
   private sync: SyncStatus = { phase: "idle", done: 0, total: 0, lastSyncAt: Math.floor(Date.now() / 1000) - 3600 };
   // search
   private recent: string[] = ["lantern", "Odessa Wren", "saltglass"];
-  private settings: Settings = { privateSession: false, reportToPlex: true, volume: 0.7 };
+  private settings: Settings = { privateSession: false, reportToPlex: true, volume: 0.7, shuffleStyle: "spread" };
 
   // player
   private status: PlayerState["status"] = "idle";
@@ -118,6 +131,10 @@ export class MockBackend implements Backend {
   private ctxPos = -1;
   private history: QueueItem[] = [];
   private ctxInfo: QueueContextInfo | null = null;
+  /** Context ids with shuffle on, least recently used first. */
+  private shuffledIds: string[] = [];
+  /** Resume point per context id; Map order is least recently used first. */
+  private resumePoints = new Map<string, ResumePoint>();
   private itemSeq = 1;
   private tick: ReturnType<typeof setInterval> | null = null;
   private rng = mulberry32(42);
@@ -472,6 +489,7 @@ export class MockBackend implements Backend {
     return { itemId: `q${this.itemSeq++}`, track, source };
   }
 
+  /** Plain random order (Fisher-Yates). */
   private shuffled<T>(arr: T[]): T[] {
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) {
@@ -479,6 +497,66 @@ export class MockBackend implements Backend {
       [a[i], a[j]] = [a[j], a[i]];
     }
     return a;
+  }
+
+  /** Spread: each artist's tracks evenly spaced, random offset and jitter
+   *  (the core's Spread style, minus its recent-play weighting). */
+  private spread(items: QueueItem[]): QueueItem[] {
+    const groups = new Map<string, QueueItem[]>();
+    for (const it of items) {
+      const k = (it.track.trackArtist ?? it.track.artistTitle).toLowerCase();
+      let g = groups.get(k);
+      if (!g) groups.set(k, (g = []));
+      g.push(it);
+    }
+    const placed: [number, QueueItem][] = [];
+    for (const g of groups.values()) {
+      const n = g.length;
+      const offset = this.rng() / n;
+      this.shuffled(g).forEach((it, j) => placed.push([offset + j / n + ((this.rng() - 0.5) * 0.2) / n, it]));
+    }
+    return placed.sort((a, b) => a[0] - b[0]).map((p) => p[1]);
+  }
+
+  private shuffleOrder(items: QueueItem[]): QueueItem[] {
+    return this.settings.shuffleStyle === "standard" ? this.shuffled(items) : this.spread(items);
+  }
+
+  private shufflePref(id: string): boolean {
+    return this.shuffledIds.includes(id);
+  }
+
+  private storeShufflePref(id: string, on: boolean) {
+    this.shuffledIds = this.shuffledIds.filter((s) => s !== id);
+    if (on) this.shuffledIds = [...this.shuffledIds, id].slice(-CONTEXT_MEMORY_CAP);
+  }
+
+  /** Remember where the current context is (track change, pause, ticks). */
+  private notePosition() {
+    const id = this.ctxInfo?.id;
+    const cur = this.current;
+    if (!id || !cur) return;
+    let rp: ResumePoint | null = null;
+    if (cur.source === "context") {
+      const at = this.ctxOrder[this.ctxPos];
+      if (at?.itemId === cur.itemId) rp = { index: this.ctxOriginal.indexOf(at), trackId: at.track.id, positionMs: this.positionMs };
+    } else {
+      // A queued song is playing: the context picks up at its next track.
+      const nxt = this.ctxOrder[this.ctxPos + 1];
+      if (nxt) rp = { index: this.ctxOriginal.indexOf(nxt), trackId: nxt.track.id, positionMs: 0 };
+    }
+    if (!rp) return;
+    this.resumePoints.delete(id);
+    this.resumePoints.set(id, rp);
+    while (this.resumePoints.size > CONTEXT_MEMORY_CAP) this.resumePoints.delete(this.resumePoints.keys().next().value!);
+  }
+
+  private resumeStart(id: string): { index: number; positionMs: number } | null {
+    const rp = this.resumePoints.get(id);
+    if (!rp) return null;
+    if (this.ctxOriginal[rp.index]?.track.id === rp.trackId) return { index: rp.index, positionMs: rp.positionMs };
+    const i = this.ctxOriginal.findIndex((it) => it.track.id === rp.trackId);
+    return i >= 0 ? { index: i, positionMs: rp.positionMs } : null;
   }
 
   private contextTracks(args: PlayContextArgs): { tracks: Track[]; info: QueueContextInfo } {
@@ -508,20 +586,33 @@ export class MockBackend implements Backend {
   private loadContext(args: PlayContextArgs, play: boolean) {
     const { tracks, info } = this.contextTracks(args);
     if (!tracks.length) return;
-    if (args.shuffle !== undefined) this.shuffle = args.shuffle;
+    this.notePosition(); // where the outgoing context was left
+    const id = info.id ?? null;
+    if (args.shuffle !== undefined) {
+      this.shuffle = args.shuffle;
+      if (id) this.storeShufflePref(id, args.shuffle);
+    } else {
+      this.shuffle = id ? this.shufflePref(id) : false;
+    }
     if (this.current) this.pushHistory(this.current);
     this.ctxOriginal = tracks.map((t) => this.item(t, "context"));
-    const start = args.startTrackId ? this.ctxOriginal.find((i) => i.track.id === args.startTrackId) : undefined;
+    this.ctxInfo = info;
+    let first = args.startTrackId ? this.ctxOriginal.find((i) => i.track.id === args.startTrackId) : undefined;
+    let offset = 0;
+    if (!first && this.shuffle) first = this.ctxOriginal[Math.floor(this.rng() * this.ctxOriginal.length)];
+    if (!first) {
+      const r = id ? this.resumeStart(id) : null;
+      first = this.ctxOriginal[r?.index ?? 0];
+      offset = r?.positionMs ?? 0;
+    }
     if (this.shuffle) {
-      const first = start ?? this.ctxOriginal[Math.floor(this.rng() * this.ctxOriginal.length)];
-      this.ctxOrder = [first, ...this.shuffled(this.ctxOriginal.filter((i) => i !== first))];
+      this.ctxOrder = [first, ...this.shuffleOrder(this.ctxOriginal.filter((i) => i !== first))];
       this.ctxPos = 0;
     } else {
       this.ctxOrder = [...this.ctxOriginal];
-      this.ctxPos = start ? this.ctxOrder.indexOf(start) : 0;
+      this.ctxPos = this.ctxOrder.indexOf(first);
     }
-    this.ctxInfo = info;
-    this.setCurrent(this.ctxOrder[this.ctxPos], play);
+    this.setCurrent(this.ctxOrder[this.ctxPos], play, offset);
   }
 
   private pushHistory(item: QueueItem) {
@@ -529,9 +620,9 @@ export class MockBackend implements Backend {
     if (this.history.length > 50) this.history.shift();
   }
 
-  private setCurrent(item: QueueItem | null, play: boolean) {
+  private setCurrent(item: QueueItem | null, play: boolean, startMs = 0) {
     this.current = item;
-    this.positionMs = 0;
+    this.positionMs = startMs;
     if (item && item.track.title.endsWith(BROKEN_TRACK_TITLE_SUFFIX) && play) {
       // Spec 07: one file missing/corrupt → toast + skip.
       // The UI turns player://error into the "Skipped" toast.
@@ -540,33 +631,43 @@ export class MockBackend implements Backend {
       return;
     }
     this.status = item ? (play ? "playing" : "paused") : "idle";
+    this.notePosition();
     if (this.status === "playing") this.startTick();
     else this.stopTick();
     this.emitState();
   }
 
-  private advance(natural: boolean) {
+  private advance(natural: boolean, manual = false) {
     if (natural && this.repeat === "one" && this.current) {
       this.positionMs = 0;
       this.emitState();
       return;
     }
-    if (this.current) this.pushHistory(this.current);
+    // Next in repeat-one skips on and drops to repeat-all.
+    if (manual && this.repeat === "one") this.repeat = "all";
     if (this.userQueue.length) {
+      if (this.current) this.pushHistory(this.current);
       this.setCurrent(this.userQueue.shift()!, true);
     } else if (this.ctxPos + 1 < this.ctxOrder.length) {
+      if (this.current) this.pushHistory(this.current);
       this.ctxPos++;
       this.setCurrent(this.ctxOrder[this.ctxPos], true);
     } else if (this.repeat === "all" && this.ctxOrder.length) {
-      if (this.shuffle) this.ctxOrder = this.shuffled(this.ctxOrder);
+      // Repeat-all replays the same (shuffled) order.
+      if (this.current) this.pushHistory(this.current);
       this.ctxPos = 0;
       this.setCurrent(this.ctxOrder[0], true);
     } else {
-      // End of everything: stay on the last track, paused at 0.
-      if (this.current) this.history.pop();
+      // The context ended (repeat off): back to its first track, paused at 0.
+      if (this.ctxOrder.length) {
+        if (this.current) this.pushHistory(this.current);
+        this.ctxPos = 0;
+        this.current = this.ctxOrder[0];
+      }
       this.status = "paused";
       this.positionMs = 0;
       this.stopTick();
+      this.notePosition();
       this.emitState();
     }
   }
@@ -576,6 +677,7 @@ export class MockBackend implements Backend {
     this.tick = setInterval(() => {
       if (this.status !== "playing" || !this.current) return;
       this.positionMs += 250;
+      if (this.positionMs % 5000 === 0) this.notePosition();
       const d = this.current.track.durationMs;
       if (this.positionMs >= d) {
         this.advance(true);
@@ -599,6 +701,7 @@ export class MockBackend implements Backend {
       volume: this.volume,
       muted: this.muted,
       shuffle: this.shuffle,
+      shuffledContexts: this.shuffledIds,
       repeat: this.repeat,
       queue: {
         current: this.current,
@@ -642,6 +745,7 @@ export class MockBackend implements Backend {
     if (this.status !== "playing") return;
     this.status = "paused";
     this.stopTick();
+    this.notePosition();
     this.emitState();
   }
   private resumeNow() {
@@ -651,22 +755,25 @@ export class MockBackend implements Backend {
     this.emitState();
   }
   playNext() {
-    return this.act(() => this.advance(false));
+    return this.act(() => this.advance(false, true));
   }
   playPrevious() {
     return this.act(() => {
-      if (this.positionMs > 3000 || !this.history.length) {
+      const restart = () => {
         this.positionMs = 0;
         this.emitState();
-        return;
-      }
-      const prev = this.history.pop()!;
-      if (this.current?.source === "user") this.userQueue.unshift(this.current);
-      if (prev.source === "context") {
-        const idx = this.ctxOrder.indexOf(prev);
-        if (idx >= 0) this.ctxPos = idx;
-      }
-      this.setCurrent(prev, this.status === "playing" || this.status === "paused" ? true : false);
+      };
+      // At or past 3 s: restart, and repeat-one is kept.
+      if (this.positionMs >= PREVIOUS_RESTART_MS || !this.current) return restart();
+      // Earlier: repeat-one drops to repeat-all, and Previous goes to the
+      // previous context position (never a queued song). On a playing
+      // queued song that is the context track before it; the song is dropped.
+      if (this.repeat === "one") this.repeat = "all";
+      const target = this.current.source === "user" ? this.ctxPos : this.ctxPos - 1;
+      if (target < 0 || target >= this.ctxOrder.length) return restart();
+      this.pushHistory(this.current);
+      this.ctxPos = target;
+      this.setCurrent(this.ctxOrder[target], true);
     });
   }
   playSeek(positionMs: number) {
@@ -689,20 +796,35 @@ export class MockBackend implements Backend {
     });
   }
   setShuffle(shuffle: boolean) {
-    return this.act(() => {
-      if (shuffle === this.shuffle) return;
+    return this.act(() => this.applyShuffle(shuffle));
+  }
+  /** Shuffle for the playing context; remembered for its id. */
+  private applyShuffle(shuffle: boolean) {
+    if (this.ctxInfo?.id) this.storeShufflePref(this.ctxInfo.id, shuffle);
+    if (shuffle !== this.shuffle) {
       this.shuffle = shuffle;
-      const played = this.ctxOrder.slice(0, this.ctxPos + 1);
+      const at = this.ctxPos >= 0 ? this.ctxOrder[this.ctxPos] : undefined;
       if (shuffle) {
-        this.ctxOrder = [...played, ...this.shuffled(this.ctxOrder.slice(this.ctxPos + 1))];
-      } else if (this.current) {
-        // Back to original order, continuing after the current track.
-        const at = this.ctxOriginal.findIndex((i) => i.itemId === this.current!.itemId);
-        if (at >= 0) {
-          this.ctxOrder = [...this.ctxOriginal];
-          this.ctxPos = at;
-        }
+        // Every other track (earlier ones too) dealt into a new order.
+        const live = new Set(this.ctxOrder);
+        const others = this.ctxOriginal.filter((i) => i !== at && live.has(i));
+        this.ctxOrder = at ? [at, ...this.shuffleOrder(others)] : this.shuffleOrder(others);
+        this.ctxPos = at ? 0 : -1;
+      } else {
+        // Back to original order, continuing after the current position.
+        const live = new Set(this.ctxOrder);
+        this.ctxOrder = this.ctxOriginal.filter((i) => live.has(i));
+        this.ctxPos = at ? this.ctxOrder.indexOf(at) : -1;
       }
+    }
+    this.emitState();
+  }
+  /** Shuffle preference for a context: applies now if it's playing,
+   *  otherwise the next time it plays. */
+  setContextShuffle(contextId: string, shuffle: boolean) {
+    return this.act(() => {
+      if (this.ctxInfo?.id === contextId) return this.applyShuffle(shuffle);
+      this.storeShufflePref(contextId, shuffle);
       this.emitState();
     });
   }
