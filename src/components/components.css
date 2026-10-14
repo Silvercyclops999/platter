@@ -131,9 +131,6 @@
   from { background-position: 100% 0; }
   to { background-position: -50% 0; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .skeleton { animation: none; }
-}
 :root[data-reduced-motion="true"] .skeleton { animation: none; }
 
 /* ---------------------------------------------------------------- Art */
@@ -439,6 +436,46 @@
   transition: transform var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing);
 }
 .switch.is-on .switch__thumb { transform: translateX(16px); background: var(--color-text-on-accent); }
+
+/* ---------------------------------------------------------------- Select + number field */
+.select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+.select__input,
+.number-field {
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-overlay);
+  box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.16);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  transition: box-shadow var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing);
+}
+.select__input {
+  min-width: 132px;
+  padding: 0 36px 0 var(--space-4);
+  appearance: none;
+  cursor: pointer;
+}
+.select__input option { background: var(--color-bg-raised2); color: var(--color-text-primary); }
+.select__icon { position: absolute; right: 12px; color: var(--color-text-secondary); pointer-events: none; }
+.select__input:hover,
+.number-field:hover { box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.32); }
+.select__input:focus-visible,
+.number-field:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
+.select.is-disabled { opacity: 0.4; }
+.number-field {
+  width: 72px;
+  padding: 0 var(--space-3);
+  text-align: center;
+  user-select: text;
+}
 
 /* ---------------------------------------------------------------- Search field */
 .search-field {

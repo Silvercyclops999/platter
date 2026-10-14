@@ -1,15 +1,18 @@
 import { useEffect } from "react";
-import { installReducedMotion } from "./design/motion";
+import { installReducedMotion, setMotionPreference } from "./design/motion";
 import { installOverlayScrollbars } from "./design/scrollbars";
 import { SignInPage, ServerPickPage } from "./pages/SignInPage";
 import { AppShell } from "./shell/AppShell";
 import { connectApp, useApp } from "./stores/app";
 import { connectPlayer } from "./stores/player";
+import { useSettings } from "./stores/settings";
 import { useUi } from "./stores/ui";
 
 /** Root: wires stores to the core, then gates on auth. */
 export default function App() {
   useEffect(() => installReducedMotion(), []);
+  const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
+  useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
   useEffect(() => installOverlayScrollbars(), []);
   useEffect(() => connectApp(), []);
   useEffect(() => connectPlayer(), []);
