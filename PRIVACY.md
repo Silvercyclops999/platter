@@ -28,22 +28,38 @@ and your own Plex server.
   Chromecast, it gets the songs from your Plex server with a short-lived
   token your server hands out for this. When you play on an AirPlay speaker,
   the app sends it the audio.
+- Discord, when Discord status is on (it is by default) and the Discord app
+  is open on your computer. Platter talks only to that local app, which shows
+  the song title, artist, album, how far into the song you are, a cover image
+  link and, for released songs, a song.link button on your Discord profile.
+  Anyone who can see your profile sees these. Nothing is sent during a
+  private session, while paused (unless you choose to show paused songs), or
+  when the status is off. Your Plex token and server address are never part
+  of it.
+- Cover Art Archive, for that cover image: it gets the album's MusicBrainz
+  release id, nothing else. Can be turned off in Settings. Discord then loads
+  the image from Cover Art Archive itself.
+- Imgur, only if you enter your own Imgur client ID in Settings. For albums
+  Cover Art Archive doesn't have, the 512 px cover image is uploaded once,
+  with your client ID. Nothing else about the song goes with it. Uploaded
+  images are public to anyone who has the link, so unreleased covers can be
+  kept off Discord (and out of uploads) in Settings. Platter doesn't delete
+  uploads.
 
 Some optional features planned for later will talk to other services, but
-only once you turn them on. Examples are Discord status, an image host for
-Discord cover art, Last.fm or ListenBrainz scrobbling, Lidarr and Tautulli.
-Each one is off until you set it up, and this file will list exactly what
-each one sends.
+only once you turn them on. Examples are Last.fm or ListenBrainz
+scrobbling, Lidarr and Tautulli. Each one is off until you set it up, and
+this file will list exactly what each one sends.
 
 ## What stays on your machine
 
 Your Plex token is kept in the OS keychain (Windows Credential Manager or
 macOS Keychain). It's never written to a plain file or to the logs. API keys
-you enter for artist info sources, and AirPlay speaker passwords, are kept
-the same way.
+you enter for artist info sources, AirPlay speaker passwords and the Imgur
+client ID are kept the same way.
 
 The library cache, artwork cache, search history and listen log live in the
-app's data folder.
+app's data folder, as do the cover links found for Discord.
 
 ## What is never collected
 

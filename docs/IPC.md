@@ -235,6 +235,47 @@ resolved in the core, kept until the UI takes it with `deep_link_take`, and
 announced with event `deeplink://open` (no payload). A song opens its album;
 with `atSeconds`, the player seeks there once when that song starts playing.
 
+## Discord
+| Command | Args | Returns |
+| --- | --- | --- |
+| `discord_status` | – | `DiscordStatus` |
+| `discord_imgur_key_set` | `{ key: string \| null }` | `{ saved, rejected }` |
+
+`DiscordStatus = { available, connected, imgurKey: { saved, rejected }, uploadFailed }`
+
+Event `discord://status` → `DiscordStatus`, when Discord connects or goes
+away, a cover upload fails, or the client ID changes.
+
+`available` is false when the app was built without a Discord application id
+(`PLATTER_DISCORD_APP_ID` at compile time); then nothing runs and Settings
+shows a note instead of the Discord rows. Otherwise the core follows the
+player's track events and talks to the local Discord app over its IPC socket
+(the `discord-ipc-0` to `-9` named pipe on Windows, the unix socket of that
+name in the temp folder on macOS). It looks for Discord every 15 s while
+something is playing and Discord isn't open. Losing Discord never affects
+playback.
+
+The status is a Listening activity (Playing if the client refuses that):
+details = song title, state = artist, large image = cover, large text =
+album, small image = the app icon, start and end timestamps while playing,
+and a Find this song button with the song's song.link page for released songs
+(found the same way as `share_public_link`). Text is cut to 128 characters.
+Updates are gathered for 300 ms (so a gapless change is one update) and sent
+at most once every 15 s, always with the latest state. A new song waits up to
+1.5 s for its cover. Nothing is shown during a private session, while
+`discordStatus` is off, while paused when `discordClearOnPause` is on, or for
+unreleased songs when `discordShowUnreleased` is off.
+
+The cover is a public URL, never a Plex URL. Cover Art Archive first, by the
+album's MusicBrainz release id from Plex (`coverartarchive.org/release/<id>/front-500`,
+checked once and kept 30 days, a miss 7 days), then, with a saved client ID
+and `discordUploadArt` on, the 512 px cover from the art cache uploaded once to
+Imgur and its `i.imgur.com` link kept for good. Only those two hosts are ever
+sent; anything else falls back to the app icon. A failed upload isn't retried
+until the next start or a new client ID. The client ID lives in the keychain;
+saving one checks it with one request that uploads nothing, and `rejected`
+is set when Imgur refuses it then or on an upload.
+
 ## Now playing
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -551,6 +592,13 @@ The rest of the fields, with their defaults:
 | `eqFallback` | `{ preset, bands }` or null | Read only. The choice for devices without their own, kept from the last such device. |
 | `eqLastOutput` | device id or null | Read only. The device the EQ last followed. |
 | `sharePublicLinks` | bool, true | Share menus find public links for released songs and albums (iTunes Search and song.link). Off leaves only Platter links and sends nothing. |
+| `discordStatus` | bool, true | Show what's playing on Discord. This device only. See Discord above. |
+| `discordClearOnPause` | bool, true | Pausing clears the status. Off shows the song as paused, without a progress bar. |
+| `discordShowUnreleased` | bool, true | Off shows nothing while an unreleased song plays. |
+| `discordUnreleasedArt` | bool, true | Off shows the app icon for unreleased songs; their cover is never looked up or uploaded. |
+| `discordFindSong` | bool, true | The Find this song button. Also needs `sharePublicLinks`. |
+| `discordCoverArchive` | bool, true | Covers from Cover Art Archive by MusicBrainz release id. |
+| `discordUploadArt` | bool, false | Upload covers Cover Art Archive lacks to Imgur. Only used while a client ID is saved and wasn't refused. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

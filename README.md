@@ -85,6 +85,12 @@ leaves your machine. Details are in [PRIVACY.md](PRIVACY.md).
 3. `npm install`
 4. `npm run tauri dev`
 
+Discord status needs a Discord application id, read when the app is
+compiled. Create an application in the Discord Developer Portal and set
+`PLATTER_DISCORD_APP_ID` to its id before building, for example
+`PLATTER_DISCORD_APP_ID=<your app id> npm run tauri build`. Without it the
+build works the same, and Settings says Discord status isn't available.
+
 Run the tests with `npm test`, and `cargo clippy -- -D warnings && cargo test`
 inside `src-tauri/`. There's a bit more in [CONTRIBUTING.md](CONTRIBUTING.md).
 

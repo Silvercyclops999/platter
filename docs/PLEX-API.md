@@ -283,6 +283,14 @@ On 5 sampled artists, list items have only `guid` (`plex://artist/…`) and no
 `mbid://<36-char uuid>` entry, with or without `includeGuids=1`. The artist
 info lookups read the MBID from that detail call and cache it for 30 days.
 
+### 2026-10-14: album MusicBrainz ids
+
+On 10 sampled albums, album detail (`/library/metadata/{id}`) has `Guid`
+with one `mbid://<36-char uuid>` entry. Checked 3 against MusicBrainz: each is
+a release id (the release lookup answers, the release-group lookup doesn't),
+and Cover Art Archive's `/release/<id>/front-500` redirects to an image for
+all 3. Discord status uses that URL for covers.
+
 ### 2026-10-14: playlist writes
 
 Read-only checks on the real server:
