@@ -4,6 +4,8 @@ export interface Toast {
   id: number;
   kind: "info" | "error";
   message: string;
+  /** Optional button, e.g. Restart for a downloaded update. */
+  action?: { label: string; run: () => void };
 }
 
 interface ToastState {

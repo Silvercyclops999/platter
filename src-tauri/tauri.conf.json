@@ -36,6 +36,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2RkMyNTMxQTRCNjhBMEMKUldRTWlyYWtNU1g4VmhPNzNPUXdJSDBTODNPUHQwam5IZ0ljNVBUSWFDN2ZDOXpoNnVMZXAvd1gK",
+      "endpoints": [
+        "https://github.com/Silvercyclops999/platter/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

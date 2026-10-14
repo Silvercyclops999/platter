@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
 import type { AuthStatus, Health, Playlist, SyncStatus } from "../lib/types";
-import { toast, useToasts } from "./toasts";
+import { useToasts } from "./toasts";
 
 interface AppStore {
   auth: AuthStatus | null;
@@ -55,7 +55,18 @@ export function connectApp(b: Backend = backend): () => void {
     }),
   );
   keep(b.listen("toast", (t) => useToasts.getState().push(t, t.kind === "error" ? 6000 : 4000)));
-  keep(b.listen("update://ready", (u) => toast.info(`Update ${u.version} ready — restart to install`)));
+  keep(
+    b.listen("update://ready", (u) =>
+      useToasts.getState().push(
+        {
+          kind: "info",
+          message: `Platter ${u.version} is ready. Restart to install it.`,
+          action: { label: "Restart", run: () => void b.updateInstallOnRestart() },
+        },
+        0,
+      ),
+    ),
+  );
 
   return () => {
     alive = false;

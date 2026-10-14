@@ -13,6 +13,18 @@ export function Toaster() {
             {t.kind === "error" ? <CircleAlert size={16} /> : <Info size={16} />}
           </span>
           <span className="toast__msg">{t.message}</span>
+          {t.action && (
+            <button
+              type="button"
+              className="toast__action"
+              onClick={() => {
+                t.action?.run();
+                dismiss(t.id);
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
           <button type="button" className="toast__close" aria-label="Dismiss notification" onClick={() => dismiss(t.id)}>
             <X size={14} aria-hidden="true" />
           </button>

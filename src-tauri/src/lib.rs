@@ -6,6 +6,7 @@ pub mod model;
 pub mod platform;
 pub mod plex;
 pub mod tracking;
+pub mod updates;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,6 +69,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Updates::default())
         .register_asynchronous_uri_scheme_protocol("art", |ctx, req, responder| {
             let cache = ctx.app_handle().state::<ArtCache>().inner().clone();
             db::artcache::respond(cache, req.uri().to_string(), responder);
@@ -111,6 +114,7 @@ pub fn run() {
             app.manage(db);
             app.manage(art);
             app.manage(player);
+            updates::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -152,6 +156,8 @@ pub fn run() {
             audio::commands::queue_jump,
             audio::commands::player_state,
             audio::commands::player_problems,
+            updates::update_check,
+            updates::update_install_on_restart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
