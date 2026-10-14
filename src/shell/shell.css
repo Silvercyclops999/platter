@@ -1,9 +1,16 @@
 /* App shell layout: title bar, sidebar, main view, queue panel, player bar. */
 
+/* Header colours, registered so they can ease from one page to the next:
+   --tint is the art's vivid colour, --tint-shade a dark shade of it. */
 @property --tint {
   syntax: "<color>";
   inherits: true;
   initial-value: #2a2520;
+}
+@property --tint-shade {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #171513;
 }
 
 .app {
@@ -247,7 +254,10 @@
   border-radius: var(--radius-card);
   background: var(--color-bg-raised);
   overflow: hidden;
-  transition: --tint var(--motion-slow) var(--motion-easing);
+  /* Page content swaps instantly; only the header colour eases across. */
+  transition:
+    --tint var(--motion-long) var(--motion-easing-in-out),
+    --tint-shade var(--motion-long) var(--motion-easing-in-out);
 }
 .main__banner { flex: none; }
 .main__viewport { position: relative; flex: 1; min-height: 0; }
@@ -262,23 +272,42 @@
   gap: var(--space-4);
   height: 64px;
   padding: 0 var(--space-6);
-  background: transparent;
-  transition: background-color var(--motion-medium) var(--motion-easing);
 }
-.main-header.is-scrolled { background: var(--color-bg-raised); }
-.main-header.is-scrolled.is-tinted { background: color-mix(in srgb, var(--tint) 70%, var(--color-bg-base)); }
+/* Background follows scroll position (--bar-alpha, set per frame by
+   MainView) rather than a timed fade. Its colour is the header's dark shade. */
+.main-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--tint-shade);
+  opacity: var(--bar-alpha, 0);
+  pointer-events: none;
+}
 .main-header__nav { display: flex; gap: var(--space-2); }
-/* Sticky page title + play button, once the page header has scrolled away. */
+/* Sticky page title + play button: fade in once the page's own play button
+   passes under the bar, and fade out again when scrolling back. */
 .main-header__bar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
-  animation: fade-in var(--motion-medium) var(--motion-easing);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--motion-slow) var(--motion-easing-in-out),
+    visibility 0s linear var(--motion-slow);
+}
+.main-header__bar.is-shown {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--motion-slow) var(--motion-easing-in-out),
+    visibility 0s;
 }
 .main-header__title {
   font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-display);
   letter-spacing: -0.01em;
 }
 .main-header__nav .icon-btn:disabled { opacity: 0.4; cursor: default; }
@@ -311,17 +340,8 @@
   overflow-x: hidden;
   scrollbar-gutter: stable;
 }
-.page { min-height: 100%; animation: fade-in var(--motion-slow) var(--motion-easing); }
-/* During the card-to-page art transition the browser cross-fades; skip the page fade. */
-:root[data-art-transition="true"] .page { animation: none; }
-::view-transition-group(platter-art) {
-  animation-duration: var(--motion-slow);
-  animation-timing-function: var(--motion-easing);
-}
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: var(--motion-medium);
-}
+/* Page content swaps in a single frame: no fade, slide or cross-dissolve. */
+.page { min-height: 100%; }
 
 /* ---------------------------------------------------------------- Queue panel */
 .queue-panel {
@@ -332,10 +352,11 @@
   min-height: 0;
   border-radius: var(--radius-card);
   background: var(--color-bg-raised);
-  animation: panel-in var(--motion-medium) var(--motion-easing);
+  /* Slides in on open; closing is instant (the panel unmounts). */
+  animation: panel-in var(--motion-quick) var(--motion-easing);
 }
 @keyframes panel-in {
-  from { opacity: 0; transform: translateX(12px); }
+  from { opacity: 0; transform: translateX(calc(24px * var(--motion-move))); }
   to { opacity: 1; transform: none; }
 }
 .queue-panel__head {

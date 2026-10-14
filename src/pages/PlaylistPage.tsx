@@ -2,7 +2,7 @@ import { Ellipsis, ListMusic, Pause, Play, Shuffle } from "lucide-react";
 import { openContextMenu } from "../components/ContextMenu";
 import { usePins } from "../stores/pins";
 import { useContextState } from "./cards";
-import { headerArtStyle, useFitTitle, usePageBar } from "./detail";
+import { usePageBar, useTitleStep } from "./detail";
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
@@ -24,22 +24,22 @@ export function PlaylistPage({ id }: { id: string }) {
   const pinned = usePins((s) => s.isPinned("playlist", id));
   const play = () => (isThis ? player.toggle() : player.playPlaylist(id));
   usePageBar(pl?.title, isThisPlaying, play);
-  const titleRef = useFitTitle<HTMLHeadingElement>(pl?.title);
+  const { header, column, step, compact } = useTitleStep(pl?.title);
   const empty = !!data && data.tracks.length === 0;
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this playlist: {error.message}</p>;
 
   return (
     <div className="detail">
-      <header className="detail-header">
-        <div className="detail-header__art" style={headerArtStyle}>
+      <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
+        <div className="detail-header__art">
           {pl ? <Art path={pl.thumb} size={232} kind="playlist" /> : <Skeleton width={232} height={232} />}
         </div>
-        <div className="detail-header__text">
+        <div ref={column} className="detail-header__text">
           {pl ? (
             <>
               <span className="detail-header__type">{pl.smart ? "Smart playlist" : "Playlist"}</span>
-              <h1 ref={titleRef} className="detail-header__title">{pl.title}</h1>
+              <h1 className="detail-header__title" data-step={step}>{pl.title}</h1>
               <div className="detail-header__meta">
                 <span>{plural(pl.trackCount, "song")},</span>
                 <span className="detail-header__muted">{formatLongDuration(pl.durationMs)}</span>

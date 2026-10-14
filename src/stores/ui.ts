@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { HeaderColors } from "../lib/color";
 
 export interface MenuItem {
   label: string;
@@ -36,15 +37,15 @@ interface UiState {
   /** Bumped to ask the search field to take focus (Ctrl/⌘+L). */
   searchFocusTick: number;
   menu: ContextMenuState | null;
-  /** Header tint for the current page (CSS color), null = neutral. */
-  tint: string | null;
+  /** Header colours for the current page (from its art), null = neutral. */
+  tint: HeaderColors | null;
   /** Title and play button for the sticky header (detail pages). */
   pageBar: PageBar | null;
   setPageBar: (b: PageBar | null) => void;
   /** The sign-in screen is open over the app (after Plex rejected the sign-in). */
   signInOpen: boolean;
   setSignInOpen: (v: boolean) => void;
-  setTint: (c: string | null) => void;
+  setTint: (c: HeaderColors | null) => void;
   toggleQueue: () => void;
   setQueueOpen: (v: boolean) => void;
   setPaletteOpen: (v: boolean) => void;
@@ -63,7 +64,10 @@ export const useUi = create<UiState>()((set, get) => ({
   pageBar: null,
   setPageBar: (pageBar) => set({ pageBar }),
   setSignInOpen: (signInOpen) => set({ signInOpen }),
-  setTint: (tint) => get().tint !== tint && set({ tint }),
+  setTint: (tint) => {
+    const cur = get().tint;
+    if (cur?.vivid !== tint?.vivid || cur?.shade !== tint?.shade) set({ tint });
+  },
   toggleQueue: () => set({ queueOpen: !get().queueOpen }),
   setQueueOpen: (v) => set({ queueOpen: v }),
   setPaletteOpen: (v) => set({ paletteOpen: v }),

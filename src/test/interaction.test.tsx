@@ -7,10 +7,8 @@ import { TrackList, TrackRow } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import type { PlayerState } from "../lib/types";
-import { navigateWithArt, ART_TRANSITION } from "../lib/viewTransition";
 import { AlbumCard } from "../pages/cards";
-import { pickFitSize } from "../pages/detail";
-import { MainView, restoreScroll, stickyThreshold } from "../shell/MainView";
+import { MainView, barAlpha, restoreScroll, stickyThreshold } from "../shell/MainView";
 import { PlayerBar } from "../shell/PlayerBar";
 import { QueuePanel, moveIndex } from "../shell/QueuePanel";
 import { Sidebar } from "../shell/Sidebar";
@@ -347,7 +345,7 @@ describe("slider hover", () => {
 // ---------------------------------------------------------------- sticky header + scroll
 
 describe("sticky page header", () => {
-  it("appears with the title and a play button once the page header scrolls away", async () => {
+  it("fades the title and a play button in once the page header scrolls away, and out again", async () => {
     const album = mock.fx.albums.find((a) => a.trackCount >= 3)!;
     const base = await mock.playerState();
     await setPlayer({ status: "paused", queue: { ...base.queue, context: null } });
@@ -356,11 +354,17 @@ describe("sticky page header", () => {
     await screen.findByRole("heading", { level: 1, name: album.title });
     await waitFor(() => expect(useUi.getState().pageBar?.title).toBe(album.title));
     const scroller = container.querySelector(".main__scroll") as HTMLElement;
-    expect(screen.queryByTestId("sticky-bar")).toBeNull();
+    const header = container.querySelector(".main-header") as HTMLElement;
+    const bar = screen.getByTestId("sticky-bar");
+    // Rendered but hidden (so it can fade out rather than vanish).
+    expect(bar).not.toHaveClass("is-shown");
+    expect(bar).toHaveAttribute("aria-hidden", "true");
 
     scroller.scrollTop = 400;
     fireEvent.scroll(scroller);
-    const bar = await screen.findByTestId("sticky-bar");
+    await waitFor(() => expect(bar).toHaveClass("is-shown"));
+    expect(bar).not.toHaveAttribute("aria-hidden");
+    expect(header.style.getPropertyValue("--bar-alpha")).toBe("1.000");
     expect(bar).toHaveTextContent(album.title);
     const play = vi.spyOn(backend, "playContext");
     fireEvent.click(within(bar).getByRole("button", { name: `Play ${album.title}` }));
@@ -368,7 +372,16 @@ describe("sticky page header", () => {
 
     scroller.scrollTop = 0;
     fireEvent.scroll(scroller);
-    expect(screen.queryByTestId("sticky-bar")).toBeNull();
+    await waitFor(() => expect(bar).not.toHaveClass("is-shown"));
+    expect(header.style.getPropertyValue("--bar-alpha")).toBe("0.000");
+  });
+
+  it("bar background follows scroll position: clear at the top, opaque about 100 px after it starts", () => {
+    expect(barAlpha(0)).toBe(0);
+    expect(barAlpha(16)).toBe(0);
+    expect(barAlpha(66)).toBeCloseTo(0.5);
+    expect(barAlpha(116)).toBe(1);
+    expect(barAlpha(2000)).toBe(1);
   });
 
   it("threshold follows the action row", () => {
@@ -505,60 +518,5 @@ describe("sidebar library", () => {
       usePins.setState({ pins: [] });
       useLibraryView.setState({ view: "list" });
     });
-  });
-});
-
-// ---------------------------------------------------------------- headers + art transition
-
-describe("page title fit", () => {
-  it("steps down the scale until it fits", () => {
-    expect(pickFitSize([48, 32, 24], (s) => s <= 32)).toBe(32);
-    expect(pickFitSize([48, 32, 24], () => false)).toBe(24);
-    expect(pickFitSize([48, 32, 24], () => true)).toBe(48);
-  });
-});
-
-describe("card to page art transition", () => {
-  it("falls back to plain navigation without the View Transitions API", () => {
-    const go = vi.fn();
-    expect(navigateWithArt(document.createElement("span"), go)).toBe(false);
-    expect(go).toHaveBeenCalled();
-  });
-
-  it("names the clicked art and runs the navigation inside a view transition", async () => {
-    const art = document.createElement("span");
-    document.body.appendChild(art);
-    let named = "";
-    const start = vi.fn((update: () => Promise<void>) => {
-      named = art.style.viewTransitionName;
-      const finished = update();
-      return { finished };
-    });
-    (document as unknown as { startViewTransition: unknown }).startViewTransition = start;
-    const go = vi.fn();
-    try {
-      expect(navigateWithArt(art, go)).toBe(true);
-      expect(named).toBe(ART_TRANSITION);
-      expect(go).toHaveBeenCalled();
-      expect(document.documentElement.dataset.artTransition).toBe("true");
-    } finally {
-      delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
-      art.remove();
-    }
-  });
-
-  it("skips the transition under reduced motion", () => {
-    const start = vi.fn();
-    (document as unknown as { startViewTransition: unknown }).startViewTransition = start;
-    document.documentElement.dataset.reducedMotion = "true";
-    const go = vi.fn();
-    try {
-      expect(navigateWithArt(document.createElement("span"), go)).toBe(false);
-      expect(start).not.toHaveBeenCalled();
-      expect(go).toHaveBeenCalled();
-    } finally {
-      delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
-      document.documentElement.dataset.reducedMotion = "false";
-    }
   });
 });

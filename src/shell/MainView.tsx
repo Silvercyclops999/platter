@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { IconButton } from "../components/Button";
 import { SearchField } from "../components/SearchField";
 import { backend } from "../lib/backend";
+import { NEUTRAL_HEADER } from "../lib/color";
 import { modKey } from "../lib/platform";
 import type { SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
@@ -22,6 +23,16 @@ const scrollMemory = new Map<number, number>();
 
 /** Height of the floating main header. */
 const HEADER_H = 64;
+
+/** The bar's background starts fading in after this much scroll… */
+const BAR_FADE_START = 16;
+/** …and is fully opaque this much further down. */
+const BAR_FADE_RANGE = 100;
+
+/** Opacity of the main header's background for a scroll offset (0 to 1). */
+export function barAlpha(scrollTop: number): number {
+  return Math.min(1, Math.max(0, (scrollTop - BAR_FADE_START) / BAR_FADE_RANGE));
+}
 
 /**
  * Scroll offset past which a detail page's own play button has gone under
@@ -129,10 +140,30 @@ export function MainView() {
   const tint = useUi((s) => s.tint);
   const tick = useUi((s) => s.searchFocusTick);
   const scroller = useRef<HTMLDivElement>(null);
-  const [scrolled, setScrolled] = useState(false);
+  const topBar = useRef<HTMLDivElement>(null);
   const [pastHeader, setPastHeader] = useState(false);
   const pageBar = useUi((s) => s.pageBar);
   const restoring = useRef(false);
+  const frame = useRef(0);
+
+  // Scroll-linked header state, at most once per frame: the bar background
+  // goes straight to a CSS variable (no re-render); the sticky title only
+  // re-renders when it crosses its threshold.
+  const syncScroll = () => {
+    const el = scroller.current;
+    if (!el) return;
+    const top = el.scrollTop;
+    topBar.current?.style.setProperty("--bar-alpha", barAlpha(top).toFixed(3));
+    setPastHeader(top > stickyThreshold(el));
+  };
+  const scheduleSync = () => {
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      syncScroll();
+    });
+  };
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
   // Ctrl/⌘+L → go to Search (the header field focuses itself).
   useEffect(() => {
@@ -145,15 +176,13 @@ export function MainView() {
     if (!el) return;
     const top = scrollMemory.get(entry.key) ?? 0;
     restoring.current = true;
-    setScrolled(top > 8);
+    topBar.current?.style.setProperty("--bar-alpha", barAlpha(top).toFixed(3));
     setPastHeader(false);
     const cancel = restoreScroll(el, top, () => {
       restoring.current = false;
       if (scroller.current) {
-        const now = scroller.current.scrollTop;
-        scrollMemory.set(entry.key, now);
-        setScrolled(now > 8);
-        setPastHeader(now > stickyThreshold(scroller.current));
+        scrollMemory.set(entry.key, scroller.current.scrollTop);
+        syncScroll();
       }
     });
     return cancel;
@@ -167,12 +196,14 @@ export function MainView() {
 
   const syncText = syncLabel(sync);
   const r = entry.route;
+  const colors = tint ?? NEUTRAL_HEADER;
+  const barShown = !!pageBar && pastHeader;
 
   return (
-    <main className="main" style={{ "--tint": tint ?? "#2a2520" } as CSSProperties} aria-label="Main content">
+    <main className="main" style={{ "--tint": colors.vivid, "--tint-shade": colors.shade } as CSSProperties} aria-label="Main content">
       <HealthBanner />
       <div className="main__viewport">
-        <div className={`main-header ${scrolled ? "is-scrolled" : ""} ${tint ? "is-tinted" : ""}`}>
+        <div className="main-header" ref={topBar}>
           <div className="main-header__nav">
             <IconButton label="Go back" tooltip="Go back (Alt+←)" tooltipPlacement="bottom" variant="filled" icon={<ChevronLeft size={20} />} disabled={!canBack} onClick={() => nav.back()} />
             <IconButton
@@ -185,8 +216,13 @@ export function MainView() {
               onClick={() => nav.forward()}
             />
           </div>
-          {pageBar && pastHeader && r.name !== "search" && (
-            <div className="main-header__bar" data-testid="sticky-bar">
+          {pageBar && r.name !== "search" && (
+            <div
+              className={`main-header__bar ${barShown ? "is-shown" : ""}`}
+              data-testid="sticky-bar"
+              aria-hidden={!barShown || undefined}
+              inert={!barShown}
+            >
               <IconButton
                 label={`${pageBar.playing ? "Pause" : "Play"} ${pageBar.title}`}
                 tooltip={false}
@@ -221,13 +257,9 @@ export function MainView() {
           className="main__scroll"
           ref={scroller}
           onScroll={(e) => {
-            const top = e.currentTarget.scrollTop;
             if (restoring.current) return;
-            scrollMemory.set(entry.key, top);
-            const s = top > 8;
-            if (s !== scrolled) setScrolled(s);
-            const past = top > stickyThreshold(e.currentTarget);
-            if (past !== pastHeader) setPastHeader(past);
+            scrollMemory.set(entry.key, e.currentTarget.scrollTop);
+            scheduleSync();
           }}
         >
           <div className="page" key={entry.key}>

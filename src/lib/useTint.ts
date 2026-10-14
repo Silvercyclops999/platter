@@ -1,27 +1,24 @@
 import { useEffect } from "react";
 import { useUi } from "../stores/ui";
 import { artUrl } from "./backend";
-import { tintFromImageUrl, tintFromServer } from "./color";
+import { headerColorsFromImageUrl, headerColorsFromServer } from "./color";
 
 /**
- * Tint the page header from artwork: the server's tint when present,
- * otherwise a dominant color sampled from the image. The color transitions
- * smoothly (registered `--tint` custom property in shell.css).
+ * Colour the page header from artwork: the art's most vivid colour, sampled
+ * from the image. The server's colour is the fallback when the image can't be
+ * read. The change eases over the long motion band (registered `--tint` and
+ * `--tint-shade` in shell.css).
  */
 export function useArtTint(serverTint: string | null | undefined, artPath: string | null | undefined) {
   useEffect(() => {
     let alive = true;
-    const fromServer = tintFromServer(serverTint);
-    if (fromServer) {
+    const fromServer = headerColorsFromServer(serverTint);
+    const url = artUrl(artPath, 64);
+    if (!url) {
       useUi.getState().setTint(fromServer);
       return;
     }
-    const url = artUrl(artPath, 64);
-    if (!url) {
-      useUi.getState().setTint(null);
-      return;
-    }
-    tintFromImageUrl(url).then((c) => alive && useUi.getState().setTint(c));
+    headerColorsFromImageUrl(url).then((c) => alive && useUi.getState().setTint(c ?? fromServer));
     return () => {
       alive = false;
     };

@@ -62,27 +62,35 @@
   gap: var(--space-6);
   min-height: 340px;
   padding: 80px var(--space-6) var(--space-6);
+  /* Colour from the art in layers: a dark shade band, with the vivid colour
+     fading to clear over it from the top. */
   background:
-    linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.35) 100%),
-    var(--tint);
+    linear-gradient(180deg, var(--tint) 0%, transparent 100%),
+    var(--tint-shade);
 }
 .detail-header__art { flex: none; }
 .detail-header__art .art { box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55); }
 .detail-header--artist .detail-header__art .art { box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45); }
 .detail-header__text { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; flex: 1; }
 .detail-header__type { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); }
+/* Title: the largest display step that fits on one line (chosen in
+   detail.ts). The smallest step wraps freely: no clamp, no ellipsis. */
 .detail-header__title {
-  font-size: var(--font-size-4xl);
-  font-weight: var(--font-weight-bold);
-  letter-spacing: -0.03em;
-  line-height: 1.05;
+  font-size: var(--font-size-display-5);
+  font-weight: var(--font-weight-display);
+  letter-spacing: -0.02em;
+  line-height: 1.08;
   padding-bottom: var(--space-2);
   overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
+.detail-header__title[data-step="1"] { font-size: var(--font-size-display-1); line-height: 1; }
+.detail-header__title[data-step="2"] { font-size: var(--font-size-display-2); line-height: 1.02; }
+.detail-header__title[data-step="3"] { font-size: var(--font-size-display-3); }
+.detail-header__title[data-step="4"] { font-size: var(--font-size-display-4); }
+/* Compact header for a narrow main column (threshold in detail.ts). */
+.detail-header--compact { min-height: 0; gap: var(--space-4); padding-top: 72px; }
+.detail-header--compact .detail-header__art .art,
+.detail-header--compact .detail-header__art .skeleton { width: 130px !important; height: 130px !important; }
 .detail-header__meta {
   display: flex;
   flex-wrap: wrap;
@@ -93,9 +101,11 @@
 .detail-header__artist { font-weight: var(--font-weight-bold); }
 .detail-header__muted { color: rgba(244, 239, 232, 0.72); }
 .detail-header__badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
+/* Under the header, a short fade from the shade (partly see-through) into
+   the page background, behind the action row. */
 .detail-body {
   padding: var(--space-6) var(--space-6) var(--space-8);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 45%, var(--color-bg-raised)) 0, var(--color-bg-raised) 232px);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint-shade) 62%, transparent) 0, transparent 216px);
 }
 .action-row { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-6); }
 .action-row .icon-btn--xl { width: 56px; height: 56px; }
@@ -124,10 +134,6 @@
 .see-more:hover { color: var(--color-text-primary); }
 
 @media (max-width: 1100px) {
-  .detail-header { min-height: 280px; }
-  .detail-header__art .art,
-  .detail-header__art .skeleton { width: 184px !important; height: 184px !important; }
-  .detail-header__title { font-size: var(--font-size-3xl); }
   .track-row,
   .track-list__head { grid-template-columns: 32px minmax(0, 5fr) minmax(0, 3fr) minmax(88px, auto); }
   .track-row--no-album { grid-template-columns: 32px minmax(0, 1fr) minmax(88px, auto); }

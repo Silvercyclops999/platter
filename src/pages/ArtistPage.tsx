@@ -14,7 +14,7 @@ import { useArtTint } from "../lib/useTint";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { AlbumCard, useContextState } from "./cards";
-import { headerArtStyle, useFitTitle, usePageBar } from "./detail";
+import { usePageBar, useTitleStep } from "./detail";
 
 export function ArtistPage({ id }: { id: string }) {
   const { data, error } = useLoad(() => backend.artistPage(id), [id]);
@@ -28,7 +28,7 @@ export function ArtistPage({ id }: { id: string }) {
   const pinned = usePins((s) => s.isPinned("artist", id));
   const play = () => (isThis ? player.toggle() : player.playArtist(id));
   usePageBar(artist?.title, isThisPlaying, play);
-  const titleRef = useFitTitle<HTMLHeadingElement>(artist?.title);
+  const { header, column, step, compact } = useTitleStep(artist?.title);
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this artist: {error.message}</p>;
 
@@ -37,15 +37,15 @@ export function ArtistPage({ id }: { id: string }) {
 
   return (
     <div className="detail">
-      <header className="detail-header detail-header--artist">
-        <div className="detail-header__art" style={headerArtStyle}>
+      <header ref={header} className={`detail-header detail-header--artist ${compact ? "detail-header--compact" : ""}`}>
+        <div className="detail-header__art">
           {artist ? <Art path={artist.thumb} size={232} round kind="artist" /> : <Skeleton width={232} height={232} radius="circle" />}
         </div>
-        <div className="detail-header__text">
+        <div ref={column} className="detail-header__text">
           {artist ? (
             <>
               <span className="detail-header__type">Artist</span>
-              <h1 ref={titleRef} className="detail-header__title">{artist.title}</h1>
+              <h1 className="detail-header__title" data-step={step}>{artist.title}</h1>
               <div className="detail-header__meta">
                 <span>{plural(releaseCount, "release")}</span>
                 <span className="detail-header__muted">• {plural(artist.viewCount, "play")}</span>

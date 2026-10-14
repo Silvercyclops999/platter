@@ -15,7 +15,7 @@ import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { copyText } from "../stores/toasts";
 import { AlbumCard, useContextState } from "./cards";
-import { headerArtStyle, useFitTitle, usePageBar } from "./detail";
+import { usePageBar, useTitleStep } from "./detail";
 
 export function AlbumPage({ id }: { id: string }) {
   const { data, error } = useLoad(() => backend.albumPage(id), [id]);
@@ -28,7 +28,7 @@ export function AlbumPage({ id }: { id: string }) {
   const pinned = usePins((s) => s.isPinned("album", id));
   const play = () => (isContext ? player.toggle() : player.playAlbum(id));
   usePageBar(album?.title, isThisPlaying, play);
-  const titleRef = useFitTitle<HTMLHeadingElement>(album?.title);
+  const { header, column, step, compact } = useTitleStep(album?.title);
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this album: {error.message}</p>;
 
@@ -37,15 +37,15 @@ export function AlbumPage({ id }: { id: string }) {
 
   return (
     <div className="detail">
-      <header className="detail-header">
-        <div className="detail-header__art" style={headerArtStyle}>
+      <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
+        <div className="detail-header__art">
           {album ? <Art path={album.thumb} size={232} alt="" /> : <Skeleton width={232} height={232} />}
         </div>
-        <div className="detail-header__text">
+        <div ref={column} className="detail-header__text">
           {album ? (
             <>
               <span className="detail-header__type">{releaseTypeLabel(album)}</span>
-              <h1 ref={titleRef} className="detail-header__title">{album.title}</h1>
+              <h1 className="detail-header__title" data-step={step}>{album.title}</h1>
               <div className="detail-header__meta">
                 <button type="button" className="link detail-header__artist" onClick={() => nav.go({ name: "artist", id: album.artistId })}>
                   {album.artistTitle}
