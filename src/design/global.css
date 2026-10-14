@@ -78,14 +78,21 @@ img {
   color: var(--color-text-primary);
 }
 
-/* Scrollbars: thin, warm, only visible on hover of the scroller. */
+/* Scrollbars: thin and warm, shown like overlays. The thumb fades in while
+   its scroller is scrolled or pointed at, and hides after just under a second
+   idle (src/design/scrollbars.ts toggles .sb-on). */
+@property --sb-alpha {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
 * {
   scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  scrollbar-color: rgb(255 240 220 / calc(var(--sb-alpha) * 0.24)) transparent;
 }
-*:hover {
-  scrollbar-color: rgba(255, 240, 220, 0.22) transparent;
-}
+.sb { transition: --sb-alpha var(--motion-quick) ease; }
+.sb-on { --sb-alpha: 1; }
+/* Engines without scrollbar-color (WebKit) use these; no fade there. */
 ::-webkit-scrollbar {
   width: 12px;
   height: 12px;
@@ -96,8 +103,8 @@ img {
   background-clip: padding-box;
   border-radius: 999px;
 }
-*:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 240, 220, 0.22);
+.sb-on::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 240, 220, 0.24);
 }
 ::-webkit-scrollbar-track {
   background: transparent;

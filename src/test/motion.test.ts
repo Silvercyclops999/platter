@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import componentsCss from "../components/components.css?raw";
+import globalCss from "../design/global.css?raw";
 import { duration, installReducedMotion, prefersReducedMotion } from "../design/motion";
+import { SCROLLBAR_IDLE_MS, installOverlayScrollbars } from "../design/scrollbars";
 import tokensCss from "../design/tokens.css?raw";
 import pagesCss from "../pages/pages.css?raw";
 import shellCss from "../shell/shell.css?raw";
@@ -86,5 +88,36 @@ describe("reduced motion", () => {
     expect(row.slice(0, row.indexOf("}"))).not.toMatch(/transition/);
     // The header colour is the one thing that eases across pages, over the long band.
     expect(shellCss).toMatch(/--tint var\(--motion-long\)/);
+  });
+});
+
+describe("overlay scrollbars", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("show on scroll and hide after just under a second idle", () => {
+    vi.useFakeTimers();
+    const stop = installOverlayScrollbars(window);
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    try {
+      el.dispatchEvent(new Event("scroll"));
+      expect(el).toHaveClass("sb", "sb-on");
+      vi.advanceTimersByTime(SCROLLBAR_IDLE_MS - 100);
+      el.dispatchEvent(new Event("scroll")); // still active: the timer restarts
+      vi.advanceTimersByTime(SCROLLBAR_IDLE_MS - 100);
+      expect(el).toHaveClass("sb-on");
+      vi.advanceTimersByTime(100);
+      expect(el).not.toHaveClass("sb-on");
+      expect(el).toHaveClass("sb"); // keeps the transition, so hiding fades too
+      expect(SCROLLBAR_IDLE_MS).toBeLessThan(1000);
+    } finally {
+      stop();
+      el.remove();
+    }
+  });
+
+  it("the thumb colour follows --sb-alpha, which fades", () => {
+    expect(globalCss).toMatch(/scrollbar-color:[^;]*var\(--sb-alpha\)/);
+    expect(globalCss).toMatch(/\.sb \{ transition: --sb-alpha var\(--motion-quick\)/);
   });
 });

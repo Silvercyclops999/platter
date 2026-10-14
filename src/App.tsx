@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { installReducedMotion } from "./design/motion";
+import { installOverlayScrollbars } from "./design/scrollbars";
 import { SignInPage, ServerPickPage } from "./pages/SignInPage";
 import { AppShell } from "./shell/AppShell";
 import { connectApp, useApp } from "./stores/app";
@@ -9,6 +10,7 @@ import { useUi } from "./stores/ui";
 /** Root: wires stores to the core, then gates on auth. */
 export default function App() {
   useEffect(() => installReducedMotion(), []);
+  useEffect(() => installOverlayScrollbars(), []);
   useEffect(() => connectApp(), []);
   useEffect(() => connectPlayer(), []);
   const auth = useApp((s) => s.auth);
