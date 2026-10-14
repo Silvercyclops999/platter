@@ -26,6 +26,10 @@ impl DbEvents for SyncHealth {
         self.inner.library_changed();
     }
 
+    fn artist_changed(&self, id: &str) {
+        self.inner.artist_changed(id);
+    }
+
     fn sync_outcome(&self, outcome: &SyncOutcome) {
         match outcome {
             SyncOutcome::NoMusicLibrary => self.plex.set_no_music_library(true),

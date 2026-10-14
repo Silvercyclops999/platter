@@ -288,12 +288,13 @@ END;
 ALTER TABLE tracks ADD COLUMN rating_count INTEGER;
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
-    // v3: artist biography and similar artist names (Plex `summary` and
-    // `Similar`) for the artist page. The next sync runs as a full pass to
-    // fill them.
+    // v3: artist biography (Plex `summary`, on list items; the next sync runs
+    // as a full pass to fill it) and similar artists (Plex `Similar`, only in
+    // artist detail, fetched when an artist page opens; see db::similar).
     r#"
 ALTER TABLE artists ADD COLUMN summary TEXT;
 ALTER TABLE artists ADD COLUMN similar TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE artists ADD COLUMN similar_fetched_at INTEGER;
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
 ];
@@ -339,9 +340,12 @@ mod tests {
         )
         .unwrap();
         migrate(&mut c).unwrap();
-        let (summary, similar): (Option<String>, String) =
-            c.query_row("SELECT summary, similar FROM artists", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
-        assert_eq!((summary, similar.as_str()), (None, "[]"));
+        let (summary, similar, at): (Option<String>, String, Option<i64>) = c
+            .query_row("SELECT summary, similar, similar_fetched_at FROM artists", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((summary, similar.as_str(), at), (None, "[]", None));
         let full: Option<i64> = c.query_row("SELECT last_full_sync_at FROM sync_state", [], |r| r.get(0)).unwrap();
         assert_eq!(full, None);
     }

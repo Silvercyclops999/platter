@@ -32,7 +32,24 @@ export function ArtistPage({ id }: { id: string }) {
 }
 
 function ArtistView({ id }: { id: string }) {
-  const { data, error } = useLoad(() => backend.artistPage(id), [id]);
+  const { data: loaded, error } = useLoad(() => backend.artistPage(id), [id]);
+  // Similar artists fetched in the background after the page opened.
+  const [similar, setSimilar] = useState<Artist[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const un = backend.listen("artist://changed", (e) => {
+      if (e.id !== id) return;
+      backend.artistPage(id).then(
+        (p) => alive && setSimilar(p.similar),
+        () => {},
+      );
+    });
+    return () => {
+      alive = false;
+      un.then((f) => f());
+    };
+  }, [id]);
+  const data = loaded && similar ? { ...loaded, similar } : loaded;
   const artist = data?.artist;
   const variant = artist ? headerVariant(artist) : "photo";
   useArtTint(null, artist ? (artist.art ?? artist.thumb) : undefined);

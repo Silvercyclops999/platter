@@ -82,7 +82,12 @@ pub async fn playlists(db: State<'_, DbHandle>) -> AppResult<Vec<Playlist>> {
 #[tauri::command]
 pub async fn artist_page(db: State<'_, DbHandle>, id: String) -> AppResult<ArtistPage> {
     let source = db.popular_source();
-    db.read_async(move |c| queries::artist_page_by(c, &id, source)).await
+    let key = id.clone();
+    let page = db.read_async(move |c| queries::artist_page_by(c, &key, source)).await?;
+    // Cached similar artists show at once; stale or missing ones refresh in
+    // the background and `artist://changed` tells the page.
+    super::similar::spawn_refresh_if_stale(db.inner().clone(), id);
+    Ok(page)
 }
 
 #[tauri::command]

@@ -30,7 +30,6 @@ pub fn row_artist(r: &Row<'_>) -> rusqlite::Result<Artist> {
         art: r.get(4)?,
         view_count: r.get(5)?,
         summary: None,
-        similar: Vec::new(),
     })
 }
 
@@ -103,15 +102,15 @@ pub fn row_playlist(r: &Row<'_>) -> rusqlite::Result<Playlist> {
 /// pass).
 pub fn upsert_artists(tx: &Transaction<'_>, items: &[Artist], gen_: i64) -> AppResult<()> {
     let mut st = tx.prepare_cached(
-        "INSERT INTO artists (id, title, sort_title, thumb, art, view_count, summary, similar, seen_gen)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO artists (id, title, sort_title, thumb, art, view_count, summary, seen_gen)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, sort_title = excluded.sort_title,
            thumb = excluded.thumb, art = excluded.art, view_count = excluded.view_count,
-           summary = excluded.summary, similar = excluded.similar, seen_gen = excluded.seen_gen",
+           summary = excluded.summary, seen_gen = excluded.seen_gen",
     )?;
+    // `similar` isn't on list items; the artist page fills it (db::similar).
     for a in items {
-        let similar = serde_json::to_string(&a.similar).unwrap_or_else(|_| "[]".into());
-        st.execute(params![a.id, a.title, a.sort_title, a.thumb, a.art, a.view_count, a.summary, similar, gen_])?;
+        st.execute(params![a.id, a.title, a.sort_title, a.thumb, a.art, a.view_count, a.summary, gen_])?;
     }
     Ok(())
 }

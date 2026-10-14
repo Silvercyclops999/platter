@@ -85,6 +85,7 @@ const EVENTS = [
   "auth://changed",
   "sync://progress",
   "library://changed",
+  "artist://changed",
   "player://state",
   "player://position",
   "player://error",
@@ -175,6 +176,7 @@ describe("mock backend covers the whole contract", () => {
     for (const e of EVENTS) await m.listen(e, () => seen.add(e));
     m.emit("update://ready", { version: "0.2.0" });
     m.emit("library://changed", null);
+    m.emit("artist://changed", { id: m.fx.artists[0].id });
     m.emit("sync://progress", { phase: "idle", done: 0, total: 0 });
     m.setHealth("offline");
     m.setHealth("local"); // server back → toast

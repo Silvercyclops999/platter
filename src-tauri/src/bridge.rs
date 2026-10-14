@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 
 use crate::db::artcache::sniff_content_type;
-use crate::db::source::{ArtBytes, Changes, HistoryEntry, ItemKind, MusicSection, RemoteHits, RemoteSearch};
+use crate::db::source::{
+    ArtBytes, Changes, HistoryEntry, ItemKind, MusicSection, RemoteHits, RemoteSearch, SimilarArtist,
+};
 use crate::audio::source::{ContextKind, PlayContext, ResolvedContext, StreamSource, TrackLookup, TrackResolver};
 use crate::db::{ArtFetcher, DbHandle, LibrarySource, queries};
 use crate::error::AppResult;
@@ -200,6 +202,11 @@ impl LibrarySource for PlexLibrary {
 
     async fn playlists(&self) -> AppResult<Vec<Playlist>> {
         self.plex.client().await?.playlists().await
+    }
+
+    async fn artist_similar(&self, artist_id: &str) -> AppResult<Vec<SimilarArtist>> {
+        let m = self.plex.client().await?.metadata(artist_id).await?;
+        Ok(m.similar_artists().into_iter().map(|(id, name)| SimilarArtist { id, name }).collect())
     }
 
     async fn playlist_items(&self, playlist_id: &str) -> AppResult<Vec<String>> {

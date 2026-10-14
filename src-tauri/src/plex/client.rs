@@ -116,6 +116,15 @@ pub struct Tag {
     pub tag: String,
 }
 
+/// One `Similar` entry on artist detail: `{id, filter, tag}`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SimilarTag {
+    #[serde(default, deserialize_with = "lenient::opt_string")]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub tag: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UltraBlurColors {
@@ -305,9 +314,10 @@ pub struct PlexMetadata {
     pub style: Vec<Tag>,
     #[serde(default, rename = "Mood")]
     pub mood: Vec<Tag>,
-    /// Similar artists on artist items (names only).
+    /// Similar artists. Only in artist detail (`/library/metadata/{id}`),
+    /// never on list items.
     #[serde(default, rename = "Similar")]
-    pub similar: Vec<Tag>,
+    pub similar: Vec<SimilarTag>,
     #[serde(default, rename = "UltraBlurColors")]
     pub ultra_blur_colors: Option<UltraBlurColors>,
     #[serde(default, rename = "Media")]
@@ -552,13 +562,17 @@ impl PlexMetadata {
             art: non_empty(&self.art),
             view_count: u32_of(self.view_count),
             summary: non_empty(&self.summary),
-            similar: self
-                .similar
-                .iter()
-                .map(|t| t.tag.trim().to_string())
-                .filter(|t| !t.is_empty())
-                .collect(),
         }
+    }
+
+    /// Similar artists from artist detail as (Plex tag id, name), blank
+    /// names dropped.
+    pub fn similar_artists(&self) -> Vec<(Option<String>, String)> {
+        self.similar
+            .iter()
+            .map(|t| (t.id.clone().filter(|i| !i.is_empty()), t.tag.trim().to_string()))
+            .filter(|(_, name)| !name.is_empty())
+            .collect()
     }
 
     pub fn format_tag(&self) -> Option<String> {
@@ -1371,27 +1385,57 @@ mod tests {
     }
 
     #[test]
-    fn artist_mapping_reads_summary_art_and_similar() {
+    fn artist_list_item_maps_summary_and_art() {
+        // List items (`/library/sections/{id}/all?type=8`) carry summary and
+        // art but no Similar.
         let m: PlexMetadata = serde_json::from_value(serde_json::json!({
             "ratingKey": "10", "type": "artist", "title": "Band", "thumb": "/t", "art": "/a",
-            "summary": "  Formed in a garage.  ", "viewCount": 40,
-            "Similar": [{"id": 5, "filter": "similar=5", "tag": "Other Band"}, {"tag": " "}, {"tag": "Third"}]
+            "summary": "  Formed in a garage.  ", "viewCount": 40
         }))
         .unwrap();
         let a = m.to_artist();
         assert_eq!(a.art.as_deref(), Some("/a"));
         assert_eq!(a.summary.as_deref(), Some("Formed in a garage."));
-        assert_eq!(a.similar, vec!["Other Band", "Third"]);
+        assert!(m.similar_artists().is_empty());
         // Not on the wire: lists stay small.
         let v = serde_json::to_value(&a).unwrap();
-        assert!(v.get("summary").is_none() && v.get("similar").is_none());
+        assert!(v.get("summary").is_none());
 
         let bare: PlexMetadata = serde_json::from_value(serde_json::json!({
             "ratingKey": "11", "type": "artist", "title": "Quiet", "summary": "", "art": ""
         }))
         .unwrap();
         let b = bare.to_artist();
-        assert_eq!((b.summary, b.art, b.similar.len()), (None, None, 0));
+        assert_eq!((b.summary, b.art), (None, None));
+    }
+
+    #[test]
+    fn artist_detail_reads_similar_by_tag_with_ids() {
+        // Shape of `/library/metadata/{artistId}`: Similar plus other tags.
+        let m: PlexMetadata = serde_json::from_value(serde_json::json!({
+            "ratingKey": "10", "type": "artist", "title": "Band", "summary": "Bio", "art": "/a",
+            "Image": [{"alt": "Band", "type": "coverPoster", "url": "/t"}],
+            "UltraBlurColors": {"topLeft": "112233"},
+            "Genre": [{"id": 1, "filter": "genre=1", "tag": "Rock"}],
+            "Style": [{"tag": "Indie"}], "Mood": [{"tag": "Warm"}], "Country": [{"tag": "Nowhere"}],
+            "Guid": [{"id": "mbid://x"}], "Location": [{"path": "/music/Band"}],
+            "Similar": [
+                {"id": 501, "filter": "similar=501", "tag": "Other Band"},
+                {"id": "502", "filter": "similar=502", "tag": "  Third  "},
+                {"filter": "similar=503", "tag": " "},
+                {"tag": "No Id"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            m.similar_artists(),
+            vec![
+                (Some("501".to_string()), "Other Band".to_string()),
+                (Some("502".to_string()), "Third".to_string()),
+                (None, "No Id".to_string()),
+            ]
+        );
+        assert_eq!(m.to_artist().summary.as_deref(), Some("Bio"));
     }
 
     #[test]

@@ -447,6 +447,8 @@ export interface EventMap {
   "auth://changed": AuthStatus;
   "sync://progress": SyncStatus;
   "library://changed": null;
+  /** One artist's page data changed outside a sync (similar artists fetched). */
+  "artist://changed": { id: string };
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

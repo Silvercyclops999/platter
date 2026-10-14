@@ -44,6 +44,16 @@ pub struct HistoryEntry {
     pub viewed_at: i64,
 }
 
+/// A similar artist from Plex artist detail (`Similar` tag). Stored as JSON
+/// in `artists.similar`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SimilarArtist {
+    /// Plex tag id, when present.
+    #[serde(default)]
+    pub id: Option<String>,
+    pub name: String,
+}
+
 /// The library as seen through Plex. All methods are paged/cheap where
 /// Plex allows; see docs/PLEX-API.md for the endpoints behind each.
 #[async_trait]
@@ -75,6 +85,12 @@ pub trait LibrarySource: Send + Sync {
 
     /// Track ratingKeys of a playlist, in order.
     async fn playlist_items(&self, playlist_id: &str) -> AppResult<Vec<String>>;
+
+    /// Similar artists from one artist's detail (`/library/metadata/{id}`).
+    /// Not part of sync: called when an artist page opens (db::similar).
+    async fn artist_similar(&self, _artist_id: &str) -> AppResult<Vec<SimilarArtist>> {
+        Ok(Vec::new())
+    }
 }
 
 /// Raw matches from the server's own search, before ranking.
@@ -113,6 +129,8 @@ pub trait DbEvents: Send + Sync {
     fn library_changed(&self);
     /// Called once per sync run; map to `Health.banner`.
     fn sync_outcome(&self, _outcome: &SyncOutcome) {}
+    /// One artist's page data changed outside a sync (similar artists).
+    fn artist_changed(&self, _id: &str) {}
 }
 
 impl<R: tauri::Runtime> DbEvents for tauri::AppHandle<R> {
@@ -127,6 +145,13 @@ impl<R: tauri::Runtime> DbEvents for tauri::AppHandle<R> {
         use tauri::Emitter;
         if let Err(e) = self.emit("library://changed", ()) {
             tracing::warn!("emit library://changed: {e}");
+        }
+    }
+
+    fn artist_changed(&self, id: &str) {
+        use tauri::Emitter;
+        if let Err(e) = self.emit("artist://changed", serde_json::json!({ "id": id })) {
+            tracing::warn!("emit artist://changed: {e}");
         }
     }
 }

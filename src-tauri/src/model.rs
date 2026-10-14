@@ -36,10 +36,6 @@ pub struct Artist {
     /// page (as `ArtistPage.about`), never with artist lists.
     #[serde(skip)]
     pub summary: Option<String>,
-    /// Names from Plex `Similar` tags. Stored by sync; the artist page sends
-    /// the ones in the library as `ArtistPage.similar`.
-    #[serde(skip)]
-    pub similar: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

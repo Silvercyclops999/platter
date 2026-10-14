@@ -67,7 +67,10 @@ credited in the track artist line, at most 10, one copy per song.
 On the artist page, `plays` is the sum of play counts over the artist's own
 tracks, `about` is the Plex artist biography (null when empty), and `similar`
 holds the Plex similar artists that are in this library, at most 12, in
-Plex's order. Artist lists never carry the biography.
+Plex's order. Artist lists never carry the biography. Similar artists come
+from the artist's detail, not from sync: `artist_page` answers with what's
+cached and, when that is missing or a week old, fetches it in the background
+and then emits `artist://changed` with `{ id }` so the page can ask again.
 `SyncStatus = { phase: "idle"|"artists"|"albums"|"tracks"|"incremental", done, total, lastSyncAt? }`
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.

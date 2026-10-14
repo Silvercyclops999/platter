@@ -1,6 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import type { Album, ArtistPageSection, ReleaseSection } from "../lib/types";
@@ -154,6 +154,25 @@ describe("artist page", () => {
     expect(grid.querySelectorAll('[role="listitem"]')).toHaveLength(mock.fx.albums.filter((x) => x.artistId === a.id).length);
     await user.click(screen.getByRole("button", { name: "Show less" }));
     expect(document.querySelector(".discography__grid")).toBeNull();
+  });
+
+  it("shows similar artists that arrive after the page opened", async () => {
+    const a = artistAt(11);
+    render(<ArtistPage id={a.id} />);
+    await screen.findByRole("heading", { level: 1, name: a.title });
+    expect(screen.queryByRole("heading", { name: "Fans also like" })).toBeNull();
+
+    const real = mock.artistPage.bind(mock);
+    const spy = vi.spyOn(mock, "artistPage").mockImplementation(async (id) => ({ ...(await real(id)), similar: [artistAt(3)] }));
+    // Another artist's update is ignored.
+    act(() => mock.emit("artist://changed", { id: artistAt(5).id }));
+    expect(spy).not.toHaveBeenCalled();
+    act(() => mock.emit("artist://changed", { id: a.id }));
+    const h = await screen.findByRole("heading", { name: "Fans also like" });
+    expect(within(h.closest("section")!).getByText(artistAt(3).title)).toBeInTheDocument();
+    // The rest of the page stays put (no skeleton flash).
+    expect(screen.getByRole("heading", { level: 1, name: a.title })).toBeInTheDocument();
+    spy.mockRestore();
   });
 
   it("lists similar artists from the library under Fans also like", async () => {

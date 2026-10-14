@@ -9,7 +9,7 @@ use crate::error::{AppError, AppResult};
 use crate::model::{Album, Artist, Playlist, Track};
 
 use super::release::release_section;
-use super::source::{Changes, HistoryEntry, ItemKind, LibrarySource, MusicSection};
+use super::source::{Changes, HistoryEntry, ItemKind, LibrarySource, MusicSection, SimilarArtist};
 
 #[derive(Default, Clone)]
 pub struct FakeLibrary {
@@ -23,6 +23,8 @@ pub struct FakeLibrary {
     pub updated: HashMap<String, i64>,
     /// Playlists whose items the server can't list (answers 500).
     pub broken_playlists: Vec<String>,
+    /// Artist id -> `Similar` from artist detail.
+    pub similar: HashMap<String, Vec<SimilarArtist>>,
 }
 
 #[derive(Default)]
@@ -31,6 +33,10 @@ pub struct FakeSource {
     pub page_calls: Mutex<Vec<(ItemKind, u64, u64)>>,
     pub playlist_item_calls: Mutex<Vec<String>>,
     pub fail_tracks_at: Mutex<Option<u64>>,
+    /// Artist ids asked for similar artists, in order.
+    pub similar_calls: Mutex<Vec<String>>,
+    /// Make `artist_similar` fail (server offline).
+    pub fail_similar: Mutex<bool>,
 }
 
 impl FakeSource {
@@ -115,6 +121,14 @@ impl LibrarySource for FakeSource {
             .map(|(_, items)| items.clone())
             .ok_or_else(|| AppError::NotFound(id.into()))
     }
+
+    async fn artist_similar(&self, artist_id: &str) -> AppResult<Vec<SimilarArtist>> {
+        self.similar_calls.lock().push(artist_id.to_owned());
+        if *self.fail_similar.lock() {
+            return Err(AppError::Network("offline".into()));
+        }
+        Ok(self.lib.lock().similar.get(artist_id).cloned().unwrap_or_default())
+    }
 }
 
 // ---------------------------------------------------------------- builders
@@ -132,7 +146,6 @@ pub fn artist(id: &str, title: &str) -> Artist {
         art: None,
         view_count: 0,
         summary: None,
-        similar: Vec::new(),
     }
 }
 

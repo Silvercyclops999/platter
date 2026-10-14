@@ -10,7 +10,7 @@ use super::fake::{self, FakeLibrary, FakeSource};
 use super::listens::{self, ContextKind, NewReport, PlayStart, ReportKind};
 use super::queries::{self, now_s};
 use super::search::{self, recent_add, recent_clear, recent_list};
-use super::source::{HistoryEntry, ItemKind, LibrarySource};
+use super::source::{HistoryEntry, ItemKind, LibrarySource, SimilarArtist};
 use super::store;
 use super::*;
 use crate::model::ReleaseSection;
@@ -33,6 +33,8 @@ struct Recorder {
     progress: Mutex<Vec<SyncStatus>>,
     changed: Mutex<u32>,
     outcomes: Mutex<Vec<SyncOutcome>>,
+    /// Ids from `artist_changed`.
+    artists: Mutex<Vec<String>>,
     /// Hook run on each progress event (e.g. read the DB mid-sync).
     hook: Mutex<Option<Hook>>,
 }
@@ -49,6 +51,9 @@ impl DbEvents for Recorder {
     }
     fn sync_outcome(&self, o: &SyncOutcome) {
         self.outcomes.lock().push(o.clone());
+    }
+    fn artist_changed(&self, id: &str) {
+        self.artists.lock().push(id.to_string());
     }
 }
 
@@ -376,24 +381,42 @@ async fn artist_page_groups_release_types_in_fixed_order() {
     assert!(t.db.read(|c| queries::artist_page(c, "nope")).unwrap_err().kind() == "notFound");
 }
 
+fn sim(id: Option<&str>, name: &str) -> SimilarArtist {
+    SimilarArtist { id: id.map(String::from), name: name.into() }
+}
+
 #[tokio::test]
 async fn artist_page_has_plays_about_and_similar_in_library() {
     let t = open();
     let mut lib = sectioned_library();
-    lib.artists[0].summary = Some("  A band from somewhere.
-".into());
-    lib.artists[0].similar =
-        vec!["other artist".into(), "Not In Library".into(), "Other Artist".into(), "Archive Artist".into()];
+    lib.artists[0].summary = Some("  A band from somewhere.  ".into());
     let expected: u64 = lib.tracks.iter().filter(|t| t.artist_id == "1").map(|t| t.view_count as u64).sum();
     assert!(expected > 0);
-    sync(&t.db, &Arc::new(FakeSource::new(lib)), false).await;
+    let src = Arc::new(FakeSource::new(lib));
+    sync(&t.db, &src, false).await;
 
+    // Before the detail fetch: no similar artists yet, and sync never asked.
     let page = t.db.read(|c| queries::artist_page(c, "1")).unwrap();
     assert_eq!(page.plays, expected);
     assert_eq!(page.about.as_deref(), Some("A band from somewhere."));
+    assert!(page.similar.is_empty());
+    assert!(src.similar_calls.lock().is_empty());
+
+    src.lib.lock().similar.insert(
+        "1".into(),
+        vec![
+            sim(Some("501"), "other artist"),
+            sim(Some("502"), "Not In Library"),
+            sim(None, "Other Artist"),
+            sim(Some("503"), "Archive Artist"),
+        ],
+    );
+    let now = 1_800_000_000;
+    assert!(similar::refresh_if_stale(&t.db, src.as_ref(), "1", now).await.unwrap());
+    let page = t.db.read(|c| queries::artist_page(c, "1")).unwrap();
     // Only library artists, once each, never the artist itself.
-    let similar: Vec<&str> = page.similar.iter().map(|a| a.title.as_str()).collect();
-    assert_eq!(similar, vec!["Other Artist"]);
+    let names: Vec<&str> = page.similar.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(names, vec!["Other Artist"]);
 
     // An artist with nothing: no plays, no about, no similar.
     let other = t.db.read(|c| queries::artist_page(c, "2")).unwrap();
@@ -403,6 +426,66 @@ async fn artist_page_has_plays_about_and_similar_in_library() {
     assert_eq!(v["plays"], expected);
     assert_eq!(v["about"], "A band from somewhere.");
     assert_eq!(v["similar"][0]["title"], "Other Artist");
+}
+
+#[tokio::test]
+async fn similar_artists_are_fetched_on_demand_and_reused_for_a_week() {
+    let t = open();
+    let rec = Arc::new(Recorder::default());
+    t.db.set_events(rec.clone());
+    let mut lib = sectioned_library();
+    lib.similar.insert("1".into(), vec![sim(Some("9"), "Other Artist")]);
+    let src = Arc::new(FakeSource::new(lib));
+    sync(&t.db, &src, true).await;
+    assert!(src.similar_calls.lock().is_empty(), "sync never fetches artist detail");
+    let stored = |db: &DbHandle| {
+        db.read(|c| {
+            Ok(c.query_row("SELECT similar, similar_fetched_at FROM artists WHERE id = '1'", [], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?))
+            })?)
+        })
+        .unwrap()
+    };
+
+    let now = 1_800_000_000;
+    let before = *rec.changed.lock();
+    assert!(similar::refresh_if_stale(&t.db, src.as_ref(), "1", now).await.unwrap());
+    assert_eq!(stored(&t.db), (r#"[{"id":"9","name":"Other Artist"}]"#.to_string(), Some(now)));
+    assert_eq!(*rec.artists.lock(), vec!["1".to_string()]);
+    assert_eq!(*rec.changed.lock(), before, "no library-wide refresh");
+
+    // Within the week: no call.
+    let later = now + similar::SIMILAR_TTL_S - 1;
+    assert!(!similar::refresh_if_stale(&t.db, src.as_ref(), "1", later).await.unwrap());
+    assert_eq!(src.similar_calls.lock().len(), 1);
+
+    // A full sync keeps what was fetched.
+    sync(&t.db, &src, true).await;
+    assert_eq!(stored(&t.db).1, Some(now));
+
+    // After a week: fetched again; an unchanged list stores the new time but
+    // doesn't tell the page.
+    let week = now + similar::SIMILAR_TTL_S;
+    assert!(!similar::refresh_if_stale(&t.db, src.as_ref(), "1", week).await.unwrap());
+    assert_eq!(src.similar_calls.lock().len(), 2);
+    assert_eq!(stored(&t.db).1, Some(week));
+    assert_eq!(rec.artists.lock().len(), 1);
+
+    // Server down: the cache stays as it was and the error comes back.
+    *src.fail_similar.lock() = true;
+    let much_later = week + similar::SIMILAR_TTL_S;
+    assert!(similar::refresh_if_stale(&t.db, src.as_ref(), "1", much_later).await.is_err());
+    assert_eq!(stored(&t.db), (r#"[{"id":"9","name":"Other Artist"}]"#.to_string(), Some(week)));
+
+    // An empty answer is stored too, so it isn't asked again every visit.
+    *src.fail_similar.lock() = false;
+    assert!(similar::refresh_if_stale(&t.db, src.as_ref(), "2", now).await.is_ok());
+    assert!(!similar::refresh_if_stale(&t.db, src.as_ref(), "2", now + 60).await.unwrap());
+    assert_eq!(src.similar_calls.lock().iter().filter(|i| *i == "2").count(), 1);
+
+    // Unknown artists are never fetched.
+    assert!(!similar::refresh_if_stale(&t.db, src.as_ref(), "nope", now).await.unwrap());
+    assert!(!src.similar_calls.lock().iter().any(|i| i == "nope"));
 }
 
 /// One track in the popular fixtures: (id, title, rating count, plays,

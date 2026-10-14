@@ -232,3 +232,10 @@ Track items from `/library/sections/{id}/all?type=10` can carry an integer
 tracks had one; unreleased tracks never do. The app stores it per track and
 ranks an artist's popular songs by it. Track artists other than the album
 artist come in `originalTitle`, as one string such as `A, B` or `A feat. B`.
+
+### 2026-10-14: artist list vs artist detail
+
+Artist list items carry summary and art; Similar, Genre/Style/Mood and
+UltraBlurColors only on /library/metadata/{id}. Similar entries there look
+like `{id, filter, tag}`. The app reads Similar from the detail call when an
+artist page opens and keeps it for a week, so sync stays one paged list call.

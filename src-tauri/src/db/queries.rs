@@ -223,10 +223,11 @@ pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppRes
 /// Most similar artists shown on an artist page.
 const SIMILAR_N: usize = 12;
 
-/// Library artists matching the stored similar names (any case), in the
-/// stored order, without the artist itself or repeats.
+/// Library artists matching the stored similar artists by name (any case),
+/// in the stored order, without the artist itself or repeats.
 fn similar_artists(c: &Connection, id: &str, names_json: &str) -> AppResult<Vec<Artist>> {
-    let names: Vec<String> = serde_json::from_str(names_json).unwrap_or_default();
+    let stored: Vec<super::source::SimilarArtist> = serde_json::from_str(names_json).unwrap_or_default();
+    let names = stored.into_iter().map(|s| s.name);
     let mut st = c.prepare_cached(&format!(
         "SELECT {ARTIST_COLS} FROM artists ar WHERE ar.title = ?1 COLLATE NOCASE AND ar.id <> ?2
          ORDER BY ar.view_count DESC, ar.pk LIMIT 1"

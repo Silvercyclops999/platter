@@ -25,6 +25,7 @@ pub mod queries;
 pub mod release;
 pub mod schema;
 pub mod search;
+pub mod similar;
 pub mod source;
 pub mod store;
 pub mod sync;
@@ -35,6 +36,7 @@ pub(crate) mod fake;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -46,7 +48,7 @@ use crate::error::{AppError, AppResult};
 
 pub use artcache::ArtCache;
 pub use release::release_section;
-pub use source::{ArtFetcher, DbEvents, LibrarySource, RemoteHits, RemoteSearch};
+pub use source::{ArtFetcher, DbEvents, LibrarySource, RemoteHits, RemoteSearch, SimilarArtist};
 pub use types::*;
 
 /// Number of idle read connections kept around.
@@ -76,6 +78,8 @@ struct Inner {
     pub(crate) vocab: search::VocabCache,
     /// Popular ranks by your own plays only (Settings).
     popular_by_plays: AtomicBool,
+    /// Artist ids with a similar-artists fetch in flight (db::similar).
+    similar_in_flight: Mutex<HashSet<String>>,
 }
 
 impl DbHandle {
@@ -99,6 +103,7 @@ impl DbHandle {
                 remote: Mutex::new(None),
                 vocab: search::VocabCache::default(),
                 popular_by_plays: AtomicBool::new(false),
+                similar_in_flight: Mutex::new(HashSet::new()),
             }),
         })
     }
@@ -147,6 +152,16 @@ impl DbHandle {
         } else {
             PopularSource::Global
         }
+    }
+
+    /// Mark a similar-artists fetch for `id` as running. False when one
+    /// already is.
+    pub(crate) fn begin_similar_fetch(&self, id: &str) -> bool {
+        self.inner.similar_in_flight.lock().insert(id.to_string())
+    }
+
+    pub(crate) fn end_similar_fetch(&self, id: &str) {
+        self.inner.similar_in_flight.lock().remove(id);
     }
 
     pub(crate) fn generation(&self) -> u64 {
