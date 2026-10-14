@@ -1,0 +1,289 @@
+//! Test helpers: generated audio, a tiny range-capable HTTP server that can
+//! drop connections, and a fake resolver. No binary fixtures are committed.
+
+use std::collections::HashMap;
+use std::io::Cursor;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use async_trait::async_trait;
+use parking_lot::Mutex;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+use super::source::{PlayContext, ResolvedContext, StreamSource, TrackLookup, TrackResolver};
+use crate::error::{AppError, AppResult};
+use crate::model::Track;
+
+pub fn track(id: &str, artist: &str, part: &str) -> Track {
+    Track {
+        id: id.into(),
+        title: format!("Track {id}"),
+        album_id: "al".into(),
+        album_title: "Album".into(),
+        artist_id: format!("ar-{artist}"),
+        artist_title: artist.into(),
+        track_artist: None,
+        track_number: 1,
+        disc_number: 1,
+        duration_ms: 1000,
+        thumb: None,
+        part_key: part.into(),
+        codec: Some("wav".into()),
+        container: Some("wav".into()),
+        bitrate: None,
+        bit_depth: None,
+        sample_rate: None,
+        user_rating: None,
+        view_count: 0,
+        last_viewed_at: None,
+    }
+}
+
+/// A 16-bit WAV of a sine.
+pub fn wav_tone(rate: u32, channels: u16, frames: usize, freq: f32, amp: f32) -> Vec<u8> {
+    wav_tone_from(rate, channels, 0, frames, freq, amp)
+}
+
+/// Like [`wav_tone`] but starting at sine phase `start` frames, so two
+/// files can be exact continuations of each other.
+pub fn wav_tone_from(
+    rate: u32,
+    channels: u16,
+    start: usize,
+    frames: usize,
+    freq: f32,
+    amp: f32,
+) -> Vec<u8> {
+    let spec = hound::WavSpec {
+        channels,
+        sample_rate: rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut cur = Cursor::new(Vec::new());
+    {
+        let mut w = hound::WavWriter::new(&mut cur, spec).unwrap();
+        for i in start..start + frames {
+            let t = i as f64 / rate as f64;
+            let s = ((2.0 * std::f64::consts::PI * freq as f64 * t).sin() * amp as f64) as f32;
+            for c in 0..channels {
+                let v = s * if c == 0 { 1.0 } else { 0.8 };
+                w.write_sample((v * i16::MAX as f32) as i16).unwrap();
+            }
+        }
+        w.finalize().unwrap();
+    }
+    cur.into_inner()
+}
+
+/// Decodes a whole in-memory file with symphonia (the reference decode).
+pub fn decode_all(bytes: &[u8], hint: &str) -> (Vec<f32>, u32, usize) {
+    let mut d = super::decode::TrackDecoder::open(Box::new(Cursor::new(bytes.to_vec())), Some(hint))
+        .expect("open");
+    let mut out = Vec::new();
+    while let Some(b) = d.next_block().expect("decode") {
+        out.extend_from_slice(b);
+    }
+    (out, d.rate, d.channels)
+}
+
+#[derive(Clone, Default)]
+pub struct Route {
+    pub body: Vec<u8>,
+    /// Drop the connection after this many body bytes, for the first
+    /// `drops` requests.
+    pub drop_after: Option<usize>,
+    pub drops: usize,
+    pub status: Option<u16>,
+}
+
+#[derive(Default)]
+pub struct ServerState {
+    pub routes: Mutex<HashMap<String, Route>>,
+    pub requests: AtomicUsize,
+    pub ranges: Mutex<Vec<String>>,
+}
+
+pub struct TestServer {
+    pub addr: SocketAddr,
+    pub state: Arc<ServerState>,
+}
+
+impl TestServer {
+    pub async fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let state = Arc::new(ServerState::default());
+        let st = state.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let st = st.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 2048];
+                    loop {
+                        let Ok(n) = sock.read(&mut tmp).await else { return };
+                        if n == 0 {
+                            return;
+                        }
+                        buf.extend_from_slice(&tmp[..n]);
+                        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let req = String::from_utf8_lossy(&buf).to_string();
+                    let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    let path = path.split('?').next().unwrap_or("").to_string();
+                    let range = req
+                        .lines()
+                        .find(|l| l.to_ascii_lowercase().starts_with("range:"))
+                        .map(|l| l[6..].trim().to_string());
+                    st.requests.fetch_add(1, Ordering::SeqCst);
+                    if let Some(r) = &range {
+                        st.ranges.lock().push(r.clone());
+                    }
+                    let route = {
+                        let mut routes = st.routes.lock();
+                        match routes.get_mut(&path) {
+                            Some(r) => {
+                                let snapshot = r.clone();
+                                if r.drops > 0 {
+                                    r.drops -= 1;
+                                }
+                                Some(snapshot)
+                            }
+                            None => None,
+                        }
+                    };
+                    let Some(route) = route else {
+                        let _ = sock
+                            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            .await;
+                        return;
+                    };
+                    if let Some(code) = route.status {
+                        let _ = sock
+                            .write_all(
+                                format!("HTTP/1.1 {code} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                                    .as_bytes(),
+                            )
+                            .await;
+                        return;
+                    }
+                    let total = route.body.len();
+                    let (start, end) = match range.as_deref().and_then(|r| r.strip_prefix("bytes=")) {
+                        Some(spec) => {
+                            let mut it = spec.split('-');
+                            let s: usize = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                            let e: usize = it
+                                .next()
+                                .and_then(|x| x.parse().ok())
+                                .unwrap_or(total.saturating_sub(1));
+                            (s.min(total), (e + 1).min(total))
+                        }
+                        None => (0, total),
+                    };
+                    let body = &route.body[start..end];
+                    let head = if range.is_some() {
+                        format!(
+                            "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n",
+                            body.len(),
+                            start,
+                            end.saturating_sub(1),
+                            total
+                        )
+                    } else {
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                    };
+                    if sock.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    let send = match route.drop_after {
+                        Some(n) if route.drops > 0 => n.min(body.len()),
+                        _ => body.len(),
+                    };
+                    for chunk in body[..send].chunks(16 * 1024) {
+                        if sock.write_all(chunk).await.is_err() {
+                            return;
+                        }
+                    }
+                    let _ = sock.flush().await;
+                    // Dropping the socket here closes the connection; if we
+                    // sent less than Content-Length the client sees an error.
+                });
+            }
+        });
+        Self { addr, state }
+    }
+
+    pub fn add(&self, path: &str, route: Route) {
+        self.state.routes.lock().insert(path.into(), route);
+    }
+
+    pub fn url(&self, path: &str) -> String {
+        format!("http://{}{}", self.addr, path)
+    }
+}
+
+/// Resolver backed by the test server: track id → `/t/{id}`, transcode →
+/// `/x/{id}`.
+pub struct FakeResolver {
+    pub base: String,
+    pub transcode_calls: AtomicUsize,
+    pub tracks: Mutex<HashMap<String, Track>>,
+}
+
+impl FakeResolver {
+    pub fn new(server: &TestServer) -> Arc<Self> {
+        Arc::new(Self {
+            base: format!("http://{}", server.addr),
+            transcode_calls: AtomicUsize::new(0),
+            tracks: Mutex::new(HashMap::new()),
+        })
+    }
+}
+
+#[async_trait]
+impl TrackResolver for FakeResolver {
+    async fn stream(&self, track: &Track) -> AppResult<StreamSource> {
+        Ok(StreamSource {
+            url: format!("{}/t/{}", self.base, track.id),
+            headers: vec![("X-Plex-Token".into(), "test-token".into())],
+            size: None,
+            codec_hint: None,
+        })
+    }
+    async fn transcode(&self, track: &Track) -> AppResult<StreamSource> {
+        self.transcode_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(StreamSource {
+            url: format!("{}/x/{}", self.base, track.id),
+            headers: vec![],
+            size: None,
+            codec_hint: Some("wav".into()),
+        })
+    }
+}
+
+#[async_trait]
+impl TrackLookup for FakeResolver {
+    async fn tracks(&self, ids: &[String]) -> AppResult<Vec<Track>> {
+        let t = self.tracks.lock();
+        Ok(ids.iter().filter_map(|i| t.get(i).cloned()).collect())
+    }
+    async fn context(&self, ctx: &PlayContext) -> AppResult<ResolvedContext> {
+        let ids = ctx
+            .track_ids
+            .clone()
+            .ok_or_else(|| AppError::Invalid("no ids".into()))?;
+        Ok(ResolvedContext {
+            tracks: self.tracks(&ids).await?,
+            title: Some("Test context".into()),
+        })
+    }
+}

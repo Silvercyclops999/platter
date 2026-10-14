@@ -5,6 +5,7 @@ pub mod error;
 pub mod model;
 pub mod platform;
 pub mod plex;
+pub mod tracking;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +13,7 @@ use std::time::Duration;
 
 use tauri::Manager;
 
+use crate::audio::player::{PlayerConfig, PlayerHandle};
 use crate::db::{ArtCache, DbHandle};
 use crate::plex::PlexState;
 use crate::plex::notifications::PlexEvent;
@@ -85,12 +87,30 @@ pub fn run() {
                 Arc::new(bridge::PlexArt(plex.clone())),
             )?;
 
+            let player = PlayerHandle::spawn(
+                tauri::async_runtime::handle().inner().clone(),
+                Arc::new(bridge::PlexStreams(plex.clone())),
+                Arc::new(bridge::CacheLookup(db.clone())),
+                Box::new(audio::output::CpalOutput::new()),
+                Arc::new(audio::events::TauriSink(app.handle().clone())),
+                PlayerConfig {
+                    persist_path: Some(data_dir.join("queue.json")),
+                    cache_dir: Some(cache_dir.join("audio")),
+                    ..Default::default()
+                },
+            );
+            tracking::spawn(
+                tracking::Tracker::new(plex.clone(), db.clone(), tracking::TrackingSettings::default()),
+                player.subscribe_tracking(),
+            );
+
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
 
             app.manage(plex);
             app.manage(db);
             app.manage(art);
+            app.manage(player);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -114,7 +134,31 @@ pub fn run() {
             db::commands::recent_searches,
             db::commands::recent_search_add,
             db::commands::recent_searches_clear,
+            audio::commands::play_context,
+            audio::commands::play_toggle,
+            audio::commands::play_pause,
+            audio::commands::play_resume,
+            audio::commands::play_next,
+            audio::commands::play_previous,
+            audio::commands::play_seek,
+            audio::commands::set_volume,
+            audio::commands::set_muted,
+            audio::commands::set_shuffle,
+            audio::commands::set_repeat,
+            audio::commands::queue_add,
+            audio::commands::queue_remove,
+            audio::commands::queue_move,
+            audio::commands::queue_clear,
+            audio::commands::queue_jump,
+            audio::commands::player_state,
+            audio::commands::player_problems,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                let player = app.state::<PlayerHandle>().inner().clone();
+                tauri::async_runtime::block_on(player.flush());
+            }
+        });
 }

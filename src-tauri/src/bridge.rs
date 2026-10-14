@@ -9,7 +9,8 @@ use parking_lot::Mutex;
 
 use crate::db::artcache::sniff_content_type;
 use crate::db::source::{ArtBytes, Changes, HistoryEntry, ItemKind, MusicSection};
-use crate::db::{ArtFetcher, LibrarySource};
+use crate::audio::source::{ContextKind, PlayContext, ResolvedContext, StreamSource, TrackLookup, TrackResolver};
+use crate::db::{ArtFetcher, DbHandle, LibrarySource, queries};
 use crate::error::AppResult;
 use crate::model::{Album, Artist, Playlist, Track};
 use crate::plex::client::{MetaType, PlexMetadata};
@@ -222,6 +223,87 @@ impl ArtFetcher for PlexArt {
         let bytes = self.0.client().await?.photo(path, width, height).await?;
         let content_type = sniff_content_type(&bytes).to_string();
         Ok(ArtBytes { bytes, content_type })
+    }
+}
+
+/// Turns a track into an HTTP source on the connected server. The token
+/// travels only in headers.
+pub struct PlexStreams(pub PlexState);
+
+fn source_of(req: crate::plex::client::StreamRequest, codec: Option<String>) -> StreamSource {
+    StreamSource {
+        url: req.url.to_string(),
+        headers: req
+            .headers
+            .iter()
+            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), v.to_string())))
+            .collect(),
+        size: None,
+        codec_hint: codec,
+    }
+}
+
+#[async_trait]
+impl TrackResolver for PlexStreams {
+    async fn stream(&self, track: &Track) -> AppResult<StreamSource> {
+        let req = self.0.client().await?.stream_request(&track.part_key)?;
+        Ok(source_of(req, track.codec.clone()))
+    }
+
+    async fn transcode(&self, track: &Track) -> AppResult<StreamSource> {
+        let session = uuid::Uuid::new_v4().to_string();
+        let req = self.0.client().await?.transcode_request(&track.id, 320, &session)?;
+        Ok(source_of(req, Some("mp3".into())))
+    }
+}
+
+/// Resolves play contexts from the local cache.
+pub struct CacheLookup(pub DbHandle);
+
+#[async_trait]
+impl TrackLookup for CacheLookup {
+    async fn tracks(&self, ids: &[String]) -> AppResult<Vec<Track>> {
+        let ids = ids.to_vec();
+        self.0.read_async(move |c| queries::tracks_by_ids(c, &ids)).await
+    }
+
+    async fn context(&self, ctx: &PlayContext) -> AppResult<ResolvedContext> {
+        let ctx = ctx.clone();
+        self.0
+            .read_async(move |c| {
+                let id = ctx.id.clone().unwrap_or_default();
+                Ok(match ctx.kind {
+                    ContextKind::Album => {
+                        let page = queries::album_page(c, &id)?;
+                        ResolvedContext { tracks: page.tracks, title: Some(page.album.title) }
+                    }
+                    ContextKind::Playlist => {
+                        let page = queries::playlist_page(c, &id)?;
+                        ResolvedContext { tracks: page.tracks, title: Some(page.playlist.title) }
+                    }
+                    ContextKind::Artist => {
+                        let page = queries::artist_page(c, &id)?;
+                        let mut tracks = page.popular;
+                        let mut seen: std::collections::HashSet<String> =
+                            tracks.iter().map(|t| t.id.clone()).collect();
+                        for section in &page.sections {
+                            for album in &section.albums {
+                                for t in queries::album_tracks(c, &album.id)? {
+                                    if seen.insert(t.id.clone()) {
+                                        tracks.push(t);
+                                    }
+                                }
+                            }
+                        }
+                        ResolvedContext { tracks, title: Some(page.artist.title) }
+                    }
+                    ContextKind::Tracks | ContextKind::Search => ResolvedContext {
+                        tracks: queries::tracks_by_ids(c, &ctx.track_ids.clone().unwrap_or_default())?,
+                        title: None,
+                    },
+                })
+            })
+            .await
     }
 }
 

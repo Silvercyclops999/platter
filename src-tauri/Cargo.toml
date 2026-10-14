@@ -41,6 +41,7 @@ tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"]
 async-trait = "0.1.92"
 unicode-normalization = "0.1.25"
 percent-encoding = "2.3.2"
+rubato = "5"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -53,5 +54,6 @@ strip = true
 
 [dev-dependencies]
 dotenvy = "0.15.7"
+hound = "3.5.1"
 tempfile = "3.27.0"
 wiremock = "0.6.5"
