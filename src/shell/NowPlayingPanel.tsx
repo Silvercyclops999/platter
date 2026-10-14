@@ -211,6 +211,7 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
         <div className="np-lyrics-full">
           {lyrics.lines.map((l, i) => (l ? <p key={i}>{l}</p> : <p key={i} className="np-lyrics-full__gap" aria-hidden="true" />))}
         </div>
+        {lyrics.credit && <p className="np-lyrics-credit">{lyrics.credit}</p>}
       </SubView>
     );
   }

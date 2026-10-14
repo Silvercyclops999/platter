@@ -58,6 +58,10 @@ pub struct Lyrics {
     pub synced: bool,
     /// Lines without timestamps; "" marks a break between verses.
     pub lines: Vec<String>,
+    /// Who wrote and who supplied the lyrics, shown under them (licensed
+    /// lyrics ask for this). None when the source names neither.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credit: Option<String>,
 }
 
 // ---------------------------------------------------------------- wire shapes
@@ -304,6 +308,7 @@ pub fn parse_lyrics_text(text: &str) -> Lyrics {
     Lyrics {
         synced,
         lines: tidy(lines),
+        credit: None,
     }
 }
 
@@ -312,6 +317,7 @@ pub fn parse_lyrics_text(text: &str) -> Lyrics {
 /// `startOffset`.
 fn parse_lyrics_json(v: &Value) -> Option<Lyrics> {
     let lyrics = v.get("MediaContainer")?.get("Lyrics")?.as_array()?;
+    let credit = lyrics.first().and_then(lyrics_credit);
     let mut synced = false;
     let mut lines = Vec::new();
     for l in lyrics.iter().filter_map(|l| l.get("Line")?.as_array()) {
@@ -336,7 +342,27 @@ fn parse_lyrics_json(v: &Value) -> Option<Lyrics> {
     Some(Lyrics {
         synced,
         lines: tidy(lines),
+        credit,
     })
+}
+
+/// "Written by …" from the author, then the provider's credit line. Plex
+/// names LyricFind by its agent id.
+fn lyrics_credit(l: &Value) -> Option<String> {
+    let text = |k: &str| {
+        l.get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    let mut parts = Vec::new();
+    if let Some(a) = text("author").or_else(|| text("by")) {
+        parts.push(format!("Written by {a}"));
+    }
+    if text("provider").is_some_and(|p| p.to_ascii_lowercase().contains("lyricfind")) {
+        parts.push("Lyrics licensed and provided by LyricFind".to_owned());
+    }
+    (!parts.is_empty()).then(|| parts.join(". "))
 }
 
 /// A lyrics stream body: JSON when the server sends its structured form,
@@ -631,11 +657,27 @@ mod tests {
             lyrics: Some(Lyrics {
                 synced: false,
                 lines: vec!["a".into()],
+                credit: None,
             }),
         };
         let v = serde_json::to_value(d).unwrap();
         assert_eq!(v["trackId"], "1");
         assert!(v["artist"].is_null());
         assert_eq!(v["lyrics"]["lines"][0], "a");
+    }
+
+    #[test]
+    fn licensed_lyrics_carry_a_credit_line() {
+        let body = json!({"MediaContainer": {"size": 1, "Lyrics": [{
+            "provider": "com.plexapp.agents.lyricfind", "author": "A. Writer", "timed": "1",
+            "Line": [{"startOffset": 0, "Span": [{"text": "first line", "startOffset": 0}]}]
+        }]}});
+        let l = parse_lyrics(body.to_string().as_bytes()).unwrap();
+        assert_eq!(
+            l.credit.as_deref(),
+            Some("Written by A. Writer. Lyrics licensed and provided by LyricFind")
+        );
+        let plain = parse_lyrics(b"just words").unwrap();
+        assert_eq!(plain.credit, None);
     }
 }

@@ -56,7 +56,8 @@ export function mockArtistSummary(artist: Artist): string | null {
 function mockLyrics(r: () => number): Lyrics {
   const verse = () => Array.from({ length: 4 }, () => LYRIC_LINES[Math.floor(r() * LYRIC_LINES.length)]);
   const lines = [...verse(), "", ...verse(), "", ...verse()];
-  return { synced: r() < 0.5, lines };
+  const synced = r() < 0.5;
+  return { synced, lines, credit: synced ? "Written by Demo Writer. Lyrics licensed and provided by LyricFind" : undefined };
 }
 
 function mockCredits(track: Track, r: () => number): Contributor[] {

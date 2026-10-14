@@ -772,3 +772,8 @@
   .player-bar { grid-template-columns: minmax(160px, 1fr) minmax(300px, 1.6fr) minmax(150px, 1fr); }
   .volume__slider { width: 72px; }
 }
+.np-lyrics-credit {
+  margin-top: var(--space-6);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}

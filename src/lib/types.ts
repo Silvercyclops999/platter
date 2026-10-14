@@ -222,6 +222,8 @@ export interface Lyrics {
   synced: boolean;
   /** Lines without timestamps; "" marks a break between verses. */
   lines: string[];
+  /** Writer and provider credit to show under the lyrics. */
+  credit?: string;
 }
 
 /** `now_playing_details`: extras for the now-playing panel. */
