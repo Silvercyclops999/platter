@@ -179,6 +179,12 @@ export interface Backend {
   // Settings
   settingsGet(): Promise<Settings>;
   settingsSet(patch: Partial<Settings>): Promise<void>;
+  /** Saves the current EQ curve as a profile (replacing one with that name) and selects it. */
+  eqProfileSave(name: string): Promise<Settings>;
+  eqProfileRename(from: string, to: string): Promise<Settings>;
+  eqProfileDelete(name: string): Promise<Settings>;
+  /** Uses the selected EQ preset or profile whenever the output in use plays (false removes it). */
+  eqUseForOutput(on: boolean): Promise<Settings>;
   artCacheInfo(): Promise<ArtCacheInfo>;
   /** Deletes every cached image; resolves to the bytes freed. */
   artCacheClear(): Promise<number>;
@@ -301,6 +307,10 @@ export function createTauriBackend(): Backend {
     cachedTracks: () => call("cached_tracks"),
     settingsGet: () => call("settings_get"),
     settingsSet: (patch) => call("settings_set", { patch }),
+    eqProfileSave: (name) => call("eq_profile_save", { name }),
+    eqProfileRename: (from, to) => call("eq_profile_rename", { from, to }),
+    eqProfileDelete: (name) => call("eq_profile_delete", { name }),
+    eqUseForOutput: (on) => call("eq_use_for_output", { on }),
     artCacheInfo: () => call("art_cache_info"),
     artCacheClear: () => call("art_cache_clear"),
     appInfo: () => call("app_info"),

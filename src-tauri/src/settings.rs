@@ -210,8 +210,10 @@ pub struct Settings {
     pub eq_profiles: Vec<EqProfile>,
     /// Presets or profiles bound to output devices.
     pub eq_outputs: Vec<EqOutput>,
-    /// The choice to return to when leaving a bound device.
+    /// The choice for output devices without their own.
     pub eq_fallback: Option<EqChoice>,
+    /// The output device the EQ last followed.
+    pub eq_last_output: Option<String>,
 }
 
 impl Default for Settings {
@@ -266,6 +268,7 @@ impl Default for Settings {
             eq_profiles: Vec::new(),
             eq_outputs: Vec::new(),
             eq_fallback: None,
+            eq_last_output: None,
         }
     }
 }

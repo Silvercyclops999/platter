@@ -533,8 +533,58 @@ export interface Settings {
   actAsPlexPlayer: boolean;
   /** Moving playback stops it on the device it leaves. */
   moveStopsOldDevice: boolean;
+  /** How one song moves into the next. */
+  crossfade: CrossfadeMode;
+  /** Length of a fixed crossfade, 1 to 12 s. */
+  crossfadeSeconds: number;
+  /** Songs of one album in album order never crossfade. */
+  crossfadeSkipAlbums: boolean;
+  /** Loudness leveling with Plex's gain values. */
+  leveling: Leveling;
+  /** dB added to every track, -12 to 12. This device only. */
+  preampDb: number;
+  /** Soft limiter so boosts never clip. This device only. */
+  limiter: boolean;
+  /** The equalizer (this device only, like the rest of the EQ). */
+  eqEnabled: boolean;
+  /** Active curve in dB at EQ_FREQS. Setting it makes the preset "custom". */
+  eqBands: number[];
+  /** Preset id, "profile:<name>" or "custom". Setting it also sets eqBands. */
+  eqPreset: string;
+  /** Saved curves. Read only: use the eqProfile* calls. */
+  eqProfiles: EqProfile[];
+  /** Presets or profiles bound to output devices. Read only: use eqUseForOutput. */
+  eqOutputs: EqOutput[];
+  /** The choice for output devices without their own. Read only. */
+  eqFallback?: { preset: string; bands: number[] } | null;
+  /** The output device the EQ last followed. Read only. */
+  eqLastOutput?: string | null;
   [key: string]: unknown;
 }
+
+export type CrossfadeMode = "smart" | "fixed" | "off";
+export type Leveling = "smart" | "track" | "album" | "off";
+export interface EqProfile {
+  name: string;
+  bands: number[];
+}
+export interface EqOutput {
+  deviceId: string;
+  deviceName: string;
+  preset: string;
+}
+/** EQ band centres in Hz. */
+export const EQ_FREQS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
+/** Built-in EQ presets (the same values as the core). */
+export const EQ_PRESETS: { id: string; name: string; bands: number[] }[] = [
+  { id: "flat", name: "Flat", bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  { id: "bassBoost", name: "Bass boost", bands: [6, 5, 4, 2, 0.5, 0, 0, 0, 0, 0] },
+  { id: "trebleBoost", name: "Treble boost", bands: [0, 0, 0, 0, 0, 0.5, 2, 4, 5, 6] },
+  { id: "vocal", name: "Vocal", bands: [-2, -2, -1, 0, 2, 3.5, 3.5, 2, 0, -1] },
+  { id: "loudness", name: "Loudness", bands: [5, 4, 2, 0, -1, -1, 0, 1.5, 3.5, 4.5] },
+  { id: "smallSpeakers", name: "Small speakers", bands: [-8, -4, 2, 3, 1.5, 0, 0, 1, 2, 1] },
+  { id: "lateNight", name: "Late night", bands: [-5, -4, -2, -0.5, 0, 1, 1.5, 1, 0, -1] },
+];
 
 export const DEFAULT_SETTINGS: Settings = {
   privateSession: false,
@@ -574,6 +624,19 @@ export const DEFAULT_SETTINGS: Settings = {
   showPlexPlayers: true,
   actAsPlexPlayer: false,
   moveStopsOldDevice: true,
+  crossfade: "smart",
+  crossfadeSeconds: 6,
+  crossfadeSkipAlbums: true,
+  leveling: "smart",
+  preampDb: 0,
+  limiter: true,
+  eqEnabled: false,
+  eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  eqPreset: "flat",
+  eqProfiles: [],
+  eqOutputs: [],
+  eqFallback: null,
+  eqLastOutput: null,
 };
 
 // ---------------------------------------------------------------- artist info
@@ -741,6 +804,8 @@ export interface EventMap {
   "health://changed": Health;
   toast: ToastEvent;
   "update://ready": { version: string };
+  /** The core changed settings itself (the EQ followed an output device). */
+  "settings://changed": Settings;
   /** These songs were liked or unliked (here, rolled back, or from Plex). */
   "likes://changed": { ids: string[] };
 }

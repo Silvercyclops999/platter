@@ -84,6 +84,10 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["open_project_page", (b) => b.openProjectPage(), undefined],
   ["update_check", (b) => b.updateCheck(), undefined],
   ["update_install_on_restart", (b) => b.updateInstallOnRestart(), undefined],
+  ["eq_profile_save", (b) => b.eqProfileSave("Desk"), { name: "Desk" }],
+  ["eq_profile_rename", (b) => b.eqProfileRename("Desk", "Studio"), { from: "Desk", to: "Studio" }],
+  ["eq_profile_delete", (b) => b.eqProfileDelete("Studio"), { name: "Studio" }],
+  ["eq_use_for_output", (b) => b.eqUseForOutput(true), { on: true }],
 ];
 
 const EVENTS = [
@@ -99,6 +103,7 @@ const EVENTS = [
   "health://changed",
   "toast",
   "update://ready",
+  "settings://changed",
 ] as const;
 
 describe("Tauri bridge matches docs/IPC.md", () => {
@@ -196,6 +201,10 @@ describe("mock backend covers the whole contract", () => {
     vi.advanceTimersByTime(300);
     // Choosing a device, then unplugging it: output://changed and output://lost.
     await m.outputSelect("mock:headphones");
+    // An EQ preset bound to it: unplugging goes back to the earlier choice (settings://changed).
+    await m.settingsSet({ eqPreset: "vocal" });
+    await m.eqUseForOutput(true);
+    await m.settingsSet({ eqPreset: "bassBoost" });
     m.unplugOutput("mock:headphones");
     vi.useRealTimers();
     expect([...seen].sort()).toEqual([...EVENTS].sort());

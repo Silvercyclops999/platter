@@ -1,0 +1,57 @@
+/* Settings: Transitions, Loudness and Equalizer controls. */
+
+.audio-slider { display: flex; align-items: center; gap: var(--space-3); }
+.audio-slider .audio-slider__track { width: 120px; flex: none; }
+.audio-slider .audio-slider__track--wide { width: 180px; }
+.audio-slider__value {
+  min-width: 52px;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+
+/* A row whose wide part sits under its text (the EQ editor). */
+.setting-row:has(> .setting-row__block) { flex-wrap: wrap; }
+.setting-row__block { flex-basis: 100%; min-width: 0; }
+
+.eq-editor { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
+.eq-editor__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.eq-editor__note { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.eq-editor__name { width: 100%; }
+
+.eq-graph {
+  display: block;
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+  touch-action: none;
+  user-select: none;
+  cursor: ns-resize;
+}
+.eq-graph__grid { stroke: rgba(255, 240, 220, 0.08); stroke-width: 1; }
+.eq-graph__grid.is-zero { stroke: rgba(255, 240, 220, 0.22); }
+.eq-graph__axis { fill: var(--color-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.eq-graph__fill { fill: var(--color-accent-soft); opacity: 0.5; }
+.eq-graph__line { fill: none; stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; }
+.eq-graph__point { cursor: ns-resize; }
+.eq-graph__point:focus,
+.eq-graph__point:focus-visible { outline: none; }
+.eq-graph__ring { fill: transparent; stroke: transparent; stroke-width: 2; transition: stroke var(--motion-very-quick) var(--motion-easing); }
+.eq-graph__dot { fill: var(--color-text-primary); stroke: var(--color-bg-raised); stroke-width: 2; }
+.eq-graph__point:hover .eq-graph__ring,
+.eq-graph__point.is-active .eq-graph__ring { stroke: rgba(255, 240, 220, 0.35); }
+.eq-graph__point:focus-visible .eq-graph__ring { stroke: var(--color-focus-ring); }
+.eq-graph__value { fill: var(--color-text-primary); font-size: 12px; font-weight: var(--font-weight-semibold); pointer-events: none; }
+.eq-graph.is-disabled { cursor: default; }
+.eq-graph.is-disabled .eq-graph__point { cursor: default; }
+.eq-editor--off .eq-graph { opacity: 0.45; }
+.eq-editor--off .eq-graph__line { stroke: var(--color-text-muted); }
+.eq-editor--off .eq-graph__fill { fill: var(--color-text-muted); opacity: 0.15; }
+
+.eq-editor__output { display: flex; align-items: center; gap: var(--space-6); max-width: 720px; }
+.eq-editor__output-text { flex: 1; min-width: 0; }
+.eq-editor__output-title { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.eq-editor__output-desc { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); line-height: 1.45; color: var(--color-text-secondary); }

@@ -357,3 +357,14 @@ anything that plays on a real device needs an OK first). Check once:
   music on it with `playMedia`, and follow it with `timeline/poll`. Whether
   they need `timeline/subscribe` pushes (Platter accepts subscribe but only
   answers polls).
+### 2026-10-14: loudness fields
+- Track detail `Media[0].Part[0].Stream[]` with `streamType: 2` carries
+  `gain`, `albumGain`, `peak`, `albumPeak`, `loudness` and `lra`, all as
+  strings (for example `"-10.93"`, `"1.015710"`). The lenient number parser
+  reads them.
+- `gain` and `albumGain` are dB to apply; `peak` and `albumPeak` are linear
+  and can be a little over 1 for lossy files. On the sample track gain plus
+  loudness came to about -21, so Plex's reference is its own, and the player
+  applies the gain as given.
+- None of these are in the list endpoints, so the player fetches track
+  detail once per track on first play and caches the four values.

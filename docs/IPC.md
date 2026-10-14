@@ -468,6 +468,19 @@ The rest of the fields, with their defaults:
 | `showPlexPlayers` | bool, true | List Plex players under Listen on in the device picker. Off makes `remote_players` return an empty list. |
 | `moveStopsOldDevice` | bool, true | Moving playback to a player pauses it here, and coming back stops the player. Off leaves both playing. |
 | `actAsPlexPlayer` | bool, false | Platter answers as a Plex player so other Plex apps can play here. Opens a local port. This device only. |
+| `crossfade` | `"smart"`, `"fixed"`, `"off"`, `"smart"` | How one song moves into the next. See Sound below. |
+| `crossfadeSeconds` | 1 to 12, 6 | Length of a fixed crossfade. |
+| `crossfadeSkipAlbums` | bool, true | Songs of one album played in album order never crossfade. |
+| `leveling` | `"smart"`, `"track"`, `"album"`, `"off"`, `"smart"` | Loudness leveling with Plex's gain values. |
+| `preampDb` | -12 to 12, 0 | dB added to every track. This device only. |
+| `limiter` | bool, true | Soft limiter so boosts never clip. This device only. |
+| `eqEnabled` | bool, false | The equalizer. This device only, like the rest of the EQ. |
+| `eqBands` | 10 numbers, -12 to 12, all 0 | The active curve at 31, 62, 125, 250, 500 Hz, 1, 2, 4, 8 and 16 kHz. Setting it makes the preset `"custom"` unless it matches the selected one. |
+| `eqPreset` | preset id, `"profile:<name>"` or `"custom"`, `"flat"` | Setting it to a preset or profile also sets `eqBands`. Presets: `flat`, `bassBoost`, `trebleBoost`, `vocal`, `loudness`, `smallSpeakers`, `lateNight`. |
+| `eqProfiles` | `{ name, bands }[]`, empty | Read only here. Saved curves; change them with the `eq_profile_*` commands. |
+| `eqOutputs` | `{ deviceId, deviceName, preset }[]`, empty | Read only here. The preset or profile each output device uses. Set with `eq_use_for_output`. |
+| `eqFallback` | `{ preset, bands }` or null | Read only. The choice for devices without their own, kept from the last such device. |
+| `eqLastOutput` | device id or null | Read only. The device the EQ last followed. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
@@ -477,6 +490,53 @@ It follows the player through the same state and position events the UI gets
 and sends OS requests back as ordinary player commands, so they add no
 commands or events. Cover art goes to the OS as a local file copied from the
 art cache, never as a server URL.
+
+## Sound
+| Command | Args |
+| --- | --- |
+| `eq_profile_save` | `{ name }` → `Settings`. Saves the current curve under `name` (replacing a profile with that name) and selects it. Built-in names are refused. |
+| `eq_profile_rename` | `{ from, to }` → `Settings`. Outputs using it keep it. |
+| `eq_profile_delete` | `{ name }` → `Settings`. Outputs using it lose their binding; if it was selected the curve stays as `"custom"`. |
+| `eq_use_for_output` | `{ on }` → `Settings`. Binds the selected preset or profile to the output device in use (`on: false` unbinds it). A custom curve has to be saved first (`invalid`). |
+
+Everything runs in the core between decode and output, so it works with the
+window hidden. The chain is leveling gain, crossfade mix, EQ, limiter,
+volume.
+
+Crossfade. Fixed fades the outgoing song out and the next one in over the
+set time with equal-power curves (never more than half of either song).
+Smart measures each song's quiet lead-in and run-out (50 ms windows under
+-40 dBFS) while it decodes, remembers them per track, and overlaps only those:
+the overlap is the outgoing run-out plus the incoming lead-in, at most 8 s,
+and only those quiet parts are faded, so a song that ends cold plays to its
+last sample and a song that fades out keeps its own fade. There is no
+crossfade on next, previous or a queue jump (those cut with the short ramp as
+before), on an A-B loop wrap, between album tracks in order while
+`crossfadeSkipAlbums` is on, or when the next song isn't decoded far enough
+yet (the change is gapless then). The outgoing song's `Ended` and the next
+song's start happen when the fade begins.
+
+Leveling. Plex's `gain` and `albumGain` (dB) and `peak` and `albumPeak` are
+read from track detail the first time a track plays and kept in the library
+cache. Smart uses album gain while an album plays in album order and track
+gain otherwise; Track and Album always use that one (falling back to the
+other when it's missing). Gain is applied as Plex gives it. A track with no
+gain data gets only the preamp. Gains are set before a track is heard;
+changing a setting mid-track ramps over 200 ms.
+
+EQ and limiter. Ten octave-wide peaking bands at the output sample rate.
+Band changes ramp over 200 ms; a flat EQ costs nothing. The limiter looks
+1.5 ms ahead and keeps peaks at -0.5 dBFS; its gain work is skipped when the
+peaks Plex reports, the gain and the EQ curve can't reach that. Turning it on
+or off dips the sound for about 10 ms.
+
+When the output device changes (a switch, a new system default, an unplug),
+the core switches to the preset or profile bound to the new device, or back
+to the earlier choice on a device without one, saves it and sends
+`settings://changed`.
+
+Events:
+- `settings://changed` → `Settings` (the core changed a setting itself)
 
 ## Updates
 | Command | Returns |

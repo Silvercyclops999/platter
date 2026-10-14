@@ -61,6 +61,7 @@ import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } f
 import { mockBio } from "./bio";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
+import * as eq from "./eq";
 import { MockHome, type ContextPlay } from "./home";
 import { MockLikes } from "./likes";
 import { MockPlaylists } from "./playlists";
@@ -1042,7 +1043,7 @@ export class MockBackend implements Backend {
       this.outputSelected = deviceId;
       this.settings.outputDevice = deviceId;
       const s = this.outputState();
-      this.emit("output://changed", s);
+      this.emitOutput();
       return s;
     });
   }
@@ -1105,6 +1106,12 @@ export class MockBackend implements Backend {
     this.emitState();
   }
 
+  /** `output://changed`, and the EQ follows the device like in the core. */
+  private emitOutput() {
+    const s = this.outputState();
+    this.emit("output://changed", s);
+    if (eq.outputChanged(this.settings, s.current)) this.emit("settings://changed", { ...this.settings, volume: this.volume });
+  }
   /** Test/demo hook: an output device is unplugged. If it was the chosen
    *  one, the core pauses, falls back to the system default and says so. */
   unplugOutput(id: string) {
@@ -1116,13 +1123,32 @@ export class MockBackend implements Backend {
     const followedDefault = this.outputSelected === null && gone.isDefault;
     if (chosen) this.outputSelected = null;
     if (chosen || followedDefault) this.loseDevice();
-    this.emit("output://changed", this.outputState());
+    this.emitOutput();
     if (chosen) this.emit("output://lost", { device: gone.name });
   }
   /** Test/demo hook: a device is plugged in. */
   plugOutput(device: OutputDevice) {
     this.outputs = [...this.outputs.filter((d) => d.id !== device.id), device];
-    this.emit("output://changed", this.outputState());
+    this.emitOutput();
+  }
+  /** Test hook: audio settings back to their defaults (profiles and bindings too). */
+  resetAudio() {
+    const d = DEFAULT_SETTINGS;
+    Object.assign(this.settings, {
+      crossfade: d.crossfade,
+      crossfadeSeconds: d.crossfadeSeconds,
+      crossfadeSkipAlbums: d.crossfadeSkipAlbums,
+      leveling: d.leveling,
+      preampDb: d.preampDb,
+      limiter: d.limiter,
+      eqEnabled: d.eqEnabled,
+      eqBands: [...d.eqBands],
+      eqPreset: d.eqPreset,
+      eqProfiles: [],
+      eqOutputs: [],
+      eqFallback: null,
+      eqLastOutput: null,
+    });
   }
   /** Test hook: the starting devices, following the system default. */
   resetOutputs() {
@@ -1315,6 +1341,14 @@ export class MockBackend implements Backend {
   settingsSet(patch: Partial<Settings>) {
     return this.delay(() => {
       const next = { ...this.settings, ...patch };
+      // Profiles and bindings change only through their own calls.
+      next.eqProfiles = this.settings.eqProfiles;
+      next.eqOutputs = this.settings.eqOutputs;
+      next.eqFallback = this.settings.eqFallback;
+      next.eqLastOutput = this.settings.eqLastOutput;
+      next.eqPreset = this.settings.eqPreset;
+      next.eqBands = this.settings.eqBands;
+      eq.applyAudioPatch(next, patch);
       // Same ranges as the core.
       next.precacheCount = Math.min(50, Math.max(1, Math.round(next.precacheCount)));
       next.artCacheMb = Math.min(51_200, Math.max(128, Math.round(next.artCacheMb)));
@@ -1327,6 +1361,30 @@ export class MockBackend implements Backend {
         this.abLoop = null;
         this.emitState();
       }
+    });
+  }
+  private changeEq(f: (s: Settings) => void) {
+    return this.delay(() => {
+      const next: Settings = { ...this.settings, eqProfiles: this.settings.eqProfiles.map((p) => ({ ...p })) };
+      f(next);
+      this.settings = next;
+      return { ...next, volume: this.volume };
+    });
+  }
+  eqProfileSave(name: string) {
+    return this.changeEq((s) => eq.saveAs(s, name));
+  }
+  eqProfileRename(from: string, to: string) {
+    return this.changeEq((s) => eq.rename(s, from, to));
+  }
+  eqProfileDelete(name: string) {
+    return this.changeEq((s) => eq.remove(s, name));
+  }
+  eqUseForOutput(on: boolean) {
+    return this.changeEq((s) => {
+      const d = this.outputState().current;
+      if (!d) throw { kind: "notFound", message: "No output device is in use." };
+      eq.useForOutput(s, d, on);
     });
   }
   artCacheInfo() {

@@ -29,6 +29,7 @@ import { reloadLikes } from "../stores/likes";
 import { updateSettings, useSettings } from "../stores/settings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
+import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
@@ -70,6 +71,12 @@ const LIKE_ROWS = [
   { value: "off", label: "Off" },
 ] as const satisfies SelectOption<Settings["likeControlRows"]>[];
 const ART_SIZES_MB = [512, 1024, 2048, 5120, 10240, 20480];
+const LEVELING = [
+  { value: "smart", label: "Smart" },
+  { value: "track", label: "Track" },
+  { value: "album", label: "Album" },
+  { value: "off", label: "Off" },
+] as const satisfies SelectOption<Settings["leveling"]>[];
 
 /** Where the app lives while its window is closed. */
 const TRAY = platform === "mac" ? "menu bar" : "tray";
@@ -138,6 +145,8 @@ interface RowDef {
   /** A named group inside the section (shown as a small heading). */
   group?: string;
   control: (ids: { title: string; desc: string }) => ReactNode;
+  /** A wide part under the row (the EQ editor). */
+  block?: () => ReactNode;
 }
 
 function Row({ row }: { row: RowDef }) {
@@ -161,6 +170,7 @@ function Row({ row }: { row: RowDef }) {
         {row.footnote && <p className="setting-row__desc">{row.footnote}</p>}
       </div>
       <div className="setting-row__control">{row.control(ids)}</div>
+      {row.block && <div className="setting-row__block">{row.block()}</div>}
     </div>
   );
 }
@@ -840,6 +850,55 @@ export function SettingsPage() {
       title: "Let other Plex apps play on this computer",
       description: "Platter shows up as a player in Plexamp and other Plex apps on your network, so they can send music here. Opens a network port, so your computer may ask to allow it. This device only.",
       control: (ids) => toggle(s, "actAsPlexPlayer", ids),
+    },
+    // Transitions
+    {
+      key: "crossfade",
+      section: "Transitions",
+      title: "Crossfade",
+      description:
+        "Smart overlaps only the quiet end of a song and the quiet start of the next, so songs that end cold aren't cut and fades keep their shape. Fixed fades over the time you set. Skipping always cuts straight to the next song.",
+      control: (ids) => <CrossfadeControl ids={ids} />,
+    },
+    {
+      key: "crossfadeSkipAlbums",
+      section: "Transitions",
+      title: "Never crossfade within an album",
+      description: "Songs from the same album played in album order run straight into each other, with no gap and no fade.",
+      control: (ids) => toggle(s, "crossfadeSkipAlbums", ids),
+    },
+    // Loudness
+    {
+      key: "leveling",
+      section: "Loudness",
+      title: "Loudness leveling",
+      description:
+        "Plays songs at a similar volume using Plex's loudness analysis. Smart keeps an album's own dynamics while you play it in order and levels each song otherwise.",
+      control: (ids) => select(s, (x) => x.leveling, LEVELING, ids, (v) => updateSettings({ leveling: v })),
+    },
+    {
+      key: "preampDb",
+      section: "Loudness",
+      title: "Preamp",
+      description: "Raises or lowers every song, from -12 to +12 dB. Songs Plex hasn't analysed get only this. This device only.",
+      control: (ids) => <PreampControl ids={ids} />,
+    },
+    {
+      key: "limiter",
+      section: "Loudness",
+      title: "Limiter",
+      description: "Gently holds back peaks so the preamp and EQ boosts never distort. This device only.",
+      control: (ids) => toggle(s, "limiter", ids),
+    },
+    // Equalizer
+    {
+      key: "eqEnabled",
+      section: "Equalizer",
+      title: "Equalizer",
+      description:
+        "Shape the sound with ten bands from 31 Hz to 16 kHz. Drag the points, or focus one and use the arrow keys (Shift for bigger steps). Pick a preset, save your own, and give an output device its own profile. This device only.",
+      control: (ids) => toggle(s, "eqEnabled", ids),
+      block: () => <EqEditor />,
     },
   ];
 

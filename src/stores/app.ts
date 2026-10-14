@@ -7,7 +7,7 @@ import { backend, type Backend } from "../lib/backend";
 import { buildArtistLookup, type ArtistLookup } from "../lib/credits";
 import type { ArtistName, AuthStatus, Health, Playlist, SyncStatus } from "../lib/types";
 import { outputLostMessage, useOutput } from "./output";
-import { loadSettings } from "./settings";
+import { loadSettings, useSettings } from "./settings";
 import { useToasts } from "./toasts";
 
 interface AppStore {
@@ -97,6 +97,8 @@ export function connectApp(b: Backend = backend): () => void {
   );
   keep(b.listen("toast", (t) => useToasts.getState().push(t, t.kind === "error" ? 6000 : 4000)));
   keep(b.listen("output://changed", (o) => useOutput.getState().set(o)));
+  // The core moved the EQ to the profile bound to a new output device.
+  keep(b.listen("settings://changed", (s) => useSettings.getState().setLocal(s)));
   keep(b.listen("output://lost", (l) => useToasts.getState().push({ kind: "info", message: outputLostMessage(l.device) }, 6000)));
   keep(
     b.listen("update://ready", (u) =>

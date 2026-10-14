@@ -241,47 +241,46 @@ pub fn use_for_output(s: &mut Settings, device: &OutputDevice, on: bool) -> AppR
         device_name: device.name.clone(),
         preset: s.eq_preset.clone(),
     });
-    // What to go back to on other devices.
-    if s.eq_fallback.is_none() {
+    Ok(())
+}
+
+fn bound_preset(s: &Settings, device_id: &str) -> Option<String> {
+    s.eq_outputs
+        .iter()
+        .find(|o| o.device_id == device_id)
+        .map(|o| o.preset.clone())
+        .filter(|id| bands_of(s, id).is_some())
+}
+
+/// The device in use changed: switch to its bound preset or profile, or to
+/// the choice for devices without one. Leaving a device without one keeps
+/// what was in use there as that choice. Returns whether the EQ changed.
+pub fn output_changed(s: &mut Settings, device: Option<&OutputDevice>) -> bool {
+    let id = device.map(|d| d.id.clone());
+    if s.eq_last_output.is_some() && s.eq_last_output == id {
+        return false;
+    }
+    let left_unbound = s.eq_last_output.as_deref().is_none_or(|old| bound_preset(s, old).is_none());
+    if left_unbound {
         s.eq_fallback = Some(EqChoice {
             preset: s.eq_preset.clone(),
             bands: s.eq_bands,
         });
     }
-    Ok(())
-}
-
-/// The device in use changed: switch to its bound preset or profile, or
-/// back to the choice from before a bound device took over. Returns
-/// whether anything changed.
-pub fn output_changed(s: &mut Settings, device: Option<&OutputDevice>) -> bool {
-    let bound = device
-        .and_then(|d| s.eq_outputs.iter().find(|o| o.device_id == d.id))
-        .map(|o| o.preset.clone())
-        .filter(|id| bands_of(s, id).is_some());
-    match bound {
-        Some(id) => {
-            if s.eq_fallback.is_none() {
-                s.eq_fallback = Some(EqChoice {
-                    preset: s.eq_preset.clone(),
-                    bands: s.eq_bands,
-                });
-            }
-            if s.eq_preset == id {
-                return false;
-            }
-            select(s, &id).is_ok()
+    s.eq_last_output = id;
+    let (preset, bands) = (s.eq_preset.clone(), s.eq_bands);
+    match device.and_then(|d| bound_preset(s, &d.id)) {
+        Some(p) => {
+            let _ = select(s, &p);
         }
-        None => match s.eq_fallback.take() {
-            Some(f) => {
-                let changed = s.eq_preset != f.preset || s.eq_bands != f.bands;
+        None => {
+            if let Some(f) = s.eq_fallback.clone() {
                 s.eq_preset = f.preset;
                 s.eq_bands = f.bands;
-                changed
             }
-            None => false,
-        },
+        }
     }
+    s.eq_preset != preset || s.eq_bands != bands
 }
 
 #[cfg(test)]
@@ -353,22 +352,26 @@ mod tests {
             ..Default::default()
         };
         save_as(&mut s, "Headphones").unwrap();
-        // Bound while on the headphones; elsewhere the user picked Vocal.
-        use_for_output(&mut s, &dev("hp"), true).unwrap();
-        s.eq_fallback = None;
+        // Vocal on the speakers.
         select(&mut s, "vocal").unwrap();
         assert!(!output_changed(&mut s, Some(&dev("speakers"))));
+        // Over on the headphones the user picks their profile and binds it.
+        assert!(!output_changed(&mut s, Some(&dev("hp"))));
+        select(&mut s, "profile:Headphones").unwrap();
+        use_for_output(&mut s, &dev("hp"), true).unwrap();
+        // Back on the speakers: Vocal again.
+        assert!(output_changed(&mut s, Some(&dev("speakers"))));
+        assert_eq!(s.eq_preset, "vocal");
+        // Changing it there is remembered for unbound devices.
+        select(&mut s, "lateNight").unwrap();
         assert!(output_changed(&mut s, Some(&dev("hp"))));
         assert_eq!(s.eq_preset, "profile:Headphones");
         assert_eq!(s.eq_bands, [2.0; EQ_BANDS]);
         assert!(!output_changed(&mut s, Some(&dev("hp"))), "already on it");
-        assert!(output_changed(&mut s, Some(&dev("speakers"))));
-        assert_eq!(s.eq_preset, "vocal");
-        assert_eq!(s.eq_fallback, None);
-        // System default (no device known) counts as unbound.
-        assert!(output_changed(&mut s, Some(&dev("hp"))));
+        // No device known counts as unbound.
         assert!(output_changed(&mut s, None));
-        assert_eq!(s.eq_preset, "vocal");
+        assert_eq!(s.eq_preset, "lateNight");
+        assert!(!output_changed(&mut s, Some(&dev("usb"))));
     }
 
     #[test]
