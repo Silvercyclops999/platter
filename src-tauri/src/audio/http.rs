@@ -52,8 +52,12 @@ pub struct HttpConfig {
 impl Default for HttpConfig {
     fn default() -> Self {
         Self {
-            max_ahead: 48 * 1024 * 1024,
-            keep_behind: 16 * 1024 * 1024,
+            // 32 MB is about 4 minutes of CD-quality FLAC and 85 s of
+            // 24/96, well past the 30 s retry window. Behind is trimmed at
+            // twice `keep_behind`, so one stream holds at most 48 MB (was 80)
+            // and the playing plus preloaded streams at most 96 MB.
+            max_ahead: 32 * 1024 * 1024,
+            keep_behind: 8 * 1024 * 1024,
             retry_window: Duration::from_secs(30),
             min_backoff: Duration::from_millis(200),
             max_backoff: Duration::from_secs(3),
