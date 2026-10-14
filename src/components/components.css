@@ -232,6 +232,20 @@
 .slider:focus-visible .slider__thumb,
 .slider.is-dragging .slider__thumb { opacity: 1; }
 .slider.is-disabled { cursor: default; opacity: 0.5; }
+.slider__hover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: var(--radius-row);
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
 .slider.is-disabled .slider__thumb { display: none; }
 
 /* ---------------------------------------------------------------- Context menu */
@@ -268,6 +282,14 @@
 .context-menu__item[aria-disabled="true"] { color: var(--color-text-muted); }
 .context-menu__item.is-danger { color: var(--color-error); }
 .context-menu__shortcut { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.context-menu__item.is-checked { color: var(--color-accent); }
+.context-menu__check { flex: none; }
+.context-menu__heading {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
 .context-menu__sep { height: 1px; margin: var(--space-1) 0; background: rgba(255, 240, 220, 0.1); }
 
 /* ---------------------------------------------------------------- Toast */
@@ -507,7 +529,8 @@
 }
 .card__play:hover { background: var(--color-accent-hover); transform: scale(1.05); }
 .card:hover .card__play,
-.card:focus-within .card__play { opacity: 1; transform: none; }
+.card:focus-within .card__play,
+.card.is-playing .card__play { opacity: 1; transform: none; }
 .card__play:focus-visible { border-radius: 50%; }
 .card__link {
   text-align: left;
@@ -636,7 +659,12 @@
   background: rgba(0, 0, 0, 0.5);
   color: var(--color-text-primary);
 }
-.track-row:hover .track-row__art-play { display: flex; }
+.track-row:hover .track-row__art-play,
+.track-row__art-play.is-playing { display: flex; }
+.track-row__art-play.is-playing .track-row__art-glyph { display: none; }
+.track-row:hover .track-row__art-play.is-playing .track-row__art-glyph { display: block; }
+.track-row:hover .track-row__art-play.is-playing .eq { display: none; }
+.eq--on-art i { background: var(--color-text-primary); }
 .track-row__text { min-width: 0; display: flex; flex-direction: column; }
 .track-row__title { color: var(--color-text-primary); font-size: var(--font-size-lg); line-height: 1.35; }
 .track-row__artist { font-size: var(--font-size-sm); line-height: 1.4; }
@@ -654,7 +682,30 @@
 .track-row__hover-btn:hover:not([aria-disabled="true"]) { color: var(--color-text-primary); }
 .track-row__hover-btn[aria-disabled="true"] { opacity: 0.5; }
 .track-row:hover .track-row__hover-btn,
-.track-row:focus-within .track-row__hover-btn { visibility: visible; }
+.track-row:focus-within .track-row__hover-btn,
+.track-row.is-picked .track-row__hover-btn { visibility: visible; }
+/* Click selection (Ctrl/⌘ and Shift extend it). */
+.track-row.is-picked { background: var(--color-state-selected); }
+.track-row.is-picked:hover { background: var(--color-state-selected); }
+.track-row.is-picked .track-row__artist,
+.track-row.is-picked .track-row__album,
+.track-row.is-picked .track-row__duration { color: var(--color-text-primary); }
+/* Queue drag and drop: a line where the row will land. */
+.track-row { position: relative; }
+.track-row.is-drop-before::before,
+.track-row.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  pointer-events: none;
+}
+.track-row.is-drop-before::before { top: -1px; }
+.track-row.is-drop-after::after { bottom: -1px; }
+.track-row[draggable="true"] { cursor: grab; }
 .track-row--compact {
   grid-template-columns: minmax(0, 1fr) auto;
   height: 56px;

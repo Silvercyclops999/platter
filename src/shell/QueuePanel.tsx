@@ -9,51 +9,98 @@ import { useUi } from "../stores/ui";
 
 type Tab = "queue" | "history";
 
-function QueueRow({ item, index, current, removable, draggable, onDropAt }: {
+const DRAG_TYPE = "text/x-platter-queue-item";
+
+/** Where a dragged queue row would land: an insertion point 0..n in the user queue. */
+export function dropTarget(e: { clientY: number; currentTarget: Element }, index: number): number {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientY > r.top + r.height / 2 ? index + 1 : index;
+}
+
+/** Convert an insertion point into queue_move's index (position after removal). */
+export function moveIndex(from: number, insertAt: number): number {
+  return insertAt > from ? insertAt - 1 : insertAt;
+}
+
+function QueueRow({
+  item,
+  index,
+  current,
+  removable,
+  reorder,
+}: {
   item: QueueItem;
   index: number;
   current?: boolean;
   removable?: boolean;
-  draggable?: boolean;
-  onDropAt?: (itemId: string, toIndex: number) => void;
+  /** Drag-to-reorder wiring (user queue only). */
+  reorder?: { insertAt: number | null; setInsertAt: (n: number | null) => void; drop: (itemId: string, insertAt: number) => void };
 }) {
   const playing = usePlayer((s) => current && s.state?.status === "playing");
+  const remove = removable ? () => player.queueRemove(item.itemId) : undefined;
+  const edge = reorder?.insertAt === index ? "before" : reorder?.insertAt === index + 1 ? "after" : null;
   return (
     <TrackRow
       compact
       track={item.track}
+      rowKey={item.itemId}
       index={index + 1}
       active={current}
       playing={!!playing}
       showAlbum={false}
       onPlay={() => (current ? player.toggle() : player.queueJump(item.itemId))}
+      onRemove={remove}
       menuItems={trackMenuItems(item.track, {
-        after: removable ? [{ label: "Remove from queue", separator: true, onSelect: () => player.queueRemove(item.itemId) }] : [],
+        after: remove ? [{ label: "Remove from queue", separator: true, onSelect: remove }] : [],
       })}
-      draggable={draggable}
+      draggable={!!reorder}
+      dropEdge={edge}
       onDragStart={(e) => {
-        e.dataTransfer.setData("text/x-platter-queue-item", item.itemId);
+        e.dataTransfer.setData(DRAG_TYPE, item.itemId);
         e.dataTransfer.effectAllowed = "move";
       }}
       onDragOver={(e) => {
-        if (onDropAt && e.dataTransfer.types.includes("text/x-platter-queue-item")) e.preventDefault();
+        if (!reorder || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const at = dropTarget(e, index);
+        if (at !== reorder.insertAt) reorder.setInsertAt(at);
       }}
+      onDragEnd={() => reorder?.setInsertAt(null)}
       onDrop={(e) => {
-        const id = e.dataTransfer.getData("text/x-platter-queue-item");
-        if (id && onDropAt) {
-          e.preventDefault();
-          onDropAt(id, index);
-        }
+        const id = e.dataTransfer.getData(DRAG_TYPE);
+        if (!reorder || !id) return;
+        e.preventDefault();
+        reorder.drop(id, dropTarget(e, index));
+        reorder.setInsertAt(null);
       }}
     />
   );
 }
+
+/** Menu for several selected queue rows. */
+const queueMultiMenu = (keys: string[], ids: string[]) => [
+  { label: "Add to queue", onSelect: () => player.queueAdd(ids, "end") },
+  { label: "Remove from queue", separator: true, onSelect: () => keys.forEach((k) => player.queueRemove(k)) },
+];
 
 /** Right panel: Now playing, Next in queue (user), Next up (context), History. */
 export function QueuePanel() {
   const queue = usePlayer((s) => s.state?.queue);
   const close = () => useUi.getState().setQueueOpen(false);
   const [tab, setTab] = useState<Tab>("queue");
+  const [insertAt, setInsertAt] = useState<number | null>(null);
+  const userQueue = queue?.userQueue ?? [];
+  const reorder = {
+    insertAt,
+    setInsertAt,
+    drop: (itemId: string, at: number) => {
+      const from = userQueue.findIndex((i) => i.itemId === itemId);
+      if (from < 0) return;
+      const to = moveIndex(from, at);
+      if (to !== from) player.queueMove(itemId, to);
+    },
+  };
 
   const ctxTitle = queue?.context?.title;
   const history = queue ? [...queue.history].reverse() : [];
@@ -99,9 +146,9 @@ export function QueuePanel() {
                     Clear queue
                   </button>
                 </div>
-                <TrackList label="Next in queue" header={false}>
+                <TrackList label="Next in queue" header={false} multiMenu={queueMultiMenu}>
                   {queue.userQueue.map((it, i) => (
-                    <QueueRow key={it.itemId} item={it} index={i} removable draggable onDropAt={(id, to) => player.queueMove(id, to)} />
+                    <QueueRow key={it.itemId} item={it} index={i} removable reorder={reorder} />
                   ))}
                 </TrackList>
               </section>
@@ -118,7 +165,7 @@ export function QueuePanel() {
                 )}
               </h3>
               {queue && queue.nextUp.length > 0 ? (
-                <TrackList label="Next up" header={false}>
+                <TrackList label="Next up" header={false} multiMenu={queueMultiMenu}>
                   {queue.nextUp.map((it, i) => (
                     <QueueRow key={it.itemId} item={it} index={i} removable />
                   ))}

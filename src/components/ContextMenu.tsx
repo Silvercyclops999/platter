@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useUi, type MenuItem } from "../stores/ui";
@@ -24,7 +25,7 @@ export function ContextMenuHost() {
   // Focus the first item once the menu is visible (hidden elements can't take focus).
   useEffect(() => {
     if (!menu || !pos) return;
-    ref.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
+    ref.current?.querySelector<HTMLElement>('[role^="menuitem"]:not([aria-disabled="true"])')?.focus();
   }, [menu, pos]);
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export function ContextMenuHost() {
 
   if (!menu) return null;
 
-  const items = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []);
+  const items = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not([aria-disabled="true"])') ?? []);
   const onKeyDown = (e: KeyboardEvent) => {
     const list = items();
     const i = list.indexOf(document.activeElement as HTMLElement);
@@ -105,16 +106,23 @@ export function ContextMenuHost() {
       {menu.items.map((item, i) => (
         <div key={i} role="none">
           {item.separator && <div role="separator" className="context-menu__sep" />}
+          {item.heading && (
+            <div className="context-menu__heading" aria-hidden="true">
+              {item.heading}
+            </div>
+          )}
           <button
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.checked}
             tabIndex={-1}
             aria-disabled={item.disabled || undefined}
-            className={`context-menu__item ${item.danger ? "is-danger" : ""}`}
+            className={`context-menu__item ${item.danger ? "is-danger" : ""} ${item.checked ? "is-checked" : ""}`}
             onClick={() => select(item)}
           >
             <span className="truncate">{item.label}</span>
             {item.shortcut && <span className="context-menu__shortcut">{item.shortcut}</span>}
+            {item.checked && <Check size={16} aria-hidden="true" className="context-menu__check" />}
           </button>
         </div>
       ))}

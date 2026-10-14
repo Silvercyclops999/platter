@@ -18,6 +18,8 @@ export interface SliderProps {
   className?: string;
   /** Optional buffered amount, drawn behind the fill (seek bar). */
   buffered?: number;
+  /** Bubble above the pointer while hovering or dragging, e.g. the time to seek to. */
+  hoverText?: (v: number) => string;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -39,9 +41,11 @@ export function Slider({
   disabled,
   className = "",
   buffered,
+  hoverText,
 }: SliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<number | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
   const shown = drag ?? value;
   const range = max - min || 1;
   const pct = clamp(((shown - min) / range) * 100, 0, 100);
@@ -63,8 +67,10 @@ export function Slider({
     onChange?.(v);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (drag == null) return;
+    if (disabled) return;
     const v = fromPointer(e.clientX);
+    if (hoverText) setHover(v);
+    if (drag == null) return;
     setDrag(v);
     onChange?.(v);
   };
@@ -124,6 +130,7 @@ export function Slider({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={() => setDrag(null)}
+      onPointerLeave={() => setHover(null)}
       onKeyDown={onKeyDown}
     >
       <div className="slider__track" ref={trackRef}>
@@ -131,6 +138,11 @@ export function Slider({
         <div className="slider__fill" style={{ width: `${pct}%` }} />
         <div className="slider__thumb" style={{ left: `${pct}%` }} />
       </div>
+      {hoverText && hover != null && !disabled && (
+        <div className="slider__hover tabular" aria-hidden="true" style={{ left: `${clamp(((hover - min) / range) * 100, 0, 100)}%` }}>
+          {hoverText(hover)}
+        </div>
+      )}
     </div>
   );
 }

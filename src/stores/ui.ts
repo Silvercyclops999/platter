@@ -8,6 +8,17 @@ export interface MenuItem {
   /** Render a separator before this item. */
   separator?: boolean;
   shortcut?: string;
+  /** Radio-style option (sort / view menus): shows a check when true. */
+  checked?: boolean;
+  /** Small group heading rendered before this item. */
+  heading?: string;
+}
+
+/** Shown in the main header once the page's own header has scrolled away. */
+export interface PageBar {
+  title: string;
+  playing: boolean;
+  onPlay: () => void;
 }
 
 export interface ContextMenuState {
@@ -27,6 +38,9 @@ interface UiState {
   menu: ContextMenuState | null;
   /** Header tint for the current page (CSS color), null = neutral. */
   tint: string | null;
+  /** Title and play button for the sticky header (detail pages). */
+  pageBar: PageBar | null;
+  setPageBar: (b: PageBar | null) => void;
   /** The sign-in screen is open over the app (after Plex rejected the sign-in). */
   signInOpen: boolean;
   setSignInOpen: (v: boolean) => void;
@@ -46,6 +60,8 @@ export const useUi = create<UiState>()((set, get) => ({
   menu: null,
   tint: null,
   signInOpen: false,
+  pageBar: null,
+  setPageBar: (pageBar) => set({ pageBar }),
   setSignInOpen: (signInOpen) => set({ signInOpen }),
   setTint: (tint) => get().tint !== tint && set({ tint }),
   toggleQueue: () => set({ queueOpen: !get().queueOpen }),
