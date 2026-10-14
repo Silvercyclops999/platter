@@ -328,13 +328,12 @@ fake only). Check once on a song you don't mind rating, then put it back:
 ### 2026-10-14: players (Listen on)
 
 Read-only checks with the probe script:
-- plex.tv resources list three non-server devices on the test account, all
-  with `provides` containing `player`: two Plexamp (`client,player,pubsub-player`;
-  Windows and iOS) and one TV app (`client,player`). All three had
-  `presence: false` while not in use, and each has its own `accessToken`.
-- Plexamp lists its companion port 32500 over plain http (a local
-  connection, and a remote one on the desktop). The TV app lists https on
-  32400 instead.
+- plex.tv resources list each signed-in player with `provides` containing
+  `player`. Plexamp reports `client,player,pubsub-player`; other Plex apps
+  report `client,player`. Idle players show `presence: false`, and each has
+  its own `accessToken`.
+- Plexamp lists its companion port 32500 over plain http. Some other Plex
+  apps list https on 32400 instead.
 - `GET /clients` answered `{"MediaContainer":{"size":0}}` with nothing open,
   and `GET /status/sessions` had no sessions, so the shapes for those come
   from public protocol references, not from this server yet.
