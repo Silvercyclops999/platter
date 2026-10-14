@@ -91,7 +91,6 @@ export function ArtistPage({ id }: { id: string }) {
                   { label: "Add popular songs to queue", onSelect: () => player.queueAdd(data!.popular.map((t) => t.id), "end") },
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-                    separator: true,
                     onSelect: () =>
                       usePins.getState().toggle({ kind: "artist", id: artist.id, title: artist.title, subtitle: "Artist", thumb: artist.thumb }),
                   },

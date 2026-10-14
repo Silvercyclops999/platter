@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
+import { openContextMenu } from "../components/ContextMenu";
+import { trackMenuItems } from "../components/TrackRow";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Slider } from "../components/Slider";
@@ -176,7 +178,15 @@ export function PlayerBar() {
               <Art path={track.thumb} size={56} />
             </button>
             <div className="player-bar__meta">
-              <button type="button" className="link player-bar__title truncate" onClick={() => nav.go({ name: "album", id: track.albumId })}>
+              <button
+                type="button"
+                className="link player-bar__title truncate"
+                onClick={() => nav.go({ name: "album", id: track.albumId })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  openContextMenu(`Options for ${track.title}`, trackMenuItems(track), e);
+                }}
+              >
                 {track.title}
               </button>
               <button type="button" className="link player-bar__artist truncate" onClick={() => nav.go({ name: "artist", id: track.artistId })}>

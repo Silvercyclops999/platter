@@ -84,7 +84,6 @@ export function PlaylistPage({ id }: { id: string }) {
                   { label: "Add to queue", disabled: empty, onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "end") },
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-                    separator: true,
                     onSelect: () =>
                       usePins.getState().toggle({
                         kind: "playlist",

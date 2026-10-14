@@ -13,6 +13,8 @@ export interface MenuItem {
   checked?: boolean;
   /** Small group heading rendered before this item. */
   heading?: string;
+  /** Checked when the menu opens; the item is left out when this returns false. */
+  when?: () => boolean;
 }
 
 /** Shown in the main header once the page's own header has scrolled away. */
@@ -23,8 +25,11 @@ export interface PageBar {
 }
 
 export interface ContextMenuState {
+  /** Pointer position (or the anchor's bottom-left). */
   x: number;
   y: number;
+  /** Element the menu is aligned to (options button, keyboard-opened row). */
+  anchor?: { left: number; right: number; top: number; bottom: number };
   items: MenuItem[];
   label: string;
   /** Element to return focus to on close. */

@@ -15,7 +15,7 @@ import { formatDuration, trackArtistLine } from "../lib/format";
 import { isMod } from "../lib/platform";
 import type { Track } from "../lib/types";
 import { isUnavailable, useApp } from "../stores/app";
-import { nav } from "../stores/router";
+import { nav, useRouter } from "../stores/router";
 import { player } from "../stores/player";
 import { toast } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
@@ -24,16 +24,31 @@ import { QualityBadge } from "./Badge";
 import { openContextMenu } from "./ContextMenu";
 import { Skeleton } from "./Skeleton";
 
-/** Standard track context menu. Pages can prepend/append items. */
-export function trackMenuItems(track: Track, extra: { before?: MenuItem[]; after?: MenuItem[] } = {}): MenuItem[] {
+/** Whether the album page for `albumId` is the one showing. */
+export function onAlbumPage(albumId: string): boolean {
+  const { entries, index } = useRouter.getState();
+  const r = entries[index]?.route;
+  return r?.name === "album" && r.id === albumId;
+}
+
+/**
+ * Standard track context menu, also used for the now-playing track. Order:
+ * queue actions, then where to go, then copy. "Go to album" is left out on
+ * that album's own page. `afterQueue` items (e.g. remove from queue) go right
+ * after "Add to queue"; pages can also prepend or append items.
+ */
+export function trackMenuItems(
+  track: Track,
+  extra: { before?: MenuItem[]; afterQueue?: MenuItem[]; after?: MenuItem[] } = {},
+): MenuItem[] {
   return [
     ...(extra.before ?? []),
     { label: "Add to queue", onSelect: () => player.queueAdd([track.id], "end") },
-    { label: "Go to artist", separator: true, onSelect: () => nav.go({ name: "artist", id: track.artistId }) },
-    { label: "Go to album", onSelect: () => nav.go({ name: "album", id: track.albumId }) },
+    ...(extra.afterQueue ?? []),
+    { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: track.artistId }) },
+    { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
     {
       label: "Copy song title",
-      separator: true,
       onSelect: () => {
         navigator.clipboard?.writeText(`${track.title} - ${trackArtistLine(track)}`).then(
           () => toast.info("Copied to clipboard"),

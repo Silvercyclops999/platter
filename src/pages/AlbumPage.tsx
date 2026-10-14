@@ -104,18 +104,17 @@ export function AlbumPage({ id }: { id: string }) {
                 `Options for ${album.title}`,
                 [
                   { label: "Add to queue", onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "end") },
-                  { label: "Go to artist", separator: true, onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
-                  {
-                    label: "Copy album title",
-                    onSelect: () => copyText(`${album.title} - ${album.artistTitle}`),
-                  },
+                  { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-                    separator: true,
                     onSelect: () =>
                       usePins
                         .getState()
                         .toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
+                  },
+                  {
+                    label: "Copy album title",
+                    onSelect: () => copyText(`${album.title} - ${album.artistTitle}`),
                   },
                 ],
                 e.currentTarget,

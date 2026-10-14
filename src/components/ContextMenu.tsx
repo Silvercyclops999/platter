@@ -1,7 +1,7 @@
 import { Check } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { useUi, type MenuItem } from "../stores/ui";
+import { useUi, type ContextMenuState, type MenuItem } from "../stores/ui";
 
 /** Global context menu host. Open with `useUi.getState().openMenu(...)`. */
 export function ContextMenuHost() {
@@ -10,16 +10,14 @@ export function ContextMenuHost() {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
-  // Clamp into the viewport once measured.
+  // Place once measured (before paint, so it opens fully formed in one frame).
   useLayoutEffect(() => {
     if (!menu || !ref.current) {
       setPos(null);
       return;
     }
     const r = ref.current.getBoundingClientRect();
-    const x = Math.min(menu.x, window.innerWidth - r.width - 8);
-    const y = menu.y + r.height > window.innerHeight - 8 ? Math.max(8, menu.y - r.height) : menu.y;
-    setPos({ x: Math.max(8, x), y });
+    setPos(placeMenu(menu, { width: r.width, height: r.height }, { width: window.innerWidth, height: window.innerHeight }));
   }, [menu]);
 
   // Focus the first item once the menu is visible (hidden elements can't take focus).
@@ -131,24 +129,57 @@ export function ContextMenuHost() {
   );
 }
 
-/** Open a menu anchored at a mouse event or below an element (keyboard). */
+const EDGE = 8;
+const GAP = 4;
+
+/**
+ * Where a menu of `size` goes in a `view`. At a pointer: top-left corner at
+ * the pointer, flipped up (bottom edge at the pointer) when it would run off
+ * the bottom. At an element (an options button, or a row from the keyboard):
+ * just below it, aligned to it: a button in the right half of the window
+ * lines up with the menu's right edge, otherwise the left edges line up.
+ * Flipped above the element when there's no room below. Always kept on screen.
+ */
+export function placeMenu(
+  menu: Pick<ContextMenuState, "x" | "y" | "anchor">,
+  size: { width: number; height: number },
+  view: { width: number; height: number },
+): { x: number; y: number } {
+  let x: number;
+  let y: number;
+  const a = menu.anchor;
+  if (a) {
+    const width = a.right - a.left;
+    const rightHalf = a.left + width / 2 > view.width / 2;
+    x = width < size.width && rightHalf ? a.right - size.width : a.left;
+    y = a.bottom + GAP;
+    if (y + size.height > view.height - EDGE) y = a.top - GAP - size.height;
+  } else {
+    x = menu.x;
+    y = menu.y;
+    if (y + size.height > view.height - EDGE) y = menu.y - size.height;
+  }
+  x = Math.max(EDGE, Math.min(x, view.width - size.width - EDGE));
+  y = Math.max(EDGE, Math.min(y, view.height - size.height - EDGE));
+  return { x, y };
+}
+
+/**
+ * Open a menu at a mouse event (pointer) or aligned to an element (options
+ * button or keyboard). Items whose `when` says no are left out.
+ */
 export function openContextMenu(
   label: string,
   items: MenuItem[],
   at: { clientX: number; clientY: number } | HTMLElement,
 ) {
-  let x: number;
-  let y: number;
-  let returnFocus: HTMLElement | null = null;
+  const shown = items.filter((i) => !i.when || i.when());
   if (at instanceof HTMLElement) {
     const r = at.getBoundingClientRect();
-    x = r.left + Math.min(r.width, 48);
-    y = r.bottom;
-    returnFocus = at;
+    const anchor = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    useUi.getState().openMenu({ label, items: shown, x: r.left, y: r.bottom, anchor, returnFocus: at });
   } else {
-    x = at.clientX;
-    y = at.clientY;
-    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    useUi.getState().openMenu({ label, items: shown, x: at.clientX, y: at.clientY, returnFocus });
   }
-  useUi.getState().openMenu({ label, items, x, y, returnFocus });
 }

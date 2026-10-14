@@ -29,10 +29,9 @@ export function AlbumCard({ album, subtitle = "artist" }: { album: Album; subtit
       [
         { label: playing ? "Pause" : "Play", onSelect: () => (isContext ? player.toggle() : player.playAlbum(album.id)) },
         { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
-        { label: "Go to artist", separator: true, onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
+        { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
         {
           label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-          separator: true,
           onSelect: () =>
             usePins.getState().toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
         },
@@ -74,7 +73,6 @@ export function ArtistCard({ artist }: { artist: Artist }) {
             { label: playing ? "Pause" : "Play", onSelect: () => (isContext ? player.toggle() : player.playArtist(artist.id)) },
             {
               label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-              separator: true,
               onSelect: () => usePins.getState().toggle({ kind: "artist", id: artist.id, title: artist.title, subtitle: "Artist", thumb: artist.thumb }),
             },
           ],
@@ -106,7 +104,6 @@ export function PlaylistCard({ playlist }: { playlist: Playlist }) {
             { label: "Add to queue", onSelect: () => player.queuePlaylist(playlist.id) },
             {
               label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-              separator: true,
               onSelect: () =>
                 usePins.getState().toggle({
                   kind: "playlist",

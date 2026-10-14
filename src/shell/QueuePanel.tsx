@@ -52,7 +52,7 @@ function QueueRow({
       onPlay={() => (current ? player.toggle() : player.queueJump(item.itemId))}
       onRemove={remove}
       menuItems={trackMenuItems(item.track, {
-        after: remove ? [{ label: "Remove from queue", separator: true, onSelect: remove }] : [],
+        afterQueue: remove ? [{ label: "Remove from queue", onSelect: remove }] : [],
       })}
       draggable={!!reorder}
       dropEdge={edge}
