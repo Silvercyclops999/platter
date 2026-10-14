@@ -224,3 +224,11 @@ larger (about 23 KB), so the server default is already below that.
 `format=webp&quality=82` returns `image/webp` at about 11 KB, and `format=png`
 returns PNG at about 131 KB. Decoded size in the WebView is the same whatever
 the format, so the app keeps the default JPEG.
+
+### 2026-10-13: track ratingCount
+
+Track items from `/library/sections/{id}/all?type=10` can carry an integer
+`ratingCount`, the global listener count Plex gets from Last.fm. About 44% of
+tracks had one; unreleased tracks never do. The app stores it per track and
+ranks an artist's popular songs by it. Track artists other than the album
+artist come in `originalTitle`, as one string such as `A, B` or `A feat. B`.

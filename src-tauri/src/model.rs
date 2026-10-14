@@ -84,6 +84,10 @@ pub struct Track {
     pub user_rating: Option<f32>,
     pub view_count: u32,
     pub last_viewed_at: Option<i64>,
+    /// Global listener count Plex attaches to a track (Plex ratingCount).
+    /// Missing on unreleased and rare songs. Ranks an artist's popular songs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

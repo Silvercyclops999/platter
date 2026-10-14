@@ -20,6 +20,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::{AppError, AppResult};
 use crate::model::{Album, Artist, Playlist, ReleaseSection, Track};
 
+use super::credits;
 use super::release::{SECTION_ORDER, section_key};
 use super::store::{
     ALBUM_COLS, ARTIST_COLS, PLAYLIST_COLS, TRACK_COLS, row_album, row_artist, row_playlist, row_track,
@@ -183,14 +184,7 @@ pub fn artist_page(c: &Connection, id: &str) -> AppResult<ArtistPage> {
         .query_row(&format!("SELECT {ARTIST_COLS} FROM artists ar WHERE ar.id = ?1"), [id], row_artist)
         .optional()?
         .ok_or_else(|| AppError::NotFound(format!("artist {id}")))?;
-    let popular = {
-        let mut st = c.prepare_cached(&format!(
-            "SELECT {TRACK_COLS} FROM tracks t WHERE t.artist_id = ?1 AND t.view_count > 0
-             ORDER BY t.view_count DESC, t.last_viewed_at DESC LIMIT ?2"
-        ))?;
-        st.query_map(params![id, POPULAR_N as i64], row_track)?
-            .collect::<Result<Vec<_>, _>>()?
-    };
+    let popular = popular_tracks(c, id, &artist.title)?;
     let all = {
         let mut st = c.prepare_cached(&format!(
             "SELECT {ALBUM_COLS} FROM albums al WHERE al.artist_id = ?1
@@ -206,6 +200,72 @@ pub fn artist_page(c: &Connection, id: &str) -> AppResult<ArtistPage> {
         })
         .collect();
     Ok(ArtistPage { artist, popular, sections })
+}
+
+/// Two copies of one song: same title (any case) and length within this.
+const SAME_SONG_MS: u64 = 2_000;
+
+/// An artist's popular songs: their own tracks plus tracks that credit them
+/// in the track artist line. Songs with a global listener count come first,
+/// most listened first; the rest follow by your own plays, then most recent
+/// play. Repeat copies of a song (same title, about the same length) show
+/// once, keeping the better ranked one.
+fn popular_tracks(c: &Connection, id: &str, title: &str) -> AppResult<Vec<Track>> {
+    let mut st = c.prepare_cached(&format!("SELECT {TRACK_COLS} FROM tracks t WHERE t.artist_id = ?1 ORDER BY t.pk"))?;
+    let mut cands = st.query_map([id], row_track)?.collect::<Result<Vec<_>, _>>()?;
+
+    // Other artists' tracks whose artist line mentions the name (the search
+    // index finds them without a table scan), kept only when the line credits
+    // the artist as a whole name.
+    if title.chars().any(char::is_alphanumeric) {
+        let phrase = format!("track_artist : \"{}\"", title.replace('"', "\"\""));
+        let mut st = c.prepare_cached(&format!(
+            "SELECT {TRACK_COLS} FROM tracks_fts JOIN tracks t ON t.pk = tracks_fts.rowid
+             WHERE tracks_fts MATCH ?1 AND t.artist_id <> ?2 ORDER BY t.pk"
+        ))?;
+        let mentioned = st.query_map(params![phrase, id], row_track)?.collect::<Result<Vec<_>, _>>()?;
+        let mut names_in = c.prepare_cached("SELECT title FROM artists WHERE instr(lower(?1), lower(title)) > 0")?;
+        let me = title.to_lowercase();
+        for t in mentioned {
+            let line = t.track_artist.as_deref().unwrap_or_default();
+            let known: Vec<String> = names_in
+                .query_map([line], |r| r.get::<_, String>(0))?
+                .map(|n| n.map(|n| n.to_lowercase()))
+                .collect::<Result<_, _>>()?;
+            let credited = credits::split_credits(line, |k| k == me || known.iter().any(|n| n == k))
+                .iter()
+                .any(|n| n.to_lowercase() == me);
+            if credited {
+                cands.push(t);
+            }
+        }
+    }
+
+    // Stable sort keeps library order for full ties.
+    cands.sort_by(|a, b| {
+        b.rating_count
+            .is_some()
+            .cmp(&a.rating_count.is_some())
+            .then(b.rating_count.cmp(&a.rating_count))
+            .then(b.view_count.cmp(&a.view_count))
+            .then(b.last_viewed_at.cmp(&a.last_viewed_at))
+    });
+
+    let mut out: Vec<Track> = Vec::with_capacity(POPULAR_N);
+    for t in cands {
+        let dupe = out.iter().any(|o| {
+            o.id == t.id
+                || (o.title.to_lowercase() == t.title.to_lowercase()
+                    && o.duration_ms.abs_diff(t.duration_ms) <= SAME_SONG_MS)
+        });
+        if !dupe {
+            out.push(t);
+            if out.len() == POPULAR_N {
+                break;
+            }
+        }
+    }
+    Ok(out)
 }
 
 pub fn album_page(c: &Connection, id: &str) -> AppResult<AlbumPage> {

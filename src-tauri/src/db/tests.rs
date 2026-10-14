@@ -376,6 +376,139 @@ async fn artist_page_groups_release_types_in_fixed_order() {
     assert!(t.db.read(|c| queries::artist_page(c, "nope")).unwrap_err().kind() == "notFound");
 }
 
+/// Track spec for the popular fixtures: (id, title, rating count, plays,
+/// last played, track artist line, length in seconds).
+type Pop<'a> = (&'a str, &'a str, Option<u32>, u32, Option<i64>, Option<&'a str>, u64);
+
+fn popular_library(own: &[Pop], others: &[(&str, &[Pop])]) -> FakeLibrary {
+    let mut lib = FakeLibrary { sections: vec![fake::section("1", "u")], ..Default::default() };
+    let mut artists = vec![fake::artist("a1", "Odessa Wren")];
+    let add = |lib: &mut FakeLibrary, ar: &crate::model::Artist, album_id: &str, specs: &[Pop]| {
+        let mut al = fake::album(album_id, &format!("{} LP", ar.title), ar, 2020, Some("Album"), &[]);
+        al.track_count = specs.len() as u32;
+        for (n, &(id, title, count, plays, last, line, secs)) in specs.iter().enumerate() {
+            let mut tr = fake::track(id, title, &al, 1, n as u32 + 1);
+            tr.rating_count = count;
+            tr.view_count = plays;
+            tr.last_viewed_at = last;
+            tr.track_artist = line.map(String::from);
+            tr.duration_ms = secs * 1000;
+            lib.tracks.push(tr);
+        }
+        lib.albums.push(al);
+    };
+    let me = artists[0].clone();
+    add(&mut lib, &me, "al1", own);
+    for (i, (name, specs)) in others.iter().enumerate() {
+        let ar = fake::artist(&format!("a{}", i + 2), name);
+        add(&mut lib, &ar, &format!("al{}", i + 2), specs);
+        artists.push(ar);
+    }
+    lib.artists = artists;
+    lib
+}
+
+async fn popular_of(lib: FakeLibrary, artist: &str) -> Vec<(String, Option<u32>)> {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(lib)), false).await;
+    let page = t.db.read(|c| queries::artist_page(c, artist)).unwrap();
+    page.popular.into_iter().map(|p| (p.id, p.rating_count)).collect()
+}
+
+fn ids(v: &[(String, Option<u32>)]) -> Vec<&str> {
+    v.iter().map(|(id, _)| id.as_str()).collect()
+}
+
+#[tokio::test]
+async fn popular_ranks_by_listener_count_then_own_plays() {
+    let own: Vec<Pop> = vec![
+        ("t1", "Low Count", Some(1_000), 50, Some(10), None, 200),
+        ("t2", "Big Hit", Some(900_000), 0, None, None, 210),
+        ("t3", "Played A Lot", None, 40, Some(5), None, 220),
+        ("t4", "Mid", Some(50_000), 3, None, None, 230),
+        ("t5", "Played Lately", None, 40, Some(99), None, 240),
+        ("t6", "Never Played", None, 0, None, None, 250),
+    ];
+    let got = popular_of(popular_library(&own, &[]), "a1").await;
+    assert_eq!(ids(&got), ["t2", "t4", "t1", "t5", "t3", "t6"]);
+    assert_eq!(got[0].1, Some(900_000), "the count reaches the page");
+}
+
+#[tokio::test]
+async fn popular_includes_whole_name_credits_on_other_artists_tracks() {
+    let own: Vec<Pop> = vec![("t1", "Own Song", Some(10), 0, None, None, 200)];
+    let moth: Vec<Pop> = vec![
+        ("m1", "Feature One", Some(500), 0, None, Some("Moth & Meridian feat. Odessa Wren"), 200),
+        ("m2", "Not Her", Some(900), 0, None, Some("Moth & Meridian, Odessa Wrenfield"), 200),
+        ("m3", "Bracketed", None, 7, None, Some("Moth & Meridian (FT. odessa wren)"), 200),
+        ("m4", "No Credit", Some(999), 0, None, None, 200),
+    ];
+    let salt: Vec<Pop> = vec![("s1", "Duet", Some(20), 0, None, Some("Saltglass & Odessa Wren"), 200)];
+    let lib = popular_library(&own, &[("Moth & Meridian", &moth), ("Saltglass", &salt)]);
+    let got = popular_of(lib.clone(), "a1").await;
+    assert_eq!(ids(&got), ["m1", "s1", "t1", "m3"]);
+
+    // A name inside a longer known name is not a credit: "Wren" is its own
+    // artist, but "Odessa Wren" lines don't credit it.
+    let mut lib = lib;
+    lib.artists.push(fake::artist("a9", "Wren"));
+    let got = popular_of(lib, "a9").await;
+    assert!(got.is_empty(), "{got:?}");
+
+    // A name with "&" in it is found whole on someone else's track.
+    let salt2: Vec<Pop> = vec![("s2", "Trio", Some(5), 0, None, Some("Saltglass, Moth & Meridian"), 200)];
+    let lib = popular_library(&[], &[("Moth & Meridian", &moth), ("Saltglass", &salt2)]);
+    let got = popular_of(lib, "a2").await;
+    assert_eq!(ids(&got), ["m4", "m2", "m1", "s2", "m3"]);
+}
+
+#[tokio::test]
+async fn popular_collapses_copies_of_the_same_song() {
+    let own: Vec<Pop> = vec![
+        ("t1", "Anthem", Some(100), 0, None, None, 200),
+        ("t2", "ANTHEM", Some(5_000), 0, None, None, 201),
+        ("t3", "Anthem", None, 90, None, None, 201),
+        ("t4", "Anthem", Some(50), 0, None, None, 260),
+        ("t5", "Other", None, 1, None, None, 200),
+    ];
+    let comp: Vec<Pop> = vec![("c1", "anthem", Some(9_000), 0, None, Some("Various, Odessa Wren"), 202)];
+    let got = popular_of(popular_library(&own, &[("Various", &comp)]), "a1").await;
+    // c1 beats t2 (higher count, within 2 s); t4 is a different length.
+    assert_eq!(ids(&got), ["c1", "t4", "t5"]);
+}
+
+#[tokio::test]
+async fn popular_fills_to_ten_and_handles_small_catalogs() {
+    let names: Vec<String> = (0..14).map(|i| format!("Song {i}")).collect();
+    let tids: Vec<String> = (0..14).map(|i| format!("t{i}")).collect();
+    let own: Vec<Pop> = (0..14)
+        .map(|i| (tids[i].as_str(), names[i].as_str(), (i % 3 == 0).then_some(i as u32 * 10), 0, None, None, 200))
+        .collect();
+    let got = popular_of(popular_library(&own, &[]), "a1").await;
+    assert_eq!(got.len(), 10, "unplayed songs fill the list");
+    assert_eq!(ids(&got)[..5], ["t12", "t9", "t6", "t3", "t0"]);
+
+    let got = popular_of(popular_library(&own[..3], &[]), "a1").await;
+    assert_eq!(ids(&got), ["t0", "t1", "t2"]);
+}
+
+#[tokio::test]
+async fn full_sync_stores_rating_count_and_keeps_it_when_missing_later() {
+    let t = open();
+    let mut lib = sectioned_library();
+    lib.tracks[0].rating_count = Some(77);
+    let id = lib.tracks[0].id.clone();
+    sync(&t.db, &Arc::new(FakeSource::new(lib.clone())), true).await;
+    let stored = |db: &DbHandle| -> Option<u32> {
+        db.read(|c| Ok(c.query_row("SELECT rating_count FROM tracks WHERE id = ?1", [&id], |r| r.get(0))?)).unwrap()
+    };
+    assert_eq!(stored(&t.db), Some(77));
+    // An answer without the field (another endpoint) doesn't wipe it.
+    lib.tracks[0].rating_count = None;
+    sync(&t.db, &Arc::new(FakeSource::new(lib)), true).await;
+    assert_eq!(stored(&t.db), Some(77));
+}
+
 #[tokio::test]
 async fn album_page_orders_tracks_and_totals_duration() {
     let t = open();

@@ -257,6 +257,9 @@ pub struct PlexMetadata {
     pub last_viewed_at: Option<i64>,
     #[serde(default, deserialize_with = "lenient::opt_f64")]
     pub user_rating: Option<f64>,
+    /// Global listener count on tracks (from Last.fm), when Plex has one.
+    #[serde(default, deserialize_with = "lenient::opt_i64")]
+    pub rating_count: Option<i64>,
     #[serde(default, deserialize_with = "lenient::opt_i64")]
     pub leaf_count: Option<i64>,
     #[serde(default, deserialize_with = "lenient::opt_i64")]
@@ -639,6 +642,7 @@ impl PlexMetadata {
             user_rating: self.user_rating.map(|r| r as f32),
             view_count: u32_of(self.view_count),
             last_viewed_at: self.last_viewed_at,
+            rating_count: self.rating_count.and_then(|n| u32::try_from(n).ok()),
         }
     }
 
@@ -1346,13 +1350,24 @@ mod tests {
     }
 
     #[test]
+    fn track_rating_count_is_optional_and_lenient() {
+        let parse = |v: serde_json::Value| serde_json::from_value::<PlexMetadata>(v).unwrap().to_track();
+        let none = parse(serde_json::json!({ "ratingKey": "1", "type": "track", "title": "Demo" }));
+        assert_eq!(none.rating_count, None);
+        let text = parse(serde_json::json!({ "ratingKey": "2", "type": "track", "title": "Hit", "ratingCount": "4521" }));
+        assert_eq!(text.rating_count, Some(4521));
+        let neg = parse(serde_json::json!({ "ratingKey": "3", "type": "track", "title": "Odd", "ratingCount": -1 }));
+        assert_eq!(neg.rating_count, None);
+    }
+
+    #[test]
     fn track_mapping_with_streams() {
         let m: PlexMetadata = serde_json::from_value(serde_json::json!({
             "ratingKey": "500", "type": "track", "title": "Song",
             "parentRatingKey": "100", "parentTitle": "LP", "parentIndex": 2, "index": 5,
             "grandparentRatingKey": "10", "grandparentTitle": "Artist",
             "originalTitle": "Artist, Guest", "duration": 200000, "parentThumb": "/pt",
-            "userRating": 10.0, "viewCount": 1,
+            "userRating": 10.0, "viewCount": 1, "ratingCount": 1834562,
             "Media": [{"bitrate": 900, "audioCodec": "flac", "container": "flac", "duration": 200000,
                 "Part": [{"id": 1, "key": "/library/parts/1/2/file.flac", "Stream": [
                     {"streamType": 2, "codec": "flac", "bitDepth": 24, "samplingRate": 96000,
@@ -1370,6 +1385,7 @@ mod tests {
         assert_eq!(t.codec.as_deref(), Some("flac"));
         assert_eq!(t.thumb.as_deref(), Some("/pt"));
         assert_eq!(t.user_rating, Some(10.0));
+        assert_eq!(t.rating_count, Some(1_834_562));
         let s = m.audio_stream().unwrap();
         assert_eq!(s.gain, Some(-7.5));
         assert_eq!(s.album_gain, Some(-6.1));

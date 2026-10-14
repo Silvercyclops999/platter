@@ -19,6 +19,7 @@
 
 pub mod artcache;
 pub mod commands;
+pub mod credits;
 pub mod listens;
 pub mod queries;
 pub mod release;

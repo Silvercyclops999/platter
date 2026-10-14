@@ -282,6 +282,12 @@ CREATE TRIGGER playlists_au AFTER UPDATE OF title ON playlists
     INSERT INTO playlists_fts (rowid, title) VALUES (new.pk, new.title);
 END;
 "#,
+    // v2: global listener count per track (Plex `ratingCount`). Existing rows
+    // have none yet, so the next sync runs as a full pass to fill it.
+    r#"
+ALTER TABLE tracks ADD COLUMN rating_count INTEGER;
+UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
 ];
 
 #[cfg(test)]
@@ -308,5 +314,26 @@ mod tests {
         assert_eq!(n, 1);
         let r = open_reader(&path).unwrap();
         assert!(r.execute("DELETE FROM artists", []).is_err(), "reader is read-only");
+    }
+
+    #[test]
+    fn v2_adds_rating_count_and_makes_the_next_sync_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        c.execute_batch(MIGRATIONS[0]).unwrap();
+        c.pragma_update(None, "user_version", 1).unwrap();
+        c.execute(
+            "INSERT INTO sync_state (id, section_id, section_uuid, last_sync_at, last_full_sync_at)
+             VALUES (1, '1', 'u', 100, 100)",
+            [],
+        )
+        .unwrap();
+        migrate(&mut c).unwrap();
+        let full: Option<i64> = c.query_row("SELECT last_full_sync_at FROM sync_state", [], |r| r.get(0)).unwrap();
+        assert_eq!(full, None);
+        let n: i64 = c
+            .query_row("SELECT count(*) FROM pragma_table_info('tracks') WHERE name = 'rating_count'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
     }
 }

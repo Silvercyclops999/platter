@@ -352,6 +352,7 @@ mod tests {
             user_rating: None,
             view_count: 0,
             last_viewed_at: None,
+            rating_count: None,
         }
     }
 
