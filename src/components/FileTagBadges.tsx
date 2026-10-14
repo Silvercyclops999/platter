@@ -70,7 +70,7 @@ export function VersionBadge({ version }: { version: string | null | undefined }
   ) : null;
 }
 
-/** Archive quality next to the format badge. */
+/** Source quality, after the version badge in the title line (the format column is too narrow for both). */
 export function ArchiveQualityBadge({ track }: { track: Track }) {
   const b = useTrackBadges(track.id);
   const label = archiveQualityLabel(b.quality, track);

@@ -112,7 +112,7 @@ describe("badges", () => {
     expect(within(rowOf(tracks[tracks.length - 1].id)).getByText("Snippet")).toBeInTheDocument();
   });
 
-  it("lists with a quality column show the source quality when it differs from the file", () => {
+  it("rows show the source quality when it differs from the file", () => {
     const build = mock.fx.albums.find((a) => a.format === null)!;
     const tracks = mock.fx.tracksByAlbum.get(build.id)!;
     render(
