@@ -235,6 +235,20 @@ impl Queue {
         self.shuffled.iter().cloned().collect()
     }
 
+    /// Queues saved before shuffle was per context only had one flag. If a
+    /// loaded queue is shuffled, remember that for its context so the page
+    /// toggle and the player agree.
+    pub fn adopt_legacy_shuffle(&mut self) {
+        if !self.shuffle {
+            return;
+        }
+        if let Some(id) = self.context.as_ref().and_then(|c| c.id.clone()) {
+            if !self.shuffle_pref(&id) {
+                self.store_shuffle_pref(&id, true);
+            }
+        }
+    }
+
     fn store_shuffle_pref(&mut self, id: &str, on: bool) {
         self.shuffled.retain(|s| s != id);
         if on {
@@ -1338,6 +1352,17 @@ mod tests {
         assert!(!q.shuffle());
         assert!(!q.shuffle_pref("y"));
         assert_eq!(q.shuffled_contexts(), vec!["x".to_string()]);
+    }
+
+    #[test]
+    fn a_shuffled_queue_from_before_per_context_shuffle_keeps_it() {
+        let mut q = Queue::with_seed(3);
+        q.set_context(ctx(), tracks(3), Some(0), Some(true));
+        let id = ctx().id.unwrap();
+        // An old queue file: shuffled, but no per-context record.
+        q.shuffled.clear();
+        q.adopt_legacy_shuffle();
+        assert_eq!(q.shuffled_contexts(), vec![id]);
     }
 
     #[test]

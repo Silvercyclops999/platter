@@ -168,6 +168,7 @@ impl PlayerHandle {
         let mut muted = false;
         if let Some(p) = config.persist_path.as_deref().and_then(persist::load) {
             queue = p.queue;
+            queue.adopt_legacy_shuffle();
             if let Some(s) = config.seed {
                 queue.reseed(s);
             }
