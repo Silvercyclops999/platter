@@ -28,6 +28,10 @@ import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 
+/** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
+export const SEEK_KEY_STEP = 5_000;
+export const SEEK_PAGE_STEP = 25_000;
+
 function SeekBar() {
   const positionMs = usePlayer((s) => s.positionMs);
   const durationMs = usePlayer((s) => s.durationMs);
@@ -43,13 +47,16 @@ function SeekBar() {
         label="Seek"
         value={Math.min(shown, durationMs)}
         max={Math.max(durationMs, 1)}
-        step={5000}
+        step={SEEK_KEY_STEP}
+        pageStep={SEEK_PAGE_STEP}
         disabled={!hasTrack}
         valueText={(v) => `${formatDuration(v)} of ${formatDuration(durationMs)}`}
-        hoverText={(v) => formatDuration(v)}
+        // Pressing seeks at once; while held the time stays at the pointer,
+        // and letting go commits where it ended.
+        commitOnPress
         onChange={(v) => setDrag(v)}
-        onCommit={(v) => {
-          setDrag(null);
+        onCommit={(v, cause) => {
+          if (cause !== "press") setDrag(null);
           player.seek(Math.round(v));
         }}
       />
@@ -60,14 +67,33 @@ function SeekBar() {
   );
 }
 
-const WHEEL_STEP = 0.05;
+/** Volume per mouse wheel notch, and per slider key: 10 points. */
+export const WHEEL_STEP = 0.1;
+export const VOLUME_SLIDER_STEP = 0.1;
+/** Pixels of wheel delta that make one notch (a mouse notch is about 100). */
+const WHEEL_NOTCH_PX = 100;
+
+/**
+ * Volume change for one wheel event: a mouse notch moves WHEEL_STEP, smooth
+ * (trackpad) deltas move in proportion, capped at WHEEL_STEP per event.
+ * Wheel up is louder.
+ */
+export function wheelVolumeDelta(e: { deltaX: number; deltaY: number; deltaMode: number }): number {
+  const d = e.deltaY || -e.deltaX;
+  if (!d) return 0;
+  // Line or page mode (some mice / platforms): treat each event as a notch.
+  const size = e.deltaMode === 0 ? Math.min(1, Math.abs(d) / WHEEL_NOTCH_PX) * WHEEL_STEP : WHEEL_STEP;
+  return d < 0 ? size : -size;
+}
 
 function Volume() {
   const volume = usePlayer((s) => s.state?.volume ?? 0.7);
   const muted = usePlayer((s) => s.state?.muted ?? false);
   const [local, setLocal] = useState<number | null>(null);
   const v = local ?? (muted ? 0 : volume);
-  const Icon = muted || v === 0 ? VolumeX : v < 0.5 ? Volume1 : Volume2;
+  // A level of 0 counts as muted, so the button always offers to unmute it.
+  const silent = muted || v === 0;
+  const Icon = silent ? VolumeX : v < 0.5 ? Volume1 : Volume2;
   const box = useRef<HTMLDivElement>(null);
   // Mouse wheel over the volume control nudges it (native listener so the
   // page doesn't scroll instead).
@@ -75,10 +101,10 @@ function Volume() {
     const el = box.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      const d = e.deltaY || -e.deltaX;
-      if (!d) return;
+      const delta = wheelVolumeDelta(e);
+      if (!delta) return;
       e.preventDefault();
-      player.nudgeVolume(d < 0 ? WHEEL_STEP : -WHEEL_STEP);
+      player.nudgeVolume(delta);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -86,26 +112,26 @@ function Volume() {
   return (
     <div className="volume" ref={box}>
       <IconButton
-        label={muted ? "Unmute" : "Mute"}
-        tooltip={muted ? "Unmute" : "Mute"}
+        label={silent ? "Unmute" : "Mute"}
+        tooltip={silent ? "Unmute" : "Mute"}
         icon={<Icon size={18} />}
-        onClick={() => player.setMuted(!muted)}
+        onClick={() => player.toggleMute()}
       />
       <Slider
         label="Volume"
         className="volume__slider"
         value={v}
         max={1}
-        step={0.05}
+        step={VOLUME_SLIDER_STEP}
+        pageStep={VOLUME_SLIDER_STEP}
         valueText={(x) => `${Math.round(x * 100)}%`}
         onChange={(x) => {
           setLocal(x);
-          player.setVolume(x);
+          player.volumeInput(x);
         }}
         onCommit={(x) => {
           setLocal(null);
-          player.setVolume(x);
-          if (x > 0 && muted) player.setMuted(false);
+          player.volumeCommit(x);
         }}
       />
     </div>

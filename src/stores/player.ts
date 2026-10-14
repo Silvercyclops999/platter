@@ -46,11 +46,30 @@ const report = (e: unknown) => {
   toast.error(msg);
 };
 
+/**
+ * Volume and mute rules (spec 04, player bar):
+ *  - The core keeps `volume` (the remembered level) and `muted` apart, so
+ *    unmute restores the exact level from before muting.
+ *  - A level of 0 always counts as muted. Dragging or stepping to 0 mutes and
+ *    keeps the level from before the drag as the one unmute restores.
+ *  - Changing the level while muted unmutes at the new level.
+ *  - Wheel/keys up while muted unmute counting up from 0.
+ */
+
+/** Last requested level (0 = muted), so fast wheel ticks build on it. */
 let pendingVolume: { value: number; at: number } | null = null;
-/** Forget in-flight volume nudges (tests, or after a slider drag). */
+/** Level from before the current slider drag, and whether it unmuted yet. */
+let drag: { from: number; unmuted: boolean } | null = null;
+/** Level unmute uses when there's nothing better to restore. */
+export const UNMUTE_FALLBACK = 0.5;
+
+/** Forget in-flight volume nudges and drags (tests, or after a slider drag). */
 export function resetVolumeNudge() {
   pendingVolume = null;
+  drag = null;
 }
+
+const round = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 10_000) / 10_000;
 
 /** Player commands with error toasts. */
 export const player = {
@@ -60,6 +79,13 @@ export const player = {
   seek: (ms: number) => {
     usePlayer.getState().setPosition(ms, usePlayer.getState().durationMs);
     return backend.playSeek(ms).catch(report);
+  },
+  /** Seek relative to the current position, clamped to the track. */
+  seekBy: (deltaMs: number): Promise<unknown> => {
+    const { state, positionMs, durationMs } = usePlayer.getState();
+    if (!state?.track) return Promise.resolve();
+    const to = Math.round(Math.min(Math.max(0, positionMs + deltaMs), durationMs));
+    return player.seek(to);
   },
   setVolume: (v: number) => backend.setVolume(v).catch(report),
   setMuted: (m: boolean) => backend.setMuted(m).catch(report),
@@ -84,19 +110,88 @@ export const player = {
       .playlistPage(id)
       .then((p) => backend.queueAdd(p.tracks.map((t) => t.id), "end"))
       .catch(report),
-  /** Nudge the volume (keyboard, mouse wheel). Unmutes when raising it. */
-  nudgeVolume: (delta: number) => {
+  /**
+   * Nudge the volume (keyboard, mouse wheel). Raising it while muted unmutes
+   * counting up from 0; lowering it to 0 mutes and keeps the last level.
+   */
+  nudgeVolume: async (delta: number) => {
     const s = usePlayer.getState().state;
-    if (!s) return Promise.resolve();
-    // While muted, raising unmutes back to the remembered level; lowering does nothing.
-    if (s.muted) return delta > 0 ? backend.setMuted(false).catch(report) : Promise.resolve();
+    if (!s) return;
     // Fast wheel ticks / key repeats build on the last requested value, not
     // the (slightly stale) one the core has echoed back.
     const now = Date.now();
-    const base = pendingVolume && now - pendingVolume.at < 500 ? pendingVolume.value : s.volume;
-    const v = Math.round(Math.min(1, Math.max(0, base + delta)) * 100) / 100;
+    const fresh = pendingVolume && now - pendingVolume.at < 500;
+    const base = fresh ? pendingVolume!.value : s.muted || s.volume <= 0 ? 0 : s.volume;
+    const v = round(base + delta);
     pendingVolume = { value: v, at: now };
-    return v === base ? Promise.resolve() : backend.setVolume(v).catch(report);
+    if (v === base) return;
+    try {
+      if (v === 0) {
+        // Stepped down to 0: mute; the core keeps `base` as the level to restore.
+        await backend.setMuted(true);
+      } else if (base === 0) {
+        // Muted: set the new low level first so unmuting doesn't jump to the old one.
+        await backend.setVolume(v);
+        await backend.setMuted(false);
+      } else {
+        await backend.setVolume(v);
+      }
+    } catch (e) {
+      report(e);
+    }
+  },
+  /** Speaker button: mute, or unmute to the remembered level. */
+  toggleMute: async () => {
+    const s = usePlayer.getState().state;
+    if (!s) return;
+    pendingVolume = null;
+    try {
+      if (s.muted || s.volume <= 0) {
+        if (s.volume <= 0) await backend.setVolume(UNMUTE_FALLBACK);
+        await backend.setMuted(false);
+      } else {
+        await backend.setMuted(true);
+      }
+    } catch (e) {
+      report(e);
+    }
+  },
+  /** Volume slider moved (press, drag or key). Unmutes as soon as the level is above 0. */
+  volumeInput: (v: number) => {
+    const s = usePlayer.getState().state;
+    if (!s) return Promise.resolve();
+    pendingVolume = null;
+    if (!drag) drag = { from: s.volume, unmuted: false };
+    if (v <= 0) return backend.setVolume(0).catch(report);
+    const unmute = s.muted && !drag.unmuted;
+    drag.unmuted ||= unmute;
+    return backend
+      .setVolume(v)
+      .then(() => (unmute ? backend.setMuted(false) : undefined))
+      .catch(report);
+  },
+  /**
+   * Volume slider let go (or a key step). Ending at 0 mutes and remembers the
+   * level from before the drag; anything else unmutes at the new level.
+   */
+  volumeCommit: async (v: number) => {
+    const s = usePlayer.getState().state;
+    const from = drag?.from ?? s?.volume ?? UNMUTE_FALLBACK;
+    drag = null;
+    pendingVolume = null;
+    if (!s) return;
+    try {
+      if (v <= 0) {
+        // Mute first so restoring the old level is never audible.
+        await backend.setMuted(true);
+        await backend.setVolume(from > 0 ? from : UNMUTE_FALLBACK);
+      } else {
+        await backend.setVolume(v);
+        if (s.muted) await backend.setMuted(false);
+      }
+    } catch (e) {
+      report(e);
+    }
   },
   toggleShuffle: () => backend.setShuffle(!(usePlayer.getState().state?.shuffle ?? false)).catch(report),
   cycleRepeatNow: () => {

@@ -234,16 +234,44 @@ describe("playback shortcuts", () => {
     input.remove();
   });
 
-  it("Ctrl+Up / Ctrl+Down change the volume in steps", async () => {
+  it("Ctrl+Up / Ctrl+Down change the volume in 1/16 steps", async () => {
     const spy = vi.spyOn(backend, "setVolume");
     render(<ShortcutHost />);
     fireEvent.keyDown(window, { key: "ArrowUp", ctrlKey: true });
-    expect(spy).toHaveBeenLastCalledWith(0.6);
+    expect(spy).toHaveBeenLastCalledWith(0.5625);
     fireEvent.keyDown(window, { key: "ArrowUp", ctrlKey: true });
-    expect(spy).toHaveBeenLastCalledWith(0.7); // builds on the last request
+    expect(spy).toHaveBeenLastCalledWith(0.625); // builds on the last request
     resetVolumeNudge();
     fireEvent.keyDown(window, { key: "ArrowDown", ctrlKey: true });
-    expect(spy).toHaveBeenLastCalledWith(0.4);
+    expect(spy).toHaveBeenLastCalledWith(0.4375);
+    // Ctrl+Shift+Up does nothing.
+    spy.mockClear();
+    fireEvent.keyDown(window, { key: "ArrowUp", ctrlKey: true, shiftKey: true });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("Shift+Left / Shift+Right seek 5 s, clamped, but not while typing", async () => {
+    const spy = vi.spyOn(backend, "playSeek");
+    act(() => usePlayer.getState().setPosition(60_000, 200_000));
+    render(
+      <>
+        <ShortcutHost />
+        <input aria-label="field" />
+      </>,
+    );
+    expect(fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true })).toBe(false);
+    expect(spy).toHaveBeenLastCalledWith(65_000);
+    fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
+    expect(spy).toHaveBeenLastCalledWith(60_000);
+    act(() => usePlayer.getState().setPosition(3_000, 200_000));
+    fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
+    expect(spy).toHaveBeenLastCalledWith(0);
+    act(() => usePlayer.getState().setPosition(198_000, 200_000));
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+    expect(spy).toHaveBeenLastCalledWith(200_000);
+    spy.mockClear();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "field" }), { key: "ArrowRight", shiftKey: true });
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("Space plays/pauses even with a track row focused, but not while typing", () => {
@@ -272,21 +300,22 @@ describe("player bar", () => {
     render(<PlayerBar />);
     const vol = screen.getByRole("slider", { name: "Volume" }).closest(".volume")!;
     expect(fireEvent.wheel(vol, { deltaY: -100 })).toBe(false);
-    expect(spy).toHaveBeenLastCalledWith(0.55);
+    expect(spy).toHaveBeenLastCalledWith(0.6);
     resetVolumeNudge();
     fireEvent.wheel(vol, { deltaY: 100 });
-    expect(spy).toHaveBeenLastCalledWith(0.45);
+    expect(spy).toHaveBeenLastCalledWith(0.4);
   });
 
-  it("raising the volume while muted unmutes back to the remembered level", async () => {
+  it("raising the volume while muted unmutes counting up from 0", async () => {
     await setPlayer({ volume: 0.62, muted: true });
     const mute = vi.spyOn(backend, "setMuted");
     const vol = vi.spyOn(backend, "setVolume");
     render(<PlayerBar />);
     expect(screen.getByRole("slider", { name: "Volume" })).toHaveAttribute("aria-valuenow", "0");
     fireEvent.wheel(screen.getByRole("slider", { name: "Volume" }), { deltaY: -100 });
-    expect(mute).toHaveBeenCalledWith(false);
-    expect(vol).not.toHaveBeenCalled();
+    expect(vol).toHaveBeenCalledWith(0.1);
+    await waitFor(() => expect(mute).toHaveBeenCalledWith(false));
+    expect(vol).not.toHaveBeenCalledWith(0.62);
   });
 
   it("the repeat button cycles off, all, one with the one-glyph", async () => {
@@ -304,15 +333,14 @@ describe("player bar", () => {
 });
 
 describe("slider hover", () => {
-  it("shows the value under the pointer and hides on leave", () => {
-    render(<Slider label="Seek" value={0} max={200_000} hoverText={(v) => `${Math.round(v / 1000)}s`} />);
+  it("shows no time bubble and keeps the thumb at the value, not the pointer", () => {
+    render(<Slider label="Seek" value={20_000} max={200_000} />);
     const s = screen.getByRole("slider", { name: "Seek" });
     const track = s.querySelector(".slider__track") as HTMLElement;
     track.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 4, right: 100, bottom: 4, x: 0, y: 0, toJSON() {} });
-    fireEvent.pointerMove(s, { clientX: 25 });
-    expect(s.querySelector(".slider__hover")).toHaveTextContent("50s");
-    fireEvent.pointerLeave(s);
+    fireEvent.pointerMove(s, { clientX: 75 });
     expect(s.querySelector(".slider__hover")).toBeNull();
+    expect((s.querySelector(".slider__thumb") as HTMLElement).style.left).toBe("10%");
   });
 });
 

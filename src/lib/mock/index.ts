@@ -677,8 +677,8 @@ export class MockBackend implements Backend {
   }
   setVolume(volume: number) {
     return this.act(() => {
+      // Like the core: the level and mute are separate; setting one leaves the other.
       this.volume = Math.max(0, Math.min(1, volume));
-      if (this.volume > 0 && this.muted) this.muted = false;
       this.emitState();
     });
   }

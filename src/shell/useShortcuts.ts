@@ -9,14 +9,17 @@ function isTyping(el: EventTarget | null): boolean {
   return el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
 }
 
-/** Volume change per Ctrl/⌘+↑/↓. */
-export const VOLUME_KEY_STEP = 0.1;
+/** Volume change per Ctrl/⌘+↑/↓: 1/16 of the range. */
+export const VOLUME_KEY_STEP = 1 / 16;
+/** Seek per Shift+←/→. */
+export const SEEK_SHORTCUT_MS = 5_000;
 
 /**
  * Global keyboard + mouse shortcuts:
  *   Ctrl/⌘+K command palette · Ctrl/⌘+L search · Ctrl/⌘+, settings ·
  *   Alt+←/→ back/forward · mouse back/forward buttons ·
- *   Space play/pause · Ctrl/⌘+←/→ prev/next · Ctrl/⌘+↑/↓ volume ·
+ *   Space play/pause · Ctrl/⌘+←/→ prev/next · Shift+←/→ seek 5 s ·
+ *   Ctrl/⌘+↑/↓ volume (1/16 steps) ·
  *   Ctrl/⌘+S shuffle · Ctrl/⌘+R repeat.
  */
 export function useShortcuts() {
@@ -60,7 +63,7 @@ export function useShortcuts() {
         if (!e.repeat) player.cycleRepeatNow();
         return;
       }
-      if (isMod(e) && !e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      if (isMod(e) && !e.shiftKey && !e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
         e.preventDefault();
         player.nudgeVolume(e.key === "ArrowUp" ? VOLUME_KEY_STEP : -VOLUME_KEY_STEP);
         return;
@@ -73,6 +76,11 @@ export function useShortcuts() {
       if (isMod(e) && e.key === "ArrowLeft") {
         e.preventDefault();
         player.previous();
+        return;
+      }
+      if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        player.seekBy(e.key === "ArrowRight" ? SEEK_SHORTCUT_MS : -SEEK_SHORTCUT_MS);
         return;
       }
       if (e.key === " " && !e.repeat) {

@@ -209,10 +209,8 @@
   border-radius: var(--radius-pill);
 }
 .slider__buffer { background: rgba(255, 240, 220, 0.12); }
-.slider__fill {
-  background: var(--color-text-primary);
-  transition: background-color var(--motion-fast) var(--motion-easing);
-}
+/* Hover, focus and drag states switch instantly, with no fade. */
+.slider__fill { background: var(--color-text-primary); }
 .slider__thumb {
   position: absolute;
   top: 50%;
@@ -223,7 +221,6 @@
   background: var(--color-text-primary);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
   opacity: 0;
-  transition: opacity var(--motion-fast) var(--motion-easing);
 }
 .slider:hover .slider__fill,
 .slider:focus-visible .slider__fill,
@@ -232,20 +229,6 @@
 .slider:focus-visible .slider__thumb,
 .slider.is-dragging .slider__thumb { opacity: 1; }
 .slider.is-disabled { cursor: default; opacity: 0.5; }
-.slider__hover {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  transform: translateX(-50%);
-  padding: 2px 6px;
-  border-radius: var(--radius-row);
-  background: var(--color-bg-overlay);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  white-space: nowrap;
-  pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
-}
 .slider.is-disabled .slider__thumb { display: none; }
 
 /* ---------------------------------------------------------------- Context menu */
