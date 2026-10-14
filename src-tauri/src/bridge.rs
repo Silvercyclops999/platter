@@ -15,6 +15,7 @@ use crate::error::AppResult;
 use crate::model::{Album, Artist, Playlist, Track};
 use crate::plex::client::{MetaType, PlexMetadata};
 use crate::plex::PlexState;
+use crate::plex::types::ConnectionKind;
 
 const PAGE: u64 = 500;
 
@@ -226,6 +227,21 @@ impl ArtFetcher for PlexArt {
     }
 }
 
+/// Bitrate cap for a connection, or None to play the original file. Away from
+/// home the default is 320 kbps; the relay is bandwidth-capped by Plex, so it
+/// drops to 128. Files already at or under the cap play untouched.
+pub fn stream_cap_kbps(conn: Option<ConnectionKind>, file_kbps: Option<u32>) -> Option<u32> {
+    let cap = match conn {
+        Some(ConnectionKind::Remote) => 320,
+        Some(ConnectionKind::Relay) => 128,
+        _ => return None,
+    };
+    match file_kbps {
+        Some(b) if b <= cap => None,
+        _ => Some(cap),
+    }
+}
+
 /// Turns a track into an HTTP source on the connected server. The token
 /// travels only in headers.
 pub struct PlexStreams(pub PlexState);
@@ -246,7 +262,13 @@ fn source_of(req: crate::plex::client::StreamRequest, codec: Option<String>) -> 
 #[async_trait]
 impl TrackResolver for PlexStreams {
     async fn stream(&self, track: &Track) -> AppResult<StreamSource> {
-        let req = self.0.client().await?.stream_request(&track.part_key)?;
+        let client = self.0.client().await?;
+        if let Some(kbps) = stream_cap_kbps(client.connection(), track.bitrate) {
+            let session = uuid::Uuid::new_v4().to_string();
+            let req = client.transcode_request(&track.id, kbps, &session)?;
+            return Ok(source_of(req, Some("mp3".into())));
+        }
+        let req = client.stream_request(&track.part_key)?;
         Ok(source_of(req, track.codec.clone()))
     }
 
@@ -331,6 +353,19 @@ mod tests {
             last_viewed_at: None,
             tint: None,
         }
+    }
+
+    #[test]
+    fn stream_quality_follows_the_connection() {
+        use ConnectionKind::*;
+        assert_eq!(stream_cap_kbps(Some(Local), Some(1411)), None);
+        assert_eq!(stream_cap_kbps(None, Some(1411)), None);
+        assert_eq!(stream_cap_kbps(Some(Remote), Some(1411)), Some(320));
+        assert_eq!(stream_cap_kbps(Some(Remote), Some(320)), None);
+        assert_eq!(stream_cap_kbps(Some(Remote), Some(256)), None);
+        assert_eq!(stream_cap_kbps(Some(Remote), None), Some(320));
+        assert_eq!(stream_cap_kbps(Some(Relay), Some(320)), Some(128));
+        assert_eq!(stream_cap_kbps(Some(Relay), Some(96)), None);
     }
 
     #[test]
