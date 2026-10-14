@@ -357,6 +357,7 @@ anything that plays on a real device needs an OK first). Check once:
   music on it with `playMedia`, and follow it with `timeline/poll`. Whether
   they need `timeline/subscribe` pushes (Platter accepts subscribe but only
   answers polls).
+
 ### 2026-10-14: loudness fields
 - Track detail `Media[0].Part[0].Stream[]` with `streamType: 2` carries
   `gain`, `albumGain`, `peak`, `albumPeak`, `loudness` and `lra`, all as
