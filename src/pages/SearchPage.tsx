@@ -43,11 +43,11 @@ function menuFor(h: SearchHit, playing: boolean, toggle: () => void): MenuItem[]
       play,
       { label: "Add to queue", onSelect: () => void player.queueAlbum(a.id) },
       { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: a.artistId }) },
-      shareItem("album", a.id),
+      shareItem("album", a.id, a.thumb),
     ];
   }
-  if (h.kind === "playlist") return [play, { label: "Add to queue", onSelect: () => void player.queuePlaylist(i.id) }, shareItem("playlist", i.id)];
-  if (h.kind === "artist") return [play, shareItem("artist", i.id)];
+  if (h.kind === "playlist") return [play, { label: "Add to queue", onSelect: () => void player.queuePlaylist(i.id) }, shareItem("playlist", i.id, i.thumb)];
+  if (h.kind === "artist") return [play, shareItem("artist", i.id, i.thumb)];
   return [play];
 }
 

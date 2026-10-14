@@ -82,6 +82,8 @@ function loadSidebarArt(): boolean {
 
 export interface MenuItem {
   label: string;
+  /** Leading icon. Left out, it's picked from the label; null means none. */
+  icon?: import("lucide-react").LucideIcon | null;
   onSelect?: () => void;
   disabled?: boolean;
   danger?: boolean;

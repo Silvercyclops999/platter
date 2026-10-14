@@ -47,6 +47,11 @@ export const color = {
   statePressed: "rgba(255, 240, 220, 0.10)",
   stateSelected: "rgba(255, 240, 220, 0.12)",
 
+  // The playing track (titles in lists, the bars marker, the playing card).
+  // A soft warm coral: at least 5:1 on every surface and selected row, and
+  // clearly apart from the ivory accent, success green and warning gold.
+  playing: "#F0957A",
+
   // Semantic
   success: "#4CC38A",
   warning: "#F2B13D",

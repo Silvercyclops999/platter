@@ -12,7 +12,7 @@ import { formatDuration } from "../lib/format";
 import type { AppError, DeepLinkOpen, ShareKind } from "../lib/types";
 import { player, usePlayer } from "./player";
 import { nav } from "./router";
-import { toast, useToasts } from "./toasts";
+import { toast, useToasts, type ToastArt } from "./toasts";
 
 export const LINK_COPIED = "Link copied";
 
@@ -35,9 +35,9 @@ export function copyWhenReady(text: Promise<string>): Promise<void> {
 }
 
 /** Copy a link (known now, or about to be). */
-export function copyLink(text: string | Promise<string>, message = LINK_COPIED): Promise<void> {
+export function copyLink(text: string | Promise<string>, message = LINK_COPIED, art?: ToastArt): Promise<void> {
   return copyWhenReady(Promise.resolve(text)).then(
-    () => void toast.info(message),
+    () => void toast.info(message, art),
     () => void toast.error("Couldn't copy"),
   );
 }
@@ -46,12 +46,12 @@ export function copyLink(text: string | Promise<string>, message = LINK_COPIED):
  * Look up and copy the public link for a released song or album. Without a
  * sure match the toast offers the Platter link instead.
  */
-export function copyPublicLink(kind: ShareKind, id: string, appLink: string): Promise<void> {
+export function copyPublicLink(kind: ShareKind, id: string, appLink: string, art?: ToastArt): Promise<void> {
   const link = backend.sharePublicLink(kind, id);
   const written = copyWhenReady(link);
   return link.then(
     () => written.then(
-      () => void toast.info(LINK_COPIED),
+      () => void toast.info(LINK_COPIED, art),
       () => void toast.error("Couldn't copy"),
     ),
     (e: unknown) => {
@@ -61,7 +61,7 @@ export function copyPublicLink(kind: ShareKind, id: string, appLink: string): Pr
         {
           kind: notFound ? "info" : "error",
           message: errMessage(e, "Couldn't find a link"),
-          action: { label: "Copy Platter link", run: () => void copyLink(appLink) },
+          action: { label: "Copy Platter link", run: () => void copyLink(appLink, LINK_COPIED, art) },
         },
         8000,
       );
@@ -73,7 +73,7 @@ export function copyPublicLink(kind: ShareKind, id: string, appLink: string): Pr
  * "Copy link at 1:23": the Platter link with the start time, after the
  * public link (with the time noted) when the song has one.
  */
-export function copyLinksAt(kind: ShareKind, id: string, atSeconds: number): Promise<void> {
+export function copyLinksAt(kind: ShareKind, id: string, atSeconds: number, art?: ToastArt): Promise<void> {
   const at = formatDuration(atSeconds * 1000);
   let both = false;
   const text = backend.shareInfo(kind, id, atSeconds).then((info) =>
@@ -88,7 +88,7 @@ export function copyLinksAt(kind: ShareKind, id: string, atSeconds: number): Pro
         ),
   );
   return copyWhenReady(text).then(
-    () => void toast.info(both ? "Links copied" : LINK_COPIED),
+    () => void toast.info(both ? "Links copied" : LINK_COPIED, art),
     () => void toast.error("Couldn't copy"),
   );
 }

@@ -252,7 +252,7 @@ export async function dropOnQueue(songs: DragSongs, at: number | "end"): Promise
     tracks.map((t) => t.id),
     at === "end" ? "end" : { index: at },
   );
-  if (at === "end") toast.info(tracks.length === 1 ? "Added to queue" : `Added ${songsText(tracks.length)} to queue`);
+  if (at === "end") toast.info(tracks.length === 1 ? "Added to queue" : `Added ${songsText(tracks.length)} to queue`, tracks.length === 1 ? { path: tracks[0].thumb } : undefined);
   say(`Added ${songsText(tracks.length)} to the queue`);
 }
 

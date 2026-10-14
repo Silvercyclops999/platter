@@ -40,7 +40,7 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
               label="Create playlist"
               tooltipPlacement="right"
               className="lib-create lib-create--rail"
-              icon={<Plus size={18} />}
+              icon={<Plus size={20} />}
               onClick={() => void createPlaylist()}
             />
           </div>
@@ -49,12 +49,12 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
             <div className="lib-head">
               <button type="button" className="lib-head__title" aria-label="Collapse Your Library" onClick={() => useUi.getState().setSidebar({ collapsed: true })}>
                 <span className="lib-head__icon" aria-hidden="true">
-                  <PanelLeftClose size={18} />
+                  <PanelLeftClose size={20} />
                 </span>
                 <span className="lib-head__text">Your Library</span>
               </button>
               <span className="lib-head__actions">
-                <IconButton size="sm" label="Create playlist" className="lib-create" icon={<Plus size={18} />} onClick={() => void createPlaylist()} />
+                <IconButton size="sm" label="Create playlist" className="lib-create" icon={<Plus size={20} />} onClick={() => void createPlaylist()} />
                 <IconButton size="sm" label="Expand Your Library" icon={<Maximize2 size={16} />} onClick={() => nav.go({ name: "library" })} />
               </span>
             </div>

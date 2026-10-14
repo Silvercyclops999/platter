@@ -93,7 +93,9 @@ describe("artist page with outside info", () => {
     const a = artistAt(2);
     render(<ArtistPage id={a.id} />);
     const card = await screen.findByRole("button", { name: `About ${a.title}` });
-    expect(within(card).getByText(new RegExp(`^${a.title} is a music act formed in`))).toBeInTheDocument();
+    expect(within(card).getByText(new RegExp(`^${a.title} is a music act formed in`))).toHaveClass("is-clamped");
+    // Without Last.fm, the stats line is the plays in the library.
+    expect(within(card).getByText(/plays in your library$/)).toHaveClass("about-card__stats");
 
     await user.click(card);
     const dialog = screen.getByRole("dialog", { name: `About ${a.title}` });
@@ -134,6 +136,11 @@ describe("artist page with outside info", () => {
     render(<ArtistPage id={a.id} />);
     const lines = await screen.findAllByText(/listeners on Last\.fm$/);
     expect(lines.length).toBe(2); // header and About card
+    // On the card the listener line takes the plays line's place, in bold over the photo.
+    const card = screen.getByRole("button", { name: `About ${a.title}` });
+    expect(within(card).getByText(/listeners on Last\.fm$/)).toHaveClass("about-card__stats");
+    expect(within(card).queryByText(/plays in your library$/)).toBeNull();
+    expect(card.querySelector(".about-card__bg")).not.toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: `About ${a.title}` }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("button", { name: "Data from Last.fm" })).toBeInTheDocument();

@@ -15,8 +15,6 @@
   overflow-y: auto;
   overflow-x: hidden;
   outline: none;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 }
 .lyrics__scroll:focus-visible { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5); }
 .lyrics__lines {

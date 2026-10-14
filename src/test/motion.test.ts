@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import componentsCss from "../components/components.css?raw";
 import globalCss from "../design/global.css?raw";
 import { duration, installReducedMotion, prefersReducedMotion } from "../design/motion";
-import { SCROLLBAR_IDLE_MS, installOverlayScrollbars } from "../design/scrollbars";
+import { SCROLLBAR_IDLE_MS, installOverlayScrollbars, thumbBox } from "../design/scrollbars";
 import tokensCss from "../design/tokens.css?raw";
 import pagesCss from "../pages/pages.css?raw";
 import shellCss from "../shell/shell.css?raw";
@@ -116,8 +116,47 @@ describe("overlay scrollbars", () => {
     }
   });
 
-  it("the thumb colour follows --sb-alpha, which fades", () => {
-    expect(globalCss).toMatch(/scrollbar-color:[^;]*var\(--sb-alpha\)/);
-    expect(globalCss).toMatch(/\.sb \{ transition: --sb-alpha var\(--motion-quick\)/);
+  it("native bars take no width; the drawn thumb fades", () => {
+    expect(globalCss).toMatch(/\* \{ scrollbar-width: none; \}/);
+    expect(globalCss).toMatch(/::-webkit-scrollbar \{ width: 0; height: 0; \}/);
+    expect(globalCss).toMatch(/\.sb-thumb \{[^}]*transition: opacity var\(--motion-quick\)/);
+    expect(shellCss).not.toMatch(/scrollbar-gutter/);
+  });
+
+  it("draws a thumb over the scroller's right edge, sized and placed by scroll position", () => {
+    const m = { clientWidth: 300, clientHeight: 400, scrollHeight: 1600, scrollTop: 0 };
+    const top = thumbBox({ top: 100, left: 20 }, m)!;
+    expect(top.left).toBe(20 + 300 - 8 - 2);
+    expect(top.top).toBe(102);
+    expect(top.height).toBe(Math.round((396 * 400) / 1600));
+    const end = thumbBox({ top: 100, left: 20 }, { ...m, scrollTop: 1200 })!;
+    expect(end.top + end.height).toBe(100 + 400 - 2);
+    expect(thumbBox({ top: 0, left: 0 }, { ...m, scrollHeight: 400 })).toBeNull();
+    // A very long list keeps a thumb big enough to grab.
+    expect(thumbBox({ top: 0, left: 0 }, { ...m, scrollHeight: 400000 })!.height).toBe(24);
+  });
+
+  it("the thumb follows its scroller and is removed after it fades out", () => {
+    vi.useFakeTimers();
+    const stop = installOverlayScrollbars(window);
+    const el = document.createElement("div");
+    Object.defineProperties(el, {
+      clientHeight: { value: 400 },
+      clientWidth: { value: 300 },
+      scrollHeight: { value: 1600 },
+    });
+    document.body.appendChild(el);
+    try {
+      el.dispatchEvent(new Event("scroll"));
+      const thumb = document.querySelector(".sb-layer .sb-thumb");
+      expect(thumb).toHaveClass("is-on");
+      vi.advanceTimersByTime(SCROLLBAR_IDLE_MS);
+      expect(thumb).not.toHaveClass("is-on");
+      vi.advanceTimersByTime(500);
+      expect(document.querySelector(".sb-thumb")).toBeNull();
+    } finally {
+      stop();
+      el.remove();
+    }
   });
 });

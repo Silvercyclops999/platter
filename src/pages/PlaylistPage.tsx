@@ -245,7 +245,7 @@ export function PlaylistPage({ id }: { id: string }) {
       [
         { label: "Add to queue", disabled: empty, onSelect: () => player.queueAdd(shown!.tracks.map((t) => t.id), "end") },
         ...playlistEditItems(pl),
-        shareItem("playlist", pl.id),
+        shareItem("playlist", pl.id, pl.thumb),
         {
           label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
           onSelect: () =>

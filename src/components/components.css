@@ -274,6 +274,18 @@
 .context-menu__shortcut { color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .context-menu__item.is-checked { color: var(--color-accent); }
 .context-menu__check { flex: none; }
+.context-menu__icon {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: calc(var(--space-3) - var(--space-4));
+  color: var(--color-text-secondary);
+}
+.context-menu__item:hover .context-menu__icon,
+.context-menu__item:focus-visible .context-menu__icon,
+.context-menu__item.is-danger .context-menu__icon { color: inherit; }
+.context-menu__label { flex: 1; }
 .context-menu__heading {
   padding: var(--space-2) var(--space-3) var(--space-1);
   font-size: var(--font-size-xs);
@@ -312,6 +324,11 @@
 .toast--error { background: #3A1A1B; color: var(--color-text-primary); box-shadow: 0 0 0 1px rgba(242, 85, 90, 0.4), 0 12px 32px rgba(0, 0, 0, 0.5); }
 .toast--error .toast__icon { color: var(--color-error); }
 .toast__icon { display: inline-flex; }
+/* A cover in place of the icon: the pill's left padding shrinks so the art sits snug. */
+.toast--art { padding-left: var(--space-2); }
+.toast__art { display: inline-flex; flex: none; }
+.toast__art .art { border-radius: 2px; }
+.toast__art .art--round { border-radius: 50%; }
 .toast__msg { font-size: var(--font-size-md); }
 .toast__close {
   display: inline-flex;
@@ -608,6 +625,8 @@
 .card__link:focus-visible { outline: none; }
 .card__link:focus-visible::after { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
 .card__title { display: block; font-size: var(--font-size-lg); font-weight: var(--font-weight-regular); }
+/* The card whose music is playing: its title takes the playing colour. */
+.card.is-playing .card__title { color: var(--color-playing); }
 /* Up to two lines, then an ellipsis. */
 .card__subtitle {
   margin-top: var(--space-1);
@@ -691,7 +710,7 @@
 .track-row:hover { background: var(--color-state-hover); }
 .track-row.is-unavailable { opacity: 0.4; }
 .track-row:focus-visible { background: var(--color-state-selected); outline-offset: -2px; }
-.track-row.is-active .track-row__title { color: var(--color-accent); }
+.track-row.is-active .track-row__title { color: var(--color-playing); }
 .track-row__num {
   position: relative;
   display: flex;
@@ -714,7 +733,7 @@
 .track-row:focus-visible .track-row__index,
 .track-row:hover .eq,
 .track-row:focus-visible .eq { visibility: hidden; }
-.track-row.is-active .track-row__index { color: var(--color-accent); }
+.track-row.is-active .track-row__index { color: var(--color-playing); }
 .track-row__main { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .track-row__art { position: relative; flex: none; }
 .track-row__art-play {
@@ -790,7 +809,7 @@
   display: block;
   width: 3px;
   height: 100%;
-  background: var(--color-accent);
+  background: var(--color-playing);
   border-radius: 1px;
   transform-origin: bottom;
   animation: eq 0.9s ease-in-out infinite;

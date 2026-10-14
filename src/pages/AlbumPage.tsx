@@ -133,7 +133,7 @@ export function AlbumPage({ id }: { id: string }) {
                   { label: "Add to queue", onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "end") },
                   addToPlaylistItem(() => data?.tracks.map((t) => t.id) ?? []),
                   { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
-                  shareItem("album", album.id),
+                  shareItem("album", album.id, album.thumb),
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
                     onSelect: () =>

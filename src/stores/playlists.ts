@@ -71,7 +71,7 @@ export async function createPlaylist(opts: { trackIds?: string[]; title?: string
       usePlaylistUi.getState().set({ renameId: p.id });
       nav.go({ name: "playlist", id: p.id });
     }
-    if (ids.length) toast.info(`Added to ${p.title}`);
+    if (ids.length) toast.info(`Added to ${p.title}`, { path: p.thumb, kind: "playlist" });
     return p;
   } catch (e) {
     toast.error(`Couldn't create the playlist: ${errorText(e)}`);
@@ -103,7 +103,7 @@ export async function addNow(playlist: Playlist, trackIds: string[]): Promise<bo
   try {
     const p = await backend.playlistAdd(playlist.id, trackIds);
     useLibraryView.getState().touch("playlist", p.id);
-    toast.info(`Added to ${p.title}`);
+    toast.info(`Added to ${p.title}`, { path: p.thumb ?? playlist.thumb, kind: "playlist" });
     return true;
   } catch (e) {
     toast.error(`Couldn't add to ${playlist.title}: ${errorText(e)}`);

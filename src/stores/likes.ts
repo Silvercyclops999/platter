@@ -118,6 +118,7 @@ export async function setLiked(tracks: Track[], liked: boolean, opts: SetLikedOp
     useToasts.getState().push({
       kind: "info",
       message: one ? "Added to Liked Songs" : `Added ${songs(changed.length)} to Liked Songs`,
+      ...(one?.thumb ? { art: { path: one.thumb } } : {}),
       action: one ? { label: "Change", run: () => useLikes.getState().openSavedIn(one, lastControl) } : undefined,
     });
   } else {
@@ -125,6 +126,7 @@ export async function setLiked(tracks: Track[], liked: boolean, opts: SetLikedOp
       {
         kind: "info",
         message: changed.length === 1 ? "Removed from Liked Songs" : `Removed ${songs(changed.length)} from Liked Songs`,
+        ...(changed.length === 1 && changed[0].thumb ? { art: { path: changed[0].thumb } } : {}),
         action: {
           label: "Undo",
           run: () => {

@@ -6,6 +6,13 @@ export interface Toast {
   message: string;
   /** Optional button, e.g. Restart for a downloaded update. */
   action?: { label: string; run: () => void };
+  /** A small cover for a toast about one song, album, artist or playlist. */
+  art?: ToastArt;
+}
+
+export interface ToastArt {
+  path: string | null;
+  kind?: "album" | "artist" | "playlist";
 }
 
 interface ToastState {
@@ -29,7 +36,7 @@ export const useToasts = create<ToastState>()((set, get) => ({
 }));
 
 export const toast = {
-  info: (message: string) => useToasts.getState().push({ kind: "info", message }),
+  info: (message: string, art?: ToastArt) => useToasts.getState().push({ kind: "info", message, ...(art?.path ? { art } : {}) }),
   error: (message: string) => useToasts.getState().push({ kind: "error", message }, 6000),
 };
 

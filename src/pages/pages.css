@@ -267,35 +267,56 @@
   grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
 }
 
+/*
+ * About card: about half the main column wide, the artist photo filling it
+ * behind a fade that darkens towards the bottom, text at the bottom-left.
+ * Narrow columns give it the full width.
+ */
 .about-card {
+  position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-6);
-  max-width: 820px;
-  padding: var(--space-6);
+  align-items: flex-end;
+  width: clamp(360px, 50%, 820px);
+  aspect-ratio: 810 / 520;
+  min-height: 260px;
+  padding: var(--space-8);
+  overflow: hidden;
   border-radius: var(--radius-card);
-  background: var(--color-state-hover);
+  background: var(--color-bg-raised2);
+  isolation: isolate;
 }
-.about-card__photo { flex: none; }
-.about-card__text { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); min-width: 0; }
-.about-card__plays { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); }
+.about-card__bg.art {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.about-card__shade {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 0%, rgba(0, 0, 0, 0.35) 40%, rgba(0, 0, 0, 0.85) 100%);
+  transition: background-color var(--motion-very-quick) ease-out;
+}
+.about-card__text { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); min-width: 0; max-width: 68ch; }
+.about-card__stats { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
 .about-card__bio {
-  font-size: var(--font-size-md);
-  line-height: 1.6;
-  color: var(--color-text-secondary);
-  white-space: pre-line;
-  max-width: 68ch;
+  font-size: var(--font-size-lg);
+  line-height: 1.5;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 .about-card__bio.is-clamped {
   display: -webkit-box;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.about-card__more { margin: 0; }
-@container main (max-width: 640px) {
-  .about-card { flex-direction: column; gap: var(--space-4); padding: var(--space-4); }
-  .about-card__photo .art { width: 112px !important; height: 112px !important; }
+@container main (max-width: 720px) {
+  .about-card { width: 100%; padding: var(--space-6); }
 }
 
 /* Track table columns drop as the main column narrows: the quality column
@@ -327,7 +348,7 @@
 .settings__group { margin: 0 var(--space-3) var(--space-8); }
 .settings__heading {
   margin-bottom: var(--space-2);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
 }
 .setting-row {
@@ -339,15 +360,15 @@
 }
 .setting-row:last-child { border-bottom: 0; }
 .setting-row__text { flex: 1; min-width: 0; }
-.setting-row__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
-.setting-row__desc { margin-top: var(--space-1); font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.45; }
+.setting-row__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.setting-row__desc { margin-top: var(--space-1); font-size: var(--font-size-md); color: var(--color-text-secondary); line-height: 1.45; }
 .setting-row__note { color: var(--color-text-primary); }
 .setting-row__control { display: flex; flex: none; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
 .settings__search { margin: 0 var(--space-3) var(--space-8); }
 .settings__empty { margin: 0 var(--space-3) var(--space-8); padding: var(--space-8) 0; text-align: center; }
 .settings__empty-title { font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; line-height: 1.2; color: var(--color-text-primary); overflow-wrap: anywhere; }
 .settings__empty-hint { margin-top: var(--space-2); font-size: var(--font-size-lg); color: var(--color-text-secondary); }
-.settings__hint { margin: 0 var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.settings__hint { margin: 0 var(--space-3); font-size: var(--font-size-md); color: var(--color-text-muted); }
 /* In a narrow main pane the control drops under the text. */
 @container main (max-width: 640px) {
   .setting-row { flex-wrap: wrap; gap: var(--space-3); }

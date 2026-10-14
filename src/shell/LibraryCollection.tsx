@@ -39,8 +39,8 @@ const SIDEBAR_COMPACT_MIN = 88;
 /** Wide grids: fixed cell widths; the column count grows with the window. */
 export const WIDE_GRID_CELL = 176;
 export const WIDE_COMPACT_CELL = 132;
-/** Title and subtitle under grid art. */
-const GRID_TEXT = 44;
+/** Title and subtitle under grid art: 8 margin, a 22 title line, 2 gap, a 20 subtitle line. */
+const GRID_TEXT = 52;
 
 const isGrid = (v: LibView) => v === "grid" || v === "compactGrid";
 

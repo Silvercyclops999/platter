@@ -2,6 +2,7 @@ import { Check, ChevronRight } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useUi, type ContextMenuState, type MenuItem } from "../stores/ui";
+import { MENU_ICON_SIZE, MENU_ICON_STROKE, menuIconFor } from "./menuIcons";
 
 /** Global context menu host. Open with `useUi.getState().openMenu(...)`. */
 export function ContextMenuHost() {
@@ -123,6 +124,9 @@ export function ContextMenuHost() {
     close();
     item.onSelect?.();
   };
+  // Icons line up in a column: when any item has one, the rest keep the space.
+  const icons = menu.items.map((item) => (item.icon === undefined ? menuIconFor(item.label) : item.icon));
+  const iconColumn = icons.some(Boolean);
   const subItem = sub !== null ? menu.items[sub] : undefined;
   const subAnchor = () => ref.current?.querySelector<HTMLElement>(`[data-submenu="${sub}"]`) ?? null;
   const focusReq = { want: subFocus > subFocused.current, done: () => (subFocused.current = subFocus) };
@@ -162,7 +166,8 @@ export function ContextMenuHost() {
               setSub(item.submenu && !item.disabled ? i : null);
             }}
           >
-            <span className="truncate">{item.label}</span>
+            {iconColumn && <MenuIcon icon={icons[i]} />}
+            <span className="truncate context-menu__label">{item.label}</span>
             {item.shortcut && <span className="context-menu__shortcut">{item.shortcut}</span>}
             {item.checked && <Check size={16} aria-hidden="true" className="context-menu__check" />}
             {item.submenu && <ChevronRight size={16} aria-hidden="true" className="context-menu__chevron" />}
@@ -185,6 +190,15 @@ export function ContextMenuHost() {
       )}
     </div>,
     document.body,
+  );
+}
+
+/** A menu item's leading icon, or an empty slot of the same width. */
+export function MenuIcon({ icon: Icon }: { icon: import("lucide-react").LucideIcon | null | undefined }) {
+  return (
+    <span className="context-menu__icon" aria-hidden="true">
+      {Icon && <Icon size={MENU_ICON_SIZE} strokeWidth={MENU_ICON_STROKE} />}
+    </span>
   );
 }
 

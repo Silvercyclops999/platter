@@ -1,28 +1,16 @@
 /* Artist page About card (as a button) and the About dialog. */
 
 .about-card--button {
-  width: 100%;
   text-align: left;
   color: inherit;
   font: inherit;
   border: 0;
   cursor: pointer;
-  transition: background-color var(--motion-very-quick) ease-out;
 }
-.about-card--button:hover { background: var(--color-state-pressed); }
-.about-card--button:active { background: var(--color-state-selected); }
+/* Hover lifts the fade a touch so the photo brightens; press dims it. */
+.about-card--button:hover .about-card__shade { background-color: rgba(255, 255, 255, 0.06); }
+.about-card--button:active .about-card__shade { background-color: rgba(0, 0, 0, 0.15); }
 .about-card--button:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
-.about-card__listeners {
-  margin: calc(var(--space-2) * -1) 0 0;
-  font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
-}
-.about-card--button .about-card__more {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-}
-.about-card--button:hover .about-card__more { text-decoration: underline; }
 
 /* Header meta: plays line, then the listener line after a dot. */
 .artist-listeners::before { content: "•"; margin-right: 6px; }

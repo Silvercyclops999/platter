@@ -5,13 +5,15 @@ import type { ShareInfo, ShareKind } from "../lib/types";
 import { usePlayer } from "../stores/player";
 import { copyLink, copyLinksAt, copyPublicLink } from "../stores/share";
 import type { MenuItem, SubmenuContext } from "../stores/ui";
+import { MenuIcon } from "./ContextMenu";
+import { Link } from "lucide-react";
 import "./share.css";
 
 const NOUN: Record<ShareKind, string> = { track: "song", album: "album", artist: "artist", playlist: "playlist" };
 
 /** The "Share" entry for a song, album, artist or playlist menu. */
-export function shareItem(kind: ShareKind, id: string): MenuItem {
-  return { label: "Share", submenu: (ctx) => <ShareSubmenu kind={kind} id={id} ctx={ctx} /> };
+export function shareItem(kind: ShareKind, id: string, thumb?: string | null): MenuItem {
+  return { label: "Share", submenu: (ctx) => <ShareSubmenu kind={kind} id={id} thumb={thumb} ctx={ctx} /> };
 }
 
 /** Where the song is now, in whole seconds, when it's the one playing. */
@@ -28,7 +30,8 @@ export function playingAt(kind: ShareKind, id: string): number | null {
  * Settings), the Platter link, and for the song playing now, the links at
  * the current time.
  */
-export function ShareSubmenu({ kind, id, ctx }: { kind: ShareKind; id: string; ctx: SubmenuContext }) {
+export function ShareSubmenu({ kind, id, thumb, ctx }: { kind: ShareKind; id: string; thumb?: string | null; ctx: SubmenuContext }) {
+  const art = thumb ? { path: thumb, kind: kind === "track" ? undefined : kind } : undefined;
   const [at] = useState(() => playingAt(kind, id));
   const [info, setInfo] = useState<ShareInfo | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -71,14 +74,16 @@ export function ShareSubmenu({ kind, id, ctx }: { kind: ShareKind; id: string; c
           aria-disabled={unreleased || undefined}
           title={unreleased ? "Unreleased music doesn't get a public link" : undefined}
           className="context-menu__item share-menu__item"
-          onClick={() => !unreleased && info && run(() => copyPublicLink(kind, id, info.appLink))}
+          onClick={() => !unreleased && info && run(() => copyPublicLink(kind, id, info.appLink, art))}
         >
-          <span className="truncate">Copy {NOUN[kind]} link</span>
+          <MenuIcon icon={Link} />
+          <span className="truncate context-menu__label">Copy {NOUN[kind]} link</span>
           {unreleased && <span className="share-menu__note">Not released</span>}
         </button>
       )}
-      <button type="button" role="menuitem" tabIndex={-1} className="context-menu__item share-menu__item" onClick={() => run(() => copyLink(appLink()))}>
-        <span className="truncate">Copy Platter link</span>
+      <button type="button" role="menuitem" tabIndex={-1} className="context-menu__item share-menu__item" onClick={() => run(() => copyLink(appLink(), undefined, art))}>
+        <MenuIcon icon={Link} />
+          <span className="truncate context-menu__label">Copy Platter link</span>
       </button>
       {at !== null && (
         <button
@@ -86,9 +91,10 @@ export function ShareSubmenu({ kind, id, ctx }: { kind: ShareKind; id: string; c
           role="menuitem"
           tabIndex={-1}
           className="context-menu__item share-menu__item"
-          onClick={() => run(() => copyLinksAt(kind, id, at))}
+          onClick={() => run(() => copyLinksAt(kind, id, at, art))}
         >
-          <span className="truncate">Copy link at {formatDuration(at * 1000)}</span>
+          <MenuIcon icon={Link} />
+          <span className="truncate context-menu__label">Copy link at {formatDuration(at * 1000)}</span>
         </button>
       )}
     </div>

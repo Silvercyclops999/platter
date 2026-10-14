@@ -78,37 +78,31 @@ img {
   color: var(--color-text-primary);
 }
 
-/* Scrollbars: thin and warm, shown like overlays. The thumb fades in while
-   its scroller is scrolled or pointed at, and hides after just under a second
-   idle (src/design/scrollbars.ts toggles .sb-on). */
-@property --sb-alpha {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
+/* Scrollbars: overlays that take no width. Native bars are hidden; a thin
+   warm thumb is drawn over each scroller's right edge in one fixed layer
+   (src/design/scrollbars.ts). It fades in while its scroller is scrolled or
+   pointed at and hides after just under a second idle. Under reduced motion
+   the fade stays (fades are kept), and the thumb never slides. */
+* { scrollbar-width: none; }
+::-webkit-scrollbar { width: 0; height: 0; }
+.sb-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 990;
+  pointer-events: none;
 }
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(255 240 220 / calc(var(--sb-alpha) * 0.4)) transparent;
-}
-.sb { transition: --sb-alpha var(--motion-quick) ease; }
-.sb-on { --sb-alpha: 1; }
-/* Engines without scrollbar-color (WebKit) use these; no fade there. */
-::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-}
-::-webkit-scrollbar-thumb {
-  background: transparent;
-  border: 3px solid transparent;
-  background-clip: padding-box;
+.sb-thumb {
+  position: fixed;
+  width: 8px;
   border-radius: 999px;
+  background: rgba(255, 240, 220, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-quick) ease, background-color var(--motion-very-quick) ease;
 }
-.sb-on::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 240, 220, 0.4);
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+.sb-thumb.is-on { opacity: 1; pointer-events: auto; }
+.sb-thumb:hover,
+.sb-thumb.is-dragging { background: rgba(255, 240, 220, 0.6); }
 
 .sr-only {
   position: absolute;

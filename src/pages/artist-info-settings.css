@@ -2,7 +2,7 @@
 
 .settings__subheading {
   margin: var(--space-4) 0 var(--space-1);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-bold);
   color: var(--color-text-secondary);
 }

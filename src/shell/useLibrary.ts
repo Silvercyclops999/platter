@@ -188,7 +188,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
     items.push(...playlistEditItems(pl));
     items.push({ label: "Create playlist", separator: true, onSelect: () => void createPlaylist() });
   }
-  items.push(shareItem(e.kind, e.id));
+  items.push(shareItem(e.kind, e.id, e.thumb));
   items.push({ ...pin, separator: true });
   if (opts.move) {
     const m = opts.move;

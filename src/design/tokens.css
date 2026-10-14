@@ -37,6 +37,8 @@
   --color-state-hover: rgba(255, 240, 220, 0.06);
   --color-state-pressed: rgba(255, 240, 220, 0.10);
   --color-state-selected: rgba(255, 240, 220, 0.12);
+  /* The playing track: titles in lists, the bars marker, the playing card. */
+  --color-playing: #F0957A;
 
   /* Semantic */
   --color-success: #4CC38A;
@@ -116,7 +118,7 @@
 :root[data-reduced-motion="true"] *,
 :root[data-reduced-motion="true"] *::before,
 :root[data-reduced-motion="true"] *::after {
-  transition-property: opacity, color, background-color, border-color, box-shadow, fill, stroke, visibility, --tint, --tint-shade, --sb-alpha !important;
+  transition-property: opacity, color, background-color, border-color, box-shadow, fill, stroke, visibility, --tint, --tint-shade !important;
   scroll-behavior: auto !important;
 }
 :root[data-reduced-motion="true"] {

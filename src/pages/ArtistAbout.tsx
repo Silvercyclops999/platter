@@ -42,27 +42,30 @@ export function useArtistInfo(id: string): ArtistInfo | null {
 
 const openLink = (url: string) => backend.openInfoLink(url).catch(() => toast.error("Couldn't open the browser"));
 
-/** About card: photo, listener line, the first lines of the bio. Opens the dialog. */
+/**
+ * About card: one large button with the artist photo filling it behind a dark
+ * fade, and over it at the bottom the stats line (Last.fm listeners when
+ * known, else plays in the library) and the bio's first three lines. Opens
+ * the dialog.
+ */
 export function AboutCard({ artist, about, plays, info }: { artist: Artist; about: string | null; plays: number; info: ArtistInfo | null }) {
   const [open, setOpen] = useState(false);
   const headingId = useId();
   const photo = photoPath(artist, info);
+  const stats = info?.listeners != null ? listenersLine(info.listeners) : playsLine(plays);
   return (
     <section className="detail-section artist-about" aria-labelledby={headingId}>
       <h2 id={headingId} className="section-title">
         About
       </h2>
       <button type="button" className="about-card about-card--button" onClick={() => setOpen(true)} aria-label={`About ${artist.title}`}>
-        <div className="about-card__photo">
-          <Art path={photo} size={160} round kind="artist" />
-        </div>
-        <div className="about-card__text">
-          <p className="about-card__plays">{playsLine(plays)}</p>
-          {info?.listeners != null && <p className="about-card__listeners">{listenersLine(info.listeners)}</p>}
+        <Art path={photo} fluid requestSize={820} kind="artist" className="about-card__bg" />
+        <span className="about-card__shade" aria-hidden="true" />
+        <span className="about-card__text">
+          <span className="about-card__stats">{stats}</span>
           {/* One run of text, so the clamp shows the most lines. */}
-          {about && <p className="about-card__bio is-clamped">{about.replace(/\s*\n+\s*/g, " ")}</p>}
-          <span className="about-card__more">Read more</span>
-        </div>
+          {about && <span className="about-card__bio is-clamped">{about.replace(/\s*\n+\s*/g, " ")}</span>}
+        </span>
       </button>
       <AboutDialog open={open} onClose={() => setOpen(false)} artist={artist} about={about} plays={plays} info={info} />
     </section>

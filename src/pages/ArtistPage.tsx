@@ -267,7 +267,7 @@ function ActionRow({
             `Options for ${artist.title}`,
             [
               { label: "Add popular songs to queue", onSelect: () => player.queueAdd(data!.popular.map((t) => t.id), "end") },
-              ...(credited ? [] : [shareItem("artist", artist.id)]),
+              ...(credited ? [] : [shareItem("artist", artist.id, artist.thumb)]),
               { label: pinned ? "Unpin from sidebar" : "Pin to sidebar", onSelect: togglePin },
             ],
             e.currentTarget,

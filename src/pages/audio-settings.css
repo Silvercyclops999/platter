@@ -17,7 +17,7 @@
 
 .eq-editor { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
 .eq-editor__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.eq-editor__note { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.eq-editor__note { margin: 0; font-size: var(--font-size-md); color: var(--color-text-secondary); }
 .eq-editor__name { width: 100%; }
 
 .eq-graph {
@@ -54,4 +54,4 @@
 .eq-editor__output { display: flex; align-items: center; gap: var(--space-6); max-width: 720px; }
 .eq-editor__output-text { flex: 1; min-width: 0; }
 .eq-editor__output-title { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
-.eq-editor__output-desc { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); line-height: 1.45; color: var(--color-text-secondary); }
+.eq-editor__output-desc { margin: var(--space-1) 0 0; font-size: var(--font-size-md); line-height: 1.45; color: var(--color-text-secondary); }

@@ -258,15 +258,15 @@
   line-height: 1.35;
 }
 .lib-row__title.is-playing,
-.lib-cell__title.is-playing { color: var(--color-accent); }
-/* The accent sits close to the text colour, so the playing row also gets a
-   speaker mark at its end. */
+.lib-cell__title.is-playing { color: var(--color-playing); }
+/* The playing row also gets a speaker mark at its end, so the state never
+   rests on colour alone. */
 .lib-row__now {
   display: inline-flex;
   flex: none;
   margin-left: auto;
   padding-left: var(--space-2);
-  color: var(--color-accent);
+  color: var(--color-playing);
 }
 .lib-row__sub {
   display: flex;
@@ -352,9 +352,9 @@
 .lib-cell__open:focus-visible::after { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
 .lib-cell__title,
 .lib-cell__sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lib-cell__title { font-size: var(--font-size-md); color: var(--color-text-primary); line-height: 1.35; }
+.lib-cell__title { font-size: var(--font-size-lg); color: var(--color-text-primary); line-height: 22px; }
 .lib-cell__subtext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lib-cell__sub { display: flex; align-items: center; font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.35; }
+.lib-cell__sub { display: flex; align-items: center; font-size: var(--font-size-md); color: var(--color-text-secondary); line-height: 20px; }
 
 /* Rail tiles: art only, the title in a tooltip. */
 .lib-tile-wrap { display: flex; justify-content: center; height: 100%; }
@@ -532,7 +532,6 @@
   inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-gutter: stable;
 }
 /* Page content swaps in a single frame: no fade, slide or cross-dissolve. */
 .page { min-height: 100%; }
@@ -612,15 +611,26 @@
   align-items: center;
   gap: var(--space-1);
   height: 64px;
-  padding: 0 var(--space-3) 0 var(--space-2);
+  padding: 0 var(--space-3) 0 var(--space-4);
   background: var(--color-bg-raised);
   transition: box-shadow var(--motion-quick) var(--motion-easing);
 }
 .np-panel__head.is-scrolled { box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.6); }
-/* The hide button only shows while the pointer (or focus) is in the panel. */
-.np-panel__hide { opacity: 0; transition: opacity var(--motion-very-quick) var(--motion-easing); }
+/*
+ * The hide button only shows while the pointer (or focus) is in the panel.
+ * At rest it takes no room, so the title lines up with the other panels'.
+ */
+.np-panel__hide {
+  width: 0;
+  margin-right: calc(-1 * var(--space-1));
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--motion-very-quick) var(--motion-easing);
+}
+.np-panel:hover .np-panel__head,
+.np-panel:focus-within .np-panel__head { padding-left: var(--space-2); }
 .np-panel:hover .np-panel__hide,
-.np-panel:focus-within .np-panel__hide { opacity: 1; }
+.np-panel:focus-within .np-panel__hide { width: 32px; margin-right: 0; opacity: 1; }
 .np-context {
   flex: 1;
   min-width: 0;

@@ -148,6 +148,7 @@
 .shortcut:hover .shortcut__play,
 .shortcut:focus-within .shortcut__play,
 .shortcut.is-playing .shortcut__play { opacity: 1; transform: none; }
+.shortcut.is-playing .shortcut__title { color: var(--color-playing); }
 .shortcut__play:hover { background: var(--color-accent-hover); transform: scale(calc(1 + 0.06 * var(--motion-move))); }
 .shortcut__play:focus-visible { border-radius: 50%; }
 

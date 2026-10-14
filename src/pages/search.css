@@ -101,7 +101,7 @@
 }
 .sr-row__title .truncate { display: block; }
 .sr-row__title:hover { text-decoration: underline; }
-.sr-row.is-current .sr-row__title { color: var(--color-accent); }
+.sr-row.is-current .sr-row__title { color: var(--color-playing); }
 .sr-row__by { font-size: var(--font-size-md); color: var(--color-text-secondary); }
 .sr-row__type { flex: none; width: 72px; font-size: var(--font-size-sm); text-align: right; color: var(--color-text-muted); }
 .sr-row__more {
