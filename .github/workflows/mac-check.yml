@@ -38,6 +38,7 @@ jobs:
         working-directory: src-tauri
         env:
           WHISPER_DONT_GENERATE_BINDINGS: 1
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
         run: cargo clippy --all-targets --features transcribe -- -D warnings
       # The universal app's Intel half builds whisper.cpp for x86_64 on this
       # ARM runner; check that cross build too.
@@ -45,6 +46,7 @@ jobs:
         working-directory: src-tauri
         env:
           WHISPER_DONT_GENERATE_BINDINGS: 1
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
         run: |
           rustup target add x86_64-apple-darwin
           cargo check --target x86_64-apple-darwin --features transcribe

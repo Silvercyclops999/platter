@@ -64,7 +64,9 @@ jobs:
       # are for 64-bit long, which Windows doesn't have); macOS can use the
       # shipped ones.
       - if: matrix.platform == 'macos-latest'
-        run: echo "WHISPER_DONT_GENERATE_BINDINGS=1" >> "$GITHUB_ENV"
+        run: |
+          echo "WHISPER_DONT_GENERATE_BINDINGS=1" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> "$GITHUB_ENV"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ vars.RELEASES_REPO && secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
