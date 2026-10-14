@@ -61,6 +61,17 @@ pub async fn remote_queue_jump(remote: State<'_, RemoteService>, item_id: String
     remote.queue_jump(item_id).await
 }
 
+/// Move to an AirPlay receiver with its password (kept in the keychain
+/// once it works).
+#[tauri::command]
+pub async fn remote_move_with_password(
+    remote: State<'_, RemoteService>,
+    player_id: String,
+    password: String,
+) -> AppResult<RemoteState> {
+    remote.move_with_password(&player_id, password).await
+}
+
 /// A player bar control while playing on another device.
 #[tauri::command]
 pub async fn remote_command(remote: State<'_, RemoteService>, command: RemoteCommand) -> AppResult<RemoteState> {
@@ -143,6 +154,12 @@ impl LocalPlayer for PlayerHandle {
     }
     async fn load_context(&self, context: PlayContext, start_track_id: Option<String>) -> AppResult<()> {
         self.play_context_at(context, start_track_id, 0, false).await
+    }
+    async fn output_selected(&self) -> AppResult<Option<String>> {
+        Ok(self.output_state().await?.selected)
+    }
+    async fn select_output(&self, id: Option<String>) -> AppResult<()> {
+        PlayerHandle::select_output(self, id).await.map(|_| ())
     }
 }
 

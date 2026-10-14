@@ -217,7 +217,7 @@ fn handle(state: &Mutex<FakeState>, m: &CastMessage) -> Vec<CastMessage> {
             if ty == "LOAD" {
                 let key = v["media"]["contentId"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_string();
                 st.plex_load = Some(v.clone());
-                st.queue = vec![key, "next-in-server-queue".into()];
+                st.queue = vec![key, "2".into()];
                 st.index = 0;
             } else {
                 st.queue = v["items"]

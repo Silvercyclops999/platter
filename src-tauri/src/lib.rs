@@ -169,6 +169,7 @@ pub fn run() {
             platform::apply_start_mode(app.handle(), platform::start_mode(&args, &initial.platform()));
             let os = platform::Platform::new();
 
+            let net_route = audio::netsink::NetRoute::default();
             let player = PlayerHandle::spawn(
                 tauri::async_runtime::handle().inner().clone(),
                 Arc::new(bridge::PlexStreams(plex.clone(), live.streams.clone(), Some(db.clone()))),
@@ -177,7 +178,8 @@ pub fn run() {
                     use audio::output::AudioOutput;
                     let mut out = audio::output::CpalOutput::new();
                     out.select(initial.output_device.clone());
-                    Box::new(out)
+                    // AirPlay plays through a network output behind this one.
+                    Box::new(audio::netsink::RoutedOutput::new(Box::new(out), net_route.clone()))
                 },
                 os.tap(Arc::new(audio::events::TauriSink(app.handle().clone()))),
                 PlayerConfig {
@@ -251,6 +253,12 @@ pub fn run() {
                     },
                 );
             }
+            remote.set_lan(remote::LanEnv {
+                mdns: Arc::new(remote::lan::MdnsSd::new()),
+                route: net_route.clone(),
+                passwords: Arc::new(plex::keychain::KeyringStore::new()),
+                tls: remote::cast::conn::tls_config()?,
+            });
             app.manage(remote);
 
             // Share links, and platter:// links opened from elsewhere.
@@ -326,6 +334,7 @@ pub fn run() {
             remote::commands::remote_play_context,
             remote::commands::remote_queue_jump,
             remote::commands::remote_command,
+            remote::commands::remote_move_with_password,
             db::commands::search,
             db::commands::search_completions,
             db::commands::search_recents,

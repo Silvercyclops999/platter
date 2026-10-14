@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn frames_round_trip_and_have_the_right_size() {
-        let pcm: Vec<i16> = (0..FRAMES * 2).map(|i| (i as i16).wrapping_mul(97) - 300).collect();
+        let pcm: Vec<i16> = (0..FRAMES * 2).map(|i| (i as i16).wrapping_mul(97).wrapping_sub(300)).collect();
         let f = encode_stereo(&pcm);
         // 23 header bits + 11264 sample bits + 3 end bits = 11290 bits.
         assert_eq!(f.len(), 1412);

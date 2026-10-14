@@ -24,6 +24,9 @@ pub const SAMPLE_RATE: u32 = 44_100;
 pub const LATENCY_FRAMES: u32 = 88_200;
 const RESEND_KEEP: usize = 512;
 
+/// Recent packets by sequence number, for resends.
+type Resend = Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>;
+
 /// RAOP volume in dB: -30 (quietest) to 0, and -144 for mute.
 pub fn volume_db(v: f32) -> f32 {
     let v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
@@ -111,7 +114,7 @@ pub struct RaopStream {
     server_control: SocketAddr,
     ssrc: u32,
     sent_since_sync: u32,
-    resend: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>,
+    resend: Resend,
     threads: Vec<JoinHandle<()>>,
 }
 
@@ -166,7 +169,7 @@ fn timing_loop(sock: UdpSocket, stop: Arc<AtomicBool>) {
 }
 
 /// Resends packets the receiver missed.
-fn control_loop(sock: Arc<UdpSocket>, to: SocketAddr, resend: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>, stop: Arc<AtomicBool>) {
+fn control_loop(sock: Arc<UdpSocket>, to: SocketAddr, resend: Resend, stop: Arc<AtomicBool>) {
     let mut buf = [0u8; 128];
     while !stop.load(Ordering::SeqCst) {
         let Ok((n, _)) = sock.recv_from(&mut buf) else { continue };
@@ -247,7 +250,7 @@ impl RaopStream {
             tracing::debug!(kind = e.kind(), "AirPlay receiver didn't take the volume");
         }
         let server_control = SocketAddr::new(cfg.addr.ip(), server_control);
-        let resend: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>> = Arc::default();
+        let resend: Resend = Arc::default();
         let mut threads = Vec::new();
         {
             let stop = stop.clone();

@@ -380,7 +380,7 @@ impl RemoteService {
         let answers = lan.mdns.scan().await;
         let has_password = |id: &str| lan.passwords.get(&airplay::password_key(id)).ok().flatten().is_some();
         let mut list = lan::lan_found(&answers, &has_password);
-        list.sort_by(|a, b| a.player.name.to_lowercase().cmp(&b.player.name.to_lowercase()));
+        list.sort_by_key(|f| f.player.name.to_lowercase());
         list
     }
 

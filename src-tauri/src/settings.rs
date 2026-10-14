@@ -217,6 +217,9 @@ pub struct Settings {
     /// Share menus find public links for released music (iTunes Search and
     /// song.link). Off leaves only Platter links.
     pub share_public_links: bool,
+    /// List Cast devices and AirPlay receivers in the device picker
+    /// (Listen on). Off keeps mDNS off.
+    pub show_cast_devices: bool,
 }
 
 impl Default for Settings {
@@ -273,6 +276,7 @@ impl Default for Settings {
             eq_fallback: None,
             eq_last_output: None,
             share_public_links: true,
+            show_cast_devices: true,
         }
     }
 }
@@ -329,6 +333,7 @@ pub struct SettingsPatch {
     /// Selects a preset or profile (and its curve).
     pub eq_preset: Option<String>,
     pub share_public_links: Option<bool>,
+    pub show_cast_devices: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -395,6 +400,7 @@ impl Settings {
         set(&mut self.act_as_plex_player, p.act_as_plex_player);
         set(&mut self.move_stops_old_device, p.move_stops_old_device);
         set(&mut self.share_public_links, p.share_public_links);
+        set(&mut self.show_cast_devices, p.show_cast_devices);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -493,6 +499,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     }
     live.platform.set(s.platform());
     live.remote.set(s.show_plex_players, s.move_stops_old_device, s.act_as_plex_player);
+    live.remote.set_show_cast(s.show_cast_devices);
     let cap = s.art_cache_bytes();
     let old = live.art_cap.swap(cap, Ordering::Relaxed);
     if let Some(art) = &live.art
@@ -800,10 +807,12 @@ mod tests {
             eq_bands: Some([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, -2.0, -1.0]),
             eq_preset: None,
             share_public_links: Some(false),
+            show_cast_devices: Some(false),
         })
         .await
         .unwrap();
         assert!(!live.share_public_links.load(Ordering::Relaxed));
+        assert!(!live.remote.show_cast());
         {
             use crate::artistinfo::InfoSource as Src;
             // The artist info service sees the switches at once.

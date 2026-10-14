@@ -77,7 +77,7 @@ async fn plex_receiver_plays_the_server_play_queue() {
     let t = link.poll().await.unwrap().unwrap();
     assert_eq!(fake.types(NS_PLEX), vec!["PAUSE", "NEXT", "SEEK"]);
     assert_eq!((t.state.as_str(), t.time_ms), ("paused", 5_000));
-    assert_eq!(t.rating_key.as_deref(), Some("next-in-server-queue"));
+    assert_eq!(t.rating_key.as_deref(), Some("2"));
     assert_eq!(t.volume, Some(70));
 
     link.leave(true).await;

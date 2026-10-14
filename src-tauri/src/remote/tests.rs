@@ -58,6 +58,10 @@ fn item(id: &str) -> QueueItem {
 struct Local {
     state: Mutex<PlayerState>,
     log: Mutex<Vec<String>>,
+    /// The chosen output, and the network route an engine would open.
+    output: Mutex<Option<String>>,
+    route: Mutex<Option<crate::audio::netsink::NetRoute>>,
+    net: Mutex<Option<Box<dyn crate::audio::netsink::NetStream>>>,
 }
 
 impl Local {
@@ -84,6 +88,9 @@ impl Local {
                 ab_loop: None,
             }),
             log: Mutex::default(),
+            output: Mutex::default(),
+            route: Mutex::default(),
+            net: Mutex::default(),
         })
     }
     fn log(&self) -> Vec<String> {
@@ -154,6 +161,30 @@ impl LocalPlayer for Local {
         st.status = PlayerStatus::Paused;
         *self.state.lock() = st;
         self.push(format!("load {}", ids.join(",")));
+        Ok(())
+    }
+    async fn output_selected(&self) -> AppResult<Option<String>> {
+        Ok(self.output.lock().clone())
+    }
+    /// Like the engine with its output open: a network id connects the
+    /// route's target, anything else closes it.
+    async fn select_output(&self, id: Option<String>) -> AppResult<()> {
+        if let Some(mut old) = self.net.lock().take() {
+            old.close();
+        }
+        if let Some(net) = id.as_deref().filter(|i| i.starts_with(crate::audio::netsink::NET_PREFIX)) {
+            let target = self
+                .route
+                .lock()
+                .as_ref()
+                .and_then(|r| r.get())
+                .filter(|t| t.device().id == net)
+                .ok_or_else(|| AppError::Invalid("no such output".into()))?;
+            let stream = tokio::task::spawn_blocking(move || target.connect()).await.unwrap()?;
+            *self.net.lock() = Some(stream);
+        }
+        self.push(format!("output {}", id.clone().unwrap_or_else(|| "default".into())));
+        *self.output.lock() = id;
         Ok(())
     }
 }
@@ -624,4 +655,224 @@ async fn a_queue_jump_while_remote_moves_the_queue_here_paused_and_resends() {
     assert!(r.local.log().contains(&"jump qc 0 false".to_string()));
     assert_eq!(requests(&r.player, "/player/playback/playMedia").await.len(), 2);
     assert!(r.remote.state().session.is_some());
+}
+
+// ---- Cast and AirPlay ---------------------------------------------------------
+
+mod lan_devices {
+    use super::*;
+    use crate::audio::netsink::NetRoute;
+    use crate::plex::keychain::{MemoryStore, TokenStore};
+    use crate::remote::airplay::fake::{FakeOptions, FakeRaop};
+    use crate::remote::airplay::{password_key, rtsp};
+    use crate::remote::cast::fake::FakeCast;
+    use crate::remote::cast::proto::{NS_PLEX, NS_RECEIVER};
+    use crate::remote::lan::{CAST_SERVICE, MdnsAnswer, RAOP_SERVICE, StaticMdns};
+    use crate::remote::types::PlayerVia;
+    use crate::remote::LanEnv;
+    use std::sync::atomic::Ordering;
+
+    struct Lan {
+        r: Rig,
+        mdns: Arc<StaticMdns>,
+        passwords: Arc<MemoryStore>,
+    }
+
+    fn at(service: &str, instance: &str, port: u16, txt: &[(&str, &str)]) -> MdnsAnswer {
+        crate::remote::lan::answer(service, instance, "127.0.0.1", port, txt)
+    }
+
+    async fn lan(answers: Vec<MdnsAnswer>) -> Lan {
+        let r = rig().await;
+        Mock::given(method("GET"))
+            .and(path("/security/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer": {"token": "transient-1"}})))
+            .mount(&r.server)
+            .await;
+        let mdns = Arc::new(StaticMdns::default());
+        *mdns.answers.lock() = answers;
+        let passwords = Arc::new(MemoryStore::new());
+        let route = NetRoute::default();
+        *r.local.route.lock() = Some(route.clone());
+        r.remote.set_lan(LanEnv {
+            mdns: mdns.clone(),
+            route,
+            passwords: passwords.clone(),
+            tls: crate::remote::cast::conn::tls_config().unwrap(),
+        });
+        Lan { r, mdns, passwords }
+    }
+
+    fn cast_answer(fake: &FakeCast) -> MdnsAnswer {
+        at(CAST_SERVICE, "Chromecast-c1", fake.addr.port(), &[("id", "c1"), ("fn", "Den TV"), ("md", "Chromecast"), ("ca", "201221")])
+    }
+
+    #[tokio::test]
+    async fn cast_devices_list_with_plex_players_and_hide_with_their_setting() {
+        let l = lan(vec![
+            at(CAST_SERVICE, "g", 9, &[("id", "g1"), ("fn", "Everywhere"), ("md", "Google Cast Group")]),
+            at(RAOP_SERVICE, "AABB@Kitchen", 9, &[("et", "0"), ("pw", "true")]),
+            at(RAOP_SERVICE, "CCDD@Old", 9, &[("et", "1")]),
+        ])
+        .await;
+        let list = l.r.remote.players().await;
+        let ids: Vec<_> = list.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["amp", "cast:g1", "airplay:AABB", "airplay:CCDD"]);
+        assert_eq!(list[1].via, PlayerVia::Cast);
+        assert!(list[2].needs_password);
+        assert!(list[3].unsupported.is_some());
+        // Off: no devices, and mDNS stops.
+        l.r.switches.set_show_cast(false);
+        let list = l.r.remote.players().await;
+        assert_eq!(list.len(), 1);
+        assert!(l.mdns.stopped.load(Ordering::SeqCst));
+        let scans = l.mdns.scans.load(Ordering::SeqCst);
+        l.r.remote.players().await;
+        assert_eq!(l.mdns.scans.load(Ordering::SeqCst), scans, "no scanning while off");
+        // Both kinds off: nothing at all.
+        l.r.switches.set(false, true, false);
+        assert!(l.r.remote.players().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn moving_to_a_cast_device_follows_it_and_comes_back() {
+        let fake = FakeCast::start().await;
+        let l = lan(vec![cast_answer(&fake)]).await;
+        l.r.remote.players().await;
+        let st = l.r.remote.move_to("cast:c1").await.unwrap();
+        let s = st.session.unwrap();
+        assert_eq!((s.player_name.as_str(), s.status), ("Den TV", RemoteStatus::Connecting));
+        let load = fake.state.lock().plex_load.clone().unwrap();
+        assert_eq!(load["media"]["customData"]["containerKey"], "/playQueues/55?own=1&window=200");
+        assert_eq!(load["media"]["customData"]["server"]["accessToken"], "transient-1", "the transient token, not the server's");
+        assert_eq!(load["currentTime"], 61.0);
+        assert!(l.r.local.log().contains(&"pause".to_string()));
+
+        wait_for("playing", || l.r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+        let s = l.r.remote.state().session.unwrap();
+        assert_eq!((s.position_ms, s.volume), (61_000, Some(0.4)));
+
+        l.r.remote.command(RemoteCommand::Pause).await.unwrap();
+        l.r.remote.command(RemoteCommand::Volume { volume: 0.25 }).await.unwrap();
+        wait_for("pause sent", || fake.types(NS_PLEX) == ["PAUSE"]).await;
+        wait_for("paused", || l.r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Paused && s.volume == Some(0.25))).await;
+
+        let st = l.r.remote.return_here().await.unwrap();
+        assert!(st.session.is_none());
+        assert_eq!(fake.types(NS_RECEIVER).last().map(String::as_str), Some("STOP"));
+        let log = l.r.local.log();
+        assert!(log.contains(&"seek 61000".to_string()), "{log:?}");
+    }
+
+    #[tokio::test]
+    async fn a_cast_device_stopped_elsewhere_hands_back_control() {
+        let fake = FakeCast::start().await;
+        let l = lan(vec![cast_answer(&fake)]).await;
+        l.r.remote.players().await;
+        l.r.remote.move_to("cast:c1").await.unwrap();
+        wait_for("playing", || l.r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+        fake.stop_elsewhere();
+        wait_for("stopped", || l.r.remote.state().stopped_on.as_deref() == Some("Den TV")).await;
+        assert!(l.r.remote.state().session.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_cast_device_that_goes_away_is_reported() {
+        let fake = FakeCast::start().await;
+        let l = lan(vec![cast_answer(&fake)]).await;
+        l.r.remote.players().await;
+        l.r.remote.move_to("cast:c1").await.unwrap();
+        fake.vanish();
+        wait_for("gone", || l.r.remote.state().session.is_none()).await;
+        assert_eq!(l.r.events.toasts(), vec!["Couldn't reach Den TV".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_cast_device_that_refuses_leaves_playback_here() {
+        let fake = FakeCast::start().await;
+        fake.state.lock().refuse_load = true;
+        let l = lan(vec![cast_answer(&fake)]).await;
+        l.r.remote.players().await;
+        let e = l.r.remote.move_to("cast:c1").await.unwrap_err();
+        assert_eq!(e.to_string(), "network: Couldn't reach Den TV");
+        assert!(!l.r.local.log().contains(&"pause".to_string()));
+        assert!(l.r.remote.state().session.is_none());
+    }
+
+    #[tokio::test]
+    async fn airplay_moves_the_sound_and_controls_flush_the_receiver() {
+        let fake = FakeRaop::start(FakeOptions::default());
+        let l = lan(vec![at(RAOP_SERVICE, "AABB@Kitchen", fake.addr.port(), &[("et", "0,1"), ("cn", "0,1")])]).await;
+        l.r.remote.players().await;
+        l.r.remote.move_to("airplay:AABB").await.unwrap();
+        assert_eq!(l.r.local.output.lock().as_deref(), Some("net:airplay:AABB"));
+        assert!(fake.methods().contains(&"RECORD".to_string()));
+        let log = l.r.local.log();
+        assert!(log.contains(&"volume 1".to_string()), "full volume here; the receiver sets the level: {log:?}");
+        assert!(!log.contains(&"pause".to_string()), "the sound keeps coming from here");
+        wait_for("playing", || l.r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+        // Nothing is heard for the delay yet: the position holds.
+        assert_eq!(l.r.remote.state().session.unwrap().position_ms, 61_000);
+
+        l.r.remote.command(RemoteCommand::Seek { position_ms: 90_000 }).await.unwrap();
+        assert!(fake.methods().contains(&"FLUSH".to_string()));
+        l.r.remote.command(RemoteCommand::Volume { volume: 0.5 }).await.unwrap();
+        assert_eq!(fake.last("SET_PARAMETER").unwrap().body, "volume: -15.000000\r\n");
+        l.r.remote.command(RemoteCommand::Pause).await.unwrap();
+        // Paused at what was heard: 90 s minus the receiver's delay.
+        assert!(l.r.local.log().iter().any(|e| e == "seek 87750"), "{:?}", l.r.local.log());
+
+        l.r.remote.return_here().await.unwrap();
+        assert_eq!(*l.r.local.output.lock(), None, "back on this computer's output");
+        assert!(l.r.local.log().contains(&"volume 0.5".to_string()));
+        assert_eq!(fake.methods().last().map(String::as_str), Some("TEARDOWN"));
+    }
+
+    #[tokio::test]
+    async fn airplay_asks_for_a_password_and_keeps_it() {
+        let fake = FakeRaop::start(FakeOptions { password: Some("hunter2".into()), ..Default::default() });
+        let l = lan(vec![at(RAOP_SERVICE, "AABB@Kitchen", fake.addr.port(), &[("pw", "true")])]).await;
+        assert!(l.r.remote.players().await.iter().any(|p| p.needs_password));
+        let e = l.r.remote.move_to("airplay:AABB").await.unwrap_err();
+        assert!(matches!(&e, AppError::Auth(m) if m == rtsp::NEEDS_PASSWORD), "{e}");
+        let e = l.r.remote.move_with_password("airplay:AABB", "nope".into()).await.unwrap_err();
+        assert!(matches!(&e, AppError::Auth(m) if m == rtsp::WRONG_PASSWORD), "{e}");
+        assert!(l.passwords.get(&password_key("airplay:AABB")).unwrap().is_none(), "a wrong password isn't kept");
+        l.r.remote.move_with_password("airplay:AABB", "hunter2".into()).await.unwrap();
+        assert_eq!(l.passwords.get(&password_key("airplay:AABB")).unwrap().unwrap().expose(), "hunter2");
+        l.r.remote.return_here().await.unwrap();
+        // Next time the stored password is used without asking.
+        assert!(!l.r.remote.players().await.iter().any(|p| p.needs_password));
+        l.r.remote.move_to("airplay:AABB").await.unwrap();
+        assert!(l.r.remote.state().session.is_some());
+    }
+
+    #[tokio::test]
+    async fn an_airplay_receiver_that_goes_away_hands_back_to_this_computer() {
+        let fake = FakeRaop::start(FakeOptions::default());
+        let l = lan(vec![at(RAOP_SERVICE, "AABB@Kitchen", fake.addr.port(), &[])]).await;
+        l.r.remote.players().await;
+        l.r.remote.move_to("airplay:AABB").await.unwrap();
+        wait_for("following", || l.r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+        // The engine's output broke and fell back to this computer.
+        *l.r.local.output.lock() = None;
+        wait_for("handed back", || l.r.remote.state().stopped_on.as_deref() == Some("Kitchen")).await;
+        assert!(l.r.local.log().contains(&"volume 0.5".to_string()));
+        assert!(!l.r.local.log().iter().any(|e| e.starts_with("jump") || e.starts_with("play ")), "playback here is already right");
+    }
+
+    #[tokio::test]
+    async fn unsupported_and_unreachable_receivers_fail_cleanly() {
+        let l = lan(vec![
+            at(RAOP_SERVICE, "CCDD@Old", 9, &[("et", "1")]),
+            at(RAOP_SERVICE, "EEFF@Gone", 1, &[]),
+        ])
+        .await;
+        l.r.remote.players().await;
+        let e = l.r.remote.move_to("airplay:CCDD").await.unwrap_err();
+        assert!(e.to_string().contains("Can't play on Old"));
+        let e = l.r.remote.move_to("airplay:EEFF").await.unwrap_err();
+        assert_eq!(e.to_string(), "network: Couldn't reach Gone");
+        assert_eq!(*l.r.local.output.lock(), None);
+    }
 }

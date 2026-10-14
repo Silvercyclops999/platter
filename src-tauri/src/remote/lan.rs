@@ -308,3 +308,34 @@ mod tests {
         assert_eq!(a.socket_addr().unwrap().to_string(), "192.0.2.9:8009");
     }
 }
+
+#[cfg(test)]
+mod live {
+    use super::*;
+
+    /// Read-only browse of this network. Prints only counts per device kind
+    /// (never names, addresses or ids). Run by hand:
+    /// `cargo test --lib live_mdns_counts -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_mdns_counts() {
+        let m = MdnsSd::new();
+        m.scan().await;
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        let answers = m.scan().await;
+        m.stop();
+        let found = lan_found(&answers, &|_| false);
+        let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
+        for f in &found {
+            let key = format!(
+                "{:?} {:?}{}{}",
+                f.player.via,
+                f.player.kind,
+                if f.player.needs_password { " password" } else { "" },
+                if f.player.unsupported.is_some() { " unsupported" } else { "" }
+            );
+            *counts.entry(key).or_default() += 1;
+        }
+        println!("mdns answers: {}, devices: {counts:?}", answers.len());
+    }
+}
