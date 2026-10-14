@@ -1,3 +1,4 @@
+pub mod artistinfo;
 pub mod audio;
 pub mod bridge;
 pub mod db;
@@ -132,15 +133,29 @@ pub fn run() {
             }));
             db.set_remote_search(Arc::new(bridge::PlexSearch(plex.clone())));
             let initial = settings::load(&db);
+            // Artist info sources share one HTTP client with the art cache,
+            // which also serves their images.
+            let info_http: Arc<dyn artistinfo::http::InfoHttp> = Arc::new(artistinfo::http::ReqwestHttp::new()?);
             let art = ArtCache::open(
                 cache_dir.join("art"),
                 initial.art_cache_bytes(),
-                Arc::new(bridge::PlexArt(plex.clone())),
+                Arc::new(artistinfo::art::RoutedArt {
+                    plex: Arc::new(bridge::PlexArt(plex.clone())),
+                    http: info_http.clone(),
+                }),
             )?;
             let live = settings::Live {
                 art: Some(art.clone()),
                 ..Default::default()
             };
+            let artist_info = artistinfo::ArtistInfoService::new(
+                db.clone(),
+                info_http,
+                Arc::new(plex::keychain::KeyringStore::new()),
+                live.artist_info.clone(),
+            );
+            artist_info.set_mbid_lookup(Arc::new(artistinfo::service::PlexMbid(plex.clone())));
+            artist_info.set_events(Arc::new(app.handle().clone()));
             // Launched at login: start hidden to the tray or minimised.
             let args: Vec<String> = std::env::args().collect();
             platform::apply_start_mode(app.handle(), platform::start_mode(&args, &initial.platform()));
@@ -206,6 +221,7 @@ pub fn run() {
             app.manage(plex);
             app.manage(db);
             app.manage(art);
+            app.manage(artist_info);
             app.manage(player);
             app.manage(app_settings);
             app.manage(live.platform.clone());
@@ -275,6 +291,11 @@ pub fn run() {
             settings::art_cache_clear,
             settings::app_info,
             settings::open_project_page,
+            artistinfo::commands::artist_info,
+            artistinfo::commands::artist_info_keys,
+            artistinfo::commands::artist_info_key_set,
+            artistinfo::commands::artist_info_cache_clear,
+            artistinfo::commands::open_info_link,
             monitor::cached::cached_tracks,
             updates::update_check,
             updates::update_install_on_restart,

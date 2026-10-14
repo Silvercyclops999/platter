@@ -335,6 +335,18 @@ CREATE TABLE playlist_aliases (
     plex_id  TEXT NOT NULL
 ) WITHOUT ROWID;
 "#,
+    // v6: artist info from outside sources (artistinfo::cache). One row per
+    // artist and source; data is the source's JSON, NULL when it had nothing.
+    r#"
+CREATE TABLE artist_info (
+    artist_id  TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    data       TEXT,
+    fetched_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (artist_id, source)
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]
@@ -412,6 +424,24 @@ mod tests {
         assert!(ids.iter().all(|i| i.starts_with("local:")));
         let d: i64 = c.query_row("SELECT duration_ms FROM playlists", [], |r| r.get(0)).unwrap();
         assert_eq!(d, -1, "differs from Plex, so the next sync refetches the items");
+    }
+
+    #[test]
+    fn v6_adds_the_artist_info_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        for m in &MIGRATIONS[..5] {
+            c.execute_batch(m).unwrap();
+        }
+        c.pragma_update(None, "user_version", 5).unwrap();
+        migrate(&mut c).unwrap();
+        c.execute(
+            "INSERT INTO artist_info (artist_id, source, data, fetched_at, expires_at) VALUES ('1', 'wikipedia', NULL, 1, 2)",
+            [],
+        )
+        .unwrap();
+        let n: i64 = c.query_row("SELECT count(*) FROM artist_info", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
     }
 
     #[test]

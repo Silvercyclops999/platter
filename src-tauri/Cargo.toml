@@ -69,3 +69,5 @@ dotenvy = "0.15.7"
 hound = "3.5.1"
 tempfile = "3.27.0"
 wiremock = "0.6.5"
+# Paused clock for the rate limiter tests.
+tokio = { version = "1.53.3", features = ["full", "test-util"] }

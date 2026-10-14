@@ -125,6 +125,13 @@ pub struct SimilarTag {
     pub tag: String,
 }
 
+/// One `Guid` entry: `{id: "mbid://<uuid>"}`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GuidTag {
+    #[serde(default)]
+    pub id: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UltraBlurColors {
@@ -318,6 +325,10 @@ pub struct PlexMetadata {
     /// never on list items.
     #[serde(default, rename = "Similar")]
     pub similar: Vec<SimilarTag>,
+    /// Outside ids (`mbid://…` on music items). Artist detail carries them
+    /// without `includeGuids`.
+    #[serde(default, rename = "Guid")]
+    pub guids: Vec<GuidTag>,
     #[serde(default, rename = "UltraBlurColors")]
     pub ultra_blur_colors: Option<UltraBlurColors>,
     #[serde(default, rename = "Media")]
@@ -573,6 +584,16 @@ impl PlexMetadata {
             .map(|t| (t.id.clone().filter(|i| !i.is_empty()), t.tag.trim().to_string()))
             .filter(|(_, name)| !name.is_empty())
             .collect()
+    }
+
+    /// The MusicBrainz id from `Guid` (`mbid://<uuid>`), when there is one.
+    pub fn mbid(&self) -> Option<String> {
+        self.guids
+            .iter()
+            .find_map(|g| g.id.strip_prefix("mbid://"))
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(str::to_owned)
     }
 
     pub fn format_tag(&self) -> Option<String> {
@@ -1577,6 +1598,16 @@ mod tests {
             ]
         );
         assert_eq!(m.to_artist().summary.as_deref(), Some("Bio"));
+        assert_eq!(m.mbid().as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn artist_without_guids_has_no_mbid() {
+        let m: PlexMetadata = serde_json::from_value(serde_json::json!({
+            "ratingKey": "10", "type": "artist", "title": "Band", "Guid": [{"id": "plex://artist/abc"}]
+        }))
+        .unwrap();
+        assert_eq!(m.mbid(), None);
     }
 
     #[test]

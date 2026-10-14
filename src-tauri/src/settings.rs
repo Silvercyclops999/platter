@@ -136,6 +136,14 @@ pub struct Settings {
     pub playlist_ask_duplicates: bool,
     /// Name for new playlists; `#N` becomes the next free number.
     pub playlist_new_name: String,
+    /// Artist info from Wikipedia and Wikidata.
+    pub info_wikipedia: bool,
+    /// Artist info from Last.fm (needs the user's key, kept in the keychain).
+    pub info_lastfm: bool,
+    /// Artist images from Fanart.tv (needs the user's key).
+    pub info_fanart: bool,
+    /// Artist photo and bio from TheAudioDB (needs the user's key).
+    pub info_audiodb: bool,
 }
 
 impl Default for Settings {
@@ -169,6 +177,10 @@ impl Default for Settings {
             notify_track_change: false,
             playlist_ask_duplicates: true,
             playlist_new_name: crate::db::playlists::DEFAULT_NAME.to_string(),
+            info_wikipedia: true,
+            info_lastfm: false,
+            info_fanart: false,
+            info_audiodb: false,
         }
     }
 }
@@ -204,6 +216,10 @@ pub struct SettingsPatch {
     pub notify_track_change: Option<bool>,
     pub playlist_ask_duplicates: Option<bool>,
     pub playlist_new_name: Option<String>,
+    pub info_wikipedia: Option<bool>,
+    pub info_lastfm: Option<bool>,
+    pub info_fanart: Option<bool>,
+    pub info_audiodb: Option<bool>,
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -245,6 +261,10 @@ impl Settings {
         set(&mut self.volume_percent, p.volume_percent);
         set(&mut self.notify_track_change, p.notify_track_change);
         set(&mut self.playlist_ask_duplicates, p.playlist_ask_duplicates);
+        set(&mut self.info_wikipedia, p.info_wikipedia);
+        set(&mut self.info_lastfm, p.info_lastfm);
+        set(&mut self.info_fanart, p.info_fanart);
+        set(&mut self.info_audiodb, p.info_audiodb);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -305,6 +325,8 @@ pub struct Live {
     pub platform: Switches,
     /// Desktop notification on track change.
     pub notify_track_change: Arc<AtomicBool>,
+    /// Which artist info sources are on.
+    pub artist_info: crate::artistinfo::Switches,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -314,6 +336,14 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     db.set_popular_source(s.popular_source);
+    {
+        use crate::artistinfo::InfoSource as Src;
+        let ai = &live.artist_info;
+        ai.set(Src::Wikipedia, s.info_wikipedia);
+        ai.set(Src::Lastfm, s.info_lastfm);
+        ai.set(Src::Fanart, s.info_fanart);
+        ai.set(Src::Audiodb, s.info_audiodb);
+    }
     live.platform.set(s.platform());
     let cap = s.art_cache_bytes();
     let old = live.art_cap.swap(cap, Ordering::Relaxed);
@@ -523,6 +553,7 @@ mod tests {
         assert!(s.media_keys && s.media_session && !s.close_to_tray && !s.launch_at_login);
         assert!(s.ab_loop_handles && s.up_next_line && s.volume_percent);
         assert!(!s.notify_track_change);
+        assert!(s.info_wikipedia && !s.info_lastfm && !s.info_fanart && !s.info_audiodb);
         assert!(s.playlist_ask_duplicates);
         assert_eq!(s.playlist_new_name, "My playlist #N");
     }
@@ -580,9 +611,19 @@ mod tests {
             notify_track_change: Some(true),
             playlist_ask_duplicates: Some(false),
             playlist_new_name: Some("  Mix #N ".into()),
+            info_wikipedia: Some(false),
+            info_lastfm: Some(true),
+            info_fanart: Some(true),
+            info_audiodb: Some(true),
         })
         .await
         .unwrap();
+        {
+            use crate::artistinfo::InfoSource as Src;
+            // The artist info service sees the switches at once.
+            assert!(!live.artist_info.get(Src::Wikipedia));
+            assert!(live.artist_info.get(Src::Lastfm) && live.artist_info.get(Src::Fanart) && live.artist_info.get(Src::Audiodb));
+        }
         assert!(live.tracking.private_session.load(Ordering::Relaxed));
         assert!(!live.tracking.report_to_plex.load(Ordering::Relaxed));
         assert_eq!((live.streams.home(), live.streams.away()), (Some(256), None));
@@ -602,6 +643,8 @@ mod tests {
         let s = st2.get().await.unwrap();
         assert!(s.private_session);
         assert!(s.report_to_plex);
+        assert!(!s.info_wikipedia && s.info_lastfm && s.info_fanart && s.info_audiodb);
+        assert!(fresh.artist_info.get(crate::artistinfo::InfoSource::Lastfm));
         assert_eq!(s.volume, 0.25);
         assert_eq!(s.shuffle_style, ShuffleStyle::Standard);
         assert_eq!((s.quality_home, s.quality_away), (StreamQuality::Kbps256, StreamQuality::Original));
@@ -676,6 +719,8 @@ mod tests {
         assert_eq!(v["upNextLine"], true);
         assert_eq!(v["volumePercent"], true);
         assert_eq!(v["notifyTrackChange"], false);
+        assert_eq!(v["infoWikipedia"], true);
+        assert_eq!(v["infoLastfm"], false);
         let p: SettingsPatch = serde_json::from_str(r#"{"shuffleStyle":"standard"}"#).unwrap();
         assert_eq!(p.shuffle_style, Some(ShuffleStyle::Standard));
         let p: SettingsPatch =
