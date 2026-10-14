@@ -340,6 +340,7 @@ pub(crate) mod tests {
             shuffled_contexts: vec![],
             repeat: Repeat::Off,
             queue: QueueView::default(),
+            ab_loop: None,
         }
     }
 
