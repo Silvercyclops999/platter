@@ -21,6 +21,7 @@
         "center": true,
         "visible": true,
         "backgroundColor": "#0E0D0C",
+        "dragDropEnabled": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --force-gpu-mem-discardable-limit-mb=64"
       }
     ],

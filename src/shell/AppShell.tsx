@@ -1,6 +1,7 @@
 import { PanelRightOpen } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
+import { DragAnnouncer } from "../components/DragAnnouncer";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
 import { SavedInHost } from "../components/SavedInMenu";
 import { Toaster } from "../components/Toast";
@@ -169,6 +170,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <DragAnnouncer />
       <FullWindow />
     </div>
   );

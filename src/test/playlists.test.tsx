@@ -265,19 +265,30 @@ describe("add to playlist submenu", () => {
   });
 });
 
+function dt() {
+  const data = new Map<string, string>();
+  return {
+    setData: (k: string, v: string) => data.set(k, v),
+    getData: (k: string) => data.get(k) ?? "",
+    get types() {
+      return [...data.keys()];
+    },
+    effectAllowed: "",
+    dropEffect: "",
+  };
+}
+
+/** Rows can still be dragged (onto playlists, the queue), but not reordered here. */
+function expectNoReorder() {
+  const rows = screen.getAllByRole("listitem");
+  const transfer = dt();
+  fireEvent.dragStart(rows[1], { dataTransfer: transfer });
+  fireEvent.dragOver(rows[0], { dataTransfer: transfer, clientY: 0 });
+  for (const r of screen.getAllByRole("listitem")) expect(r).not.toHaveClass("is-drop-before", "is-drop-after");
+  fireEvent.dragEnd(rows[1], { dataTransfer: transfer });
+}
+
 describe("reorder", () => {
-  function dt() {
-    const data = new Map<string, string>();
-    return {
-      setData: (k: string, v: string) => data.set(k, v),
-      getData: (k: string) => data.get(k) ?? "",
-      get types() {
-        return [...data.keys()];
-      },
-      effectAllowed: "",
-      dropEffect: "",
-    };
-  }
 
   it("drag a row in custom order: a drop line shows and the list renumbers", async () => {
     const p = await makePlaylist("Drag me", 4);
@@ -318,7 +329,7 @@ describe("reorder", () => {
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
     await user.click(screen.getByRole("button", { name: "Sort songs: Custom order" }));
     await user.click(screen.getByRole("menuitemradio", { name: "Title" }));
-    for (const r of screen.getAllByRole("listitem")) expect(r).not.toHaveAttribute("draggable", "true");
+    expectNoReorder();
     const stored = await tracksOf(p.id);
     await user.click(screen.getAllByRole("listitem")[0].querySelector(".track-row__title")!);
     await user.keyboard("{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}");
@@ -424,7 +435,7 @@ describe("smart playlists", () => {
     await waitFor(() => expect(screen.getAllByRole("listitem").length).toBeGreaterThan(1));
     expect(screen.getByText("Smart playlist")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Most Played" })).not.toBeInTheDocument();
-    for (const r of screen.getAllByRole("listitem")) expect(r).not.toHaveAttribute("draggable", "true");
+    expectNoReorder();
     await user.click(screen.getByRole("button", { name: "More options for Most Played" }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Add to queue", "Duplicate", "Share", "Pin to sidebar"]);

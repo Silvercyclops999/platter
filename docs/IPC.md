@@ -449,7 +449,7 @@ dropdown parts off; the UI checks them.
 | `set_context_shuffle` | `{ contextId, shuffle }` (applies now if that context is playing, otherwise the next time it plays) |
 | `set_repeat` | `{ repeat: "off"|"all"|"one" }` |
 | `set_ab_loop` | `{ abLoop: { aMs, bMs } | null }` (null clears it) |
-| `queue_add` | `{ trackIds, at: "next"|"end" }` |
+| `queue_add` | `{ trackIds, at: "next"|"end"|{ index } }` (`index` puts them at that spot in the user queue; past the end appends) |
 | `queue_remove` | `{ itemId }` |
 | `queue_move` | `{ itemId, toIndex }` (index within the user queue) |
 | `queue_clear` | – (clears the user queue only) |
@@ -724,6 +724,7 @@ The rest of the fields, with their defaults:
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |
 | `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |
 | `groupEditions` | bool, true | Albums sharing `ARCHIVE_GROUP` list as one album (the face) in the library, artist pages and Home's album shelves. |
+| `dragAndDrop` | bool, true | Songs, albums and playlists can be dragged onto playlists, Liked Songs and the queue. Off stops those drags; reordering inside a playlist or the queue still works. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

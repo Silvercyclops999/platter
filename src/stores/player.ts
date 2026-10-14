@@ -19,6 +19,7 @@ import type {
   RemoteSession,
   RemoteState,
   RepeatMode,
+  QueueAt,
 } from "../lib/types";
 import { toast } from "./toasts";
 
@@ -224,7 +225,7 @@ export const player = {
     play({ context: { kind: "artist", id }, startTrackId, shuffle }).catch(report),
   playTracks: (trackIds: string[], startTrackId?: string, kind: "tracks" | "search" = "tracks") =>
     play({ context: { kind, trackIds }, startTrackId }).catch(report),
-  queueAdd: (trackIds: string[], at: "next" | "end") => backend.queueAdd(trackIds, at).catch(report),
+  queueAdd: (trackIds: string[], at: QueueAt) => backend.queueAdd(trackIds, at).catch(report),
   queueAlbum: (id: string) =>
     backend
       .albumPage(id)

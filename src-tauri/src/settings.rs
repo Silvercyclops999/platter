@@ -280,6 +280,8 @@ pub struct Settings {
     pub show_fan_edits: bool,
     /// Albums sharing ARCHIVE_GROUP show as one card with an edition picker.
     pub group_editions: bool,
+    /// Drag songs, albums and playlists onto playlists, Liked Songs and the queue.
+    pub drag_and_drop: bool,
 }
 
 impl Default for Settings {
@@ -354,6 +356,7 @@ impl Default for Settings {
             explicit_content: ExplicitContent::Allowed,
             show_fan_edits: false,
             group_editions: true,
+            drag_and_drop: true,
         }
     }
 }
@@ -428,6 +431,7 @@ pub struct SettingsPatch {
     pub explicit_content: Option<ExplicitContent>,
     pub show_fan_edits: Option<bool>,
     pub group_editions: Option<bool>,
+    pub drag_and_drop: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -512,6 +516,7 @@ impl Settings {
         set(&mut self.explicit_content, p.explicit_content);
         set(&mut self.show_fan_edits, p.show_fan_edits);
         set(&mut self.group_editions, p.group_editions);
+        set(&mut self.drag_and_drop, p.drag_and_drop);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -886,6 +891,7 @@ mod tests {
         assert!(s.discord_find_song && s.discord_cover_archive && !s.discord_upload_art);
         assert!(s.show_plex_avatar);
         assert!(s.read_file_tags && s.group_editions && !s.show_fan_edits);
+        assert!(s.drag_and_drop);
         assert_eq!(s.explicit_content, ExplicitContent::Allowed);
     }
 
@@ -1020,6 +1026,7 @@ mod tests {
             explicit_content: Some(ExplicitContent::Filtered),
             show_fan_edits: Some(true),
             group_editions: Some(false),
+            drag_and_drop: Some(false),
         })
         .await
         .unwrap();
@@ -1061,6 +1068,7 @@ mod tests {
         assert!(!fresh.remote.show_players() && *fresh.remote.allow_casting.borrow());
         assert_eq!(s.volume, 0.25);
         assert!(!s.read_file_tags && s.show_fan_edits && !s.group_editions);
+        assert!(!s.drag_and_drop);
         assert_eq!(s.explicit_content, ExplicitContent::Filtered);
         assert!(db2.tag_view().filter_explicit, "the library view follows at start");
         assert_eq!(s.shuffle_style, ShuffleStyle::Standard);

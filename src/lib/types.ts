@@ -85,6 +85,9 @@ export interface ArtistName {
   title: string;
 }
 
+/** Where queued songs go: before the rest of the queue, at its end, or at a spot in it. */
+export type QueueAt = "next" | "end" | { index: number };
+
 export interface Playlist {
   id: string;
   title: string;
@@ -621,6 +624,8 @@ export interface Settings {
   showFanEdits: boolean;
   /** Albums sharing a group tag show as one card with an edition picker. */
   groupEditions: boolean;
+  /** Drag songs, albums and playlists onto playlists, Liked Songs and the queue. */
+  dragAndDrop: boolean;
   [key: string]: unknown;
 }
 
@@ -720,6 +725,7 @@ export const DEFAULT_SETTINGS: Settings = {
   explicitContent: "allowed",
   showFanEdits: false,
   groupEditions: true,
+  dragAndDrop: true,
 };
 
 // ---------------------------------------------------------------- file tags

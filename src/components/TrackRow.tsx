@@ -16,6 +16,8 @@ import { formatDuration, trackArtistLine } from "../lib/format";
 import { isMod } from "../lib/platform";
 import type { Track } from "../lib/types";
 import { isUnavailable, useApp } from "../stores/app";
+import { endSongDrag, startSongDrag, tracksDrag } from "../stores/drag";
+import { useSettings } from "../stores/settings";
 import { likeMenuLabel, toggleLiked } from "../stores/likes";
 import { nav, useRouter } from "../stores/router";
 import { player } from "../stores/player";
@@ -119,6 +121,8 @@ interface Selection {
   clear: () => void;
   /** Menu for the whole selection, or null when the row isn't part of a multi-selection. */
   multiMenu: (key: string) => { label: string; items: MenuItem[] } | null;
+  /** The selected rows' tracks in list order. */
+  pickedTracks: () => Track[];
 }
 
 const SelectionContext = createContext<Selection | null>(null);
@@ -193,6 +197,11 @@ function useSelection(
         const ids = rows.map((el) => el.dataset.trackId!);
         return { label: `Options for ${rows.length} songs`, items: buildMulti(keys, ids) };
       },
+      pickedTracks: () =>
+        rowKeys(root.current)
+          .filter((el) => selected.has(el.dataset.rowKey!))
+          .map((el) => tracksIn.get(el))
+          .filter((t): t is Track => !!t),
     }),
     [selected, click, clear, ordered, root, buildMulti],
   );
@@ -234,6 +243,8 @@ export interface TrackRowProps {
   entering?: boolean;
   /** Dimmed (unliked on the Liked Songs page, until you leave it). */
   dimmed?: boolean;
+  /** Reorder within the list (custom order playlists, the queue). Songs drag
+   *  onto playlists and the queue anyway while that setting is on. */
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -290,6 +301,20 @@ export function TrackRow({
   const playButton = () => (active ? player.toggle() : onPlay());
   const PlayIcon = active && playing ? Pause : Play;
   const playLabel = `${active && playing ? "Pause" : "Play"} ${track.title}`;
+  const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
+
+  // A drag takes the whole selection when this row is part of it, otherwise
+  // just this row, which gets the selected highlight for the drag.
+  const dragStart = (e: React.DragEvent) => {
+    const many = picked && (sel?.selected.size ?? 0) > 1 ? sel!.pickedTracks() : [];
+    if (!many.length) sel?.selectOnly(key);
+    startSongDrag(e, tracksDrag(many.length ? many : [track]));
+    onDragStart?.(e);
+  };
+  const dragEnd = (e: React.DragEvent) => {
+    endSongDrag();
+    onDragEnd?.(e);
+  };
 
   const openMenu = (at: { clientX: number; clientY: number } | HTMLElement) => {
     const multi = sel?.multiMenu(key);
@@ -361,11 +386,13 @@ export function TrackRow({
       }}
       onKeyDown={onKeyDown}
       onContextMenu={onContextMenu}
-      draggable={draggable}
-      onDragStart={onDragStart}
+      draggable={draggable || songDrags || undefined}
+      onDragStart={draggable || songDrags ? dragStart : undefined}
+      // Enter as well as over: the drop line shows at once.
+      onDragEnter={onDragOver}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
-      onDragEnd={onDragEnd}
+      onDragEnd={dragEnd}
       onDrop={onDrop}
     >
       {!compact && (

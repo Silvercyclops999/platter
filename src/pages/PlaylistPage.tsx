@@ -14,6 +14,7 @@ import { useLoad } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
+import { dragLeft } from "../stores/drag";
 import { askRemove, editDetails, removeRows, savePlaylistDetails, usePlaylistUi } from "../stores/playlists";
 import { nav } from "../stores/router";
 import { toast } from "../stores/toasts";
@@ -211,7 +212,7 @@ export function PlaylistPage({ id }: { id: string }) {
             e.preventDefault();
             e.dataTransfer.dropEffect = "move";
             const at = dropPoint(e, index);
-            if (at !== insertAt) setInsertAt(at);
+            setInsertAt(at);
           },
           onDragEnd: () => setInsertAt(null),
           onDrop: (e: DragEvent) => {
@@ -376,7 +377,7 @@ export function PlaylistPage({ id }: { id: string }) {
             </div>
           )
         ) : (
-          <div ref={listRef} onKeyDownCapture={onListKeys} onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && setInsertAt(null)}>
+          <div ref={listRef} onKeyDownCapture={onListKeys} onDragLeave={(e) => dragLeft(e) && setInsertAt(null)}>
             <TrackList label={pl ? `${pl.title} tracks` : "Tracks"} multiMenu={multiMenu}>
               {shown
                 ? view.map((r, i) => (

@@ -789,7 +789,7 @@ export function SettingsPage() {
       key: "playlistAskDuplicates",
       section: "Library",
       title: "Ask before adding a song that's already in a playlist",
-      description: "When a song you add from a menu is already in that playlist, ask whether to add it again.",
+      description: "When a song you add from a menu or by dragging is already in that playlist, ask whether to add it again.",
       control: (ids) => toggle(s, "playlistAskDuplicates", ids),
     },
     {
@@ -1089,6 +1089,15 @@ export function SettingsPage() {
       description:
         "Albums that share a group tag, like a deluxe edition or builds of an unreleased album, show as one card. The album page gets an edition picker.",
       control: (ids) => toggle(s, "groupEditions", ids),
+    },
+    // Library: drag and drop
+    {
+      key: "dragAndDrop",
+      section: "Library",
+      group: "Drag and drop",
+      title: "Drag and drop to add to playlists and the queue",
+      description: "Drag songs, albums and playlists onto a playlist or Liked Songs in Your Library, or into the queue. Reordering a playlist or the queue by dragging works either way.",
+      control: (ids) => toggle(s, "dragAndDrop", ids),
     },
   ];
 

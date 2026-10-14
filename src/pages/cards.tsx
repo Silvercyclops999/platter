@@ -6,6 +6,7 @@ import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/
 import { shareItem } from "../components/ShareMenu";
 import { ExplicitBadge } from "../components/FileTagBadges";
 import { releaseTypeLabel } from "../lib/format";
+import { albumDrag, playlistDrag } from "../stores/drag";
 import { useAlbumBadges, useEditions } from "../stores/fileTags";
 import { useSettings } from "../stores/settings";
 import type { Album, Artist, HomeItem, PlayContextKind, Playlist } from "../lib/types";
@@ -155,6 +156,7 @@ export function AlbumCard({ album, subtitle = "artist", note }: { album: Album; 
       onOpen={a.open}
       onPlay={a.play}
       onContextMenu={a.onContextMenu}
+      drag={() => albumDrag(album.id, album.title)}
     />
   );
 }
@@ -187,6 +189,7 @@ export function PlaylistCard({ playlist }: { playlist: Playlist }) {
       onOpen={a.open}
       onPlay={a.play}
       onContextMenu={a.onContextMenu}
+      drag={() => playlistDrag(playlist.id, playlist.title, playlist.trackCount)}
     />
   );
 }

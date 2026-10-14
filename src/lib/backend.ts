@@ -64,6 +64,7 @@ import type {
   UpdateInfo,
   TagIndex,
   TagScanStatus,
+  QueueAt,
 } from "./types";
 
 export type Unlisten = () => void;
@@ -152,7 +153,7 @@ export interface Backend {
   setRepeat(repeat: RepeatMode): Promise<void>;
   /** Sets the A-B loop on the playing track (points in either order, 1 s apart or more); null clears it. */
   setAbLoop(abLoop: AbLoop | null): Promise<void>;
-  queueAdd(trackIds: string[], at: "next" | "end"): Promise<void>;
+  queueAdd(trackIds: string[], at: QueueAt): Promise<void>;
   queueRemove(itemId: string): Promise<void>;
   queueMove(itemId: string, toIndex: number): Promise<void>;
   queueClear(): Promise<void>;

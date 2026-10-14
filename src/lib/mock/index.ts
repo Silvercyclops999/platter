@@ -58,6 +58,7 @@ import type {
   ShareKind,
   SyncStatus,
   Track,
+  QueueAt,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
@@ -1391,13 +1392,13 @@ export class MockBackend implements Backend {
       this.emitState();
     });
   }
-  queueAdd(trackIds: string[], at: "next" | "end") {
+  queueAdd(trackIds: string[], at: QueueAt) {
     return this.act(() => {
       const items = trackIds.map((id) => this.trackById(id)).filter((t): t is Track => !!t).map((t) => this.item(t, "user"));
-      this.userQueue = at === "next" ? [...items, ...this.userQueue] : [...this.userQueue, ...items];
+      const i = at === "next" ? 0 : at === "end" ? this.userQueue.length : Math.max(0, Math.min(at.index, this.userQueue.length));
+      this.userQueue = [...this.userQueue.slice(0, i), ...items, ...this.userQueue.slice(i)];
       if (!this.current && this.userQueue.length) this.setCurrent(this.userQueue.shift()!, false);
       this.emitState();
-      this.emit("toast", { kind: "info", message: items.length === 1 ? "Added to queue" : `Added ${items.length} songs to queue` });
     });
   }
   queueRemove(itemId: string) {

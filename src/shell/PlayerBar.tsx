@@ -28,6 +28,7 @@ import { Slider } from "../components/Slider";
 import { Tooltip } from "../components/Tooltip";
 import { formatDuration } from "../lib/format";
 import { modKey } from "../lib/platform";
+import { dropOnQueue, endSongDrag, startSongDrag, tracksDrag, useSongDrop } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
 import { fullWindow } from "../stores/fullWindow";
 import { nav, useCurrentEntry } from "../stores/router";
@@ -263,19 +264,35 @@ function LyricsButton() {
   );
 }
 
+/** The queue button; songs dropped on it go to the end of the queue. */
+function QueueButton() {
+  const queueOpen = useUi((s) => s.queueOpen);
+  const toggleQueue = useUi((s) => s.toggleQueue);
+  const drop = useSongDrop("queue", "the queue", () => "ok", (songs) => dropOnQueue(songs, "end"));
+  return (
+    <span className={`drop-button ${drop.over ? "is-drop-target" : ""}`} {...drop.handlers}>
+      <IconButton label="Queue" pressed={queueOpen} icon={<ListMusic size={18} />} onClick={toggleQueue} />
+    </span>
+  );
+}
+
 /** Bottom player bar. */
 export function PlayerBar() {
   const state = usePlayer((s) => s.state);
-  const queueOpen = useUi((s) => s.queueOpen);
-  const toggleQueue = useUi((s) => s.toggleQueue);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
   const toggleOutput = useUi((s) => s.toggleOutput);
   const track = state?.track;
+  const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
+  // The playing song drags like a track row.
+  const dragNow =
+    track && songDrags
+      ? { draggable: true, onDragStart: (e: React.DragEvent) => void startSongDrag(e, tracksDrag([track])), onDragEnd: endSongDrag }
+      : null;
 
   return (
     <footer className="player-bar" aria-label="Player">
-      <div className="player-bar__now">
+      <div className="player-bar__now" {...dragNow}>
         {track ? (
           <>
             <button
@@ -330,7 +347,7 @@ export function PlayerBar() {
       <div className="player-bar__extras">
         <PrivateSession />
         <LyricsButton />
-        <IconButton label="Queue" pressed={queueOpen} icon={<ListMusic size={18} />} onClick={toggleQueue} />
+        <QueueButton />
         <IconButton label="Connect to a device" pressed={outputOpen} icon={<MonitorSpeaker size={18} />} onClick={toggleOutput} />
         <Volume />
         <IconButton

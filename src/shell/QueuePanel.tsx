@@ -1,10 +1,11 @@
 import { X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Tabs } from "../components/Tabs";
 import { TrackList, TrackRow, trackMenuItems } from "../components/TrackRow";
 import type { QueueItem } from "../lib/types";
+import { dragLeft, dropOnQueue, isSongDrag, useDrag } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
 import { useUi } from "../stores/ui";
 
@@ -23,6 +24,16 @@ export function moveIndex(from: number, insertAt: number): number {
   return insertAt > from ? insertAt - 1 : insertAt;
 }
 
+/** A queue row or songs from elsewhere: either can land in "Next in queue". */
+const queueDrag = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes(DRAG_TYPE) || isSongDrag(e);
+
+interface Reorder {
+  insertAt: number | null;
+  setInsertAt: (n: number | null) => void;
+  /** A queue row or songs dropped at insertion point `at` of the user queue. */
+  drop: (e: DragEvent, at: number) => void;
+}
+
 function QueueRow({
   item,
   index,
@@ -33,9 +44,10 @@ function QueueRow({
   item: QueueItem;
   index: number;
   current?: boolean;
+  /** Removable rows (the user queue and "Next up") can be moved into the user queue. */
   removable?: boolean;
-  /** Drag-to-reorder wiring (user queue only). */
-  reorder?: { insertAt: number | null; setInsertAt: (n: number | null) => void; drop: (itemId: string, insertAt: number) => void };
+  /** Drop wiring (user queue rows only). */
+  reorder?: Reorder;
 }) {
   const playing = usePlayer((s) => current && s.state?.status === "playing");
   const remove = removable ? () => player.queueRemove(item.itemId) : undefined;
@@ -54,26 +66,27 @@ function QueueRow({
       menuItems={trackMenuItems(item.track, {
         afterQueue: remove ? [{ label: "Remove from queue", onSelect: remove }] : [],
       })}
-      draggable={!!reorder}
+      draggable={removable}
       dropEdge={edge}
       onDragStart={(e) => {
+        if (!removable) return;
         e.dataTransfer.setData(DRAG_TYPE, item.itemId);
-        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.effectAllowed = "copyMove";
       }}
       onDragOver={(e) => {
-        if (!reorder || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+        if (!reorder || !queueDrag(e)) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = e.dataTransfer.types.includes(DRAG_TYPE) ? "move" : "copy";
         const at = dropTarget(e, index);
-        if (at !== reorder.insertAt) reorder.setInsertAt(at);
+        reorder.setInsertAt(at);
       }}
       onDragEnd={() => reorder?.setInsertAt(null)}
       onDrop={(e) => {
-        const id = e.dataTransfer.getData(DRAG_TYPE);
-        if (!reorder || !id) return;
+        if (!reorder || !queueDrag(e)) return;
         e.preventDefault();
-        reorder.drop(id, dropTarget(e, index));
-        reorder.setInsertAt(null);
+        e.stopPropagation();
+        reorder.drop(e, dropTarget(e, index));
       }}
     />
   );
@@ -93,14 +106,47 @@ export function QueuePanel() {
   const [insertAt, setInsertAt] = useState<number | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const userQueue = queue?.userQueue ?? [];
-  const reorder = {
+  // A drag from elsewhere that ends (dropped, Escape) takes its line with it.
+  const dragging = useDrag((s) => !!s.songs);
+  useEffect(() => {
+    if (!dragging) setInsertAt(null);
+  }, [dragging]);
+  const reorder: Reorder = {
     insertAt,
     setInsertAt,
-    drop: (itemId: string, at: number) => {
-      const from = userQueue.findIndex((i) => i.itemId === itemId);
-      if (from < 0) return;
-      const to = moveIndex(from, at);
-      if (to !== from) player.queueMove(itemId, to);
+    drop: (e, at) => {
+      setInsertAt(null);
+      const itemId = e.dataTransfer.getData(DRAG_TYPE);
+      if (itemId) {
+        const from = userQueue.findIndex((i) => i.itemId === itemId);
+        // A "Next up" row moves into the user queue at that spot.
+        if (from < 0) player.queueMove(itemId, at);
+        else if (moveIndex(from, at) !== from) player.queueMove(itemId, moveIndex(from, at));
+        return;
+      }
+      const songs = useDrag.getState().songs;
+      if (songs && isSongDrag(e)) void dropOnQueue(songs, at);
+    },
+  };
+  // Over the panel but not a user queue row: above it (now playing) goes
+  // first, anywhere else at its end.
+  const panelAt = (e: DragEvent) => ((e.target as Element).closest?.("[data-queue-section]")?.getAttribute("data-queue-section") === "now" ? 0 : userQueue.length);
+  const panelOver = (e: DragEvent) => {
+    if (tab !== "queue" || !queueDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = e.dataTransfer.types.includes(DRAG_TYPE) ? "move" : "copy";
+    setInsertAt(panelAt(e));
+  };
+  const panelDrop = {
+    onDragEnter: panelOver,
+    onDragOver: panelOver,
+    onDragLeave: (e: DragEvent) => {
+      if (dragLeft(e)) setInsertAt(null);
+    },
+    onDrop: (e: DragEvent) => {
+      if (tab !== "queue" || !queueDrag(e)) return;
+      e.preventDefault();
+      reorder.drop(e, panelAt(e));
     },
   };
 
@@ -122,10 +168,10 @@ export function QueuePanel() {
         />
         <IconButton label="Close queue" icon={<X size={18} />} onClick={close} />
       </header>
-      <div className="queue-panel__body" id="queue-panel" role="tabpanel" aria-labelledby={`queue-tab-${tab}`}>
+      <div className="queue-panel__body" id="queue-panel" role="tabpanel" aria-labelledby={`queue-tab-${tab}`} {...panelDrop}>
         {tab === "queue" ? (
           <>
-            <section className="queue-section" aria-labelledby="q-now">
+            <section className="queue-section" aria-labelledby="q-now" data-queue-section="now">
               <h3 id="q-now" className="queue-section__title">
                 Now playing
               </h3>
@@ -138,6 +184,7 @@ export function QueuePanel() {
               )}
             </section>
 
+            {queue && queue.userQueue.length === 0 && insertAt !== null && <div className="queue-drop-line" aria-hidden="true" />}
             {queue && queue.userQueue.length > 0 && (
               <section className="queue-section" aria-labelledby="q-user">
                 <div className="queue-section__row">

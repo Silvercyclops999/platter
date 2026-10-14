@@ -107,6 +107,8 @@ pub struct QueueView {
 pub enum AddAt {
     Next,
     End,
+    /// At this position in the user queue (0 is first; past the end appends).
+    Index(usize),
 }
 
 /// RNG that isn't persisted; reseeded from entropy after a restore.
@@ -709,7 +711,8 @@ impl Queue {
     }
 
     /// Adds tracks to the user queue. `Next` puts them (in order) before
-    /// everything else queued; `End` appends.
+    /// everything else queued; `End` appends; `Index` puts them (in order)
+    /// at that spot.
     pub fn add(&mut self, tracks: Vec<Track>, at: AddAt) -> Vec<QueueItem> {
         let items: Vec<QueueItem> = tracks
             .into_iter()
@@ -726,6 +729,12 @@ impl Queue {
                 }
             }
             AddAt::End => self.user.extend(items.iter().cloned()),
+            AddAt::Index(i) => {
+                let at = i.min(self.user.len());
+                for (k, it) in items.iter().enumerate() {
+                    self.user.insert(at + k, it.clone());
+                }
+            }
         }
         items
     }
@@ -873,6 +882,26 @@ mod tests {
         assert_eq!(q.advance_auto().unwrap().track.id, "t3");
         assert!(q.advance_auto().is_none(), "end of context, repeat off");
         assert_eq!(cur(&q), "t3");
+    }
+
+    #[test]
+    fn add_at_index_inserts_in_order_and_clamps_past_the_end() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx(), tracks(3), Some(0), Some(false));
+        q.add(vec![track("a", "B", "/p"), track("b", "B", "/p")], AddAt::End);
+        q.add(vec![track("x", "B", "/p"), track("y", "B", "/p")], AddAt::Index(1));
+        assert_eq!(ids(&q.view().user_queue), vec!["a", "x", "y", "b"]);
+        q.add(vec![track("z", "B", "/p")], AddAt::Index(99));
+        assert_eq!(ids(&q.view().user_queue), vec!["a", "x", "y", "b", "z"]);
+        q.add(vec![track("f", "B", "/p")], AddAt::Index(0));
+        assert_eq!(ids(&q.view().user_queue)[0], "f");
+    }
+
+    #[test]
+    fn add_at_deserializes_from_the_ui_forms() {
+        assert_eq!(serde_json::from_str::<AddAt>(r#""next""#).unwrap(), AddAt::Next);
+        assert_eq!(serde_json::from_str::<AddAt>(r#""end""#).unwrap(), AddAt::End);
+        assert_eq!(serde_json::from_str::<AddAt>(r#"{"index":2}"#).unwrap(), AddAt::Index(2));
     }
 
     #[test]

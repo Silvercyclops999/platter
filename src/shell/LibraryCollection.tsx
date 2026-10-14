@@ -6,16 +6,18 @@
  */
 import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import { Pause, Pin as PinIcon, Play, Volume2 } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Art, FluidArtSize } from "../components/Art";
 import { LikedCover } from "../components/LikedCover";
 import { openContextMenu } from "../components/ContextMenu";
 import { Skeleton } from "../components/Skeleton";
 import { Tooltip } from "../components/Tooltip";
 import { addedLabel, playedLabel } from "../lib/relativeTime";
+import { albumDrag, dropOnLiked, dropOnPlaylist, endSongDrag, libraryDropRule, playlistDrag, startSongDrag, useSongDrop } from "../stores/drag";
 import { KIND_LABEL, subtitle, typeLabel, type LibEntry, type LibView } from "../stores/library";
 import { usePlayer } from "../stores/player";
 import { sameRoute, useCurrentEntry } from "../stores/router";
+import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { entryMenu, movePlaylist, openEntry, playEntry, type LibraryModel } from "./useLibrary";
 
@@ -102,6 +104,37 @@ interface ItemProps {
   onMenu: (e: LibEntry, ev: MouseEvent<HTMLElement> | HTMLElement) => void;
 }
 
+/**
+ * Drag and drop for a library item: albums and playlists drag all their
+ * songs; your playlists and Liked Songs take songs dropped on them, and
+ * everything else dims for the drag.
+ */
+function useItemDnd(e: LibEntry) {
+  const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
+  const drop = useSongDrop(
+    e.liked ? "liked" : `${e.kind}:${e.id}`,
+    e.title,
+    (songs) => libraryDropRule(e, songs),
+    (songs) => (e.liked ? dropOnLiked(songs) : dropOnPlaylist(e.id, songs)),
+  );
+  const source = songDrags && !e.unavailable && !e.liked && (e.kind === "album" || e.kind === "playlist");
+  return {
+    className: `${drop.over ? "is-drop-target" : ""} ${drop.dimmed ? "is-drop-dim" : ""}`,
+    props: {
+      ...drop.handlers,
+      ...(source
+        ? {
+            draggable: true,
+            onDragStart: (ev: DragEvent) => {
+              startSongDrag(ev, e.kind === "album" ? albumDrag(e.id, e.title) : playlistDrag(e.id, e.title));
+            },
+            onDragEnd: endSongDrag,
+          }
+        : null),
+    },
+  };
+}
+
 function PlayOverlay({ e, playing, className }: { e: LibEntry; playing: boolean; className: string }) {
   if (e.unavailable) return null;
   return (
@@ -128,10 +161,12 @@ function Row({ e, index, tabIndex, selected, isContext, playing, filtered, onMen
   const sub = subtitle(e, filtered);
   const added = wide ? addedLabel(e.addedAt) : "";
   const played = wide ? playedLabel(e.playedAt) : "";
+  const dnd = useItemDnd(e);
   return (
     <div
-      className={`lib-row ${compact ? "lib-row--compact" : ""} ${wide ? "lib-row--wide" : ""} ${selected ? "is-selected" : ""}`}
+      className={`lib-row ${compact ? "lib-row--compact" : ""} ${wide ? "lib-row--wide" : ""} ${selected ? "is-selected" : ""} ${dnd.className}`}
       role="listitem"
+      {...dnd.props}
       onContextMenu={(ev) => {
         ev.preventDefault();
         onMenu(e, ev);
@@ -194,10 +229,12 @@ function Row({ e, index, tabIndex, selected, isContext, playing, filtered, onMen
 /** Grid and compact grid cells. */
 function Cell({ e, index, tabIndex, selected, isContext, playing, filtered, onMenu, compact }: ItemProps & { compact: boolean }) {
   const sub = subtitle(e, filtered);
+  const dnd = useItemDnd(e);
   return (
     <div
-      className={`lib-cell ${compact ? "lib-cell--compact" : ""} ${selected ? "is-selected" : ""}`}
+      className={`lib-cell ${compact ? "lib-cell--compact" : ""} ${selected ? "is-selected" : ""} ${dnd.className}`}
       role="listitem"
+      {...dnd.props}
       onContextMenu={(ev) => {
         ev.preventDefault();
         onMenu(e, ev);
@@ -234,8 +271,9 @@ function Cell({ e, index, tabIndex, selected, isContext, playing, filtered, onMe
 /** A rail tile: art only, with the title and subtitle in a tooltip. */
 function Tile({ e, index, tabIndex, selected, onMenu }: ItemProps) {
   const sub = subtitle(e, false);
+  const dnd = useItemDnd(e);
   return (
-    <div className="lib-tile-wrap" role="listitem" onDoubleClick={() => !e.unavailable && void playEntry(e)}>
+    <div className={`lib-tile-wrap ${dnd.className}`} role="listitem" onDoubleClick={() => !e.unavailable && void playEntry(e)} {...dnd.props}>
       <Tooltip
         placement="right"
         label={
