@@ -56,7 +56,8 @@ pub enum ContextKind {
     Artist,
     Tracks,
     Search,
-    /// Liked Songs (id "liked"), newest like first.
+    /// Liked Songs (id "liked"), newest like first, or `track_ids` when
+    /// given (the page's sort or filter).
     Liked,
 }
 

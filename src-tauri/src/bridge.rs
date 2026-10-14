@@ -421,7 +421,11 @@ impl TrackLookup for CacheLookup {
                         ResolvedContext { tracks, title: Some(page.artist.title) }
                     }
                     ContextKind::Liked => ResolvedContext {
-                        tracks: crate::db::likes::liked_tracks(c, liked_min)?,
+                        // The page's own order when it sends one (a sort or filter).
+                        tracks: match &ctx.track_ids {
+                            Some(ids) => queries::tracks_by_ids(c, ids)?,
+                            None => crate::db::likes::liked_tracks(c, liked_min)?,
+                        },
                         title: Some("Liked Songs".into()),
                     },
                     ContextKind::Tracks | ContextKind::Search => ResolvedContext {
