@@ -272,9 +272,11 @@
 .settings__empty-title { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
 .settings__empty-hint { margin-top: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .settings__hint { margin: 0 var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
-@media (max-width: 760px) {
+/* In a narrow main pane the control drops under the text. */
+@container main (max-width: 640px) {
   .setting-row { flex-wrap: wrap; gap: var(--space-3); }
   .setting-row__text { flex-basis: 100%; }
+  .setting-row__control { justify-content: flex-start; }
 }
 
 /* Small confirm and list dialogs (Settings) */
