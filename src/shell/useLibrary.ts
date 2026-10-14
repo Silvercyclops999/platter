@@ -3,6 +3,7 @@ import { useEffect, useMemo } from "react";
 import type { MenuItem } from "../stores/ui";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { createPlaylist } from "../stores/playlists";
+import { useLikes } from "../stores/likes";
 import type { Playlist } from "../lib/types";
 import { useApp } from "../stores/app";
 import {
@@ -86,6 +87,25 @@ export function mergePins(entries: LibEntry[], pins: ReturnType<typeof usePins.g
   return [...pinned, ...entries.filter((e) => !pinnedKeys.has(key(e.kind, e.id)))];
 }
 
+/** The Liked Songs row: a playlist owned by you, pinned first. */
+export function likedEntry(owner: string | null): LibEntry {
+  return {
+    kind: "playlist",
+    id: "liked",
+    title: "Liked Songs",
+    sortTitle: "Liked Songs",
+    creator: owner,
+    creatorId: null,
+    thumb: null,
+    smart: false,
+    format: null,
+    addedAt: null,
+    playedAt: null,
+    pinned: true,
+    liked: true,
+  };
+}
+
 export function useLibraryModel(query: string): LibraryModel {
   const items = useLibraryView((s) => s.items);
   const filter = useLibraryView((s) => s.filter);
@@ -96,7 +116,10 @@ export function useLibraryModel(query: string): LibraryModel {
   const owner = useApp((s) => s.auth?.username ?? null);
   const pins = usePins((s) => s.pins);
 
-  const all = useMemo(() => mergePins(toEntries(items ?? [], owner), pins), [items, owner, pins]);
+  const all = useMemo(
+    () => (items === null ? [] : [likedEntry(owner), ...mergePins(toEntries(items, owner), pins)]),
+    [items, owner, pins],
+  );
   const kinds = items === null ? LIB_KINDS : LIB_KINDS.filter((k) => all.some((e) => e.kind === k));
   // A saved filter for a type that's no longer there shows everything.
   const activeFilter: LibFilter = filter !== "all" && !kinds.includes(filter) ? "all" : filter;
@@ -110,12 +133,14 @@ export function useLibraryModel(query: string): LibraryModel {
 
 export function playEntry(e: LibEntry) {
   const ctx = usePlayer.getState().state?.queue.context;
+  if (e.liked) return ctx?.kind === "liked" ? player.toggle() : player.playLiked();
   if (ctx?.kind === e.kind && ctx.id === e.id) return player.toggle();
   useLibraryView.getState().touch(e.kind, e.id);
   return e.kind === "album" ? player.playAlbum(e.id) : e.kind === "artist" ? player.playArtist(e.id) : player.playPlaylist(e.id);
 }
 
 export function openEntry(e: LibEntry) {
+  if (e.liked) return nav.go({ name: "liked" });
   nav.go({ name: e.kind, id: e.id });
 }
 
@@ -140,6 +165,12 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
   };
   if (e.unavailable) return [pin];
   const play: MenuItem = { label: opts.playing ? "Pause" : "Play", onSelect: () => void playEntry(e) };
+  if (e.liked)
+    return [
+      play,
+      { label: "Add to queue", onSelect: () => void player.queueAdd([...useLikes.getState().ids], "end") },
+      { label: "Create playlist", separator: true, onSelect: () => void createPlaylist() },
+    ];
   const items: MenuItem[] = [play];
   if (e.kind === "album") {
     items.push({ label: "Add to queue", onSelect: () => void player.queueAlbum(e.id) });

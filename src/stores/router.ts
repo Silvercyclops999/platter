@@ -15,6 +15,8 @@ export type Route =
   | { name: "artist"; id: string }
   | { name: "album"; id: string }
   | { name: "playlist"; id: string }
+  /** Liked Songs. */
+  | { name: "liked" }
   | { name: "settings" }
   /** A Home shelf's "Show all" grid. */
   | { name: "homeShelf"; shelf: HomeShelfId };

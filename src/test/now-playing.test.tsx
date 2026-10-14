@@ -140,8 +140,8 @@ describe("panel content", () => {
     expect(within(p).getByRole("link", { name: solo.title })).toBeInTheDocument();
     expect(within(p).getByRole("button", { name: `Go to album ${solo.albumTitle}` })).toBeInTheDocument();
     expect(within(p).getByRole("button", { name: `More options for ${solo.title}` })).toBeInTheDocument();
-    // No saved tick until likes exist.
-    expect(within(p).queryByRole("button", { name: /like|saved/i })).toBeNull();
+    // The like control follows the title.
+    expect(within(p).getByRole("button", { name: `Add ${solo.title} to Liked Songs` })).toBeInTheDocument();
   });
 
   it("hides lyrics, about and credits when there's nothing to show", async () => {

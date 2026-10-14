@@ -1,0 +1,152 @@
+/* Likes: the save control, the Liked Songs cover and the "saved in" menu. */
+
+/* ---------------------------------------------------------------- save control */
+.save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  transition: color var(--motion-quick) var(--motion-easing), transform var(--motion-very-quick) var(--motion-easing);
+}
+.save-btn:hover { color: var(--color-text-primary); }
+.save-btn:active { transform: scale(calc(1 - 0.08 * var(--motion-move))); }
+.save-btn:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+.save-btn__disc { fill: var(--color-accent); transition: fill var(--motion-quick) var(--motion-easing); }
+.save-btn__tick { stroke: var(--color-text-on-accent); }
+.save-btn.is-liked:hover .save-btn__disc { fill: var(--color-accent-hover); }
+/* A new like lands with a small pop. */
+.save-btn__glyph--tick { animation: save-pop var(--motion-medium) var(--motion-easing); }
+@keyframes save-pop {
+  0% { transform: scale(calc(1 - 0.35 * var(--motion-move))); }
+  60% { transform: scale(calc(1 + 0.12 * var(--motion-move))); }
+  100% { transform: scale(1); }
+}
+
+/* Track rows: liked songs always show the tick; the plus waits for hover
+   or focus (or always, from Settings). The Liked Songs page's own rows keep
+   even the tick for hover. */
+.save-btn--row { visibility: hidden; }
+.save-btn--row.is-liked:not(.is-quiet),
+.save-btn--row.is-always,
+.track-row:hover .save-btn--row,
+.track-row:focus-within .save-btn--row,
+.track-row.is-picked .save-btn--row { visibility: visible; }
+.track-row--compact .save-btn--row { margin-right: var(--space-1); }
+.player-bar__now .save-btn { margin: 0 var(--space-2); }
+.np-title .save-btn { margin-top: 2px; }
+
+/* ---------------------------------------------------------------- Liked Songs cover */
+.liked-cover {
+  --liked-heart: 40%;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius-row);
+  color: var(--ivory-800);
+  background:
+    radial-gradient(120% 90% at 18% 8%, rgba(255, 253, 248, 0.95) 0%, rgba(255, 253, 248, 0) 55%),
+    linear-gradient(140deg, var(--ivory-200) 0%, var(--ivory-400) 48%, var(--ivory-600) 100%);
+}
+.liked-cover--fluid { width: 100%; aspect-ratio: 1; --liked-heart: 40%; }
+.liked-cover__heart {
+  width: var(--liked-heart);
+  height: var(--liked-heart);
+  filter: drop-shadow(0 2px 6px rgba(35, 32, 29, 0.25));
+}
+.liked-cover--fluid .liked-cover__heart { width: 40%; height: 40%; }
+
+/* ---------------------------------------------------------------- saved-in menu */
+.saved-in {
+  position: fixed;
+  z-index: 905;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: min(520px, calc(100vh - 32px));
+  padding: var(--space-2) var(--space-1) 0;
+  border-radius: var(--radius-card);
+  background: var(--color-bg-overlay);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 240, 220, 0.05);
+  color: var(--color-text-primary);
+  animation: saved-in-in var(--motion-quick) var(--motion-easing);
+}
+@keyframes saved-in-in {
+  from { opacity: 0; transform: translateY(calc(4px * var(--motion-move))); }
+  to { opacity: 1; transform: none; }
+}
+.saved-in__title {
+  margin: var(--space-1) var(--space-3) var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+.saved-in__find { margin-top: 0; }
+.saved-in__new,
+.saved-in__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: 2px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  text-align: left;
+}
+.saved-in__new:hover,
+.saved-in__row:hover,
+.saved-in__new:focus-visible,
+.saved-in__row:focus-visible { background: var(--color-state-pressed); outline: none; }
+.saved-in__row[aria-disabled="true"] { cursor: default; }
+.saved-in__row[aria-disabled="true"] .saved-in__box { opacity: 0.45; }
+.saved-in__list { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin-top: var(--space-1); padding-bottom: var(--space-1); }
+.saved-in__section + .saved-in__section { margin-top: var(--space-2); }
+.saved-in__heading {
+  margin: var(--space-2) var(--space-2) var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+.saved-in__art { display: inline-flex; flex: none; }
+.saved-in__art .art,
+.saved-in__art .liked-cover { border-radius: 2px; }
+.saved-in__text { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.3; }
+.saved-in__sub { display: flex; align-items: center; gap: 4px; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.saved-in__pin { flex: none; color: var(--color-accent); }
+.saved-in__hint { color: var(--color-text-muted); }
+.saved-in__box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--color-text-secondary);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-on-accent);
+  transition: background-color var(--motion-very-quick) var(--motion-easing), border-color var(--motion-very-quick) var(--motion-easing);
+}
+.saved-in__row:hover .saved-in__box { border-color: var(--color-text-primary); }
+.saved-in__row.is-checked .saved-in__box { border-color: var(--color-accent); background: var(--color-accent); }
+.saved-in__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid rgba(255, 240, 220, 0.08);
+}
+
+/* Now playing: the control sits after the title and artists. */
+.np-title:has(> .np-title__text) { flex-direction: row; align-items: center; gap: var(--space-3); }
+.np-title__text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.np-title--large:has(> .np-title__text) { justify-content: center; }
+.np-title--large .np-title__text { flex: 0 1 auto; align-items: center; }
+.np-title--large .save-btn { width: 32px; height: 32px; }
+.np-title--large .save-btn__glyph { width: 24px; height: 24px; }

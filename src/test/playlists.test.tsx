@@ -336,7 +336,7 @@ describe("remove", () => {
     fireEvent.contextMenu(screen.getAllByRole("listitem")[1], { clientX: 5, clientY: 5 });
     const menu = await screen.findByRole("menu");
     const labels = within(menu).getAllByRole("menuitem").map((m) => m.textContent);
-    expect(labels.slice(0, 3)).toEqual(["Add to playlist", "Remove from this playlist", "Add to queue"]);
+    expect(labels.slice(0, 4)).toEqual(["Add to playlist", "Add to Liked Songs", "Remove from this playlist", "Add to queue"]);
     await user.click(within(menu).getByRole("menuitem", { name: "Remove from this playlist" }));
     expect(rowTitles()).toEqual([before[0], before[2]]);
     await waitFor(async () => expect(await tracksOf(p.id)).toEqual([before[0], before[2]]));

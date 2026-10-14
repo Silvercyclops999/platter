@@ -202,6 +202,8 @@ export interface LibEntry {
   pinned: boolean;
   /** A pinned item that's no longer in the library. */
   unavailable?: boolean;
+  /** Liked Songs (always pinned first; opens its own page). */
+  liked?: boolean;
 }
 
 /** Library items as rows. Playlists are the signed-in user's own, so they're the creator. */

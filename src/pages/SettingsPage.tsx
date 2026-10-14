@@ -25,6 +25,7 @@ import type {
 import { useApp } from "../stores/app";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
+import { reloadLikes } from "../stores/likes";
 import { updateSettings, useSettings } from "../stores/settings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
@@ -59,6 +60,15 @@ const MOTION = [
   { value: "on", label: "On" },
   { value: "off", label: "Off" },
 ] as const satisfies SelectOption<ReduceMotion>[];
+const LIKED_MEANS = [
+  { value: "five", label: "5 stars" },
+  { value: "fourUp", label: "4 stars or more" },
+] as const satisfies SelectOption<Settings["likedMeans"]>[];
+const LIKE_ROWS = [
+  { value: "hover", label: "On hover" },
+  { value: "always", label: "Always" },
+  { value: "off", label: "Off" },
+] as const satisfies SelectOption<Settings["likeControlRows"]>[];
 const ART_SIZES_MB = [512, 1024, 2048, 5120, 10240, 20480];
 
 /** Where the app lives while its window is closed. */
@@ -745,6 +755,21 @@ export function SettingsPage() {
       title: "New playlists start with name",
       description: "The name a new playlist gets. #N becomes the next free number, so you get My playlist #1, #2 and so on.",
       control: (ids) => <PlaylistNameSetting ids={ids} />,
+    },
+    // Library: likes
+    {
+      key: "likedMeans",
+      section: "Library",
+      title: "Liked means",
+      description: "Likes are Plex star ratings, so other Plex apps see them. Liking a song always gives it five stars; this picks which ratings count as liked.",
+      control: (ids) => select(s, (x) => x.likedMeans, LIKED_MEANS, ids, (v) => void updateSettings({ likedMeans: v }).then(reloadLikes)),
+    },
+    {
+      key: "likeControlRows",
+      section: "Library",
+      title: "Show the like control on song rows",
+      description: "On hover shows the plus when you point at a song (liked songs always show their tick). Always shows it on every row; Off hides it in rows.",
+      control: (ids) => select(s, (x) => x.likeControlRows, LIKE_ROWS, ids, (v) => updateSettings({ likeControlRows: v })),
     },
     // Integrations: artist info
     {

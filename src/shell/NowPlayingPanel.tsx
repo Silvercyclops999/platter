@@ -4,6 +4,7 @@ import { Art } from "../components/Art";
 import { ArtistLinks, TextLink, useTrackCredits } from "../components/ArtistLinks";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
+import { SaveButton } from "../components/SaveButton";
 import { trackMenuItems } from "../components/TrackRow";
 import type { NowPlayingDetails, Track } from "../lib/types";
 import { useApp } from "../stores/app";
@@ -171,14 +172,17 @@ function NextCard() {
   );
 }
 
-/** Title and artists under the cover. The saved tick joins when likes arrive. */
+/** Title and artists under the cover, with the like control after them. */
 function TrackTitle({ track, large }: { track: Track; large?: boolean }) {
   return (
     <div className={`np-title ${large ? "np-title--large" : ""}`}>
-      <div className="np-title__name truncate">
-        <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.title}</TextLink>
+      <div className="np-title__text">
+        <div className="np-title__name truncate">
+          <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.title}</TextLink>
+        </div>
+        <ArtistLinks track={track} className="np-title__artists truncate" />
       </div>
-      <ArtistLinks track={track} className="np-title__artists truncate" />
+      <SaveButton track={track} place="panel" />
     </div>
   );
 }

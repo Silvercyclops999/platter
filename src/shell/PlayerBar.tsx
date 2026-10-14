@@ -1,6 +1,5 @@
 import {
   EyeOff,
-  Heart,
   ListMusic,
   MicVocal,
   MonitorSpeaker,
@@ -19,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { TextLink } from "../components/ArtistLinks";
 import { openContextMenu } from "../components/ContextMenu";
+import { SaveButton } from "../components/SaveButton";
 import { trackMenuItems } from "../components/TrackRow";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
@@ -241,7 +241,7 @@ export function PlayerBar() {
               </div>
               <PlayerSubline track={track} />
             </div>
-            <IconButton label="Like" tooltip="Likes arrive in Phase 2" softDisabled icon={<Heart size={16} />} size="md" />
+            <SaveButton track={track} place="bar" />
           </>
         ) : state === null ? (
           // Still loading the restored session: reserve the same space (no layout shift).

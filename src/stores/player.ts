@@ -106,6 +106,9 @@ export const player = {
     backend.playContext({ context: { kind: "album", id }, startTrackId, shuffle }).catch(report),
   playPlaylist: (id: string, startTrackId?: string, shuffle?: boolean) =>
     backend.playContext({ context: { kind: "playlist", id }, startTrackId, shuffle }).catch(report),
+  /** Liked Songs; `trackIds` plays them in the page's order (a sort or filter). */
+  playLiked: (startTrackId?: string, trackIds?: string[], shuffle?: boolean) =>
+    backend.playContext({ context: { kind: "liked", id: "liked", trackIds }, startTrackId, shuffle }).catch(report),
   playArtist: (id: string, startTrackId?: string, shuffle?: boolean) =>
     backend.playContext({ context: { kind: "artist", id }, startTrackId, shuffle }).catch(report),
   playTracks: (trackIds: string[], startTrackId?: string, kind: "tracks" | "search" = "tracks") =>

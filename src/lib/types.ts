@@ -73,6 +73,10 @@ export interface Track {
   lastViewedAt: number | null;
   /** Global listener count from Plex; absent when it has none. */
   ratingCount?: number;
+  /** When the user last rated it, unix seconds (for a liked song: when it was liked). */
+  ratedAt?: number | null;
+  /** Plex genre and mood tags on the track itself. */
+  genres?: string[];
 }
 
 /** A library artist's name and id (`artist_names`). */
@@ -249,6 +253,12 @@ export interface RemovedItem {
   index: number;
 }
 
+/** `liked_page`: liked songs, newest like first. */
+export interface LikedPage {
+  tracks: Track[];
+  totalDurationMs: number;
+}
+
 /** Where `playlist_add` puts songs: the end (default), the top, or after a row. */
 export interface AddPlace {
   after?: string;
@@ -322,7 +332,8 @@ export interface SearchResults {
 
 // ---------------------------------------------------------------- playback & queue
 
-export type PlayContextKind = "album" | "playlist" | "artist" | "tracks" | "search";
+/** "liked" is Liked Songs (id "liked"). */
+export type PlayContextKind = "album" | "playlist" | "artist" | "tracks" | "search" | "liked";
 
 export interface PlayContext {
   kind: PlayContextKind;
@@ -452,6 +463,10 @@ export interface ToastEvent {
 export type StreamQuality = "original" | "320" | "256" | "192" | "128";
 export type PopularSource = "global" | "myPlays";
 export type ReduceMotion = "system" | "on" | "off";
+/** Which Plex star ratings count as liked ("five": rating 10; "fourUp": 8 and up). */
+export type LikedMeans = "five" | "fourUp";
+/** When track rows show the like control. */
+export type LikeControlRows = "hover" | "always" | "off";
 
 export interface Settings {
   privateSession: boolean;
@@ -508,6 +523,10 @@ export interface Settings {
   infoFanart: boolean;
   /** Artist photo and bio from TheAudioDB (needs a key). */
   infoAudiodb: boolean;
+  /** Which star ratings count as liked. Liking always writes five stars. */
+  likedMeans: LikedMeans;
+  /** When track rows show the like control (liked songs always show it unless "off"). */
+  likeControlRows: LikeControlRows;
   [key: string]: unknown;
 }
 
@@ -544,6 +563,8 @@ export const DEFAULT_SETTINGS: Settings = {
   infoLastfm: false,
   infoFanart: false,
   infoAudiodb: false,
+  likedMeans: "five",
+  likeControlRows: "hover",
 };
 
 // ---------------------------------------------------------------- artist info
@@ -654,6 +675,8 @@ export interface EventMap {
   "health://changed": Health;
   toast: ToastEvent;
   "update://ready": { version: string };
+  /** These songs were liked or unliked (here, rolled back, or from Plex). */
+  "likes://changed": { ids: string[] };
 }
 
 export type EventName = keyof EventMap;

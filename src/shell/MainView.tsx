@@ -8,6 +8,7 @@ import { ArtistPage } from "../pages/ArtistPage";
 import { HomePage } from "../pages/HomePage";
 import { HomeShelfPage } from "../pages/HomeShelfPage";
 import { LibraryPage } from "../pages/LibraryPage";
+import { LikedPage } from "../pages/LikedPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { SearchPage } from "../pages/SearchPage";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -101,6 +102,8 @@ function Page({ route }: { route: Route }) {
       return <AlbumPage id={route.id} />;
     case "playlist":
       return <PlaylistPage id={route.id} />;
+    case "liked":
+      return <LikedPage />;
     case "settings":
       return <SettingsPage />;
     case "homeShelf":

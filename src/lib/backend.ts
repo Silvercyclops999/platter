@@ -36,6 +36,7 @@ import type {
   InfoKeysStatus,
   KeyedInfoSource,
   LibraryItem,
+  LikedPage,
   NowPlayingDetails,
   OutputState,
   Page,
@@ -99,6 +100,15 @@ export interface Backend {
   playlistUpdate(id: string, details: { title?: string; summary?: string }): Promise<Playlist>;
   playlistSetCover(id: string, bytes: Uint8Array, contentType: string): Promise<void>;
   playlistDelete(id: string): Promise<void>;
+
+  // Likes (docs/IPC.md "Likes")
+  /** Like (five stars) or unlike (clear the rating); resolves to the ids that changed. */
+  likesSet(trackIds: string[], liked: boolean): Promise<string[]>;
+  /** Every liked song's id, newest like first. */
+  likedIds(): Promise<string[]>;
+  likedPage(): Promise<LikedPage>;
+  /** Playlists holding the song, most recently changed first. */
+  playlistsWithTrack(trackId: string): Promise<string[]>;
 
   // Now playing
   /** Artist bio, extra credits and lyrics for the now-playing panel. */
@@ -227,6 +237,10 @@ export function createTauriBackend(): Backend {
     playlistUpdate: (id, details) => call("playlist_update", { id, title: details.title, summary: details.summary }),
     playlistSetCover: (id, bytes, contentType) => call("playlist_set_cover", { id, bytes: Array.from(bytes), contentType }),
     playlistDelete: (id) => call("playlist_delete", { id }),
+    likesSet: (trackIds, liked) => call("likes_set", { trackIds, liked }),
+    likedIds: () => call("liked_ids"),
+    likedPage: () => call("liked_page"),
+    playlistsWithTrack: (trackId) => call("playlists_with_track", { trackId }),
     nowPlayingDetails: (trackId) => call("now_playing_details", { trackId }),
 
     search: (args) => call("search", { ...args }),

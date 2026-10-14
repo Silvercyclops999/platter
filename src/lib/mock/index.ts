@@ -61,6 +61,7 @@ import { mockBio } from "./bio";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { MockHome, type ContextPlay } from "./home";
+import { MockLikes } from "./likes";
 import { MockPlaylists } from "./playlists";
 
 export interface MockOptions {
@@ -134,6 +135,8 @@ export class MockBackend implements Backend {
   readonly fx: Fixtures;
   /** Playlist editing (test hooks: refuseNextWrite, deleteElsewhere). */
   readonly pl: MockPlaylists;
+  /** Likes (test hooks: refuseNextWrite, likeElsewhere, clearAll). */
+  readonly likes: MockLikes;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -190,6 +193,12 @@ export class MockBackend implements Backend {
       this.fx,
       (id) => this.trackById(id),
       () => this.emit("library://changed", null),
+      (message) => this.emit("toast", { kind: "error", message }),
+    );
+    this.likes = new MockLikes(
+      this.fx,
+      () => this.settings.likedMeans,
+      (ids) => this.emit("likes://changed", { ids }),
       (message) => this.emit("toast", { kind: "error", message }),
     );
     this.contextPlays = this.seedContextPlays();
@@ -565,6 +574,21 @@ export class MockBackend implements Backend {
     return this.delay(() => this.pl.delete(id));
   }
 
+  // ---------------------------------------------------------------- likes
+
+  likesSet(trackIds: string[], liked: boolean) {
+    return this.delay(() => this.likes.set(trackIds, liked));
+  }
+  likedIds() {
+    return this.delay(() => this.likes.ids());
+  }
+  likedPage() {
+    return this.delay(() => this.likes.page());
+  }
+  playlistsWithTrack(trackId: string) {
+    return this.delay(() => this.likes.playlistsWith(trackId));
+  }
+
   nowPlayingDetails(trackId: string) {
     return this.delay(() => {
       const track = this.trackById(trackId) ?? this.notFound("Track");
@@ -799,6 +823,8 @@ export class MockBackend implements Backend {
         const ids = this.fx.playlistTracks.get(pl.id) ?? [];
         return { tracks: ids.map((i) => this.trackById(i)!).filter(Boolean), info: { kind: "playlist", id: pl.id, title: pl.title } };
       }
+      case "liked":
+        return { tracks: c.trackIds ? c.trackIds.map((i) => this.trackById(i)!).filter(Boolean) : this.likes.likedTracks(), info: { kind: "liked", id: "liked", title: "Liked Songs" } };
       case "artist": {
         const ar = this.fx.artists.find((a) => a.id === c.id) ?? this.notFound("Artist");
         const tracks = this.fx.tracks.filter((t) => t.artistId === ar.id).sort((a, b) => b.viewCount - a.viewCount);

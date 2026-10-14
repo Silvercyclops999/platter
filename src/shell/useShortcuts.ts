@@ -1,6 +1,7 @@
 import { useEffect } from "react";
-import { isMod } from "../lib/platform";
-import { player } from "../stores/player";
+import { isMod, platform } from "../lib/platform";
+import { toggleLiked } from "../stores/likes";
+import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { useUi } from "../stores/ui";
 
@@ -14,13 +15,22 @@ export const VOLUME_KEY_STEP = 1 / 16;
 /** Seek per Shift+←/→. */
 export const SEEK_SHORTCUT_MS = 5_000;
 
+/** Like or unlike the playing song: Alt+Shift+B (Option+Shift+B on a Mac). */
+export const LIKE_SHORTCUT = platform === "mac" ? "⌥⇧B" : "Alt+Shift+B";
+
+/** The like shortcut's keys (by key position, so Option's special letters on a Mac still count). */
+export function isLikeShortcut(e: Pick<KeyboardEvent, "altKey" | "shiftKey" | "ctrlKey" | "metaKey" | "key" | "code">): boolean {
+  return e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && (e.code === "KeyB" || e.key.toLowerCase() === "b");
+}
+
 /**
  * Global keyboard + mouse shortcuts:
  *   Ctrl/⌘+K command palette · Ctrl/⌘+L search · Ctrl/⌘+, settings ·
  *   Alt+←/→ back/forward · mouse back/forward buttons ·
  *   Space play/pause · Ctrl/⌘+←/→ prev/next · Shift+←/→ seek 5 s ·
  *   Ctrl/⌘+↑/↓ volume (1/16 steps) ·
- *   Ctrl/⌘+S shuffle · Ctrl/⌘+R repeat.
+ *   Ctrl/⌘+S shuffle · Ctrl/⌘+R repeat ·
+ *   Alt+Shift+B like / unlike the playing song.
  */
 export function useShortcuts() {
   useEffect(() => {
@@ -76,6 +86,12 @@ export function useShortcuts() {
       if (isMod(e) && e.key === "ArrowLeft") {
         e.preventDefault();
         player.previous();
+        return;
+      }
+      if (isLikeShortcut(e)) {
+        e.preventDefault();
+        const track = usePlayer.getState().state?.track;
+        if (track && !e.repeat) void toggleLiked([track]);
         return;
       }
       if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {

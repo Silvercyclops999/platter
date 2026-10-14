@@ -1,0 +1,72 @@
+/* Liked Songs page. */
+
+.liked__cover { box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55); }
+.detail-header--compact .liked__cover { width: 130px !important; height: 130px !important; --liked-heart: 52px !important; }
+
+/* Action row: play and shuffle on the left, find and sort on the right. */
+.liked__tools { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
+.liked__sort { margin-left: 0; }
+.liked__sort-arrows { opacity: 0.7; }
+.liked-find { display: flex; align-items: center; }
+.liked-find.is-open {
+  position: relative;
+  width: 220px;
+  height: 32px;
+  border-radius: 4px;
+  background: var(--color-state-pressed);
+  animation: liked-find-open var(--motion-quick) var(--motion-easing);
+}
+@keyframes liked-find-open {
+  from { width: 32px; }
+  to { width: 220px; }
+}
+.liked-find__icon { position: absolute; left: 10px; color: var(--color-text-secondary); pointer-events: none; }
+.liked-find__input {
+  width: 100%;
+  height: 100%;
+  padding: 0 var(--space-3) 0 34px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+.liked-find__input::placeholder { color: var(--color-text-muted); }
+.liked-find__input:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
+.liked-find__input::-webkit-search-cancel-button { display: none; }
+
+.liked__chips { margin: calc(-1 * var(--space-2)) 0 var(--space-6); }
+.liked__chip-clear { display: inline-grid; place-items: center; width: 32px; padding: 0; }
+.liked__none { margin: var(--space-6) var(--space-4); color: var(--color-text-secondary); }
+.liked__empty .btn { margin-top: var(--space-4); }
+
+/* Table: number, title, album, date added, time. */
+.liked__list :is(.track-row, .track-list__head).track-row--added {
+  grid-template-columns: 32px minmax(0, 5fr) minmax(0, 3fr) minmax(112px, 2fr) minmax(108px, auto);
+}
+.track-row__added,
+.track-list__added { font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container main (max-width: 760px) {
+  .liked__list :is(.track-row, .track-list__head).track-row--added { grid-template-columns: 32px minmax(0, 1fr) 0 0 minmax(108px, auto); }
+  .liked__list .track-row__album,
+  .liked__list .track-row__added,
+  .liked__list .track-list__album,
+  .liked__list .track-list__added { visibility: hidden; }
+}
+
+/* Compact view: shorter rows, no art, artists beside the title. */
+.liked__list--compact .track-row { height: 40px; }
+.liked__list--compact .track-row__title { font-size: var(--font-size-md); }
+.liked__list--compact .track-row__text { flex-direction: row; align-items: baseline; gap: var(--space-2); }
+.liked__list--compact .track-row__artist { flex: 0 1 auto; }
+.liked__list--compact .track-row__title { flex: 0 1 auto; }
+
+/* A new like fades in at the top; an unliked song waits, dimmed. */
+.track-row.is-entering { animation: liked-row-in var(--motion-slow) var(--motion-easing); }
+@keyframes liked-row-in {
+  from { opacity: 0; transform: translateY(calc(-6px * var(--motion-move))); background: var(--color-state-selected); }
+  to { opacity: 1; transform: none; }
+}
+.track-row.is-dimmed { opacity: 0.45; }
+.track-row.is-dimmed:hover { opacity: 0.7; }

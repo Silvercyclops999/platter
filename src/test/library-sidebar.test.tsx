@@ -284,7 +284,8 @@ describe("library sidebar", () => {
     await renderSidebar();
     expect(rows().length).toBeGreaterThan(3);
     await user.click(screen.getByRole("button", { name: "Playlists" }));
-    expect(rows()).toHaveLength(mock.fx.playlists.length);
+    // Liked Songs is pinned first among the playlists.
+    expect(rows()).toHaveLength(mock.fx.playlists.length + 1);
     // Type word gone: just the owner.
     expect(within(rows()[0]).getByText("listener")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Search in playlists" })).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { Ellipsis, Heart, Pause, Play, X } from "lucide-react";
+import { Ellipsis, Pause, Play, X } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -16,6 +16,7 @@ import { formatDuration, trackArtistLine } from "../lib/format";
 import { isMod } from "../lib/platform";
 import type { Track } from "../lib/types";
 import { isUnavailable, useApp } from "../stores/app";
+import { likeMenuLabel, toggleLiked } from "../stores/likes";
 import { nav, useRouter } from "../stores/router";
 import { player } from "../stores/player";
 import { toast } from "../stores/toasts";
@@ -25,6 +26,7 @@ import { ArtistLinks, TextLink } from "./ArtistLinks";
 import { QualityBadge } from "./Badge";
 import { openContextMenu } from "./ContextMenu";
 import { addToPlaylistItem } from "./PlaylistPicker";
+import { SaveButton } from "./SaveButton";
 import { Skeleton } from "./Skeleton";
 
 /** Whether the album page for `albumId` is the one showing. */
@@ -44,9 +46,20 @@ export function goToArtistItems(track: Track): MenuItem[] {
   return targets.map((a) => ({ label: `Go to ${a.name}`, onSelect: () => nav.go({ name: "artist", id: a.id }) }));
 }
 
+/** "Add to Liked Songs" / "Remove from Liked Songs" for songs (the label follows their state). */
+export function likeItem(tracks: () => Track[]): MenuItem {
+  return {
+    // Read when the menu shows: rows build their menu ahead of time.
+    get label() {
+      return likeMenuLabel(tracks().map((t) => t.id));
+    },
+    onSelect: () => void toggleLiked(tracks()),
+  };
+}
+
 /**
  * Standard track context menu, also used for the now-playing track. Order:
- * add to playlist, queue actions, then where to go, then copy. "Go to album"
+ * add to playlist, the like toggle, queue actions, then where to go, then copy. "Go to album"
  * is left out on that album's own page. `afterPlaylist` items (remove from
  * this playlist) go right after "Add to playlist", `afterQueue` items (e.g.
  * remove from queue) right after "Add to queue"; pages can also prepend or
@@ -59,6 +72,7 @@ export function trackMenuItems(
   return [
     ...(extra.before ?? []),
     addToPlaylistItem(() => [track.id]),
+    likeItem(() => [track]),
     ...(extra.afterPlaylist ?? []),
     { label: "Add to queue", onSelect: () => player.queueAdd([track.id], "end") },
     ...(extra.afterQueue ?? []),
@@ -78,9 +92,16 @@ export function trackMenuItems(
 }
 
 /** Menu for several selected rows: only actions that make sense for all of them. */
-export function multiTrackMenuItems(trackIds: string[]): MenuItem[] {
-  return [{ label: "Add to queue", onSelect: () => player.queueAdd(trackIds, "end") }, addToPlaylistItem(() => trackIds)];
+export function multiTrackMenuItems(trackIds: string[], tracks: Track[] = []): MenuItem[] {
+  return [
+    { label: "Add to queue", onSelect: () => player.queueAdd(trackIds, "end") },
+    ...(tracks.length ? [likeItem(() => tracks)] : []),
+    addToPlaylistItem(() => trackIds),
+  ];
 }
+
+/** The tracks for a multi-selection's track ids, looked up in the rows on screen. */
+const tracksIn = new WeakMap<HTMLElement, Track>();
 
 // ---------------------------------------------------------------- selection
 
@@ -200,6 +221,14 @@ export interface TrackRowProps {
   compact?: boolean;
   /** Highlighted by keyboard navigation that lives elsewhere (search box arrows). */
   selected?: boolean;
+  /** Liked Songs page: the like tick shows on hover only. */
+  likedQuiet?: boolean;
+  /** "Date added" column text (in place of the quality badges). */
+  added?: string;
+  /** Fades in (a new like at the top of Liked Songs). */
+  entering?: boolean;
+  /** Dimmed (unliked on the Liked Songs page, until you leave it). */
+  dimmed?: boolean;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -232,6 +261,10 @@ export function TrackRow({
   trailing,
   compact,
   selected,
+  likedQuiet,
+  added,
+  entering,
+  dimmed,
   draggable,
   onDragStart,
   onDragOver,
@@ -311,7 +344,10 @@ export function TrackRow({
       data-track-id={track.id}
       data-selected={picked || undefined}
       title={unavailable ? "Not available right now" : undefined}
-      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
+      ref={(el) => {
+        if (el) tracksIn.set(el, track);
+      }}
+      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${entering ? "is-entering" : ""} ${dimmed ? "is-dimmed" : ""} ${added !== undefined ? "track-row--added" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
       onClick={onClick}
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).closest("button")) return;
@@ -391,7 +427,9 @@ export function TrackRow({
         </div>
       )}
       {!compact &&
-        (showPlays ? (
+        (added !== undefined ? (
+          <div className="track-row__added">{added}</div>
+        ) : showPlays ? (
           <div className="track-row__plays tabular">
             {track.viewCount.toLocaleString()}
           </div>
@@ -401,11 +439,7 @@ export function TrackRow({
           </div>
         ))}
       <div className="track-row__end">
-        {!compact && (
-          <button type="button" tabIndex={-1} className="track-row__hover-btn" aria-label="Like (coming in Phase 2)" aria-disabled="true">
-            <Heart size={16} aria-hidden="true" />
-          </button>
-        )}
+        {!compact && <SaveButton track={track} place="row" quietWhenLiked={likedQuiet} />}
         <span className="track-row__duration tabular">{formatDuration(track.durationMs)}</span>
         {trailing}
         {onRemove && (
@@ -446,30 +480,39 @@ export function TrackList({
   showAlbum = true,
   showPlays = false,
   header = true,
-  multiMenu = (_keys: string[], ids: string[]) => multiTrackMenuItems(ids),
+  addedColumn = false,
+  multiMenu = (_keys: string[], ids: string[], tracks: Track[]) => multiTrackMenuItems(ids, tracks),
 }: {
   children: ReactNode;
   label: string;
   showAlbum?: boolean;
   showPlays?: boolean;
   header?: boolean;
+  /** The header names a "Date added" column (rows pass `added`). */
+  addedColumn?: boolean;
   /** Menu for a multi-selection: row keys and track ids in list order. */
-  multiMenu?: (keys: string[], trackIds: string[]) => MenuItem[];
+  multiMenu?: (keys: string[], trackIds: string[], tracks: Track[]) => MenuItem[];
 }) {
   const root = useRef<HTMLDivElement>(null);
   const buildMulti = useRef(multiMenu);
   buildMulti.current = multiMenu;
-  const stableBuild = useCallback((k: string[], ids: string[]) => buildMulti.current(k, ids), []);
+  const stableBuild = useCallback((k: string[], ids: string[]) => buildMulti.current(k, ids, tracksFor(root.current, ids)), []);
   const selection = useSelection(root, stableBuild);
   return (
     <SelectionContext.Provider value={selection}>
       <div className="track-list" data-tracklist ref={root}>
         {header && (
-          <div className={`track-list__head ${showAlbum ? "" : "track-row--no-album"} ${showPlays ? "track-row--plays" : ""}`} aria-hidden="true">
+          <div className={`track-list__head ${showAlbum ? "" : "track-row--no-album"} ${showPlays ? "track-row--plays" : ""} ${addedColumn ? "track-row--added" : ""}`} aria-hidden="true">
             <span className="track-row__num">#</span>
             <span>Title</span>
             {showAlbum && <span className="track-list__album">Album</span>}
-            {showPlays ? <span className="track-list__plays">Plays</span> : <span className="track-list__badges" />}
+            {addedColumn ? (
+              <span className="track-list__added">Date added</span>
+            ) : showPlays ? (
+              <span className="track-list__plays">Plays</span>
+            ) : (
+              <span className="track-list__badges" />
+            )}
             <span className="track-list__dur">Time</span>
           </div>
         )}
@@ -479,6 +522,17 @@ export function TrackList({
       </div>
     </SelectionContext.Provider>
   );
+}
+
+/** Tracks for ids from the rows under `root` (the multi-selection menu). */
+function tracksFor(root: HTMLElement | null, ids: string[]): Track[] {
+  const rows = Array.from(root?.querySelectorAll<HTMLElement>(".track-row[data-track-id]") ?? []);
+  const byId = new Map<string, Track>();
+  for (const el of rows) {
+    const t = tracksIn.get(el);
+    if (t) byId.set(t.id, t);
+  }
+  return ids.map((id) => byId.get(id)).filter((t): t is Track => !!t);
 }
 
 export function TrackRowSkeleton({ showArt = false, showAlbum = true, showPlays = false }: { showArt?: boolean; showAlbum?: boolean; showPlays?: boolean }) {

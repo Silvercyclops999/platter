@@ -8,6 +8,7 @@ import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/
 import { Pause, Pin as PinIcon, Play, Volume2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Art, FluidArtSize } from "../components/Art";
+import { LikedCover } from "../components/LikedCover";
 import { openContextMenu } from "../components/ContextMenu";
 import { Skeleton } from "../components/Skeleton";
 import { Tooltip } from "../components/Tooltip";
@@ -139,7 +140,7 @@ function Row({ e, index, tabIndex, selected, isContext, playing, filtered, onMen
     >
       {!compact && showArt && (
         <span className="lib-row__art">
-          <Art path={e.thumb} size={LIST_ART} round={e.kind === "artist"} kind={e.kind} />
+          {e.liked ? <LikedCover size={LIST_ART} /> : <Art path={e.thumb} size={LIST_ART} round={e.kind === "artist"} kind={e.kind} />}
           <PlayOverlay e={e} playing={isContext && playing} className="lib-row__play" />
         </span>
       )}
@@ -204,7 +205,7 @@ function Cell({ e, index, tabIndex, selected, isContext, playing, filtered, onMe
       onDoubleClick={() => !e.unavailable && void playEntry(e)}
     >
       <span className="lib-cell__art">
-        <Art path={e.thumb} fluid round={e.kind === "artist"} kind={e.kind} />
+        {e.liked ? <LikedCover fluid /> : <Art path={e.thumb} fluid round={e.kind === "artist"} kind={e.kind} />}
         <PlayOverlay e={e} playing={isContext && playing} className={`lib-cell__play ${isContext && playing ? "is-on" : ""}`} />
       </span>
       <button
@@ -257,7 +258,7 @@ function Tile({ e, index, tabIndex, selected, onMenu }: ItemProps) {
             onMenu(e, ev);
           }}
         >
-          <Art path={e.thumb} size={RAIL_ART} round={e.kind === "artist"} kind={e.kind} />
+          {e.liked ? <LikedCover size={RAIL_ART} /> : <Art path={e.thumb} size={RAIL_ART} round={e.kind === "artist"} kind={e.kind} />}
         </button>
       </Tooltip>
     </div>
@@ -372,7 +373,7 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   }, [g.rowHeight, g.cols, v]);
 
   // Keyboard focus: one tab stop in the list, arrows move it.
-  const selectedIndex = entries.findIndex((e) => !e.unavailable && sameRoute(route, { name: e.kind, id: e.id }));
+  const selectedIndex = entries.findIndex((e) => !e.unavailable && (e.liked ? route.name === "liked" : sameRoute(route, { name: e.kind, id: e.id })));
   const [cursor, setCursor] = useState<number | null>(null);
   const pending = useRef<number | null>(null);
   const vrows = v.getVirtualItems();
@@ -405,7 +406,7 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
       const i = list.findIndex((x) => x.id === e.id);
       move = { up: i > 0, down: i < list.length - 1, run: (by: -1 | 1) => movePlaylist(model.all, entries, e.id, by) };
     }
-    const items = entryMenu(e, { playing: ctx.key === `${e.kind}:${e.id}` && ctx.playing, move });
+    const items = entryMenu(e, { playing: ctx.key === (e.liked ? "liked:liked" : `${e.kind}:${e.id}`) && ctx.playing, move });
     openContextMenu(`Options for ${e.title || "item"}`, items, at instanceof HTMLElement ? at : at.nativeEvent);
   };
 
@@ -426,7 +427,8 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   };
 
   const item = (e: LibEntry, i: number) => {
-    const key = `${e.kind}:${e.id}`;
+    // Liked Songs plays as its own context kind.
+    const key = e.liked ? "liked:liked" : `${e.kind}:${e.id}`;
     const p: ItemProps = {
       e,
       index: i,

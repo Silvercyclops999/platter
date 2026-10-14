@@ -5,7 +5,7 @@ import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { addToPlaylistItem, playlistEditItems } from "../components/PlaylistPicker";
 import { Skeleton } from "../components/Skeleton";
-import { TrackList, TrackRow, TrackRowSkeleton, trackMenuItems } from "../components/TrackRow";
+import { TrackList, TrackRow, TrackRowSkeleton, likeItem, trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { formatLongDuration, plural, trackArtistLine } from "../lib/format";
 import type { Playlist, PlaylistPage as PlaylistData, Track } from "../lib/types";
@@ -229,8 +229,9 @@ export function PlaylistPage({ id }: { id: string }) {
       afterPlaylist: own ? [{ label: "Remove from this playlist", onSelect: () => removeNow([row.itemId]) }] : [],
     });
 
-  const multiMenu = (keys: string[], trackIds: string[]): MenuItem[] => [
+  const multiMenu = (keys: string[], trackIds: string[], tracks: Track[]): MenuItem[] => [
     { label: "Add to queue", onSelect: () => player.queueAdd(trackIds, "end") },
+    likeItem(() => tracks),
     ...(own ? [{ label: "Remove from this playlist", onSelect: () => removeNow(keys) }] : []),
     addToPlaylistItem(() => trackIds),
   ];
