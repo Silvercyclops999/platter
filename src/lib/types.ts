@@ -342,12 +342,55 @@ export interface ToastEvent {
 
 // ---------------------------------------------------------------- settings
 
+/** Streaming quality: the original file or a cap in kbps. */
+export type StreamQuality = "original" | "320" | "256" | "192" | "128";
+export type PopularSource = "global" | "myPlays";
+export type ReduceMotion = "system" | "on" | "off";
+
 export interface Settings {
   privateSession: boolean;
   reportToPlex: boolean;
   volume: number;
   shuffleStyle: ShuffleStyle;
+  qualityHome: StreamQuality;
+  qualityAway: StreamQuality;
+  showFormatBadge: boolean;
+  resumeContexts: boolean;
+  /** Upcoming tracks kept on disk, 1 to 50. */
+  precacheCount: number;
+  popularSource: PopularSource;
+  /** Artwork cache size in MB. */
+  artCacheMb: number;
+  artworkColours: boolean;
+  reduceMotion: ReduceMotion;
   [key: string]: unknown;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  privateSession: false,
+  reportToPlex: true,
+  volume: 0.7,
+  shuffleStyle: "spread",
+  qualityHome: "original",
+  qualityAway: "320",
+  showFormatBadge: true,
+  resumeContexts: true,
+  precacheCount: 5,
+  popularSource: "global",
+  artCacheMb: 2048,
+  artworkColours: true,
+  reduceMotion: "system",
+};
+
+export interface ArtCacheInfo {
+  usedBytes: number;
+  capBytes: number;
+}
+
+export interface AppInfo {
+  version: string;
+  licence: string;
+  repoUrl: string;
 }
 
 // ---------------------------------------------------------------- updates

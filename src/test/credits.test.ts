@@ -125,6 +125,16 @@ describe("popular rule (browser mock)", () => {
     expect(popularTracks(tracks, me, lookup).map((x) => x.id)).toEqual(["hit", "feat", "low", "played", "unplayed"]);
   });
 
+  it("ranks by your plays only when the source is my plays", () => {
+    const tracks = [
+      t({ id: "hit", ratingCount: 9000 }),
+      t({ id: "played", viewCount: 50 }),
+      t({ id: "some", viewCount: 3, ratingCount: 10 }),
+    ];
+    expect(popularTracks(tracks, me, lookup, "global").map((x) => x.id)).toEqual(["hit", "some", "played"]);
+    expect(popularTracks(tracks, me, lookup, "myPlays").map((x) => x.id)).toEqual(["played", "some", "hit"]);
+  });
+
   it("collapses copies of a song and stops at ten", () => {
     const copies = [
       t({ id: "a", title: "Anthem", ratingCount: 5 }),

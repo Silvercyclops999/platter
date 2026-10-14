@@ -13,6 +13,7 @@
  *   ?httpArt=1      art URLs in the Windows app's form (http://art.localhost/…?w=&h=)
  *                   instead of generated SVGs, for memory checks that serve
  *                   real JPEGs at the requested size (scripts/measure-memory.mjs)
+ *   ?update=1       "Check for updates" finds a new version (ready to install)
  *   ?health=offline start in a given app state (see HEALTH_DEMOS in ./health:
  *                   offline, noInternet, starting, updating, startTimeout,
  *                   relay, remote, signIn, accessRemoved, filesUnavailable,
@@ -41,6 +42,7 @@ import type {
   SyncStatus,
   Track,
 } from "../types";
+import { DEFAULT_SETTINGS } from "../types";
 import { buildArtistLookup } from "../credits";
 import { mockArtUrl } from "./art";
 import { popularTracks } from "./popular";
@@ -58,6 +60,8 @@ export interface MockOptions {
   health?: HealthDemo;
   /** Auto-approve the sign-in PIN after this many ms (null = never). */
   autoApproveMs: number | null;
+  /** "Check for updates" finds a new version. */
+  updateAvailable?: boolean;
 }
 
 const isTestEnv = (() => {
@@ -89,6 +93,7 @@ export function optionsFromUrl(search: string): MockOptions {
     timelines: !isTestEnv,
     health: isHealthDemo(p.get("health")) ? (p.get("health") as HealthDemo) : undefined,
     autoApproveMs: isTestEnv ? null : 6000,
+    updateAvailable: p.get("update") === "1",
   };
 }
 
@@ -117,7 +122,9 @@ export class MockBackend implements Backend {
   private sync: SyncStatus = { phase: "idle", done: 0, total: 0, lastSyncAt: Math.floor(Date.now() / 1000) - 3600 };
   // search
   private recent: string[] = ["lantern", "Odessa Wren", "saltglass"];
-  private settings: Settings = { privateSession: false, reportToPlex: true, volume: 0.7, shuffleStyle: "spread" };
+  private settings: Settings = { ...DEFAULT_SETTINGS };
+  /** Bytes in the (pretend) artwork cache. */
+  private artUsed = 412 * 1024 * 1024;
 
   // player
   private status: PlayerState["status"] = "idle";
@@ -318,8 +325,34 @@ export class MockBackend implements Backend {
   syncStatus() {
     return this.delay(() => this.sync);
   }
-  syncNow() {
-    return this.delay(() => undefined);
+  syncNow(full?: boolean) {
+    return this.delay(() => {
+      if (full && this.sync.phase === "idle") this.runSync(["artists", "albums", "tracks"]);
+    });
+  }
+
+  /** Simulated sync: each phase counts up, then idle + library://changed. */
+  private runSync(phases: SyncStatus["phase"][]) {
+    const [phase, ...rest] = phases;
+    if (!phase) {
+      this.sync = { phase: "idle", done: 0, total: 0, lastSyncAt: Math.floor(Date.now() / 1000) };
+      this.emit("sync://progress", this.sync);
+      this.emit("library://changed", null);
+      return;
+    }
+    const total = phase === "artists" ? this.fx.artists.length : phase === "albums" ? this.fx.albums.length : this.fx.tracks.length;
+    const step = Math.max(1, Math.ceil(total / 6));
+    let done = 0;
+    const tick = () => {
+      this.sync = { ...this.sync, phase, done, total };
+      this.emit("sync://progress", this.sync);
+      if (done >= total) this.later(200, () => this.runSync(rest));
+      else {
+        done = Math.min(total, done + step);
+        this.later(250, tick);
+      }
+    };
+    tick();
   }
   home() {
     return this.delay(() => {
@@ -384,7 +417,7 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
       const albums = this.fx.albums.filter((a) => a.artistId === id);
-      const popular = popularTracks(this.fx.tracks, artist, buildArtistLookup(this.fx.artists));
+      const popular = popularTracks(this.fx.tracks, artist, buildArtistLookup(this.fx.artists), this.settings.popularSource);
       const order: ReleaseSection[] = ["albums", "singlesEps", "live", "compilations", "soundtracks", "remixes", "demos", "mixtapes"];
       const sections = order
         .map((section) => ({
@@ -603,7 +636,7 @@ export class MockBackend implements Backend {
     let offset = 0;
     if (!first && this.shuffle) first = this.ctxOriginal[Math.floor(this.rng() * this.ctxOriginal.length)];
     if (!first) {
-      const r = id ? this.resumeStart(id) : null;
+      const r = id && this.settings.resumeContexts ? this.resumeStart(id) : null;
       first = this.ctxOriginal[r?.index ?? 0];
       offset = r?.positionMs ?? 0;
     }
@@ -910,12 +943,37 @@ export class MockBackend implements Backend {
   }
   settingsSet(patch: Partial<Settings>) {
     return this.delay(() => {
-      this.settings = { ...this.settings, ...patch };
+      const next = { ...this.settings, ...patch };
+      // Same ranges as the core.
+      next.precacheCount = Math.min(50, Math.max(1, Math.round(next.precacheCount)));
+      next.artCacheMb = Math.min(51_200, Math.max(128, Math.round(next.artCacheMb)));
+      this.settings = next;
+      this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
     });
   }
+  artCacheInfo() {
+    return this.delay(() => ({ usedBytes: this.artUsed, capBytes: this.settings.artCacheMb * 1024 * 1024 }));
+  }
+  artCacheClear() {
+    return this.delay(() => {
+      const freed = this.artUsed;
+      this.artUsed = 0;
+      return freed;
+    });
+  }
+  appInfo() {
+    return this.delay(() => ({ version: "0.1.0", licence: "GPL-3.0-or-later", repoUrl: "https://github.com/Silvercyclops999/platter" }));
+  }
+  openProjectPage() {
+    return this.delay(() => undefined);
+  }
   updateCheck() {
-    return this.delay(() => ({ available: false, version: null, notes: null }));
+    return this.delay(() =>
+      this.opts.updateAvailable
+        ? { available: true, version: "0.2.0", notes: null }
+        : { available: false, version: null, notes: null },
+    );
   }
   updateInstallOnRestart() {
     return this.delay(() => undefined);

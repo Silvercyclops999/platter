@@ -15,6 +15,8 @@ import type {
   AlbumPage,
   AlbumsArgs,
   AppError,
+  AppInfo,
+  ArtCacheInfo,
   Artist,
   ArtistName,
   ArtistPage,
@@ -100,6 +102,14 @@ export interface Backend {
   // Settings
   settingsGet(): Promise<Settings>;
   settingsSet(patch: Partial<Settings>): Promise<void>;
+  artCacheInfo(): Promise<ArtCacheInfo>;
+  /** Deletes every cached image; resolves to the bytes freed. */
+  artCacheClear(): Promise<number>;
+
+  // App
+  appInfo(): Promise<AppInfo>;
+  /** Opens the project page in the default browser. */
+  openProjectPage(): Promise<void>;
 
   // Updates
   updateCheck(): Promise<UpdateInfo>;
@@ -176,6 +186,10 @@ export function createTauriBackend(): Backend {
     cachedTracks: () => call("cached_tracks"),
     settingsGet: () => call("settings_get"),
     settingsSet: (patch) => call("settings_set", { patch }),
+    artCacheInfo: () => call("art_cache_info"),
+    artCacheClear: () => call("art_cache_clear"),
+    appInfo: () => call("app_info"),
+    openProjectPage: () => call("open_project_page"),
     updateCheck: () => call("update_check"),
     updateInstallOnRestart: () => call("update_install_on_restart"),
 

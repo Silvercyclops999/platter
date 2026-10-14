@@ -2,15 +2,22 @@
  * The artist page's popular songs, same rule as the core: the artist's own
  * tracks plus tracks crediting them as a whole name; songs with a global
  * listener count first (highest first), then by plays and last play; one
- * copy per song (same title, length within 2 s); at most 10.
+ * copy per song (same title, length within 2 s); at most 10. "myPlays"
+ * ignores the global counts.
  */
 import { creditKey, splitCredits, type ArtistLookup } from "../credits";
-import type { Artist, Track } from "../types";
+import type { Artist, PopularSource, Track } from "../types";
 
 export const POPULAR_N = 10;
 const SAME_SONG_MS = 2000;
 
-export function popularTracks(tracks: readonly Track[], artist: Pick<Artist, "id" | "title">, lookup: ArtistLookup): Track[] {
+export function popularTracks(
+  tracks: readonly Track[],
+  artist: Pick<Artist, "id" | "title">,
+  lookup: ArtistLookup,
+  source: PopularSource = "global",
+): Track[] {
+  const global = source === "global";
   const me = creditKey(artist.title);
   const cands = tracks.filter(
     (t) =>
@@ -23,8 +30,8 @@ export function popularTracks(tracks: readonly Track[], artist: Pick<Artist, "id
     .map((t, i) => ({ t, i }))
     .sort(
       (a, b) =>
-        Number(b.t.ratingCount != null) - Number(a.t.ratingCount != null) ||
-        (b.t.ratingCount ?? 0) - (a.t.ratingCount ?? 0) ||
+        (global ? Number(b.t.ratingCount != null) - Number(a.t.ratingCount != null) : 0) ||
+        (global ? (b.t.ratingCount ?? 0) - (a.t.ratingCount ?? 0) : 0) ||
         b.t.viewCount - a.t.viewCount ||
         (b.t.lastViewedAt ?? -1) - (a.t.lastViewedAt ?? -1) ||
         a.i - b.i,

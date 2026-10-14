@@ -153,6 +153,8 @@ Event `health://changed` → `Health`. Event `toast` → `{ kind: "info"|"error"
 | --- | --- |
 | `settings_get` | – → `Settings { privateSession, reportToPlex, volume, shuffleStyle, ... }` |
 | `settings_set` | `{ patch: Partial<Settings> }` |
+| `art_cache_info` | – → `{ usedBytes, capBytes }` |
+| `art_cache_clear` | – → bytes freed (number) |
 
 `privateSession` (default false) stops plays being written to the local
 listen log. `reportToPlex` (default true) controls timeline and scrobble
@@ -162,10 +164,29 @@ is `"spread"` (default: keeps an artist's songs apart and pushes recently
 played ones back) or `"standard"` (plain random order). Settings are
 stored in the local database and apply immediately.
 
+The rest of the fields, with their defaults:
+
+| Field | Values | What it does |
+| --- | --- | --- |
+| `qualityHome` | `"original"`, `"320"`, `"256"`, `"192"`, `"128"` | Bitrate cap on the local connection. Original plays the file as is. |
+| `qualityAway` | same, default `"320"` | Cap over remote access and the relay. The relay never goes above 128 kbps. |
+| `showFormatBadge` | bool, true | Shows the codec and sample rate badge in track lists and album headers. |
+| `resumeContexts` | bool, true | Albums and playlists start where they were left. Off starts at track 1; points are still saved. |
+| `precacheCount` | 1 to 50, 5 | Upcoming tracks kept on disk. Out of range values are clamped. |
+| `popularSource` | `"global"`, `"myPlays"` | Ranks the artist page's Popular by listener counts or by your own plays. |
+| `artCacheMb` | 128 to 51200, 2048 | Artwork cache size. Shrinking it removes the oldest images at once. |
+| `artworkColours` | bool, true | Headers tint from artwork. Off gives every header the same neutral colour. |
+| `reduceMotion` | `"system"`, `"on"`, `"off"` | Follow the OS setting, or force reduced motion on or off. |
+
+Quality changes apply from the next track. Settings saved by an older build
+load with these defaults for anything missing.
+
 ## Updates
 | Command | Returns |
 | --- | --- |
 | `update_check` | `{ available: bool, version?, notes? }` |
 | `update_install_on_restart` | – |
+| `app_info` | – → `{ version, licence, repoUrl }` |
+| `open_project_page` | – (opens the project page in the default browser) |
 
 Event `update://ready` → `{ version }`.

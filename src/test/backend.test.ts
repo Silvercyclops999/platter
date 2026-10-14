@@ -72,6 +72,10 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["cached_tracks", (b) => b.cachedTracks(), undefined],
   ["settings_get", (b) => b.settingsGet(), undefined],
   ["settings_set", (b) => b.settingsSet({ privateSession: true }), { patch: { privateSession: true } }],
+  ["art_cache_info", (b) => b.artCacheInfo(), undefined],
+  ["art_cache_clear", (b) => b.artCacheClear(), undefined],
+  ["app_info", (b) => b.appInfo(), undefined],
+  ["open_project_page", (b) => b.openProjectPage(), undefined],
   ["update_check", (b) => b.updateCheck(), undefined],
   ["update_install_on_restart", (b) => b.updateInstallOnRestart(), undefined],
 ];
