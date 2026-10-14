@@ -430,3 +430,24 @@ anything that plays on a real device needs an OK first). Check once:
 - On a Plex Home account the same call has `home: true`, `homeSize` and
   `homeAdmin`, and `thumb` is the picture of the user the token belongs to.
   Switching Home users isn't handled yet.
+
+### 2026-10-14: lyrics streams
+- Track detail lists lyrics as `streamType: 4` streams next to the audio
+  stream, each with `key: "/library/streams/{id}"`, `codec` and `format`
+  (`"lrc"` or `"txt"`), `provider` (the agent that supplied them, for
+  example `com.plexapp.agents.lyricfind`), `timed: "1"` on timed ones,
+  `minLines`, `displayTitle` and `extendedDisplayTitle` ("LRC (External)").
+  A track can have both an LRC and a TXT stream. Of 80 well-played tracks,
+  31 had lyrics, every one with an LRC stream and 9 with a TXT stream too.
+- `GET /library/streams/{id}` with `Accept: application/json` returns
+  `MediaContainer.Lyrics[]` with `provider`, `timed` (bool), `minLines`,
+  `author` and `by`, and `Line[]`. Timed lines carry `startOffset` and
+  `endOffset` in ms and one `Span` with the whole line's `text` and the same
+  offsets. No word timing was seen from this provider. Plain (TXT) lines
+  have only `Span[].text`.
+- Without the JSON accept header the same path returns the raw file (served
+  as `text/html`): LRC with `[mm:ss.xx]` tags and header tags such as
+  `[by:...]` and a copyright line, or plain text.
+- After a burst of a few dozen lyrics requests the server started answering
+  404 for every lyrics stream (ones that had returned 200 minutes before).
+  The app treats a failed lyrics stream as "no lyrics" without caching it.

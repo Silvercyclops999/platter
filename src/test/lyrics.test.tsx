@@ -1,0 +1,335 @@
+/**
+ * The lyrics view: line and word tracking, seeking from a line, the
+ * auto-follow pause, plain lyrics, no lyrics, the player bar button and
+ * auto-show.
+ */
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { backend } from "../lib/backend";
+import type { MockBackend } from "../lib/mock";
+import { mockLyrics, mockLyricsKind } from "../lib/mock/details";
+import { DEFAULT_SETTINGS, type Lyrics, type PlayerState, type Track } from "../lib/types";
+import { LyricsPage } from "../pages/LyricsPage";
+import { SettingsPage, SOURCE_NOTICES } from "../pages/SettingsPage";
+import {
+  clearLyricsCache,
+  currentLineIndex,
+  currentWordIndex,
+  followTarget,
+  FOLLOW_RESUME_MS,
+  interpolate,
+  lineState,
+  loadLyrics,
+  timedLines,
+  useLyricsAutoShow,
+} from "../shell/lyrics";
+import { PlayerBar } from "../shell/PlayerBar";
+import { usePlayer } from "../stores/player";
+import { useRouter } from "../stores/router";
+import { loadSettings, useSettings } from "../stores/settings";
+import { useUi } from "../stores/ui";
+
+const mock = backend as MockBackend;
+const byKind = (k: ReturnType<typeof mockLyricsKind>) => mock.fx.tracks.find((t) => mockLyricsKind(t.id) === k && t.durationMs > 120_000)!;
+const words = byKind("words");
+const lines = byKind("lines");
+const plain = byKind("plain");
+const none = byKind("none");
+
+function state(track: Track | null, status: PlayerState["status"] = "paused"): PlayerState {
+  return {
+    status,
+    track,
+    positionMs: 0,
+    durationMs: track?.durationMs ?? 0,
+    volume: 0.7,
+    muted: false,
+    shuffle: false,
+    shuffledContexts: [],
+    repeat: "off",
+    queue: { current: null, userQueue: [], nextUp: [], history: [], context: null },
+  };
+}
+
+function at(track: Track, positionMs: number, status: PlayerState["status"] = "paused") {
+  act(() => usePlayer.setState({ state: state(track, status), positionMs, durationMs: track.durationMs }));
+}
+
+const route = () => {
+  const r = useRouter.getState();
+  return r.entries[r.index].route;
+};
+
+beforeEach(() => {
+  clearLyricsCache();
+  mock.lyricsDown = false;
+  useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
+  useRouter.getState().reset();
+  useUi.setState({ nowPlayingOpen: false, nowPlayingExpanded: false, queueOpen: false });
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+// ---------------------------------------------------------------- rules
+
+describe("timing rules", () => {
+  const ls = [{ startMs: 1000 }, { startMs: 2000 }, { startMs: 2000 }, { startMs: 5000 }];
+
+  it("finds the line playing: the last one started", () => {
+    expect(currentLineIndex(ls, 0)).toBe(-1);
+    expect(currentLineIndex(ls, 1000)).toBe(0);
+    expect(currentLineIndex(ls, 1999)).toBe(0);
+    expect(currentLineIndex(ls, 2000)).toBe(2);
+    expect(currentLineIndex(ls, 99_000)).toBe(3);
+    expect(currentLineIndex([], 5)).toBe(-1);
+  });
+
+  it("finds the word playing", () => {
+    const w = [
+      { startMs: 100, text: "a " },
+      { startMs: 300, text: "b" },
+    ];
+    expect(currentWordIndex(w, 50)).toBe(-1);
+    expect(currentWordIndex(w, 200)).toBe(0);
+    expect(currentWordIndex(w, 300)).toBe(1);
+    expect(currentWordIndex(undefined, 300)).toBe(-1);
+  });
+
+  it("names past, current and future lines", () => {
+    expect([0, 1, 2].map((i) => lineState(i, 1))).toEqual(["past", "current", "future"]);
+    expect(lineState(0, -1)).toBe("future");
+  });
+
+  it("puts the current line a third from the top, inside the scroll range", () => {
+    expect(followTarget(1000, 60, 900, 5000)).toBe(1000 + 30 - 300);
+    expect(followTarget(100, 60, 900, 5000)).toBe(0);
+    expect(followTarget(4900, 60, 900, 5000)).toBe(4100);
+  });
+
+  it("moves the position on between updates only while playing", () => {
+    const base = { positionMs: 10_000, at: 1_000 };
+    expect(interpolate(base, 1_200, true, 60_000)).toBe(10_200);
+    expect(interpolate(base, 1_200, false, 60_000)).toBe(10_000);
+    expect(interpolate(base, 99_000, true, 60_000)).toBe(60_000);
+  });
+
+  it("uses timed lines only for synced lyrics", () => {
+    const l: Lyrics = { synced: true, lines: ["a"], timed: [{ startMs: 0, text: "a" }] };
+    expect(timedLines(l)).toHaveLength(1);
+    expect(timedLines({ synced: false, lines: ["a"] })).toBeNull();
+    expect(timedLines(null)).toBeNull();
+  });
+});
+
+describe("mock lyrics", () => {
+  it("has a song with word timing, one timed by line, one plain and one with none", () => {
+    const w = mockLyrics(words)!;
+    expect(w.synced && w.timed!.some((l) => l.words && l.words.length > 1)).toBe(true);
+    expect(w.timed!.every((l) => !l.words || l.words.map((x) => x.text).join("") === l.text)).toBe(true);
+    const l = mockLyrics(lines)!;
+    expect(l.synced && l.timed!.every((x) => !x.words)).toBe(true);
+    expect(mockLyrics(plain)!.synced).toBe(false);
+    expect(mockLyrics(none)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------- view
+
+describe("synced lyrics", () => {
+  const timed = () => mockLyrics(words)!.timed!;
+
+  it("marks the current line and the sung words, and follows playback", async () => {
+    const t = timed();
+    const line = t.findIndex((l, i) => i > 0 && (l.words?.length ?? 0) > 3);
+    at(words, t[line].words![1].startMs + 10);
+    render(<LyricsPage />);
+    const current = await screen.findByRole("button", { current: true });
+    expect(current).toHaveAccessibleName(t[line].text);
+    const sung = current.querySelectorAll(".lyrics__word.is-sung");
+    expect(sung).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: t[line - 1].text || "Instrumental" })[0]).toHaveClass(/is-(past|current)/);
+    // Playback moves on: the next line takes over.
+    at(words, t[line + 1].startMs + 5);
+    await waitFor(() => expect(screen.getByRole("button", { current: true })).toHaveClass("lyrics__line"));
+    expect(screen.getByRole("button", { current: true })).not.toBe(current);
+    expect(current).toHaveClass("is-past");
+  });
+
+  it("seeks to a line when it's clicked", async () => {
+    const t = timed();
+    at(words, 0);
+    const seek = vi.spyOn(backend, "playSeek");
+    render(<LyricsPage />);
+    const target = t.findIndex((l, i) => i > 3 && l.text);
+    await screen.findAllByRole("button", { name: t[target].text });
+    const btn = document.querySelectorAll<HTMLElement>(".lyrics__line")[target];
+    expect(btn).toHaveAccessibleName(t[target].text);
+    fireEvent.click(btn);
+    expect(seek).toHaveBeenCalledWith(t[target].startMs);
+  });
+
+  it("pauses following on a hand scroll, until 5 s pass or Back to current line", async () => {
+    at(words, 30_000);
+    render(<LyricsPage />);
+    const scroller = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.wheel(scroller, { deltaY: 400 });
+    expect(screen.getByRole("button", { name: "Back to current line" })).toBeInTheDocument();
+    // More scrolling restarts the wait.
+    act(() => vi.advanceTimersByTime(FOLLOW_RESUME_MS - 1000));
+    fireEvent.wheel(scroller, { deltaY: 100 });
+    act(() => vi.advanceTimersByTime(FOLLOW_RESUME_MS - 1000));
+    expect(screen.getByRole("button", { name: "Back to current line" })).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.queryByRole("button", { name: "Back to current line" })).toBeNull();
+    // The button resumes at once.
+    fireEvent.wheel(scroller, { deltaY: 100 });
+    fireEvent.click(screen.getByRole("button", { name: "Back to current line" }));
+    expect(screen.queryByRole("button", { name: "Back to current line" })).toBeNull();
+  });
+
+  it("shows the credit line under the lyrics", async () => {
+    at(words, 0);
+    render(<LyricsPage />);
+    expect(await screen.findByText(/Lyrics licensed and provided by LyricFind/)).toBeInTheDocument();
+  });
+});
+
+describe("plain and missing lyrics", () => {
+  it("shows plain lyrics as text with no highlighting", async () => {
+    at(plain, 40_000);
+    render(<LyricsPage />);
+    const view = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    expect(within(view).queryAllByRole("button")).toHaveLength(0);
+    expect(view.querySelectorAll("p.lyrics__line").length).toBeGreaterThan(5);
+    expect(view.querySelector("[aria-current]")).toBeNull();
+  });
+
+  it("says so when the song has none", async () => {
+    at(none, 0);
+    render(<LyricsPage />);
+    expect(await screen.findByText("No lyrics for this song")).toBeInTheDocument();
+  });
+
+  it("lyrics source down: silent, the view says there are none", async () => {
+    mock.lyricsDown = true;
+    at(words, 0);
+    render(<LyricsPage />);
+    expect(await screen.findByText("No lyrics for this song")).toBeInTheDocument();
+  });
+
+  it("a failed fetch is none, and isn't remembered", async () => {
+    const spy = vi.spyOn(backend, "lyrics").mockRejectedValueOnce({ kind: "network", message: "down" });
+    expect(await loadLyrics(words.id)).toBeNull();
+    expect(await loadLyrics(words.id)).not.toBeNull();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------- button and auto-show
+
+describe("player bar lyrics button", () => {
+  it("opens the lyrics view and goes back from it", async () => {
+    useRouter.getState().navigate({ name: "liked" });
+    at(words, 0);
+    render(<PlayerBar />);
+    const btn = screen.getByRole("button", { name: "Lyrics" });
+    await waitFor(() => expect(btn).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(btn);
+    expect(route()).toEqual({ name: "lyrics" });
+    expect(btn).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(btn);
+    expect(route()).toEqual({ name: "liked" });
+  });
+
+  it("is off for a song without lyrics, but stays live on the lyrics page", async () => {
+    at(none, 0);
+    render(<PlayerBar />);
+    const btn = screen.getByRole("button", { name: "Lyrics" });
+    await waitFor(() => expect(btn).toHaveAttribute("aria-disabled", "true"));
+    fireEvent.click(btn);
+    expect(route()).toEqual({ name: "home" });
+    act(() => useRouter.getState().navigate({ name: "lyrics" }));
+    expect(btn).not.toHaveAttribute("aria-disabled");
+  });
+});
+
+describe("auto-show", () => {
+  function Host() {
+    useLyricsAutoShow();
+    return null;
+  }
+
+  async function startSong(track: Track) {
+    at(none, 0, "playing");
+    render(<Host />);
+    at(track, 0, "playing");
+    // Let the lyrics fetch settle.
+    await act(() => loadLyrics(track.id));
+    await act(() => new Promise((r) => setTimeout(r, 0)));
+  }
+
+  it("opens the lyrics view for a synced song while now playing is open", async () => {
+    useUi.getState().setNowPlayingOpen(true);
+    await startSong(words);
+    expect(route()).toEqual({ name: "lyrics" });
+  });
+
+  it("not for plain lyrics", async () => {
+    useUi.getState().setNowPlayingOpen(true);
+    await startSong(plain);
+    expect(route()).toEqual({ name: "home" });
+  });
+
+  it("not with now playing closed", async () => {
+    await startSong(lines);
+    expect(route()).toEqual({ name: "home" });
+  });
+
+  it("never when the setting is Off", async () => {
+    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, lyricsMode: "off" } });
+    useUi.getState().setNowPlayingOpen(true);
+    await startSong(words);
+    expect(route()).toEqual({ name: "home" });
+  });
+});
+
+// ---------------------------------------------------------------- settings
+
+describe("lyrics settings", () => {
+  it("list Lyrics, LRCLIB and the full-window fade with their defaults, and save changes", async () => {
+    const user = userEvent.setup();
+    await backend.settingsSet({ ...DEFAULT_SETTINGS });
+    useSettings.setState({ settings: null });
+    await loadSettings();
+    const set = vi.spyOn(backend, "settingsSet");
+    render(<SettingsPage />);
+    const mode = screen.getByRole("combobox", { name: "Lyrics" });
+    expect(mode).toHaveValue("autoShow");
+    const lrclib = screen.getByRole("switch", { name: "Lyrics from LRCLIB when Plex has none" });
+    expect(lrclib).not.toBeChecked();
+    const fade = screen.getByRole("switch", { name: "Full-window view hides controls" });
+    expect(fade).toBeChecked();
+    await user.selectOptions(mode, "off");
+    expect(set).toHaveBeenCalledWith({ lyricsMode: "off" });
+    await user.click(lrclib);
+    expect(set).toHaveBeenCalledWith({ lyricsLrclib: true });
+    await user.click(fade);
+    expect(set).toHaveBeenCalledWith({ fullWindowHideControls: false });
+    expect(SOURCE_NOTICES.some((n) => n.name.startsWith("LRCLIB"))).toBe(true);
+    await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  });
+
+  it("turning LRCLIB on asks for lyrics again", async () => {
+    const spy = vi.spyOn(backend, "lyrics");
+    await loadLyrics(none.id);
+    await loadLyrics(none.id);
+    expect(spy).toHaveBeenCalledTimes(1);
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, lyricsLrclib: true } }));
+    await loadLyrics(none.id);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+});

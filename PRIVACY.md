@@ -52,6 +52,12 @@ and your own Plex server.
   images are public to anyone who has the link, so unreleased covers can be
   kept off Discord (and out of uploads) in Settings. Platter doesn't delete
   uploads.
+- LRCLIB (lrclib.net), only if you turn on "Lyrics from LRCLIB when Plex has
+  none" in Settings (it's off by default). For a song your Plex server has no
+  lyrics for, it gets the artist, title, album and length. If that finds
+  nothing, a search sends the artist and title only. This applies to every
+  song without lyrics, unreleased ones included. Answers are kept on your
+  computer for 30 days (7 days when there were none).
 
 Some optional features planned for later will talk to other services, but
 only once you turn them on. Examples are Last.fm or ListenBrainz

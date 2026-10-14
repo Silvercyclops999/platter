@@ -330,11 +330,35 @@ panel needs them (not cached in the library database).
 `artist = { id, title, summary?, thumb?, art? }` is the album artist with its
 Plex bio and photo. `credits = { name, roles: ("composer"|"writer"|"lyricist"|"producer")[] }[]`
 lists people Plex credits beyond the track's artists; it is often empty.
-`lyrics = { synced, lines: string[] }` is there only when the track has a
-lyrics stream with words in it. Lines come without timestamps and `""` marks a
-break between verses; `synced` says the source was timed. Only the track
-request can fail the call: when the artist or lyrics request fails, that part
-is just left out.
+`lyrics` (the `Lyrics` shape below, from Plex only) is there only when the
+track has a lyrics stream with words in it. Only the track request can fail
+the call: when the artist or lyrics request fails, that part is just left out.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `lyrics_get` | `{ trackId }` | `Lyrics \| null` |
+
+The lyrics view and the full-window view use this. Sources in order: the
+track's Plex lyrics stream (a sidecar `.lrc` or `.txt` file, or Plex's own
+lyrics), then LRCLIB when `lyricsLrclib` is on. LRCLIB is asked with
+`/api/get` (artist, title, album, length in seconds); when that finds
+nothing, `/api/search` with the artist and title only, taking a result only
+when both match once case, accents and featured artists are folded away
+(synced lyrics within 10 s of the track's length first, then the closest
+length; synced lyrics further off keep their words without the times). LRCLIB
+answers are cached in SQLite (`lyrics_cache`): found 30 days, none 7 days.
+A source that's down, busy or unreadable gives `null` and isn't cached. Only
+a malformed id is an error (`invalid`).
+
+`Lyrics = { synced, lines: string[], timed?: LyricLine[], credit?, source: "plex"|"lrclib" }`.
+`lines` is the text in file order, `""` marking a break between verses.
+`timed` is there when `synced`: lines in play order, `{ startMs, text, words?: { startMs, text }[] }`,
+a line with several time tags appearing once per tag, `text: ""` marking an
+instrumental gap. `words` comes from enhanced LRC `<mm:ss.xx>` tags or Plex
+spans with their own offsets; joined, the words make `text`. An LRC
+`[offset:±ms]` header is applied (positive shows lyrics sooner). `credit` is
+the writer and provider line ("Lyrics from LRCLIB", or "Lyrics from LRCLIB,
+matched by title" for a search match).
 
 ## Search
 | Command | Args | Returns |
@@ -646,6 +670,9 @@ The rest of the fields, with their defaults:
 | `discordCoverArchive` | bool, true | Covers from Cover Art Archive by MusicBrainz release id. |
 | `discordUploadArt` | bool, false | Upload covers Cover Art Archive lacks to Imgur. Only used while a client ID is saved and wasn't refused. |
 | `showPlexAvatar` | bool, true | The app menu button shows the Plex profile picture (`AuthStatus.avatar`). Off shows the first letter of the username. This device only. |
+| `lyricsMode` | `"autoShow"\|"off"`, `"autoShow"` | Auto-show opens the lyrics view when a song with synced lyrics starts while now playing is open. Off opens it only from its button. |
+| `lyricsLrclib` | bool, false | `lyrics_get` asks LRCLIB when Plex has no lyrics (sends artist, title, album and length; the search sends artist and title). Off sends nothing. |
+| `fullWindowHideControls` | bool, true | The full-window view fades its controls after 3 s without mouse movement or a key. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
