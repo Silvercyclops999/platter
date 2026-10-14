@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
-import { useState } from "react";
-import { IconButton } from "../components/Button";
+import { useRef, useState } from "react";
+import { Button, IconButton } from "../components/Button";
+import { Dialog } from "../components/Dialog";
 import { Tabs } from "../components/Tabs";
 import { TrackList, TrackRow, trackMenuItems } from "../components/TrackRow";
 import type { QueueItem } from "../lib/types";
@@ -90,6 +91,7 @@ export function QueuePanel() {
   const close = () => useUi.getState().setQueueOpen(false);
   const [tab, setTab] = useState<Tab>("queue");
   const [insertAt, setInsertAt] = useState<number | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const userQueue = queue?.userQueue ?? [];
   const reorder = {
     insertAt,
@@ -142,7 +144,7 @@ export function QueuePanel() {
                   <h3 id="q-user" className="queue-section__title">
                     Next in queue
                   </h3>
-                  <button type="button" className="queue-section__action" onClick={() => player.queueClear()}>
+                  <button type="button" className="queue-section__action" onClick={() => setConfirmClear(true)}>
                     Clear queue
                   </button>
                 </div>
@@ -189,6 +191,32 @@ export function QueuePanel() {
           </section>
         )}
       </div>
+      <ClearQueueDialog open={confirmClear} onClose={() => setConfirmClear(false)} />
     </aside>
+  );
+}
+
+/** Confirm before clearing the user queue (the context's songs stay). */
+function ClearQueueDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  return (
+    <Dialog open={open} onClose={onClose} label="Clear your queue?" className="guide queue-confirm" initialFocus={cancel}>
+      <h2 className="guide__title">Clear your queue?</h2>
+      <p className="queue-confirm__text">This removes the songs you added to your queue. You can't undo it.</p>
+      <div className="guide__actions">
+        <Button ref={cancel} onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => {
+            onClose();
+            player.queueClear();
+          }}
+        >
+          Clear queue
+        </Button>
+      </div>
+    </Dialog>
   );
 }

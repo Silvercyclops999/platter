@@ -364,6 +364,9 @@
 }
 .queue-section__action:hover { color: var(--color-text-primary); text-decoration: underline; }
 .queue-empty { padding: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-md); }
+.dialog.queue-confirm { width: min(420px, calc(100vw - 48px)); }
+.queue-confirm__text { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-md); line-height: 1.5; }
+.queue-confirm .guide__actions { gap: var(--space-3); }
 
 /* ---------------------------------------------------------------- Player bar */
 .player-bar {
