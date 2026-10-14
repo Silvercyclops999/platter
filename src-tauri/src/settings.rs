@@ -19,6 +19,7 @@ use crate::bridge::StreamPrefs;
 use crate::db::store::{kv_get, kv_set};
 use crate::db::{ArtCache, DbHandle, PopularSource};
 use crate::error::{AppError, AppResult};
+use crate::platform::{PlatformSettings, Switches};
 use crate::tracking::TrackingSettings;
 
 const KEY: &str = "app.settings";
@@ -114,6 +115,15 @@ pub struct Settings {
     pub search_suggestions: bool,
     /// Remember items opened from search (shown when the empty box is focused).
     pub search_recents: bool,
+    /// Media keys work while Platter is in the background.
+    pub media_keys: bool,
+    /// Show in the system media controls (Windows media flyout and lock
+    /// screen, macOS Now Playing).
+    pub media_session: bool,
+    /// Closing the window hides it to the tray / menu bar.
+    pub close_to_tray: bool,
+    /// Start Platter when you sign in to the computer.
+    pub launch_at_login: bool,
 }
 
 impl Default for Settings {
@@ -137,6 +147,10 @@ impl Default for Settings {
             home_colour_wash: true,
             search_suggestions: true,
             search_recents: true,
+            media_keys: true,
+            media_session: true,
+            close_to_tray: false,
+            launch_at_login: false,
         }
     }
 }
@@ -162,6 +176,10 @@ pub struct SettingsPatch {
     pub home_colour_wash: Option<bool>,
     pub search_suggestions: Option<bool>,
     pub search_recents: Option<bool>,
+    pub media_keys: Option<bool>,
+    pub media_session: Option<bool>,
+    pub close_to_tray: Option<bool>,
+    pub launch_at_login: Option<bool>,
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -194,6 +212,10 @@ impl Settings {
         set(&mut self.home_colour_wash, p.home_colour_wash);
         set(&mut self.search_suggestions, p.search_suggestions);
         set(&mut self.search_recents, p.search_recents);
+        set(&mut self.media_keys, p.media_keys);
+        set(&mut self.media_session, p.media_session);
+        set(&mut self.close_to_tray, p.close_to_tray);
+        set(&mut self.launch_at_login, p.launch_at_login);
         self.clamp();
         Ok(())
     }
@@ -206,6 +228,15 @@ impl Settings {
 
     pub fn art_cache_bytes(&self) -> u64 {
         self.art_cache_mb as u64 * MB
+    }
+
+    pub fn platform(&self) -> PlatformSettings {
+        PlatformSettings {
+            media_keys: self.media_keys,
+            media_session: self.media_session,
+            close_to_tray: self.close_to_tray,
+            launch_at_login: self.launch_at_login,
+        }
     }
 }
 
@@ -234,6 +265,8 @@ pub struct Live {
     /// The art cache size the disk monitor returns to after trimming.
     pub art_cap: Arc<AtomicU64>,
     pub art: Option<ArtCache>,
+    /// Media controls, tray and launch at login.
+    pub platform: Switches,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -242,6 +275,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.tracking.report_to_plex.store(s.report_to_plex, Ordering::Relaxed);
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     db.set_popular_source(s.popular_source);
+    live.platform.set(s.platform());
     let cap = s.art_cache_bytes();
     let old = live.art_cap.swap(cap, Ordering::Relaxed);
     if let Some(art) = &live.art
@@ -443,6 +477,7 @@ mod tests {
         assert_eq!(s.art_cache_mb, 2048);
         assert_eq!(s.reduce_motion, ReduceMotion::System);
         assert!(s.search_suggestions && s.search_recents);
+        assert!(s.media_keys && s.media_session && !s.close_to_tray && !s.launch_at_login);
     }
 
     #[test]
@@ -488,6 +523,10 @@ mod tests {
             home_colour_wash: Some(false),
             search_suggestions: Some(false),
             search_recents: Some(false),
+            media_keys: Some(false),
+            media_session: Some(false),
+            close_to_tray: Some(true),
+            launch_at_login: Some(true),
         })
         .await
         .unwrap();
@@ -496,6 +535,8 @@ mod tests {
         assert_eq!((live.streams.home(), live.streams.away()), (Some(256), None));
         assert_eq!(db.popular_source(), PopularSource::MyPlays);
         assert_eq!(live.art_cap.load(Ordering::Relaxed), 512 * MB);
+        // Media controls, tray and launch at login get the change at once.
+        assert_eq!(live.platform.get(), PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true });
 
         // Partial patch leaves other fields alone.
         st.set(SettingsPatch { report_to_plex: Some(true), ..Default::default() }).await.unwrap();
@@ -515,6 +556,11 @@ mod tests {
         assert_eq!((s.precache_count, s.art_cache_mb), (12, 512));
         assert_eq!((s.popular_source, s.reduce_motion), (PopularSource::MyPlays, ReduceMotion::On));
         assert!(!s.search_suggestions && !s.search_recents);
+        assert!(!s.media_keys && !s.media_session && s.close_to_tray && s.launch_at_login);
+        assert_eq!(
+            fresh.platform.get(),
+            PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true }
+        );
         // Loaded at startup into the live switches.
         assert!(fresh.tracking.private_session.load(Ordering::Relaxed));
         assert!(fresh.tracking.report_to_plex.load(Ordering::Relaxed));
@@ -565,6 +611,10 @@ mod tests {
         assert_eq!(v["reduceMotion"], "system");
         assert_eq!(v["searchSuggestions"], true);
         assert_eq!(v["searchRecents"], true);
+        assert_eq!(v["mediaKeys"], true);
+        assert_eq!(v["mediaSession"], true);
+        assert_eq!(v["closeToTray"], false);
+        assert_eq!(v["launchAtLogin"], false);
         let p: SettingsPatch = serde_json::from_str(r#"{"shuffleStyle":"standard"}"#).unwrap();
         assert_eq!(p.shuffle_style, Some(ShuffleStyle::Standard));
         let p: SettingsPatch =

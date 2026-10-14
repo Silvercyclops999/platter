@@ -105,6 +105,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // Launch at login (a LaunchAgent on macOS, the default).
+        .plugin(tauri_plugin_autostart::Builder::new().arg(platform::AUTOSTART_ARG).build())
         .manage(updates::Updates::default())
         .register_asynchronous_uri_scheme_protocol("art", |ctx, req, responder| {
             let cache = ctx.app_handle().state::<ArtCache>().inner().clone();
@@ -135,6 +138,10 @@ pub fn run() {
                 art: Some(art.clone()),
                 ..Default::default()
             };
+            // Launched at login: start hidden to the tray or minimised.
+            let args: Vec<String> = std::env::args().collect();
+            platform::apply_start_mode(app.handle(), platform::start_mode(&args, &initial.platform()));
+            let os = platform::Platform::new();
 
             let player = PlayerHandle::spawn(
                 tauri::async_runtime::handle().inner().clone(),
@@ -146,7 +153,7 @@ pub fn run() {
                     out.select(initial.output_device.clone());
                     Box::new(out)
                 },
-                Arc::new(audio::events::TauriSink(app.handle().clone())),
+                os.tap(Arc::new(audio::events::TauriSink(app.handle().clone()))),
                 PlayerConfig {
                     persist_path: Some(data_dir.join("queue.json")),
                     cache_dir: Some(audio_dir.clone()),
@@ -157,6 +164,7 @@ pub fn run() {
                 },
             );
             let app_settings = settings::SettingsState::new(db.clone(), live.clone());
+            os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone());
             tracking::spawn(
                 tracking::Tracker::new(plex.clone(), db.clone(), live.tracking.clone()),
                 player.subscribe_tracking(),
@@ -179,6 +187,7 @@ pub fn run() {
             app.manage(art);
             app.manage(player);
             app.manage(app_settings);
+            app.manage(live.platform.clone());
             updates::start(app.handle().clone());
             Ok(())
         })
@@ -240,6 +249,16 @@ pub fn run() {
             updates::update_check,
             updates::update_install_on_restart,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+                && let Some(live) = window.try_state::<platform::Switches>()
+                && platform::close_action(&live.get()) == platform::CloseAction::Hide
+            {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
