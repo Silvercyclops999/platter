@@ -11,6 +11,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { trackCredits } from "../lib/credits";
 import { formatDuration, trackArtistLine } from "../lib/format";
 import { isMod } from "../lib/platform";
 import type { Track } from "../lib/types";
@@ -20,6 +21,7 @@ import { player } from "../stores/player";
 import { toast } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
 import { Art } from "./Art";
+import { ArtistLinks, TextLink } from "./ArtistLinks";
 import { QualityBadge } from "./Badge";
 import { openContextMenu } from "./ContextMenu";
 import { Skeleton } from "./Skeleton";
@@ -29,6 +31,16 @@ export function onAlbumPage(albumId: string): boolean {
   const { entries, index } = useRouter.getState();
   const r = entries[index]?.route;
   return r?.name === "album" && r.id === albumId;
+}
+
+/**
+ * One "Go to <name>" per artist in the track's line that has a library page,
+ * in line order. When none does, the album artist.
+ */
+export function goToArtistItems(track: Track): MenuItem[] {
+  const linked = trackCredits(track, useApp.getState().artistLookup).filter((c) => c.id);
+  const targets = linked.length ? linked.map((c) => ({ name: c.name, id: c.id! })) : [{ name: track.artistTitle, id: track.artistId }];
+  return targets.map((a) => ({ label: `Go to ${a.name}`, onSelect: () => nav.go({ name: "artist", id: a.id }) }));
 }
 
 /**
@@ -45,7 +57,7 @@ export function trackMenuItems(
     ...(extra.before ?? []),
     { label: "Add to queue", onSelect: () => player.queueAdd([track.id], "end") },
     ...(extra.afterQueue ?? []),
-    { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: track.artistId }) },
+    ...goToArtistItems(track),
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
     {
       label: "Copy song title",
@@ -363,36 +375,14 @@ export function TrackRow({
         )}
         <div className="track-row__text">
           <div className="track-row__title truncate">{track.title}</div>
-          {showArtist && (
-            <div className="track-row__artist truncate">
-              <button
-                type="button"
-                tabIndex={-1}
-                className="link"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  nav.go({ name: "artist", id: track.artistId });
-                }}
-              >
-                {trackArtistLine(track)}
-              </button>
-            </div>
-          )}
+          {showArtist && <ArtistLinks track={track} className="track-row__artist truncate" />}
         </div>
       </div>
       {showAlbum && !compact && (
         <div className="track-row__album truncate">
-          <button
-            type="button"
-            tabIndex={-1}
-            className="link"
-            onClick={(e) => {
-              e.stopPropagation();
-              nav.go({ name: "album", id: track.albumId });
-            }}
-          >
+          <TextLink tabIndex={-1} onActivate={() => nav.go({ name: "album", id: track.albumId })}>
             {track.albumTitle}
-          </button>
+          </TextLink>
         </div>
       )}
       {!compact &&

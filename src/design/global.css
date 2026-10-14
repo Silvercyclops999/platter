@@ -139,6 +139,15 @@ img {
   text-decoration: underline;
   color: var(--color-text-primary);
 }
+/* Links inside a line of text are inline spans, so a long line ends in one
+   ellipsis instead of a name cut off mid-word. */
+.text-link { cursor: pointer; }
+/* The line clips overflow, so keep the focus ring inside it. */
+.text-link:focus-visible {
+  outline-offset: -2px;
+  text-decoration: underline;
+  color: var(--color-text-primary);
+}
 
 .tabular {
   font-variant-numeric: tabular-nums;

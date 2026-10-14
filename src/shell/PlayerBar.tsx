@@ -17,13 +17,14 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
+import { ArtistLinks, TextLink } from "../components/ArtistLinks";
 import { openContextMenu } from "../components/ContextMenu";
 import { trackMenuItems } from "../components/TrackRow";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Slider } from "../components/Slider";
 import { Tooltip } from "../components/Tooltip";
-import { formatDuration, trackArtistLine } from "../lib/format";
+import { formatDuration } from "../lib/format";
 import { modKey } from "../lib/platform";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
@@ -178,20 +179,16 @@ export function PlayerBar() {
               <Art path={track.thumb} size={56} />
             </button>
             <div className="player-bar__meta">
-              <button
-                type="button"
-                className="link player-bar__title truncate"
-                onClick={() => nav.go({ name: "album", id: track.albumId })}
+              <div
+                className="player-bar__title truncate"
                 onContextMenu={(e) => {
                   e.preventDefault();
                   openContextMenu(`Options for ${track.title}`, trackMenuItems(track), e);
                 }}
               >
-                {track.title}
-              </button>
-              <button type="button" className="link player-bar__artist truncate" onClick={() => nav.go({ name: "artist", id: track.artistId })}>
-                {trackArtistLine(track)}
-              </button>
+                <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.title}</TextLink>
+              </div>
+              <ArtistLinks track={track} className="player-bar__artist truncate" />
             </div>
             <IconButton label="Like" tooltip="Likes arrive in Phase 2" softDisabled icon={<Heart size={16} />} size="md" />
           </>

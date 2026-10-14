@@ -36,19 +36,19 @@ describe("track menu", () => {
     useRouter.getState().reset({ name: "album", id: t1.albumId });
     fireEvent.contextMenu(row(), { clientX: 10, clientY: 10 });
     await screen.findByRole("menu");
-    expect(labels()).toEqual(["Add to queue", "Go to artist", "Copy song title"]);
+    expect(labels()).toEqual(["Add to queue", `Go to ${t1.artistTitle}`, "Copy song title"]);
   });
 
   it("keeps 'Go to album' everywhere else, including another album's page", async () => {
     useRouter.getState().reset({ name: "album", id: `${t1.albumId}-other` });
     fireEvent.contextMenu(row(), { clientX: 10, clientY: 10 });
     await screen.findByRole("menu");
-    expect(labels()).toEqual(["Add to queue", "Go to artist", "Go to album", "Copy song title"]);
+    expect(labels()).toEqual(["Add to queue", `Go to ${t1.artistTitle}`, "Go to album", "Copy song title"]);
   });
 
   it("queue items put 'Remove from queue' right after 'Add to queue'", () => {
     const items = trackMenuItems(t1, { afterQueue: [{ label: "Remove from queue" }] });
-    expect(items.map((i) => i.label)).toEqual(["Add to queue", "Remove from queue", "Go to artist", "Go to album", "Copy song title"]);
+    expect(items.map((i) => i.label)).toEqual(["Add to queue", "Remove from queue", `Go to ${t1.artistTitle}`, "Go to album", "Copy song title"]);
   });
 
   it("the options button opens the menu aligned to the button", async () => {
@@ -105,9 +105,9 @@ describe("now-playing menu", () => {
         <ContextMenuHost />
       </>,
     );
-    fireEvent.contextMenu(screen.getByRole("button", { name: t1.title }), { clientX: 20, clientY: 700 });
+    fireEvent.contextMenu(screen.getByRole("link", { name: t1.title }), { clientX: 20, clientY: 700 });
     const menu = await screen.findByRole("menu", { name: `Options for ${t1.title}` });
     expect(menu).toBeInTheDocument();
-    expect(labels()).toEqual(["Add to queue", "Go to artist", "Go to album", "Copy song title"]);
+    expect(labels()).toEqual(["Add to queue", `Go to ${t1.artistTitle}`, "Go to album", "Copy song title"]);
   });
 });

@@ -1,6 +1,7 @@
 import { Clock3, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Art } from "../components/Art";
+import { ArtistLinks } from "../components/ArtistLinks";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
@@ -138,7 +139,7 @@ function isSearchBox(el: EventTarget | null): boolean {
 
 function TopResult({ hit, selected, onPlay }: { hit: SearchHit; selected: boolean; onPlay: () => void }) {
   let title = "";
-  let sub = "";
+  let sub: ReactNode = "";
   let thumb: string | null | undefined;
   let open = () => {};
   let round = false;
@@ -158,7 +159,11 @@ function TopResult({ hit, selected, onPlay }: { hit: SearchHit; selected: boolea
   } else if (hit.kind === "track" && hit.track) {
     const t = hit.track;
     title = t.title;
-    sub = `Song · ${trackArtistLine(t)}`;
+    sub = (
+      <>
+        Song · <ArtistLinks track={t} />
+      </>
+    );
     thumb = t.thumb;
     open = () => nav.go({ name: "album", id: t.albumId });
   } else if (hit.kind === "playlist" && hit.playlist) {

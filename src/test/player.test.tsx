@@ -21,8 +21,8 @@ describe("PlayerBar reflects the mock player", () => {
   it("shows the current track, artist, and position", () => {
     render(<PlayerBar />);
     const s = usePlayer.getState().state!;
-    expect(screen.getByRole("button", { name: s.track!.title })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: s.track!.artistTitle })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: s.track!.title })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: s.track!.artistTitle })).toBeInTheDocument();
     expect(screen.getByText(formatDuration(s.positionMs))).toBeInTheDocument();
     const seek = screen.getByRole("slider", { name: "Seek" });
     expect(seek).toHaveAttribute("aria-valuemax", String(s.durationMs));
