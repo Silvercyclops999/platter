@@ -52,7 +52,7 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Appearance", "App", "About"]);
+    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Appearance", "App", "About", "Now playing"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
@@ -283,7 +283,8 @@ describe("settings page", () => {
   it("shows skeletons until settings arrive", () => {
     useSettings.setState({ settings: null });
     render(<SettingsPage />);
-    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    // Core settings wait for the core; the now-playing rows are local and show at once.
+    expect(screen.queryByRole("switch", { name: "Private session" })).not.toBeInTheDocument();
     expect(document.querySelector(".skeleton")).not.toBeNull();
   });
 

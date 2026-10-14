@@ -22,6 +22,7 @@ import type {
   UpdateInfo,
 } from "../lib/types";
 import { useApp } from "../stores/app";
+import { NowPlayingSettings } from "../shell/NowPlayingSettings";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 
@@ -62,6 +63,12 @@ const CONNECTION_LABEL: Record<ConnectionKind, string> = {
 };
 
 /** Main open-source parts Platter is built on (shown under About). */
+/** The now-playing group lives outside the row list; show it when the search fits. */
+function nowPlayingMatches(query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || ["now playing", "lyrics", "open", "song starts", "panel"].some((w) => w.includes(q) || q.includes(w));
+}
+
 export const NOTICES: { name: string; licence: string }[] = [
   { name: "Tauri", licence: "MIT or Apache-2.0" },
   { name: "React", licence: "MIT" },
@@ -572,12 +579,13 @@ export function SettingsPage() {
           </section>
         );
       })}
-      {shown.length === 0 && (
+      {shown.length === 0 && !nowPlayingMatches(query) && (
         <div className="settings__empty" role="status">
           <p className="settings__empty-title">No settings match "{query.trim()}"</p>
           <p className="settings__empty-hint">Try another word, like quality, cache or motion.</p>
         </div>
       )}
+      {nowPlayingMatches(query) && <NowPlayingSettings />}
       <p className="settings__hint">Shortcut: {modKey}+,</p>
       <ConfirmDialog
         open={dialog === "signOut"}
