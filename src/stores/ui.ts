@@ -69,6 +69,16 @@ function saveNowPlayingPrefs(p: NowPlayingPrefs) {
   }
 }
 
+const SIDEBAR_ART_KEY = "platter.sidebar-art.v1"; // gitleaks:allow (localStorage key name, not a secret)
+
+function loadSidebarArt(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_ART_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
 export interface MenuItem {
   label: string;
   onSelect?: () => void;
@@ -139,6 +149,9 @@ interface UiState extends PanelWidths {
   setSidebar: (p: { width?: number; collapsed?: boolean }) => void;
   /** Save the user's right panel width (on drag release). */
   setRightWidth: (w: number) => void;
+  /** Library sidebar list rows show art (Settings). Per device. */
+  sidebarArt: boolean;
+  setSidebarArt: (v: boolean) => void;
 }
 
 const panels = (s: UiState): PanelWidths => ({ sidebarWidth: s.sidebarWidth, sidebarCollapsed: s.sidebarCollapsed, rightWidth: s.rightWidth });
@@ -200,4 +213,18 @@ export const useUi = create<UiState>()((set, get) => ({
     set({ rightWidth });
     savePanels(panels(get()));
   },
+  sidebarArt: loadSidebarArt(),
+  setSidebarArt: (sidebarArt) => {
+    set({ sidebarArt });
+    try {
+      localStorage.setItem(SIDEBAR_ART_KEY, sidebarArt ? "on" : "off");
+    } catch {
+      /* storage unavailable: this session only */
+    }
+  },
 }));
+
+/** Whether the library sidebar's list rows show art, and its setter (Settings). */
+export function useSidebarArt(): [boolean, (v: boolean) => void] {
+  return [useUi((s) => s.sidebarArt), useUi((s) => s.setSidebarArt)];
+}

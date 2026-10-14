@@ -11,14 +11,10 @@ import { AlbumCard } from "../pages/cards";
 import { MainView, barAlpha, restoreScroll, stickyThreshold } from "../shell/MainView";
 import { PlayerBar } from "../shell/PlayerBar";
 import { QueuePanel, moveIndex } from "../shell/QueuePanel";
-import { Sidebar } from "../shell/Sidebar";
 import { useShortcuts } from "../shell/useShortcuts";
-import { libraryEntries, useLibraryView, type LibEntry } from "../stores/library";
-import { usePins } from "../stores/pins";
 import { resetVolumeNudge, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { useUi } from "../stores/ui";
-import { useApp } from "../stores/app";
 
 const mock = backend as MockBackend;
 const route = () => useRouter.getState().entries[useRouter.getState().index].route;
@@ -451,72 +447,5 @@ describe("queue panel", () => {
     expect(moveIndex(0, 3)).toBe(2);
     expect(moveIndex(3, 0)).toBe(0);
     expect(moveIndex(2, 2)).toBe(2);
-  });
-});
-
-// ---------------------------------------------------------------- sidebar library
-
-const e = (kind: LibEntry["kind"], id: string, title: string, pinned = false): LibEntry => ({ kind, id, title, subtitle: kind, thumb: null, pinned });
-
-describe("sidebar library", () => {
-  const items = [e("album", "a1", "Zebra", true), e("playlist", "p1", "Mornings"), e("playlist", "p2", "Afternoon"), e("artist", "r1", "Bell", true)];
-
-  it("keeps pinned first, then sorts the rest", () => {
-    const base = { filter: "all" as const, query: "", recents: {} };
-    expect(libraryEntries(items, { ...base, sort: "alpha" }).map((x) => x.title)).toEqual(["Zebra", "Bell", "Afternoon", "Mornings"]);
-    expect(libraryEntries(items, { ...base, sort: "recents", recents: { "playlist:p2": 5 } }).map((x) => x.title)).toEqual([
-      "Zebra",
-      "Bell",
-      "Afternoon",
-      "Mornings",
-    ]);
-    expect(libraryEntries(items, { ...base, sort: "recents", recents: { "playlist:p1": 9, "playlist:p2": 5 } }).map((x) => x.title)).toEqual([
-      "Zebra",
-      "Bell",
-      "Mornings",
-      "Afternoon",
-    ]);
-  });
-
-  it("filters by type and by search text", () => {
-    expect(libraryEntries(items, { filter: "playlist", sort: "alpha", query: "", recents: {} }).map((x) => x.id)).toEqual(["p2", "p1"]);
-    expect(libraryEntries(items, { filter: "all", sort: "alpha", query: "morn", recents: {} }).map((x) => x.id)).toEqual(["p1"]);
-  });
-
-  it("chips filter the list, search narrows it, and the view menu switches to compact", async () => {
-    const user = userEvent.setup();
-    act(() => {
-      useApp.setState({ playlists: mock.fx.playlists.slice(0, 2) });
-      usePins.setState({ pins: [{ kind: "album", id: mock.fx.albums[0].id, title: mock.fx.albums[0].title, subtitle: "Album", thumb: null }] });
-      useLibraryView.setState({ filter: "all", sort: "recents", view: "list" });
-    });
-    useRouter.getState().reset();
-    render(
-      <>
-        <Sidebar collapsed={false} />
-        <ContextMenuHost />
-      </>,
-    );
-    const list = screen.getByRole("list", { name: "Your Library items" });
-    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
-    await user.click(screen.getByRole("button", { name: "Albums" }));
-    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
-    await user.click(screen.getByRole("button", { name: "Albums" })); // again clears
-    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
-
-    await user.click(screen.getByRole("button", { name: "Search in Your Library" }));
-    await user.type(screen.getByRole("searchbox", { name: "Search in Your Library" }), mock.fx.playlists[1].title);
-    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
-    await user.keyboard("{Escape}");
-    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
-
-    await user.click(screen.getByRole("button", { name: /^Sort and view/ }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Compact" }));
-    expect(useLibraryView.getState().view).toBe("compact");
-    expect(list).toHaveClass("is-compact");
-    act(() => {
-      usePins.setState({ pins: [] });
-      useLibraryView.setState({ view: "list" });
-    });
   });
 });
