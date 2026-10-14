@@ -18,6 +18,7 @@ use super::types::{RemoteCommand, RemoteStatus};
 use super::RemoteSwitches;
 use crate::audio::events::{PlayerState, PlayerStatus};
 use crate::audio::queue::{ItemSource, QueueItem, QueueView, Repeat};
+use crate::audio::source::{ContextKind, PlayContext};
 use crate::audio::testutil::track;
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
@@ -143,6 +144,17 @@ impl LocalPlayer for Local {
     }
     async fn tracks(&self, ids: &[String]) -> AppResult<Vec<Track>> {
         Ok(ids.iter().map(|i| track(i, "A", "/p")).collect())
+    }
+    async fn load_context(&self, context: PlayContext, start: Option<String>) -> AppResult<()> {
+        let ids = context.track_ids.unwrap_or_default();
+        let first = start.unwrap_or_else(|| ids[0].clone());
+        let rest: Vec<&str> = ids.iter().filter(|i| **i != first).map(String::as_str).collect();
+        let fresh = Local::playing(&first, &rest, 0);
+        let mut st = fresh.state.lock().clone();
+        st.status = PlayerStatus::Paused;
+        *self.state.lock() = st;
+        self.push(format!("load {}", ids.join(",")));
+        Ok(())
     }
 }
 
@@ -583,4 +595,23 @@ async fn platter_as_a_player_answers_play_media_and_timeline_poll() {
     assert!(res.contains("machineIdentifier=\"me\""));
 
     stop.send(true).unwrap();
+}
+
+#[tokio::test]
+async fn playing_something_new_while_remote_sends_it_to_the_same_player() {
+    let r = rig().await;
+    r.remote.move_to("amp").await.unwrap();
+    let ctx = PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(vec!["x".into(), "y".into()]) };
+    let st = r.remote.play_context(ctx, None).await.unwrap();
+    assert_eq!(st.session.unwrap().track.unwrap().id, "x");
+    assert!(r.local.log().contains(&"load x,y".to_string()));
+    let pqs = requests(&r.server, "/playQueues").await;
+    assert_eq!(q(&pqs[1])["uri"], "server://srv/com.plexapp.plugins.library/library/metadata/x,y");
+    let pm = requests(&r.player, "/player/playback/playMedia").await;
+    assert_eq!(pm.len(), 2);
+    assert_eq!(q(&pm[1])["offset"], "0");
+    // Not remote: refused.
+    r.remote.return_here().await.unwrap();
+    let ctx = PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(vec!["x".into()]) };
+    assert!(r.remote.play_context(ctx, None).await.is_err());
 }

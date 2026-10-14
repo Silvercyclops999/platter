@@ -43,6 +43,17 @@ pub async fn remote_return(remote: State<'_, RemoteService>) -> AppResult<Remote
     remote.return_here().await
 }
 
+/// Play an album, playlist or songs on the device playing now (instead of
+/// `play_context` while remote).
+#[tauri::command]
+pub async fn remote_play_context(
+    remote: State<'_, RemoteService>,
+    context: PlayContext,
+    start_track_id: Option<String>,
+) -> AppResult<RemoteState> {
+    remote.play_context(context, start_track_id).await
+}
+
 /// A player bar control while playing on another device.
 #[tauri::command]
 pub async fn remote_command(remote: State<'_, RemoteService>, command: RemoteCommand) -> AppResult<RemoteState> {
@@ -122,6 +133,9 @@ impl LocalPlayer for PlayerHandle {
     }
     async fn tracks(&self, ids: &[String]) -> AppResult<Vec<Track>> {
         self.lookup_tracks(ids).await
+    }
+    async fn load_context(&self, context: PlayContext, start_track_id: Option<String>) -> AppResult<()> {
+        self.play_context_at(context, start_track_id, 0, false).await
     }
 }
 

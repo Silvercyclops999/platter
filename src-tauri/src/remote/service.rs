@@ -30,6 +30,7 @@ use super::types::{
 };
 use crate::audio::events::{PlayerState, PlayerStatus};
 use crate::audio::queue::Repeat;
+use crate::audio::source::PlayContext;
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
 use crate::plex::Token;
@@ -79,6 +80,8 @@ pub trait LocalPlayer: Send + Sync {
     /// Play these songs from `start` at a position, playing or paused.
     async fn play_tracks(&self, ids: Vec<String>, start: Option<String>, ms: u64, play: bool) -> AppResult<()>;
     async fn tracks(&self, ids: &[String]) -> AppResult<Vec<Track>>;
+    /// Load a context paused at its start (nothing sounds here).
+    async fn load_context(&self, context: PlayContext, start_track_id: Option<String>) -> AppResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +344,35 @@ impl RemoteService {
             found = self.inner.players.lock().iter().find(|f| f.player.id == player_id).cloned();
         }
         let found = found.ok_or_else(|| AppError::NotFound("That device isn't available any more.".into()))?;
+        self.start_on(found).await
+    }
+
+    /// Play something new while playing on another device: it's loaded here
+    /// (paused, so nothing sounds here) and sent to the same player.
+    pub async fn play_context(&self, context: PlayContext, start_track_id: Option<String>) -> AppResult<RemoteState> {
+        let _op = self.inner.op.lock().await;
+        let found = self
+            .inner
+            .active
+            .lock()
+            .as_ref()
+            .map(|a| a.found.clone())
+            .ok_or_else(|| AppError::Invalid("Nothing is playing on another device.".into()))?;
+        self.inner.local.load_context(context, start_track_id).await?;
+        // The old follow loop stops; the player gets the new queue.
+        self.inner.generation.fetch_add(1, Ordering::SeqCst);
+        self.inner.active.lock().take();
+        let r = self.start_on(found).await;
+        if r.is_err() {
+            self.emit_state();
+        }
+        r
+    }
+
+    /// Send Platter's queue to `found` and start following it.
+    async fn start_on(&self, found: Found) -> AppResult<RemoteState> {
+        let player_id = found.player.id.clone();
+        let player_id = player_id.as_str();
         let name = found.player.name.clone();
 
         let st = self.inner.local.state().await?;
