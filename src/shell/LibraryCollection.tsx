@@ -51,8 +51,6 @@ function observeNonEmptyRect(instance: Virtualizer<HTMLElement, Element>, cb: (r
 
 export interface Geometry {
   cols: number;
-  /** Cell width; null when cells fill the row. */
-  cellWidth: number | null;
   art: number;
   pad: number;
   rowHeight: number;
@@ -60,9 +58,9 @@ export interface Geometry {
 
 /** Columns, art and row height for a view at a content width. */
 export function geometry(view: LibView, mode: CollectionMode, width: number, showArt = true): Geometry {
-  if (mode === "rail") return { cols: 1, cellWidth: null, art: RAIL_ART, pad: 4, rowHeight: RAIL_TILE };
-  if (view === "list") return { cols: 1, cellWidth: null, art: LIST_ART, pad: 8, rowHeight: showArt ? LIST_ROW : LIST_ROW_NO_ART };
-  if (view === "compactList") return { cols: 1, cellWidth: null, art: 0, pad: 8, rowHeight: mode === "wide" ? WIDE_COMPACT_ROW : COMPACT_ROW };
+  if (mode === "rail") return { cols: 1, art: RAIL_ART, pad: 4, rowHeight: RAIL_TILE };
+  if (view === "list") return { cols: 1, art: LIST_ART, pad: 8, rowHeight: showArt ? LIST_ROW : LIST_ROW_NO_ART };
+  if (view === "compactList") return { cols: 1, art: 0, pad: 8, rowHeight: mode === "wide" ? WIDE_COMPACT_ROW : COMPACT_ROW };
   const compact = view === "compactGrid";
   const pad = compact ? 6 : mode === "wide" ? 12 : 8;
   const w = width > 0 ? width : mode === "wide" ? 1024 : 276;
@@ -79,7 +77,7 @@ export function geometry(view: LibView, mode: CollectionMode, width: number, sho
   }
   const cellWidth = (w - GRID_GAP * (cols - 1)) / cols;
   const art = Math.floor(cellWidth - pad * 2);
-  return { cols, cellWidth: null, art, pad, rowHeight: Math.round(art + pad * 2 + (compact ? 0 : GRID_TEXT)) + GRID_GAP };
+  return { cols, art, pad, rowHeight: Math.round(art + pad * 2 + (compact ? 0 : GRID_TEXT)) + GRID_GAP };
 }
 
 function useContextKey(): { key: string | null; playing: boolean } {
@@ -466,7 +464,7 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
                 ...(grid
                   ? {
                       display: "grid",
-                      gridTemplateColumns: g.cellWidth ? `repeat(${g.cols}, ${g.cellWidth}px)` : `repeat(${g.cols}, minmax(0, 1fr))`,
+                      gridTemplateColumns: `repeat(${g.cols}, minmax(0, 1fr))`,
                       columnGap: GRID_GAP,
                     }
                   : null),

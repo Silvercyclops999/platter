@@ -420,14 +420,15 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       const albums = this.allAlbums();
       const byArtist = new Map<string, { added: number | null; played: number | null }>();
-      const items: LibraryItem[] = albums.map((a) => {
+      // The large-library demo repeats albums; keep their ids unique here.
+      const items: LibraryItem[] = albums.map((a, i) => {
         const d = byArtist.get(a.artistId) ?? { added: null, played: null };
         d.added = d.added === null ? a.addedAt : Math.min(d.added, a.addedAt);
         d.played = Math.max(d.played ?? 0, a.lastViewedAt ?? 0) || null;
         byArtist.set(a.artistId, d);
         return {
           kind: "album",
-          id: a.id,
+          id: i < this.fx.albums.length ? a.id : `${a.id}-${i}`,
           title: a.title,
           sortTitle: a.sortTitle,
           creator: a.artistTitle,
