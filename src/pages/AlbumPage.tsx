@@ -1,8 +1,10 @@
 import { Ellipsis, Pause, Play, Shuffle } from "lucide-react";
+import { useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { Badge, QualityBadge } from "../components/Badge";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
+import { CoverPopup } from "../components/CoverPopup";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
@@ -29,6 +31,8 @@ export function AlbumPage({ id }: { id: string }) {
   const play = () => (isContext ? player.toggle() : player.playAlbum(id));
   usePageBar(album?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(album?.title);
+  const [coverOpen, setCoverOpen] = useState(false);
+  const coverBtn = useRef<HTMLButtonElement>(null);
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this album: {error.message}</p>;
 
@@ -39,7 +43,20 @@ export function AlbumPage({ id }: { id: string }) {
     <div className="detail">
       <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
         <div className="detail-header__art">
-          {album ? <Art path={album.thumb} size={232} alt="" /> : <Skeleton width={232} height={232} />}
+          {album ? (
+            <button
+              ref={coverBtn}
+              type="button"
+              className="cover-button"
+              aria-label="View the cover art"
+              aria-haspopup="dialog"
+              onClick={() => setCoverOpen(true)}
+            >
+              <Art path={album.thumb} size={232} alt="" />
+            </button>
+          ) : (
+            <Skeleton width={232} height={232} />
+          )}
         </div>
         <div ref={column} className="detail-header__text">
           {album ? (
@@ -75,6 +92,10 @@ export function AlbumPage({ id }: { id: string }) {
           )}
         </div>
       </header>
+
+      {album && (
+        <CoverPopup open={coverOpen} onClose={() => setCoverOpen(false)} path={album.thumb} title={album.title} returnFocus={coverBtn} />
+      )}
 
       <div className="detail-body">
         <div className="action-row">
