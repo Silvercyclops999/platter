@@ -416,6 +416,30 @@
 .tab:focus-visible { border-radius: var(--radius-pill); }
 
 .chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/* A chip row that scrolls sideways, with fades and arrow buttons at the edges that have more. */
+.chips-scroll { position: relative; min-width: 0; }
+.chips.chips--scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px; margin: -2px; }
+.chips--scroll::-webkit-scrollbar { display: none; }
+.chips--scroll .chip { flex: none; }
+.chips-scroll.has-after .chips--scroll { mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent); }
+.chips-scroll.has-before .chips--scroll { mask-image: linear-gradient(to right, transparent, #000 56px); }
+.chips-scroll.has-before.has-after .chips--scroll { mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent); }
+.chips-scroll__btn {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-bg-raised2);
+  color: var(--color-text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transform: translateY(-50%);
+}
+.chips-scroll__btn:hover { background: var(--color-state-selected); }
+.chips-scroll__btn--prev { left: 0; }
+.chips-scroll__btn--next { right: 0; }
 .chip {
   height: 32px;
   padding: 0 var(--space-3);

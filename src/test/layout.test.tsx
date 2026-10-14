@@ -27,15 +27,16 @@ function solve(windowWidth: number, rightOpen: boolean, user: Partial<LayoutInpu
 
 describe("layout solver", () => {
   it("shares the window with both panels at their max (right panel open)", () => {
-    // Between 1024 and 1280 the right panel shrinks first, then the sidebar rails.
-    expect(solve(1200, true)).toEqual([420, "full", 400, 348]);
-    expect(solve(1100, true)).toEqual([RAIL_WIDTH, "rail", 716, RIGHT_MIN]);
+    // The sidebar rails first; the right panel only shrinks once that isn't enough.
+    expect(solve(1200, true)).toEqual([RAIL_WIDTH, "rail", 676, 420]);
+    expect(solve(1100, true)).toEqual([RAIL_WIDTH, "rail", 576, 420]);
+    expect(solve(900, true)).toEqual([RAIL_WIDTH, "rail", 420, 376]);
     expect(WIDTHS.map((w) => solve(w, true))).toEqual([
-      // The right panel is at its min and the sidebar on the rail.
+      // The narrowest window: the right panel at its min, main bottoms out near its floor.
       [RAIL_WIDTH, "rail", 416, RIGHT_MIN],
-      [RAIL_WIDTH, "rail", 640, RIGHT_MIN],
+      [RAIL_WIDTH, "rail", 500, 420],
+      [RAIL_WIDTH, "rail", 756, 420],
       // Just fits: main sits a little above its floor.
-      [420, "full", 408, 420],
       [420, "full", 568, 420],
       [420, "full", 728, 420],
       [420, "full", 1048, 420],
@@ -45,7 +46,7 @@ describe("layout solver", () => {
 
   it("narrows the sidebar instead of railing it when the right panel is closed", () => {
     expect(WIDTHS.map((w) => solve(w, false))).toEqual([
-      [344, "narrowed", 400, STRIP_WIDTH],
+      [324, "narrowed", 420, STRIP_WIDTH],
       [420, "full", 548, STRIP_WIDTH],
       [420, "full", 804, STRIP_WIDTH],
       [420, "full", 964, STRIP_WIDTH],
@@ -58,10 +59,10 @@ describe("layout solver", () => {
   it("keeps default widths at every size where they fit", () => {
     const open = WIDTHS.map((w) => solve(w, true, { sidebarWidth: 300, rightWidth: 340 }));
     expect(open[0]).toEqual([RAIL_WIDTH, "rail", 416, RIGHT_MIN]);
-    expect(open[1]).toEqual([300, "full", 400, 292]);
+    expect(open[1]).toEqual([RAIL_WIDTH, "rail", 580, 340]);
     for (const [s, mode, main, right] of open.slice(2)) {
       expect([s, mode, right]).toEqual([300, "full", 340]);
-      expect(main).toBeGreaterThan(400);
+      expect(main).toBeGreaterThan(420);
     }
     const closed = WIDTHS.map((w) => solve(w, false, { sidebarWidth: 300, rightWidth: 340 }));
     expect(closed.every(([s, mode]) => s === 300 && mode === "full")).toBe(true);
@@ -71,16 +72,18 @@ describe("layout solver", () => {
     for (const w of WIDTHS)
       for (const open of [true, false]) {
         const [, , main] = solve(w, open);
-        expect(main).toBeGreaterThanOrEqual(400);
+        expect(main).toBeGreaterThanOrEqual(w === 800 && open ? 416 : 420);
       }
   });
 
   it("restores the user's widths when the window widens again", () => {
     const input = { sidebarWidth: 380, rightWidth: 400, rightOpen: true, sidebarCollapsed: false };
-    const narrow = solveLayout({ ...input, windowWidth: 1024 });
+    const narrow = solveLayout({ ...input, windowWidth: 800 });
     expect(narrow.sidebarMode).toBe("rail");
     expect(narrow.sidebarAuto).toBe(true);
     expect(narrow.right).toBe(RIGHT_MIN);
+    // A little wider: the right panel gets its width back before the sidebar opens.
+    expect(solveLayout({ ...input, windowWidth: 1024 })).toMatchObject({ sidebarMode: "rail", right: 400 });
     const wide = solveLayout({ ...input, windowWidth: 1920 });
     expect(wide).toMatchObject({ sidebar: 380, sidebarMode: "full", sidebarAuto: false, right: 400 });
     // Closed panel: narrowed, then back to the user's width.

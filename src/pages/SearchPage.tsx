@@ -249,7 +249,7 @@ export function SearchPage({ query }: { query: string }) {
   return (
     <div className="page-pad sr" aria-busy={!res && !failed}>
       <h1 className="sr-only">Results for “{q}”</h1>
-      <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="sr-chips" />
+      <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="sr-chips" scroll />
       {offline && (failed || res?.source === "server" || empty) ? (
         // Only the server could answer this: say why, and that it comes back.
         <div className="sr-empty" role="status">

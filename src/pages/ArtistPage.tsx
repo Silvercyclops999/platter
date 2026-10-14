@@ -98,12 +98,9 @@ function ArtistView({ id, discography }: { id: string; discography?: boolean }) 
 
   return (
     <div className="detail artist-page">
-      {variant === "banner" && artist ? (
-        <header
-          ref={header}
-          className={`artist-banner ${compact ? "artist-banner--compact" : ""}`}
-          data-variant="banner"
-        >
+      {/* A narrow main column swaps the banner for the compact round-photo header. */}
+      {variant === "banner" && artist && !compact ? (
+        <header ref={header} className="artist-banner" data-variant="banner">
           <BannerImage path={banner!} box={header} />
           <div ref={column} className="detail-header__text artist-banner__text">
             {text}
@@ -331,7 +328,7 @@ function Discography({ sections, openAll }: { sections: ArtistPageSection[]; ope
   }, [openAll]);
   const chips = discographyChips(sections);
   const chipRow = (
-    <FilterChips label="Release type" items={chips} value={filter} onChange={setFilter} className="discography__chips" />
+    <FilterChips label="Release type" items={chips} value={filter} onChange={setFilter} className="discography__chips" scroll />
   );
   const cards = (limit?: number) =>
     discographyItems(sections, filter, limit).map(({ album, latest }) => (

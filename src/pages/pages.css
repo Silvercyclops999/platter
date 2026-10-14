@@ -229,7 +229,9 @@
   background: var(--tint-shade);
   isolation: isolate;
 }
-.artist-banner--compact { height: clamp(240px, 46cqw, 300px); }
+/* Narrow: the compact header with a round photo (the banner is left out). */
+.detail-header--artist.detail-header--compact .detail-header__art .art,
+.detail-header--artist.detail-header--compact .detail-header__art .skeleton { width: 100px !important; height: 100px !important; }
 .artist-banner__art { position: absolute; inset: 0; z-index: -2; }
 .artist-banner__art img {
   width: 100%;

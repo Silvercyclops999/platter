@@ -21,7 +21,7 @@ export const RIGHT_DEFAULT = 340;
 export const STRIP_WIDTH = 24;
 
 /** The main column never gets narrower than this while other columns can give way. */
-export const MAIN_MIN = 400;
+export const MAIN_MIN = 420;
 /** Window padding on each side and the gap between columns (matches shell.css). */
 export const EDGE = 8;
 export const GAP = 8;
@@ -62,11 +62,12 @@ export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.ma
 const FRAME = 2 * EDGE + 2 * GAP;
 
 /**
- * Share the window between the columns. The right panel shrinks to its
- * minimum first; then the sidebar goes to the rail (right panel open) or
- * narrows toward its minimum (closed). The main column keeps MAIN_MIN while
- * anything else can still give way. Auto states are derived, never stored,
- * so the user's widths come back as the window widens.
+ * Share the window between the columns. With the right panel open the
+ * sidebar goes to the rail first, then the right panel shrinks toward its
+ * minimum. With it closed the sidebar narrows toward its minimum, then
+ * rails. The main column keeps MAIN_MIN while anything else can still give
+ * way. Auto states are derived, never stored, so the user's widths (both
+ * panels') come back as the window widens.
  */
 export function solveLayout(input: LayoutInput): Layout {
   const { windowWidth, rightOpen, sidebarCollapsed } = input;
@@ -78,10 +79,7 @@ export function solveLayout(input: LayoutInput): Layout {
 
   const room = () => windowWidth - FRAME - sidebar - right - MAIN_MIN;
 
-  // 1. The right panel gives way first, down to its minimum.
-  if (room() < 0 && rightOpen) right = Math.max(RIGHT_MIN, right + room());
-
-  // 2. Then the sidebar: the rail with the right panel open, narrower without.
+  // 1. The sidebar gives way first: the rail with the right panel open, narrower without.
   if (room() < 0 && mode !== "rail") {
     if (rightOpen) {
       sidebar = RAIL_WIDTH;
@@ -99,6 +97,9 @@ export function solveLayout(input: LayoutInput): Layout {
       }
     }
   }
+
+  // 2. Then the right panel, down to its minimum.
+  if (room() < 0 && rightOpen) right = Math.max(RIGHT_MIN, right + room());
 
   const main = Math.max(0, windowWidth - FRAME - sidebar - right);
   return { sidebar, sidebarMode: mode, sidebarAuto: auto, right, main };

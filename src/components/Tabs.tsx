@@ -1,4 +1,5 @@
-import { useRef, type KeyboardEvent } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useRovingRow } from "./roving";
 
 export interface TabItem<T extends string> {
@@ -58,14 +59,14 @@ export interface FilterChipsProps<T extends string> {
   value: T;
   onChange: (v: T) => void;
   className?: string;
+  /** One row that scrolls sideways (with arrow buttons) instead of wrapping. */
+  scroll?: boolean;
 }
 
 /** Pill filter chips (single select), one Tab stop with arrows inside. */
-export function FilterChips<T extends string>({ label, items, value, onChange, className = "" }: FilterChipsProps<T>) {
-  // One Tab stop for the row; arrows move between chips.
-  const roving = useRovingRow();
+export function FilterChips<T extends string>({ label, items, value, onChange, className = "", scroll = false }: FilterChipsProps<T>) {
   return (
-    <div role="group" aria-label={label} className={`chips ${className}`} {...roving}>
+    <ChipRow label={label} className={className} scroll={scroll}>
       {items.map((t) => (
         <button
           key={t.id}
@@ -77,6 +78,61 @@ export function FilterChips<T extends string>({ label, items, value, onChange, c
           {t.label}
         </button>
       ))}
+    </ChipRow>
+  );
+}
+
+/**
+ * A row of chip buttons: one Tab stop, arrows move between chips. With
+ * `scroll` it stays one line and scrolls sideways, with arrow buttons at the
+ * edges that have more.
+ */
+export function ChipRow({ label, className = "", scroll = false, children }: { label: string; className?: string; scroll?: boolean; children: ReactNode }) {
+  const roving = useRovingRow();
+  const edges = useScrollEdges(roving.ref, scroll);
+  const row = (
+    <div role="group" aria-label={label} className={`chips ${scroll ? "chips--scroll" : className}`} {...roving} onScroll={edges.update}>
+      {children}
     </div>
   );
+  if (!scroll) return row;
+  const by = (dir: 1 | -1) => roving.ref.current?.scrollBy?.({ left: dir * 200, behavior: "smooth" });
+  return (
+    <div className={`chips-scroll ${edges.start ? "has-before" : ""} ${edges.end ? "has-after" : ""} ${className}`}>
+      {row}
+      {/* Mouse helpers; the keyboard scrolls by moving between chips. */}
+      {edges.start && (
+        <button type="button" tabIndex={-1} className="chips-scroll__btn chips-scroll__btn--prev" aria-label="Scroll back" onClick={() => by(-1)}>
+          <ChevronLeft size={18} aria-hidden="true" />
+        </button>
+      )}
+      {edges.end && (
+        <button type="button" tabIndex={-1} className="chips-scroll__btn chips-scroll__btn--next" aria-label="Scroll for more" onClick={() => by(1)}>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Whether a sideways scroller has more to show before and after what's visible. */
+function useScrollEdges(ref: React.RefObject<HTMLElement | null>, on: boolean) {
+  const [edges, setEdges] = useState({ start: false, end: false });
+  const update = () => {
+    const el = ref.current;
+    if (!el || !on) return;
+    const start = el.scrollLeft > 1;
+    const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setEdges((e) => (e.start === start && e.end === end ? e : { start, end }));
+  };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !on) return;
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  return { ...edges, update };
 }

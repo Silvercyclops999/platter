@@ -192,7 +192,8 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
     document.getElementById(`${listId}-${sel}`)?.scrollIntoView?.({ block: "nearest" });
   }, [sel, listId]);
 
-  if (collapsed && !expanded)
+  // Narrow windows show a round button, but the field stays open while it holds a query.
+  if (collapsed && !expanded && !text)
     return (
       <Tooltip label={`Search (${modKey}+L)`} placement="bottom">
         <button

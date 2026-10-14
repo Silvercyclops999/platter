@@ -53,6 +53,12 @@
   .liked__list .track-list__album,
   .liked__list .track-list__added { visibility: hidden; }
 }
+/* Narrowest: the album column is gone (pages.css), so date added goes too: #, title, time. */
+@container main (max-width: 640px) {
+  .liked__list :is(.track-row, .track-list__head).track-row--added { grid-template-columns: 32px minmax(0, 1fr) minmax(108px, auto); }
+  .liked__list .track-row__added,
+  .liked__list .track-list__added { display: none; }
+}
 
 /* Compact view: shorter rows, no art, artists beside the title. */
 .liked__list--compact .track-row { height: 40px; }
