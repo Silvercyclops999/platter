@@ -700,7 +700,7 @@
   color: var(--color-text-secondary);
 }
 .track-list__head .track-row__num { height: auto; }
-.track-list__dur { text-align: right; padding-right: calc(24px + var(--space-2)); }
+.track-list__dur { display: flex; justify-content: flex-end; padding-right: calc(24px + var(--space-2)); }
 .track-row {
   height: 56px;
   border-radius: var(--radius-row);
@@ -797,7 +797,7 @@
 .track-row.is-drop-after::after { bottom: -1px; }
 .track-row--compact {
   grid-template-columns: minmax(0, 1fr) auto;
-  height: 56px;
+  height: 64px;
   padding: 0 var(--space-2);
 }
 .track-row--compact .track-row__title { font-size: var(--font-size-md); }

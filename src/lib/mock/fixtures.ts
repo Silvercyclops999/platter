@@ -239,8 +239,9 @@ export function buildFixtures(seed = 7): Fixtures {
           artistId,
           artistTitle: name,
           trackArtist: feat,
-          trackNumber: i + 1,
-          discNumber: 1,
+          // Live albums come on two discs, numbered from 1 on each.
+          trackNumber: planKey === "live" && i >= Math.ceil(n / 2) ? i + 1 - Math.ceil(n / 2) : i + 1,
+          discNumber: planKey === "live" && i >= Math.ceil(n / 2) ? 2 : 1,
           durationMs: (95 + Math.floor(r() * 240)) * 1000 + Math.floor(r() * 1000),
           thumb: album.thumb,
           partKey: `/library/parts/${trackId}/1/file.${tq.container === "mp4" ? "m4a" : tq.container}`,

@@ -1,0 +1,26 @@
+/* ---------------------------------------------------------------- album page */
+
+.detail-header__artist-photo { flex: none; }
+
+/* Compact view: shorter rows, no artist line under the title. */
+.album-tracks--compact .track-row { height: 40px; }
+
+/* "Disc N" row that starts each disc of a multi-disc album. */
+.album-disc {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  height: 56px;
+  padding: 0 var(--space-4);
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+}
+.album-disc:first-child { margin-top: 0; }
+.album-disc__icon { display: flex; justify-content: flex-end; }
+.album-disc__label { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); }
+
+/* Release date and label under the tracklist. */
+.album-footer { margin-top: var(--space-6); padding: 0 var(--space-4); color: var(--color-text-secondary); }
+.album-footer__date { font-size: var(--font-size-md); }
+.album-footer__label { margin-top: var(--space-1); font-size: var(--font-size-xs); }

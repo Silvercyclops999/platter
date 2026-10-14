@@ -1,5 +1,5 @@
 import { Ellipsis, Pause, Pin, PinOff, Play, Shuffle } from "lucide-react";
-import { useEffect, useId, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
@@ -34,11 +34,11 @@ import {
 } from "./artist";
 
 /** Page state (see more, chip, expanded rows) starts over for each artist. */
-export function ArtistPage({ id }: { id: string }) {
-  return <ArtistView key={id} id={id} />;
+export function ArtistPage({ id, discography }: { id: string; discography?: boolean }) {
+  return <ArtistView key={id} id={id} discography={discography} />;
 }
 
-function ArtistView({ id }: { id: string }) {
+function ArtistView({ id, discography }: { id: string; discography?: boolean }) {
   const { data: loaded, error } = useLoad(() => backend.artistPage(id), [id]);
   // Similar artists and the global Popular list arrive in the background
   // after the page opened; the page is asked again when they do.
@@ -147,7 +147,7 @@ function ArtistView({ id }: { id: string }) {
               case "popular":
                 return <PopularSection key={s} id={id} data={data} />;
               case "discography":
-                return <Discography key={s} sections={data.sections} />;
+                return <Discography key={s} sections={data.sections} openAll={discography} />;
               case "appearsOn":
                 return <AppearsOn key={s} albums={data.appearsOn} />;
               case "about":
@@ -269,7 +269,7 @@ function ActionRow({
           openContextMenu(
             `Options for ${artist.title}`,
             [
-              { label: "Add popular songs to queue", onSelect: () => player.queueAdd(data!.popular.map((t) => t.id), "end") },
+              { label: "Add popular songs to queue", onSelect: () => void player.addToQueue(data!.popular, artist.thumb) },
               ...(credited ? [] : [shareItem("artist", artist.id, artist.thumb)]),
               { label: pinned ? "Unpin from sidebar" : "Pin to sidebar", onSelect: togglePin },
             ],
@@ -317,10 +317,18 @@ function PopularSection({ id, data }: { id: string; data: ArtistPageData }) {
   );
 }
 
-function Discography({ sections }: { sections: ArtistPageSection[] }) {
+/** `openAll`: start on the whole discography, scrolled into view. */
+function Discography({ sections, openAll }: { sections: ArtistPageSection[]; openAll?: boolean }) {
   const [filter, setFilter] = useState<DiscographyFilter>("popular");
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useState(!!openAll);
   const headingId = useId();
+  const allRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!openAll) return;
+    // After the page's own scroll restore for a new entry.
+    const raf = requestAnimationFrame(() => allRef.current?.scrollIntoView?.({ block: "start" }));
+    return () => cancelAnimationFrame(raf);
+  }, [openAll]);
   const chips = discographyChips(sections);
   const chipRow = (
     <FilterChips label="Release type" items={chips} value={filter} onChange={setFilter} className="discography__chips" />
@@ -342,7 +350,7 @@ function Discography({ sections }: { sections: ArtistPageSection[] }) {
     );
   }
   return (
-    <section className="discography discography--all" aria-labelledby={headingId}>
+    <section ref={allRef} className="discography discography--all" aria-labelledby={headingId}>
       <header className="shelf__head">
         <h2 id={headingId} className="shelf__title">
           Discography

@@ -6,7 +6,7 @@ import { openContextMenu } from "../components/ContextMenu";
 import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem, playlistEditItems } from "../components/PlaylistPicker";
 import { Skeleton } from "../components/Skeleton";
-import { TrackList, TrackRow, TrackRowSkeleton, likeItem, trackMenuItems } from "../components/TrackRow";
+import { TrackList, TrackRow, TrackRowSkeleton, likeItem, queueable, trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { formatLongDuration, plural, trackArtistLine } from "../lib/format";
 import type { Playlist, PlaylistPage as PlaylistData, Track } from "../lib/types";
@@ -232,7 +232,7 @@ export function PlaylistPage({ id }: { id: string }) {
     });
 
   const multiMenu = (keys: string[], trackIds: string[], tracks: Track[]): MenuItem[] => [
-    { label: "Add to queue", onSelect: () => player.queueAdd(trackIds, "end") },
+    { label: "Add to queue", onSelect: () => void player.addToQueue(queueable(trackIds, tracks)) },
     likeItem(() => tracks),
     ...(own ? [{ label: "Remove from this playlist", onSelect: () => removeNow(keys) }] : []),
     addToPlaylistItem(() => trackIds),
@@ -243,7 +243,7 @@ export function PlaylistPage({ id }: { id: string }) {
     openContextMenu(
       `Options for ${pl.title}`,
       [
-        { label: "Add to queue", disabled: empty, onSelect: () => player.queueAdd(shown!.tracks.map((t) => t.id), "end") },
+        { label: "Add to queue", disabled: empty, onSelect: () => void player.addToQueue(shown!.tracks, pl.thumb) },
         ...playlistEditItems(pl),
         shareItem("playlist", pl.id, pl.thumb),
         {

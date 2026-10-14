@@ -3,8 +3,9 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Tabs } from "../components/Tabs";
-import { TrackList, TrackRow, trackMenuItems } from "../components/TrackRow";
-import type { QueueItem } from "../lib/types";
+import { TrackList, TrackRow, queueable, trackMenuItems } from "../components/TrackRow";
+import { backend } from "../lib/backend";
+import type { QueueItem, Track } from "../lib/types";
 import { dragLeft, dropOnQueue, isSongDrag, useDrag } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
 import { useUi } from "../stores/ui";
@@ -94,12 +95,54 @@ function QueueRow({
 }
 
 /** Menu for several selected queue rows. */
-const queueMultiMenu = (keys: string[], ids: string[]) => [
-  { label: "Add to queue", onSelect: () => player.queueAdd(ids, "end") },
+const queueMultiMenu = (keys: string[], ids: string[], tracks: Track[]) => [
+  { label: "Add to queue", onSelect: () => void player.addToQueue(queueable(ids, tracks)) },
   { label: "Remove from queue", separator: true, onSelect: () => keys.forEach((k) => player.queueRemove(k)) },
 ];
 
-/** Right panel: Now playing, Next in queue (user), Next up (context), History. */
+/** Songs the Recently played tab lists at most. */
+export const RECENT_LIMIT = 50;
+
+/**
+ * Recently played: songs played on this device, newest first, once each.
+ * Loaded when the tab opens and again when the song changes.
+ */
+function RecentlyPlayed() {
+  const trackId = usePlayer((s) => s.state?.track?.id);
+  const status = usePlayer((s) => s.state?.status);
+  const [tracks, setTracks] = useState<Track[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    backend.recentTracks(RECENT_LIMIT).then(
+      (t) => alive && setTracks(t),
+      () => alive && setTracks((cur) => cur ?? []),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [trackId]);
+  if (!tracks) return null;
+  if (!tracks.length) return <p className="queue-empty">Songs you play will show up here.</p>;
+  const ids = tracks.map((t) => t.id);
+  return (
+    <TrackList label="Recently played" header={false}>
+      {tracks.map((t, i) => (
+        <TrackRow
+          key={t.id}
+          compact
+          track={t}
+          index={i + 1}
+          active={t.id === trackId}
+          playing={t.id === trackId && status === "playing"}
+          showAlbum={false}
+          onPlay={() => (t.id === trackId ? player.toggle() : player.playTracks(ids, t.id))}
+        />
+      ))}
+    </TrackList>
+  );
+}
+
+/** Right panel: Now playing, Next in queue (user), Next from (context); Recently played. */
 export function QueuePanel() {
   const queue = usePlayer((s) => s.state?.queue);
   const close = () => useUi.getState().setQueueOpen(false);
@@ -152,7 +195,6 @@ export function QueuePanel() {
   };
 
   const ctxTitle = queue?.context?.title;
-  const history = queue ? [...queue.history].reverse() : [];
 
   return (
     <aside className="queue-panel" aria-label="Queue">
@@ -204,38 +246,29 @@ export function QueuePanel() {
               </section>
             )}
 
-            <section className="queue-section" aria-labelledby="q-next">
-              <h3 id="q-next" className="queue-section__title">
-                {ctxTitle ? (
-                  <>
-                    Next from: <span className="queue-section__ctx">{ctxTitle}</span>
-                  </>
-                ) : (
-                  "Next up"
-                )}
-              </h3>
-              {queue && queue.nextUp.length > 0 ? (
+            {/* No placeholder: with nothing left in the context the section just isn't there. */}
+            {queue && queue.nextUp.length > 0 && (
+              <section className="queue-section" aria-labelledby="q-next">
+                <h3 id="q-next" className="queue-section__title">
+                  {ctxTitle ? (
+                    <>
+                      Next from: <span className="queue-section__ctx">{ctxTitle}</span>
+                    </>
+                  ) : (
+                    "Next up"
+                  )}
+                </h3>
                 <TrackList label="Next up" header={false} multiMenu={queueMultiMenu}>
                   {queue.nextUp.map((it, i) => (
                     <QueueRow key={it.itemId} item={it} index={i} removable />
                   ))}
                 </TrackList>
-              ) : (
-                <p className="queue-empty">Nothing else queued.</p>
-              )}
-            </section>
+              </section>
+            )}
           </>
         ) : (
           <section className="queue-section" aria-label="Recently played">
-            {history.length ? (
-              <TrackList label="Recently played" header={false}>
-                {history.map((it, i) => (
-                  <QueueRow key={`${it.itemId}-${i}`} item={it} index={i} />
-                ))}
-              </TrackList>
-            ) : (
-              <p className="queue-empty">Songs you play will show up here.</p>
-            )}
+            <RecentlyPlayed />
           </section>
         )}
       </div>

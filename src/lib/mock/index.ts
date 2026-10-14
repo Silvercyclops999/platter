@@ -82,6 +82,9 @@ import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 import { MockFileTags } from "./fileTags";
 import { MockTranscribe } from "./transcribe";
 
+/** Record labels for the mock album footers. */
+const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
+
 export interface MockOptions {
   latencyMs: number;
   signedOut: boolean;
@@ -677,14 +680,37 @@ export class MockBackend implements Backend {
       const album = this.fx.albums.find((a) => a.id === id) ?? this.notFound("Album");
       const tracks = this.tags.albumTracks(this.fx.tracksByAlbum.get(id) ?? []);
       const editions = new Set(this.tags.index().groups[this.tags.index().albums[id]?.group ?? ""]?.map((e) => e.albumId) ?? []);
+      // Plex has a release date for most albums and a label for some.
+      const n = Number(id) || 0;
+      const released = album.year ? `${album.year}-${String((n % 12) + 1).padStart(2, "0")}-${String((n % 27) + 1).padStart(2, "0")}` : null;
+      const studio = n % 3 === 0 ? null : MOCK_LABELS[n % MOCK_LABELS.length];
       return {
         album,
         tracks,
         totalDurationMs: tracks.reduce((s, t) => s + t.durationMs, 0),
+        artistThumb: this.fx.artists.find((a) => a.id === album.artistId)?.thumb ?? null,
+        released,
+        studio,
         moreByArtist: this.tags
           .visibleAlbums(this.fx.albums)
           .filter((a) => a.artistId === album.artistId && a.id !== id && !editions.has(a.id)),
       };
+    });
+  }
+  /** Like the listen log: what played here, newest first, once each; earlier plays from the fixtures after. */
+  recentTracks(limit = 50) {
+    return this.delay(() => {
+      const seen = new Set<string>();
+      const out: Track[] = [];
+      const played = [...(this.current ? [this.current.track] : []), ...[...this.history].reverse().map((i) => i.track)];
+      const earlier = this.fx.tracks.filter((t) => t.lastViewedAt).sort((a, b) => b.lastViewedAt! - a.lastViewedAt!);
+      for (const t of [...played, ...earlier]) {
+        if (out.length >= limit) break;
+        if (seen.has(t.id)) continue;
+        seen.add(t.id);
+        out.push(t);
+      }
+      return out;
     });
   }
   playlistPage(id: string) {

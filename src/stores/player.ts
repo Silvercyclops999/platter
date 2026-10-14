@@ -170,6 +170,11 @@ const play = (args: PlayContextArgs): Promise<unknown> =>
 
 const round = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 10_000) / 10_000;
 
+/** The toast after songs go to the end of the queue. */
+export function queuedToast(n: number, thumb?: string | null) {
+  toast.info(n === 1 ? "Added to queue" : `Added ${n} songs to queue`, thumb ? { path: thumb } : undefined);
+}
+
 /** Player commands with error toasts. */
 export const player = {
   toggle: () => {
@@ -226,15 +231,28 @@ export const player = {
   playTracks: (trackIds: string[], startTrackId?: string, kind: "tracks" | "search" = "tracks") =>
     play({ context: { kind, trackIds }, startTrackId }).catch(report),
   queueAdd: (trackIds: string[], at: QueueAt) => backend.queueAdd(trackIds, at).catch(report),
+  /**
+   * "Add to queue" from a menu: to the end of the queue, then a short toast
+   * with the cover (the song's own for one song, else `thumb` when given).
+   */
+  addToQueue: (tracks: { id: string; thumb: string | null }[], thumb?: string | null) => {
+    if (!tracks.length) return Promise.resolve();
+    return backend
+      .queueAdd(
+        tracks.map((t) => t.id),
+        "end",
+      )
+      .then(() => queuedToast(tracks.length, tracks.length === 1 ? tracks[0].thumb : thumb), report);
+  },
   queueAlbum: (id: string) =>
     backend
       .albumPage(id)
-      .then((p) => backend.queueAdd(p.tracks.map((t) => t.id), "end"))
+      .then((p) => player.addToQueue(p.tracks, p.album.thumb))
       .catch(report),
   queuePlaylist: (id: string) =>
     backend
       .playlistPage(id)
-      .then((p) => backend.queueAdd(p.tracks.map((t) => t.id), "end"))
+      .then((p) => player.addToQueue(p.tracks, p.playlist.thumb))
       .catch(report),
   /**
    * Nudge the volume (keyboard, mouse wheel). Raising it while muted unmutes

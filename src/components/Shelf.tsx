@@ -9,6 +9,8 @@ import "./shelf.css";
 export interface ShelfProps {
   title: string;
   onShowAll?: () => void;
+  /** The link's text (default "Show all"). */
+  showAllLabel?: string;
   children?: ReactNode;
   loading?: boolean;
   skeletonKind?: "album" | "artist" | "playlist";
@@ -23,7 +25,7 @@ export interface ShelfProps {
  * cards far out of view keep their box and skeleton but hold no decoded
  * image. Art is requested at the cards' real rendered width.
  */
-export function Shelf({ title, onShowAll, children, loading, skeletonKind = "album", filters }: ShelfProps) {
+export function Shelf({ title, onShowAll, showAllLabel = "Show all", children, loading, skeletonKind = "album", filters }: ShelfProps) {
   const id = useId();
   const row = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
@@ -86,7 +88,7 @@ export function Shelf({ title, onShowAll, children, loading, skeletonKind = "alb
           {!edges.end && <IconButton size="sm" label={`Scroll ${title} right`} tooltip={false} icon={<ChevronRight size={18} />} onClick={() => scrollBy(1)} />}
           {onShowAll && (
             <button type="button" className="shelf__all" onClick={onShowAll}>
-              Show all
+              {showAllLabel}
             </button>
           )}
         </div>

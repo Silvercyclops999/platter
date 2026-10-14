@@ -1,5 +1,5 @@
-import { Ellipsis, Pause, Play, Shuffle } from "lucide-react";
-import { useRef, useState } from "react";
+import { Disc3, Ellipsis, List, Pause, Play, Rows3, Shuffle } from "lucide-react";
+import { Fragment, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { Badge, QualityBadge } from "../components/Badge";
 import { IconButton } from "../components/Button";
@@ -22,6 +22,8 @@ import { transcribe, useTranscribe } from "../stores/transcribe";
 import { AlbumCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { EditionPicker } from "./EditionPicker";
+import { ALBUM_VIEW_LABEL, discGroups, formatReleaseDate, labelLine, loadAlbumView, saveAlbumView, type AlbumView } from "./album";
+import "./album.css";
 
 export function AlbumPage({ id }: { id: string }) {
   const { data, error } = useLoad(() => backend.albumPage(id), [id]);
@@ -38,6 +40,22 @@ export function AlbumPage({ id }: { id: string }) {
   const { header, column, step, compact } = useTitleStep(album?.title);
   const [coverOpen, setCoverOpen] = useState(false);
   const coverBtn = useRef<HTMLButtonElement>(null);
+  const [view, setView] = useState<AlbumView>(loadAlbumView);
+  const chooseView = (v: AlbumView) => {
+    setView(v);
+    saveAlbumView(v);
+  };
+  const viewMenu = (el: HTMLElement) =>
+    openContextMenu(
+      "View as",
+      (["compact", "list"] as AlbumView[]).map((v, i) => ({
+        heading: i === 0 ? "View as" : undefined,
+        label: ALBUM_VIEW_LABEL[v],
+        checked: view === v,
+        onSelect: () => chooseView(v),
+      })),
+      el,
+    );
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this album: {error.message}</p>;
 
@@ -69,6 +87,7 @@ export function AlbumPage({ id }: { id: string }) {
               <span className="detail-header__type">{releaseTypeLabel(album)}</span>
               <h1 className="detail-header__title" data-step={step}>{album.title}</h1>
               <div className="detail-header__meta">
+                {data!.artistThumb && <Art path={data!.artistThumb} size={24} round kind="artist" className="detail-header__artist-photo" />}
                 <button type="button" className="link detail-header__artist" onClick={() => nav.go({ name: "artist", id: album.artistId })}>
                   {album.artistTitle}
                 </button>
@@ -130,7 +149,7 @@ export function AlbumPage({ id }: { id: string }) {
               openContextMenu(
                 `Options for ${album.title}`,
                 [
-                  { label: "Add to queue", onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "end") },
+                  { label: "Add to queue", onSelect: () => void player.addToQueue(data!.tracks, album.thumb) },
                   addToPlaylistItem(() => data?.tracks.map((t) => t.id) ?? []),
                   { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
                   shareItem("album", album.id, album.thumb),
@@ -153,29 +172,59 @@ export function AlbumPage({ id }: { id: string }) {
               )
             }
           />
+          <button
+            type="button"
+            className="pl-sort"
+            aria-haspopup="menu"
+            aria-label={`View as: ${ALBUM_VIEW_LABEL[view]}`}
+            onClick={(e) => viewMenu(e.currentTarget)}
+          >
+            <span>{ALBUM_VIEW_LABEL[view]}</span>
+            {view === "list" ? <List size={16} aria-hidden="true" /> : <Rows3 size={16} aria-hidden="true" />}
+          </button>
         </div>
 
-        <TrackList label={album ? `${album.title} tracks` : "Tracks"} showAlbum={false} showPlays>
-          {data
-            ? data.tracks.map((t) => (
-                <TrackRow
-                  key={t.id}
-                  track={t}
-                  index={t.trackNumber}
-                  showAlbum={false}
-                  showPlays
-                  showArtist={!!t.trackArtist || t.artistId !== album!.artistId}
-                  active={t.id === nowTrackId}
-                  playing={t.id === nowTrackId && status === "playing"}
-                  onPlay={() => player.playAlbum(id, t.id)}
-                />
-              ))
-            : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showAlbum={false} showPlays />)}
-        </TrackList>
+        <div className={`album-tracks album-tracks--${view}`}>
+          <TrackList label={album ? `${album.title} tracks` : "Tracks"} showAlbum={false} showPlays>
+            {data
+              ? discGroups(data.tracks).map((g) => (
+                  <Fragment key={g.disc ?? "all"}>
+                    {g.disc !== null && (
+                      <div className="album-disc" role="listitem" aria-label={`Disc ${g.disc}`}>
+                        <span className="album-disc__icon">
+                          <Disc3 size={16} aria-hidden="true" />
+                        </span>
+                        <span className="album-disc__label">Disc {g.disc}</span>
+                      </div>
+                    )}
+                    {g.tracks.map((t) => (
+                      <TrackRow
+                        key={t.id}
+                        track={t}
+                        index={t.trackNumber}
+                        showAlbum={false}
+                        showPlays
+                        showArtist={view === "list" && (!!t.trackArtist || t.artistId !== album!.artistId)}
+                        active={t.id === nowTrackId}
+                        playing={t.id === nowTrackId && status === "playing"}
+                        onPlay={() => player.playAlbum(id, t.id)}
+                      />
+                    ))}
+                  </Fragment>
+                ))
+              : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showAlbum={false} showPlays />)}
+          </TrackList>
+        </div>
+
+        {album && <AlbumFooter released={data!.released} studio={data!.studio} year={album.year} />}
 
         {album && data!.moreByArtist.length > 0 && (
           <div className="detail-more">
-            <Shelf title={`More by ${album.artistTitle}`} onShowAll={() => nav.go({ name: "artist", id: album.artistId })}>
+            <Shelf
+              title={`More by ${album.artistTitle}`}
+              showAllLabel="See discography"
+              onShowAll={() => nav.go({ name: "artist", id: album.artistId, discography: true })}
+            >
               {data!.moreByArtist.map((a) => (
                 <ShelfItem key={a.id}>
                   <AlbumCard album={a} subtitle="year" />
@@ -186,5 +235,18 @@ export function AlbumPage({ id }: { id: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** Under the tracklist: the full release date, then the label line. Hidden when Plex has neither. */
+function AlbumFooter({ released, studio, year }: { released?: string | null; studio?: string | null; year: number | null }) {
+  const date = formatReleaseDate(released);
+  const label = labelLine(studio, year);
+  if (!date && !label) return null;
+  return (
+    <footer className="album-footer">
+      {date && <p className="album-footer__date">{date}</p>}
+      {label && <p className="album-footer__label">{label}</p>}
+    </footer>
   );
 }

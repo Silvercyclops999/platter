@@ -169,7 +169,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
   if (e.liked)
     return [
       play,
-      { label: "Add to queue", onSelect: () => void player.queueAdd([...useLikes.getState().ids], "end") },
+      { label: "Add to queue", onSelect: () => void player.addToQueue([...useLikes.getState().ids].map((id) => ({ id, thumb: null }))) },
       { label: "Create playlist", separator: true, onSelect: () => void createPlaylist() },
     ];
   const items: MenuItem[] = [play];

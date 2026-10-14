@@ -13,7 +13,8 @@ export type Route =
   | { name: "search"; query?: string }
   /** Wide library; a tab opens it filtered to that type. */
   | { name: "library"; tab?: LibraryTab }
-  | { name: "artist"; id: string }
+  /** `discography` opens it at the whole discography (an album page's "See discography"). */
+  | { name: "artist"; id: string; discography?: boolean }
   | { name: "album"; id: string }
   | { name: "playlist"; id: string }
   /** Liked Songs. */

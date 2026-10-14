@@ -97,7 +97,7 @@ function Page({ route }: { route: Route }) {
     case "library":
       return <LibraryPage tab={route.tab} />;
     case "artist":
-      return <ArtistPage id={route.id} />;
+      return <ArtistPage id={route.id} discography={route.discography} />;
     case "album":
       return <AlbumPage id={route.id} />;
     case "playlist":

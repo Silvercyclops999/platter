@@ -1,4 +1,4 @@
-import { Ellipsis, Pause, Play, X } from "lucide-react";
+import { Clock3, Ellipsis, Pause, Play, X } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -81,7 +81,7 @@ export function trackMenuItems(
     addToPlaylistItem(() => [track.id]),
     likeItem(() => [track]),
     ...(extra.afterPlaylist ?? []),
-    { label: "Add to queue", onSelect: () => player.queueAdd([track.id], "end") },
+    { label: "Add to queue", onSelect: () => void player.addToQueue([track]) },
     ...(extra.afterQueue ?? []),
     ...goToArtistItems(track),
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
@@ -106,10 +106,15 @@ export function trackMenuItems(
   ];
 }
 
+/** Songs for "Add to queue": the rows' tracks when they're all known, else bare ids (no cover). */
+export function queueable(trackIds: string[], tracks: Track[] = []): { id: string; thumb: string | null }[] {
+  return tracks.length === trackIds.length ? tracks : trackIds.map((id) => ({ id, thumb: null }));
+}
+
 /** Menu for several selected rows: only actions that make sense for all of them. */
 export function multiTrackMenuItems(trackIds: string[], tracks: Track[] = []): MenuItem[] {
   return [
-    { label: "Add to queue", onSelect: () => player.queueAdd(trackIds, "end") },
+    { label: "Add to queue", onSelect: () => void player.addToQueue(queueable(trackIds, tracks)) },
     ...(tracks.length ? [likeItem(() => tracks)] : []),
     addToPlaylistItem(() => trackIds),
   ];
@@ -431,7 +436,7 @@ export function TrackRow({
       <div className="track-row__main">
         {(showArt || compact) && (
           <span className="track-row__art">
-            <Art path={track.thumb} size={40} />
+            <Art path={track.thumb} size={compact ? 48 : 40} />
             {compact && (
               <button
                 type="button"
@@ -571,7 +576,9 @@ export function TrackList({
             ) : (
               <span className="track-list__badges" />
             )}
-            <span className="track-list__dur">Time</span>
+            <span className="track-list__dur" title="Duration">
+              <Clock3 size={16} />
+            </span>
           </div>
         )}
         <div role="list" aria-label={label}>
