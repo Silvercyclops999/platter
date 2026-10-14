@@ -13,7 +13,9 @@ import { useArtTint } from "../lib/useTint";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
-import { AlbumCard } from "./cards";
+import { copyText } from "../stores/toasts";
+import { AlbumCard, useContextState } from "./cards";
+import { headerArtStyle, useFitTitle, usePageBar } from "./detail";
 
 export function AlbumPage({ id }: { id: string }) {
   const { data, error } = useLoad(() => backend.albumPage(id), [id]);
@@ -22,9 +24,11 @@ export function AlbumPage({ id }: { id: string }) {
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
   const shuffle = usePlayer((s) => s.state?.shuffle ?? false);
-  const ctx = usePlayer((s) => s.state?.queue.context);
-  const isThisPlaying = ctx?.kind === "album" && ctx.id === id && status === "playing";
+  const { isContext, playing: isThisPlaying } = useContextState("album", id);
   const pinned = usePins((s) => s.isPinned("album", id));
+  const play = () => (isContext ? player.toggle() : player.playAlbum(id, undefined, shuffle));
+  usePageBar(album?.title, isThisPlaying, play);
+  const titleRef = useFitTitle<HTMLHeadingElement>(album?.title);
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this album: {error.message}</p>;
 
@@ -34,14 +38,14 @@ export function AlbumPage({ id }: { id: string }) {
   return (
     <div className="detail">
       <header className="detail-header">
-        <div className="detail-header__art">
+        <div className="detail-header__art" style={headerArtStyle}>
           {album ? <Art path={album.thumb} size={232} alt="" /> : <Skeleton width={232} height={232} />}
         </div>
         <div className="detail-header__text">
           {album ? (
             <>
               <span className="detail-header__type">{releaseTypeLabel(album)}</span>
-              <h1 className={`detail-header__title ${album.title.length > 28 ? "is-long" : ""}`}>{album.title}</h1>
+              <h1 ref={titleRef} className="detail-header__title">{album.title}</h1>
               <div className="detail-header__meta">
                 <button type="button" className="link detail-header__artist" onClick={() => nav.go({ name: "artist", id: album.artistId })}>
                   {album.artistTitle}
@@ -80,7 +84,7 @@ export function AlbumPage({ id }: { id: string }) {
             size="xl"
             disabled={!album}
             icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
-            onClick={() => (ctx?.kind === "album" && ctx.id === id ? player.toggle() : player.playAlbum(id, undefined, shuffle))}
+            onClick={play}
           />
           <IconButton
             label={shuffle ? "Disable shuffle" : "Enable shuffle"}
@@ -101,6 +105,10 @@ export function AlbumPage({ id }: { id: string }) {
                 [
                   { label: "Add to queue", onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "end") },
                   { label: "Go to artist", separator: true, onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
+                  {
+                    label: "Copy album title",
+                    onSelect: () => copyText(`${album.title} - ${album.artistTitle}`),
+                  },
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
                     separator: true,
@@ -127,7 +135,7 @@ export function AlbumPage({ id }: { id: string }) {
                   showArtist={!!t.trackArtist || t.artistId !== album!.artistId}
                   active={t.id === nowTrackId}
                   playing={t.id === nowTrackId && status === "playing"}
-                  onPlay={() => player.playAlbum(id, t.id)}
+                  onPlay={() => player.playAlbum(id, t.id, shuffle)}
                 />
               ))
             : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showAlbum={false} />)}

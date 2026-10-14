@@ -1,3 +1,5 @@
+import { Disc3 } from "lucide-react";
+import { Button } from "../components/Button";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { backend } from "../lib/backend";
 import { useLoad } from "../lib/useLoad";
@@ -24,8 +26,17 @@ export function HomePage() {
       <h1 className="page-title">{greeting()}</h1>
       {error && !data ? (
         <p className="page-error">Couldn't load Home: {error.message}</p>
+      ) : data && shelves.every((s) => !s.items?.length) ? (
+        <div className="empty-state" role="status">
+          <Disc3 size={40} strokeWidth={1.5} aria-hidden="true" />
+          <h2 className="empty-state__title">Nothing here yet</h2>
+          <p className="empty-state__text">Once your library has synced, albums you add and play show up here.</p>
+          <Button variant="secondary" size="sm" onClick={() => nav.go({ name: "library", tab: "albums" })}>
+            Browse your library
+          </Button>
+        </div>
       ) : (
-        shelves.map((s) => (
+        shelves.filter((s) => !data || s.items?.length).map((s) => (
           <Shelf key={s.title} title={s.title} loading={!data} onShowAll={() => nav.go({ name: "library", tab: "albums" })}>
             {s.items?.map((a) => (
               <ShelfItem key={a.id}>

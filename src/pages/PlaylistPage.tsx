@@ -1,4 +1,8 @@
-import { Pause, Play, Shuffle } from "lucide-react";
+import { Ellipsis, ListMusic, Pause, Play, Shuffle } from "lucide-react";
+import { openContextMenu } from "../components/ContextMenu";
+import { usePins } from "../stores/pins";
+import { useContextState } from "./cards";
+import { headerArtStyle, useFitTitle, usePageBar } from "./detail";
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
@@ -16,22 +20,26 @@ export function PlaylistPage({ id }: { id: string }) {
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
   const shuffle = usePlayer((s) => s.state?.shuffle ?? false);
-  const ctx = usePlayer((s) => s.state?.queue.context);
-  const isThis = ctx?.kind === "playlist" && ctx.id === id;
+  const { isContext: isThis, playing: isThisPlaying } = useContextState("playlist", id);
+  const pinned = usePins((s) => s.isPinned("playlist", id));
+  const play = () => (isThis ? player.toggle() : player.playPlaylist(id, undefined, shuffle));
+  usePageBar(pl?.title, isThisPlaying, play);
+  const titleRef = useFitTitle<HTMLHeadingElement>(pl?.title);
+  const empty = !!data && data.tracks.length === 0;
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this playlist: {error.message}</p>;
 
   return (
     <div className="detail">
       <header className="detail-header">
-        <div className="detail-header__art">
+        <div className="detail-header__art" style={headerArtStyle}>
           {pl ? <Art path={pl.thumb} size={232} kind="playlist" /> : <Skeleton width={232} height={232} />}
         </div>
         <div className="detail-header__text">
           {pl ? (
             <>
               <span className="detail-header__type">{pl.smart ? "Smart playlist" : "Playlist"}</span>
-              <h1 className={`detail-header__title ${pl.title.length > 24 ? "is-long" : ""}`}>{pl.title}</h1>
+              <h1 ref={titleRef} className="detail-header__title">{pl.title}</h1>
               <div className="detail-header__meta">
                 <span>{plural(pl.trackCount, "song")},</span>
                 <span className="detail-header__muted">{formatLongDuration(pl.durationMs)}</span>
@@ -49,12 +57,12 @@ export function PlaylistPage({ id }: { id: string }) {
       <div className="detail-body">
         <div className="action-row">
           <IconButton
-            label={isThis && status === "playing" ? "Pause playlist" : "Play playlist"}
+            label={isThisPlaying ? `Pause ${pl?.title ?? "playlist"}` : `Play ${pl?.title ?? "playlist"}`}
             variant="accent"
             size="xl"
-            disabled={!pl}
-            icon={isThis && status === "playing" ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
-            onClick={() => (isThis ? player.toggle() : player.playPlaylist(id, undefined, shuffle))}
+            disabled={!pl || empty}
+            icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
+            onClick={play}
           />
           <IconButton
             label={shuffle ? "Disable shuffle" : "Enable shuffle"}
@@ -63,12 +71,48 @@ export function PlaylistPage({ id }: { id: string }) {
             icon={<Shuffle size={22} />}
             onClick={() => player.setShuffle(!shuffle)}
           />
+          <IconButton
+            label={`More options for ${pl?.title ?? "playlist"}`}
+            size="lg"
+            icon={<Ellipsis size={22} />}
+            disabled={!pl}
+            onClick={(e) =>
+              pl &&
+              openContextMenu(
+                `Options for ${pl.title}`,
+                [
+                  { label: "Add to queue", disabled: empty, onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "end") },
+                  {
+                    label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
+                    separator: true,
+                    onSelect: () =>
+                      usePins.getState().toggle({
+                        kind: "playlist",
+                        id: pl.id,
+                        title: pl.title,
+                        subtitle: `Playlist · ${pl.trackCount} songs`,
+                        thumb: pl.thumb,
+                      }),
+                  },
+                ],
+                e.currentTarget,
+              )
+            }
+          />
         </div>
+        {empty ? (
+          <div className="empty-state">
+            <ListMusic size={40} strokeWidth={1.5} aria-hidden="true" />
+            <h2 className="empty-state__title">This playlist is empty</h2>
+            <p className="empty-state__text">Songs added to it in Plex will show up here.</p>
+          </div>
+        ) : (
         <TrackList label={pl ? `${pl.title} tracks` : "Tracks"}>
           {data
             ? data.tracks.map((t, i) => (
                 <TrackRow
                   key={`${t.id}-${i}`}
+                  rowKey={`${t.id}-${i}`}
                   track={t}
                   index={i + 1}
                   showArt
@@ -79,6 +123,7 @@ export function PlaylistPage({ id }: { id: string }) {
               ))
             : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showArt />)}
         </TrackList>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Settings as SettingsIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, Settings as SettingsIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { IconButton } from "../components/Button";
 import { SearchField } from "../components/SearchField";
@@ -19,6 +19,56 @@ import { HealthBanner } from "./HealthBanner";
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
+
+/** Height of the floating main header. */
+const HEADER_H = 64;
+
+/**
+ * Scroll offset past which a detail page's own play button has gone under
+ * the main header, so the sticky title + play button take over.
+ */
+export function stickyThreshold(scroller: HTMLElement): number {
+  const row = scroller.querySelector<HTMLElement>(".action-row");
+  const t = row ? row.offsetTop + row.offsetHeight - HEADER_H : 0;
+  return t > 0 ? t : 280;
+}
+
+/**
+ * Restore a remembered scroll offset. Pages load their content
+ * asynchronously, so keep trying each frame until the page is tall enough,
+ * the user scrolls, or `maxMs` passes. Returns a cancel function.
+ */
+export function restoreScroll(el: HTMLElement, top: number, onDone: () => void, maxMs = 2000): () => void {
+  el.scrollTop = top;
+  if (top <= 0 || Math.abs(el.scrollTop - top) < 2) {
+    onDone();
+    return () => {};
+  }
+  const started = performance.now();
+  let raf = 0;
+  let live = true;
+  const stop = () => {
+    if (!live) return;
+    live = false;
+    cancelAnimationFrame(raf);
+    el.removeEventListener("wheel", stop);
+    el.removeEventListener("pointerdown", stop);
+    el.removeEventListener("keydown", stop);
+    onDone();
+  };
+  const step = () => {
+    if (!live) return;
+    el.scrollTop = top;
+    if (Math.abs(el.scrollTop - top) < 2 || performance.now() - started > maxMs) stop();
+    else raf = requestAnimationFrame(step);
+  };
+  // The user taking over cancels the restore.
+  el.addEventListener("wheel", stop, { passive: true });
+  el.addEventListener("pointerdown", stop);
+  el.addEventListener("keydown", stop);
+  raf = requestAnimationFrame(step);
+  return stop;
+}
 
 function syncLabel(s: SyncStatus | null): string | null {
   if (!s || s.phase === "idle") return null;
@@ -80,6 +130,9 @@ export function MainView() {
   const tick = useUi((s) => s.searchFocusTick);
   const scroller = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
+  const [pastHeader, setPastHeader] = useState(false);
+  const pageBar = useUi((s) => s.pageBar);
+  const restoring = useRef(false);
 
   // Ctrl/⌘+L → go to Search (the header field focuses itself).
   useEffect(() => {
@@ -91,13 +144,19 @@ export function MainView() {
     const el = scroller.current;
     if (!el) return;
     const top = scrollMemory.get(entry.key) ?? 0;
-    el.scrollTop = top;
-    // Content may still be loading; try again next frame.
-    const raf = requestAnimationFrame(() => {
-      if (scroller.current) scroller.current.scrollTop = top;
-    });
+    restoring.current = true;
     setScrolled(top > 8);
-    return () => cancelAnimationFrame(raf);
+    setPastHeader(false);
+    const cancel = restoreScroll(el, top, () => {
+      restoring.current = false;
+      if (scroller.current) {
+        const now = scroller.current.scrollTop;
+        scrollMemory.set(entry.key, now);
+        setScrolled(now > 8);
+        setPastHeader(now > stickyThreshold(scroller.current));
+      }
+    });
+    return cancel;
   }, [entry.key]);
 
   // Pages without artwork reset the tint.
@@ -126,6 +185,19 @@ export function MainView() {
               onClick={() => nav.forward()}
             />
           </div>
+          {pageBar && pastHeader && r.name !== "search" && (
+            <div className="main-header__bar" data-testid="sticky-bar">
+              <IconButton
+                label={`${pageBar.playing ? "Pause" : "Play"} ${pageBar.title}`}
+                tooltip={false}
+                variant="accent"
+                size="lg"
+                icon={pageBar.playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="nudge-right" />}
+                onClick={pageBar.onPlay}
+              />
+              <span className="main-header__title truncate">{pageBar.title}</span>
+            </div>
+          )}
           {r.name === "search" && <HeaderSearch query={r.query ?? ""} />}
           <div className="main-header__end">
             {syncText && (
@@ -150,9 +222,12 @@ export function MainView() {
           ref={scroller}
           onScroll={(e) => {
             const top = e.currentTarget.scrollTop;
+            if (restoring.current) return;
             scrollMemory.set(entry.key, top);
             const s = top > 8;
             if (s !== scrolled) setScrolled(s);
+            const past = top > stickyThreshold(e.currentTarget);
+            if (past !== pastHeader) setPastHeader(past);
           }}
         >
           <div className="page" key={entry.key}>

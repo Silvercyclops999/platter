@@ -46,6 +46,12 @@ const report = (e: unknown) => {
   toast.error(msg);
 };
 
+let pendingVolume: { value: number; at: number } | null = null;
+/** Forget in-flight volume nudges (tests, or after a slider drag). */
+export function resetVolumeNudge() {
+  pendingVolume = null;
+}
+
 /** Player commands with error toasts. */
 export const player = {
   toggle: () => backend.playToggle().catch(report),
@@ -68,6 +74,35 @@ export const player = {
   playTracks: (trackIds: string[], startTrackId?: string, kind: "tracks" | "search" = "tracks") =>
     backend.playContext({ context: { kind, trackIds }, startTrackId }).catch(report),
   queueAdd: (trackIds: string[], at: "next" | "end") => backend.queueAdd(trackIds, at).catch(report),
+  queueAlbum: (id: string) =>
+    backend
+      .albumPage(id)
+      .then((p) => backend.queueAdd(p.tracks.map((t) => t.id), "end"))
+      .catch(report),
+  queuePlaylist: (id: string) =>
+    backend
+      .playlistPage(id)
+      .then((p) => backend.queueAdd(p.tracks.map((t) => t.id), "end"))
+      .catch(report),
+  /** Nudge the volume (keyboard, mouse wheel). Unmutes when raising it. */
+  nudgeVolume: (delta: number) => {
+    const s = usePlayer.getState().state;
+    if (!s) return Promise.resolve();
+    // While muted, raising unmutes back to the remembered level; lowering does nothing.
+    if (s.muted) return delta > 0 ? backend.setMuted(false).catch(report) : Promise.resolve();
+    // Fast wheel ticks / key repeats build on the last requested value, not
+    // the (slightly stale) one the core has echoed back.
+    const now = Date.now();
+    const base = pendingVolume && now - pendingVolume.at < 500 ? pendingVolume.value : s.volume;
+    const v = Math.round(Math.min(1, Math.max(0, base + delta)) * 100) / 100;
+    pendingVolume = { value: v, at: now };
+    return v === base ? Promise.resolve() : backend.setVolume(v).catch(report);
+  },
+  toggleShuffle: () => backend.setShuffle(!(usePlayer.getState().state?.shuffle ?? false)).catch(report),
+  cycleRepeatNow: () => {
+    const r = usePlayer.getState().state?.repeat ?? "off";
+    return backend.setRepeat(r === "off" ? "all" : r === "all" ? "one" : "off").catch(report);
+  },
   queueRemove: (itemId: string) => backend.queueRemove(itemId).catch(report),
   queueMove: (itemId: string, toIndex: number) => backend.queueMove(itemId, toIndex).catch(report),
   queueClear: () => backend.queueClear().catch(report),

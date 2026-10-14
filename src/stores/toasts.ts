@@ -32,3 +32,15 @@ export const toast = {
   info: (message: string) => useToasts.getState().push({ kind: "info", message }),
   error: (message: string) => useToasts.getState().push({ kind: "error", message }, 6000),
 };
+
+/** Copy text to the clipboard and say whether it worked. */
+export function copyText(text: string): void {
+  if (!navigator.clipboard) {
+    toast.error("Couldn't copy");
+    return;
+  }
+  navigator.clipboard.writeText(text).then(
+    () => toast.info("Copied to clipboard"),
+    () => toast.error("Couldn't copy"),
+  );
+}

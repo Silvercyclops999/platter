@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Disc3, ListMusic, User } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CardSkeleton } from "../components/Card";
 import { FilterChips, Tabs } from "../components/Tabs";
 import { VirtualGrid } from "../components/VirtualGrid";
@@ -11,6 +12,17 @@ import { useRouter, type LibraryTab } from "../stores/router";
 import { AlbumCard, ArtistCard, PlaylistCard } from "./cards";
 
 const PAGE = 120;
+
+/** Shown in place of an empty grid. */
+export function EmptyLibrary({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
+  return (
+    <div className="empty-state" role="status">
+      {icon}
+      <h2 className="empty-state__title">{title}</h2>
+      <p className="empty-state__text">{text}</p>
+    </div>
+  );
+}
 
 /**
  * Lazily paged list: fetches `PAGE`-sized pages as the grid asks for ranges.
@@ -104,6 +116,13 @@ function AlbumsGrid() {
       <p className="library__count" aria-live="polite">
         {total == null ? " " : plural(total, "album")}
       </p>
+      {total === 0 ? (
+        <EmptyLibrary
+          icon={<Disc3 size={40} strokeWidth={1.5} aria-hidden="true" />}
+          title={section === "all" ? "No albums yet" : `No ${SECTIONS.find((s) => s.id === section)!.label.toLowerCase()} yet`}
+          text={section === "all" ? "Albums in your Plex music library show up here after the next sync." : "Try another release type, or All."}
+        />
+      ) : (
       <VirtualGrid
         label="Albums"
         count={total ?? 24}
@@ -113,6 +132,7 @@ function AlbumsGrid() {
           return a ? <AlbumCard album={a} /> : <CardSkeleton />;
         }}
       />
+      )}
     </>
   );
 }
@@ -123,6 +143,13 @@ function ArtistsGrid() {
   return (
     <>
       <p className="library__count">{total == null ? " " : plural(total, "artist")}</p>
+      {total === 0 ? (
+        <EmptyLibrary
+          icon={<User size={40} strokeWidth={1.5} aria-hidden="true" />}
+          title="No artists yet"
+          text="Artists in your Plex music library show up here after the next sync."
+        />
+      ) : (
       <VirtualGrid
         label="Artists"
         count={total ?? 12}
@@ -132,6 +159,7 @@ function ArtistsGrid() {
           return a ? <ArtistCard artist={a} /> : <CardSkeleton kind="artist" />;
         }}
       />
+      )}
     </>
   );
 }
@@ -141,11 +169,19 @@ function PlaylistsGrid() {
   return (
     <>
       <p className="library__count">{data ? plural(data.length, "playlist") : " "}</p>
-      <VirtualGrid
-        label="Playlists"
-        count={data?.length ?? 8}
-        renderItem={(i) => (data ? <PlaylistCard playlist={data[i]} /> : <CardSkeleton kind="playlist" />)}
-      />
+      {data && data.length === 0 ? (
+        <EmptyLibrary
+          icon={<ListMusic size={40} strokeWidth={1.5} aria-hidden="true" />}
+          title="No playlists yet"
+          text="Playlists you make in Plex show up here."
+        />
+      ) : (
+        <VirtualGrid
+          label="Playlists"
+          count={data?.length ?? 8}
+          renderItem={(i) => (data ? <PlaylistCard playlist={data[i]} /> : <CardSkeleton kind="playlist" />)}
+        />
+      )}
     </>
   );
 }

@@ -108,6 +108,56 @@
   padding-bottom: 0;
 }
 .sidebar__lib-head { padding-bottom: var(--space-1); }
+.lib-chips { padding: 0 var(--space-1) var(--space-2); gap: var(--space-2); }
+.chip--sm { height: 28px; font-size: var(--font-size-sm); }
+.lib-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 0 var(--space-1);
+}
+.lib-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-row);
+  background: var(--color-bg-overlay);
+  color: var(--color-text-secondary);
+}
+.lib-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--font-size-sm);
+  user-select: text;
+}
+.lib-search input::placeholder { color: var(--color-text-muted); }
+.lib-search input::-webkit-search-cancel-button { display: none; }
+.lib-search input:focus-visible { outline: none; }
+.lib-search:focus-within { box-shadow: inset 0 0 0 1px var(--color-text-muted); }
+.lib-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-row);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: color var(--motion-fast) var(--motion-easing);
+}
+.lib-sort:hover { color: var(--color-text-primary); }
+.lib-item--compact { padding: 6px var(--space-2); }
+.lib-item__compact { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: var(--font-size-md); }
+.lib-item__compact .lib-item__sub { display: inline; flex: none; }
+.lib-empty { padding: var(--space-4) var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.45; }
 .sidebar__lib-list {
   flex: 1;
   min-height: 0;
@@ -218,6 +268,19 @@
 .main-header.is-scrolled { background: var(--color-bg-raised); }
 .main-header.is-scrolled.is-tinted { background: color-mix(in srgb, var(--tint) 70%, var(--color-bg-base)); }
 .main-header__nav { display: flex; gap: var(--space-2); }
+/* Sticky page title + play button, once the page header has scrolled away. */
+.main-header__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  animation: fade-in var(--motion-medium) var(--motion-easing);
+}
+.main-header__title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.01em;
+}
 .main-header__nav .icon-btn:disabled { opacity: 0.4; cursor: default; }
 .main-header__nav .icon-btn:disabled:hover { transform: none; background: rgba(0, 0, 0, 0.42); }
 .main-header__search { flex: 1; }
@@ -249,6 +312,16 @@
   scrollbar-gutter: stable;
 }
 .page { min-height: 100%; animation: fade-in var(--motion-slow) var(--motion-easing); }
+/* During the card-to-page art transition the browser cross-fades; skip the page fade. */
+:root[data-art-transition="true"] .page { animation: none; }
+::view-transition-group(platter-art) {
+  animation-duration: var(--motion-slow);
+  animation-timing-function: var(--motion-easing);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--motion-medium);
+}
 
 /* ---------------------------------------------------------------- Queue panel */
 .queue-panel {
