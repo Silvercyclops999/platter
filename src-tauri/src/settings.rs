@@ -21,6 +21,7 @@ use crate::bridge::StreamPrefs;
 use crate::db::store::{kv_get, kv_set};
 use crate::db::{ArtCache, DbHandle, PopularSource};
 use crate::error::{AppError, AppResult};
+use crate::platform::discord::activity::StatusLine;
 use crate::platform::discord::{DiscordSettings, DiscordSwitches};
 use crate::platform::{PlatformSettings, Switches};
 use crate::tracking::TrackingSettings;
@@ -259,10 +260,15 @@ pub struct Settings {
     pub discord_clear_on_pause: bool,
     /// A "Find this song" button (song.link) for released songs.
     pub discord_find_song: bool,
-    /// Look up covers on Cover Art Archive by MusicBrainz id.
+    /// Look up covers on Cover Art Archive (by MusicBrainz id, or a MusicBrainz
+    /// search for released albums).
     pub discord_cover_archive: bool,
     /// Upload covers to Imgur with the user's client id (kept in the keychain).
     pub discord_upload_art: bool,
+    /// Upload covers to catbox.moe (no key; public and permanent).
+    pub discord_upload_catbox: bool,
+    /// What Discord's member list shows after "Listening to".
+    pub discord_status_line: StatusLine,
     /// The top bar shows the Plex profile picture (this device only).
     pub show_plex_avatar: bool,
     /// Whether the lyrics view opens by itself.
@@ -358,6 +364,8 @@ impl Default for Settings {
             discord_find_song: true,
             discord_cover_archive: true,
             discord_upload_art: false,
+            discord_upload_catbox: false,
+            discord_status_line: StatusLine::App,
             show_plex_avatar: true,
             lyrics_mode: LyricsMode::AutoShow,
             lyrics_lrclib: false,
@@ -438,6 +446,8 @@ pub struct SettingsPatch {
     pub discord_find_song: Option<bool>,
     pub discord_cover_archive: Option<bool>,
     pub discord_upload_art: Option<bool>,
+    pub discord_upload_catbox: Option<bool>,
+    pub discord_status_line: Option<StatusLine>,
     pub show_plex_avatar: Option<bool>,
     pub lyrics_mode: Option<LyricsMode>,
     pub lyrics_lrclib: Option<bool>,
@@ -528,6 +538,8 @@ impl Settings {
         set(&mut self.discord_find_song, p.discord_find_song);
         set(&mut self.discord_cover_archive, p.discord_cover_archive);
         set(&mut self.discord_upload_art, p.discord_upload_art);
+        set(&mut self.discord_upload_catbox, p.discord_upload_catbox);
+        set(&mut self.discord_status_line, p.discord_status_line);
         set(&mut self.show_plex_avatar, p.show_plex_avatar);
         set(&mut self.lyrics_mode, p.lyrics_mode);
         set(&mut self.lyrics_lrclib, p.lyrics_lrclib);
@@ -602,6 +614,8 @@ impl Settings {
             find_song: self.discord_find_song,
             cover_archive: self.discord_cover_archive,
             upload_art: self.discord_upload_art,
+            upload_catbox: self.discord_upload_catbox,
+            status_line: self.discord_status_line,
             private_session: self.private_session,
         }
     }
@@ -925,6 +939,8 @@ mod tests {
         assert!(s.share_public_links);
         assert!(s.discord_status && s.discord_show_unreleased && s.discord_unreleased_art && s.discord_clear_on_pause);
         assert!(s.discord_find_song && s.discord_cover_archive && !s.discord_upload_art);
+        assert_eq!(s.discord_status_line, StatusLine::App);
+        assert!(!s.discord_upload_catbox);
         assert!(s.show_plex_avatar);
         assert!(s.read_file_tags && s.group_editions && !s.show_fan_edits);
         assert!(s.drag_and_drop);
@@ -965,6 +981,8 @@ mod tests {
             discord_status: Some(false),
             discord_clear_on_pause: Some(false),
             discord_upload_art: Some(true),
+            discord_status_line: Some(StatusLine::Artist),
+            discord_upload_catbox: Some(true),
             private_session: Some(true),
             ..Default::default()
         })
@@ -972,6 +990,9 @@ mod tests {
         publish(&s, &live, &db);
         let d = live.discord.get();
         assert!(!d.enabled && !d.clear_on_pause && d.upload_art && d.private_session);
+        assert_eq!(d.status_line, StatusLine::Artist);
+        assert!(d.upload_catbox);
+        assert_eq!(serde_json::to_value(&s).unwrap()["discordStatusLine"], "artist");
         assert!(d.show_unreleased && d.unreleased_art && d.find_song && d.cover_archive);
     }
 
@@ -1057,6 +1078,8 @@ mod tests {
             discord_find_song: Some(false),
             discord_cover_archive: Some(false),
             discord_upload_art: Some(true),
+            discord_upload_catbox: Some(true),
+            discord_status_line: Some(StatusLine::Song),
             show_plex_avatar: Some(false),
             lyrics_mode: Some(LyricsMode::Off),
             lyrics_lrclib: Some(true),

@@ -4,7 +4,7 @@
 //! Layout:
 //! - [`ipc`]      the socket, frames, handshake and SET_ACTIVITY
 //! - [`activity`] what Discord shows (pure), and which URLs may go there
-//! - [`art`]      public cover art (Cover Art Archive, Imgur) and its cache
+//! - [`art`]      public cover art (Cover Art Archive, Imgur, catbox.moe) and its cache
 //! - [`commands`] Tauri commands and the real Plex, art cache and share glue
 //!
 //! The service follows the player's tracking events on its own task, so a
@@ -31,7 +31,7 @@ use tokio::time::Instant;
 
 use crate::artistinfo::service::KeyState;
 use crate::audio::events::TrackingEvent;
-use activity::{Kind, Song};
+use activity::{Kind, Song, StatusLine};
 use art::{ArtOutcome, ArtRequest, ArtResolver};
 use ipc::{Connector, IpcClient, Reply};
 
@@ -53,6 +53,10 @@ pub struct DiscordSettings {
     pub find_song: bool,
     pub cover_archive: bool,
     pub upload_art: bool,
+    /// Upload covers to catbox.moe (no key).
+    pub upload_catbox: bool,
+    /// What the member list shows after "Listening to".
+    pub status_line: StatusLine,
     /// A private session hides everything.
     pub private_session: bool,
 }
@@ -67,6 +71,8 @@ impl Default for DiscordSettings {
             find_song: true,
             cover_archive: true,
             upload_art: false,
+            upload_catbox: false,
+            status_line: StatusLine::App,
             private_session: false,
         }
     }
@@ -228,6 +234,7 @@ pub fn spawn(
         cur: None,
         conn: None,
         kind: Kind::Listening,
+        with_line: true,
         last_sent: None,
         last_send_at: None,
         reconnect_at: None,
@@ -254,6 +261,8 @@ enum Lookup {
 struct Current {
     track_id: String,
     album_id: String,
+    /// The album artist (for the cover search).
+    album_artist: String,
     thumb: Option<String>,
     song: Song,
     /// Position while paused.
@@ -282,6 +291,8 @@ struct Runner {
     cur: Option<Current>,
     conn: Option<IpcClient>,
     kind: Kind,
+    /// Send `status_display_type` (off once Discord refuses it).
+    with_line: bool,
     /// What Discord shows now (None: nothing, or a fresh connection).
     last_sent: Option<Value>,
     last_send_at: Option<Instant>,
@@ -351,6 +362,7 @@ impl Runner {
                 self.cur = Some(Current {
                     track_id: track.id.clone(),
                     album_id: track.album_id.clone(),
+                    album_artist: track.artist_title.clone(),
                     thumb: track.thumb.clone(),
                     song: Song {
                         title: track.title.clone(),
@@ -416,7 +428,9 @@ impl Runner {
         }
         // A cover that may now be shown differently is looked up again.
         if let Some(c) = self.cur.as_mut()
-            && (s.cover_archive != self.settings.cover_archive || s.upload_art != self.settings.upload_art)
+            && (s.cover_archive != self.settings.cover_archive
+                || s.upload_art != self.settings.upload_art
+                || s.upload_catbox != self.settings.upload_catbox)
             && c.art == Lookup::Done
         {
             c.art = Lookup::NotAsked;
@@ -462,14 +476,18 @@ impl Runner {
         if c.song.unreleased && !s.show_unreleased {
             return;
         }
-        let art_wanted = (s.cover_archive || s.upload_art) && (!c.song.unreleased || s.unreleased_art);
+        let art_wanted = (s.cover_archive || s.upload_art || s.upload_catbox) && (!c.song.unreleased || s.unreleased_art);
         if c.art == Lookup::NotAsked && art_wanted {
             c.art = Lookup::Pending;
             let req = ArtRequest {
                 album_id: c.album_id.clone(),
                 thumb: c.thumb.clone(),
+                artist: c.album_artist.clone(),
+                album: c.song.album.clone(),
+                unreleased: c.song.unreleased,
                 use_archive: s.cover_archive,
                 upload: s.upload_art,
+                catbox: s.upload_catbox,
             };
             let (art, tx, track_id) = (self.deps.art.clone(), self.side_tx.clone(), c.track_id.clone());
             tokio::spawn(async move {
@@ -489,7 +507,7 @@ impl Runner {
 
     fn desired(&self) -> Option<Value> {
         let song = self.cur.as_ref().map(|c| &c.song);
-        activity::build(song, &self.settings, self.kind)
+        activity::build(song, &self.settings, self.kind, self.with_line)
     }
 
     fn drop_conn(&mut self, now: Instant, retry_in: Duration) {
@@ -577,6 +595,13 @@ impl Runner {
                 self.last_send_at = Some(now);
                 self.dirty = false;
                 self.disconnect_if_off();
+            }
+            Ok(Ok(Reply::Refused { code, message }))
+                if self.with_line && want.as_ref().is_some_and(|w| w.get("status_display_type").is_some()) =>
+            {
+                tracing::info!("Discord refused the status line choice ({code} {message}); leaving it out");
+                self.with_line = false;
+                self.not_before = now;
             }
             Ok(Ok(Reply::Refused { code, message })) if self.kind == Kind::Listening && want.is_some() => {
                 tracing::info!("Discord refused a Listening status ({code} {message}); using Playing");

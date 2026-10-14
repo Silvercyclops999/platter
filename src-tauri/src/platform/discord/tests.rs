@@ -154,7 +154,9 @@ async fn status_appears_within_2s_with_cover_and_find_this_song() {
     let a = acts[0].clone().unwrap();
     assert_eq!(a["type"], 2, "Listening");
     assert_eq!(a["details"], "Song 1");
-    assert_eq!(a["state"], "Band");
+    assert_eq!(a["state"], "by Band");
+    assert_eq!(a["status_display_type"], 0);
+    assert!(a["assets"].get("small_image").is_none());
     assert_eq!(a["assets"]["large_image"], COVER);
     assert_eq!(a["assets"]["large_text"], "Record");
     assert_eq!(a["buttons"][0]["url"], LINK);
@@ -224,7 +226,7 @@ async fn pausing_can_show_paused_instead() {
     wait(16.0).await;
     let a = last(&r.discord).unwrap();
     assert!(a.get("timestamps").is_none(), "no progress bar while paused");
-    assert_eq!(a["assets"]["small_text"], "Paused");
+    assert_eq!(a["assets"]["large_text"], "Record (paused)");
     assert_eq!(a["details"], "Song 1");
 }
 
@@ -393,8 +395,42 @@ async fn a_client_that_refuses_listening_gets_playing() {
     r.events.send(started(song("1"))).unwrap();
     wait(2.0).await;
     let acts = r.discord.activities();
-    assert_eq!(acts.len(), 2, "tried Listening, then Playing");
-    assert_eq!(acts[1].as_ref().unwrap()["type"], 0);
+    assert_eq!(acts.len(), 3, "tried Listening, without the status line, then Playing");
+    assert_eq!(acts[2].as_ref().unwrap()["type"], 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_client_that_refuses_the_status_line_gets_it_left_out() {
+    let r = rig_with(
+        FakeArt::new(ArtOutcome::Url(COVER.into())),
+        FakeLib::default(),
+        DiscordSettings { status_line: StatusLine::Artist, ..Default::default() },
+    );
+    r.discord.refuse_status_line.store(true, Ordering::SeqCst);
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 2, "{acts:?}");
+    assert_eq!(acts[0].as_ref().unwrap()["status_display_type"], 1);
+    let a = acts[1].as_ref().unwrap();
+    assert!(a.get("status_display_type").is_none());
+    assert_eq!(a["type"], 2, "still Listening");
+    // The next song goes straight to the accepted shape.
+    r.events.send(started(song("2"))).unwrap();
+    wait(16.0).await;
+    assert!(last(&r.discord).unwrap().get("status_display_type").is_none());
+    assert_eq!(r.discord.activities().len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn changing_the_status_line_updates_discord() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(last(&r.discord).unwrap()["status_display_type"], 0);
+    r.switches.set(DiscordSettings { status_line: StatusLine::Song, ..Default::default() });
+    wait(16.0).await;
+    assert_eq!(last(&r.discord).unwrap()["status_display_type"], 2);
 }
 
 #[tokio::test(start_paused = true)]
@@ -476,14 +512,185 @@ fn resolver(mbid: Option<&str>) -> Covers3 {
     let up = Arc::new(FakeUpload::default());
     let mbids = Arc::new(Mbids(mbid.map(str::to_owned), AtomicUsize::new(0)));
     let keys = Arc::new(MemoryStore::new());
-    let r = ArtResolver::new(db, http.clone(), up.clone(), mbids.clone(), Arc::new(Covers), keys.clone());
+    let r = ArtResolver::new(db, http.clone(), up.clone(), mbids.clone(), Arc::new(Covers), keys.clone())
+        .with_musicbrainz_limiter(Arc::new(crate::artistinfo::limit::Limiter::per_second(1000.0)));
     Covers3 { http, up, mbids, keys, r, _dir: dir }
 }
 
 use crate::db::DbHandle;
 
 fn req(upload: bool) -> ArtRequest {
-    ArtRequest { album_id: "al1".into(), thumb: Some("/library/metadata/9/thumb/1".into()), use_archive: true, upload }
+    ArtRequest {
+        album_id: "al1".into(),
+        thumb: Some("/library/metadata/9/thumb/1".into()),
+        artist: "Band".into(),
+        album: "Record (Deluxe Edition)".into(),
+        unreleased: false,
+        use_archive: true,
+        upload,
+        catbox: false,
+    }
+}
+
+const GROUP: &str = "7c3e2a3c-0000-4000-8000-000000000002";
+const GROUP_COVER: &str = "https://coverartarchive.org/release-group/7c3e2a3c-0000-4000-8000-000000000002/front-500";
+
+fn mb_reply(title: &str, artist: &str, score: u64) -> String {
+    serde_json::json!({ "release-groups": [{
+        "id": GROUP, "score": score, "title": title,
+        "artist-credit": [{ "name": artist, "artist": { "name": artist } }]
+    }]})
+    .to_string()
+}
+
+fn catbox_ok() -> HttpResponse {
+    HttpResponse { status: 200, body: "https://files.catbox.moe/ab12cd.jpg".into(), ..Default::default() }
+}
+
+#[tokio::test]
+async fn a_sure_musicbrainz_match_gives_the_release_group_cover() {
+    let c = resolver(None);
+    c.http.route("musicbrainz.org/ws/2/release-group", 200, &mb_reply("Record", "Band", 100));
+    c.http.route("coverartarchive.org/release-group/", 200, r#"{"images":[{"front":true}]}"#);
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(GROUP_COVER.into()));
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(GROUP_COVER.into()));
+    assert_eq!(c.http.calls("musicbrainz.org"), 1, "cached after the first");
+    let search = &c.http.urls()[0];
+    let search = search.to_lowercase();
+    assert!(search.contains("record") && !search.contains("deluxe"), "edition notes aren't sent: {search}");
+    assert!(search.contains("band"));
+}
+
+#[tokio::test]
+async fn near_misses_are_refused() {
+    for (title, artist, score) in [
+        ("Record Two", "Band", 100),
+        ("Record", "Band Tribute", 100),
+        ("Record", "Band", 92),
+    ] {
+        let c = resolver(None);
+        c.http.route("musicbrainz.org/ws/2/release-group", 200, &mb_reply(title, artist, score));
+        c.http.route("coverartarchive.org/release-group/", 200, r#"{"images":[{"front":true}]}"#);
+        assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::None, "{title} / {artist} / {score}");
+        assert_eq!(c.http.calls("coverartarchive.org"), 0);
+    }
+    // Two albums of the same name by the same artist: no telling which.
+    let both = serde_json::json!({ "release-groups": [
+        { "id": GROUP, "score": 100, "title": "Record", "artist-credit": [{ "name": "Band" }] },
+        { "id": MBID, "score": 100, "title": "Record", "artist-credit": [{ "name": "Band" }] },
+    ]});
+    assert_eq!(crate::artistinfo::musicbrainz::pick_release_group(&both, "Band", "Record"), None);
+}
+
+#[tokio::test]
+async fn a_release_group_without_a_front_cover_is_a_cached_miss() {
+    let c = resolver(None);
+    c.http.route("musicbrainz.org/ws/2/release-group", 200, &mb_reply("Record", "Band", 100));
+    c.http.route("coverartarchive.org/release-group/", 404, "Not Found");
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::None);
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::None);
+    assert_eq!(c.http.calls("musicbrainz.org"), 1, "the miss is remembered");
+    assert_eq!(c.http.calls("coverartarchive.org"), 1);
+}
+
+#[tokio::test]
+async fn a_failed_search_is_not_cached() {
+    let c = resolver(None);
+    c.http.fail("musicbrainz.org");
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::None);
+    c.http.route("musicbrainz.org", 200, &mb_reply("Record", "Band", 100));
+    c.http.route("coverartarchive.org/release-group/", 200, r#"{"images":[{"front":true}]}"#);
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(GROUP_COVER.into()));
+}
+
+#[tokio::test]
+async fn unreleased_albums_are_never_looked_up_only_uploaded() {
+    let c = resolver(Some(MBID));
+    c.http.route("coverartarchive.org", 200, r#"{"images":[{"front":true}]}"#);
+    c.http.route("musicbrainz.org", 200, &mb_reply("Record", "Band", 100));
+    let demo = ArtRequest { unreleased: true, ..req(false) };
+    assert_eq!(c.r.resolve(&demo).await, ArtOutcome::None);
+    assert!(c.http.urls().is_empty(), "nothing sent: {:?}", c.http.urls());
+    assert_eq!(c.mbids.1.load(Ordering::SeqCst), 0);
+    *c.up.answer.lock() = Some(catbox_ok());
+    let demo = ArtRequest { catbox: true, ..demo };
+    assert_eq!(c.r.resolve(&demo).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
+    assert!(c.http.urls().is_empty());
+}
+
+#[tokio::test]
+async fn order_is_release_id_then_search_then_upload_then_icon() {
+    // The release id wins: no search.
+    let c = resolver(Some(MBID));
+    c.http.route("coverartarchive.org/release/", 200, r#"{"images":[{"front":true}]}"#);
+    assert_eq!(c.r.resolve(&req(true)).await, ArtOutcome::Url(COVER.into()));
+    assert_eq!(c.http.calls("musicbrainz.org"), 0);
+
+    // No cover by id: the search is next.
+    let c = resolver(Some(MBID));
+    c.http.route("coverartarchive.org/release/", 404, "");
+    c.http.route("musicbrainz.org/ws/2/release-group", 200, &mb_reply("Record", "Band", 100));
+    c.http.route("coverartarchive.org/release-group/", 200, r#"{"images":[{"front":true}]}"#);
+    let urls = |c: &Covers3| c.http.urls();
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(GROUP_COVER.into()));
+    let u = urls(&c);
+    assert!(u[0].contains("/release/") && u[1].contains("musicbrainz.org") && u[2].contains("/release-group/"), "{u:?}");
+
+    // Nothing public: the upload host; Imgur over catbox when both can.
+    let c = resolver(None);
+    c.http.route("musicbrainz.org", 200, r#"{"release-groups":[]}"#);
+    c.keys.set(IMGUR_ACCOUNT, &crate::plex::token::Token::new("k").unwrap()).unwrap();
+    *c.up.answer.lock() = Some(imgur_ok());
+    let both = ArtRequest { catbox: true, ..req(true) };
+    assert_eq!(c.r.resolve(&both).await, ArtOutcome::Url("https://i.imgur.com/AbC123.jpg".into()));
+    assert_eq!(c.up.log.lock()[0].0, IMGUR_UPLOAD);
+
+    // Neither upload on: the icon.
+    let c = resolver(None);
+    c.http.route("musicbrainz.org", 200, r#"{"release-groups":[]}"#);
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::None);
+    assert!(c.up.log.lock().is_empty());
+}
+
+#[tokio::test]
+async fn catbox_uploads_once_without_a_key() {
+    let c = resolver(None);
+    c.http.route("musicbrainz.org", 200, r#"{"release-groups":[]}"#);
+    *c.up.answer.lock() = Some(catbox_ok());
+    let r = ArtRequest { catbox: true, ..req(false) };
+    assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
+    assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
+    assert_eq!(c.up.log.lock().len(), 1, "one upload per album");
+    let (url, headers, ct, body) = c.up.log.lock()[0].clone();
+    assert_eq!(url, CATBOX_UPLOAD);
+    assert!(headers.is_empty());
+    assert!(ct.starts_with("multipart/form-data; boundary="));
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("name=\"reqtype\"\r\n\r\nfileupload\r\n") && text.contains("name=\"fileToUpload\""));
+    assert!(text.contains("JPEGDATA") && !text.contains("Record") && !text.contains("/library/"));
+    // With Imgur's client id refused, catbox still works.
+    let c = resolver(None);
+    c.http.route("api.imgur.com/3/credits", 403, "{}");
+    c.r.set_key(Some("bad".into())).await.unwrap();
+    *c.up.answer.lock() = Some(catbox_ok());
+    let both = ArtRequest { catbox: true, ..req(true) };
+    assert_eq!(c.r.resolve(&both).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
+}
+
+#[tokio::test]
+async fn a_catbox_answer_that_isnt_its_file_link_is_not_used() {
+    for body in ["https://evil.example/a.jpg", "Something went wrong", "https://catbox.moe/a.jpg"] {
+        let c = resolver(None);
+        *c.up.answer.lock() = Some(HttpResponse { status: 200, body: body.to_owned().into(), ..Default::default() });
+        let r = ArtRequest { catbox: true, use_archive: false, ..req(false) };
+        assert!(matches!(c.r.resolve(&r).await, ArtOutcome::UploadFailed(_)), "{body}");
+    }
+    let c = resolver(None);
+    *c.up.answer.lock() = Some(HttpResponse { status: 412, ..Default::default() });
+    let r = ArtRequest { catbox: true, use_archive: false, ..req(false) };
+    assert!(matches!(c.r.resolve(&r).await, ArtOutcome::UploadFailed(_)));
+    assert!(matches!(c.r.resolve(&r).await, ArtOutcome::UploadFailed(_)));
+    assert_eq!(c.up.log.lock().len(), 1, "not retried this session");
 }
 
 #[tokio::test]

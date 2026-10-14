@@ -2,11 +2,17 @@
 //! has to be a public HTTPS URL; Plex art needs the server and its token and
 //! never leaves the computer as a URL.
 //!
-//! 1. Cover Art Archive, by the album's MusicBrainz release id (only the id
-//!    is sent).
-//! 2. Otherwise, with the user's own Imgur client id, the 512 px cover is
-//!    uploaded once and its link kept.
-//! 3. Otherwise nothing (the activity uses the app icon).
+//! 1. Cover Art Archive, by the album's MusicBrainz release id from Plex
+//!    (only the id is sent).
+//! 2. For a released album without one, a MusicBrainz search by album
+//!    artist and title; only a sure match is taken, and its release group's
+//!    cover on Cover Art Archive is used.
+//! 3. Otherwise the 512 px cover is uploaded once and its link kept: to
+//!    Imgur with the user's own client id, else to catbox.moe when that's on.
+//! 4. Otherwise nothing (the activity uses the app icon).
+//!
+//! Unreleased albums skip steps 1 and 2: their cover is only ever uploaded,
+//! and only when unreleased covers may be shown.
 //!
 //! Answers are kept per album in the `discord_art` table.
 
@@ -21,6 +27,8 @@ use serde_json::Value;
 use super::activity::image_allowed;
 use crate::artistinfo::http::{HttpResponse, InfoHttp};
 use crate::artistinfo::is_mbid;
+use crate::artistinfo::limit::Limiter;
+use crate::artistinfo::musicbrainz::MusicBrainz;
 use crate::artistinfo::service::KeyState;
 use crate::db::DbHandle;
 use crate::db::queries::now_s;
@@ -34,6 +42,9 @@ pub const IMGUR_UPLOAD: &str = "https://api.imgur.com/3/image";
 /// A cheap authenticated call that checks a client id without uploading.
 pub const IMGUR_CHECK: &str = "https://api.imgur.com/3/credits";
 pub const CAA: &str = "https://coverartarchive.org/release";
+pub const CAA_GROUP: &str = "https://coverartarchive.org/release-group";
+/// catbox.moe's anonymous upload (no account, no key).
+pub const CATBOX_UPLOAD: &str = "https://catbox.moe/user/api.php";
 /// Cover size uploaded and asked of Cover Art Archive.
 pub const COVER_PX: u32 = 512;
 
@@ -91,22 +102,45 @@ pub fn put(c: &Connection, album_id: &str, url: Option<&str>, source: &str, now:
 
 // ---------------------------------------------------------------- multipart
 
-/// A one-file multipart/form-data body (field `image`) and its content type.
-pub fn multipart(bytes: &[u8], content_type: &str) -> (Vec<u8>, String) {
+/// A multipart/form-data body with some text fields and one file, and its
+/// content type.
+pub fn multipart_form(fields: &[(&str, &str)], file_field: &str, bytes: &[u8], content_type: &str) -> (Vec<u8>, String) {
     let boundary = format!("platter-{}", uuid::Uuid::new_v4().simple());
     let ext = if content_type.contains("png") { "png" } else { "jpg" };
-    let mut body = Vec::with_capacity(bytes.len() + 512);
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"type\"\r\n\r\nfile\r\n\
-             --{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"cover.{ext}\"\r\n\
-             Content-Type: {content_type}\r\n\r\n"
-        )
-        .as_bytes(),
-    );
+    let mut head = String::new();
+    for (k, v) in fields {
+        head.push_str(&format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n"));
+    }
+    head.push_str(&format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"cover.{ext}\"\r\n\
+         Content-Type: {content_type}\r\n\r\n"
+    ));
+    let mut body = Vec::with_capacity(bytes.len() + head.len() + 64);
+    body.extend_from_slice(head.as_bytes());
     body.extend_from_slice(bytes);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
     (body, format!("multipart/form-data; boundary={boundary}"))
+}
+
+/// Imgur's upload body (field `image`).
+pub fn multipart(bytes: &[u8], content_type: &str) -> (Vec<u8>, String) {
+    multipart_form(&[("type", "file")], "image", bytes, content_type)
+}
+
+/// Where a cover is uploaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Host {
+    Imgur,
+    Catbox,
+}
+
+impl Host {
+    fn source(self) -> &'static str {
+        match self {
+            Self::Imgur => "imgur",
+            Self::Catbox => "catbox",
+        }
+    }
 }
 
 // ---------------------------------------------------------------- resolver
@@ -117,8 +151,16 @@ pub struct ArtRequest {
     pub album_id: String,
     /// The Plex art path (only ever read through the art cache).
     pub thumb: Option<String>,
+    /// The album artist and title, for the MusicBrainz search.
+    pub artist: String,
+    pub album: String,
+    /// Unreleased albums are never looked up by name or id, only uploaded.
+    pub unreleased: bool,
     pub use_archive: bool,
+    /// Upload to Imgur (with a client id).
     pub upload: bool,
+    /// Upload to catbox.moe (when Imgur isn't used).
+    pub catbox: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +179,8 @@ pub struct ArtResolver {
     mbids: Arc<dyn AlbumMbid>,
     covers: Arc<dyn CoverBytes>,
     keys: Arc<dyn TokenStore>,
+    /// MusicBrainz pacing, shared with the artist pages.
+    musicbrainz: Arc<Limiter>,
     /// The client id, read from the keychain once.
     key: Mutex<Option<Option<Token>>>,
     rejected: Mutex<bool>,
@@ -161,10 +205,17 @@ impl ArtResolver {
             mbids,
             covers,
             keys,
+            musicbrainz: Arc::new(Limiter::per_second(1.0)),
             key: Mutex::new(None),
             rejected: Mutex::new(false),
             failed: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Use the app's MusicBrainz pacing (one request a second in all).
+    pub fn with_musicbrainz_limiter(mut self, limiter: Arc<Limiter>) -> Self {
+        self.musicbrainz = limiter;
+        self
     }
 
     fn key(&self) -> Option<Token> {
@@ -221,62 +272,108 @@ impl ArtResolver {
         {
             match (&row.url, row.source.as_str()) {
                 (Some(u), "imgur") if req.upload => return ArtOutcome::Url(u.clone()),
-                (Some(u), "caa") if req.use_archive => return ArtOutcome::Url(u.clone()),
+                (Some(u), "catbox") if req.catbox => return ArtOutcome::Url(u.clone()),
+                (Some(u), "caa") if req.use_archive && !req.unreleased => return ArtOutcome::Url(u.clone()),
                 (None, "caa") => archive_missed = true,
                 _ => {}
             }
         }
-        if req.use_archive && !archive_missed {
-            match self.archive(&req.album_id, now).await {
+        if req.use_archive && !req.unreleased && !archive_missed {
+            match self.archive(req, now).await {
                 Ok(Some(u)) => return ArtOutcome::Url(u),
                 Ok(None) => {}
                 Err(e) => tracing::debug!("cover art archive: {e}"),
             }
         }
-        if req.upload {
-            return self.upload(req, now).await;
-        }
-        ArtOutcome::None
+        self.upload(req, now).await
     }
 
-    /// Cover Art Archive's front cover for the album's release, cached either
-    /// way. Errors (offline, Plex down) aren't cached.
-    async fn archive(&self, album_id: &str, now: i64) -> AppResult<Option<String>> {
-        let Some(mbid) = self.mbids.release_mbid(album_id).await?.filter(|m| is_mbid(m)) else {
-            return Ok(None);
-        };
-        let r = self.http.get(&format!("{CAA}/{mbid}"), &[]).await?;
-        let url = match r.status {
+    /// A public cover from Cover Art Archive: by the album's release id, else
+    /// by a sure MusicBrainz match on artist and title. The answer is cached
+    /// either way; a step that failed (offline, Plex down, MusicBrainz busy)
+    /// leaves a miss uncached so it's tried again next time.
+    async fn archive(&self, req: &ArtRequest, now: i64) -> AppResult<Option<String>> {
+        let mut complete = true;
+        let mut url = None;
+        match self.mbids.release_mbid(&req.album_id).await {
+            Ok(Some(mbid)) if is_mbid(&mbid) => match self.front(&format!("{CAA}/{mbid}")).await {
+                Ok(u) => url = u,
+                Err(e) => {
+                    tracing::debug!("cover art archive by release: {e}");
+                    complete = false;
+                }
+            },
+            Ok(_) => {}
+            Err(e) => {
+                tracing::debug!("album release id: {e}");
+                complete = false;
+            }
+        }
+        if url.is_none() {
+            let mb = MusicBrainz { http: self.http.as_ref(), limiter: &self.musicbrainz };
+            match mb.release_group_id(&req.artist, &req.album).await {
+                Ok(Some(group)) => match self.front(&format!("{CAA_GROUP}/{group}")).await {
+                    Ok(u) => url = u,
+                    Err(e) => {
+                        tracing::debug!("cover art archive by release group: {e}");
+                        complete = false;
+                    }
+                },
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::debug!("musicbrainz album search: {e:?}");
+                    complete = false;
+                }
+            }
+        }
+        if url.is_some() || complete {
+            let (id, u) = (req.album_id.clone(), url.clone());
+            let ttl = if url.is_some() { CAA_TTL } else { CAA_MISS_TTL };
+            self.db.write_async(move |c| put(c, &id, u.as_deref(), "caa", now, now + ttl)).await?;
+        }
+        Ok(url)
+    }
+
+    /// `<base>/front-500` when Cover Art Archive has a front cover at `base`
+    /// (a release or a release group).
+    async fn front(&self, base: &str) -> AppResult<Option<String>> {
+        let r = self.http.get(base, &[]).await?;
+        match r.status {
             200 => {
                 let v: Value = r.json()?;
                 let front = v["images"]
                     .as_array()
                     .is_some_and(|imgs| imgs.iter().any(|i| i["front"].as_bool() == Some(true)));
-                front.then(|| format!("{CAA}/{mbid}/front-500"))
+                Ok(front.then(|| format!("{base}/front-500")))
             }
-            404 => None,
-            s => return Err(AppError::Server(format!("cover art archive answered {s}"))),
-        };
-        let (id, u) = (album_id.to_owned(), url.clone());
-        let ttl = if url.is_some() { CAA_TTL } else { CAA_MISS_TTL };
-        self.db.write_async(move |c| put(c, &id, u.as_deref(), "caa", now, now + ttl)).await?;
-        Ok(url)
+            404 => Ok(None),
+            s => Err(AppError::Server(format!("cover art archive answered {s}"))),
+        }
     }
 
+    /// Upload the cover: to Imgur when it's on with a working client id,
+    /// else to catbox.moe when that's on.
     async fn upload(&self, req: &ArtRequest, now: i64) -> ArtOutcome {
-        let (Some(key), Some(thumb)) = (self.key(), req.thumb.as_deref()) else {
-            return ArtOutcome::None;
+        let Some(thumb) = req.thumb.as_deref() else { return ArtOutcome::None };
+        let imgur_key = if req.upload { self.key() } else { None };
+        let rejected = *self.rejected.lock();
+        let (host, key) = match imgur_key {
+            Some(k) if !rejected => (Host::Imgur, Some(k)),
+            _ if req.catbox => (Host::Catbox, None),
+            Some(_) => return ArtOutcome::UploadFailed("Imgur refused the client ID".into()),
+            None => return ArtOutcome::None,
         };
-        if *self.rejected.lock() {
-            return ArtOutcome::UploadFailed("Imgur refused the client ID".into());
-        }
         if self.failed.lock().contains(&req.album_id) {
             return ArtOutcome::UploadFailed("an earlier upload failed".into());
         }
-        match self.try_upload(&key, thumb).await {
+        let sent = match &key {
+            Some(k) => self.try_upload(k, thumb).await,
+            None => self.try_catbox(thumb).await,
+        };
+        match sent {
             Ok(url) => {
                 let (id, u) = (req.album_id.clone(), url.clone());
-                if let Err(e) = self.db.write_async(move |c| put(c, &id, Some(&u), "imgur", now, i64::MAX)).await {
+                if let Err(e) = self.db.write_async(move |c| put(c, &id, Some(&u), host.source(), now, i64::MAX)).await {
                     tracing::debug!("discord art cache: {e}");
                 }
                 ArtOutcome::Url(url)
@@ -307,6 +404,21 @@ impl ArtResolver {
         let link = v["data"]["link"].as_str().unwrap_or_default().replace("http://", "https://");
         if !image_allowed(&link) {
             return Err(AppError::Decode("Imgur gave no usable link".into()));
+        }
+        Ok(link)
+    }
+
+    /// catbox.moe's anonymous upload. The answer is the file's link as text.
+    async fn try_catbox(&self, thumb: &str) -> AppResult<String> {
+        let (bytes, ty) = self.covers.cover(thumb, COVER_PX).await?;
+        let (body, ct) = multipart_form(&[("reqtype", "fileupload")], "fileToUpload", &bytes, &ty);
+        let r = self.upload.post(CATBOX_UPLOAD, &[], &ct, body).await?;
+        if !r.ok() {
+            return Err(AppError::Server(format!("catbox.moe answered {}", r.status)));
+        }
+        let link = String::from_utf8_lossy(&r.body).trim().replace("http://", "https://");
+        if !link.starts_with("https://files.catbox.moe/") || !image_allowed(&link) {
+            return Err(AppError::Decode("catbox.moe gave no usable link".into()));
         }
         Ok(link)
     }

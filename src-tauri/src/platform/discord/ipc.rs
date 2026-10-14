@@ -233,6 +233,8 @@ pub mod fake {
         pub down: AtomicBool,
         /// Refuse activities of type 2 (as a client without Listening would).
         pub refuse_listening: AtomicBool,
+        /// Refuse activities that carry `status_display_type` (an older client).
+        pub refuse_status_line: AtomicBool,
         /// Hang up after this many more commands (0 = never).
         pub hang_up_after: AtomicUsize,
         pub connects: AtomicUsize,
@@ -273,7 +275,10 @@ pub mod fake {
                 }
                 let nonce = v.get("nonce").cloned().unwrap_or_default();
                 let ty = v["args"]["activity"].get("type").and_then(Value::as_i64);
-                let reply = if ty == Some(2) && self.refuse_listening.load(Ordering::SeqCst) {
+                let line = v["args"]["activity"].get("status_display_type").is_some();
+                let reply = if (ty == Some(2) && self.refuse_listening.load(Ordering::SeqCst))
+                    || (line && self.refuse_status_line.load(Ordering::SeqCst))
+                {
                     json!({ "cmd": "SET_ACTIVITY", "evt": "ERROR", "nonce": nonce,
                             "data": { "code": 4000, "message": "child \"activity\" fails because [\"type\" must be one of [0]]" } })
                 } else {

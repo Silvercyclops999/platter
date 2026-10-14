@@ -110,6 +110,7 @@ pub fn start<R: Runtime>(
     art: ArtCache,
     share: ShareService,
     switches: &DiscordSwitches,
+    musicbrainz: Arc<crate::artistinfo::limit::Limiter>,
     events: broadcast::Receiver<TrackingEvent>,
 ) -> AppResult<()> {
     let resolver = Arc::new(ArtResolver::new(
@@ -119,7 +120,8 @@ pub fn start<R: Runtime>(
         Arc::new(PlexAlbumMbid(plex)),
         Arc::new(CachedCovers(art)),
         Arc::new(KeyringStore::new()),
-    ));
+    )
+    .with_musicbrainz_limiter(musicbrainz));
     let sink: Arc<dyn StatusSink> = Arc::new(app.clone());
     let handle = match app_id() {
         Some(id) => {

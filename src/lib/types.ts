@@ -334,6 +334,7 @@ export interface LyricWord {
 }
 
 export type LyricsMode = "autoShow" | "off";
+export type DiscordStatusLine = "app" | "artist" | "song";
 
 /** `now_playing_details`: extras for the now-playing panel. */
 export interface NowPlayingDetails {
@@ -621,10 +622,14 @@ export interface Settings {
   discordClearOnPause: boolean;
   /** A Find this song button (song.link) for released songs. */
   discordFindSong: boolean;
-  /** Covers from Cover Art Archive by MusicBrainz id. */
+  /** Covers from Cover Art Archive, by MusicBrainz id or a MusicBrainz search (released albums). */
   discordCoverArchive: boolean;
   /** Covers uploaded to Imgur with the user's client ID. */
   discordUploadArt: boolean;
+  /** Covers uploaded to catbox.moe (no key; public and permanent). */
+  discordUploadCatbox: boolean;
+  /** What Discord's member list shows after "Listening to". */
+  discordStatusLine: DiscordStatusLine;
   /** The top bar shows the Plex profile picture. This device only. */
   showPlexAvatar: boolean;
   /** The lyrics view opens by itself for songs with synced lyrics. */
@@ -744,6 +749,8 @@ export const DEFAULT_SETTINGS: Settings = {
   discordFindSong: true,
   discordCoverArchive: true,
   discordUploadArt: false,
+  discordUploadCatbox: false,
+  discordStatusLine: "app",
   showPlexAvatar: true,
   lyricsMode: "autoShow",
   lyricsLrclib: false,

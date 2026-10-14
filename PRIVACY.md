@@ -44,14 +44,24 @@ and your own Plex server.
   when the status is off. Your Plex token and server address are never part
   of it.
 - Cover Art Archive, for that cover image: it gets the album's MusicBrainz
-  release id, nothing else. Can be turned off in Settings. Discord then loads
-  the image from Cover Art Archive itself.
+  release id, or a MusicBrainz release group id, nothing else. Can be turned
+  off in Settings. Discord then loads the image from Cover Art Archive itself.
+- MusicBrainz, for that same cover when Plex has no MusicBrainz id for a
+  released album: it gets the album artist and album title, once per album.
+  Unreleased albums are never searched. Off with the Cover Art Archive
+  setting.
 - Imgur, only if you enter your own Imgur client ID in Settings. For albums
   Cover Art Archive doesn't have, the 512 px cover image is uploaded once,
   with your client ID. Nothing else about the song goes with it. Uploaded
   images are public to anyone who has the link, so unreleased covers can be
   kept off Discord (and out of uploads) in Settings. Platter doesn't delete
   uploads.
+- catbox.moe, only if you turn on "Upload covers to catbox.moe" in Settings
+  (it's off by default) and Imgur isn't in use. For albums Cover Art Archive
+  doesn't have, the 512 px cover image is uploaded once, without an account.
+  Nothing else about the song goes with it. The image is public to anyone
+  with the link and can't be deleted from Platter. catbox.moe's own rules
+  apply to what's uploaded.
 - LRCLIB (lrclib.net), only if you turn on "Lyrics from LRCLIB when Plex has
   none" in Settings (it's off by default). For a song your Plex server has no
   lyrics for, it gets the artist, title, album and length. If that finds

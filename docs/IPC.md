@@ -300,8 +300,12 @@ something is playing and Discord isn't open. Losing Discord never affects
 playback.
 
 The status is a Listening activity (Playing if the client refuses that):
-details = song title, state = artist, large image = cover, large text =
-album, small image = the app icon, start and end timestamps while playing,
+details = song title, state = "by " and the artists (featured artists split
+out, joined with commas), large image = cover (the app icon when there's
+none), large text = album (with "(paused)" while paused), no small image,
+`status_display_type` from `discordStatusLine` (0 app name, 1 state, 2
+details; left out from then on if the client refuses it, before falling back
+to Playing), start and end timestamps while playing,
 and a Find this song button with the song's song.link page for released songs
 (found the same way as `share_public_link`). Text is cut to 128 characters.
 Updates are gathered for 300 ms (so a gapless change is one update) and sent
@@ -312,10 +316,19 @@ unreleased songs when `discordShowUnreleased` is off.
 
 The cover is a public URL, never a Plex URL. Cover Art Archive first, by the
 album's MusicBrainz release id from Plex (`coverartarchive.org/release/<id>/front-500`,
-checked once and kept 30 days, a miss 7 days), then, with a saved client ID
-and `discordUploadArt` on, the 512 px cover from the art cache uploaded once to
-Imgur and its `i.imgur.com` link kept for good. Only those two hosts are ever
-sent; anything else falls back to the app icon. A failed upload isn't retried
+checked once and kept 30 days, a miss 7 days). For a released album without
+one, a MusicBrainz release group search by album artist and title (sharing
+the artist pages' one request a second), taking only a score 100 result whose
+title and artists match once case, accents, punctuation, featured artists and
+edition notes are folded, and only when one group matches; its cover is
+`coverartarchive.org/release-group/<id>/front-500`, cached the same way. A
+search that fails isn't cached. Unreleased albums skip both. Then, with a
+saved client ID and `discordUploadArt` on, the 512 px cover from the art cache
+uploaded once to Imgur and its `i.imgur.com` link kept for good; else, with
+`discordUploadCatbox` on, the same upload to catbox.moe's anonymous API
+(`reqtype=fileupload`, `fileToUpload`) and its `files.catbox.moe` link kept for
+good. Only those hosts are ever sent; anything else falls back to the app
+icon. A failed upload isn't retried
 until the next start or a new client ID. The client ID lives in the keychain;
 saving one checks it with one request that uploads nothing, and `rejected`
 is set when Imgur refuses it then or on an upload.
@@ -807,8 +820,10 @@ The rest of the fields, with their defaults:
 | `discordShowUnreleased` | bool, true | Off shows nothing while an unreleased song plays. |
 | `discordUnreleasedArt` | bool, true | Off shows the app icon for unreleased songs; their cover is never looked up or uploaded. |
 | `discordFindSong` | bool, true | The Find this song button. Also needs `sharePublicLinks`. |
-| `discordCoverArchive` | bool, true | Covers from Cover Art Archive by MusicBrainz release id. |
+| `discordCoverArchive` | bool, true | Covers from Cover Art Archive by MusicBrainz release id, or by a MusicBrainz search on album artist and title for released albums. |
 | `discordUploadArt` | bool, false | Upload covers Cover Art Archive lacks to Imgur. Only used while a client ID is saved and wasn't refused. |
+| `discordUploadCatbox` | bool, false | Upload covers Cover Art Archive lacks to catbox.moe (no key) when Imgur isn't used. Uploads are public and can't be deleted. |
+| `discordStatusLine` | `"app"\|"artist"\|"song"`, `"app"` | What the member list shows after "Listening to" (`status_display_type`). |
 | `showPlexAvatar` | bool, true | The app menu button shows the Plex profile picture (`AuthStatus.avatar`). Off shows the first letter of the username. This device only. |
 | `lyricsMode` | `"autoShow"\|"off"`, `"autoShow"` | Auto-show opens the lyrics view when a song with synced lyrics starts while now playing is open. Off opens it only from its button. |
 | `lyricsLrclib` | bool, false | `lyrics_get` asks LRCLIB when Plex has no lyrics (sends artist, title, album and length; the search sends artist and title). Off sends nothing. |

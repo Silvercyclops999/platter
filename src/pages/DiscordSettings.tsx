@@ -51,8 +51,15 @@ export function discordNote(status: DiscordStatus | null, on: boolean | undefine
 export function imgurNote(status: DiscordStatus | null): string | undefined {
   if (!status) return undefined;
   if (status.imgurKey.rejected) return "Imgur rejected the client ID.";
-  if (status.uploadFailed) return "The last cover couldn't be uploaded, so Discord shows the Platter icon.";
+  if (status.uploadFailed && status.imgurKey.saved) return "The last cover couldn't be uploaded, so Discord shows the Platter icon.";
   return undefined;
+}
+
+/** The note under the catbox.moe row: a failed upload, when catbox was the host used. */
+export function catboxNote(status: DiscordStatus | null, on: boolean | undefined): string | undefined {
+  if (!status || !on || !status.uploadFailed) return undefined;
+  if (status.imgurKey.saved && !status.imgurKey.rejected) return undefined;
+  return "The last cover couldn't be uploaded, so Discord shows the Platter icon.";
 }
 
 /**

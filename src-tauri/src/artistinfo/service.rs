@@ -126,7 +126,8 @@ struct Limiters {
     fanart: Limiter,
     audiodb: Limiter,
     listenbrainz: Limiter,
-    musicbrainz: Limiter,
+    /// Shared with the Discord cover search (one request a second in all).
+    musicbrainz: Arc<Limiter>,
 }
 
 impl Default for Limiters {
@@ -139,7 +140,7 @@ impl Default for Limiters {
             audiodb: Limiter::per_second(1.0),
             listenbrainz: Limiter::per_second(1.0),
             // MusicBrainz allows one request a second.
-            musicbrainz: Limiter::per_second(1.0),
+            musicbrainz: Arc::new(Limiter::per_second(1.0)),
         }
     }
 }
@@ -241,6 +242,11 @@ impl ArtistInfoService {
 
     pub fn http(&self) -> Arc<dyn InfoHttp> {
         self.inner.http.clone()
+    }
+
+    /// The MusicBrainz pacing, for other lookups that ask MusicBrainz.
+    pub fn musicbrainz_limiter(&self) -> Arc<Limiter> {
+        self.inner.limits.musicbrainz.clone()
     }
 
     // ------------------------------------------------------------ keys

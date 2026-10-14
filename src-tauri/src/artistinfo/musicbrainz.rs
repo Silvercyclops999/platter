@@ -60,7 +60,80 @@ pub fn pick(v: &Value, name: &str) -> Option<String> {
     })
 }
 
+pub const RELEASE_GROUP_API: &str = "https://musicbrainz.org/ws/2/release-group/";
+
+/// A release group search by title and artist. The title is sent without
+/// edition notes or featured artists, so "Record (Deluxe Edition)" finds
+/// "Record".
+pub fn release_group_url(artist: &str, title: &str) -> String {
+    let t = phrase(&crate::share::matching::title_key(title));
+    let a = phrase(artist.trim());
+    let mut u = Url::parse(RELEASE_GROUP_API).expect("static url");
+    u.query_pairs_mut()
+        .append_pair("query", &format!("releasegroup:{t} AND artist:{a}"))
+        .append_pair("limit", "10")
+        .append_pair("fmt", "json");
+    u.into()
+}
+
+/// A release group's artist credit as one line ("A feat. B").
+fn credit_line(rg: &Value) -> String {
+    rg.get("artist-credit")
+        .and_then(Value::as_array)
+        .map(|cs| {
+            cs.iter()
+                .map(|c| {
+                    let name = c.get("name").and_then(Value::as_str).unwrap_or_default();
+                    let join = c.get("joinphrase").and_then(Value::as_str).unwrap_or_default();
+                    format!("{name}{join}")
+                })
+                .collect::<String>()
+        })
+        .unwrap_or_default()
+}
+
+/// The release group a search reply surely means: score 100, the same title
+/// once case, accents, punctuation, featured artists and edition notes are
+/// folded, and the same artists. Two different groups that both match
+/// (an artist with two albums of one name) is no answer.
+pub fn pick_release_group(v: &Value, artist: &str, title: &str) -> Option<String> {
+    use crate::share::matching::{artist_names, title_key};
+    let (want_title, want_artists) = (title_key(title), artist_names(artist));
+    if want_title.is_empty() || want_artists.is_empty() {
+        return None;
+    }
+    let mut found: Option<String> = None;
+    for rg in v.get("release-groups")?.as_array()? {
+        if rg.get("score").and_then(Value::as_u64) != Some(100) {
+            continue;
+        }
+        let Some(id) = rg.get("id").and_then(Value::as_str).filter(|id| is_mbid(id)) else { continue };
+        let same_title = rg.get("title").and_then(Value::as_str).is_some_and(|t| title_key(t) == want_title);
+        if !same_title || artist_names(&credit_line(rg)) != want_artists {
+            continue;
+        }
+        match &found {
+            Some(f) if f != id => return None,
+            _ => found = Some(id.to_owned()),
+        }
+    }
+    found
+}
+
 impl MusicBrainz<'_> {
+    /// The release group id of an album, only for a sure match.
+    pub async fn release_group_id(&self, artist: &str, title: &str) -> Fetch<String> {
+        if artist.trim().is_empty() || title.trim().is_empty() {
+            return Ok(None);
+        }
+        let resp = self.limiter.get(self.http, &release_group_url(artist, title), &[]).await?;
+        if !resp.ok() {
+            return Err(FetchError::Unavailable(format!("MusicBrainz answered {}", resp.status)));
+        }
+        let v: Value = resp.json().map_err(FetchError::from)?;
+        Ok(pick_release_group(&v, artist, title))
+    }
+
     /// `Ok(None)` when there is no exact match.
     pub async fn artist_id(&self, name: &str) -> Fetch<String> {
         if name.trim().is_empty() {
@@ -98,6 +171,22 @@ mod tests {
         let v = json!({"artists": [{"id": "not-an-id", "name": "Rue Ellis", "score": 100}]});
         assert_eq!(pick(&v, "Rue Ellis"), None);
         assert_eq!(pick(&json!({}), "Rue Ellis"), None);
+    }
+
+    #[test]
+    fn release_groups_match_on_folded_title_and_the_same_artists() {
+        let v = json!({"release-groups": [{
+            "id": A, "score": 100, "title": "Night Drive",
+            "artist-credit": [{"name": "Rue Ellis", "joinphrase": " feat. "}, {"name": "Guest"}]
+        }]});
+        assert_eq!(pick_release_group(&v, "Rue Ellis feat. Guest", "Night Drive (2019 Remaster)").as_deref(), Some(A));
+        assert_eq!(pick_release_group(&v, "rue ellis, guest", "NIGHT DRIVE!").as_deref(), Some(A));
+        assert_eq!(pick_release_group(&v, "Rue Ellis", "Night Drive"), None, "a missing artist is a different credit");
+        assert_eq!(pick_release_group(&v, "Rue Ellis feat. Guest", "Night Drive Live"), None);
+        assert_eq!(pick_release_group(&v, "", "Night Drive"), None);
+        let u = Url::parse(&release_group_url("Rue Ellis", "Night Drive (Deluxe Edition)")).unwrap();
+        let q = u.query_pairs().find(|(k, _)| k == "query").unwrap().1.into_owned();
+        assert_eq!(q, r#"releasegroup:"night drive" AND artist:"Rue Ellis""#);
     }
 
     #[test]

@@ -302,6 +302,7 @@ pub fn run() {
                 art.clone(),
                 share.clone(),
                 &live.discord,
+                artist_info.musicbrainz_limiter(),
                 player.subscribe_tracking(),
             )?;
             app.manage(share);

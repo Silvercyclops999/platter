@@ -30,7 +30,7 @@ import { updateSettings, useSettings } from "../stores/settings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
-import { discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
+import { catboxNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { BatchControl, BatchNote, ModelControl, TranscribeNote } from "./TranscribeSettings";
 import "./playlist.css";
@@ -77,6 +77,11 @@ const LYRICS_MODE = [
   { value: "autoShow", label: "Auto-show when available" },
   { value: "off", label: "Off" },
 ] as const satisfies SelectOption<Settings["lyricsMode"]>[];
+const DISCORD_STATUS_LINE = [
+  { value: "app", label: "Platter" },
+  { value: "artist", label: "Artist" },
+  { value: "song", label: "Song" },
+] as const satisfies SelectOption<Settings["discordStatusLine"]>[];
 const ART_SIZES_MB = [512, 1024, 2048, 5120, 10240, 20480];
 const LEVELING = [
   { value: "smart", label: "Smart" },
@@ -1023,7 +1028,8 @@ export function SettingsPage() {
             section: "Integrations",
             group: "Discord",
             title: "Covers from Cover Art Archive",
-            description: "Finds a public copy of the album's cover by its MusicBrainz id. Only the id is sent.",
+            description:
+              "Finds a public copy of the album's cover by its MusicBrainz id. For released albums without one, MusicBrainz is searched by album artist and title, and only an exact match is used.",
             control: (ids) => toggle(s, "discordCoverArchive", ids),
           },
           {
@@ -1034,6 +1040,27 @@ export function SettingsPage() {
             description: "Covers Cover Art Archive doesn't have are uploaded once to Imgur so Discord can show them. Anyone with the link can see an uploaded cover. Needs your own Imgur client ID, kept in this computer's keychain.",
             note: errorNote(imgurNote(discord)),
             control: (ids) => <ImgurKeyControl ids={ids} status={discord} setKey={setImgurKey} />,
+          },
+          {
+            key: "discordUploadCatbox",
+            section: "Integrations",
+            group: "Discord",
+            title: "Upload covers to catbox.moe",
+            description:
+              "Covers Cover Art Archive doesn't have are uploaded once to catbox.moe, which needs no account. An uploaded cover is public to anyone with the link and can't be deleted. Imgur is used instead when it's set up.",
+            note: errorNote(catboxNote(discord, s?.discordUploadCatbox)),
+            footnote:
+              "Where covers come from: Cover Art Archive first, then an upload to Imgur or catbox.moe if one is on. Without a cover, Discord shows the Platter icon.",
+            control: (ids) => toggle(s, "discordUploadCatbox", ids),
+          },
+          {
+            key: "discordStatusLine",
+            section: "Integrations",
+            group: "Discord",
+            title: "Status line shows",
+            description: "What the member list shows after \"Listening to\": Platter, the artist, or the song.",
+            control: (ids) =>
+              select(s, (x) => x.discordStatusLine, DISCORD_STATUS_LINE, ids, (v) => updateSettings({ discordStatusLine: v })),
           },
         ] satisfies RowDef[])),
     // Lyrics and the full-window view

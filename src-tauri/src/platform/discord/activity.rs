@@ -20,7 +20,7 @@ const TEXT_MAX: usize = 128;
 const IMAGE_MAX: usize = 256;
 const BUTTON_URL_MAX: usize = 512;
 
-const IMAGE_HOSTS: &[&str] = &["coverartarchive.org", "i.imgur.com"];
+const IMAGE_HOSTS: &[&str] = &["coverartarchive.org", "i.imgur.com", "files.catbox.moe"];
 const BUTTON_HOSTS: &[&str] = &["song.link", "album.link"];
 
 /// Listening (2), or Playing (0) when the client refuses Listening.
@@ -37,6 +37,48 @@ impl Kind {
             Self::Playing => 0,
         }
     }
+}
+
+/// Which text Discord's member list shows after "Listening to"
+/// (`status_display_type`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StatusLine {
+    /// The app's name.
+    #[default]
+    App,
+    /// The artist (the activity's `state`).
+    Artist,
+    /// The song title (the activity's `details`).
+    Song,
+}
+
+impl StatusLine {
+    pub fn code(self) -> i64 {
+        match self {
+            Self::App => 0,
+            Self::Artist => 1,
+            Self::Song => 2,
+        }
+    }
+}
+
+/// The separate artists in a credit, for "by A, B": featured artists and
+/// ";" or "/" lists are split, while names joined by "&" stay whole (that is
+/// often one act).
+pub fn credit_list(artist: &str) -> String {
+    let mut cur = artist.trim().to_string();
+    for sep in [" feat. ", " Feat. ", " FEAT. ", " feat ", " ft. ", " Ft. ", " featuring ", " Featuring ", "; ", " / ", "(feat. ", "(ft. "] {
+        cur = cur.replace(sep, "\u{1}");
+    }
+    let mut names: Vec<String> = Vec::new();
+    for part in cur.split(['\u{1}', ',']) {
+        let n = part.trim().trim_matches(['(', ')', '[', ']']).trim();
+        if !n.is_empty() && !names.iter().any(|x| x.eq_ignore_ascii_case(n)) {
+            names.push(n.to_string());
+        }
+    }
+    names.join(", ")
 }
 
 /// The song as Discord will describe it.
@@ -69,7 +111,7 @@ fn host_ok(url: &str, hosts: &[&str], max: usize) -> bool {
         && u.host_str().is_some_and(|h| hosts.contains(&h))
 }
 
-/// Public cover hosts only (Cover Art Archive and Imgur).
+/// Public cover hosts only (Cover Art Archive, Imgur and catbox.moe).
 pub fn image_allowed(url: &str) -> bool {
     host_ok(url, IMAGE_HOSTS, IMAGE_MAX)
 }
@@ -97,7 +139,10 @@ pub fn fit(s: &str) -> Option<String> {
 }
 
 /// The activity to show, or None to show nothing.
-pub fn build(song: Option<&Song>, s: &DiscordSettings, kind: Kind) -> Option<Value> {
+///
+/// `with_line` adds `status_display_type`; it's left out once Discord has
+/// refused it.
+pub fn build(song: Option<&Song>, s: &DiscordSettings, kind: Kind, with_line: bool) -> Option<Value> {
     if !s.enabled || s.private_session {
         return None;
     }
@@ -109,10 +154,16 @@ pub fn build(song: Option<&Song>, s: &DiscordSettings, kind: Kind) -> Option<Val
         return None;
     }
     let mut a = json!({ "type": kind.code() });
+    if with_line {
+        a["status_display_type"] = s.status_line.code().into();
+    }
     if let Some(t) = fit(&song.title) {
         a["details"] = t.into();
     }
-    if let Some(t) = fit(&song.artist) {
+    let artists = credit_list(&song.artist);
+    if !artists.is_empty()
+        && let Some(t) = fit(&format!("by {artists}"))
+    {
         a["state"] = t.into();
     }
 
@@ -121,13 +172,15 @@ pub fn build(song: Option<&Song>, s: &DiscordSettings, kind: Kind) -> Option<Val
         .as_deref()
         .filter(|u| image_allowed(u))
         .filter(|_| !song.unreleased || s.unreleased_art);
+    // The cover alone (the app icon only stands in for a missing one).
     let mut assets = json!({ "large_image": cover.unwrap_or(APP_ICON) });
-    if let Some(t) = fit(&song.album) {
+    let hover = if song.playing || song.album.trim().is_empty() {
+        song.album.clone()
+    } else {
+        format!("{} (paused)", song.album.trim())
+    };
+    if let Some(t) = fit(&hover) {
         assets["large_text"] = t.into();
-    }
-    if cover.is_some() || !song.playing {
-        assets["small_image"] = APP_ICON.into();
-        assets["small_text"] = if song.playing { "Platter" } else { "Paused" }.into();
     }
     a["assets"] = assets;
 
@@ -170,57 +223,91 @@ mod tests {
 
     #[test]
     fn a_playing_song_is_listening_with_cover_progress_and_button() {
-        let a = build(Some(&song()), &on(), Kind::Listening).unwrap();
+        let a = build(Some(&song()), &on(), Kind::Listening, true).unwrap();
         assert_eq!(a["type"], 2);
         assert_eq!(a["details"], "Song");
-        assert_eq!(a["state"], "Band");
+        assert_eq!(a["state"], "by Band");
+        assert_eq!(a["status_display_type"], 0, "the member list names the app by default");
         assert_eq!(a["assets"]["large_text"], "Record");
         assert!(a["assets"]["large_image"].as_str().unwrap().starts_with("https://coverartarchive.org/"));
-        assert_eq!(a["assets"]["small_image"], APP_ICON);
+        assert!(a["assets"].get("small_image").is_none(), "no small image beside a cover");
         assert_eq!(a["timestamps"]["start"], 1_000_000);
         assert_eq!(a["timestamps"]["end"], 1_200_000);
         assert_eq!(a["buttons"][0]["label"], "Find this song");
         assert_eq!(a["buttons"][0]["url"], "https://song.link/i/123");
-        assert_eq!(build(Some(&song()), &on(), Kind::Playing).unwrap()["type"], 0);
+        assert_eq!(build(Some(&song()), &on(), Kind::Playing, true).unwrap()["type"], 0);
     }
 
     #[test]
     fn off_private_or_nothing_playing_shows_nothing() {
-        assert!(build(None, &on(), Kind::Listening).is_none());
+        assert!(build(None, &on(), Kind::Listening, true).is_none());
         let off = DiscordSettings { enabled: false, ..on() };
-        assert!(build(Some(&song()), &off, Kind::Listening).is_none());
+        assert!(build(Some(&song()), &off, Kind::Listening, true).is_none());
         let private = DiscordSettings { private_session: true, ..on() };
-        assert!(build(Some(&song()), &private, Kind::Listening).is_none());
+        assert!(build(Some(&song()), &private, Kind::Listening, true).is_none());
     }
 
     #[test]
     fn pause_clears_or_shows_paused_without_progress() {
         let paused = Song { playing: false, ..song() };
-        assert!(build(Some(&paused), &on(), Kind::Listening).is_none());
+        assert!(build(Some(&paused), &on(), Kind::Listening, true).is_none());
         let keep = DiscordSettings { clear_on_pause: false, ..on() };
-        let a = build(Some(&paused), &keep, Kind::Listening).unwrap();
+        let a = build(Some(&paused), &keep, Kind::Listening, true).unwrap();
         assert!(a.get("timestamps").is_none());
-        assert_eq!(a["assets"]["small_text"], "Paused");
+        assert_eq!(a["assets"]["large_text"], "Record (paused)");
+        assert!(a["assets"].get("small_image").is_none());
+    }
+
+    #[test]
+    fn without_a_cover_the_app_icon_is_the_only_image() {
+        let s = Song { image: None, ..song() };
+        let a = build(Some(&s), &on(), Kind::Listening, true).unwrap();
+        assert_eq!(a["assets"]["large_image"], APP_ICON);
+        assert_eq!(a["assets"]["large_text"], "Record");
+        assert!(a["assets"].get("small_image").is_none());
+    }
+
+    #[test]
+    fn status_line_follows_its_setting_and_can_be_left_out() {
+        for (line, code) in [(StatusLine::App, 0), (StatusLine::Artist, 1), (StatusLine::Song, 2)] {
+            let set = DiscordSettings { status_line: line, ..on() };
+            assert_eq!(build(Some(&song()), &set, Kind::Listening, true).unwrap()["status_display_type"], code);
+        }
+        assert!(build(Some(&song()), &on(), Kind::Listening, false).unwrap().get("status_display_type").is_none());
+    }
+
+    #[test]
+    fn state_lists_the_artists_after_by() {
+        assert_eq!(credit_list("Band feat. Guest"), "Band, Guest");
+        assert_eq!(credit_list("A; B / C"), "A, B, C");
+        assert_eq!(credit_list("Earth, Wind & Fire"), "Earth, Wind & Fire");
+        assert_eq!(credit_list("Simon & Garfunkel"), "Simon & Garfunkel");
+        assert_eq!(credit_list("A (feat. B)"), "A, B");
+        assert_eq!(credit_list("  "), "");
+        let s = Song { artist: "Band ft. Guest".into(), ..song() };
+        assert_eq!(build(Some(&s), &on(), Kind::Listening, true).unwrap()["state"], "by Band, Guest");
+        let none = Song { artist: String::new(), ..song() };
+        assert!(build(Some(&none), &on(), Kind::Listening, true).unwrap().get("state").is_none());
     }
 
     #[test]
     fn unreleased_songs_follow_their_settings_and_never_get_a_button() {
         let demo = Song { unreleased: true, ..song() };
-        let a = build(Some(&demo), &on(), Kind::Listening).unwrap();
+        let a = build(Some(&demo), &on(), Kind::Listening, true).unwrap();
         assert!(a.get("buttons").is_none());
         assert!(a["assets"]["large_image"].as_str().unwrap().starts_with("https://"));
         let no_art = DiscordSettings { unreleased_art: false, ..on() };
-        assert_eq!(build(Some(&demo), &no_art, Kind::Listening).unwrap()["assets"]["large_image"], APP_ICON);
+        assert_eq!(build(Some(&demo), &no_art, Kind::Listening, true).unwrap()["assets"]["large_image"], APP_ICON);
         let hidden = DiscordSettings { show_unreleased: false, ..on() };
-        assert!(build(Some(&demo), &hidden, Kind::Listening).is_none());
+        assert!(build(Some(&demo), &hidden, Kind::Listening, true).is_none());
         // Released songs are unaffected by the unreleased switches.
-        assert!(build(Some(&song()), &hidden, Kind::Listening).is_some());
+        assert!(build(Some(&song()), &hidden, Kind::Listening, true).is_some());
     }
 
     #[test]
     fn find_song_button_follows_its_setting() {
         let off = DiscordSettings { find_song: false, ..on() };
-        assert!(build(Some(&song()), &off, Kind::Listening).unwrap().get("buttons").is_none());
+        assert!(build(Some(&song()), &off, Kind::Listening, true).unwrap().get("buttons").is_none());
     }
 
     #[test]
@@ -235,7 +322,7 @@ mod tests {
         ] {
             assert!(!image_allowed(bad), "{bad}");
             let s = Song { image: Some(bad.into()), link: Some(bad.into()), ..song() };
-            let a = build(Some(&s), &on(), Kind::Listening).unwrap();
+            let a = build(Some(&s), &on(), Kind::Listening, true).unwrap();
             assert_eq!(a["assets"]["large_image"], APP_ICON);
             assert!(a.get("buttons").is_none());
         }
