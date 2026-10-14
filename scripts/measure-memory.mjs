@@ -1,10 +1,12 @@
 // Memory check for the album grid against the browser mock.
 //
 //   npx vite --port 1460            (in another terminal)
-//   node scripts/measure-memory.mjs [--dpr 1.5] [--albums 5000] [--url http://localhost:1460]
+//   node scripts/measure-memory.mjs [--page library|home] [--dpr 1.5] [--albums 5000]
+//                                   [--url http://localhost:1460] [--headed] [--args "--flag"]
 //   (set CHROME=<path to chrome.exe> to use an already installed Chromium)
 //
-// Opens Your Library with N albums, scrolls the whole grid, then reports the
+// Library: opens Your Library with N albums, scrolls the whole grid. Home:
+// opens Home, scrolls every shelf to its end and back. Both then report the
 // JS heap, DOM node count, mounted <img> count, the decoded size of the
 // mounted artwork and the private memory of the Chromium process tree
 // (Windows only). Art is served as real JPEGs at the size each URL asks for
@@ -19,11 +21,13 @@ const arg = (name, def) => {
 const base = arg("url", "http://localhost:1460");
 const dpr = Number(arg("dpr", "1"));
 const albums = Number(arg("albums", "5000"));
+const pageName = arg("page", "library");
+const headed = process.argv.includes("--headed");
 
 // A marker switch so the browser process can be found for the memory total.
 const marker = `--platter-measure=${process.pid}`;
 const browser = await chromium.launch({
-  headless: true,
+  headless: !headed,
   // --args "--flag-a --flag-b" tries browser switches (e.g. WebView2 candidates).
   args: [marker, ...arg("args", "").split(" ").filter(Boolean)],
   ...(process.env.CHROME ? { executablePath: process.env.CHROME } : { channel: "chromium" }),
@@ -131,13 +135,74 @@ async function snapshot(label) {
   return row;
 }
 
+// Frame timing while scrolling: share of frames slower than 20 ms.
+async function frames(run) {
+  await page.evaluate(() => {
+    window.__frames = [];
+    let last = performance.now();
+    const tick = (t) => {
+      window.__frames.push(t - last);
+      last = t;
+      if (window.__frames.length < 100000 && !window.__stopFrames) requestAnimationFrame(tick);
+    };
+    window.__stopFrames = false;
+    requestAnimationFrame(tick);
+  });
+  await run();
+  return page.evaluate(() => {
+    window.__stopFrames = true;
+    const f = window.__frames.slice(1);
+    const slow = f.filter((x) => x > 20).length;
+    return { frames: f.length, slowPct: +((100 * slow) / Math.max(1, f.length)).toFixed(1), worstMs: Math.round(Math.max(0, ...f)) };
+  });
+}
+
 await page.goto(`${base}/?albums=${albums}&latency=0&httpArt=1`);
+
+if (pageName === "home") {
+  await page.locator(".shelf__row .card").first().waitFor();
+  await page.waitForTimeout(1500);
+  await snapshot(`home loaded (dpr ${dpr})`);
+  const f = await frames(async () => {
+    const n = await page.locator(".shelf__row").count();
+    for (let i = 0; i < n; i++) {
+      for (let step = 0; step < 40; step++) {
+        const done = await page.evaluate((i) => {
+          const el = document.querySelectorAll(".shelf__row")[i];
+          el.scrollLeft += 40;
+          return el.scrollLeft + el.clientWidth >= el.scrollWidth - 2;
+        }, i);
+        await page.waitForTimeout(16);
+        if (done) break;
+      }
+    }
+  });
+  console.log(JSON.stringify({ label: "shelf scroll frames", ...f }));
+  await page.waitForTimeout(1500);
+  await snapshot("after scrolling every shelf");
+  await page.evaluate(() => document.querySelectorAll(".shelf__row").forEach((el) => (el.scrollLeft = 0)));
+  await page.waitForTimeout(1500);
+  await snapshot("shelves back at start");
+  await page.waitForTimeout(10000);
+  await snapshot("10 s later");
+  await browser.close();
+  process.exit(0);
+}
+
 await page.getByRole("button", { name: "Your Library" }).first().click();
 await page.getByRole("list", { name: "Albums" }).waitFor();
 await page.waitForTimeout(1500);
 await snapshot(`library loaded (dpr ${dpr})`);
 
-// Scroll the whole grid in viewport-sized steps.
+// Smooth-ish scroll for a few seconds (frame timing), then the whole grid
+// in viewport-sized steps.
+const gridFrames = await frames(async () => {
+  for (let i = 0; i < 180; i++) {
+    await page.evaluate(() => (document.querySelector(".main__scroll").scrollTop += 60));
+    await page.waitForTimeout(16);
+  }
+});
+console.log(JSON.stringify({ label: "grid scroll frames", ...gridFrames }));
 for (;;) {
   const done = await page.evaluate(() => {
     const el = document.querySelector(".main__scroll");
