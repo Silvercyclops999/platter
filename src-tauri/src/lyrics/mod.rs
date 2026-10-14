@@ -2,20 +2,24 @@
 //! `lyrics_get`).
 //!
 //! Sources in order: the Plex server's lyrics stream (a sidecar .lrc or .txt
-//! file, or Plex's own lyrics), then LRCLIB when its setting is on. LRCLIB
-//! answers are cached in SQLite (found: 30 days, none: 7 days); Plex isn't
-//! cached here (the server keeps its own).
+//! file, or Plex's own lyrics), then lyrics the user wrote in the app, then
+//! LRCLIB when its setting is on. The user's own lyrics go first instead
+//! when they asked for that (for the song, or for every song in Settings).
+//! LRCLIB answers are cached in SQLite (found: 30 days, none: 7 days); Plex
+//! isn't cached here (the server keeps its own).
 //!
 //! Layout:
 //! - [`lrclib`]   the LRCLIB requests and match rules (pure)
 //! - [`cache`]    the `lyrics_cache` table
-//! - [`commands`] the Tauri command and the Plex side
+//! - [`user`]     the `user_lyrics` table (the lyrics editor's saves)
+//! - [`commands`] the Tauri commands and the Plex side
 //!
 //! Any source being down is silent: the view says there are no lyrics.
 
 pub mod cache;
 pub mod commands;
 pub mod lrclib;
+pub mod user;
 
 #[cfg(test)]
 mod tests;
@@ -31,7 +35,7 @@ use crate::artistinfo::http::InfoHttp;
 use crate::artistinfo::limit::Limiter;
 use crate::db::DbHandle;
 use crate::db::queries::now_s;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::plex::details::{Lyrics, LyricsSource, parse_lyrics_text};
 use crate::share::matching::exact_key;
 use lrclib::Query;
@@ -96,25 +100,52 @@ struct Inner {
     limiter: Limiter,
     /// "Lyrics from LRCLIB when Plex has none" (Settings).
     lrclib_on: Arc<AtomicBool>,
+    /// "Prefer my own lyrics over Plex's" (Settings).
+    prefer_own: Arc<AtomicBool>,
+}
+
+/// The switches lyrics read from Settings.
+#[derive(Clone, Default)]
+pub struct Switches {
+    pub lrclib: Arc<AtomicBool>,
+    pub prefer_own: Arc<AtomicBool>,
 }
 
 impl LyricsService {
-    pub fn new(db: DbHandle, http: Arc<dyn InfoHttp>, plex: Arc<dyn PlexLyrics>, lrclib_on: Arc<AtomicBool>) -> Self {
-        Self::with_gap(db, http, plex, lrclib_on, LRCLIB_GAP)
+    pub fn new(db: DbHandle, http: Arc<dyn InfoHttp>, plex: Arc<dyn PlexLyrics>, switches: Switches) -> Self {
+        Self::with_gap(db, http, plex, switches, LRCLIB_GAP)
     }
 
-    pub fn with_gap(db: DbHandle, http: Arc<dyn InfoHttp>, plex: Arc<dyn PlexLyrics>, lrclib_on: Arc<AtomicBool>, gap: Duration) -> Self {
-        Self { inner: Arc::new(Inner { db, http, plex, limiter: Limiter::with_gap(gap), lrclib_on }) }
+    pub fn with_gap(db: DbHandle, http: Arc<dyn InfoHttp>, plex: Arc<dyn PlexLyrics>, switches: Switches, gap: Duration) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                db,
+                http,
+                plex,
+                limiter: Limiter::with_gap(gap),
+                lrclib_on: switches.lrclib,
+                prefer_own: switches.prefer_own,
+            }),
+        }
     }
 
     /// The track's lyrics, or None when no source has them (or a source is
     /// down: that's silent).
     pub async fn get(&self, track_id: &str) -> AppResult<Option<Lyrics>> {
+        let own = self.own(track_id).await?;
+        let own_first = own.as_ref().is_some_and(|o| o.prefer) || self.inner.prefer_own.load(Ordering::Relaxed);
+        let own = own.and_then(|o| user::to_lyrics(&o.text));
+        if own_first && own.is_some() {
+            return Ok(own);
+        }
         match self.inner.plex.lyrics(track_id).await {
             Ok(Some(l)) => return Ok(Some(l)),
             Ok(None) => {}
             Err(e) if e.kind() == "invalid" => return Err(e),
             Err(e) => tracing::debug!(kind = e.kind(), "plex lyrics unavailable"),
+        }
+        if own.is_some() {
+            return Ok(own);
         }
         if !self.inner.lrclib_on.load(Ordering::Relaxed) {
             return Ok(None);
@@ -127,6 +158,40 @@ impl LyricsService {
             return Ok(None);
         }
         self.lrclib(&q).await
+    }
+
+    /// The track's own lyrics, as saved by the editor.
+    pub async fn own(&self, track_id: &str) -> AppResult<Option<user::OwnLyrics>> {
+        if !user::valid_track_id(track_id) {
+            return Ok(None);
+        }
+        let id = track_id.to_owned();
+        self.inner.db.read_async(move |c| user::get(c, &id)).await
+    }
+
+    /// Save the track's own lyrics (LRC or plain lines).
+    pub async fn save_own(&self, track_id: &str, text: &str, prefer: bool) -> AppResult<()> {
+        if !user::valid_track_id(track_id) {
+            return Err(AppError::Invalid("track id".into()));
+        }
+        let text = user::clean(text)?;
+        let id = track_id.to_owned();
+        let now = now_s();
+        self.inner.db.write_async(move |c| user::put(c, &id, &text, prefer, now)).await
+    }
+
+    /// Remove the track's own lyrics. True when there were some.
+    pub async fn delete_own(&self, track_id: &str) -> AppResult<bool> {
+        if !user::valid_track_id(track_id) {
+            return Ok(false);
+        }
+        let id = track_id.to_owned();
+        self.inner.db.write_async(move |c| user::delete(c, &id)).await
+    }
+
+    /// Every track with its own lyrics.
+    pub async fn own_ids(&self) -> AppResult<Vec<String>> {
+        self.inner.db.read_async(user::ids).await
     }
 
     async fn lrclib(&self, q: &Query) -> AppResult<Option<Lyrics>> {

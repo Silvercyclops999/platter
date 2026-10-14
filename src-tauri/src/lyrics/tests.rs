@@ -43,6 +43,7 @@ struct Fx {
     http: Arc<FakeHttp>,
     plex: Arc<FakePlex>,
     on: Arc<AtomicBool>,
+    prefer: Arc<AtomicBool>,
     db: DbHandle,
     _dir: tempfile::TempDir,
 }
@@ -68,8 +69,10 @@ fn fx() -> Fx {
     let http = Arc::new(FakeHttp::new());
     let plex = Arc::new(FakePlex::default());
     let on = Arc::new(AtomicBool::new(true));
-    let svc = LyricsService::with_gap(db.clone(), http.clone(), plex.clone(), on.clone(), Duration::from_millis(1));
-    Fx { svc, http, plex, on, db, _dir: dir }
+    let prefer = Arc::new(AtomicBool::new(false));
+    let switches = Switches { lrclib: on.clone(), prefer_own: prefer.clone() };
+    let svc = LyricsService::with_gap(db.clone(), http.clone(), plex.clone(), switches, Duration::from_millis(1));
+    Fx { svc, http, plex, on, prefer, db, _dir: dir }
 }
 
 const SYNCED: &str = "[00:01.00]Hello\n[00:02.00]World";
@@ -247,4 +250,81 @@ async fn unknown_tracks_and_bad_ids() {
     f.plex.set("../x", Err("invalid"));
     assert_eq!(f.svc.get("../x").await.unwrap_err().kind(), "invalid");
     assert_eq!(*f.plex.calls.lock(), 2);
+}
+
+// ---------------------------------------------------------------- own lyrics
+
+const MINE: &str = "[00:01.50]My first line\n[00:04.00]My second line";
+
+#[tokio::test]
+async fn own_lyrics_come_after_plex_and_before_lrclib() {
+    let f = fx();
+    f.http.route("api/get", 200, &record("Test Artist", "Opening", 200.0, Some(SYNCED), None).to_string());
+    f.svc.save_own("501", MINE, false).await.unwrap();
+    // No Plex lyrics: the user's own, and LRCLIB isn't asked.
+    let l = f.svc.get("501").await.unwrap().unwrap();
+    assert_eq!(l.source, LyricsSource::User);
+    assert!(l.synced);
+    assert_eq!(l.timed[0].start_ms, 1500);
+    assert!(f.http.urls().is_empty());
+    // Plex has some: Plex's.
+    f.plex.set("501", Ok(Some(plex_lyrics())));
+    assert_eq!(f.svc.get("501").await.unwrap().unwrap().source, LyricsSource::Plex);
+}
+
+#[tokio::test]
+async fn preferring_own_lyrics_per_song_or_for_every_song() {
+    let f = fx();
+    f.plex.set("501", Ok(Some(plex_lyrics())));
+    f.svc.save_own("501", MINE, true).await.unwrap();
+    assert_eq!(f.svc.get("501").await.unwrap().unwrap().source, LyricsSource::User);
+    assert_eq!(*f.plex.calls.lock(), 0, "Plex isn't asked when the song prefers its own");
+    f.svc.save_own("501", MINE, false).await.unwrap();
+    assert_eq!(f.svc.get("501").await.unwrap().unwrap().source, LyricsSource::Plex);
+    f.prefer.store(true, Ordering::Relaxed);
+    assert_eq!(f.svc.get("501").await.unwrap().unwrap().source, LyricsSource::User);
+    // The setting alone shows nothing new for songs without their own.
+    f.plex.set("801", Ok(Some(plex_lyrics())));
+    assert_eq!(f.svc.get("801").await.unwrap().unwrap().source, LyricsSource::Plex);
+}
+
+#[tokio::test]
+async fn own_lyrics_save_replace_list_and_delete() {
+    let f = fx();
+    assert_eq!(f.svc.own("501").await.unwrap(), None);
+    f.svc.save_own("501", "\u{feff}\r\n  Plain line one\r\nPlain line two\r\n\r\n", false).await.unwrap();
+    let own = f.svc.own("501").await.unwrap().unwrap();
+    assert_eq!(own.text, "Plain line one\nPlain line two");
+    assert!(!own.prefer);
+    let l = f.svc.get("501").await.unwrap().unwrap();
+    assert!(!l.synced, "plain lines save without timing");
+    assert_eq!(l.lines, vec!["Plain line one", "Plain line two"]);
+    f.svc.save_own("501", MINE, true).await.unwrap();
+    f.svc.save_own("801", "Words", false).await.unwrap();
+    assert!(f.svc.own("501").await.unwrap().unwrap().prefer);
+    assert_eq!(f.svc.own_ids().await.unwrap(), vec!["501", "801"]);
+    assert!(f.svc.delete_own("501").await.unwrap());
+    assert!(!f.svc.delete_own("501").await.unwrap());
+    assert_eq!(f.svc.own_ids().await.unwrap(), vec!["801"]);
+}
+
+#[tokio::test]
+async fn own_lyrics_refuse_empty_long_or_bad_ids() {
+    let f = fx();
+    assert_eq!(f.svc.save_own("501", "  \n\n ", false).await.unwrap_err().kind(), "invalid");
+    assert_eq!(f.svc.save_own("501", "[00:01.00]\n[ar:Someone]", false).await.unwrap_err().kind(), "invalid");
+    let long = "la ".repeat(user::MAX_BYTES);
+    assert_eq!(f.svc.save_own("501", &long, false).await.unwrap_err().kind(), "invalid");
+    assert_eq!(f.svc.save_own("../x", "Words", false).await.unwrap_err().kind(), "invalid");
+    assert_eq!(f.svc.own("../x").await.unwrap(), None);
+    assert!(f.svc.own_ids().await.unwrap().is_empty());
+}
+
+#[test]
+fn export_names_are_safe_file_names() {
+    assert_eq!(user::export_file_name("Test Artist - Opening"), "Test Artist - Opening.lrc");
+    assert_eq!(user::export_file_name("AC/DC: What? *Live*"), "AC_DC_ What_ _Live_.lrc");
+    assert_eq!(user::export_file_name("  ...  "), "Lyrics.lrc");
+    assert_eq!(user::export_file_name("song.LRC"), "song.LRC");
+    assert!(user::export_file_name(&"x".repeat(500)).chars().count() <= 124);
 }

@@ -76,9 +76,13 @@ pub struct Lyrics {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LyricsSource {
-    /// The Plex server (a sidecar file or Plex's own lyrics).
+    /// Plex's own lyrics (an agent such as LyricFind supplied them).
     #[default]
     Plex,
+    /// A .lrc or .txt file next to the song, served by Plex.
+    File,
+    /// Written by the user in the app.
+    User,
     /// LRCLIB, when its setting is on and Plex had none.
     Lrclib,
 }
@@ -175,6 +179,9 @@ struct Stream {
     codec: Option<String>,
     #[serde(default, deserialize_with = "lenient::opt_string")]
     format: Option<String>,
+    /// The agent that supplied a lyrics stream.
+    #[serde(default, deserialize_with = "lenient::opt_string")]
+    provider: Option<String>,
 }
 
 fn first_meta(body: &[u8]) -> AppResult<Meta> {
@@ -196,6 +203,19 @@ struct TrackExtras {
     credits: Vec<Contributor>,
     /// Path of the lyrics stream, if the track has one.
     lyrics_path: Option<String>,
+    /// That stream is a .lrc or .txt file next to the song, not lyrics an
+    /// agent supplied.
+    lyrics_file: bool,
+}
+
+/// A lyrics stream comes from a file next to the song when Plex's local
+/// media agent supplied it (or no agent is named). Lyrics services name
+/// their own agent (`com.plexapp.agents.lyricfind`).
+fn is_sidecar(provider: Option<&str>) -> bool {
+    match provider.map(str::trim).filter(|p| !p.is_empty()) {
+        None => true,
+        Some(p) => p.to_ascii_lowercase().contains("localmedia"),
+    }
 }
 
 fn non_empty(s: Option<String>) -> Option<String> {
@@ -241,18 +261,16 @@ fn track_extras(m: Meta) -> TrackExtras {
             .iter()
             .any(|v| v.as_deref().is_some_and(|c| c.eq_ignore_ascii_case("lrc")))
     };
-    let lyrics_path = lyric_streams
-        .iter()
-        .find(|s| is_lrc(s))
-        .or(lyric_streams.first())
-        .and_then(|s| match (&s.key, s.id) {
-            (Some(k), _) if k.starts_with('/') => Some(k.clone()),
-            (_, Some(id)) => Some(format!("/library/streams/{id}")),
-            _ => None,
-        });
+    let chosen = lyric_streams.iter().find(|s| is_lrc(s)).or(lyric_streams.first());
+    let lyrics_path = chosen.and_then(|s| match (&s.key, s.id) {
+        (Some(k), _) if k.starts_with('/') => Some(k.clone()),
+        (_, Some(id)) => Some(format!("/library/streams/{id}")),
+        _ => None,
+    });
     TrackExtras {
         artist_id: non_empty(m.grandparent_rating_key),
         credits,
+        lyrics_file: lyrics_path.is_some() && chosen.is_some_and(|s| is_sidecar(s.provider.as_deref())),
         lyrics_path,
     }
 }
@@ -561,7 +579,7 @@ pub async fn fetch(client: &PlexClient, track_id: &str) -> AppResult<NowPlayingD
             .await
             .map_err(|e| tracing::debug!(kind = e.kind(), "lyrics unavailable"))
             .ok()?;
-        parse_lyrics(&body)
+        parse_lyrics(&body).map(|l| from_stream(l, extras.lyrics_file))
     };
     let (artist, lyrics) = futures::join!(artist, lyrics);
     Ok(NowPlayingDetails {
@@ -582,7 +600,8 @@ pub async fn fetch_lyrics(client: &PlexClient, track_id: &str) -> AppResult<Opti
     let body = client
         .get_bytes(&format!("/library/metadata/{track_id}"), &[])
         .await?;
-    let Some(path) = track_extras(first_meta(&body)?).lyrics_path else {
+    let extras = track_extras(first_meta(&body)?);
+    let Some(path) = extras.lyrics_path else {
         return Ok(None);
     };
     Ok(client
@@ -590,7 +609,16 @@ pub async fn fetch_lyrics(client: &PlexClient, track_id: &str) -> AppResult<Opti
         .await
         .map_err(|e| tracing::debug!(kind = e.kind(), "lyrics unavailable"))
         .ok()
-        .and_then(|b| parse_lyrics(&b)))
+        .and_then(|b| parse_lyrics(&b))
+        .map(|l| from_stream(l, extras.lyrics_file)))
+}
+
+/// Mark lyrics read from a file next to the song.
+fn from_stream(mut l: Lyrics, file: bool) -> Lyrics {
+    if file {
+        l.source = LyricsSource::File;
+    }
+    l
 }
 
 /// docs/IPC.md `now_playing_details`.
@@ -658,6 +686,20 @@ mod tests {
         );
         // The lrc stream has no key, so its path is built from the id.
         assert_eq!(x.lyrics_path.as_deref(), Some("/library/streams/78"));
+        // No agent named: a file next to the song.
+        assert!(x.lyrics_file);
+    }
+
+    #[test]
+    fn lyrics_from_an_agent_are_not_a_file() {
+        let mut t = track_fixture();
+        t["Media"][0]["Part"][0]["Stream"][2]["provider"] = json!("com.plexapp.agents.lyricfind");
+        assert!(!track_extras(meta(t.clone())).lyrics_file);
+        t["Media"][0]["Part"][0]["Stream"][2]["provider"] = json!("com.plexapp.agents.localmedia");
+        assert!(track_extras(meta(t)).lyrics_file);
+        let l = from_stream(parse_lyrics_text("Hello"), true);
+        assert_eq!(l.source, LyricsSource::File);
+        assert_eq!(from_stream(parse_lyrics_text("Hello"), false).source, LyricsSource::Plex);
     }
 
     #[test]

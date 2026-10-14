@@ -121,6 +121,7 @@ pub fn run() {
         // Launch at login (a LaunchAgent on macOS, the default).
         .plugin(tauri_plugin_autostart::Builder::new().arg(platform::AUTOSTART_ARG).build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(updates::Updates::default())
         .register_asynchronous_uri_scheme_protocol("art", |ctx, req, responder| {
             let cache = ctx.app_handle().state::<ArtCache>().inner().clone();
@@ -310,7 +311,7 @@ pub fn run() {
                 db.clone(),
                 lyrics_http,
                 Arc::new(lyrics::commands::PlexSource(plex.clone())),
-                live.lyrics_lrclib.clone(),
+                lyrics::Switches { lrclib: live.lyrics_lrclib.clone(), prefer_own: live.lyrics_prefer_own.clone() },
             ));
 
             plex.start(app.handle().clone());
@@ -345,6 +346,11 @@ pub fn run() {
             plex::commands::health,
             plex::details::now_playing_details,
             lyrics::commands::lyrics_get,
+            lyrics::commands::lyrics_own_get,
+            lyrics::commands::lyrics_own_save,
+            lyrics::commands::lyrics_own_delete,
+            lyrics::commands::lyrics_own_ids,
+            lyrics::commands::lyrics_export,
             db::commands::sync_status,
             db::commands::sync_now,
             db::commands::home,

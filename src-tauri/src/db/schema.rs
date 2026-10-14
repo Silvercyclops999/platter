@@ -455,6 +455,16 @@ CREATE TABLE IF NOT EXISTS album_tags (
 );
 CREATE INDEX IF NOT EXISTS album_tags_grp ON album_tags (grp);
 "#,
+    // v14: lyrics the user wrote in the app (lyrics::user), as LRC text (or
+    // plain lines), one row per track. prefer: show them ahead of Plex's.
+    r#"
+CREATE TABLE IF NOT EXISTS user_lyrics (
+    track_id   TEXT PRIMARY KEY,
+    body       TEXT NOT NULL,
+    prefer     INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL
+);
+"#,
 ];
 
 #[cfg(test)]
@@ -672,6 +682,17 @@ mod tests {
         c.execute(row, []).unwrap();
         assert!(c.execute(row, []).is_err(), "one row per part key");
         c.execute("INSERT INTO album_tags (album_id, grp, face_id) VALUES ('1', 'g', '1')", []).unwrap();
+    }
+
+    #[test]
+    fn v14_adds_user_lyrics() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        migrate(&mut c).unwrap();
+        const { assert!(SCHEMA_VERSION >= 14) };
+        let row = "INSERT INTO user_lyrics (track_id, body, updated_at) VALUES ('1', 'Hello', 1)";
+        c.execute(row, []).unwrap();
+        assert!(c.execute(row, []).is_err(), "one row per track");
     }
 
     #[test]

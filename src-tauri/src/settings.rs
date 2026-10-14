@@ -270,6 +270,10 @@ pub struct Settings {
     /// Look lyrics up on LRCLIB when Plex has none (sends artist, title,
     /// album and length).
     pub lyrics_lrclib: bool,
+    /// The user's own lyrics show ahead of Plex's for every song.
+    pub lyrics_prefer_own: bool,
+    /// Songs without lyrics offer "Add lyrics" in the lyrics view.
+    pub lyrics_show_add: bool,
     /// The full-window view hides its controls after 3 s without movement.
     pub full_window_hide_controls: bool,
     /// Read explicit, version and edition tags from the files (this device only).
@@ -351,6 +355,8 @@ impl Default for Settings {
             show_plex_avatar: true,
             lyrics_mode: LyricsMode::AutoShow,
             lyrics_lrclib: false,
+            lyrics_prefer_own: false,
+            lyrics_show_add: true,
             full_window_hide_controls: true,
             read_file_tags: true,
             explicit_content: ExplicitContent::Allowed,
@@ -426,6 +432,8 @@ pub struct SettingsPatch {
     pub show_plex_avatar: Option<bool>,
     pub lyrics_mode: Option<LyricsMode>,
     pub lyrics_lrclib: Option<bool>,
+    pub lyrics_prefer_own: Option<bool>,
+    pub lyrics_show_add: Option<bool>,
     pub full_window_hide_controls: Option<bool>,
     pub read_file_tags: Option<bool>,
     pub explicit_content: Option<ExplicitContent>,
@@ -511,6 +519,8 @@ impl Settings {
         set(&mut self.show_plex_avatar, p.show_plex_avatar);
         set(&mut self.lyrics_mode, p.lyrics_mode);
         set(&mut self.lyrics_lrclib, p.lyrics_lrclib);
+        set(&mut self.lyrics_prefer_own, p.lyrics_prefer_own);
+        set(&mut self.lyrics_show_add, p.lyrics_show_add);
         set(&mut self.full_window_hide_controls, p.full_window_hide_controls);
         set(&mut self.read_file_tags, p.read_file_tags);
         set(&mut self.explicit_content, p.explicit_content);
@@ -621,6 +631,8 @@ pub struct Live {
     pub discord: DiscordSwitches,
     /// Lyrics from LRCLIB when Plex has none.
     pub lyrics_lrclib: Arc<AtomicBool>,
+    /// The user's own lyrics ahead of Plex's.
+    pub lyrics_prefer_own: Arc<AtomicBool>,
     /// The file tag scan, once it exists (it starts after settings load).
     pub tag_scanner: Arc<parking_lot::Mutex<Option<crate::tags::scan::TagScanner>>>,
 }
@@ -633,6 +645,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links, Ordering::Relaxed);
     live.lyrics_lrclib.store(s.lyrics_lrclib, Ordering::Relaxed);
+    live.lyrics_prefer_own.store(s.lyrics_prefer_own, Ordering::Relaxed);
     // Global with no source for it on quietly ranks by plays.
     db.set_popular_source(if s.info_listenbrainz || s.info_lastfm { s.popular_source } else { PopularSource::MyPlays });
     db.set_link_featured(s.link_featured);
@@ -1021,6 +1034,8 @@ mod tests {
             show_plex_avatar: Some(false),
             lyrics_mode: Some(LyricsMode::Off),
             lyrics_lrclib: Some(true),
+            lyrics_prefer_own: Some(true),
+            lyrics_show_add: Some(false),
             full_window_hide_controls: Some(false),
             read_file_tags: Some(false),
             explicit_content: Some(ExplicitContent::Filtered),
@@ -1269,6 +1284,13 @@ mod tests {
         publish(&s, &live, &db);
         assert!(live.lyrics_lrclib.load(Ordering::Relaxed));
         assert_eq!(s.lyrics_mode, LyricsMode::Off);
+        // Own lyrics: Plex's first, and "Add lyrics" offered, until changed.
+        assert!(!s.lyrics_prefer_own && s.lyrics_show_add);
+        assert!(!live.lyrics_prefer_own.load(Ordering::Relaxed));
+        s.apply(&serde_json::from_str(r#"{"lyricsPreferOwn":true,"lyricsShowAdd":false}"#).unwrap()).unwrap();
+        publish(&s, &live, &db);
+        assert!(live.lyrics_prefer_own.load(Ordering::Relaxed));
+        assert!(!s.lyrics_show_add);
         assert!(!s.full_window_hide_controls);
     }
 }
