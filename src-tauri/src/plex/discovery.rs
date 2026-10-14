@@ -1,6 +1,6 @@
-//! Server discovery and the connection race (spec 02 steps 5–6).
+//! Server discovery and the connection race.
 //!
-//! Servers come only from plex.tv's resources list (CLAUDE.md rule 4b): no
+//! Servers come only from plex.tv's resources list: no
 //! VPN or hard-coded address is ever assumed. Each server's connections are
 //! probed in parallel at `/identity`; the winner is the best *class* that
 //! answers (local > remote > relay), not simply the first responder — on the
@@ -395,7 +395,7 @@ pub struct DiscoveryCache {
     pub servers: Vec<CachedServer>,
     #[serde(default)]
     pub selected: Option<String>,
-    /// Servers whose library settings were already checked (spec 02).
+    /// Servers whose library settings were already checked.
     #[serde(default)]
     pub settings_checked: Vec<String>,
 }

@@ -1,6 +1,6 @@
 //! Reads behind every Library command in docs/IPC.md.
 //!
-//! Home definitions (spec 03):
+//! Home definitions:
 //! - **Recently played**: albums by the most recent play of any of their
 //!   tracks, merging Plex history (`play_history`, all devices) with the local
 //!   listen log (catches offline plays not yet reported). Falls back to the

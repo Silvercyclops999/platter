@@ -35,7 +35,7 @@ pub struct SyncStatus {
 }
 
 /// What a sync run ended with. Not on the IPC surface directly; the
-/// integrator maps it to `Health.banner` (spec 07 library rows) via
+/// integrator maps it to `Health.banner` via
 /// [`DbEvents::sync_outcome`](super::DbEvents::sync_outcome).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]

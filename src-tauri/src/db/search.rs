@@ -1,4 +1,4 @@
-//! Local search (spec 05).
+//! Local search.
 //!
 //! - FTS5 over artists, albums (+ album artist), tracks (+ album artist,
 //!   album, track artist) and playlists; tokenizer `unicode61

@@ -1,4 +1,4 @@
-/* Design tokens (spec 01). Mirrors src/design/tokens.ts — keep in sync
+/* Design tokens. Mirrors src/design/tokens.ts — keep in sync
    (tokens.test.ts checks every value). Dark theme only for Phase 1. */
 
 :root {

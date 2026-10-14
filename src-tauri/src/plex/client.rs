@@ -496,7 +496,7 @@ impl PlaybackState {
     }
 }
 
-/// `/:/timeline` report (spec 06).
+/// `/:/timeline` report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineReport {
     pub rating_key: String,
@@ -1226,7 +1226,7 @@ impl PlexClient {
         self.send(rb).await.map(|_| ())
     }
 
-    // ---- play tracking (spec 06) ------------------------------------------
+    // ---- play tracking ------------------------------------------
 
     /// `GET /:/timeline` progress report.
     pub async fn timeline(&self, r: &TimelineReport) -> AppResult<()> {

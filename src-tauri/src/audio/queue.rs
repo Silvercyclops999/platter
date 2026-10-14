@@ -1,4 +1,4 @@
-//! The play queue (spec 04), pure logic.
+//! The play queue, pure logic.
 //!
 //! * A **context** (album, playlist, artist, tracks, search) supplies
 //!   "Next up": the rest of the context after the current position.

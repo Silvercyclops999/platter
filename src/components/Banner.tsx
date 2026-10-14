@@ -17,7 +17,7 @@ const ICONS = {
   progress: RefreshCw,
 };
 
-/** Full-width message strip at the top of the main view (connection states, spec 07). */
+/** Full-width message strip at the top of the main view (connection states). */
 export function Banner({ kind, children, action }: BannerProps) {
   const Icon = ICONS[kind];
   return (

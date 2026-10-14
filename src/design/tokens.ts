@@ -1,5 +1,5 @@
 /**
- * Design tokens for Platter (spec 01).
+ * Design tokens for Platter.
  *
  * This file is the source of truth for values used from TypeScript (canvas
  * work, inline styles, tests). `tokens.css` declares the same values as CSS
@@ -53,7 +53,7 @@ export const color = {
   error: "#F2555A",
   info: "#5AA9F5",
 
-  // Connection status dot (spec 07)
+  // Connection status dot
   statusLocal: "#3FCF8E",
   statusRemote: "#4C9EFF",
   statusRelay: "#F2B13D",

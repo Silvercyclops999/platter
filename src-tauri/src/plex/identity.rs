@@ -1,5 +1,5 @@
 //! Stable per-install client identity and the `X-Plex-*` headers sent on
-//! every request (spec 02 "Stable client identity").
+//! every request.
 
 use std::path::Path;
 

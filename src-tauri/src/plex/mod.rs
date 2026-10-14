@@ -1,5 +1,5 @@
 //! Plex client: PIN sign-in, keychain, server discovery and connection race,
-//! and the HTTP API used by sync, playback and tracking (spec 02).
+//! and the HTTP API used by sync, playback and tracking.
 //!
 //! Layout:
 //! - [`token`]: the `Token` secret type (redacting `Debug`, never displayed).

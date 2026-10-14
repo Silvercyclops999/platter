@@ -1,6 +1,6 @@
 //! Controller tests: commands → engine → events, with a capture output and
-//! a local HTTP server. Covers the spec 04 queue/playback rules end to end
-//! and the spec 06 tracking signals.
+//! a local HTTP server. Covers the queue/playback rules end to end
+//! and the play tracking signals.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

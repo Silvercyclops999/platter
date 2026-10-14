@@ -8,8 +8,8 @@
 //! - [`queries`]  every Library read in docs/IPC.md
 //! - [`sync`]     first / incremental / weekly full sync, deletions, library
 //!   replaced detection
-//! - [`search`]   local search (spec 05)
-//! - [`listens`]  local listen log + offline report queue (spec 06)
+//! - [`search`]   local search
+//! - [`listens`]  local listen log + offline report queue
 //! - [`artcache`] artwork disk cache (LRU, size cap, request coalescing)
 //! - [`commands`] Tauri command fns (registered by the integrator in lib.rs)
 //!

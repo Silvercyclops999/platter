@@ -1,5 +1,5 @@
 //! Payloads the player emits: UI events (docs/IPC.md "Playback & queue") and
-//! the internal play-tracking stream for spec 06.
+//! the internal play-tracking stream.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ pub const EV_STATE: &str = "player://state";
 pub const EV_POSITION: &str = "player://position";
 pub const EV_ERROR: &str = "player://error";
 
-/// The message shown when a track can't be played (spec 07).
+/// The message shown when a track can't be played.
 pub const SKIPPED_MESSAGE: &str = "Skipped: file unavailable";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,7 +96,7 @@ impl<R: tauri::Runtime> EventSink for TauriSink<R> {
     }
 }
 
-/// Signals for play tracking (spec 06): Plex `/:/timeline` + `/:/scrobble`
+/// Signals for play tracking: Plex `/:/timeline` + `/:/scrobble`
 /// and the local listen log. Delivered on a `tokio::sync::broadcast`
 /// channel from [`super::player::PlayerHandle::subscribe_tracking`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

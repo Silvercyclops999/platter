@@ -1,4 +1,4 @@
-//! Tauri commands for Library (spec 03) and Search (spec 05), per
+//! Tauri commands for Library and Search, per
 //! docs/IPC.md. Registered by the integrator in `lib.rs`:
 //!
 //! ```ignore

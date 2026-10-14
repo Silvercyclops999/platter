@@ -8,7 +8,7 @@ import { useApp } from "../stores/app";
 import { Logo } from "../shell/Logo";
 import { TitleBar } from "../shell/TitleBar";
 
-/** Welcome screen (spec 02): Sign in with Plex → PIN code → waiting / cancel. */
+/** Welcome screen: Sign in with Plex → PIN code → waiting / cancel. */
 export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
   const auth = useApp((s) => s.auth);
   const [pin, setPin] = useState<PinInfo | null>(null);
@@ -101,7 +101,7 @@ export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
   );
 }
 
-/** Shown when signed in but several servers are available (spec 02). */
+/** Shown when signed in but several servers are available. */
 export function ServerPickPage() {
   const accessRemoved = useApp((s) => s.health?.banner?.kind === "accessRemoved");
   const [servers, setServers] = useState<ServerInfo[] | null>(null);

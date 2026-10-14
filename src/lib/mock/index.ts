@@ -2,7 +2,7 @@
  * In-memory mock of the Rust core, used outside Tauri (Vite dev server,
  * Playwright, Vitest). Implements every command and event in docs/IPC.md with
  * invented fixture data, simulated playback (position ticks 4×/s, queue rules
- * roughly per spec 04), sync progress and health changes.
+ * roughly like the real core), sync progress and health changes.
  *
  * URL switches (plain browser only):
  *   ?latency=ms     delay every command (default 120; 0 in tests)

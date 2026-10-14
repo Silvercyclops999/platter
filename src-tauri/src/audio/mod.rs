@@ -1,4 +1,4 @@
-//! Playback engine: HTTP range streaming, decode-ahead, output, queue (spec 04).
+//! Playback engine: HTTP range streaming, decode-ahead, output, queue.
 //!
 //! Integration (done by the integrator in `lib.rs`):
 //! 1. Implement [`source::TrackResolver`] (stream/transcode URLs from the
@@ -7,7 +7,7 @@
 //!    Arc::new(TauriSink(app.handle().clone())), PlayerConfig { .. })` and
 //!    `app.manage(handle)`.
 //! 3. Register the commands in [`commands`].
-//! 4. Subscribe to [`player::PlayerHandle::subscribe_tracking`] for spec 06.
+//! 4. Subscribe to [`player::PlayerHandle::subscribe_tracking`] for play tracking.
 
 pub mod cache;
 pub mod commands;

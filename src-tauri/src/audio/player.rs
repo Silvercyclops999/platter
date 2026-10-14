@@ -4,7 +4,7 @@
 //!
 //! Emits `player://state`, `player://position` (4×/s while playing) and
 //! `player://error` through an [`EventSink`], plus [`TrackingEvent`]s on a
-//! broadcast channel for play tracking (spec 06).
+//! broadcast channel for play tracking.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -309,7 +309,7 @@ impl PlayerHandle {
             let _ = rx.await;
         }
     }
-    /// Play-tracking events (spec 06).
+    /// Play-tracking events.
     pub fn subscribe_tracking(&self) -> broadcast::Receiver<TrackingEvent> {
         self.tracking.subscribe()
     }

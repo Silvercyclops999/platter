@@ -18,7 +18,7 @@ describe("design tokens", () => {
     }
   });
 
-  it("uses the spec 01 type scale, weights, spacing grid, radii and motion", () => {
+  it("uses the type scale, weights, spacing grid, radii and motion", () => {
     expect(Object.values(fontSize)).toEqual([12, 13, 14, 16, 20, 24, 32, 48]);
     expect(Object.values(fontWeight)).toEqual([400, 600, 700]);
     expect(Object.values(space)).toEqual([4, 8, 12, 16, 24, 32, 48, 64]);

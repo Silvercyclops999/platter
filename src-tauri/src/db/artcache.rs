@@ -1,4 +1,4 @@
-//! Artwork disk cache (spec 03, docs/IPC.md "Artwork").
+//! Artwork disk cache.
 //!
 //! Files live under the cache dir, keyed by a hash of (path, w, h); a small
 //! SQLite index (`index.db`) holds size, MIME type and an LRU access stamp.

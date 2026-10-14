@@ -23,7 +23,7 @@ export function trackMenuItems(track: Track, extra: { before?: MenuItem[]; after
       label: "Copy song title",
       separator: true,
       onSelect: () => {
-        navigator.clipboard?.writeText(`${track.title} — ${trackArtistLine(track)}`).then(
+        navigator.clipboard?.writeText(`${track.title} - ${trackArtistLine(track)}`).then(
           () => toast.info("Copied to clipboard"),
           () => toast.error("Couldn't copy"),
         );

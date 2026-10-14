@@ -1,5 +1,5 @@
 //! Health state machine behind the `health` command and `health://changed`
-//! (spec 07 "Server and connection" / "Account").
+//!.
 //!
 //! Pure: inputs are probe outcomes, server events and a clock value; the
 //! output is a [`Health`] snapshot plus an action for the caller (re-race

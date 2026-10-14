@@ -6,7 +6,7 @@ import { connectApp, useApp } from "./stores/app";
 import { connectPlayer } from "./stores/player";
 import { useUi } from "./stores/ui";
 
-/** Root: wires stores to the core, then gates on auth (spec 02). */
+/** Root: wires stores to the core, then gates on auth. */
 export default function App() {
   useEffect(() => installReducedMotion(), []);
   useEffect(() => connectApp(), []);

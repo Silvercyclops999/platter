@@ -99,7 +99,7 @@ export interface AppError {
   message: string;
 }
 
-// ---------------------------------------------------------------- auth & servers (spec 02)
+// ---------------------------------------------------------------- auth & servers
 
 export type ConnectionKind = "local" | "remote" | "relay";
 
@@ -127,7 +127,7 @@ export interface PinInfo {
   expiresAt: number;
 }
 
-// ---------------------------------------------------------------- library (spec 03)
+// ---------------------------------------------------------------- library
 
 export interface Page<T> {
   items: T[];
@@ -186,7 +186,7 @@ export interface PlaylistPage {
   tracks: Track[];
 }
 
-// ---------------------------------------------------------------- search (spec 05)
+// ---------------------------------------------------------------- search
 
 export type SearchFilter = "all" | "songs" | "artists" | "albums" | "playlists";
 
@@ -214,7 +214,7 @@ export interface SearchResults {
   source: "local" | "server";
 }
 
-// ---------------------------------------------------------------- playback & queue (spec 04)
+// ---------------------------------------------------------------- playback & queue
 
 export type PlayContextKind = "album" | "playlist" | "artist" | "tracks" | "search";
 
@@ -277,7 +277,7 @@ export interface PlayerError {
   message: string;
 }
 
-// ---------------------------------------------------------------- health (spec 07)
+// ---------------------------------------------------------------- health
 
 export type HealthStatus =
   | "local"
@@ -327,7 +327,7 @@ export interface ToastEvent {
   message: string;
 }
 
-// ---------------------------------------------------------------- settings (spec 06)
+// ---------------------------------------------------------------- settings
 
 export interface Settings {
   privateSession: boolean;
@@ -336,7 +336,7 @@ export interface Settings {
   [key: string]: unknown;
 }
 
-// ---------------------------------------------------------------- updates (spec 08)
+// ---------------------------------------------------------------- updates
 
 export interface UpdateInfo {
   available: boolean;

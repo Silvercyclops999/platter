@@ -38,7 +38,7 @@ export function routeBadge(h: Health | null): string | null {
   return null;
 }
 
-/** Sidebar connection dot (spec 07) with a details popover. */
+/** Sidebar connection dot with a details popover. */
 export function StatusDot({ compact = false }: { compact?: boolean }) {
   const health = useApp((s) => s.health);
   const [open, setOpen] = useState(false);

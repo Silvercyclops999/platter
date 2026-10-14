@@ -1,5 +1,5 @@
-//! Tauri commands for docs/IPC.md "Auth & servers" (spec 02) and `health`
-//! (spec 07). Registration happens in `lib.rs`:
+//! Tauri commands for docs/IPC.md "Auth & servers" and `health`
+//! Registration happens in `lib.rs`:
 //!
 //! ```ignore
 //! .setup(|app| {

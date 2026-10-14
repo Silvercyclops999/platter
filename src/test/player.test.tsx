@@ -104,7 +104,7 @@ describe("QueuePanel", () => {
   });
 });
 
-describe("mock queue semantics (spec 04)", () => {
+describe("mock queue semantics", () => {
   it("previous restarts after 3 s, repeat one replays, clear only clears the user queue", async () => {
     const album = mock.fx.albums.find((a) => a.trackCount >= 4)!;
     const tracks = mock.fx.tracksByAlbum.get(album.id)!;

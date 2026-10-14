@@ -107,7 +107,7 @@ function PrivateSession() {
   );
 }
 
-/** Bottom player bar (spec 04). */
+/** Bottom player bar. */
 export function PlayerBar() {
   const state = usePlayer((s) => s.state);
   const queueOpen = useUi((s) => s.queueOpen);

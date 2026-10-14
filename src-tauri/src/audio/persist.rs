@@ -1,4 +1,4 @@
-//! Queue + position persistence (spec 04: "Queue and position persist across
+//! Queue + position persistence ("Queue and position persist across
 //! restarts"). Written atomically (temp file + rename) so a crash mid-write
 //! never leaves a corrupt file.
 

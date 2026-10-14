@@ -1,4 +1,4 @@
-//! Play tracking (spec 06): turns the player's tracking events into Plex
+//! Play tracking: turns the player's tracking events into Plex
 //! timeline/scrobble reports and rows in the local listen log.
 //!
 //! Plex gets `/:/timeline` on play, pause, resume, seek, stop and every 10 s

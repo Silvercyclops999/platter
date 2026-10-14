@@ -41,7 +41,7 @@ export type Unlisten = () => void;
 export interface Backend {
   readonly kind: "tauri" | "mock";
 
-  // Auth & servers (spec 02)
+  // Auth & servers
   authStatus(): Promise<AuthStatus>;
   authStart(): Promise<PinInfo>;
   authCancel(): Promise<void>;
@@ -49,7 +49,7 @@ export interface Backend {
   serversList(): Promise<ServerInfo[]>;
   serverSelect(machineId: string): Promise<void>;
 
-  // Library (spec 03)
+  // Library
   syncStatus(): Promise<SyncStatus>;
   syncNow(full?: boolean): Promise<void>;
   home(): Promise<HomeData>;
@@ -60,13 +60,13 @@ export interface Backend {
   albumPage(id: string): Promise<AlbumPage>;
   playlistPage(id: string): Promise<PlaylistPage>;
 
-  // Search (spec 05)
+  // Search
   search(args: SearchArgs): Promise<SearchResults>;
   recentSearches(): Promise<string[]>;
   recentSearchAdd(query: string): Promise<void>;
   recentSearchesClear(): Promise<void>;
 
-  // Playback & queue (spec 04)
+  // Playback & queue
   playContext(args: PlayContextArgs): Promise<void>;
   playToggle(): Promise<void>;
   playPause(): Promise<void>;
@@ -90,11 +90,11 @@ export interface Backend {
   /** Ids of tracks stored on this computer (playable without the server). */
   cachedTracks(): Promise<string[]>;
 
-  // Settings (spec 06)
+  // Settings
   settingsGet(): Promise<Settings>;
   settingsSet(patch: Partial<Settings>): Promise<void>;
 
-  // Updates (spec 08)
+  // Updates
   updateCheck(): Promise<UpdateInfo>;
   updateInstallOnRestart(): Promise<void>;
 
@@ -120,7 +120,7 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   }
 }
 
-/** Art is requested at 2× the display size (spec 03), rounded to 8px buckets
+/** Art is requested at 2× the display size, rounded to 8px buckets
  *  so nearby sizes share cache entries. */
 export function artPixelSize(css: number): number {
   return Math.max(8, Math.ceil((css * 2) / 8) * 8);

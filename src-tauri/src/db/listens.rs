@@ -1,4 +1,4 @@
-//! Local listen log and offline report queue (spec 06).
+//! Local listen log and offline report queue.
 //!
 //! The caller (playback/tracking) owns policy: when a private session is
 //! on it simply doesn't call [`start_play`]; when "report to Plex" is off it

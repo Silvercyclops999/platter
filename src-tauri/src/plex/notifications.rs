@@ -1,4 +1,4 @@
-//! Server push events over `/:/websockets/notifications` (spec 07 health
+//! Server push events over `/:/websockets/notifications` (health
 //! inputs). The token goes in the `X-Plex-Token` handshake header, never in
 //! the URL. The connection is re-opened with exponential backoff
 //! (1 s → 60 s cap, plus jitter).

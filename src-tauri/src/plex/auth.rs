@@ -1,4 +1,4 @@
-//! plex.tv account API: PIN sign-in (spec 02 steps 2–3), the signed-in user,
+//! plex.tv account API: PIN sign-in, the signed-in user,
 //! and the resources (servers) list. The base URL is injectable for tests.
 
 use std::sync::Arc;

@@ -109,7 +109,7 @@ pub async fn player_state(player: State<'_, PlayerHandle>) -> AppResult<PlayerSt
     player.state().await
 }
 
-/// Not in docs/IPC.md yet: the Problems list (spec 07, "Skipped: file
+/// Not in docs/IPC.md yet: the Problems list ("Skipped: file
 /// unavailable" entries).
 #[tauri::command]
 pub async fn player_problems(player: State<'_, PlayerHandle>) -> AppResult<Vec<Problem>> {

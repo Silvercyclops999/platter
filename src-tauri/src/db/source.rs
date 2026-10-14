@@ -111,7 +111,7 @@ pub trait ArtFetcher: Send + Sync {
 pub trait DbEvents: Send + Sync {
     fn sync_progress(&self, status: &SyncStatus);
     fn library_changed(&self);
-    /// Called once per sync run; map to `Health.banner` (spec 07).
+    /// Called once per sync run; map to `Health.banner`.
     fn sync_outcome(&self, _outcome: &SyncOutcome) {}
 }
 

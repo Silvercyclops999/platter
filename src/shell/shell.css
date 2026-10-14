@@ -140,7 +140,7 @@
   padding: var(--space-2) var(--space-3);
 }
 
-/* Status dot + popover (spec 07) */
+/* Status dot + popover */
 .status-dot-btn {
   display: flex;
   align-items: center;

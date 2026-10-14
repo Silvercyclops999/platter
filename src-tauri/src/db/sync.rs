@@ -1,4 +1,4 @@
-//! Library sync engine (spec 03).
+//! Library sync engine.
 //!
 //! - **First / full sync**: pages artists (8), albums (9), tracks (10) at
 //!   [`PAGE_SIZE`] per page, one transaction per page, so everything synced so
