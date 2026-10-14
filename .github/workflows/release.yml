@@ -67,6 +67,34 @@ jobs:
         run: |
           echo "WHISPER_DONT_GENERATE_BINDINGS=1" >> "$GITHUB_ENV"
           echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> "$GITHUB_ENV"
+      # Mac signing and notarization switch on only when every Apple secret is
+      # set; without them the Mac build stays unsigned, as before. Tauri signs
+      # with the hardened runtime, notarizes and staples when these are present.
+      - if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]              && [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            {
+              # Base64 may wrap over several lines; the delimiter form keeps it whole.
+              echo "APPLE_CERTIFICATE<<APPLE_CERT_EOF"
+              echo "$APPLE_CERTIFICATE"
+              echo "APPLE_CERT_EOF"
+              echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+              echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+              echo "APPLE_ID=$APPLE_ID"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+            } >> "$GITHUB_ENV"
+            echo "Mac signing and notarization: on"
+          else
+            echo "Mac signing and notarization: off (Apple secrets not set), building unsigned"
+          fi
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ vars.RELEASES_REPO && secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
@@ -78,7 +106,7 @@ jobs:
           repo: ${{ vars.RELEASES_REPO || github.event.repository.name }}
           tagName: ${{ github.ref_name }}
           releaseName: 'Platter ${{ github.ref_name }}'
-          releaseBody: 'Early build, installers not code-signed yet. Windows: SmartScreen, More info, Run anyway. macOS: right-click, Open.'
+          releaseBody: 'Early build, installers not code-signed yet. Windows: SmartScreen, More info, Run anyway. macOS: open it once, then System Settings, Privacy & Security, Open Anyway.'
           releaseDraft: true
           # Not a prerelease: the updater reads releases/latest, which skips prereleases.
           prerelease: false
