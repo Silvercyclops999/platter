@@ -207,6 +207,9 @@ pub struct AlbumPage {
 pub struct PlaylistPage {
     pub playlist: Playlist,
     pub tracks: Vec<Track>,
+    /// One id per track, same order: what edits use to name a row (a song
+    /// can be in a playlist twice).
+    pub item_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

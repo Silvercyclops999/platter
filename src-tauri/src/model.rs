@@ -103,4 +103,10 @@ pub struct Playlist {
     pub track_count: u32,
     pub duration_ms: u64,
     pub thumb: Option<String>,
+    /// The playlist's description (Plex `summary`).
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// Last change, unix seconds (Plex `updatedAt`, bumped by local edits).
+    #[serde(default)]
+    pub updated_at: Option<i64>,
 }

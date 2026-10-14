@@ -44,6 +44,13 @@ pub struct HistoryEntry {
     pub viewed_at: i64,
 }
 
+/// One playlist row: the track and Plex's playlistItemID for that row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaylistEntry {
+    pub track_id: String,
+    pub item_id: Option<String>,
+}
+
 /// A similar artist from Plex artist detail (`Similar` tag). Stored as JSON
 /// in `artists.similar`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -85,6 +92,17 @@ pub trait LibrarySource: Send + Sync {
 
     /// Track ratingKeys of a playlist, in order.
     async fn playlist_items(&self, playlist_id: &str) -> AppResult<Vec<String>>;
+
+    /// A playlist's items in order with their playlistItemIDs (needed to
+    /// remove or move one). Defaults to [`Self::playlist_items`] without ids.
+    async fn playlist_entries(&self, playlist_id: &str) -> AppResult<Vec<PlaylistEntry>> {
+        Ok(self
+            .playlist_items(playlist_id)
+            .await?
+            .into_iter()
+            .map(|track_id| PlaylistEntry { track_id, item_id: None })
+            .collect())
+    }
 
     /// Similar artists from one artist's detail (`/library/metadata/{id}`).
     /// Not part of sync: called when an artist page opens (db::similar).

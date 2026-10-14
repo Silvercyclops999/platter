@@ -8,7 +8,7 @@ use crate::error::AppResult;
 use crate::model::{Album, Artist, Playlist, Track};
 
 use super::release::{section_from_key, section_key, section_rank};
-use super::source::{HistoryEntry, ItemKind};
+use super::source::{HistoryEntry, ItemKind, PlaylistEntry};
 
 // ---------------------------------------------------------------- columns
 
@@ -19,7 +19,7 @@ pub const ALBUM_COLS: &str = "al.id, al.title, al.sort_title, al.artist_id, al.a
 pub const TRACK_COLS: &str = "t.id, t.title, t.album_id, t.album_title, t.artist_id, t.artist_title, \
      t.track_artist, t.track_number, t.disc_number, t.duration_ms, t.thumb, t.part_key, t.codec, \
      t.container, t.bitrate, t.bit_depth, t.sample_rate, t.user_rating, t.view_count, t.last_viewed_at, t.rating_count";
-pub const PLAYLIST_COLS: &str = "p.id, p.title, p.smart, p.track_count, p.duration_ms, p.thumb";
+pub const PLAYLIST_COLS: &str = "p.id, p.title, p.smart, p.track_count, p.duration_ms, p.thumb, p.summary, p.updated_at";
 
 pub fn row_artist(r: &Row<'_>) -> rusqlite::Result<Artist> {
     Ok(Artist {
@@ -93,6 +93,8 @@ pub fn row_playlist(r: &Row<'_>) -> rusqlite::Result<Playlist> {
         track_count: r.get(3)?,
         duration_ms: r.get::<_, i64>(4)?.max(0) as u64,
         thumb: r.get(5)?,
+        summary: r.get(6)?,
+        updated_at: r.get(7)?,
     })
 }
 
@@ -244,7 +246,8 @@ fn table_for(kind: ItemKind) -> &'static str {
 /// recent searches and settings.
 pub fn wipe_library(tx: &Transaction<'_>) -> AppResult<()> {
     tx.execute_batch(
-        "DELETE FROM playlist_items; DELETE FROM playlists; DELETE FROM tracks;
+        "DELETE FROM playlist_items; DELETE FROM playlists; DELETE FROM playlist_ops;
+         DELETE FROM playlist_aliases; DELETE FROM tracks;
          DELETE FROM albums; DELETE FROM artists; DELETE FROM play_history;
          DELETE FROM sync_state;",
     )?;
@@ -261,15 +264,31 @@ pub fn insert_history(tx: &Transaction<'_>, items: &[HistoryEntry]) -> AppResult
     Ok(())
 }
 
+/// Playlist ids a sync must leave alone: ones with edits still waiting to
+/// reach Plex, and ones made here that Plex doesn't have yet.
+pub fn playlists_with_local_changes(c: &Connection) -> AppResult<HashSet<String>> {
+    let mut st = c.prepare_cached(
+        "SELECT playlist_id FROM playlist_ops UNION SELECT id FROM playlists WHERE local_only = 1",
+    )?;
+    let ids = st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<_, _>>()?;
+    Ok(ids)
+}
+
 /// Replace the playlist list. Returns ids whose items need (re)fetching:
-/// new playlists and ones whose count or duration changed.
+/// new playlists and ones whose count, duration or updatedAt changed (all
+/// of them with `force_all`). Playlists with local changes that haven't
+/// reached Plex yet are left as they are.
 pub fn replace_playlists(tx: &Transaction<'_>, items: &[Playlist], force_all: bool) -> AppResult<Vec<String>> {
+    let local = playlists_with_local_changes(tx)?;
+    let items: Vec<&Playlist> = items.iter().filter(|p| !local.contains(&p.id)).collect();
     let mut stale = Vec::new();
     {
-        let mut prev = tx.prepare_cached("SELECT track_count, duration_ms FROM playlists WHERE id = ?1")?;
-        for p in items {
-            let old: Option<(u32, i64)> = prev.query_row([&p.id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-            if force_all || old != Some((p.track_count, p.duration_ms as i64)) {
+        let mut prev =
+            tx.prepare_cached("SELECT track_count, duration_ms, updated_at FROM playlists WHERE id = ?1")?;
+        for p in &items {
+            let old: Option<(u32, i64, Option<i64>)> =
+                prev.query_row([&p.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+            if force_all || old != Some((p.track_count, p.duration_ms as i64, p.updated_at)) {
                 stale.push(p.id.clone());
             }
         }
@@ -279,29 +298,48 @@ pub fn replace_playlists(tx: &Transaction<'_>, items: &[Playlist], force_all: bo
         let mut st = tx.prepare("SELECT id FROM playlists")?;
         st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
     };
-    for id in existing.iter().filter(|id| !keep.contains(id.as_str())) {
+    for id in existing.iter().filter(|id| !keep.contains(id.as_str()) && !local.contains(*id)) {
         tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
     }
-    let mut st = tx.prepare_cached(
-        "INSERT INTO playlists (id, title, smart, track_count, duration_ms, thumb)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT (id) DO UPDATE SET title = excluded.title, smart = excluded.smart,
-           track_count = excluded.track_count, duration_ms = excluded.duration_ms,
-           thumb = excluded.thumb",
-    )?;
     for p in items {
-        st.execute(params![p.id, p.title, p.smart, p.track_count, p.duration_ms as i64, p.thumb])?;
+        upsert_playlist(tx, p)?;
     }
     Ok(stale)
 }
 
-pub fn set_playlist_items(tx: &Transaction<'_>, playlist_id: &str, track_ids: &[String]) -> AppResult<()> {
-    tx.execute("DELETE FROM playlist_items WHERE playlist_id = ?1", [playlist_id])?;
-    let mut st = tx.prepare_cached(
-        "INSERT INTO playlist_items (playlist_id, position, track_id) VALUES (?1, ?2, ?3)",
+/// Insert or update one playlist row as Plex has it.
+pub fn upsert_playlist(c: &Connection, p: &Playlist) -> AppResult<()> {
+    let mut st = c.prepare_cached(
+        "INSERT INTO playlists (id, title, smart, track_count, duration_ms, thumb, summary, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (id) DO UPDATE SET title = excluded.title, smart = excluded.smart,
+           track_count = excluded.track_count, duration_ms = excluded.duration_ms,
+           thumb = excluded.thumb, summary = excluded.summary, updated_at = excluded.updated_at,
+           local_only = 0",
     )?;
-    for (i, id) in track_ids.iter().enumerate() {
-        st.execute(params![playlist_id, i as i64, id])?;
+    st.execute(params![
+        p.id,
+        p.title,
+        p.smart,
+        p.track_count,
+        p.duration_ms as i64,
+        p.thumb,
+        p.summary,
+        p.updated_at
+    ])?;
+    Ok(())
+}
+
+/// Replace a playlist's items. Items without a Plex playlistItemID get a
+/// local one so every row can still be named.
+pub fn set_playlist_items(c: &Connection, playlist_id: &str, items: &[PlaylistEntry]) -> AppResult<()> {
+    c.execute("DELETE FROM playlist_items WHERE playlist_id = ?1", [playlist_id])?;
+    let mut st = c.prepare_cached(
+        "INSERT INTO playlist_items (playlist_id, position, track_id, item_id) VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for (i, e) in items.iter().enumerate() {
+        let item_id = e.item_id.clone().unwrap_or_else(super::playlists::local_item_id);
+        st.execute(params![playlist_id, i as i64, e.track_id, item_id])?;
     }
     Ok(())
 }

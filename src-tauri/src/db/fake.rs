@@ -198,7 +198,16 @@ pub fn track(id: &str, title: &str, album: &Album, disc: u32, n: u32) -> Track {
 }
 
 pub fn playlist(id: &str, title: &str, n: u32) -> Playlist {
-    Playlist { id: id.into(), title: title.into(), smart: false, track_count: n, duration_ms: n as u64 * 200_000, thumb: None }
+    Playlist {
+        id: id.into(),
+        title: title.into(),
+        smart: false,
+        track_count: n,
+        duration_ms: n as u64 * 200_000,
+        thumb: None,
+        summary: None,
+        updated_at: None,
+    }
 }
 
 /// A generated library: `n_artists` × `albums_per` × `tracks_per`.

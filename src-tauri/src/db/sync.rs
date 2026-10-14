@@ -451,7 +451,7 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool) -> AppResult<()> {
         if ctx.cancelled() {
             break;
         }
-        let items = match ctx.source.playlist_items(&id).await {
+        let items = match ctx.source.playlist_entries(&id).await {
             Ok(items) => items,
             // Orphaned smart playlists (left over from a deleted library)
             // answer 500. Drop them instead of failing the whole sync.
@@ -470,7 +470,10 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool) -> AppResult<()> {
         ctx.db
             .write_async(move |c| {
                 let tx = c.transaction()?;
-                store::set_playlist_items(&tx, &id, &items)?;
+                // An edit made here while the items were loading wins.
+                if !store::playlists_with_local_changes(&tx)?.contains(&id) {
+                    store::set_playlist_items(&tx, &id, &items)?;
+                }
                 tx.commit()?;
                 Ok(())
             })

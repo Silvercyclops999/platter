@@ -308,6 +308,33 @@ CREATE TABLE search_recents (
     PRIMARY KEY (kind, id)
 );
 "#,
+    // v5: playlist editing. Playlists keep their description and Plex
+    // updatedAt; items keep Plex's playlistItemID (needed to remove or move
+    // one). Playlists made here start local only until their first song
+    // reaches Plex. Edits queue in playlist_ops and replay in order; an id
+    // made here maps to the Plex id once created (playlist_aliases).
+    // duration_ms = -1 makes the next sync refetch every playlist's items so
+    // the item ids fill in.
+    r#"
+ALTER TABLE playlists ADD COLUMN summary TEXT;
+ALTER TABLE playlists ADD COLUMN updated_at INTEGER;
+ALTER TABLE playlists ADD COLUMN local_only INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE playlist_items ADD COLUMN item_id TEXT;
+UPDATE playlist_items SET item_id = 'local:' || playlist_id || '.' || position;
+UPDATE playlists SET duration_ms = -1;
+CREATE TABLE playlist_ops (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    playlist_id TEXT NOT NULL,
+    op          TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX playlist_ops_playlist ON playlist_ops (playlist_id);
+CREATE TABLE playlist_aliases (
+    local_id TEXT PRIMARY KEY,
+    plex_id  TEXT NOT NULL
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]
@@ -359,6 +386,32 @@ mod tests {
         assert_eq!((summary, similar.as_str(), at), (None, "[]", None));
         let full: Option<i64> = c.query_row("SELECT last_full_sync_at FROM sync_state", [], |r| r.get(0)).unwrap();
         assert_eq!(full, None);
+    }
+
+    #[test]
+    fn v5_names_every_playlist_row_and_refetches_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        for m in &MIGRATIONS[..4] {
+            c.execute_batch(m).unwrap();
+        }
+        c.pragma_update(None, "user_version", 4).unwrap();
+        c.execute("INSERT INTO playlists (id, title, track_count, duration_ms) VALUES ('p', 'P', 2, 500)", []).unwrap();
+        c.execute("INSERT INTO playlist_items (playlist_id, position, track_id) VALUES ('p', 0, 't'), ('p', 1, 't')", [])
+            .unwrap();
+        migrate(&mut c).unwrap();
+        let ids: Vec<String> = c
+            .prepare("SELECT item_id FROM playlist_items ORDER BY position")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1], "the same song twice still has two names");
+        assert!(ids.iter().all(|i| i.starts_with("local:")));
+        let d: i64 = c.query_row("SELECT duration_ms FROM playlists", [], |r| r.get(0)).unwrap();
+        assert_eq!(d, -1, "differs from Plex, so the next sync refetches the items");
     }
 
     #[test]

@@ -132,6 +132,10 @@ pub struct Settings {
     pub volume_percent: bool,
     /// Desktop notification on each new track (this device only).
     pub notify_track_change: bool,
+    /// Ask before adding a song that's already in the playlist.
+    pub playlist_ask_duplicates: bool,
+    /// Name for new playlists; `#N` becomes the next free number.
+    pub playlist_new_name: String,
 }
 
 impl Default for Settings {
@@ -163,6 +167,8 @@ impl Default for Settings {
             up_next_line: true,
             volume_percent: true,
             notify_track_change: false,
+            playlist_ask_duplicates: true,
+            playlist_new_name: crate::db::playlists::DEFAULT_NAME.to_string(),
         }
     }
 }
@@ -196,6 +202,8 @@ pub struct SettingsPatch {
     pub up_next_line: Option<bool>,
     pub volume_percent: Option<bool>,
     pub notify_track_change: Option<bool>,
+    pub playlist_ask_duplicates: Option<bool>,
+    pub playlist_new_name: Option<String>,
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -236,6 +244,14 @@ impl Settings {
         set(&mut self.up_next_line, p.up_next_line);
         set(&mut self.volume_percent, p.volume_percent);
         set(&mut self.notify_track_change, p.notify_track_change);
+        set(&mut self.playlist_ask_duplicates, p.playlist_ask_duplicates);
+        if let Some(name) = &p.playlist_new_name {
+            let name = name.trim();
+            if name.chars().count() > crate::db::playlists::TITLE_MAX {
+                return Err(AppError::Invalid("Playlist names can be up to 100 characters.".into()));
+            }
+            self.playlist_new_name = name.to_string();
+        }
         self.clamp();
         Ok(())
     }
@@ -507,6 +523,8 @@ mod tests {
         assert!(s.media_keys && s.media_session && !s.close_to_tray && !s.launch_at_login);
         assert!(s.ab_loop_handles && s.up_next_line && s.volume_percent);
         assert!(!s.notify_track_change);
+        assert!(s.playlist_ask_duplicates);
+        assert_eq!(s.playlist_new_name, "My playlist #N");
     }
 
     #[test]
@@ -560,6 +578,8 @@ mod tests {
             up_next_line: Some(false),
             volume_percent: Some(false),
             notify_track_change: Some(true),
+            playlist_ask_duplicates: Some(false),
+            playlist_new_name: Some("  Mix #N ".into()),
         })
         .await
         .unwrap();
@@ -595,6 +615,8 @@ mod tests {
             PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true }
         );
         assert!(!s.ab_loop_handles && !s.up_next_line && !s.volume_percent && s.notify_track_change);
+        assert!(!s.playlist_ask_duplicates);
+        assert_eq!(s.playlist_new_name, "Mix #N");
         // Loaded at startup into the live switches.
         assert!(fresh.notify_track_change.load(Ordering::Relaxed));
         assert!(fresh.tracking.private_session.load(Ordering::Relaxed));

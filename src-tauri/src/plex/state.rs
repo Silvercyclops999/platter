@@ -314,6 +314,13 @@ impl PlexState {
         }
     }
 
+    /// The selected server's machine id (names library items in playlist
+    /// writes).
+    pub async fn machine_id(&self) -> Option<String> {
+        let s = self.inner.session.read().await;
+        s.current.as_ref().map(|c| c.server.machine_id.clone())
+    }
+
     /// Like `client`, but first waits (up to `wait`) for the saved session to
     /// finish restoring at startup, so early requests such as artwork don't
     /// fail just because they arrived before the keychain was read.

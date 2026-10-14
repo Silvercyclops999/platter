@@ -518,17 +518,23 @@ pub fn album_tracks(c: &Connection, album_id: &str) -> AppResult<Vec<Track>> {
     Ok(st.query_map([album_id], row_track)?.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// A playlist and its songs. An id made here that has since been created in
+/// Plex still finds it (see db::playlists).
 pub fn playlist_page(c: &Connection, id: &str) -> AppResult<PlaylistPage> {
+    let id = super::playlists::resolve_id(c, id)?;
     let playlist = c
-        .query_row(&format!("SELECT {PLAYLIST_COLS} FROM playlists p WHERE p.id = ?1"), [id], row_playlist)
+        .query_row(&format!("SELECT {PLAYLIST_COLS} FROM playlists p WHERE p.id = ?1"), [&id], row_playlist)
         .optional()?
         .ok_or_else(|| AppError::NotFound(format!("playlist {id}")))?;
     let mut st = c.prepare_cached(&format!(
-        "SELECT {TRACK_COLS} FROM playlist_items pi JOIN tracks t ON t.id = pi.track_id
+        "SELECT {TRACK_COLS}, pi.item_id FROM playlist_items pi JOIN tracks t ON t.id = pi.track_id
          WHERE pi.playlist_id = ?1 ORDER BY pi.position"
     ))?;
-    let tracks = st.query_map([id], row_track)?.collect::<Result<Vec<_>, _>>()?;
-    Ok(PlaylistPage { playlist, tracks })
+    let rows = st
+        .query_map([&id], |r| Ok((row_track(r)?, r.get::<_, Option<String>>(21)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let (tracks, item_ids) = rows.into_iter().map(|(t, item)| (t, item.unwrap_or_default())).unzip();
+    Ok(PlaylistPage { playlist, tracks, item_ids })
 }
 
 /// Tracks by id, in the given order (missing ids skipped). For the player.

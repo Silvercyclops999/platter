@@ -6,6 +6,7 @@ pub mod model;
 pub mod monitor;
 pub mod notify;
 pub mod platform;
+pub mod playlists;
 pub mod plex;
 pub mod settings;
 pub mod tracking;
@@ -182,6 +183,14 @@ pub fn run() {
                 cache_dir.clone(),
             );
 
+            let playlists = playlists::Playlists::new(
+                db.clone(),
+                Arc::new(playlists::PlexPlaylists(plex.clone())),
+                Arc::new(playlists::AppEvents { plex: plex.clone(), db: db.clone() }),
+            );
+            playlists::spawn(playlists.clone());
+            app.manage(playlists);
+
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
             monitor::files::spawn(plex.clone(), db.clone(), player.clone());
@@ -224,6 +233,14 @@ pub fn run() {
             db::commands::artist_page,
             db::commands::album_page,
             db::commands::playlist_page,
+            playlists::playlist_create,
+            playlists::playlist_add,
+            playlists::playlist_duplicates,
+            playlists::playlist_remove,
+            playlists::playlist_move,
+            playlists::playlist_update,
+            playlists::playlist_set_cover,
+            playlists::playlist_delete,
             db::commands::search,
             db::commands::search_completions,
             db::commands::search_recents,

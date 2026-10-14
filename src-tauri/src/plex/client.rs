@@ -683,7 +683,11 @@ impl PlexMetadata {
                 .duration
                 .and_then(|d| u64::try_from(d).ok())
                 .unwrap_or(0),
-            thumb: non_empty(&self.composite).or_else(|| non_empty(&self.thumb)),
+            // `thumb` is only there when someone chose a cover; otherwise
+            // the mosaic Plex makes from the songs.
+            thumb: non_empty(&self.thumb).or_else(|| non_empty(&self.composite)),
+            summary: non_empty(&self.summary),
+            updated_at: self.updated_at,
         }
     }
 
@@ -697,6 +701,25 @@ impl PlexMetadata {
             device_id: self.device_id,
         }
     }
+}
+
+/// A Plex id used in a path: digits only, so nothing else ends up in the URL.
+fn plain_id(id: &str) -> AppResult<&str> {
+    if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(id)
+    } else {
+        Err(AppError::Invalid(format!("not a Plex id: {id:?}")))
+    }
+}
+
+/// `server://{machine}/com.plexapp.plugins.library/library/metadata/{k1,k2,…}`:
+/// how Plex names library items to put in a playlist.
+fn library_uri(machine_id: &str, track_ids: &[String]) -> AppResult<String> {
+    if track_ids.is_empty() {
+        return Err(AppError::Invalid("no songs to add".into()));
+    }
+    let keys = track_ids.iter().map(|t| plain_id(t)).collect::<AppResult<Vec<_>>>()?.join(",");
+    Ok(format!("server://{machine_id}/{LIBRARY_IDENTIFIER}/library/metadata/{keys}"))
 }
 
 fn total_of(c: &Container, fallback: usize) -> u64 {
@@ -1174,6 +1197,124 @@ impl PlexClient {
             items: c.metadata.iter().map(PlexMetadata::to_track).collect(),
             total,
         })
+    }
+
+    /// `GET /playlists/{id}`: one playlist, with its description.
+    pub async fn playlist(&self, id: &str) -> AppResult<Playlist> {
+        let id = plain_id(id)?;
+        let c = self.container(&format!("/playlists/{id}"), &[], None).await?;
+        c.metadata
+            .first()
+            .map(PlexMetadata::to_playlist)
+            .ok_or_else(|| AppError::NotFound(format!("/playlists/{id}")))
+    }
+
+    /// Every row of a playlist in order: (track ratingKey, playlistItemID).
+    pub async fn playlist_rows(&self, id: &str) -> AppResult<Vec<(String, Option<String>)>> {
+        let id = plain_id(id)?;
+        let mut out = Vec::new();
+        let mut start = 0;
+        loop {
+            let c = self
+                .container(&format!("/playlists/{id}/items"), &[], Some((start, PAGE_SIZE)))
+                .await?;
+            let n = c.metadata.len() as u64;
+            let total = total_of(&c, c.metadata.len());
+            out.extend(
+                c.metadata
+                    .iter()
+                    .map(|m| (m.rating_key.clone(), m.playlist_item_id.map(|i| i.to_string()))),
+            );
+            start += n;
+            if n == 0 || start >= total {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    /// `POST /playlists?type=audio&title=…&smart=0&uri=…`: a new playlist
+    /// holding `track_ids` in order. Plex needs at least one item.
+    pub async fn create_playlist(&self, machine_id: &str, title: &str, track_ids: &[String]) -> AppResult<Playlist> {
+        let uri = library_uri(machine_id, track_ids)?;
+        let rb = self.request(Method::POST, "/playlists")?.query(&[
+            ("type", "audio"),
+            ("title", title),
+            ("smart", "0"),
+            ("uri", uri.as_str()),
+        ]);
+        let resp = self.send(rb).await?;
+        let bytes = resp.bytes().await.map_err(map_send_error)?;
+        let env: Envelope<Container> =
+            serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
+        env.media_container
+            .metadata
+            .first()
+            .map(PlexMetadata::to_playlist)
+            .filter(|p| !p.id.is_empty())
+            .ok_or_else(|| AppError::Decode("/playlists: no playlist in the reply".into()))
+    }
+
+    /// `PUT /playlists/{id}/items?uri=…`: append songs in order.
+    pub async fn playlist_add(&self, machine_id: &str, id: &str, track_ids: &[String]) -> AppResult<()> {
+        let id = plain_id(id)?;
+        let uri = library_uri(machine_id, track_ids)?;
+        let rb = self
+            .request(Method::PUT, &format!("/playlists/{id}/items"))?
+            .query(&[("uri", uri.as_str())]);
+        self.send(rb).await.map(|_| ())
+    }
+
+    /// `DELETE /playlists/{id}/items/{playlistItemID}`.
+    pub async fn playlist_remove(&self, id: &str, item_id: &str) -> AppResult<()> {
+        let (id, item) = (plain_id(id)?, plain_id(item_id)?);
+        let rb = self.request(Method::DELETE, &format!("/playlists/{id}/items/{item}"))?;
+        self.send(rb).await.map(|_| ())
+    }
+
+    /// `PUT /playlists/{id}/items/{playlistItemID}/move?after={playlistItemID}`;
+    /// without `after` the row goes to the top.
+    pub async fn playlist_move(&self, id: &str, item_id: &str, after: Option<&str>) -> AppResult<()> {
+        let (id, item) = (plain_id(id)?, plain_id(item_id)?);
+        let mut rb = self.request(Method::PUT, &format!("/playlists/{id}/items/{item}/move"))?;
+        if let Some(a) = after {
+            rb = rb.query(&[("after", plain_id(a)?)]);
+        }
+        self.send(rb).await.map(|_| ())
+    }
+
+    /// `PUT /playlists/{id}?title=…&summary=…` (only the fields given).
+    pub async fn playlist_edit(&self, id: &str, title: Option<&str>, summary: Option<&str>) -> AppResult<()> {
+        let id = plain_id(id)?;
+        let mut q: Vec<(&str, &str)> = Vec::new();
+        if let Some(t) = title {
+            q.push(("title", t));
+        }
+        if let Some(s) = summary {
+            q.push(("summary", s));
+        }
+        if q.is_empty() {
+            return Ok(());
+        }
+        let rb = self.request(Method::PUT, &format!("/playlists/{id}"))?.query(&q);
+        self.send(rb).await.map(|_| ())
+    }
+
+    /// `POST /library/metadata/{id}/posters` with the image as the body.
+    pub async fn playlist_poster(&self, id: &str, bytes: Vec<u8>, content_type: &str) -> AppResult<()> {
+        let id = plain_id(id)?;
+        let rb = self
+            .request(Method::POST, &format!("/library/metadata/{id}/posters"))?
+            .header("content-type", content_type)
+            .body(bytes);
+        self.send(rb).await.map(|_| ())
+    }
+
+    /// `DELETE /playlists/{id}`.
+    pub async fn playlist_delete(&self, id: &str) -> AppResult<()> {
+        let id = plain_id(id)?;
+        let rb = self.request(Method::DELETE, &format!("/playlists/{id}"))?;
+        self.send(rb).await.map(|_| ())
     }
 
     /// `/hubs/search?query=…&sectionId=…&limit=…` → one hub per type.
@@ -1721,6 +1862,125 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&b[..], &[1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn playlist_writes_use_the_documented_requests() {
+        let server = MockServer::start().await;
+        let uri = "server://m1/com.plexapp.plugins.library/library/metadata/11,12";
+        Mock::given(method("POST"))
+            .and(path("/playlists"))
+            .and(query_param("type", "audio"))
+            .and(query_param("title", "Road & Trip"))
+            .and(query_param("smart", "0"))
+            .and(query_param("uri", uri))
+            .and(header("x-plex-token", TOKEN))
+            .respond_with(mc(serde_json::json!({ "size": 1, "Metadata": [
+                { "ratingKey": "900", "title": "Road & Trip", "smart": false, "leafCount": 2, "composite": "/playlists/900/composite/1" }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/playlists/900/items"))
+            .and(query_param("uri", uri))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/playlists/900/items/31"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/playlists/900/items/31/move"))
+            .and(query_param("after", "32"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/playlists/900/items/33/move"))
+            .and(wiremock::matchers::query_param_is_missing("after"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/playlists/900"))
+            .and(query_param("title", "New"))
+            .and(query_param("summary", "Words"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/library/metadata/900/posters"))
+            .and(header("content-type", "image/jpeg"))
+            .and(wiremock::matchers::body_bytes(vec![1u8, 2, 3]))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/playlists/900"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let c = client(&server);
+        let ids = vec!["11".to_string(), "12".to_string()];
+        let p = c.create_playlist("m1", "Road & Trip", &ids).await.unwrap();
+        assert_eq!((p.id.as_str(), p.track_count), ("900", 2));
+        c.playlist_add("m1", "900", &ids).await.unwrap();
+        c.playlist_remove("900", "31").await.unwrap();
+        c.playlist_move("900", "31", Some("32")).await.unwrap();
+        c.playlist_move("900", "33", None).await.unwrap();
+        c.playlist_edit("900", Some("New"), Some("Words")).await.unwrap();
+        c.playlist_edit("900", None, None).await.unwrap(); // nothing to send
+        c.playlist_poster("900", vec![1, 2, 3], "image/jpeg").await.unwrap();
+        c.playlist_delete("900").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn playlist_writes_refuse_odd_ids_and_empty_adds() {
+        let server = MockServer::start().await;
+        let c = client(&server);
+        assert!(matches!(c.playlist_remove("900", "../1").await, Err(AppError::Invalid(_))));
+        assert!(matches!(c.playlist_delete("9 0").await, Err(AppError::Invalid(_))));
+        assert!(matches!(c.playlist_add("m1", "900", &[]).await, Err(AppError::Invalid(_))));
+        assert!(matches!(c.create_playlist("m1", "x", &["a".into()]).await, Err(AppError::Invalid(_))));
+    }
+
+    #[tokio::test]
+    async fn one_playlist_and_its_rows_with_item_ids() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/playlists/900"))
+            .respond_with(mc(serde_json::json!({ "size": 1, "Metadata": [{
+                "ratingKey": "900", "title": "Road", "smart": false, "leafCount": 2, "duration": 400000,
+                "summary": "For driving", "updatedAt": 1791384148,
+                "composite": "/playlists/900/composite/1", "thumb": "/library/metadata/900/thumb/5"
+            }]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/playlists/900/items"))
+            .respond_with(mc(serde_json::json!({ "size": 2, "totalSize": 2, "Metadata": [
+                { "ratingKey": "11", "title": "a", "playlistItemID": 31 },
+                { "ratingKey": "12", "title": "b", "playlistItemID": 32 }
+            ]})))
+            .mount(&server)
+            .await;
+        let c = client(&server);
+        let p = c.playlist("900").await.unwrap();
+        assert_eq!(p.summary.as_deref(), Some("For driving"));
+        assert_eq!(p.updated_at, Some(1791384148));
+        assert_eq!(p.thumb.as_deref(), Some("/library/metadata/900/thumb/5"), "a chosen cover wins over the mosaic");
+        let rows = c.playlist_rows("900").await.unwrap();
+        assert_eq!(rows, vec![("11".into(), Some("31".into())), ("12".into(), Some("32".into()))]);
     }
 
     #[tokio::test]
