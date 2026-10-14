@@ -113,8 +113,8 @@ pub mod whisper {
 
     fn load(path: &Path, kind: ModelKind) -> Result<WhisperContext, RecognizeError> {
         let p = WhisperContextParameters {
-            // Metal on Macs; the Windows build is CPU only.
-            use_gpu: cfg!(target_os = "macos"),
+            // CPU on every platform for now; the GPU builds need more toolchain.
+            use_gpu: false,
             // Word times from the attention heads, steadier than token guesses.
             dtw_parameters: DtwParameters { mode: DtwMode::ModelPreset { model_preset: preset(kind) }, ..Default::default() },
             ..Default::default()

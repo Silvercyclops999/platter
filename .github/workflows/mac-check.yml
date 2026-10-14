@@ -50,3 +50,11 @@ jobs:
         run: |
           rustup target add x86_64-apple-darwin
           cargo check --target x86_64-apple-darwin --features transcribe
+      # A full link of the app with transcription, so missing symbols show
+      # up here and not in the release.
+      - name: cargo build (link, transcribe)
+        working-directory: src-tauri
+        env:
+          WHISPER_DONT_GENERATE_BINDINGS: 1
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+        run: cargo build --features transcribe
