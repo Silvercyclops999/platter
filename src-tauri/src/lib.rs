@@ -144,6 +144,7 @@ pub fn run() {
             // which also serves their images.
             let info_http: Arc<dyn artistinfo::http::InfoHttp> = Arc::new(artistinfo::http::ReqwestHttp::new()?);
             let share_http = info_http.clone();
+            let discord_http = info_http.clone();
             let art = ArtCache::open(
                 cache_dir.join("art"),
                 initial.art_cache_bytes(),
@@ -270,6 +271,18 @@ pub fn run() {
             );
             share.set_events(Arc::new(app.handle().clone()));
             share::commands::install(app.handle(), &share);
+
+            // Discord status follows the player on its own task.
+            platform::discord::commands::start(
+                app.handle(),
+                plex.clone(),
+                db.clone(),
+                discord_http,
+                art.clone(),
+                share.clone(),
+                &live.discord,
+                player.subscribe_tracking(),
+            )?;
             app.manage(share);
 
             plex.start(app.handle().clone());
@@ -384,6 +397,8 @@ pub fn run() {
             share::commands::share_info,
             share::commands::share_public_link,
             share::commands::deep_link_take,
+            platform::discord::commands::discord_status,
+            platform::discord::commands::discord_imgur_key_set,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event

@@ -1,5 +1,5 @@
 //! Windows/macOS glue: the system media controls, media keys, the tray or
-//! menu bar item, close to tray and launch at login.
+//! menu bar item, close to tray, launch at login and Discord status.
 //!
 //! Player state reaches this module through [`Tap`], an event sink that
 //! sits in front of the UI's sink. OS commands go back to the player
@@ -7,6 +7,7 @@
 
 pub mod art;
 pub mod commands;
+pub mod discord;
 pub mod keys;
 pub mod media;
 #[cfg(any(target_os = "windows", target_os = "macos"))]

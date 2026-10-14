@@ -391,6 +391,18 @@ CREATE TABLE share_links (
     expires_at INTEGER NOT NULL
 );
 "#,
+    // v10: public cover URLs for Discord status, per album
+    // (platform::discord::art). source is "caa" (url NULL: Cover Art Archive
+    // has none) or "imgur" (kept for good).
+    r#"
+CREATE TABLE IF NOT EXISTS discord_art (
+    album_id   TEXT PRIMARY KEY,
+    url        TEXT,
+    source     TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+"#,
 ];
 
 #[cfg(test)]
@@ -551,6 +563,24 @@ mod tests {
         assert!(
             c.execute("INSERT INTO share_links (key, url, fetched_at, expires_at) VALUES ('k', 'u', 1, 2)", []).is_err(),
             "one row per lookup"
+        );
+    }
+
+    #[test]
+    fn v10_adds_the_discord_art_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        migrate(&mut c).unwrap();
+        const { assert!(SCHEMA_VERSION >= 10) };
+        c.execute(
+            "INSERT INTO discord_art (album_id, url, source, fetched_at, expires_at) VALUES ('1', NULL, 'caa', 1, 2)",
+            [],
+        )
+        .unwrap();
+        assert!(
+            c.execute("INSERT INTO discord_art (album_id, url, source, fetched_at, expires_at) VALUES ('1', 'u', 'imgur', 1, 2)", [])
+                .is_err(),
+            "one row per album"
         );
     }
 

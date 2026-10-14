@@ -21,6 +21,7 @@ use crate::bridge::StreamPrefs;
 use crate::db::store::{kv_get, kv_set};
 use crate::db::{ArtCache, DbHandle, PopularSource};
 use crate::error::{AppError, AppResult};
+use crate::platform::discord::{DiscordSettings, DiscordSwitches};
 use crate::platform::{PlatformSettings, Switches};
 use crate::tracking::TrackingSettings;
 
@@ -220,6 +221,20 @@ pub struct Settings {
     /// List Cast devices and AirPlay receivers in the device picker
     /// (Listen on). Off keeps mDNS off.
     pub show_cast_devices: bool,
+    /// Show what's playing on Discord (this device only).
+    pub discord_status: bool,
+    /// Show unreleased songs on Discord (off: nothing while one plays).
+    pub discord_show_unreleased: bool,
+    /// Unreleased songs show their cover (off: the app icon).
+    pub discord_unreleased_art: bool,
+    /// Pausing clears the Discord status (off: it shows as paused).
+    pub discord_clear_on_pause: bool,
+    /// A "Find this song" button (song.link) for released songs.
+    pub discord_find_song: bool,
+    /// Look up covers on Cover Art Archive by MusicBrainz id.
+    pub discord_cover_archive: bool,
+    /// Upload covers to Imgur with the user's client id (kept in the keychain).
+    pub discord_upload_art: bool,
 }
 
 impl Default for Settings {
@@ -277,6 +292,13 @@ impl Default for Settings {
             eq_last_output: None,
             share_public_links: true,
             show_cast_devices: true,
+            discord_status: true,
+            discord_show_unreleased: true,
+            discord_unreleased_art: true,
+            discord_clear_on_pause: true,
+            discord_find_song: true,
+            discord_cover_archive: true,
+            discord_upload_art: false,
         }
     }
 }
@@ -334,6 +356,13 @@ pub struct SettingsPatch {
     pub eq_preset: Option<String>,
     pub share_public_links: Option<bool>,
     pub show_cast_devices: Option<bool>,
+    pub discord_status: Option<bool>,
+    pub discord_show_unreleased: Option<bool>,
+    pub discord_unreleased_art: Option<bool>,
+    pub discord_clear_on_pause: Option<bool>,
+    pub discord_find_song: Option<bool>,
+    pub discord_cover_archive: Option<bool>,
+    pub discord_upload_art: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -401,6 +430,13 @@ impl Settings {
         set(&mut self.move_stops_old_device, p.move_stops_old_device);
         set(&mut self.share_public_links, p.share_public_links);
         set(&mut self.show_cast_devices, p.show_cast_devices);
+        set(&mut self.discord_status, p.discord_status);
+        set(&mut self.discord_show_unreleased, p.discord_show_unreleased);
+        set(&mut self.discord_unreleased_art, p.discord_unreleased_art);
+        set(&mut self.discord_clear_on_pause, p.discord_clear_on_pause);
+        set(&mut self.discord_find_song, p.discord_find_song);
+        set(&mut self.discord_cover_archive, p.discord_cover_archive);
+        set(&mut self.discord_upload_art, p.discord_upload_art);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -442,6 +478,19 @@ impl Settings {
             launch_at_login: self.launch_at_login,
         }
     }
+
+    pub fn discord(&self) -> DiscordSettings {
+        DiscordSettings {
+            enabled: self.discord_status,
+            show_unreleased: self.discord_show_unreleased,
+            unreleased_art: self.discord_unreleased_art,
+            clear_on_pause: self.discord_clear_on_pause,
+            find_song: self.discord_find_song,
+            cover_archive: self.discord_cover_archive,
+            upload_art: self.discord_upload_art,
+            private_session: self.private_session,
+        }
+    }
 }
 
 /// Read settings; a missing or unreadable value gives the defaults.
@@ -479,6 +528,8 @@ pub struct Live {
     pub remote: crate::remote::RemoteSwitches,
     /// Public links for released music in the Share menus.
     pub share_public_links: Arc<AtomicBool>,
+    /// Discord status.
+    pub discord: DiscordSwitches,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -498,6 +549,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         ai.set(Src::Audiodb, s.info_audiodb);
     }
     live.platform.set(s.platform());
+    live.discord.set(s.discord());
     live.remote.set(s.show_plex_players, s.move_stops_old_device, s.act_as_plex_player);
     live.remote.set_show_cast(s.show_cast_devices);
     let cap = s.art_cache_bytes();
@@ -733,6 +785,27 @@ mod tests {
         assert_eq!((s.liked_means, s.like_control_rows), (LikedMeans::Five, LikeControlRows::Hover));
         assert_eq!(s.liked_min_rating(), 10.0);
         assert!(s.share_public_links);
+        assert!(s.discord_status && s.discord_show_unreleased && s.discord_unreleased_art && s.discord_clear_on_pause);
+        assert!(s.discord_find_song && s.discord_cover_archive && !s.discord_upload_art);
+    }
+
+    #[test]
+    fn discord_settings_publish_with_the_private_session() {
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = Settings::default();
+        s.apply(&SettingsPatch {
+            discord_status: Some(false),
+            discord_clear_on_pause: Some(false),
+            discord_upload_art: Some(true),
+            private_session: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+        publish(&s, &live, &db);
+        let d = live.discord.get();
+        assert!(!d.enabled && !d.clear_on_pause && d.upload_art && d.private_session);
+        assert!(d.show_unreleased && d.unreleased_art && d.find_song && d.cover_archive);
     }
 
     #[test]
@@ -808,11 +881,19 @@ mod tests {
             eq_preset: None,
             share_public_links: Some(false),
             show_cast_devices: Some(false),
+            discord_status: Some(false),
+            discord_show_unreleased: Some(false),
+            discord_unreleased_art: Some(false),
+            discord_clear_on_pause: Some(false),
+            discord_find_song: Some(false),
+            discord_cover_archive: Some(false),
+            discord_upload_art: Some(true),
         })
         .await
         .unwrap();
         assert!(!live.share_public_links.load(Ordering::Relaxed));
         assert!(!live.remote.show_cast());
+        assert!(!live.discord.get().enabled && live.discord.get().upload_art && live.discord.get().private_session);
         {
             use crate::artistinfo::InfoSource as Src;
             // The artist info service sees the switches at once.

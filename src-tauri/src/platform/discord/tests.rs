@@ -1,0 +1,595 @@
+//! The service against an in-memory Discord, and the cover lookups against
+//! fake HTTP. Nothing here talks to a real Discord client or uploads.
+
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use async_trait::async_trait;
+use parking_lot::Mutex;
+use serde_json::Value;
+use tokio::sync::broadcast;
+
+use super::activity::APP_ICON;
+use super::art::*;
+use super::ipc::fake::{FakeConnector, FakeDiscord};
+use super::*;
+use crate::artistinfo::http::fake::FakeHttp;
+use crate::artistinfo::http::HttpResponse;
+use crate::audio::testutil::track;
+use crate::model::Track;
+use crate::plex::keychain::{MemoryStore, TokenStore};
+
+const COVER: &str = "https://coverartarchive.org/release/0b1e2a3c-0000-4000-8000-000000000001/front-500";
+const LINK: &str = "https://song.link/i/42";
+const MBID: &str = "0b1e2a3c-0000-4000-8000-000000000001";
+
+// ---------------------------------------------------------------- fakes
+
+#[derive(Default)]
+struct FakeLib {
+    unreleased_albums: HashSet<String>,
+    link_calls: AtomicUsize,
+}
+
+#[async_trait]
+impl Library for FakeLib {
+    async fn unreleased(&self, album_id: &str) -> bool {
+        self.unreleased_albums.contains(album_id)
+    }
+    async fn song_link(&self, _: &str) -> Option<String> {
+        self.link_calls.fetch_add(1, Ordering::SeqCst);
+        Some(LINK.into())
+    }
+}
+
+struct FakeArt {
+    outcome: Mutex<ArtOutcome>,
+    delay: Duration,
+    calls: AtomicUsize,
+}
+
+impl FakeArt {
+    fn new(outcome: ArtOutcome) -> Self {
+        Self { outcome: Mutex::new(outcome), delay: Duration::ZERO, calls: AtomicUsize::new(0) }
+    }
+}
+
+#[async_trait]
+impl CoverArt for FakeArt {
+    async fn resolve(&self, _: &ArtRequest) -> ArtOutcome {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(self.delay).await;
+        self.outcome.lock().clone()
+    }
+    fn key_state(&self) -> KeyState {
+        KeyState::default()
+    }
+}
+
+#[derive(Default)]
+struct Statuses(Mutex<Vec<DiscordStatus>>);
+
+impl StatusSink for Statuses {
+    fn changed(&self, s: &DiscordStatus) {
+        self.0.lock().push(*s);
+    }
+}
+
+struct Rig {
+    discord: Arc<FakeDiscord>,
+    events: broadcast::Sender<TrackingEvent>,
+    switches: DiscordSwitches,
+    handle: DiscordHandle,
+    art: Arc<FakeArt>,
+    lib: Arc<FakeLib>,
+    statuses: Arc<Statuses>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+fn rig_with(art: FakeArt, lib: FakeLib, settings: DiscordSettings) -> Rig {
+    let discord = FakeDiscord::new();
+    let (events, rx) = broadcast::channel(64);
+    let switches = DiscordSwitches::default();
+    switches.set(settings);
+    let art = Arc::new(art);
+    let lib = Arc::new(lib);
+    let statuses = Arc::new(Statuses::default());
+    let deps = Deps {
+        connector: Arc::new(FakeConnector(discord.clone())),
+        art: art.clone(),
+        library: lib.clone(),
+        status: statuses.clone(),
+    };
+    let mut cfg = Config::new("1234567890");
+    cfg.clock = Arc::new(now_ms);
+    let (handle, task) = spawn(cfg, deps, rx, switches.subscribe());
+    Rig { discord, events, switches, handle, art, lib, statuses, task }
+}
+
+fn rig() -> Rig {
+    rig_with(FakeArt::new(ArtOutcome::Url(COVER.into())), FakeLib::default(), DiscordSettings::default())
+}
+
+fn song(id: &str) -> Track {
+    let mut t = track(id, "Band", &format!("/library/parts/{id}/1/file.flac"));
+    t.title = format!("Song {id}");
+    t.album_id = format!("al{id}");
+    t.album_title = "Record".into();
+    t.duration_ms = 200_000;
+    t.thumb = Some(format!("/library/metadata/{id}/thumb/1"));
+    t
+}
+
+/// The paused tokio clock as unix ms, so positions and time agree.
+fn now_ms() -> i64 {
+    use std::sync::OnceLock;
+    static BASE: OnceLock<tokio::time::Instant> = OnceLock::new();
+    let base = *BASE.get_or_init(tokio::time::Instant::now);
+    1_700_000_000_000 + tokio::time::Instant::now().saturating_duration_since(base).as_millis() as i64
+}
+
+fn started(t: Track) -> TrackingEvent {
+    TrackingEvent::TrackStarted { track: t, item_id: "q1".into(), at: now_ms(), context: None }
+}
+
+async fn wait(secs: f64) {
+    tokio::time::sleep(Duration::from_secs_f64(secs)).await;
+}
+
+fn last(d: &FakeDiscord) -> Option<Value> {
+    d.activities().last().cloned().flatten()
+}
+
+// ---------------------------------------------------------------- service
+
+#[tokio::test(start_paused = true)]
+async fn status_appears_within_2s_with_cover_and_find_this_song() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 1, "{acts:?}");
+    let a = acts[0].clone().unwrap();
+    assert_eq!(a["type"], 2, "Listening");
+    assert_eq!(a["details"], "Song 1");
+    assert_eq!(a["state"], "Band");
+    assert_eq!(a["assets"]["large_image"], COVER);
+    assert_eq!(a["assets"]["large_text"], "Record");
+    assert_eq!(a["buttons"][0]["url"], LINK);
+    let end = a["timestamps"]["end"].as_i64().unwrap() - a["timestamps"]["start"].as_i64().unwrap();
+    assert_eq!(end, 200_000);
+    assert!(r.handle.status().connected);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_slow_cover_never_holds_the_status_back() {
+    let mut art = FakeArt::new(ArtOutcome::Url(COVER.into()));
+    art.delay = Duration::from_secs(8);
+    let r = rig_with(art, FakeLib::default(), DiscordSettings::default());
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], APP_ICON);
+    // The cover lands at 8 s; the next update is due 15 s after the first.
+    wait(15.0).await;
+    assert_eq!(r.discord.activities().len(), 2);
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], COVER);
+}
+
+#[tokio::test(start_paused = true)]
+async fn updates_are_coalesced_to_one_per_15s_with_the_latest_state() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    for id in ["2", "3", "4", "5"] {
+        r.events.send(started(song(id))).unwrap();
+        wait(1.0).await;
+    }
+    wait(8.0).await; // 14 s in: still only the first
+    assert_eq!(r.discord.activities().len(), 1);
+    wait(10.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 2, "one update for four changes");
+    assert_eq!(acts[1].as_ref().unwrap()["details"], "Song 5");
+    wait(30.0).await;
+    assert_eq!(r.discord.activities().len(), 2, "nothing new to say");
+}
+
+#[tokio::test(start_paused = true)]
+async fn pausing_clears_the_status_by_default() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    r.events.send(TrackingEvent::Paused { track_id: "1".into(), position_ms: 30_000 }).unwrap();
+    wait(16.0).await;
+    assert_eq!(r.discord.activities().last(), Some(&None), "cleared");
+    r.events.send(TrackingEvent::Resumed { track_id: "1".into(), position_ms: 30_000 }).unwrap();
+    wait(16.0).await;
+    let a = last(&r.discord).unwrap();
+    let start = a["timestamps"]["start"].as_i64().unwrap();
+    assert!((now_ms() - start - 30_000).abs() < 20_000, "resumes from 0:30");
+}
+
+#[tokio::test(start_paused = true)]
+async fn pausing_can_show_paused_instead() {
+    let r = rig_with(
+        FakeArt::new(ArtOutcome::Url(COVER.into())),
+        FakeLib::default(),
+        DiscordSettings { clear_on_pause: false, ..Default::default() },
+    );
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    r.events.send(TrackingEvent::Paused { track_id: "1".into(), position_ms: 30_000 }).unwrap();
+    wait(16.0).await;
+    let a = last(&r.discord).unwrap();
+    assert!(a.get("timestamps").is_none(), "no progress bar while paused");
+    assert_eq!(a["assets"]["small_text"], "Paused");
+    assert_eq!(a["details"], "Song 1");
+}
+
+#[tokio::test(start_paused = true)]
+async fn seeking_moves_the_progress_bar() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    let before = last(&r.discord).unwrap()["timestamps"]["start"].as_i64().unwrap();
+    r.events.send(TrackingEvent::Seeked { track_id: "1".into(), from_ms: 2_000, to_ms: 120_000 }).unwrap();
+    wait(16.0).await;
+    let after = last(&r.discord).unwrap()["timestamps"]["start"].as_i64().unwrap();
+    assert!(before - after > 100_000, "start moved back by the seek: {before} {after}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn ordinary_progress_ticks_send_nothing() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    for s in 2..40u64 {
+        r.events
+            .send(TrackingEvent::Progress { track_id: "1".into(), position_ms: s * 1000, duration_ms: 200_000 })
+            .unwrap();
+        wait(1.0).await;
+    }
+    assert_eq!(r.discord.activities().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopping_clears_but_a_gapless_change_does_not_flash() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(16.0).await;
+    // Track 1 ends and 2 starts at once: one update, straight to song 2.
+    r.events
+        .send(TrackingEvent::TrackEnded { track: song("1"), item_id: "q1".into(), listened_ms: 1, completed: true, skipped_at_ms: None })
+        .unwrap();
+    r.events.send(started(song("2"))).unwrap();
+    wait(2.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 2);
+    assert_eq!(acts[1].as_ref().unwrap()["details"], "Song 2");
+    // Stop: the status goes.
+    r.events
+        .send(TrackingEvent::TrackEnded { track: song("2"), item_id: "q2".into(), listened_ms: 1, completed: false, skipped_at_ms: Some(1) })
+        .unwrap();
+    wait(16.0).await;
+    assert_eq!(r.discord.activities().last(), Some(&None));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_private_session_hides_everything_and_turning_off_leaves_discord() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    r.switches.set(DiscordSettings { private_session: true, ..Default::default() });
+    wait(16.0).await;
+    assert_eq!(r.discord.activities().last(), Some(&None));
+    r.switches.set(DiscordSettings::default());
+    wait(16.0).await;
+    assert!(last(&r.discord).is_some(), "back after the private session");
+    r.switches.set(DiscordSettings { enabled: false, ..Default::default() });
+    wait(16.0).await;
+    assert_eq!(r.discord.activities().last(), Some(&None));
+    assert!(!r.handle.status().connected, "off disconnects");
+    let n = r.discord.frames.lock().len();
+    r.events.send(started(song("2"))).unwrap();
+    wait(30.0).await;
+    assert_eq!(r.discord.frames.lock().len(), n, "nothing sent while off");
+}
+
+#[tokio::test(start_paused = true)]
+async fn unreleased_songs_follow_the_settings_and_never_look_up_links() {
+    let lib = FakeLib { unreleased_albums: ["al1".to_string()].into(), ..Default::default() };
+    let r = rig_with(FakeArt::new(ArtOutcome::Url(COVER.into())), lib, DiscordSettings::default());
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    let a = last(&r.discord).unwrap();
+    assert!(a.get("buttons").is_none());
+    assert_eq!(r.lib.link_calls.load(Ordering::SeqCst), 0, "no link search for unreleased music");
+    r.switches.set(DiscordSettings { show_unreleased: false, ..Default::default() });
+    wait(16.0).await;
+    assert_eq!(r.discord.activities().last(), Some(&None), "nothing while an unreleased song plays");
+}
+
+#[tokio::test(start_paused = true)]
+async fn hidden_unreleased_songs_never_reach_the_cover_lookups() {
+    let lib = FakeLib { unreleased_albums: ["al1".to_string()].into(), ..Default::default() };
+    let s = DiscordSettings { unreleased_art: false, ..Default::default() };
+    let r = rig_with(FakeArt::new(ArtOutcome::Url(COVER.into())), lib, s);
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], APP_ICON);
+    assert_eq!(r.art.calls.load(Ordering::SeqCst), 0, "no upload or lookup for a hidden cover");
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_token_or_server_address_is_ever_sent_to_discord() {
+    // Even if a lookup handed back a server URL, it must not get through.
+    let art = FakeArt::new(ArtOutcome::Url("https://192.0.2.7:32400/library/metadata/1/thumb?X-Plex-Token=SECRET".into()));
+    let r = rig_with(art, FakeLib::default(), DiscordSettings { clear_on_pause: false, ..Default::default() });
+    let mut t = song("1");
+    t.thumb = Some("/library/metadata/1/thumb/1?X-Plex-Token=SECRET".into());
+    t.part_key = "https://192.0.2.7:32400/library/parts/1/file.flac?X-Plex-Token=SECRET".into();
+    r.events.send(started(t)).unwrap();
+    wait(2.0).await;
+    r.events.send(TrackingEvent::Paused { track_id: "1".into(), position_ms: 5_000 }).unwrap();
+    wait(16.0).await;
+    assert_eq!(r.discord.activities().len(), 2);
+    let wire = r.discord.wire_text();
+    for bad in ["SECRET", "X-Plex-Token", "192.0.2.", "32400", "plex.direct", "/library/", "/photo/"] {
+        assert!(!wire.contains(bad), "{bad} reached Discord: {wire}");
+    }
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], APP_ICON);
+}
+
+#[tokio::test(start_paused = true)]
+async fn discord_closing_mid_song_never_touches_playback_and_reconnects() {
+    let r = rig();
+    r.discord.hang_up_after.store(1, Ordering::SeqCst);
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(r.discord.activities().len(), 1);
+    // Discord quits. Player events keep flowing without blocking.
+    for s in 0..100u64 {
+        r.events
+            .send(TrackingEvent::Progress { track_id: "1".into(), position_ms: 3000 + s, duration_ms: 200_000 })
+            .expect("the player's events never fail because of Discord");
+    }
+    r.events.send(TrackingEvent::Seeked { track_id: "1".into(), from_ms: 3_000, to_ms: 60_000 }).unwrap();
+    // The loss shows at the next update (15 s after the last).
+    wait(16.0).await;
+    assert!(!r.handle.status().connected);
+    assert!(!r.task.is_finished(), "the service carries on");
+    // Discord comes back: the latest status is sent again.
+    r.discord.down.store(false, Ordering::SeqCst);
+    wait(31.0).await;
+    assert!(r.handle.status().connected);
+    assert!(r.discord.connects.load(Ordering::SeqCst) >= 2);
+    assert_eq!(last(&r.discord).unwrap()["details"], "Song 1");
+    let statuses = r.statuses.0.lock().clone();
+    assert!(statuses.iter().any(|s| !s.connected), "Settings heard about the disconnect");
+}
+
+#[tokio::test(start_paused = true)]
+async fn discord_not_running_is_quiet_and_looks_up_nothing() {
+    let r = rig();
+    r.discord.down.store(true, Ordering::SeqCst);
+    r.events.send(started(song("1"))).unwrap();
+    wait(40.0).await;
+    assert!(!r.handle.status().connected);
+    assert_eq!(r.art.calls.load(Ordering::SeqCst), 0, "no cover lookups without Discord");
+    assert_eq!(r.lib.link_calls.load(Ordering::SeqCst), 0);
+    // Discord starts: picked up within the retry time.
+    r.discord.down.store(false, Ordering::SeqCst);
+    wait(17.0).await;
+    assert!(r.handle.status().connected);
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], COVER);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_client_that_refuses_listening_gets_playing() {
+    let r = rig();
+    r.discord.refuse_listening.store(true, Ordering::SeqCst);
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 2, "tried Listening, then Playing");
+    assert_eq!(acts[1].as_ref().unwrap()["type"], 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_upload_shows_the_app_icon_and_tells_settings() {
+    let art = FakeArt::new(ArtOutcome::UploadFailed("Imgur answered 500".into()));
+    let r = rig_with(art, FakeLib::default(), DiscordSettings { upload_art: true, ..Default::default() });
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], APP_ICON);
+    assert!(r.handle.status().upload_failed);
+    assert!(r.statuses.0.lock().iter().any(|s| s.upload_failed));
+    r.handle.key_changed();
+    assert!(!r.handle.status().upload_failed, "a new key clears it");
+}
+
+// ---------------------------------------------------------------- covers
+
+struct Mbids(Option<String>, AtomicUsize);
+
+#[async_trait]
+impl AlbumMbid for Mbids {
+    async fn release_mbid(&self, _: &str) -> crate::error::AppResult<Option<String>> {
+        self.1.fetch_add(1, Ordering::SeqCst);
+        Ok(self.0.clone())
+    }
+}
+
+struct Covers;
+
+#[async_trait]
+impl CoverBytes for Covers {
+    async fn cover(&self, thumb: &str, px: u32) -> crate::error::AppResult<(Vec<u8>, String)> {
+        assert_eq!(px, COVER_PX);
+        assert!(thumb.starts_with("/library/"));
+        Ok((b"\xff\xd8JPEGDATA".to_vec(), "image/jpeg".into()))
+    }
+}
+
+type Post = (String, Vec<(&'static str, String)>, String, Vec<u8>);
+
+#[derive(Default)]
+struct FakeUpload {
+    answer: Mutex<Option<HttpResponse>>,
+    log: Mutex<Vec<Post>>,
+}
+
+#[async_trait]
+impl UploadHttp for FakeUpload {
+    async fn post(&self, url: &str, headers: &[(&'static str, String)], ct: &str, body: Vec<u8>) -> crate::error::AppResult<HttpResponse> {
+        self.log.lock().push((url.into(), headers.to_vec(), ct.into(), body));
+        match self.answer.lock().clone() {
+            Some(r) => Ok(r),
+            None => Err(crate::error::AppError::Network("connection refused".into())),
+        }
+    }
+}
+
+fn imgur_ok() -> HttpResponse {
+    HttpResponse {
+        status: 200,
+        body: r#"{"data":{"link":"https://i.imgur.com/AbC123.jpg","deletehash":"x"},"success":true,"status":200}"#.into(),
+        ..Default::default()
+    }
+}
+
+struct Covers3 {
+    http: Arc<FakeHttp>,
+    up: Arc<FakeUpload>,
+    mbids: Arc<Mbids>,
+    keys: Arc<MemoryStore>,
+    r: ArtResolver,
+    _dir: tempfile::TempDir,
+}
+
+fn resolver(mbid: Option<&str>) -> Covers3 {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("d.db")).unwrap();
+    let http = Arc::new(FakeHttp::new());
+    let up = Arc::new(FakeUpload::default());
+    let mbids = Arc::new(Mbids(mbid.map(str::to_owned), AtomicUsize::new(0)));
+    let keys = Arc::new(MemoryStore::new());
+    let r = ArtResolver::new(db, http.clone(), up.clone(), mbids.clone(), Arc::new(Covers), keys.clone());
+    Covers3 { http, up, mbids, keys, r, _dir: dir }
+}
+
+use crate::db::DbHandle;
+
+fn req(upload: bool) -> ArtRequest {
+    ArtRequest { album_id: "al1".into(), thumb: Some("/library/metadata/9/thumb/1".into()), use_archive: true, upload }
+}
+
+#[tokio::test]
+async fn cover_art_archive_is_used_by_release_id_and_cached() {
+    let c = resolver(Some(MBID));
+    c.http.route("coverartarchive.org/release/", 200, r#"{"images":[{"front":true,"image":"x"}]}"#);
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(COVER.into()));
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(COVER.into()));
+    assert_eq!(c.http.calls("coverartarchive.org"), 1, "cached after the first");
+    assert_eq!(c.http.urls()[0], format!("{CAA}/{MBID}"), "only the release id is sent");
+}
+
+#[tokio::test]
+async fn albums_the_archive_lacks_are_uploaded_once_to_imgur() {
+    let c = resolver(Some(MBID));
+    c.http.route("coverartarchive.org/release/", 404, "Not Found");
+    c.keys.set(IMGUR_ACCOUNT, &crate::plex::token::Token::new("client123").unwrap()).unwrap();
+    *c.up.answer.lock() = Some(imgur_ok());
+    assert_eq!(c.r.resolve(&req(true)).await, ArtOutcome::Url("https://i.imgur.com/AbC123.jpg".into()));
+    assert_eq!(c.r.resolve(&req(true)).await, ArtOutcome::Url("https://i.imgur.com/AbC123.jpg".into()));
+    assert_eq!(c.up.log.lock().len(), 1, "one upload per album");
+    assert_eq!(c.http.calls("coverartarchive.org"), 1, "the miss is remembered");
+    let (url, headers, ct, body) = c.up.log.lock()[0].clone();
+    assert_eq!(url, IMGUR_UPLOAD);
+    assert_eq!(headers, vec![("Authorization", "Client-ID client123".to_string())]);
+    assert!(ct.starts_with("multipart/form-data; boundary="));
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("JPEGDATA") && text.contains("name=\"image\""));
+    assert!(!text.contains("/library/") && !text.contains("Record"), "only the image is sent");
+}
+
+#[tokio::test]
+async fn without_a_key_or_mbid_there_is_no_public_cover() {
+    let c = resolver(None);
+    assert_eq!(c.r.resolve(&req(true)).await, ArtOutcome::None);
+    assert_eq!(c.http.calls("coverartarchive.org"), 0);
+    assert!(c.up.log.lock().is_empty());
+    assert_eq!(c.mbids.1.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn image_upload_failed_is_reported_and_not_retried_until_a_new_key() {
+    let c = resolver(None);
+    c.keys.set(IMGUR_ACCOUNT, &crate::plex::token::Token::new("client123").unwrap()).unwrap();
+    *c.up.answer.lock() = Some(HttpResponse { status: 500, ..Default::default() });
+    assert!(matches!(c.r.resolve(&req(true)).await, ArtOutcome::UploadFailed(_)));
+    assert!(matches!(c.r.resolve(&req(true)).await, ArtOutcome::UploadFailed(_)));
+    assert_eq!(c.up.log.lock().len(), 1);
+    // Offline also fails cleanly.
+    *c.up.answer.lock() = None;
+    c.http.route("api.imgur.com/3/credits", 200, "{}");
+    c.r.set_key(Some("client456".into())).await.unwrap();
+    assert!(matches!(c.r.resolve(&req(true)).await, ArtOutcome::UploadFailed(_)));
+    *c.up.answer.lock() = Some(imgur_ok());
+    c.r.set_key(Some("client456".into())).await.unwrap();
+    assert!(matches!(c.r.resolve(&req(true)).await, ArtOutcome::Url(_)));
+}
+
+#[tokio::test]
+async fn a_refused_client_id_is_flagged_on_save_and_on_upload() {
+    let c = resolver(None);
+    c.http.route("api.imgur.com/3/credits", 403, "{}");
+    let st = c.r.set_key(Some(" bad ".into())).await.unwrap();
+    assert!(st.saved && st.rejected);
+    assert_eq!(c.keys.get(IMGUR_ACCOUNT).unwrap().unwrap().expose(), "bad");
+    assert!(c.up.log.lock().is_empty(), "checking a key uploads nothing");
+    c.http.route("api.imgur.com/3/credits", 200, "{}");
+    c.r.set_key(Some("good".into())).await.unwrap();
+    *c.up.answer.lock() = Some(HttpResponse { status: 403, ..Default::default() });
+    assert!(matches!(c.r.resolve(&req(true)).await, ArtOutcome::UploadFailed(_)));
+    assert!(c.r.key_state().rejected);
+    let st = c.r.set_key(None).await.unwrap();
+    assert!(!st.saved && !st.rejected);
+}
+
+#[tokio::test]
+async fn an_upload_answer_off_the_public_hosts_is_not_used() {
+    let c = resolver(None);
+    c.keys.set(IMGUR_ACCOUNT, &crate::plex::token::Token::new("k").unwrap()).unwrap();
+    *c.up.answer.lock() = Some(HttpResponse { status: 200, body: r#"{"data":{"link":"https://evil.example/a.jpg"}}"#.into(), ..Default::default() });
+    assert!(matches!(c.r.resolve(&req(true)).await, ArtOutcome::UploadFailed(_)));
+}
+
+#[tokio::test]
+async fn turning_the_archive_off_skips_its_cached_cover() {
+    let c = resolver(Some(MBID));
+    c.http.route("coverartarchive.org/release/", 200, r#"{"images":[{"front":true}]}"#);
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(COVER.into()));
+    let off = ArtRequest { use_archive: false, ..req(false) };
+    assert_eq!(c.r.resolve(&off).await, ArtOutcome::None);
+}
+
+#[test]
+fn multipart_body_has_the_type_and_the_image() {
+    let (body, ct) = multipart(b"IMG", "image/png");
+    let b = ct.split("boundary=").nth(1).unwrap();
+    let text = String::from_utf8(body).unwrap();
+    assert!(text.starts_with(&format!("--{b}\r\n")));
+    assert!(text.contains("filename=\"cover.png\"\r\nContent-Type: image/png\r\n\r\nIMG\r\n"));
+    assert!(text.ends_with(&format!("--{b}--\r\n")));
+}
+
+#[test]
+fn an_empty_build_time_id_means_unavailable() {
+    // The test build has no id unless one is set in the environment.
+    if let Some(id) = app_id() {
+        assert!(id.bytes().all(|b| b.is_ascii_digit()));
+    }
+}
