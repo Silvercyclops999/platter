@@ -93,7 +93,7 @@ describe("track row selection", () => {
     await user.keyboard("{/Control}");
     fireEvent.contextMenu(rows()[2], { clientX: 20, clientY: 20 });
     const menu = await screen.findByRole("menu", { name: "Options for 2 songs" });
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Add to queue"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Add to queue", "Add to playlist"]);
     await user.click(within(menu).getByRole("menuitem", { name: "Add to queue" }));
     expect(spy).toHaveBeenCalledWith([a.id, c.id], "end");
     // The selection survives the menu.
@@ -183,7 +183,7 @@ describe("cards", () => {
     expect(screen.getByRole("button", { name: `Pause ${album.title}` })).toBeInTheDocument();
     fireEvent.contextMenu(screen.getByRole("button", { name: album.title }), { clientX: 5, clientY: 5 });
     const menu = await screen.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Pause", "Add to queue", "Go to artist", "Pin to sidebar"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Pause", "Add to queue", "Add to playlist", "Go to artist", "Pin to sidebar"]);
     await user.click(within(menu).getByRole("menuitem", { name: "Add to queue" }));
     await waitFor(() => expect(add).toHaveBeenCalledWith(mock.fx.tracksByAlbum.get(album.id)!.map((t) => t.id), "end"));
   });

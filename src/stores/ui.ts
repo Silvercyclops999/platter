@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { create } from "zustand";
 import type { HeaderColors } from "../lib/color";
 import { RIGHT_DEFAULT, RIGHT_MAX, RIGHT_MIN, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, clamp } from "../shell/layout";
@@ -93,6 +94,14 @@ export interface MenuItem {
   heading?: string;
   /** Checked when the menu opens; the item is left out when this returns false. */
   when?: () => boolean;
+  /** Opens a submenu beside the item (on hover, focus, click or Right arrow).
+   *  `close` closes the whole menu; `back` returns focus to this item. */
+  submenu?: (ctx: SubmenuContext) => ReactNode;
+}
+
+export interface SubmenuContext {
+  close: () => void;
+  back: () => void;
 }
 
 /** Shown in the main header once the page's own header has scrolled away. */

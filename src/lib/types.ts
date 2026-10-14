@@ -88,6 +88,10 @@ export interface Playlist {
   trackCount: number;
   durationMs: number;
   thumb: string | null;
+  /** The playlist's description (Plex summary). */
+  summary?: string | null;
+  /** Last change, unix seconds. */
+  updatedAt?: number | null;
 }
 
 export type LibraryItemKind = "playlist" | "album" | "artist";
@@ -234,6 +238,21 @@ export interface AlbumPage {
 export interface PlaylistPage {
   playlist: Playlist;
   tracks: Track[];
+  /** One per track, same order: names a row for edits (a song can be in twice). */
+  itemIds: string[];
+}
+
+/** A row taken out of a playlist and where it was (`playlist_remove`). */
+export interface RemovedItem {
+  itemId: string;
+  trackId: string;
+  index: number;
+}
+
+/** Where `playlist_add` puts songs: the end (default), the top, or after a row. */
+export interface AddPlace {
+  after?: string;
+  top?: boolean;
 }
 
 // ---------------------------------------------------------------- now playing
@@ -477,6 +496,10 @@ export interface Settings {
   volumePercent: boolean;
   /** Desktop notification on each new track (this device only). */
   notifyTrackChange: boolean;
+  /** Ask before adding a song that's already in the playlist. */
+  playlistAskDuplicates: boolean;
+  /** Name for new playlists; "#N" becomes the next free number. */
+  playlistNewName: string;
   [key: string]: unknown;
 }
 
@@ -507,6 +530,8 @@ export const DEFAULT_SETTINGS: Settings = {
   upNextLine: true,
   volumePercent: true,
   notifyTrackChange: false,
+  playlistAskDuplicates: true,
+  playlistNewName: "My playlist #N",
 };
 
 // ---------------------------------------------------------------- output devices

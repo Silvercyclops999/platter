@@ -571,23 +571,23 @@ impl Playlists {
     async fn refused(&self, q: &QueuedOp, e: &AppError) {
         let pid = q.playlist_id.clone();
         tracing::warn!("playlist edit refused: {}", e.kind());
+        let title_now = || {
+            let p = pid.clone();
+            async move { self.db().read_async(move |c| Ok(local::playlist(c, &p)?.map(|p| p.title))).await.ok().flatten() }
+        };
+        let edited = title_now().await;
         let p = pid.clone();
-        let title = self
-            .db()
-            .read_async(move |c| Ok(local::playlist(c, &p)?.map(|p| p.title)))
-            .await
-            .ok()
-            .flatten();
+        let _ = self.db().write_async(move |c| local::drop_ops_for(c, &p)).await;
+        self.resync(&pid).await;
+        // Name it as Plex has it (a refused rename shouldn't show its new name).
+        let title = title_now().await.or(edited);
         let name = title.map(|t| format!("\"{t}\"")).unwrap_or_else(|| "a playlist".into());
         let message = match &q.op {
             Op::Create => format!("Plex didn't accept the new playlist {name}."),
             Op::Delete => format!("Plex didn't delete {name}."),
             _ => format!("Plex didn't accept a change to {name}. Showing it as it is in Plex."),
         };
-        let p = pid.clone();
-        let _ = self.db().write_async(move |c| local::drop_ops_for(c, &p)).await;
         self.inner.events.error(&message);
-        self.resync(&pid).await;
     }
 
     /// Read a playlist back from Plex into the cache. Gone from Plex: gone

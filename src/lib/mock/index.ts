@@ -22,6 +22,7 @@
 import type { Backend, Unlisten } from "../backend";
 import type {
   AbLoop,
+  AddPlace,
   Album,
   AlbumSort,
   ArtistSort,
@@ -58,6 +59,7 @@ import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } f
 import { mockBio } from "./bio";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { MockHome, type ContextPlay } from "./home";
+import { MockPlaylists } from "./playlists";
 
 export interface MockOptions {
   latencyMs: number;
@@ -128,6 +130,8 @@ const clone = <T,>(v: T): T => (typeof structuredClone === "function" ? structur
 export class MockBackend implements Backend {
   readonly kind = "mock" as const;
   readonly fx: Fixtures;
+  /** Playlist editing (test hooks: refuseNextWrite, deleteElsewhere). */
+  readonly pl: MockPlaylists;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -177,6 +181,12 @@ export class MockBackend implements Backend {
   constructor(opts: Partial<MockOptions> = {}) {
     this.opts = { ...optionsFromUrl(""), ...opts };
     this.fx = buildFixtures();
+    this.pl = new MockPlaylists(
+      this.fx,
+      (id) => this.trackById(id),
+      () => this.emit("library://changed", null),
+      (message) => this.emit("toast", { kind: "error", message }),
+    );
     this.contextPlays = this.seedContextPlays();
     this.auth = this.opts.signedOut
       ? { state: "signedOut", needsServerPick: false }
@@ -517,8 +527,37 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       const playlist = this.fx.playlists.find((p) => p.id === id) ?? this.notFound("Playlist");
       const ids = this.fx.playlistTracks.get(id) ?? [];
-      return { playlist, tracks: ids.map((tid) => this.trackById(tid)!).filter(Boolean) };
+      const itemIds = this.pl.itemIds(id);
+      const rows = ids.map((tid, i) => ({ track: this.trackById(tid), itemId: itemIds[i] ?? `it-${id}-${i}` })).filter((r) => r.track);
+      return { playlist, tracks: rows.map((r) => r.track!), itemIds: rows.map((r) => r.itemId) };
     });
+  }
+
+  // ---------------------------------------------------------------- playlist editing
+
+  playlistCreate(title?: string, trackIds: string[] = []) {
+    return this.delay(() => this.pl.create(this.settings.playlistNewName, title, trackIds));
+  }
+  playlistAdd(id: string, trackIds: string[], place?: AddPlace) {
+    return this.delay(() => this.pl.add(id, trackIds, place));
+  }
+  playlistDuplicates(id: string, trackIds: string[]) {
+    return this.delay(() => this.pl.duplicates(id, trackIds));
+  }
+  playlistRemove(id: string, itemIds: string[]) {
+    return this.delay(() => this.pl.remove(id, itemIds));
+  }
+  playlistMove(id: string, itemIds: string[], after?: string | null) {
+    return this.delay(() => this.pl.move(id, itemIds, after));
+  }
+  playlistUpdate(id: string, details: { title?: string; summary?: string }) {
+    return this.delay(() => this.pl.update(id, details));
+  }
+  playlistSetCover(id: string, bytes: Uint8Array, contentType: string) {
+    return this.delay(() => this.pl.setCover(id, bytes, contentType));
+  }
+  playlistDelete(id: string) {
+    return this.delay(() => this.pl.delete(id));
   }
 
   nowPlayingDetails(trackId: string) {

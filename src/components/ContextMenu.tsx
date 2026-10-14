@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useUi, type ContextMenuState, type MenuItem } from "../stores/ui";
@@ -9,6 +9,18 @@ export function ContextMenuHost() {
   const close = useUi((s) => s.closeMenu);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  // The open submenu (item index) and a counter that moves focus into it.
+  const [sub, setSub] = useState<number | null>(null);
+  const [subFocus, setSubFocus] = useState(0);
+  const subFocused = useRef(0);
+  // Focus that came from the arrow keys opens a submenu; the first focus on open doesn't.
+  const keyNav = useRef(false);
+  useEffect(() => {
+    setSub(null);
+    subFocused.current = 0;
+    keyNav.current = false;
+    setSubFocus(0);
+  }, [menu]);
 
   // Place once measured (before paint, so it opens fully formed in one frame).
   useLayoutEffect(() => {
@@ -54,12 +66,28 @@ export function ContextMenuHost() {
 
   if (!menu) return null;
 
-  const items = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not([aria-disabled="true"])') ?? []);
+  // Only this menu's own items; a submenu handles its keys itself.
+  const items = () =>
+    Array.from(ref.current?.querySelectorAll<HTMLElement>(':scope > [role="none"] > [role^="menuitem"]:not([aria-disabled="true"])') ?? []);
   const onKeyDown = (e: KeyboardEvent) => {
+    if ((e.target as Element).closest(".context-menu__sub")) return;
     const list = items();
     const i = list.indexOf(document.activeElement as HTMLElement);
-    const go = (n: number) => list[(n + list.length) % list.length]?.focus();
+    const go = (n: number) => {
+      keyNav.current = true;
+      list[(n + list.length) % list.length]?.focus();
+    };
+    const at = list[i];
     switch (e.key) {
+      case "ArrowRight":
+      case "Enter":
+      case " ":
+        if (at?.dataset.submenu !== undefined) {
+          e.preventDefault();
+          setSub(Number(at.dataset.submenu));
+          setSubFocus((n) => n + 1);
+        }
+        break;
       case "ArrowDown":
         e.preventDefault();
         go(i + 1);
@@ -85,11 +113,19 @@ export function ContextMenuHost() {
     }
   };
 
-  const select = (item: MenuItem) => {
+  const select = (item: MenuItem, i: number) => {
     if (item.disabled) return;
+    if (item.submenu) {
+      setSub(i);
+      setSubFocus((n) => n + 1);
+      return;
+    }
     close();
     item.onSelect?.();
   };
+  const subItem = sub !== null ? menu.items[sub] : undefined;
+  const subAnchor = () => ref.current?.querySelector<HTMLElement>(`[data-submenu="${sub}"]`) ?? null;
+  const focusReq = { want: subFocus > subFocused.current, done: () => (subFocused.current = subFocus) };
 
   return createPortal(
     <div
@@ -115,18 +151,124 @@ export function ContextMenuHost() {
             aria-checked={item.checked}
             tabIndex={-1}
             aria-disabled={item.disabled || undefined}
-            className={`context-menu__item ${item.danger ? "is-danger" : ""} ${item.checked ? "is-checked" : ""}`}
-            onClick={() => select(item)}
+            aria-haspopup={item.submenu ? "menu" : undefined}
+            aria-expanded={item.submenu ? sub === i : undefined}
+            data-submenu={item.submenu ? i : undefined}
+            className={`context-menu__item ${item.danger ? "is-danger" : ""} ${item.checked ? "is-checked" : ""} ${item.submenu && sub === i ? "is-open" : ""}`}
+            onClick={() => select(item, i)}
+            onMouseEnter={() => !item.disabled && setSub(item.submenu ? i : null)}
+            onFocus={() => {
+              if (!keyNav.current) return;
+              setSub(item.submenu && !item.disabled ? i : null);
+            }}
           >
             <span className="truncate">{item.label}</span>
             {item.shortcut && <span className="context-menu__shortcut">{item.shortcut}</span>}
             {item.checked && <Check size={16} aria-hidden="true" className="context-menu__check" />}
+            {item.submenu && <ChevronRight size={16} aria-hidden="true" className="context-menu__chevron" />}
           </button>
         </div>
       ))}
+      {subItem?.submenu && pos && (
+        <Submenu
+          key={sub}
+          anchor={subAnchor}
+          focusTick={focusReq}
+          label={subItem.label}
+          render={subItem.submenu}
+          close={close}
+          back={() => {
+            setSub(null);
+            subAnchor()?.focus();
+          }}
+        />
+      )}
     </div>,
     document.body,
   );
+}
+
+/**
+ * A panel beside its menu item: to the right, overlapping a little, or to
+ * the left when there's no room; moved up to stay on screen. Focus moves in
+ * only when asked (Right arrow, Enter, click); hovering just shows it.
+ */
+function Submenu({
+  anchor,
+  focusTick,
+  label,
+  render,
+  close,
+  back,
+}: {
+  anchor: () => HTMLElement | null;
+  /** Whether focus should move in now, and how to say it did. */
+  focusTick: { want: boolean; done: () => void };
+  label: string;
+  render: NonNullable<MenuItem["submenu"]>;
+  close: () => void;
+  back: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const a = anchor()?.getBoundingClientRect();
+    const el = ref.current;
+    if (!a || !el) return;
+    const r = el.getBoundingClientRect();
+    setAt(placeSubmenu(a, { width: r.width, height: r.height }, { width: window.innerWidth, height: window.innerHeight }));
+    // Only once placed: a hidden panel can't take focus.
+  }, [anchor]);
+
+  // Focus in on request (Right arrow, Enter or click on the item).
+  useEffect(() => {
+    if (!at || !focusTick.want) return;
+    ref.current?.querySelector<HTMLElement>("input, [role^='menuitem']:not([aria-disabled='true'])")?.focus();
+    focusTick.done();
+  }, [focusTick, at]);
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape" || e.key === "Tab") {
+      e.preventDefault();
+      e.nativeEvent.stopImmediatePropagation();
+      close();
+      return;
+    }
+    const t = e.target as HTMLElement;
+    const caretAtStart = !(t instanceof HTMLInputElement) || (t.selectionStart ?? 0) === 0;
+    if (e.key === "ArrowLeft" && caretAtStart) {
+      e.preventDefault();
+      back();
+    }
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="context-menu context-menu__sub"
+      role="menu"
+      aria-label={label}
+      style={{ left: at?.x ?? 0, top: at?.y ?? 0, visibility: at ? "visible" : "hidden" }}
+      onKeyDown={onKeyDown}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {render({ close, back })}
+    </div>
+  );
+}
+
+/** Where a submenu goes beside its item `a` (see Submenu). */
+export function placeSubmenu(
+  a: { left: number; right: number; top: number },
+  size: { width: number; height: number },
+  view: { width: number; height: number },
+): { x: number; y: number } {
+  const OVERLAP = 4;
+  let x = a.right - OVERLAP;
+  if (x + size.width > view.width - EDGE) x = a.left - size.width + OVERLAP;
+  const y = Math.max(EDGE, Math.min(a.top - 4, view.height - size.height - EDGE));
+  return { x: Math.max(EDGE, x), y };
 }
 
 const EDGE = 8;

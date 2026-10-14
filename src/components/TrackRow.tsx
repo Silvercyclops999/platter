@@ -24,6 +24,7 @@ import { Art } from "./Art";
 import { ArtistLinks, TextLink } from "./ArtistLinks";
 import { QualityBadge } from "./Badge";
 import { openContextMenu } from "./ContextMenu";
+import { addToPlaylistItem } from "./PlaylistPicker";
 import { Skeleton } from "./Skeleton";
 
 /** Whether the album page for `albumId` is the one showing. */
@@ -45,16 +46,20 @@ export function goToArtistItems(track: Track): MenuItem[] {
 
 /**
  * Standard track context menu, also used for the now-playing track. Order:
- * queue actions, then where to go, then copy. "Go to album" is left out on
- * that album's own page. `afterQueue` items (e.g. remove from queue) go right
- * after "Add to queue"; pages can also prepend or append items.
+ * add to playlist, queue actions, then where to go, then copy. "Go to album"
+ * is left out on that album's own page. `afterPlaylist` items (remove from
+ * this playlist) go right after "Add to playlist", `afterQueue` items (e.g.
+ * remove from queue) right after "Add to queue"; pages can also prepend or
+ * append items.
  */
 export function trackMenuItems(
   track: Track,
-  extra: { before?: MenuItem[]; afterQueue?: MenuItem[]; after?: MenuItem[] } = {},
+  extra: { before?: MenuItem[]; afterPlaylist?: MenuItem[]; afterQueue?: MenuItem[]; after?: MenuItem[] } = {},
 ): MenuItem[] {
   return [
     ...(extra.before ?? []),
+    addToPlaylistItem(() => [track.id]),
+    ...(extra.afterPlaylist ?? []),
     { label: "Add to queue", onSelect: () => player.queueAdd([track.id], "end") },
     ...(extra.afterQueue ?? []),
     ...goToArtistItems(track),
@@ -74,7 +79,7 @@ export function trackMenuItems(
 
 /** Menu for several selected rows: only actions that make sense for all of them. */
 export function multiTrackMenuItems(trackIds: string[]): MenuItem[] {
-  return [{ label: "Add to queue", onSelect: () => player.queueAdd(trackIds, "end") }];
+  return [{ label: "Add to queue", onSelect: () => player.queueAdd(trackIds, "end") }, addToPlaylistItem(() => trackIds)];
 }
 
 // ---------------------------------------------------------------- selection

@@ -26,6 +26,8 @@ import { useApp } from "../stores/app";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { updateSettings, useSettings } from "../stores/settings";
+import { PlaylistNameSetting } from "./PlaylistSettings";
+import "./playlist.css";
 import { toast } from "../stores/toasts";
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
@@ -692,6 +694,21 @@ export function SettingsPage() {
           </Button>
         </>
       ),
+    },
+    // Library: playlists
+    {
+      key: "playlistAskDuplicates",
+      section: "Library",
+      title: "Ask before adding a song that's already in a playlist",
+      description: "When a song you add from a menu is already in that playlist, ask whether to add it again.",
+      control: (ids) => toggle(s, "playlistAskDuplicates", ids),
+    },
+    {
+      key: "playlistNewName",
+      section: "Library",
+      title: "New playlists start with name",
+      description: "The name a new playlist gets. #N becomes the next free number, so you get My playlist #1, #2 and so on.",
+      control: (ids) => <PlaylistNameSetting ids={ids} />,
     },
   ];
 

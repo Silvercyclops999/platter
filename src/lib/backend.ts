@@ -12,6 +12,8 @@ import { artPixelSize } from "./artSize";
 import { createMockBackend } from "./mock";
 import type {
   AbLoop,
+  AddPlace,
+  RemovedItem,
   Album,
   AlbumPage,
   AlbumsArgs,
@@ -78,6 +80,21 @@ export interface Backend {
   artistPage(id: string): Promise<ArtistPage>;
   albumPage(id: string): Promise<AlbumPage>;
   playlistPage(id: string): Promise<PlaylistPage>;
+
+  // Playlist editing (docs/IPC.md "Playlist editing")
+  /** A new playlist, named from Settings unless `title` is given, holding `trackIds`. */
+  playlistCreate(title?: string, trackIds?: string[]): Promise<Playlist>;
+  /** Add songs at the end, the top, or after a row. */
+  playlistAdd(id: string, trackIds: string[], place?: AddPlace): Promise<Playlist>;
+  /** Which of these songs the playlist already has. */
+  playlistDuplicates(id: string, trackIds: string[]): Promise<string[]>;
+  playlistRemove(id: string, itemIds: string[]): Promise<RemovedItem[]>;
+  /** Move rows (in their order) to just after `after`, or to the top without it. */
+  playlistMove(id: string, itemIds: string[], after?: string | null): Promise<void>;
+  /** Rename and/or change the description ("" clears it). */
+  playlistUpdate(id: string, details: { title?: string; summary?: string }): Promise<Playlist>;
+  playlistSetCover(id: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  playlistDelete(id: string): Promise<void>;
 
   // Now playing
   /** Artist bio, extra credits and lyrics for the now-playing panel. */
@@ -187,6 +204,14 @@ export function createTauriBackend(): Backend {
     artistPage: (id) => call("artist_page", { id }),
     albumPage: (id) => call("album_page", { id }),
     playlistPage: (id) => call("playlist_page", { id }),
+    playlistCreate: (title, trackIds) => call("playlist_create", { title, trackIds }),
+    playlistAdd: (id, trackIds, place) => call("playlist_add", { id, trackIds, after: place?.after, top: place?.top }),
+    playlistDuplicates: (id, trackIds) => call("playlist_duplicates", { id, trackIds }),
+    playlistRemove: (id, itemIds) => call("playlist_remove", { id, itemIds }),
+    playlistMove: (id, itemIds, after) => call("playlist_move", { id, itemIds, after: after ?? undefined }),
+    playlistUpdate: (id, details) => call("playlist_update", { id, title: details.title, summary: details.summary }),
+    playlistSetCover: (id, bytes, contentType) => call("playlist_set_cover", { id, bytes: Array.from(bytes), contentType }),
+    playlistDelete: (id) => call("playlist_delete", { id }),
     nowPlayingDetails: (trackId) => call("now_playing_details", { trackId }),
 
     search: (args) => call("search", { ...args }),

@@ -1,6 +1,7 @@
 import { PanelRightOpen } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
+import { PlaylistDialogs } from "../components/PlaylistDialogs";
 import { Toaster } from "../components/Toast";
 import { Tooltip } from "../components/Tooltip";
 import { chrome } from "../lib/platform";
@@ -160,6 +161,7 @@ export function AppShell() {
       <CommandPalette />
       <ContextMenuHost />
       <Toaster />
+      <PlaylistDialogs />
     </div>
   );
 }

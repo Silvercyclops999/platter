@@ -4,6 +4,7 @@ import { Art } from "../components/Art";
 import { Badge, QualityBadge } from "../components/Badge";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
+import { addToPlaylistItem } from "../components/PlaylistPicker";
 import { CoverPopup } from "../components/CoverPopup";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
@@ -125,6 +126,7 @@ export function AlbumPage({ id }: { id: string }) {
                 `Options for ${album.title}`,
                 [
                   { label: "Add to queue", onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "end") },
+                  addToPlaylistItem(() => data?.tracks.map((t) => t.id) ?? []),
                   { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",

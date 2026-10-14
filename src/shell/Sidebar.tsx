@@ -1,12 +1,14 @@
-import { Maximize2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Maximize2, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { useState } from "react";
 import { IconButton } from "../components/Button";
 import { useLibraryView } from "../stores/library";
+import { createPlaylist } from "../stores/playlists";
 import { nav } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { LibraryCollection } from "./LibraryCollection";
 import { LibraryChips, LibrarySearch, LibrarySortView } from "./LibraryControls";
 import { StatusDot } from "./StatusDot";
+import "./library-create.css";
 import { useLibraryLoader, useLibraryModel, useLibraryRecents } from "./useLibrary";
 
 /**
@@ -34,6 +36,13 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
               icon={<PanelLeftOpen size={20} />}
               onClick={() => (auto ? nav.go({ name: "library" }) : useUi.getState().setSidebar({ collapsed: false }))}
             />
+            <IconButton
+              label="Create playlist"
+              tooltipPlacement="right"
+              className="lib-create lib-create--rail"
+              icon={<Plus size={18} />}
+              onClick={() => void createPlaylist()}
+            />
           </div>
         ) : (
           <>
@@ -44,7 +53,10 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
                 </span>
                 <span className="lib-head__text">Your Library</span>
               </button>
-              <IconButton size="sm" label="Expand Your Library" icon={<Maximize2 size={16} />} onClick={() => nav.go({ name: "library" })} />
+              <span className="lib-head__actions">
+                <IconButton size="sm" label="Create playlist" className="lib-create" icon={<Plus size={18} />} onClick={() => void createPlaylist()} />
+                <IconButton size="sm" label="Expand Your Library" icon={<Maximize2 size={16} />} onClick={() => nav.go({ name: "library" })} />
+              </span>
             </div>
             <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} />
             <div className="lib-tools">

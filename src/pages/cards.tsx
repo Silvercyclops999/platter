@@ -2,6 +2,7 @@
 import type { MouseEvent } from "react";
 import { Card } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
+import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { releaseTypeLabel } from "../lib/format";
 import type { Album, Artist, HomeItem, PlayContextKind, Playlist } from "../lib/types";
 import { usePins } from "../stores/pins";
@@ -38,6 +39,7 @@ export function useAlbumActions(album: Album): ItemActions {
         [
           { label: playing ? "Pause" : "Play", onSelect: play },
           { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
+          addToPlaylistItem(albumSongs(album.id)),
           { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
           {
             label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
@@ -91,6 +93,7 @@ export function usePlaylistActions(playlist: Playlist): ItemActions {
         [
           { label: playing ? "Pause" : "Play", onSelect: play },
           { label: "Add to queue", onSelect: () => player.queuePlaylist(playlist.id) },
+          ...playlistEditItems(playlist),
           {
             label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
             onSelect: () =>

@@ -1,6 +1,9 @@
 /** Data, recents and menus shared by the library sidebar, its rail and wide mode. */
 import { useEffect, useMemo } from "react";
 import type { MenuItem } from "../stores/ui";
+import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
+import { createPlaylist } from "../stores/playlists";
+import type { Playlist } from "../lib/types";
 import { useApp } from "../stores/app";
 import {
   LIB_KINDS,
@@ -140,12 +143,19 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
   const items: MenuItem[] = [play];
   if (e.kind === "album") {
     items.push({ label: "Add to queue", onSelect: () => void player.queueAlbum(e.id) });
+    items.push(addToPlaylistItem(albumSongs(e.id)));
     if (e.creatorId) {
       const artistId = e.creatorId;
       items.push({ label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: artistId }) });
     }
   }
-  if (e.kind === "playlist") items.push({ label: "Add to queue", onSelect: () => void player.queuePlaylist(e.id) });
+  if (e.kind === "playlist") {
+    items.push({ label: "Add to queue", onSelect: () => void player.queuePlaylist(e.id) });
+    const known = useApp.getState().playlists?.find((p) => p.id === e.id);
+    const pl: Playlist = known ?? { id: e.id, title: e.title, smart: e.smart, trackCount: 0, durationMs: 0, thumb: e.thumb ?? null };
+    items.push(...playlistEditItems(pl));
+    items.push({ label: "Create playlist", separator: true, onSelect: () => void createPlaylist() });
+  }
   items.push({ ...pin, separator: true });
   if (opts.move) {
     const m = opts.move;

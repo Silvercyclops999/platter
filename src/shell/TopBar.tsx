@@ -8,6 +8,7 @@ import { chrome, modKey } from "../lib/platform";
 import { useApp } from "../stores/app";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
+import { createPlaylist } from "../stores/playlists";
 import { toast, useToasts } from "../stores/toasts";
 import { Logo } from "./Logo";
 import { SearchBox } from "./SearchBox";
@@ -193,6 +194,10 @@ export function AppMenu() {
               {username}
             </div>
           )}
+          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => void createPlaylist())}>
+            <span>Create playlist</span>
+          </button>
+          <div className="appmenu__sep" role="separator" />
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "settings" }))}>
             <span>Settings</span>
             <kbd className="appmenu__hint">{modKey}+,</kbd>
