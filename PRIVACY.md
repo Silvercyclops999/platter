@@ -16,6 +16,12 @@ and your own Plex server.
 - Last.fm, Fanart.tv and TheAudioDB, only if you enter your own API key for
   them in Settings. They get the artist's name or MusicBrainz id and your key.
   Their images are fetched from their own image servers.
+- Apple's iTunes Search, only when you copy a public link for a song or album
+  from a Share menu (on by default, can be turned off in Settings). The search
+  carries the artist and the song or album title, nothing else. Unreleased
+  music is never looked up.
+- song.link: the public links Platter copies point to song.link pages. The app
+  itself never contacts song.link; whoever opens the link does.
 
 Some optional features planned for later will talk to other services, but
 only once you turn them on. Examples are Discord status, an image host for

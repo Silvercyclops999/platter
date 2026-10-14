@@ -198,6 +198,43 @@ with one lookup; `rejected` means the service refused it, which turns that
 source off until another key is saved or the app restarts. `open_info_link`
 only opens https links on the sources' and Creative Commons' sites.
 
+## Sharing
+| Command | Args | Returns |
+| --- | --- | --- |
+| `share_info` | `{ kind: "track"|"album"|"artist"|"playlist", id, atSeconds? }` | `{ appLink, public: "available"|"unreleased"|"off"|"none" }` |
+| `share_public_link` | `{ kind, id }` | the public link (string) |
+| `deep_link_take` | – | `DeepLinkOpen` or null |
+
+`DeepLinkOpen = { status: "open"|"notInLibrary"|"invalid", kind?, id?, albumId?, atSeconds? }`
+
+`appLink` is a `platter://` link: `platter://<song|album|artist|playlist>/<id>`,
+plus `?t=<seconds>` for a song when `atSeconds` is given, and `s=<tag>`, eight
+hex digits of a hash of the server's id (not the id itself), so a link from
+another server isn't mistaken for whatever has the same number here. Links
+are read leniently: `track` for `song`, `t` as seconds or `m:ss`, a missing
+`s`.
+
+`public` says whether `share_public_link` can work: `unreleased` for music
+whose album release type is a demo (the one rule lives in
+`db::release::is_unreleased`, where archive tags will join it), `off` when the
+`sharePublicLinks` setting is off, `none` for artists and playlists.
+
+`share_public_link` searches the iTunes Search API with the artist and title
+(songs) or the artist and album title (albums), nothing else, at most one
+search every 3 seconds. A result counts only when artist, title and album all
+match after folding case, accents, punctuation, featured artists and edition
+notes, and a song's length is within 3 seconds. The link is the store item's
+song.link page (`https://song.link/i/<id>`, `https://album.link/i/<id>`).
+Answers are cached for 30 days, misses for a day. Errors: `notFound`
+("Couldn't find this song online" or album) with no sure match, `invalid`
+("Not released", or turned off), `network` or `server` when the search can't
+be reached (not cached).
+
+Opening a `platter://` link (the OS starts or focuses Platter with it) is
+resolved in the core, kept until the UI takes it with `deep_link_take`, and
+announced with event `deeplink://open` (no payload). A song opens its album;
+with `atSeconds`, the player seeks there once when that song starts playing.
+
 ## Now playing
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -481,6 +518,7 @@ The rest of the fields, with their defaults:
 | `eqOutputs` | `{ deviceId, deviceName, preset }[]`, empty | Read only here. The preset or profile each output device uses. Set with `eq_use_for_output`. |
 | `eqFallback` | `{ preset, bands }` or null | Read only. The choice for devices without their own, kept from the last such device. |
 | `eqLastOutput` | device id or null | Read only. The device the EQ last followed. |
+| `sharePublicLinks` | bool, true | Share menus find public links for released songs and albums (iTunes Search and song.link). Off leaves only Platter links and sends nothing. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
