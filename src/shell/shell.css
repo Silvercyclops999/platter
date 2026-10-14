@@ -321,6 +321,15 @@
 }
 .lib-row__title.is-playing,
 .lib-cell__title.is-playing { color: var(--color-accent); }
+/* The accent sits close to the text colour, so the playing row also gets a
+   speaker mark at its end. */
+.lib-row__now {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+  padding-left: var(--space-2);
+  color: var(--color-accent);
+}
 .lib-row__sub {
   display: flex;
   align-items: center;

@@ -5,7 +5,7 @@
  * what's on screen.
  */
 import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
-import { Pause, Pin as PinIcon, Play } from "lucide-react";
+import { Pause, Pin as PinIcon, Play, Volume2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Art, FluidArtSize } from "../components/Art";
 import { openContextMenu } from "../components/ContextMenu";
@@ -166,6 +166,11 @@ function Row({ e, index, tabIndex, selected, isContext, playing, filtered, onMen
                 <span className="lib-row__subtext">{sub}</span>
               </span>
             )}
+          </span>
+        )}
+        {isContext && (
+          <span className="lib-row__now" role="img" aria-label="Now playing">
+            <Volume2 size={16} aria-hidden="true" />
           </span>
         )}
       </button>
