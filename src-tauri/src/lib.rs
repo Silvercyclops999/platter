@@ -11,7 +11,6 @@ pub mod tracking;
 pub mod updates;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tauri::Manager;
@@ -22,42 +21,67 @@ use crate::plex::PlexState;
 use crate::plex::notifications::PlexEvent;
 
 /// Re-sync the cache when the server connects and when Plex reports library
-/// changes. Changes arrive in bursts during a scan, so they're coalesced.
+/// changes. Changes arrive in bursts during a scan, so they're coalesced:
+/// a sync starts once no new change has arrived for `QUIET`.
 fn watch_library(plex: PlexState, db: DbHandle) {
-    let dirty = Arc::new(AtomicBool::new(false));
+    const QUIET: Duration = Duration::from_secs(5);
+    // When the last relevant change arrived; None = nothing pending.
+    let pending: Arc<parking_lot::Mutex<Option<std::time::Instant>>> = Arc::default();
     let mut events = plex.subscribe();
-    let flag = dirty.clone();
+    let mark = pending.clone();
+    let db_events = db.clone();
     tauri::async_runtime::spawn(async move {
         loop {
-            match events.recv().await {
-                Ok(PlexEvent::Connected) | Ok(PlexEvent::LibraryUpdate { .. }) => {
-                    flag.store(true, Ordering::Relaxed)
-                }
-                Ok(PlexEvent::Activity { event, kind, .. })
-                    if event == "ended" && kind.starts_with("library.") =>
-                {
-                    flag.store(true, Ordering::Relaxed)
-                }
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    flag.store(true, Ordering::Relaxed)
-                }
+            let ev = match events.recv().await {
+                Ok(ev) => Some(ev),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => None,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            let music = db_events
+                .read(db::store::sync_state)
+                .ok()
+                .flatten()
+                .map(|s| s.section_id);
+            let relevant = match &ev {
+                Some(ev) => marks_library_dirty(ev, music.as_deref()),
+                None => true, // missed events; assume something changed
+            };
+            if relevant {
+                if let Some(PlexEvent::LibraryUpdate { section_id, item_type, state, .. }) = &ev {
+                    tracing::debug!(?section_id, ?item_type, ?state, "library change");
+                }
+                *mark.lock() = Some(std::time::Instant::now());
             }
         }
     });
     tauri::async_runtime::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            if dirty.load(Ordering::Relaxed) && plex.client().await.is_ok() {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let due = matches!(*pending.lock(), Some(at) if at.elapsed() >= QUIET);
+            if due && plex.client().await.is_ok() {
                 match db.start_sync(false) {
-                    Ok(true) => dirty.store(false, Ordering::Relaxed),
+                    Ok(true) => *pending.lock() = None,
                     Ok(false) => {} // a sync is running; try again next tick
                     Err(e) => tracing::warn!("sync start failed: {e}"),
                 }
             }
         }
     });
+}
+
+/// Whether a Plex notification means the music cache may be stale. Changes
+/// in other libraries on the server (movies, TV) are ignored once the music
+/// section is known.
+fn marks_library_dirty(ev: &PlexEvent, music_section: Option<&str>) -> bool {
+    match ev {
+        PlexEvent::Connected => true,
+        PlexEvent::LibraryUpdate { section_id, .. } => match (section_id.as_deref(), music_section) {
+            (Some(s), Some(m)) => s == m,
+            _ => true,
+        },
+        PlexEvent::Activity { event, kind, .. } => event == "ended" && kind.starts_with("library."),
+        _ => false,
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -196,4 +220,31 @@ pub fn run() {
                 tauri::async_runtime::block_on(player.flush());
             }
         });
+}
+
+#[cfg(test)]
+mod watch_tests {
+    use super::*;
+
+    fn update(section: Option<&str>) -> PlexEvent {
+        PlexEvent::LibraryUpdate {
+            section_id: section.map(str::to_owned),
+            item_id: Some("1".into()),
+            item_type: Some(1),
+            state: Some(5),
+        }
+    }
+
+    #[test]
+    fn other_libraries_dont_trigger_a_music_sync() {
+        assert!(!marks_library_dirty(&update(Some("2")), Some("7")));
+        assert!(marks_library_dirty(&update(Some("7")), Some("7")));
+    }
+
+    #[test]
+    fn unknown_sections_still_count() {
+        assert!(marks_library_dirty(&update(None), Some("7")));
+        assert!(marks_library_dirty(&update(Some("2")), None));
+        assert!(marks_library_dirty(&PlexEvent::Connected, Some("7")));
+    }
 }
