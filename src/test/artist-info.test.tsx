@@ -79,9 +79,10 @@ describe("artist info decisions", () => {
   });
 
   it("names the service that refused a key", () => {
-    const keys = { lastfm: { saved: true, rejected: true }, fanart: { saved: false, rejected: false }, audiodb: { saved: false, rejected: false } };
+    const keys = { lastfm: { saved: true, rejected: true }, fanart: { saved: false, rejected: false }, audiodb: { saved: false, rejected: false }, listenbrainz: { saved: true, rejected: true } };
     expect(keyNote("lastfm", keys)).toBe("Last.fm rejected the key.");
     expect(keyNote("fanart", keys)).toBeUndefined();
+    expect(keyNote("listenbrainz", keys)).toBe("ListenBrainz rejected the token.");
   });
 });
 
@@ -213,6 +214,30 @@ describe("Artist info settings", () => {
     expect(await within(row("infoFanart")).findByRole("alert")).toHaveTextContent("Fanart.tv rejected the key.");
     expect(within(row("infoFanart")).getByRole("switch", { name: "Fanart.tv" })).not.toBeChecked();
     expect(useSettings.getState().settings?.infoFanart).toBe(false);
+  });
+
+  it("ListenBrainz is on without a token; a token saves without touching the switch", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    const sw = await within(row("infoListenbrainz")).findByRole("switch", { name: "ListenBrainz (popular songs)" });
+    expect(sw).toBeChecked();
+    await user.type(await screen.findByLabelText("ListenBrainz user token"), "tok");
+    await user.click(within(row("infoListenbrainzToken")).getByRole("button", { name: "Save token" }));
+    expect(await within(row("infoListenbrainzToken")).findByRole("button", { name: "Remove token" })).toBeInTheDocument();
+    expect(useSettings.getState().settings?.infoListenbrainz).toBe(true);
+    await user.click(within(row("infoListenbrainzToken")).getByRole("button", { name: "Remove token" }));
+    expect(await screen.findByLabelText("ListenBrainz user token")).toBeInTheDocument();
+    expect(useSettings.getState().settings?.infoListenbrainz).toBe(true);
+    await user.click(sw);
+    expect(useSettings.getState().settings?.infoListenbrainz).toBe(false);
+  });
+
+  it("a refused token shows on its row", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    await user.type(await screen.findByLabelText("ListenBrainz user token"), "bad-token");
+    await user.click(within(row("infoListenbrainzToken")).getByRole("button", { name: "Save token" }));
+    expect(await within(row("infoListenbrainzToken")).findByRole("alert")).toHaveTextContent("ListenBrainz rejected the token.");
   });
 
   it("clears the artist info cache", async () => {

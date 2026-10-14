@@ -3,18 +3,28 @@ import { trackCredits, type Credit } from "../lib/credits";
 import type { Track } from "../lib/types";
 import { useApp } from "../stores/app";
 import { nav } from "../stores/router";
+import { useSettings } from "../stores/settings";
+
+/** The "Link featured artists" setting (on until settings load). */
+export const useLinkFeatured = (): boolean => useSettings((s) => s.settings?.linkFeatured ?? true);
+export const linkFeaturedNow = (): boolean => useSettings.getState().settings?.linkFeatured ?? true;
 
 type CreditTrack = Pick<Track, "trackArtist" | "artistTitle" | "artistId">;
 
 /** A track's credits, split against the library's artist names. */
 export function useTrackCredits(track: CreditTrack): Credit[] {
   const lookup = useApp((s) => s.artistLookup);
+  const linkAll = useLinkFeatured();
   const { trackArtist, artistTitle, artistId } = track;
-  return useMemo(() => trackCredits({ trackArtist, artistTitle, artistId }, lookup), [trackArtist, artistTitle, artistId, lookup]);
+  return useMemo(
+    () => trackCredits({ trackArtist, artistTitle, artistId }, lookup, linkAll),
+    [trackArtist, artistTitle, artistId, lookup, linkAll],
+  );
 }
 
 /**
- * A track's artist line with every library artist as its own link. Links are
+ * A track's artist line with every credited artist as its own link (library
+ * artists, and featured names with a generated page). Links are
  * inline text (not buttons) so the whole line ellipsizes as one when it runs
  * out of room. Clicks and keys stay on the link, so a row around it neither
  * plays nor selects.

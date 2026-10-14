@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildArtistLookup, splitCredits, trackCredits } from "../lib/credits";
-import { popularTracks } from "../lib/mock/popular";
+import { buildArtistLookup, creditId, isCreditId, splitCredits, trackCredits } from "../lib/credits";
+import { normalizeTitle, popularTracks, rankPopular } from "../lib/mock/popular";
 import type { Track } from "../lib/types";
 
 const lookup = buildArtistLookup([
@@ -113,36 +113,64 @@ describe("popular rule (browser mock)", () => {
   });
   const me = { id: "1", title: "Odessa Wren" };
 
-  it("ranks by listener count, then plays, and includes credited features", () => {
+  it("follows the global list, then plays, and includes credited features", () => {
     const tracks = [
-      t({ id: "low", ratingCount: 10 }),
-      t({ id: "played", viewCount: 50 }),
-      t({ id: "hit", ratingCount: 9000 }),
-      t({ id: "feat", artistId: "3", artistTitle: "Saltglass", trackArtist: "Saltglass (feat. Odessa Wren)", ratingCount: 500 }),
+      t({ id: "low", title: "Low", ratingCount: 10 }),
+      t({ id: "played", title: "Played", viewCount: 50 }),
+      t({ id: "hit", title: "Hit (2011 Remaster)", ratingCount: 9000 }),
+      t({ id: "feat", title: "Feature", artistId: "3", artistTitle: "Saltglass", trackArtist: "Saltglass (feat. Odessa Wren)" }),
       t({ id: "other", artistId: "3", artistTitle: "Saltglass", trackArtist: "Saltglass, Wren", ratingCount: 99999 }),
-      t({ id: "unplayed" }),
+      t({ id: "unplayed", title: "Unplayed" }),
     ];
-    expect(popularTracks(tracks, me, lookup).map((x) => x.id)).toEqual(["hit", "feat", "low", "played", "unplayed"]);
+    const cands = tracks.filter((x) => x.id !== "other");
+    expect(rankPopular(cands, ["feature", "hit"]).map((x) => x.id)).toEqual(["feat", "hit", "played", "low", "unplayed"]);
+    // No list: plays, and rating counts only break ties.
+    expect(rankPopular(cands, null).map((x) => x.id)).toEqual(["played", "hit", "low", "feat", "unplayed"]);
+    // The whole-name credit rule picks the candidates.
+    expect(popularTracks(tracks, me, lookup, "myPlays").map((x) => x.id)).toEqual(["played", "hit", "low", "feat", "unplayed"]);
   });
 
-  it("ranks by your plays only when the source is my plays", () => {
-    const tracks = [
-      t({ id: "hit", ratingCount: 9000 }),
-      t({ id: "played", viewCount: 50 }),
-      t({ id: "some", viewCount: 3, ratingCount: 10 }),
-    ];
-    expect(popularTracks(tracks, me, lookup, "global").map((x) => x.id)).toEqual(["hit", "some", "played"]);
-    expect(popularTracks(tracks, me, lookup, "myPlays").map((x) => x.id)).toEqual(["played", "some", "hit"]);
+  it("folds titles like the core", () => {
+    expect(normalizeTitle("Song Title - 2011 Remaster")).toBe("song title");
+    expect(normalizeTitle("Song Title (feat. Someone)")).toBe("song title");
+    expect(normalizeTitle("Don’t Stop!")).toBe("dont stop");
+    expect(normalizeTitle("Rock & Roll")).toBe("rock and roll");
+    expect(normalizeTitle("Part One - The Return")).toBe("part one the return");
   });
 
   it("collapses copies of a song and stops at ten", () => {
     const copies = [
       t({ id: "a", title: "Anthem", ratingCount: 5 }),
-      t({ id: "b", title: "ANTHEM", ratingCount: 50, durationMs: 201_500 }),
+      t({ id: "b", title: "ANTHEM", ratingCount: 50, durationMs: 201_500, viewCount: 2 }),
       t({ id: "c", title: "Anthem", durationMs: 260_000 }),
     ];
-    expect(popularTracks(copies, me, lookup).map((x) => x.id)).toEqual(["b", "c"]);
+    expect(rankPopular(copies, null).map((x) => x.id)).toEqual(["b", "c"]);
+    expect(rankPopular(copies, ["anthem"]).map((x) => x.id)).toEqual(["b"]);
     const many = Array.from({ length: 14 }, () => t({}));
     expect(popularTracks(many, me, lookup)).toHaveLength(10);
+  });
+});
+
+describe("credited artist links", () => {
+  it("gives names with no library artist a credit id when linking all", () => {
+    expect(splitCredits("Saltglass feat. Juno Ashby", lookup, true)).toEqual([
+      { name: "Saltglass", id: "3" },
+      { name: "Juno Ashby", id: "credit:juno ashby" },
+    ]);
+    expect(splitCredits("Saltglass feat. Juno Ashby", lookup)[1].id).toBeNull();
+    expect(creditId(" Juno Ashby ")).toBe("credit:juno ashby");
+    expect(isCreditId("credit:x") && !isCreditId("12")).toBe(true);
+  });
+
+  it("keeps learned names with separators whole", () => {
+    const learned = buildArtistLookup([{ id: "1", title: "Odessa Wren" }, { id: creditId("Rue, The Moth"), title: "Rue, The Moth" }]);
+    expect(splitCredits("Rue, The Moth & Odessa Wren", learned, true)).toEqual([
+      { name: "Rue, The Moth", id: "credit:rue, the moth" },
+      { name: "Odessa Wren", id: "1" },
+    ]);
+  });
+
+  it("handles names made of symbols", () => {
+    expect(splitCredits("Saltglass feat. $", lookup, true)[1]).toEqual({ name: "$", id: "credit:$" });
   });
 });

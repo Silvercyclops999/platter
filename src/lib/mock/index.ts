@@ -27,6 +27,9 @@ import type {
   AddPlace,
   Album,
   AlbumSort,
+  Artist,
+  ArtistInfo,
+  ArtistPage,
   ArtistSort,
   AuthStatus,
   EventMap,
@@ -56,11 +59,11 @@ import type {
   Track,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
-import { buildArtistLookup } from "../credits";
+import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
 import { mockArtUrl } from "./art";
 import { mockNowPlayingDetails } from "./details";
-import { popularTracks } from "./popular";
-import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
+import { credits, globalTop, popularTracks, rankPopular } from "./popular";
+import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
 import { mockBio } from "./bio";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
@@ -478,7 +481,10 @@ export class MockBackend implements Backend {
     });
   }
   artistNames() {
-    return this.delay(() => this.fx.artists.map((a) => ({ id: a.id, title: a.title })));
+    return this.delay(() => [
+      ...this.fx.artists.map((a) => ({ id: a.id, title: a.title })),
+      ...LEARNED_NAMES.map((n) => ({ id: creditId(n), title: n })),
+    ]);
   }
   private allAlbums(): Album[] {
     const base = this.fx.albums;
@@ -550,11 +556,22 @@ export class MockBackend implements Backend {
       return items;
     });
   }
+  /** Library names plus learned names with separators, as the core sends them. */
+  private nameLookup() {
+    return buildArtistLookup([...this.fx.artists, ...LEARNED_NAMES.map((n) => ({ id: creditId(n), title: n }))]);
+  }
+  /** Global ranking only while a source for it is on (the core's rule). */
+  private popularSource() {
+    const s = this.settings;
+    return s.infoListenbrainz || s.infoLastfm ? s.popularSource : "myPlays";
+  }
   artistPage(id: string) {
     return this.delay(() => {
+      const lookup = this.nameLookup();
+      if (isCreditId(id)) return this.creditedPage(id, lookup);
       const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
       const albums = this.fx.albums.filter((a) => a.artistId === id);
-      const popular = popularTracks(this.fx.tracks, artist, buildArtistLookup(this.fx.artists), this.settings.popularSource);
+      const popular = popularTracks(this.fx.tracks, artist, lookup, this.popularSource());
       const order: ReleaseSection[] = ["albums", "singlesEps", "live", "compilations", "soundtracks", "remixes", "demos", "mixtapes"];
       const sections = order
         .map((section) => ({
@@ -568,8 +585,41 @@ export class MockBackend implements Backend {
       // are the next two in the library; the last few have none.
       const about = this.plexBio(idx, artist.title);
       const similar = idx >= this.fx.artists.length - 3 ? [] : [1, 2].map((d) => this.fx.artists[(idx + d) % this.fx.artists.length]);
-      return { artist, popular, sections, plays, about, similar };
+      const appearsOn = this.albumsOf(this.fx.tracks.filter((t) => t.artistId !== id && credits(t, artist.title, lookup)));
+      return { artist, popular, sections, plays, about, similar, appearsOn };
     });
+  }
+  /** Featured names with no library artist, for search (while "Link featured artists" is on). */
+  private creditedArtists(): Artist[] {
+    if (!this.settings.linkFeatured) return [];
+    const lookup = this.nameLookup();
+    const byKey = new Map<string, Artist>();
+    for (const t of this.fx.tracks) {
+      if (!t.trackArtist) continue;
+      for (const c of splitCredits(t.trackArtist, lookup)) {
+        const key = creditKey(c.name);
+        if (this.fx.artists.some((a) => creditKey(a.title) === key)) continue;
+        const a = byKey.get(key) ?? { id: creditId(c.name), title: c.name, sortTitle: c.name, thumb: null, art: null, viewCount: 0 };
+        a.viewCount += t.viewCount;
+        byKey.set(key, a);
+      }
+    }
+    return [...byKey.values()];
+  }
+  private albumsOf(tracks: Track[]): Album[] {
+    const ids = [...new Set(tracks.map((t) => t.albumId))];
+    return this.fx.albums.filter((a) => ids.includes(a.id)).sort((a, b) => (b.year ?? -1) - (a.year ?? -1) || b.addedAt - a.addedAt);
+  }
+  /** A featured name's generated page: the songs that credit it. */
+  private creditedPage(id: string, lookup: ReturnType<typeof buildArtistLookup>): ArtistPage {
+    const key = id.slice(CREDIT_PREFIX.length);
+    const tracks = key ? this.fx.tracks.filter((t) => credits(t, key, lookup)) : [];
+    if (!tracks.length) return this.notFound("Artist");
+    const title = splitCredits(tracks[0].trackArtist!, lookup).find((c) => creditKey(c.name) === key)?.name ?? key;
+    const plays = tracks.reduce((n, t) => n + t.viewCount, 0);
+    const popular = rankPopular(tracks, this.popularSource() === "global" ? globalTop(tracks) : null);
+    const artist: Artist = { id, title, sortTitle: title, thumb: null, art: null, viewCount: plays };
+    return { artist, popular, sections: [], plays, about: null, similar: [], appearsOn: this.albumsOf(tracks) };
   }
   albumPage(id: string) {
     return this.delay(() => {
@@ -669,7 +719,7 @@ export class MockBackend implements Backend {
           .sort((a, b) => b.s - a.s || pop(b.t) - pop(a.t))
           .map((x) => x.t);
       const f = args.filter;
-      const artists = f === "all" || f === "artists" ? rank(this.fx.artists, (a) => a.title, (a) => a.viewCount) : [];
+      const artists = f === "all" || f === "artists" ? rank([...this.fx.artists, ...this.creditedArtists()], (a) => a.title, (a) => a.viewCount) : [];
       const albums = f === "all" || f === "albums" ? rank(this.fx.albums, (a) => a.title, (a) => a.viewCount) : [];
       const songs =
         f === "all" || f === "songs"
@@ -872,6 +922,14 @@ export class MockBackend implements Backend {
       case "liked":
         return { tracks: c.trackIds ? c.trackIds.map((i) => this.trackById(i)!).filter(Boolean) : this.likes.likedTracks(), info: { kind: "liked", id: "liked", title: "Liked Songs" } };
       case "artist": {
+        if (c.id && isCreditId(c.id)) {
+          const lookup = this.nameLookup();
+          const key = c.id.slice(CREDIT_PREFIX.length);
+          const tracks = this.fx.tracks.filter((t) => credits(t, key, lookup));
+          if (!tracks.length) this.notFound("Artist");
+          const title = splitCredits(tracks[0].trackArtist!, lookup).find((x) => creditKey(x.name) === key)?.name ?? key;
+          return { tracks, info: { kind: "artist", id: c.id, title } };
+        }
         const ar = this.fx.artists.find((a) => a.id === c.id) ?? this.notFound("Artist");
         const tracks = this.fx.tracks.filter((t) => t.artistId === ar.id).sort((a, b) => b.viewCount - a.viewCount);
         return { tracks, info: { kind: "artist", id: ar.id, title: ar.title } };
@@ -1452,7 +1510,13 @@ export class MockBackend implements Backend {
   }
 
   artistInfo(id: string) {
-    return this.delay(() => {
+    return this.delay((): ArtistInfo => {
+      if (isCreditId(id)) {
+        // A featured guest: the made-up services know nothing about them.
+        this.creditedPage(id, this.nameLookup());
+        const blank: ArtistInfo = { id, bio: null, bioSource: null, origin: null, yearsActive: null, members: [], tags: [], listeners: null, scrobbles: null, photo: null, banner: null, logo: null, credits: [] };
+        return blank;
+      }
       const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
       const idx = this.fx.artists.indexOf(artist);
       // In the browser the first open answers with Plex only, then the

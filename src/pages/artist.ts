@@ -98,20 +98,21 @@ export function discographyItems(
   return [{ album: latest, latest: true }, ...rest.map((album) => ({ album, latest: false }))];
 }
 
-export type ArtistSectionId = "popular" | "discography" | "about" | "fansAlsoLike";
+export type ArtistSectionId = "popular" | "discography" | "about" | "fansAlsoLike" | "appearsOn";
 
 /**
  * Sections in page order, leaving out the ones with nothing to show. About
  * shows with a bio or a Last.fm listener count.
  */
 export function artistSections(
-  page: Pick<ArtistPage, "popular" | "sections" | "about" | "similar"> & { listeners?: number | null },
+  page: Pick<ArtistPage, "popular" | "sections" | "about" | "similar"> & { appearsOn?: Album[]; listeners?: number | null },
 ): ArtistSectionId[] {
   const out: ArtistSectionId[] = [];
   if (page.popular.length) out.push("popular");
   if (page.sections.some((s) => s.albums.length)) out.push("discography");
   if (page.about?.trim() || page.listeners) out.push("about");
   if (page.similar.length) out.push("fansAlsoLike");
+  if (page.appearsOn?.length) out.push("appearsOn");
   return out;
 }
 

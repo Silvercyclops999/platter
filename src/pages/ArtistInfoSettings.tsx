@@ -13,6 +13,7 @@ export const INFO_SOURCE_NAME: Record<KeyedInfoSource, string> = {
   lastfm: "Last.fm",
   fanart: "Fanart.tv",
   audiodb: "TheAudioDB",
+  listenbrainz: "ListenBrainz",
 };
 
 /** The settings switch for each keyed source. */
@@ -20,11 +21,16 @@ export const INFO_SWITCH: Record<KeyedInfoSource, keyof Settings & `info${string
   lastfm: "infoLastfm",
   fanart: "infoFanart",
   audiodb: "infoAudiodb",
+  listenbrainz: "infoListenbrainz",
 };
+
+/** Sources that work without a key; a key (token) only helps. Saving or removing one leaves the switch alone. */
+export const OPTIONAL_KEY: ReadonlySet<KeyedInfoSource> = new Set(["listenbrainz"]);
 
 /** "Last.fm rejected the key." for a refused key, else nothing. */
 export function keyNote(source: KeyedInfoSource, keys: InfoKeysStatus | null): string | undefined {
-  return keys?.[source].rejected ? `${INFO_SOURCE_NAME[source]} rejected the key.` : undefined;
+  const what = OPTIONAL_KEY.has(source) ? "token" : "key";
+  return keys?.[source].rejected ? `${INFO_SOURCE_NAME[source]} rejected the ${what}.` : undefined;
 }
 
 /** Key status for the Settings rows, loaded when the page opens. */
@@ -45,8 +51,10 @@ export function useInfoKeys() {
     try {
       const st = await backend.artistInfoKeySet(source, key);
       setKeys((k) => (k ? { ...k, [source]: st } : k));
-      if (key && !st.rejected) await updateSettings({ [INFO_SWITCH[source]]: true });
-      if (!key) await updateSettings({ [INFO_SWITCH[source]]: false });
+      if (!OPTIONAL_KEY.has(source)) {
+        if (key && !st.rejected) await updateSettings({ [INFO_SWITCH[source]]: true });
+        if (!key) await updateSettings({ [INFO_SWITCH[source]]: false });
+      }
       return st;
     } catch (e) {
       toast.error(`Couldn't save the key${e && typeof e === "object" && "message" in e ? `: ${String(e.message)}` : ""}`);
@@ -59,7 +67,8 @@ export function useInfoKeys() {
 /**
  * A keyed source's control: a key field until a key is saved, then the
  * on/off switch and a way to remove the key. Keys go to the OS keychain and
- * are never shown again.
+ * are never shown again. A source with an optional key (ListenBrainz) has
+ * its own switch row; here it gets only the token field or "Remove token".
  */
 export function InfoKeyControl({
   source,
@@ -78,6 +87,8 @@ export function InfoKeyControl({
   if (!s || !keys) return <Skeleton width={160} height={32} radius="pill" />;
   const state = keys[source];
   const name = INFO_SOURCE_NAME[source];
+  const optional = OPTIONAL_KEY.has(source);
+  const what = optional ? "token" : "key";
 
   if (!state.saved) {
     const save = async () => {
@@ -100,16 +111,23 @@ export function InfoKeyControl({
           className="info-key__field"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="API key"
+          placeholder={optional ? "User token" : "API key"}
           autoComplete="off"
           spellCheck={false}
-          aria-label={`${name} API key`}
+          aria-label={optional ? `${name} user token` : `${name} API key`}
           aria-describedby={ids.desc}
         />
         <Button size="sm" type="submit" disabled={busy || !text.trim()}>
-          {busy ? "Checking…" : "Save key"}
+          {busy ? "Checking…" : `Save ${what}`}
         </Button>
       </form>
+    );
+  }
+  if (optional) {
+    return (
+      <Button size="sm" onClick={() => void setKey(source, null)}>
+        Remove token
+      </Button>
     );
   }
   return (

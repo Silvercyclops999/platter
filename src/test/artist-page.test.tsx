@@ -1,6 +1,7 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { ContextMenuHost } from "../components/ContextMenu";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import type { Album, ArtistPageSection, ReleaseSection } from "../lib/types";
@@ -66,6 +67,7 @@ describe("artist page decisions", () => {
     expect(artistSections(base)).toEqual(["popular", "discography", "about", "fansAlsoLike"]);
     expect(artistSections({ ...base, about: "  ", similar: [] })).toEqual(["popular", "discography"]);
     expect(artistSections({ popular: [], sections: [], about: null, similar: [] })).toEqual([]);
+    expect(artistSections({ ...base, appearsOn: [album("x", "albums", 2020, 0)] })).toEqual(["popular", "discography", "about", "fansAlsoLike", "appearsOn"]);
   });
 
   it("writes the plays line", () => {
@@ -90,7 +92,8 @@ describe("artist page", () => {
     expect(container.querySelector("header[data-variant]")).toHaveAttribute("data-variant", "banner");
     const plays = mock.fx.tracks.filter((t) => t.artistId === a.id).reduce((n, t) => n + t.viewCount, 0);
     expect(screen.getAllByText(playsLine(plays)).length).toBeGreaterThan(0);
-    expect(headings()).toEqual(["Popular", "Discography", "About", "Fans also like"]);
+    const appears = (await mock.artistPage(a.id)).appearsOn.length ? ["Appears on"] : [];
+    expect(headings()).toEqual(["Popular", "Discography", "About", "Fans also like", ...appears]);
   });
 
   it("shows the round photo header when there's no background art", async () => {
@@ -105,7 +108,8 @@ describe("artist page", () => {
     const a = artistAt(11);
     render(<ArtistPage id={a.id} />);
     await screen.findByRole("heading", { level: 1, name: a.title });
-    expect(headings()).toEqual(["Popular", "Discography"]);
+    const appears = (await mock.artistPage(a.id)).appearsOn.length ? ["Appears on"] : [];
+    expect(headings()).toEqual(["Popular", "Discography", ...appears]);
   });
 
   it("shows five popular songs, ten after See more, and back", async () => {
@@ -182,5 +186,54 @@ describe("artist page", () => {
     const shelf = h.closest("section")!;
     expect(within(shelf).getByText(artistAt(1).title)).toBeInTheDocument();
     expect(within(shelf).getByText(artistAt(2).title)).toBeInTheDocument();
+  });
+
+  it("reloads Popular when the global list arrives", async () => {
+    const a = artistAt(0);
+    render(<ArtistPage id={a.id} />);
+    await screen.findByRole("heading", { level: 1, name: a.title });
+    const list = screen.getByRole("list", { name: "Popular tracks" });
+    const real = mock.artistPage.bind(mock);
+    const hit = mock.fx.tracks.find((t) => t.artistId !== a.id)!;
+    const spy = vi.spyOn(mock, "artistPage").mockImplementation(async (id) => ({ ...(await real(id)), popular: [{ ...hit, title: "Global Number One" }] }));
+    try {
+      act(() => mock.emit("artistinfo://changed", { id: a.id }));
+      expect(await screen.findByRole("listitem", { name: /Global Number One/ })).toBeInTheDocument();
+      expect(list).toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("credited artist page", () => {
+  const guest = () => {
+    const t = mock.fx.tracks.find((x) => x.trackArtist?.includes(" feat. Juno Ashby"))!;
+    return { track: t, id: "credit:juno ashby" };
+  };
+
+  it("shows the songs that credit the name and the albums they're on, without Plex-only controls", async () => {
+    const user = userEvent.setup();
+    const { track, id } = guest();
+    render(
+      <>
+        <ArtistPage id={id} />
+        <ContextMenuHost />
+      </>,
+    );
+    await screen.findByRole("heading", { level: 1, name: "Juno Ashby" });
+    expect(headings()).toEqual(["Popular", "Appears on"]);
+    const list = screen.getByRole("list", { name: "Popular tracks" });
+    expect(within(list).getAllByRole("listitem", { name: new RegExp(track.title) }).length).toBeGreaterThan(0);
+    const appears = screen.getByRole("heading", { name: "Appears on" }).closest("section")!;
+    expect(within(appears).getAllByText(track.albumTitle).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "More options for Juno Ashby" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: /Share/ })).toBeNull();
+  });
+
+  it("is not found when nothing credits the name", async () => {
+    render(<ArtistPage id="credit:nobody at all" />);
+    expect(await screen.findByText(/Couldn't load this artist/)).toBeInTheDocument();
   });
 });

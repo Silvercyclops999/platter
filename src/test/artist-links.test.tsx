@@ -10,6 +10,8 @@ import { PlayerBar } from "../shell/PlayerBar";
 import { useApp } from "../stores/app";
 import { usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
+import { useSettings } from "../stores/settings";
+import { DEFAULT_SETTINGS } from "../lib/types";
 import { useUi } from "../stores/ui";
 
 const mock = backend as MockBackend;
@@ -30,6 +32,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => useUi.setState({ menu: null }));
   act(() => useApp.setState({ artistLookup: new Map() }));
+  act(() => useSettings.setState({ settings: null }));
   useRouter.getState().reset();
 });
 
@@ -46,12 +49,23 @@ function renderRow(onPlay = vi.fn()) {
 }
 
 describe("artist links in a track row", () => {
-  it("links every library artist on its own and leaves unknown names as text", () => {
-    const { row } = renderRow();
+  it("links every credited artist on its own, featured names without a library artist too", async () => {
+    const user = userEvent.setup();
+    const { row, onPlay } = renderRow();
     const links = within(row).getAllByRole("link");
-    expect(links.map((l) => l.textContent)).toEqual([t1.artistTitle, amp.title, t1.albumTitle]);
+    expect(links.map((l) => l.textContent)).toEqual([t1.artistTitle, amp.title, "Nobody Known", t1.albumTitle]);
     expect(row).toHaveTextContent(`${t1.artistTitle}, ${amp.title}, Nobody Known`);
+    await user.click(within(row).getByRole("link", { name: "Nobody Known" }));
+    expect(route()).toEqual({ name: "artist", id: "credit:nobody known" });
+    expect(onPlay).not.toHaveBeenCalled();
+  });
+
+  it("leaves names without a library artist as text when featured links are off", () => {
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, linkFeatured: false } }));
+    const { row } = renderRow();
+    expect(within(row).getAllByRole("link").map((l) => l.textContent)).toEqual([t1.artistTitle, amp.title, t1.albumTitle]);
     expect(within(row).queryByRole("link", { name: "Nobody Known" })).toBeNull();
+    expect(trackMenuItems(featured).map((i) => i.label)).not.toContain("Go to Nobody Known");
   });
 
   it("goes to that artist without playing or selecting the row", async () => {
@@ -87,7 +101,7 @@ describe("artist links in a track row", () => {
 describe("track menu", () => {
   it("has one 'Go to' item per linked artist, in line order, where 'Go to artist' was", () => {
     const labels = trackMenuItems(featured).map((i) => i.label);
-    expect(labels).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", `Go to ${t1.artistTitle}`, `Go to ${amp.title}`, "Go to album", "Share", "Copy song title"]);
+    expect(labels).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", `Go to ${t1.artistTitle}`, `Go to ${amp.title}`, "Go to Nobody Known", "Go to album", "Share", "Copy song title"]);
   });
 
   it("each item goes to its artist", () => {
@@ -118,7 +132,7 @@ describe("artist links in the player bar", () => {
     expect(within(bar).getByRole("link", { name: t1.artistTitle })).toBeInTheDocument();
     fireEvent.click(within(bar).getByRole("link", { name: amp.title }));
     expect(route()).toEqual({ name: "artist", id: amp.id });
-    expect(within(bar).queryByRole("link", { name: "Nobody Known" })).toBeNull();
+    expect(within(bar).getByRole("link", { name: "Nobody Known" })).toBeInTheDocument();
     fireEvent.contextMenu(within(bar).getByRole("link", { name: featured.title }), { clientX: 20, clientY: 700 });
     const menu = await screen.findByRole("menu", { name: `Options for ${featured.title}` });
     expect(within(menu).getByRole("menuitem", { name: `Go to ${amp.title}` })).toBeInTheDocument();

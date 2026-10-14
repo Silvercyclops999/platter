@@ -95,6 +95,14 @@ export function connectApp(b: Backend = backend): () => void {
       loadArtistNames();
     }),
   );
+  // Artist info can teach names with separators ("Tyler, The Maker").
+  let namesTimer: ReturnType<typeof setTimeout> | null = null;
+  keep(
+    b.listen("artistinfo://changed", () => {
+      if (namesTimer) clearTimeout(namesTimer);
+      namesTimer = setTimeout(loadArtistNames, 2000);
+    }),
+  );
   keep(b.listen("toast", (t) => useToasts.getState().push(t, t.kind === "error" ? 6000 : 4000)));
   keep(b.listen("output://changed", (o) => useOutput.getState().set(o)));
   // The core moved the EQ to the profile bound to a new output device.
@@ -116,6 +124,7 @@ export function connectApp(b: Backend = backend): () => void {
   return () => {
     alive = false;
     if (cachedTimer) clearInterval(cachedTimer);
+    if (namesTimer) clearTimeout(namesTimer);
     unsubs.forEach((u) => u());
   };
 }

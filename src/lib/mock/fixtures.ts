@@ -39,6 +39,11 @@ const ARTIST_NAMES = [
   "Gravel Psalms",
 ];
 
+/** Featured artists with no library entry. One has a comma in its name. */
+export const GUEST_NAMES = ["Juno Ashby", "Pell Rivers", "Tyler, The Maker", "Wren Okoro"];
+/** Names with separators the core would have learned (kept whole in splits). */
+export const LEARNED_NAMES = ["Tyler, The Maker"];
+
 const GENRES = ["Indie Rock", "Dream Pop", "Hip-Hop", "Electronic", "Folk", "Soul", "Ambient", "Post-Punk"];
 
 const WORDS_A = [
@@ -293,12 +298,20 @@ export function buildFixtures(seed = 7): Fixtures {
     });
   });
 
-  // Global listener counts on a bit under half the released tracks, like a
+  // Plex rating counts on a bit under half the released tracks, like a
   // real library. Derived from the id so the random stream above is untouched.
   const unreleased = new Set(albums.filter((a) => a.format === null).map((a) => a.id));
   for (const t of tracks) {
     const h = hashString(`count:${t.id}`);
     if (!unreleased.has(t.albumId) && h % 100 < 44) t.ratingCount = 500 + (h % 2_000_000);
+  }
+
+  // Featured guests with no albums of their own (credited-artist pages), on
+  // a few released songs. Also derived from the id.
+  for (const t of tracks) {
+    if (t.trackArtist || unreleased.has(t.albumId)) continue;
+    const h = hashString(`guest:${t.id}`);
+    if (h % 100 < 6) t.trackArtist = `${t.artistTitle} feat. ${GUEST_NAMES[h % GUEST_NAMES.length]}`;
   }
 
   return { artists, albums, tracks, playlists, playlistTracks, tracksByAlbum };

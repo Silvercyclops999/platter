@@ -5,13 +5,18 @@
  * so a name that contains "&" or "," stays whole. What is left is split on
  * ", ", " & ", " feat. ", " ft. ", " featuring ", " x " (any case) and on
  * brackets, so "A (feat. B)" works too.
+ *
+ * Names with no library artist link to a generated credited-artist page
+ * (`credit:<name, lower case>`) when `linkAll` is on (the "Link featured
+ * artists" setting). Learned names that contain separators come in with the
+ * library's names (already as `credit:` ids), so they stay whole.
  */
 import { trackArtistLine } from "./format";
 import type { ArtistName, Track } from "./types";
 
 export interface Credit {
   name: string;
-  /** Library artist id, or null when no library artist has this name. */
+  /** Artist page id (a library artist, or `credit:` for a credited artist); null when the name doesn't link. */
   id: string | null;
 }
 
@@ -22,6 +27,15 @@ export interface ArtistLookup {
 }
 
 export const creditKey = (name: string): string => name.trim().toLowerCase();
+
+/** Id prefix of a credited artist's page. */
+export const CREDIT_PREFIX = "credit:";
+
+/** The page id for a credited name with no library artist. */
+export const creditId = (name: string): string => `${CREDIT_PREFIX}${creditKey(name)}`;
+
+/** Whether an artist id is a credited artist (no Plex entry). */
+export const isCreditId = (id: string): boolean => id.startsWith(CREDIT_PREFIX);
 
 export function buildArtistLookup(names: readonly ArtistName[]): ArtistLookup {
   const m = new Map<string, string>();
@@ -90,7 +104,7 @@ function parts(line: string): [number, number][] {
 }
 
 /** Credited names in line order, each once (case-insensitive), with ids where known. */
-export function splitCredits(line: string, lookup: ArtistLookup): Credit[] {
+export function splitCredits(line: string, lookup: ArtistLookup, linkAll = false): Credit[] {
   const ps = parts(line);
   const out: Credit[] = [];
   const seen = new Set<string>();
@@ -110,7 +124,7 @@ export function splitCredits(line: string, lookup: ArtistLookup): Credit[] {
     const key = creditKey(name);
     if (!seen.has(key)) {
       seen.add(key);
-      out.push({ name, id: lookup.get(key) ?? null });
+      out.push({ name, id: lookup.get(key) ?? (linkAll && key ? creditId(name) : null) });
     }
     i = end + 1;
   }
@@ -122,7 +136,11 @@ export function splitCredits(line: string, lookup: ArtistLookup): Credit[] {
  * when there are none). The album artist always links, even before the
  * library's names have loaded.
  */
-export function trackCredits(t: Pick<Track, "trackArtist" | "artistTitle" | "artistId">, lookup: ArtistLookup): Credit[] {
+export function trackCredits(
+  t: Pick<Track, "trackArtist" | "artistTitle" | "artistId">,
+  lookup: ArtistLookup,
+  linkAll = false,
+): Credit[] {
   const albumKey = creditKey(t.artistTitle);
   const withAlbum: ArtistLookup =
     albumKey && t.artistId
@@ -131,5 +149,5 @@ export function trackCredits(t: Pick<Track, "trackArtist" | "artistTitle" | "art
           get: (k) => (k === albumKey ? t.artistId : lookup.get(k)),
         }
       : lookup;
-  return splitCredits(trackArtistLine(t), withAlbum);
+  return splitCredits(trackArtistLine(t), withAlbum, linkAll);
 }

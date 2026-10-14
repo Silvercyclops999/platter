@@ -44,6 +44,7 @@ export function mockKeysStatus(state: MockInfoKeys): InfoKeysStatus {
     lastfm: mockKeyState(state, "lastfm"),
     fanart: mockKeyState(state, "fanart"),
     audiodb: mockKeyState(state, "audiodb"),
+    listenbrainz: mockKeyState(state, "listenbrainz"),
   };
 }
 

@@ -9,9 +9,10 @@ import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { artUrl, backend } from "../lib/backend";
+import { isCreditId } from "../lib/credits";
 import { useLoad } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
-import type { Artist, ArtistPage as ArtistPageData, ArtistPageSection } from "../lib/types";
+import type { Album, Artist, ArtistPage as ArtistPageData, ArtistPageSection } from "../lib/types";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
@@ -27,6 +28,7 @@ import {
   discographyItems,
   headerVariant,
   listenersLine,
+  photoPath,
   playsLine,
   type DiscographyFilter,
 } from "./artist";
@@ -38,23 +40,26 @@ export function ArtistPage({ id }: { id: string }) {
 
 function ArtistView({ id }: { id: string }) {
   const { data: loaded, error } = useLoad(() => backend.artistPage(id), [id]);
-  // Similar artists fetched in the background after the page opened.
-  const [similar, setSimilar] = useState<Artist[] | null>(null);
+  // Similar artists and the global Popular list arrive in the background
+  // after the page opened; the page is asked again when they do.
+  const [fresh, setFresh] = useState<ArtistPageData | null>(null);
   useEffect(() => {
     let alive = true;
-    const un = backend.listen("artist://changed", (e) => {
+    const reload = (e: { id: string }) => {
       if (e.id !== id) return;
       backend.artistPage(id).then(
-        (p) => alive && setSimilar(p.similar),
+        (p) => alive && setFresh(p),
         () => {},
       );
-    });
+    };
+    const uns = [backend.listen("artist://changed", reload), backend.listen("artistinfo://changed", reload)];
     return () => {
       alive = false;
-      un.then((f) => f());
+      uns.forEach((un) => un.then((f) => f()));
     };
   }, [id]);
-  const data = loaded && similar ? { ...loaded, similar } : loaded;
+  const data = fresh ?? loaded;
+  const credited = isCreditId(id);
   const artist = data?.artist;
   const info = useArtistInfo(id);
   const banner = artist ? bannerPath(artist, info) : null;
@@ -108,7 +113,7 @@ function ArtistView({ id }: { id: string }) {
           data-variant="photo"
         >
           <div className="detail-header__art">
-            {artist ? <Art path={artist.thumb} size={232} round kind="artist" /> : <Skeleton width={232} height={232} radius="circle" />}
+            {artist ? <Art path={photoPath(artist, info)} size={232} round kind="artist" /> : <Skeleton width={232} height={232} radius="circle" />}
           </div>
           <div ref={column} className="detail-header__text">
             {text}
@@ -117,7 +122,7 @@ function ArtistView({ id }: { id: string }) {
       )}
 
       <div className="detail-body">
-        <ActionRow id={id} data={data} playing={isThisPlaying} onPlay={play} />
+        <ActionRow id={id} data={data} playing={isThisPlaying} onPlay={play} credited={credited} />
 
         {!data && (
           <>
@@ -140,6 +145,8 @@ function ArtistView({ id }: { id: string }) {
                 return <PopularSection key={s} id={id} data={data} />;
               case "discography":
                 return <Discography key={s} sections={data.sections} />;
+              case "appearsOn":
+                return <AppearsOn key={s} albums={data.appearsOn} />;
               case "about":
                 return <AboutCard key={s} artist={data.artist} about={about} plays={data.plays} info={info} />;
               case "fansAlsoLike":
@@ -201,7 +208,20 @@ function BannerImage({ path, box }: { path: string; box: RefObject<HTMLElement |
 
 // ---------------------------------------------------------------- action row
 
-function ActionRow({ id, data, playing, onPlay }: { id: string; data: ArtistPageData | undefined; playing: boolean; onPlay: () => void }) {
+function ActionRow({
+  id,
+  data,
+  playing,
+  onPlay,
+  credited,
+}: {
+  id: string;
+  data: ArtistPageData | undefined;
+  playing: boolean;
+  onPlay: () => void;
+  /** A credited artist has no Plex entry, so nothing that needs one (sharing) shows. */
+  credited: boolean;
+}) {
   const artist = data?.artist;
   const shuffle = usePlayer((s) => s.state?.shuffledContexts?.includes(id) ?? false);
   const pinned = usePins((s) => s.isPinned("artist", id));
@@ -247,7 +267,7 @@ function ActionRow({ id, data, playing, onPlay }: { id: string; data: ArtistPage
             `Options for ${artist.title}`,
             [
               { label: "Add popular songs to queue", onSelect: () => player.queueAdd(data!.popular.map((t) => t.id), "end") },
-              shareItem("artist", artist.id),
+              ...(credited ? [] : [shareItem("artist", artist.id)]),
               { label: pinned ? "Unpin from sidebar" : "Pin to sidebar", onSelect: togglePin },
             ],
             e.currentTarget,
@@ -335,6 +355,18 @@ function Discography({ sections }: { sections: ArtistPageSection[] }) {
         {cards(Infinity)}
       </div>
     </section>
+  );
+}
+
+function AppearsOn({ albums }: { albums: Album[] }) {
+  return (
+    <Shelf title="Appears on">
+      {albums.map((album) => (
+        <ShelfItem key={album.id}>
+          <AlbumCard album={album} subtitle="artist" />
+        </ShelfItem>
+      ))}
+    </Shelf>
   );
 }
 

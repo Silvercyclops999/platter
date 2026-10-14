@@ -71,7 +71,7 @@ export interface Track {
   userRating: number | null;
   viewCount: number;
   lastViewedAt: number | null;
-  /** Global listener count from Plex; absent when it has none. */
+  /** Plex ratingCount; absent when it has none. Not on one scale: only breaks ties in Popular. */
   ratingCount?: number;
   /** When the user last rated it, unix seconds (for a liked song: when it was liked). */
   ratedAt?: number | null;
@@ -232,6 +232,8 @@ export interface ArtistPage {
   about: string | null;
   /** Plex similar artists that are in this library. */
   similar: Artist[];
+  /** Albums by others with tracks that credit this artist, newest first. */
+  appearsOn: Album[];
 }
 
 export interface AlbumPage {
@@ -525,6 +527,10 @@ export interface Settings {
   infoFanart: boolean;
   /** Artist photo and bio from TheAudioDB (needs a key). */
   infoAudiodb: boolean;
+  /** Popular songs from ListenBrainz (a token is optional). */
+  infoListenbrainz: boolean;
+  /** Every name in a track's artist line links to a page, featured artists included. */
+  linkFeatured: boolean;
   /** Which star ratings count as liked. Liking always writes five stars. */
   likedMeans: LikedMeans;
   /** When track rows show the like control (liked songs always show it unless "off"). */
@@ -641,6 +647,8 @@ export const DEFAULT_SETTINGS: Settings = {
   infoLastfm: false,
   infoFanart: false,
   infoAudiodb: false,
+  infoListenbrainz: true,
+  linkFeatured: true,
   likedMeans: "five",
   likeControlRows: "hover",
   showPlexPlayers: true,
@@ -718,8 +726,8 @@ export interface DeepLinkOpen {
 // ---------------------------------------------------------------- artist info
 
 /** An outside artist info source. */
-export type InfoSource = "wikipedia" | "lastfm" | "fanart" | "audiodb";
-/** A source that needs the user's API key. */
+export type InfoSource = "wikipedia" | "lastfm" | "fanart" | "audiodb" | "listenbrainz";
+/** A source that takes the user's API key (ListenBrainz: an optional token). */
 export type KeyedInfoSource = Exclude<InfoSource, "wikipedia">;
 
 export interface InfoMember {

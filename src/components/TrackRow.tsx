@@ -22,7 +22,7 @@ import { player } from "../stores/player";
 import { toast } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
 import { Art } from "./Art";
-import { ArtistLinks, TextLink } from "./ArtistLinks";
+import { ArtistLinks, TextLink, linkFeaturedNow } from "./ArtistLinks";
 import { QualityBadge } from "./Badge";
 import { openContextMenu } from "./ContextMenu";
 import { addToPlaylistItem } from "./PlaylistPicker";
@@ -38,11 +38,12 @@ export function onAlbumPage(albumId: string): boolean {
 }
 
 /**
- * One "Go to <name>" per artist in the track's line that has a library page,
- * in line order. When none does, the album artist.
+ * One "Go to <name>" per artist in the track's line that has a page (every
+ * credited name while "Link featured artists" is on), in line order. When
+ * none does, the album artist.
  */
 export function goToArtistItems(track: Track): MenuItem[] {
-  const linked = trackCredits(track, useApp.getState().artistLookup).filter((c) => c.id);
+  const linked = trackCredits(track, useApp.getState().artistLookup, linkFeaturedNow()).filter((c) => c.id);
   const targets = linked.length ? linked.map((c) => ({ name: c.name, id: c.id! })) : [{ name: track.artistTitle, id: track.artistId }];
   return targets.map((a) => ({ label: `Go to ${a.name}`, onSelect: () => nav.go({ name: "artist", id: a.id }) }));
 }
