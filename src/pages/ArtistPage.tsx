@@ -20,6 +20,7 @@ export function ArtistPage({ id }: { id: string }) {
   const [showMore, setShowMore] = useState(false);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
+  const shuffle = usePlayer((s) => s.state?.shuffle ?? false);
   const ctx = usePlayer((s) => s.state?.queue.context);
   const isThis = ctx?.kind === "artist" && ctx.id === id;
 
@@ -62,9 +63,15 @@ export function ArtistPage({ id }: { id: string }) {
             size="xl"
             disabled={!artist}
             icon={isThis && status === "playing" ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
-            onClick={() => (isThis ? player.toggle() : player.playArtist(id))}
+            onClick={() => (isThis ? player.toggle() : player.playArtist(id, undefined, shuffle))}
           />
-          <IconButton label="Shuffle play" size="lg" icon={<Shuffle size={22} />} disabled={!artist} onClick={() => player.playArtist(id, undefined, true)} />
+          <IconButton
+            label={shuffle ? "Disable shuffle" : "Enable shuffle"}
+            size="lg"
+            pressed={shuffle}
+            icon={<Shuffle size={22} />}
+            onClick={() => player.setShuffle(!shuffle)}
+          />
         </div>
 
         <section className="detail-section" aria-labelledby="popular-h">

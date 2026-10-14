@@ -15,6 +15,7 @@ export function PlaylistPage({ id }: { id: string }) {
   useArtTint(null, pl?.thumb);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
+  const shuffle = usePlayer((s) => s.state?.shuffle ?? false);
   const ctx = usePlayer((s) => s.state?.queue.context);
   const isThis = ctx?.kind === "playlist" && ctx.id === id;
 
@@ -53,9 +54,15 @@ export function PlaylistPage({ id }: { id: string }) {
             size="xl"
             disabled={!pl}
             icon={isThis && status === "playing" ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
-            onClick={() => (isThis ? player.toggle() : player.playPlaylist(id))}
+            onClick={() => (isThis ? player.toggle() : player.playPlaylist(id, undefined, shuffle))}
           />
-          <IconButton label="Shuffle play" size="lg" icon={<Shuffle size={22} />} disabled={!pl} onClick={() => player.playPlaylist(id, undefined, true)} />
+          <IconButton
+            label={shuffle ? "Disable shuffle" : "Enable shuffle"}
+            size="lg"
+            pressed={shuffle}
+            icon={<Shuffle size={22} />}
+            onClick={() => player.setShuffle(!shuffle)}
+          />
         </div>
         <TrackList label={pl ? `${pl.title} tracks` : "Tracks"}>
           {data

@@ -3195,6 +3195,7 @@ dependencies = [
  "reqwest",
  "rubato",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "symphonia",

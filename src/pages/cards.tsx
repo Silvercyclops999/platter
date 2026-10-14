@@ -20,7 +20,6 @@ export function AlbumCard({ album, subtitle = "artist" }: { album: Album; subtit
       `Options for ${album.title}`,
       [
         { label: "Play", onSelect: () => player.playAlbum(album.id) },
-        { label: "Shuffle play", onSelect: () => player.playAlbum(album.id, undefined, true) },
         { label: "Go to artist", separator: true, onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
         {
           label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
@@ -61,7 +60,6 @@ export function ArtistCard({ artist }: { artist: Artist }) {
           `Options for ${artist.title}`,
           [
             { label: "Play", onSelect: () => player.playArtist(artist.id) },
-            { label: "Shuffle play", onSelect: () => player.playArtist(artist.id, undefined, true) },
             {
               label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
               separator: true,
@@ -91,7 +89,6 @@ export function PlaylistCard({ playlist }: { playlist: Playlist }) {
           `Options for ${playlist.title}`,
           [
             { label: "Play", onSelect: () => player.playPlaylist(playlist.id) },
-            { label: "Shuffle play", onSelect: () => player.playPlaylist(playlist.id, undefined, true) },
             {
               label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
               separator: true,

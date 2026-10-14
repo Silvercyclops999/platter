@@ -60,6 +60,10 @@ fn watch_library(plex: PlexState, db: DbHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Two TLS crypto backends get compiled in (the updater pulls in ring), so
+    // rustls can't pick one on its own. Use the same one as our HTTP client.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

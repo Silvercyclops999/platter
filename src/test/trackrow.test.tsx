@@ -68,7 +68,7 @@ describe("TrackRow", () => {
     fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
     const menu = await screen.findByRole("menu", { name: `Options for ${t1.title}` });
     const items = screen.getAllByRole("menuitem");
-    expect(items.map((i) => i.textContent)).toEqual(["Play next", "Add to queue", "Go to artist", "Go to album", "Copy song title"]);
+    expect(items.map((i) => i.textContent)).toEqual(["Add to queue", "Go to artist", "Go to album", "Copy song title"]);
     expect(items[0]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(items[1]).toHaveFocus();
@@ -89,7 +89,7 @@ describe("TrackRow", () => {
     row.focus();
     await user.keyboard("{Shift>}{F10}{/Shift}");
     await screen.findByRole("menu");
-    await user.keyboard("{ArrowDown}{Enter}");
+    await user.keyboard("{Enter}");
     expect(spy).toHaveBeenCalledWith([t1.id], "end");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });

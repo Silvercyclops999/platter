@@ -15,7 +15,6 @@ import { Skeleton } from "./Skeleton";
 export function trackMenuItems(track: Track, extra: { before?: MenuItem[]; after?: MenuItem[] } = {}): MenuItem[] {
   return [
     ...(extra.before ?? []),
-    { label: "Play next", onSelect: () => player.queueAdd([track.id], "next") },
     { label: "Add to queue", onSelect: () => player.queueAdd([track.id], "end") },
     { label: "Go to artist", separator: true, onSelect: () => nav.go({ name: "artist", id: track.artistId }) },
     { label: "Go to album", onSelect: () => nav.go({ name: "album", id: track.albumId }) },

@@ -21,6 +21,7 @@ export function AlbumPage({ id }: { id: string }) {
   useArtTint(album?.tint, album?.thumb);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
+  const shuffle = usePlayer((s) => s.state?.shuffle ?? false);
   const ctx = usePlayer((s) => s.state?.queue.context);
   const isThisPlaying = ctx?.kind === "album" && ctx.id === id && status === "playing";
   const pinned = usePins((s) => s.isPinned("album", id));
@@ -79,9 +80,15 @@ export function AlbumPage({ id }: { id: string }) {
             size="xl"
             disabled={!album}
             icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
-            onClick={() => (ctx?.kind === "album" && ctx.id === id ? player.toggle() : player.playAlbum(id))}
+            onClick={() => (ctx?.kind === "album" && ctx.id === id ? player.toggle() : player.playAlbum(id, undefined, shuffle))}
           />
-          <IconButton label="Shuffle play" size="lg" icon={<Shuffle size={22} />} disabled={!album} onClick={() => player.playAlbum(id, undefined, true)} />
+          <IconButton
+            label={shuffle ? "Disable shuffle" : "Enable shuffle"}
+            size="lg"
+            pressed={shuffle}
+            icon={<Shuffle size={22} />}
+            onClick={() => player.setShuffle(!shuffle)}
+          />
           <IconButton
             label={`More options for ${album?.title ?? "album"}`}
             size="lg"
@@ -93,7 +100,6 @@ export function AlbumPage({ id }: { id: string }) {
                 `Options for ${album.title}`,
                 [
                   { label: "Add to queue", onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "end") },
-                  { label: "Play next", onSelect: () => player.queueAdd(data!.tracks.map((t) => t.id), "next") },
                   { label: "Go to artist", separator: true, onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
