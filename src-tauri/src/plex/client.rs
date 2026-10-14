@@ -174,6 +174,12 @@ pub struct PlexPart {
     pub size: Option<i64>,
     #[serde(default)]
     pub container: Option<String>,
+    /// Only sent with `checkFiles=1`: the file is on disk.
+    #[serde(default, deserialize_with = "lenient::opt_bool")]
+    pub exists: Option<bool>,
+    /// Only sent with `checkFiles=1`: the server can read the file.
+    #[serde(default, deserialize_with = "lenient::opt_bool")]
+    pub accessible: Option<bool>,
     #[serde(default, rename = "Stream")]
     pub streams: Vec<PlexStream>,
 }
@@ -1026,6 +1032,29 @@ impl PlexClient {
             .ok_or_else(|| AppError::NotFound(format!("item {rating_key}")))
     }
 
+    /// Ask the server whether a track's file can be read right now
+    /// (`GET /library/metadata/{id}?checkFiles=1`). This is a metadata call,
+    /// not a file transfer, so it never interrupts a playing stream.
+    /// `Ok(None)` when the server doesn't say.
+    pub async fn file_readable(&self, rating_key: &str) -> AppResult<Option<bool>> {
+        let c = self
+            .container(
+                &format!("/library/metadata/{rating_key}"),
+                &[("checkFiles", "1".to_string())],
+                None,
+            )
+            .await?;
+        let part = c
+            .metadata
+            .first()
+            .and_then(|m| m.media.first())
+            .and_then(|m| m.parts.first());
+        Ok(part.and_then(|p| match (p.exists, p.accessible) {
+            (None, None) => None,
+            (e, a) => Some(e.unwrap_or(true) && a.unwrap_or(true)),
+        }))
+    }
+
     pub async fn children(&self, rating_key: &str) -> AppResult<Vec<PlexMetadata>> {
         let c = self
             .container(
@@ -1232,6 +1261,32 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const TOKEN: &str = "client-secret-token-xyz";
+
+    async fn check_files_reply(server: &MockServer, id: &str, part: serde_json::Value) {
+        Mock::given(method("GET"))
+            .and(path(format!("/library/metadata/{id}")))
+            .and(query_param("checkFiles", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "MediaContainer": {"Metadata": [{"ratingKey": id, "type": "track", "title": "t",
+                    "Media": [{"Part": [part]}]}]}
+            })))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn file_readable_reads_check_files_flags() {
+        let server = MockServer::start().await;
+        check_files_reply(&server, "1", serde_json::json!({"key": "/p/1", "exists": "1", "accessible": "1"})).await;
+        check_files_reply(&server, "2", serde_json::json!({"key": "/p/2", "exists": "1", "accessible": "0"})).await;
+        check_files_reply(&server, "3", serde_json::json!({"key": "/p/3", "exists": false})).await;
+        check_files_reply(&server, "4", serde_json::json!({"key": "/p/4"})).await;
+        let c = client(&server);
+        assert_eq!(c.file_readable("1").await.unwrap(), Some(true));
+        assert_eq!(c.file_readable("2").await.unwrap(), Some(false));
+        assert_eq!(c.file_readable("3").await.unwrap(), Some(false));
+        assert_eq!(c.file_readable("4").await.unwrap(), None);
+    }
 
     fn client(server: &MockServer) -> PlexClient {
         PlexClient::new(

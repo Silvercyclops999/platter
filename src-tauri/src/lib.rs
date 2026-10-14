@@ -3,6 +3,7 @@ pub mod bridge;
 pub mod db;
 pub mod error;
 pub mod model;
+pub mod monitor;
 pub mod platform;
 pub mod plex;
 pub mod settings;
@@ -84,11 +85,16 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let cache_dir = app.path().app_cache_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            monitor::crash::install(&data_dir);
+            let audio_dir = cache_dir.join("audio");
 
             let plex = PlexState::new(data_dir.clone())?;
             let db = DbHandle::open(data_dir.join("library.sqlite"))?;
             db.set_source(Arc::new(bridge::PlexLibrary::new(plex.clone())));
-            db.set_events(Arc::new(app.handle().clone()));
+            db.set_events(Arc::new(monitor::library::SyncHealth {
+                inner: Arc::new(app.handle().clone()),
+                plex: plex.clone(),
+            }));
             db.set_remote_search(Arc::new(bridge::PlexSearch(plex.clone())));
             let art = ArtCache::open(
                 cache_dir.join("art"),
@@ -104,7 +110,7 @@ pub fn run() {
                 Arc::new(audio::events::TauriSink(app.handle().clone())),
                 PlayerConfig {
                     persist_path: Some(data_dir.join("queue.json")),
-                    cache_dir: Some(cache_dir.join("audio")),
+                    cache_dir: Some(audio_dir.clone()),
                     ..Default::default()
                 },
             );
@@ -117,6 +123,15 @@ pub fn run() {
 
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
+            monitor::files::spawn(plex.clone(), db.clone(), player.clone());
+            monitor::net::spawn(plex.clone());
+            monitor::disk::spawn(
+                plex.clone(),
+                audio_dir.clone(),
+                art.clone(),
+                db::artcache::DEFAULT_CAP_BYTES,
+            );
+            app.manage(monitor::cached::AudioCacheDir(audio_dir));
 
             app.manage(plex);
             app.manage(db);
@@ -167,6 +182,7 @@ pub fn run() {
             audio::commands::player_problems,
             settings::settings_get,
             settings::settings_set,
+            monitor::cached::cached_tracks,
             updates::update_check,
             updates::update_install_on_restart,
         ])

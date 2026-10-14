@@ -565,3 +565,56 @@ async fn shuffle_play_starts_with_a_shuffled_context() {
     let up: Vec<String> = s.queue.next_up.iter().map(|i| i.track.id.clone()).collect();
     assert_eq!(up, ids[idx + 1..].iter().map(|s| s.to_string()).collect::<Vec<_>>());
 }
+
+/// A crash never runs the exit flush: the queue file as it was a moment
+/// after the last change must be enough to restore the queue and position.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn crash_without_flush_restores_queue_and_position() {
+    let dir = tempfile::tempdir().unwrap();
+    let live = dir.path().join("queue.json");
+    let mut r = rig(
+        &["a", "b", "c"],
+        5.0,
+        true,
+        PlayerConfig {
+            persist_path: Some(live.clone()),
+            ..Default::default()
+        },
+    )
+    .await;
+    r.player
+        .play_context(ctx(&["a", "b", "c"]), Some("b".into()), Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    r.player.pause().await.unwrap();
+    r.player.seek(1_500).await.unwrap();
+    // Wait for the debounced write, then take the file as a crash leaves it.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(p) = super::persist::load(&live)
+            && p.position_ms == 1_500
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "position never persisted");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let crashed = dir.path().join("after-crash.json");
+    std::fs::copy(&live, &crashed).unwrap();
+    let r2 = rig(
+        &["a", "b", "c"],
+        5.0,
+        true,
+        PlayerConfig {
+            persist_path: Some(crashed),
+            ..Default::default()
+        },
+    )
+    .await;
+    let s = r2.player.state().await.unwrap();
+    assert_eq!(s.status, PlayerStatus::Paused);
+    assert_eq!(tid(&s.track), "b");
+    assert_eq!(s.position_ms, 1_500);
+    assert_eq!(s.queue.next_up.len(), 1);
+}

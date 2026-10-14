@@ -6,9 +6,11 @@
 //! connections, require sign-in). The async loop that feeds it lives in
 //! `state.rs`.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use super::client::status_error;
+use super::notifications::PlexEvent;
 use super::types::{Banner, ConnectionKind, Health, HealthStatus, ScanProgress};
 use crate::error::AppError;
 
@@ -79,6 +81,13 @@ pub struct HealthMachine {
     access_removed: bool,
     scan: Option<ScanProgress>,
     files_available: bool,
+    /// False when the last failed re-race couldn't reach plex.tv either, or
+    /// the computer has no network route at all.
+    internet: bool,
+    /// The server has no music library.
+    no_music_library: bool,
+    /// The disk holding the caches is nearly full.
+    low_disk: bool,
 }
 
 impl Default for HealthMachine {
@@ -102,6 +111,9 @@ impl HealthMachine {
             access_removed: false,
             scan: None,
             files_available: true,
+            internet: true,
+            no_music_library: false,
+            low_disk: false,
         }
     }
 
@@ -112,13 +124,25 @@ impl HealthMachine {
     /// Signed in with a server picked (or switched servers). Until the first
     /// probe the status is Offline with no banner.
     pub fn on_server_selected(&mut self, name: &str, version: Option<String>) {
+        let low_disk = self.low_disk;
         *self = HealthMachine {
             signed_in: true,
             status: HealthStatus::Offline,
             server_name: Some(name.to_string()),
             version,
+            low_disk,
             ..HealthMachine::new()
         };
+    }
+
+    /// The token was rejected. Unlike sign-out, the app stays open (cached
+    /// music keeps playing) and shows "Please sign in again".
+    pub fn on_token_rejected(&mut self) {
+        self.signed_in = true;
+        self.status = HealthStatus::NoAuth;
+        self.connection = None;
+        self.latency_ms = None;
+        self.scan = None;
     }
 
     pub fn on_signed_out(&mut self) {
@@ -149,6 +173,7 @@ impl HealthMachine {
                 self.starting_since = None;
                 self.updating = false;
                 self.access_removed = false;
+                self.internet = true;
                 HealthAction::None
             }
             ProbeOutcome::Unauthorized => {
@@ -191,14 +216,28 @@ impl HealthMachine {
             .is_some_and(|since| now_ms - since < START_GRACE_MS)
     }
 
-    /// Re-race found no working connection.
-    pub fn on_rediscover_failed(&mut self, now_ms: i64) {
+    /// Re-race found no working connection. `internet` is whether plex.tv
+    /// answered during the same attempt: if it didn't either, the problem is
+    /// this computer's connection, not the server.
+    pub fn on_rediscover_failed(&mut self, now_ms: i64, internet: bool) {
         if !self.signed_in {
             return;
         }
+        self.internet = internet;
         if self.in_restart_window(now_ms) {
             return;
         }
+        self.status = HealthStatus::Offline;
+        self.connection = None;
+        self.latency_ms = None;
+    }
+
+    /// The computer has no network route at all (cable out, Wi-Fi off).
+    pub fn on_no_network(&mut self) {
+        if !self.signed_in || self.status == HealthStatus::NoAuth {
+            return;
+        }
+        self.internet = false;
         self.status = HealthStatus::Offline;
         self.connection = None;
         self.latency_ms = None;
@@ -236,41 +275,69 @@ impl HealthMachine {
         self.files_available = available;
     }
 
+    pub fn files_available(&self) -> bool {
+        self.files_available
+    }
+
+    pub fn set_no_music_library(&mut self, none: bool) {
+        self.no_music_library = none;
+    }
+
+    pub fn no_music_library(&self) -> bool {
+        self.no_music_library
+    }
+
+    pub fn set_low_disk(&mut self, low: bool) {
+        self.low_disk = low;
+    }
+
+    /// Connected to the server (any route).
+    pub fn connected(&self) -> bool {
+        matches!(
+            self.status,
+            HealthStatus::Local | HealthStatus::Remote | HealthStatus::Relay
+        )
+    }
+
+    /// Only music already on this computer can play right now.
+    pub fn cached_only(&self) -> bool {
+        self.signed_in && (!self.connected() || !self.files_available)
+    }
+
     fn banner(&self, now_ms: i64) -> Option<Banner> {
-        let b = |kind: &str, message: String| {
+        let b = |kind: &str, message: &str| {
             Some(Banner {
                 kind: kind.to_string(),
-                message,
+                message: message.to_string(),
             })
         };
         if !self.signed_in {
             return None;
         }
         if self.access_removed {
-            return b(
-                "accessRemoved",
-                "You no longer have access to this server.".into(),
-            );
+            return b("accessRemoved", "You no longer have access to this server.");
         }
         match self.status {
-            HealthStatus::NoAuth => b("signIn", "Please sign in again.".into()),
+            HealthStatus::NoAuth => return b("signIn", "Please sign in again."),
             HealthStatus::Starting | HealthStatus::Updating => {
                 let late = self
                     .starting_since
                     .is_some_and(|s| now_ms - s >= START_GRACE_MS);
-                if late {
+                return if late {
                     b(
                         "startTimeout",
-                        "Your server is taking too long to come back. Check that Plex is running."
-                            .into(),
+                        "Your server is taking too long to come back. Check that Plex is running.",
                     )
                 } else if self.status == HealthStatus::Updating {
-                    b("updating", "Server is updating…".into())
+                    b("updating", "Server is updating…")
                 } else {
-                    b("starting", "Server is starting…".into())
-                }
+                    b("starting", "Server is starting…")
+                };
             }
             HealthStatus::Offline => {
+                if !self.internet {
+                    return b("noInternet", "You're offline.");
+                }
                 let msg = match self.last_seen_at {
                     Some(seen) => format!(
                         "Your server is offline. Last seen {}.",
@@ -278,24 +345,29 @@ impl HealthMachine {
                     ),
                     None => "Your server is offline.".into(),
                 };
-                b("offline", msg)
+                return b("offline", &msg);
             }
-            HealthStatus::Relay => b(
-                "relay",
-                "Connected through Plex Relay, so quality is reduced. Turn on Remote Access in Plex for full quality."
-                    .into(),
-            ),
-            HealthStatus::Local | HealthStatus::Remote => {
-                if !self.files_available {
-                    b(
-                        "filesUnavailable",
-                        "Your server is up, but your music files aren't available.".into(),
-                    )
-                } else {
-                    None
-                }
-            }
+            HealthStatus::Local | HealthStatus::Remote | HealthStatus::Relay => {}
         }
+        if !self.files_available {
+            return b(
+                "filesUnavailable",
+                "Your server is up, but your music files aren't available.",
+            );
+        }
+        if self.no_music_library {
+            return b("noMusicLibrary", "No music library found.");
+        }
+        if self.low_disk {
+            return b("diskFull", "Not enough space.");
+        }
+        if self.status == HealthStatus::Relay {
+            return b(
+                "relay",
+                "Connected through Plex Relay, so quality is reduced. Turn on Remote Access in Plex for full quality.",
+            );
+        }
+        None
     }
 
     pub fn snapshot(&self, now_ms: i64) -> Health {
@@ -309,7 +381,79 @@ impl HealthMachine {
             scan: self.scan.clone(),
             banner: self.banner(now_ms),
             files_available: self.files_available,
+            cached_only: self.cached_only(),
         }
+    }
+}
+
+/// Counts new tracks while Plex scans the library, for "Adding new music…
+/// 120 of 340". Plex reports a scan as an activity (percent only), and each
+/// item it adds as a timeline entry: state 0 when created, 5 when fully
+/// processed. Only tracks first seen as created count, so a rescan of an
+/// unchanged library shows nothing.
+#[derive(Debug, Default, Clone)]
+pub struct ScanTracker {
+    activities: HashSet<String>,
+    seen: HashSet<String>,
+    done: HashSet<String>,
+}
+
+const TRACK_TYPE: i64 = 10;
+const STATE_CREATED: i64 = 0;
+const STATE_DONE: i64 = 5;
+
+impl ScanTracker {
+    fn is_scan(kind: &str) -> bool {
+        kind.starts_with("library.update") || kind.starts_with("library.refresh")
+    }
+
+    /// Feed one server event. Returns true if the progress changed.
+    pub fn on_event(&mut self, ev: &PlexEvent) -> bool {
+        let before = self.progress();
+        match ev {
+            PlexEvent::Activity { event, uuid, kind, .. } if Self::is_scan(kind) => {
+                if event == "ended" {
+                    self.activities.remove(uuid);
+                    if self.activities.is_empty() {
+                        self.seen.clear();
+                        self.done.clear();
+                    }
+                } else {
+                    self.activities.insert(uuid.clone());
+                }
+            }
+            PlexEvent::LibraryUpdate {
+                item_id: Some(id),
+                item_type: Some(TRACK_TYPE),
+                state: Some(state),
+                ..
+            } => {
+                if *state == STATE_CREATED {
+                    self.seen.insert(id.clone());
+                } else if *state == STATE_DONE && self.seen.contains(id) {
+                    self.done.insert(id.clone());
+                }
+            }
+            // The socket dropped: whatever was running may have ended unseen.
+            PlexEvent::Disconnected => {
+                self.activities.clear();
+                self.seen.clear();
+                self.done.clear();
+            }
+            _ => {}
+        }
+        before != self.progress()
+    }
+
+    /// `Some` while a scan is running and has found new tracks.
+    pub fn progress(&self) -> Option<ScanProgress> {
+        if self.activities.is_empty() || self.seen.is_empty() {
+            return None;
+        }
+        Some(ScanProgress {
+            done: self.done.len() as u32,
+            total: self.seen.len() as u32,
+        })
     }
 }
 
@@ -400,7 +544,7 @@ mod tests {
         );
         // Not offline until the re-race fails.
         assert_eq!(m.status(), HealthStatus::Local);
-        m.on_rediscover_failed(later);
+        m.on_rediscover_failed(later, true);
         let h = m.snapshot(later);
         assert_eq!(h.status, HealthStatus::Offline);
         let b = h.banner.unwrap();
@@ -455,7 +599,7 @@ mod tests {
             m.on_probe(ProbeOutcome::Unreachable, T0 + 200_000),
             HealthAction::Rediscover
         );
-        m.on_rediscover_failed(T0 + 200_000);
+        m.on_rediscover_failed(T0 + 200_000, true);
         assert_eq!(m.status(), HealthStatus::Offline);
     }
 
@@ -570,6 +714,153 @@ mod tests {
         assert_eq!(ago(4 * 60_000), "4 min ago");
         assert_eq!(ago(3 * 3_600_000), "3 h ago");
         assert_eq!(ago(72 * 3_600_000), "3 days ago");
+    }
+
+    #[test]
+    fn no_internet_says_you_are_offline() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        m.on_probe(ProbeOutcome::Unreachable, T0 + 1000);
+        // plex.tv didn't answer during the re-race either
+        m.on_rediscover_failed(T0 + 1000, false);
+        let h = m.snapshot(T0 + 1000);
+        assert_eq!(h.status, HealthStatus::Offline);
+        let b = h.banner.unwrap();
+        assert_eq!(b.kind, "noInternet");
+        assert_eq!(b.message, "You're offline.");
+        assert!(h.cached_only);
+        // network back, server back
+        m.on_probe(ok(ConnectionKind::Local), T0 + 5000);
+        let h = m.snapshot(T0 + 5000);
+        assert!(h.banner.is_none());
+        assert!(!h.cached_only);
+    }
+
+    #[test]
+    fn no_network_route_is_offline_at_once() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Remote), T0);
+        m.on_no_network();
+        let h = m.snapshot(T0);
+        assert_eq!(h.status, HealthStatus::Offline);
+        assert_eq!(h.banner.unwrap().kind, "noInternet");
+    }
+
+    #[test]
+    fn server_offline_is_cached_only() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        assert!(!m.cached_only());
+        m.on_rediscover_failed(T0 + 1, true);
+        assert!(m.snapshot(T0 + 1).cached_only);
+    }
+
+    #[test]
+    fn files_unavailable_is_cached_only_and_recovers() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        m.set_files_available(false);
+        let h = m.snapshot(T0);
+        assert!(h.cached_only);
+        assert_eq!(
+            h.banner.unwrap().message,
+            "Your server is up, but your music files aren't available."
+        );
+        m.set_files_available(true);
+        assert!(m.snapshot(T0).banner.is_none());
+    }
+
+    #[test]
+    fn token_rejected_keeps_app_open_with_sign_in_banner() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        m.on_token_rejected();
+        let h = m.snapshot(T0);
+        assert_eq!(h.status, HealthStatus::NoAuth);
+        assert_eq!(h.banner.unwrap().message, "Please sign in again.");
+        assert!(h.cached_only);
+    }
+
+    #[test]
+    fn no_music_library_banner() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        m.set_no_music_library(true);
+        assert_eq!(
+            m.snapshot(T0).banner.unwrap().message,
+            "No music library found."
+        );
+        m.set_no_music_library(false);
+        assert!(m.snapshot(T0).banner.is_none());
+    }
+
+    #[test]
+    fn low_disk_banner_survives_server_switch() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        m.set_low_disk(true);
+        assert_eq!(m.snapshot(T0).banner.unwrap().message, "Not enough space.");
+        m.on_server_selected("Other", None);
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        assert_eq!(m.snapshot(T0).banner.unwrap().kind, "diskFull");
+        m.set_low_disk(false);
+        assert!(m.snapshot(T0).banner.is_none());
+    }
+
+    fn activity(event: &str, uuid: &str) -> PlexEvent {
+        PlexEvent::Activity {
+            event: event.into(),
+            uuid: uuid.into(),
+            kind: "library.update.section".into(),
+            title: None,
+            subtitle: None,
+            progress: Some(10),
+            section_id: Some("3".into()),
+        }
+    }
+
+    fn timeline(id: &str, ty: i64, state: i64) -> PlexEvent {
+        PlexEvent::LibraryUpdate {
+            section_id: Some("3".into()),
+            item_id: Some(id.into()),
+            item_type: Some(ty),
+            state: Some(state),
+        }
+    }
+
+    #[test]
+    fn scan_counts_new_tracks() {
+        let mut t = ScanTracker::default();
+        assert!(!t.on_event(&activity("started", "a")));
+        assert_eq!(t.progress(), None, "nothing new yet");
+        for i in 0..340 {
+            t.on_event(&timeline(&format!("t{i}"), 10, 0));
+        }
+        // an album and an existing track being refreshed don't count
+        t.on_event(&timeline("al1", 9, 0));
+        t.on_event(&timeline("old", 10, 5));
+        for i in 0..120 {
+            t.on_event(&timeline(&format!("t{i}"), 10, 5));
+        }
+        assert_eq!(
+            t.progress(),
+            Some(ScanProgress {
+                done: 120,
+                total: 340
+            })
+        );
+        assert!(t.on_event(&activity("ended", "a")));
+        assert_eq!(t.progress(), None);
+    }
+
+    #[test]
+    fn scan_progress_clears_on_disconnect() {
+        let mut t = ScanTracker::default();
+        t.on_event(&activity("started", "a"));
+        t.on_event(&timeline("x", 10, 0));
+        assert!(t.progress().is_some());
+        assert!(t.on_event(&PlexEvent::Disconnected));
+        assert_eq!(t.progress(), None);
     }
 
     #[test]

@@ -44,6 +44,7 @@ percent-encoding = "2.3.2"
 rubato = "5"
 tauri-plugin-updater = "2.13.3"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+fs4 = { version = "1", features = ["sync"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

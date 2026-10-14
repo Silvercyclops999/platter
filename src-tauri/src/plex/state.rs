@@ -17,14 +17,14 @@ use super::client::PlexClient;
 use super::discovery::{
     self, DiscoveredServer, DiscoveryCache, Probe, RaceConfig, ServerList, load_servers,
 };
-use super::health::{HealthAction, HealthMachine, PING_INTERVAL, ProbeOutcome};
+use super::health::{HealthAction, HealthMachine, PING_INTERVAL, ProbeOutcome, ScanTracker};
 use super::identity::ClientIdentity;
 use super::keychain::{ACCOUNT_TOKEN, KeyringStore, SERVER_TOKEN, TokenStore};
 use super::notifications::{self, PlexEvent};
 use super::token::Token;
 use super::types::{
-    AuthState, AuthStatus, EVENT_AUTH_CHANGED, EVENT_HEALTH_CHANGED, EVENT_TOAST, Health, PinInfo,
-    ScanProgress, ServerInfo, Toast,
+    AuthState, AuthStatus, EVENT_AUTH_CHANGED, EVENT_HEALTH_CHANGED, EVENT_TOAST, Health,
+    HealthStatus, PinInfo, ServerInfo, Toast,
 };
 use crate::error::{AppError, AppResult};
 
@@ -79,6 +79,8 @@ struct Session {
     servers: Vec<DiscoveredServer>,
     current: Option<Current>,
     cache: DiscoveryCache,
+    /// Plex rejected the saved token; waiting for the user to sign in again.
+    reauth: bool,
 }
 
 struct Inner {
@@ -93,6 +95,7 @@ struct Inner {
     pin_cancel: Mutex<Option<watch::Sender<bool>>>,
     health: Mutex<HealthMachine>,
     last_health: Mutex<Option<Health>>,
+    scan: Mutex<ScanTracker>,
     /// Stops the health loop + notification socket of the current server.
     background_stop: Mutex<Option<watch::Sender<bool>>>,
     notif_stop: Mutex<Option<watch::Sender<bool>>>,
@@ -158,6 +161,7 @@ impl PlexState {
                 pin_cancel: Mutex::new(None),
                 health: Mutex::new(HealthMachine::new()),
                 last_health: Mutex::new(None),
+                scan: Mutex::new(ScanTracker::default()),
                 background_stop: Mutex::new(None),
                 notif_stop: Mutex::new(None),
                 recheck: Notify::new(),
@@ -194,7 +198,8 @@ impl PlexState {
         sink.emit(event, v);
     }
 
-    fn toast(&self, kind: &str, message: impl Into<String>) {
+    /// Show a toast in the UI.
+    pub fn toast(&self, kind: &str, message: impl Into<String>) {
         self.emit(
             EVENT_TOAST,
             &Toast {
@@ -213,9 +218,23 @@ impl PlexState {
         let h = self.health();
         let mut last = self.inner.last_health.lock();
         if last.as_ref() != Some(&h) {
+            let was_offline = last.as_ref().is_some_and(|p| {
+                p.status == HealthStatus::Offline
+                    && p.banner
+                        .as_ref()
+                        .is_some_and(|b| b.kind == "offline" || b.kind == "noInternet")
+            });
+            let back = was_offline
+                && matches!(
+                    h.status,
+                    HealthStatus::Local | HealthStatus::Remote | HealthStatus::Relay
+                );
             *last = Some(h.clone());
             drop(last);
             self.emit(EVENT_HEALTH_CHANGED, &h);
+            if back {
+                self.toast("info", "Your server is back.");
+            }
         }
     }
 
@@ -234,6 +253,8 @@ impl PlexState {
             if pending {
                 st.state = AuthState::Pending;
             }
+            st.reauth_required = s.reauth;
+            st.username = if s.reauth { s.username.clone() } else { None };
             return st;
         }
         let server = s.current.as_ref().map(|c| {
@@ -247,6 +268,7 @@ impl PlexState {
             username: s.username.clone(),
             needs_server_pick: server.is_none() && !s.servers.is_empty(),
             server,
+            reauth_required: false,
         }
     }
 
@@ -284,6 +306,61 @@ impl PlexState {
     /// Ask the health loop to ping now (wake from sleep, network change).
     pub fn recheck(&self) {
         self.inner.recheck.notify_one();
+    }
+
+    /// The computer woke from sleep or its network changed: reopen the
+    /// notification socket (it is likely dead) and ping now.
+    pub async fn reconnect(&self) {
+        let client = self
+            .inner
+            .session
+            .read()
+            .await
+            .current
+            .as_ref()
+            .and_then(|c| c.client.clone());
+        if let Some(c) = client {
+            self.start_notifications(c);
+        }
+        self.recheck();
+    }
+
+    /// The computer has no network route at all. Show "You're offline"
+    /// right away instead of waiting for the next ping.
+    pub fn on_network_lost(&self) {
+        self.inner.health.lock().on_no_network();
+        self.emit_health();
+    }
+
+    /// Result of the music files check (see `crate::monitor`).
+    pub fn set_files_available(&self, available: bool) {
+        self.inner.health.lock().set_files_available(available);
+        self.emit_health();
+    }
+
+    pub fn files_available(&self) -> bool {
+        self.inner.health.lock().files_available()
+    }
+
+    /// The last library sync found no music library on the server.
+    pub fn set_no_music_library(&self, none: bool) {
+        self.inner.health.lock().set_no_music_library(none);
+        self.emit_health();
+    }
+
+    pub fn no_music_library(&self) -> bool {
+        self.inner.health.lock().no_music_library()
+    }
+
+    /// The disk holding the caches is nearly full.
+    pub fn set_low_disk(&self, low: bool) {
+        self.inner.health.lock().set_low_disk(low);
+        self.emit_health();
+    }
+
+    /// Connected to the server over any route.
+    pub fn connected(&self) -> bool {
+        self.inner.health.lock().connected()
     }
 
     // ---- sign-in ----------------------------------------------------------
@@ -363,6 +440,7 @@ impl PlexState {
             let mut s = self.inner.session.write().await;
             s.account = Some(token.clone());
             s.username = username;
+            s.reauth = false;
         }
         self.refresh_and_pick(&token).await
     }
@@ -396,7 +474,7 @@ impl PlexState {
         let list = match load_servers(&self.inner.tv, token, &cache).await {
             Ok(l) => l,
             Err(AppError::Auth(_)) => {
-                self.sign_out_inner("Please sign in again.").await;
+                self.expire_session().await;
                 return Err(AppError::Auth("Please sign in again.".into()));
             }
             Err(e) => {
@@ -427,6 +505,9 @@ impl PlexState {
                 drop(h);
                 self.emit_health();
                 if servers.len() == 1 {
+                    // Switching straight to the only other server clears
+                    // the banner, so say it once.
+                    self.toast("info", "You no longer have access to this server.");
                     Some(servers[0].machine_id.clone())
                 } else {
                     None
@@ -460,11 +541,32 @@ impl PlexState {
             s.username = None;
             s.servers.clear();
             s.current = None;
+            s.reauth = false;
         }
+        *self.inner.scan.lock() = ScanTracker::default();
         self.inner.health.lock().on_signed_out();
         if !reason.is_empty() {
             self.toast("error", reason);
         }
+        self.emit_auth().await;
+        self.emit_health();
+    }
+
+    /// Plex rejected the saved token (expired or revoked). Forget it, stop
+    /// talking to the server, and keep the app open so cached music still
+    /// plays; the UI shows "Please sign in again" with a sign-in button.
+    async fn expire_session(&self) {
+        self.stop_background();
+        let _ = self.inner.store.delete(ACCOUNT_TOKEN);
+        let _ = self.inner.store.delete(SERVER_TOKEN);
+        {
+            let mut s = self.inner.session.write().await;
+            s.account = None;
+            s.current = None;
+            s.reauth = true;
+        }
+        *self.inner.scan.lock() = ScanTracker::default();
+        self.inner.health.lock().on_token_rejected();
         self.emit_auth().await;
         self.emit_health();
     }
@@ -556,7 +658,11 @@ impl PlexState {
                     now_ms(),
                 );
             }
-            None => self.inner.health.lock().on_rediscover_failed(now_ms()),
+            None => {
+                // Only a guess at this point; the health loop's re-race
+                // checks plex.tv too.
+                self.inner.health.lock().on_rediscover_failed(now_ms(), true)
+            }
         }
         self.emit_auth().await;
         self.emit_health();
@@ -588,12 +694,7 @@ impl PlexState {
         let Ok(sections) = client.music_sections().await else {
             return;
         };
-        if sections.is_empty() {
-            self.toast(
-                "info",
-                "No music library found on this server. Add one in Plex, then it will show up here.",
-            );
-        }
+        // An empty list is reported by the library sync as a banner.
         for sec in &sections {
             let Ok(prefs) = client.section_prefs(&sec.id).await else {
                 return;
@@ -643,24 +744,15 @@ impl PlexState {
 
     fn on_plex_event(&self, ev: &PlexEvent) {
         let now = now_ms();
+        let scan = {
+            let mut t = self.inner.scan.lock();
+            t.on_event(ev).then(|| t.progress())
+        };
+        if let Some(scan) = scan {
+            self.inner.health.lock().on_scan(scan);
+            self.emit_health();
+        }
         match ev {
-            PlexEvent::Activity {
-                event,
-                kind,
-                progress,
-                ..
-            } if kind.starts_with("library.update") || kind.starts_with("library.refresh") => {
-                let scan = if event == "ended" {
-                    None
-                } else {
-                    Some(ScanProgress {
-                        done: progress.unwrap_or(0).clamp(0, 100) as u32,
-                        total: 100,
-                    })
-                };
-                self.inner.health.lock().on_scan(scan);
-                self.emit_health();
-            }
             PlexEvent::UpdateState { state } => {
                 let installing = matches!(state.as_str(), "installing" | "updating");
                 self.inner.health.lock().on_update_state(installing, now);
@@ -729,7 +821,7 @@ impl PlexState {
         match action {
             HealthAction::None => {}
             HealthAction::SignInRequired => {
-                self.sign_out_inner("Please sign in again.").await;
+                self.expire_session().await;
                 return;
             }
             HealthAction::Rediscover => self.rediscover(current).await,
@@ -742,10 +834,14 @@ impl PlexState {
     async fn rediscover(&self, current: Current) {
         let account = self.inner.session.read().await.account.clone();
         let mut server = current.server.clone();
+        // Whether plex.tv answered: if neither it nor the server does, this
+        // computer is the one that's offline.
+        let mut internet = false;
         if let Some(account) = &account {
             let cache = self.inner.session.read().await.cache.clone();
             match load_servers(&self.inner.tv, account, &cache).await {
                 Ok(list) => {
+                    internet = !list.from_cache;
                     match list
                         .servers
                         .iter()
@@ -773,7 +869,7 @@ impl PlexState {
                     }
                 }
                 Err(AppError::Auth(_)) => {
-                    self.sign_out_inner("Please sign in again.").await;
+                    self.expire_session().await;
                     return;
                 }
                 Err(_) => {}
@@ -824,7 +920,10 @@ impl PlexState {
                         cur.client = None;
                     }
                 }
-                self.inner.health.lock().on_rediscover_failed(now_ms());
+                self.inner
+                    .health
+                    .lock()
+                    .on_rediscover_failed(now_ms(), internet);
             }
         }
     }
@@ -916,7 +1015,8 @@ mod tests {
     }
 
     async fn plex_tv(resources: serde_json::Value) -> MockServer {
-        let tv = MockServer::start().await;
+        // Not pooled, so a test can take plex.tv down by dropping it.
+        let tv = MockServer::builder().start().await;
         Mock::given(method("POST"))
             .and(path("/api/v2/pins"))
             .respond_with(ResponseTemplate::new(201).set_body_json(
@@ -1115,12 +1215,21 @@ mod tests {
         store
             .set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap())
             .unwrap();
-        let (st, rec) = state(dir.path(), &tv.uri(), store.clone());
+        let (st, _rec) = state(dir.path(), &tv.uri(), store.clone());
         let err = st.restore().await.unwrap_err();
         assert_eq!(err.kind(), "auth");
         assert_eq!(store.get(ACCOUNT_TOKEN).unwrap(), None);
-        assert_eq!(st.auth_status().await.state, AuthState::SignedOut);
-        assert!(rec.toasts().iter().any(|t| t.contains("sign in again")));
+        let a = st.auth_status().await;
+        assert_eq!(a.state, AuthState::SignedOut);
+        // The app stays open with a sign-in banner, not the welcome screen.
+        assert!(a.reauth_required);
+        let h = st.health();
+        assert_eq!(h.banner.unwrap().message, "Please sign in again.");
+        assert!(h.cached_only);
+        // Signing out for real clears it.
+        st.sign_out().await.unwrap();
+        assert!(!st.auth_status().await.reauth_required);
+        assert!(st.health().banner.is_none());
     }
 
     #[tokio::test]
@@ -1206,8 +1315,135 @@ mod tests {
         let (st, _rec) = state(dir.path(), &tv.uri(), store.clone());
         st.restore().await.unwrap();
         st.health_tick().await;
-        assert_eq!(st.auth_status().await.state, AuthState::SignedOut);
+        let a = st.auth_status().await;
+        assert_eq!(a.state, AuthState::SignedOut);
+        assert!(a.reauth_required);
+        assert_eq!(st.health().banner.unwrap().kind, "signIn");
         assert_eq!(store.get(ACCOUNT_TOKEN).unwrap(), None);
+        // No more server calls while waiting for sign-in.
+        assert!(st.client().await.is_err());
+    }
+
+    async fn connected(server: &MockServer) -> (PlexState, Arc<Recorder>, tempfile::TempDir, MockServer) {
+        let tv = plex_tv(serde_json::json!([resource("m1", &server.uri())])).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new());
+        store
+            .set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap())
+            .unwrap();
+        let (st, rec) = state(dir.path(), &tv.uri(), store);
+        st.restore().await.unwrap();
+        assert_eq!(st.health().status, HealthStatus::Local);
+        (st, rec, dir, tv)
+    }
+
+    #[tokio::test]
+    async fn server_back_after_offline_is_announced() {
+        let server = pms("m1", true).await;
+        let (st, rec, _d, _tv) = connected(&server).await;
+        st.inner.health.lock().on_rediscover_failed(now_ms(), true);
+        st.emit_health();
+        assert_eq!(st.health().banner.unwrap().kind, "offline");
+        assert!(st.health().cached_only);
+        st.health_tick().await;
+        assert_eq!(st.health().status, HealthStatus::Local);
+        assert!(rec.toasts().iter().any(|t| t == "Your server is back."));
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn computer_offline_says_you_are_offline() {
+        // Server and plex.tv both unreachable: the problem is this computer.
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, tv) = connected(&server).await;
+        drop(server);
+        drop(tv);
+        st.health_tick().await;
+        let h = st.health();
+        assert_eq!(h.status, HealthStatus::Offline);
+        assert_eq!(h.banner.unwrap().message, "You're offline.");
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn server_down_with_internet_says_server_offline() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        drop(server);
+        st.health_tick().await;
+        let b = st.health().banner.unwrap();
+        assert_eq!(b.kind, "offline");
+        assert!(b.message.starts_with("Your server is offline. Last seen"));
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn network_lost_is_immediate_and_reconnect_recovers() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        st.on_network_lost();
+        assert_eq!(st.health().banner.unwrap().kind, "noInternet");
+        // network back (or woke from sleep): reconnect pings right away
+        st.reconnect().await;
+        st.health_tick().await;
+        assert_eq!(st.health().status, HealthStatus::Local);
+        assert!(st.health().banner.is_none());
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn scan_progress_from_server_events() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        st.on_plex_event(&PlexEvent::Activity {
+            event: "started".into(),
+            uuid: "u1".into(),
+            kind: "library.update.section".into(),
+            title: None,
+            subtitle: None,
+            progress: Some(0),
+            section_id: Some("3".into()),
+        });
+        for i in 0..4 {
+            st.on_plex_event(&PlexEvent::LibraryUpdate {
+                section_id: Some("3".into()),
+                item_id: Some(format!("{i}")),
+                item_type: Some(10),
+                state: Some(0),
+            });
+        }
+        st.on_plex_event(&PlexEvent::LibraryUpdate {
+            section_id: Some("3".into()),
+            item_id: Some("0".into()),
+            item_type: Some(10),
+            state: Some(5),
+        });
+        let scan = st.health().scan.unwrap();
+        assert_eq!((scan.done, scan.total), (1, 4));
+        st.on_plex_event(&PlexEvent::Activity {
+            event: "ended".into(),
+            uuid: "u1".into(),
+            kind: "library.update.section".into(),
+            title: None,
+            subtitle: None,
+            progress: Some(100),
+            section_id: Some("3".into()),
+        });
+        assert!(st.health().scan.is_none());
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn files_unavailable_and_back() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        st.set_files_available(false);
+        let h = st.health();
+        assert_eq!(h.banner.unwrap().kind, "filesUnavailable");
+        assert!(h.cached_only);
+        st.set_files_available(true);
+        assert!(st.health().banner.is_none());
+        st.sign_out().await.unwrap();
     }
 
     #[tokio::test]

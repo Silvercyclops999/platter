@@ -45,6 +45,17 @@ pub fn string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Ok(opt_string(d)?.unwrap_or_default())
 }
 
+/// Like [`bool`], but `None` when the field is missing.
+pub fn opt_bool<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    let v = Option::<Value>::deserialize(d)?;
+    Ok(match v {
+        Some(Value::Bool(b)) => Some(b),
+        Some(Value::Number(n)) => Some(n.as_i64().unwrap_or(0) != 0),
+        Some(Value::String(s)) => Some(matches!(s.trim(), "1" | "true" | "True")),
+        _ => None,
+    })
+}
+
 pub fn bool<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     let v = Option::<Value>::deserialize(d)?;
     Ok(match v {

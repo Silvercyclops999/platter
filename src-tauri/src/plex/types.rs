@@ -39,6 +39,9 @@ pub struct AuthStatus {
     pub username: Option<String>,
     pub server: Option<ServerInfo>,
     pub needs_server_pick: bool,
+    /// Plex rejected the saved sign-in. The app stays open (cached music
+    /// still plays) with a "Please sign in again" banner.
+    pub reauth_required: bool,
 }
 
 impl AuthStatus {
@@ -48,6 +51,7 @@ impl AuthStatus {
             username: None,
             server: None,
             needs_server_pick: false,
+            reauth_required: false,
         }
     }
 }
@@ -82,8 +86,9 @@ pub struct ScanProgress {
     pub total: u32,
 }
 
-/// Banner kinds: `offline`, `starting`, `updating`, `startTimeout`, `relay`,
-/// `signIn`, `accessRemoved`, `filesUnavailable`, `noMusicLibrary`.
+/// Banner kinds: `offline`, `noInternet`, `starting`, `updating`,
+/// `startTimeout`, `relay`, `signIn`, `accessRemoved`, `filesUnavailable`,
+/// `noMusicLibrary`, `diskFull`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Banner {
@@ -104,6 +109,9 @@ pub struct Health {
     pub scan: Option<ScanProgress>,
     pub banner: Option<Banner>,
     pub files_available: bool,
+    /// Only music already on this computer can play (server offline, signed
+    /// out by the server, or files unavailable). The UI dims the rest.
+    pub cached_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,10 +145,12 @@ mod tests {
                 connection: Some(ConnectionKind::Relay),
             }),
             needs_server_pick: false,
+            reauth_required: true,
         };
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["state"], "signedIn");
         assert_eq!(v["needsServerPick"], false);
+        assert_eq!(v["reauthRequired"], true);
         assert_eq!(v["server"]["machineId"], "m");
         assert_eq!(v["server"]["connection"], "relay");
         let h = serde_json::to_value(HealthStatus::NoAuth).unwrap();
