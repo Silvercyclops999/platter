@@ -117,6 +117,8 @@ export interface AuthStatus {
   username?: string | null;
   server?: ServerInfo | null;
   needsServerPick: boolean;
+  /** Plex rejected the saved sign-in: keep the app open with a sign-in banner. */
+  reauthRequired?: boolean;
 }
 
 export interface PinInfo {
@@ -286,8 +288,22 @@ export type HealthStatus =
   | "updating"
   | "noAuth";
 
+/** Banner kinds the core sends (see healthBanner in MainView). */
+export type HealthBannerKind =
+  | "offline"
+  | "noInternet"
+  | "starting"
+  | "updating"
+  | "startTimeout"
+  | "relay"
+  | "signIn"
+  | "accessRemoved"
+  | "filesUnavailable"
+  | "noMusicLibrary"
+  | "diskFull";
+
 export interface HealthBanner {
-  kind: string;
+  kind: HealthBannerKind | (string & {});
   message: string;
 }
 
@@ -297,10 +313,13 @@ export interface Health {
   connection?: ConnectionKind | null;
   latencyMs?: number | null;
   serverVersion?: string | null;
+  /** Unix time in milliseconds of the last successful ping. */
   lastSeenAt?: number | null;
   scan?: { done: number; total: number } | null;
   banner?: HealthBanner | null;
   filesAvailable: boolean;
+  /** Only music already on this computer can play; the UI dims the rest. */
+  cachedOnly?: boolean;
 }
 
 export interface ToastEvent {

@@ -364,6 +364,12 @@
   animation: rise-in var(--motion-medium) var(--motion-easing);
 }
 
+/* Short how-to inside a dialog (e.g. adding a music library in Plex). */
+.guide { padding: var(--space-6); }
+.guide__title { margin: 0 0 var(--space-4); font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.guide__steps { margin: 0; padding-left: var(--space-6); display: grid; gap: var(--space-3); color: var(--color-text-secondary); font-size: var(--font-size-md); line-height: 1.5; }
+.guide__actions { display: flex; justify-content: flex-end; margin-top: var(--space-6); }
+
 /* ---------------------------------------------------------------- Tabs + chips */
 .tabs { display: flex; gap: var(--space-1); }
 .tab {
@@ -592,6 +598,7 @@
   transition: background-color var(--motion-fast) var(--motion-easing);
 }
 .track-row:hover { background: var(--color-state-hover); }
+.track-row.is-unavailable { opacity: 0.4; }
 .track-row:focus-visible { background: var(--color-state-selected); outline-offset: -2px; }
 .track-row.is-active .track-row__title { color: var(--color-accent); }
 .track-row__num {

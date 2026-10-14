@@ -66,6 +66,7 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["queue_jump", (b) => b.queueJump("q2"), { itemId: "q2" }],
   ["player_state", (b) => b.playerState(), undefined],
   ["health", (b) => b.health(), undefined],
+  ["cached_tracks", (b) => b.cachedTracks(), undefined],
   ["settings_get", (b) => b.settingsGet(), undefined],
   ["settings_set", (b) => b.settingsSet({ privateSession: true }), { patch: { privateSession: true } }],
   ["update_check", (b) => b.updateCheck(), undefined],
@@ -134,9 +135,10 @@ describe("mock backend covers the whole contract", () => {
     m.emit("library://changed", null);
     m.emit("sync://progress", { phase: "idle", done: 0, total: 0 });
     m.setHealth("offline");
+    m.setHealth("local"); // server back → toast
     await m.authStart();
     await m.playContext({ context: { kind: "album", id: m.fx.albums[0].id } });
-    // A corrupt track in an untagged build triggers player://error + toast.
+    // A corrupt track in an untagged build triggers player://error.
     const broken = m.fx.tracks.find((t) => t.title.endsWith("(corrupt rip)"))!;
     await m.playContext({ context: { kind: "album", id: broken.albumId }, startTrackId: broken.id });
     await m.playResume();

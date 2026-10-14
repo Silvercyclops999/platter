@@ -85,8 +85,10 @@ export interface Backend {
   queueJump(itemId: string): Promise<void>;
   playerState(): Promise<PlayerState>;
 
-  // Health (spec 07)
+  // Health and app states
   health(): Promise<Health>;
+  /** Ids of tracks stored on this computer (playable without the server). */
+  cachedTracks(): Promise<string[]>;
 
   // Settings (spec 06)
   settingsGet(): Promise<Settings>;
@@ -168,6 +170,7 @@ export function createTauriBackend(): Backend {
     playerState: () => call("player_state"),
 
     health: () => call("health"),
+    cachedTracks: () => call("cached_tracks"),
     settingsGet: () => call("settings_get"),
     settingsSet: (patch) => call("settings_set", { patch }),
     updateCheck: () => call("update_check"),

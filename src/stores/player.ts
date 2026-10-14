@@ -33,6 +33,8 @@ export function connectPlayer(b: Backend = backend): () => void {
   b.listen("player://position", (p) => usePlayer.getState().setPosition(p.positionMs, p.durationMs)).then((u) =>
     alive ? unsubs.push(u) : u(),
   );
+  // A track that can't be played is skipped by the core; say so.
+  b.listen("player://error", (e) => toast.error(e.message)).then((u) => (alive ? unsubs.push(u) : u()));
   return () => {
     alive = false;
     unsubs.forEach((u) => u());

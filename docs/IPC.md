@@ -31,7 +31,11 @@ the URL.
 | `servers_list` | – | `ServerInfo[]` |
 | `server_select` | `{ machineId }` | – |
 
-`AuthStatus = { state: "signedOut" | "pending" | "signedIn", username?, server?: ServerInfo, needsServerPick: bool }`
+`AuthStatus = { state: "signedOut" | "pending" | "signedIn", username?, server?: ServerInfo, needsServerPick: bool, reauthRequired: bool }`
+
+`reauthRequired` means Plex rejected the saved sign-in (expired or revoked).
+The app stays open so music on this computer keeps playing, and the health
+banner asks the user to sign in again.
 `ServerInfo = { machineId, name, owned, online, version?, connection?: "local"|"remote"|"relay" }`
 
 Event `auth://changed` → `AuthStatus`.
@@ -99,8 +103,17 @@ Events:
 | Command | Returns |
 | --- | --- |
 | `health` | `Health` |
+| `cached_tracks` | `string[]` (ids of tracks stored on this computer) |
 
-`Health = { status: "local"|"remote"|"relay"|"offline"|"starting"|"updating"|"noAuth", serverName?, connection?, latencyMs?, serverVersion?, lastSeenAt?, scan?: { done, total }, banner?: { kind, message } , filesAvailable: bool }`
+`Health = { status: "local"|"remote"|"relay"|"offline"|"starting"|"updating"|"noAuth", serverName?, connection?, latencyMs?, serverVersion?, lastSeenAt? (Unix ms), scan?: { done, total }, banner?: { kind, message }, filesAvailable: bool, cachedOnly: bool }`
+
+`banner.kind` is one of `offline`, `noInternet`, `starting`, `updating`,
+`startTimeout`, `relay`, `signIn`, `accessRemoved`, `filesUnavailable`,
+`noMusicLibrary`, `diskFull`; `message` is the text to show. `scan` counts new
+tracks while Plex scans ("Adding new music… 120 of 340"). `cachedOnly` is true
+while only music already on this computer can play; the UI then asks
+`cached_tracks` and dims the rest. See docs/APP-STATES.md.
+
 Event `health://changed` → `Health`. Event `toast` → `{ kind: "info"|"error", message }`.
 
 ## Settings and tracking

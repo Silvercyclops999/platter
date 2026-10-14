@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Badge } from "../components/Badge";
 import type { Health } from "../lib/types";
 import { useApp } from "../stores/app";
+import { agoText } from "./bannerView";
 
 export function statusInfo(h: Health | null): { tone: "local" | "remote" | "relay" | "offline" | "pending"; label: string } {
   switch (h?.status) {
@@ -12,24 +14,28 @@ export function statusInfo(h: Health | null): { tone: "local" | "remote" | "rela
     case "relay":
       return { tone: "relay", label: "Connected through relay" };
     case "offline":
-      return { tone: "offline", label: "Server offline" };
+      return { tone: "offline", label: h.banner?.kind === "noInternet" ? "You're offline" : "Server offline" };
     case "starting":
       return { tone: "relay", label: "Server is starting" };
     case "updating":
       return { tone: "relay", label: "Server is updating" };
     case "noAuth":
-      return { tone: "offline", label: "Signed out" };
+      return { tone: "offline", label: h.banner?.kind === "accessRemoved" ? "No access" : "Signed out" };
     default:
       return { tone: "pending", label: "Checking connection" };
   }
 }
 
+/** `ts` is Unix ms. */
 function ago(ts: number | null | undefined): string {
-  if (!ts) return "—";
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  return `${Math.floor(s / 3600)} hr ago`;
+  return ts ? agoText(Date.now() - ts) : "—";
+}
+
+/** "Remote" / "Relay" badge next to the server name. */
+export function routeBadge(h: Health | null): string | null {
+  if (h?.status === "remote") return "Remote";
+  if (h?.status === "relay") return "Relay";
+  return null;
 }
 
 /** Sidebar connection dot (spec 07) with a details popover. */
@@ -40,6 +46,7 @@ export function StatusDot({ compact = false }: { compact?: boolean }) {
   const pop = useRef<HTMLDivElement>(null);
   const id = useId();
   const { tone, label } = statusInfo(health);
+  const badge = routeBadge(health);
 
   useEffect(() => {
     if (!open) return;
@@ -76,6 +83,11 @@ export function StatusDot({ compact = false }: { compact?: boolean }) {
       >
         <span className={`status-dot status-dot--${tone}`} aria-hidden="true" />
         {!compact && <span className="status-dot-btn__text truncate">{health?.serverName ?? "Server"}</span>}
+        {!compact && badge && (
+          <Badge tone="neutral" title={badge === "Relay" ? "Connected through Plex Relay, so quality is reduced" : "Connected from outside your home network"}>
+            {badge}
+          </Badge>
+        )}
       </button>
       {open &&
         rect &&

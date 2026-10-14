@@ -9,7 +9,7 @@ import { Logo } from "../shell/Logo";
 import { TitleBar } from "../shell/TitleBar";
 
 /** Welcome screen (spec 02): Sign in with Plex → PIN code → waiting / cancel. */
-export function SignInPage() {
+export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
   const auth = useApp((s) => s.auth);
   const [pin, setPin] = useState<PinInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,10 +44,19 @@ export function SignInPage() {
         <h1 className="welcome__title">Welcome to Platter</h1>
         {!pending ? (
           <>
-            <p className="welcome__lead">Your Plex music library, beautifully played. Sign in with your Plex account to start listening.</p>
+            <p className="welcome__lead">
+              {onBack
+                ? "Plex asked you to sign in again. Music saved on this computer keeps playing in the meantime."
+                : "Your Plex music library, beautifully played. Sign in with your Plex account to start listening."}
+            </p>
             <Button variant="primary" size="lg" onClick={start} disabled={busy} autoFocus>
               Sign in with Plex
             </Button>
+            {onBack && (
+              <Button variant="ghost" onClick={onBack}>
+                Not now
+              </Button>
+            )}
             <p className="welcome__fine">Platter never sees your password. You'll approve this device on plex.tv.</p>
           </>
         ) : (
@@ -94,6 +103,7 @@ export function SignInPage() {
 
 /** Shown when signed in but several servers are available (spec 02). */
 export function ServerPickPage() {
+  const accessRemoved = useApp((s) => s.health?.banner?.kind === "accessRemoved");
   const [servers, setServers] = useState<ServerInfo[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -105,7 +115,11 @@ export function ServerPickPage() {
       <div className="welcome__panel" role="main">
         <Logo size={48} />
         <h1 className="welcome__title">Choose your server</h1>
-        <p className="welcome__lead">Pick the Plex server that has your music.</p>
+        <p className="welcome__lead">
+          {accessRemoved
+            ? "You no longer have access to this server. Pick another one."
+            : "Pick the Plex server that has your music."}
+        </p>
         <ul className="server-list">
           {servers
             ? servers.map((s) => (

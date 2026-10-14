@@ -27,6 +27,9 @@ interface UiState {
   menu: ContextMenuState | null;
   /** Header tint for the current page (CSS color), null = neutral. */
   tint: string | null;
+  /** The sign-in screen is open over the app (after Plex rejected the sign-in). */
+  signInOpen: boolean;
+  setSignInOpen: (v: boolean) => void;
   setTint: (c: string | null) => void;
   toggleQueue: () => void;
   setQueueOpen: (v: boolean) => void;
@@ -42,6 +45,8 @@ export const useUi = create<UiState>()((set, get) => ({
   searchFocusTick: 0,
   menu: null,
   tint: null,
+  signInOpen: false,
+  setSignInOpen: (signInOpen) => set({ signInOpen }),
   setTint: (tint) => get().tint !== tint && set({ tint }),
   toggleQueue: () => set({ queueOpen: !get().queueOpen }),
   setQueueOpen: (v) => set({ queueOpen: v }),

@@ -1,11 +1,10 @@
 import { ChevronLeft, ChevronRight, Settings as SettingsIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Banner } from "../components/Banner";
 import { IconButton } from "../components/Button";
 import { SearchField } from "../components/SearchField";
 import { backend } from "../lib/backend";
 import { modKey } from "../lib/platform";
-import type { Health, SyncStatus } from "../lib/types";
+import type { SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { ArtistPage } from "../pages/ArtistPage";
 import { HomePage } from "../pages/HomePage";
@@ -16,20 +15,10 @@ import { SettingsPage } from "../pages/SettingsPage";
 import { useApp } from "../stores/app";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry, useRouter, type Route } from "../stores/router";
 import { useUi } from "../stores/ui";
+import { HealthBanner } from "./HealthBanner";
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
-
-function healthBanner(h: Health | null): { kind: "info" | "warning" | "error" | "offline" | "progress"; message: string } | null {
-  if (!h) return null;
-  if (h.status === "offline") return { kind: "offline", message: h.banner?.message ?? "Your server is offline." };
-  if (h.status === "starting") return { kind: "progress", message: h.banner?.message ?? "Server is starting…" };
-  if (h.status === "updating") return { kind: "progress", message: h.banner?.message ?? "Server is updating" };
-  if (!h.filesAvailable) return { kind: "error", message: "Your server is up, but your music files aren't available" };
-  if (h.banner) return { kind: h.status === "relay" ? "warning" : "info", message: h.banner.message };
-  if (h.scan) return { kind: "progress", message: `Adding new music… ${h.scan.done.toLocaleString()} of ${h.scan.total.toLocaleString()}` };
-  return null;
-}
 
 function syncLabel(s: SyncStatus | null): string | null {
   if (!s || s.phase === "idle") return null;
@@ -86,7 +75,6 @@ export function MainView() {
   const entry = useCurrentEntry();
   const canBack = useCanGoBack();
   const canForward = useCanGoForward();
-  const health = useApp((s) => s.health);
   const sync = useApp((s) => s.sync);
   const tint = useUi((s) => s.tint);
   const tick = useUi((s) => s.searchFocusTick);
@@ -118,17 +106,12 @@ export function MainView() {
     if (n !== "album" && n !== "artist" && n !== "playlist") useUi.getState().setTint(null);
   }, [entry.route.name]);
 
-  const banner = healthBanner(health);
   const syncText = syncLabel(sync);
   const r = entry.route;
 
   return (
     <main className="main" style={{ "--tint": tint ?? "#2a2520" } as CSSProperties} aria-label="Main content">
-      {banner && (
-        <div className="main__banner">
-          <Banner kind={banner.kind}>{banner.message}</Banner>
-        </div>
-      )}
+      <HealthBanner />
       <div className="main__viewport">
         <div className={`main-header ${scrolled ? "is-scrolled" : ""} ${tint ? "is-tinted" : ""}`}>
           <div className="main-header__nav">

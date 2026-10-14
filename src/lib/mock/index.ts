@@ -8,7 +8,10 @@
  *   ?latency=ms     delay every command (default 120; 0 in tests)
  *   ?signedOut=1    start on the sign-in screen
  *   ?albums=5000    pad the album list to N items (virtual grid perf check)
- *   ?health=offline start in a given health status
+ *   ?health=offline start in a given app state (see HEALTH_DEMOS in ./health:
+ *                   offline, noInternet, starting, updating, startTimeout,
+ *                   relay, remote, signIn, accessRemoved, filesUnavailable,
+ *                   noMusicLibrary, diskFull, scanning)
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
@@ -19,7 +22,6 @@ import type {
   EventMap,
   EventName,
   Health,
-  HealthStatus,
   PinInfo,
   PlayContextArgs,
   PlayerState,
@@ -36,6 +38,7 @@ import type {
 } from "../types";
 import { mockArtUrl } from "./art";
 import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
+import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 
 export interface MockOptions {
   latencyMs: number;
@@ -43,7 +46,7 @@ export interface MockOptions {
   albumCount?: number;
   /** Run startup timelines (health "starting" → "local", incremental sync). */
   timelines: boolean;
-  health?: HealthStatus;
+  health?: HealthDemo;
   /** Auto-approve the sign-in PIN after this many ms (null = never). */
   autoApproveMs: number | null;
 }
@@ -63,7 +66,7 @@ export function optionsFromUrl(search: string): MockOptions {
     signedOut: p.get("signedOut") === "1",
     albumCount: p.has("albums") ? Number(p.get("albums")) : undefined,
     timelines: !isTestEnv,
-    health: (p.get("health") as HealthStatus) || undefined,
+    health: isHealthDemo(p.get("health")) ? (p.get("health") as HealthDemo) : undefined,
     autoApproveMs: isTestEnv ? null : 6000,
   };
 }
@@ -118,7 +121,9 @@ export class MockBackend implements Backend {
     this.fx = buildFixtures();
     this.auth = this.opts.signedOut
       ? { state: "signedOut", needsServerPick: false }
-      : { state: "signedIn", username: "listener", server: SERVER, needsServerPick: false };
+      : this.opts.health === "signIn"
+        ? { state: "signedOut", username: "listener", needsServerPick: false, reauthRequired: true }
+        : { state: "signedIn", username: "listener", server: SERVER, needsServerPick: false };
     const startStatus = this.opts.health ?? (this.opts.timelines ? "starting" : "local");
     this.healthState = this.makeHealth(startStatus);
 
@@ -187,7 +192,8 @@ export class MockBackend implements Backend {
 
   private runStartup() {
     this.later(700, () => this.setHealth(this.opts.health ?? "local"));
-    if (this.opts.health === "offline") return; // nothing to sync from
+    const h = this.opts.health;
+    if (h && h !== "local" && h !== "remote" && h !== "relay" && h !== "scanning") return; // nothing to sync from
     // incremental sync
     const total = 340;
     let done = 0;
@@ -210,30 +216,33 @@ export class MockBackend implements Backend {
     });
   }
 
-  private makeHealth(status: HealthStatus): Health {
-    const base: Health = {
-      status,
-      serverName: SERVER.name,
-      connection: status === "local" || status === "remote" || status === "relay" ? status : null,
-      latencyMs: status === "local" ? 4 : status === "remote" ? 38 : status === "relay" ? 160 : null,
-      serverVersion: SERVER.version,
-      lastSeenAt: Math.floor(Date.now() / 1000) - (status === "offline" ? 240 : 0),
-      scan: null,
-      banner: null,
-      filesAvailable: true,
-    };
-    if (status === "offline") base.banner = { kind: "offline", message: "Your server is offline. Last seen 4 min ago." };
-    if (status === "starting") base.banner = { kind: "starting", message: "Server is starting…" };
-    if (status === "updating") base.banner = { kind: "updating", message: "Server is updating" };
-    if (status === "relay")
-      base.banner = { kind: "relay", message: "Connected through Plex Relay. Quality is reduced to fit its bandwidth." };
-    return base;
+  private makeHealth(demo: HealthDemo): Health {
+    return demoHealth(demo, { name: SERVER.name, version: SERVER.version ?? "" });
   }
 
-  /** Test/demo hook: change health status (emits health://changed). */
-  setHealth(status: HealthStatus, patch: Partial<Health> = {}) {
-    this.healthState = { ...this.makeHealth(status), ...patch };
+  /** Test/demo hook: change the app state (emits health://changed, and a
+   *  "back" toast when leaving offline, like the core). */
+  setHealth(demo: HealthDemo, patch: Partial<Health> = {}) {
+    const wasOffline = this.healthState.banner?.kind === "offline" || this.healthState.banner?.kind === "noInternet";
+    this.healthState = { ...this.makeHealth(demo), ...patch };
     this.emit("health://changed", this.healthState);
+    const s = this.healthState.status;
+    if (wasOffline && (s === "local" || s === "remote" || s === "relay")) this.emit("toast", { kind: "info", message: "Your server is back." });
+  }
+
+  /** Test/demo hook: Plex rejected the saved sign-in (expired or revoked). */
+  expireSignIn() {
+    this.auth = { state: "signedOut", username: "listener", needsServerPick: false, reauthRequired: true };
+    this.emit("auth://changed", this.auth);
+    this.setHealth("signIn");
+  }
+
+  /** Mock: the first two albums are on this computer (pre-cached). */
+  cachedTracks() {
+    return this.delay(() => {
+      const albums = new Set(this.fx.albums.slice(0, 2).map((a) => a.id));
+      return this.fx.tracks.filter((t) => albums.has(t.albumId)).map((t) => t.id);
+    });
   }
 
   // ---------------------------------------------------------------- auth
@@ -518,8 +527,8 @@ export class MockBackend implements Backend {
     this.positionMs = 0;
     if (item && item.track.title.endsWith(BROKEN_TRACK_TITLE_SUFFIX) && play) {
       // Spec 07: one file missing/corrupt → toast + skip.
+      // The UI turns player://error into the "Skipped" toast.
       this.emit("player://error", { trackId: item.track.id, kind: "io", message: "Skipped: file unavailable" });
-      this.emit("toast", { kind: "error", message: `Skipped “${item.track.title}”: file unavailable` });
       this.advance(false);
       return;
     }
@@ -612,6 +621,12 @@ export class MockBackend implements Backend {
   }
   playPause() {
     return this.act(() => this.pauseNow());
+  }
+  /** Test/demo hook: headphones unplugged / Bluetooth dropped. The core
+   *  pauses; Play resumes on whatever output is there now. */
+  loseDevice() {
+    if (this.status === "buffering") this.status = "playing";
+    this.pauseNow();
   }
   playResume() {
     return this.act(() => this.resumeNow());

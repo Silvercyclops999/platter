@@ -2,6 +2,7 @@ import { Ellipsis, Heart, Play } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { formatDuration, trackArtistLine } from "../lib/format";
 import type { Track } from "../lib/types";
+import { isUnavailable, useApp } from "../stores/app";
 import { nav } from "../stores/router";
 import { player } from "../stores/player";
 import { toast } from "../stores/toasts";
@@ -81,7 +82,9 @@ export function TrackRow({
   onDrop,
 }: TrackRowProps) {
   const items = menuItems ?? trackMenuItems(track);
-  const label = `${track.title} by ${trackArtistLine(track)}`;
+  // Dimmed while only music on this computer can play and this isn't.
+  const unavailable = useApp((s) => isUnavailable(track.id, s));
+  const label = `${track.title} by ${trackArtistLine(track)}${unavailable ? ", not available right now" : ""}`;
 
   const onContextMenu = (e: MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -114,7 +117,8 @@ export function TrackRow({
       tabIndex={0}
       aria-label={label}
       aria-current={active ? "true" : undefined}
-      className={`track-row ${active ? "is-active" : ""} ${showAlbum ? "" : "track-row--no-album"} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""}`}
+      title={unavailable ? "Not available right now" : undefined}
+      className={`track-row ${active ? "is-active" : ""} ${unavailable ? "is-unavailable" : ""} ${showAlbum ? "" : "track-row--no-album"} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""}`}
       onDoubleClick={onPlay}
       onKeyDown={onKeyDown}
       onContextMenu={onContextMenu}
