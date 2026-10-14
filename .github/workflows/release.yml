@@ -67,9 +67,10 @@ jobs:
           repo: ${{ vars.RELEASES_REPO || github.event.repository.name }}
           tagName: ${{ github.ref_name }}
           releaseName: 'Platter ${{ github.ref_name }}'
-          releaseBody: 'Unsigned pre-release build. Windows: SmartScreen → More info → Run anyway. macOS: right-click → Open.'
+          releaseBody: 'Early build, installers not code-signed yet. Windows: SmartScreen, More info, Run anyway. macOS: right-click, Open.'
           releaseDraft: true
-          prerelease: true
+          # Not a prerelease: the updater reads releases/latest, which skips prereleases.
+          prerelease: false
           includeUpdaterJson: true
           generateReleaseNotes: true
           args: ${{ matrix.args }}
