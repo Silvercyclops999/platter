@@ -1,4 +1,4 @@
-import { CornerDownLeft, Disc3, House, LibraryBig, ListMusic, Music, Search, Settings, User } from "lucide-react";
+import { CornerDownLeft, Disc3, House, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, User, Volume1, Volume2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
@@ -31,6 +31,10 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "play-pause", label: "Play / pause", hint: "Space", icon: <Music size={16} />, group: "Playback", run: () => player.toggle() },
   { id: "next", label: "Next track", hint: `${modKey}+→`, icon: <Music size={16} />, group: "Playback", run: () => player.next() },
   { id: "previous", label: "Previous track", hint: `${modKey}+←`, icon: <Music size={16} />, group: "Playback", run: () => player.previous() },
+  { id: "shuffle", label: "Shuffle on / off", hint: `${modKey}+S`, icon: <Shuffle size={16} />, group: "Playback", run: () => player.toggleShuffle() },
+  { id: "repeat", label: "Repeat: off, all, one", hint: `${modKey}+R`, icon: <Repeat size={16} />, group: "Playback", run: () => player.cycleRepeatNow() },
+  { id: "volume-up", label: "Volume up", hint: `${modKey}+↑`, icon: <Volume2 size={16} />, group: "Playback", run: () => player.nudgeVolume(0.1) },
+  { id: "volume-down", label: "Volume down", hint: `${modKey}+↓`, icon: <Volume1 size={16} />, group: "Playback", run: () => player.nudgeVolume(-0.1) },
 ];
 
 /** Ctrl/⌘+K command palette (stub): navigation commands + quick library search. */

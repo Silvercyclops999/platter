@@ -15,7 +15,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
@@ -46,6 +46,7 @@ function SeekBar() {
         step={5000}
         disabled={!hasTrack}
         valueText={(v) => `${formatDuration(v)} of ${formatDuration(durationMs)}`}
+        hoverText={(v) => formatDuration(v)}
         onChange={(v) => setDrag(v)}
         onCommit={(v) => {
           setDrag(null);
@@ -59,16 +60,34 @@ function SeekBar() {
   );
 }
 
+const WHEEL_STEP = 0.05;
+
 function Volume() {
   const volume = usePlayer((s) => s.state?.volume ?? 0.7);
   const muted = usePlayer((s) => s.state?.muted ?? false);
   const [local, setLocal] = useState<number | null>(null);
   const v = local ?? (muted ? 0 : volume);
   const Icon = muted || v === 0 ? VolumeX : v < 0.5 ? Volume1 : Volume2;
+  const box = useRef<HTMLDivElement>(null);
+  // Mouse wheel over the volume control nudges it (native listener so the
+  // page doesn't scroll instead).
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const d = e.deltaY || -e.deltaX;
+      if (!d) return;
+      e.preventDefault();
+      player.nudgeVolume(d < 0 ? WHEEL_STEP : -WHEEL_STEP);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
   return (
-    <div className="volume">
+    <div className="volume" ref={box}>
       <IconButton
         label={muted ? "Unmute" : "Mute"}
+        tooltip={muted ? "Unmute" : "Mute"}
         icon={<Icon size={18} />}
         onClick={() => player.setMuted(!muted)}
       />
@@ -158,6 +177,7 @@ export function PlayerBar() {
         <div className="player-bar__controls">
           <IconButton
             label={shuffle ? "Disable shuffle" : "Enable shuffle"}
+            tooltip={`${shuffle ? "Disable shuffle" : "Enable shuffle"} (${modKey}+S)`}
             pressed={shuffle}
             icon={<Shuffle size={18} />}
             onClick={() => player.setShuffle(!shuffle)}
@@ -175,6 +195,7 @@ export function PlayerBar() {
           <IconButton label="Next" tooltip={`Next (${modKey}+→)`} icon={<SkipForward size={20} fill="currentColor" />} onClick={() => player.next()} />
           <IconButton
             label={repeat === "off" ? "Enable repeat" : repeat === "all" ? "Enable repeat one" : "Disable repeat"}
+            tooltip={`${repeat === "off" ? "Enable repeat" : repeat === "all" ? "Enable repeat one" : "Disable repeat"} (${modKey}+R)`}
             pressed={repeat !== "off"}
             icon={repeat === "one" ? <Repeat1 size={18} /> : <Repeat size={18} />}
             onClick={() => player.cycleRepeat(repeat)}
