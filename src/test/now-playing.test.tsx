@@ -14,6 +14,7 @@ import {
 } from "../shell/nowPlaying";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
 import { usePlayer } from "../stores/player";
+import { FULL_WINDOW_PREFS_DEFAULT, useFullWindow } from "../stores/fullWindow";
 import { useRouter } from "../stores/router";
 import { loadNowPlayingPrefs, NOW_PLAYING_PREFS_DEFAULT, useUi } from "../stores/ui";
 
@@ -70,12 +71,12 @@ beforeEach(() => {
   localStorage.clear();
   clearNowPlayingCache();
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-  useUi.setState({ queueOpen: false, nowPlayingOpen: false, nowPlayingExpanded: false, nowPlayingPrefs: { ...NOW_PLAYING_PREFS_DEFAULT }, menu: null });
+  useUi.setState({ queueOpen: false, nowPlayingOpen: false, nowPlayingPrefs: { ...NOW_PLAYING_PREFS_DEFAULT }, menu: null });
   usePlayer.setState({ state: playerState(solo) });
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  useUi.setState({ queueOpen: false, nowPlayingOpen: false, nowPlayingExpanded: false });
+  useUi.setState({ queueOpen: false, nowPlayingOpen: false });
 });
 
 describe("opening and the shared right slot", () => {
@@ -241,56 +242,23 @@ describe("panel content", () => {
   });
 });
 
-describe("expanded mode", () => {
-  const expandedView = () => screen.queryByRole("region", { name: "Now playing, expanded" });
+describe("expand button", () => {
+  beforeEach(() => {
+    useFullWindow.setState({ open: false, mode: "lyrics", osFullscreen: false, prefs: { ...FULL_WINDOW_PREFS_DEFAULT, mode: "lyrics" } });
+  });
+  afterEach(() => {
+    useFullWindow.setState({ open: false, mode: "artwork", osFullscreen: false, prefs: { ...FULL_WINDOW_PREFS_DEFAULT } });
+  });
 
-  it("opens from the expand button and leaves with Esc, returning focus", async () => {
+  it("opens the expanded view in artwork mode, even when another mode was used last", () => {
     details(EMPTY);
     useUi.getState().setNowPlayingOpen(true);
     render(<AppShell />);
-    const expand = screen.getByRole("button", { name: "Expand now playing view" });
-    expand.focus();
-    fireEvent.click(expand);
-    expect(expandedView()).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Leave expanded view" })).toHaveFocus();
-    // The player bar stays usable underneath.
-    expect(screen.getByRole("contentinfo", { name: "Player" })).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(expandedView()).toBeNull();
-    expect(panel()).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Expand now playing view" })).toHaveFocus();
-  });
-
-  it("leaves with the minimize button", () => {
-    details(EMPTY);
-    useUi.getState().setNowPlayingExpanded(true);
-    render(<AppShell />);
-    fireEvent.click(screen.getByRole("button", { name: "Leave expanded view" }));
-    expect(expandedView()).toBeNull();
-    expect(useUi.getState()).toMatchObject({ nowPlayingExpanded: false, nowPlayingOpen: true });
-  });
-
-  it("Esc closes an open menu first", () => {
-    details(EMPTY);
-    useUi.getState().setNowPlayingExpanded(true);
-    render(<AppShell />);
-    act(() => useUi.getState().openMenu({ label: "m", items: [{ label: "x" }], x: 0, y: 0 }));
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(useUi.getState().nowPlayingExpanded).toBe(true);
-  });
-
-  it("closes when the panel closes or the queue takes the slot", () => {
-    details(EMPTY);
-    useUi.getState().setNowPlayingExpanded(true);
-    render(<AppShell />);
-    expect(expandedView()).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
-    expect(expandedView()).toBeNull();
-    expect(useUi.getState()).toMatchObject({ queueOpen: true, nowPlayingOpen: false, nowPlayingExpanded: false });
-    act(() => useUi.getState().setNowPlayingExpanded(true));
-    act(() => useUi.getState().toggleNowPlaying());
-    expect(expandedView()).toBeNull();
-    expect(useUi.getState().nowPlayingExpanded).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Expand now playing view" }));
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "artwork" });
+    expect(screen.getByRole("dialog", { name: "Expanded now playing" })).toBeInTheDocument();
+    // One expanded view: the panel has no mode of its own.
+    expect(screen.queryByRole("region", { name: "Now playing, expanded" })).toBeNull();
   });
 });
 

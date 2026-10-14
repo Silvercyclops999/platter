@@ -30,7 +30,7 @@ import { LyricsEditorHost } from "./LyricsEditor";
 import { startTranscribe } from "../stores/transcribe";
 import { loadOwnLyricsIds } from "../stores/lyricsEditor";
 import { MainView } from "./MainView";
-import { NowPlayingExpanded, NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
+import { NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
 import { OutputPanel } from "./OutputPanel";
 import { PlayerBar } from "./PlayerBar";
 import { RemoteStrip } from "./RemoteStrip";
@@ -60,7 +60,6 @@ export function AppShell() {
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
-  const expanded = useUi((s) => s.nowPlayingExpanded);
   // The queue, the now-playing panel and the output picker share the right slot, one at a time.
   const rightView = outputOpen ? "output" : queueOpen ? "queue" : nowPlayingOpen ? "nowPlaying" : null;
   const rightOpen = rightView !== null;
@@ -166,7 +165,6 @@ export function AppShell() {
             </Tooltip>
           </div>
         )}
-        {expanded && nowPlayingOpen && <NowPlayingExpanded />}
       </div>
       <RemoteStrip />
       <PlayerBar />

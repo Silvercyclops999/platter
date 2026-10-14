@@ -44,7 +44,7 @@ beforeEach(async () => {
   await mock.settingsSet({ showPlexPlayers: true, showCastDevices: true, moveStopsOldDevice: true, showAirplayLocked: true });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showAirplayLocked: true } });
   useRemote.setState({ players: null, busy: undefined, password: null });
-  useUi.setState({ queueOpen: false, nowPlayingOpen: false, nowPlayingExpanded: false, outputOpen: true, outputReturn: null, menu: null });
+  useUi.setState({ queueOpen: false, nowPlayingOpen: false, outputOpen: true, outputReturn: null, menu: null });
   useToasts.setState({ toasts: [] });
 });
 

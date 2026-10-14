@@ -37,7 +37,7 @@ beforeEach(async () => {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
   localStorage.clear();
   mock.resetOutputs();
-  useUi.setState({ queueOpen: false, nowPlayingOpen: false, nowPlayingExpanded: false, outputOpen: false, outputReturn: null, menu: null });
+  useUi.setState({ queueOpen: false, nowPlayingOpen: false, outputOpen: false, outputReturn: null, menu: null });
   useOutput.setState({ state: null, switching: undefined });
   useToasts.setState({ toasts: [] });
 });

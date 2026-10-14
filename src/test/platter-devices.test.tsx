@@ -44,7 +44,7 @@ beforeEach(async () => {
   await mock.settingsSet({ ...DEFAULT_SETTINGS });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useRemote.setState({ players: null, busy: undefined, password: null });
-  useUi.setState({ queueOpen: false, nowPlayingOpen: false, nowPlayingExpanded: false, outputOpen: true, outputReturn: null, menu: null });
+  useUi.setState({ queueOpen: false, nowPlayingOpen: false, outputOpen: true, outputReturn: null, menu: null });
   useToasts.setState({ toasts: [] });
 });
 

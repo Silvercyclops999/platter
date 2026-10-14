@@ -1,4 +1,4 @@
-import { ChevronLeft, Ellipsis, Maximize2, Minimize2, PanelRightClose, Play } from "lucide-react";
+import { ChevronLeft, Ellipsis, Maximize2, PanelRightClose, Play } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Art } from "../components/Art";
 import { ArtistLinks, TextLink, useTrackCredits } from "../components/ArtistLinks";
@@ -8,6 +8,7 @@ import { SaveButton } from "../components/SaveButton";
 import { trackMenuItems } from "../components/TrackRow";
 import type { NowPlayingDetails, Track } from "../lib/types";
 import { useApp } from "../stores/app";
+import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { useUi } from "../stores/ui";
@@ -24,8 +25,6 @@ import {
 
 /** Requested art size for the panel's cover: the widest panel minus its padding. */
 const PANEL_ART = 388;
-/** Requested art size for the expanded view's cover. */
-const EXPANDED_ART = 640;
 
 type View = "main" | "lyrics" | "bio";
 
@@ -173,9 +172,9 @@ function NextCard() {
 }
 
 /** Title and artists under the cover, with the like control after them. */
-function TrackTitle({ track, large }: { track: Track; large?: boolean }) {
+function TrackTitle({ track }: { track: Track }) {
   return (
-    <div className={`np-title ${large ? "np-title--large" : ""}`}>
+    <div className="np-title">
       <div className="np-title__text">
         <div className="np-title__name truncate">
           <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.title}</TextLink>
@@ -248,7 +247,7 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
 /** Right panel: the playing track with its cover, lyrics, artist, credits and what's next. */
 export function NowPlayingPanel() {
   const track = usePlayer((s) => s.state?.track);
-  const expanded = useUi((s) => s.nowPlayingExpanded);
+  const expanded = useFullWindow((s) => s.open);
   const [scrolled, setScrolled] = useState(false);
   const [view, setView] = useState<{ id: string | undefined; v: View }>({ id: track?.id, v: "main" });
   // Full lyrics or bio belong to one track: a new track goes back to the main view.
@@ -275,7 +274,7 @@ export function NowPlayingPanel() {
             tooltip="Expand"
             pressed={expanded}
             icon={<Maximize2 size={16} />}
-            onClick={() => useUi.getState().setNowPlayingExpanded(true)}
+            onClick={() => fullWindow.open("artwork")}
           />
         </div>
       </header>
@@ -287,67 +286,6 @@ export function NowPlayingPanel() {
         )}
       </div>
     </aside>
-  );
-}
-
-/** The now-playing view over the whole main area, on a colour from the cover. */
-export function NowPlayingExpanded() {
-  const track = usePlayer((s) => s.state?.track);
-  const colors = useCoverColors(track?.thumb);
-  const minimize = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    minimize.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      // Esc leaves, unless a menu or dialog above us takes it first.
-      if (e.key !== "Escape" || e.defaultPrevented || useUi.getState().menu || document.querySelector("dialog[open], [role=dialog]")) return;
-      e.preventDefault();
-      useUi.getState().setNowPlayingExpanded(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      const expand = document.querySelector<HTMLElement>(".np-panel__expand");
-      (expand ?? returnTo)?.focus?.();
-    };
-  }, []);
-
-  const style = colors ? ({ "--np-bg": colors.vivid } as CSSProperties) : undefined;
-  return (
-    <section className="np-expanded" aria-label="Now playing, expanded" style={style}>
-      <header className="np-expanded__head">
-        <ContextName className="np-expanded__context" />
-        <div className="np-panel__actions">
-          {track && (
-            <IconButton
-              label={`More options for ${track.title}`}
-              tooltip="More options"
-              icon={<Ellipsis size={20} />}
-              onClick={(e) => moreOptions(track, e.currentTarget)}
-            />
-          )}
-          <IconButton
-            ref={minimize}
-            label="Leave expanded view"
-            tooltip="Minimize (Esc)"
-            tooltipPlacement="bottom"
-            icon={<Minimize2 size={18} />}
-            onClick={() => useUi.getState().setNowPlayingExpanded(false)}
-          />
-        </div>
-      </header>
-      {track ? (
-        <div className="np-expanded__stage" key={track.id}>
-          <div className="np-expanded__art">
-            <Art path={track.thumb} fluid requestSize={EXPANDED_ART} />
-          </div>
-          <TrackTitle track={track} large />
-        </div>
-      ) : (
-        <p className="np-empty">Nothing playing.</p>
-      )}
-    </section>
   );
 }
 

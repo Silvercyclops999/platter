@@ -59,7 +59,7 @@ beforeEach(() => {
   setOsFullscreenImpl(os);
   useFullWindow.setState({ open: false, mode: "artwork", osFullscreen: false, prefs: { ...FULL_WINDOW_PREFS_DEFAULT } });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
-  useUi.setState({ nowPlayingOpen: false, nowPlayingExpanded: false, queueOpen: false, menu: null });
+  useUi.setState({ nowPlayingOpen: false, queueOpen: false, menu: null });
   useRouter.getState().reset();
   play(synced);
 });

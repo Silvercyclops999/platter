@@ -76,7 +76,7 @@ beforeEach(async () => {
   useLyricsEditor.setState({ track: null, ownIds: new Set(), version: 0 });
   useToasts.setState({ toasts: [] });
   useRouter.getState().reset();
-  useUi.setState({ nowPlayingOpen: false, nowPlayingExpanded: false, queueOpen: false, menu: null });
+  useUi.setState({ nowPlayingOpen: false, queueOpen: false, menu: null });
 });
 afterEach(() => {
   act(() => closeLyricsEditor());

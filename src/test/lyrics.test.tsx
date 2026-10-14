@@ -67,7 +67,7 @@ beforeEach(() => {
   mock.lyricsDown = false;
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useRouter.getState().reset();
-  useUi.setState({ nowPlayingOpen: false, nowPlayingExpanded: false, queueOpen: false });
+  useUi.setState({ nowPlayingOpen: false, queueOpen: false });
   useFullWindow.setState({ open: false, mode: "artwork", osFullscreen: false, prefs: { ...FULL_WINDOW_PREFS_DEFAULT } });
 });
 afterEach(() => {
