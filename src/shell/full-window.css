@@ -1,17 +1,20 @@
 /* ---------------------------------------------------------------- Expanded now playing
-   Fills the window above the player bar (the sidebar, top bar and panels go
-   under it). Its header picks what fills it: the artwork, the artist's image
-   or the lyrics. The header fades after a few idle seconds. */
+   Fills the window between the top bar and the player bar; the sidebar and
+   the right panel go under it. Its background runs under both bars, which
+   sit over it with their own backgrounds cleared. Its header picks what
+   fills it: the artwork, the artist's image or the lyrics. After a few idle
+   seconds the header, the player bar and the top bar's contents fade. */
 
 .fw {
-  /* The player bar stays in view under it. */
+  --fw-top-bar: 64px;
   --fw-player-bar: 88px;
   position: fixed;
-  inset: 0 0 var(--fw-player-bar) 0;
-  /* Over the top bar and panels (700), under menus, tooltips and dialogs (800 and up). */
+  inset: 0;
+  /* Over the panels (700), under the bars while open (760), menus, tooltips and dialogs (800 and up). */
   z-index: 750;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  padding: var(--fw-top-bar) 0 var(--fw-player-bar);
   overflow: hidden;
   background: #0d0c0b;
   color: var(--color-text-primary);
@@ -23,6 +26,15 @@
   to { opacity: 1; }
 }
 .fw.is-idle { cursor: none; }
+
+/* The bars stay over the view, clear, and fade with its header. */
+html.fw-open .topbar { z-index: 760; background: transparent; }
+html.fw-open .player-bar { position: relative; z-index: 760; }
+html.fw-open .topbar > *,
+html.fw-open .player-bar { transition: opacity var(--motion-medium) var(--motion-easing); }
+html.fw-idle .topbar > *,
+html.fw-idle .player-bar { opacity: 0; pointer-events: none; }
+html.fw-idle body { cursor: none; }
 
 .fw__bg {
   position: absolute;
@@ -66,7 +78,9 @@
 }
 .fw__context { flex: 1; min-width: 0; font-size: var(--font-size-lg); font-weight: 700; }
 .fw__actions { display: flex; align-items: center; gap: var(--space-2); }
-.fw__modes { display: flex; align-items: center; gap: var(--space-1); margin-right: var(--space-2); }
+.fw__modes { display: flex; align-items: center; gap: var(--space-1); }
+.fw__divider { width: 1px; height: 20px; margin: 0 var(--space-1); background: rgba(255, 255, 255, 0.25); }
+.fw__context a, .fw__context button { color: inherit; }
 .fw .icon-btn--plain,
 .fw__actions .icon-btn { color: var(--color-text-primary); }
 .fw__actions .icon-btn.is-active { color: var(--color-accent); }
@@ -88,7 +102,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
-  width: min(560px, calc(100vh - var(--fw-player-bar) - 260px), 100%);
+  width: min(560px, calc(100vh - var(--fw-player-bar) - var(--fw-top-bar) - 196px), 100%);
   min-width: 180px;
   animation: fw-in var(--motion-slow) ease;
 }
@@ -100,9 +114,12 @@
 .fw__album { font-size: var(--font-size-md); color: rgba(255, 255, 255, 0.7); }
 .fw__title a, .fw__title button, .fw__album a, .fw__album button { color: inherit; }
 
-/* ---- Lyrics: a small cover beside the title, then the lyrics in a centred column. */
+/* ---- Lyrics: a small cover beside the title (it fades with the header), then
+   the lyrics in a left-aligned column starting about a quarter of the way
+   across, with room on the right. */
+.fw--lyrics .fw__stage { justify-content: flex-start; padding-left: clamp(var(--space-6), 22vw, 640px); }
 .fw__lyrics-mode {
-  width: min(960px, 100%);
+  width: min(1040px, 100%);
   height: 100%;
   min-height: 0;
   display: flex;
@@ -121,7 +138,7 @@
   min-height: 0;
   position: relative;
 }
-.fw__lyrics .lyrics--synced {
+.fw__lyrics .lyrics--synced .lyrics__scroll {
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10%, #000 85%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 10%, #000 85%, transparent 100%);
 }
@@ -177,7 +194,8 @@
 
 @media (max-width: 800px) {
   .fw__top { padding-left: var(--space-4); }
-  .fw__stage { padding: 0 var(--space-4) var(--space-4); }
+  .fw__stage,
+  .fw--lyrics .fw__stage { padding: 0 var(--space-4) var(--space-4); }
   .fw__title { font-size: var(--font-size-2xl); }
   .fw__artists { font-size: var(--font-size-lg); }
   .fw__artist-meta { padding: var(--space-6); }

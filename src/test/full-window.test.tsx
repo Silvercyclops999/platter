@@ -3,7 +3,7 @@
  * and its Esc order), the header fading, keys, and its modes (artwork, the
  * artist's image, lyrics).
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
@@ -116,14 +116,14 @@ describe("opening and closing", () => {
     expect(useUi.getState().nowPlayingOpen).toBe(false);
   });
 
-  it("closes with Esc, the close button, or a double-click on the background", async () => {
+  it("closes with Esc, Minimize, or a double-click on the background", async () => {
     render(<FullWindow />);
     act(() => fullWindow.open());
     key("Escape");
     await waitFor(() => expect(view()).toBeNull());
 
     act(() => fullWindow.open());
-    fireEvent.click(screen.getByRole("button", { name: "Close expanded view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Minimize expanded view" }));
     await waitFor(() => expect(view()).toBeNull());
 
     act(() => fullWindow.open());
@@ -153,9 +153,36 @@ describe("opening and closing", () => {
     act(() => fullWindow.open());
     key("f");
     await waitFor(() => expect(os.on).toBe(true));
-    fireEvent.click(screen.getByRole("button", { name: "Close expanded view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Minimize expanded view" }));
     await waitFor(() => expect(view()).toBeNull());
     expect(os.on).toBe(false);
+  });
+
+  it("marks the window while open, so the bars sit over it, and clears that on close", async () => {
+    render(<FullWindow />);
+    act(() => fullWindow.open());
+    expect(document.documentElement).toHaveClass("fw-open");
+    key("Escape");
+    await waitFor(() => expect(view()).toBeNull());
+    expect(document.documentElement).not.toHaveClass("fw-open");
+    expect(document.documentElement).not.toHaveClass("fw-idle");
+  });
+
+  it("the header names what's playing from, linking back to it", async () => {
+    render(<FullWindow />);
+    act(() => fullWindow.open());
+    const ctx = document.querySelector(".fw__context")!;
+    expect(ctx).toHaveTextContent(synced.albumTitle);
+    fireEvent.click(within(ctx as HTMLElement).getByText(synced.albumTitle));
+    await waitFor(() => expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "album", id: synced.albumId }));
+    await waitFor(() => expect(view()).toBeNull());
+  });
+
+  it("More options opens the song's menu", async () => {
+    render(<FullWindow />);
+    act(() => fullWindow.open());
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+    expect(useUi.getState().menu?.label).toBe(`Options for ${synced.title}`);
   });
 
   it("steps aside when a link goes to a page", async () => {
@@ -167,16 +194,22 @@ describe("opening and closing", () => {
 });
 
 describe("header fade", () => {
-  it("after 3 s without movement, and comes back on movement or a key", () => {
+  it("after about 4 s without movement, and comes back on movement or a key", () => {
+    expect(CONTROLS_HIDE_MS).toBe(4_000);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     render(<FullWindow />);
     act(() => fullWindow.open());
     const root = view()!;
     expect(root).not.toHaveClass("is-idle");
-    act(() => vi.advanceTimersByTime(CONTROLS_HIDE_MS));
+    act(() => vi.advanceTimersByTime(CONTROLS_HIDE_MS - 1));
+    expect(root).not.toHaveClass("is-idle");
+    act(() => vi.advanceTimersByTime(1));
     expect(root).toHaveClass("is-idle");
+    // The player bar and the top bar fade with it.
+    expect(document.documentElement).toHaveClass("fw-idle");
     act(() => void fireEvent.mouseMove(window));
     expect(root).not.toHaveClass("is-idle");
+    expect(document.documentElement).not.toHaveClass("fw-idle");
     act(() => vi.advanceTimersByTime(CONTROLS_HIDE_MS));
     expect(root).toHaveClass("is-idle");
     key("Shift");

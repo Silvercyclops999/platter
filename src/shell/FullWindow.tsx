@@ -1,8 +1,10 @@
-import { Disc3, Maximize, MicVocal, Minimize, PenLine, UserRound, X } from "lucide-react";
+import { Disc3, Ellipsis, Maximize, MicVocal, Minimize, Minimize2, PenLine, UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { Art } from "../components/Art";
 import { ArtistLinks, TextLink } from "../components/ArtistLinks";
 import { IconButton } from "../components/Button";
+import { openContextMenu } from "../components/ContextMenu";
+import { trackMenuItems } from "../components/TrackRow";
 import type { Track } from "../lib/types";
 import { fullWindow, useFullWindow, type FullWindowMode } from "../stores/fullWindow";
 import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
@@ -12,13 +14,16 @@ import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { useLyrics } from "./lyrics";
 import { LyricsPane, useLyricsBackground } from "./LyricsView";
-import { useNowPlayingDetails } from "./nowPlaying";
+import { contextRoute, useNowPlayingDetails } from "./nowPlaying";
 import { SEEK_KEY_STEP } from "./PlayerBar";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
 import "./full-window.css";
 
-/** The header fades after this long without the mouse moving or a key. */
-export const CONTROLS_HIDE_MS = 3_000;
+/**
+ * The header, the player bar and the top bar's contents fade after this long
+ * without the mouse moving or a key.
+ */
+export const CONTROLS_HIDE_MS = 4_000;
 /** Requested size of the big cover. */
 const COVER_ART = 640;
 /** Requested size of the artist image. */
@@ -113,15 +118,40 @@ function ModeToggle({ mode, current, label, off, offTip, icon }: { mode: FullWin
   );
 }
 
+/** What's playing from (album, playlist, artist, Liked Songs), linking back to it when it's a page. */
+function ContextName() {
+  const ctx = usePlayer((s) => s.state?.queue.context);
+  const track = usePlayer((s) => s.state?.track);
+  const title = ctx?.title || (ctx?.kind === "album" ? track?.albumTitle : null) || (ctx?.kind === "liked" ? "Liked Songs" : null) || "Now playing";
+  const route = contextRoute(ctx);
+  return (
+    <span className="fw__context truncate">
+      {route ? <TextLink onActivate={() => nav.go(route)}>{title}</TextLink> : title}
+    </span>
+  );
+}
+
+/** Root classes the rest of the window reads: the view is open, and its controls are hidden. */
+function useRootClasses(idle: boolean) {
+  useEffect(() => {
+    const root = document.documentElement.classList;
+    root.add("fw-open");
+    return () => root.remove("fw-open", "fw-idle");
+  }, []);
+  useEffect(() => {
+    document.documentElement.classList.toggle("fw-idle", idle);
+  }, [idle]);
+}
+
 function FullWindowView() {
   const track = usePlayer((s) => s.state?.track);
-  const ctx = usePlayer((s) => s.state?.queue.context);
   const { lyrics, loading: lyricsLoading } = useLyrics(track?.id);
   const { details } = useNowPlayingDetails(track?.id);
   const mode = useFullWindow((s) => s.mode);
   const osFull = useFullWindow((s) => s.osFullscreen);
   const hideControls = useSettings((s) => s.settings?.fullWindowHideControls ?? true);
   const idle = useIdle(hideControls, CONTROLS_HIDE_MS);
+  useRootClasses(idle);
   const tint = useLyricsBackground(track?.thumb);
   const root = useRef<HTMLDivElement>(null);
 
@@ -163,7 +193,7 @@ function FullWindowView() {
   else if (shown === "lyrics")
     stage = (
       <div className="fw__lyrics-mode" key={track.id}>
-        <div className="fw__now fw__now--row">
+        <div className="fw__now fw__now--row fw__chrome">
           <div className="fw__cover">
             <Art path={track.thumb} fluid requestSize={COVER_ART} />
           </div>
@@ -216,7 +246,7 @@ function FullWindowView() {
       <div className="fw__shade" aria-hidden="true" />
 
       <header className="fw__top fw__chrome">
-        <span className="fw__context truncate">{ctx?.title || track?.albumTitle || "Now playing"}</span>
+        <ContextName />
         <div className="fw__actions">
           {/* Add lyrics lives in the empty state; the pencil edits lyrics you wrote. */}
           {track && shown === "lyrics" && ownLyrics && (
@@ -232,6 +262,16 @@ function FullWindowView() {
             <ModeToggle mode="artist" current={mode} label="Artist image" off={!artistPhoto} offTip="No artist image" icon={<UserRound size={18} />} />
             <ModeToggle mode="lyrics" current={mode} label="Lyrics" off={noLyrics || !track} offTip="No lyrics for this song" icon={<MicVocal size={18} />} />
           </div>
+          <span className="fw__divider" aria-hidden="true" />
+          {track && (
+            <IconButton
+              label="More options"
+              tooltip={`More options for ${track.title}`}
+              tooltipPlacement="bottom"
+              icon={<Ellipsis size={20} />}
+              onClick={(e) => openContextMenu(`Options for ${track.title}`, trackMenuItems(track), e.currentTarget)}
+            />
+          )}
           <IconButton
             label={osFull ? "Exit full screen" : "Enter full screen"}
             tooltip={`${osFull ? "Exit full screen" : "Enter full screen"} (F)`}
@@ -240,10 +280,10 @@ function FullWindowView() {
             onClick={() => void fullWindow.toggleOsFullscreen()}
           />
           <IconButton
-            label="Close expanded view"
-            tooltip="Close (Esc)"
+            label="Minimize expanded view"
+            tooltip="Minimize (Esc)"
             tooltipPlacement="bottom"
-            icon={<X size={20} />}
+            icon={<Minimize2 size={18} />}
             onClick={() => void fullWindow.close()}
           />
         </div>
@@ -255,9 +295,10 @@ function FullWindowView() {
 }
 
 /**
- * The expanded now-playing view: fills the window above the player bar
- * (the sidebar and panels go under it) with the artwork, the artist's image
- * or the lyrics, picked in its header.
+ * The expanded now-playing view: fills the window between the top bar and
+ * the player bar (the sidebar and the right panel go under it) with the
+ * artwork, the artist's image or the lyrics, picked in its header. Minimize
+ * or Esc returns to the layout underneath, untouched.
  */
 export function FullWindow() {
   const open = useFullWindow((s) => s.open);

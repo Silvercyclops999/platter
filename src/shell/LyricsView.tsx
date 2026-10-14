@@ -1,4 +1,4 @@
-import { ArrowDown, PenLine } from "lucide-react";
+import { AudioLines, PenLine } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
@@ -8,7 +8,7 @@ import type { LyricLine, Lyrics, Track } from "../lib/types";
 import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
-import { currentLineIndex, currentWordIndex, followTarget, FOLLOW_RESUME_MS, interpolate, lineState, lyricsSourceLabel, timedLines, useLyrics } from "./lyrics";
+import { currentLineIndex, currentWordIndex, followTarget, interpolate, lineState, lyricsSourceLabel, timedLines, useLyrics } from "./lyrics";
 import { useCoverColors } from "./nowPlaying";
 import { TranscribeOffer } from "./TranscribeOffer";
 import "./lyrics.css";
@@ -76,7 +76,6 @@ function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]
   const scroller = useRef<HTMLDivElement>(null);
   const lineEls = useRef<(HTMLElement | null)[]>([]);
   const [following, setFollowing] = useState(true);
-  const resumeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const first = useRef(true);
 
   const scrollToCurrent = useCallback(
@@ -91,25 +90,16 @@ function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]
     [current],
   );
 
-  // Keep the current line about a third from the top (the first placement jumps).
+  // Keep the current line a little above the middle (the first placement jumps).
   useLayoutEffect(() => {
     if (!following) return;
     scrollToCurrent(!first.current);
     first.current = false;
   }, [current, following, scrollToCurrent]);
 
-  useEffect(() => () => clearTimeout(resumeTimer.current), []);
-
-  const resume = () => {
-    clearTimeout(resumeTimer.current);
-    setFollowing(true);
-  };
-  // Scrolling by hand pauses following until 5 s pass with no scrolling.
-  const pause = () => {
-    setFollowing(false);
-    clearTimeout(resumeTimer.current);
-    resumeTimer.current = setTimeout(resume, FOLLOW_RESUME_MS);
-  };
+  const resume = () => setFollowing(true);
+  // Scrolling by hand stops following; the view stays put until Sync.
+  const pause = () => setFollowing(false);
   const onKey = (e: KeyboardEvent) => {
     if (e.target === scroller.current && SCROLL_KEYS.has(e.key)) pause();
   };
@@ -170,9 +160,9 @@ function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]
         {footer}
       </div>
       {!following && (
-        <button type="button" className="lyrics__back" onClick={resume}>
-          <ArrowDown size={16} aria-hidden="true" />
-          Back to current line
+        <button type="button" className="lyrics__sync" aria-label="Sync to the current line" onClick={resume}>
+          <AudioLines size={16} aria-hidden="true" />
+          Sync
         </button>
       )}
     </div>
@@ -204,7 +194,8 @@ function PlainLyrics({ lines, credit, className, footer }: { lines: string[]; cr
 
 /**
  * Lyrics for the playing song: synced lyrics follow playback (current line
- * bright, a third from the top; click a line to seek there). Unsynced lyrics
+ * bright, a little above the middle; click a line to seek there). A hand
+ * scroll stops following until Sync. Unsynced lyrics
  * say so at the top and are plain text in one tint: no follow, no seeking.
  * Under them: where they came from, and Edit for lyrics the user wrote.
  */

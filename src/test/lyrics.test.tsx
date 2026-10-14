@@ -17,7 +17,6 @@ import {
   currentLineIndex,
   currentWordIndex,
   followTarget,
-  FOLLOW_RESUME_MS,
   interpolate,
   lineState,
   loadLyrics,
@@ -105,8 +104,8 @@ describe("timing rules", () => {
     expect(lineState(0, -1)).toBe("future");
   });
 
-  it("puts the current line a third from the top, inside the scroll range", () => {
-    expect(followTarget(1000, 60, 900, 5000)).toBe(1000 + 30 - 300);
+  it("puts the current line a little above the middle, inside the scroll range", () => {
+    expect(followTarget(1000, 60, 900, 5000)).toBeCloseTo(1000 + 30 - 900 * 0.42);
     expect(followTarget(100, 60, 900, 5000)).toBe(0);
     expect(followTarget(4900, 60, 900, 5000)).toBe(4100);
   });
@@ -173,24 +172,23 @@ describe("synced lyrics", () => {
     expect(seek).toHaveBeenCalledWith(t[target].startMs);
   });
 
-  it("pauses following on a hand scroll, until 5 s pass or Back to current line", async () => {
+  it("stops following on a hand scroll and stays put until Sync", async () => {
     at(words, 30_000);
     render(<LyricsPane />);
     const scroller = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fireEvent.wheel(scroller, { deltaY: 400 });
-    expect(screen.getByRole("button", { name: "Back to current line" })).toBeInTheDocument();
-    // More scrolling restarts the wait.
-    act(() => vi.advanceTimersByTime(FOLLOW_RESUME_MS - 1000));
-    fireEvent.wheel(scroller, { deltaY: 100 });
-    act(() => vi.advanceTimersByTime(FOLLOW_RESUME_MS - 1000));
-    expect(screen.getByRole("button", { name: "Back to current line" })).toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(1000));
-    expect(screen.queryByRole("button", { name: "Back to current line" })).toBeNull();
-    // The button resumes at once.
-    fireEvent.wheel(scroller, { deltaY: 100 });
-    fireEvent.click(screen.getByRole("button", { name: "Back to current line" }));
-    expect(screen.queryByRole("button", { name: "Back to current line" })).toBeNull();
+    const sync = screen.getByRole("button", { name: /^Sync/ });
+    expect(sync).toHaveTextContent("Sync");
+    expect(sync).toHaveClass("lyrics__sync");
+    // No timer brings following back: the pill stays.
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
+    // The highlight keeps moving while scrolled away.
+    act(() => usePlayer.setState({ positionMs: 90_000 }));
+    // Sync resumes at once.
+    fireEvent.click(screen.getByRole("button", { name: /^Sync/ }));
+    expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
   });
 
   it("shows the credit line under the lyrics", async () => {
@@ -215,7 +213,7 @@ describe("plain and missing lyrics", () => {
     expect(view.querySelector("[aria-current]")).toBeNull();
     fireEvent.click(ls[3]);
     expect(seek).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "Back to current line" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
   });
 
   it("synced lyrics have no unsynced note", async () => {

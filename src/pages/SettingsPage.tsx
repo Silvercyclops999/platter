@@ -1123,7 +1123,7 @@ export function SettingsPage() {
       key: "fullWindowHideControls",
       section: "Appearance",
       title: "Expanded view hides controls",
-      description: "After 3 seconds without moving the mouse, the expanded now-playing view fades its header. Moving the mouse or pressing a key brings it back.",
+      description: "After 4 seconds without moving the mouse, the expanded now-playing view fades its header, the player bar and the top bar, leaving the artwork or lyrics. Moving the mouse or pressing a key brings them back.",
       control: (ids) => toggle(s, "fullWindowHideControls", ids),
     },
     {

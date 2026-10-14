@@ -144,17 +144,14 @@ export function lineState(i: number, current: number): "past" | "current" | "fut
   return i < current ? "past" : i === current ? "current" : "future";
 }
 
-/** Where the current line sits in the view: about a third from the top. */
-export const FOLLOW_ANCHOR = 1 / 3;
+/** Where the current line sits in the view: a little above the middle. */
+export const FOLLOW_ANCHOR = 0.42;
 
 /** Scroll offset that puts a line at the anchor, clamped to the scroll range. */
 export function followTarget(lineTop: number, lineHeight: number, viewHeight: number, scrollHeight: number): number {
   const top = lineTop + lineHeight / 2 - viewHeight * FOLLOW_ANCHOR;
   return Math.max(0, Math.min(top, Math.max(0, scrollHeight - viewHeight)));
 }
-
-/** Scrolling by hand pauses auto-follow for this long after the last scroll. */
-export const FOLLOW_RESUME_MS = 5_000;
 
 /**
  * Playback position between the core's updates (4 a second): the last
