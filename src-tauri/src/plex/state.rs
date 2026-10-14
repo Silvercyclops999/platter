@@ -101,6 +101,8 @@ struct Inner {
     notif_stop: Mutex<Option<watch::Sender<bool>>>,
     recheck: Notify,
     events: broadcast::Sender<PlexEvent>,
+    /// False while `start` is restoring the saved session; true otherwise.
+    restored: watch::Sender<bool>,
 }
 
 /// Cheap to clone; all clones share state.
@@ -166,6 +168,7 @@ impl PlexState {
                 notif_stop: Mutex::new(None),
                 recheck: Notify::new(),
                 events,
+                restored: watch::channel(true).0,
             }),
         })
     }
@@ -178,11 +181,19 @@ impl PlexState {
     /// the previous session in the background.
     pub fn start(&self, app: tauri::AppHandle) {
         self.set_event_sink(Arc::new(TauriSink(app)));
+        self.restore_in_background();
+    }
+
+    /// Restore the saved session on a background task. Until it finishes,
+    /// `client_when_ready` callers wait for it.
+    fn restore_in_background(&self) {
+        self.inner.restored.send_replace(false);
         let me = self.clone();
         spawn(async move {
             if let Err(e) = me.restore().await {
                 tracing::warn!(kind = e.kind(), "restoring Plex session failed");
             }
+            me.inner.restored.send_replace(true);
         });
     }
 
@@ -301,6 +312,15 @@ impl PlexState {
             None if s.account.is_none() => Err(AppError::Auth("Not signed in.".into())),
             None => Err(AppError::Invalid("No server selected.".into())),
         }
+    }
+
+    /// Like `client`, but first waits (up to `wait`) for the saved session to
+    /// finish restoring at startup, so early requests such as artwork don't
+    /// fail just because they arrived before the keychain was read.
+    pub async fn client_when_ready(&self, wait: std::time::Duration) -> AppResult<PlexClient> {
+        let mut rx = self.inner.restored.subscribe();
+        let _ = tokio::time::timeout(wait, rx.wait_for(|done| *done)).await;
+        self.client().await
     }
 
     /// Ask the health loop to ping now (wake from sleep, network change).
@@ -1161,6 +1181,32 @@ mod tests {
         assert_eq!(st.auth_status().await.state, AuthState::Pending);
         st.cancel_sign_in();
         assert_eq!(st.auth_status().await.state, AuthState::SignedOut);
+    }
+
+    #[tokio::test]
+    async fn early_requests_wait_for_the_saved_session() {
+        let server = pms("m1", true).await;
+        let tv = plex_tv(serde_json::json!([resource("m1", &server.uri())])).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new());
+        store
+            .set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap())
+            .unwrap();
+        let (st, _rec) = state(dir.path(), &tv.uri(), store);
+        st.restore_in_background();
+        // A plain client() this early fails; the startup-aware one waits.
+        let c = st.client_when_ready(Duration::from_secs(10)).await;
+        assert!(c.is_ok(), "{:?}", c.err());
+    }
+
+    #[tokio::test]
+    async fn waiting_without_a_restore_returns_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, _rec) = state(dir.path(), "http://127.0.0.1:9", Arc::new(MemoryStore::new()));
+        let t = std::time::Instant::now();
+        let c = st.client_when_ready(Duration::from_secs(10)).await;
+        assert!(matches!(c, Err(AppError::Auth(_))));
+        assert!(t.elapsed() < Duration::from_secs(1));
     }
 
     #[tokio::test]

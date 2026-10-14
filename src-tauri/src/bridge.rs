@@ -17,6 +17,9 @@ use crate::plex::client::{MetaType, PlexHub, PlexMetadata};
 use crate::plex::PlexState;
 use crate::plex::types::ConnectionKind;
 
+/// How long startup requests wait for the saved Plex session to restore.
+const STARTUP_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
 const PAGE: u64 = 500;
 
 fn meta_type(kind: ItemKind) -> MetaType {
@@ -254,7 +257,7 @@ pub struct PlexArt(pub PlexState);
 #[async_trait]
 impl ArtFetcher for PlexArt {
     async fn fetch(&self, path: &str, width: u32, height: u32) -> AppResult<ArtBytes> {
-        let bytes = self.0.client().await?.photo(path, width, height).await?;
+        let bytes = self.0.client_when_ready(STARTUP_WAIT).await?.photo(path, width, height).await?;
         let content_type = sniff_content_type(&bytes).to_string();
         Ok(ArtBytes { bytes, content_type })
     }
@@ -295,7 +298,7 @@ fn source_of(req: crate::plex::client::StreamRequest, codec: Option<String>) -> 
 #[async_trait]
 impl TrackResolver for PlexStreams {
     async fn stream(&self, track: &Track) -> AppResult<StreamSource> {
-        let client = self.0.client().await?;
+        let client = self.0.client_when_ready(STARTUP_WAIT).await?;
         if let Some(kbps) = stream_cap_kbps(client.connection(), track.bitrate) {
             let session = uuid::Uuid::new_v4().to_string();
             let req = client.transcode_request(&track.id, kbps, &session)?;
