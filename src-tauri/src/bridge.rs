@@ -428,7 +428,51 @@ fn unix_now() -> i64 {
 /// Resolves play contexts from the local cache.
 /// Contexts and tracks from the cache. With a `PlexState`, a toast says when
 /// the explicit filter or hidden fan edits left songs out of a context.
-pub struct CacheLookup(pub DbHandle, pub Option<PlexState>);
+/// The third part says which songs can play while the server is out of reach.
+pub struct CacheLookup(pub DbHandle, pub Option<PlexState>, pub OfflinePlay);
+
+/// While only music on this computer can play, plays keep to the songs in
+/// the audio cache, and the first play that leaves songs out says so once.
+#[derive(Debug, Default)]
+pub struct OfflinePlay {
+    audio_dir: Option<std::path::PathBuf>,
+    told: std::sync::atomic::AtomicBool,
+}
+
+impl OfflinePlay {
+    pub fn new(audio_dir: std::path::PathBuf) -> Self {
+        OfflinePlay {
+            audio_dir: Some(audio_dir),
+            told: Default::default(),
+        }
+    }
+
+    /// Ids that can play now, or `None` when the server can be reached.
+    pub async fn playable(&self, cached_only: bool) -> Option<std::collections::HashSet<String>> {
+        if !cached_only {
+            self.told.store(false, Ordering::Relaxed);
+            return None;
+        }
+        let dir = self.audio_dir.clone()?;
+        let ids = tokio::task::spawn_blocking(move || crate::monitor::cached::cached_ids(&dir))
+            .await
+            .unwrap_or_default();
+        Some(ids.into_iter().collect())
+    }
+
+    /// The notice for `n` songs left out, the first time only.
+    pub fn notice(&self, n: usize) -> Option<String> {
+        if n == 0 || self.told.swap(true, Ordering::Relaxed) {
+            return None;
+        }
+        Some(offline_left_out_message(n))
+    }
+}
+
+pub fn offline_left_out_message(n: usize) -> String {
+    let songs = if n == 1 { "1 song that isn't".to_string() } else { format!("{n} songs that aren't") };
+    format!("Skipped {songs} on this computer. They play again when Platter can reach your server.")
+}
 
 #[async_trait]
 impl TrackLookup for CacheLookup {
@@ -450,6 +494,17 @@ impl TrackLookup for CacheLookup {
             plex.toast("info", m);
         }
         Ok(resolved)
+    }
+
+    async fn playable_now(&self) -> Option<std::collections::HashSet<String>> {
+        let plex = self.1.as_ref()?;
+        self.2.playable(plex.cached_only()).await
+    }
+
+    fn left_out_offline(&self, n: usize) {
+        if let (Some(m), Some(plex)) = (self.2.notice(n), &self.1) {
+            plex.toast("info", m);
+        }
     }
 }
 
@@ -524,6 +579,29 @@ impl CacheLookup {
 mod tests {
     use super::*;
     use crate::model::ReleaseSection;
+
+    #[tokio::test]
+    async fn offline_plays_keep_to_cached_songs_and_say_so_once() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("101-0123456789abcdef.audio"), b"x").unwrap();
+        let off = OfflinePlay::new(d.path().to_path_buf());
+        // Connected: everything plays, nothing to filter.
+        assert_eq!(off.playable(false).await, None);
+        let ids = off.playable(true).await.unwrap();
+        assert_eq!(ids.into_iter().collect::<Vec<_>>(), vec!["101".to_string()]);
+        assert_eq!(
+            off.notice(3).as_deref(),
+            Some("Skipped 3 songs that aren't on this computer. They play again when Platter can reach your server.")
+        );
+        assert_eq!(off.notice(2), None, "once while offline");
+        // Back online, then offline again: says it again.
+        off.playable(false).await;
+        assert_eq!(
+            off.notice(1).as_deref(),
+            Some("Skipped 1 song that isn't on this computer. They play again when Platter can reach your server.")
+        );
+        assert_eq!(OfflinePlay::default().notice(0), None);
+    }
 
     fn album(id: &str) -> Album {
         Album {

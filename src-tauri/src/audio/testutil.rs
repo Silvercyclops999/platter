@@ -313,6 +313,10 @@ pub struct FakeResolver {
     pub base: String,
     pub transcode_calls: AtomicUsize,
     pub tracks: Mutex<HashMap<String, Track>>,
+    /// `Some(ids)`: only these can play now (server out of reach).
+    pub playable: Mutex<Option<std::collections::HashSet<String>>>,
+    /// Every `left_out_offline` call.
+    pub left_out: Mutex<Vec<usize>>,
 }
 
 impl FakeResolver {
@@ -321,6 +325,8 @@ impl FakeResolver {
             base: format!("http://{}", server.addr),
             transcode_calls: AtomicUsize::new(0),
             tracks: Mutex::new(HashMap::new()),
+            playable: Mutex::new(None),
+            left_out: Mutex::new(Vec::new()),
         })
     }
 }
@@ -361,5 +367,11 @@ impl TrackLookup for FakeResolver {
             tracks: self.tracks(&ids).await?,
             title: Some("Test context".into()),
         })
+    }
+    async fn playable_now(&self) -> Option<std::collections::HashSet<String>> {
+        self.playable.lock().clone()
+    }
+    fn left_out_offline(&self, n: usize) {
+        self.left_out.lock().push(n);
     }
 }

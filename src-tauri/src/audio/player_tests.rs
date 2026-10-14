@@ -1044,3 +1044,45 @@ async fn context_and_jump_can_start_at_a_position_paused() {
     assert_eq!((tid(&s.track), s.status, s.position_ms), ("c".to_string(), PlayerStatus::Paused, 1_000));
     assert!(r.player.queue_jump_at("missing".into(), 0, true).await.is_err());
 }
+
+fn is_offline_refusal(e: &crate::error::AppError) -> bool {
+    matches!(e, crate::error::AppError::Invalid(m) if m == crate::audio::player::OFFLINE_NOTHING_PLAYS)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn offline_play_leaves_out_songs_that_need_the_server() {
+    let r = rig(&["a", "b", "c", "d"], 0.2, false, PlayerConfig::default()).await;
+    *r.resolver.playable.lock() = Some(["a", "c"].iter().map(|s| s.to_string()).collect());
+    // Clicking a song that can't play starts at the next one that can.
+    r.player
+        .play_context(ctx(&["a", "b", "c", "d"]), Some("b".into()), Some(false))
+        .await
+        .unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "c");
+    let upcoming: Vec<String> = s.queue.next_up.iter().map(|i| i.track.id.clone()).collect();
+    assert!(!upcoming.iter().any(|id| id == "b" || id == "d"), "{upcoming:?}");
+    assert_eq!(*r.resolver.left_out.lock(), vec![2]);
+    // Asking only for songs that can't play is refused with a reason.
+    let e = r.player.queue_add(vec!["d".into()], AddAt::End).await.unwrap_err();
+    assert!(is_offline_refusal(&e), "{e}");
+    let e = r.player.play_context(ctx(&["b", "d"]), None, Some(false)).await.unwrap_err();
+    assert!(is_offline_refusal(&e), "{e}");
+    // Back online: everything plays again.
+    *r.resolver.playable.lock() = None;
+    r.player
+        .play_context(ctx(&["a", "b", "c", "d"]), Some("b".into()), Some(false))
+        .await
+        .unwrap();
+    assert_eq!(tid(&r.player.state().await.unwrap().track), "b");
+}
+
+#[test]
+fn playable_part_wraps_round_to_find_a_start() {
+    use crate::audio::player::playable_part;
+    let tracks: Vec<Track> = ["a", "b", "c"].iter().map(|id| track(id, "A", &format!("/p/{id}"))).collect();
+    let ok: std::collections::HashSet<String> = ["a"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(playable_part(&tracks, Some("c"), &ok), (Some("a".into()), 2));
+    assert_eq!(playable_part(&tracks, Some("a"), &ok), (Some("a".into()), 2));
+    assert_eq!(playable_part(&tracks, None, &ok), (None, 2));
+}

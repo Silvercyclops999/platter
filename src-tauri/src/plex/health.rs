@@ -88,7 +88,13 @@ pub struct HealthMachine {
     no_music_library: bool,
     /// The disk holding the caches is nearly full.
     low_disk: bool,
+    /// macOS Local Network privacy is keeping Platter off the home network:
+    /// the last race had every local address refused by the system.
+    local_network_blocked: bool,
 }
+
+/// What the macOS Local Network banner says.
+pub const LOCAL_NETWORK_BLOCKED: &str = "macOS is blocking Platter from your home network. Open System Settings, Privacy & Security, Local Network, and turn on Platter.";
 
 impl Default for HealthMachine {
     fn default() -> Self {
@@ -114,7 +120,25 @@ impl HealthMachine {
             internet: true,
             no_music_library: false,
             low_disk: false,
+            local_network_blocked: false,
         }
+    }
+
+    /// Whether the last connection race found the home network blocked by
+    /// the system (only reported on macOS).
+    pub fn set_local_network_blocked(&mut self, blocked: bool) {
+        self.local_network_blocked = blocked;
+    }
+
+    pub fn local_network_blocked(&self) -> bool {
+        self.local_network_blocked
+    }
+
+    /// Connected over remote or relay only because the home network was
+    /// blocked: worth racing again to see if local works now.
+    pub fn retry_local(&self) -> bool {
+        self.local_network_blocked
+            && matches!(self.status, HealthStatus::Remote | HealthStatus::Relay)
     }
 
     pub fn status(&self) -> HealthStatus {
@@ -174,6 +198,9 @@ impl HealthMachine {
                 self.updating = false;
                 self.access_removed = false;
                 self.internet = true;
+                if connection == ConnectionKind::Local {
+                    self.local_network_blocked = false;
+                }
                 HealthAction::None
             }
             ProbeOutcome::Unauthorized => {
@@ -238,6 +265,9 @@ impl HealthMachine {
             return;
         }
         self.internet = false;
+        // With no route at all every address fails at once; that isn't a
+        // block on the home network.
+        self.local_network_blocked = false;
         self.status = HealthStatus::Offline;
         self.connection = None;
         self.latency_ms = None;
@@ -338,6 +368,9 @@ impl HealthMachine {
                 if !self.internet {
                     return b("noInternet", "You're offline.");
                 }
+                if self.local_network_blocked {
+                    return b("localNetwork", LOCAL_NETWORK_BLOCKED);
+                }
                 let msg = match self.last_seen_at {
                     Some(seen) => format!(
                         "Your server is offline. Last seen {}.",
@@ -347,7 +380,13 @@ impl HealthMachine {
                 };
                 return b("offline", &msg);
             }
-            HealthStatus::Local | HealthStatus::Remote | HealthStatus::Relay => {}
+            HealthStatus::Local => {}
+            // Playing over the internet from home: still worth fixing, since
+            // remote and relay streams are lower quality.
+            HealthStatus::Remote | HealthStatus::Relay if self.local_network_blocked => {
+                return b("localNetwork", LOCAL_NETWORK_BLOCKED);
+            }
+            HealthStatus::Remote | HealthStatus::Relay => {}
         }
         if !self.files_available {
             return b(
@@ -744,6 +783,56 @@ mod tests {
         let h = m.snapshot(T0);
         assert_eq!(h.status, HealthStatus::Offline);
         assert_eq!(h.banner.unwrap().kind, "noInternet");
+    }
+
+    #[test]
+    fn local_network_blocked_with_nothing_else_says_how_to_fix_it() {
+        let mut m = signed_in();
+        m.set_local_network_blocked(true);
+        m.on_rediscover_failed(T0, true);
+        let h = m.snapshot(T0);
+        assert_eq!(h.status, HealthStatus::Offline);
+        let b = h.banner.unwrap();
+        assert_eq!(b.kind, "localNetwork");
+        assert_eq!(b.message, LOCAL_NETWORK_BLOCKED);
+        assert!(h.cached_only);
+        // Turned on in System Settings: the next race wins locally.
+        m.on_probe(ok(ConnectionKind::Local), T0 + 1000);
+        let h = m.snapshot(T0 + 1000);
+        assert!(h.banner.is_none());
+        assert!(!h.cached_only);
+    }
+
+    #[test]
+    fn local_network_blocked_but_remote_works_keeps_playing_and_says_so() {
+        let mut m = signed_in();
+        m.set_local_network_blocked(true);
+        m.on_probe(ok(ConnectionKind::Remote), T0);
+        let h = m.snapshot(T0);
+        assert_eq!(h.status, HealthStatus::Remote);
+        assert!(!h.cached_only);
+        assert_eq!(h.banner.unwrap().kind, "localNetwork");
+        // Each tick races again so turning access on moves back to local.
+        assert!(m.retry_local());
+        // Relay too, ahead of the relay tip.
+        m.on_probe(ok(ConnectionKind::Relay), T0);
+        assert_eq!(m.snapshot(T0).banner.unwrap().kind, "localNetwork");
+        m.set_local_network_blocked(false);
+        assert_eq!(m.snapshot(T0).banner.unwrap().kind, "relay");
+        assert!(!m.retry_local());
+    }
+
+    #[test]
+    fn no_route_at_all_is_offline_not_a_blocked_network() {
+        let mut m = signed_in();
+        m.set_local_network_blocked(true);
+        m.on_no_network();
+        assert_eq!(m.snapshot(T0).banner.unwrap().kind, "noInternet");
+        // plex.tv not answering either means this computer is offline.
+        let mut m = signed_in();
+        m.set_local_network_blocked(true);
+        m.on_rediscover_failed(T0, false);
+        assert_eq!(m.snapshot(T0).banner.unwrap().kind, "noInternet");
     }
 
     #[test]

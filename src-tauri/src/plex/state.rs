@@ -350,6 +350,14 @@ impl PlexState {
         self.inner.recheck.notify_one();
     }
 
+    /// Check again now if the home network was blocked (the window came back
+    /// to the front, maybe from System Settings).
+    pub fn recheck_if_local_network_blocked(&self) {
+        if self.inner.health.lock().local_network_blocked() {
+            self.recheck();
+        }
+    }
+
     /// The computer woke from sleep or its network changed: reopen the
     /// notification socket (it is likely dead) and ping now.
     pub async fn reconnect(&self) {
@@ -398,6 +406,11 @@ impl PlexState {
     pub fn set_low_disk(&self, low: bool) {
         self.inner.health.lock().set_low_disk(low);
         self.emit_health();
+    }
+
+    /// Only music stored on this computer can play right now.
+    pub fn cached_only(&self) -> bool {
+        self.inner.health.lock().cached_only()
     }
 
     /// Connected to the server over any route.
@@ -630,13 +643,24 @@ impl PlexState {
             Some(c) => vec![c],
             None => server.connections.clone(),
         };
-        discovery::race(
+        let out = discovery::race_detailed(
             &self.inner.probe_http,
             &connections,
             Some(&server.machine_id),
             self.inner.race_cfg,
         )
-        .await
+        .await;
+        // Only macOS asks each app for home network access; elsewhere an
+        // instant "no route" is a real network problem.
+        let blocked = cfg!(target_os = "macos") && out.local_refused;
+        if blocked {
+            tracing::warn!(
+                fallback = ?out.best.as_ref().map(|p| p.kind),
+                "the system refused every local address: Local Network access is likely off"
+            );
+        }
+        self.inner.health.lock().set_local_network_blocked(blocked);
+        out.best
     }
 
     /// Pick a server and connect over its best connection.
@@ -861,6 +885,10 @@ impl PlexState {
         };
         let action = self.inner.health.lock().on_probe(outcome, now_ms());
         match action {
+            // Playing over remote or relay because macOS blocked the home
+            // network: race again each tick, so turning access on in System
+            // Settings moves back to the local connection by itself.
+            HealthAction::None if self.inner.health.lock().retry_local() => self.rediscover(current).await,
             HealthAction::None => {}
             HealthAction::SignInRequired => {
                 self.expire_session().await;

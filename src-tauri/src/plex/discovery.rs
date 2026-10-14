@@ -263,37 +263,94 @@ struct IdentityBody {
     version: Option<String>,
 }
 
+/// Why a connection didn't answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeFail {
+    /// The system refused the connection at once with "no route to host",
+    /// "network unreachable" or "not permitted". On macOS this is what an app
+    /// gets when Local Network privacy blocks it from the home network.
+    Refused,
+    /// Anything else: timeout, connection refused, TLS, bad answer, another
+    /// server at the address.
+    Other,
+}
+
+/// A refusal faster than this is the system saying no, not a host that
+/// stopped answering (a missing host on the network takes seconds to fail).
+pub const INSTANT_REFUSAL: Duration = Duration::from_millis(500);
+
+/// Classify a failed request: an instant host/network-unreachable or
+/// permission error anywhere in the error's source chain is a refusal.
+pub fn classify_failure(err: &(dyn std::error::Error + 'static), elapsed: Duration) -> ProbeFail {
+    if elapsed >= INSTANT_REFUSAL {
+        return ProbeFail::Other;
+    }
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if let Some(io) = e.downcast_ref::<std::io::Error>()
+            && is_refusal(io)
+        {
+            return ProbeFail::Refused;
+        }
+        cur = e.source();
+    }
+    ProbeFail::Other
+}
+
+fn is_refusal(io: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        io.kind(),
+        ErrorKind::HostUnreachable | ErrorKind::NetworkUnreachable | ErrorKind::PermissionDenied
+    )
+}
+
 async fn probe_one(
     http: &reqwest::Client,
     conn: &Connection,
     expect_machine_id: Option<&str>,
     timeout: Duration,
-) -> Option<Probe> {
+) -> Result<Probe, ProbeFail> {
     let started = Instant::now();
-    let resp = http
+    let resp = match http
         .get(format!("{}/identity", conn.uri))
         .timeout(timeout)
         .send()
         .await
-        .ok()?;
+    {
+        Ok(r) => r,
+        Err(e) => {
+            let fail = classify_failure(&e, started.elapsed());
+            tracing::debug!(kind = ?conn.kind, ?fail, "connection failed");
+            return Err(fail);
+        }
+    };
     if !resp.status().is_success() {
-        return None;
+        return Err(ProbeFail::Other);
     }
-    let body: IdentityEnvelope = resp.json().await.ok()?;
+    let body: IdentityEnvelope = resp.json().await.map_err(|_| ProbeFail::Other)?;
     let latency = started.elapsed();
     if let Some(expected) = expect_machine_id
         && body.media_container.machine_identifier != expected
     {
         // Address now belongs to another server (address changed).
         tracing::debug!(kind = ?conn.kind, "identity mismatch, ignoring connection");
-        return None;
+        return Err(ProbeFail::Other);
     }
-    Some(Probe {
+    Ok(Probe {
         uri: conn.uri.clone(),
         kind: conn.kind,
         latency,
         version: body.media_container.version,
     })
+}
+
+/// What a race found: the winner, and whether the system refused every
+/// home-network address (see [`ProbeFail::Refused`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RaceOutcome {
+    pub best: Option<Probe>,
+    pub local_refused: bool,
 }
 
 /// Probe every connection in parallel and pick per [`select_best`]. Returns
@@ -305,21 +362,37 @@ pub async fn race(
     expect_machine_id: Option<&str>,
     cfg: RaceConfig,
 ) -> Option<Probe> {
-    let best_possible = connections.iter().map(|c| c.kind).min()?;
+    race_detailed(http, connections, expect_machine_id, cfg).await.best
+}
+
+/// [`race`], also saying whether the home-network addresses were refused.
+/// Remote and relay addresses are always raced alongside the local ones, so
+/// a blocked home network falls back to them.
+pub async fn race_detailed(
+    http: &reqwest::Client,
+    connections: &[Connection],
+    expect_machine_id: Option<&str>,
+    cfg: RaceConfig,
+) -> RaceOutcome {
+    let Some(best_possible) = connections.iter().map(|c| c.kind).min() else {
+        return RaceOutcome::default();
+    };
+    let locals = connections.iter().filter(|c| c.kind == ConnectionKind::Local).count();
     let start = Instant::now();
     let hard_deadline = start + cfg.timeout;
     let mut pending: FuturesUnordered<_> = connections
         .iter()
-        .map(|c| probe_one(http, c, expect_machine_id, cfg.timeout))
+        .map(|c| async move { (c.kind, probe_one(http, c, expect_machine_id, cfg.timeout).await) })
         .collect();
     let mut answers: Vec<Probe> = Vec::new();
+    let mut local_refusals = 0usize;
     let mut grace_deadline: Option<Instant> = None;
     loop {
         let deadline = grace_deadline.map_or(hard_deadline, |g| g.min(hard_deadline));
         tokio::select! {
             next = pending.next() => match next {
                 None => break,
-                Some(Some(p)) => {
+                Some((_, Ok(p))) => {
                     let top = p.kind == best_possible;
                     answers.push(p);
                     if top {
@@ -329,12 +402,16 @@ pub async fn race(
                         grace_deadline = Some(Instant::now() + cfg.grace);
                     }
                 }
-                Some(None) => {}
+                Some((ConnectionKind::Local, Err(ProbeFail::Refused))) => local_refusals += 1,
+                Some((_, Err(_))) => {}
             },
             _ = tokio::time::sleep_until(deadline) => break,
         }
     }
-    select_best(&answers).cloned()
+    RaceOutcome {
+        best: select_best(&answers).cloned(),
+        local_refused: locals > 0 && local_refusals == locals,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -645,6 +722,57 @@ mod tests {
         let started = std::time::Instant::now();
         assert!(race(&http(), &conns, None, cfg).await.is_none());
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// An error that wraps another, like reqwest wrapping hyper wrapping io.
+    #[derive(Debug)]
+    struct Wrapped(std::io::Error);
+    impl std::fmt::Display for Wrapped {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("request failed")
+        }
+    }
+    impl std::error::Error for Wrapped {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[test]
+    fn instant_no_route_or_not_permitted_is_a_refusal() {
+        use std::io::{Error, ErrorKind};
+        let fast = Duration::from_millis(3);
+        for kind in [ErrorKind::HostUnreachable, ErrorKind::NetworkUnreachable, ErrorKind::PermissionDenied] {
+            let e = Wrapped(Error::from(kind));
+            assert_eq!(classify_failure(&e, fast), ProbeFail::Refused, "{kind:?}");
+        }
+        // A host that's just gone takes seconds to say no route.
+        let slow = Wrapped(Error::from(ErrorKind::HostUnreachable));
+        assert_eq!(classify_failure(&slow, Duration::from_secs(3)), ProbeFail::Other);
+        // A server that's down refuses the port; nothing is blocking us.
+        for kind in [ErrorKind::ConnectionRefused, ErrorKind::TimedOut, ErrorKind::ConnectionReset] {
+            let e = Wrapped(Error::from(kind));
+            assert_eq!(classify_failure(&e, fast), ProbeFail::Other, "{kind:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_closed_port_is_not_a_blocked_network() {
+        let remote = identity_server(0, "m").await;
+        let conns = [
+            Connection {
+                uri: dead(),
+                kind: ConnectionKind::Local,
+            },
+            conn(&remote, ConnectionKind::Remote),
+        ];
+        let out = race_detailed(&http(), &conns, Some("m"), RaceConfig::default()).await;
+        assert_eq!(out.best.unwrap().kind, ConnectionKind::Remote);
+        assert!(!out.local_refused);
+        // No local addresses at all: nothing to be blocked from.
+        let only_remote = [conn(&remote, ConnectionKind::Remote)];
+        let out = race_detailed(&http(), &only_remote, Some("m"), RaceConfig::default()).await;
+        assert!(!out.local_refused);
     }
 
     #[tokio::test]

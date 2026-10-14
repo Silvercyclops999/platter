@@ -2,6 +2,7 @@
 //! implements (with the Plex client and the SQLite cache). The engine never
 //! depends on the `plex` module.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -99,6 +100,13 @@ pub trait TrackLookup: Send + Sync {
     /// artist: popular-then-albums or however the integrator defines it;
     /// `tracks`/`search`: the given `track_ids`).
     async fn context(&self, ctx: &PlayContext) -> AppResult<ResolvedContext>;
+    /// While only music stored on this computer can play (server out of
+    /// reach), the ids of those tracks; `None` when everything can play.
+    async fn playable_now(&self) -> Option<HashSet<String>> {
+        None
+    }
+    /// `n` songs were left out of a play because they need the server.
+    fn left_out_offline(&self, _n: usize) {}
 }
 
 #[cfg(test)]

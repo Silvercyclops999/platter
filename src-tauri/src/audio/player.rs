@@ -31,6 +31,29 @@ use super::source::{ContextKind, PlayContext, TrackLookup, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
 
+/// Play refused because nothing asked for is stored on this computer.
+pub const OFFLINE_NOTHING_PLAYS: &str =
+    "These songs aren't on this computer, so they can't play until Platter can reach your server.";
+
+/// Where to start among the playable tracks, and how many are left out. A
+/// start song that can't play moves to the next playable one after it (or
+/// the first one, wrapping round).
+pub fn playable_part(tracks: &[Track], start: Option<&str>, ok: &HashSet<String>) -> (Option<String>, usize) {
+    let left_out = tracks.iter().filter(|t| !ok.contains(&t.id)).count();
+    let start = start.map(|id| {
+        if ok.contains(id) {
+            return Some(id.to_string());
+        }
+        let at = tracks.iter().position(|t| t.id == id).unwrap_or(0);
+        tracks[at..]
+            .iter()
+            .chain(&tracks[..at])
+            .find(|t| ok.contains(&t.id))
+            .map(|t| t.id.clone())
+    });
+    (start.flatten(), left_out)
+}
+
 /// "Previous" restarts the track instead at or past this point.
 pub const PREVIOUS_RESTART_MS: u64 = 3_000;
 /// The shortest A-B loop.
@@ -308,6 +331,7 @@ impl PlayerHandle {
         if resolved.tracks.is_empty() {
             return Err(AppError::Invalid("nothing to play".into()));
         }
+        let (tracks, start_track_id) = self.keep_playable(resolved.tracks, start_track_id).await?;
         let info = ContextInfo {
             kind: context.kind,
             id: context.id.clone(),
@@ -315,7 +339,7 @@ impl PlayerHandle {
         };
         self.call(|reply| Cmd::SetContext {
             info,
-            tracks: resolved.tracks,
+            tracks,
             start_track_id,
             shuffle,
             reply,
@@ -380,7 +404,30 @@ impl PlayerHandle {
         if tracks.is_empty() {
             return Err(AppError::NotFound("tracks".into()));
         }
+        let (tracks, _) = self.keep_playable(tracks, None).await?;
         self.call(|r| Cmd::QueueAdd(tracks, at, r)).await
+    }
+
+    /// While only music on this computer can play, leaves the rest out (and
+    /// tells the lookup how many, for its notice). A start song that can't
+    /// play gives way to the next one that can.
+    async fn keep_playable(
+        &self,
+        tracks: Vec<Track>,
+        start: Option<String>,
+    ) -> AppResult<(Vec<Track>, Option<String>)> {
+        let Some(ok) = self.lookup.playable_now().await else {
+            return Ok((tracks, start));
+        };
+        let (start, left_out) = playable_part(&tracks, start.as_deref(), &ok);
+        let kept: Vec<Track> = tracks.into_iter().filter(|t| ok.contains(&t.id)).collect();
+        if kept.is_empty() {
+            return Err(AppError::Invalid(OFFLINE_NOTHING_PLAYS.into()));
+        }
+        if left_out > 0 {
+            self.lookup.left_out_offline(left_out);
+        }
+        Ok((kept, start))
     }
     pub async fn queue_remove(&self, item_id: String) -> AppResult<()> {
         self.call(|r| Cmd::QueueRemove(item_id, r)).await
@@ -422,6 +469,7 @@ impl PlayerHandle {
         if resolved.tracks.is_empty() {
             return Err(AppError::Invalid("nothing to play".into()));
         }
+        let (tracks, start_track_id) = self.keep_playable(resolved.tracks, start_track_id).await?;
         let info = ContextInfo {
             kind: context.kind,
             id: context.id.clone(),
@@ -429,7 +477,7 @@ impl PlayerHandle {
         };
         self.call(|reply| Cmd::SetContextAt {
             info,
-            tracks: resolved.tracks,
+            tracks,
             start_track_id,
             start_ms,
             play,

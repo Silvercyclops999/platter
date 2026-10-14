@@ -39,6 +39,7 @@ pub const COMMANDS: &[&str] = &[
     "servers_list",
     "server_select",
     "health",
+    "open_local_network_settings",
 ];
 
 #[tauri::command]
@@ -83,4 +84,23 @@ pub async fn server_select(state: State<'_, PlexState>, machine_id: String) -> A
 #[tauri::command]
 pub async fn health(state: State<'_, PlexState>) -> AppResult<Health> {
     Ok(state.health())
+}
+
+/// System Settings, Privacy & Security, Local Network (macOS 13 and later
+/// still take the older Security pane address with its Privacy anchor).
+pub const LOCAL_NETWORK_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork";
+
+/// Opens the macOS Local Network privacy settings, then checks the
+/// connection again so access turned on there is picked up quickly.
+#[tauri::command]
+pub async fn open_local_network_settings(app: AppHandle, state: State<'_, PlexState>) -> AppResult<()> {
+    if !cfg!(target_os = "macos") {
+        return Err(AppError::Invalid("Only macOS has Local Network settings.".into()));
+    }
+    app.opener()
+        .open_url(LOCAL_NETWORK_SETTINGS_URL, None::<&str>)
+        .map_err(|e| AppError::Internal(format!("open settings: {e}")))?;
+    state.recheck();
+    Ok(())
 }

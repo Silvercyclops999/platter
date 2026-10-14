@@ -178,7 +178,11 @@ pub fn run() {
             let player = PlayerHandle::spawn(
                 tauri::async_runtime::handle().inner().clone(),
                 Arc::new(bridge::PlexStreams(plex.clone(), live.streams.clone(), Some(db.clone()))),
-                Arc::new(bridge::CacheLookup(db.clone(), Some(plex.clone()))),
+                Arc::new(bridge::CacheLookup(
+                    db.clone(),
+                    Some(plex.clone()),
+                    bridge::OfflinePlay::new(audio_dir.clone()),
+                )),
                 {
                     use audio::output::AudioOutput;
                     let mut out = audio::output::CpalOutput::new();
@@ -388,6 +392,7 @@ pub fn run() {
             plex::commands::servers_list,
             plex::commands::server_select,
             plex::commands::health,
+            plex::commands::open_local_network_settings,
             plex::details::now_playing_details,
             lyrics::commands::lyrics_get,
             lyrics::commands::lyrics_own_get,
@@ -481,6 +486,7 @@ pub fn run() {
             artistinfo::commands::artist_info_cache_clear,
             artistinfo::commands::open_info_link,
             monitor::cached::cached_tracks,
+            monitor::cached::cached_library,
             updates::update_check,
             updates::update_install_on_restart,
             share::commands::share_info,
@@ -492,6 +498,13 @@ pub fn run() {
             tags::commands::tag_scan_status,
         ])
         .on_window_event(|window, event| {
+            // Back from System Settings: pick up Local Network access at once.
+            if let tauri::WindowEvent::Focused(true) = event
+                && window.label() == "main"
+                && let Some(plex) = window.try_state::<plex::PlexState>()
+            {
+                plex.recheck_if_local_network_blocked();
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == "main"
                 && let Some(live) = window.try_state::<platform::Switches>()
