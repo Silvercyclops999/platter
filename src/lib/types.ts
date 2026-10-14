@@ -194,6 +194,39 @@ export interface PlaylistPage {
   tracks: Track[];
 }
 
+// ---------------------------------------------------------------- now playing
+
+export interface ArtistAbout {
+  id: string;
+  title: string;
+  summary?: string | null;
+  thumb?: string | null;
+  art?: string | null;
+}
+
+export type CreditRole = "composer" | "writer" | "lyricist" | "producer";
+
+export interface Contributor {
+  name: string;
+  roles: CreditRole[];
+}
+
+export interface Lyrics {
+  /** The source had timestamps (shown as plain text for now). */
+  synced: boolean;
+  /** Lines without timestamps; "" marks a break between verses. */
+  lines: string[];
+}
+
+/** `now_playing_details`: extras for the now-playing panel. */
+export interface NowPlayingDetails {
+  trackId: string;
+  artist?: ArtistAbout | null;
+  /** People credited beyond the track's artists. Often empty. */
+  credits: Contributor[];
+  lyrics?: Lyrics | null;
+}
+
 // ---------------------------------------------------------------- search
 
 export type SearchFilter = "all" | "songs" | "artists" | "albums" | "playlists";

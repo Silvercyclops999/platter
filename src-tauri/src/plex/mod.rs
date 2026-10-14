@@ -10,12 +10,14 @@
 //! - [`client`]: `PlexClient`, the typed Plex Media Server API.
 //! - [`notifications`]: server websocket events + reconnect backoff.
 //! - [`health`]: pure health state machine behind the `health` command.
+//! - [`details`]: the now-playing panel's extras (artist bio, credits, lyrics).
 //! - [`types`]: IPC shapes for auth/servers/health (docs/IPC.md).
 //! - [`state`] + [`commands`]: Tauri-managed state and commands.
 
 pub mod auth;
 pub mod client;
 pub mod commands;
+pub mod details;
 pub mod discovery;
 pub mod health;
 pub mod identity;

@@ -185,6 +185,7 @@ pub fn run() {
             plex::commands::servers_list,
             plex::commands::server_select,
             plex::commands::health,
+            plex::details::now_playing_details,
             db::commands::sync_status,
             db::commands::sync_now,
             db::commands::home,

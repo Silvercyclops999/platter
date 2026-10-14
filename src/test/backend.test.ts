@@ -42,6 +42,7 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["artist_page", (b) => b.artistPage("7"), { id: "7" }],
   ["album_page", (b) => b.albumPage("8"), { id: "8" }],
   ["playlist_page", (b) => b.playlistPage("9"), { id: "9" }],
+  ["now_playing_details", (b) => b.nowPlayingDetails("5"), { trackId: "5" }],
   ["search", (b) => b.search({ query: "q", filter: "songs", limit: 5 }), { query: "q", filter: "songs", limit: 5 }],
   ["recent_searches", (b) => b.recentSearches(), undefined],
   ["recent_search_add", (b) => b.recentSearchAdd("x"), { query: "x" }],

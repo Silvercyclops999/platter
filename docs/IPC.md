@@ -68,6 +68,22 @@ credited in the track artist line, at most 10, one copy per song.
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.
 
+## Now playing
+| Command | Args | Returns |
+| --- | --- | --- |
+| `now_playing_details` | `{ trackId }` | `NowPlayingDetails { trackId, artist?, credits, lyrics? }` |
+
+The extras the now-playing panel shows for a track, read from Plex when the
+panel needs them (not cached in the library database).
+`artist = { id, title, summary?, thumb?, art? }` is the album artist with its
+Plex bio and photo. `credits = { name, roles: ("composer"|"writer"|"lyricist"|"producer")[] }[]`
+lists people Plex credits beyond the track's artists; it is often empty.
+`lyrics = { synced, lines: string[] }` is there only when the track has a
+lyrics stream with words in it. Lines come without timestamps and `""` marks a
+break between verses; `synced` says the source was timed. Only the track
+request can fail the call: when the artist or lyrics request fails, that part
+is just left out.
+
 ## Search
 | Command | Args | Returns |
 | --- | --- | --- |

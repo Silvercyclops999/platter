@@ -800,6 +800,14 @@ impl PlexClient {
             .map_err(|e| AppError::Decode(format!("{}: {e}", path.split('?').next().unwrap_or(""))))
     }
 
+    /// Raw body of a GET, for endpoints parsed outside this module (the
+    /// now-playing details) and plain-text bodies such as lyrics streams.
+    pub(crate) async fn get_bytes(&self, path: &str, query: &[(&str, String)]) -> AppResult<Bytes> {
+        let rb = self.request(Method::GET, path)?.query(query);
+        let resp = self.send(rb).await?;
+        resp.bytes().await.map_err(map_send_error)
+    }
+
     async fn container(
         &self,
         path: &str,

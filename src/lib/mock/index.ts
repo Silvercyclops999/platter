@@ -45,6 +45,7 @@ import type {
 import { DEFAULT_SETTINGS } from "../types";
 import { buildArtistLookup } from "../credits";
 import { mockArtUrl } from "./art";
+import { mockNowPlayingDetails } from "./details";
 import { popularTracks } from "./popular";
 import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
@@ -445,6 +446,13 @@ export class MockBackend implements Backend {
       const playlist = this.fx.playlists.find((p) => p.id === id) ?? this.notFound("Playlist");
       const ids = this.fx.playlistTracks.get(id) ?? [];
       return { playlist, tracks: ids.map((tid) => this.trackById(tid)!).filter(Boolean) };
+    });
+  }
+
+  nowPlayingDetails(trackId: string) {
+    return this.delay(() => {
+      const track = this.trackById(trackId) ?? this.notFound("Track");
+      return mockNowPlayingDetails(track, this.fx.artists.find((a) => a.id === track.artistId));
     });
   }
 

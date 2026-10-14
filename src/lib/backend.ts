@@ -26,6 +26,7 @@ import type {
   EventName,
   Health,
   HomeData,
+  NowPlayingDetails,
   Page,
   PinInfo,
   PlayContextArgs,
@@ -66,6 +67,10 @@ export interface Backend {
   artistPage(id: string): Promise<ArtistPage>;
   albumPage(id: string): Promise<AlbumPage>;
   playlistPage(id: string): Promise<PlaylistPage>;
+
+  // Now playing
+  /** Artist bio, extra credits and lyrics for the now-playing panel. */
+  nowPlayingDetails(trackId: string): Promise<NowPlayingDetails>;
 
   // Search
   search(args: SearchArgs): Promise<SearchResults>;
@@ -157,6 +162,7 @@ export function createTauriBackend(): Backend {
     artistPage: (id) => call("artist_page", { id }),
     albumPage: (id) => call("album_page", { id }),
     playlistPage: (id) => call("playlist_page", { id }),
+    nowPlayingDetails: (trackId) => call("now_playing_details", { trackId }),
 
     search: (args) => call("search", { ...args }),
     recentSearches: () => call("recent_searches"),
