@@ -1,0 +1,65 @@
+/* Discography page: the artist's name and two menus, then stacked release blocks (or a grid). */
+.disco__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin: 0 var(--space-3) var(--space-6);
+}
+.disco__title {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.01em;
+}
+.disco__title .link { overflow-wrap: anywhere; text-align: left; }
+.disco__tools { display: flex; flex: none; gap: var(--space-1); }
+.disco__menu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  transition: color var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing);
+}
+.disco__menu-btn:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-state-hover); }
+.disco__menu-btn:focus-visible { border-radius: var(--radius-pill); }
+
+/* One release: cover and text, then its tracklist. Blocks follow each other directly. */
+.disco-release + .disco-release { margin-top: var(--space-8); }
+.disco-release__head {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-5, 20px);
+  margin: 0 var(--space-3) var(--space-4);
+}
+.disco-release__cover { flex: none; padding: 0; border-radius: var(--radius-art, 4px); }
+.disco-release__cover .art { width: 136px !important; height: 136px !important; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.disco-release__text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.disco-release__title {
+  margin: 0;
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.disco-release__title .link { text-align: left; }
+.disco-release__meta { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.disco-release__actions { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+
+.disco__grid { margin: 0 calc(-1 * var(--space-1)); }
+
+/* Narrow: a smaller cover and title; the menus drop under the name. */
+@container main (max-width: 640px) {
+  .disco__head { flex-wrap: wrap; }
+  .disco-release__head { align-items: center; }
+  .disco-release__cover .art { width: 96px !important; height: 96px !important; }
+  .disco-release__title { font-size: var(--font-size-2xl); }
+}

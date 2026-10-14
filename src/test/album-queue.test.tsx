@@ -7,7 +7,6 @@ import type { MockBackend } from "../lib/mock";
 import type { Track } from "../lib/types";
 import { discGroups, formatReleaseDate, labelLine, loadAlbumView } from "../pages/album";
 import { AlbumPage } from "../pages/AlbumPage";
-import { ArtistPage } from "../pages/ArtistPage";
 import { QueuePanel } from "../shell/QueuePanel";
 import { connectPlayer, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
@@ -133,16 +132,13 @@ describe("album page", () => {
     expect(container.querySelector(".album-tracks .track-row__artist")).toBeNull();
   });
 
-  it("'See discography' opens the artist's whole discography", async () => {
+  it("'See discography' opens the artist's discography page", async () => {
     const user = userEvent.setup();
     const album = single();
     render(<AlbumPage id={album.id} />);
     await user.click(await screen.findByRole("button", { name: "See discography" }));
     const { entries, index } = useRouter.getState();
-    expect(entries[index].route).toEqual({ name: "artist", id: album.artistId, discography: true });
-
-    render(<ArtistPage id={album.artistId} discography />);
-    expect(await screen.findByRole("button", { name: "Show less" })).toBeInTheDocument();
+    expect(entries[index].route).toEqual({ name: "discography", id: album.artistId });
   });
 
   it("'Add to queue' in the album menu queues every song and shows a toast with the cover", async () => {

@@ -223,7 +223,7 @@ export function AlbumPage({ id }: { id: string }) {
             <Shelf
               title={`More by ${album.artistTitle}`}
               showAllLabel="See discography"
-              onShowAll={() => nav.go({ name: "artist", id: album.artistId, discography: true })}
+              onShowAll={() => nav.go({ name: "discography", id: album.artistId })}
             >
               {data!.moreByArtist.map((a) => (
                 <ShelfItem key={a.id}>

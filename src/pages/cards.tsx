@@ -29,7 +29,7 @@ export interface ItemActions {
   onContextMenu: (e: MouseEvent<HTMLElement>) => void;
 }
 
-export function useAlbumActions(album: Album): ItemActions {
+export function useAlbumActions(album: Album): ItemActions & { openMenu: (at: { clientX: number; clientY: number } | HTMLElement) => void } {
   const pinned = usePins((s) => s.isPinned("album", album.id));
   const { isContext, playing } = useContextState("album", album.id);
   const play = () => (isContext ? player.toggle() : player.playAlbum(album.id));
@@ -39,24 +39,30 @@ export function useAlbumActions(album: Album): ItemActions {
     open: () => nav.go({ name: "album", id: album.id }),
     onContextMenu: (e) => {
       e.preventDefault();
-      openContextMenu(
-        `Options for ${album.title}`,
-        [
-          { label: playing ? "Pause" : "Play", onSelect: play },
-          { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
-          addToPlaylistItem(albumSongs(album.id)),
-          { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
-          shareItem("album", album.id, album.thumb),
-          {
-            label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-            onSelect: () =>
-              usePins.getState().toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
-          },
-        ],
-        e,
-      );
+      openMenu(e);
     },
+    openMenu,
   };
+
+  /** The album's menu at the pointer, or under a button. */
+  function openMenu(at: { clientX: number; clientY: number } | HTMLElement) {
+    openContextMenu(
+      `Options for ${album.title}`,
+      [
+        { label: playing ? "Pause" : "Play", onSelect: play },
+        { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
+        addToPlaylistItem(albumSongs(album.id)),
+        { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
+        shareItem("album", album.id, album.thumb),
+        {
+          label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
+          onSelect: () =>
+            usePins.getState().toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
+        },
+      ],
+      at,
+    );
+  }
 }
 
 export function useArtistActions(artist: Artist): ItemActions {

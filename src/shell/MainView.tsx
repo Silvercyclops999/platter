@@ -5,6 +5,7 @@ import { NEUTRAL_HEADER } from "../lib/color";
 import type { SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { ArtistPage } from "../pages/ArtistPage";
+import { DiscographyPage } from "../pages/DiscographyPage";
 import { HomePage } from "../pages/HomePage";
 import { ArtistShelfPage, HomeShelfPage } from "../pages/HomeShelfPage";
 import { LibraryPage } from "../pages/LibraryPage";
@@ -97,7 +98,9 @@ function Page({ route }: { route: Route }) {
     case "library":
       return <LibraryPage tab={route.tab} />;
     case "artist":
-      return <ArtistPage id={route.id} discography={route.discography} />;
+      return <ArtistPage id={route.id} />;
+    case "discography":
+      return <DiscographyPage id={route.id} type={route.type} />;
     case "album":
       return <AlbumPage id={route.id} />;
     case "playlist":

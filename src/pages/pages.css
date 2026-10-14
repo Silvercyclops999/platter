@@ -263,11 +263,6 @@
 
 .discography { margin: 0 calc(-1 * var(--space-3)); }
 .discography__chips { margin: 0 var(--space-3) var(--space-4); }
-.discography--all { margin-bottom: var(--space-8); }
-.discography__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
-}
 
 /*
  * About card: about half the main column wide, the artist photo filling it

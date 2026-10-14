@@ -1,5 +1,5 @@
 import { Ellipsis, Pause, Pin, PinOff, Play, Shuffle } from "lucide-react";
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useState, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
@@ -35,11 +35,11 @@ import {
 } from "./artist";
 
 /** Page state (see more, chip, expanded rows) starts over for each artist. */
-export function ArtistPage({ id, discography }: { id: string; discography?: boolean }) {
-  return <ArtistView key={id} id={id} discography={discography} />;
+export function ArtistPage({ id }: { id: string }) {
+  return <ArtistView key={id} id={id} />;
 }
 
-function ArtistView({ id, discography }: { id: string; discography?: boolean }) {
+function ArtistView({ id }: { id: string }) {
   const { data: loaded, error } = useLoad(() => backend.artistPage(id), [id]);
   // Similar artists and the global Popular list arrive in the background
   // after the page opened; the page is asked again when they do.
@@ -145,7 +145,7 @@ function ArtistView({ id, discography }: { id: string; discography?: boolean }) 
               case "popular":
                 return <PopularSection key={s} id={id} data={data} />;
               case "discography":
-                return <Discography key={s} sections={data.sections} openAll={discography} />;
+                return <Discography key={s} id={id} sections={data.sections} />;
               case "appearsOn":
                 return <AppearsOn key={s} id={id} albums={data.appearsOn} />;
               case "about":
@@ -315,55 +315,27 @@ function PopularSection({ id, data }: { id: string; data: ArtistPageData }) {
   );
 }
 
-/** `openAll`: start on the whole discography, scrolled into view. */
-function Discography({ sections, openAll }: { sections: ArtistPageSection[]; openAll?: boolean }) {
+/** The discography shelf with its type chips; Show all opens the full discography page at the chosen type. */
+function Discography({ id, sections }: { id: string; sections: ArtistPageSection[] }) {
   const [filter, setFilter] = useState<DiscographyFilter>("popular");
-  const [all, setAll] = useState(!!openAll);
-  const headingId = useId();
-  const allRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!openAll) return;
-    // After the page's own scroll restore for a new entry.
-    const raf = requestAnimationFrame(() => allRef.current?.scrollIntoView?.({ block: "start" }));
-    return () => cancelAnimationFrame(raf);
-  }, [openAll]);
   const chips = discographyChips(sections);
   const chipRow = (
     <FilterChips label="Release type" items={chips} value={filter} onChange={setFilter} className="discography__chips" scroll />
   );
-  const cards = (limit?: number) =>
-    discographyItems(sections, filter, limit).map(({ album, latest }) => (
-      <ShelfItem key={album.id}>
-        <AlbumCard album={album} subtitle="year" note={latest ? "Latest release" : undefined} />
-      </ShelfItem>
-    ));
-
-  if (!all) {
-    return (
-      <div className="discography">
-        <Shelf title="Discography" onShowAll={() => setAll(true)} filters={chipRow}>
-          {cards()}
-        </Shelf>
-      </div>
-    );
-  }
   return (
-    <section ref={allRef} className="discography discography--all" aria-labelledby={headingId}>
-      <header className="shelf__head">
-        <h2 id={headingId} className="shelf__title">
-          Discography
-        </h2>
-        <div className="shelf__tools">
-          <button type="button" className="shelf__all" onClick={() => setAll(false)}>
-            Show less
-          </button>
-        </div>
-      </header>
-      {chipRow}
-      <div className="discography__grid" role="list">
-        {cards(Infinity)}
-      </div>
-    </section>
+    <div className="discography">
+      <Shelf
+        title="Discography"
+        onShowAll={() => nav.go(filter === "popular" ? { name: "discography", id } : { name: "discography", id, type: filter })}
+        filters={chipRow}
+      >
+        {discographyItems(sections, filter).map(({ album, latest }) => (
+          <ShelfItem key={album.id}>
+            <AlbumCard album={album} subtitle="year" note={latest ? "Latest release" : undefined} />
+          </ShelfItem>
+        ))}
+      </Shelf>
+    </div>
   );
 }
 

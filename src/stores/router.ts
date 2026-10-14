@@ -3,7 +3,7 @@
  * back/forward work like a browser. Scroll offsets per entry live in MainView.
  */
 import { create } from "zustand";
-import type { HomeShelfId } from "../lib/types";
+import type { HomeShelfId, ReleaseSection } from "../lib/types";
 import { fullWindow } from "./fullWindow";
 
 export type LibraryTab = "artists" | "albums" | "playlists";
@@ -13,8 +13,9 @@ export type Route =
   | { name: "search"; query?: string }
   /** Wide library; a tab opens it filtered to that type. */
   | { name: "library"; tab?: LibraryTab }
-  /** `discography` opens it at the whole discography (an album page's "See discography"). */
-  | { name: "artist"; id: string; discography?: boolean }
+  | { name: "artist"; id: string }
+  /** An artist's whole discography, optionally filtered to one release type. */
+  | { name: "discography"; id: string; type?: ReleaseSection }
   | { name: "album"; id: string }
   | { name: "playlist"; id: string }
   /** Liked Songs. */

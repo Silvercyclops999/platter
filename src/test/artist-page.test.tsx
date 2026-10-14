@@ -6,6 +6,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import type { Album, ArtistPageSection, ReleaseSection } from "../lib/types";
 import { ArtistPage } from "../pages/ArtistPage";
+import { useRouter } from "../stores/router";
 import { artistSections, discographyChips, discographyItems, headerVariant, playsLine } from "../pages/artist";
 
 const mock = backend as MockBackend;
@@ -149,16 +150,18 @@ describe("artist page", () => {
     expect(albums).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("expands the discography into a grid with Show all, and back", async () => {
+  it("Show all opens the discography page, at the chip's release type", async () => {
     const user = userEvent.setup();
     const a = artistAt(0);
+    useRouter.getState().reset();
     render(<ArtistPage id={a.id} />);
-    await screen.findByRole("group", { name: "Release type" });
-    await user.click(screen.getAllByRole("button", { name: "Show all" })[0]);
-    const grid = document.querySelector(".discography__grid")!;
-    expect(grid.querySelectorAll('[role="listitem"]')).toHaveLength(mock.fx.albums.filter((x) => x.artistId === a.id).length);
-    await user.click(screen.getByRole("button", { name: "Show less" }));
-    expect(document.querySelector(".discography__grid")).toBeNull();
+    const chips = await screen.findByRole("group", { name: "Release type" });
+    const shelf = screen.getByRole("heading", { name: "Discography" }).closest("section")!;
+    await user.click(within(shelf).getByRole("button", { name: "Show all" }));
+    expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "discography", id: a.id });
+    await user.click(within(chips).getAllByRole("button")[1]);
+    await user.click(within(shelf).getByRole("button", { name: "Show all" }));
+    expect(useRouter.getState().entries[useRouter.getState().index].route).toMatchObject({ name: "discography", id: a.id, type: expect.any(String) });
   });
 
   it("shows similar artists that arrive after the page opened", async () => {
