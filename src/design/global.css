@@ -74,7 +74,7 @@ img {
 }
 
 ::selection {
-  background: var(--amber-700);
+  background: color-mix(in srgb, var(--color-accent) 40%, transparent);
   color: var(--color-text-primary);
 }
 

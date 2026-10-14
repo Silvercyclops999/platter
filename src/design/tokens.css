@@ -31,6 +31,9 @@
   --color-accent-hover: #FCC459;
   --color-accent-pressed: #E08E0B;
   --color-focus-ring: #FFD98A;
+  /* Darker accent for borders/selection, and a soft tint for washes. */
+  --color-accent-strong: #8F560A;
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --color-state-hover: rgba(255, 240, 220, 0.06);
   --color-state-pressed: rgba(255, 240, 220, 0.10);
   --color-state-selected: rgba(255, 240, 220, 0.12);
@@ -38,6 +41,7 @@
   /* Semantic */
   --color-success: #4CC38A;
   --color-warning: #F2B13D;
+  --color-warning-text: #FFEBC2;
   --color-error: #F2555A;
   --color-info: #5AA9F5;
 

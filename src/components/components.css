@@ -177,7 +177,7 @@
 }
 .badge--neutral { background: var(--color-state-selected); color: var(--color-text-secondary); }
 .badge--quality { border: 1px solid rgba(255, 240, 220, 0.18); color: var(--color-text-muted); }
-.badge--hires { border: 1px solid var(--amber-700); color: var(--amber-300); }
+.badge--hires { border: 1px solid var(--color-accent-strong); color: var(--color-accent-hover); }
 .badge--version { background: rgba(90, 169, 245, 0.16); color: #9CCBF8; }
 .badge--accent { background: var(--color-accent); color: var(--color-text-on-accent); }
 
@@ -333,9 +333,9 @@
 .banner__action { flex: none; }
 .banner--info { background: rgba(90, 169, 245, 0.14); color: #CFE5FB; }
 .banner--info .banner__icon { color: var(--color-info); }
-.banner--progress { background: rgba(245, 165, 36, 0.12); color: var(--amber-100); }
+.banner--progress { background: var(--color-accent-soft); color: var(--color-text-primary); }
 .banner--progress .banner__icon { color: var(--color-accent); }
-.banner--warning { background: rgba(242, 177, 61, 0.14); color: var(--amber-100); }
+.banner--warning { background: rgba(242, 177, 61, 0.14); color: var(--color-warning-text); }
 .banner--warning .banner__icon { color: var(--color-warning); }
 .banner--error,
 .banner--offline { background: rgba(242, 85, 90, 0.16); color: #FBD9DA; }
