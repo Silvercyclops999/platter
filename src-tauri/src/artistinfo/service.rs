@@ -209,6 +209,26 @@ fn library_ids(c: &Connection, names: &[String]) -> AppResult<HashMap<String, St
     Ok(out)
 }
 
+/// Library artists among names found in a bio, folded name -> id. One pass
+/// over the artists (titles have no index to look each name up by).
+fn library_names_in(c: &Connection, candidates: &[String]) -> AppResult<HashMap<String, String>> {
+    if candidates.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let want: HashSet<String> = candidates.iter().map(|n| fold_name(n)).collect();
+    let mut out = HashMap::new();
+    let mut stmt = c.prepare_cached("SELECT id, title FROM artists")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    for row in rows {
+        let (id, title) = row?;
+        let key = fold_name(&title);
+        if want.contains(&key) {
+            out.entry(key).or_insert(id);
+        }
+    }
+    Ok(out)
+}
+
 impl ArtistInfoService {
     pub fn new(db: DbHandle, http: Arc<dyn InfoHttp>, keys: Arc<dyn TokenStore>, switches: Switches) -> Self {
         Self {
@@ -382,7 +402,10 @@ impl ArtistInfoService {
             }
         }
         let names = sources.wiki.as_ref().map(|w| w.members.clone()).unwrap_or_default();
-        let library = library_ids(c, &names)?;
+        let mut library = library_ids(c, &names)?;
+        if let Some((bio, _)) = merge::pick_bio(plex.summary.as_deref(), &sources) {
+            library.extend(library_names_in(c, &merge::bio_candidates(&bio))?);
+        }
         Ok(Some(Snapshot { plex, sources, library, stale, popular_stale }))
     }
 

@@ -5,7 +5,7 @@
  * what's shown) so the About card and dialog can be checked in a browser.
  * Nothing here comes from a real service.
  */
-import type { Artist, ArtistInfo, InfoCredit, InfoKeyState, InfoKeysStatus, KeyedInfoSource, Settings } from "../types";
+import type { Artist, ArtistInfo, BioLink, InfoCredit, InfoKeyState, InfoKeysStatus, InfoLink, KeyedInfoSource, Settings } from "../types";
 
 const TOWNS = ["Harbourside", "Millbrook", "North Fenwick", "Calder Vale", "Port Ellery", "Ashgrove"];
 const GENRE_TAGS = [
@@ -19,9 +19,9 @@ const FIRST = ["Mara", "Jonas", "Ilse", "Tobin", "Petra", "Rafe", "Odile", "Casi
 const LAST = ["Quill", "Hollis", "Brandt", "Okafor", "Lund", "Vasquez", "Merrin"];
 
 /** The longer "encyclopedia" bio a Wikipedia lead section stands in for. */
-function longBio(name: string, i: number, town: string, start: number): string {
+function longBio(name: string, i: number, town: string, start: number, friend: string | null): string {
   return [
-    `${name} is a music act formed in ${town} in ${start}. Over the years the line-up has changed a few times, but the core of the sound has stayed the same: patient songs, close harmonies and records made mostly at home.`,
+    `${name} is a music act formed in ${town} in ${start}. Over the years the line-up has changed a few times, but the core of the sound has stayed the same: patient songs, close harmonies and records made mostly at home.${friend ? ` Early on they shared bills with ${friend}, and the two acts still swap songs on stage.` : ""}`,
     `The early releases came out on small labels and sold at shows. A run of singles in the following years found a wider audience on college radio, and a self-released album later reached the independent charts.`,
     i % 2 === 0
       ? `Since then the band has kept a steady pace of a record every two or three years, with demos and alternate takes released in between. Several members also play in side projects.`
@@ -87,9 +87,12 @@ export function mockArtistInfo(
   const start = 1988 + ((idx * 7) % 30);
   const ended = idx % 5 === 4 ? start + 9 : null;
   const isBand = idx % 3 !== 1;
-  const wikiBio = wikiOn && onWiki ? longBio(artist.title, idx, town, start) : null;
   // A band's members: two invented people plus, for some, another artist in the library.
   const other = library[(idx + 3) % library.length];
+  // Another artist in the library the bio names (linked in the About dialog).
+  const friend = library[(idx + 5) % library.length];
+  const friendName = friend && friend.id !== artist.id ? friend.title : null;
+  const wikiBio = wikiOn && onWiki ? longBio(artist.title, idx, town, start, friendName) : null;
   const members =
     wikiOn && onWiki && isBand
       ? [
@@ -128,6 +131,21 @@ export function mockArtistInfo(
   const photo = !artist.thumb && fanartOn ? `/ext/fanart/${artist.id}/artistthumb` : null;
   // Generated art makes a poor logo, so the mock has none.
   const logo: string | null = null;
+  // Plex's images, then the made-up Fanart.tv set (a few photos and backgrounds).
+  const gallery = [
+    artist.thumb,
+    artist.art,
+    ...(fanartOn ? [0, 1, 2].flatMap((n) => [`/ext/fanart/${artist.id}/artistthumb/${n}`, `/ext/fanart/${artist.id}/artistbackground/${n}`]) : []),
+  ].filter((p): p is string => !!p);
+  const links: InfoLink[] = [];
+  if (wikiOn && onWiki) {
+    const handle = artist.title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (idx % 2 === 0) links.push({ kind: "website", label: "Official website", url: `https://${handle || "band"}.example/` });
+    links.push({ kind: "instagram", label: "Instagram", url: `https://www.instagram.com/${handle}/` });
+    if (idx % 3 === 0) links.push({ kind: "bandcamp", label: "Bandcamp", url: `https://${handle}.bandcamp.com/` });
+    links.push({ kind: "wikipedia", label: "Wikipedia", url: `https://en.wikipedia.org/wiki/${slug}` });
+  }
+  if (lastfmOn) links.push({ kind: "lastfm", label: "Last.fm", url: `https://www.last.fm/music/${encodeURIComponent(artist.title)}` });
 
   const credits: InfoCredit[] = [];
   if (bioSource === "wikipedia")
@@ -154,7 +172,7 @@ export function mockArtistInfo(
       licence: bioSource === "lastfm" ? "CC BY-SA" : null,
       licenceUrl: bioSource === "lastfm" ? "https://creativecommons.org/licenses/by-sa/3.0/" : null,
     });
-  if (banner || photo || logo)
+  if (banner || photo || logo || (fanartOn && gallery.some((g) => g.startsWith("/ext/"))))
     credits.push({ source: "fanart", text: "Images from Fanart.tv", url: "https://fanart.tv", licence: null, licenceUrl: null });
   if (bioSource === "audiodb")
     credits.push({ source: "audiodb", text: "From TheAudioDB", url: "https://www.theaudiodb.com", licence: null, licenceUrl: null });
@@ -173,5 +191,8 @@ export function mockArtistInfo(
     banner,
     logo,
     credits,
+    gallery,
+    links,
+    bioLinks: bio && friendName && bio.includes(friendName) ? [{ text: friendName, artistId: friend.id } satisfies BioLink] : [],
   };
 }

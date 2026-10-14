@@ -1626,7 +1626,24 @@ export class MockBackend implements Backend {
       if (isCreditId(id)) {
         // A featured guest: the made-up services know nothing about them.
         this.creditedPage(id, this.nameLookup());
-        const blank: ArtistInfo = { id, bio: null, bioSource: null, origin: null, yearsActive: null, members: [], tags: [], listeners: null, scrobbles: null, photo: null, banner: null, logo: null, credits: [] };
+        const blank: ArtistInfo = {
+          id,
+          bio: null,
+          bioSource: null,
+          origin: null,
+          yearsActive: null,
+          members: [],
+          tags: [],
+          listeners: null,
+          scrobbles: null,
+          photo: null,
+          banner: null,
+          logo: null,
+          credits: [],
+          gallery: [],
+          links: [],
+          bioLinks: [],
+        };
         return blank;
       }
       const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
@@ -1654,7 +1671,7 @@ export class MockBackend implements Backend {
       return n;
     });
   }
-  openInfoLink(url: string) {
+  openInfoLink(url: string, _artistId?: string) {
     return this.delay(() => {
       if (typeof window !== "undefined" && !isTestEnv) window.open(url, "_blank", "noopener");
     });

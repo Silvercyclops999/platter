@@ -112,6 +112,30 @@ pub struct WikiData {
     pub members: Vec<String>,
     /// MusicBrainz artist id from Wikidata (used when Plex has none).
     pub mbid: Option<String>,
+    /// Official website and well-known profiles, https only.
+    pub links: Vec<InfoLink>,
+}
+
+/// A link in the About dialog's side column: the official website or a
+/// profile on a well-known site.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfoLink {
+    /// "website", "wikipedia", "lastfm", "instagram", "x", "facebook",
+    /// "youtube", "bandcamp" or "soundcloud".
+    pub kind: String,
+    /// What the link says ("Official website", "Instagram").
+    pub label: String,
+    pub url: String,
+}
+
+/// An artist in the library named in the bio, for linking it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BioLink {
+    /// The name exactly as the bio writes it.
+    pub text: String,
+    pub artist_id: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -134,6 +158,9 @@ pub struct FanartData {
     pub background: Option<String>,
     pub thumb: Option<String>,
     pub logo: Option<String>,
+    /// Every photo and background, most liked first (for the gallery).
+    pub thumbs: Vec<String>,
+    pub backgrounds: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -142,6 +169,8 @@ pub struct AudioDbData {
     pub url: Option<String>,
     pub bio: Option<String>,
     pub thumb: Option<String>,
+    /// Wide fan art images (for the gallery).
+    pub fanart: Vec<String>,
 }
 
 /// Why a lookup gave nothing to cache.
@@ -212,6 +241,13 @@ pub struct ArtistInfo {
     pub banner: Option<String>,
     pub logo: Option<String>,
     pub credits: Vec<Credit>,
+    /// Art paths for the About dialog's gallery: Plex's images first, then
+    /// the sources'.
+    pub gallery: Vec<String>,
+    /// Official website and profiles (Wikidata), then Wikipedia and Last.fm.
+    pub links: Vec<InfoLink>,
+    /// Library artists the bio names, in the order they first appear.
+    pub bio_links: Vec<BioLink>,
 }
 
 /// Plain-text cleanup shared by the sources: drop tags, decode the common

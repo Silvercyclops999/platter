@@ -600,3 +600,35 @@ async fn credited_artists_get_info_by_musicbrainz_search_never_plex() {
     // A credit nobody has is not found.
     assert!(matches!(r.svc.info("credit:nobody").await, Err(AppError::NotFound(_))));
 }
+
+#[tokio::test]
+async fn bio_names_in_the_library_link_and_wikidata_links_come_through() {
+    let r = rig(None, Some(MBID));
+    let now = now_s();
+    let wiki = WikiData {
+        qid: "Q1".into(),
+        bio: Some("The Band toured with Singer for years. The Band then split.".into()),
+        article_url: Some("https://en.wikipedia.org/wiki/The_Band".into()),
+        links: vec![InfoLink { kind: "website".into(), label: "Official website".into(), url: "https://band.example/".into() }],
+        ..Default::default()
+    };
+    let fanart = FanartData {
+        mbid: MBID.into(),
+        thumbs: vec!["https://assets.fanart.tv/1.jpg".into(), "https://assets.fanart.tv/2.jpg".into()],
+        ..Default::default()
+    };
+    r.db.write(move |c| {
+        cache::put(c, ARTIST, "wikipedia", Some(&wiki), now, cache::TTL_S)?;
+        cache::put(c, ARTIST, "fanart", Some(&fanart), now, cache::TTL_S)?;
+        Ok(())
+    })
+    .unwrap();
+    r.keys.set(InfoSource::Fanart.key_account(), &crate::plex::Token::new("fk").unwrap()).unwrap();
+    r.svc.switches().set(InfoSource::Fanart, true);
+    let (info, _) = r.svc.cached(ARTIST, now).await.unwrap();
+    // "The Band" is the artist itself: never linked.
+    assert_eq!(info.bio_links, [BioLink { text: "Singer".into(), artist_id: "77".into() }]);
+    assert_eq!(info.links.iter().map(|l| l.kind.as_str()).collect::<Vec<_>>(), ["website", "wikipedia"]);
+    assert_eq!(info.gallery.len(), 3, "Plex's photo, then Fanart.tv's two");
+    assert!(commands::listed_for(&info, "https://band.example/"));
+}

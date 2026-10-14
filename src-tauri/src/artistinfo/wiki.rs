@@ -14,7 +14,7 @@ use url::Url;
 
 use super::http::InfoHttp;
 use super::limit::Limiter;
-use super::{Fetch, FetchError, WikiData, clean_text, fold_name, is_mbid};
+use super::{Fetch, FetchError, InfoLink, WikiData, clean_text, fold_name, is_mbid};
 
 pub const WIKIDATA_API: &str = "https://www.wikidata.org/w/api.php";
 
@@ -48,6 +48,40 @@ const MUSIC_OCCUPATIONS: &[&str] = &[
 ];
 
 const MAX_MEMBERS: usize = 24;
+
+/// Profile ids on well-known sites (property, kind, label, URL before and after the id).
+const PROFILES: &[(&str, &str, &str, &str, &str)] = &[
+    ("P2003", "instagram", "Instagram", "https://www.instagram.com/", "/"),
+    ("P2002", "x", "X", "https://x.com/", ""),
+    ("P2013", "facebook", "Facebook", "https://www.facebook.com/", ""),
+    ("P2397", "youtube", "YouTube", "https://www.youtube.com/channel/", ""),
+    ("P3283", "bandcamp", "Bandcamp", "https://", ".bandcamp.com/"),
+    ("P3040", "soundcloud", "SoundCloud", "https://soundcloud.com/", ""),
+];
+
+/// A profile id safe to put in a URL: letters, digits, dot, dash, underscore.
+fn safe_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 100 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+}
+
+/// The official website (P856, https only, first one) and the profiles the
+/// item lists. Nothing is fetched: these come from the item already read.
+pub fn links(entity: &Value) -> Vec<InfoLink> {
+    let mut out = Vec::new();
+    if let Some(site) = claim_values(entity, "P856").filter_map(Value::as_str).find_map(|u| {
+        let parsed = Url::parse(u).ok()?;
+        (parsed.scheme() == "https" && parsed.host_str().is_some() && parsed.username().is_empty() && parsed.password().is_none())
+            .then(|| parsed.to_string())
+    }) {
+        out.push(InfoLink { kind: "website".into(), label: "Official website".into(), url: site });
+    }
+    for (prop, kind, label, before, after) in PROFILES {
+        if let Some(id) = claim_values(entity, prop).filter_map(Value::as_str).find(|id| safe_id(id)) {
+            out.push(InfoLink { kind: (*kind).into(), label: (*label).into(), url: format!("{before}{id}{after}") });
+        }
+    }
+    out
+}
 
 pub struct Wiki<'a> {
     pub http: &'a dyn InfoHttp,
@@ -294,6 +328,7 @@ impl Wiki<'_> {
             years_active: years_active(start, end),
             members: member_ids.iter().filter_map(|q| labels.get(q).cloned()).collect(),
             mbid: claim_string(&e, "P434").filter(|m| is_mbid(m)),
+            links: links(&e),
         }))
     }
 
@@ -325,6 +360,25 @@ mod tests {
         assert_eq!(years_active(Some(1985), None).as_deref(), Some("1985–present"));
         assert_eq!(years_active(Some(1964), Some(2009)).as_deref(), Some("1964–2009"));
         assert_eq!(years_active(None, None), None);
+    }
+
+    #[test]
+    fn reads_the_website_and_profiles_https_only() {
+        let snak = |v: Value| serde_json::json!({"rank": "normal", "mainsnak": {"datavalue": {"value": v}}});
+        let e = serde_json::json!({"claims": {
+            "P856": [snak("http://band.example/".into()), snak("https://band.example/home".into())],
+            "P2003": [snak("band_official".into())],
+            "P2002": [snak("bad/../id".into()), snak("bandhq".into())],
+            "P3283": [snak("bandname".into())],
+        }});
+        let l = links(&e);
+        let urls: Vec<&str> = l.iter().map(|x| x.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            ["https://band.example/home", "https://www.instagram.com/band_official/", "https://x.com/bandhq", "https://bandname.bandcamp.com/"]
+        );
+        assert_eq!(l[0].label, "Official website");
+        assert!(links(&serde_json::json!({"claims": {}})).is_empty());
     }
 
     #[test]

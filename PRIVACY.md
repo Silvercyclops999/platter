@@ -13,7 +13,9 @@ and your own Plex server.
 - GitHub, to check for and download app updates.
 - Wikipedia and Wikidata, for artist bios and facts (on by default, can be
   turned off in Settings). The request carries the artist's name or
-  MusicBrainz id, nothing else.
+  MusicBrainz id, nothing else. The artist's website and profile links shown
+  in the About dialog come from the same answer and only open, in your
+  browser, when you click one.
 - Last.fm, Fanart.tv and TheAudioDB, only if you enter your own API key for
   them in Settings. They get the artist's name or MusicBrainz id and your key.
   Their images are fetched from their own image servers.

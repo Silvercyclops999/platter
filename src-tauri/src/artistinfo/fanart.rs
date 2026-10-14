@@ -15,9 +15,12 @@ pub struct Fanart<'a> {
     pub key: &'a str,
 }
 
-/// The most liked image of a kind.
-fn best(v: &Value, kind: &str) -> Option<String> {
-    let list = v.get(kind)?.as_array()?;
+/// Images of one kind kept for the gallery.
+pub const GALLERY_PER_KIND: usize = 6;
+
+/// Every https image of a kind, most liked first (ties keep the service's order).
+fn ranked(v: &Value, kind: &str) -> Vec<String> {
+    let Some(list) = v.get(kind).and_then(Value::as_array) else { return Vec::new() };
     let likes = |i: &Value| -> i64 {
         match i.get("likes") {
             Some(Value::String(s)) => s.parse().unwrap_or(0),
@@ -25,19 +28,32 @@ fn best(v: &Value, kind: &str) -> Option<String> {
             _ => 0,
         }
     };
-    list.iter()
-        .filter(|i| i.get("url").and_then(Value::as_str).is_some_and(|u| u.starts_with("https://")))
-        .max_by_key(|i| likes(i))
-        .and_then(|i| i.get("url").and_then(Value::as_str))
-        .map(str::to_owned)
+    let mut imgs: Vec<(i64, String)> = list
+        .iter()
+        .filter_map(|i| {
+            let u = i.get("url").and_then(Value::as_str)?;
+            u.starts_with("https://").then(|| (likes(i), u.to_owned()))
+        })
+        .collect();
+    imgs.sort_by_key(|(l, _)| std::cmp::Reverse(*l));
+    imgs.into_iter().map(|(_, u)| u).collect()
+}
+
+/// The most liked image of a kind.
+fn best(v: &Value, kind: &str) -> Option<String> {
+    ranked(v, kind).into_iter().next()
 }
 
 pub fn parse(mbid: &str, v: &Value) -> Option<FanartData> {
+    let backgrounds: Vec<String> = ranked(v, "artistbackground").into_iter().take(GALLERY_PER_KIND).collect();
+    let thumbs: Vec<String> = ranked(v, "artistthumb").into_iter().take(GALLERY_PER_KIND).collect();
     let d = FanartData {
         mbid: mbid.to_owned(),
-        background: best(v, "artistbackground"),
-        thumb: best(v, "artistthumb"),
+        background: backgrounds.first().cloned(),
+        thumb: thumbs.first().cloned(),
         logo: best(v, "hdmusiclogo").or_else(|| best(v, "musiclogo")),
+        thumbs,
+        backgrounds,
     };
     (d.background.is_some() || d.thumb.is_some() || d.logo.is_some()).then_some(d)
 }
@@ -70,6 +86,8 @@ mod tests {
         )
         .unwrap();
         let d = parse("m", &v).unwrap();
+        assert_eq!(d.backgrounds.len(), 2);
+        assert!(d.backgrounds[1].ends_with("/a.jpg"));
         assert!(d.background.unwrap().ends_with("/b.jpg"));
         assert!(d.logo.unwrap().ends_with("/l.png"));
         assert_eq!(d.thumb, None);

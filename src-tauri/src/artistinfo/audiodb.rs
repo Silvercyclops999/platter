@@ -34,8 +34,13 @@ pub fn to_data(row: &Value) -> Option<AudioDbData> {
         url: text(row, "idArtist").map(|id| format!("https://www.theaudiodb.com/artist/{id}")),
         bio: text(row, "strBiographyEN").map(|b| clean_text(&b)).filter(|b| !b.is_empty()),
         thumb: text(row, "strArtistThumb").filter(|u| u.starts_with("https://")),
+        fanart: ["strArtistFanart", "strArtistFanart2", "strArtistFanart3", "strArtistFanart4", "strArtistWideThumb"]
+            .iter()
+            .filter_map(|k| text(row, k))
+            .filter(|u| u.starts_with("https://"))
+            .collect(),
     };
-    (d.bio.is_some() || d.thumb.is_some()).then_some(d)
+    (d.bio.is_some() || d.thumb.is_some() || !d.fanart.is_empty()).then_some(d)
 }
 
 impl AudioDb<'_> {
@@ -82,8 +87,10 @@ mod tests {
 
     #[test]
     fn reads_rows_under_any_list_key() {
-        let v = serde_json::json!({"artists": [{"idArtist": "111", "strArtist": "Band", "strBiographyEN": "Bio.", "strArtistThumb": "https://r2.theaudiodb.com/images/media/artist/thumb/x.jpg"}]});
+        let v = serde_json::json!({"artists": [{"idArtist": "111", "strArtist": "Band", "strBiographyEN": "Bio.", "strArtistThumb": "https://r2.theaudiodb.com/images/media/artist/thumb/x.jpg",
+            "strArtistFanart": "https://r2.theaudiodb.com/images/media/artist/fanart/f1.jpg", "strArtistFanart2": "http://r2.theaudiodb.com/f2.jpg", "strArtistFanart3": ""}]});
         let d = to_data(rows(&v)[0]).unwrap();
+        assert_eq!(d.fanart, ["https://r2.theaudiodb.com/images/media/artist/fanart/f1.jpg"]);
         assert_eq!(d.url.as_deref(), Some("https://www.theaudiodb.com/artist/111"));
         assert_eq!(d.bio.as_deref(), Some("Bio."));
         let v = serde_json::json!({"search": null, "lookup": [{"strArtist": "B"}]});

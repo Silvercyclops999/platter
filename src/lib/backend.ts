@@ -232,7 +232,8 @@ export interface Backend {
   /** Forget cached artist info; resolves to how many artists had some. */
   artistInfoCacheClear(): Promise<number>;
   /** Open a source or licence link in the default browser. */
-  openInfoLink(url: string): Promise<void>;
+  /** With `artistId`, that artist's own listed links (their website) open too. */
+  openInfoLink(url: string, artistId?: string): Promise<void>;
 
   // Sharing (docs/IPC.md "Sharing")
   /** The Platter link (with a start time for songs) and whether a public link can be had. */
@@ -389,7 +390,7 @@ export function createTauriBackend(): Backend {
     artistInfoKeys: () => call("artist_info_keys"),
     artistInfoKeySet: (source, key) => call("artist_info_key_set", { source, key }),
     artistInfoCacheClear: () => call("artist_info_cache_clear"),
-    openInfoLink: (url) => call("open_info_link", { url }),
+    openInfoLink: (url, artistId) => call("open_info_link", { url, artistId: artistId ?? null }),
     shareInfo: (kind, id, atSeconds) => call("share_info", { kind, id, atSeconds }),
     sharePublicLink: (kind, id) => call("share_public_link", { kind, id }),
     deepLinkTake: () => call("deep_link_take"),

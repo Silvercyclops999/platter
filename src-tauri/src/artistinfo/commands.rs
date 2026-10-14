@@ -43,8 +43,15 @@ pub async fn artist_info_cache_clear(info: State<'_, ArtistInfoService>) -> AppR
     info.clear_cache().await
 }
 
-/// Sites a credit or source link may open.
+/// Sites a credit, source or profile link may open. An artist's official
+/// website opens too, but only when it's the one their info lists.
 const LINK_HOSTS: &[&str] = &[
+    "instagram.com",
+    "x.com",
+    "facebook.com",
+    "youtube.com",
+    "bandcamp.com",
+    "soundcloud.com",
     "wikipedia.org",
     "www.wikidata.org",
     "www.last.fm",
@@ -61,10 +68,26 @@ pub fn link_allowed(url: &str) -> bool {
         && u.host_str().is_some_and(|h| LINK_HOSTS.iter().any(|ok| h == *ok || h.ends_with(&format!(".{ok}"))))
 }
 
-/// Open a credit link (source page or licence) in the default browser.
+/// Whether `url` is one of the links shown for the artist (their official website).
+pub fn listed_for(info: &ArtistInfo, url: &str) -> bool {
+    url.starts_with("https://") && info.links.iter().any(|l| l.url == url)
+}
+
+/// Open a credit, source or profile link in the default browser. With
+/// `artist_id`, the artist's own listed links (their website) open too.
 #[tauri::command]
-pub async fn open_info_link(app: AppHandle, url: String) -> AppResult<()> {
-    if !link_allowed(&url) {
+pub async fn open_info_link(
+    app: AppHandle,
+    info: State<'_, ArtistInfoService>,
+    url: String,
+    artist_id: Option<String>,
+) -> AppResult<()> {
+    let allowed = link_allowed(&url)
+        || match artist_id {
+            Some(id) => info.info(&id).await.is_ok_and(|i| listed_for(&i, &url)),
+            None => false,
+        };
+    if !allowed {
         return Err(AppError::Invalid("link not allowed".into()));
     }
     app.opener()
@@ -84,5 +107,18 @@ mod tests {
         assert!(!link_allowed("http://en.wikipedia.org/wiki/Band"));
         assert!(!link_allowed("https://wikipedia.org.evil.example/"));
         assert!(!link_allowed("file:///etc/passwd"));
+        assert!(link_allowed("https://www.instagram.com/band/"));
+        assert!(link_allowed("https://band.bandcamp.com/"));
+        assert!(!link_allowed("https://band.example/"));
+    }
+
+    #[test]
+    fn an_artists_own_website_opens_only_when_listed() {
+        let info = ArtistInfo {
+            links: vec![super::super::InfoLink { kind: "website".into(), label: "Official website".into(), url: "https://band.example/".into() }],
+            ..Default::default()
+        };
+        assert!(listed_for(&info, "https://band.example/"));
+        assert!(!listed_for(&info, "https://other.example/"));
     }
 }

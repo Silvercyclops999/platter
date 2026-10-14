@@ -938,6 +938,23 @@ export interface ArtistInfo {
   banner: string | null;
   logo: string | null;
   credits: InfoCredit[];
+  /** Art paths for the About dialog's gallery: Plex's images first, then the sources'. */
+  gallery: string[];
+  /** Official website and profiles (Wikidata), then Wikipedia and Last.fm. */
+  links: InfoLink[];
+  /** Library artists the bio names, as written there. */
+  bioLinks: BioLink[];
+}
+
+export interface InfoLink {
+  kind: "website" | "wikipedia" | "lastfm" | "instagram" | "x" | "facebook" | "youtube" | "bandcamp" | "soundcloud" | string;
+  label: string;
+  url: string;
+}
+
+export interface BioLink {
+  text: string;
+  artistId: string;
 }
 
 export interface InfoKeyState {

@@ -201,9 +201,9 @@ in that order (the page's sort or filter).
 | `artist_info_keys` | – | `{ lastfm, fanart, audiodb, listenbrainz: { saved, rejected } }` |
 | `artist_info_key_set` | `{ source: "lastfm"|"fanart"|"audiodb"|"listenbrainz", key: string|null }` | `{ saved, rejected }` |
 | `artist_info_cache_clear` | – | number of artists that had cached info |
-| `open_info_link` | `{ url }` | – (opens a source or licence page in the default browser) |
+| `open_info_link` | `{ url, artistId? }` | – (opens a source, licence or profile page in the default browser) |
 
-`ArtistInfo = { id, bio?, bioSource?: "plex"|"wikipedia"|"lastfm"|"audiodb", origin?, yearsActive?, members: { name, artistId? }[], tags: string[], listeners?, scrobbles?, photo?, banner?, logo?, credits: { source, text, url?, licence?, licenceUrl? }[] }`
+`ArtistInfo = { id, bio?, bioSource?: "plex"|"wikipedia"|"lastfm"|"audiodb", origin?, yearsActive?, members: { name, artistId? }[], tags: string[], listeners?, scrobbles?, photo?, banner?, logo?, credits: { source, text, url?, licence?, licenceUrl? }[], gallery: string[], links: { kind, label, url }[], bioLinks: { text, artistId }[] }`
 
 Optional outside sources fill gaps that Plex leaves: Wikipedia and Wikidata
 (no key, on by default), Last.fm, Fanart.tv and TheAudioDB (each needs the
@@ -220,6 +220,15 @@ when Plex has no background art. `photo`, `banner` and `logo` are art paths
 (`/ext/<image url>`) served by the `art` protocol and cached like Plex art.
 `members` link to library artists by name. `credits` lists one line per
 source whose data is shown, with its link and licence.
+
+`gallery` holds up to 12 art paths for the About dialog: Plex's photo and
+background first, then Fanart.tv's photos and backgrounds, then TheAudioDB's
+photo and fan art. `links` are the official website and profiles (Instagram,
+X, Facebook, YouTube, Bandcamp, SoundCloud) that the Wikidata item lists,
+https only, then the Wikipedia article and the Last.fm page. They come from
+answers already fetched; nothing extra is requested. `bioLinks` are library
+artists the bio names (the text exactly as written, first mention each,
+never the artist itself), for linking them in place.
 
 The same background fetch gets the artist's global top list for Popular
 while `popularSource` is "global": ListenBrainz top recordings by the
@@ -240,7 +249,9 @@ artist, cached under the `credit:` id.
 Keys are kept in the OS keychain, never in settings. Saving a key checks it
 with one lookup; `rejected` means the service refused it, which turns that
 source off until another key is saved or the app restarts. `open_info_link`
-only opens https links on the sources' and Creative Commons' sites.
+only opens https links on the sources', Creative Commons' and the profile
+sites. With `artistId` it also opens a link listed in that artist's `links`
+(their official website).
 
 ## Sharing
 | Command | Args | Returns |
