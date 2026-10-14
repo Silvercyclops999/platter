@@ -131,6 +131,8 @@ pub fn artist(id: &str, title: &str) -> Artist {
         thumb: Some(format!("/library/metadata/{id}/thumb/1")),
         art: None,
         view_count: 0,
+        summary: None,
+        similar: Vec::new(),
     }
 }
 

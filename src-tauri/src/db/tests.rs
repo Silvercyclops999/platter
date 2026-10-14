@@ -376,6 +376,35 @@ async fn artist_page_groups_release_types_in_fixed_order() {
     assert!(t.db.read(|c| queries::artist_page(c, "nope")).unwrap_err().kind() == "notFound");
 }
 
+#[tokio::test]
+async fn artist_page_has_plays_about_and_similar_in_library() {
+    let t = open();
+    let mut lib = sectioned_library();
+    lib.artists[0].summary = Some("  A band from somewhere.
+".into());
+    lib.artists[0].similar =
+        vec!["other artist".into(), "Not In Library".into(), "Other Artist".into(), "Archive Artist".into()];
+    let expected: u64 = lib.tracks.iter().filter(|t| t.artist_id == "1").map(|t| t.view_count as u64).sum();
+    assert!(expected > 0);
+    sync(&t.db, &Arc::new(FakeSource::new(lib)), false).await;
+
+    let page = t.db.read(|c| queries::artist_page(c, "1")).unwrap();
+    assert_eq!(page.plays, expected);
+    assert_eq!(page.about.as_deref(), Some("A band from somewhere."));
+    // Only library artists, once each, never the artist itself.
+    let similar: Vec<&str> = page.similar.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(similar, vec!["Other Artist"]);
+
+    // An artist with nothing: no plays, no about, no similar.
+    let other = t.db.read(|c| queries::artist_page(c, "2")).unwrap();
+    assert_eq!((other.plays, other.about, other.similar.len()), (0, None, 0));
+
+    let v = serde_json::to_value(&page).unwrap();
+    assert_eq!(v["plays"], expected);
+    assert_eq!(v["about"], "A band from somewhere.");
+    assert_eq!(v["similar"][0]["title"], "Other Artist");
+}
+
 /// One track in the popular fixtures: (id, title, rating count, plays,
 /// last played, track artist line, length in seconds).
 type Pop<'a> = (&'a str, &'a str, Option<u32>, u32, Option<i64>, Option<&'a str>, u64);

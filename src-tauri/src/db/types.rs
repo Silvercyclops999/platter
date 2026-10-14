@@ -110,6 +110,12 @@ pub struct ArtistPage {
     pub artist: Artist,
     pub popular: Vec<Track>,
     pub sections: Vec<ArtistSection>,
+    /// Sum of play counts over the artist's own tracks.
+    pub plays: u64,
+    /// Plex artist biography, when it has one.
+    pub about: Option<String>,
+    /// Plex similar artists that are in this library, in Plex's order.
+    pub similar: Vec<Artist>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

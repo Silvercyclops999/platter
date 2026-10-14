@@ -288,6 +288,14 @@ END;
 ALTER TABLE tracks ADD COLUMN rating_count INTEGER;
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
+    // v3: artist biography and similar artist names (Plex `summary` and
+    // `Similar`) for the artist page. The next sync runs as a full pass to
+    // fill them.
+    r#"
+ALTER TABLE artists ADD COLUMN summary TEXT;
+ALTER TABLE artists ADD COLUMN similar TEXT NOT NULL DEFAULT '[]';
+UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
 ];
 
 #[cfg(test)]
@@ -314,6 +322,28 @@ mod tests {
         assert_eq!(n, 1);
         let r = open_reader(&path).unwrap();
         assert!(r.execute("DELETE FROM artists", []).is_err(), "reader is read-only");
+    }
+
+    #[test]
+    fn v3_adds_artist_summary_and_similar_and_makes_the_next_sync_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        c.execute_batch(MIGRATIONS[0]).unwrap();
+        c.execute_batch(MIGRATIONS[1]).unwrap();
+        c.pragma_update(None, "user_version", 2).unwrap();
+        c.execute("INSERT INTO artists (id, title, sort_title) VALUES ('1', 'A', 'A')", []).unwrap();
+        c.execute(
+            "INSERT INTO sync_state (id, section_id, section_uuid, last_sync_at, last_full_sync_at)
+             VALUES (1, '1', 'u', 100, 100)",
+            [],
+        )
+        .unwrap();
+        migrate(&mut c).unwrap();
+        let (summary, similar): (Option<String>, String) =
+            c.query_row("SELECT summary, similar FROM artists", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((summary, similar.as_str()), (None, "[]"));
+        let full: Option<i64> = c.query_row("SELECT last_full_sync_at FROM sync_state", [], |r| r.get(0)).unwrap();
+        assert_eq!(full, None);
     }
 
     #[test]

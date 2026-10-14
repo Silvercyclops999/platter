@@ -211,7 +211,38 @@ pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppRes
             (!albums.is_empty()).then_some(ArtistSection { section: *s, albums })
         })
         .collect();
-    Ok(ArtistPage { artist, popular, sections })
+    let plays: i64 =
+        c.query_row("SELECT COALESCE(sum(view_count), 0) FROM tracks WHERE artist_id = ?1", [id], |r| r.get(0))?;
+    let (about, similar_names): (Option<String>, String) =
+        c.query_row("SELECT summary, similar FROM artists WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let about = about.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let similar = similar_artists(c, id, &similar_names)?;
+    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar })
+}
+
+/// Most similar artists shown on an artist page.
+const SIMILAR_N: usize = 12;
+
+/// Library artists matching the stored similar names (any case), in the
+/// stored order, without the artist itself or repeats.
+fn similar_artists(c: &Connection, id: &str, names_json: &str) -> AppResult<Vec<Artist>> {
+    let names: Vec<String> = serde_json::from_str(names_json).unwrap_or_default();
+    let mut st = c.prepare_cached(&format!(
+        "SELECT {ARTIST_COLS} FROM artists ar WHERE ar.title = ?1 COLLATE NOCASE AND ar.id <> ?2
+         ORDER BY ar.view_count DESC, ar.pk LIMIT 1"
+    ))?;
+    let mut out: Vec<Artist> = Vec::new();
+    for name in names {
+        if out.len() == SIMILAR_N {
+            break;
+        }
+        if let Some(a) = st.query_row(params![name.trim(), id], row_artist).optional()?
+            && !out.iter().any(|o| o.id == a.id)
+        {
+            out.push(a);
+        }
+    }
+    Ok(out)
 }
 
 /// Two copies of one song: same title (any case) and length within this.

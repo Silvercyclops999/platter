@@ -32,6 +32,14 @@ pub struct Artist {
     pub thumb: Option<String>,
     pub art: Option<String>,
     pub view_count: u32,
+    /// Plex artist biography. Stored by sync and sent only on the artist
+    /// page (as `ArtistPage.about`), never with artist lists.
+    #[serde(skip)]
+    pub summary: Option<String>,
+    /// Names from Plex `Similar` tags. Stored by sync; the artist page sends
+    /// the ones in the library as `ArtistPage.similar`.
+    #[serde(skip)]
+    pub similar: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

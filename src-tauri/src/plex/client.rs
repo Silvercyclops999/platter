@@ -266,6 +266,9 @@ pub struct PlexMetadata {
     pub child_count: Option<i64>,
     #[serde(default)]
     pub studio: Option<String>,
+    /// Artist biography (and album review text on albums).
+    #[serde(default, deserialize_with = "lenient::opt_string")]
+    pub summary: Option<String>,
     #[serde(default)]
     pub originally_available_at: Option<String>,
     #[serde(
@@ -302,6 +305,9 @@ pub struct PlexMetadata {
     pub style: Vec<Tag>,
     #[serde(default, rename = "Mood")]
     pub mood: Vec<Tag>,
+    /// Similar artists on artist items (names only).
+    #[serde(default, rename = "Similar")]
+    pub similar: Vec<Tag>,
     #[serde(default, rename = "UltraBlurColors")]
     pub ultra_blur_colors: Option<UltraBlurColors>,
     #[serde(default, rename = "Media")]
@@ -545,6 +551,13 @@ impl PlexMetadata {
             thumb: non_empty(&self.thumb),
             art: non_empty(&self.art),
             view_count: u32_of(self.view_count),
+            summary: non_empty(&self.summary),
+            similar: self
+                .similar
+                .iter()
+                .map(|t| t.tag.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect(),
         }
     }
 
@@ -1355,6 +1368,30 @@ mod tests {
         assert_eq!(a.track_count, 12);
         assert_eq!(a.tint.as_deref(), Some("5b3a2c"));
         assert_eq!(a.genres, vec!["Rock"]);
+    }
+
+    #[test]
+    fn artist_mapping_reads_summary_art_and_similar() {
+        let m: PlexMetadata = serde_json::from_value(serde_json::json!({
+            "ratingKey": "10", "type": "artist", "title": "Band", "thumb": "/t", "art": "/a",
+            "summary": "  Formed in a garage.  ", "viewCount": 40,
+            "Similar": [{"id": 5, "filter": "similar=5", "tag": "Other Band"}, {"tag": " "}, {"tag": "Third"}]
+        }))
+        .unwrap();
+        let a = m.to_artist();
+        assert_eq!(a.art.as_deref(), Some("/a"));
+        assert_eq!(a.summary.as_deref(), Some("Formed in a garage."));
+        assert_eq!(a.similar, vec!["Other Band", "Third"]);
+        // Not on the wire: lists stay small.
+        let v = serde_json::to_value(&a).unwrap();
+        assert!(v.get("summary").is_none() && v.get("similar").is_none());
+
+        let bare: PlexMetadata = serde_json::from_value(serde_json::json!({
+            "ratingKey": "11", "type": "artist", "title": "Quiet", "summary": "", "art": ""
+        }))
+        .unwrap();
+        let b = bare.to_artist();
+        assert_eq!((b.summary, b.art, b.similar.len()), (None, None, 0));
     }
 
     #[test]

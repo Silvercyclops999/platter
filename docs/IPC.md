@@ -53,7 +53,7 @@ Event `auth://changed` → `AuthStatus`.
 | `artist_names` | – | `{ id, title }[]` (every artist) |
 | `albums` | `{ sort: "name"|"artist"|"year"|"recent"|"plays", offset, limit, section?: ReleaseSection }` | `Page<Album>` |
 | `playlists` | – | `Playlist[]` |
-| `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[] }` |
+| `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[] }` |
 | `album_page` | `{ id }` | `AlbumPage { album, tracks: Track[], totalDurationMs, moreByArtist: Album[] }` |
 | `playlist_page` | `{ id }` | `{ playlist, tracks: Track[] }` |
 
@@ -64,6 +64,10 @@ keeps it, and loads it again after `library://changed`. A track's
 artist page's `popular` list: songs with a count first, highest first, then
 the rest by your own plays. `popular` also has songs where the artist is
 credited in the track artist line, at most 10, one copy per song.
+On the artist page, `plays` is the sum of play counts over the artist's own
+tracks, `about` is the Plex artist biography (null when empty), and `similar`
+holds the Plex similar artists that are in this library, at most 12, in
+Plex's order. Artist lists never carry the biography.
 `SyncStatus = { phase: "idle"|"artists"|"albums"|"tracks"|"incremental", done, total, lastSyncAt? }`
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.
