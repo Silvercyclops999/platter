@@ -28,6 +28,7 @@ use crate::model::{Album, Artist, Playlist, Track};
 use super::DbHandle;
 use super::queries::now_s;
 use super::store::{ALBUM_COLS, ARTIST_COLS, PLAYLIST_COLS, TRACK_COLS, row_album, row_artist, row_playlist, row_track};
+use super::source::RemoteHits;
 use super::types::*;
 
 const MAX_QUERY_CHARS: usize = 200;
@@ -365,6 +366,16 @@ fn search_playlists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usi
     Ok(rank(v, n))
 }
 
+/// How many results of `kind` a search with `filter`/`limit` returns.
+fn kind_limit(filter: SearchFilter, limit: Option<u32>, kind: SearchFilter, all_n: usize) -> usize {
+    match (filter, limit) {
+        (SearchFilter::All, Some(l)) if kind != SearchFilter::Songs => (l as usize).clamp(1, 50),
+        (SearchFilter::All, _) => all_n,
+        (f, l) if f == kind => l.map(|l| l as usize).unwrap_or(FILTER_DEFAULT).clamp(1, 200),
+        _ => 0,
+    }
+}
+
 /// Run a search on a read connection. `generation` keys the vocab cache.
 pub(crate) fn search_conn(
     c: &Connection,
@@ -405,14 +416,7 @@ pub(crate) fn search_conn(
         return Ok(out);
     };
 
-    let n_for = |kind: SearchFilter, all_n: usize| -> usize {
-        match (filter, limit) {
-            (SearchFilter::All, Some(l)) if kind != SearchFilter::Songs => (l as usize).clamp(1, 50),
-            (SearchFilter::All, _) => all_n,
-            (f, l) if f == kind => l.map(|l| l as usize).unwrap_or(FILTER_DEFAULT).clamp(1, 200),
-            _ => 0,
-        }
-    };
+    let n_for = |kind: SearchFilter, all_n: usize| kind_limit(filter, limit, kind, all_n);
 
     let mut top: Option<(f64, SearchHit)> = None;
     let mut consider = |score: f64, hit: SearchHit| {
@@ -469,6 +473,151 @@ pub(crate) fn warm(db: &DbHandle, c: &Connection) -> AppResult<()> {
 pub fn search(db: &DbHandle, query: &str, filter: SearchFilter, limit: Option<u32>) -> AppResult<SearchResults> {
     let generation = db.generation();
     db.read(|c| search_conn(c, &db.inner.vocab, generation, query, filter, limit, now_s()))
+}
+
+// ---------------------------------------------------------------- server fallback
+
+/// How long to wait for the server before answering from the cache.
+const REMOTE_TIMEOUT: Duration = Duration::from_secs(4);
+/// Items per kind asked of the server.
+const REMOTE_LIMIT: u32 = 30;
+
+/// Rank server matches with the same rules as the local index and shape
+/// them like a local result (`source: server`).
+pub fn rank_remote(
+    query: &str,
+    filter: SearchFilter,
+    limit: Option<u32>,
+    hits: RemoteHits,
+    now: i64,
+) -> SearchResults {
+    let start = Instant::now();
+    let q = parse_query(query, |_| Vec::new());
+    let mut out = SearchResults { source: SearchSource::Server, ..Default::default() };
+    if q.fts.is_none() {
+        return out;
+    }
+    let n_for = |kind: SearchFilter, all_n: usize| kind_limit(filter, limit, kind, all_n);
+    let mut top: Option<(f64, SearchHit)> = None;
+    let mut consider = |score: f64, hit: SearchHit| {
+        if top.as_ref().is_none_or(|(s, _)| score > *s) {
+            top = Some((score, hit));
+        }
+    };
+    let hit = |kind| SearchHit { kind, artist: None, album: None, track: None, playlist: None };
+
+    let artists = rank(
+        hits.artists
+            .into_iter()
+            .map(|a| {
+                let (t, in_title) = tier(&q, &a.title, &[]);
+                let score = score(t, in_title, a.view_count, None, a.title.len(), now) + 3.0;
+                Scored { item: a, score }
+            })
+            .collect(),
+        n_for(SearchFilter::Artists, ALL_SHELF),
+    );
+    if let Some(f) = artists.first() {
+        consider(f.score, SearchHit { artist: Some(f.item.clone()), ..hit(SearchKind::Artist) });
+    }
+    let albums = rank(
+        hits.albums
+            .into_iter()
+            .map(|a| {
+                let (t, in_title) = tier(&q, &a.title, &[Some(&a.artist_title)]);
+                let score = score(t, in_title, a.view_count, a.last_viewed_at, a.title.len(), now) + 2.0;
+                Scored { item: a, score }
+            })
+            .collect(),
+        n_for(SearchFilter::Albums, ALL_SHELF),
+    );
+    if let Some(f) = albums.first() {
+        consider(f.score, SearchHit { album: Some(f.item.clone()), ..hit(SearchKind::Album) });
+    }
+    let songs = rank(
+        hits.tracks
+            .into_iter()
+            .map(|tr| {
+                let (t, in_title) = tier(
+                    &q,
+                    &tr.title,
+                    &[Some(&tr.artist_title), Some(&tr.album_title), tr.track_artist.as_deref()],
+                );
+                let score = score(t, in_title, tr.view_count, tr.last_viewed_at, tr.title.len(), now) + 1.0;
+                Scored { item: tr, score }
+            })
+            .collect(),
+        n_for(SearchFilter::Songs, ALL_SONGS),
+    );
+    if let Some(f) = songs.first() {
+        consider(f.score, SearchHit { track: Some(f.item.clone()), ..hit(SearchKind::Track) });
+    }
+    let playlists = rank(
+        hits.playlists
+            .into_iter()
+            .map(|p| {
+                let (t, in_title) = tier(&q, &p.title, &[]);
+                let score = score(t, in_title, 0, None, p.title.len(), now);
+                Scored { item: p, score }
+            })
+            .collect(),
+        n_for(SearchFilter::Playlists, ALL_SHELF),
+    );
+    if let Some(f) = playlists.first() {
+        consider(f.score, SearchHit { playlist: Some(f.item.clone()), ..hit(SearchKind::Playlist) });
+    }
+    out.artists = artists.into_iter().map(|s| s.item).collect();
+    out.albums = albums.into_iter().map(|s| s.item).collect();
+    out.songs = songs.into_iter().map(|s| s.item).collect();
+    out.playlists = playlists.into_iter().map(|s| s.item).collect();
+    if filter == SearchFilter::All {
+        out.top = top.map(|(_, h)| h);
+    }
+    out.took_ms = start.elapsed().as_secs_f64() * 1000.0;
+    out
+}
+
+/// Search the local index, or the server until the first library sync has
+/// finished (the cache may be missing most of the library until then). Any server failure (offline, slow, error) falls back to the
+/// cache, so search always answers.
+pub async fn search_with_fallback(
+    db: &DbHandle,
+    query: &str,
+    filter: SearchFilter,
+    limit: Option<u32>,
+) -> AppResult<SearchResults> {
+    let local = |db: DbHandle, query: String| async move {
+        tokio::task::spawn_blocking(move || search(&db, &query, filter, limit))
+            .await
+            .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
+    };
+    let has_terms = parse_query(query, |_| Vec::new()).fts.is_some();
+    let remote = db.remote_search().filter(|_| has_terms);
+    let Some(remote) = remote else {
+        return local(db.clone(), query.to_string()).await;
+    };
+    let sync_state = db.read_async(super::store::sync_state).await?;
+    if sync_state.as_ref().is_some_and(|s| s.last_sync_at.is_some()) {
+        return local(db.clone(), query.to_string()).await;
+    }
+    let started = Instant::now();
+    let section = sync_state.map(|s| s.section_id);
+    let clipped: String = query.trim().chars().take(MAX_QUERY_CHARS).collect();
+    match tokio::time::timeout(REMOTE_TIMEOUT, remote.search(&clipped, section.as_deref(), REMOTE_LIMIT)).await {
+        Ok(Ok(hits)) => {
+            let mut r = rank_remote(query, filter, limit, hits, now_s());
+            r.took_ms = started.elapsed().as_secs_f64() * 1000.0;
+            Ok(r)
+        }
+        Ok(Err(e)) => {
+            tracing::debug!("server search failed, using cache: {}", e.kind());
+            local(db.clone(), query.to_string()).await
+        }
+        Err(_) => {
+            tracing::debug!("server search timed out, using cache");
+            local(db.clone(), query.to_string()).await
+        }
+    }
 }
 
 // ---------------------------------------------------------------- recents

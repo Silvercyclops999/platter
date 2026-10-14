@@ -8,12 +8,12 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 
 use crate::db::artcache::sniff_content_type;
-use crate::db::source::{ArtBytes, Changes, HistoryEntry, ItemKind, MusicSection};
+use crate::db::source::{ArtBytes, Changes, HistoryEntry, ItemKind, MusicSection, RemoteHits, RemoteSearch};
 use crate::audio::source::{ContextKind, PlayContext, ResolvedContext, StreamSource, TrackLookup, TrackResolver};
 use crate::db::{ArtFetcher, DbHandle, LibrarySource, queries};
 use crate::error::AppResult;
 use crate::model::{Album, Artist, Playlist, Track};
-use crate::plex::client::{MetaType, PlexMetadata};
+use crate::plex::client::{MetaType, PlexHub, PlexMetadata};
 use crate::plex::PlexState;
 use crate::plex::types::ConnectionKind;
 
@@ -215,6 +215,39 @@ impl LibrarySource for PlexLibrary {
     }
 }
 
+/// Server-side search (`/hubs/search`), used until the first sync finishes.
+pub struct PlexSearch(pub PlexState);
+
+/// Sort Plex search hubs into kinds. Each item's own `type` wins; the hub's
+/// type (or identifier) is the fallback.
+pub(crate) fn hits_from_hubs(hubs: Vec<PlexHub>) -> RemoteHits {
+    let mut out = RemoteHits::default();
+    for hub in hubs {
+        let hub_kind = hub.kind.clone().unwrap_or_else(|| hub.hub_identifier.clone());
+        for m in hub.metadata {
+            let kind = m.kind.clone().unwrap_or_else(|| hub_kind.clone());
+            match kind.as_str() {
+                "artist" => out.artists.push(m.to_artist()),
+                "album" => out.albums.push(m.to_album()),
+                "track" => out.tracks.push(m.to_track()),
+                "playlist" if m.playlist_type.as_deref().is_none_or(|t| t == "audio") => {
+                    out.playlists.push(m.to_playlist())
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+#[async_trait]
+impl RemoteSearch for PlexSearch {
+    async fn search(&self, query: &str, section_id: Option<&str>, limit: u32) -> AppResult<RemoteHits> {
+        let hubs = self.0.client().await?.search_music(query, section_id, limit).await?;
+        Ok(hits_from_hubs(hubs))
+    }
+}
+
 /// Fetches resized artwork through the connected Plex server.
 pub struct PlexArt(pub PlexState);
 
@@ -382,5 +415,48 @@ mod tests {
         assert_eq!(b.section, ReleaseSection::Soundtracks);
         assert_eq!(c.section, ReleaseSection::Albums);
         assert_eq!(c.format, None);
+    }
+    #[test]
+    fn search_hubs_sort_into_kinds() {
+        let item = |kind: &str, key: &str| PlexMetadata {
+            rating_key: key.into(),
+            title: format!("{kind} {key}"),
+            kind: Some(kind.into()),
+            ..Default::default()
+        };
+        let hubs = vec![
+            PlexHub {
+                hub_identifier: "artist".into(),
+                kind: Some("artist".into()),
+                metadata: vec![item("artist", "1")],
+                ..Default::default()
+            },
+            PlexHub {
+                hub_identifier: "track".into(),
+                kind: Some("track".into()),
+                metadata: vec![item("track", "2"), item("track", "3")],
+                ..Default::default()
+            },
+            PlexHub {
+                hub_identifier: "playlist".into(),
+                kind: Some("playlist".into()),
+                metadata: vec![
+                    item("playlist", "4"),
+                    PlexMetadata { playlist_type: Some("video".into()), ..item("playlist", "5") },
+                ],
+                ..Default::default()
+            },
+            PlexHub {
+                hub_identifier: "album".into(),
+                kind: None,
+                metadata: vec![PlexMetadata { kind: None, ..item("album", "6") }],
+                ..Default::default()
+            },
+        ];
+        let h = hits_from_hubs(hubs);
+        assert_eq!(h.artists.len(), 1);
+        assert_eq!(h.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["2", "3"]);
+        assert_eq!(h.playlists.len(), 1);
+        assert_eq!(h.albums[0].id, "6");
     }
 }

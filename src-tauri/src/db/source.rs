@@ -77,6 +77,22 @@ pub trait LibrarySource: Send + Sync {
     async fn playlist_items(&self, playlist_id: &str) -> AppResult<Vec<String>>;
 }
 
+/// Raw matches from the server's own search, before ranking.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RemoteHits {
+    pub artists: Vec<Artist>,
+    pub albums: Vec<Album>,
+    pub tracks: Vec<Track>,
+    pub playlists: Vec<Playlist>,
+}
+
+/// Server-side search, used only while the first library sync is still
+/// filling the cache (`/hubs/search`).
+#[async_trait]
+pub trait RemoteSearch: Send + Sync {
+    async fn search(&self, query: &str, section_id: Option<&str>, limit: u32) -> AppResult<RemoteHits>;
+}
+
 /// Image bytes plus MIME type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtBytes {

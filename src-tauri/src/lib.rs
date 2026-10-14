@@ -5,6 +5,7 @@ pub mod error;
 pub mod model;
 pub mod platform;
 pub mod plex;
+pub mod settings;
 pub mod tracking;
 pub mod updates;
 
@@ -88,6 +89,7 @@ pub fn run() {
             let db = DbHandle::open(data_dir.join("library.sqlite"))?;
             db.set_source(Arc::new(bridge::PlexLibrary::new(plex.clone())));
             db.set_events(Arc::new(app.handle().clone()));
+            db.set_remote_search(Arc::new(bridge::PlexSearch(plex.clone())));
             let art = ArtCache::open(
                 cache_dir.join("art"),
                 db::artcache::DEFAULT_CAP_BYTES,
@@ -106,8 +108,10 @@ pub fn run() {
                     ..Default::default()
                 },
             );
+            let tracking_settings = tracking::TrackingSettings::default();
+            let app_settings = settings::SettingsState::new(db.clone(), tracking_settings.clone());
             tracking::spawn(
-                tracking::Tracker::new(plex.clone(), db.clone(), tracking::TrackingSettings::default()),
+                tracking::Tracker::new(plex.clone(), db.clone(), tracking_settings),
                 player.subscribe_tracking(),
             );
 
@@ -118,6 +122,7 @@ pub fn run() {
             app.manage(db);
             app.manage(art);
             app.manage(player);
+            app.manage(app_settings);
             updates::start(app.handle().clone());
             Ok(())
         })
@@ -160,6 +165,8 @@ pub fn run() {
             audio::commands::queue_jump,
             audio::commands::player_state,
             audio::commands::player_problems,
+            settings::settings_get,
+            settings::settings_set,
             updates::update_check,
             updates::update_install_on_restart,
         ])

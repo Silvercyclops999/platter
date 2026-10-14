@@ -96,11 +96,7 @@ pub async fn search(
     filter: Option<SearchFilter>,
     limit: Option<u32>,
 ) -> AppResult<SearchResults> {
-    let db = db.inner().clone();
-    let filter = filter.unwrap_or_default();
-    tokio::task::spawn_blocking(move || search::search(&db, &query, filter, limit))
-        .await
-        .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
+    search::search_with_fallback(db.inner(), &query, filter.unwrap_or_default(), limit).await
 }
 
 #[tauri::command]

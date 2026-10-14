@@ -45,7 +45,7 @@ use crate::error::{AppError, AppResult};
 
 pub use artcache::ArtCache;
 pub use release::release_section;
-pub use source::{ArtFetcher, DbEvents, LibrarySource};
+pub use source::{ArtFetcher, DbEvents, LibrarySource, RemoteHits, RemoteSearch};
 pub use types::*;
 
 /// Number of idle read connections kept around.
@@ -71,6 +71,7 @@ struct Inner {
     pub(crate) sync: sync::SyncController,
     source: Mutex<Option<Arc<dyn LibrarySource>>>,
     events: Mutex<Option<Arc<dyn DbEvents>>>,
+    remote: Mutex<Option<Arc<dyn RemoteSearch>>>,
     pub(crate) vocab: search::VocabCache,
 }
 
@@ -92,6 +93,7 @@ impl DbHandle {
                 sync: sync::SyncController::default(),
                 source: Mutex::new(None),
                 events: Mutex::new(None),
+                remote: Mutex::new(None),
                 vocab: search::VocabCache::default(),
             }),
         })
@@ -108,6 +110,15 @@ impl DbHandle {
 
     pub fn source(&self) -> Option<Arc<dyn LibrarySource>> {
         self.inner.source.lock().clone()
+    }
+
+    /// Plug in the server search used while the first sync runs.
+    pub fn set_remote_search(&self, remote: Arc<dyn RemoteSearch>) {
+        *self.inner.remote.lock() = Some(remote);
+    }
+
+    pub(crate) fn remote_search(&self) -> Option<Arc<dyn RemoteSearch>> {
+        self.inner.remote.lock().clone()
     }
 
     /// Plug in the event sink (an `AppHandle` implements [`DbEvents`]).

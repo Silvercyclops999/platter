@@ -11,6 +11,7 @@ use super::listens::{self, ContextKind, NewReport, PlayStart, ReportKind};
 use super::queries::{self, now_s};
 use super::search::{self, recent_add, recent_clear, recent_list};
 use super::source::{HistoryEntry, ItemKind, LibrarySource};
+use super::store;
 use super::*;
 use crate::model::ReleaseSection;
 
@@ -623,6 +624,122 @@ async fn search_filter_limits_kinds() {
     assert!(!r.albums.is_empty());
     let r = search::search(&t.db, "love", SearchFilter::Songs, Some(2)).unwrap();
     assert_eq!(r.songs.len(), 2);
+}
+
+// ---------------------------------------------------------------- server fallback
+
+#[derive(Default)]
+struct FakeRemote {
+    hits: RemoteHits,
+    fail: bool,
+    calls: Mutex<Vec<(String, Option<String>)>>,
+}
+
+#[async_trait::async_trait]
+impl RemoteSearch for FakeRemote {
+    async fn search(&self, query: &str, section_id: Option<&str>, _limit: u32) -> crate::error::AppResult<RemoteHits> {
+        self.calls.lock().push((query.to_string(), section_id.map(str::to_string)));
+        if self.fail {
+            return Err(crate::error::AppError::Network("offline".into()));
+        }
+        Ok(self.hits.clone())
+    }
+}
+
+fn remote_hits() -> RemoteHits {
+    let lib = search_library();
+    RemoteHits {
+        artists: lib.artists.clone(),
+        albums: lib.albums.clone(),
+        // Server order is not ours: reversed on purpose.
+        tracks: lib.tracks.iter().rev().cloned().collect(),
+        playlists: lib.playlists.iter().map(|(p, _)| p.clone()).collect(),
+    }
+}
+
+#[tokio::test]
+async fn search_uses_server_until_first_sync_finishes() {
+    let t = open();
+    // A first sync has started (section known) but not finished.
+    t.db.write(|c| {
+        store::put_sync_state(
+            c,
+            &store::SyncState {
+                section_id: "7".into(),
+                section_uuid: "u".into(),
+                section_title: None,
+                last_sync_at: None,
+                last_full_sync_at: None,
+                generation: 1,
+            },
+        )
+    })
+    .unwrap();
+    let remote = Arc::new(FakeRemote { hits: remote_hits(), ..Default::default() });
+    t.db.set_remote_search(remote.clone());
+
+    let r = search::search_with_fallback(&t.db, "love", SearchFilter::All, Some(10)).await.unwrap();
+    assert_eq!(r.source, SearchSource::Server);
+    // Same ranking rules as the local index.
+    let top = r.top.unwrap();
+    assert_eq!(top.kind, SearchKind::Artist);
+    assert_eq!(top.artist.unwrap().title, "Love");
+    assert_eq!(r.songs.len(), 4);
+    assert_eq!(r.songs[0].title, "Love");
+    assert_eq!(remote.calls.lock()[0], ("love".to_string(), Some("7".to_string())));
+
+    // Filters apply to server results too.
+    let r = search::search_with_fallback(&t.db, "love", SearchFilter::Albums, None).await.unwrap();
+    assert!(r.songs.is_empty() && r.artists.is_empty() && r.playlists.is_empty() && r.top.is_none());
+    assert_eq!(r.albums[0].title, "Lovely Day");
+}
+
+#[tokio::test]
+async fn search_uses_cache_once_synced_and_never_asks_server() {
+    let t = search_db().await;
+    let remote = Arc::new(FakeRemote { hits: remote_hits(), ..Default::default() });
+    t.db.set_remote_search(remote.clone());
+    let r = search::search_with_fallback(&t.db, "love", SearchFilter::All, None).await.unwrap();
+    assert_eq!(r.source, SearchSource::Local);
+    assert!(remote.calls.lock().is_empty());
+}
+
+#[tokio::test]
+async fn server_search_failure_falls_back_to_cache() {
+    let t = open();
+    let remote = Arc::new(FakeRemote { fail: true, ..Default::default() });
+    t.db.set_remote_search(remote.clone());
+    let r = search::search_with_fallback(&t.db, "love", SearchFilter::All, None).await.unwrap();
+    assert_eq!(r.source, SearchSource::Local);
+    assert!(r.songs.is_empty());
+    assert_eq!(remote.calls.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn empty_and_long_queries_are_safe_with_fallback() {
+    let t = open();
+    let remote = Arc::new(FakeRemote { hits: remote_hits(), ..Default::default() });
+    t.db.set_remote_search(remote.clone());
+    for q in ["", "   ", "--"] {
+        let r = search::search_with_fallback(&t.db, q, SearchFilter::All, None).await.unwrap();
+        assert!(r.top.is_none() && r.songs.is_empty());
+    }
+    assert!(remote.calls.lock().is_empty(), "nothing to search for, no server call");
+    let long = "love ".repeat(2_000);
+    let r = search::search_with_fallback(&t.db, &long, SearchFilter::All, None).await.unwrap();
+    assert_eq!(r.source, SearchSource::Server);
+    assert!(remote.calls.lock()[0].0.chars().count() <= 200, "query is clipped before it leaves");
+}
+
+#[test]
+fn rank_remote_orders_exact_then_prefix_then_other() {
+    let r = search::rank_remote("love", SearchFilter::Songs, Some(20), remote_hits(), now_s());
+    let titles: Vec<&str> = r.songs.iter().map(|s| s.title.as_str()).collect();
+    assert_eq!(titles[0], "Love");
+    assert_eq!(titles[1], "Lovesick Blues");
+    let pos = |t: &str| titles.iter().position(|x| *x == t).unwrap();
+    assert!(pos("Lovely Day") < pos("Glove Box"));
+    assert_eq!(r.source, SearchSource::Server);
 }
 
 #[tokio::test]

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use tokio::sync::broadcast;
 
 use crate::audio::events::TrackingEvent;
@@ -20,6 +21,7 @@ use crate::db::DbHandle;
 use crate::db::listens::{self, ContextKind, NewReport, PlayStart, ReportKind};
 use crate::db::queries::now_s;
 use crate::plex::PlexState;
+use crate::error::AppResult;
 use crate::plex::client::{PlaybackState, TimelineReport};
 
 const TIMELINE_EVERY_MS: u64 = 10_000;
@@ -130,36 +132,64 @@ fn reports_for(cur: &mut Current, ev: &TrackingEvent) -> Vec<Report> {
     }
 }
 
+/// Where play reports go. The app uses the connected Plex server; tests use
+/// a recorder.
+#[async_trait]
+pub trait PlayReporter: Send + Sync {
+    /// True when a server is connected right now.
+    async fn online(&self) -> bool;
+    async fn timeline(&self, r: &TimelineReport) -> AppResult<()>;
+    async fn scrobble(&self, rating_key: &str) -> AppResult<()>;
+}
+
+#[async_trait]
+impl PlayReporter for PlexState {
+    async fn online(&self) -> bool {
+        self.client().await.is_ok()
+    }
+
+    async fn timeline(&self, r: &TimelineReport) -> AppResult<()> {
+        self.client().await?.timeline(r).await
+    }
+
+    async fn scrobble(&self, rating_key: &str) -> AppResult<()> {
+        self.client().await?.scrobble(rating_key).await
+    }
+}
+
 pub struct Tracker {
-    plex: PlexState,
+    plex: Arc<dyn PlayReporter>,
     db: DbHandle,
     settings: TrackingSettings,
 }
 
 impl Tracker {
     pub fn new(plex: PlexState, db: DbHandle, settings: TrackingSettings) -> Self {
+        Self::with_reporter(Arc::new(plex), db, settings)
+    }
+
+    pub fn with_reporter(plex: Arc<dyn PlayReporter>, db: DbHandle, settings: TrackingSettings) -> Self {
         Self { plex, db, settings }
     }
 
+    fn reporting(&self) -> bool {
+        self.settings.report_to_plex.load(Ordering::Relaxed)
+    }
+
     async fn send_timeline(&self, r: TimelineReport) {
-        if !self.settings.report_to_plex.load(Ordering::Relaxed) {
+        if !self.reporting() {
             return;
         }
-        if let Ok(client) = self.plex.client().await
-            && let Err(e) = client.timeline(&r).await
-        {
+        if let Err(e) = self.plex.timeline(&r).await {
             tracing::debug!("timeline not sent: {}", e.kind());
         }
     }
 
     async fn scrobble(&self, play_id: Option<i64>, rating_key: String) {
-        if !self.settings.report_to_plex.load(Ordering::Relaxed) {
+        if !self.reporting() {
             return;
         }
-        let sent = match self.plex.client().await {
-            Ok(client) => client.scrobble(&rating_key).await.is_ok(),
-            Err(_) => false,
-        };
+        let sent = self.plex.scrobble(&rating_key).await.is_ok();
         let db = self.db.clone();
         let _ = db
             .write_async(move |c| {
@@ -188,7 +218,9 @@ impl Tracker {
 
     /// Send queued scrobbles, oldest first. Stops at the first failure.
     pub async fn replay_pending(&self) {
-        let Ok(client) = self.plex.client().await else { return };
+        if !self.reporting() || !self.plex.online().await {
+            return;
+        }
         let pending = match self.db.read_async(|c| listens::pending_reports(c, 200)).await {
             Ok(p) => p,
             Err(_) => return,
@@ -196,7 +228,7 @@ impl Tracker {
         let mut sent = Vec::new();
         for r in pending {
             let ok = match r.kind {
-                ReportKind::Scrobble => client.scrobble(&r.rating_key).await.is_ok(),
+                ReportKind::Scrobble => self.plex.scrobble(&r.rating_key).await.is_ok(),
                 ReportKind::Timeline => true, // stale timelines are dropped
             };
             if !ok {
@@ -220,17 +252,21 @@ impl Tracker {
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => break,
             };
-            for Report::Timeline(r) in reports_for(&mut cur, &ev) {
-                self.send_timeline(r).await;
-            }
-            if let Err(e) = self.log(&mut cur, &ev).await {
-                tracing::warn!("listen log: {e}");
-            }
+            self.handle(&mut cur, &ev).await;
+        }
+    }
+
+    async fn handle(&self, cur: &mut Current, ev: &TrackingEvent) {
+        for Report::Timeline(r) in reports_for(cur, ev) {
+            self.send_timeline(r).await;
+        }
+        if let Err(e) = self.log(cur, ev).await {
+            tracing::warn!("listen log: {e}");
         }
     }
 
     /// Local listen log + scrobble decisions.
-    async fn log(&self, cur: &mut Current, ev: &TrackingEvent) -> crate::error::AppResult<()> {
+    async fn log(&self, cur: &mut Current, ev: &TrackingEvent) -> AppResult<()> {
         let private = self.settings.private_session.load(Ordering::Relaxed);
         match ev {
             TrackingEvent::TrackStarted { track, at, context, .. } if !private => {
@@ -243,7 +279,7 @@ impl Tracker {
                     context_kind: kind,
                     context_id: id,
                     device: None,
-                    offline: self.plex.client().await.is_err(),
+                    offline: !self.plex.online().await,
                 };
                 cur.play_id = Some(self.db.write_async(move |c| listens::start_play(c, &start)).await?);
             }
@@ -368,5 +404,112 @@ mod tests {
             skipped_at_ms: None,
         };
         assert!(reports_for(&mut cur, &stale_end).is_empty());
+    }
+
+    // ------------------------------------------------------------ settings
+
+    #[derive(Default)]
+    struct Recorder {
+        timelines: parking_lot::Mutex<Vec<PlaybackState>>,
+        scrobbles: parking_lot::Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl PlayReporter for Recorder {
+        async fn online(&self) -> bool {
+            true
+        }
+        async fn timeline(&self, r: &TimelineReport) -> AppResult<()> {
+            self.timelines.lock().push(r.state);
+            Ok(())
+        }
+        async fn scrobble(&self, rating_key: &str) -> AppResult<()> {
+            self.scrobbles.lock().push(rating_key.to_string());
+            Ok(())
+        }
+    }
+
+    struct Rig {
+        tracker: Tracker,
+        rec: Arc<Recorder>,
+        db: DbHandle,
+        _dir: tempfile::TempDir,
+    }
+
+    fn rig(private: bool, report: bool) -> Rig {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DbHandle::open(dir.path().join("t.db")).unwrap();
+        let rec = Arc::new(Recorder::default());
+        let settings = TrackingSettings::default();
+        settings.private_session.store(private, Ordering::Relaxed);
+        settings.report_to_plex.store(report, Ordering::Relaxed);
+        let tracker = Tracker::with_reporter(rec.clone(), db.clone(), settings);
+        Rig { tracker, rec, db, _dir: dir }
+    }
+
+    /// Start a 200 s track, play 150 s of it and let it finish.
+    async fn full_play(t: &Tracker) {
+        let mut cur = Current::default();
+        let tr = track("7");
+        let evs = [
+            TrackingEvent::TrackStarted { track: tr.clone(), item_id: "q1".into(), at: 1_000_000, context: None },
+            TrackingEvent::Progress { track_id: "7".into(), position_ms: 150_000, duration_ms: 200_000 },
+            TrackingEvent::TrackEnded {
+                track: tr,
+                item_id: "q1".into(),
+                listened_ms: 200_000,
+                completed: true,
+                skipped_at_ms: None,
+            },
+        ];
+        for ev in &evs {
+            t.handle(&mut cur, ev).await;
+        }
+    }
+
+    fn listen_rows(db: &DbHandle) -> i64 {
+        db.read(|c| Ok(c.query_row("SELECT count(*) FROM listen_log", [], |r| r.get(0))?)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn normal_play_logs_and_reports() {
+        let r = rig(false, true);
+        full_play(&r.tracker).await;
+        assert_eq!(listen_rows(&r.db), 1);
+        assert_eq!(*r.rec.scrobbles.lock(), vec!["7".to_string()]);
+        assert!(!r.rec.timelines.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn private_session_writes_no_listen_log_but_still_reports() {
+        let r = rig(true, true);
+        full_play(&r.tracker).await;
+        assert_eq!(listen_rows(&r.db), 0);
+        assert!(!r.rec.timelines.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn report_off_makes_no_plex_calls() {
+        let r = rig(false, false);
+        full_play(&r.tracker).await;
+        assert_eq!(listen_rows(&r.db), 1);
+        assert!(r.rec.timelines.lock().is_empty());
+        assert!(r.rec.scrobbles.lock().is_empty());
+        // Nothing queued for later either.
+        let pending = r.db.read(|c| listens::pending_reports(c, 10)).unwrap();
+        assert!(pending.is_empty());
+        r.tracker.replay_pending().await;
+        assert!(r.rec.scrobbles.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn flags_change_take_effect_immediately() {
+        let r = rig(false, true);
+        r.tracker.settings.private_session.store(true, Ordering::Relaxed);
+        r.tracker.settings.report_to_plex.store(false, Ordering::Relaxed);
+        full_play(&r.tracker).await;
+        assert_eq!(listen_rows(&r.db), 0);
+        assert!(r.rec.timelines.lock().is_empty());
+        assert!(r.rec.scrobbles.lock().is_empty());
     }
 }
