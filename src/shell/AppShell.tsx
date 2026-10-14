@@ -23,6 +23,7 @@ import {
 } from "./layout";
 import { MainView } from "./MainView";
 import { NowPlayingExpanded, NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
+import { OutputPanel } from "./OutputPanel";
 import { PlayerBar } from "./PlayerBar";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
@@ -46,9 +47,10 @@ export function AppShell() {
   useOpenNowPlayingOnStart();
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
+  const outputOpen = useUi((s) => s.outputOpen);
   const expanded = useUi((s) => s.nowPlayingExpanded);
-  // The queue and the now-playing panel share the right slot, one at a time.
-  const rightView = queueOpen ? "queue" : nowPlayingOpen ? "nowPlaying" : null;
+  // The queue, the now-playing panel and the output picker share the right slot, one at a time.
+  const rightView = outputOpen ? "output" : queueOpen ? "queue" : nowPlayingOpen ? "nowPlaying" : null;
   const rightOpen = rightView !== null;
   // One panel replacing the other rises in place of sliding in from the edge.
   const [slot, setSlot] = useState<{ view: typeof rightView; swap: boolean }>({ view: rightView, swap: false });
@@ -128,7 +130,7 @@ export function AppShell() {
           <>
             <ResizeHandle
               className="resize-handle--right"
-              label={queueOpen ? "Resize queue" : "Resize now playing view"}
+              label={outputOpen ? "Resize device picker" : queueOpen ? "Resize queue" : "Resize now playing view"}
               value={layout.right}
               min={RIGHT_MIN}
               max={RIGHT_MAX}
@@ -141,7 +143,7 @@ export function AppShell() {
                 return true;
               }}
             />
-            {queueOpen ? <QueuePanel /> : <NowPlayingPanel />}
+            {outputOpen ? <OutputPanel /> : queueOpen ? <QueuePanel /> : <NowPlayingPanel />}
           </>
         ) : (
           <div className="right-strip">

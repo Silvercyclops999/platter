@@ -24,6 +24,7 @@ import type {
 } from "../lib/types";
 import { useApp } from "../stores/app";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
+import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 
@@ -458,6 +459,13 @@ export function SettingsPage() {
       title: "Private session",
       description: "Plays aren't saved to your listening history on this device. Plex still counts them unless you turn that off above.",
       control: (ids) => toggle(s, "privateSession", ids),
+    },
+    {
+      key: "outputDevice",
+      section: "Playback",
+      title: "Output device",
+      description: "Where music plays on this computer. System default follows your computer's sound setting. If the device you pick is unplugged, Platter pauses and switches to the system default.",
+      control: (ids) => <OutputDeviceSelect ids={ids} />,
     },
     // Library
     {

@@ -361,7 +361,7 @@ export function useOpenNowPlayingOnStart() {
         const id = s.state?.track?.id;
         if (!id || !prev.state || id === prev.state.track?.id || !isPlaying(s.state?.status)) return;
         const ui = useUi.getState();
-        if (ui.nowPlayingPrefs.openOnStart && !ui.queueOpen && !ui.nowPlayingOpen) ui.setNowPlayingOpen(true);
+        if (ui.nowPlayingPrefs.openOnStart && !ui.queueOpen && !ui.nowPlayingOpen && !ui.outputOpen) ui.setNowPlayingOpen(true);
       }),
     [],
   );

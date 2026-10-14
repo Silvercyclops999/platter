@@ -28,6 +28,7 @@ import type {
   HomeData,
   LibraryItem,
   NowPlayingDetails,
+  OutputState,
   Page,
   PinInfo,
   PlayContextArgs,
@@ -101,6 +102,12 @@ export interface Backend {
   queueClear(): Promise<void>;
   queueJump(itemId: string): Promise<void>;
   playerState(): Promise<PlayerState>;
+
+  // Output devices
+  /** Audio outputs on this computer, the chosen one and the one in use. */
+  outputDevices(): Promise<OutputState>;
+  /** Play on a device (null: the system default), keeping position and play state. */
+  outputSelect(deviceId: string | null): Promise<OutputState>;
 
   // Health and app states
   health(): Promise<Health>;
@@ -191,6 +198,8 @@ export function createTauriBackend(): Backend {
     queueClear: () => call("queue_clear"),
     queueJump: (itemId) => call("queue_jump", { itemId }),
     playerState: () => call("player_state"),
+    outputDevices: () => call("output_devices"),
+    outputSelect: (deviceId) => call("output_select", { deviceId }),
 
     health: () => call("health"),
     cachedTracks: () => call("cached_tracks"),

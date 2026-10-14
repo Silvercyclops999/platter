@@ -163,6 +163,33 @@ Events:
 - `player://position` → `{ positionMs, durationMs, bufferedMs }` (4×/s while playing)
 - `player://error` → `{ trackId?, kind, message }` (e.g. "Skipped: file unavailable")
 
+## Output devices
+| Command | Args |
+| --- | --- |
+| `output_devices` | – → `OutputState` |
+| `output_select` | `{ deviceId: string \| null }` → `OutputState` (null follows the system default) |
+
+`OutputState = { devices: OutputDevice[], selected: string | null, current: OutputDevice | null }`
+`OutputDevice = { id, name, isDefault }`
+
+`id` is the OS's stable device id. `selected` is the chosen device, or null
+when playback follows the system default. `current` is the device playing, or
+the one the next play would open. Switching moves the open stream at once and
+keeps the position and play state. The choice is saved as the
+`outputDevice` setting (this device only); `settings_set` doesn't change it.
+An unknown id is a `notFound` error.
+
+While following the system default, a change of default moves playback to
+the new device without stopping. If the device in use is unplugged, playback
+pauses and Play resumes on whatever output is there. If that device was the
+chosen one, the choice drops back to the system default for this session
+and `output://lost` fires; the saved setting is kept, so the device is used
+again at the next start if it's back.
+
+Events:
+- `output://changed` → `OutputState` (after a switch, a fallback, or a reroute)
+- `output://lost` → `{ device }` (name of the chosen device that went away)
+
 ## Health and app states
 | Command | Returns |
 | --- | --- |
@@ -209,6 +236,7 @@ The rest of the fields, with their defaults:
 | `artCacheMb` | 128 to 51200, 2048 | Artwork cache size. Shrinking it removes the oldest images at once. |
 | `artworkColours` | bool, true | Headers tint from artwork. Off gives every header the same neutral colour. |
 | `reduceMotion` | `"system"`, `"on"`, `"off"` | Follow the OS setting, or force reduced motion on or off. |
+| `outputDevice` | device id or null, null | Read only here. Set with `output_select`; null follows the system default. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

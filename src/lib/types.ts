@@ -424,6 +424,9 @@ export interface Settings {
   artCacheMb: number;
   artworkColours: boolean;
   reduceMotion: ReduceMotion;
+  /** Chosen output device id; null follows the system default. Read only:
+   *  change it with `outputSelect`. */
+  outputDevice?: string | null;
   [key: string]: unknown;
 }
 
@@ -441,7 +444,26 @@ export const DEFAULT_SETTINGS: Settings = {
   artCacheMb: 2048,
   artworkColours: true,
   reduceMotion: "system",
+  outputDevice: null,
 };
+
+// ---------------------------------------------------------------- output devices
+
+/** An audio output device on this computer. */
+export interface OutputDevice {
+  id: string;
+  name: string;
+  /** The system default output right now. */
+  isDefault: boolean;
+}
+
+export interface OutputState {
+  devices: OutputDevice[];
+  /** The chosen device id; null follows the system default. */
+  selected: string | null;
+  /** The device playing, or the one the next play would open. */
+  current: OutputDevice | null;
+}
 
 export interface ArtCacheInfo {
   usedBytes: number;
@@ -474,6 +496,10 @@ export interface EventMap {
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;
+  /** Output devices or the device in use changed. */
+  "output://changed": OutputState;
+  /** The chosen output device went away; playback paused and moved to the system default. */
+  "output://lost": { device: string };
   "health://changed": Health;
   toast: ToastEvent;
   "update://ready": { version: string };

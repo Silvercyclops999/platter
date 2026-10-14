@@ -68,7 +68,8 @@ describe("PlayerBar reflects the mock player", () => {
   it("Phase 3 buttons are present but inert", () => {
     render(<PlayerBar />);
     expect(screen.getByRole("button", { name: "Lyrics" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("button", { name: "Connect to a device" })).toHaveAttribute("aria-disabled", "true");
+    // The device picker works now (output picker tests cover it).
+    expect(screen.getByRole("button", { name: "Connect to a device" })).not.toHaveAttribute("aria-disabled");
   });
 });
 

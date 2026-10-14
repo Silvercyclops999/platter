@@ -29,6 +29,8 @@ import type {
   EventName,
   Health,
   LibraryItem,
+  OutputDevice,
+  OutputState,
   PinInfo,
   PlayContextArgs,
   PlayerState,
@@ -109,6 +111,13 @@ const SERVER: ServerInfo = {
   connection: "local",
 };
 
+/** Invented audio outputs; the first is the system default. */
+const MOCK_OUTPUTS: OutputDevice[] = [
+  { id: "mock:speakers", name: "Speakers (Built-in Audio)", isDefault: true },
+  { id: "mock:headphones", name: "Headphones (USB Audio DAC)", isDefault: false },
+  { id: "mock:hdmi", name: "Living Room Receiver (HDMI)", isDefault: false },
+];
+
 const clone = <T,>(v: T): T => (typeof structuredClone === "function" ? structuredClone(v) : JSON.parse(JSON.stringify(v)));
 
 export class MockBackend implements Backend {
@@ -126,6 +135,9 @@ export class MockBackend implements Backend {
   // search
   private recent: string[] = ["lantern", "Odessa Wren", "saltglass"];
   private settings: Settings = { ...DEFAULT_SETTINGS };
+  // output devices (invented)
+  private outputs: OutputDevice[] = MOCK_OUTPUTS.map((d) => ({ ...d }));
+  private outputSelected: string | null = null;
   /** Bytes in the (pretend) artwork cache. */
   private artUsed = 412 * 1024 * 1024;
 
@@ -826,6 +838,56 @@ export class MockBackend implements Backend {
   playResume() {
     return this.act(() => this.resumeNow());
   }
+
+  // ---------------------------------------------------------------- output devices
+
+  private outputState(): OutputState {
+    const sel = this.outputs.find((d) => d.id === this.outputSelected);
+    return {
+      devices: this.outputs,
+      selected: this.outputSelected,
+      current: sel ?? this.outputs.find((d) => d.isDefault) ?? null,
+    };
+  }
+  outputDevices() {
+    return this.delay(() => this.outputState());
+  }
+  outputSelect(deviceId: string | null) {
+    return this.delay(() => {
+      if (deviceId !== null && !this.outputs.some((d) => d.id === deviceId)) this.notFound("Output device");
+      // Same as the core: position and play state carry over.
+      this.outputSelected = deviceId;
+      this.settings.outputDevice = deviceId;
+      const s = this.outputState();
+      this.emit("output://changed", s);
+      return s;
+    });
+  }
+  /** Test/demo hook: an output device is unplugged. If it was the chosen
+   *  one, the core pauses, falls back to the system default and says so. */
+  unplugOutput(id: string) {
+    const gone = this.outputs.find((d) => d.id === id);
+    if (!gone) return;
+    this.outputs = this.outputs.filter((d) => d.id !== id);
+    if (gone.isDefault && this.outputs[0]) this.outputs = this.outputs.map((d, i) => ({ ...d, isDefault: i === 0 }));
+    const chosen = this.outputSelected === id;
+    const followedDefault = this.outputSelected === null && gone.isDefault;
+    if (chosen) this.outputSelected = null;
+    if (chosen || followedDefault) this.loseDevice();
+    this.emit("output://changed", this.outputState());
+    if (chosen) this.emit("output://lost", { device: gone.name });
+  }
+  /** Test/demo hook: a device is plugged in. */
+  plugOutput(device: OutputDevice) {
+    this.outputs = [...this.outputs.filter((d) => d.id !== device.id), device];
+    this.emit("output://changed", this.outputState());
+  }
+  /** Test hook: the starting devices, following the system default. */
+  resetOutputs() {
+    this.outputs = MOCK_OUTPUTS.map((d) => ({ ...d }));
+    this.outputSelected = null;
+    this.settings.outputDevice = null;
+  }
   private pauseNow() {
     if (this.status !== "playing") return;
     this.status = "paused";
@@ -997,6 +1059,8 @@ export class MockBackend implements Backend {
       // Same ranges as the core.
       next.precacheCount = Math.min(50, Math.max(1, Math.round(next.precacheCount)));
       next.artCacheMb = Math.min(51_200, Math.max(128, Math.round(next.artCacheMb)));
+      // Only outputSelect changes the output device.
+      next.outputDevice = this.settings.outputDevice;
       this.settings = next;
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));

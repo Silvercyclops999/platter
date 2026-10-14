@@ -69,6 +69,9 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["queue_clear", (b) => b.queueClear(), undefined],
   ["queue_jump", (b) => b.queueJump("q2"), { itemId: "q2" }],
   ["player_state", (b) => b.playerState(), undefined],
+  ["output_devices", (b) => b.outputDevices(), undefined],
+  ["output_select", (b) => b.outputSelect("dev-1"), { deviceId: "dev-1" }],
+  ["output_select", (b) => b.outputSelect(null), { deviceId: null }],
   ["health", (b) => b.health(), undefined],
   ["cached_tracks", (b) => b.cachedTracks(), undefined],
   ["settings_get", (b) => b.settingsGet(), undefined],
@@ -89,6 +92,8 @@ const EVENTS = [
   "player://state",
   "player://position",
   "player://error",
+  "output://changed",
+  "output://lost",
   "health://changed",
   "toast",
   "update://ready",
@@ -187,6 +192,9 @@ describe("mock backend covers the whole contract", () => {
     await m.playContext({ context: { kind: "album", id: broken.albumId }, startTrackId: broken.id });
     await m.playResume();
     vi.advanceTimersByTime(300);
+    // Choosing a device, then unplugging it: output://changed and output://lost.
+    await m.outputSelect("mock:headphones");
+    m.unplugOutput("mock:headphones");
     vi.useRealTimers();
     expect([...seen].sort()).toEqual([...EVENTS].sort());
     m.dispose();

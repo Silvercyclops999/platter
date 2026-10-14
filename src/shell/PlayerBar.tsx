@@ -161,6 +161,8 @@ export function PlayerBar() {
   const queueOpen = useUi((s) => s.queueOpen);
   const toggleQueue = useUi((s) => s.toggleQueue);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
+  const outputOpen = useUi((s) => s.outputOpen);
+  const toggleOutput = useUi((s) => s.toggleOutput);
   const track = state?.track;
   const playing = state?.status === "playing" || state?.status === "buffering" || state?.status === "loading";
   const repeat = state?.repeat ?? "off";
@@ -243,7 +245,7 @@ export function PlayerBar() {
         <PrivateSession />
         <IconButton label="Lyrics" tooltip="Lyrics arrive in Phase 3" softDisabled icon={<MicVocal size={18} />} />
         <IconButton label="Queue" pressed={queueOpen} icon={<ListMusic size={18} />} onClick={toggleQueue} />
-        <IconButton label="Connect to a device" tooltip="Devices arrive in Phase 3" softDisabled icon={<MonitorSpeaker size={18} />} />
+        <IconButton label="Connect to a device" pressed={outputOpen} icon={<MonitorSpeaker size={18} />} onClick={toggleOutput} />
         <Volume />
       </div>
     </footer>

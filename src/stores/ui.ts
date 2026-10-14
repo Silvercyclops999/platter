@@ -119,6 +119,12 @@ interface UiState extends PanelWidths {
   queueOpen: boolean;
   /** The right slot shows the now-playing panel. */
   nowPlayingOpen: boolean;
+  /** The right slot shows the output device picker (it takes the slot from either panel). */
+  outputOpen: boolean;
+  /** What the slot showed before the picker opened; closing the picker returns to it. */
+  outputReturn: "queue" | "nowPlaying" | null;
+  toggleOutput: () => void;
+  setOutputOpen: (v: boolean) => void;
   /** The now-playing view fills the main area (only while nowPlayingOpen). */
   nowPlayingExpanded: boolean;
   nowPlayingPrefs: NowPlayingPrefs;
@@ -162,9 +168,24 @@ export const useUi = create<UiState>()((set, get) => ({
   nowPlayingOpen: false,
   nowPlayingExpanded: false,
   nowPlayingPrefs: loadNowPlayingPrefs(),
+  outputOpen: false,
+  outputReturn: null,
+  toggleOutput: () => get().setOutputOpen(!get().outputOpen),
+  setOutputOpen: (v) => {
+    const s = get();
+    if (v === s.outputOpen) return;
+    if (v) {
+      const outputReturn = s.queueOpen ? "queue" : s.nowPlayingOpen ? "nowPlaying" : null;
+      set({ outputOpen: true, outputReturn, queueOpen: false, nowPlayingOpen: false, nowPlayingExpanded: false });
+    } else {
+      set({ outputOpen: false, outputReturn: null, queueOpen: s.outputReturn === "queue", nowPlayingOpen: s.outputReturn === "nowPlaying" });
+    }
+  },
   toggleNowPlaying: () => get().setNowPlayingOpen(!get().nowPlayingOpen),
-  setNowPlayingOpen: (v) => set(v ? { nowPlayingOpen: true, queueOpen: false } : { nowPlayingOpen: false, nowPlayingExpanded: false }),
-  setNowPlayingExpanded: (v) => set(v ? { nowPlayingExpanded: true, nowPlayingOpen: true, queueOpen: false } : { nowPlayingExpanded: false }),
+  setNowPlayingOpen: (v) =>
+    set(v ? { nowPlayingOpen: true, queueOpen: false, outputOpen: false, outputReturn: null } : { nowPlayingOpen: false, nowPlayingExpanded: false }),
+  setNowPlayingExpanded: (v) =>
+    set(v ? { nowPlayingExpanded: true, nowPlayingOpen: true, queueOpen: false, outputOpen: false, outputReturn: null } : { nowPlayingExpanded: false }),
   setNowPlayingPrefs: (p) => {
     const nowPlayingPrefs = { ...get().nowPlayingPrefs, ...p };
     set({ nowPlayingPrefs });
@@ -184,7 +205,8 @@ export const useUi = create<UiState>()((set, get) => ({
   },
   toggleQueue: () => get().setQueueOpen(!get().queueOpen),
   // The queue takes the right slot from the now-playing panel (and its expanded view).
-  setQueueOpen: (v) => set(v ? { queueOpen: true, nowPlayingOpen: false, nowPlayingExpanded: false } : { queueOpen: false }),
+  setQueueOpen: (v) =>
+    set(v ? { queueOpen: true, nowPlayingOpen: false, nowPlayingExpanded: false, outputOpen: false, outputReturn: null } : { queueOpen: false }),
   setPaletteOpen: (v) => set({ paletteOpen: v }),
   focusSearch: () => set({ searchFocusTick: get().searchFocusTick + 1 }),
   openMenu: (m) =>
