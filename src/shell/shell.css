@@ -222,6 +222,7 @@
 .main-header__nav .icon-btn:disabled:hover { transform: none; background: rgba(0, 0, 0, 0.42); }
 .main-header__search { flex: 1; }
 .main-header__end { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.main-header__end .icon-btn[aria-current="page"] { background: var(--color-bg-overlay); color: var(--color-accent); }
 .sync-pill {
   display: inline-flex;
   align-items: center;

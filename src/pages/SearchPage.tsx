@@ -366,8 +366,14 @@ export function SearchPage({ query }: { query: string }) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         if (!picks.length) return;
         e.preventDefault();
-        const next = e.key === "ArrowDown" ? Math.min(sel + 1, picks.length - 1) : Math.max(sel - 1, -1);
-        setSel(next);
+        // Functional update: several presses can land before the next render.
+        const last = picks.length - 1;
+        const down = e.key === "ArrowDown";
+        setSel((s) => {
+          const next = down ? Math.min(s + 1, last) : Math.max(s - 1, -1);
+          live.current.sel = next;
+          return next;
+        });
       } else if (e.key === "Enter" && sel >= 0 && picks[sel]) {
         e.preventDefault();
         if (q) backend.recentSearchAdd(q).catch(() => {});

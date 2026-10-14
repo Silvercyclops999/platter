@@ -58,7 +58,7 @@ export function SettingsPage() {
           onChange={(v) => updateSettings({ reportToPlex: v })}
         />
       </section>
-      <p className="settings__hint">Open settings any time with {modKey}+,</p>
+      <p className="settings__hint">Shortcut: {modKey}+,</p>
     </div>
   );
 }
