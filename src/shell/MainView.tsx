@@ -11,6 +11,7 @@ import { ArtistShelfPage, HomeShelfPage } from "../pages/HomeShelfPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { LikedPage } from "../pages/LikedPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
+import { RecentsPage } from "../pages/RecentsPage";
 import { SearchPage } from "../pages/SearchPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { useApp } from "../stores/app";
@@ -109,6 +110,8 @@ function Page({ route }: { route: Route }) {
       return <LikedPage />;
     case "settings":
       return <SettingsPage />;
+    case "recents":
+      return <RecentsPage />;
     case "homeShelf":
       return <HomeShelfPage shelf={route.shelf} />;
     case "artistShelf":

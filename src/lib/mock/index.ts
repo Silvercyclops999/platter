@@ -77,6 +77,7 @@ import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
 import * as eq from "./eq";
 import { MockHome, type ContextPlay } from "./home";
 import { MockLikes } from "./likes";
+import { buildRecents, seedListens, type MockListen } from "./recents";
 import { MockPlaylists } from "./playlists";
 import { MockRemote } from "./remote";
 import { MockShare } from "./share";
@@ -229,6 +230,8 @@ export class MockBackend implements Backend {
   private history: QueueItem[] = [];
   /** Plays started from an album, artist or playlist (feeds Home). */
   private contextPlays: ContextPlay[] = [];
+  /** The listen log: every play here (feeds Recents and Recently played). */
+  private listens: MockListen[] = [];
   private ctxInfo: QueueContextInfo | null = null;
   /** Context ids with shuffle on, least recently used first. */
   private shuffledIds: string[] = [];
@@ -254,6 +257,7 @@ export class MockBackend implements Backend {
       (message) => this.emit("toast", { kind: "error", message }),
     );
     this.contextPlays = this.seedContextPlays();
+    this.listens = seedListens(this.fx, this.likes.ids());
     this.share = new MockShare(
       this.fx,
       () => this.settings,
@@ -744,21 +748,18 @@ export class MockBackend implements Backend {
       };
     });
   }
-  /** Like the listen log: what played here, newest first, once each; earlier plays from the fixtures after. */
+  /** The listen log: what played here, newest first, repeats kept. */
   recentTracks(limit = 50) {
-    return this.delay(() => {
-      const seen = new Set<string>();
-      const out: Track[] = [];
-      const played = [...(this.current ? [this.current.track] : []), ...[...this.history].reverse().map((i) => i.track)];
-      const earlier = this.fx.tracks.filter((t) => t.lastViewedAt).sort((a, b) => b.lastViewedAt! - a.lastViewedAt!);
-      for (const t of [...played, ...earlier]) {
-        if (out.length >= limit) break;
-        if (seen.has(t.id)) continue;
-        seen.add(t.id);
-        out.push(t);
-      }
-      return out;
-    });
+    return this.delay(() =>
+      [...this.listens]
+        .sort((a, b) => b.at - a.at)
+        .map((l) => this.trackById(l.trackId))
+        .filter((t): t is Track => !!t)
+        .slice(0, limit),
+    );
+  }
+  recents(limit?: number) {
+    return this.delay(() => buildRecents(this.fx, this.listens, this.likes.likedTracks(), (id) => this.trackById(id), Date.now(), limit));
   }
   playlistPage(id: string) {
     return this.delay(() => {
@@ -866,6 +867,15 @@ export class MockBackend implements Backend {
       this.exported.push({ text, fileName: name });
       return name;
     });
+  }
+
+  /** A play for the listen log, credited to the context it came from. */
+  private logListen(track: Track) {
+    const c = this.ctxInfo;
+    const kind: MockListen["kind"] =
+      c && (c.kind === "album" || c.kind === "artist" || c.kind === "playlist") && c.id ? c.kind : c?.kind === "liked" ? "liked" : "songs";
+    const at = Date.now();
+    this.listens.push({ trackId: track.id, at, end: at + track.durationMs, kind, id: kind === "liked" || kind === "songs" ? undefined : c?.id ?? undefined });
   }
 
   private trackById(id: string): Track | undefined {
@@ -1180,6 +1190,7 @@ export class MockBackend implements Backend {
   private setCurrent(item: QueueItem | null, play: boolean, startMs = 0) {
     // Like the core: a loop belongs to one track.
     if (item !== this.current) this.abLoop = null;
+    if (item && play && item !== this.current) this.logListen(item.track);
     this.current = item;
     this.positionMs = startMs;
     if (item && item.track.title.endsWith(BROKEN_TRACK_TITLE_SUFFIX) && play) {

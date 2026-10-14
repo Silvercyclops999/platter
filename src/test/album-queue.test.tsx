@@ -241,18 +241,18 @@ describe("queue panel", () => {
     await act(() => mock.playPause());
   });
 
-  it("Recently played lists the listen log, once each, and plays from a row", async () => {
+  it("Recently played lists the listen log with repeats, and plays from a row", async () => {
     const user = userEvent.setup();
-    const [a, b, c] = mock.fx.tracks;
-    vi.spyOn(backend, "recentTracks").mockResolvedValue([a, b, c]);
+    const [a, b] = mock.fx.tracks;
+    vi.spyOn(backend, "recentTracks").mockResolvedValue([a, b, a]);
     const play = vi.spyOn(backend, "playContext").mockResolvedValue();
     render(<QueuePanel />);
     await user.click(screen.getByRole("tab", { name: "Recently played" }));
     const list = await screen.findByRole("list", { name: "Recently played" });
-    expect(within(list).getAllByRole("listitem").map((i) => i.getAttribute("data-track-id"))).toEqual([a.id, b.id, c.id]);
+    expect(within(list).getAllByRole("listitem").map((i) => i.getAttribute("data-track-id"))).toEqual([a.id, b.id, a.id]);
     fireEvent.doubleClick(within(list).getAllByRole("listitem")[1]);
     await waitFor(() => expect(play).toHaveBeenCalled());
-    expect(play.mock.calls[0][0]).toMatchObject({ context: { kind: "tracks", trackIds: [a.id, b.id, c.id] }, startTrackId: b.id });
+    expect(play.mock.calls[0][0]).toMatchObject({ context: { kind: "tracks", trackIds: [a.id, b.id, a.id] }, startTrackId: b.id });
   });
 
   it("Recently played says so when there's nothing, including when the log can't be read", async () => {

@@ -548,15 +548,13 @@ pub fn playlist_page(c: &Connection, id: &str) -> AppResult<PlaylistPage> {
     Ok(PlaylistPage { playlist, tracks, item_ids })
 }
 
-/// Songs played on this device (the listen log), newest first, each once.
-/// Songs no longer in the library are skipped. For the queue panel's
-/// Recently played tab.
+/// Songs played on this device (the listen log), newest first. A song
+/// played twice shows twice. Songs no longer in the library are skipped.
+/// For the queue panel's Recently played tab.
 pub fn recent_tracks(c: &Connection, limit: usize) -> AppResult<Vec<Track>> {
     let mut st = c.prepare_cached(&format!(
-        "SELECT {TRACK_COLS} FROM (
-             SELECT rating_key, max(started_at) AS at, max(id) AS seq FROM listen_log GROUP BY rating_key
-         ) l JOIN tracks t ON t.id = l.rating_key
-         ORDER BY l.at DESC, l.seq DESC LIMIT ?1"
+        "SELECT {TRACK_COLS} FROM listen_log l JOIN tracks t ON t.id = l.rating_key
+         ORDER BY l.started_at DESC, l.id DESC LIMIT ?1"
     ))?;
     Ok(st.query_map([limit as i64], row_track)?.collect::<Result<Vec<_>, _>>()?)
 }

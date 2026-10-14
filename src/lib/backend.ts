@@ -35,6 +35,7 @@ import type {
   Health,
   HomeData,
   HomeItem,
+  RecentsEntry,
   HomeShelfId,
   InfoKeyState,
   InfoKeysStatus,
@@ -101,8 +102,10 @@ export interface Backend {
   artistPage(id: string): Promise<ArtistPage>;
   albumPage(id: string): Promise<AlbumPage>;
   playlistPage(id: string): Promise<PlaylistPage>;
-  /** Songs played on this device, newest first, each once (the queue panel's Recently played). */
+  /** Songs played on this device, newest first, repeats kept (the queue panel's Recently played). */
   recentTracks(limit?: number): Promise<Track[]>;
+  /** Listening sessions and likes for the Recents page, newest first. */
+  recents(limit?: number): Promise<RecentsEntry[]>;
 
   // Playlist editing (docs/IPC.md "Playlist editing")
   /** A new playlist, named from Settings unless `title` is given, holding `trackIds`. */
@@ -324,6 +327,7 @@ export function createTauriBackend(): Backend {
     albumPage: (id) => call("album_page", { id }),
     playlistPage: (id) => call("playlist_page", { id }),
     recentTracks: (limit) => call("recent_tracks", { limit }),
+    recents: (limit) => call("recents", { limit }),
     playlistCreate: (title, trackIds) => call("playlist_create", { title, trackIds }),
     playlistAdd: (id, trackIds, place) => call("playlist_add", { id, trackIds, after: place?.after, top: place?.top }),
     playlistDuplicates: (id, trackIds) => call("playlist_duplicates", { id, trackIds }),

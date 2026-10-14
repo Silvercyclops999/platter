@@ -21,6 +21,8 @@ export type Route =
   /** Liked Songs. */
   | { name: "liked" }
   | { name: "settings" }
+  /** What was played here, by day and listening session. */
+  | { name: "recents" }
   /** Lyrics for the playing song: never a page, it opens the expanded view in lyrics mode. */
   | { name: "lyrics" }
   /** A Home shelf's "Show all" grid. */

@@ -65,7 +65,8 @@ Event `auth://changed` → `AuthStatus`.
 | `library_items` | – | `LibraryItem[]` (every playlist, album and artist, unordered) |
 | `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[], appearsOn: Album[] }` |
 | `album_page` | `{ id }` | `AlbumPage { album, tracks: Track[], totalDurationMs, moreByArtist: Album[], artistThumb?, released?, studio? }` (`released` is YYYY-MM-DD and `studio` the label, both from Plex when it has them) |
-| `recent_tracks` | `{ limit?: number }` | `Track[]` played on this device (the listen log), newest first, each once; limit defaults to 50 and caps at 200 |
+| `recent_tracks` | `{ limit?: number }` | `Track[]` played on this device (the listen log), newest first, repeats kept; limit defaults to 50 and caps at 200 |
+| `recents` | `{ limit?: number }` | `RecentsEntry[]` for the Recents page, newest first (see below) |
 | `playlist_page` | `{ id }` | `{ playlist, tracks: Track[] }` |
 
 `Page<T> = { items: T[], total }`.
@@ -78,6 +79,17 @@ the most played album, artist and playlist in turn, then more recent ones,
 with no repeats. `playlists` puts the ones played on this computer first,
 newest first, then the rest by title. `topArtists` is artists by play count,
 played ones only.
+
+`recents` reads the listen log for the last 90 days (300 entries at most).
+`RecentsEntry` is `{ kind, item?, at, tracks: Track[] }`. Plays are grouped
+into listening sessions: back-to-back plays from the same album, artist,
+playlist, Liked Songs (`kind: "liked"`) or from no single context
+(`kind: "songs"`), with less than 30 minutes between one song's end and the
+next one's start. `kind: "context"` carries the album, artist or playlist as
+a `HomeItem` in `item`. Skips aren't plays and are left out. Likes in the
+same window show as `kind: "likedAdded"`, grouped the same way by their
+rating time. `at` is the newest play or like in unix ms, and `tracks` is
+newest first with repeats kept.
 `artist_names` feeds the artist links in track lines: the UI loads it once,
 keeps it, and loads it again after `library://changed` (and shortly after
 `artistinfo://changed`, which can teach new names). It ends with names that

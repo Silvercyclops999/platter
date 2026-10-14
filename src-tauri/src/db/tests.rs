@@ -890,7 +890,7 @@ async fn album_page_has_release_date_label_and_artist_photo() {
 }
 
 #[tokio::test]
-async fn recent_tracks_are_newest_first_once_each() {
+async fn recent_tracks_are_newest_first_with_repeats() {
     let t = open();
     sync(&t.db, &Arc::new(FakeSource::new(sectioned_library())), false).await;
     t.db.write(|c| {
@@ -901,9 +901,81 @@ async fn recent_tracks_are_newest_first_once_each() {
     })
     .unwrap();
     let ids: Vec<_> = t.db.read(|c| queries::recent_tracks(c, 10)).unwrap().into_iter().map(|t| t.id).collect();
-    assert_eq!(ids, vec!["131", "111", "121"], "deduped, newest first, missing songs skipped");
+    assert_eq!(ids, vec!["131", "111", "121", "111"], "newest first, repeats kept, missing songs skipped");
     let ids: Vec<_> = t.db.read(|c| queries::recent_tracks(c, 2)).unwrap().into_iter().map(|t| t.id).collect();
     assert_eq!(ids, vec!["131", "111"]);
+}
+
+#[tokio::test]
+async fn recents_group_plays_into_sessions_by_context_with_likes() {
+    use super::history::{self, RecentsKind};
+    let t = open();
+    let mut lib = sectioned_library();
+    let min = 60_000;
+    let base = 1_700_000_000_000i64;
+    // Two songs liked a minute apart, an hour before the first play.
+    for (id, at) in [("101", base / 1000 - 3600), ("102", base / 1000 - 3540)] {
+        let tr = lib.tracks.iter_mut().find(|t| t.id == id).unwrap();
+        tr.user_rating = Some(10.0);
+        tr.rated_at = Some(at);
+    }
+    sync(&t.db, &Arc::new(FakeSource::new(lib)), false).await;
+    let ctx = |kind: Option<ContextKind>, id: Option<&str>, key: &str, at: i64, skipped: bool| {
+        t.db.write(|c| {
+            let p = listens::start_play(c, &PlayStart {
+                rating_key: key.into(),
+                part_key: None,
+                started_at: at,
+                duration_ms: 3 * min as u64,
+                context_kind: kind,
+                context_id: id.map(str::to_string),
+                device: None,
+                offline: false,
+            })?;
+            let heard = if skipped { 5_000 } else { 3 * min as u64 };
+            listens::end_play(c, p, at + heard as i64, heard, heard, !skipped).map(|_| ())
+        })
+        .unwrap();
+    };
+    ctx(Some(ContextKind::Album), Some("11"), "111", base, false);
+    ctx(Some(ContextKind::Album), Some("11"), "112", base + 3 * min, false);
+    ctx(Some(ContextKind::Album), Some("11"), "112", base + 6 * min, true); // a skip: not a play
+    ctx(Some(ContextKind::Search), None, "121", base + 10 * min, false);
+    ctx(None, None, "gone", base + 13 * min, false); // not in the library
+    ctx(Some(ContextKind::Artist), Some("1"), "131", base + 14 * min, false);
+    ctx(Some(ContextKind::Album), Some("11"), "111", base + 120 * min, false); // back later: a new session
+    ctx(Some(ContextKind::Liked), None, "101", base + 124 * min, false);
+    ctx(Some(ContextKind::Playlist), Some("nope"), "141", base + 127 * min, false); // playlist gone: loose songs
+
+    let got = t.db.read(|c| history::recents(c, base - 86_400_000, 10.0, 50)).unwrap();
+    let summary: Vec<_> = got
+        .iter()
+        .map(|e| {
+            let what = match (&e.kind, &e.item) {
+                (RecentsKind::Context, Some(i)) => format!("{}:{}", i.key().0, i.key().1),
+                (k, _) => format!("{k:?}"),
+            };
+            (what, e.tracks.iter().map(|t| t.id.clone()).collect::<Vec<_>>())
+        })
+        .collect();
+    let s = |w: &str, ids: &[&str]| (w.to_string(), ids.iter().map(|i| i.to_string()).collect::<Vec<_>>());
+    assert_eq!(
+        summary,
+        vec![
+            s("Songs", &["141"]),
+            s("Liked", &["101"]),
+            s("album:11", &["111"]),
+            s("artist:1", &["131"]),
+            s("Songs", &["121"]),
+            s("album:11", &["112", "111"]),
+            s("LikedAdded", &["102", "101"]),
+        ],
+    );
+    assert_eq!(got[0].at, base + 127 * min);
+    // The limit keeps the newest.
+    assert_eq!(t.db.read(|c| history::recents(c, base - 86_400_000, 10.0, 2)).unwrap().len(), 2);
+    // Older than the window: left out.
+    assert!(t.db.read(|c| history::recents(c, base + 200 * min, 10.0, 50)).unwrap().is_empty());
 }
 
 #[tokio::test]

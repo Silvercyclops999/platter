@@ -194,7 +194,8 @@ export function HomePage() {
                   key={s.id}
                   title={s.title}
                   skeletonKind={s.id === "topArtists" ? "artist" : "album"}
-                  onShowAll={() => nav.go({ name: "homeShelf", shelf: s.id })}
+                  // Recently played's Show all is the Recents page.
+                  onShowAll={() => nav.go(s.id === "recentlyPlayed" ? { name: "recents" } : { name: "homeShelf", shelf: s.id })}
                 >
                   {s.items.map((item) => (
                     <ShelfItem key={homeItemInfo(item).key}>

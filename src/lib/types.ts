@@ -201,6 +201,20 @@ export interface HomeData {
   topArtists: Artist[];
 }
 
+/** What a Recents row is: a listening session from an album, artist or
+ *  playlist (`item`), from Liked Songs, of loose songs, or songs liked. */
+export type RecentsKind = "context" | "liked" | "songs" | "likedAdded";
+
+/** One row on the Recents page (`recents`). */
+export interface RecentsEntry {
+  kind: RecentsKind;
+  item?: HomeItem | null;
+  /** Newest play or like in the row, unix ms. */
+  at: number;
+  /** Newest first; a song played twice shows twice. */
+  tracks: Track[];
+}
+
 /** A Home shelf, for its "Show all" page (`home_shelf`). */
 export type HomeShelfId = "recentlyPlayed" | "jumpBackIn" | "playlists" | "recentlyAdded" | "topArtists";
 

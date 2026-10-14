@@ -1,4 +1,4 @@
-import { CornerDownLeft, Disc3, House, Keyboard, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, User, Volume1, Volume2 } from "lucide-react";
+import { CornerDownLeft, Disc3, History, House, Keyboard, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, User, Volume1, Volume2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
@@ -27,6 +27,7 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "go-albums", label: "Library: Albums", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "albums" }) },
   { id: "go-artists", label: "Library: Artists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "artists" }) },
   { id: "go-playlists", label: "Library: Playlists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "playlists" }) },
+  { id: "go-recents", label: "Go to Recents", icon: <History size={16} />, group: "Navigation", run: () => nav.go({ name: "recents" }) },
   { id: "go-settings", label: "Open settings", hint: `${modKey}+,`, icon: <Settings size={16} />, group: "Navigation", run: () => nav.go({ name: "settings" }) },
   { id: "go-back", label: "Go back", hint: shortcutLabel("back"), icon: <CornerDownLeft size={16} />, group: "Navigation", run: () => nav.back() },
   { id: "shortcuts", label: "Keyboard shortcuts", hint: shortcutLabel("help"), icon: <Keyboard size={16} />, group: "Navigation", run: () => useUi.getState().setShortcutsOpen(true) },

@@ -228,6 +228,9 @@ export function AppMenu() {
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => void createPlaylist())}>
             <span>Create playlist</span>
           </button>
+          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "recents" }))}>
+            <span>Recents</span>
+          </button>
           <div className="appmenu__sep" role="separator" />
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "settings" }))}>
             <span>Settings</span>

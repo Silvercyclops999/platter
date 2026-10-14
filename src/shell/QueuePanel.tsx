@@ -104,8 +104,9 @@ const queueMultiMenu = (keys: string[], ids: string[], tracks: Track[]) => [
 export const RECENT_LIMIT = 50;
 
 /**
- * Recently played: songs played on this device, newest first, once each.
- * Loaded when the tab opens and again when the song changes.
+ * Recently played: songs played on this device, newest first. A song
+ * played twice shows twice. Loaded when the tab opens and again when the
+ * song changes.
  */
 function RecentlyPlayed() {
   const trackId = usePlayer((s) => s.state?.track?.id);
@@ -124,16 +125,19 @@ function RecentlyPlayed() {
   if (!tracks) return null;
   if (!tracks.length) return <p className="queue-empty">Songs you play will show up here.</p>;
   const ids = tracks.map((t) => t.id);
+  // Only the newest copy of the playing song is marked.
+  const current = ids.indexOf(trackId ?? "");
   return (
     <TrackList label="Recently played" header={false}>
       {tracks.map((t, i) => (
         <TrackRow
-          key={t.id}
+          key={`${i}:${t.id}`}
+          rowKey={`${i}:${t.id}`}
           compact
           track={t}
           index={i + 1}
-          active={t.id === trackId}
-          playing={t.id === trackId && status === "playing"}
+          active={i === current}
+          playing={i === current && status === "playing"}
           showAlbum={false}
           onPlay={() => (t.id === trackId ? player.toggle() : player.playTracks(ids, t.id))}
         />

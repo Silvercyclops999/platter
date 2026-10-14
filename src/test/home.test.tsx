@@ -213,6 +213,15 @@ describe("home page", () => {
     await user.click(within(shelf as HTMLElement).getByRole("button", { name: "Show all" }));
     expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "homeShelf", shelf: "topArtists" });
   });
+
+  it("Recently played's Show all opens Recents", async () => {
+    const user = userEvent.setup();
+    renderHome(data());
+    await waitFor(() => expect(shelfTitles()).toContain("Recently played"));
+    const shelf = screen.getByRole("heading", { name: "Recently played" }).closest("section")!;
+    await user.click(within(shelf as HTMLElement).getByRole("button", { name: "Show all" }));
+    expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "recents" });
+  });
 });
 
 describe("colour wash", () => {

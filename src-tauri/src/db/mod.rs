@@ -11,6 +11,7 @@
 //!   replaced detection
 //! - [`search`]   local search
 //! - [`listens`]  local listen log + offline report queue
+//! - [`history`]  the Recents page: listening sessions from the listen log
 //! - [`playlists`] local playlist edits + the queue of edits for Plex
 //! - [`likes`]    liked tracks (Plex ratings) + the queue of rating writes
 //! - [`artcache`] artwork disk cache (LRU, size cap, request coalescing)
@@ -23,6 +24,7 @@
 pub mod artcache;
 pub mod commands;
 pub mod credits;
+pub mod history;
 pub mod likes;
 pub mod listens;
 pub mod playlists;

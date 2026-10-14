@@ -7,7 +7,7 @@
 //! .invoke_handler(tauri::generate_handler![
 //!     dbc::sync_status, dbc::sync_now, dbc::home, dbc::home_shelf, dbc::artists, dbc::artist_names, dbc::albums,
 //!     dbc::playlists, dbc::library_items, dbc::artist_page, dbc::album_page, dbc::playlist_page,
-//!     dbc::recent_tracks,
+//!     dbc::recent_tracks, dbc::recents,
 //!     dbc::search, dbc::search_completions, dbc::search_recents,
 //!     dbc::search_recent_add, dbc::search_recent_remove, dbc::search_recents_clear,
 //! ])
@@ -23,6 +23,7 @@ use crate::model::{Playlist, ReleaseSection};
 
 use super::DbHandle;
 use super::queries::{self, now_s};
+use super::history;
 use super::search;
 use super::types::*;
 
@@ -167,6 +168,16 @@ const RECENT_TRACKS_MAX: usize = 200;
 pub async fn recent_tracks(db: State<'_, DbHandle>, limit: Option<usize>) -> AppResult<Vec<crate::model::Track>> {
     let n = limit.unwrap_or(50).clamp(1, RECENT_TRACKS_MAX);
     db.read_async(move |c| queries::recent_tracks(c, n)).await
+}
+
+/// The Recents page: listening sessions and likes from the last
+/// [`history::HISTORY_DAYS`] days, newest first.
+#[tauri::command]
+pub async fn recents(db: State<'_, DbHandle>, limit: Option<usize>) -> AppResult<Vec<history::RecentsEntry>> {
+    let n = limit.unwrap_or(history::HISTORY_MAX).clamp(1, history::HISTORY_MAX);
+    let liked_min = crate::settings::load(db.inner()).liked_min_rating();
+    let since = (now_s() - history::HISTORY_DAYS * 24 * 3600) * 1000;
+    db.read_async(move |c| history::recents(c, since, liked_min, n)).await
 }
 
 #[tauri::command]
