@@ -435,6 +435,34 @@ async fn popular_ranks_by_listener_count_then_own_plays() {
 }
 
 #[tokio::test]
+async fn popular_by_my_plays_ignores_global_counts() {
+    let own: Vec<Pop> = vec![
+        ("t1", "Low Count", Some(1_000), 50, Some(10), None, 200),
+        ("t2", "Big Hit", Some(900_000), 0, None, None, 210),
+        ("t3", "Played A Lot", None, 40, Some(5), None, 220),
+        ("t4", "Mid", Some(50_000), 3, None, None, 230),
+        ("t5", "Played Lately", None, 40, Some(99), None, 240),
+    ];
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(popular_library(&own, &[]))), false).await;
+    let order = |source| {
+        t.db.read(|c| queries::artist_page_by(c, "a1", source))
+            .unwrap()
+            .popular
+            .into_iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(order(PopularSource::Global), ["t2", "t4", "t1", "t5", "t3"]);
+    assert_eq!(order(PopularSource::MyPlays), ["t1", "t5", "t3", "t4", "t2"]);
+
+    // The handle carries the choice for the commands and play contexts.
+    assert_eq!(t.db.popular_source(), PopularSource::Global);
+    t.db.set_popular_source(PopularSource::MyPlays);
+    assert_eq!(t.db.popular_source(), PopularSource::MyPlays);
+}
+
+#[tokio::test]
 async fn popular_includes_whole_name_credits_on_other_artists_tracks() {
     let own: Vec<Pop> = vec![("t1", "Own Song", Some(10), 0, None, None, 200)];
     let moth: Vec<Pop> = vec![

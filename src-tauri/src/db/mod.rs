@@ -74,6 +74,8 @@ struct Inner {
     events: Mutex<Option<Arc<dyn DbEvents>>>,
     remote: Mutex<Option<Arc<dyn RemoteSearch>>>,
     pub(crate) vocab: search::VocabCache,
+    /// Popular ranks by your own plays only (Settings).
+    popular_by_plays: AtomicBool,
 }
 
 impl DbHandle {
@@ -96,6 +98,7 @@ impl DbHandle {
                 events: Mutex::new(None),
                 remote: Mutex::new(None),
                 vocab: search::VocabCache::default(),
+                popular_by_plays: AtomicBool::new(false),
             }),
         })
     }
@@ -129,6 +132,21 @@ impl DbHandle {
 
     pub(crate) fn events(&self) -> Option<Arc<dyn DbEvents>> {
         self.inner.events.lock().clone()
+    }
+
+    /// How the artist page ranks Popular (from Settings).
+    pub fn set_popular_source(&self, source: PopularSource) {
+        self.inner
+            .popular_by_plays
+            .store(source == PopularSource::MyPlays, Ordering::Release);
+    }
+
+    pub fn popular_source(&self) -> PopularSource {
+        if self.inner.popular_by_plays.load(Ordering::Acquire) {
+            PopularSource::MyPlays
+        } else {
+            PopularSource::Global
+        }
     }
 
     pub(crate) fn generation(&self) -> u64 {

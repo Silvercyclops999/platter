@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -263,14 +264,52 @@ impl ArtFetcher for PlexArt {
     }
 }
 
-/// Bitrate cap for a connection, or None to play the original file. Away from
-/// home the default is 320 kbps; the relay is bandwidth-capped by Plex, so it
-/// drops to 128. Files already at or under the cap play untouched.
-pub fn stream_cap_kbps(conn: Option<ConnectionKind>, file_kbps: Option<u32>) -> Option<u32> {
+/// The Plex relay is bandwidth-limited by the server; it never streams more.
+pub const RELAY_MAX_KBPS: u32 = 128;
+
+/// Streaming quality caps from Settings, in kbps (0 = original file).
+/// Read on every stream request, so a change applies from the next track.
+#[derive(Debug, Default)]
+pub struct StreamPrefs {
+    home_kbps: AtomicU32,
+    away_kbps: AtomicU32,
+}
+
+impl StreamPrefs {
+    pub fn new(home: Option<u32>, away: Option<u32>) -> Self {
+        let p = Self::default();
+        p.set(home, away);
+        p
+    }
+
+    pub fn set(&self, home: Option<u32>, away: Option<u32>) {
+        self.home_kbps.store(home.unwrap_or(0), Ordering::Relaxed);
+        self.away_kbps.store(away.unwrap_or(0), Ordering::Relaxed);
+    }
+
+    pub fn home(&self) -> Option<u32> {
+        Some(self.home_kbps.load(Ordering::Relaxed)).filter(|k| *k > 0)
+    }
+
+    pub fn away(&self) -> Option<u32> {
+        Some(self.away_kbps.load(Ordering::Relaxed)).filter(|k| *k > 0)
+    }
+}
+
+/// Bitrate cap for a connection, or None to play the original file. On the
+/// local connection the home setting applies, on remote access the away
+/// setting; the relay uses the away setting but never more than
+/// [`RELAY_MAX_KBPS`]. Files already at or under the cap play untouched.
+pub fn stream_cap_kbps(
+    conn: Option<ConnectionKind>,
+    file_kbps: Option<u32>,
+    home: Option<u32>,
+    away: Option<u32>,
+) -> Option<u32> {
     let cap = match conn {
-        Some(ConnectionKind::Remote) => 320,
-        Some(ConnectionKind::Relay) => 128,
-        _ => return None,
+        Some(ConnectionKind::Remote) => away?,
+        Some(ConnectionKind::Relay) => away.map_or(RELAY_MAX_KBPS, |a| a.min(RELAY_MAX_KBPS)),
+        _ => home?,
     };
     match file_kbps {
         Some(b) if b <= cap => None,
@@ -280,7 +319,7 @@ pub fn stream_cap_kbps(conn: Option<ConnectionKind>, file_kbps: Option<u32>) -> 
 
 /// Turns a track into an HTTP source on the connected server. The token
 /// travels only in headers.
-pub struct PlexStreams(pub PlexState);
+pub struct PlexStreams(pub PlexState, pub Arc<StreamPrefs>);
 
 fn source_of(req: crate::plex::client::StreamRequest, codec: Option<String>) -> StreamSource {
     StreamSource {
@@ -299,7 +338,8 @@ fn source_of(req: crate::plex::client::StreamRequest, codec: Option<String>) -> 
 impl TrackResolver for PlexStreams {
     async fn stream(&self, track: &Track) -> AppResult<StreamSource> {
         let client = self.0.client_when_ready(STARTUP_WAIT).await?;
-        if let Some(kbps) = stream_cap_kbps(client.connection(), track.bitrate) {
+        let prefs = &self.1;
+        if let Some(kbps) = stream_cap_kbps(client.connection(), track.bitrate, prefs.home(), prefs.away()) {
             let session = uuid::Uuid::new_v4().to_string();
             let req = client.transcode_request(&track.id, kbps, &session)?;
             return Ok(source_of(req, Some("mp3".into())));
@@ -327,6 +367,7 @@ impl TrackLookup for CacheLookup {
 
     async fn context(&self, ctx: &PlayContext) -> AppResult<ResolvedContext> {
         let ctx = ctx.clone();
+        let popular = self.0.popular_source();
         self.0
             .read_async(move |c| {
                 let id = ctx.id.clone().unwrap_or_default();
@@ -340,7 +381,7 @@ impl TrackLookup for CacheLookup {
                         ResolvedContext { tracks: page.tracks, title: Some(page.playlist.title) }
                     }
                     ContextKind::Artist => {
-                        let page = queries::artist_page(c, &id)?;
+                        let page = queries::artist_page_by(c, &id, popular)?;
                         let mut tracks = page.popular;
                         let mut seen: std::collections::HashSet<String> =
                             tracks.iter().map(|t| t.id.clone()).collect();
@@ -394,14 +435,40 @@ mod tests {
     #[test]
     fn stream_quality_follows_the_connection() {
         use ConnectionKind::*;
-        assert_eq!(stream_cap_kbps(Some(Local), Some(1411)), None);
-        assert_eq!(stream_cap_kbps(None, Some(1411)), None);
-        assert_eq!(stream_cap_kbps(Some(Remote), Some(1411)), Some(320));
-        assert_eq!(stream_cap_kbps(Some(Remote), Some(320)), None);
-        assert_eq!(stream_cap_kbps(Some(Remote), Some(256)), None);
-        assert_eq!(stream_cap_kbps(Some(Remote), None), Some(320));
-        assert_eq!(stream_cap_kbps(Some(Relay), Some(320)), Some(128));
-        assert_eq!(stream_cap_kbps(Some(Relay), Some(96)), None);
+        // Defaults: original at home, 320 away.
+        let cap = |c, f| stream_cap_kbps(c, f, None, Some(320));
+        assert_eq!(cap(Some(Local), Some(1411)), None);
+        assert_eq!(cap(None, Some(1411)), None);
+        assert_eq!(cap(Some(Remote), Some(1411)), Some(320));
+        assert_eq!(cap(Some(Remote), Some(320)), None);
+        assert_eq!(cap(Some(Remote), Some(256)), None);
+        assert_eq!(cap(Some(Remote), None), Some(320));
+        assert_eq!(cap(Some(Relay), Some(320)), Some(128));
+        assert_eq!(cap(Some(Relay), Some(96)), None);
+    }
+
+    #[test]
+    fn quality_settings_cap_the_stream_request() {
+        use ConnectionKind::*;
+        // A home cap applies only on the local connection.
+        assert_eq!(stream_cap_kbps(Some(Local), Some(1411), Some(192), Some(320)), Some(192));
+        assert_eq!(stream_cap_kbps(Some(Local), Some(128), Some(192), Some(320)), None);
+        assert_eq!(stream_cap_kbps(Some(Remote), Some(1411), Some(192), Some(320)), Some(320));
+        // Original away from home plays the file as is over remote access...
+        assert_eq!(stream_cap_kbps(Some(Remote), Some(1411), None, None), None);
+        // ...but the relay keeps the server's limit as the most it streams.
+        assert_eq!(stream_cap_kbps(Some(Relay), Some(1411), None, None), Some(128));
+        assert_eq!(stream_cap_kbps(Some(Relay), Some(1411), None, Some(256)), Some(128));
+        assert_eq!(stream_cap_kbps(Some(Relay), Some(1411), None, Some(96)), Some(96));
+        assert_eq!(stream_cap_kbps(Some(Remote), Some(1411), None, Some(128)), Some(128));
+    }
+
+    #[test]
+    fn stream_prefs_store_original_as_no_cap() {
+        let p = StreamPrefs::new(None, Some(320));
+        assert_eq!((p.home(), p.away()), (None, Some(320)));
+        p.set(Some(256), None);
+        assert_eq!((p.home(), p.away()), (Some(256), None));
     }
 
     #[test]

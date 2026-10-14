@@ -81,7 +81,8 @@ pub async fn playlists(db: State<'_, DbHandle>) -> AppResult<Vec<Playlist>> {
 
 #[tauri::command]
 pub async fn artist_page(db: State<'_, DbHandle>, id: String) -> AppResult<ArtistPage> {
-    db.read_async(move |c| queries::artist_page(c, &id)).await
+    let source = db.popular_source();
+    db.read_async(move |c| queries::artist_page_by(c, &id, source)).await
 }
 
 #[tauri::command]

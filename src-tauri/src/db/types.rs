@@ -21,6 +21,17 @@ pub struct ArtistName {
     pub title: String,
 }
 
+/// How the artist page ranks Popular (the `popularSource` setting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum PopularSource {
+    /// Global listener counts first, then your own plays.
+    #[default]
+    Global,
+    /// Only your own play counts (then most recent play).
+    MyPlays,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncPhase {

@@ -187,11 +187,16 @@ pub fn playlists(c: &Connection) -> AppResult<Vec<Playlist>> {
 }
 
 pub fn artist_page(c: &Connection, id: &str) -> AppResult<ArtistPage> {
+    artist_page_by(c, id, PopularSource::Global)
+}
+
+/// [`artist_page`] with Popular ranked by `source`.
+pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppResult<ArtistPage> {
     let artist = c
         .query_row(&format!("SELECT {ARTIST_COLS} FROM artists ar WHERE ar.id = ?1"), [id], row_artist)
         .optional()?
         .ok_or_else(|| AppError::NotFound(format!("artist {id}")))?;
-    let popular = popular_tracks(c, id, &artist.title)?;
+    let popular = popular_tracks(c, id, &artist.title, source)?;
     let all = {
         let mut st = c.prepare_cached(&format!(
             "SELECT {ALBUM_COLS} FROM albums al WHERE al.artist_id = ?1
@@ -216,8 +221,9 @@ const SAME_SONG_MS: u64 = 2_000;
 /// in the track artist line. Songs with a global listener count come first,
 /// most listened first; the rest follow by your own plays, then most recent
 /// play. Repeat copies of a song (same title, about the same length) show
-/// once, keeping the better ranked one.
-fn popular_tracks(c: &Connection, id: &str, title: &str) -> AppResult<Vec<Track>> {
+/// once, keeping the better ranked one. With [`PopularSource::MyPlays`] the
+/// global counts are ignored: your plays, then most recent play.
+fn popular_tracks(c: &Connection, id: &str, title: &str, source: PopularSource) -> AppResult<Vec<Track>> {
     let mut st = c.prepare_cached(&format!("SELECT {TRACK_COLS} FROM tracks t WHERE t.artist_id = ?1 ORDER BY t.pk"))?;
     let mut cands = st.query_map([id], row_track)?.collect::<Result<Vec<_>, _>>()?;
 
@@ -249,11 +255,17 @@ fn popular_tracks(c: &Connection, id: &str, title: &str) -> AppResult<Vec<Track>
     }
 
     // Stable sort keeps library order for full ties.
+    let global = source == PopularSource::Global;
     cands.sort_by(|a, b| {
-        b.rating_count
-            .is_some()
-            .cmp(&a.rating_count.is_some())
-            .then(b.rating_count.cmp(&a.rating_count))
+        let by_count = if global {
+            b.rating_count
+                .is_some()
+                .cmp(&a.rating_count.is_some())
+                .then(b.rating_count.cmp(&a.rating_count))
+        } else {
+            std::cmp::Ordering::Equal
+        };
+        by_count
             .then(b.view_count.cmp(&a.view_count))
             .then(b.last_viewed_at.cmp(&a.last_viewed_at))
     });
