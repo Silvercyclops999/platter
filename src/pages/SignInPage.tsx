@@ -41,7 +41,7 @@ export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
       <TitleBar />
       <div className="welcome__panel" role="main">
         <Logo size={64} />
-        <h1 className="welcome__title">Welcome to Platter</h1>
+        <h1 className="welcome__title">{onBack ? "Sign in again" : "Welcome to Platter"}</h1>
         {!pending ? (
           <>
             <p className="welcome__lead">

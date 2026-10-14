@@ -74,7 +74,7 @@ export function isHealthDemo(v: string | null): v is HealthDemo {
 export function demoHealth(demo: HealthDemo, server: { name: string; version: string }, now: number = Date.now()): Health {
   const status = STATUS[demo];
   const connected = status === "local" || status === "remote" || status === "relay";
-  const offlineFor = 4 * 60_000;
+  const offlineFor = 4 * 60_000 + 30_000;
   const h: Health = {
     status,
     serverName: server.name,
