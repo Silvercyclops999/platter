@@ -20,13 +20,65 @@
   background: var(--color-bg-base);
 }
 
+/* Column widths come from the layout solver (layout.ts) as --sidebar-w and
+   --right-w on .app; a drag writes them directly. Edge and gap match EDGE and
+   GAP there. */
 .app__body {
+  position: relative;
   flex: 1;
   display: flex;
   gap: var(--space-2);
   min-height: 0;
   padding: var(--space-2) var(--space-2) 0;
 }
+
+/* Drag handles sit in the gaps between columns. */
+.resize-handle {
+  position: absolute;
+  top: var(--space-2);
+  bottom: 0;
+  z-index: 20;
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resize-handle--sidebar { left: calc(var(--space-2) + var(--sidebar-w) + var(--space-2) / 2 - 6px); }
+.resize-handle--right { right: calc(var(--space-2) + var(--right-w) + var(--space-2) / 2 - 6px); }
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  left: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-easing);
+}
+.resize-handle:hover::after,
+.app.is-resizing .resize-handle::after { opacity: 0.5; }
+.resize-handle:focus-visible { outline: none; }
+.resize-handle:focus-visible::after { opacity: 1; background: var(--color-focus-ring); }
+.app.is-resizing { cursor: col-resize; user-select: none; }
+.app.is-resizing * { cursor: col-resize !important; }
+.app.is-resizing .main,
+.app.is-resizing .sidebar,
+.app.is-resizing .queue-panel { pointer-events: none; }
+
+/* Closed right panel: a slim strip that opens it again. */
+.right-strip { width: var(--right-w); flex: none; display: flex; }
+.right-strip__btn {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding-top: 20px;
+  border-radius: var(--radius-card);
+  color: var(--color-text-muted);
+  transition: background-color var(--motion-quick) var(--motion-easing), color var(--motion-quick) var(--motion-easing);
+}
+.right-strip__btn:hover { background: var(--color-bg-raised); color: var(--color-text-primary); }
+.right-strip__btn:focus-visible { outline-offset: -2px; }
 
 /* ---------------------------------------------------------------- Title bar */
 .titlebar {
@@ -64,12 +116,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  width: 272px;
+  width: var(--sidebar-w, 300px);
   flex: none;
   min-height: 0;
-  transition: width var(--motion-medium) var(--motion-easing);
 }
-.sidebar.is-collapsed { width: 72px; }
 .sidebar__block {
   border-radius: var(--radius-card);
   background: var(--color-bg-raised);
@@ -246,7 +296,10 @@
 .status-popover__list dd { margin: 0; text-align: right; color: var(--color-text-primary); }
 
 /* ---------------------------------------------------------------- Main view */
+/* The main column is the container for width-based page rules
+   (card width, track table columns). */
 .main {
+  container: main / inline-size;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -345,7 +398,7 @@
 
 /* ---------------------------------------------------------------- Queue panel */
 .queue-panel {
-  width: 340px;
+  width: var(--right-w, 340px);
   flex: none;
   display: flex;
   flex-direction: column;

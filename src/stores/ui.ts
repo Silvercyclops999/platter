@@ -1,5 +1,39 @@
 import { create } from "zustand";
 import type { HeaderColors } from "../lib/color";
+import { RIGHT_DEFAULT, RIGHT_MAX, RIGHT_MIN, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, clamp } from "../shell/layout";
+
+/** Panel widths the user chose. App-only and per device (localStorage), like the library view. */
+export interface PanelWidths {
+  sidebarWidth: number;
+  sidebarCollapsed: boolean;
+  rightWidth: number;
+}
+
+const PANELS_KEY = "platter.panels.v1"; // gitleaks:allow (localStorage key name, not a secret)
+
+export function loadPanels(): PanelWidths {
+  const d: PanelWidths = { sidebarWidth: SIDEBAR_DEFAULT, sidebarCollapsed: false, rightWidth: RIGHT_DEFAULT };
+  try {
+    const raw = localStorage.getItem(PANELS_KEY);
+    if (!raw) return d;
+    const p = JSON.parse(raw) as Partial<PanelWidths>;
+    return {
+      sidebarWidth: typeof p.sidebarWidth === "number" ? clamp(p.sidebarWidth, SIDEBAR_MIN, SIDEBAR_MAX) : d.sidebarWidth,
+      sidebarCollapsed: typeof p.sidebarCollapsed === "boolean" ? p.sidebarCollapsed : d.sidebarCollapsed,
+      rightWidth: typeof p.rightWidth === "number" ? clamp(p.rightWidth, RIGHT_MIN, RIGHT_MAX) : d.rightWidth,
+    };
+  } catch {
+    return d;
+  }
+}
+
+function savePanels(p: PanelWidths) {
+  try {
+    localStorage.setItem(PANELS_KEY, JSON.stringify(p));
+  } catch {
+    /* storage unavailable: this session only */
+  }
+}
 
 export interface MenuItem {
   label: string;
@@ -36,7 +70,7 @@ export interface ContextMenuState {
   returnFocus: HTMLElement | null;
 }
 
-interface UiState {
+interface UiState extends PanelWidths {
   queueOpen: boolean;
   paletteOpen: boolean;
   /** Bumped to ask the search field to take focus (Ctrl/⌘+L). */
@@ -57,9 +91,16 @@ interface UiState {
   focusSearch: () => void;
   openMenu: (m: Omit<ContextMenuState, "returnFocus"> & { returnFocus?: HTMLElement | null }) => void;
   closeMenu: () => void;
+  /** Save the user's sidebar width and/or rail state (on drag release). */
+  setSidebar: (p: { width?: number; collapsed?: boolean }) => void;
+  /** Save the user's right panel width (on drag release). */
+  setRightWidth: (w: number) => void;
 }
 
+const panels = (s: UiState): PanelWidths => ({ sidebarWidth: s.sidebarWidth, sidebarCollapsed: s.sidebarCollapsed, rightWidth: s.rightWidth });
+
 export const useUi = create<UiState>()((set, get) => ({
+  ...loadPanels(),
   queueOpen: false,
   paletteOpen: false,
   searchFocusTick: 0,
@@ -88,5 +129,19 @@ export const useUi = create<UiState>()((set, get) => ({
     const m = get().menu;
     set({ menu: null });
     m?.returnFocus?.focus?.();
+  },
+  setSidebar: ({ width, collapsed }) => {
+    const s = get();
+    const sidebarWidth = width === undefined ? s.sidebarWidth : Math.round(clamp(width, SIDEBAR_MIN, SIDEBAR_MAX));
+    const sidebarCollapsed = collapsed ?? s.sidebarCollapsed;
+    if (sidebarWidth === s.sidebarWidth && sidebarCollapsed === s.sidebarCollapsed) return;
+    set({ sidebarWidth, sidebarCollapsed });
+    savePanels(panels(get()));
+  },
+  setRightWidth: (w) => {
+    const rightWidth = Math.round(clamp(w, RIGHT_MIN, RIGHT_MAX));
+    if (rightWidth === get().rightWidth) return;
+    set({ rightWidth });
+    savePanels(panels(get()));
   },
 }));
