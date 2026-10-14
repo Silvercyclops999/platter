@@ -26,6 +26,8 @@ import type {
   EventName,
   Health,
   HomeData,
+  HomeItem,
+  HomeShelfId,
   LibraryItem,
   NowPlayingDetails,
   OutputState,
@@ -61,6 +63,8 @@ export interface Backend {
   syncStatus(): Promise<SyncStatus>;
   syncNow(full?: boolean): Promise<void>;
   home(): Promise<HomeData>;
+  /** Everything in one Home shelf, for its "Show all" page. */
+  homeShelf(shelf: HomeShelfId, limit?: number): Promise<HomeItem[]>;
   artists(args: ArtistsArgs): Promise<Page<Artist>>;
   /** Every artist name and id (builds the artist links in track lines). */
   artistNames(): Promise<ArtistName[]>;
@@ -165,6 +169,7 @@ export function createTauriBackend(): Backend {
     syncStatus: () => call("sync_status"),
     syncNow: (full) => call("sync_now", { full }),
     home: () => call("home"),
+    homeShelf: (shelf, limit) => call("home_shelf", { shelf, limit }),
     artists: (args) => call("artists", { ...args }),
     artistNames: () => call("artist_names"),
     albums: (args) => call("albums", { ...args }),

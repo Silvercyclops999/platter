@@ -539,6 +539,33 @@ export function SettingsPage() {
       description: "Turns off movement like sliding and scaling. Fades stay. Match system follows your computer's setting.",
       control: (ids) => select(s, (x) => x.reduceMotion, MOTION, ids, (v) => updateSettings({ reduceMotion: v })),
     },
+    // Home
+    {
+      key: "homeShortcuts",
+      section: "Home",
+      title: "Show the shortcut grid",
+      description: "Shows up to 8 things you've played lately or play most at the top of Home.",
+      control: (ids) => toggle(s, "homeShortcuts", ids),
+    },
+    {
+      key: "homeColourWash",
+      section: "Home",
+      title: "Colour wash from artwork",
+      description: "Tints the top of Home with the colour of the shortcut you point at.",
+      note: s && !s.artworkColours ? "Turn on Artwork colours to use this." : undefined,
+      control: (ids) =>
+        s ? (
+          <Switch
+            checked={s.artworkColours && s.homeColourWash}
+            disabled={!s.artworkColours}
+            onChange={(v) => updateSettings({ homeColourWash: v })}
+            labelledBy={ids.title}
+            describedBy={ids.desc}
+          />
+        ) : (
+          <Skeleton width={40} height={24} radius="pill" />
+        ),
+    },
     // App
     {
       key: "updates",

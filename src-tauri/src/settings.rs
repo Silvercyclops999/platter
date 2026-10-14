@@ -105,6 +105,11 @@ pub struct Settings {
     /// Chosen output device id; None follows the system default. Changed
     /// with `output_select`, not `settings_set`.
     pub output_device: Option<String>,
+    /// Home shows the grid of recent and most played shortcuts.
+    pub home_shortcuts: bool,
+    /// Home's top takes a colour wash from the shortcuts' artwork (only
+    /// while Artwork colours is on).
+    pub home_colour_wash: bool,
 }
 
 impl Default for Settings {
@@ -124,6 +129,8 @@ impl Default for Settings {
             artwork_colours: true,
             reduce_motion: ReduceMotion::System,
             output_device: None,
+            home_shortcuts: true,
+            home_colour_wash: true,
         }
     }
 }
@@ -145,6 +152,8 @@ pub struct SettingsPatch {
     pub art_cache_mb: Option<u32>,
     pub artwork_colours: Option<bool>,
     pub reduce_motion: Option<ReduceMotion>,
+    pub home_shortcuts: Option<bool>,
+    pub home_colour_wash: Option<bool>,
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -173,6 +182,8 @@ impl Settings {
         set(&mut self.art_cache_mb, p.art_cache_mb);
         set(&mut self.artwork_colours, p.artwork_colours);
         set(&mut self.reduce_motion, p.reduce_motion);
+        set(&mut self.home_shortcuts, p.home_shortcuts);
+        set(&mut self.home_colour_wash, p.home_colour_wash);
         self.clamp();
         Ok(())
     }
@@ -462,6 +473,8 @@ mod tests {
             art_cache_mb: Some(512),
             artwork_colours: Some(false),
             reduce_motion: Some(ReduceMotion::On),
+            home_shortcuts: Some(false),
+            home_colour_wash: Some(false),
         })
         .await
         .unwrap();

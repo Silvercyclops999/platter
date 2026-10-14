@@ -52,7 +52,7 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Appearance", "App", "About", "Now playing"]);
+    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Appearance", "Home", "App", "About", "Now playing"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
@@ -66,6 +66,8 @@ describe("settings page", () => {
     expect(screen.getByRole("combobox", { name: "Artwork and cache size" })).toHaveValue("2048");
     expect(screen.getByRole("switch", { name: "Artwork colours" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("combobox", { name: "Reduce motion" })).toHaveValue("system");
+    expect(screen.getByRole("switch", { name: "Show the shortcut grid" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Colour wash from artwork" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("button", { name: "Resync library" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
 

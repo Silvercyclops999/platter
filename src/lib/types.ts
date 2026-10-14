@@ -169,11 +169,27 @@ export interface SyncStatus {
   lastSyncAt?: number | null;
 }
 
+/** One album, artist or playlist on Home (shortcut tile or mixed shelf). */
+export type HomeItem =
+  | { kind: "album"; album: Album }
+  | { kind: "artist"; artist: Artist }
+  | { kind: "playlist"; playlist: Playlist };
+
 export interface HomeData {
-  recentlyPlayed: Album[];
-  recentlyAdded: Album[];
+  /** Up to 8 shortcut tiles: recent first, then most played, de-duplicated. */
+  shortcuts: HomeItem[];
+  /** Albums, artists and playlists by most recent play. */
+  recentlyPlayed: HomeItem[];
   jumpBackIn: Album[];
+  /** Playlists, most recently played first, then by title. */
+  playlists: Playlist[];
+  recentlyAdded: Album[];
+  /** Artists by play count. */
+  topArtists: Artist[];
 }
+
+/** A Home shelf, for its "Show all" page (`home_shelf`). */
+export type HomeShelfId = "recentlyPlayed" | "jumpBackIn" | "playlists" | "recentlyAdded" | "topArtists";
 
 export type ArtistSort = "name" | "recent" | "plays";
 export type AlbumSort = "name" | "artist" | "year" | "recent" | "plays";
@@ -427,6 +443,10 @@ export interface Settings {
   /** Chosen output device id; null follows the system default. Read only:
    *  change it with `outputSelect`. */
   outputDevice?: string | null;
+  /** Home shows the grid of recent and most played shortcuts. */
+  homeShortcuts: boolean;
+  /** Home's top takes a colour wash from the shortcuts' artwork (while artworkColours is on). */
+  homeColourWash: boolean;
   [key: string]: unknown;
 }
 
@@ -445,6 +465,8 @@ export const DEFAULT_SETTINGS: Settings = {
   artworkColours: true,
   reduceMotion: "system",
   outputDevice: null,
+  homeShortcuts: true,
+  homeColourWash: true,
 };
 
 // ---------------------------------------------------------------- output devices

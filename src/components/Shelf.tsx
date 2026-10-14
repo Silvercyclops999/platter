@@ -4,6 +4,7 @@ import { nextArtRange, sameRange, type ArtRange } from "../lib/shelfWindow";
 import { ArtActive, FluidArtSize } from "./Art";
 import { IconButton } from "./Button";
 import { CardSkeleton } from "./Card";
+import "./shelf.css";
 
 export interface ShelfProps {
   title: string;

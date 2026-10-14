@@ -800,13 +800,103 @@ async fn home_rows_from_history_and_listens() {
 
     let home = t.db.read(|c| queries::home(c, now)).unwrap();
     let album_of = |track_id: &str| lib.tracks.iter().find(|t| t.id == track_id).unwrap().album_id.clone();
-    let played: Vec<_> = home.recently_played.iter().map(|a| a.id.clone()).collect();
+    let played: Vec<_> = home.recently_played.iter().map(|a| a.key().1.to_string()).collect();
+    assert!(home.recently_played.iter().all(|i| i.key().0 == "album"));
     assert_eq!(played, vec![album_of(&local_track), album_of(&tr(2, 0, 1)), album_of(&tr(1, 1, 0)), album_of(&tr(0, 0, 0))]);
     assert_eq!(home.recently_added.len(), queries::HOME_ROW);
     assert!(home.recently_added.windows(2).all(|w| w[0].added_at >= w[1].added_at));
     // Jump back in: (1,1) qualifies (5 plays, unfinished) but it is already
     // in the first six recently played, so the row stays empty here.
     assert!(home.jump_back_in.is_empty());
+}
+
+fn keys(items: &[HomeItem]) -> Vec<(String, String)> {
+    items
+        .iter()
+        .map(|i| {
+            let (k, id) = i.key();
+            (k.to_string(), id.to_string())
+        })
+        .collect()
+}
+
+fn local_play(db: &DbHandle, track: &str, at_s: i64, kind: ContextKind, id: Option<&str>) {
+    db.write(|c| {
+        let play = listens::start_play(c, &PlayStart {
+            rating_key: track.to_string(),
+            part_key: None,
+            started_at: at_s * 1000,
+            duration_ms: 200_000,
+            context_kind: Some(kind),
+            context_id: id.map(str::to_string),
+            device: None,
+            offline: false,
+        })?;
+        listens::end_play(c, play, at_s * 1000 + 200_000, 200_000, 200_000, true).map(|_| ())
+    })
+    .unwrap();
+}
+
+#[tokio::test]
+async fn home_recents_credit_the_artist_or_playlist_a_play_started_from() {
+    let t = open();
+    let mut lib = fake::generated(3, 2, 3);
+    let now = now_s();
+    let tr = |a: usize, b: usize, n: usize| lib.tracks[(a * 2 + b) * 3 + n].id.clone();
+    let pl_tracks = vec![tr(0, 0, 0), tr(1, 0, 0)];
+    lib.playlists.push((fake::playlist("p1", "Mix", 2), pl_tracks.clone()));
+    lib.playlists.push((fake::playlist("p2", "Another", 0), vec![]));
+    lib.artists[2].view_count = 40;
+    lib.artists[0].view_count = 90;
+    lib.albums[3].view_count = 12;
+    // Plex history: album (1,1) an hour ago, plus the playlist's tracks as
+    // reported to Plex from this computer.
+    lib.history = vec![
+        HistoryEntry { rating_key: tr(1, 1, 0), viewed_at: now - 3600 },
+        HistoryEntry { rating_key: pl_tracks[0].clone(), viewed_at: now - 600 + 200 },
+        HistoryEntry { rating_key: pl_tracks[1].clone(), viewed_at: now - 300 + 200 },
+    ];
+    let artist2 = lib.artists[2].id.clone();
+    let src = Arc::new(FakeSource::new(lib.clone()));
+    sync(&t.db, &src, false).await;
+    local_play(&t.db, &pl_tracks[0], now - 600, ContextKind::Playlist, Some("p1"));
+    local_play(&t.db, &pl_tracks[1], now - 300, ContextKind::Playlist, Some("p1"));
+    local_play(&t.db, &tr(2, 1, 2), now - 60, ContextKind::Artist, Some(&artist2));
+
+    let home = t.db.read(|c| queries::home(c, now)).unwrap();
+    let s = |k: &str, id: &str| (k.to_string(), id.to_string());
+    assert_eq!(
+        keys(&home.recently_played),
+        vec![s("artist", &artist2), s("playlist", "p1"), s("album", &lib.albums[3].id)],
+        "the playlist's and the artist's albums don't show on their own",
+    );
+    // Shortcuts: the recents, then most played (album, artist, playlist in
+    // turn), without repeats.
+    assert_eq!(
+        keys(&home.shortcuts),
+        vec![s("artist", &artist2), s("playlist", "p1"), s("album", &lib.albums[3].id), s("artist", &lib.artists[0].id)],
+    );
+    assert_eq!(home.top_artists.iter().map(|a| a.id.clone()).collect::<Vec<_>>(), vec![lib.artists[0].id.clone(), artist2.clone()]);
+    assert_eq!(home.playlists.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["p1", "p2"], "played first, then by title");
+
+    let all = t.db.read(|c| queries::home_shelf(c, now, HomeShelf::RecentlyAdded, 500)).unwrap();
+    assert_eq!(all.len(), 6, "every album, capped by the library");
+    let top = t.db.read(|c| queries::home_shelf(c, now, HomeShelf::TopArtists, 1)).unwrap();
+    assert_eq!(keys(&top), vec![s("artist", &lib.artists[0].id)]);
+}
+
+#[test]
+fn shortcuts_take_eight_recent_first_then_most_played() {
+    let al = |id: &str| HomeItem::Album { album: fake::album(id, id, &fake::artist("a", "A"), 2000, None, &[]) };
+    let ar = |id: &str| HomeItem::Artist { artist: fake::artist(id, id) };
+    let recent: Vec<_> = (0..10).map(|i| al(&format!("r{i}"))).collect();
+    let most = vec![al("r0"), ar("x"), al("m1")];
+    let got: Vec<_> = queries::shortcuts(&recent, &most).iter().map(|i| i.key().1.to_string()).collect();
+    assert_eq!(got, vec!["r0", "r1", "r2", "r3", "r4", "r5", "x", "m1"]);
+    // Fewer than eight known: show what there is.
+    let got = queries::shortcuts(&recent[..2], &[]);
+    assert_eq!(got.len(), 2);
+    assert!(queries::shortcuts(&[], &[]).is_empty());
 }
 
 // ---------------------------------------------------------------- search

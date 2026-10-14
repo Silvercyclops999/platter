@@ -28,6 +28,7 @@ import type {
   EventMap,
   EventName,
   Health,
+  HomeShelfId,
   LibraryItem,
   OutputDevice,
   OutputState,
@@ -53,6 +54,7 @@ import { popularTracks } from "./popular";
 import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
 import { mockBio } from "./bio";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
+import { MockHome, type ContextPlay } from "./home";
 
 export interface MockOptions {
   latencyMs: number;
@@ -154,6 +156,8 @@ export class MockBackend implements Backend {
   private ctxOrder: QueueItem[] = [];
   private ctxPos = -1;
   private history: QueueItem[] = [];
+  /** Plays started from an album, artist or playlist (feeds Home). */
+  private contextPlays: ContextPlay[] = [];
   private ctxInfo: QueueContextInfo | null = null;
   /** Context ids with shuffle on, least recently used first. */
   private shuffledIds: string[] = [];
@@ -166,6 +170,7 @@ export class MockBackend implements Backend {
   constructor(opts: Partial<MockOptions> = {}) {
     this.opts = { ...optionsFromUrl(""), ...opts };
     this.fx = buildFixtures();
+    this.contextPlays = this.seedContextPlays();
     this.auth = this.opts.signedOut
       ? { state: "signedOut", needsServerPick: false }
       : this.opts.health === "signIn"
@@ -370,16 +375,22 @@ export class MockBackend implements Backend {
     tick();
   }
   home() {
-    return this.delay(() => {
-      const al = this.fx.albums;
-      const recentlyPlayed = al
-        .filter((a) => a.lastViewedAt)
-        .sort((a, b) => (b.lastViewedAt ?? 0) - (a.lastViewedAt ?? 0))
-        .slice(0, 12);
-      const recentlyAdded = [...al].sort((a, b) => b.addedAt - a.addedAt).slice(0, 12);
-      const jumpBackIn = [...al].sort((a, b) => b.viewCount - a.viewCount).slice(0, 12);
-      return { recentlyPlayed, recentlyAdded, jumpBackIn };
-    });
+    return this.delay(() => new MockHome(this.fx, this.contextPlays).home());
+  }
+  homeShelf(shelf: HomeShelfId, limit?: number) {
+    return this.delay(() => new MockHome(this.fx, this.contextPlays).shelf(shelf, limit));
+  }
+  /** Invented history: a few playlist and artist plays around the newest album play. */
+  private seedContextPlays(): ContextPlay[] {
+    const newest = Math.max(0, ...this.fx.albums.map((a) => a.lastViewedAt ?? 0));
+    const pl = this.fx.playlists;
+    const ar = this.fx.artists;
+    const out: ContextPlay[] = [];
+    if (pl[0]) out.push({ kind: "playlist", id: pl[0].id, at: newest + 3600 }, { kind: "playlist", id: pl[0].id, at: newest - 5 * 86400 });
+    if (ar[3]) out.push({ kind: "artist", id: ar[3].id, at: newest - 1800 });
+    if (pl[2]) out.push({ kind: "playlist", id: pl[2].id, at: newest - 2 * 86400 });
+    if (pl[4]) out.push({ kind: "playlist", id: pl[4].id, at: newest - 9 * 86400 });
+    return out;
   }
   artists(args: { sort: ArtistSort; offset: number; limit: number }) {
     return this.delay(() => {
@@ -685,6 +696,9 @@ export class MockBackend implements Backend {
     if (!tracks.length) return;
     this.notePosition(); // where the outgoing context was left
     const id = info.id ?? null;
+    const kind = args.context.kind;
+    if (play && id && (kind === "album" || kind === "artist" || kind === "playlist"))
+      this.contextPlays.push({ kind, id, at: Math.floor(Date.now() / 1000) });
     if (args.shuffle !== undefined) {
       this.shuffle = args.shuffle;
       if (id) this.storeShufflePref(id, args.shuffle);

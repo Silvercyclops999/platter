@@ -194,6 +194,7 @@ pub fn run() {
             db::commands::sync_status,
             db::commands::sync_now,
             db::commands::home,
+            db::commands::home_shelf,
             db::commands::artists,
             db::commands::artist_names,
             db::commands::albums,

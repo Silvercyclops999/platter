@@ -3,6 +3,7 @@
  * back/forward work like a browser. Scroll offsets per entry live in MainView.
  */
 import { create } from "zustand";
+import type { HomeShelfId } from "../lib/types";
 
 export type LibraryTab = "artists" | "albums" | "playlists";
 
@@ -14,7 +15,9 @@ export type Route =
   | { name: "artist"; id: string }
   | { name: "album"; id: string }
   | { name: "playlist"; id: string }
-  | { name: "settings" };
+  | { name: "settings" }
+  /** A Home shelf's "Show all" grid. */
+  | { name: "homeShelf"; shelf: HomeShelfId };
 
 export interface HistoryEntry {
   key: number;

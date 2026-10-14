@@ -1,0 +1,167 @@
+/* ---------------------------------------------------------------- Home */
+
+/* The wash colour eases between tiles. Registered so it can transition. */
+@property --home-wash {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+.page-pad.home {
+  position: relative;
+  isolation: isolate;
+  /* The chips sit right under the main header. */
+  padding-top: 64px;
+  transition: --home-wash var(--motion-slow) var(--motion-easing-in-out);
+}
+
+/* Soft colour from the hovered tile's cover (the first tile at rest),
+   fading down into the page. */
+.home__wash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 340px;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--home-wash) 62%, transparent) 0%,
+    color-mix(in srgb, var(--home-wash) 26%, transparent) 55%,
+    transparent 100%
+  );
+  opacity: 0;
+  transition: opacity var(--motion-slow) var(--motion-easing-in-out);
+}
+.home.has-wash .home__wash { opacity: 1; }
+/* Reduced motion: the wash swaps at once. */
+:root[data-reduced-motion="true"] .page-pad.home,
+:root[data-reduced-motion="true"] .home__wash {
+  transition-duration: 0s;
+}
+
+/* Chips pinned under the main header while the page scrolls. Their backdrop
+   fades in with the header's (--chips-alpha, set on scroll). */
+.home__chips {
+  position: sticky;
+  top: var(--main-header-h, 64px);
+  z-index: 5;
+  margin: 0 calc(-1 * var(--page-x)) var(--space-4);
+  padding: var(--space-2) calc(var(--page-x) + var(--space-3));
+}
+.home__chips::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--tint-shade);
+  opacity: var(--chips-alpha, 0);
+  pointer-events: none;
+}
+
+.home__empty {
+  padding: var(--space-6) var(--space-3);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+/* ---------------------------------------------------------------- Shortcut grid */
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0 var(--space-3) var(--space-8);
+}
+
+.shortcut {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 64px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius-row);
+  background: rgba(255, 240, 220, 0.08);
+  isolation: isolate;
+  transition: background-color var(--motion-quick) var(--motion-easing);
+}
+.shortcut:hover,
+.shortcut:focus-within {
+  background: rgba(255, 240, 220, 0.16);
+  transition-duration: var(--motion-very-quick);
+}
+.shortcut__art { flex: none; display: flex; }
+.shortcut__art .art { border-radius: 0; box-shadow: 4px 0 12px rgba(0, 0, 0, 0.25); }
+.shortcut[data-kind="artist"] .shortcut__art { padding: 4px; }
+.shortcut[data-kind="artist"] .shortcut__art .art { border-radius: 50%; box-shadow: none; }
+.shortcut__link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--space-3);
+  text-align: left;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.3;
+}
+/* Stretched link: the whole tile opens the item. */
+.shortcut__link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--radius-row);
+}
+.shortcut__link:focus-visible { outline: none; }
+.shortcut__link:focus-visible::after { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
+.shortcut__title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+}
+.shortcut__play {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: var(--space-3);
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: scale(calc(1 - 0.12 * var(--motion-move)));
+  transition:
+    opacity var(--motion-quick) var(--motion-easing),
+    transform var(--motion-quick) var(--motion-easing),
+    background-color var(--motion-quick) var(--motion-easing);
+}
+.shortcut:hover .shortcut__play,
+.shortcut:focus-within .shortcut__play,
+.shortcut.is-playing .shortcut__play { opacity: 1; transform: none; }
+.shortcut__play:hover { background: var(--color-accent-hover); transform: scale(calc(1 + 0.06 * var(--motion-move))); }
+.shortcut__play:focus-visible { border-radius: 50%; }
+
+.shortcut--skeleton { background: var(--color-state-hover); }
+.shortcut__skeleton-line { width: 48%; height: 14px; margin-left: var(--space-3); border-radius: var(--radius-row); }
+
+@container main (max-width: 760px) {
+  .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Narrow tiles give the title the full width; the play button floats over its end. */
+  .shortcut__play { position: absolute; right: var(--space-2); top: 16px; margin-right: 0; }
+}
+
+/* ---------------------------------------------------------------- Show all grid */
+.shelf-page__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-width), 1fr));
+}

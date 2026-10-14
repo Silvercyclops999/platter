@@ -1,0 +1,10 @@
+/* Shelf scroll arrows show while the pointer or focus is on the shelf. */
+.shelf__tools .icon-btn {
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-easing);
+}
+.shelf:hover .shelf__tools .icon-btn,
+.shelf:focus-within .shelf__tools .icon-btn {
+  opacity: 1;
+  transition-duration: var(--motion-very-quick);
+}

@@ -9,6 +9,7 @@ import type { SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { ArtistPage } from "../pages/ArtistPage";
 import { HomePage } from "../pages/HomePage";
+import { HomeShelfPage } from "../pages/HomeShelfPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { SearchPage } from "../pages/SearchPage";
@@ -105,6 +106,8 @@ function Page({ route }: { route: Route }) {
       return <PlaylistPage id={route.id} />;
     case "settings":
       return <SettingsPage />;
+    case "homeShelf":
+      return <HomeShelfPage shelf={route.shelf} />;
   }
 }
 

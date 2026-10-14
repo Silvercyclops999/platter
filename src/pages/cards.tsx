@@ -3,7 +3,7 @@ import type { MouseEvent } from "react";
 import { Card } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { releaseTypeLabel } from "../lib/format";
-import type { Album, Artist, PlayContextKind, Playlist } from "../lib/types";
+import type { Album, Artist, HomeItem, PlayContextKind, Playlist } from "../lib/types";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
@@ -15,109 +15,182 @@ export function useContextState(kind: PlayContextKind, id: string): { isContext:
   return { isContext, playing };
 }
 
-export function AlbumCard({ album, subtitle = "artist", note }: { album: Album; subtitle?: "artist" | "year"; note?: string }) {
+/** Open, play / pause and the context menu for one album, artist or playlist. */
+export interface ItemActions {
+  playing: boolean;
+  open: () => void;
+  play: () => void;
+  onContextMenu: (e: MouseEvent<HTMLElement>) => void;
+}
+
+export function useAlbumActions(album: Album): ItemActions {
   const pinned = usePins((s) => s.isPinned("album", album.id));
   const { isContext, playing } = useContextState("album", album.id);
+  const play = () => (isContext ? player.toggle() : player.playAlbum(album.id));
+  return {
+    playing,
+    play,
+    open: () => nav.go({ name: "album", id: album.id }),
+    onContextMenu: (e) => {
+      e.preventDefault();
+      openContextMenu(
+        `Options for ${album.title}`,
+        [
+          { label: playing ? "Pause" : "Play", onSelect: play },
+          { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
+          { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
+          {
+            label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
+            onSelect: () =>
+              usePins.getState().toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
+          },
+        ],
+        e,
+      );
+    },
+  };
+}
+
+export function useArtistActions(artist: Artist): ItemActions {
+  const pinned = usePins((s) => s.isPinned("artist", artist.id));
+  const { isContext, playing } = useContextState("artist", artist.id);
+  const play = () => (isContext ? player.toggle() : player.playArtist(artist.id));
+  return {
+    playing,
+    play,
+    open: () => nav.go({ name: "artist", id: artist.id }),
+    onContextMenu: (e) => {
+      e.preventDefault();
+      openContextMenu(
+        `Options for ${artist.title}`,
+        [
+          { label: playing ? "Pause" : "Play", onSelect: play },
+          {
+            label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
+            onSelect: () => usePins.getState().toggle({ kind: "artist", id: artist.id, title: artist.title, subtitle: "Artist", thumb: artist.thumb }),
+          },
+        ],
+        e,
+      );
+    },
+  };
+}
+
+export function usePlaylistActions(playlist: Playlist): ItemActions {
+  const pinned = usePins((s) => s.isPinned("playlist", playlist.id));
+  const { isContext, playing } = useContextState("playlist", playlist.id);
+  const play = () => (isContext ? player.toggle() : player.playPlaylist(playlist.id));
+  return {
+    playing,
+    play,
+    open: () => nav.go({ name: "playlist", id: playlist.id }),
+    onContextMenu: (e) => {
+      e.preventDefault();
+      openContextMenu(
+        `Options for ${playlist.title}`,
+        [
+          { label: playing ? "Pause" : "Play", onSelect: play },
+          { label: "Add to queue", onSelect: () => player.queuePlaylist(playlist.id) },
+          {
+            label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
+            onSelect: () =>
+              usePins.getState().toggle({
+                kind: "playlist",
+                id: playlist.id,
+                title: playlist.title,
+                subtitle: `Playlist · ${playlist.trackCount} songs`,
+                thumb: playlist.thumb,
+              }),
+          },
+        ],
+        e,
+      );
+    },
+  };
+}
+
+export function playlistSubtitle(playlist: Playlist): string {
+  return `${playlist.smart ? "Smart playlist" : "Playlist"} · ${playlist.trackCount} songs`;
+}
+
+export function AlbumCard({ album, subtitle = "artist", note }: { album: Album; subtitle?: "artist" | "year" | "type"; note?: string }) {
+  const a = useAlbumActions(album);
   const sub = note
     ? `${note} · ${releaseTypeLabel(album)}`
     : subtitle === "year"
       ? `${album.year ?? "Unreleased"} · ${releaseTypeLabel(album)}`
-      : `${album.year ? album.year + " · " : ""}${album.artistTitle}`;
-  const onContextMenu = (e: MouseEvent<HTMLElement>) => {
-    e.preventDefault();
-    openContextMenu(
-      `Options for ${album.title}`,
-      [
-        { label: playing ? "Pause" : "Play", onSelect: () => (isContext ? player.toggle() : player.playAlbum(album.id)) },
-        { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
-        { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
-        {
-          label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-          onSelect: () =>
-            usePins.getState().toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
-        },
-      ],
-      e,
-    );
-  };
+      : subtitle === "type"
+        ? `${releaseTypeLabel(album)} · ${album.artistTitle}`
+        : `${album.year ? album.year + " · " : ""}${album.artistTitle}`;
   return (
     <Card
       kind="album"
       title={album.title}
       subtitle={sub}
       thumb={album.thumb}
-      playing={playing}
-      onOpen={() => nav.go({ name: "album", id: album.id })}
-      onPlay={() => (isContext ? player.toggle() : player.playAlbum(album.id))}
-      onContextMenu={onContextMenu}
+      playing={a.playing}
+      onOpen={a.open}
+      onPlay={a.play}
+      onContextMenu={a.onContextMenu}
     />
   );
 }
 
 export function ArtistCard({ artist }: { artist: Artist }) {
-  const pinned = usePins((s) => s.isPinned("artist", artist.id));
-  const { isContext, playing } = useContextState("artist", artist.id);
+  const a = useArtistActions(artist);
   return (
     <Card
       kind="artist"
       title={artist.title}
       subtitle="Artist"
       thumb={artist.thumb}
-      playing={playing}
-      onOpen={() => nav.go({ name: "artist", id: artist.id })}
-      onPlay={() => (isContext ? player.toggle() : player.playArtist(artist.id))}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        openContextMenu(
-          `Options for ${artist.title}`,
-          [
-            { label: playing ? "Pause" : "Play", onSelect: () => (isContext ? player.toggle() : player.playArtist(artist.id)) },
-            {
-              label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-              onSelect: () => usePins.getState().toggle({ kind: "artist", id: artist.id, title: artist.title, subtitle: "Artist", thumb: artist.thumb }),
-            },
-          ],
-          e,
-        );
-      }}
+      playing={a.playing}
+      onOpen={a.open}
+      onPlay={a.play}
+      onContextMenu={a.onContextMenu}
     />
   );
 }
 
 export function PlaylistCard({ playlist }: { playlist: Playlist }) {
-  const pinned = usePins((s) => s.isPinned("playlist", playlist.id));
-  const { isContext, playing } = useContextState("playlist", playlist.id);
+  const a = usePlaylistActions(playlist);
   return (
     <Card
       kind="playlist"
       title={playlist.title}
-      subtitle={`${playlist.smart ? "Smart playlist" : "Playlist"} · ${playlist.trackCount} songs`}
+      subtitle={playlistSubtitle(playlist)}
       thumb={playlist.thumb}
-      playing={playing}
-      onOpen={() => nav.go({ name: "playlist", id: playlist.id })}
-      onPlay={() => (isContext ? player.toggle() : player.playPlaylist(playlist.id))}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        openContextMenu(
-          `Options for ${playlist.title}`,
-          [
-            { label: playing ? "Pause" : "Play", onSelect: () => (isContext ? player.toggle() : player.playPlaylist(playlist.id)) },
-            { label: "Add to queue", onSelect: () => player.queuePlaylist(playlist.id) },
-            {
-              label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
-              onSelect: () =>
-                usePins.getState().toggle({
-                  kind: "playlist",
-                  id: playlist.id,
-                  title: playlist.title,
-                  subtitle: `Playlist · ${playlist.trackCount} songs`,
-                  thumb: playlist.thumb,
-                }),
-            },
-          ],
-          e,
-        );
-      }}
+      playing={a.playing}
+      onOpen={a.open}
+      onPlay={a.play}
+      onContextMenu={a.onContextMenu}
     />
   );
+}
+
+/**
+ * Card for a mixed Home item. In mixed rows the subtitle leads with the type
+ * ("Album · artist", "Artist", "Playlist · 12 songs").
+ */
+export function HomeItemCard({ item }: { item: HomeItem }) {
+  switch (item.kind) {
+    case "album":
+      return <AlbumCard album={item.album} subtitle="type" />;
+    case "artist":
+      return <ArtistCard artist={item.artist} />;
+    case "playlist":
+      return <PlaylistCard playlist={item.playlist} />;
+  }
+}
+
+/** Key, title and art path of a Home item. */
+export function homeItemInfo(item: HomeItem): { key: string; title: string; thumb: string | null } {
+  switch (item.kind) {
+    case "album":
+      return { key: `album:${item.album.id}`, title: item.album.title, thumb: item.album.thumb };
+    case "artist":
+      return { key: `artist:${item.artist.id}`, title: item.artist.title, thumb: item.artist.thumb };
+    case "playlist":
+      return { key: `playlist:${item.playlist.id}`, title: item.playlist.title, thumb: item.playlist.thumb };
+  }
 }

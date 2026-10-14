@@ -1,10 +1,14 @@
 //! Reads behind every Library command in docs/IPC.md.
 //!
 //! Home definitions:
-//! - **Recently played**: albums by the most recent play of any of their
-//!   tracks, merging Plex history (`play_history`, all devices) with the local
-//!   listen log (catches offline plays not yet reported). Falls back to the
-//!   album's own `last_viewed_at`.
+//! - **Recently played**: albums, artists and playlists by their most recent
+//!   play, merging Plex history (`play_history`, all devices) with the local
+//!   listen log (catches offline plays not yet reported, and knows which
+//!   artist or playlist a play started from). See [`recently_played`].
+//! - **Shortcuts**: the grid of 8 at the top: recent items first, then the
+//!   most played albums, artists and playlists, de-duplicated.
+//! - **Your playlists**: most recently played here first, then by title.
+//! - **Your top artists**: artists by play count.
 //! - **Recently added**: albums by `added_at`, newest first.
 //! - **Jump back in**: albums you were into lately but haven't finished.
 //!   Window: last 28 days. An album qualifies when it has ≥ 2 plays in the
@@ -28,6 +32,12 @@ use super::store::{
 use super::types::*;
 
 pub const HOME_ROW: usize = 12;
+/// Tiles in Home's shortcut grid.
+pub const HOME_SHORTCUTS: usize = 8;
+/// Recent items that lead the shortcut grid before most played ones join.
+const SHORTCUT_RECENT: usize = 6;
+/// Most items a "Show all" page lists.
+pub const SHELF_ALL_MAX: usize = 200;
 const JUMP_BACK_WINDOW_S: i64 = 28 * 24 * 3600;
 const POPULAR_N: usize = 10;
 const MORE_BY_N: usize = 12;
@@ -51,24 +61,46 @@ fn albums_by_ids(c: &Connection, ids: &[String]) -> AppResult<Vec<Album>> {
     Ok(out)
 }
 
-/// Album ids with their latest play time (seconds), newest first.
-fn recent_album_plays(c: &Connection, limit: usize) -> AppResult<Vec<(String, i64)>> {
+/// Recently played albums, artists and playlists, newest first.
+///
+/// A play started from an artist or a playlist counts for that artist or
+/// playlist only, not for each track's album, so playing a playlist doesn't
+/// fill the row with its albums. Plex history (all devices) has no context,
+/// so its plays count for the album, except those matching a local artist or
+/// playlist play of the same track (reported to Plex from here). Albums' own
+/// `last_viewed_at` stands in until Plex history has synced.
+fn recent_keys(c: &Connection, limit: usize) -> AppResult<Vec<(String, String)>> {
     let mut st = c.prepare_cached(
-        "WITH plays AS (
-             SELECT rating_key, viewed_at AS at FROM play_history
+        "WITH contexts AS (
+             SELECT context_kind AS kind, context_id AS id, max(started_at) / 1000 AS at
+             FROM listen_log
+             WHERE context_kind IN ('album', 'artist', 'playlist') AND context_id IS NOT NULL
+             GROUP BY context_kind, context_id
+         ), track_plays AS (
+             SELECT h.rating_key, h.viewed_at AS at FROM play_history h
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM listen_log l
+                 WHERE l.rating_key = h.rating_key
+                   AND l.context_kind IN ('artist', 'playlist') AND l.context_id IS NOT NULL
+                   AND h.viewed_at BETWEEN l.started_at / 1000 - 60
+                       AND coalesce(l.ended_at, l.started_at + l.duration_ms) / 1000 + 600
+             )
              UNION ALL
-             SELECT rating_key, started_at / 1000 AS at FROM listen_log
+             SELECT rating_key, started_at / 1000 FROM listen_log
+             WHERE context_id IS NULL OR context_kind IS NULL OR context_kind NOT IN ('artist', 'playlist')
          ), recent AS (
-             SELECT rating_key, max(at) AS at FROM plays GROUP BY rating_key
+             SELECT rating_key, max(at) AS at FROM track_plays GROUP BY rating_key
              ORDER BY at DESC LIMIT 2000
-         ), by_album AS (
-             SELECT t.album_id AS album_id, max(r.at) AS at
-             FROM recent r JOIN tracks t ON t.id = r.rating_key
+         ), items AS (
+             SELECT kind, id, at FROM contexts
+             UNION ALL
+             SELECT 'album', t.album_id, max(r.at) FROM recent r JOIN tracks t ON t.id = r.rating_key
              GROUP BY t.album_id
              UNION ALL
-             SELECT id, last_viewed_at FROM albums WHERE last_viewed_at IS NOT NULL
+             SELECT 'album', id, last_viewed_at FROM albums
+             WHERE last_viewed_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM play_history)
          )
-         SELECT album_id, max(at) AS at FROM by_album GROUP BY album_id ORDER BY at DESC LIMIT ?1",
+         SELECT kind, id, max(at) AS at FROM items GROUP BY kind, id ORDER BY at DESC, kind, id LIMIT ?1",
     )?;
     let rows = st
         .query_map([limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -76,18 +108,114 @@ fn recent_album_plays(c: &Connection, limit: usize) -> AppResult<Vec<(String, i6
     Ok(rows)
 }
 
-pub fn home(c: &Connection, now: i64) -> AppResult<HomeData> {
-    let recent_ids: Vec<String> = recent_album_plays(c, HOME_ROW)?.into_iter().map(|(id, _)| id).collect();
-    let recently_played = albums_by_ids(c, &recent_ids)?;
+/// Look up `(kind, id)` keys; ones no longer in the library are skipped.
+fn items_by_keys(c: &Connection, keys: &[(String, String)]) -> AppResult<Vec<HomeItem>> {
+    let mut al = c.prepare_cached(&format!("SELECT {ALBUM_COLS} FROM albums al WHERE al.id = ?1"))?;
+    let mut ar = c.prepare_cached(&format!("SELECT {ARTIST_COLS} FROM artists ar WHERE ar.id = ?1"))?;
+    let mut pl = c.prepare_cached(&format!("SELECT {PLAYLIST_COLS} FROM playlists p WHERE p.id = ?1"))?;
+    let mut out = Vec::with_capacity(keys.len());
+    for (kind, id) in keys {
+        let item = match kind.as_str() {
+            "album" => al.query_row([id], row_album).optional()?.map(|album| HomeItem::Album { album }),
+            "artist" => ar.query_row([id], row_artist).optional()?.map(|artist| HomeItem::Artist { artist }),
+            "playlist" => pl.query_row([id], row_playlist).optional()?.map(|playlist| HomeItem::Playlist { playlist }),
+            _ => None,
+        };
+        out.extend(item);
+    }
+    Ok(out)
+}
 
-    let recently_added = {
+/// Recently played albums, artists and playlists.
+pub fn recently_played(c: &Connection, limit: usize) -> AppResult<Vec<HomeItem>> {
+    items_by_keys(c, &recent_keys(c, limit)?)
+}
+
+/// Artists by play count (played ones only).
+pub fn top_artists(c: &Connection, limit: usize) -> AppResult<Vec<Artist>> {
+    let mut st = c.prepare_cached(&format!(
+        "SELECT {ARTIST_COLS} FROM artists ar WHERE ar.view_count > 0
+         ORDER BY ar.view_count DESC, ar.sort_title COLLATE NOCASE LIMIT ?1"
+    ))?;
+    Ok(st.query_map([limit as i64], row_artist)?.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Playlists, most recently played here first, then by title.
+pub fn home_playlists(c: &Connection, limit: usize) -> AppResult<Vec<Playlist>> {
+    let mut st = c.prepare_cached(&format!(
+        "SELECT {PLAYLIST_COLS} FROM playlists p
+         LEFT JOIN (SELECT context_id, max(started_at) AS at FROM listen_log
+                    WHERE context_kind = 'playlist' GROUP BY context_id) l ON l.context_id = p.id
+         ORDER BY l.at IS NULL, l.at DESC, p.title COLLATE NOCASE LIMIT ?1"
+    ))?;
+    Ok(st.query_map([limit as i64], row_playlist)?.collect::<Result<Vec<_>, _>>()?)
+}
+
+pub fn recently_added(c: &Connection, limit: usize) -> AppResult<Vec<Album>> {
+    let mut st = c.prepare_cached(&format!(
+        "SELECT {ALBUM_COLS} FROM albums al ORDER BY al.added_at DESC, al.pk DESC LIMIT ?1"
+    ))?;
+    Ok(st.query_map([limit as i64], row_album)?.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Most played albums, artists and playlists, taking turns (album, artist,
+/// playlist) since their counts aren't on the same scale.
+fn most_played(c: &Connection, per_kind: usize) -> AppResult<Vec<HomeItem>> {
+    let albums: Vec<Album> = {
         let mut st = c.prepare_cached(&format!(
-            "SELECT {ALBUM_COLS} FROM albums al ORDER BY al.added_at DESC, al.pk DESC LIMIT ?1"
+            "SELECT {ALBUM_COLS} FROM albums al WHERE al.view_count > 0
+             ORDER BY al.view_count DESC, al.pk LIMIT ?1"
         ))?;
-        st.query_map([HOME_ROW as i64], row_album)?.collect::<Result<Vec<_>, _>>()?
+        st.query_map([per_kind as i64], row_album)?.collect::<Result<_, _>>()?
     };
+    let artists = top_artists(c, per_kind)?;
+    let playlists: Vec<Playlist> = {
+        let mut st = c.prepare_cached(&format!(
+            "SELECT {PLAYLIST_COLS} FROM playlists p
+             JOIN (SELECT context_id, count(*) AS n FROM listen_log
+                   WHERE context_kind = 'playlist' AND skipped = 0 GROUP BY context_id) l
+               ON l.context_id = p.id
+             ORDER BY l.n DESC, p.title COLLATE NOCASE LIMIT ?1"
+        ))?;
+        st.query_map([per_kind as i64], row_playlist)?.collect::<Result<_, _>>()?
+    };
+    let mut albums = albums.into_iter().map(|album| HomeItem::Album { album });
+    let mut artists = artists.into_iter().map(|artist| HomeItem::Artist { artist });
+    let mut playlists = playlists.into_iter().map(|playlist| HomeItem::Playlist { playlist });
+    let mut out = Vec::new();
+    loop {
+        let before = out.len();
+        out.extend(albums.next());
+        out.extend(artists.next());
+        out.extend(playlists.next());
+        if out.len() == before {
+            return Ok(out);
+        }
+    }
+}
 
-    let exclude: HashSet<&str> = recent_ids.iter().take(6).map(String::as_str).collect();
+/// The shortcut grid: up to [`SHORTCUT_RECENT`] recent items lead, most
+/// played ones follow, and further recent items fill any gap. No repeats.
+pub fn shortcuts(recent: &[HomeItem], most: &[HomeItem]) -> Vec<HomeItem> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::with_capacity(HOME_SHORTCUTS);
+    let lead = recent.iter().take(SHORTCUT_RECENT);
+    let rest = recent.iter().skip(SHORTCUT_RECENT);
+    for item in lead.chain(most.iter()).chain(rest) {
+        if out.len() >= HOME_SHORTCUTS {
+            break;
+        }
+        let (kind, id) = item.key();
+        if seen.insert((kind, id.to_string())) {
+            out.push(item.clone());
+        }
+    }
+    out
+}
+
+/// Jump back in (see the module docs). Albums in `recent_albums` (the start
+/// of Recently played) are left out so the two rows differ.
+fn jump_back_in(c: &Connection, now: i64, recent_albums: &HashSet<String>, limit: usize) -> AppResult<Vec<Album>> {
     let since = now - JUMP_BACK_WINDOW_S;
     let mut st = c.prepare_cached(
         "WITH plays AS (
@@ -100,26 +228,71 @@ pub fn home(c: &Connection, now: i64) -> AppResult<HomeData> {
                 max(p.at) AS last, al.track_count
          FROM plays p JOIN tracks t ON t.id = p.rating_key JOIN albums al ON al.id = t.album_id
          GROUP BY t.album_id HAVING n >= 2
-         ORDER BY n DESC, last DESC LIMIT 100",
+         ORDER BY n DESC, last DESC LIMIT 500",
     )?;
     let rows: Vec<(String, i64, i64, i64)> = st
         .query_map([since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(4)?)))?
         .collect::<Result<_, _>>()?;
     let mut ids = Vec::new();
     for (rank, (id, _n, distinct, track_count)) in rows.into_iter().enumerate() {
-        if exclude.contains(id.as_str()) {
+        if recent_albums.contains(&id) {
             continue;
         }
         let unfinished = distinct < track_count;
         if unfinished || rank < HOME_ROW {
             ids.push(id);
         }
-        if ids.len() >= HOME_ROW {
+        if ids.len() >= limit {
             break;
         }
     }
-    let jump_back_in = albums_by_ids(c, &ids)?;
-    Ok(HomeData { recently_played, recently_added, jump_back_in })
+    albums_by_ids(c, &ids)
+}
+
+/// Album ids among the first six recently played items.
+fn first_recent_albums(recent: &[HomeItem]) -> HashSet<String> {
+    recent
+        .iter()
+        .take(6)
+        .filter_map(|i| match i {
+            HomeItem::Album { album } => Some(album.id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn home(c: &Connection, now: i64) -> AppResult<HomeData> {
+    let mut recently_played = recently_played(c, HOME_ROW.max(HOME_SHORTCUTS))?;
+    let most = most_played(c, HOME_SHORTCUTS)?;
+    let shortcuts = shortcuts(&recently_played, &most);
+    let jump_back_in = jump_back_in(c, now, &first_recent_albums(&recently_played), HOME_ROW)?;
+    recently_played.truncate(HOME_ROW);
+    Ok(HomeData {
+        shortcuts,
+        recently_played,
+        jump_back_in,
+        playlists: home_playlists(c, HOME_ROW)?,
+        recently_added: recently_added(c, HOME_ROW)?,
+        top_artists: top_artists(c, HOME_ROW)?,
+    })
+}
+
+/// Everything in one Home shelf, for its "Show all" page.
+pub fn home_shelf(c: &Connection, now: i64, shelf: HomeShelf, limit: u32) -> AppResult<Vec<HomeItem>> {
+    let n = (limit as usize).clamp(1, SHELF_ALL_MAX);
+    Ok(match shelf {
+        HomeShelf::RecentlyPlayed => recently_played(c, n)?,
+        HomeShelf::JumpBackIn => {
+            let recent = recently_played(c, 6)?;
+            let albums = jump_back_in(c, now, &first_recent_albums(&recent), n)?;
+            albums.into_iter().map(|album| HomeItem::Album { album }).collect()
+        }
+        HomeShelf::Playlists => {
+            home_playlists(c, n)?.into_iter().map(|playlist| HomeItem::Playlist { playlist }).collect()
+        }
+        HomeShelf::RecentlyAdded => recently_added(c, n)?.into_iter().map(|album| HomeItem::Album { album }).collect(),
+        HomeShelf::TopArtists => top_artists(c, n)?.into_iter().map(|artist| HomeItem::Artist { artist }).collect(),
+    })
 }
 
 fn clamp_page(offset: u32, limit: u32) -> (i64, i64) {

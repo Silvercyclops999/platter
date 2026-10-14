@@ -5,7 +5,7 @@
 //! use platter_lib::db::commands as dbc;
 //! .manage(db_handle)
 //! .invoke_handler(tauri::generate_handler![
-//!     dbc::sync_status, dbc::sync_now, dbc::home, dbc::artists, dbc::artist_names, dbc::albums,
+//!     dbc::sync_status, dbc::sync_now, dbc::home, dbc::home_shelf, dbc::artists, dbc::artist_names, dbc::albums,
 //!     dbc::playlists, dbc::library_items, dbc::artist_page, dbc::album_page, dbc::playlist_page,
 //!     dbc::search, dbc::recent_searches, dbc::recent_search_add,
 //!     dbc::recent_searches_clear,
@@ -44,6 +44,13 @@ pub async fn sync_now(db: State<'_, DbHandle>, full: Option<bool>) -> AppResult<
 #[tauri::command]
 pub async fn home(db: State<'_, DbHandle>) -> AppResult<HomeData> {
     db.read_async(|c| queries::home(c, now_s())).await
+}
+
+/// Everything in one Home shelf, for its "Show all" page.
+#[tauri::command]
+pub async fn home_shelf(db: State<'_, DbHandle>, shelf: HomeShelf, limit: Option<u32>) -> AppResult<Vec<HomeItem>> {
+    let limit = limit.unwrap_or(queries::SHELF_ALL_MAX as u32);
+    db.read_async(move |c| queries::home_shelf(c, now_s(), shelf, limit)).await
 }
 
 #[tauri::command]

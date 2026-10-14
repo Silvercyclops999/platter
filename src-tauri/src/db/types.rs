@@ -106,12 +106,50 @@ pub enum SyncOutcome {
     Cancelled,
 }
 
+/// One album, artist or playlist on Home (shortcut tile or mixed shelf).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HomeItem {
+    Album { album: Album },
+    Artist { artist: Artist },
+    Playlist { playlist: Playlist },
+}
+
+impl HomeItem {
+    /// `(kind, id)`, unique across the three kinds.
+    pub fn key(&self) -> (&'static str, &str) {
+        match self {
+            HomeItem::Album { album } => ("album", &album.id),
+            HomeItem::Artist { artist } => ("artist", &artist.id),
+            HomeItem::Playlist { playlist } => ("playlist", &playlist.id),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeData {
-    pub recently_played: Vec<Album>,
-    pub recently_added: Vec<Album>,
+    /// Up to 8 shortcut tiles: recent first, then most played, de-duplicated.
+    pub shortcuts: Vec<HomeItem>,
+    /// Albums, artists and playlists by most recent play.
+    pub recently_played: Vec<HomeItem>,
     pub jump_back_in: Vec<Album>,
+    /// Playlists, most recently played first, then by title.
+    pub playlists: Vec<Playlist>,
+    pub recently_added: Vec<Album>,
+    /// Artists by play count.
+    pub top_artists: Vec<Artist>,
+}
+
+/// A Home shelf, for its "Show all" page (`home_shelf`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HomeShelf {
+    RecentlyPlayed,
+    JumpBackIn,
+    Playlists,
+    RecentlyAdded,
+    TopArtists,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -48,7 +48,8 @@ Event `auth://changed` → `AuthStatus`.
 | --- | --- | --- |
 | `sync_status` | – | `SyncStatus` |
 | `sync_now` | `{ full?: bool }` | – |
-| `home` | – | `HomeData { recentlyPlayed: Album[], recentlyAdded: Album[], jumpBackIn: Album[] }` |
+| `home` | – | `HomeData { shortcuts: HomeItem[], recentlyPlayed: HomeItem[], jumpBackIn: Album[], playlists: Playlist[], recentlyAdded: Album[], topArtists: Artist[] }` |
+| `home_shelf` | `{ shelf: "recentlyPlayed"|"jumpBackIn"|"playlists"|"recentlyAdded"|"topArtists", limit?: number }` | `HomeItem[]` (the whole shelf, for Show all; limit defaults to and caps at 200) |
 | `artists` | `{ sort: "name"|"recent"|"plays", offset, limit }` | `Page<Artist>` |
 | `artist_names` | – | `{ id, title }[]` (every artist) |
 | `albums` | `{ sort: "name"|"artist"|"year"|"recent"|"plays", offset, limit, section?: ReleaseSection }` | `Page<Album>` |
@@ -59,6 +60,15 @@ Event `auth://changed` → `AuthStatus`.
 | `playlist_page` | `{ id }` | `{ playlist, tracks: Track[] }` |
 
 `Page<T> = { items: T[], total }`.
+`HomeItem` is `{ kind: "album", album }`, `{ kind: "artist", artist }` or
+`{ kind: "playlist", playlist }`. Home rows hold 12 items. Recently played
+counts a play started from an artist or a playlist for that artist or
+playlist, not for each song's album; Plex history from other devices counts
+for the album. `shortcuts` holds up to 8: the first 6 recently played, then
+the most played album, artist and playlist in turn, then more recent ones,
+with no repeats. `playlists` puts the ones played on this computer first,
+newest first, then the rest by title. `topArtists` is artists by play count,
+played ones only.
 `artist_names` feeds the artist links in track lines: the UI loads it once,
 keeps it, and loads it again after `library://changed`. A track's
 `ratingCount` (global listener count, absent when Plex has none) ranks the
@@ -237,6 +247,8 @@ The rest of the fields, with their defaults:
 | `artworkColours` | bool, true | Headers tint from artwork. Off gives every header the same neutral colour. |
 | `reduceMotion` | `"system"`, `"on"`, `"off"` | Follow the OS setting, or force reduced motion on or off. |
 | `outputDevice` | device id or null, null | Read only here. Set with `output_select`; null follows the system default. |
+| `homeShortcuts` | bool, true | Home shows the grid of recent and most played shortcuts. |
+| `homeColourWash` | bool, true | Home's top takes its colour from the shortcuts' artwork. Only applies while `artworkColours` is on. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
