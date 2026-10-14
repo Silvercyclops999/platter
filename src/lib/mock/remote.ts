@@ -1,6 +1,8 @@
 /**
- * Listen on in the mock: a few invented Plex players with sessions, and a
- * pretend remote session that ticks like a real player's timeline.
+ * Listen on in the mock: a few invented Plex players with sessions, a
+ * Chromecast, a Cast speaker group and AirPlay speakers (one with a
+ * password, one Platter can't play on), and a pretend remote session that
+ * ticks like a real player's timeline.
  *
  * Test/demo hooks: `stopElsewhere()` (someone stops the player there),
  * `loseRemote()` (the player stops answering), `setPlayers()`.
@@ -22,9 +24,34 @@ export interface RemoteHost {
 /** Ids of players that refuse commands (to demo "Couldn't reach"). */
 export const UNREACHABLE = new Set(["mock-tv"]);
 
+/** The mock AirPlay speaker's password. */
+export const MOCK_AIRPLAY_PASSWORD = "1234";
+export const NEEDS_PASSWORD = "This speaker needs its AirPlay password.";
+export const WRONG_PASSWORD = "That AirPlay password didn't work.";
+
+const plex = { via: "plex" as const, needsPassword: false, unsupported: null };
+const lan = (via: "cast" | "airplay") => ({ via, needsPassword: false, unsupported: null, playing: null, online: true });
+
+/** Cast devices and AirPlay receivers "on the network". */
+export function mockLanDevices(): RemotePlayer[] {
+  return [
+    { id: "cast:den", name: "Den TV", product: "Chromecast", kind: "tv", ...lan("cast") },
+    { id: "cast:group", name: "Downstairs", product: "Speaker group", kind: "group", ...lan("cast") },
+    { id: "airplay:patio", name: "Patio", product: "AirPlay", kind: "speaker", ...lan("airplay"), needsPassword: true },
+    {
+      id: "airplay:old",
+      name: "Old AirPort",
+      product: "AirPlay",
+      kind: "speaker",
+      ...lan("airplay"),
+      unsupported: "Needs AirPlay encryption Platter doesn't support",
+    },
+  ];
+}
+
 export function mockPlayers(sample: Track | undefined): RemotePlayer[] {
   return [
-    { id: "mock-amp-desk", name: "Studio Desk", product: "Plexamp", kind: "computer", playing: null, online: true },
+    { id: "mock-amp-desk", name: "Studio Desk", product: "Plexamp", kind: "computer", playing: null, online: true, ...plex },
     {
       id: "mock-sonos",
       name: "Kitchen",
@@ -32,14 +59,18 @@ export function mockPlayers(sample: Track | undefined): RemotePlayer[] {
       kind: "speaker",
       playing: sample ? `${sample.title} • ${sample.trackArtist ?? sample.artistTitle}` : null,
       online: true,
+      ...plex,
     },
-    { id: "mock-phone", name: "Pixel phone", product: "Plexamp", kind: "phone", playing: null, online: true },
-    { id: "mock-tv", name: "Living Room TV", product: "Plex for Samsung", kind: "tv", playing: null, online: false },
+    { id: "mock-phone", name: "Pixel phone", product: "Plexamp", kind: "phone", playing: null, online: true, ...plex },
+    { id: "mock-tv", name: "Living Room TV", product: "Plex for Samsung", kind: "tv", playing: null, online: false, ...plex },
   ];
 }
 
 export class MockRemote {
   private list: RemotePlayer[];
+  private lanList: RemotePlayer[] = mockLanDevices();
+  /** AirPlay passwords "in the keychain". */
+  private passwords = new Map<string, string>();
   private session: RemoteSession | null = null;
   private stoppedOn: string | null = null;
   /** The songs the player plays, from the move. */
@@ -65,20 +96,51 @@ export class MockRemote {
     this.host.emitState(this.state());
   }
 
-  players(): RemotePlayer[] {
-    if (!this.host.settings().showPlexPlayers) return [];
-    this.host.emitPlayers(this.list);
-    return this.list;
+  private all(): RemotePlayer[] {
+    const s = this.host.settings();
+    return [
+      ...(s.showPlexPlayers ? this.list : []),
+      ...(s.showCastDevices ? this.lanList.map((p) => ({ ...p, needsPassword: p.needsPassword && !this.passwords.has(p.id) })) : []),
+    ];
   }
 
-  /** Test hook: replace the player list. */
+  players(): RemotePlayer[] {
+    const list = this.all();
+    this.host.emitPlayers(list);
+    return list;
+  }
+
+  /** Test hook: replace the Plex player list. */
   setPlayers(list: RemotePlayer[]) {
     this.list = list;
   }
 
-  move(id: string): RemoteState {
-    const p = this.list.find((x) => x.id === id);
+  /** Test hook: replace the Cast and AirPlay devices. */
+  setLanDevices(list: RemotePlayer[]) {
+    this.lanList = list;
+  }
+
+  /** Test hook: the starting Cast and AirPlay devices, no passwords kept. */
+  resetLan() {
+    this.lanList = mockLanDevices();
+    this.passwords.clear();
+  }
+
+  /** Move to an AirPlay speaker with its password. */
+  moveWithPassword(id: string, password: string): RemoteState {
+    if (id === "airplay:patio" && password !== MOCK_AIRPLAY_PASSWORD) throw { kind: "auth", message: WRONG_PASSWORD };
+    const st = this.move(id, password);
+    this.passwords.set(id, password);
+    return st;
+  }
+
+  move(id: string, password?: string): RemoteState {
+    const p = this.all().find((x) => x.id === id) ?? this.list.find((x) => x.id === id);
     if (!p) throw { kind: "notFound", message: "That device isn't available any more." };
+    if (p.unsupported) throw { kind: "invalid", message: `Can't play on ${p.name}: ${p.unsupported}.` };
+    if (id === "airplay:patio" && (password ?? this.passwords.get(id)) !== MOCK_AIRPLAY_PASSWORD) {
+      throw { kind: "auth", message: NEEDS_PASSWORD };
+    }
     if (this.session?.playerId === id) return this.state();
     if (this.session) this.returnHere(false);
     const local = this.host.local();

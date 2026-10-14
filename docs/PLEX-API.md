@@ -79,6 +79,16 @@ relay `https://sonos.plex.tv` with the account token.
 | Play it on a player | `/player/playback/playMedia?providerIdentifier=com.plexapp.plugins.library&machineIdentifier=&protocol=&address=&port=&token=&key=/library/metadata/{start}&offset={ms}&containerKey=/playQueues/{id}?window=100&own=1&type=music` |
 | Controls | `/player/playback/{play,pause,stop,skipNext,skipPrevious}?type=music`, `seekTo?offset={ms}`, `setParameters?volume=0..100`, `shuffle=0|1`, `repeat=0|1|2` (off, one, all) |
 | Follow it | `/player/timeline/poll?wait=0` (XML `Timeline` per type; the `type="music"` one has `state`, `time`, `duration`, `ratingKey`, `key`, `playQueueID`, `playQueueItemID`, `volume`, `shuffle`, `repeat`) |
+| Token for another device | `GET /security/token?type=delegation&scope=all` (`MediaContainer.token`, a transient token) |
+
+Casting to a Chromecast uses Plex's Cast receiver (app id `9AC194DC`). After
+launching it, the sender sends a media `LOAD` whose `contentId` is
+`/library/metadata/{start}` and whose `customData` carries `offset` (seconds),
+`containerKey` (`/playQueues/{id}?own=1&window=200`) and a `server` object
+(`machineIdentifier`, `protocol`, `address`, `port`, `accessToken`, `user`).
+Play, pause, next, previous, stop and seek go on the `urn:x-cast:plex`
+namespace as `{type: "PLAY"}` and so on, seek with `currentTime` in seconds.
+Status comes back as standard media status messages.
 
 ## Findings log
 Anything surprising goes here as it's tested (date, endpoint, what happened).
@@ -369,3 +379,16 @@ anything that plays on a real device needs an OK first). Check once:
   applies the gain as given.
 - None of these are in the list endpoints, so the player fetches track
   detail once per track on first play and caches the four values.
+
+### 2026-10-14: casting (not yet checked live)
+- The Cast path above follows how existing open-source Plex cast senders
+  drive Plex's receiver. Nothing has been sent to a real device yet. To
+  check with a real Chromecast: that the receiver starts and plays the play
+  queue at the offset, which field of its media status carries the playing
+  song's rating key (Platter reads `customData.ratingKey`, `customData.key`
+  or a `/library/metadata/{id}` `contentId`), and whether it honours
+  `QUEUE_UPDATE` for shuffle and repeat.
+- `/security/token?type=delegation&scope=all` hasn't been called against
+  the real server (it creates a token). Platter falls back to the server
+  token when it gets no answer; check that the transient token comes back
+  and that the receiver accepts it.

@@ -561,6 +561,8 @@ export interface Settings {
   eqLastOutput?: string | null;
   /** Share menus find public links for released music (iTunes Search and song.link). */
   sharePublicLinks: boolean;
+  /** List Cast devices and AirPlay receivers under Listen on (mDNS stays off when off). */
+  showCastDevices: boolean;
   [key: string]: unknown;
 }
 
@@ -640,6 +642,7 @@ export const DEFAULT_SETTINGS: Settings = {
   eqFallback: null,
   eqLastOutput: null,
   sharePublicLinks: true,
+  showCastDevices: true,
 };
 
 // ---------------------------------------------------------------- sharing
@@ -742,8 +745,11 @@ export interface OutputState {
 
 // ---------------------------------------------------------------- listen on
 
-/** What a Plex player is, for its icon. */
-export type PlayerKind = "computer" | "phone" | "speaker" | "browser" | "tv";
+/** What a player is, for its icon. "group" is a Cast speaker group. */
+export type PlayerKind = "computer" | "phone" | "speaker" | "browser" | "tv" | "group";
+
+/** How Platter reaches a device: a Plex player, a Cast device, or an AirPlay receiver. */
+export type PlayerVia = "plex" | "cast" | "airplay";
 
 /** A Plex player in the device picker. */
 export interface RemotePlayer {
@@ -757,6 +763,11 @@ export interface RemotePlayer {
   playing: string | null;
   /** Seen on the network now. Others are listed but may not answer. */
   online: boolean;
+  via: PlayerVia;
+  /** An AirPlay receiver with a password Platter doesn't have yet. */
+  needsPassword: boolean;
+  /** Listed but can't be played on, and why. */
+  unsupported: string | null;
 }
 
 export type RemoteStatus = "connecting" | "playing" | "paused" | "buffering";

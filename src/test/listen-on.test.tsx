@@ -77,12 +77,14 @@ describe("the Listen on section", () => {
 
   it("says when no players are found", async () => {
     mock.remote.setPlayers([]);
+    mock.remote.setLanDevices([]);
     render(<AppShell />);
-    expect(await within(await findListenOn()).findByText(/No Plex players found/)).toBeInTheDocument();
+    expect(await within(await findListenOn()).findByText(/No devices found/)).toBeInTheDocument();
+    mock.remote.resetLan();
   });
 
   it("is hidden when the setting is off", async () => {
-    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false } }));
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false, showCastDevices: false } }));
     render(<AppShell />);
     await within(picker()).findByRole("heading", { name: "Select another output" });
     expect(within(picker()).queryByRole("region", { name: "Listen on" })).toBeNull();

@@ -1,13 +1,15 @@
-import { Globe, Laptop, Smartphone, Speaker, Tv } from "lucide-react";
+import { Globe, Laptop, Layers, Lock, Smartphone, Speaker, Tv } from "lucide-react";
 import { useEffect } from "react";
 import { Skeleton } from "../components/Skeleton";
 import type { PlayerKind, RemotePlayer, RemoteSession } from "../lib/types";
 import { usePlayer } from "../stores/player";
 import { moveTo, returnHere, useRemote, watchPlayers } from "../stores/remote";
 import { useSettings } from "../stores/settings";
+import { AirPlayPassword } from "./AirPlayPassword";
 import "./listen-on.css";
+import "./cast.css";
 
-/** The icon for a kind of Plex player. */
+/** The icon for a kind of player. */
 export function PlayerIcon({ kind, size = 20 }: { kind: PlayerKind; size?: number }) {
   switch (kind) {
     case "phone":
@@ -18,6 +20,8 @@ export function PlayerIcon({ kind, size = 20 }: { kind: PlayerKind; size?: numbe
       return <Globe size={size} />;
     case "tv":
       return <Tv size={size} />;
+    case "group":
+      return <Layers size={size} />;
     default:
       return <Laptop size={size} />;
   }
@@ -25,6 +29,7 @@ export function PlayerIcon({ kind, size = 20 }: { kind: PlayerKind; size?: numbe
 
 /** The grey line under a player's name. */
 export function playerSub(p: RemotePlayer): string {
+  if (p.unsupported) return `${p.product} • ${p.unsupported}`;
   if (p.playing) return p.playing;
   return p.online ? p.product : `${p.product} • Not active`;
 }
@@ -57,6 +62,8 @@ function Row({
   busy,
   label,
   muted,
+  unsupported,
+  locked,
   onPick,
 }: {
   icon: React.ReactNode;
@@ -65,17 +72,14 @@ function Row({
   busy: boolean;
   label: string;
   muted?: boolean;
+  unsupported?: boolean;
+  locked?: boolean;
   onPick: () => void;
 }) {
+  const cls = `output-row${muted ? " listen-row--idle" : ""}${unsupported ? " listen-row--unsupported" : ""}`;
   return (
     <li>
-      <button
-        type="button"
-        className={`output-row${muted ? " listen-row--idle" : ""}`}
-        aria-label={label}
-        aria-busy={busy || undefined}
-        onClick={onPick}
-      >
+      <button type="button" className={cls} aria-label={label} aria-busy={busy || undefined} onClick={onPick}>
         <span className="output-row__icon" aria-hidden="true">
           {icon}
         </span>
@@ -83,19 +87,33 @@ function Row({
           <span className="output-row__name truncate">{name}</span>
           <span className="output-row__sub truncate">{busy ? "Connecting…" : sub}</span>
         </span>
+        {locked && (
+          <span className="listen-row__lock" aria-hidden="true">
+            <Lock size={14} />
+          </span>
+        )}
       </button>
     </li>
   );
 }
 
-/** "Listen on": Plex players to move playback to, and this computer while remote. */
+function rowLabel(p: RemotePlayer): string {
+  if (p.unsupported) return `${p.name}, can't play here: ${p.unsupported}`;
+  if (p.needsPassword) return `Play on ${p.name} (asks for its password)`;
+  return `Play on ${p.name}`;
+}
+
+/** "Listen on": Plex players, Cast devices and AirPlay speakers to move
+ * playback to, and this computer while remote. */
 export function ListenOn() {
-  const show = useSettings((s) => s.settings?.showPlexPlayers ?? true);
+  const showPlex = useSettings((s) => s.settings?.showPlexPlayers ?? true);
+  const showCast = useSettings((s) => s.settings?.showCastDevices ?? true);
+  const show = showPlex || showCast;
   const players = useRemote((s) => s.players);
   const busy = useRemote((s) => s.busy);
   const session = usePlayer((s) => s.remote);
 
-  useEffect(() => (show ? watchPlayers() : undefined), [show]);
+  useEffect(() => (show ? watchPlayers() : undefined), [show, showPlex, showCast]);
 
   if (!show && !session) return null;
   const others = (players ?? []).filter((p) => p.id !== session?.playerId);
@@ -123,8 +141,10 @@ export function ListenOn() {
               icon={<PlayerIcon kind={p.kind} />}
               name={p.name}
               sub={playerSub(p)}
-              label={`Play on ${p.name}`}
+              label={rowLabel(p)}
               muted={!p.online}
+              unsupported={!!p.unsupported}
+              locked={p.needsPassword}
               busy={busy === p.id}
               onPick={() => void moveTo(p)}
             />
@@ -132,8 +152,13 @@ export function ListenOn() {
       </ul>
       {show && players === null && <Skeleton height={48} radius="card" style={{ marginTop: 4 }} />}
       {show && players !== null && others.length === 0 && (
-        <p className="output-empty">No Plex players found. Open Plexamp or another Plex app on a device signed in to your account.</p>
+        <p className="output-empty">
+          {showCast
+            ? "No devices found. Open Plexamp or another Plex app, or turn on a Chromecast or AirPlay speaker on this network."
+            : "No Plex players found. Open Plexamp or another Plex app on a device signed in to your account."}
+        </p>
       )}
+      <AirPlayPassword />
     </section>
   );
 }

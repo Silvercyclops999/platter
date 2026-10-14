@@ -173,6 +173,8 @@ export interface Backend {
   remoteQueueJump(itemId: string): Promise<RemoteState>;
   /** A player bar control while playing on another device. */
   remoteCommand(command: RemoteCommand): Promise<RemoteState>;
+  /** Move to an AirPlay receiver with its password (kept in the keychain once it works). */
+  remoteMoveWithPassword(playerId: string, password: string): Promise<RemoteState>;
 
   // Health and app states
   health(): Promise<Health>;
@@ -313,6 +315,7 @@ export function createTauriBackend(): Backend {
     remoteQueueJump: (itemId) => call("remote_queue_jump", { itemId }),
     remotePlayContext: (args) => call("remote_play_context", { context: args.context, startTrackId: args.startTrackId }),
     remoteCommand: (command) => call("remote_command", { command }),
+    remoteMoveWithPassword: (playerId, password) => call("remote_move_with_password", { playerId, password }),
 
     health: () => call("health"),
     cachedTracks: () => call("cached_tracks"),

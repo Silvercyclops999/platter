@@ -1,0 +1,34 @@
+/* Cast and AirPlay rows under Listen on, and the AirPlay password prompt. */
+
+.listen-row--unsupported { cursor: default; }
+.listen-row--unsupported .output-row__name,
+.listen-row--unsupported .output-row__icon { color: var(--color-text-muted); }
+.listen-row--unsupported:hover { background: transparent; }
+
+.listen-row__lock {
+  flex: none;
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+
+.airplay-pw__label {
+  display: block;
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+.airplay-pw__input {
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-md);
+}
+.airplay-pw__input:focus { outline: none; border-color: rgba(255, 240, 220, 0.28); background: var(--color-bg-overlay); }
+.airplay-pw__input:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+.airplay-pw__input[aria-invalid="true"] { border-color: var(--color-error); }

@@ -22,6 +22,12 @@ and your own Plex server.
   music is never looked up.
 - song.link: the public links Platter copies point to song.link pages. The app
   itself never contacts song.link; whoever opens the link does.
+- Chromecasts and AirPlay speakers on your own network. While "Show
+  Chromecast and AirPlay devices" is on, the app listens for them with
+  multicast DNS on the local network (nothing leaves it). When you play on a
+  Chromecast, it gets the songs from your Plex server with a short-lived
+  token your server hands out for this. When you play on an AirPlay speaker,
+  the app sends it the audio.
 
 Some optional features planned for later will talk to other services, but
 only once you turn them on. Examples are Discord status, an image host for
@@ -33,7 +39,8 @@ each one sends.
 
 Your Plex token is kept in the OS keychain (Windows Credential Manager or
 macOS Keychain). It's never written to a plain file or to the logs. API keys
-you enter for artist info sources are kept the same way.
+you enter for artist info sources, and AirPlay speaker passwords, are kept
+the same way.
 
 The library cache, artwork cache, search history and listen log live in the
 app's data folder.

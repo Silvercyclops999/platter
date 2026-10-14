@@ -370,11 +370,13 @@ Events:
 
 ## Listen on
 Plex players Platter can move playback to (Plexamp, Plex apps, Sonos linked
-to Plex), and remote mode while one plays.
+to Plex), Chromecasts and AirPlay speakers on the local network, and remote
+mode while one plays.
 
 | Command | Args |
 | --- | --- |
-| `remote_players` | – → `RemotePlayer[]` (finds them now; empty when `showPlexPlayers` is off) |
+| `remote_players` | – → `RemotePlayer[]` (finds them now; Plex players only with `showPlexPlayers`, Cast and AirPlay devices only with `showCastDevices`) |
+| `remote_move_with_password` | `{ playerId, password }` → `RemoteState` (AirPlay speakers with a password; the password goes to the keychain once it works) |
 | `remote_state` | – → `RemoteState` |
 | `remote_move` | `{ playerId }` → `RemoteState` |
 | `remote_return` | – → `RemoteState` |
@@ -382,8 +384,14 @@ to Plex), and remote mode while one plays.
 | `remote_play_context` | `{ context, startTrackId? }` → `RemoteState` (same `context` as `play_context`) |
 | `remote_queue_jump` | `{ itemId }` → `RemoteState` |
 
-`RemotePlayer = { id, name, product, kind, playing: string | null, online }`
-with `kind` one of `"computer" | "phone" | "speaker" | "browser" | "tv"`.
+`RemotePlayer = { id, name, product, kind, playing: string | null, online, via, needsPassword, unsupported: string | null }`
+with `kind` one of `"computer" | "phone" | "speaker" | "browser" | "tv" | "group"`
+and `via` one of `"plex" | "cast" | "airplay"`. Cast ids start with `cast:`,
+AirPlay ids with `airplay:`. `needsPassword` is set for an AirPlay speaker
+with a password that isn't in the keychain yet; the picker asks for it and
+calls `remote_move_with_password`. `unsupported` says why a listed device
+can't be played on (for example an AirPlay speaker that only takes encrypted
+or paired senders); moving there fails with an `invalid` error.
 `playing` is the grey line from the server's sessions ("Song • Artist", or
 "Paused: Song • Artist"). `online` is false for players plex.tv knows but
 that aren't on the network now; they're listed last and may not answer.
@@ -420,6 +428,29 @@ reach <device>" and playback here is put on its last song and position,
 paused. If the player reports stopped after it has played (someone stopped
 it there), the session ends the same way without a toast and `stoppedOn`
 names the device until the next move or return.
+
+Chromecasts (and Cast speaker groups) are found over mDNS
+(`_googlecast._tcp`). A move connects to the device, starts Plex's Cast
+receiver and loads the same server play queue with a transient token from
+the server (`/security/token?type=delegation&scope=all`), so the device
+streams from the server and plays the queue by itself. If Plex's receiver
+doesn't start, the default media receiver gets up to 100 songs as stream
+URLs instead (formats Cast can't play go through the server's MP3
+transcoder). Volume is the device's own. The session ends with `stoppedOn`
+when another app or sender takes the device over.
+
+AirPlay speakers are found over mDNS (`_raop._tcp`). A move keeps the queue
+and decoding here and moves the audio output to the speaker (Apple Lossless
+at 44.1 kHz over RAOP); the output id becomes `net:airplay:<id>` and the
+local volume goes to full while the speaker's volume follows the slider.
+What's heard runs about two seconds behind, so `positionMs` is the heard
+position; pause, seek and skip clear the speaker's buffer so they take
+effect at once. A wrong or missing password is an `auth` error ("This
+speaker needs its AirPlay password." or "That AirPlay password didn't
+work."); a speaker that only takes paired AirPlay 2 senders is an `auth`
+error saying so. Coming back puts the output and volume back. If the
+speaker drops off, the output falls back to this computer paused (the usual
+lost-device path) and `stoppedOn` names it.
 
 Events:
 - `remote://state` → `RemoteState` (on every change and every poll while remote)
@@ -505,6 +536,7 @@ The rest of the fields, with their defaults:
 | `showPlexPlayers` | bool, true | List Plex players under Listen on in the device picker. Off makes `remote_players` return an empty list. |
 | `moveStopsOldDevice` | bool, true | Moving playback to a player pauses it here, and coming back stops the player. Off leaves both playing. |
 | `actAsPlexPlayer` | bool, false | Platter answers as a Plex player so other Plex apps can play here. Opens a local port. This device only. |
+| `showCastDevices` | bool, true | List Chromecasts, Cast groups and AirPlay speakers under Listen on. Off stops mDNS browsing. |
 | `crossfade` | `"smart"`, `"fixed"`, `"off"`, `"smart"` | How one song moves into the next. See Sound below. |
 | `crossfadeSeconds` | 1 to 12, 6 | Length of a fixed crossfade. |
 | `crossfadeSkipAlbums` | bool, true | Songs of one album played in album order never crossfade. |

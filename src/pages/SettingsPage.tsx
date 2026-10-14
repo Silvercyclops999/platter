@@ -111,6 +111,9 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "SQLite", licence: "Public domain" },
   { name: "keyring", licence: "MIT or Apache-2.0" },
   { name: "souvlaki", licence: "MIT" },
+  { name: "mdns-sd", licence: "MIT or Apache-2.0" },
+  { name: "tokio-rustls", licence: "MIT or Apache-2.0" },
+  { name: "RustCrypto MD5", licence: "MIT or Apache-2.0" },
 ];
 
 /** Outside services (artist info, public share links), each under its own terms (shown under About). */
@@ -852,6 +855,13 @@ export function SettingsPage() {
       title: "Let other Plex apps play on this computer",
       description: "Platter shows up as a player in Plexamp and other Plex apps on your network, so they can send music here. Opens a network port, so your computer may ask to allow it. This device only.",
       control: (ids) => toggle(s, "actAsPlexPlayer", ids),
+    },
+    {
+      key: "showCastDevices",
+      section: "Playback",
+      title: "Show Chromecast and AirPlay devices",
+      description: "Lists Chromecasts, Google speakers and groups, and AirPlay speakers on your network under Listen on. Off stops Platter looking for them.",
+      control: (ids) => toggle(s, "showCastDevices", ids),
     },
     // Transitions
     {

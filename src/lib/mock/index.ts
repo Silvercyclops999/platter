@@ -1091,6 +1091,9 @@ export class MockBackend implements Backend {
       return this.remote.resend();
     });
   }
+  remoteMoveWithPassword(playerId: string, password: string) {
+    return this.delay(() => this.remote.moveWithPassword(playerId, password));
+  }
   remoteCommand(command: RemoteCommand) {
     return this.delay(() => this.remote.command(command));
   }
