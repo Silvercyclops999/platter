@@ -331,6 +331,73 @@ Events:
 - `output://changed` → `OutputState` (after a switch, a fallback, or a reroute)
 - `output://lost` → `{ device }` (name of the chosen device that went away)
 
+## Listen on
+Plex players Platter can move playback to (Plexamp, Plex apps, Sonos linked
+to Plex), and remote mode while one plays.
+
+| Command | Args |
+| --- | --- |
+| `remote_players` | – → `RemotePlayer[]` (finds them now; empty when `showPlexPlayers` is off) |
+| `remote_state` | – → `RemoteState` |
+| `remote_move` | `{ playerId }` → `RemoteState` |
+| `remote_return` | – → `RemoteState` |
+| `remote_command` | `{ command: RemoteCommand }` → `RemoteState` |
+| `remote_play_context` | `{ context, startTrackId? }` → `RemoteState` (same `context` as `play_context`) |
+| `remote_queue_jump` | `{ itemId }` → `RemoteState` |
+
+`RemotePlayer = { id, name, product, kind, playing: string | null, online }`
+with `kind` one of `"computer" | "phone" | "speaker" | "browser" | "tv"`.
+`playing` is the grey line from the server's sessions ("Song • Artist", or
+"Paused: Song • Artist"). `online` is false for players plex.tv knows but
+that aren't on the network now; they're listed last and may not answer.
+
+`RemoteState = { session: RemoteSession | null, stoppedOn: string | null }`
+`RemoteSession = { playerId, playerName, kind, status, track: Track | null, positionMs, durationMs, volume: number | null, shuffle, repeat }`
+with `status` one of `"connecting" | "playing" | "paused" | "buffering"`.
+
+`RemoteCommand` is tagged by `kind`: `play`, `pause`, `next`, `previous`,
+`{ kind: "seek", positionMs }`, `{ kind: "volume", volume }` (0..1),
+`{ kind: "shuffle", on }`, `{ kind: "repeat", mode }`.
+
+`remote_move` makes a server play queue from the current song and the rest
+of the queue (up to 300 songs), tells the player to play it at the current
+position, pauses here (unless `moveStopsOldDevice` is off) and starts
+following the player once a second. If the player doesn't take it, the
+error is a `network` error with the message "Couldn't reach <device>" and
+playback here carries on. Moving from one player to another comes back here
+first.
+
+While a session is open the player bar shows the session over the local
+state and its controls use `remote_command`; playing an album or a queue
+entry uses `remote_play_context` or `remote_queue_jump`, which load it here
+paused and send the new queue to the same player. Local queue edits (add,
+remove, move) stay local until the next send.
+
+`remote_return` reads the player's position, stops it (unless
+`moveStopsOldDevice` is off) and carries on here: the same song seeks, a song
+further along the queue is jumped to, and a song outside the queue plays
+with the player's play queue. It plays if the player was playing.
+
+If the player stops answering (3 polls in a row), a toast says "Couldn't
+reach <device>" and playback here is put on its last song and position,
+paused. If the player reports stopped after it has played (someone stopped
+it there), the session ends the same way without a toast and `stoppedOn`
+names the device until the next move or return.
+
+Events:
+- `remote://state` → `RemoteState` (on every change and every poll while remote)
+- `remote://players` → `RemotePlayer[]` (after each refresh)
+
+The player list refreshes when `remote_players` is called (the picker does
+every 10 s while open) and every 60 s in the background while a session is
+open.
+
+With `actAsPlexPlayer` on, the core listens on the first free port from
+32500 and answers the Plex companion calls (`/resources`,
+`/player/timeline/poll`, `/player/playback/playMedia`, play, pause, stop,
+skipNext, skipPrevious, seekTo, setParameters). It announces itself with GDM
+on the local network. Media from another server is refused.
+
 ## Health and app states
 | Command | Returns |
 | --- | --- |
@@ -398,6 +465,9 @@ The rest of the fields, with their defaults:
 | `infoAudiodb` | bool, false | Artist photo and bio from TheAudioDB. Same key rule. |
 | `likedMeans` | `"five"` or `"fourUp"`, `"five"` | Which Plex ratings count as liked: five stars (10), or four stars and up (8 or more). Liking always writes five stars. |
 | `likeControlRows` | `"hover"`, `"always"` or `"off"`, `"hover"` | When song rows show the like control. Liked songs always show their tick unless it's `"off"`; the player bar and now playing always show it. |
+| `showPlexPlayers` | bool, true | List Plex players under Listen on in the device picker. Off makes `remote_players` return an empty list. |
+| `moveStopsOldDevice` | bool, true | Moving playback to a player pauses it here, and coming back stops the player. Off leaves both playing. |
+| `actAsPlexPlayer` | bool, false | Platter answers as a Plex player so other Plex apps can play here. Opens a local port. This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

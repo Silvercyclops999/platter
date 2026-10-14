@@ -61,6 +61,25 @@ Every server request sends:
 | Delete | `DELETE /playlists/{id}` |
 | History | `GET /status/sessions/history/all` |
 
+## Players (Listen on)
+Commands to a player use the Plex companion protocol: `GET
+/player/<controller>/<command>?...&commandID=N` with the target's client id in
+`X-Plex-Target-Client-Identifier`. They go straight to the player's address,
+through the server (players registered in `/clients`), or through the Sonos
+relay `https://sonos.plex.tv` with the account token.
+
+| Purpose | Request |
+| --- | --- |
+| Players signed in to the account | `GET https://plex.tv/api/v2/resources?includeHttps=1` (entries whose `provides` has `player`) |
+| Players registered with the server | `GET /clients` (`MediaContainer.Server[]`: `name`, `address`, `port`, `machineIdentifier`, `product`, `protocolCapabilities`) |
+| Sonos linked to Plex | `GET https://sonos.plex.tv/resources` (XML `Player` elements) |
+| What's playing where | `GET /status/sessions` (`Metadata[].Player.machineIdentifier`, `.state`) |
+| Make a play queue | `POST /playQueues?type=audio&uri=server://{machineId}/com.plexapp.plugins.library/library/metadata/{keys}&key=/library/metadata/{start}&shuffle=0&repeat=0|1&continuous=0&own=1` |
+| Read a play queue | `GET /playQueues/{id}` |
+| Play it on a player | `/player/playback/playMedia?providerIdentifier=com.plexapp.plugins.library&machineIdentifier=&protocol=&address=&port=&token=&key=/library/metadata/{start}&offset={ms}&containerKey=/playQueues/{id}?window=100&own=1&type=music` |
+| Controls | `/player/playback/{play,pause,stop,skipNext,skipPrevious}?type=music`, `seekTo?offset={ms}`, `setParameters?volume=0..100`, `shuffle=0|1`, `repeat=0|1|2` (off, one, all) |
+| Follow it | `/player/timeline/poll?wait=0` (XML `Timeline` per type; the `type="music"` one has `state`, `time`, `duration`, `ratingKey`, `key`, `playQueueID`, `playQueueItemID`, `volume`, `shuffle`, `repeat`) |
+
 ## Findings log
 Anything surprising goes here as it's tested (date, endpoint, what happened).
 
@@ -305,3 +324,37 @@ fake only). Check once on a song you don't mind rating, then put it back:
 - `rating=-1` clears the rating (the app's unlike).
 - Whether a rating change sends a websocket `timeline` event (the app syncs
   on those, so likes from other apps would show without waiting).
+
+### 2026-10-14: players (Listen on)
+
+Read-only checks with the probe script:
+- plex.tv resources list three non-server devices on the test account, all
+  with `provides` containing `player`: two Plexamp (`client,player,pubsub-player`;
+  Windows and iOS) and one TV app (`client,player`). All three had
+  `presence: false` while not in use, and each has its own `accessToken`.
+- Plexamp lists its companion port 32500 over plain http (a local
+  connection, and a remote one on the desktop). The TV app lists https on
+  32400 instead.
+- `GET /clients` answered `{"MediaContainer":{"size":0}}` with nothing open,
+  and `GET /status/sessions` had no sessions, so the shapes for those come
+  from public protocol references, not from this server yet.
+
+Not tried against real players (builders only test against wiremock fakes;
+anything that plays on a real device needs an OK first). Check once:
+- `GET /clients` with Plexamp open on the same network: the player shows up
+  with `address`, `port` and `protocolCapabilities`.
+- `GET https://sonos.plex.tv/resources` on an account with and without Sonos
+  linked (shape, and what a no-Sonos account gets).
+- `POST /playQueues?type=audio&uri=...&key=...` with a list of rating keys:
+  `playQueueID` comes back and the order is kept. Also the longest key list
+  the server takes (Platter caps at 300).
+- `playMedia` to Plexamp directly at its 32500 address with the player's own
+  token, then through the server with `X-Plex-Target-Client-Identifier`:
+  which one Plexamp accepts, and whether `offset` starts it at that spot.
+- `/player/timeline/poll?wait=0` on Plexamp: XML or JSON, and whether `time`
+  moves while playing. Then `pause`, `seekTo`, `setParameters?volume=` and
+  `stop`.
+- Platter as a player (setting on): Plexamp and Plex Web list it, can start
+  music on it with `playMedia`, and follow it with `timeline/poll`. Whether
+  they need `timeline/subscribe` pushes (Platter accepts subscribe but only
+  answers polls).
