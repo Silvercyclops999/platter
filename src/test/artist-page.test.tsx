@@ -154,7 +154,7 @@ describe("artist page", () => {
     const a = artistAt(0);
     render(<ArtistPage id={a.id} />);
     await screen.findByRole("group", { name: "Release type" });
-    await user.click(screen.getByRole("button", { name: "Show all" }));
+    await user.click(screen.getAllByRole("button", { name: "Show all" })[0]);
     const grid = document.querySelector(".discography__grid")!;
     expect(grid.querySelectorAll('[role="listitem"]')).toHaveLength(mock.fx.albums.filter((x) => x.artistId === a.id).length);
     await user.click(screen.getByRole("button", { name: "Show less" }));

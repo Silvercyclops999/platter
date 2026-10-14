@@ -6,7 +6,7 @@ import type { SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { ArtistPage } from "../pages/ArtistPage";
 import { HomePage } from "../pages/HomePage";
-import { HomeShelfPage } from "../pages/HomeShelfPage";
+import { ArtistShelfPage, HomeShelfPage } from "../pages/HomeShelfPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { LikedPage } from "../pages/LikedPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
@@ -108,6 +108,8 @@ function Page({ route }: { route: Route }) {
       return <SettingsPage />;
     case "homeShelf":
       return <HomeShelfPage shelf={route.shelf} />;
+    case "artistShelf":
+      return <ArtistShelfPage id={route.id} shelf={route.shelf} />;
     case "lyrics":
       // Never pushed: the router opens the expanded view in lyrics mode instead.
       return null;

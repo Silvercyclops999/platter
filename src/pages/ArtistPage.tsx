@@ -15,6 +15,7 @@ import { useArtTint } from "../lib/useTint";
 import type { Album, Artist, ArtistPage as ArtistPageData, ArtistPageSection } from "../lib/types";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
+import { nav } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
@@ -146,11 +147,11 @@ function ArtistView({ id, discography }: { id: string; discography?: boolean }) 
               case "discography":
                 return <Discography key={s} sections={data.sections} openAll={discography} />;
               case "appearsOn":
-                return <AppearsOn key={s} albums={data.appearsOn} />;
+                return <AppearsOn key={s} id={id} albums={data.appearsOn} />;
               case "about":
                 return <AboutCard key={s} artist={data.artist} about={about} plays={data.plays} info={info} />;
               case "fansAlsoLike":
-                return <FansAlsoLike key={s} artists={data.similar} />;
+                return <FansAlsoLike key={s} id={id} artists={data.similar} />;
             }
           })}
       </div>
@@ -366,9 +367,9 @@ function Discography({ sections, openAll }: { sections: ArtistPageSection[]; ope
   );
 }
 
-function AppearsOn({ albums }: { albums: Album[] }) {
+function AppearsOn({ id, albums }: { id: string; albums: Album[] }) {
   return (
-    <Shelf title="Appears on">
+    <Shelf title="Appears on" onShowAll={() => nav.go({ name: "artistShelf", id, shelf: "appearsOn" })}>
       {albums.map((album) => (
         <ShelfItem key={album.id}>
           <AlbumCard album={album} subtitle="artist" />
@@ -378,9 +379,9 @@ function AppearsOn({ albums }: { albums: Album[] }) {
   );
 }
 
-function FansAlsoLike({ artists }: { artists: Artist[] }) {
+function FansAlsoLike({ id, artists }: { id: string; artists: Artist[] }) {
   return (
-    <Shelf title="Fans also like" skeletonKind="artist">
+    <Shelf title="Fans also like" skeletonKind="artist" onShowAll={() => nav.go({ name: "artistShelf", id, shelf: "fansAlsoLike" })}>
       {artists.map((a) => (
         <ShelfItem key={a.id}>
           <ArtistCard artist={a} />

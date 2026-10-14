@@ -23,7 +23,9 @@ export type Route =
   /** Lyrics for the playing song: never a page, it opens the expanded view in lyrics mode. */
   | { name: "lyrics" }
   /** A Home shelf's "Show all" grid. */
-  | { name: "homeShelf"; shelf: HomeShelfId };
+  | { name: "homeShelf"; shelf: HomeShelfId }
+  /** An artist page shelf's "Show all" grid. */
+  | { name: "artistShelf"; id: string; shelf: "appearsOn" | "fansAlsoLike" };
 
 export interface HistoryEntry {
   key: number;
