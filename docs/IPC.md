@@ -84,7 +84,8 @@ cache. After the first sync, search never touches the network.
 | `play_seek` | `{ positionMs }` |
 | `set_volume` | `{ volume: 0..1 }` (linear slider value; core applies the perceptual curve) |
 | `set_muted` | `{ muted }` |
-| `set_shuffle` | `{ shuffle }` |
+| `set_shuffle` | `{ shuffle }` (for the playing context) |
+| `set_context_shuffle` | `{ contextId, shuffle }` (applies now if that context is playing, otherwise the next time it plays) |
 | `set_repeat` | `{ repeat: "off"|"all"|"one" }` |
 | `queue_add` | `{ trackIds, at: "next"|"end" }` |
 | `queue_remove` | `{ itemId }` |
@@ -93,9 +94,30 @@ cache. After the first sync, search never touches the network.
 | `queue_jump` | `{ itemId }` (play that item now) |
 | `player_state` | – → `PlayerState` |
 
-`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, repeat, queue: QueueView }`
+`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView }`
 `QueueView = { current?: QueueItem, userQueue: QueueItem[], nextUp: QueueItem[], history: QueueItem[], context?: { kind, id?, title? } }`
 `QueueItem = { itemId, track: Track, source: "user"|"context" }`
+
+Shuffle is remembered per album, playlist or artist id; repeat is one global
+setting. `shuffle` is the playing context's state and `shuffledContexts` lists
+every context id whose shuffle is on, so a page can show its own toggle for a
+context that isn't playing. `play_context` without `shuffle` uses that
+context's stored value; passing `shuffle` sets it.
+
+Queue rules the core applies:
+- Without `startTrackId`, a context starts at its resume point (the track and
+  position it was left at) when shuffle is off, at track 1 if it was never
+  played, and on a random track when shuffle is on. Resume points and shuffle
+  values are saved with the queue, for the 200 most recently used contexts.
+- `play_previous` within the first 3 s goes to the previous position in the
+  context's play order (the shuffled order when shuffled). Queued songs are
+  never a target; on a playing queued song it drops that song and goes back
+  to the context track before it. On the first track, or at 3 s or later, it
+  restarts the track.
+- In repeat-one, `play_next` or an early `play_previous` switches repeat to
+  all. A late `play_previous` restarts and keeps repeat-one.
+- When the context runs out with repeat off, the player goes back to its first
+  track, paused at 0:00, with the rest of the context as upcoming.
 
 Events:
 - `player://state` → `PlayerState` (on any state/track/queue change)
@@ -122,13 +144,15 @@ Event `health://changed` → `Health`. Event `toast` → `{ kind: "info"|"error"
 ## Settings and tracking
 | Command | Args |
 | --- | --- |
-| `settings_get` | – → `Settings { privateSession, reportToPlex, volume, ... }` |
+| `settings_get` | – → `Settings { privateSession, reportToPlex, volume, shuffleStyle, ... }` |
 | `settings_set` | `{ patch: Partial<Settings> }` |
 
 `privateSession` (default false) stops plays being written to the local
 listen log. `reportToPlex` (default true) controls timeline and scrobble
 reports; when it's off nothing is sent or queued. `volume` is the same 0..1
-value as `set_volume`; setting it here also moves the player. Settings are
+value as `set_volume`; setting it here also moves the player. `shuffleStyle`
+is `"spread"` (default: keeps an artist's songs apart and pushes recently
+played ones back) or `"standard"` (plain random order). Settings are
 stored in the local database and apply immediately.
 
 ## Updates
