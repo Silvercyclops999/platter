@@ -21,6 +21,8 @@ pub struct FakeLibrary {
     pub history: Vec<HistoryEntry>,
     /// id → updatedAt (unix s); missing = 0.
     pub updated: HashMap<String, i64>,
+    /// Playlists whose items the server can't list (answers 500).
+    pub broken_playlists: Vec<String>,
 }
 
 #[derive(Default)]
@@ -104,6 +106,9 @@ impl LibrarySource for FakeSource {
     async fn playlist_items(&self, id: &str) -> AppResult<Vec<String>> {
         self.playlist_item_calls.lock().push(id.to_owned());
         let l = self.lib.lock();
+        if l.broken_playlists.iter().any(|b| b == id) {
+            return Err(AppError::Server("500".into()));
+        }
         l.playlists
             .iter()
             .find(|(p, _)| p.id == id)

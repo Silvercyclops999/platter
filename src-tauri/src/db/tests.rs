@@ -941,3 +941,18 @@ mod bench {
         }
     }
 }
+
+#[tokio::test]
+async fn a_playlist_the_server_cannot_list_is_dropped_not_fatal() {
+    let t = open();
+    let mut lib = fake::generated(2, 2, 3);
+    let ids: Vec<String> = lib.tracks.iter().map(|t| t.id.clone()).collect();
+    lib.playlists.push((fake::playlist("ok", "Fine", 1), vec![ids[0].clone()]));
+    lib.playlists.push((fake::playlist("orphan", "From a deleted library", 5), vec![]));
+    lib.broken_playlists.push("orphan".into());
+    let src = Arc::new(FakeSource::new(lib));
+    sync(&t.db, &src, false).await;
+    let lists = t.db.read(queries::playlists).unwrap();
+    assert_eq!(lists.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["ok"]);
+    assert_eq!(count(&t.db, "tracks"), 12, "the rest of the sync still lands");
+}

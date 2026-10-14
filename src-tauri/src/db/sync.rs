@@ -451,7 +451,22 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool) -> AppResult<()> {
         if ctx.cancelled() {
             break;
         }
-        let items = ctx.source.playlist_items(&id).await?;
+        let items = match ctx.source.playlist_items(&id).await {
+            Ok(items) => items,
+            // Orphaned smart playlists (left over from a deleted library)
+            // answer 500. Drop them instead of failing the whole sync.
+            Err(AppError::Server(_) | AppError::NotFound(_)) => {
+                tracing::warn!("playlist {id} can't be listed by the server; skipping it");
+                ctx.db
+                    .write_async(move |c| {
+                        c.execute("DELETE FROM playlists WHERE id = ?1", [&id])?;
+                        Ok(())
+                    })
+                    .await?;
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         ctx.db
             .write_async(move |c| {
                 let tx = c.transaction()?;
