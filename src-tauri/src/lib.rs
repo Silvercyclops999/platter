@@ -301,6 +301,7 @@ pub fn run() {
             remote::commands::remote_move,
             remote::commands::remote_return,
             remote::commands::remote_play_context,
+            remote::commands::remote_queue_jump,
             remote::commands::remote_command,
             db::commands::search,
             db::commands::search_completions,

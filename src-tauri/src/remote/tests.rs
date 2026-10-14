@@ -615,3 +615,13 @@ async fn playing_something_new_while_remote_sends_it_to_the_same_player() {
     let ctx = PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(vec!["x".into()]) };
     assert!(r.remote.play_context(ctx, None).await.is_err());
 }
+
+#[tokio::test]
+async fn a_queue_jump_while_remote_moves_the_queue_here_paused_and_resends() {
+    let r = rig().await;
+    r.remote.move_to("amp").await.unwrap();
+    r.remote.queue_jump("qc".into()).await.unwrap();
+    assert!(r.local.log().contains(&"jump qc 0 false".to_string()));
+    assert_eq!(requests(&r.player, "/player/playback/playMedia").await.len(), 2);
+    assert!(r.remote.state().session.is_some());
+}

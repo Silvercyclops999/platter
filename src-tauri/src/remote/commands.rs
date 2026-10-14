@@ -54,6 +54,13 @@ pub async fn remote_play_context(
     remote.play_context(context, start_track_id).await
 }
 
+/// Jump to a queue entry on the device playing now (instead of
+/// `queue_jump` while remote).
+#[tauri::command]
+pub async fn remote_queue_jump(remote: State<'_, RemoteService>, item_id: String) -> AppResult<RemoteState> {
+    remote.queue_jump(item_id).await
+}
+
 /// A player bar control while playing on another device.
 #[tauri::command]
 pub async fn remote_command(remote: State<'_, RemoteService>, command: RemoteCommand) -> AppResult<RemoteState> {

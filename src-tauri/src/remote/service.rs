@@ -359,6 +359,25 @@ impl RemoteService {
             .map(|a| a.found.clone())
             .ok_or_else(|| AppError::Invalid("Nothing is playing on another device.".into()))?;
         self.inner.local.load_context(context, start_track_id).await?;
+        self.resend(found).await
+    }
+
+    /// Jump to a queue entry while playing on another device: the queue here
+    /// moves (paused) and the player gets it from that song.
+    pub async fn queue_jump(&self, item_id: String) -> AppResult<RemoteState> {
+        let _op = self.inner.op.lock().await;
+        let found = self
+            .inner
+            .active
+            .lock()
+            .as_ref()
+            .map(|a| a.found.clone())
+            .ok_or_else(|| AppError::Invalid("Nothing is playing on another device.".into()))?;
+        self.inner.local.jump_at(item_id, 0, false).await?;
+        self.resend(found).await
+    }
+
+    async fn resend(&self, found: Found) -> AppResult<RemoteState> {
         // The old follow loop stops; the player gets the new queue.
         self.inner.generation.fetch_add(1, Ordering::SeqCst);
         self.inner.active.lock().take();
