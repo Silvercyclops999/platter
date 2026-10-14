@@ -2,16 +2,16 @@
    (tokens.test.ts checks every value). Dark theme only for Phase 1. */
 
 :root {
-  --amber-50: #FFF8EB;
-  --amber-100: #FFEBC2;
-  --amber-200: #FFD98A;
-  --amber-300: #FCC459;
-  --amber-400: #F5A524;
-  --amber-500: #E08E0B;
-  --amber-600: #BA7208;
-  --amber-700: #8F560A;
-  --amber-800: #66400D;
-  --amber-900: #3D280C;
+  --ivory-50: #FFFDF8;
+  --ivory-100: #F8F4EA;
+  --ivory-200: #F2ECDF;
+  --ivory-300: #ECE4D3;
+  --ivory-400: #D6CCB8;
+  --ivory-500: #B9AE98;
+  --ivory-600: #8F8676;
+  --ivory-700: #5E574D;
+  --ivory-800: #3B3631;
+  --ivory-900: #23201D;
 
   /* Background layers */
   --color-bg-base: #0E0D0C;
@@ -24,15 +24,15 @@
   --color-text-primary: #F4EFE8;
   --color-text-secondary: #B8AFA4;
   --color-text-muted: #8A8178;
-  --color-text-on-accent: #1A1206;
+  --color-text-on-accent: #121110;
 
   /* Accent + states */
-  --color-accent: #F5A524;
-  --color-accent-hover: #FCC459;
-  --color-accent-pressed: #E08E0B;
-  --color-focus-ring: #FFD98A;
+  --color-accent: #ECE4D3;
+  --color-accent-hover: #FFFDF8;
+  --color-accent-pressed: #D6CCB8;
+  --color-focus-ring: #FFFDF8;
   /* Darker accent for borders/selection, and a soft tint for washes. */
-  --color-accent-strong: #8F560A;
+  --color-accent-strong: #5E574D;
   --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --color-state-hover: rgba(255, 240, 220, 0.06);
   --color-state-pressed: rgba(255, 240, 220, 0.10);
@@ -48,7 +48,7 @@
   /* Connection status */
   --color-status-local: #3FCF8E;
   --color-status-remote: #4C9EFF;
-  --color-status-relay: #F5A524;
+  --color-status-relay: #F2B13D;
   --color-status-offline: #F2555A;
 
   /* Type */

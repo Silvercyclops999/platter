@@ -10,7 +10,7 @@ export interface ButtonProps extends Base {
   children?: ReactNode;
 }
 
-/** Pill button. Primary = amber fill; secondary = outline; ghost = text. */
+/** Pill button. Primary = accent fill; secondary = outline; ghost = text. */
 export function Button({ variant = "secondary", size = "md", icon, children, className = "", type = "button", ...rest }: ButtonProps) {
   return (
     <button type={type} className={`btn btn--${variant} btn--${size} ${className}`} {...rest}>
