@@ -64,6 +64,15 @@ export function releaseTypeLabel(a: Pick<Album, "format" | "subformats">): strin
   return "Album";
 }
 
+/** Disk size for people: "412 MB", "2 GB", "1.5 GB". */
+export function formatBytes(n: number): string {
+  const mb = n / (1024 * 1024);
+  if (mb < 1) return n > 0 ? "less than 1 MB" : "0 MB";
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  const gb = mb / 1024;
+  return `${gb >= 10 || Number.isInteger(gb) ? Math.round(gb) : gb.toFixed(1)} GB`;
+}
+
 export function plural(n: number, one: string, many = one + "s"): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
 }

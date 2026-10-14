@@ -1,70 +1,590 @@
-import { useId } from "react";
+import { Server } from "lucide-react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { Button } from "../components/Button";
+import { Dialog } from "../components/Dialog";
+import { SearchField } from "../components/SearchField";
+import { Select, type SelectOption } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
+import { backend } from "../lib/backend";
+import { formatBytes } from "../lib/format";
 import { modKey } from "../lib/platform";
+import type {
+  AppError,
+  AppInfo,
+  ArtCacheInfo,
+  ConnectionKind,
+  PopularSource,
+  ReduceMotion,
+  ServerInfo,
+  Settings,
+  StreamQuality,
+  UpdateInfo,
+} from "../lib/types";
+import { useApp } from "../stores/app";
 import { updateSettings, useSettings } from "../stores/settings";
+import { toast } from "../stores/toasts";
 
-function ToggleRow({
-  title,
-  description,
-  checked,
-  onChange,
-}: {
+const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
+
+// ------------------------------------------------------------------ options
+
+const QUALITY_LABEL: Record<StreamQuality, string> = {
+  original: "Original",
+  "320": "320 kbps",
+  "256": "256 kbps",
+  "192": "192 kbps",
+  "128": "128 kbps",
+};
+const opts = <T extends string>(values: T[], label: Record<T, string>): SelectOption<T>[] =>
+  values.map((value) => ({ value, label: label[value] }));
+const HOME_QUALITY = opts<StreamQuality>(["original", "320", "256", "192", "128"], QUALITY_LABEL);
+const AWAY_QUALITY = opts<StreamQuality>(["320", "original", "192", "128"], QUALITY_LABEL);
+const SHUFFLE = [
+  { value: "spread", label: "Spread" },
+  { value: "standard", label: "Standard" },
+] as const satisfies SelectOption<Settings["shuffleStyle"]>[];
+const POPULAR = [
+  { value: "global", label: "Global popularity" },
+  { value: "myPlays", label: "My plays" },
+] as const satisfies SelectOption<PopularSource>[];
+const MOTION = [
+  { value: "system", label: "Match system" },
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+] as const satisfies SelectOption<ReduceMotion>[];
+const ART_SIZES_MB = [512, 1024, 2048, 5120, 10240, 20480];
+
+const CONNECTION_LABEL: Record<ConnectionKind, string> = {
+  local: "Local connection",
+  remote: "Remote access",
+  relay: "Plex relay",
+};
+
+/** Main open-source parts Platter is built on (shown under About). */
+export const NOTICES: { name: string; licence: string }[] = [
+  { name: "Tauri", licence: "MIT or Apache-2.0" },
+  { name: "React", licence: "MIT" },
+  { name: "Zustand", licence: "MIT" },
+  { name: "TanStack Virtual", licence: "MIT" },
+  { name: "Lucide icons", licence: "ISC" },
+  { name: "Inter typeface", licence: "SIL Open Font License 1.1" },
+  { name: "Tokio", licence: "MIT" },
+  { name: "Serde", licence: "MIT or Apache-2.0" },
+  { name: "reqwest", licence: "MIT or Apache-2.0" },
+  { name: "rustls", licence: "Apache-2.0, ISC or MIT" },
+  { name: "Symphonia", licence: "MPL-2.0" },
+  { name: "cpal", licence: "Apache-2.0" },
+  { name: "rusqlite", licence: "MIT" },
+  { name: "SQLite", licence: "Public domain" },
+  { name: "keyring", licence: "MIT or Apache-2.0" },
+];
+
+// ------------------------------------------------------------------ rows
+
+interface RowDef {
+  key: string;
+  section: string;
   title: string;
   description: string;
-  checked: boolean | undefined;
-  onChange: (v: boolean) => void;
-}) {
+  /** Extra line under the description (state, notes). Not searched. */
+  note?: ReactNode;
+  control: (ids: { title: string; desc: string }) => ReactNode;
+}
+
+function Row({ row }: { row: RowDef }) {
   const id = useId();
+  const ids = { title: `${id}-t`, desc: `${id}-d` };
   return (
-    <div className="setting-row">
+    <div className="setting-row" data-setting={row.key}>
       <div className="setting-row__text">
-        <div id={`${id}-t`} className="setting-row__title">
-          {title}
+        <div id={ids.title} className="setting-row__title">
+          {row.title}
         </div>
-        <p id={`${id}-d`} className="setting-row__desc">
-          {description}
+        <p id={ids.desc} className="setting-row__desc">
+          {row.description}
+          {row.note && (
+            <>
+              {" "}
+              <span className="setting-row__note">{row.note}</span>
+            </>
+          )}
         </p>
       </div>
-      {checked === undefined ? (
-        <Skeleton width={40} height={24} radius="pill" />
-      ) : (
-        <Switch checked={checked} onChange={onChange} labelledBy={`${id}-t`} describedBy={`${id}-d`} />
-      )}
+      <div className="setting-row__control">{row.control(ids)}</div>
     </div>
   );
+}
+
+const loading = <Skeleton width={120} height={32} radius="pill" />;
+
+function toggle(s: Settings | null, key: keyof Settings, ids: { title: string; desc: string }, onChange?: (v: boolean) => void) {
+  if (!s) return <Skeleton width={40} height={24} radius="pill" />;
+  return (
+    <Switch
+      checked={!!s[key]}
+      onChange={onChange ?? ((v) => updateSettings({ [key]: v }))}
+      labelledBy={ids.title}
+      describedBy={ids.desc}
+    />
+  );
+}
+
+function select<T extends string>(
+  s: Settings | null,
+  value: (s: Settings) => T,
+  options: readonly SelectOption<T>[],
+  ids: { title: string; desc: string },
+  onChange: (v: T) => void,
+) {
+  if (!s) return loading;
+  return <Select value={value(s)} options={options} onChange={onChange} labelledBy={ids.title} describedBy={ids.desc} />;
+}
+
+/** 1 to 50; applies on every valid entry, snaps back on blur if invalid. */
+function PrecacheField({ value, ids }: { value: number; ids: { title: string; desc: string } }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      min={1}
+      max={50}
+      step={1}
+      className="number-field"
+      value={text}
+      aria-labelledby={ids.title}
+      aria-describedby={ids.desc}
+      onChange={(e) => {
+        setText(e.target.value);
+        const n = Number(e.target.value);
+        if (Number.isInteger(n) && n >= 1 && n <= 50 && n !== value) void updateSettings({ precacheCount: n });
+      }}
+      onBlur={() => setText(String(value))}
+    />
+  );
+}
+
+// ------------------------------------------------------------------ dialogs
+
+function ConfirmDialog({
+  open,
+  title,
+  body,
+  confirm,
+  onConfirm,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  body: string;
+  confirm: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open={open} onClose={onClose} label={title} className="confirm">
+      <h2 className="confirm__title">{title}</h2>
+      <p className="confirm__body">{body}</p>
+      <div className="confirm__actions">
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => {
+            onClose();
+            onConfirm();
+          }}
+        >
+          {confirm}
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
+function ServerDialog({ open, onClose, current }: { open: boolean; onClose: () => void; current?: string | null }) {
+  const [servers, setServers] = useState<ServerInfo[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setServers(null);
+    setErr(null);
+    backend.serversList().then(setServers, (e: AppError) => setErr(e.message));
+  }, [open]);
+  const pick = (s: ServerInfo) =>
+    backend.serverSelect(s.machineId).then(
+      () => {
+        onClose();
+        if (s.machineId !== current) toast.info(`Switched to ${s.name}`);
+      },
+      (e: AppError) => setErr(e.message),
+    );
+  return (
+    <Dialog open={open} onClose={onClose} label="Switch server" className="confirm">
+      <h2 className="confirm__title">Switch server</h2>
+      <ul className="server-list">
+        {servers
+          ? servers.map((s) => (
+              <li key={s.machineId}>
+                <button
+                  type="button"
+                  className="server-item"
+                  disabled={!s.online}
+                  aria-current={s.machineId === current ? "true" : undefined}
+                  onClick={() => void pick(s)}
+                >
+                  <Server size={20} aria-hidden="true" />
+                  <span className="server-item__name">{s.name}</span>
+                  <span className={`server-item__state ${s.online ? "is-online" : ""}`}>
+                    {s.machineId === current ? "Current" : s.online ? "Online" : "Offline"}
+                  </span>
+                </button>
+              </li>
+            ))
+          : [0, 1].map((i) => (
+              <li key={i}>
+                <Skeleton height={56} radius="card" />
+              </li>
+            ))}
+      </ul>
+      {err && (
+        <p className="confirm__error" role="alert">
+          {err}
+        </p>
+      )}
+      <div className="confirm__actions">
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
+function NoticesDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Dialog open={open} onClose={onClose} label="Open-source notices" className="confirm">
+      <h2 className="confirm__title">Open-source notices</h2>
+      <p className="confirm__body">Platter is built on these open-source projects. Thanks to everyone who works on them.</p>
+      <ul className="notices">
+        {NOTICES.map((n) => (
+          <li key={n.name} className="notices__item">
+            <span className="notices__name">{n.name}</span>
+            <span className="notices__licence">{n.licence}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="confirm__actions">
+        <Button variant="primary" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
+// ------------------------------------------------------------------ page
+
+type UpdateState = { kind: "idle" } | { kind: "checking" } | { kind: "done"; info: UpdateInfo } | { kind: "error"; message: string };
+
+function matches(row: RowDef, q: string): boolean {
+  if (!q) return true;
+  const hay = `${row.section} ${row.title} ${row.description}`.toLowerCase();
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((w) => hay.includes(w));
 }
 
 /** Settings (opened from the header or with Ctrl/Cmd+,). */
 export function SettingsPage() {
   const s = useSettings((x) => x.settings);
+  const auth = useApp((x) => x.auth);
+  const healthConn = useApp((x) => x.health?.connection);
+  const syncing = useApp((x) => !!x.sync && x.sync.phase !== "idle");
+  const [query, setQuery] = useState("");
+  const [art, setArt] = useState<ArtCacheInfo | null>(null);
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  const [update, setUpdate] = useState<UpdateState>({ kind: "idle" });
+  const [dialog, setDialog] = useState<"signOut" | "server" | "notices" | null>(null);
+
+  const artMb = s?.artCacheMb;
+  useEffect(() => {
+    let alive = true;
+    backend.artCacheInfo().then((a) => alive && setArt(a), () => {});
+    return () => {
+      alive = false;
+    };
+  }, [artMb]);
+  useEffect(() => {
+    backend.appInfo().then(setInfo, () => {});
+  }, []);
+
+  const conn = healthConn ?? auth?.server?.connection ?? null;
+  const away = conn === "remote" || conn === "relay";
+
+  const clearArt = () =>
+    backend.artCacheClear().then(
+      (freed) => {
+        toast.info(freed > 0 ? `Cleared ${formatBytes(freed)} of artwork` : "The artwork cache was already empty");
+        return backend.artCacheInfo().then(setArt);
+      },
+      (e) => toast.error(`Couldn't clear the cache${errText(e) ? `: ${errText(e)}` : ""}`),
+    );
+  const resync = () =>
+    backend.syncNow(true).catch((e) => toast.error(`Couldn't start a resync${errText(e) ? `: ${errText(e)}` : ""}`));
+  const checkUpdates = () => {
+    setUpdate({ kind: "checking" });
+    backend.updateCheck().then(
+      (i) => setUpdate({ kind: "done", info: i }),
+      (e) => setUpdate({ kind: "error", message: errText(e) || "Couldn't check for updates" }),
+    );
+  };
+  const signOut = () => backend.authSignOut().catch((e) => toast.error(`Couldn't sign out${errText(e) ? `: ${errText(e)}` : ""}`));
+
+  const artOptions: SelectOption<string>[] = [...new Set([...ART_SIZES_MB, ...(artMb ? [artMb] : [])])]
+    .sort((a, b) => a - b)
+    .map((mb) => ({ value: String(mb), label: formatBytes(mb * 1024 * 1024) }));
+
+  const version = info?.version;
+  const updateNote =
+    update.kind === "checking"
+      ? "Checking…"
+      : update.kind === "error"
+        ? update.message
+        : update.kind === "done"
+          ? update.info.available
+            ? `Version ${update.info.version ?? "new"} is ready. Restart to install it.`
+            : "You're up to date."
+          : undefined;
+
+  const rows: RowDef[] = [
+    // Account
+    {
+      key: "account",
+      section: "Account",
+      title: auth?.username ? `Signed in as ${auth.username}` : "Signed in",
+      description: auth?.server
+        ? `${auth.server.name}${conn ? `, ${CONNECTION_LABEL[conn]}` : ""}`
+        : "No server selected",
+      control: () => (
+        <>
+          <Button size="sm" onClick={() => setDialog("server")}>
+            Switch server
+          </Button>
+          <Button size="sm" onClick={() => setDialog("signOut")}>
+            Sign out
+          </Button>
+        </>
+      ),
+    },
+    // Audio quality
+    {
+      key: "qualityHome",
+      section: "Audio quality",
+      title: "Streaming quality at home",
+      description: "Used on your home network. Original plays the file as it is. Changes apply from the next track.",
+      note: away ? "You're away from home right now." : undefined,
+      control: (ids) => select(s, (x) => x.qualityHome, HOME_QUALITY, ids, (v) => updateSettings({ qualityHome: v })),
+    },
+    {
+      key: "qualityAway",
+      section: "Audio quality",
+      title: "Streaming quality away from home",
+      description: "Used over remote access or the Plex relay. The relay stays capped by the server.",
+      note:
+        conn === "relay"
+          ? "On the relay now, so Plex limits streams to 128 kbps."
+          : !away && conn
+            ? "You're at home right now."
+            : undefined,
+      control: (ids) => select(s, (x) => x.qualityAway, AWAY_QUALITY, ids, (v) => updateSettings({ qualityAway: v })),
+    },
+    {
+      key: "showFormatBadge",
+      section: "Audio quality",
+      title: "Show format badge",
+      description: "Shows the format, bit depth and sample rate (like FLAC 24/96) next to songs and albums.",
+      control: (ids) => toggle(s, "showFormatBadge", ids),
+    },
+    // Playback
+    {
+      key: "shuffleStyle",
+      section: "Playback",
+      title: "Shuffle style",
+      description: "Spread keeps songs by the same artist apart. Standard is a plain random order.",
+      control: (ids) => select(s, (x) => x.shuffleStyle, SHUFFLE, ids, (v) => updateSettings({ shuffleStyle: v })),
+    },
+    {
+      key: "resumeContexts",
+      section: "Playback",
+      title: "Albums and playlists resume where you left off",
+      description: "Playing an album or playlist again picks up at the song and spot you stopped. Off starts at the first song.",
+      control: (ids) => toggle(s, "resumeContexts", ids),
+    },
+    {
+      key: "precacheCount",
+      section: "Playback",
+      title: "Pre-cache ahead",
+      description: "How many upcoming songs to save on this computer so they start instantly and survive a dropped connection. 1 to 50.",
+      control: (ids) => (s ? <PrecacheField value={s.precacheCount} ids={ids} /> : loading),
+    },
+    {
+      key: "reportToPlex",
+      section: "Playback",
+      title: "Report plays to Plex",
+      description: "Lets Plex count plays and show what's playing in your other Plex apps.",
+      control: (ids) => toggle(s, "reportToPlex", ids),
+    },
+    {
+      key: "privateSession",
+      section: "Playback",
+      title: "Private session",
+      description: "Plays aren't saved to your listening history on this device. Plex still counts them unless you turn that off above.",
+      control: (ids) => toggle(s, "privateSession", ids),
+    },
+    // Library
+    {
+      key: "popularSource",
+      section: "Library",
+      title: "Artist page Popular",
+      description: "Rank an artist's popular songs by how many people play them, or by your own plays.",
+      control: (ids) => select(s, (x) => x.popularSource, POPULAR, ids, (v) => updateSettings({ popularSource: v })),
+    },
+    {
+      key: "artCache",
+      section: "Library",
+      title: "Artwork and cache size",
+      description: "Cover art is kept on this computer up to this size. Clearing it frees the space; art downloads again as you browse.",
+      note: art ? `Using ${formatBytes(art.usedBytes)}.` : undefined,
+      control: (ids) => (
+        <>
+          {s ? (
+            <Select
+              value={String(s.artCacheMb)}
+              options={artOptions}
+              onChange={(v) => updateSettings({ artCacheMb: Number(v) })}
+              labelledBy={ids.title}
+              describedBy={ids.desc}
+            />
+          ) : (
+            loading
+          )}
+          <Button size="sm" onClick={() => void clearArt()}>
+            Clear cache
+          </Button>
+        </>
+      ),
+    },
+    {
+      key: "resync",
+      section: "Library",
+      title: "Resync library",
+      description: "Reads your whole library from Plex again. Use it if something looks out of date. Progress shows at the top.",
+      note: syncing ? "Syncing now." : undefined,
+      control: () => (
+        <Button size="sm" disabled={syncing} onClick={() => void resync()}>
+          Resync library
+        </Button>
+      ),
+    },
+    // Appearance
+    {
+      key: "artworkColours",
+      section: "Appearance",
+      title: "Artwork colours",
+      description: "Album, artist and playlist headers take their colour from the artwork. Off uses one neutral colour.",
+      control: (ids) => toggle(s, "artworkColours", ids),
+    },
+    {
+      key: "reduceMotion",
+      section: "Appearance",
+      title: "Reduce motion",
+      description: "Turns off movement like sliding and scaling. Fades stay. Match system follows your computer's setting.",
+      control: (ids) => select(s, (x) => x.reduceMotion, MOTION, ids, (v) => updateSettings({ reduceMotion: v })),
+    },
+    // App
+    {
+      key: "updates",
+      section: "App",
+      title: "Check for updates",
+      description: version ? `You have version ${version}.` : "Platter checks for new versions on its own every few hours.",
+      note: updateNote,
+      control: () =>
+        update.kind === "done" && update.info.available ? (
+          <Button size="sm" variant="primary" onClick={() => void backend.updateInstallOnRestart()}>
+            Restart to install
+          </Button>
+        ) : (
+          <Button size="sm" disabled={update.kind === "checking"} onClick={checkUpdates}>
+            Check for updates
+          </Button>
+        ),
+    },
+    // About
+    {
+      key: "about",
+      section: "About",
+      title: `Platter${version ? ` ${version}` : ""}`,
+      description: `A music player for your Plex library. Free software under the ${info?.licence ?? "GPL-3.0-or-later"} licence.`,
+      control: () => (
+        <>
+          <Button size="sm" onClick={() => setDialog("notices")}>
+            Open-source notices
+          </Button>
+          <Button size="sm" onClick={() => void backend.openProjectPage().catch(() => toast.error("Couldn't open the browser"))}>
+            Project page
+          </Button>
+        </>
+      ),
+    },
+  ];
+
+  const shown = rows.filter((r) => matches(r, query.trim()));
+  const sections = [...new Set(shown.map((r) => r.section))];
+
   return (
     <div className="page-pad settings">
       <h1 className="page-title">Settings</h1>
-      <section className="settings__group" aria-labelledby="settings-listening">
-        <h2 id="settings-listening" className="settings__heading">
-          Listening
-        </h2>
-        <ToggleRow
-          title="Private session"
-          description="Plays aren't saved to your listening history on this device. Plex still counts them unless you turn that off below."
-          checked={s?.privateSession}
-          onChange={(v) => updateSettings({ privateSession: v })}
-        />
-        <ToggleRow
-          title="Report plays to Plex"
-          description="Lets Plex count plays and show what's playing in your other Plex apps."
-          checked={s?.reportToPlex}
-          onChange={(v) => updateSettings({ reportToPlex: v })}
-        />
-        <ToggleRow
-          title="Spread out shuffle"
-          description="Keeps songs by the same artist apart when shuffling. Turn it off for a plain random order."
-          checked={s ? s.shuffleStyle !== "standard" : undefined}
-          onChange={(v) => updateSettings({ shuffleStyle: v ? "spread" : "standard" })}
-        />
-      </section>
+      <div className="settings__search">
+        <SearchField value={query} onChange={setQuery} label="Search settings" placeholder="Search settings" />
+      </div>
+      {sections.map((section) => {
+        const id = `settings-${section.toLowerCase().replace(/\s+/g, "-")}`;
+        return (
+          <section key={section} className="settings__group" aria-labelledby={id}>
+            <h2 id={id} className="settings__heading">
+              {section}
+            </h2>
+            {shown
+              .filter((r) => r.section === section)
+              .map((r) => (
+                <Row key={r.key} row={r} />
+              ))}
+          </section>
+        );
+      })}
+      {shown.length === 0 && (
+        <div className="settings__empty" role="status">
+          <p className="settings__empty-title">No settings match "{query.trim()}"</p>
+          <p className="settings__empty-hint">Try another word, like quality, cache or motion.</p>
+        </div>
+      )}
       <p className="settings__hint">Shortcut: {modKey}+,</p>
+      <ConfirmDialog
+        open={dialog === "signOut"}
+        title="Sign out of Plex?"
+        body="Platter forgets your Plex sign-in on this computer. You'll need to sign in again to play your music."
+        confirm="Sign out"
+        onConfirm={() => void signOut()}
+        onClose={() => setDialog(null)}
+      />
+      <ServerDialog open={dialog === "server"} onClose={() => setDialog(null)} current={auth?.server?.machineId} />
+      <NoticesDialog open={dialog === "notices"} onClose={() => setDialog(null)} />
     </div>
   );
 }

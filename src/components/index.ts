@@ -9,6 +9,7 @@ export { SearchField } from "./SearchField";
 export { Shelf, ShelfItem } from "./Shelf";
 export { Skeleton, SkeletonLines } from "./Skeleton";
 export { Slider } from "./Slider";
+export { Select } from "./Select";
 export { Switch } from "./Switch";
 export { FilterChips, Tabs } from "./Tabs";
 export { Toaster } from "./Toast";

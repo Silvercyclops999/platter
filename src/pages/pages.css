@@ -265,7 +265,30 @@
 .setting-row__text { flex: 1; min-width: 0; }
 .setting-row__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
 .setting-row__desc { margin-top: var(--space-1); font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.45; }
+.setting-row__note { color: var(--color-text-primary); }
+.setting-row__control { display: flex; flex: none; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
+.settings__search { margin: 0 var(--space-3) var(--space-8); }
+.settings__empty { margin: 0 var(--space-3) var(--space-8); padding: var(--space-8) 0; text-align: center; }
+.settings__empty-title { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.settings__empty-hint { margin-top: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .settings__hint { margin: 0 var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+@media (max-width: 760px) {
+  .setting-row { flex-wrap: wrap; gap: var(--space-3); }
+  .setting-row__text { flex-basis: 100%; }
+}
+
+/* Small confirm and list dialogs (Settings) */
+.confirm { width: min(440px, calc(100vw - 48px)); padding: var(--space-6); }
+.confirm__title { margin: 0 0 var(--space-3); font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.confirm__body { margin: 0; font-size: var(--font-size-md); line-height: 1.5; color: var(--color-text-secondary); }
+.confirm__error { margin-top: var(--space-3); font-size: var(--font-size-sm); color: var(--color-error); }
+.confirm__actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-6); }
+.confirm .server-list { margin-top: var(--space-2); }
+.notices { margin: var(--space-4) 0 0; padding: 0; list-style: none; }
+.notices__item { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border-bottom: 1px solid rgba(255, 240, 220, 0.08); font-size: var(--font-size-sm); }
+.notices__item:last-child { border-bottom: 0; }
+.notices__name { color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }
+.notices__licence { color: var(--color-text-secondary); text-align: right; }
 
 /* ---------------------------------------------------------------- Welcome / sign-in */
 .welcome {
