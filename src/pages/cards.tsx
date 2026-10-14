@@ -4,7 +4,6 @@ import { Card } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { releaseTypeLabel } from "../lib/format";
 import type { Album, Artist, PlayContextKind, Playlist } from "../lib/types";
-import { navigateWithArt } from "../lib/viewTransition";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
@@ -48,7 +47,7 @@ export function AlbumCard({ album, subtitle = "artist" }: { album: Album; subtit
       subtitle={sub}
       thumb={album.thumb}
       playing={playing}
-      onOpen={(art) => navigateWithArt(art, () => nav.go({ name: "album", id: album.id }))}
+      onOpen={() => nav.go({ name: "album", id: album.id })}
       onPlay={() => (isContext ? player.toggle() : player.playAlbum(album.id))}
       onContextMenu={onContextMenu}
     />
@@ -65,7 +64,7 @@ export function ArtistCard({ artist }: { artist: Artist }) {
       subtitle="Artist"
       thumb={artist.thumb}
       playing={playing}
-      onOpen={(art) => navigateWithArt(art, () => nav.go({ name: "artist", id: artist.id }))}
+      onOpen={() => nav.go({ name: "artist", id: artist.id })}
       onPlay={() => (isContext ? player.toggle() : player.playArtist(artist.id))}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -96,7 +95,7 @@ export function PlaylistCard({ playlist }: { playlist: Playlist }) {
       subtitle={`${playlist.smart ? "Smart playlist" : "Playlist"} · ${playlist.trackCount} songs`}
       thumb={playlist.thumb}
       playing={playing}
-      onOpen={(art) => navigateWithArt(art, () => nav.go({ name: "playlist", id: playlist.id }))}
+      onOpen={() => nav.go({ name: "playlist", id: playlist.id })}
       onPlay={() => (isContext ? player.toggle() : player.playPlaylist(playlist.id))}
       onContextMenu={(e) => {
         e.preventDefault();

@@ -30,8 +30,11 @@ export interface TooltipProps {
   describe?: boolean;
 }
 
+/** Short hover delay before a tooltip appears; it then fades in (quick) and leaves instantly. */
+export const TOOLTIP_DELAY_MS = 200;
+
 /** Hover/focus tooltip. Wraps a single focusable child. */
-export function Tooltip({ label, children, placement = "top", delayMs = 450, describe = false }: TooltipProps) {
+export function Tooltip({ label, children, placement = "top", delayMs = TOOLTIP_DELAY_MS, describe = false }: TooltipProps) {
   const id = useId();
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -88,7 +91,7 @@ export function Tooltip({ label, children, placement = "top", delayMs = 450, des
       } catch {
         visible = false;
       }
-      if (visible) showFor(e.currentTarget, 250);
+      if (visible) showFor(e.currentTarget, TOOLTIP_DELAY_MS);
     },
     onBlur: (e: FocusEvent<HTMLElement>) => {
       props.onBlur?.(e);

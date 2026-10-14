@@ -43,18 +43,29 @@ describe("reduced motion", () => {
     expect(fake.hasListener()).toBe(false);
   });
 
-  it("CSS zeroes every motion token and kills transitions when reduced", () => {
+  it("reduced motion drops movement but keeps fades and colour changes", () => {
     const css = tokensCss;
-    const media = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    // Movement distances and scales are multiplied by --motion-move, which is 0 when reduced.
     const attr = css.slice(css.indexOf(':root[data-reduced-motion="true"] {'));
-    for (const block of [media, attr]) {
-      const body = block.slice(0, block.indexOf("}"));
-      expect(body).toMatch(/--motion-fast:\s*0ms/);
-      expect(body).toMatch(/--motion-medium:\s*0ms/);
-      expect(body).toMatch(/--motion-slow:\s*0ms/);
+    expect(attr.slice(0, attr.indexOf("}"))).toMatch(/--motion-move:\s*0;/);
+    // Durations are not zeroed (fades stay)...
+    expect(css).not.toMatch(/--motion-(quick|medium|slow|long):\s*0ms/);
+    expect(css).not.toMatch(/transition-duration:\s*0ms !important/);
+    // ...and transitions are limited to opacity and colour, so transforms jump.
+    const all = css.slice(css.indexOf(':root[data-reduced-motion="true"] *,'));
+    const props = all.slice(all.indexOf("transition-property:"), all.indexOf(";"));
+    for (const p of ["opacity", "color", "background-color", "--tint", "--tint-shade"]) expect(props).toContain(p);
+    expect(props).not.toContain("transform");
+  });
+
+  it("every movement in the motion CSS scales with --motion-move", () => {
+    const files = { "components.css": componentsCss, "shell.css": shellCss };
+    for (const [f, text] of Object.entries(files)) {
+      // Card plate, card play rise, icon hover scale, panel slide, rise-in.
+      const moving = text.match(/(translate[XY]?|scale)\(calc\([^;]+/g) ?? [];
+      expect(moving.length, f).toBeGreaterThan(0);
+      for (const m of moving) expect(m, `${f}: ${m}`).toContain("var(--motion-move)");
     }
-    expect(css).toMatch(/:root\[data-reduced-motion="true"\] \*[\s\S]*transition-duration:\s*0ms !important/);
-    expect(css).toMatch(/animation-duration:\s*0ms !important/);
   });
 
   it("component CSS only animates through the motion tokens", () => {
@@ -62,7 +73,18 @@ describe("reduced motion", () => {
     for (const [f, text] of Object.entries(files)) {
       // Any `transition:` declaration must use var(--motion-*) durations.
       const transitions = text.match(/transition:[^;]+;/g) ?? [];
-      for (const t of transitions) expect(t, `${f}: ${t}`).toMatch(/var\(--motion-(fast|medium|slow)\)/);
+      for (const t of transitions) expect(t, `${f}: ${t}`).toMatch(/var\(--motion-(very-quick|quick|fast|medium|slow|long)\)/);
     }
+  });
+
+  it("structural changes are instant: no page fade, view transition or menu fade", () => {
+    expect(shellCss).not.toMatch(/\.page\s*\{[^}]*animation/);
+    expect(shellCss).not.toContain("view-transition");
+    const menu = componentsCss.slice(componentsCss.indexOf(".context-menu {"));
+    expect(menu.slice(0, menu.indexOf("}"))).not.toMatch(/animation|transition/);
+    const row = componentsCss.slice(componentsCss.indexOf(".track-row {\n  height"));
+    expect(row.slice(0, row.indexOf("}"))).not.toMatch(/transition/);
+    // The header colour is the one thing that eases across pages, over the long band.
+    expect(shellCss).toMatch(/--tint var\(--motion-long\)/);
   });
 });

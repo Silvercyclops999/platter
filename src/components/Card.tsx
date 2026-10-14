@@ -1,5 +1,5 @@
 import { Pause, Play } from "lucide-react";
-import { useRef, type MouseEvent, type ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { Art } from "./Art";
 import { Skeleton } from "./Skeleton";
 
@@ -8,8 +8,8 @@ export interface CardProps {
   title: string;
   subtitle?: ReactNode;
   thumb: string | null | undefined;
-  /** Open the item. Gets the art box so the page can morph it into its header. */
-  onOpen: (art: HTMLElement | null) => void;
+  /** Open the item. */
+  onOpen: () => void;
   /** Play (or, while `playing`, pause) without navigating. */
   onPlay?: () => void;
   /** This item is the playing context: the button shows Pause and stays visible. */
@@ -24,10 +24,9 @@ export interface CardProps {
  * via a stretched title button; the hover play button sits above it.
  */
 export function Card({ kind, title, subtitle, thumb, onOpen, onPlay, playing, onContextMenu, artSize = 200 }: CardProps) {
-  const art = useRef<HTMLDivElement>(null);
   return (
     <div className={`card card--${kind} ${playing ? "is-playing" : ""}`} onContextMenu={onContextMenu}>
-      <div className="card__art" ref={art}>
+      <div className="card__art">
         <Art path={thumb} fluid requestSize={artSize} round={kind === "artist"} kind={kind} />
         {onPlay && (
           <button
@@ -43,7 +42,7 @@ export function Card({ kind, title, subtitle, thumb, onOpen, onPlay, playing, on
           </button>
         )}
       </div>
-      <button type="button" className="card__link" onClick={() => onOpen(art.current?.querySelector<HTMLElement>(".art") ?? null)} title={title}>
+      <button type="button" className="card__link" onClick={onOpen} title={title}>
         <span className="card__title truncate">{title}</span>
       </button>
       {subtitle && <div className="card__subtitle truncate">{subtitle}</div>}

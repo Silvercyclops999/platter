@@ -49,10 +49,15 @@
   border-radius: var(--radius-pill);
   color: var(--color-text-secondary);
   position: relative;
+  /* Settling back (hover out) is quick; reacting (hover in) is very quick. */
   transition:
-    color var(--motion-fast) var(--motion-easing),
-    background-color var(--motion-fast) var(--motion-easing),
-    transform var(--motion-fast) var(--motion-easing);
+    color var(--motion-quick) var(--motion-easing),
+    background-color var(--motion-quick) var(--motion-easing),
+    transform var(--motion-quick) var(--motion-easing);
+}
+.icon-btn:hover:not([aria-disabled="true"]) {
+  transform: scale(calc(1 + 0.05 * var(--motion-move)));
+  transition-duration: var(--motion-very-quick);
 }
 .icon-btn:focus-visible { border-radius: var(--radius-pill); }
 .icon-btn--sm { width: 28px; height: 28px; }
@@ -61,12 +66,12 @@
 .icon-btn--xl { width: 48px; height: 48px; }
 .icon-btn__glyph { display: inline-flex; }
 .icon-btn--plain:hover:not([aria-disabled="true"]) { color: var(--color-text-primary); }
-.icon-btn--plain:active:not([aria-disabled="true"]) { transform: scale(0.94); }
+.icon-btn:active:not([aria-disabled="true"]) { transform: scale(calc(1 - 0.04 * var(--motion-move))); }
 .icon-btn--filled { background: rgba(0, 0, 0, 0.42); color: var(--color-text-primary); }
-.icon-btn--filled:hover:not([aria-disabled="true"]) { background: rgba(0, 0, 0, 0.6); transform: scale(1.04); }
+.icon-btn--filled:hover:not([aria-disabled="true"]) { background: rgba(0, 0, 0, 0.6); }
 .icon-btn--accent { background: var(--color-accent); color: var(--color-text-on-accent); }
-.icon-btn--accent:hover:not([aria-disabled="true"]) { background: var(--color-accent-hover); transform: scale(1.04); }
-.icon-btn--accent:active:not([aria-disabled="true"]) { background: var(--color-accent-pressed); transform: scale(0.97); }
+.icon-btn--accent:hover:not([aria-disabled="true"]) { background: var(--color-accent-hover); }
+.icon-btn--accent:active:not([aria-disabled="true"]) { background: var(--color-accent-pressed); }
 .icon-btn.is-active { color: var(--color-accent); }
 .icon-btn.is-active::after {
   content: "";
@@ -95,7 +100,7 @@
   font-weight: var(--font-weight-semibold);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   white-space: nowrap;
-  animation: fade-in var(--motion-fast) var(--motion-easing);
+  animation: fade-in var(--motion-quick) var(--motion-easing-in-out);
 }
 .tooltip--top { transform: translate(-50%, -100%); }
 .tooltip--bottom { transform: translate(-50%, 0); }
@@ -106,7 +111,7 @@
   to { opacity: 1; }
 }
 @keyframes rise-in {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(calc(6px * var(--motion-move))); }
   to { opacity: 1; transform: none; }
 }
 
@@ -129,6 +134,7 @@
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; }
 }
+:root[data-reduced-motion="true"] .skeleton { animation: none; }
 
 /* ---------------------------------------------------------------- Art */
 .art {
@@ -148,9 +154,11 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transition: opacity var(--motion-medium) var(--motion-easing);
 }
+/* Fade in only when the image actually loaded after mount; art that was
+   already decoded (from cache) shows at once. */
 .art.is-loaded img { opacity: 1; }
+.art.is-loaded.is-fading img { animation: fade-in var(--motion-quick) var(--motion-easing); }
 .art__skeleton { position: absolute; inset: 0; }
 .art__fallback {
   position: absolute;
@@ -241,7 +249,6 @@
   border-radius: var(--radius-row);
   background: var(--color-bg-overlay);
   box-shadow: 0 16px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 240, 220, 0.05);
-  animation: fade-in var(--motion-fast) var(--motion-easing);
 }
 .context-menu__item {
   display: flex;
@@ -478,11 +485,25 @@
   flex-direction: column;
   padding: var(--space-3);
   border-radius: var(--radius-card);
-  transition: background-color var(--motion-medium) var(--motion-easing);
   min-width: 0;
+  isolation: isolate;
 }
-.card:hover,
-.card:focus-within { background: var(--color-state-hover); }
+/* Hover plate: grows from a small inset to the card's bounds while fading in. */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--radius-card);
+  background: var(--color-state-hover);
+  opacity: 0;
+  transform: scale(calc(1 - 0.06 * var(--motion-move)));
+  transition:
+    opacity var(--motion-quick) var(--motion-easing),
+    transform var(--motion-quick) var(--motion-easing);
+}
+.card:hover::before,
+.card:focus-within::before { opacity: 1; transform: none; }
 .card__art {
   position: relative;
   margin-bottom: var(--space-3);
@@ -504,13 +525,13 @@
   color: var(--color-text-on-accent);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(calc(8px * var(--motion-move)));
   transition:
-    opacity var(--motion-medium) var(--motion-easing),
-    transform var(--motion-medium) var(--motion-easing),
-    background-color var(--motion-fast) var(--motion-easing);
+    opacity var(--motion-quick) var(--motion-easing),
+    transform var(--motion-quick) var(--motion-easing),
+    background-color var(--motion-quick) var(--motion-easing);
 }
-.card__play:hover { background: var(--color-accent-hover); transform: scale(1.05); }
+.card__play:hover { background: var(--color-accent-hover); transform: scale(calc(1 + 0.05 * var(--motion-move))); }
 .card:hover .card__play,
 .card:focus-within .card__play,
 .card.is-playing .card__play { opacity: 1; transform: none; }
@@ -542,7 +563,7 @@
 }
 .card--artist .card__link,
 .card--artist .card__subtitle { text-align: left; }
-.card--skeleton:hover { background: none; }
+.card--skeleton::before { display: none; }
 
 /* ---------------------------------------------------------------- Shelf */
 .shelf { margin-bottom: var(--space-8); }
@@ -601,7 +622,6 @@
   border-radius: var(--radius-row);
   color: var(--color-text-secondary);
   font-size: var(--font-size-md);
-  transition: background-color var(--motion-fast) var(--motion-easing);
 }
 .track-row:hover { background: var(--color-state-hover); }
 .track-row.is-unavailable { opacity: 0.4; }
@@ -662,6 +682,7 @@
   color: var(--color-text-secondary);
   visibility: hidden;
 }
+.track-row__hover-btn { transition: color var(--motion-quick) var(--motion-easing); }
 .track-row__hover-btn:hover:not([aria-disabled="true"]) { color: var(--color-text-primary); }
 .track-row__hover-btn[aria-disabled="true"] { opacity: 0.5; }
 .track-row:hover .track-row__hover-btn,

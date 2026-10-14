@@ -80,11 +80,27 @@
   --radius-card: 8px;
   --radius-pill: 999px;
 
-  /* Motion */
-  --motion-fast: 150ms;
-  --motion-medium: 250ms;
-  --motion-slow: 350ms;
+  /* Display steps for page-header titles (largest first) */
+  --font-size-display-1: 96px;
+  --font-size-display-2: 64px;
+  --font-size-display-3: 44px;
+  --font-size-display-4: 32px;
+  --font-size-display-5: 24px;
+  --font-weight-display: 800;
+
+  /* Motion bands. Instant for structure, quick for most feedback, long only
+     for the header colour. Entrances animate; exits are mostly instant. */
+  --motion-instant: 0ms;
+  --motion-very-quick: 70ms;
+  --motion-quick: 180ms;
+  --motion-medium: 300ms;
+  --motion-slow: 500ms;
+  --motion-long: 900ms;
+  --motion-fast: 180ms;
   --motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  --motion-easing-in-out: cubic-bezier(0.45, 0, 0.25, 1);
+  /* Multiplier on every movement distance and scale; 0 under reduced motion. */
+  --motion-move: 1;
 
   /* Header tint (album/artist pages set this from artwork) */
   --tint: #3a3128;
@@ -92,27 +108,17 @@
   color-scheme: dark;
 }
 
-/* Reduced motion: OS setting (media query) or app-level override
-   (data-reduced-motion set by src/design/motion.ts). */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --motion-fast: 0ms;
-    --motion-medium: 0ms;
-    --motion-slow: 0ms;
-  }
-}
-
-:root[data-reduced-motion="true"] {
-  --motion-fast: 0ms;
-  --motion-medium: 0ms;
-  --motion-slow: 0ms;
-}
-
+/* Reduced motion (OS setting, mirrored onto data-reduced-motion by
+   src/design/motion.ts): movement goes, fades and colour changes stay.
+   --motion-move zeroes the distances and scales that rules multiply by it,
+   and transitions are limited to opacity and colour so any other transform
+   jumps straight to its end state. */
 :root[data-reduced-motion="true"] *,
 :root[data-reduced-motion="true"] *::before,
 :root[data-reduced-motion="true"] *::after {
-  animation-duration: 0ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0ms !important;
+  transition-property: opacity, color, background-color, border-color, box-shadow, fill, stroke, visibility, --tint, --tint-shade, --sb-alpha !important;
   scroll-behavior: auto !important;
+}
+:root[data-reduced-motion="true"] {
+  --motion-move: 0;
 }

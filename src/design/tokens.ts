@@ -101,12 +101,28 @@ export const radius = {
   pill: 999,
 } as const;
 
-/** Durations in ms. All become 0 under reduced motion. */
+/** Page-header title steps in px, largest first (each about two thirds of the one above). */
+export const displaySize = [96, 64, 44, 32, 24] as const;
+
+/** Extra-bold weight for page-header titles. */
+export const displayWeight = 800;
+
+/**
+ * Motion bands in ms. Most changes are instant or quick; entrances animate,
+ * exits are mostly instant. Reduced motion keeps these durations for fades
+ * and colour, and drops movement (see tokens.css).
+ */
 export const motion = {
-  fast: 150, // hover
-  medium: 250, // panels
-  slow: 350, // page transitions
-  easing: "cubic-bezier(0.2, 0, 0, 1)", // standard ease-out
+  instant: 0, // menus, row hover, panel close
+  veryQuick: 70, // hover in (icon buttons)
+  quick: 180, // card hover, image load, tooltips, panels in, hover out
+  medium: 300, // queue rows
+  slow: 500, // sticky title fade
+  long: 900, // header colour
+  /** Older name for `quick`, still used by some rules. */
+  fast: 180,
+  easing: "cubic-bezier(0.2, 0, 0, 1)", // decelerate
+  easingInOut: "cubic-bezier(0.45, 0, 0.25, 1)",
 } as const;
 
 /** Map from token group/key to the CSS custom property that carries it. */
@@ -124,9 +140,8 @@ export function cssVariableTable(): Record<string, string> {
   for (const [k, v] of Object.entries(fontWeight)) t[`font-weight-${k}`] = String(v);
   for (const [k, v] of Object.entries(space)) t[`space-${k}`] = `${v}px`;
   for (const [k, v] of Object.entries(radius)) t[`radius-${k}`] = `${v}px`;
-  t["motion-fast"] = `${motion.fast}ms`;
-  t["motion-medium"] = `${motion.medium}ms`;
-  t["motion-slow"] = `${motion.slow}ms`;
-  t["motion-easing"] = motion.easing;
+  for (const [k, v] of Object.entries(motion)) t[`motion-${kebab(k)}`] = typeof v === "number" ? `${v}ms` : v;
+  displaySize.forEach((v, i) => (t[`font-size-display-${i + 1}`] = `${v}px`));
+  t["font-weight-display"] = String(displayWeight);
   return t;
 }
