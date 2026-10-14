@@ -349,6 +349,7 @@ async fn library_items_list_everything_with_added_and_played_dates() {
 
     let a1 = get(LibraryKind::Album, &first.id);
     assert_eq!(a1.creator.as_deref(), Some(first.artist_title.as_str()));
+    assert_eq!(a1.creator_id.as_deref(), Some(first.artist_id.as_str()));
     assert_eq!(a1.added_at, Some(first.added_at));
     assert_eq!(a1.played_at, Some(5000));
     assert_eq!(get(LibraryKind::Album, &second.id).played_at, Some(9_000));

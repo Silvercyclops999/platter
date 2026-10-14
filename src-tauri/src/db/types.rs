@@ -53,6 +53,8 @@ pub struct LibraryItem {
     pub sort_title: String,
     /// Album artist for albums; None for artists and playlists.
     pub creator: Option<String>,
+    /// Album artist id (albums only), for "Go to artist".
+    pub creator_id: Option<String>,
     pub thumb: Option<String>,
     /// Plex smart playlist.
     pub smart: bool,

@@ -72,10 +72,9 @@ Plex's order. Artist lists never carry the biography. Similar artists come
 from the artist's detail, not from sync: `artist_page` answers with what's
 cached and, when that is missing or a week old, fetches it in the background
 and then emits `artist://changed` with `{ id }` so the page can ask again.
-
-`LibraryItem = { kind: "playlist"|"album"|"artist", id, title, sortTitle, creator?, thumb?, smart, format?, addedAt?, playedAt? }`
+`LibraryItem = { kind: "playlist"|"album"|"artist", id, title, sortTitle, creator?, creatorId?, thumb?, smart, format?, addedAt?, playedAt? }`
 feeds the library sidebar, which sorts and filters it in the UI. `creator` is
-the album artist (albums only). `addedAt` is Plex's addedAt for albums and the
+the album artist and `creatorId` its id (albums only). `addedAt` is Plex's addedAt for albums and the
 earliest of an artist's albums for artists; playlists have none. `playedAt` is
 the latest play in Plex history or the local listen log (and Plex's
 lastViewedAt) for albums, an artist's newest album play, and the latest local

@@ -100,6 +100,8 @@ export interface LibraryItem {
   sortTitle: string;
   /** Album artist (albums only). */
   creator?: string | null;
+  /** Album artist id (albums only). */
+  creatorId?: string | null;
   thumb?: string | null;
   smart: boolean;
   /** Lower-case Plex album format ("ep", "single"), albums only. */

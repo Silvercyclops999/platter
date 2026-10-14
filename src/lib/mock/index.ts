@@ -431,6 +431,7 @@ export class MockBackend implements Backend {
           title: a.title,
           sortTitle: a.sortTitle,
           creator: a.artistTitle,
+          creatorId: a.artistId,
           thumb: a.thumb,
           smart: false,
           format: a.format,

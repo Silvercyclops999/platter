@@ -418,7 +418,7 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 (a, b) => a.or(b),
             };
             let added = (added > 0).then_some(added);
-            let e = artist_dates.entry(artist_id).or_insert((None, None));
+            let e = artist_dates.entry(artist_id.clone()).or_insert((None, None));
             e.0 = match (e.0, added) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (a, b) => a.or(b),
@@ -430,6 +430,7 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 title,
                 sort_title,
                 creator: Some(artist_title),
+                creator_id: Some(artist_id),
                 thumb,
                 smart: false,
                 format,
@@ -452,6 +453,7 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 title,
                 sort_title,
                 creator: None,
+                creator_id: None,
                 thumb,
                 smart: false,
                 format: None,
@@ -474,6 +476,7 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 sort_title: r.get(1)?,
                 title: r.get(1)?,
                 creator: None,
+                creator_id: None,
                 thumb: r.get(2)?,
                 smart: r.get(3)?,
                 format: None,
