@@ -8,6 +8,12 @@ import { artUrl } from "../lib/backend";
  */
 export const FluidArtSize = createContext<number | null>(null);
 
+/**
+ * False while a layout (such as a shelf) has this art scrolled far out of
+ * view: the box and skeleton stay, but no image is requested or kept decoded.
+ */
+export const ArtActive = createContext(true);
+
 export interface ArtProps {
   path: string | null | undefined;
   /** Display size in CSS px (the box is square). Use `fluid` to fill the parent width. */
@@ -35,13 +41,21 @@ export interface ArtProps {
 export function Art({ path, size = 48, fluid, requestSize, round, kind = "album", alt = "", className = "", onLoad }: ArtProps) {
   const fluidSize = useContext(FluidArtSize);
   const cssSize = fluid ? (fluidSize ?? requestSize ?? 200) : size;
-  const src = artUrl(path, cssSize);
+  const active = useContext(ArtActive);
+  const wanted = artUrl(path, cssSize);
+  const src = active ? wanted : undefined;
   // Track which src loaded/failed so a new src starts fresh without an effect.
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   // Set when the image finished loading after it was shown: only then fade.
   const [fadeSrc, setFadeSrc] = useState<string | null>(null);
   const img = useRef<HTMLImageElement>(null);
+  // Released art starts over when it comes back: shown at once if the image
+  // is still decoded in the cache, otherwise skeleton then fade.
+  if (!src && (loadedSrc !== null || fadeSrc !== null)) {
+    setLoadedSrc(null);
+    setFadeSrc(null);
+  }
   const loaded = !!src && loadedSrc === src;
   const failed = !!src && failedSrc === src;
 
@@ -58,12 +72,12 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
 
   return (
     <span className={`art ${round ? "art--round" : ""} ${loaded ? "is-loaded" : ""} ${loaded && fadeSrc === src ? "is-fading" : ""} ${className}`} style={style}>
-      {(!src || failed) && (
+      {(!wanted || failed) && (
         <span className="art__fallback" aria-hidden="true">
           <Fallback size={fluid ? 40 : Math.max(16, Math.round(size * 0.38))} strokeWidth={1.5} />
         </span>
       )}
-      {src && !failed && !loaded && <span className="art__skeleton skeleton" aria-hidden="true" />}
+      {wanted && !failed && !loaded && <span className="art__skeleton skeleton" aria-hidden="true" />}
       {src && !failed && (
         <img
           ref={img}
