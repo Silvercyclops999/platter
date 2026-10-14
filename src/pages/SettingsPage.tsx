@@ -1047,6 +1047,21 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "lyricsLrclib", ids),
     },
     {
+      key: "lyricsPreferOwn",
+      section: "Appearance",
+      title: "Prefer my own lyrics over Plex's",
+      description:
+        "Songs you've written lyrics for in Platter show yours, even when Plex has some. Off shows yours only when Plex has none, unless you chose otherwise for the song.",
+      control: (ids) => toggle(s, "lyricsPreferOwn", ids),
+    },
+    {
+      key: "lyricsShowAdd",
+      section: "Appearance",
+      title: "Show Add lyrics on songs without lyrics",
+      description: "The lyrics view offers to write lyrics for a song that has none. Add lyrics stays in the song's menu either way.",
+      control: (ids) => toggle(s, "lyricsShowAdd", ids),
+    },
+    {
       key: "fullWindowHideControls",
       section: "Appearance",
       title: "Full-window view hides controls",

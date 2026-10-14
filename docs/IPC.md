@@ -384,10 +384,18 @@ the call: when the artist or lyrics request fails, that part is just left out.
 | Command | Args | Returns |
 | --- | --- | --- |
 | `lyrics_get` | `{ trackId }` | `Lyrics \| null` |
+| `lyrics_own_get` | `{ trackId }` | `OwnLyrics \| null` |
+| `lyrics_own_save` | `{ trackId, text, prefer }` | – |
+| `lyrics_own_delete` | `{ trackId }` | `bool` (there were some) |
+| `lyrics_own_ids` | – | `string[]` |
+| `lyrics_export` | `{ text, fileName }` | `string \| null` |
 
-The lyrics view and the full-window view use this. Sources in order: the
-track's Plex lyrics stream (a sidecar `.lrc` or `.txt` file, or Plex's own
-lyrics), then LRCLIB when `lyricsLrclib` is on. LRCLIB is asked with
+The lyrics view and the full-window view use `lyrics_get`. Sources in order:
+the track's Plex lyrics stream (a sidecar `.lrc` or `.txt` file, or Plex's
+own lyrics), then lyrics the user wrote in the app, then LRCLIB when
+`lyricsLrclib` is on. The user's own lyrics go first instead when they were
+saved with `prefer` or `lyricsPreferOwn` is on (Plex isn't asked then).
+LRCLIB is asked with
 `/api/get` (artist, title, album, length in seconds); when that finds
 nothing, `/api/search` with the artist and title only, taking a result only
 when both match once case, accents and featured artists are folded away
@@ -397,7 +405,10 @@ answers are cached in SQLite (`lyrics_cache`): found 30 days, none 7 days.
 A source that's down, busy or unreadable gives `null` and isn't cached. Only
 a malformed id is an error (`invalid`).
 
-`Lyrics = { synced, lines: string[], timed?: LyricLine[], credit?, source: "plex"|"lrclib" }`.
+`Lyrics = { synced, lines: string[], timed?: LyricLine[], credit?, source: "plex"|"file"|"user"|"lrclib" }`.
+`source` is `file` when the Plex stream is a file next to the song (the
+stream names Plex's local media agent, or no agent), `plex` when an agent
+such as LyricFind supplied it, `user` for lyrics written in the app.
 `lines` is the text in file order, `""` marking a break between verses.
 `timed` is there when `synced`: lines in play order, `{ startMs, text, words?: { startMs, text }[] }`,
 a line with several time tags appearing once per tag, `text: ""` marking an
@@ -406,6 +417,19 @@ spans with their own offsets; joined, the words make `text`. An LRC
 `[offset:±ms]` header is applied (positive shows lyrics sooner). `credit` is
 the writer and provider line ("Lyrics from LRCLIB", or "Lyrics from LRCLIB,
 matched by title" for a search match).
+
+Own lyrics are what the lyrics editor saves, one row per track in SQLite
+(`user_lyrics`), never written next to the music file.
+`OwnLyrics = { trackId, text, prefer, updatedAt }`: `text` is LRC with one
+`[mm:ss.xx]` tag per line when synced, plain lines otherwise, blank lines
+between verses either way. `prefer` shows them ahead of Plex's for that song.
+`lyrics_own_save` trims the text and refuses text with no words or over
+64 KB, and a track id that isn't a library id (`invalid`). `lyrics_own_ids`
+lets menus say "Add lyrics" or "Edit lyrics".
+
+`lyrics_export` opens a save dialog (suggested name `fileName` made safe for
+file systems, ending in `.lrc`) and writes `text` where the user picks.
+Returns the saved file's name, or `null` when the dialog was cancelled.
 
 ## Search
 | Command | Args | Returns |
@@ -719,6 +743,8 @@ The rest of the fields, with their defaults:
 | `showPlexAvatar` | bool, true | The app menu button shows the Plex profile picture (`AuthStatus.avatar`). Off shows the first letter of the username. This device only. |
 | `lyricsMode` | `"autoShow"\|"off"`, `"autoShow"` | Auto-show opens the lyrics view when a song with synced lyrics starts while now playing is open. Off opens it only from its button. |
 | `lyricsLrclib` | bool, false | `lyrics_get` asks LRCLIB when Plex has no lyrics (sends artist, title, album and length; the search sends artist and title). Off sends nothing. |
+| `lyricsPreferOwn` | bool, false | Lyrics written in the app show ahead of Plex's for every song that has them. Off shows them only when Plex has none, or for songs saved with `prefer`. |
+| `lyricsShowAdd` | bool, true | The lyrics view and the full-window view offer Add lyrics for a song with none. The track menu keeps Add lyrics either way. |
 | `fullWindowHideControls` | bool, true | The full-window view fades its controls after 3 s without mouse movement or a key. |
 | `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |

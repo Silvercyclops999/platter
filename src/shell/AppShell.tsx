@@ -26,6 +26,8 @@ import {
 } from "./layout";
 import { FullWindow } from "./FullWindow";
 import { useLyricsAutoShow } from "./lyrics";
+import { LyricsEditorHost } from "./LyricsEditor";
+import { loadOwnLyricsIds } from "../stores/lyricsEditor";
 import { MainView } from "./MainView";
 import { NowPlayingExpanded, NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
 import { OutputPanel } from "./OutputPanel";
@@ -52,6 +54,7 @@ export function AppShell() {
   useShortcuts();
   useOpenNowPlayingOnStart();
   useLyricsAutoShow();
+  useEffect(() => void loadOwnLyricsIds(), []);
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
@@ -171,6 +174,7 @@ export function AppShell() {
       <Toaster />
       <PlaylistDialogs />
       <DragAnnouncer />
+      <LyricsEditorHost />
       <FullWindow />
     </div>
   );

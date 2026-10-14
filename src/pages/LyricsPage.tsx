@@ -1,6 +1,9 @@
+import { PenLine } from "lucide-react";
 import type { CSSProperties } from "react";
+import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { NEUTRAL_HEADER } from "../lib/color";
+import { openLyricsEditor } from "../stores/lyricsEditor";
 import { usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
 import { useLyrics } from "../shell/lyrics";
@@ -20,6 +23,7 @@ export function LyricsPage() {
   const track = usePlayer((s) => s.state?.track);
   const { lyrics, loading } = useLyrics(track?.id);
   const bg = useLyricsBackground(track?.thumb);
+  const showAdd = useSettings((s) => s.settings?.lyricsShowAdd ?? true);
 
   let body;
   if (!track) body = <p className="lyrics-page__empty">Nothing playing.</p>;
@@ -31,8 +35,18 @@ export function LyricsPage() {
         ))}
       </div>
     );
-  else if (!lyrics) body = <p className="lyrics-page__empty">No lyrics for this song</p>;
-  else body = <LyricsView lyrics={lyrics} trackId={track.id} />;
+  else if (!lyrics)
+    body = (
+      <div className="lyrics-page__empty-wrap">
+        <p className="lyrics-page__empty">No lyrics for this song</p>
+        {showAdd && (
+          <Button variant="primary" icon={<PenLine size={16} />} onClick={() => openLyricsEditor(track)}>
+            Add lyrics
+          </Button>
+        )}
+      </div>
+    );
+  else body = <LyricsView lyrics={lyrics} track={track} />;
 
   return (
     <section className="lyrics-page" aria-label={track ? `Lyrics: ${track.title}` : "Lyrics"} style={{ "--lyrics-bg": bg } as CSSProperties}>

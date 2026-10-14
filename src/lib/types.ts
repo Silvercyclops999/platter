@@ -302,7 +302,18 @@ export interface Lyrics {
   source?: LyricsSource;
 }
 
-export type LyricsSource = "plex" | "lrclib";
+/** plex: Plex's own (an agent such as LyricFind); file: a .lrc or .txt next to the song; user: written in Platter. */
+export type LyricsSource = "plex" | "file" | "user" | "lrclib";
+
+/** `lyrics_own_get`: lyrics the user wrote for a song. */
+export interface OwnLyrics {
+  trackId: string;
+  /** LRC text, or plain lines when not synced. */
+  text: string;
+  /** Shown ahead of Plex's lyrics for this song. */
+  prefer: boolean;
+  updatedAt: number;
+}
 
 export interface LyricLine {
   startMs: number;
@@ -614,6 +625,10 @@ export interface Settings {
   lyricsMode: LyricsMode;
   /** Look lyrics up on LRCLIB when Plex has none. */
   lyricsLrclib: boolean;
+  /** The user's own lyrics show ahead of Plex's for every song. */
+  lyricsPreferOwn: boolean;
+  /** Songs without lyrics offer "Add lyrics" in the lyrics view. */
+  lyricsShowAdd: boolean;
   /** The full-window view hides its controls after 3 s without movement. */
   fullWindowHideControls: boolean;
   /** Read explicit, version and edition tags from the files (this device only). */
@@ -720,6 +735,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showPlexAvatar: true,
   lyricsMode: "autoShow",
   lyricsLrclib: false,
+  lyricsPreferOwn: false,
+  lyricsShowAdd: true,
   fullWindowHideControls: true,
   readFileTags: true,
   explicitContent: "allowed",

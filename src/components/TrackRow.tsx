@@ -19,6 +19,7 @@ import { isUnavailable, useApp } from "../stores/app";
 import { endSongDrag, startSongDrag, tracksDrag } from "../stores/drag";
 import { useSettings } from "../stores/settings";
 import { likeMenuLabel, toggleLiked } from "../stores/likes";
+import { lyricsEditLabel, openLyricsEditor } from "../stores/lyricsEditor";
 import { nav, useRouter } from "../stores/router";
 import { player } from "../stores/player";
 import { toast } from "../stores/toasts";
@@ -84,6 +85,13 @@ export function trackMenuItems(
     ...(extra.afterQueue ?? []),
     ...goToArtistItems(track),
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
+    {
+      // Read when the menu shows: lyrics may have been saved since the row built it.
+      get label() {
+        return lyricsEditLabel(track.id);
+      },
+      onSelect: () => openLyricsEditor(track),
+    },
     shareItem("track", track.id),
     {
       label: "Copy song title",

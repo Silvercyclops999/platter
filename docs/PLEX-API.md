@@ -451,6 +451,12 @@ anything that plays on a real device needs an OK first). Check once:
 - After a burst of a few dozen lyrics requests the server started answering
   404 for every lyrics stream (ones that had returned 200 minutes before).
   The app treats a failed lyrics stream as "no lyrics" without caching it.
+- Telling a sidecar file from agent lyrics: of 65 well-played tracks checked
+  again, the one with lyrics had `provider: "com.plexapp.agents.lyricfind"`.
+  No sidecar `.lrc` or `.txt` was in that sample, so the app's rule is an
+  assumption to confirm: a stream naming `com.plexapp.agents.localmedia`, or
+  no provider at all, is a file next to the song; any other agent is Plex's
+  own lyrics.
 ### 2026-10-14: file header reads for tags
 
 `cargo test live_tags -- --ignored --nocapture` read 9 parts (3 FLAC, 3 MP3,

@@ -41,6 +41,7 @@ import type {
   LibraryItem,
   LikedPage,
   Lyrics,
+  OwnLyrics,
   NowPlayingDetails,
   OutputState,
   Page,
@@ -126,6 +127,16 @@ export interface Backend {
   nowPlayingDetails(trackId: string): Promise<NowPlayingDetails>;
   /** The track's lyrics: Plex first, then LRCLIB when its setting is on. Null when there are none. */
   lyrics(trackId: string): Promise<Lyrics | null>;
+  /** Lyrics the user wrote for the song in the editor, or null. */
+  ownLyrics(trackId: string): Promise<OwnLyrics | null>;
+  /** Save the song's own lyrics (LRC or plain lines). */
+  ownLyricsSave(trackId: string, text: string, prefer: boolean): Promise<void>;
+  /** Remove the song's own lyrics; true when there were some. */
+  ownLyricsDelete(trackId: string): Promise<boolean>;
+  /** Every song with its own lyrics. */
+  ownLyricsIds(): Promise<string[]>;
+  /** Save lyrics as an .lrc file through a save dialog. The saved file's name, or null when cancelled. */
+  lyricsExport(text: string, fileName: string): Promise<string | null>;
 
   // Search
   search(args: SearchArgs): Promise<SearchResults>;
@@ -298,6 +309,11 @@ export function createTauriBackend(): Backend {
     playlistsWithTrack: (trackId) => call("playlists_with_track", { trackId }),
     nowPlayingDetails: (trackId) => call("now_playing_details", { trackId }),
     lyrics: (trackId) => call("lyrics_get", { trackId }),
+    ownLyrics: (trackId) => call("lyrics_own_get", { trackId }),
+    ownLyricsSave: (trackId, text, prefer) => call("lyrics_own_save", { trackId, text, prefer }),
+    ownLyricsDelete: (trackId) => call("lyrics_own_delete", { trackId }),
+    ownLyricsIds: () => call("lyrics_own_ids"),
+    lyricsExport: (text, fileName) => call("lyrics_export", { text, fileName }),
 
     search: (args) => call("search", { ...args }),
     searchCompletions: (query, limit) => call("search_completions", { query, limit }),

@@ -57,6 +57,7 @@ import type {
   Settings,
   ShareKind,
   SyncStatus,
+  OwnLyrics,
   Track,
   QueueAt,
 } from "../types";
@@ -64,6 +65,7 @@ import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
 import { mockArtUrl } from "./art";
 import { mockLyrics, mockNowPlayingDetails } from "./details";
+import { lyricsFromText } from "../lrc";
 import { credits, globalTop, popularTracks, rankPopular } from "./popular";
 import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
 import { mockBio } from "./bio";
@@ -716,10 +718,46 @@ export class MockBackend implements Backend {
   /** Lyrics sources unreachable (app states: the view says there are none). */
   lyricsDown = false;
 
+  /** Lyrics written in the editor, by track id (the core keeps them in SQLite). */
+  own = new Map<string, OwnLyrics>();
+  /** Files "saved" by Export .lrc (null result: the save dialog was cancelled). */
+  exported: { text: string; fileName: string }[] = [];
+  exportCancels = false;
+
+  /** Plex's lyrics, then the user's own, unless they asked for theirs first. */
   lyrics(trackId: string) {
     return this.delay(() => {
       const track = this.trackById(trackId) ?? this.notFound("Track");
-      return this.lyricsDown ? null : mockLyrics(track);
+      const own = this.own.get(trackId);
+      const mine = own ? lyricsFromText(own.text) : null;
+      if (mine && (own!.prefer || this.settings.lyricsPreferOwn)) return mine;
+      const plex = this.lyricsDown ? null : mockLyrics(track);
+      return plex ?? mine;
+    });
+  }
+  ownLyrics(trackId: string) {
+    return this.delay(() => this.own.get(trackId) ?? null);
+  }
+  ownLyricsSave(trackId: string, text: string, prefer: boolean) {
+    return this.delay(() => {
+      this.trackById(trackId) ?? this.notFound("Track");
+      const clean = text.replace(/\r\n?/g, "\n").trim();
+      if (!lyricsFromText(clean)) throw { kind: "invalid", message: "There are no lyrics to save." };
+      this.own.set(trackId, { trackId, text: clean, prefer, updatedAt: Math.floor(Date.now() / 1000) });
+    });
+  }
+  ownLyricsDelete(trackId: string) {
+    return this.delay(() => this.own.delete(trackId));
+  }
+  ownLyricsIds() {
+    return this.delay(() => [...this.own.keys()].sort());
+  }
+  lyricsExport(text: string, fileName: string) {
+    return this.delay(() => {
+      if (this.exportCancels) return null;
+      const name = fileName.replace(/[<>:"/\\|?*]/g, "_").trim() + ".lrc";
+      this.exported.push({ text, fileName: name });
+      return name;
     });
   }
 

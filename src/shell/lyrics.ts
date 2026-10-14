@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { backend } from "../lib/backend";
 import type { LyricLine, LyricWord, Lyrics } from "../lib/types";
+import { useLyricsEditor } from "../stores/lyricsEditor";
 import { usePlayer } from "../stores/player";
 import { nav, useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
@@ -47,15 +48,21 @@ export function loadLyrics(trackId: string): Promise<Lyrics | null> {
   return p;
 }
 
-/** Lyrics for a track; `loading` until known. Turning LRCLIB on or off asks again. */
+/**
+ * Lyrics for a track; `loading` until known. Turning LRCLIB on or off,
+ * preferring your own lyrics, and saving lyrics in the editor ask again.
+ */
 export function useLyrics(trackId: string | null | undefined): { lyrics: Lyrics | null; loading: boolean } {
   const lrclib = useSettings((s) => s.settings?.lyricsLrclib ?? false);
+  const preferOwn = useSettings((s) => s.settings?.lyricsPreferOwn ?? false);
+  const version = useLyricsEditor((s) => s.version);
+  const sources = `${lrclib}|${preferOwn}|${version}`;
   const [state, setState] = useState<{ key: string | null; lyrics: Lyrics | null; loading: boolean }>(() => ({
     key: null,
     lyrics: null,
     loading: !!trackId,
   }));
-  const key = trackId ? `${trackId}|${lrclib}` : null;
+  const key = trackId ? `${trackId}|${sources}` : null;
   if (key !== state.key) {
     const known = trackId ? cache.has(trackId) : true;
     setState({ key, lyrics: trackId ? (cache.get(trackId) ?? null) : null, loading: !known });
@@ -63,22 +70,42 @@ export function useLyrics(trackId: string | null | undefined): { lyrics: Lyrics 
   useEffect(() => {
     if (!trackId) return;
     let alive = true;
-    loadLyrics(trackId).then((lyrics) => alive && setState({ key: `${trackId}|${lrclib}`, lyrics, loading: false }));
+    loadLyrics(trackId).then((lyrics) => alive && setState({ key: `${trackId}|${sources}`, lyrics, loading: false }));
     return () => {
       alive = false;
     };
-  }, [trackId, lrclib]);
+  }, [trackId, sources]);
   return { lyrics: state.lyrics, loading: state.loading };
 }
 
-// Turning LRCLIB on finds lyrics Plex didn't have; off drops them.
-let lastLrclib: boolean | undefined;
+// Turning LRCLIB on finds lyrics Plex didn't have; off drops them. Preferring
+// your own lyrics changes which source wins.
+let lastSources: string | undefined;
 useSettings.subscribe((s) => {
-  const v = s.settings?.lyricsLrclib;
-  if (v === undefined) return;
-  if (lastLrclib !== undefined && v !== lastLrclib) clearLyricsCache();
-  lastLrclib = v;
+  if (!s.settings) return;
+  const v = `${s.settings.lyricsLrclib}|${s.settings.lyricsPreferOwn}`;
+  if (lastSources !== undefined && v !== lastSources) clearLyricsCache();
+  lastSources = v;
 });
+// Saving or removing lyrics in the editor.
+useLyricsEditor.subscribe((s, p) => s.version !== p.version && clearLyricsCache());
+
+/**
+ * Where the lyrics came from, shown under them. None when the credit line
+ * already says (LRCLIB, licensed lyrics).
+ */
+export function lyricsSourceLabel(l: Lyrics): string | null {
+  switch (l.source) {
+    case "user":
+      return "Your lyrics";
+    case "file":
+      return "From the lyrics file next to this song";
+    case "lrclib":
+      return null;
+    default:
+      return l.credit ? null : "Lyrics from Plex";
+  }
+}
 
 // ---------------------------------------------------------------- timing
 

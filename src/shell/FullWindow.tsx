@@ -1,10 +1,11 @@
-import { Maximize, MicVocal, Minimize, X } from "lucide-react";
+import { Maximize, MicVocal, Minimize, PenLine, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import { Art } from "../components/Art";
 import { ArtistLinks, TextLink } from "../components/ArtistLinks";
 import { IconButton } from "../components/Button";
 import { useLyricsBackground } from "../pages/LyricsPage";
 import { fullWindow, FULL_WINDOW_WIDE, useFullWindow } from "../stores/fullWindow";
+import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
 import { nav, useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
@@ -71,7 +72,7 @@ const modified = (e: KeyboardEvent) => e.ctrlKey || e.metaKey || e.altKey || e.s
  * screen first).
  */
 function onFullWindowKey(e: KeyboardEvent) {
-  if (e.defaultPrevented || useUi.getState().menu || document.querySelector("dialog[open]")) return;
+  if (e.defaultPrevented || useUi.getState().menu || document.querySelector("dialog[open], .dialog-backdrop")) return;
   const key = e.key;
   let handled = true;
   if (key === "Escape") void fullWindow.escape();
@@ -122,6 +123,8 @@ function FullWindowView() {
   useEffect(() => useRouter.subscribe((s, p) => s.index !== p.index && void fullWindow.close()), []);
 
   const hasLyrics = !!lyrics;
+  const ownLyrics = useLyricsEditor((s) => !!track && s.ownIds.has(track.id));
+  const showAdd = useSettings((s) => s.settings?.lyricsShowAdd ?? true);
   const showLyrics = hasLyrics && lyricsOn;
   // Narrow windows: lyrics take the cover's place, with a small cover beside the title.
   const compact = showLyrics && !wide;
@@ -151,6 +154,14 @@ function FullWindowView() {
       <header className="fw__top fw__chrome">
         <span className="fw__context truncate">{ctx?.title || track?.albumTitle || "Now playing"}</span>
         <div className="fw__actions">
+          {track && (ownLyrics || (!hasLyrics && showAdd)) && (
+            <IconButton
+              label={ownLyrics ? "Edit lyrics" : "Add lyrics"}
+              tooltipPlacement="bottom"
+              icon={<PenLine size={18} />}
+              onClick={() => openLyricsEditor(track)}
+            />
+          )}
           <IconButton
             label="Lyrics"
             tooltip={hasLyrics ? "Lyrics (L)" : "No lyrics for this song"}
@@ -196,7 +207,7 @@ function FullWindowView() {
             </div>
             {showLyrics && lyrics && (
               <div className={`fw__lyrics ${timedLines(lyrics) ? "" : "is-plain"}`}>
-                <LyricsView lyrics={lyrics} size="full" trackId={track.id} />
+                <LyricsView lyrics={lyrics} size="full" track={track} />
               </div>
             )}
           </>

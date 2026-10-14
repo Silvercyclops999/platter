@@ -1,10 +1,12 @@
 import { ArrowDown } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { prefersReducedMotion } from "../design/motion";
-import type { LyricLine, Lyrics } from "../lib/types";
+import type { LyricLine, Lyrics, Track } from "../lib/types";
+import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
-import { currentLineIndex, currentWordIndex, followTarget, FOLLOW_RESUME_MS, interpolate, lineState, timedLines } from "./lyrics";
+import { currentLineIndex, currentWordIndex, followTarget, FOLLOW_RESUME_MS, interpolate, lineState, lyricsSourceLabel, timedLines } from "./lyrics";
 import "./lyrics.css";
+import "./lyrics-editor.css";
 
 /** Keys that scroll a focused scroller by hand. */
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
@@ -53,7 +55,7 @@ function usePlayhead(lines: LyricLine[]): { line: number; word: number; jump: (m
   return { ...pos, jump };
 }
 
-function SyncedLyrics({ lines, credit, className }: { lines: LyricLine[]; credit?: string; className: string }) {
+function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]; credit?: string; className: string; footer?: ReactNode }) {
   const { line: current, word, jump } = usePlayhead(lines);
   const scroller = useRef<HTMLDivElement>(null);
   const lineEls = useRef<(HTMLElement | null)[]>([]);
@@ -149,6 +151,7 @@ function SyncedLyrics({ lines, credit, className }: { lines: LyricLine[]; credit
           })}
         </div>
         {credit && <p className="lyrics__credit">{credit}</p>}
+        {footer}
       </div>
       {!following && (
         <button type="button" className="lyrics__back" onClick={resume}>
@@ -160,7 +163,7 @@ function SyncedLyrics({ lines, credit, className }: { lines: LyricLine[]; credit
   );
 }
 
-function PlainLyrics({ lines, credit, className }: { lines: string[]; credit?: string; className: string }) {
+function PlainLyrics({ lines, credit, className, footer }: { lines: string[]; credit?: string; className: string; footer?: ReactNode }) {
   return (
     <div className={`lyrics lyrics--plain ${className}`}>
       <div className="lyrics__scroll" tabIndex={0} aria-label="Lyrics">
@@ -176,6 +179,7 @@ function PlainLyrics({ lines, credit, className }: { lines: string[]; credit?: s
           )}
         </div>
         {credit && <p className="lyrics__credit">{credit}</p>}
+        {footer}
       </div>
     </div>
   );
@@ -184,14 +188,34 @@ function PlainLyrics({ lines, credit, className }: { lines: string[]; credit?: s
 /**
  * Lyrics for the playing song: synced lyrics follow playback (current line
  * bright, a third from the top; click a line to seek there), plain lyrics are
- * just text. `size` picks the type scale (page or full window).
+ * just text. `size` picks the type scale (page or full window). Under them:
+ * where they came from, and Edit for lyrics the user wrote.
  */
-export function LyricsView({ lyrics, size = "page", trackId }: { lyrics: Lyrics; size?: "page" | "full"; trackId: string }) {
+export function LyricsView({ lyrics, size = "page", track }: { lyrics: Lyrics; size?: "page" | "full"; track: Track }) {
   const timed = timedLines(lyrics);
   const cls = `lyrics--${size}`;
+  const footer = <LyricsSourceLine lyrics={lyrics} track={track} />;
   return timed ? (
-    <SyncedLyrics key={trackId} lines={timed} credit={lyrics.credit} className={cls} />
+    <SyncedLyrics key={track.id} lines={timed} credit={lyrics.credit} className={cls} footer={footer} />
   ) : (
-    <PlainLyrics key={trackId} lines={lyrics.lines} credit={lyrics.credit} className={cls} />
+    <PlainLyrics key={track.id} lines={lyrics.lines} credit={lyrics.credit} className={cls} footer={footer} />
+  );
+}
+
+function LyricsSourceLine({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
+  const label = lyricsSourceLabel(lyrics);
+  const own = useLyricsEditor((s) => s.ownIds.has(track.id));
+  // Your own lyrics, or ones you wrote that Plex's are showing over.
+  const edit = lyrics.source === "user" || own;
+  if (!label && !edit) return null;
+  return (
+    <p className="lyrics__source">
+      {label && <span>{label}</span>}
+      {edit && (
+        <button type="button" className="lyrics__source-edit" onClick={() => openLyricsEditor(track)}>
+          {lyrics.source === "user" ? "Edit" : "Edit your lyrics"}
+        </button>
+      )}
+    </p>
   );
 }

@@ -74,7 +74,8 @@ export function mockLyrics(track: Pick<Track, "id" | "durationMs">): Lyrics | nu
   const r = mulberry32(hashString("np-lyrics-" + track.id));
   const verse = () => Array.from({ length: 4 }, () => LYRIC_LINES[Math.floor(r() * LYRIC_LINES.length)]);
   const lines = [...verse(), "", ...verse(), "", ...verse()];
-  if (kind === "plain") return { synced: false, lines, source: "plex" };
+  // Plain lyrics stand for a .txt file next to the song.
+  if (kind === "plain") return { synced: false, lines, source: "file" };
   const span = Math.max(30_000, track.durationMs - 2 * LEAD_MS);
   const step = Math.floor(span / lines.length);
   const timed = lines.map((text, i) => {
