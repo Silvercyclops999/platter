@@ -53,6 +53,17 @@ pub struct PlayerState {
     pub shuffled_contexts: Vec<String>,
     pub repeat: Repeat,
     pub queue: QueueView,
+    /// The A-B loop on the playing track, if one is set.
+    #[serde(default)]
+    pub ab_loop: Option<AbLoop>,
+}
+
+/// An A-B loop: playback that reaches B goes back to A (ms, A before B).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbLoop {
+    pub a_ms: u64,
+    pub b_ms: u64,
 }
 
 /// `player://position` payload.
@@ -227,8 +238,11 @@ mod tests {
             shuffled_contexts: vec!["al".into()],
             repeat: Repeat::One,
             queue: QueueView::default(),
+            ab_loop: Some(AbLoop { a_ms: 1_000, b_ms: 4_000 }),
         };
         let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["abLoop"]["aMs"], 1_000);
+        assert_eq!(v["abLoop"]["bMs"], 4_000);
         assert_eq!(v["status"], "buffering");
         assert_eq!(v["positionMs"], 5);
         assert_eq!(v["repeat"], "one");

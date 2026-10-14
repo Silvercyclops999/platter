@@ -5,7 +5,7 @@
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
-import type { PlayerState, RepeatMode } from "../lib/types";
+import type { AbLoop, PlayerState, RepeatMode } from "../lib/types";
 import { toast } from "./toasts";
 
 interface PlayerStore {
@@ -91,6 +91,16 @@ export const player = {
   setMuted: (m: boolean) => backend.setMuted(m).catch(report),
   setShuffle: (s: boolean) => backend.setShuffle(s).catch(report),
   setContextShuffle: (id: string, s: boolean) => backend.setContextShuffle(id, s).catch(report),
+  /** Set or clear the A-B loop. Shows at once; a refusal puts the old one back. */
+  setAbLoop: (l: AbLoop | null) => {
+    const before = usePlayer.getState().state;
+    const shown = before ? { ...before, abLoop: l } : null;
+    if (shown) usePlayer.setState({ state: shown });
+    return backend.setAbLoop(l).catch((e) => {
+      if (before && usePlayer.getState().state === shown) usePlayer.setState({ state: before });
+      report(e);
+    });
+  },
   cycleRepeat: (r: RepeatMode) => backend.setRepeat(r === "off" ? "all" : r === "all" ? "one" : "off").catch(report),
   playAlbum: (id: string, startTrackId?: string, shuffle?: boolean) =>
     backend.playContext({ context: { kind: "album", id }, startTrackId, shuffle }).catch(report),

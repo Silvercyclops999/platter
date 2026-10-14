@@ -4,6 +4,7 @@ pub mod db;
 pub mod error;
 pub mod model;
 pub mod monitor;
+pub mod notify;
 pub mod platform;
 pub mod plex;
 pub mod settings;
@@ -108,6 +109,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // Launch at login (a LaunchAgent on macOS, the default).
         .plugin(tauri_plugin_autostart::Builder::new().arg(platform::AUTOSTART_ARG).build())
+        .plugin(tauri_plugin_notification::init())
         .manage(updates::Updates::default())
         .register_asynchronous_uri_scheme_protocol("art", |ctx, req, responder| {
             let cache = ctx.app_handle().state::<ArtCache>().inner().clone();
@@ -168,6 +170,16 @@ pub fn run() {
             tracking::spawn(
                 tracking::Tracker::new(plex.clone(), db.clone(), live.tracking.clone()),
                 player.subscribe_tracking(),
+            );
+            notify::spawn(
+                app.handle().clone(),
+                player.subscribe_tracking(),
+                notify::Switches {
+                    enabled: live.notify_track_change.clone(),
+                    private_session: live.tracking.private_session.clone(),
+                },
+                art.clone(),
+                cache_dir.clone(),
             );
 
             plex.start(app.handle().clone());
@@ -230,6 +242,7 @@ pub fn run() {
             audio::commands::set_shuffle,
             audio::commands::set_context_shuffle,
             audio::commands::set_repeat,
+            audio::commands::set_ab_loop,
             audio::commands::queue_add,
             audio::commands::queue_remove,
             audio::commands::queue_move,

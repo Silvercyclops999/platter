@@ -7,7 +7,7 @@
 //! startup and on every change; player settings go through the player.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -124,6 +124,14 @@ pub struct Settings {
     pub close_to_tray: bool,
     /// Start Platter when you sign in to the computer.
     pub launch_at_login: bool,
+    /// Right-click or Alt+click on the seek bar sets A-B loop points.
+    pub ab_loop_handles: bool,
+    /// Near a track's end the player bar shows what plays next.
+    pub up_next_line: bool,
+    /// Show the volume percentage while it changes.
+    pub volume_percent: bool,
+    /// Desktop notification on each new track (this device only).
+    pub notify_track_change: bool,
 }
 
 impl Default for Settings {
@@ -151,6 +159,10 @@ impl Default for Settings {
             media_session: true,
             close_to_tray: false,
             launch_at_login: false,
+            ab_loop_handles: true,
+            up_next_line: true,
+            volume_percent: true,
+            notify_track_change: false,
         }
     }
 }
@@ -180,6 +192,10 @@ pub struct SettingsPatch {
     pub media_session: Option<bool>,
     pub close_to_tray: Option<bool>,
     pub launch_at_login: Option<bool>,
+    pub ab_loop_handles: Option<bool>,
+    pub up_next_line: Option<bool>,
+    pub volume_percent: Option<bool>,
+    pub notify_track_change: Option<bool>,
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -216,6 +232,10 @@ impl Settings {
         set(&mut self.media_session, p.media_session);
         set(&mut self.close_to_tray, p.close_to_tray);
         set(&mut self.launch_at_login, p.launch_at_login);
+        set(&mut self.ab_loop_handles, p.ab_loop_handles);
+        set(&mut self.up_next_line, p.up_next_line);
+        set(&mut self.volume_percent, p.volume_percent);
+        set(&mut self.notify_track_change, p.notify_track_change);
         self.clamp();
         Ok(())
     }
@@ -267,6 +287,8 @@ pub struct Live {
     pub art: Option<ArtCache>,
     /// Media controls, tray and launch at login.
     pub platform: Switches,
+    /// Desktop notification on track change.
+    pub notify_track_change: Arc<AtomicBool>,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -274,6 +296,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.tracking.private_session.store(s.private_session, Ordering::Relaxed);
     live.tracking.report_to_plex.store(s.report_to_plex, Ordering::Relaxed);
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
+    live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     db.set_popular_source(s.popular_source);
     live.platform.set(s.platform());
     let cap = s.art_cache_bytes();
@@ -354,6 +377,10 @@ async fn apply_to_player(player: &PlayerHandle, s: &Settings, patch: &SettingsPa
     }
     if patch.precache_count.is_some() {
         player.set_precache_count(s.precache_count as usize).await?;
+    }
+    // Turning the loop handles off clears a loop that's set.
+    if patch.ab_loop_handles == Some(false) {
+        player.set_ab_loop(None).await?;
     }
     Ok(())
 }
@@ -478,6 +505,8 @@ mod tests {
         assert_eq!(s.reduce_motion, ReduceMotion::System);
         assert!(s.search_suggestions && s.search_recents);
         assert!(s.media_keys && s.media_session && !s.close_to_tray && !s.launch_at_login);
+        assert!(s.ab_loop_handles && s.up_next_line && s.volume_percent);
+        assert!(!s.notify_track_change);
     }
 
     #[test]
@@ -527,6 +556,10 @@ mod tests {
             media_session: Some(false),
             close_to_tray: Some(true),
             launch_at_login: Some(true),
+            ab_loop_handles: Some(false),
+            up_next_line: Some(false),
+            volume_percent: Some(false),
+            notify_track_change: Some(true),
         })
         .await
         .unwrap();
@@ -561,7 +594,9 @@ mod tests {
             fresh.platform.get(),
             PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true }
         );
+        assert!(!s.ab_loop_handles && !s.up_next_line && !s.volume_percent && s.notify_track_change);
         // Loaded at startup into the live switches.
+        assert!(fresh.notify_track_change.load(Ordering::Relaxed));
         assert!(fresh.tracking.private_session.load(Ordering::Relaxed));
         assert!(fresh.tracking.report_to_plex.load(Ordering::Relaxed));
         assert_eq!(fresh.streams.home(), Some(256));
@@ -615,6 +650,10 @@ mod tests {
         assert_eq!(v["mediaSession"], true);
         assert_eq!(v["closeToTray"], false);
         assert_eq!(v["launchAtLogin"], false);
+        assert_eq!(v["abLoopHandles"], true);
+        assert_eq!(v["upNextLine"], true);
+        assert_eq!(v["volumePercent"], true);
+        assert_eq!(v["notifyTrackChange"], false);
         let p: SettingsPatch = serde_json::from_str(r#"{"shuffleStyle":"standard"}"#).unwrap();
         assert_eq!(p.shuffle_style, Some(ShuffleStyle::Standard));
         let p: SettingsPatch =

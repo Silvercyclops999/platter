@@ -1,0 +1,134 @@
+/* Player bar extras: A-B loop, the "Next:" line, the volume readout. */
+
+/* ---------------------------------------------------------------- A-B loop */
+.seek { position: relative; }
+.seek__bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.ab-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* The span sits as a soft band around the track so the fill stays readable. */
+.ab-span {
+  position: absolute;
+  top: 50%;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+.ab-handle {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 16px;
+  margin: -8px 0 0 -2px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+  cursor: ew-resize;
+  touch-action: none;
+}
+/* A larger invisible grab area. */
+.ab-handle::before {
+  content: "";
+  position: absolute;
+  inset: -4px -6px;
+}
+.ab-handle:hover,
+.ab-handle.is-dragging { background: var(--color-accent-hover); }
+.ab-handle:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.ab-handle--pending {
+  opacity: 0.7;
+  pointer-events: none;
+  cursor: default;
+}
+
+.ab-chip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + var(--space-1));
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.02em;
+  line-height: 20px;
+  transition: background-color var(--motion-fast) var(--motion-easing);
+}
+.ab-chip:hover { background: var(--color-accent-hover); }
+.ab-chip:active { background: var(--color-accent-pressed); }
+.ab-chip:focus-visible { border-radius: var(--radius-pill); }
+
+/* ---------------------------------------------------------------- Up next */
+.player-sub {
+  display: grid;
+  min-width: 0;
+}
+.player-sub__line {
+  grid-area: 1 / 1;
+  min-width: 0;
+  opacity: 1;
+  transition:
+    opacity var(--motion-medium) var(--motion-easing-in-out),
+    visibility 0s linear 0s;
+}
+.player-sub__line.is-out {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-medium) var(--motion-easing-in-out),
+    visibility 0s linear var(--motion-medium);
+}
+.player-sub__line > .player-bar__artist { display: block; }
+.up-next {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.up-next:hover { color: var(--color-text-primary); text-decoration: underline; }
+
+/* ---------------------------------------------------------------- Volume readout */
+.volume__bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.volume-readout {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: var(--radius-row);
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-slow) var(--motion-easing-in-out);
+}
+.volume-readout.is-shown {
+  opacity: 1;
+  transition-duration: var(--motion-very-quick);
+}

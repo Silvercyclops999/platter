@@ -151,6 +151,7 @@ dropdown parts off; the UI checks them.
 | `set_shuffle` | `{ shuffle }` (for the playing context) |
 | `set_context_shuffle` | `{ contextId, shuffle }` (applies now if that context is playing, otherwise the next time it plays) |
 | `set_repeat` | `{ repeat: "off"|"all"|"one" }` |
+| `set_ab_loop` | `{ abLoop: { aMs, bMs } | null }` (null clears it) |
 | `queue_add` | `{ trackIds, at: "next"|"end" }` |
 | `queue_remove` | `{ itemId }` |
 | `queue_move` | `{ itemId, toIndex }` (index within the user queue) |
@@ -158,7 +159,7 @@ dropdown parts off; the UI checks them.
 | `queue_jump` | `{ itemId }` (play that item now) |
 | `player_state` | – → `PlayerState` |
 
-`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView }`
+`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView, abLoop: { aMs, bMs } | null }`
 `QueueView = { current?: QueueItem, userQueue: QueueItem[], nextUp: QueueItem[], history: QueueItem[], context?: { kind, id?, title? } }`
 `QueueItem = { itemId, track: Track, source: "user"|"context" }`
 
@@ -182,6 +183,17 @@ Queue rules the core applies:
   all. A late `play_previous` restarts and keeps repeat-one.
 - When the context runs out with repeat off, the player goes back to its first
   track, paused at 0:00, with the rest of the context as upcoming.
+
+A-B loop: `set_ab_loop` takes the two points in either order and swaps them so
+A comes first. They're clamped to the track and must be at least 1 s apart,
+otherwise the call fails with `invalid` and the loop is left as it was. The
+core does the looping, so it keeps going with the window hidden: when playback
+reaches B (or the end of the audio) it goes back to A. After one full pass
+from A to B the core keeps that audio and replays it, so later passes have no
+gap; loops longer than about a minute re-read from A each time instead. The
+loop belongs to the playing track. Any track change, a seek outside A..B, or
+turning off `abLoopHandles` clears it. Pausing, resuming and seeking inside
+the span keep it.
 
 Events:
 - `player://state` → `PlayerState` (on any state/track/queue change)
@@ -270,6 +282,10 @@ The rest of the fields, with their defaults:
 | `mediaKeys` | bool, true | Hardware media keys control Platter in the background. While `mediaSession` is on the OS sends the keys to that session; with it off, Platter registers the keys itself. |
 | `closeToTray` | bool, false | Shows a tray icon (menu bar item on macOS). Closing the window hides it instead of quitting. Turning it off brings a hidden window back. |
 | `launchAtLogin` | bool, false | Starts Platter at sign-in, hidden in the tray when `closeToTray` is on, otherwise minimised. |
+| `abLoopHandles` | bool, true | Right-click or Alt+click on the seek bar sets A-B loop points. Turning it off clears a loop that's set. |
+| `upNextLine` | bool, true | In the last 15 s of a track (last 30 % under 50 s) the player bar's artist line shows what's next. |
+| `volumePercent` | bool, true | Shows the volume percentage above the slider while it changes. |
+| `notifyTrackChange` | bool, false | Desktop notification when a new track starts. Not shown while the window has focus, in a private session, or when the previous track change was under 5 s ago. Clicking it brings the window forward. This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

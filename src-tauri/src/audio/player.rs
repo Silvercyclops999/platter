@@ -20,7 +20,7 @@ use super::cache::{DiskCache, Precacher, cache_key};
 use super::engine::{Engine, EngineConfig, EngineDeps, EngineEvent};
 use super::gate::TransferGate;
 use super::events::{
-    ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload, Problem,
+    AbLoop, ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload, Problem,
     SKIPPED_MESSAGE, TrackingEvent, perceptual_gain,
 };
 use super::output::{AudioOutput, OutputState};
@@ -32,6 +32,8 @@ use crate::model::Track;
 
 /// "Previous" restarts the track instead at or past this point.
 pub const PREVIOUS_RESTART_MS: u64 = 3_000;
+/// The shortest A-B loop.
+pub const MIN_LOOP_MS: u64 = 1_000;
 const PROBLEMS_CAP: usize = 200;
 
 #[derive(Debug, Clone)]
@@ -95,6 +97,7 @@ enum Cmd {
     SetResumeContexts(bool, Reply<()>),
     SetPrecacheCount(usize, Reply<()>),
     SetRepeat(Repeat, Reply<()>),
+    SetLoop(Option<AbLoop>, Reply<()>),
     QueueAdd(Vec<Track>, AddAt, Reply<()>),
     QueueRemove(String, Reply<()>),
     QueueMove(String, usize, Reply<()>),
@@ -214,6 +217,7 @@ impl PlayerHandle {
             dirty: false,
             persist_at: None,
             ticks: 0,
+            ab: None,
         };
         rt.spawn(actor.run(rx, engine_rx));
         Self {
@@ -305,6 +309,11 @@ impl PlayerHandle {
     pub async fn set_repeat(&self, repeat: Repeat) -> AppResult<()> {
         self.call(|r| Cmd::SetRepeat(repeat, r)).await
     }
+    /// Sets the A-B loop on the playing track (points in either order, at
+    /// least [`MIN_LOOP_MS`] apart), or clears it with None.
+    pub async fn set_ab_loop(&self, ab: Option<AbLoop>) -> AppResult<()> {
+        self.call(|r| Cmd::SetLoop(ab, r)).await
+    }
     /// `queue_add`: looks the tracks up, then queues them.
     pub async fn queue_add(&self, track_ids: Vec<String>, at: AddAt) -> AppResult<()> {
         let tracks = self.lookup.tracks(&track_ids).await?;
@@ -389,6 +398,8 @@ struct Actor {
     dirty: bool,
     persist_at: Option<Instant>,
     ticks: u64,
+    /// The A-B loop and the queue entry it belongs to.
+    ab: Option<(String, AbLoop)>,
 }
 
 impl Actor {
@@ -478,7 +489,49 @@ impl Actor {
             shuffled_contexts: self.queue.shuffled_contexts(),
             repeat: self.queue.repeat(),
             queue: self.queue.view(),
+            ab_loop: self.current_loop(),
         }
+    }
+
+    /// The loop, if it belongs to the current entry.
+    fn current_loop(&self) -> Option<AbLoop> {
+        match (&self.ab, self.queue.current()) {
+            (Some((id, l)), Some(c)) if &c.item_id == id => Some(*l),
+            _ => None,
+        }
+    }
+
+    fn clear_loop(&mut self) {
+        if self.ab.take().is_some()
+            && let Some(k) = self.cur_key
+        {
+            self.engine.set_loop(k, None);
+        }
+    }
+
+    fn set_loop(&mut self, ab: Option<AbLoop>) -> AppResult<()> {
+        let Some(ab) = ab else {
+            self.clear_loop();
+            return Ok(());
+        };
+        let Some(item) = self.queue.current() else {
+            return Err(AppError::Invalid("nothing is playing".into()));
+        };
+        let dur = item.track.duration_ms;
+        let (mut a, mut b) = (ab.a_ms.min(ab.b_ms), ab.a_ms.max(ab.b_ms));
+        if dur > 0 {
+            a = a.min(dur);
+            b = b.min(dur);
+        }
+        if b - a < MIN_LOOP_MS {
+            return Err(AppError::Invalid("B must be at least 1 s after A".into()));
+        }
+        let l = AbLoop { a_ms: a, b_ms: b };
+        self.ab = Some((item.item_id.clone(), l));
+        if let Some(k) = self.cur_key {
+            self.engine.set_loop(k, Some((a, b)));
+        }
+        Ok(())
     }
 
     fn emit_state(&self) {
@@ -585,6 +638,13 @@ impl Actor {
         {
             Ok(key) => {
                 self.cur_key = Some(key);
+                // A loop survives reloading its own track, nothing else.
+                match self.current_loop() {
+                    Some(l) => {
+                        self.engine.set_loop(key, Some((l.a_ms, l.b_ms)));
+                    }
+                    None => self.ab = None,
+                }
                 self.status = if play {
                     PlayerStatus::Loading
                 } else {
@@ -747,6 +807,9 @@ impl Actor {
                 self.mark_dirty();
                 let _ = reply.send(Ok(()));
             }
+            Cmd::SetLoop(ab, reply) => {
+                let _ = reply.send(self.set_loop(ab));
+            }
             Cmd::QueueAdd(tracks, at, reply) => {
                 self.queue.add(tracks, at);
                 if self.queue.current().is_none() {
@@ -886,6 +949,12 @@ impl Actor {
     fn do_seek(&mut self, ms: u64) -> AppResult<()> {
         let dur = self.current_track().map_or(0, |t| t.duration_ms);
         let ms = if dur > 0 { ms.min(dur) } else { ms };
+        // Seeking outside the loop's span clears it.
+        if let Some(l) = self.current_loop()
+            && (ms < l.a_ms || ms > l.b_ms)
+        {
+            self.clear_loop();
+        }
         let from = self.position_ms();
         if self.cur_key.is_some() && self.engine.seek(ms) {
             if let Some(t) = self.current_track() {
@@ -906,6 +975,7 @@ impl Actor {
     /// Nothing more to play. With repeat off the context rewinds to its
     /// first track, paused at 0:00, with the rest listed as upcoming.
     fn end_of_queue(&mut self) {
+        self.ab = None;
         self.engine.stop();
         self.cur_key = None;
         self.next_key = None;
@@ -936,6 +1006,7 @@ impl Actor {
                     self.cur_key = Some(key);
                     self.next_key = None;
                     self.cur_ended = false;
+                    self.ab = None;
                     self.on_track_audible();
                     self.update_next();
                 } else {

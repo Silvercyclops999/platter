@@ -123,6 +123,56 @@ struct Segment {
     ctl: Arc<LoaderCtl>,
     stats: Option<HttpStats>,
     origin: Option<Origin>,
+    /// The A-B loop on this track, if any.
+    ab: Option<AbLoop>,
+    /// Replaying the loop's saved audio. While it runs, `samples` hold the
+    /// audio from `Replay::resume_frame` on.
+    replay: Option<Replay>,
+}
+
+/// Most samples an A-B loop keeps for gapless replay (about a minute of
+/// 48 kHz stereo). Longer loops wrap by re-decoding from A.
+const MAX_LOOP_SAMPLES: usize = 6_000_000;
+
+/// An A-B loop: when playback reaches B it goes back to A. Once a whole
+/// pass from A to B has played, its audio is kept and replayed from memory,
+/// so later passes have no gap.
+struct AbLoop {
+    a_ms: u64,
+    b_ms: u64,
+    a: u64,
+    b: u64,
+    clip: Vec<f32>,
+    building: bool,
+    ready: Option<Arc<Vec<f32>>>,
+}
+
+impl AbLoop {
+    fn new(a_ms: u64, b_ms: u64, m: &Mix) -> Self {
+        Self {
+            a_ms,
+            b_ms,
+            a: m.ms_to_frames(a_ms),
+            b: m.ms_to_frames(b_ms),
+            clip: Vec::new(),
+            building: false,
+            ready: None,
+        }
+    }
+}
+
+struct Replay {
+    clip: Arc<Vec<f32>>,
+    at: usize,
+    resume_frame: u64,
+}
+
+/// What reaching B does.
+enum Wrap {
+    /// Play the saved A..B audio (gapless).
+    Replay(Arc<Vec<f32>>),
+    /// Re-decode from A.
+    Reload,
 }
 
 impl Segment {
@@ -141,6 +191,75 @@ impl Segment {
             ctl: LoaderCtl::new(prio),
             stats: None,
             origin: None,
+            ab: None,
+            replay: None,
+        }
+    }
+
+    /// Track frame of the next sample to play.
+    fn pos(&self) -> u64 {
+        self.start_frame + self.consumed
+    }
+
+    /// Track frame where `samples` begin.
+    fn samples_start(&self) -> u64 {
+        self.replay.as_ref().map_or(self.pos(), |r| r.resume_frame)
+    }
+
+    /// Stops a replay; playback continues from the decoded samples.
+    fn end_replay(&mut self) {
+        if let Some(r) = self.replay.take() {
+            self.start_frame = r.resume_frame;
+            self.consumed = 0;
+        }
+    }
+
+    /// Whether the A-B loop wraps before the next frame, and how.
+    fn wrap_due(&self) -> Option<Wrap> {
+        let l = self.ab.as_ref()?;
+        if self.replay.as_ref().is_some_and(|r| r.at < r.clip.len()) {
+            return None;
+        }
+        let pos = self.pos();
+        // B past the decoded end of the track counts as the end.
+        let at_end = self.done && self.samples.is_empty();
+        if pos < l.b && !at_end {
+            return None;
+        }
+        match &l.ready {
+            Some(clip) if pos == l.b => Some(Wrap::Replay(clip.clone())),
+            _ => Some(Wrap::Reload),
+        }
+    }
+
+    /// Keeps the frame just played if it continues an A..B pass.
+    fn record(&mut self, frame: &[f32]) {
+        let pos = self.pos().saturating_sub(1);
+        let Some(l) = self.ab.as_mut() else { return };
+        if l.ready.is_some() {
+            return;
+        }
+        let ch = frame.len().max(1);
+        if pos == l.a {
+            l.clip.clear();
+            let want = (l.b - l.a) as usize * ch;
+            l.building = want <= MAX_LOOP_SAMPLES;
+            if l.building {
+                l.clip.reserve_exact(want);
+            }
+        }
+        if !l.building {
+            return;
+        }
+        if pos != l.a + (l.clip.len() / ch) as u64 || pos >= l.b {
+            l.building = false;
+            l.clip = Vec::new();
+            return;
+        }
+        l.clip.extend_from_slice(frame);
+        if pos + 1 == l.b {
+            l.building = false;
+            l.ready = Some(Arc::new(std::mem::take(&mut l.clip)));
         }
     }
 }
@@ -237,6 +356,72 @@ impl Mix {
         }
     }
 
+    /// Re-decodes the front segment from `target` (frames) / `ms`. The
+    /// preloaded next is dropped and re-chained after it.
+    fn reload_front(&mut self, target: u64, ms: u64) {
+        let mut rechain: Option<Pending> = None;
+        while self.segments.len() > 1 {
+            let s = self.segments.pop_back().expect("len > 1");
+            s.ctl.cancel.store(true, Ordering::SeqCst);
+            if self.next.is_none() {
+                rechain = Some(Pending {
+                    key: s.key,
+                    tag: s.tag,
+                    track: s.track,
+                });
+            }
+        }
+        if rechain.is_some() {
+            self.next = rechain;
+        }
+        // The front re-decodes; a parked resampler for it is stale.
+        self.handoff = None;
+        let Some(front) = self.segments.front_mut() else { return };
+        front.replay = None;
+        front.samples.clear();
+        front.generation += 1;
+        front.start_frame = target;
+        front.consumed = 0;
+        front.done = false;
+        *front.ctl.seek.lock() = Some((front.generation, ms));
+        self.drained_sent = false;
+    }
+
+    /// The front reached its loop's B: go back to A.
+    fn wrap_front(&mut self, wrap: Wrap, cfg: &EngineConfig) {
+        self.make_tail(cfg);
+        let Some(front) = self.segments.front_mut() else { return };
+        let Some((a, a_ms)) = front.ab.as_ref().map(|l| (l.a, l.a_ms)) else { return };
+        match wrap {
+            Wrap::Replay(clip) => {
+                let resume_frame = front.samples_start();
+                front.replay = Some(Replay { clip, at: 0, resume_frame });
+                front.start_frame = a;
+                front.consumed = 0;
+            }
+            Wrap::Reload => {
+                front.end_replay();
+                self.reload_front(a, a_ms);
+            }
+        }
+    }
+
+    /// The output rate changed: loop points move to the new rate and saved
+    /// loop audio is dropped.
+    fn rescale_loops(&mut self) {
+        let rate = self.format.sample_rate as u64;
+        for s in self.segments.iter_mut() {
+            s.end_replay();
+            if let Some(l) = s.ab.as_mut() {
+                l.a = l.a_ms * rate / 1000;
+                l.b = l.b_ms * rate / 1000;
+                l.clip = Vec::new();
+                l.building = false;
+                l.ready = None;
+            }
+        }
+    }
+
     /// No next track after all: flush the parked resampler into its track.
     fn flush_handoff(&mut self) {
         if let Some(mut h) = self.handoff.take() {
@@ -283,9 +468,29 @@ impl Renderer for Core {
             if !m.playing && m.gain <= 0.0 {
                 break;
             }
+            // A-B loop: at B, go back to A.
+            if let Some(w) = m.segments.front().and_then(Segment::wrap_due) {
+                m.wrap_front(w, &self.cfg);
+                consumed_any = true;
+                if !m.tail.is_empty() {
+                    continue;
+                }
+            }
             // Find audio in the front segment, retiring finished ones.
             let mut got = false;
             while let Some(front) = m.segments.front_mut() {
+                if let Some(r) = front.replay.as_mut() {
+                    if r.at + ch <= r.clip.len() {
+                        o.copy_from_slice(&r.clip[r.at..r.at + ch]);
+                        r.at += ch;
+                        front.consumed += 1;
+                        front.listened += 1;
+                        front.record(o);
+                        got = true;
+                        break;
+                    }
+                    front.end_replay();
+                }
                 if front.samples.len() >= ch {
                     if !front.started {
                         front.started = true;
@@ -299,6 +504,7 @@ impl Renderer for Core {
                     }
                     front.consumed += 1;
                     front.listened += 1;
+                    front.record(o);
                     got = true;
                     break;
                 }
@@ -516,6 +722,9 @@ impl Engine {
         let changed = m.format != fmt;
         m.format = fmt;
         m.output_open = true;
+        if changed {
+            m.rescale_loops();
+        }
         Ok(changed)
     }
 
@@ -700,14 +909,15 @@ impl Engine {
     }
 
     fn seek_inner(&self, ms: u64, force_reload: bool) -> bool {
-        let mut rechain: Option<Pending> = None;
         {
             let mut m = self.core().mix.lock();
             let cfg = self.core().cfg.clone();
             let ch = m.ch();
             let target = m.ms_to_frames(ms);
-            let Some(front) = m.segments.front() else { return false };
-            let pos = front.start_frame + front.consumed;
+            let Some(front) = m.segments.front_mut() else { return false };
+            // A replay's audio isn't in `samples`: continue from those.
+            front.end_replay();
+            let pos = front.pos();
             let buffered = (front.samples.len() / ch) as u64;
             if !force_reload && target >= pos && target <= pos + buffered {
                 m.make_tail(&cfg);
@@ -720,31 +930,7 @@ impl Engine {
                 return true;
             }
             m.make_tail(&cfg);
-            // Drop the preloaded next; it will be re-chained after this one.
-            while m.segments.len() > 1 {
-                let s = m.segments.pop_back().expect("len > 1");
-                s.ctl.cancel.store(true, Ordering::SeqCst);
-                if m.next.is_none() {
-                    rechain = Some(Pending {
-                        key: s.key,
-                        tag: s.tag,
-                        track: s.track,
-                    });
-                }
-            }
-            if rechain.is_some() {
-                m.next = rechain.take();
-            }
-            // The front re-decodes; a parked resampler for it is stale.
-            m.handoff = None;
-            let front = m.segments.front_mut().expect("front");
-            front.samples.clear();
-            front.generation += 1;
-            front.start_frame = target;
-            front.consumed = 0;
-            front.done = false;
-            *front.ctl.seek.lock() = Some((front.generation, ms));
-            m.drained_sent = false;
+            m.reload_front(target, ms);
         }
         self.core().cv.notify_all();
         true
@@ -755,8 +941,8 @@ impl Engine {
         let m = self.core().mix.lock();
         let ch = m.ch();
         let front = m.segments.front()?;
-        let pos = front.start_frame + front.consumed;
-        let decoded_end = pos + (front.samples.len() / ch) as u64;
+        let pos = front.pos();
+        let decoded_end = front.samples_start() + (front.samples.len() / ch) as u64;
         let mut buffered_ms = if front.done {
             front.track.duration_ms
         } else {
@@ -783,6 +969,21 @@ impl Engine {
             listened_ms: m.frames_to_ms(front.listened),
             started: front.started,
         })
+    }
+
+    /// Sets or clears the A-B loop (ms, A before B) on the audible track.
+    /// False if `key` isn't the audible track.
+    pub fn set_loop(&self, key: u64, ab: Option<(u64, u64)>) -> bool {
+        let mut m = self.core().mix.lock();
+        let lp = ab.map(|(a, b)| AbLoop::new(a, b, &m));
+        match m.segments.front_mut() {
+            Some(front) if front.key == key => {
+                // A running replay is the track's own audio, so it plays on.
+                front.ab = lp;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Key of the preloaded next segment (if it exists yet).

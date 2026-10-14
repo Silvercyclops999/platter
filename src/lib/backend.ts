@@ -11,6 +11,7 @@ import { listen as tauriListen } from "@tauri-apps/api/event";
 import { artPixelSize } from "./artSize";
 import { createMockBackend } from "./mock";
 import type {
+  AbLoop,
   Album,
   AlbumPage,
   AlbumsArgs,
@@ -106,6 +107,8 @@ export interface Backend {
   /** Shuffle preference for a context by id (applies now if it's playing). */
   setContextShuffle(contextId: string, shuffle: boolean): Promise<void>;
   setRepeat(repeat: RepeatMode): Promise<void>;
+  /** Sets the A-B loop on the playing track (points in either order, 1 s apart or more); null clears it. */
+  setAbLoop(abLoop: AbLoop | null): Promise<void>;
   queueAdd(trackIds: string[], at: "next" | "end"): Promise<void>;
   queueRemove(itemId: string): Promise<void>;
   queueMove(itemId: string, toIndex: number): Promise<void>;
@@ -205,6 +208,7 @@ export function createTauriBackend(): Backend {
     setShuffle: (shuffle) => call("set_shuffle", { shuffle }),
     setContextShuffle: (contextId, shuffle) => call("set_context_shuffle", { contextId, shuffle }),
     setRepeat: (repeat) => call("set_repeat", { repeat }),
+    setAbLoop: (abLoop) => call("set_ab_loop", { abLoop }),
     queueAdd: (trackIds, at) => call("queue_add", { trackIds, at }),
     queueRemove: (itemId) => call("queue_remove", { itemId }),
     queueMove: (itemId, toIndex) => call("queue_move", { itemId, toIndex }),

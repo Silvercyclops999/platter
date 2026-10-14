@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
-import { ArtistLinks, TextLink } from "../components/ArtistLinks";
+import { TextLink } from "../components/ArtistLinks";
 import { openContextMenu } from "../components/ContextMenu";
 import { trackMenuItems } from "../components/TrackRow";
 import { IconButton } from "../components/Button";
@@ -30,6 +30,8 @@ import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
+import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtras";
+import { normalizeLoop } from "./playerRules";
 
 /** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
 export const SEEK_KEY_STEP = 5_000;
@@ -38,31 +40,74 @@ export const SEEK_PAGE_STEP = 25_000;
 function SeekBar() {
   const positionMs = usePlayer((s) => s.positionMs);
   const durationMs = usePlayer((s) => s.durationMs);
-  const hasTrack = usePlayer((s) => !!s.state?.track);
+  const trackId = usePlayer((s) => s.state?.track?.id ?? null);
+  const hasTrack = trackId !== null;
+  const loopOn = useSettings((s) => s.settings?.abLoopHandles ?? true);
+  const loop = usePlayer((s) => s.state?.abLoop ?? null);
   const [drag, setDrag] = useState<number | null>(null);
+  // A-B loop: the first right-click (or Alt+click) picks A, the second B.
+  const [pendingA, setPendingA] = useState<number | null>(null);
+  useEffect(() => setPendingA(null), [trackId, loopOn]);
   const shown = drag ?? positionMs;
+  const clearLoop = () => {
+    setPendingA(null);
+    if (loop) void player.setAbLoop(null);
+  };
+  const setLoop = (p: number, q: number) => {
+    const next = normalizeLoop(p, q, durationMs);
+    return next ? player.setAbLoop(next) : undefined;
+  };
+  const onAltPress = (v: number) => {
+    const ms = Math.round(v);
+    if (pendingA == null) {
+      // Starting over: a set loop goes and this point is the new A.
+      if (loop) void player.setAbLoop(null);
+      setPendingA(ms);
+      return;
+    }
+    // Too close to A: wait for another point.
+    if (!normalizeLoop(pendingA, ms, durationMs)) return;
+    setPendingA(null);
+    void setLoop(pendingA, ms);
+  };
+  const showLoop = loopOn && hasTrack;
   return (
     <div className="seek">
+      {showLoop && loop && <LoopChip onClear={clearLoop} />}
       <span className="seek__time tabular" aria-hidden="true">
         {formatDuration(shown)}
       </span>
-      <Slider
-        label="Seek"
-        value={Math.min(shown, durationMs)}
-        max={Math.max(durationMs, 1)}
-        step={SEEK_KEY_STEP}
-        pageStep={SEEK_PAGE_STEP}
-        disabled={!hasTrack}
-        valueText={(v) => `${formatDuration(v)} of ${formatDuration(durationMs)}`}
-        // Pressing seeks at once; while held the time stays at the pointer,
-        // and letting go commits where it ended.
-        commitOnPress
-        onChange={(v) => setDrag(v)}
-        onCommit={(v, cause) => {
-          if (cause !== "press") setDrag(null);
-          player.seek(Math.round(v));
-        }}
-      />
+      <div className="seek__bar">
+        <Slider
+          label="Seek"
+          value={Math.min(shown, durationMs)}
+          max={Math.max(durationMs, 1)}
+          step={SEEK_KEY_STEP}
+          pageStep={SEEK_PAGE_STEP}
+          disabled={!hasTrack}
+          valueText={(v) => `${formatDuration(v)} of ${formatDuration(durationMs)}`}
+          // Pressing seeks at once; while held the time stays at the pointer,
+          // and letting go commits where it ended. A press outside a loop's
+          // span clears the loop (the core does that on the seek).
+          commitOnPress
+          onChange={(v) => setDrag(v)}
+          onCommit={(v, cause) => {
+            if (cause !== "press") setDrag(null);
+            player.seek(Math.round(v));
+          }}
+          onAltPress={showLoop ? onAltPress : undefined}
+          onOtherKey={(e) => {
+            if (e.key === "Escape" && (loop || pendingA != null)) {
+              e.preventDefault();
+              e.stopPropagation();
+              clearLoop();
+            }
+          }}
+        />
+        {showLoop && (
+          <LoopLayer loop={loop} pendingA={pendingA} durationMs={durationMs} onChange={setLoop} onClear={clearLoop} />
+        )}
+      </div>
       <span className="seek__time seek__time--end tabular" aria-hidden="true">
         -{formatDuration(Math.max(0, durationMs - shown))}
       </span>
@@ -120,23 +165,25 @@ function Volume() {
         icon={<Icon size={18} />}
         onClick={() => player.toggleMute()}
       />
-      <Slider
-        label="Volume"
-        className="volume__slider"
-        value={v}
-        max={1}
-        step={VOLUME_SLIDER_STEP}
-        pageStep={VOLUME_SLIDER_STEP}
-        valueText={(x) => `${Math.round(x * 100)}%`}
-        onChange={(x) => {
-          setLocal(x);
-          player.volumeInput(x);
-        }}
-        onCommit={(x) => {
-          setLocal(null);
-          player.volumeCommit(x);
-        }}
-      />
+      <VolumeReadout value={v} silent={silent} dragging={local !== null}>
+        <Slider
+          label="Volume"
+          className="volume__slider"
+          value={v}
+          max={1}
+          step={VOLUME_SLIDER_STEP}
+          pageStep={VOLUME_SLIDER_STEP}
+          valueText={(x) => `${Math.round(x * 100)}%`}
+          onChange={(x) => {
+            setLocal(x);
+            player.volumeInput(x);
+          }}
+          onCommit={(x) => {
+            setLocal(null);
+            player.volumeCommit(x);
+          }}
+        />
+      </VolumeReadout>
     </div>
   );
 }
@@ -192,7 +239,7 @@ export function PlayerBar() {
               >
                 <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.title}</TextLink>
               </div>
-              <ArtistLinks track={track} className="player-bar__artist truncate" />
+              <PlayerSubline track={track} />
             </div>
             <IconButton label="Like" tooltip="Likes arrive in Phase 2" softDisabled icon={<Heart size={16} />} size="md" />
           </>

@@ -476,6 +476,13 @@ export function SettingsPage() {
       description: "Where music plays on this computer. System default follows your computer's sound setting. If the device you pick is unplugged, Platter pauses and switches to the system default.",
       control: (ids) => <OutputDeviceSelect ids={ids} />,
     },
+    {
+      key: "abLoopHandles",
+      section: "Playback",
+      title: "A-B loop on the seek bar",
+      description: "Right-click or Alt+click the seek bar to mark a start, then an end. The part between them repeats until you clear it with Esc or the A-B chip.",
+      control: (ids) => toggle(s, "abLoopHandles", ids),
+    },
     // Library
     {
       key: "popularSource",
@@ -570,6 +577,20 @@ export function SettingsPage() {
       description: "Turns off movement like sliding and scaling. Fades stay. Match system follows your computer's setting.",
       control: (ids) => select(s, (x) => x.reduceMotion, MOTION, ids, (v) => updateSettings({ reduceMotion: v })),
     },
+    {
+      key: "upNextLine",
+      section: "Appearance",
+      title: "Show what's next in the player bar",
+      description: "In the last seconds of a song, the line under its title shows the next song. Click it to open the queue.",
+      control: (ids) => toggle(s, "upNextLine", ids),
+    },
+    {
+      key: "volumePercent",
+      section: "Appearance",
+      title: "Show volume percentage",
+      description: "Shows the volume as a percentage above the slider for a moment while you change it.",
+      control: (ids) => toggle(s, "volumePercent", ids),
+    },
     // Home
     {
       key: "homeShortcuts",
@@ -646,6 +667,13 @@ export function SettingsPage() {
       title: "Open Platter when you sign in",
       description: `Starts Platter when you sign in to your computer. It starts hidden in the ${TRAY} if Close to the ${TRAY} is on, otherwise minimised.`,
       control: (ids) => toggle(s, "launchAtLogin", ids),
+    },
+    {
+      key: "notifyTrackChange",
+      section: "App",
+      title: "Notify on track change",
+      description: "Shows a desktop notification when a new song starts, unless Platter is in front, a private session is on, or you're skipping through songs. This device only.",
+      control: (ids) => toggle(s, "notifyTrackChange", ids),
     },
     // About
     {

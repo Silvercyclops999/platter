@@ -5,7 +5,7 @@
 
 use tauri::State;
 
-use super::events::{PlayerState, Problem};
+use super::events::{AbLoop, PlayerState, Problem};
 use super::output::OutputState;
 use crate::settings::SettingsState;
 use super::player::PlayerHandle;
@@ -82,6 +82,12 @@ pub async fn set_context_shuffle(
 #[tauri::command]
 pub async fn set_repeat(player: State<'_, PlayerHandle>, repeat: Repeat) -> AppResult<()> {
     player.set_repeat(repeat).await
+}
+
+/// Sets the A-B loop on the playing track (`abLoop: null` clears it).
+#[tauri::command]
+pub async fn set_ab_loop(player: State<'_, PlayerHandle>, ab_loop: Option<AbLoop>) -> AppResult<()> {
+    player.set_ab_loop(ab_loop).await
 }
 
 #[tauri::command]

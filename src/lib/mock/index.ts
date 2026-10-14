@@ -21,6 +21,7 @@
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
+  AbLoop,
   Album,
   AlbumSort,
   ArtistSort,
@@ -154,6 +155,8 @@ export class MockBackend implements Backend {
   private muted = false;
   private shuffle = false;
   private repeat: RepeatMode = "off";
+  /** A-B loop on the current track. */
+  private abLoop: AbLoop | null = null;
   private current: QueueItem | null = null;
   private userQueue: QueueItem[] = [];
   private ctxOriginal: QueueItem[] = [];
@@ -805,6 +808,8 @@ export class MockBackend implements Backend {
   }
 
   private setCurrent(item: QueueItem | null, play: boolean, startMs = 0) {
+    // Like the core: a loop belongs to one track.
+    if (item !== this.current) this.abLoop = null;
     this.current = item;
     this.positionMs = startMs;
     if (item && item.track.title.endsWith(BROKEN_TRACK_TITLE_SUFFIX) && play) {
@@ -863,6 +868,8 @@ export class MockBackend implements Backend {
       this.positionMs += 250;
       if (this.positionMs % 5000 === 0) this.notePosition();
       const d = this.current.track.durationMs;
+      // A-B loop: at B (or the end), back to A.
+      if (this.abLoop && this.positionMs >= Math.min(this.abLoop.bMs, d)) this.positionMs = this.abLoop.aMs;
       if (this.positionMs >= d) {
         this.advance(true);
         return;
@@ -887,6 +894,7 @@ export class MockBackend implements Backend {
       shuffle: this.shuffle,
       shuffledContexts: this.shuffledIds,
       repeat: this.repeat,
+      abLoop: this.abLoop,
       queue: {
         current: this.current,
         userQueue: this.userQueue,
@@ -1013,6 +1021,8 @@ export class MockBackend implements Backend {
   playSeek(positionMs: number) {
     return this.act(() => {
       this.positionMs = Math.max(0, Math.min(positionMs, this.current?.track.durationMs ?? 0));
+      // Seeking outside the loop's span clears it.
+      if (this.abLoop && (this.positionMs < this.abLoop.aMs || this.positionMs > this.abLoop.bMs)) this.abLoop = null;
       this.emitState();
     });
   }
@@ -1065,6 +1075,21 @@ export class MockBackend implements Backend {
   setRepeat(repeat: RepeatMode) {
     return this.act(() => {
       this.repeat = repeat;
+      this.emitState();
+    });
+  }
+  setAbLoop(abLoop: AbLoop | null) {
+    return this.act(() => {
+      if (abLoop) {
+        if (!this.current) throw { kind: "invalid", message: "nothing is playing" };
+        const d = this.current.track.durationMs;
+        const a = Math.min(abLoop.aMs, abLoop.bMs, d);
+        const b = Math.min(Math.max(abLoop.aMs, abLoop.bMs), d);
+        if (b - a < 1000) throw { kind: "invalid", message: "B must be at least 1 s after A" };
+        this.abLoop = { aMs: Math.round(a), bMs: Math.round(b) };
+      } else {
+        this.abLoop = null;
+      }
       this.emitState();
     });
   }
@@ -1151,6 +1176,10 @@ export class MockBackend implements Backend {
       this.settings = next;
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
+      if (patch.abLoopHandles === false && this.abLoop) {
+        this.abLoop = null;
+        this.emitState();
+      }
     });
   }
   artCacheInfo() {

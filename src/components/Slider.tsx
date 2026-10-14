@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 
 /** What caused a commit: a pointer press, a pointer release, or a key. */
 export type CommitCause = "press" | "release" | "key";
@@ -28,6 +28,13 @@ export interface SliderProps {
   className?: string;
   /** Optional buffered amount, drawn behind the fill (seek bar). */
   buffered?: number;
+  /**
+   * Right-click or Alt+click at a point, with the value there. When set, those
+   * don't move the slider (the seek bar's A-B loop points).
+   */
+  onAltPress?: (v: number) => void;
+  /** Keys the slider doesn't handle itself (e.g. Escape). */
+  onOtherKey?: (e: KeyboardEvent<HTMLDivElement>) => void;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -52,6 +59,8 @@ export function Slider({
   disabled,
   className = "",
   buffered,
+  onAltPress,
+  onOtherKey,
 }: SliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<number | null>(null);
@@ -70,6 +79,10 @@ export function Slider({
     if (disabled || e.button !== 0) return;
     e.preventDefault();
     (e.currentTarget as HTMLElement).focus();
+    if (e.altKey && onAltPress) {
+      onAltPress(fromPointer(e.clientX));
+      return;
+    }
     e.currentTarget.setPointerCapture?.(e.pointerId);
     const v = fromPointer(e.clientX);
     setDrag(v);
@@ -115,7 +128,10 @@ export function Slider({
         next = max;
         break;
     }
-    if (next == null) return;
+    if (next == null) {
+      onOtherKey?.(e);
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     next = clamp(next, min, max);
@@ -144,6 +160,17 @@ export function Slider({
         onCommit?.(drag, "release");
       }}
       onKeyDown={onKeyDown}
+      onContextMenu={
+        onAltPress
+          ? (e: MouseEvent<HTMLDivElement>) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (disabled) return;
+              (e.currentTarget as HTMLElement).focus();
+              onAltPress(fromPointer(e.clientX));
+            }
+          : undefined
+      }
     >
       <div className="slider__track" ref={trackRef}>
         {bufPct != null && <div className="slider__buffer" style={{ width: `${bufPct}%` }} />}

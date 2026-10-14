@@ -670,3 +670,124 @@ async fn seek_preempts_a_precache_transfer_on_a_one_transfer_server() {
         "{ranges:?}"
     );
 }
+
+// ------------------------------------------------------------ A-B loop
+
+const fn frames(ms: usize) -> usize {
+    ms * RATE as usize / 1000
+}
+
+/// `all[from..to]` in ms (stereo samples).
+fn span(all: &[f32], from_ms: usize, to_ms: usize) -> &[f32] {
+    &all[frames(from_ms) * 2..frames(to_ms) * 2]
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ab_loop_set_before_a_replays_sample_exact_with_no_gap() {
+    let r = rig().await;
+    let a = wav_tone(RATE, 2, RATE as usize * 2, 440.0, 0.5);
+    r.server.add("/t/a", Route { body: a.clone(), ..Default::default() });
+    let key = r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    assert!(r.engine.set_loop(key, Some((500, 1_500))));
+    let (all, _, _) = decode_all(&a, "wav");
+    let mut want = span(&all, 0, 1_500).to_vec();
+    for _ in 0..3 {
+        want.extend_from_slice(span(&all, 500, 1_500));
+    }
+    let got = settled_samples(&r.cap, want.len()).await;
+    assert_same(&got[..want.len()], &want);
+    // Still looping: the position stays inside the span.
+    let p = r.engine.position().unwrap().position_ms;
+    assert!((500..=1_500).contains(&p), "position {p}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ab_loop_set_inside_the_span_goes_back_to_a_then_keeps_looping() {
+    let r = rig().await;
+    let a = wav_tone(RATE, 2, RATE as usize * 2, 440.0, 0.5);
+    r.server.add("/t/a", Route { body: a.clone(), ..Default::default() });
+    let key = r.engine.load(t("a"), "ia".into(), 1_000, true).unwrap();
+    assert!(r.engine.set_loop(key, Some((500, 1_500))));
+    let (all, _, _) = decode_all(&a, "wav");
+    // The first wrap re-decodes from A; later ones replay from memory.
+    let mut want = span(&all, 1_000, 1_500).to_vec();
+    for _ in 0..3 {
+        want.extend_from_slice(span(&all, 500, 1_500));
+    }
+    let got = settled_samples(&r.cap, want.len()).await;
+    assert_same(&got[..want.len()], &want);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ab_loop_with_b_past_the_audio_wraps_at_the_end() {
+    let r = rig().await;
+    // The tags say 3 s; the file holds 2 s.
+    let a = wav_tone(RATE, 2, RATE as usize * 2, 440.0, 0.5);
+    r.server.add("/t/a", Route { body: a.clone(), ..Default::default() });
+    let key = r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    assert!(r.engine.set_loop(key, Some((500, 2_900))));
+    let (all, _, _) = decode_all(&a, "wav");
+    let mut want = span(&all, 0, 2_000).to_vec();
+    for _ in 0..2 {
+        want.extend_from_slice(span(&all, 500, 2_000));
+    }
+    let got = settled_samples(&r.cap, want.len()).await;
+    assert_same(&got[..want.len()], &want);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn clearing_the_loop_plays_on_to_the_end() {
+    let mut r = rig().await;
+    let a = wav_tone(RATE, 2, RATE as usize * 2, 440.0, 0.5);
+    r.server.add("/t/a", Route { body: a.clone(), ..Default::default() });
+    let key = r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    assert!(r.engine.set_loop(key, Some((500, 1_500))));
+    let (all, _, _) = decode_all(&a, "wav");
+    // Let it loop at least twice, then clear.
+    let two = frames(1_500) * 2 + 2 * frames(1_000) * 2;
+    settled_samples(&r.cap, two).await;
+    assert!(r.engine.set_loop(key, None));
+    collect_until(&mut r.events, is_drained, Duration::from_secs(20)).await;
+    let n = wait_capture_still(&r.cap).await;
+    let got = r.cap.samples();
+    let got = &got[..n];
+    let tail = span(&all, 1_500, 2_000);
+    assert!(got.len() >= two + tail.len());
+    assert_same(&got[got.len() - tail.len()..], tail);
+    // Everything before was the first pass and then whole or partial passes
+    // of the loop, all the track's own audio.
+    let body = &got[..got.len() - tail.len()];
+    let first = span(&all, 0, 1_500);
+    assert_same(&body[..first.len()], first);
+    let pass = span(&all, 500, 1_500);
+    for chunk in body[first.len()..].chunks(pass.len()) {
+        assert_same(chunk, &pass[..chunk.len()]);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn seeking_during_a_replay_lands_on_the_right_audio() {
+    let mut r = rig_paced(RATE, cfg()).await;
+    let a = wav_tone(RATE, 2, RATE as usize * 3, 440.0, 0.5);
+    r.server.add("/t/a", Route { body: a.clone(), ..Default::default() });
+    let key = r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    assert!(r.engine.set_loop(key, Some((200, 700))));
+    // Wait until the second pass (a replay) is under way.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while r.cap.len_frames(2) < frames(700) + frames(500) + frames(100) {
+        assert!(Instant::now() < deadline, "never looped");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let p = r.engine.position().unwrap().position_ms;
+    assert!((200..=700).contains(&p), "position {p}");
+    r.engine.set_loop(key, None);
+    r.engine.seek(2_000);
+    r.cap.clear();
+    collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
+    let (all, _, _) = decode_all(&a, "wav");
+    let want = span(&all, 2_000, 3_000);
+    let got = settled_samples(&r.cap, want.len()).await;
+    // A block may have been rendered before the clear.
+    assert!(got.len() >= want.len());
+    assert_same(&got[got.len() - want.len()..], want);
+}

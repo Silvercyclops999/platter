@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 
 use super::engine::EngineConfig;
 use super::events::{
-    ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload,
+    AbLoop, ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload,
     SKIPPED_MESSAGE, TrackingEvent,
 };
 use super::http::HttpConfig;
@@ -966,4 +966,63 @@ async fn system_default_changes_are_followed_without_stopping() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(r.cap.opens(), opens);
     assert_eq!(r.cap.opened_id().as_deref(), Some("spk"));
+}
+
+// ------------------------------------------------------------ A-B loop
+
+fn ab(a_ms: u64, b_ms: u64) -> Option<AbLoop> {
+    Some(AbLoop { a_ms, b_ms })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ab_loop_wraps_in_the_core_and_points_are_checked() {
+    let mut r = rig(&["a", "b"], 2.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    // B before A swaps them.
+    r.player.set_ab_loop(ab(1_200, 100)).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(s.ab_loop, ab(100, 1_200));
+    // Under 1 s apart is refused and leaves the loop alone.
+    assert!(r.player.set_ab_loop(ab(300, 1_000)).await.is_err());
+    assert_eq!(r.player.state().await.unwrap().ab_loop, ab(100, 1_200));
+    next_tracking(&mut r.tracking, started("a")).await;
+
+    // The captured output is A..B over and over, with no gap.
+    let all = concat(&r, &["a"]);
+    let f = |ms: usize| ms * RATE as usize / 1000 * 2;
+    let mut want = all[..f(1_200)].to_vec();
+    for _ in 0..2 {
+        want.extend_from_slice(&all[f(100)..f(1_200)]);
+    }
+    let got = settled_samples(&r.cap, want.len()).await;
+    assert_eq!(&got[..want.len()], &want[..]);
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "a");
+    assert!(s.position_ms <= 1_200, "position {}", s.position_ms);
+
+    // A seek inside the span keeps it; outside clears it.
+    r.player.seek(600).await.unwrap();
+    assert_eq!(r.player.state().await.unwrap().ab_loop, ab(100, 1_200));
+    r.player.seek(1_500).await.unwrap();
+    assert_eq!(r.player.state().await.unwrap().ab_loop, None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ab_loop_clears_on_track_change_and_on_request() {
+    let mut r = rig(&["a", "b"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.set_ab_loop(ab(0, 2_000)).await.unwrap();
+    r.player.set_ab_loop(None).await.unwrap();
+    assert_eq!(r.player.state().await.unwrap().ab_loop, None);
+    r.player.set_ab_loop(ab(0, 2_000)).await.unwrap();
+    r.player.next().await.unwrap();
+    let s = wait_state(&r.player, |s| tid(&s.track) == "b").await;
+    assert_eq!(s.ab_loop, None);
+    // Pausing and resuming the same track keeps it.
+    next_tracking(&mut r.tracking, started("b")).await;
+    r.player.set_ab_loop(ab(500, 2_500)).await.unwrap();
+    r.player.pause().await.unwrap();
+    r.player.resume().await.unwrap();
+    assert_eq!(r.player.state().await.unwrap().ab_loop, ab(500, 2_500));
 }

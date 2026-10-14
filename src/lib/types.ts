@@ -355,6 +355,14 @@ export interface PlayerState {
   shuffledContexts: string[];
   repeat: RepeatMode;
   queue: QueueView;
+  /** The A-B loop on the playing track, if one is set. */
+  abLoop?: AbLoop | null;
+}
+
+/** An A-B loop: playback that reaches B goes back to A (ms, A before B). */
+export interface AbLoop {
+  aMs: number;
+  bMs: number;
 }
 
 export interface PlayerPosition {
@@ -461,6 +469,14 @@ export interface Settings {
   closeToTray: boolean;
   /** Start Platter when you sign in to the computer. This device only. */
   launchAtLogin: boolean;
+  /** Right-click or Alt+click on the seek bar sets A-B loop points. */
+  abLoopHandles: boolean;
+  /** Near a track's end the player bar shows what plays next. */
+  upNextLine: boolean;
+  /** Show the volume percentage while it changes. */
+  volumePercent: boolean;
+  /** Desktop notification on each new track (this device only). */
+  notifyTrackChange: boolean;
   [key: string]: unknown;
 }
 
@@ -487,6 +503,10 @@ export const DEFAULT_SETTINGS: Settings = {
   mediaSession: true,
   closeToTray: false,
   launchAtLogin: false,
+  abLoopHandles: true,
+  upNextLine: true,
+  volumePercent: true,
+  notifyTrackChange: false,
 };
 
 // ---------------------------------------------------------------- output devices
