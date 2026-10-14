@@ -11,6 +11,7 @@
   gap: var(--space-2);
   width: 100%;
   min-height: 24px;
+  margin-top: var(--space-2);
   padding: 2px var(--space-4);
   background: var(--color-accent);
   color: var(--color-text-on-accent);
