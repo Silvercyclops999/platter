@@ -73,7 +73,7 @@ describe("TrackRow", () => {
     await user.keyboard("{ArrowDown}");
     expect(items[1]).toHaveFocus();
     await user.keyboard("{End}");
-    expect(items[4]).toHaveFocus();
+    expect(items[3]).toHaveFocus();
     await user.keyboard("{ArrowDown}"); // wraps
     expect(items[0]).toHaveFocus();
     await user.keyboard("{Escape}");
