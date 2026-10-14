@@ -1,0 +1,114 @@
+/* Design tokens (spec 01). Mirrors src/design/tokens.ts — keep in sync
+   (tokens.test.ts checks every value). Dark theme only for Phase 1. */
+
+:root {
+  --amber-50: #FFF8EB;
+  --amber-100: #FFEBC2;
+  --amber-200: #FFD98A;
+  --amber-300: #FCC459;
+  --amber-400: #F5A524;
+  --amber-500: #E08E0B;
+  --amber-600: #BA7208;
+  --amber-700: #8F560A;
+  --amber-800: #66400D;
+  --amber-900: #3D280C;
+
+  /* Background layers */
+  --color-bg-base: #0E0D0C;
+  --color-bg-raised: #171513;
+  --color-bg-raised2: #201D1A;
+  --color-bg-overlay: #2A2622;
+  --color-border: #2F2A25;
+
+  /* Text */
+  --color-text-primary: #F4EFE8;
+  --color-text-secondary: #B8AFA4;
+  --color-text-muted: #8A8178;
+  --color-text-on-accent: #1A1206;
+
+  /* Accent + states */
+  --color-accent: #F5A524;
+  --color-accent-hover: #FCC459;
+  --color-accent-pressed: #E08E0B;
+  --color-focus-ring: #FFD98A;
+  --color-state-hover: rgba(255, 240, 220, 0.06);
+  --color-state-pressed: rgba(255, 240, 220, 0.10);
+  --color-state-selected: rgba(255, 240, 220, 0.12);
+
+  /* Semantic */
+  --color-success: #4CC38A;
+  --color-warning: #F2B13D;
+  --color-error: #F2555A;
+  --color-info: #5AA9F5;
+
+  /* Connection status */
+  --color-status-local: #3FCF8E;
+  --color-status-remote: #4C9EFF;
+  --color-status-relay: #F5A524;
+  --color-status-offline: #F2555A;
+
+  /* Type */
+  --font-family: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 32px;
+  --font-size-4xl: 48px;
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Spacing (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Radius */
+  --radius-row: 4px;
+  --radius-card: 8px;
+  --radius-pill: 999px;
+
+  /* Motion */
+  --motion-fast: 150ms;
+  --motion-medium: 250ms;
+  --motion-slow: 350ms;
+  --motion-easing: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Header tint (album/artist pages set this from artwork) */
+  --tint: #3a3128;
+
+  color-scheme: dark;
+}
+
+/* Reduced motion: OS setting (media query) or app-level override
+   (data-reduced-motion set by src/design/motion.ts). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-medium: 0ms;
+    --motion-slow: 0ms;
+  }
+}
+
+:root[data-reduced-motion="true"] {
+  --motion-fast: 0ms;
+  --motion-medium: 0ms;
+  --motion-slow: 0ms;
+}
+
+:root[data-reduced-motion="true"] *,
+:root[data-reduced-motion="true"] *::before,
+:root[data-reduced-motion="true"] *::after {
+  animation-duration: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0ms !important;
+  scroll-behavior: auto !important;
+}

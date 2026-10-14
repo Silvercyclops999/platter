@@ -1,0 +1,78 @@
+/**
+ * Small history-based router (no URL): a stack of routes plus an index, so
+ * back/forward work like a browser. Scroll offsets per entry live in MainView.
+ */
+import { create } from "zustand";
+
+export type LibraryTab = "artists" | "albums" | "playlists";
+
+export type Route =
+  | { name: "home" }
+  | { name: "search"; query?: string }
+  | { name: "library"; tab: LibraryTab }
+  | { name: "artist"; id: string }
+  | { name: "album"; id: string }
+  | { name: "playlist"; id: string };
+
+export interface HistoryEntry {
+  key: number;
+  route: Route;
+}
+
+interface RouterState {
+  entries: HistoryEntry[];
+  index: number;
+  navigate: (route: Route) => void;
+  /** Update the current entry in place (e.g. search query, library tab). */
+  replace: (route: Route) => void;
+  back: () => void;
+  forward: () => void;
+  reset: (route?: Route) => void;
+}
+
+let seq = 1;
+const entry = (route: Route): HistoryEntry => ({ key: seq++, route });
+
+export function sameRoute(a: Route, b: Route): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export const useRouter = create<RouterState>()((set, get) => ({
+  entries: [entry({ name: "home" })],
+  index: 0,
+  navigate: (route) => {
+    const { entries, index } = get();
+    if (sameRoute(entries[index].route, route)) return;
+    const next = entries.slice(0, index + 1);
+    next.push(entry(route));
+    // Keep history bounded.
+    const trimmed = next.length > 100 ? next.slice(next.length - 100) : next;
+    set({ entries: trimmed, index: trimmed.length - 1 });
+  },
+  replace: (route) => {
+    const { entries, index } = get();
+    const next = [...entries];
+    next[index] = { ...next[index], route };
+    set({ entries: next });
+  },
+  back: () => {
+    const { index } = get();
+    if (index > 0) set({ index: index - 1 });
+  },
+  forward: () => {
+    const { index, entries } = get();
+    if (index < entries.length - 1) set({ index: index + 1 });
+  },
+  reset: (route = { name: "home" }) => set({ entries: [entry(route)], index: 0 }),
+}));
+
+export const useCurrentEntry = () => useRouter((s) => s.entries[s.index]);
+export const useCanGoBack = () => useRouter((s) => s.index > 0);
+export const useCanGoForward = () => useRouter((s) => s.index < s.entries.length - 1);
+
+/** Imperative helpers for non-React code (shortcuts, context menus). */
+export const nav = {
+  go: (route: Route) => useRouter.getState().navigate(route),
+  back: () => useRouter.getState().back(),
+  forward: () => useRouter.getState().forward(),
+};
