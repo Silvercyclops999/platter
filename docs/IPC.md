@@ -94,6 +94,47 @@ play started from a playlist. Times are unix seconds.
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.
 
+## Playlist editing
+| Command | Args | Returns |
+| --- | --- | --- |
+| `playlist_create` | `{ title?, trackIds? }` | `Playlist` |
+| `playlist_add` | `{ id, trackIds, after?, top? }` | `Playlist` |
+| `playlist_duplicates` | `{ id, trackIds }` | `string[]` (the ones already in it) |
+| `playlist_remove` | `{ id, itemIds }` | `{ itemId, trackId, index }[]` (what was removed and where) |
+| `playlist_move` | `{ id, itemIds, after? }` | – |
+| `playlist_update` | `{ id, title?, summary? }` | `Playlist` |
+| `playlist_set_cover` | `{ id, bytes: number[], contentType }` | – |
+| `playlist_delete` | `{ id }` | – |
+
+`Playlist` also carries `summary` (the description) and `updatedAt` (unix
+seconds, the last change). `playlist_page` returns `itemIds` next to
+`tracks`, one per row in the same order. Edits name rows by item id because
+a song can be in a playlist more than once.
+
+Plex playlists are the store. Every edit changes the local cache at once,
+emits `library://changed`, and is queued for Plex. The queue replays in
+order as soon as the server is reachable and every 15 seconds after that,
+so edits made offline reach Plex later. If Plex refuses an edit, the rest of
+that playlist's queued edits are dropped, a `toast` says so, and the
+playlist is read back from Plex. A playlist deleted in Plex disappears here
+on the next read.
+
+`playlist_create` without `title` names the playlist from the
+`playlistNewName` setting, where `#N` becomes the next number no playlist
+uses ("My playlist #3"). Plex makes playlists from a list of songs, so a new
+empty playlist exists only on this computer until its first song is added;
+then it's created in Plex with everything it has by then. Its id changes to
+the Plex id, and the old id keeps working in every command and in
+`playlist_page`.
+
+`playlist_add` appends at the end, at the top with `top: true`, or right
+after the row `after`. Titles are 1 to 100 characters and descriptions up to
+300 (`""` clears it); longer ones are an `invalid` error. Covers are JPEG,
+PNG or WebP under 10 MB. Smart playlists can't be edited (`invalid`).
+
+`playlist_duplicates` lets the UI ask before adding a song that's already
+there (setting `playlistAskDuplicates`).
+
 ## Now playing
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -286,6 +327,8 @@ The rest of the fields, with their defaults:
 | `upNextLine` | bool, true | In the last 15 s of a track (last 30 % under 50 s) the player bar's artist line shows what's next. |
 | `volumePercent` | bool, true | Shows the volume percentage above the slider while it changes. |
 | `notifyTrackChange` | bool, false | Desktop notification when a new track starts. Not shown while the window has focus, in a private session, or when the previous track change was under 5 s ago. Clicking it brings the window forward. This device only. |
+| `playlistAskDuplicates` | bool, true | Ask before adding a song that's already in the playlist. |
+| `playlistNewName` | text, `"My playlist #N"` | Name for new playlists; `#N` becomes the next free number. Up to 100 characters. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

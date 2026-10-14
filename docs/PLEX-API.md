@@ -50,8 +50,15 @@ Every server request sends:
 | Purpose | Request |
 | --- | --- |
 | List | `GET /playlists?playlistType=audio` |
+| One playlist | `GET /playlists/{id}` |
+| Items | `GET /playlists/{id}/items` with container paging |
 | Create | `POST /playlists?type=audio&title=…&smart=0&uri=server://{machineId}/com.plexapp.plugins.library/library/metadata/{keys}` |
 | Add items | `PUT /playlists/{id}/items?uri=…` |
+| Remove an item | `DELETE /playlists/{id}/items/{playlistItemID}` |
+| Move an item | `PUT /playlists/{id}/items/{playlistItemID}/move?after={playlistItemID}` (no `after`: to the top) |
+| Rename, description | `PUT /playlists/{id}?title=…&summary=…` |
+| Cover | `POST /library/metadata/{id}/posters` with the image as the body |
+| Delete | `DELETE /playlists/{id}` |
 | History | `GET /status/sessions/history/all` |
 
 ## Findings log
@@ -239,3 +246,32 @@ Artist list items carry summary and art; Similar, Genre/Style/Mood and
 UltraBlurColors only on /library/metadata/{id}. Similar entries there look
 like `{id, filter, tag}`. The app reads Similar from the detail call when an
 artist page opens and keeps it for a week, so sync stays one paged list call.
+
+### 2026-10-14: playlist writes
+
+Read-only checks on the real server:
+- `GET /playlists/{id}` returns one `Metadata` with `summary` (the
+  description, an empty string when unset), `updatedAt`, `leafCount`,
+  `duration` and `composite`. No `thumb` unless someone chose a cover, so the
+  app shows `thumb` when there is one and the `composite` mosaic otherwise.
+- `GET /playlists/{id}/items` on a smart playlist has no `playlistItemID`
+  on its items. The server has no ordinary playlists yet, so the field on
+  ordinary playlist items is taken from the public API docs: a number per
+  row, used to remove or move that row.
+- Orphaned smart playlists left from an old library answer 500 on
+  `/items`, as noted before.
+
+Not tried against a real server yet (unit tested against wiremock and a
+fake only). Check once on a throwaway playlist, then delete it:
+- Create with `uri=…/library/metadata/{k1},{k2}`: the reply's `Metadata[0]`
+  holds the new `ratingKey`, and the songs keep the order given.
+- Plex needs at least one item to create a playlist (the app waits for the
+  first song). Worth confirming whether an empty `uri` is refused.
+- Add appends at the end, in the order given.
+- Remove and move by `playlistItemID`; move without `after` goes to the top.
+- `PUT /playlists/{id}?title=&summary=` changes only the fields sent.
+- Poster upload as a raw JPEG body with `Content-Type: image/jpeg`.
+- Delete.
+- Whether `updatedAt` changes on every edit (the sync refetches a playlist's
+  items when count, duration or `updatedAt` change; a reorder alone only
+  changes `updatedAt`).

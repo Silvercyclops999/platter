@@ -94,7 +94,7 @@
 .pl-finder__list { margin: 0; padding: 0; list-style: none; }
 .pl-finder__row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 4fr) minmax(0, 3fr) auto auto;
+  grid-template-columns: 40px minmax(0, 4fr) minmax(0, 3fr) 48px 136px;
   align-items: center;
   gap: var(--space-3);
   height: 56px;
@@ -108,7 +108,9 @@
 .pl-finder__artist,
 .pl-finder__album,
 .pl-finder__dur { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.pl-finder__dur { text-align: right; }
 .pl-finder__add {
+  justify-self: end;
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -126,7 +128,7 @@
 .pl-finder__add:focus-visible { border-radius: var(--radius-pill); }
 .pl-finder__add.is-added { border-color: transparent; color: var(--color-accent); cursor: default; }
 @container main (max-width: 700px) {
-  .pl-finder__row { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  .pl-finder__row { grid-template-columns: 40px minmax(0, 1fr) 136px; }
   .pl-finder__album,
   .pl-finder__dur { display: none; }
 }

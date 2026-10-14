@@ -20,8 +20,8 @@
 }
 .pl-picker__find::placeholder { color: var(--color-text-muted); }
 .pl-picker__find:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
-.pl-picker__new,
-.pl-picker__item { justify-content: flex-start; gap: var(--space-3); }
+.context-menu__item.pl-picker__new,
+.context-menu__item.pl-picker__item { justify-content: flex-start; gap: var(--space-3); }
 .pl-picker__plus {
   display: grid;
   place-items: center;
