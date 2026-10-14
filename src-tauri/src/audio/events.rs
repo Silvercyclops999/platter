@@ -35,7 +35,10 @@ pub struct PlayerState {
     /// Linear slider value 0..1 (the perceptual curve is applied inside).
     pub volume: f32,
     pub muted: bool,
+    /// Shuffle for the playing context.
     pub shuffle: bool,
+    /// Context ids whose shuffle preference is on (playing or not).
+    pub shuffled_contexts: Vec<String>,
     pub repeat: Repeat,
     pub queue: QueueView,
 }
@@ -197,6 +200,7 @@ mod tests {
             volume: 0.5,
             muted: false,
             shuffle: true,
+            shuffled_contexts: vec!["al".into()],
             repeat: Repeat::One,
             queue: QueueView::default(),
         };
@@ -204,6 +208,7 @@ mod tests {
         assert_eq!(v["status"], "buffering");
         assert_eq!(v["positionMs"], 5);
         assert_eq!(v["repeat"], "one");
+        assert_eq!(v["shuffledContexts"][0], "al");
         assert!(v["queue"]["userQueue"].is_array());
         assert!(v["queue"]["nextUp"].is_array());
     }

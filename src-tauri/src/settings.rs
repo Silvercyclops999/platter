@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::audio::player::PlayerHandle;
+use crate::audio::queue::ShuffleStyle;
 use crate::db::DbHandle;
 use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
@@ -28,11 +29,18 @@ pub struct Settings {
     pub report_to_plex: bool,
     /// Linear slider value, 0..1.
     pub volume: f32,
+    /// How shuffle orders tracks (spread keeps an artist's songs apart).
+    pub shuffle_style: ShuffleStyle,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { private_session: false, report_to_plex: true, volume: 0.7 }
+        Self {
+            private_session: false,
+            report_to_plex: true,
+            volume: 0.7,
+            shuffle_style: ShuffleStyle::Spread,
+        }
     }
 }
 
@@ -43,6 +51,7 @@ pub struct SettingsPatch {
     pub private_session: Option<bool>,
     pub report_to_plex: Option<bool>,
     pub volume: Option<f32>,
+    pub shuffle_style: Option<ShuffleStyle>,
 }
 
 impl Settings {
@@ -58,6 +67,9 @@ impl Settings {
         }
         if let Some(v) = p.report_to_plex {
             self.report_to_plex = v;
+        }
+        if let Some(v) = p.shuffle_style {
+            self.shuffle_style = v;
         }
         Ok(())
     }
@@ -142,6 +154,9 @@ pub async fn settings_set(
     if patch.volume.is_some() {
         player.set_volume(s.volume).await?;
     }
+    if patch.shuffle_style.is_some() {
+        player.set_shuffle_style(s.shuffle_style).await?;
+    }
     Ok(())
 }
 
@@ -168,7 +183,12 @@ mod tests {
         let (db, dir) = db();
         let tracking = TrackingSettings::default();
         let st = SettingsState::new(db.clone(), tracking.clone());
-        st.set(SettingsPatch { private_session: Some(true), report_to_plex: Some(false), volume: Some(0.25) })
+        st.set(SettingsPatch {
+            private_session: Some(true),
+            report_to_plex: Some(false),
+            volume: Some(0.25),
+            shuffle_style: Some(ShuffleStyle::Standard),
+        })
             .await
             .unwrap();
         assert!(tracking.private_session.load(Ordering::Relaxed));
@@ -186,6 +206,7 @@ mod tests {
         assert!(s.private_session);
         assert!(s.report_to_plex);
         assert_eq!(s.volume, 0.25);
+        assert_eq!(s.shuffle_style, ShuffleStyle::Standard);
         // Loaded at startup into the tracker's switches.
         assert!(fresh.private_session.load(Ordering::Relaxed));
         assert!(fresh.report_to_plex.load(Ordering::Relaxed));
@@ -217,6 +238,9 @@ mod tests {
         let v = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(v["privateSession"], false);
         assert_eq!(v["reportToPlex"], true);
+        assert_eq!(v["shuffleStyle"], "spread");
+        let p: SettingsPatch = serde_json::from_str(r#"{"shuffleStyle":"standard"}"#).unwrap();
+        assert_eq!(p.shuffle_style, Some(ShuffleStyle::Standard));
         let p: SettingsPatch = serde_json::from_str(r#"{"privateSession":true}"#).unwrap();
         assert_eq!(p.private_session, Some(true));
         assert_eq!(p.report_to_plex, None);

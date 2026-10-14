@@ -4,10 +4,17 @@
 //!   "Next up": the rest of the context after the current position.
 //! * The **user queue** ("Play next" inserts at its front, "Add to queue"
 //!   appends) always plays before the context continues.
-//! * **Shuffle** reorders the context with artists spread apart and recently
-//!   played tracks pushed back; the current track stays first. Turning it off
-//!   restores context order from the current track.
-//! * **Repeat** off / all / one. **Previous** steps back through history.
+//! * **Shuffle** reorders the context; the current track stays first. The
+//!   Spread style keeps an artist's tracks apart and pushes recently played
+//!   tracks back; Standard is a plain random order. Turning it off restores
+//!   context order from the current track. Shuffle is remembered per context
+//!   id; repeat is one global setting.
+//! * **Repeat** off / all / one. Next, or an early Previous, drops repeat-one
+//!   to repeat-all.
+//! * **Previous** steps back through the context's play order (`order` /
+//!   `pos`), never to a user-queue entry. `history` is only for display.
+//! * **Resume points**: each context id remembers its last track and
+//!   position, so playing it again without a chosen track picks up there.
 //!
 //! Every entry has a stable `itemId`, so the UI can move/remove/jump to a
 //! specific entry even when the same track appears twice. The whole queue is
@@ -26,6 +33,30 @@ use crate::model::Track;
 
 const HISTORY_CAP: usize = 100;
 const RECENT_CAP: usize = 50;
+/// Contexts that keep a resume point / shuffle preference (least recently
+/// used dropped first).
+pub const CONTEXT_MEMORY_CAP: usize = 200;
+
+/// How shuffle orders a context (the `shuffleStyle` setting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShuffleStyle {
+    /// Keeps an artist's tracks apart and pushes recent plays back.
+    #[default]
+    Spread,
+    /// Plain random order (Fisher-Yates).
+    Standard,
+}
+
+/// Where a context was left: an index into its tracks, checked against the
+/// track id so a changed playlist doesn't resume on the wrong song.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumePoint {
+    pub index: usize,
+    pub track_id: String,
+    pub position_ms: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,6 +151,15 @@ pub struct Queue {
     next_id: u64,
     /// Recently played track ids, newest last (shuffle avoids them).
     recent: VecDeque<String>,
+    /// Resume point per context id, least recently used first.
+    #[serde(default)]
+    resume: VecDeque<(String, ResumePoint)>,
+    /// Context ids with shuffle on, least recently used first.
+    #[serde(default)]
+    shuffled: VecDeque<String>,
+    /// Comes from settings, so it isn't saved with the queue.
+    #[serde(skip)]
+    shuffle_style: ShuffleStyle,
     #[serde(skip)]
     rng: QRng,
 }
@@ -165,6 +205,113 @@ impl Queue {
     pub fn is_empty(&self) -> bool {
         self.current.is_none() && self.user.is_empty() && self.items.is_empty()
     }
+    pub fn shuffle_style(&self) -> ShuffleStyle {
+        self.shuffle_style
+    }
+    pub fn set_shuffle_style(&mut self, style: ShuffleStyle) {
+        self.shuffle_style = style;
+    }
+
+    fn context_id(&self) -> Option<&str> {
+        self.context.as_ref()?.id.as_deref()
+    }
+
+    fn order_at(&self, p: isize) -> Option<usize> {
+        if p < 0 {
+            return None;
+        }
+        self.order.get(p as usize).copied()
+    }
+
+    // ------------------------------------------------- per-context memory
+
+    /// The stored shuffle preference for a context (off unless set).
+    pub fn shuffle_pref(&self, id: &str) -> bool {
+        self.shuffled.iter().any(|s| s == id)
+    }
+
+    /// Context ids with shuffle on, least recently used first.
+    pub fn shuffled_contexts(&self) -> Vec<String> {
+        self.shuffled.iter().cloned().collect()
+    }
+
+    fn store_shuffle_pref(&mut self, id: &str, on: bool) {
+        self.shuffled.retain(|s| s != id);
+        if on {
+            self.shuffled.push_back(id.to_owned());
+            while self.shuffled.len() > CONTEXT_MEMORY_CAP {
+                self.shuffled.pop_front();
+            }
+        }
+    }
+
+    /// Sets shuffle for a context. For the playing context it applies now;
+    /// for any other it's remembered for the next time it plays.
+    pub fn set_context_shuffle(&mut self, id: &str, on: bool) {
+        if self.context_id() == Some(id) {
+            self.set_shuffle(on);
+        } else {
+            self.store_shuffle_pref(id, on);
+        }
+    }
+
+    pub fn resume_point(&self, id: &str) -> Option<&ResumePoint> {
+        self.resume.iter().find(|(k, _)| k == id).map(|(_, r)| r)
+    }
+
+    fn store_resume(&mut self, id: String, rp: ResumePoint) {
+        self.resume.retain(|(k, _)| *k != id);
+        self.resume.push_back((id, rp));
+        while self.resume.len() > CONTEXT_MEMORY_CAP {
+            self.resume.pop_front();
+        }
+    }
+
+    /// Records where the current context is (call on track change, pause
+    /// and position saves). While a user-queue entry plays, the context
+    /// would pick up at its next track.
+    pub fn note_position(&mut self, position_ms: u64) {
+        let Some(id) = self.context_id().map(str::to_owned) else {
+            return;
+        };
+        let Some(cur) = self.current.as_ref() else {
+            return;
+        };
+        let rp = if cur.source == ItemSource::Context {
+            match self.order_at(self.pos) {
+                Some(i) if self.items[i].item_id == cur.item_id => ResumePoint {
+                    index: i,
+                    track_id: cur.track.id.clone(),
+                    position_ms,
+                },
+                _ => return,
+            }
+        } else {
+            match self.order_at(self.pos + 1) {
+                Some(i) => ResumePoint {
+                    index: i,
+                    track_id: self.items[i].track.id.clone(),
+                    position_ms: 0,
+                },
+                None => return,
+            }
+        };
+        self.store_resume(id, rp);
+    }
+
+    /// Index and position to resume `id` at, if its stored track is still
+    /// in `self.items` (same slot, or else the first slot with that track).
+    fn resume_start(&self, id: &str) -> Option<(usize, u64)> {
+        let rp = self.resume_point(id)?;
+        let at = |i: usize| self.items.get(i).is_some_and(|it| it.track.id == rp.track_id);
+        if at(rp.index) {
+            return Some((rp.index, rp.position_ms));
+        }
+        self.items
+            .iter()
+            .position(|it| it.track.id == rp.track_id)
+            .map(|i| (i, rp.position_ms))
+    }
 
     fn note_played(&mut self, item: &QueueItem) {
         self.recent.retain(|t| *t != item.track.id);
@@ -188,8 +335,7 @@ impl Queue {
     }
 
     /// Replaces the context and starts at `start` (index in `tracks`).
-    /// `shuffle` overrides the shuffle mode when given. The user queue is
-    /// kept. Returns the new current item.
+    /// See [`Queue::set_context_at`].
     pub fn set_context(
         &mut self,
         info: ContextInfo,
@@ -197,9 +343,34 @@ impl Queue {
         start: Option<usize>,
         shuffle: Option<bool>,
     ) -> Option<QueueItem> {
-        if let Some(s) = shuffle {
-            self.shuffle = s;
-        }
+        self.set_context_at(info, tracks, start, shuffle).map(|(i, _)| i)
+    }
+
+    /// Replaces the context. The user queue is kept.
+    ///
+    /// Shuffle: `shuffle` when given (and remembered for this context id),
+    /// otherwise the context's stored preference (off by default).
+    ///
+    /// Start: `start` when given; with shuffle on, a random track; else the
+    /// context's resume point; else track 1. Returns the new current item
+    /// and the position to start it at.
+    pub fn set_context_at(
+        &mut self,
+        info: ContextInfo,
+        tracks: Vec<Track>,
+        start: Option<usize>,
+        shuffle: Option<bool>,
+    ) -> Option<(QueueItem, u64)> {
+        let id = info.id.clone();
+        self.shuffle = match (shuffle, id.as_deref()) {
+            (Some(s), Some(id)) => {
+                self.store_shuffle_pref(id, s);
+                s
+            }
+            (Some(s), None) => s,
+            (None, Some(id)) => self.shuffle_pref(id),
+            (None, None) => false,
+        };
         self.context = Some(info);
         let mut items = Vec::with_capacity(tracks.len());
         for t in tracks {
@@ -217,17 +388,21 @@ impl Queue {
             self.pos = -1;
             return None;
         }
+        let mut offset = 0;
         let start = match start {
             Some(s) if s < n => s,
             _ if self.shuffle => self.rng.0.random_range(0..n),
-            _ => 0,
+            _ => match id.as_deref().and_then(|id| self.resume_start(id)) {
+                Some((i, ms)) => {
+                    offset = ms;
+                    i
+                }
+                None => 0,
+            },
         };
         if self.shuffle {
             let others: Vec<usize> = (0..n).filter(|i| *i != start).collect();
-            let mut order = vec![start];
-            order.extend(self.spread(others));
-            self.dedupe_adjacent(&mut order, 1);
-            self.order = order;
+            self.order = self.shuffled_order(Some(start), others);
             self.pos = 0;
         } else {
             self.order = (0..n).collect();
@@ -235,7 +410,24 @@ impl Queue {
         }
         let item = self.items[start].clone();
         self.set_current(item.clone(), true);
-        Some(item)
+        Some((item, offset))
+    }
+
+    /// `first` (if any) followed by `others` in shuffled order, using the
+    /// current shuffle style.
+    fn shuffled_order(&mut self, first: Option<usize>, mut others: Vec<usize>) -> Vec<usize> {
+        match self.shuffle_style {
+            ShuffleStyle::Spread => {
+                let spread = self.spread(others);
+                let mut order: Vec<usize> = first.into_iter().chain(spread).collect();
+                self.dedupe_adjacent(&mut order, 1);
+                order
+            }
+            ShuffleStyle::Standard => {
+                others.shuffle(&mut self.rng.0);
+                first.into_iter().chain(others).collect()
+            }
+        }
     }
 
     fn artist_key(t: &Track) -> String {
@@ -407,35 +599,66 @@ impl Queue {
     }
 
     /// User pressed next. `None` at the end of the queue (repeat off).
+    /// Repeat-one drops to repeat-all.
     pub fn next_manual(&mut self) -> Option<QueueItem> {
+        if self.repeat == Repeat::One {
+            self.repeat = Repeat::All;
+        }
         self.step(true)
     }
 
-    /// User pressed previous (and the position is ≤ 3 s; the controller
-    /// handles the restart rule). Returns the new current, or `None` when
-    /// there's no history.
+    /// Moves to the next entry without touching repeat (e.g. the first
+    /// queued track when nothing was loaded).
+    pub fn advance(&mut self) -> Option<QueueItem> {
+        self.step(true)
+    }
+
+    /// Play-order index Previous would go to: the context entry before the
+    /// current one, or for a playing user-queue entry, the context entry
+    /// that played before it.
+    fn previous_pos(&self) -> Option<isize> {
+        let cur = self.current.as_ref()?;
+        let p = if cur.source == ItemSource::User {
+            self.pos
+        } else {
+            self.pos - 1
+        };
+        self.order_at(p).map(|_| p)
+    }
+
+    /// Whether an early Previous has somewhere to go (otherwise it restarts).
+    pub fn has_previous(&self) -> bool {
+        self.previous_pos().is_some()
+    }
+
+    /// User pressed previous within the first 3 s (the controller handles
+    /// the restart rule). Goes to the previous context position; a playing
+    /// user-queue entry is dropped. Repeat-one drops to repeat-all. Returns
+    /// the new current, or `None` on the first position (restart instead).
     pub fn previous(&mut self) -> Option<QueueItem> {
-        let h = self.history.pop_back()?;
-        let old = self.current.take();
-        let old_was_context = old.as_ref().is_some_and(|o| o.source == ItemSource::Context);
-        if let Some(o) = old
-            && o.source == ItemSource::User
-        {
-            self.user.push_front(o);
+        if self.repeat == Repeat::One {
+            self.repeat = Repeat::All;
         }
-        if let Some(k) = self
-            .order
-            .iter()
-            .position(|&i| self.items[i].item_id == h.item_id)
-        {
-            self.pos = k as isize;
-        } else if old_was_context {
-            // h is a user/old-context entry; the old current plays after it.
-            self.pos -= 1;
+        let p = self.previous_pos()?;
+        self.pos = p;
+        let item = self.items[self.order[p as usize]].clone();
+        self.set_current(item.clone(), true);
+        Some(item)
+    }
+
+    /// The context ran out (repeat off): go back to its first track in play
+    /// order, with the rest listed as upcoming. `None` with no context.
+    pub fn rewind(&mut self) -> Option<QueueItem> {
+        let first = *self.order.first()?;
+        self.pos = 0;
+        let item = self.items[first].clone();
+        if let Some(old) = self.current.replace(item.clone()) {
+            self.history.push_back(old);
+            while self.history.len() > HISTORY_CAP {
+                self.history.pop_front();
+            }
         }
-        self.note_played(&h);
-        self.current = Some(h.clone());
-        Some(h)
+        Some(item)
     }
 
     /// Plays the entry with `item_id` now. Earlier user-queue entries are
@@ -536,7 +759,11 @@ impl Queue {
         self.repeat = r;
     }
 
+    /// Shuffle for the playing context (also remembered for its id).
     pub fn set_shuffle(&mut self, on: bool) {
+        if let Some(id) = self.context_id().map(str::to_owned) {
+            self.store_shuffle_pref(&id, on);
+        }
         if on == self.shuffle {
             return;
         }
@@ -550,10 +777,7 @@ impl Queue {
             let others: Vec<usize> = (0..n)
                 .filter(|i| Some(*i) != cur && live.contains(i))
                 .collect();
-            let spread = self.spread(others);
-            let mut order: Vec<usize> = cur.into_iter().chain(spread).collect();
-            self.dedupe_adjacent(&mut order, 1);
-            self.order = order;
+            self.order = self.shuffled_order(cur, others);
             self.pos = if cur.is_some() { 0 } else { -1 };
         } else {
             self.order = (0..n).filter(|i| live.contains(i)).collect();
@@ -685,14 +909,29 @@ mod tests {
         assert_eq!(q.peek_auto().unwrap().item_id, id);
         assert_eq!(q.advance_auto().unwrap().item_id, id);
         assert_eq!(q.advance_auto().unwrap().item_id, id);
+        // Next skips on and drops repeat-one to repeat-all.
         assert_eq!(q.next_manual().unwrap().track.id, "t1");
+        assert_eq!(q.repeat(), Repeat::All);
         q.set_repeat(Repeat::Off);
         assert!(q.next_manual().is_none());
         assert!(q.peek_auto().is_none());
     }
 
     #[test]
-    fn previous_walks_back_through_history_and_then_forward_again() {
+    fn early_previous_in_repeat_one_drops_to_repeat_all() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx(), tracks(3), Some(1), Some(false));
+        q.set_repeat(Repeat::One);
+        assert_eq!(q.previous().unwrap().track.id, "t0");
+        assert_eq!(q.repeat(), Repeat::All);
+        // On the first track there is nowhere to go, but it still drops.
+        q.set_repeat(Repeat::One);
+        assert!(q.previous().is_none());
+        assert_eq!(q.repeat(), Repeat::All);
+    }
+
+    #[test]
+    fn previous_walks_back_through_context_positions_then_forward_again() {
         let mut q = Queue::with_seed(1);
         q.set_context(ctx(), tracks(4), Some(0), Some(false));
         q.next_manual();
@@ -700,21 +939,85 @@ mod tests {
         assert_eq!(cur(&q), "t2");
         assert_eq!(q.previous().unwrap().track.id, "t1");
         assert_eq!(q.previous().unwrap().track.id, "t0");
-        assert!(q.previous().is_none(), "no more history");
+        assert!(!q.has_previous());
+        assert!(q.previous().is_none(), "first track: caller restarts");
+        assert_eq!(cur(&q), "t0");
         assert_eq!(q.next_manual().unwrap().track.id, "t1");
         assert_eq!(q.next_manual().unwrap().track.id, "t2");
     }
 
     #[test]
-    fn previous_from_a_user_item_requeues_it() {
+    fn previous_after_a_jump_ahead_goes_to_the_skipped_neighbour() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx(), tracks(6), Some(0), Some(false));
+        let t4 = q.view().next_up[3].item_id.clone();
+        q.jump(&t4).unwrap();
+        assert_eq!(cur(&q), "t4");
+        // t3 never played, but it's the previous context position.
+        assert_eq!(q.previous().unwrap().track.id, "t3");
+        assert_eq!(ids(&q.view().next_up), vec!["t4", "t5"]);
+    }
+
+    #[test]
+    fn previous_skips_a_queued_song_that_played_between_context_tracks() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx(), tracks(4), Some(1), Some(false));
+        q.add(vec![track("u", "B", "/p")], AddAt::End);
+        assert_eq!(q.advance_auto().unwrap().track.id, "u");
+        assert_eq!(q.advance_auto().unwrap().track.id, "t2");
+        assert_eq!(q.previous().unwrap().track.id, "t1");
+        assert!(q.view().user_queue.is_empty());
+    }
+
+    #[test]
+    fn previous_on_a_queued_song_drops_it_and_returns_to_the_context_track() {
         let mut q = Queue::with_seed(1);
         q.set_context(ctx(), tracks(3), Some(0), Some(false));
         q.add(vec![track("u", "B", "/p")], AddAt::Next);
         assert_eq!(q.next_manual().unwrap().track.id, "u");
         assert_eq!(q.previous().unwrap().track.id, "t0");
-        assert_eq!(ids(&q.view().user_queue), vec!["u"]);
-        assert_eq!(q.next_manual().unwrap().track.id, "u");
+        assert!(q.view().user_queue.is_empty(), "the queued song is dropped");
         assert_eq!(q.next_manual().unwrap().track.id, "t1");
+        assert_eq!(q.next_manual().unwrap().track.id, "t2");
+    }
+
+    #[test]
+    fn previous_on_a_queued_song_with_no_context_track_before_it_restarts() {
+        let mut q = Queue::with_seed(1);
+        q.add(vec![track("u", "B", "/p")], AddAt::End);
+        q.advance();
+        assert_eq!(cur(&q), "u");
+        assert!(!q.has_previous());
+        assert!(q.previous().is_none());
+        assert_eq!(cur(&q), "u");
+    }
+
+    #[test]
+    fn shuffled_previous_walks_the_shuffled_order() {
+        let mut q = Queue::with_seed(4);
+        q.set_context(ctx(), tracks(8), None, Some(true));
+        let mut played = vec![cur(&q)];
+        for _ in 0..3 {
+            played.push(q.next_manual().unwrap().track.id);
+        }
+        for want in played.iter().rev().skip(1) {
+            assert_eq!(&q.previous().unwrap().track.id, want);
+        }
+        assert!(q.previous().is_none());
+    }
+
+    #[test]
+    fn rewind_goes_back_to_the_first_track_with_the_rest_upcoming() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx(), tracks(3), Some(0), Some(false));
+        q.advance_auto();
+        q.advance_auto();
+        assert!(q.advance_auto().is_none());
+        assert_eq!(q.rewind().unwrap().track.id, "t0");
+        assert_eq!(cur(&q), "t0");
+        assert_eq!(ids(&q.view().next_up), vec!["t1", "t2"]);
+        assert_eq!(ids(&q.view().history), vec!["t2", "t1", "t0"]);
+        assert!(Queue::new().rewind().is_none());
     }
 
     #[test]
@@ -918,5 +1221,204 @@ mod tests {
         // New ids don't collide after restore.
         let a = r.add(vec![track("x", "B", "/p")], AddAt::End);
         assert!(q.find(&a[0].item_id).is_none());
+    }
+
+    fn ctx_id(id: &str) -> ContextInfo {
+        ContextInfo {
+            kind: ContextKind::Album,
+            id: Some(id.into()),
+            title: None,
+        }
+    }
+
+    #[test]
+    fn fresh_context_starts_at_track_one() {
+        let mut q = Queue::with_seed(1);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(5), None, None).unwrap();
+        assert_eq!(item.track.id, "t0");
+        assert_eq!(ms, 0);
+        assert!(!q.shuffle());
+    }
+
+    #[test]
+    fn a_context_played_before_resumes_at_its_track_and_position() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(5), Some(2), None);
+        q.note_position(42_000);
+        // Something else plays in between.
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(5), None, None).unwrap();
+        assert_eq!(item.track.id, "t2");
+        assert_eq!(ms, 42_000);
+        assert_eq!(ids(&q.view().next_up), vec!["t3", "t4"]);
+        // An explicit start track wins over the resume point.
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(5), Some(4), None).unwrap();
+        assert_eq!(item.track.id, "t4");
+        assert_eq!(ms, 0);
+    }
+
+    #[test]
+    fn resume_while_a_queued_song_plays_points_at_the_next_context_track() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(5), Some(1), None);
+        q.add(vec![track("u", "B", "/p")], AddAt::End);
+        q.advance_auto();
+        q.note_position(9_000);
+        let rp = q.resume_point("x").unwrap();
+        assert_eq!((rp.index, rp.track_id.as_str(), rp.position_ms), (2, "t2", 0));
+    }
+
+    #[test]
+    fn resume_point_for_a_missing_track_starts_at_track_one() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(5), Some(3), None);
+        q.note_position(5_000);
+        // The playlist changed: t3 is gone.
+        let changed: Vec<Track> = tracks(5).into_iter().filter(|t| t.id != "t3").collect();
+        let (item, ms) = q.set_context_at(ctx_id("x"), changed, None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t0", 0));
+        // A moved track is still found.
+        q.set_context(ctx_id("z"), tracks(5), Some(4), None);
+        q.note_position(1_000);
+        let mut moved = tracks(5);
+        moved.rotate_right(1); // t4 is now first
+        let (item, ms) = q.set_context_at(ctx_id("z"), moved, None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t4", 1_000));
+    }
+
+    #[test]
+    fn shuffle_on_starts_on_a_random_track_not_the_resume_point() {
+        let mut starts = HashSet::new();
+        for seed in 0..30 {
+            let mut q = Queue::with_seed(seed);
+            q.set_context(ctx_id("x"), tracks(10), Some(5), Some(false));
+            q.note_position(30_000);
+            let (item, ms) = q.set_context_at(ctx_id("x"), tracks(10), None, Some(true)).unwrap();
+            assert_eq!(ms, 0);
+            starts.insert(item.track.id);
+        }
+        assert!(starts.len() > 3, "{starts:?}");
+    }
+
+    #[test]
+    fn context_memory_is_capped_dropping_the_least_recent() {
+        let mut q = Queue::with_seed(1);
+        for i in 0..CONTEXT_MEMORY_CAP + 5 {
+            let id = format!("c{i}");
+            q.set_context(ctx_id(&id), tracks(2), Some(1), Some(true));
+            q.note_position(1);
+        }
+        assert!(q.resume_point("c0").is_none());
+        assert!(q.resume_point("c4").is_none());
+        assert!(q.resume_point("c5").is_some());
+        assert!(!q.shuffle_pref("c0"));
+        assert!(q.shuffle_pref("c5"));
+        assert_eq!(q.shuffled_contexts().len(), CONTEXT_MEMORY_CAP);
+    }
+
+    #[test]
+    fn shuffle_is_remembered_per_context() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(5), None, None);
+        q.set_shuffle(true);
+        assert!(q.shuffle_pref("x"));
+        // Another album plays unshuffled.
+        q.set_context(ctx_id("y"), tracks(5), None, None);
+        assert!(!q.shuffle());
+        // Back to x: still shuffled.
+        q.set_context(ctx_id("x"), tracks(5), None, None);
+        assert!(q.shuffle());
+        // A preference set for a context that isn't playing.
+        q.set_context_shuffle("y", true);
+        assert!(q.shuffle(), "x is still playing, unchanged");
+        q.set_context(ctx_id("y"), tracks(5), None, None);
+        assert!(q.shuffle());
+        // For the playing context it applies now.
+        q.set_context_shuffle("y", false);
+        assert!(!q.shuffle());
+        assert!(!q.shuffle_pref("y"));
+        assert_eq!(q.shuffled_contexts(), vec!["x".to_string()]);
+    }
+
+    #[test]
+    fn shuffle_prefs_and_resume_points_survive_serde() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(5), Some(2), Some(true));
+        q.note_position(7_000);
+        q.set_context(ctx_id("y"), tracks(5), Some(3), Some(false));
+        q.note_position(8_000);
+        let json = serde_json::to_string(&q).unwrap();
+        let r: Queue = serde_json::from_str(&json).unwrap();
+        assert!(r.shuffle_pref("x"));
+        assert!(!r.shuffle_pref("y"));
+        assert_eq!(r.resume_point("y").unwrap().position_ms, 8_000);
+        assert_eq!(r.resume_point("y").unwrap().track_id, "t3");
+        // Files written before these fields existed still load.
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        v.as_object_mut().unwrap().remove("resume");
+        v.as_object_mut().unwrap().remove("shuffled");
+        let old: Queue = serde_json::from_value(v).unwrap();
+        assert!(old.resume_point("y").is_none());
+    }
+
+    /// Several artists, uneven counts, like a real playlist.
+    fn mixed_tracks() -> Vec<Track> {
+        let mut t = Vec::new();
+        for (a, n) in [("A", 12), ("B", 8), ("C", 6), ("D", 4)] {
+            for i in 0..n {
+                t.push(track(&format!("{a}{i}"), a, "/p"));
+            }
+        }
+        t
+    }
+
+    fn full_order(q: &Queue) -> Vec<QueueItem> {
+        let mut o = vec![q.current().unwrap().clone()];
+        o.extend(q.view().next_up);
+        o
+    }
+
+    #[test]
+    fn spread_is_the_default_style_and_standard_is_plain_random() {
+        assert_eq!(Queue::new().shuffle_style(), ShuffleStyle::Spread);
+        let t = mixed_tracks();
+        let runs = 200;
+        let (mut spread_adj, mut std_adj) = (0, 0);
+        let mut first_counts: HashMap<String, usize> = HashMap::new();
+        for seed in 0..runs {
+            let mut q = Queue::with_seed(seed);
+            q.set_context(ctx_id("x"), t.clone(), Some(0), Some(true));
+            spread_adj += adjacent_same_artist(&full_order(&q));
+
+            let mut q = Queue::with_seed(seed);
+            q.set_shuffle_style(ShuffleStyle::Standard);
+            q.set_context(ctx_id("x"), t.clone(), Some(0), Some(true));
+            let o = full_order(&q);
+            // A permutation with the start first.
+            assert_eq!(o.len(), t.len());
+            assert_eq!(o[0].track.id, "A0");
+            let set: HashSet<_> = o.iter().map(|i| i.track.id.clone()).collect();
+            assert_eq!(set.len(), t.len());
+            std_adj += adjacent_same_artist(&o);
+            *first_counts.entry(o[1].track.id.clone()).or_default() += 1;
+        }
+        let spread_avg = spread_adj as f64 / runs as f64;
+        let std_avg = std_adj as f64 / runs as f64;
+        // Plain random: about sum(n*(n-1))/N = (132+56+30+12)/30 = 7.7 pairs.
+        assert!((6.0..9.5).contains(&std_avg), "standard {std_avg}");
+        assert!(spread_avg < std_avg / 3.0, "spread {spread_avg} vs standard {std_avg}");
+        // Standard isn't biased: many different tracks come up second.
+        assert!(first_counts.len() > 20, "{}", first_counts.len());
+    }
+
+    #[test]
+    fn standard_style_also_applies_when_toggling_shuffle_on() {
+        let mut q = Queue::with_seed(2);
+        q.set_shuffle_style(ShuffleStyle::Standard);
+        q.set_context(ctx_id("x"), tracks(10), Some(3), Some(false));
+        q.set_shuffle(true);
+        let o = full_order(&q);
+        assert_eq!(o[0].track.id, "t3");
+        assert_eq!(o.len(), 10);
     }
 }

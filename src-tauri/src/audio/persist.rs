@@ -67,6 +67,8 @@ mod tests {
             Some(2),
             Some(false),
         );
+        q.note_position(12_000);
+        q.set_context_shuffle("other", true);
         q.add(vec![track("u", "B", "/p")], AddAt::End);
         q.set_repeat(Repeat::All);
         let p = Persisted {
@@ -83,6 +85,11 @@ mod tests {
         assert!(r.muted);
         assert_eq!(r.queue.view(), q.view());
         assert_eq!(r.queue.repeat(), Repeat::All);
+        // Resume points and shuffle preferences are saved with the queue.
+        let rp = r.queue.resume_point("pl").unwrap();
+        assert_eq!((rp.track_id.as_str(), rp.position_ms), ("t2", 12_000));
+        assert!(r.queue.shuffle_pref("other"));
+        assert!(!r.queue.shuffle_pref("pl"));
     }
 
     #[test]

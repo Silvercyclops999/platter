@@ -25,12 +25,12 @@ use super::events::{
 };
 use super::output::AudioOutput;
 use super::persist::{self, Persisted};
-use super::queue::{AddAt, ContextInfo, Queue, QueueItem, Repeat};
+use super::queue::{AddAt, ContextInfo, Queue, QueueItem, Repeat, ShuffleStyle};
 use super::source::{PlayContext, TrackLookup, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
 
-/// "Previous" restarts the track instead when past this point.
+/// "Previous" restarts the track instead at or past this point.
 pub const PREVIOUS_RESTART_MS: u64 = 3_000;
 const PROBLEMS_CAP: usize = 200;
 
@@ -48,6 +48,8 @@ pub struct PlayerConfig {
     pub engine: EngineConfig,
     /// Fixed shuffle seed (tests).
     pub seed: Option<u64>,
+    /// Starting shuffle style (from settings).
+    pub shuffle_style: ShuffleStyle,
 }
 
 impl Default for PlayerConfig {
@@ -61,6 +63,7 @@ impl Default for PlayerConfig {
             position_interval: Duration::from_millis(250),
             engine: EngineConfig::default(),
             seed: None,
+            shuffle_style: ShuffleStyle::default(),
         }
     }
 }
@@ -84,6 +87,8 @@ enum Cmd {
     SetVolume(f32, Reply<()>),
     SetMuted(bool, Reply<()>),
     SetShuffle(bool, Reply<()>),
+    SetContextShuffle(String, bool, Reply<()>),
+    SetShuffleStyle(ShuffleStyle, Reply<()>),
     SetRepeat(Repeat, Reply<()>),
     QueueAdd(Vec<Track>, AddAt, Reply<()>),
     QueueRemove(String, Reply<()>),
@@ -170,6 +175,7 @@ impl PlayerHandle {
             volume = p.volume.clamp(0.0, 1.0);
             muted = p.muted;
         }
+        queue.set_shuffle_style(config.shuffle_style);
         let status = if queue.current().is_some() {
             PlayerStatus::Paused
         } else {
@@ -270,6 +276,14 @@ impl PlayerHandle {
     }
     pub async fn set_shuffle(&self, shuffle: bool) -> AppResult<()> {
         self.call(|r| Cmd::SetShuffle(shuffle, r)).await
+    }
+    /// Shuffle preference for a context by id: applies now if it's
+    /// playing, otherwise the next time it plays.
+    pub async fn set_context_shuffle(&self, context_id: String, shuffle: bool) -> AppResult<()> {
+        self.call(|r| Cmd::SetContextShuffle(context_id, shuffle, r)).await
+    }
+    pub async fn set_shuffle_style(&self, style: ShuffleStyle) -> AppResult<()> {
+        self.call(|r| Cmd::SetShuffleStyle(style, r)).await
     }
     pub async fn set_repeat(&self, repeat: Repeat) -> AppResult<()> {
         self.call(|r| Cmd::SetRepeat(repeat, r)).await
@@ -379,7 +393,11 @@ impl Actor {
 
     // ------------------------------------------------------------ helpers
 
+    /// Also records the current context's resume point, since everything
+    /// that marks dirty (track change, pause, seek, the periodic save while
+    /// playing) is a moment it should be updated.
     fn mark_dirty(&mut self) {
+        self.queue.note_position(self.position_ms());
         if self.config.persist_path.is_some() {
             self.dirty = true;
             self.persist_at = Some(Instant::now() + self.config.persist_debounce);
@@ -426,6 +444,7 @@ impl Actor {
             volume: self.volume,
             muted: self.muted,
             shuffle: self.queue.shuffle(),
+            shuffled_contexts: self.queue.shuffled_contexts(),
             repeat: self.queue.repeat(),
             queue: self.queue.view(),
         }
@@ -585,14 +604,19 @@ impl Actor {
                 shuffle,
                 reply,
             } => {
+                // Remember where the outgoing context was left.
+                self.queue.note_position(self.position_ms());
                 self.end_current_as_skip();
                 let start = start_track_id
                     .as_ref()
                     .and_then(|id| tracks.iter().position(|t| &t.id == id));
                 self.skip_ids.clear();
                 self.failures_in_row = 0;
-                self.queue.set_context(info, tracks, start, shuffle);
-                let r = self.start_current(true, 0);
+                let at = self
+                    .queue
+                    .set_context_at(info, tracks, start, shuffle)
+                    .map_or(0, |(_, ms)| ms);
+                let r = self.start_current(true, at);
                 let _ = reply.send(r);
             }
             Cmd::Toggle(reply) => {
@@ -622,13 +646,19 @@ impl Actor {
                 let _ = reply.send(r);
             }
             Cmd::Previous(reply) => {
-                let pos = self.position_ms();
-                let r = if pos > PREVIOUS_RESTART_MS || self.queue.view().history.is_empty() {
+                // At or past 3 s: restart (repeat-one is kept). Earlier: the
+                // previous context position, or a restart on the first one.
+                let r = if self.position_ms() >= PREVIOUS_RESTART_MS {
                     self.do_seek(0)
-                } else {
+                } else if self.queue.has_previous() {
                     self.end_current_as_skip();
+                    self.failures_in_row = 0;
                     self.queue.previous();
                     self.start_current(true, 0)
+                } else {
+                    self.queue.previous(); // drops repeat-one
+                    self.update_next();
+                    self.do_seek(0)
                 };
                 let _ = reply.send(r);
             }
@@ -653,6 +683,16 @@ impl Actor {
                 self.mark_dirty();
                 let _ = reply.send(Ok(()));
             }
+            Cmd::SetContextShuffle(id, s, reply) => {
+                self.queue.set_context_shuffle(&id, s);
+                self.update_next();
+                self.mark_dirty();
+                let _ = reply.send(Ok(()));
+            }
+            Cmd::SetShuffleStyle(style, reply) => {
+                self.queue.set_shuffle_style(style);
+                let _ = reply.send(Ok(()));
+            }
             Cmd::SetRepeat(r, reply) => {
                 self.queue.set_repeat(r);
                 self.update_next();
@@ -663,7 +703,7 @@ impl Actor {
                 self.queue.add(tracks, at);
                 if self.queue.current().is_none() {
                     // Nothing loaded: the first queued track becomes current.
-                    self.queue.next_manual();
+                    self.queue.advance();
                     self.status = PlayerStatus::Paused;
                     self.restore_pos = 0;
                 }
@@ -780,11 +820,16 @@ impl Actor {
         Ok(())
     }
 
+    /// Nothing more to play. With repeat off the context rewinds to its
+    /// first track, paused at 0:00, with the rest listed as upcoming.
     fn end_of_queue(&mut self) {
         self.engine.stop();
         self.cur_key = None;
         self.next_key = None;
         self.restore_pos = 0;
+        if self.queue.repeat() == Repeat::Off {
+            self.queue.rewind();
+        }
         self.status = if self.queue.current().is_some() {
             PlayerStatus::Paused
         } else {

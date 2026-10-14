@@ -206,12 +206,13 @@ async fn plays_a_context_gaplessly_with_tracking_signals() {
         vec!["start a", "end a", "start b", "end b", "start c", "end c"]
     );
     let s = wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
-    assert_eq!(tid(&s.track), "c");
+    // The context ended (repeat off): back to its first track, paused.
+    assert_eq!(tid(&s.track), "a");
     assert_eq!(s.position_ms, 0);
     let want = concat(&r, &["a", "b", "c"]);
     assert_eq!(settled_samples(&r.cap, want.len()).await, want);
     let hist: Vec<String> = s.queue.history.iter().map(|i| i.track.id.clone()).collect();
-    assert_eq!(hist, vec!["b", "a"]);
+    assert_eq!(hist, vec!["c", "b", "a"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -617,4 +618,176 @@ async fn crash_without_flush_restores_queue_and_position() {
     assert_eq!(tid(&s.track), "b");
     assert_eq!(s.position_ms, 1_500);
     assert_eq!(s.queue.next_up.len(), 1);
+}
+
+fn album(id: &str, ids: &[&str]) -> PlayContext {
+    PlayContext {
+        kind: ContextKind::Album,
+        id: Some(id.into()),
+        track_ids: Some(ids.iter().map(|s| s.to_string()).collect()),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn previous_at_exactly_3s_restarts_and_keeps_repeat_one() {
+    let mut r = rig(&["a", "b", "c"], 5.0, true, PlayerConfig::default()).await;
+    r.player
+        .play_context(ctx(&["a", "b", "c"]), Some("b".into()), Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    r.player.set_repeat(Repeat::One).await.unwrap();
+    r.player.pause().await.unwrap();
+    r.player.seek(3_000).await.unwrap();
+    r.player.previous().await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "b");
+    assert_eq!(s.position_ms, 0);
+    assert_eq!(s.repeat, Repeat::One, "a late Previous keeps repeat-one");
+    // Now under 3 s: back to "a", and repeat-one drops to repeat-all.
+    r.player.previous().await.unwrap();
+    let s = wait_state(&r.player, |s| tid(&s.track) == "a").await;
+    assert_eq!(s.repeat, Repeat::All);
+    // First track, early Previous: restarts.
+    r.player.previous().await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "a");
+    assert_eq!(s.position_ms, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn previous_on_a_queued_song_drops_it() {
+    let mut r = rig(&["a", "b", "u"], 5.0, true, PlayerConfig::default()).await;
+    r.player
+        .play_context(ctx(&["a", "b"]), None, Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.queue_add(vec!["u".into()], AddAt::End).await.unwrap();
+    r.player.next().await.unwrap();
+    next_tracking(&mut r.tracking, started("u")).await;
+    r.player.previous().await.unwrap();
+    let s = wait_state(&r.player, |s| tid(&s.track) == "a").await;
+    assert!(s.queue.user_queue.is_empty());
+    assert_eq!(s.queue.next_up.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn next_in_repeat_one_drops_to_repeat_all() {
+    let mut r = rig(&["a", "b"], 5.0, true, PlayerConfig::default()).await;
+    r.player
+        .play_context(ctx(&["a", "b"]), None, Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.set_repeat(Repeat::One).await.unwrap();
+    r.player.next().await.unwrap();
+    let s = wait_state(&r.player, |s| tid(&s.track) == "b").await;
+    assert_eq!(s.repeat, Repeat::All);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn context_end_rewinds_to_the_first_track_paused() {
+    let mut r = rig(&["a", "b", "c"], 0.2, false, PlayerConfig::default()).await;
+    r.player
+        .play_context(ctx(&["a", "b", "c"]), Some("b".into()), Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, ended("c")).await;
+    let s = wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    assert_eq!(tid(&s.track), "a");
+    assert_eq!(s.position_ms, 0);
+    let up: Vec<String> = s.queue.next_up.iter().map(|i| i.track.id.clone()).collect();
+    assert_eq!(up, vec!["b", "c"]);
+    // Play starts the context from the top.
+    r.player.resume().await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_context_resumes_where_it_was_left_even_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("queue.json");
+    let cfg = || PlayerConfig {
+        persist_path: Some(path.clone()),
+        ..Default::default()
+    };
+    let ids = ["a", "b", "c", "x"];
+    {
+        let mut r = rig(&ids, 5.0, true, cfg()).await;
+        r.player
+            .play_context(album("al", &["a", "b", "c"]), Some("b".into()), None)
+            .await
+            .unwrap();
+        next_tracking(&mut r.tracking, started("b")).await;
+        r.player.pause().await.unwrap();
+        r.player.seek(2_000).await.unwrap();
+        // Something else plays, then the app quits.
+        r.player
+            .play_context(album("other", &["x"]), None, None)
+            .await
+            .unwrap();
+        next_tracking(&mut r.tracking, started("x")).await;
+        r.player.flush().await;
+    }
+    let mut r = rig(&ids, 5.0, true, cfg()).await;
+    r.player
+        .play_context(album("al", &["a", "b", "c"]), None, None)
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    let s = r.player.state().await.unwrap();
+    assert!(s.position_ms >= 2_000, "{}", s.position_ms);
+    // A context never played before starts at track 1.
+    r.player
+        .play_context(album("fresh", &["c", "a"]), None, None)
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, started("c")).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shuffle_is_per_context_and_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("queue.json");
+    let cfg = || PlayerConfig {
+        persist_path: Some(path.clone()),
+        ..Default::default()
+    };
+    let ids = ["a", "b", "c", "d"];
+    {
+        let mut r = rig(&ids, 5.0, true, cfg()).await;
+        r.player
+            .play_context(album("one", &["a", "b"]), None, None)
+            .await
+            .unwrap();
+        next_tracking(&mut r.tracking, started("a")).await;
+        // Set for a context that isn't playing: nothing changes now.
+        r.player.set_context_shuffle("two".into(), true).await.unwrap();
+        let s = r.player.state().await.unwrap();
+        assert!(!s.shuffle);
+        assert_eq!(s.shuffled_contexts, vec!["two".to_string()]);
+        r.player.flush().await;
+    }
+    let mut r = rig(&ids, 5.0, true, cfg()).await;
+    assert_eq!(
+        r.player.state().await.unwrap().shuffled_contexts,
+        vec!["two".to_string()]
+    );
+    r.player
+        .play_context(album("two", &["c", "d"]), None, None)
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, |e| matches!(e, TrackingEvent::TrackStarted { .. })).await;
+    assert!(r.player.state().await.unwrap().shuffle);
+    // The playing context's toggle applies now and is remembered.
+    r.player.set_context_shuffle("two".into(), false).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert!(!s.shuffle);
+    assert!(s.shuffled_contexts.is_empty());
+    r.player
+        .play_context(album("one", &["a", "b"]), Some("a".into()), None)
+        .await
+        .unwrap();
+    assert!(!r.player.state().await.unwrap().shuffle);
 }

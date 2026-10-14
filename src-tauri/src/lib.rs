@@ -111,6 +111,7 @@ pub fn run() {
                 PlayerConfig {
                     persist_path: Some(data_dir.join("queue.json")),
                     cache_dir: Some(audio_dir.clone()),
+                    shuffle_style: settings::load(&db).shuffle_style,
                     ..Default::default()
                 },
             );
@@ -172,6 +173,7 @@ pub fn run() {
             audio::commands::set_volume,
             audio::commands::set_muted,
             audio::commands::set_shuffle,
+            audio::commands::set_context_shuffle,
             audio::commands::set_repeat,
             audio::commands::queue_add,
             audio::commands::queue_remove,

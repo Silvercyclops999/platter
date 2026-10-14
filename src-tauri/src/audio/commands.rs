@@ -66,6 +66,17 @@ pub async fn set_shuffle(player: State<'_, PlayerHandle>, shuffle: bool) -> AppR
     player.set_shuffle(shuffle).await
 }
 
+/// Shuffle preference for an album/playlist/artist by id. Applies now if
+/// it's the playing context, otherwise the next time it plays.
+#[tauri::command]
+pub async fn set_context_shuffle(
+    player: State<'_, PlayerHandle>,
+    context_id: String,
+    shuffle: bool,
+) -> AppResult<()> {
+    player.set_context_shuffle(context_id, shuffle).await
+}
+
 #[tauri::command]
 pub async fn set_repeat(player: State<'_, PlayerHandle>, repeat: Repeat) -> AppResult<()> {
     player.set_repeat(repeat).await
