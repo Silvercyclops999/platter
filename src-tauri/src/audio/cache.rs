@@ -7,14 +7,18 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use parking_lot::Mutex;
+use reqwest::StatusCode;
+use reqwest::header::RANGE;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
 
-use super::source::TrackResolver;
+use super::gate::{Permit, Priority, TransferGate};
+use super::http::parse_total;
+use super::source::{StreamSource, TrackResolver};
 use crate::model::Track;
 
 /// Stable cache key for a track's current file (the part key changes when the
@@ -92,7 +96,8 @@ impl DiskCache {
 
     /// Stores a complete file and evicts old entries past the cap.
     pub fn insert_bytes(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
-        let tmp = self.dir.join(format!("{key}.part"));
+        // Distinct from a pre-cache download's partial file for the same key.
+        let tmp = self.dir.join(format!("{key}.ins.part"));
         fs::write(&tmp, bytes)?;
         fs::rename(&tmp, self.path(key))?;
         self.evict();
@@ -157,10 +162,39 @@ impl DiskCache {
     }
 }
 
-/// Downloads wanted tracks into the cache one at a time, in order.
+/// What the pre-cacher needs to know about the engine.
+pub trait PrecacheHost: Send + Sync {
+    /// True when the playing and preloaded streams are fully buffered (or
+    /// paused with a full read-ahead window), so pre-caching won't compete.
+    fn precache_allowed(&self) -> bool;
+    /// The engine is already streaming this track (don't download it twice).
+    fn is_streaming(&self, track: &Track) -> bool;
+}
+
+/// Downloads wanted tracks into the cache one at a time, in order, through
+/// the transfer gate at the lowest priority. A preempted download keeps its
+/// partial file and resumes by `Range`.
 pub struct Precacher {
     want: Mutex<Vec<Track>>,
     wake: Arc<Notify>,
+}
+
+/// Collaborators of the pre-cache task.
+struct Deps {
+    cache: Arc<DiskCache>,
+    resolver: Arc<dyn TrackResolver>,
+    client: reqwest::Client,
+    gate: Arc<TransferGate>,
+    host: Option<Arc<dyn PrecacheHost>>,
+}
+
+impl Deps {
+    fn allowed(&self) -> bool {
+        self.host.as_ref().is_none_or(|h| h.precache_allowed())
+    }
+    fn streaming(&self, t: &Track) -> bool {
+        self.host.as_ref().is_some_and(|h| h.is_streaming(t))
+    }
 }
 
 impl Precacher {
@@ -169,26 +203,38 @@ impl Precacher {
         cache: Arc<DiskCache>,
         resolver: Arc<dyn TrackResolver>,
         client: reqwest::Client,
+        gate: Arc<TransferGate>,
+        host: Option<Arc<dyn PrecacheHost>>,
     ) -> Arc<Self> {
         let me = Arc::new(Self {
             want: Mutex::new(Vec::new()),
             wake: Arc::new(Notify::new()),
         });
+        let deps = Deps {
+            cache,
+            resolver,
+            client,
+            gate,
+            host,
+        };
         let weak = Arc::downgrade(&me);
         let wake = me.wake.clone();
         handle.spawn(async move {
             loop {
                 let notified = wake.notified();
                 let Some(me) = weak.upgrade() else { return };
-                let next = me
-                    .want
-                    .lock()
-                    .iter()
-                    .find(|t| !cache.contains(&cache_key(t)))
-                    .cloned();
+                let next = if deps.allowed() {
+                    me.want
+                        .lock()
+                        .iter()
+                        .find(|t| !deps.cache.contains(&cache_key(t)) && !deps.streaming(t))
+                        .cloned()
+                } else {
+                    None
+                };
                 match next {
                     Some(t) => {
-                        if let Err(e) = download(&cache, &*resolver, &client, &t, &me).await {
+                        if let Err(e) = download(&deps, &t, &me).await {
                             tracing::debug!("precache {} failed: {e}", t.id);
                             // Don't hammer: drop it from the wish list.
                             me.want.lock().retain(|w| w.id != t.id);
@@ -196,7 +242,9 @@ impl Precacher {
                     }
                     None => {
                         drop(me);
-                        notified.await;
+                        // Re-check periodically: the engine's buffering
+                        // state changes without telling us.
+                        let _ = tokio::time::timeout(Duration::from_millis(200), notified).await;
                     }
                 }
             }
@@ -204,7 +252,7 @@ impl Precacher {
         me
     }
 
-    /// Replaces the wish list (current + next N tracks, in priority order).
+    /// Replaces the wish list (upcoming tracks, in priority order).
     pub fn set_wanted(&self, tracks: Vec<Track>) {
         *self.want.lock() = tracks;
         self.wake.notify_one();
@@ -222,43 +270,135 @@ impl Drop for Precacher {
     }
 }
 
-async fn download(
-    cache: &DiskCache,
-    resolver: &dyn TrackResolver,
-    client: &reqwest::Client,
-    track: &Track,
-    pre: &Precacher,
-) -> Result<(), String> {
+/// How one download attempt ended.
+enum Attempt {
+    Done,
+    /// Preempted: resume later by range.
+    Yield,
+    Failed(String),
+}
+
+async fn download(d: &Deps, track: &Track, pre: &Precacher) -> Result<(), String> {
     let key = cache_key(track);
-    let src = resolver.stream(track).await.map_err(|e| e.to_string())?;
-    let mut req = client.get(&src.url);
-    for (k, v) in &src.headers {
-        req = req.header(k.as_str(), v.as_str());
-    }
-    let mut resp = req.send().await.map_err(|e| e.without_url().to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("http {}", resp.status().as_u16()));
-    }
-    let part = cache.part_path(&key);
-    let mut f = tokio::fs::File::create(&part).await.map_err(|e| e.to_string())?;
-    let result: Result<(), String> = async {
-        while let Some(chunk) = resp.chunk().await.map_err(|e| e.without_url().to_string())? {
-            f.write_all(&chunk).await.map_err(|e| e.to_string())?;
-            if !pre.still_wanted(&track.id) {
-                return Err("no longer wanted".into());
+    let src = d.resolver.stream(track).await.map_err(|e| e.to_string())?;
+    let part = d.cache.part_path(&key);
+    let prio = Priority::Precache.cell();
+    let mut failures = 0u32;
+    let result = loop {
+        if !pre.still_wanted(&track.id) {
+            break Err("no longer wanted".to_string());
+        }
+        if d.streaming(track) {
+            break Err("being streamed".to_string());
+        }
+        if !d.allowed() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+        let permit = d.gate.acquire(&prio).await;
+        let a = attempt(d, &src, &part, pre, &track.id, &permit).await;
+        drop(permit);
+        match a {
+            Attempt::Done => break Ok(()),
+            Attempt::Yield => {}
+            Attempt::Failed(e) => {
+                failures += 1;
+                if failures >= 3 {
+                    break Err(e);
+                }
+                tokio::time::sleep(Duration::from_millis(250 * failures as u64)).await;
             }
         }
-        f.flush().await.map_err(|e| e.to_string())?;
-        Ok(())
-    }
-    .await;
-    drop(f);
+    };
     match result {
-        Ok(()) => cache.commit(&key).map_err(|e| e.to_string()),
+        Ok(()) => d.cache.commit(&key).map_err(|e| e.to_string()),
         Err(e) => {
             let _ = tokio::fs::remove_file(&part).await;
             Err(e)
         }
+    }
+}
+
+/// One request, continuing the partial file from where it ends. Checks for
+/// preemption only between chunks, so a file write is never cut short.
+async fn attempt(
+    d: &Deps,
+    src: &StreamSource,
+    part: &Path,
+    pre: &Precacher,
+    id: &str,
+    permit: &Permit,
+) -> Attempt {
+    let have = tokio::fs::metadata(part).await.map(|m| m.len()).unwrap_or(0);
+    let mut req = d.client.get(&src.url);
+    for (k, v) in &src.headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let sent = tokio::select! {
+        r = req.header(RANGE, format!("bytes={have}-")).send() => r,
+        _ = permit.preempted() => return Attempt::Yield,
+    };
+    let mut resp = match sent {
+        Ok(r) => r,
+        Err(e) => return Attempt::Failed(e.without_url().to_string()),
+    };
+    let status = resp.status();
+    if status == StatusCode::RANGE_NOT_SATISFIABLE && have > 0 {
+        return Attempt::Done; // every byte is already here
+    }
+    if !status.is_success() {
+        return Attempt::Failed(format!("http {}", status.as_u16()));
+    }
+    let total = parse_total(resp.headers()).or_else(|| resp.content_length());
+    // 200 means the server ignored the range: start over.
+    let append = status == StatusCode::PARTIAL_CONTENT;
+    let file = if append {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(part)
+            .await
+    } else {
+        tokio::fs::File::create(part).await
+    };
+    let mut f = match file {
+        Ok(f) => f,
+        Err(e) => return Attempt::Failed(e.to_string()),
+    };
+    let mut written = if append { have } else { 0 };
+    loop {
+        let next = tokio::select! {
+            c = resp.chunk() => c,
+            _ = permit.preempted() => {
+                let _ = f.flush().await;
+                return Attempt::Yield;
+            }
+        };
+        match next {
+            Ok(Some(chunk)) => {
+                if let Err(e) = f.write_all(&chunk).await {
+                    let _ = f.flush().await;
+                    return Attempt::Failed(e.to_string());
+                }
+                written += chunk.len() as u64;
+                if !pre.still_wanted(id) {
+                    let _ = f.flush().await;
+                    return Attempt::Failed("no longer wanted".into());
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                let _ = f.flush().await;
+                return Attempt::Failed(e.without_url().to_string());
+            }
+        }
+    }
+    if let Err(e) = f.flush().await {
+        return Attempt::Failed(e.to_string());
+    }
+    match total {
+        Some(t) if written < t => Attempt::Failed("short body".into()),
+        _ => Attempt::Done,
     }
 }
 

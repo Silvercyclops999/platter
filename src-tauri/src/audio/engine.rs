@@ -23,9 +23,10 @@ use parking_lot::{Condvar, Mutex};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use super::cache::{DiskCache, cache_key};
+use super::cache::{DiskCache, PrecacheHost, cache_key};
 use super::convert::Converter;
 use super::decode::{DecodeError, TrackDecoder, extension_hint};
+use super::gate::{Priority, PriorityCell, TransferGate};
 use super::http::{HttpConfig, HttpSource, HttpStats};
 use super::output::{AudioOutput, OutputCallback, OutputEvent, OutputFormat, Renderer};
 use super::source::{StreamSource, TrackResolver};
@@ -82,13 +83,16 @@ pub enum Origin {
 struct LoaderCtl {
     cancel: AtomicBool,
     seek: Mutex<Option<(u64, u64)>>, // (generation, ms)
+    /// Transfer-gate priority of this segment's stream.
+    prio: PriorityCell,
 }
 
 impl LoaderCtl {
-    fn new() -> Arc<Self> {
+    fn new(prio: Priority) -> Arc<Self> {
         Arc::new(Self {
             cancel: AtomicBool::new(false),
             seek: Mutex::new(None),
+            prio: prio.cell(),
         })
     }
 }
@@ -113,7 +117,7 @@ struct Segment {
 }
 
 impl Segment {
-    fn new(key: u64, tag: String, track: Track, start_frame: u64) -> Self {
+    fn new(key: u64, tag: String, track: Track, start_frame: u64, prio: Priority) -> Self {
         Self {
             key,
             tag,
@@ -125,7 +129,7 @@ impl Segment {
             done: false,
             started: false,
             generation: 0,
-            ctl: LoaderCtl::new(),
+            ctl: LoaderCtl::new(prio),
             stats: None,
             origin: None,
         }
@@ -298,6 +302,11 @@ impl Renderer for Core {
                             tag: seg.tag.clone(),
                         });
                     }
+                    // The next track is now the audible one: its stream
+                    // gets top transfer priority.
+                    if let Some(next) = m.segments.front() {
+                        next.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
+                    }
                     let listened_ms = m.frames_to_ms(seg.listened);
                     events.push(EngineEvent::Ended {
                         key: seg.key,
@@ -361,6 +370,7 @@ struct Env {
     cache: Option<Arc<DiskCache>>,
     client: reqwest::Client,
     rt: Handle,
+    gate: Arc<TransferGate>,
 }
 
 pub struct EngineDeps {
@@ -370,6 +380,29 @@ pub struct EngineDeps {
     pub rt: Handle,
     pub output: Box<dyn AudioOutput>,
     pub config: EngineConfig,
+    /// Shared with the pre-cacher: one HTTP body transfer at a time.
+    pub gate: Arc<TransferGate>,
+}
+
+impl PrecacheHost for Core {
+    fn precache_allowed(&self) -> bool {
+        let m = self.mix.lock();
+        // A queued next track that hasn't started loading is fine: the
+        // pre-cacher fetches it itself (and the loader then finds it on disk).
+        m.segments.iter().take(2).all(|s| match s.origin {
+            Some(Origin::Cache) => true,
+            Some(_) => s.stats.as_ref().is_some_and(|st| st.get().idle),
+            None => false,
+        })
+    }
+
+    fn is_streaming(&self, track: &Track) -> bool {
+        self.mix
+            .lock()
+            .segments
+            .iter()
+            .any(|s| s.track.id == track.id && s.origin != Some(Origin::Cache))
+    }
 }
 
 /// Position of the audible track.
@@ -421,6 +454,7 @@ impl Engine {
             cache: deps.cache,
             client: deps.client,
             rt: deps.rt,
+            gate: deps.gate,
         });
         (
             Self {
@@ -430,6 +464,12 @@ impl Engine {
             },
             rx,
         )
+    }
+
+    /// For the pre-cacher: lets it wait until the playing/next streams are
+    /// buffered and skip tracks the engine is already streaming.
+    pub fn precache_host(&self) -> Arc<dyn PrecacheHost> {
+        self.env.core.clone()
     }
 
     fn core(&self) -> &Core {
@@ -493,7 +533,7 @@ impl Engine {
             m.cancel_all();
             m.next = None;
             let start_frame = m.ms_to_frames(start_ms);
-            let seg = Segment::new(key, tag, track.clone(), start_frame);
+            let seg = Segment::new(key, tag, track.clone(), start_frame, Priority::Current);
             ctl = seg.ctl.clone();
             m.segments.push_back(seg);
             m.playing = play;
@@ -729,7 +769,7 @@ impl Drop for Engine {
 
 fn take_pending(m: &mut Mix) -> Option<(u64, Track, Arc<LoaderCtl>)> {
     let p = m.next.take()?;
-    let seg = Segment::new(p.key, p.tag, p.track.clone(), 0);
+    let seg = Segment::new(p.key, p.tag, p.track.clone(), 0, Priority::Next);
     let ctl = seg.ctl.clone();
     m.segments.push_back(seg);
     Some((p.key, p.track, ctl))
@@ -756,7 +796,13 @@ struct Opened {
     cache_from: Option<HttpStats>,
 }
 
-fn open_from(env: &Env, track: &Track, src: StreamSource, origin: Origin) -> Result<Opened, OpenFail> {
+fn open_from(
+    env: &Env,
+    track: &Track,
+    src: StreamSource,
+    origin: Origin,
+    prio: &PriorityCell,
+) -> Result<Opened, OpenFail> {
     let hint = src
         .codec_hint
         .clone()
@@ -766,6 +812,8 @@ fn open_from(env: &Env, track: &Track, src: StreamSource, origin: Origin) -> Res
         env.client.clone(),
         src,
         env.core.cfg.http.clone(),
+        env.gate.clone(),
+        prio.clone(),
     )
     .map_err(|e| match e {
         AppError::NotFound(_) | AppError::Auth(_) => OpenFail::Fatal(e),
@@ -784,13 +832,18 @@ fn open_from(env: &Env, track: &Track, src: StreamSource, origin: Origin) -> Res
     })
 }
 
-fn open_track(env: &Env, track: &Track, transcode: bool) -> Result<Opened, OpenFail> {
+fn open_track(
+    env: &Env,
+    track: &Track,
+    transcode: bool,
+    prio: &PriorityCell,
+) -> Result<Opened, OpenFail> {
     if transcode {
         let src = env
             .rt
             .block_on(env.resolver.transcode(track))
             .map_err(OpenFail::Fatal)?;
-        return open_from(env, track, src, Origin::Transcode);
+        return open_from(env, track, src, Origin::Transcode, prio);
     }
     if let Some(cache) = &env.cache
         && let Some(path) = cache.get(&cache_key(track))
@@ -816,7 +869,7 @@ fn open_track(env: &Env, track: &Track, transcode: bool) -> Result<Opened, OpenF
             AppError::NotFound(_) | AppError::Auth(_) => OpenFail::Fatal(e),
             other => OpenFail::Retry(other),
         })?;
-    open_from(env, track, src, Origin::Stream)
+    open_from(env, track, src, Origin::Stream, prio)
 }
 
 /// Push result for a decoded block.
@@ -883,13 +936,13 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
     let core = env.core.clone();
     // 1. Open: cache → original stream → transcoder.
     let mut transcoded = false;
-    let mut opened = match open_track(&env, &track, false) {
+    let mut opened = match open_track(&env, &track, false, &ctl.prio) {
         Ok(o) => o,
         Err(OpenFail::Fatal(e)) => return fail(&env, key, &track, e),
         Err(OpenFail::Retry(e)) => {
             tracing::info!("track {} not playable directly ({e}); trying transcode", track.id);
             transcoded = true;
-            match open_track(&env, &track, true) {
+            match open_track(&env, &track, true, &ctl.prio) {
                 Ok(o) => o,
                 Err(OpenFail::Fatal(e) | OpenFail::Retry(e)) => return fail(&env, key, &track, e),
             }
@@ -976,7 +1029,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             if let Err(e) = opened.dec.seek_ms(ms) {
                 tracing::warn!("seek failed on {}: {e}", track.id);
                 // Reopen from scratch and try once more.
-                match open_track(&env, &track, transcoded) {
+                match open_track(&env, &track, transcoded, &ctl.prio) {
                     Ok(o) => {
                         opened = o;
                         if opened.dec.seek_ms(ms).is_err() {
@@ -1090,7 +1143,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 if !pushed_any && !transcoded && !matches!(e, DecodeError::Io(_)) {
                     tracing::info!("decode of {} failed ({e}); trying transcode", track.id);
                     transcoded = true;
-                    match open_track(&env, &track, true) {
+                    match open_track(&env, &track, true, &ctl.prio) {
                         Ok(o) => {
                             opened = o;
                             conv = Converter::new(

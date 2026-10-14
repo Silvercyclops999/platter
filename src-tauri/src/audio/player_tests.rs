@@ -208,7 +208,8 @@ async fn plays_a_context_gaplessly_with_tracking_signals() {
     let s = wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
     assert_eq!(tid(&s.track), "c");
     assert_eq!(s.position_ms, 0);
-    assert_eq!(r.cap.samples(), concat(&r, &["a", "b", "c"]));
+    let want = concat(&r, &["a", "b", "c"]);
+    assert_eq!(settled_samples(&r.cap, want.len()).await, want);
     let hist: Vec<String> = s.queue.history.iter().map(|i| i.track.id.clone()).collect();
     assert_eq!(hist, vec!["b", "a"]);
 }
@@ -325,7 +326,8 @@ async fn missing_file_is_skipped_with_error_and_problem_logged() {
     assert_eq!(probs.len(), 1);
     assert_eq!(probs[0].track_id, "b");
     // a then c, back to back.
-    assert_eq!(r.cap.samples(), concat(&r, &["a", "c"]));
+    let want = concat(&r, &["a", "c"]);
+    assert_eq!(settled_samples(&r.cap, want.len()).await, want);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -338,7 +340,67 @@ async fn missing_first_track_skips_to_the_next() {
         .unwrap();
     next_tracking(&mut r.tracking, ended("b")).await;
     assert_eq!(r.player.problems().len(), 1);
-    assert_eq!(r.cap.samples(), concat(&r, &["b"]));
+    let want = concat(&r, &["b"]);
+    assert_eq!(settled_samples(&r.cap, want.len()).await, want);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_transfer_server_plays_queue_with_precache() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache_dir = dir.path().join("cache");
+    let mut r = rig(
+        &["a", "b", "c"],
+        1.0,
+        true,
+        PlayerConfig {
+            cache_dir: Some(cache_dir.clone()),
+            precache_count: 5,
+            ..Default::default()
+        },
+    )
+    .await;
+    // The server aborts any transfer when a newer one starts, and is slowish.
+    r.server.state.exclusive.store(true, std::sync::atomic::Ordering::SeqCst);
+    for route in r.server.state.routes.lock().values_mut() {
+        route.chunk_delay = Some(Duration::from_millis(15));
+    }
+    r.player
+        .play_context(ctx(&["a", "b", "c"]), None, Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, ended("c")).await;
+    let want = concat(&r, &["a", "b", "c"]);
+    assert_eq!(settled_samples(&r.cap, want.len()).await, want);
+    assert!(r.sink.errors.lock().is_empty(), "{:?}", r.sink.errors.lock());
+    assert!(r.player.problems().is_empty());
+    // Never two transfers at once: the server never had to cut one off.
+    assert_eq!(r.server.state.killed.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    // Whatever landed in the cache is complete and intact, and the upcoming
+    // tracks were pre-cached while "a" played.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let names: Vec<String> = std::fs::read_dir(&cache_dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        let has = |id: &str| names.iter().any(|n| n.starts_with(&format!("{id}-")) && n.ends_with(".audio"));
+        if has("b") && has("c") && !names.iter().any(|n| n.ends_with(".part")) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "cache incomplete: {names:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    for (id, body) in &r.bodies {
+        let path = cache_dir.join(format!(
+            "{}.audio",
+            super::cache::cache_key(r.resolver.tracks.lock().get(id).unwrap())
+        ));
+        if path.exists() {
+            assert_eq!(&std::fs::read(&path).unwrap(), body, "cached {id}");
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -449,9 +511,12 @@ async fn position_events_flow_while_playing_and_volume_state_updates() {
     let mut r = rig(&["a"], 2.0, true, PlayerConfig::default()).await;
     r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
     next_tracking(&mut r.tracking, started("a")).await;
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while r.sink.positions.lock().len() < 3 {
+        assert!(Instant::now() < deadline, "no position events");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let pos = r.sink.positions.lock().clone();
-    assert!(pos.len() >= 3, "{}", pos.len());
     assert!(pos.iter().all(|p| p.duration_ms == 2_000));
     assert!(pos.last().unwrap().buffered_ms >= pos.last().unwrap().position_ms);
     r.player.set_volume(0.25).await.unwrap();

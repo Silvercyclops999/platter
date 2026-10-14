@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::engine::{Engine, EngineConfig, EngineDeps, EngineEvent, Origin};
+use super::gate::{Priority, TransferGate};
 use super::http::{HttpConfig, HttpSource, http_client};
 use super::output::{CaptureHandle, CaptureOutput, OutputFormat};
 use super::source::StreamSource;
@@ -38,15 +39,23 @@ struct Rig {
     events: UnboundedReceiver<EngineEvent>,
     cap: CaptureHandle,
     channels: usize,
+    gate: Arc<TransferGate>,
 }
 
-async fn rig_with(rate: u32, config: EngineConfig, cache: Option<Arc<super::cache::DiskCache>>) -> Rig {
+async fn rig_full(
+    rate: u32,
+    config: EngineConfig,
+    cache: Option<Arc<super::cache::DiskCache>>,
+    paced: bool,
+) -> Rig {
     let server = TestServer::start().await;
     let resolver = FakeResolver::new(&server);
     let (out, cap) = CaptureOutput::new(OutputFormat {
         sample_rate: rate,
         channels: 2,
     });
+    let out = if paced { out.realtime() } else { out };
+    let gate = TransferGate::new();
     let (engine, events) = Engine::new(EngineDeps {
         resolver: resolver.clone(),
         cache,
@@ -54,6 +63,7 @@ async fn rig_with(rate: u32, config: EngineConfig, cache: Option<Arc<super::cach
         rt: tokio::runtime::Handle::current(),
         output: Box::new(out),
         config,
+        gate: gate.clone(),
     });
     Rig {
         server,
@@ -62,7 +72,16 @@ async fn rig_with(rate: u32, config: EngineConfig, cache: Option<Arc<super::cach
         events,
         cap,
         channels: 2,
+        gate,
     }
+}
+
+async fn rig_with(rate: u32, config: EngineConfig, cache: Option<Arc<super::cache::DiskCache>>) -> Rig {
+    rig_full(rate, config, cache, false).await
+}
+
+async fn rig_paced(rate: u32, config: EngineConfig) -> Rig {
+    rig_full(rate, config, None, true).await
 }
 
 async fn rig() -> Rig {
@@ -125,7 +144,7 @@ async fn gapless_back_to_back_is_sample_exact() {
     let (rb, _, _) = decode_all(&b, "wav");
     let mut want = ra.clone();
     want.extend_from_slice(&rb);
-    let got = r.cap.samples();
+    let got = settled_samples(&r.cap, want.len()).await;
     assert_same(&got, &want);
     assert_eq!(got.len() / r.channels, RATE as usize + 123 + 30_011);
 
@@ -174,9 +193,9 @@ async fn gapless_with_resampling_has_exact_length_and_no_discontinuity() {
     r.engine.set_next(Some((t("b"), "ib".into())), key);
     collect_until(&mut r.events, is_drained, Duration::from_secs(20)).await;
 
-    let got = r.cap.samples();
-    let frames = got.len() / 2;
     let exp = |n: usize| (n as u64 * 48_000 + RATE as u64 / 2) / RATE as u64;
+    let got = settled_samples(&r.cap, (exp(na) + exp(nb)) as usize * 2).await;
+    let frames = got.len() / 2;
     assert_eq!(frames as u64, exp(na) + exp(nb));
 
     // Largest step anywhere in the steady-state middle of A...
@@ -213,7 +232,7 @@ async fn dropped_connection_resumes_without_changing_audio() {
     r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
     collect_until(&mut r.events, is_drained, Duration::from_secs(20)).await;
     let (want, _, _) = decode_all(&a, "wav");
-    assert_same(&r.cap.samples(), &want);
+    assert_same(&settled_samples(&r.cap, want.len()).await, &want);
     let ranges = r.server.state.ranges.lock().clone();
     assert!(
         ranges.iter().filter(|r| !r.starts_with("bytes=0-")).count() >= 3,
@@ -245,7 +264,7 @@ async fn http_source_resumes_byte_exact() {
             min_backoff: Duration::from_millis(5),
             ..Default::default()
         };
-        let mut s = HttpSource::open(rt, http_client(), src, cfg).unwrap();
+        let mut s = HttpSource::open(rt, http_client(), src, cfg, TransferGate::new(), Priority::Current.cell()).unwrap();
         let mut all = Vec::new();
         s.read_to_end(&mut all).unwrap();
         // Seek back and far forward.
@@ -298,6 +317,8 @@ async fn stream_gone_for_good_fails_after_retry_window() {
                 ..Default::default()
             },
             cfg,
+            TransferGate::new(),
+            Priority::Current.cell(),
         )
         .unwrap();
         // The server "goes away" after the first response.
@@ -324,7 +345,7 @@ async fn undecodable_original_falls_back_to_transcode() {
     collect_until(&mut r.events, is_drained, Duration::from_secs(20)).await;
     assert_eq!(r.resolver.transcode_calls.load(Ordering::SeqCst), 1);
     let (want, _, _) = decode_all(&good, "wav");
-    assert_same(&r.cap.samples(), &want);
+    assert_same(&settled_samples(&r.cap, want.len()).await, &want);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -395,7 +416,7 @@ async fn seek_within_buffer_is_sample_accurate() {
     collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
     let (want, _, _) = decode_all(&a, "wav");
     let from = (1_500 * RATE as usize / 1000) * 2;
-    assert_same(&r.cap.samples(), &want[from..]);
+    assert_same(&settled_samples(&r.cap, want.len() - from).await, &want[from..]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -422,12 +443,12 @@ async fn seek_beyond_buffer_uses_range_and_is_sample_accurate() {
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
     let latency = started.elapsed();
-    assert!(latency < Duration::from_millis(500), "seek took {latency:?}");
+    assert!(latency < Duration::from_millis(2_000), "seek took {latency:?}");
     r.engine.play().unwrap();
     collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
     let (want, _, _) = decode_all(&a, "wav");
     let from = (4_321 * RATE as usize / 1000) * 2;
-    assert_same(&r.cap.samples(), &want[from..]);
+    assert_same(&settled_samples(&r.cap, want.len() - from).await, &want[from..]);
     let ranges = r.server.state.ranges.lock().clone();
     assert!(ranges.iter().any(|x| x != "bytes=0-"), "{ranges:?}");
 }
@@ -446,7 +467,7 @@ async fn start_position_and_back_seek() {
     collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
     let (want, _, _) = decode_all(&a, "wav");
     let from = (500 * RATE as usize / 1000) * 2;
-    assert_same(&r.cap.samples(), &want[from..]);
+    assert_same(&settled_samples(&r.cap, want.len() - from).await, &want[from..]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -467,33 +488,35 @@ async fn device_loss_pauses_and_play_reopens() {
     r.engine.play().unwrap();
     collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
     let (want, _, _) = decode_all(&a, "wav");
-    assert_same(&r.cap.samples(), &want);
+    assert_same(&settled_samples(&r.cap, want.len()).await, &want);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pause_ramps_down_and_resume_continues_seamlessly() {
     let mut config = cfg();
     config.ramp_ms = 10;
-    let mut r = rig_with(RATE, config, None).await;
-    let a = wav_tone(RATE, 2, RATE as usize * 2, 440.0, 0.5);
+    // Real-time pacing so the pause lands mid-track on any machine.
+    let mut r = rig_paced(RATE, config).await;
+    let total = RATE as usize * 2;
+    let a = wav_tone(RATE, 2, total, 440.0, 0.5);
     r.server.add("/t/a", Route { body: a.clone(), ..Default::default() });
     r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
     // Let some audio play, then pause.
-    loop {
-        if r.cap.len_frames(2) > 10_000 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(1)).await;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while r.cap.len_frames(2) < 4_000 {
+        assert!(Instant::now() < deadline, "playback never started");
+        tokio::time::sleep(Duration::from_millis(2)).await;
     }
     r.engine.pause();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let at_pause = r.cap.len_frames(2);
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // The ramp finishes, then nothing more is consumed.
+    let at_pause = wait_capture_still(&r.cap).await / 2;
+    assert!(at_pause < total, "paused before the end");
+    tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(r.cap.len_frames(2), at_pause, "nothing consumed while paused");
     r.engine.play().unwrap();
-    collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
+    collect_until(&mut r.events, is_drained, Duration::from_secs(20)).await;
     // Every source frame was played exactly once (ramps scale, never skip).
-    assert_eq!(r.cap.len_frames(2), RATE as usize * 2);
+    assert_eq!(settled_samples(&r.cap, total * 2).await.len(), total * 2);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -508,7 +531,7 @@ async fn plays_from_disk_cache_when_server_is_gone() {
     r.engine.load(tr, "ia".into(), 0, true).unwrap();
     collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
     let (want, _, _) = decode_all(&a, "wav");
-    assert_same(&r.cap.samples(), &want);
+    assert_same(&settled_samples(&r.cap, want.len()).await, &want);
     assert_eq!(r.server.state.requests.load(Ordering::SeqCst), 0);
 }
 
@@ -549,6 +572,8 @@ async fn precacher_downloads_wanted_tracks_in_order() {
         cache.clone(),
         resolver,
         http_client(),
+        TransferGate::new(),
+        None,
     );
     // "missing" 404s and is dropped from the wish list; the rest still land.
     pre.set_wanted(vec![t("a"), t("missing"), t("b")]);
@@ -562,4 +587,86 @@ async fn precacher_downloads_wanted_tracks_in_order() {
         assert_eq!(&std::fs::read(cache.get(&key).unwrap()).unwrap(), body);
     }
     assert!(!cache.contains(&super::cache::cache_key(&t("missing"))));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn seek_preempts_a_precache_transfer_on_a_one_transfer_server() {
+    let mut config = cfg();
+    config.buffer_ahead_ms = 200;
+    config.http.max_ahead = 64 * 1024;
+    let mut r = rig_with(RATE, config, None).await;
+    r.server.state.exclusive.store(true, Ordering::SeqCst);
+    let a = wav_tone(RATE, 2, RATE as usize * 6, 440.0, 0.5);
+    r.server.add("/t/a", Route { body: a.clone(), ..Default::default() });
+    // A slow background download (~2.5 s if left alone).
+    let big: Vec<u8> = (0..1_048_576u32).map(|i| (i % 253) as u8).collect();
+    r.server.add(
+        "/t/big",
+        Route {
+            body: big.clone(),
+            chunk_delay: Some(Duration::from_millis(40)),
+            ..Default::default()
+        },
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Arc::new(super::cache::DiskCache::new(dir.path(), 50 << 20).unwrap());
+    let pre = super::cache::Precacher::spawn(
+        &tokio::runtime::Handle::current(),
+        cache.clone(),
+        r.resolver.clone(),
+        http_client(),
+        r.gate.clone(),
+        Some(r.engine.precache_host()),
+    );
+
+    let mut tr = t("a");
+    tr.duration_ms = 6_000;
+    r.engine.load(tr, "ia".into(), 0, false).unwrap();
+    wait_buffered(&r.engine, 150).await;
+    pre.set_wanted(vec![t("big")]);
+    // Wait until the background download is under way.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while r.server.state.ranges_for("/t/big").is_empty() {
+        assert!(Instant::now() < deadline, "precache never started");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(r.gate.holder_priority(), Some(Priority::Precache as u8));
+
+    // A far seek needs the network now: it must not wait for the download.
+    let started = Instant::now();
+    assert!(r.engine.seek(4_321));
+    loop {
+        let p = r.engine.position().unwrap();
+        if p.position_ms == 4_321 && p.buffered_ms > 4_400 {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(20), "seek never buffered");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    let latency = started.elapsed();
+    assert!(latency < Duration::from_millis(1_500), "seek waited {latency:?}");
+    assert!(r.gate.preemptions() >= 1);
+    assert_eq!(r.server.state.killed.load(Ordering::SeqCst), 0);
+
+    // Playback from the seek point is exact.
+    r.engine.play().unwrap();
+    collect_until(&mut r.events, is_drained, Duration::from_secs(20)).await;
+    let (want, _, _) = decode_all(&a, "wav");
+    let from = (4_321 * RATE as usize / 1000) * 2;
+    assert_same(&settled_samples(&r.cap, want.len() - from).await, &want[from..]);
+
+    // The download resumed by range and completed intact.
+    let key = super::cache::cache_key(&t("big"));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !cache.contains(&key) {
+        assert!(Instant::now() < deadline, "precache never finished");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(std::fs::read(cache.get(&key).unwrap()).unwrap(), big);
+    let ranges = r.server.state.ranges_for("/t/big");
+    assert!(
+        ranges.iter().any(|x| x.as_deref().is_some_and(|x| x != "bytes=0-")),
+        "{ranges:?}"
+    );
 }

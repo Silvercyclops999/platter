@@ -18,6 +18,7 @@ use tokio::time::Instant;
 
 use super::cache::{DiskCache, Precacher, cache_key};
 use super::engine::{Engine, EngineConfig, EngineDeps, EngineEvent};
+use super::gate::TransferGate;
 use super::events::{
     ErrorPayload, EventSink, PlayerState, PlayerStatus, PositionPayload, Problem, SKIPPED_MESSAGE,
     TrackingEvent, perceptual_gain,
@@ -127,16 +128,27 @@ impl PlayerHandle {
                 .map_err(|e| tracing::warn!("pre-cache disabled: {e}"))
                 .ok()
         });
-        let precacher = cache
-            .as_ref()
-            .map(|c| Precacher::spawn(&rt, c.clone(), resolver.clone(), client.clone()));
+        // One HTTP body transfer at a time across streams and pre-caching:
+        // some servers drop the older transfer when a second one starts.
+        let gate = TransferGate::new();
         let (engine, engine_rx) = Engine::new(EngineDeps {
-            resolver,
+            resolver: resolver.clone(),
             cache: cache.clone(),
-            client,
+            client: client.clone(),
             rt: rt.clone(),
             output,
             config: config.engine.clone(),
+            gate: gate.clone(),
+        });
+        let precacher = cache.as_ref().map(|c| {
+            Precacher::spawn(
+                &rt,
+                c.clone(),
+                resolver.clone(),
+                client.clone(),
+                gate.clone(),
+                Some(engine.precache_host()),
+            )
         });
         let (tx, rx) = mpsc::unbounded_channel();
         let (tracking, _) = broadcast::channel(256);

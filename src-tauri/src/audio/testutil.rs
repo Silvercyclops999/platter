@@ -89,6 +89,36 @@ pub fn decode_all(bytes: &[u8], hint: &str) -> (Vec<f32>, u32, usize) {
     (out, d.rate, d.channels)
 }
 
+/// Captured samples once at least `len` have arrived. The engine reports
+/// "ended"/"drained" from inside the render call, slightly before the
+/// capture thread stores that block, so tests must wait for the data.
+pub async fn settled_samples(cap: &super::output::CaptureHandle, len: usize) -> Vec<f32> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        if cap.samples().len() >= len || std::time::Instant::now() > deadline {
+            // Give any unexpected extra audio a moment to show up too.
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            return cap.samples();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+}
+
+/// Waits until the capture stops growing (e.g. after a pause ramp).
+pub async fn wait_capture_still(cap: &super::output::CaptureHandle) -> usize {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut last = cap.samples().len();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let now = cap.samples().len();
+        if now == last {
+            return now;
+        }
+        assert!(std::time::Instant::now() < deadline, "capture never went quiet");
+        last = now;
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Route {
     pub body: Vec<u8>,
@@ -97,6 +127,8 @@ pub struct Route {
     pub drop_after: Option<usize>,
     pub drops: usize,
     pub status: Option<u16>,
+    /// Pause between 16 KiB body chunks (a slow transfer).
+    pub chunk_delay: Option<std::time::Duration>,
 }
 
 #[derive(Default)]
@@ -104,6 +136,25 @@ pub struct ServerState {
     pub routes: Mutex<HashMap<String, Route>>,
     pub requests: AtomicUsize,
     pub ranges: Mutex<Vec<String>>,
+    /// (path, range) of every request.
+    pub log: Mutex<Vec<(String, Option<String>)>>,
+    /// Emulate a server that allows one transfer at a time: starting a body
+    /// aborts any other body still being sent.
+    pub exclusive: std::sync::atomic::AtomicBool,
+    pub transfer_gen: std::sync::atomic::AtomicU64,
+    /// Bodies aborted because a newer transfer started (exclusive mode).
+    pub killed: AtomicUsize,
+}
+
+impl ServerState {
+    pub fn ranges_for(&self, path: &str) -> Vec<Option<String>> {
+        self.log
+            .lock()
+            .iter()
+            .filter(|l| l.0 == path)
+            .map(|l| l.1.clone())
+            .collect()
+    }
 }
 
 pub struct TestServer {
@@ -145,6 +196,7 @@ impl TestServer {
                     if let Some(r) = &range {
                         st.ranges.lock().push(r.clone());
                     }
+                    st.log.lock().push((path.clone(), range.clone()));
                     let route = {
                         let mut routes = st.routes.lock();
                         match routes.get_mut(&path) {
@@ -208,9 +260,30 @@ impl TestServer {
                         Some(n) if route.drops > 0 => n.min(body.len()),
                         _ => body.len(),
                     };
+                    let my_gen = st.transfer_gen.fetch_add(1, Ordering::SeqCst) + 1;
                     for chunk in body[..send].chunks(16 * 1024) {
+                        if st.exclusive.load(Ordering::SeqCst)
+                            && st.transfer_gen.load(Ordering::SeqCst) != my_gen
+                        {
+                            // A newer transfer started: the newest one wins.
+                            // Only count it if the client was still reading
+                            // (not if it had already hung up on us).
+                            let mut probe = [0u8; 1];
+                            let client_gone = match sock.try_read(&mut probe) {
+                                Ok(0) => true,
+                                Ok(_) => false,
+                                Err(e) => e.kind() != std::io::ErrorKind::WouldBlock,
+                            };
+                            if !client_gone {
+                                st.killed.fetch_add(1, Ordering::SeqCst);
+                            }
+                            return;
+                        }
                         if sock.write_all(chunk).await.is_err() {
                             return;
+                        }
+                        if let Some(d) = route.chunk_delay {
+                            tokio::time::sleep(d).await;
                         }
                     }
                     let _ = sock.flush().await;

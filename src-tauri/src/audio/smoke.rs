@@ -67,6 +67,7 @@ async fn engine_plays_two_generated_tracks_gaplessly_on_the_default_device() {
         rt: tokio::runtime::Handle::current(),
         output: Box::new(CpalOutput::new()),
         config: EngineConfig::default(),
+        gate: super::gate::TransferGate::new(),
     });
     let mut a = track("a", "x", "/a");
     a.duration_ms = 2000;

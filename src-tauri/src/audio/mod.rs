@@ -15,6 +15,7 @@ pub mod convert;
 pub mod decode;
 pub mod engine;
 pub mod events;
+pub mod gate;
 pub mod http;
 pub mod output;
 pub mod persist;

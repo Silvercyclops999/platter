@@ -7,6 +7,10 @@
 //! are free; far seeks restart the fetch at the new offset; reads near the end
 //! of the file (trailing tags, MP4 `moov`) are served from a separately
 //! fetched tail so probing doesn't throw away the window.
+//!
+//! Every body transfer goes through the player's [`TransferGate`] (one
+//! transfer at a time). A preempted fetch drops its connection and resumes
+//! by `Range` once it gets the gate back; that is not counted as a failure.
 
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -19,22 +23,25 @@ use symphonia::core::io::MediaSource;
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
 
+use super::gate::{PriorityCell, TransferGate};
 use super::source::StreamSource;
 use crate::error::{AppError, AppResult};
 
 /// Tuning for [`HttpSource`].
 #[derive(Debug, Clone)]
 pub struct HttpConfig {
-    /// Stop fetching when this many bytes are buffered ahead of the reader.
+    /// Stop fetching when this many bytes are buffered ahead of the reader
+    /// (resume below three quarters of it).
     pub max_ahead: usize,
     /// Keep at most this many bytes behind the reader (for cheap back-seeks).
     pub keep_behind: usize,
-    /// Give up after this long without receiving a byte.
+    /// Give up after failing this long without receiving a byte.
     pub retry_window: Duration,
     /// First retry delay; doubles up to `max_backoff`.
     pub min_backoff: Duration,
     pub max_backoff: Duration,
-    /// How long `open` waits for the first response.
+    /// How long `open` waits for the first response (time spent waiting
+    /// for the transfer gate doesn't count).
     pub open_timeout: Duration,
     /// Seeks less than this far past the buffered end just wait for the data.
     pub jump_threshold: u64,
@@ -106,11 +113,19 @@ struct State {
     tail_failed: bool,
     /// Reconnects after a dropped connection (diagnostics / tests).
     resumes: u32,
+    /// The fetch task doesn't currently need the network (complete, or
+    /// paused with the read-ahead window full).
+    idle: bool,
+    /// The fetch task is waiting for the transfer gate.
+    gate_wait: bool,
 }
 
 impl State {
     fn end(&self) -> u64 {
         self.base + self.data.len() as u64
+    }
+    fn complete(&self) -> bool {
+        self.base == 0 && self.total == Some(self.data.len() as u64)
     }
 }
 
@@ -119,6 +134,22 @@ struct Shared {
     cv: Condvar,
     /// Wakes the fetch task (reader progressed, restart, close).
     wake: Notify,
+    /// Tells an in-flight request to drop (close, restart elsewhere).
+    abort: Notify,
+}
+
+impl Shared {
+    fn stats(&self) -> BufferStats {
+        let st = self.st.lock();
+        BufferStats {
+            read_pos: st.read_pos,
+            buffered_end: st.end(),
+            total: st.total,
+            complete: st.complete(),
+            resumes: st.resumes,
+            idle: st.idle && st.fatal.is_none(),
+        }
+    }
 }
 
 /// Seekable, read-ahead HTTP byte source. Must be read from a thread that is
@@ -130,9 +161,11 @@ pub struct HttpSource {
     client: reqwest::Client,
     src: Arc<StreamSource>,
     cfg: HttpConfig,
+    gate: Arc<TransferGate>,
+    prio: PriorityCell,
 }
 
-/// Snapshot of what's buffered, for `bufferedMs`.
+/// Snapshot of what's buffered, for `bufferedMs` and pre-cache gating.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BufferStats {
     pub read_pos: u64,
@@ -140,16 +173,22 @@ pub struct BufferStats {
     pub total: Option<u64>,
     pub complete: bool,
     pub resumes: u32,
+    /// Not transferring and not wanting to (complete or window full).
+    pub idle: bool,
 }
 
 impl HttpSource {
     /// Starts fetching and waits for the first response so a 404 or auth
     /// error surfaces here. Blocking; call from a non-runtime thread.
+    /// `prio` may be changed later (e.g. promoted when the track becomes
+    /// audible).
     pub fn open(
         handle: Handle,
         client: reqwest::Client,
         src: StreamSource,
         cfg: HttpConfig,
+        gate: Arc<TransferGate>,
+        prio: PriorityCell,
     ) -> AppResult<Self> {
         let shared = Arc::new(Shared {
             st: Mutex::new(State {
@@ -158,6 +197,7 @@ impl HttpSource {
             }),
             cv: Condvar::new(),
             wake: Notify::new(),
+            abort: Notify::new(),
         });
         let src = Arc::new(src);
         handle.spawn(fetch_task(
@@ -165,8 +205,10 @@ impl HttpSource {
             client.clone(),
             src.clone(),
             cfg.clone(),
+            gate.clone(),
+            prio.clone(),
         ));
-        let deadline = Instant::now() + cfg.open_timeout;
+        let mut deadline = Instant::now() + cfg.open_timeout;
         {
             let mut st = shared.st.lock();
             loop {
@@ -175,15 +217,28 @@ impl HttpSource {
                     st.closed = true;
                     drop(st);
                     shared.wake.notify_one();
+                    shared.abort.notify_one();
                     return Err(e);
                 }
                 if st.opened {
                     break;
                 }
-                if shared.cv.wait_until(&mut st, deadline).timed_out() && !st.opened {
+                if st.gate_wait {
+                    // Waiting behind another transfer isn't the server's fault.
+                    deadline = Instant::now() + cfg.open_timeout;
+                }
+                if shared
+                    .cv
+                    .wait_for(&mut st, Duration::from_millis(100))
+                    .timed_out()
+                    && !st.opened
+                    && !st.gate_wait
+                    && Instant::now() >= deadline
+                {
                     st.closed = true;
                     drop(st);
                     shared.wake.notify_one();
+                    shared.abort.notify_one();
                     return Err(AppError::Network("stream did not respond".into()));
                 }
             }
@@ -195,18 +250,13 @@ impl HttpSource {
             client,
             src,
             cfg,
+            gate,
+            prio,
         })
     }
 
     pub fn stats(&self) -> BufferStats {
-        let st = self.shared.st.lock();
-        BufferStats {
-            read_pos: st.read_pos,
-            buffered_end: st.end(),
-            total: st.total,
-            complete: st.base == 0 && st.total == Some(st.data.len() as u64),
-            resumes: st.resumes,
-        }
+        self.shared.stats()
     }
 
     /// Shared stats handle that stays valid after the source moves into the
@@ -217,8 +267,7 @@ impl HttpSource {
 
     /// The whole file, if it was fetched contiguously from byte 0.
     pub fn completed_bytes(&self) -> Option<Vec<u8>> {
-        let st = self.shared.st.lock();
-        (st.base == 0 && st.total == Some(st.data.len() as u64)).then(|| st.data.clone())
+        self.stats_handle().completed_bytes()
     }
 
     fn request_tail(&self, st: &mut State, total: u64) {
@@ -230,8 +279,31 @@ impl HttpSource {
         let shared = self.shared.clone();
         let client = self.client.clone();
         let src = self.src.clone();
+        let gate = self.gate.clone();
+        let prio = self.prio.clone();
         self.handle.spawn(async move {
-            let res = fetch_range(&client, &src, start, Some(total - 1)).await;
+            let mut attempts = 0;
+            let res = loop {
+                if shared.st.lock().closed {
+                    return;
+                }
+                let permit = gate.acquire(&prio).await;
+                tokio::select! {
+                    r = fetch_range(&client, &src, start, Some(total - 1)) => {
+                        attempts += 1;
+                        match r {
+                            Ok(b) => break Ok(b),
+                            Err(e) if attempts >= 3 => break Err(e),
+                            Err(_) => {
+                                drop(permit);
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                            }
+                        }
+                    }
+                    // Preempted: retry once the gate is ours again.
+                    _ = permit.preempted() => {}
+                }
+            };
             let mut st = shared.st.lock();
             match res {
                 Ok(bytes) if bytes.len() as u64 == total - start => {
@@ -250,20 +322,13 @@ pub struct HttpStats(Arc<Shared>);
 
 impl HttpStats {
     pub fn get(&self) -> BufferStats {
-        let st = self.0.st.lock();
-        BufferStats {
-            read_pos: st.read_pos,
-            buffered_end: st.end(),
-            total: st.total,
-            complete: st.base == 0 && st.total == Some(st.data.len() as u64),
-            resumes: st.resumes,
-        }
+        self.0.stats()
     }
 
     /// The whole file, if it was fetched contiguously from byte 0.
     pub fn completed_bytes(&self) -> Option<Vec<u8>> {
         let st = self.0.st.lock();
-        (st.base == 0 && st.total == Some(st.data.len() as u64)).then(|| st.data.clone())
+        st.complete().then(|| st.data.clone())
     }
 }
 
@@ -271,6 +336,7 @@ impl Drop for HttpSource {
     fn drop(&mut self) {
         self.shared.st.lock().closed = true;
         self.shared.wake.notify_one();
+        self.shared.abort.notify_one();
     }
 }
 
@@ -329,8 +395,11 @@ impl Read for HttpSource {
                 st.data.clear();
                 st.eof = false;
                 st.read_pos = pos;
-                self.shared.wake.notify_one();
+                st.idle = false;
+                self.shared.abort.notify_one();
             }
+            // The reader is waiting: make sure the fetcher knows.
+            self.shared.wake.notify_one();
             self.shared.cv.wait_for(&mut st, Duration::from_millis(100));
         }
     }
@@ -383,8 +452,8 @@ fn header_map(src: &StreamSource) -> HeaderMap {
     h
 }
 
-fn parse_total(h: &HeaderMap) -> Option<u64> {
-    // "bytes 100-199/1234"
+/// Total size from `Content-Range: bytes a-b/total`.
+pub(crate) fn parse_total(h: &HeaderMap) -> Option<u64> {
     let v = h.get(CONTENT_RANGE)?.to_str().ok()?;
     v.rsplit('/').next()?.trim().parse().ok()
 }
@@ -422,143 +491,92 @@ async fn fetch_range(
     Ok(b.to_vec())
 }
 
-async fn fetch_task(shared: Arc<Shared>, client: reqwest::Client, src: Arc<StreamSource>, cfg: HttpConfig) {
+/// What ended one request.
+enum Stop {
+    /// Go back and decide again (window full, restart, preempted, EOF).
+    Again,
+    /// The connection failed: back off and resume.
+    Failed,
+    /// Give up for good.
+    Exit,
+}
+
+async fn fetch_task(
+    shared: Arc<Shared>,
+    client: reqwest::Client,
+    src: Arc<StreamSource>,
+    cfg: HttpConfig,
+    gate: Arc<TransferGate>,
+    prio: PriorityCell,
+) {
     let mut backoff = cfg.min_backoff;
-    let mut last_progress = Instant::now();
-    'outer: loop {
-        // Where to fetch from, and wait while there's nothing to do.
-        let (generation, from) = loop {
+    // Set while requests keep failing; cleared by any received byte.
+    let mut failing_since: Option<Instant> = None;
+    let resume_below = cfg.max_ahead - cfg.max_ahead / 4;
+    loop {
+        // 1. Wait until bytes are needed. Holds no gate permit.
+        let generation = loop {
             let notified = shared.wake.notified();
             {
-                let st = shared.st.lock();
+                let mut st = shared.st.lock();
                 if st.closed {
                     return;
                 }
                 let complete = st.eof || st.total.is_some_and(|t| st.end() >= t);
                 let ahead = st.end().saturating_sub(st.read_pos) as usize;
-                if st.fatal.is_none() && !complete && ahead < cfg.max_ahead {
-                    break (st.generation, st.end());
+                let need = st.fatal.is_none() && !complete && ahead < resume_below;
+                st.idle = !need;
+                if need {
+                    break st.generation;
                 }
             }
             notified.await;
-            last_progress = Instant::now();
         };
 
-        let range = format!("bytes={from}-");
-        let resp = client
-            .get(&src.url)
-            .headers(header_map(&src))
-            .header(RANGE, range)
-            .send()
-            .await;
-        let mut resp = match resp {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::debug!("stream request failed: {}", e.without_url());
-                if !retry_wait(&shared, &mut backoff, last_progress, &cfg).await {
-                    break 'outer;
-                }
+        // 2. Wait for the transfer gate.
+        shared.st.lock().gate_wait = true;
+        let permit = tokio::select! {
+            p = gate.acquire(&prio) => Some(p),
+            _ = shared.abort.notified() => None,
+        };
+        let from = {
+            let mut st = shared.st.lock();
+            st.gate_wait = false;
+            shared.cv.notify_all();
+            if st.closed {
+                return;
+            }
+            if st.generation != generation {
                 continue;
             }
+            st.end()
         };
-        let status = resp.status();
-        if let Some(f) = classify(status) {
-            let mut st = shared.st.lock();
-            st.fatal = Some(f);
-            shared.cv.notify_all();
-            return;
-        }
-        if !status.is_success() {
-            // 5xx: transient server trouble, retry.
-            tracing::debug!("stream http {}", status.as_u16());
-            if !retry_wait(&shared, &mut backoff, last_progress, &cfg).await {
-                break 'outer;
-            }
-            continue;
-        }
-        // A 200 means the server ignored the range: skip what we have.
-        let mut skip = if status == StatusCode::OK { from } else { 0 };
-        {
-            let mut st = shared.st.lock();
-            if let Some(t) = parse_total(resp.headers()) {
-                st.total = Some(t);
-            } else if status == StatusCode::OK
-                && let Some(len) = resp.content_length()
-            {
-                st.total = Some(len);
-            }
-            st.opened = true;
-            shared.cv.notify_all();
-        }
-        loop {
-            let chunk = resp.chunk().await;
-            match chunk {
-                Ok(Some(mut bytes)) => {
-                    if skip > 0 {
-                        let n = (skip as usize).min(bytes.len());
-                        skip -= n as u64;
-                        let _ = bytes.split_to(n);
-                        if bytes.is_empty() {
-                            continue;
-                        }
-                    }
-                    last_progress = Instant::now();
-                    backoff = cfg.min_backoff;
+        let Some(permit) = permit else { continue };
+
+        // 3. One request, until it stops for any reason.
+        let stop = tokio::select! {
+            s = transfer(&shared, &client, &src, &cfg, generation, from, &mut failing_since, &mut backoff) => s,
+            _ = permit.preempted() => Stop::Again,
+            _ = shared.abort.notified() => Stop::Again,
+        };
+        drop(permit);
+        match stop {
+            Stop::Again => {}
+            Stop::Exit => return,
+            Stop::Failed => {
+                let since = *failing_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= cfg.retry_window {
+                    break;
+                }
+                {
                     let mut st = shared.st.lock();
                     if st.closed {
                         return;
                     }
-                    if st.generation != generation {
-                        continue 'outer;
-                    }
-                    st.data.extend_from_slice(&bytes);
-                    // Trim far-behind bytes so the window can't grow without bound.
-                    let behind = st.read_pos.saturating_sub(st.base) as usize;
-                    if behind > cfg.keep_behind * 2 {
-                        let drop_n = behind - cfg.keep_behind;
-                        st.data.drain(..drop_n);
-                        st.base += drop_n as u64;
-                    }
-                    shared.cv.notify_all();
-                    let ahead = st.end().saturating_sub(st.read_pos) as usize;
-                    if ahead >= cfg.max_ahead {
-                        // Pause: drop the connection, resume later by range.
-                        continue 'outer;
-                    }
+                    st.resumes += 1;
                 }
-                Ok(None) => {
-                    let early_close = {
-                        let mut st = shared.st.lock();
-                        if st.generation != generation {
-                            continue 'outer;
-                        }
-                        match st.total {
-                            Some(t) if st.end() < t => true,
-                            _ => {
-                                st.eof = true;
-                                if st.total.is_none() {
-                                    st.total = Some(st.end());
-                                }
-                                shared.cv.notify_all();
-                                false
-                            }
-                        }
-                    };
-                    // Connection closed early: resume from the last byte.
-                    if early_close
-                        && !retry_wait(&shared, &mut backoff, last_progress, &cfg).await
-                    {
-                        break 'outer;
-                    }
-                    continue 'outer;
-                }
-                Err(e) => {
-                    tracing::debug!("stream dropped: {}", e.without_url());
-                    if !retry_wait(&shared, &mut backoff, last_progress, &cfg).await {
-                        break 'outer;
-                    }
-                    continue 'outer;
-                }
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(cfg.max_backoff);
             }
         }
     }
@@ -566,27 +584,118 @@ async fn fetch_task(shared: Arc<Shared>, client: reqwest::Client, src: Arc<Strea
     if st.fatal.is_none() {
         st.fatal = Some(Fatal::Network("stream lost".into()));
     }
+    st.idle = false;
     shared.cv.notify_all();
 }
 
-/// Sleeps for the backoff; returns false once the retry window is exhausted.
-async fn retry_wait(
+#[allow(clippy::too_many_arguments)]
+async fn transfer(
     shared: &Arc<Shared>,
-    backoff: &mut Duration,
-    last_progress: Instant,
+    client: &reqwest::Client,
+    src: &StreamSource,
     cfg: &HttpConfig,
-) -> bool {
-    if last_progress.elapsed() >= cfg.retry_window {
-        return false;
+    generation: u64,
+    from: u64,
+    failing_since: &mut Option<Instant>,
+    backoff: &mut Duration,
+) -> Stop {
+    let resp = client
+        .get(&src.url)
+        .headers(header_map(src))
+        .header(RANGE, format!("bytes={from}-"))
+        .send()
+        .await;
+    let mut resp = match resp {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!("stream request failed: {}", e.without_url());
+            return Stop::Failed;
+        }
+    };
+    let status = resp.status();
+    if let Some(f) = classify(status) {
+        let mut st = shared.st.lock();
+        st.fatal = Some(f);
+        shared.cv.notify_all();
+        return Stop::Exit;
     }
+    if !status.is_success() {
+        // 5xx: transient server trouble, retry.
+        tracing::debug!("stream http {}", status.as_u16());
+        return Stop::Failed;
+    }
+    // A 200 means the server ignored the range: skip what we have.
+    let mut skip = if status == StatusCode::OK { from } else { 0 };
     {
         let mut st = shared.st.lock();
-        if st.closed {
-            return false;
+        if let Some(t) = parse_total(resp.headers()) {
+            st.total = Some(t);
+        } else if status == StatusCode::OK
+            && let Some(len) = resp.content_length()
+        {
+            st.total = Some(len);
         }
-        st.resumes += 1;
+        st.opened = true;
+        shared.cv.notify_all();
     }
-    tokio::time::sleep(*backoff).await;
-    *backoff = (*backoff * 2).min(cfg.max_backoff);
-    true
+    loop {
+        match resp.chunk().await {
+            Ok(Some(mut bytes)) => {
+                if skip > 0 {
+                    let n = (skip as usize).min(bytes.len());
+                    skip -= n as u64;
+                    let _ = bytes.split_to(n);
+                    if bytes.is_empty() {
+                        continue;
+                    }
+                }
+                *failing_since = None;
+                *backoff = cfg.min_backoff;
+                let mut st = shared.st.lock();
+                if st.closed {
+                    return Stop::Exit;
+                }
+                if st.generation != generation {
+                    return Stop::Again;
+                }
+                st.data.extend_from_slice(&bytes);
+                // Trim far-behind bytes so the window can't grow without bound.
+                let behind = st.read_pos.saturating_sub(st.base) as usize;
+                if behind > cfg.keep_behind * 2 {
+                    let drop_n = behind - cfg.keep_behind;
+                    st.data.drain(..drop_n);
+                    st.base += drop_n as u64;
+                }
+                shared.cv.notify_all();
+                let ahead = st.end().saturating_sub(st.read_pos) as usize;
+                if ahead >= cfg.max_ahead {
+                    // Window full: drop the connection (and the gate),
+                    // resume by range later.
+                    return Stop::Again;
+                }
+            }
+            Ok(None) => {
+                let mut st = shared.st.lock();
+                if st.generation != generation {
+                    return Stop::Again;
+                }
+                return match st.total {
+                    // Connection closed early: resume from the last byte.
+                    Some(t) if st.end() < t => Stop::Failed,
+                    _ => {
+                        st.eof = true;
+                        if st.total.is_none() {
+                            st.total = Some(st.end());
+                        }
+                        shared.cv.notify_all();
+                        Stop::Again
+                    }
+                };
+            }
+            Err(e) => {
+                tracing::debug!("stream dropped: {}", e.without_url());
+                return Stop::Failed;
+            }
+        }
+    }
 }
