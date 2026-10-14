@@ -147,7 +147,8 @@
 .lib-chips::-webkit-scrollbar { display: none; }
 .lib-chips .chip { flex: none; }
 .chip--sm { height: 32px; font-size: var(--font-size-sm); }
-.lib-chips__clear { width: 32px; padding: 0; justify-content: center; }
+.lib-chips__clear { display: inline-grid; place-items: center; flex: none; width: 32px; padding: 0; }
+.lib-chips__clear svg, .liked__chip-clear svg { display: block; }
 
 .lib-tools {
   display: flex;
