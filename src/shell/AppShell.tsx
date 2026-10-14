@@ -4,6 +4,7 @@ import { ContextMenuHost } from "../components/ContextMenu";
 import { Toaster } from "../components/Toast";
 import { Tooltip } from "../components/Tooltip";
 import { chrome } from "../lib/platform";
+import { useCurrentEntry } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { CommandPalette } from "./CommandPalette";
 import {
@@ -59,6 +60,8 @@ export function AppShell() {
   const shell = useRef<HTMLDivElement>(null);
   const layout = solveLayout({ windowWidth: width, sidebarWidth, rightWidth, rightOpen, sidebarCollapsed });
   const rail = layout.sidebarMode === "rail";
+  // Wide library mode: the library page spans from the left edge, so no sidebar.
+  const wideLibrary = useCurrentEntry().route.name === "library";
 
   // While dragging, widths go straight to CSS variables on the shell; the
   // store (and React) only hear about it on release, or when the sidebar
@@ -101,9 +104,9 @@ export function AppShell() {
     <div ref={shell} className={`app app--chrome-${chrome} ${queueOpen ? "has-queue" : ""} ${nowPlayingOpen ? "has-now-playing" : ""} ${slot.swap ? "right-swap" : ""} ${rail ? "sidebar-collapsed" : ""}`} style={style}>
       <TitleBar />
       <div className="app__body">
-        <Sidebar collapsed={rail} />
+        {!wideLibrary && <Sidebar collapsed={rail} auto={layout.sidebarAuto} />}
         {/* An auto-collapsed rail has no room to open into, so no handle. */}
-        {!layout.sidebarAuto && (
+        {!layout.sidebarAuto && !wideLibrary && (
           <ResizeHandle
             className="resize-handle--sidebar"
             label="Resize sidebar"

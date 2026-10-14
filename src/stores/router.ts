@@ -9,7 +9,8 @@ export type LibraryTab = "artists" | "albums" | "playlists";
 export type Route =
   | { name: "home" }
   | { name: "search"; query?: string }
-  | { name: "library"; tab: LibraryTab }
+  /** Wide library; a tab opens it filtered to that type. */
+  | { name: "library"; tab?: LibraryTab }
   | { name: "artist"; id: string }
   | { name: "album"; id: string }
   | { name: "playlist"; id: string }
