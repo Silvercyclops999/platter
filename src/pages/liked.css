@@ -37,8 +37,7 @@
 .liked-find__input::-webkit-search-cancel-button { display: none; }
 
 .liked__chips { margin: calc(-1 * var(--space-2)) 0 var(--space-6); }
-.liked__chip-clear { display: inline-grid; place-items: center; flex: none; width: 32px; padding: 0; }
-.liked__none { margin: var(--space-6) var(--space-4); color: var(--color-text-secondary); }
+
 .liked__empty .btn { margin-top: var(--space-4); }
 
 /* Table: number, title, album, date added, time. */
@@ -46,7 +45,7 @@
   grid-template-columns: 32px minmax(0, 5fr) minmax(0, 3fr) minmax(112px, 2fr) minmax(108px, auto);
 }
 .track-row__added,
-.track-list__added { font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track-list__added { font-size: var(--font-size-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @container main (max-width: 760px) {
   .liked__list :is(.track-row, .track-list__head).track-row--added { grid-template-columns: 32px minmax(0, 1fr) 0 0 minmax(108px, auto); }
   .liked__list .track-row__album,

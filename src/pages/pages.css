@@ -152,8 +152,9 @@
   text-align: center;
   color: var(--color-text-muted);
 }
-.empty-state__title { margin-top: var(--space-2); font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
-.empty-state__text { max-width: 360px; font-size: var(--font-size-md); color: var(--color-text-secondary); }
+/* A big bold heading, one grey line, then the next step as a pill. */
+.empty-state__title { margin-top: var(--space-2); font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; line-height: 1.2; color: var(--color-text-primary); }
+.empty-state__text { max-width: 420px; font-size: var(--font-size-lg); color: var(--color-text-secondary); }
 .empty-state .btn { margin-top: var(--space-2); }
 .see-more {
   margin: var(--space-2) var(--space-4) 0;
@@ -344,8 +345,8 @@
 .setting-row__control { display: flex; flex: none; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
 .settings__search { margin: 0 var(--space-3) var(--space-8); }
 .settings__empty { margin: 0 var(--space-3) var(--space-8); padding: var(--space-8) 0; text-align: center; }
-.settings__empty-title { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
-.settings__empty-hint { margin-top: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.settings__empty-title { font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; line-height: 1.2; color: var(--color-text-primary); overflow-wrap: anywhere; }
+.settings__empty-hint { margin-top: var(--space-2); font-size: var(--font-size-lg); color: var(--color-text-secondary); }
 .settings__hint { margin: 0 var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 /* In a narrow main pane the control drops under the text. */
 @container main (max-width: 640px) {

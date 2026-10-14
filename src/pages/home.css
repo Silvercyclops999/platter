@@ -154,7 +154,8 @@
 .shortcut--skeleton { background: var(--color-state-hover); }
 .shortcut__skeleton-line { width: 48%; height: 14px; margin-left: var(--space-3); border-radius: var(--radius-row); }
 
-@container main (max-width: 760px) {
+/* Four tiles a row only when each has room for its title. */
+@container main (max-width: 900px) {
   .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Narrow tiles give the title the full width; the play button floats over its end. */
   .shortcut__play { position: absolute; right: var(--space-2); top: 16px; margin-right: 0; }

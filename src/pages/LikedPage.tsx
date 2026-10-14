@@ -247,7 +247,7 @@ export function LikedPage() {
           <div role="group" aria-label="Filter by genre or mood" className="chips liked__chips">
             {activeChip ? (
               <>
-                <button type="button" className="chip chip--sm liked__chip-clear" aria-label="Clear filter" onClick={() => setChip(null)}>
+                <button type="button" className="chip chip--clear liked__chip-clear" aria-label="Clear filter" onClick={() => setChip(null)}>
                   <X size={16} aria-hidden="true" />
                 </button>
                 <button type="button" className="chip is-selected" aria-pressed="true" onClick={() => setChip(null)}>
@@ -273,9 +273,12 @@ export function LikedPage() {
             </Button>
           </div>
         ) : data && rows.length === 0 ? (
-          <p className="liked__none" role="status">
-            {query.trim() ? `No liked songs match "${query.trim()}"` : "No liked songs here"}
-          </p>
+          <div className="empty-state liked__none" role="status">
+            <h2 className="empty-state__title">{query.trim() ? `Couldn't find "${query.trim()}"` : "No liked songs here"}</h2>
+            <p className="empty-state__text">
+              {query.trim() ? "Check the spelling, or try fewer or different words." : "Clear the filter to see all your liked songs."}
+            </p>
+          </div>
         ) : (
           <LikedTable
             rows={rows}

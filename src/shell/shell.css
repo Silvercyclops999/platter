@@ -146,9 +146,7 @@
 }
 .lib-chips::-webkit-scrollbar { display: none; }
 .lib-chips .chip { flex: none; }
-.chip--sm { height: 32px; font-size: var(--font-size-sm); }
-.lib-chips__clear { display: inline-grid; place-items: center; flex: none; width: 32px; padding: 0; }
-.lib-chips__clear svg, .liked__chip-clear svg { display: block; }
+.chip--sm { height: 32px; }
 
 .lib-tools {
   display: flex;
@@ -249,6 +247,8 @@
 .lib-row__open:focus-visible { outline: none; }
 .lib-row__open:focus-visible::after { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
 .lib-row__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+/* Two-line rows: title about 16, subtitle about 14 (compact rows stay at 14). */
+.lib-row__text .lib-row__title { font-size: var(--font-size-lg); line-height: 1.3; }
 .lib-row__title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -272,7 +272,7 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--color-text-secondary);
   line-height: 1.35;
 }
@@ -281,13 +281,13 @@
 .lib-row--compact { gap: 0; }
 .lib-row__line { display: flex; align-items: center; min-width: 0; font-size: var(--font-size-md); }
 .lib-row__line .lib-row__title { min-width: 0; }
-.lib-row__type { flex: none; white-space: pre; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.lib-row__type { flex: none; white-space: pre; font-size: var(--font-size-md); color: var(--color-text-secondary); }
 
 /* Wide mode list: two date columns after the title. */
 .lib-row__added,
 .lib-row__played {
   flex: none;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
@@ -301,7 +301,7 @@
   margin-bottom: var(--space-2);
   padding: 0 var(--space-2);
   border-bottom: 1px solid rgba(255, 240, 220, 0.08);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--color-text-secondary);
 }
 .lib-thead > span:first-child { flex: 1; min-width: 0; }
@@ -353,6 +353,7 @@
 .lib-cell__title,
 .lib-cell__sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-cell__title { font-size: var(--font-size-md); color: var(--color-text-primary); line-height: 1.35; }
+.lib-cell__subtext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-cell__sub { display: flex; align-items: center; font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.35; }
 
 /* Rail tiles: art only, the title in a tooltip. */
@@ -757,7 +758,7 @@
 .np-next__art:focus-visible .np-next__play { opacity: 1; }
 .np-next__meta { display: flex; flex-direction: column; min-width: 0; }
 .np-next__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
-.np-next__artist { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.np-next__artist { font-size: var(--font-size-md); color: var(--color-text-secondary); }
 
 /* Full lyrics and full bio, in place of the cards. */
 .np-sub { animation: np-fade var(--motion-quick) ease; }

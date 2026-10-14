@@ -277,7 +277,7 @@
 .searchbox__icon { display: inline-flex; justify-content: center; width: 40px; color: var(--color-text-muted); }
 .searchbox__text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .searchbox__title { font-size: var(--font-size-md); color: var(--color-text-primary); }
-.searchbox__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.searchbox__sub { font-size: var(--font-size-md); color: var(--color-text-secondary); }
 .searchbox__play,
 .searchbox__remove {
   display: inline-flex;

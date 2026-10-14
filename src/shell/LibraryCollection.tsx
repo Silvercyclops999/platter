@@ -259,7 +259,7 @@ function Cell({ e, index, tabIndex, selected, isContext, playing, filtered, onMe
             <span className={`lib-cell__title ${isContext ? "is-playing" : ""}`}>{e.title}</span>
             <span className="lib-cell__sub">
               {e.pinned && pinGlyph}
-              {sub || " "}
+              <span className="lib-cell__subtext">{sub || " "}</span>
             </span>
           </>
         )}

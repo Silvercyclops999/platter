@@ -33,7 +33,7 @@ export function LibraryChips({ filter, sub, kinds }: { filter: LibFilter; sub: L
         };
         if (c.kind === "clear")
           return (
-            <button key="clear" type="button" className="chip chip--sm lib-chips__clear" aria-label="Clear filter" onClick={press}>
+            <button key="clear" type="button" className="chip chip--sm chip--clear lib-chips__clear" aria-label="Clear filter" onClick={press}>
               <X size={16} aria-hidden="true" />
             </button>
           );

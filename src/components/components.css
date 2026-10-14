@@ -56,17 +56,20 @@
     transform var(--motion-quick) var(--motion-easing);
 }
 .icon-btn:hover:not([aria-disabled="true"]) {
-  transform: scale(calc(1 + 0.05 * var(--motion-move)));
+  transform: scale(calc(1 + 0.04 * var(--motion-move)));
   transition-duration: var(--motion-very-quick);
 }
 .icon-btn:focus-visible { border-radius: var(--radius-pill); }
-.icon-btn--sm { width: 28px; height: 28px; }
+.icon-btn--sm { width: 32px; height: 32px; }
 .icon-btn--md { width: 32px; height: 32px; }
 .icon-btn--lg { width: 40px; height: 40px; }
 .icon-btn--xl { width: 48px; height: 48px; }
 .icon-btn__glyph { display: inline-flex; }
 .icon-btn--plain:hover:not([aria-disabled="true"]) { color: var(--color-text-primary); }
-.icon-btn:active:not([aria-disabled="true"]) { transform: scale(calc(1 - 0.04 * var(--motion-move))); }
+.icon-btn:active:not([aria-disabled="true"]) { opacity: 0.7; transform: none; }
+/* Filled and accent buttons shrink back a little instead of dimming. */
+.icon-btn--filled:active:not([aria-disabled="true"]),
+.icon-btn--accent:active:not([aria-disabled="true"]) { opacity: 1; transform: scale(calc(1 - 0.04 * var(--motion-move))); }
 .icon-btn--filled { background: rgba(0, 0, 0, 0.42); color: var(--color-text-primary); }
 .icon-btn--filled:hover:not([aria-disabled="true"]) { background: rgba(0, 0, 0, 0.6); }
 .icon-btn--accent { background: var(--color-accent); color: var(--color-text-on-accent); }
@@ -84,7 +87,7 @@
   border-radius: 50%;
   background: currentColor;
 }
-.icon-btn[aria-disabled="true"] { opacity: 0.38; }
+.icon-btn[aria-disabled="true"] { opacity: 0.5; }
 
 /* ---------------------------------------------------------------- Tooltip */
 .tooltip {
@@ -96,7 +99,7 @@
   border-radius: var(--radius-row);
   background: var(--color-bg-overlay);
   color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   white-space: nowrap;
@@ -253,7 +256,7 @@
   justify-content: space-between;
   gap: var(--space-4);
   width: 100%;
-  height: 36px;
+  height: 40px;
   padding: 0 var(--space-3);
   border-radius: 2px;
   font-size: var(--font-size-md);
@@ -299,7 +302,7 @@
   gap: var(--space-2);
   max-width: 480px;
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-pill);
   background: var(--color-text-primary);
   color: var(--color-bg-base);
   font-weight: var(--font-weight-semibold);
@@ -405,9 +408,22 @@
   font-weight: var(--font-weight-regular);
   transition: background-color var(--motion-fast) var(--motion-easing), color var(--motion-fast) var(--motion-easing);
 }
-.chip:hover { background: rgba(255, 240, 220, 0.16); }
-.chip.is-selected { background: var(--color-text-primary); color: var(--color-bg-base); font-weight: var(--font-weight-semibold); }
+.chip:hover { background: rgba(255, 240, 220, 0.16); transition-duration: var(--motion-very-quick); }
+/* Same weight as the unselected chip, so picking one doesn't change its width. */
+.chip.is-selected { background: var(--color-text-primary); color: var(--color-bg-base); }
+.chip.is-selected:hover { background: var(--color-accent-hover); }
+.chip:active { opacity: 0.85; }
 .chip:focus-visible { border-radius: var(--radius-pill); }
+/* Round clear button at the start of a filtered chip row. */
+.chip.chip--clear {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+.chip--clear svg { display: block; }
 
 /* ---------------------------------------------------------------- Switch */
 .switch {
@@ -507,9 +523,9 @@
 .search-field input:focus-visible { outline: none; }
 .search-field__clear {
   position: absolute;
-  right: 8px;
+  right: 6px;
   display: inline-flex;
-  padding: 6px;
+  padding: 8px;
   border-radius: var(--radius-pill);
   color: var(--color-text-secondary);
 }
@@ -591,12 +607,20 @@
 }
 .card__link:focus-visible { outline: none; }
 .card__link:focus-visible::after { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
-.card__title { display: block; font-size: var(--font-size-md); }
+.card__title { display: block; font-size: var(--font-size-lg); font-weight: var(--font-weight-regular); }
+/* Up to two lines, then an ellipsis. */
 .card__subtitle {
   margin-top: var(--space-1);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--color-text-secondary);
   line-height: 1.35;
+}
+.card__subtitle.truncate {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .card--artist .card__link,
 .card--artist .card__subtitle { text-align: left; }
@@ -653,11 +677,11 @@
   height: 36px;
   margin-bottom: var(--space-2);
   border-bottom: 1px solid rgba(255, 240, 220, 0.1);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--color-text-secondary);
 }
 .track-list__head .track-row__num { height: auto; }
-.track-list__dur { text-align: right; padding-right: 36px; }
+.track-list__dur { text-align: right; padding-right: calc(24px + var(--space-2)); }
 .track-row {
   height: 56px;
   border-radius: var(--radius-row);
@@ -711,11 +735,13 @@
 .eq--on-art i { background: var(--color-text-primary); }
 .track-row__text { min-width: 0; flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; }
 .track-row__title { color: var(--color-text-primary); font-size: var(--font-size-lg); line-height: 1.35; }
-.track-row__artist { font-size: var(--font-size-sm); line-height: 1.4; }
+.track-row__artist { font-size: var(--font-size-md); line-height: 1.4; }
 .track-row__album { font-size: var(--font-size-md); }
 .track-row__badges { display: flex; gap: var(--space-1); justify-content: flex-start; overflow: hidden; }
 .track-row__end { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); }
 .track-row__duration { min-width: 40px; text-align: right; font-size: var(--font-size-md); }
+/* Keeps the now-playing queue row's time in line with the removable rows below it. */
+.track-row__slot { flex: none; width: 24px; }
 .track-row__hover-btn {
   display: inline-flex;
   padding: 4px;

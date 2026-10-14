@@ -24,7 +24,7 @@ export function VirtualGrid({
   renderItem,
   minColumnWidth = 176,
   gap = 8,
-  textHeight = 72,
+  textHeight = 100,
   onRangeChange,
   label,
 }: VirtualGridProps) {

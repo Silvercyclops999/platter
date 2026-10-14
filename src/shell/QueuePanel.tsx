@@ -63,6 +63,7 @@ function QueueRow({
       showAlbum={false}
       onPlay={() => (current ? player.toggle() : player.queueJump(item.itemId))}
       onRemove={remove}
+      trailing={current ? <span className="track-row__slot" aria-hidden="true" /> : undefined}
       menuItems={trackMenuItems(item.track, {
         afterQueue: remove ? [{ label: "Remove from queue", onSelect: remove }] : [],
       })}
