@@ -47,7 +47,7 @@ const report = (e: unknown) => {
 };
 
 /**
- * Volume and mute rules (spec 04, player bar):
+ * Volume and mute rules:
  *  - The core keeps `volume` (the remembered level) and `muted` apart, so
  *    unmute restores the exact level from before muting.
  *  - A level of 0 always counts as muted. Dragging or stepping to 0 mutes and
