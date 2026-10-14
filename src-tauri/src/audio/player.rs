@@ -26,7 +26,8 @@ use super::events::{
 use super::output::{AudioOutput, OutputState};
 use super::persist::{self, Persisted};
 use super::queue::{AddAt, ContextInfo, Queue, QueueItem, Repeat, ShuffleStyle};
-use super::source::{PlayContext, TrackLookup, TrackResolver};
+use super::dsp::DspSettings;
+use super::source::{ContextKind, PlayContext, TrackLookup, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
 
@@ -54,6 +55,8 @@ pub struct PlayerConfig {
     pub shuffle_style: ShuffleStyle,
     /// Contexts resume where they were left (from settings).
     pub resume_contexts: bool,
+    /// Crossfade, leveling, EQ and limiter (from settings).
+    pub dsp: DspSettings,
 }
 
 impl Default for PlayerConfig {
@@ -69,6 +72,7 @@ impl Default for PlayerConfig {
             seed: None,
             shuffle_style: ShuffleStyle::default(),
             resume_contexts: true,
+            dsp: DspSettings::default(),
         }
     }
 }
@@ -96,6 +100,7 @@ enum Cmd {
     SetShuffleStyle(ShuffleStyle, Reply<()>),
     SetResumeContexts(bool, Reply<()>),
     SetPrecacheCount(usize, Reply<()>),
+    SetDsp(DspSettings, Reply<()>),
     SetRepeat(Repeat, Reply<()>),
     SetLoop(Option<AbLoop>, Reply<()>),
     QueueAdd(Vec<Track>, AddAt, Reply<()>),
@@ -127,6 +132,7 @@ pub struct PlayerHandle {
     lookup: Arc<dyn TrackLookup>,
     tracking: broadcast::Sender<TrackingEvent>,
     problems: Arc<Mutex<Vec<Problem>>>,
+    outputs: broadcast::Sender<OutputState>,
 }
 
 fn now_ms() -> i64 {
@@ -205,6 +211,8 @@ impl PlayerHandle {
             PlayerStatus::Idle
         };
         engine.set_gain_now(if muted { 0.0 } else { perceptual_gain(volume) });
+        engine.set_dsp(config.dsp);
+        let (outputs, _) = broadcast::channel(16);
 
         let actor = Actor {
             engine,
@@ -229,6 +237,7 @@ impl PlayerHandle {
             persist_at: None,
             ticks: 0,
             ab: None,
+            outputs: outputs.clone(),
         };
         rt.spawn(actor.run(rx, engine_rx));
         Self {
@@ -236,7 +245,18 @@ impl PlayerHandle {
             lookup,
             tracking,
             problems,
+            outputs,
         }
+    }
+
+    /// Applies crossfade, leveling, EQ and limiter settings (ramped).
+    pub async fn set_dsp(&self, dsp: DspSettings) -> AppResult<()> {
+        self.call(|r| Cmd::SetDsp(dsp, r)).await
+    }
+
+    /// Output device changes (the same states `output://changed` carries).
+    pub fn subscribe_output(&self) -> broadcast::Receiver<OutputState> {
+        self.outputs.subscribe()
     }
 
     async fn call<T>(&self, make: impl FnOnce(Reply<T>) -> Cmd) -> AppResult<T> {
@@ -447,6 +467,7 @@ struct Actor {
     ticks: u64,
     /// The A-B loop and the queue entry it belongs to.
     ab: Option<(String, AbLoop)>,
+    outputs: broadcast::Sender<OutputState>,
 }
 
 impl Actor {
@@ -621,7 +642,24 @@ impl Actor {
             .find(|i| !self.skip_ids.contains(&i.item_id))
     }
 
+    /// Tells the engine which album is playing in album order (leveling's
+    /// Smart mode uses album gain for it).
+    fn sync_album_context(&self) {
+        let album = self
+            .queue
+            .context()
+            .filter(|c| c.kind == ContextKind::Album && !self.queue.shuffle())
+            .and_then(|c| c.id.clone());
+        self.engine.set_album_context(album);
+    }
+
+    fn emit_output(&self, state: &OutputState) {
+        self.sink.output(state);
+        let _ = self.outputs.send(state.clone());
+    }
+
     fn update_next(&mut self) {
+        self.sync_album_context();
         if let Some(cur) = self.cur_key {
             let next = self.pick_next().map(|i| (i.track, i.item_id));
             self.next_key = self.engine.set_next(next, cur);
@@ -679,6 +717,7 @@ impl Actor {
         self.cur_ended = false;
         self.next_key = None;
         self.restore_pos = start_ms;
+        self.sync_album_context();
         match self
             .engine
             .load(item.track.clone(), item.item_id.clone(), start_ms, play)
@@ -848,6 +887,11 @@ impl Actor {
                 self.refresh_precache();
                 let _ = reply.send(Ok(()));
             }
+            Cmd::SetDsp(dsp, reply) => {
+                self.engine.set_dsp(dsp);
+                let _ = reply.send(Ok(()));
+                return;
+            }
             Cmd::SetRepeat(r, reply) => {
                 self.queue.set_repeat(r);
                 self.update_next();
@@ -967,7 +1011,7 @@ impl Actor {
             });
         }
         let state = self.engine.output_state();
-        self.sink.output(&state);
+        self.emit_output(&state);
         r.map(|_| state)
     }
 
@@ -1178,7 +1222,7 @@ impl Actor {
                 tracing::info!("audio device lost: {why}");
                 self.engine.close_output();
                 self.pause_for_output();
-                self.sink.output(&self.engine.output_state());
+                self.emit_output(&self.engine.output_state());
                 if let Some(device) = fell_back_from {
                     self.sink.output_lost(&OutputLost { device });
                 }
@@ -1189,10 +1233,10 @@ impl Actor {
                     tracing::warn!("audio output did not reopen: {e}");
                     self.pause_for_output();
                 }
-                self.sink.output(&self.engine.output_state());
+                self.emit_output(&self.engine.output_state());
             }
             EngineEvent::OutputChanged => {
-                self.sink.output(&self.engine.output_state());
+                self.emit_output(&self.engine.output_state());
                 return;
             }
         }

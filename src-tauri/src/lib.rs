@@ -165,7 +165,7 @@ pub fn run() {
 
             let player = PlayerHandle::spawn(
                 tauri::async_runtime::handle().inner().clone(),
-                Arc::new(bridge::PlexStreams(plex.clone(), live.streams.clone())),
+                Arc::new(bridge::PlexStreams(plex.clone(), live.streams.clone(), Some(db.clone()))),
                 Arc::new(bridge::CacheLookup(db.clone())),
                 {
                     use audio::output::AudioOutput;
@@ -180,10 +180,16 @@ pub fn run() {
                     shuffle_style: initial.shuffle_style,
                     resume_contexts: initial.resume_contexts,
                     precache_count: initial.precache_count as usize,
+                    dsp: initial.dsp(),
                     ..Default::default()
                 },
             );
             let app_settings = settings::SettingsState::new(db.clone(), live.clone());
+            tauri::async_runtime::spawn(audio::commands::follow_output(
+                app.handle().clone(),
+                player.clone(),
+                app_settings.clone(),
+            ));
             os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone());
             tracking::spawn(
                 tracking::Tracker::new(plex.clone(), db.clone(), live.tracking.clone()),
@@ -331,6 +337,10 @@ pub fn run() {
             audio::commands::player_problems,
             audio::commands::output_devices,
             audio::commands::output_select,
+            audio::commands::eq_profile_save,
+            audio::commands::eq_profile_rename,
+            audio::commands::eq_profile_delete,
+            audio::commands::eq_use_for_output,
             settings::settings_get,
             settings::settings_set,
             settings::art_cache_info,

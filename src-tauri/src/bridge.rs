@@ -14,7 +14,8 @@ use crate::db::source::{
     SimilarArtist,
 };
 use crate::audio::source::{ContextKind, PlayContext, ResolvedContext, StreamSource, TrackLookup, TrackResolver};
-use crate::db::{ArtFetcher, DbHandle, LibrarySource, queries};
+use crate::audio::dsp::TrackAudio;
+use crate::db::{ArtFetcher, DbHandle, LibrarySource, queries, trackaudio};
 use crate::error::AppResult;
 use crate::model::{Album, Artist, Playlist, Track};
 use crate::plex::client::{MetaType, PlexHub, PlexMetadata};
@@ -341,8 +342,9 @@ pub fn stream_cap_kbps(
 }
 
 /// Turns a track into an HTTP source on the connected server. The token
-/// travels only in headers.
-pub struct PlexStreams(pub PlexState, pub Arc<StreamPrefs>);
+/// travels only in headers. With the db it also serves loudness data and
+/// remembers measured silence.
+pub struct PlexStreams(pub PlexState, pub Arc<StreamPrefs>, pub Option<DbHandle>);
 
 fn source_of(req: crate::plex::client::StreamRequest, codec: Option<String>) -> StreamSource {
     StreamSource {
@@ -376,6 +378,51 @@ impl TrackResolver for PlexStreams {
         let req = self.0.client().await?.transcode_request(&track.id, 320, &session)?;
         Ok(source_of(req, Some("mp3".into())))
     }
+
+    /// Loudness from the cache, or from Plex track detail on first play
+    /// (then cached); measured silence from the cache.
+    async fn audio_info(&self, track: &Track) -> Option<TrackAudio> {
+        let db = self.2.clone()?;
+        let id = track.id.clone();
+        let cached = db.read_async(move |c| trackaudio::get(c, &id)).await.ok().flatten();
+        if let Some((a, true)) = cached {
+            return Some(a);
+        }
+        let mut a = cached.map(|c| c.0).unwrap_or_default();
+        let Ok(client) = self.0.client().await else { return Some(a) };
+        match client.track(&track.id).await {
+            Ok((_, stream)) => {
+                let s = stream.unwrap_or_default();
+                let f = |v: Option<f64>| v.filter(|v| v.is_finite()).map(|v| v as f32);
+                a.gain_db = f(s.gain);
+                a.album_gain_db = f(s.album_gain);
+                a.peak = f(s.peak);
+                a.album_peak = f(s.album_peak);
+                let (id, stored) = (track.id.clone(), a);
+                let now = unix_now();
+                if let Err(e) = db.write_async(move |c| trackaudio::set_loudness(c, &id, &stored, now)).await {
+                    tracing::debug!("could not store loudness: {e}");
+                }
+            }
+            Err(e) => tracing::debug!("no loudness for {}: {e}", track.id),
+        }
+        Some(a)
+    }
+
+    fn save_silence(&self, track_id: &str, head_ms: u64, tail_ms: u64) {
+        if let Some(db) = &self.2
+            && let Err(e) = db.write(|c| trackaudio::set_silence(c, track_id, head_ms, tail_ms))
+        {
+            tracing::debug!("could not store silence: {e}");
+        }
+    }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Resolves play contexts from the local cache.

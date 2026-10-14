@@ -7,11 +7,12 @@ use tauri::State;
 
 use super::events::{AbLoop, PlayerState, Problem};
 use super::output::OutputState;
-use crate::settings::SettingsState;
+use crate::settings::{Settings, SettingsState};
+use super::eqprofile;
 use super::player::PlayerHandle;
 use super::queue::{AddAt, Repeat};
 use super::source::PlayContext;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 #[tauri::command]
 pub async fn play_context(
@@ -152,4 +153,102 @@ pub async fn output_select(
 #[tauri::command]
 pub async fn player_problems(player: State<'_, PlayerHandle>) -> AppResult<Vec<Problem>> {
     Ok(player.problems())
+}
+
+// ------------------------------------------------------------------- EQ
+
+/// Saves the current EQ curve as a named profile (replacing one with that
+/// name) and selects it. Returns the new settings.
+#[tauri::command]
+pub async fn eq_profile_save(
+    settings: State<'_, SettingsState>,
+    player: State<'_, PlayerHandle>,
+    name: String,
+) -> AppResult<Settings> {
+    change_eq(&settings, &player, |s| eqprofile::save_as(s, &name)).await
+}
+
+/// Renames a profile, keeping the outputs that use it.
+#[tauri::command]
+pub async fn eq_profile_rename(
+    settings: State<'_, SettingsState>,
+    player: State<'_, PlayerHandle>,
+    from: String,
+    to: String,
+) -> AppResult<Settings> {
+    change_eq(&settings, &player, |s| eqprofile::rename(s, &from, &to)).await
+}
+
+/// Deletes a profile; outputs using it lose their binding.
+#[tauri::command]
+pub async fn eq_profile_delete(
+    settings: State<'_, SettingsState>,
+    player: State<'_, PlayerHandle>,
+    name: String,
+) -> AppResult<Settings> {
+    change_eq(&settings, &player, |s| eqprofile::delete(s, &name)).await
+}
+
+/// Uses the selected preset or profile whenever the current output device
+/// plays (`on: false` removes that).
+#[tauri::command]
+pub async fn eq_use_for_output(
+    settings: State<'_, SettingsState>,
+    player: State<'_, PlayerHandle>,
+    on: bool,
+) -> AppResult<Settings> {
+    let device = player
+        .output_state()
+        .await?
+        .current
+        .ok_or_else(|| AppError::NotFound("No output device is in use.".into()))?;
+    change_eq(&settings, &player, |s| eqprofile::use_for_output(s, &device, on)).await
+}
+
+async fn change_eq(
+    settings: &SettingsState,
+    player: &PlayerHandle,
+    f: impl FnOnce(&mut Settings) -> AppResult<()>,
+) -> AppResult<Settings> {
+    let s = match settings.modify(|s| f(s).map(|_| true)).await? {
+        Some(s) => s,
+        None => settings.get().await?,
+    };
+    player.set_dsp(s.dsp()).await?;
+    Ok(s)
+}
+
+/// Settings changed by the core itself (an output switch moved the EQ).
+pub const EV_SETTINGS: &str = "settings://changed";
+
+/// Switches the EQ to the profile bound to the output device in use, now
+/// and whenever the device changes, and tells the UI (`settings://changed`).
+pub async fn follow_output<R: tauri::Runtime>(app: tauri::AppHandle<R>, player: PlayerHandle, settings: SettingsState) {
+    use tauri::Emitter;
+    use tokio::sync::broadcast::error::RecvError;
+    let mut rx = player.subscribe_output();
+    let mut last: Option<Option<String>> = None;
+    let mut next = player.output_state().await.ok();
+    loop {
+        if let Some(state) = next.take() {
+            let id = state.current.as_ref().map(|d| d.id.clone());
+            if last.as_ref() != Some(&id) {
+                last = Some(id);
+                let device = state.current.clone();
+                match settings.modify(|s| Ok(eqprofile::output_changed(s, device.as_ref()))).await {
+                    Ok(Some(s)) => {
+                        let _ = player.set_dsp(s.dsp()).await;
+                        let _ = app.emit(EV_SETTINGS, &s);
+                    }
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!("EQ output switch failed: {e}"),
+                }
+            }
+        }
+        match rx.recv().await {
+            Ok(state) => next = Some(state),
+            Err(RecvError::Lagged(_)) => next = player.output_state().await.ok(),
+            Err(RecvError::Closed) => return,
+        }
+    }
 }

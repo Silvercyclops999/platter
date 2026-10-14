@@ -315,16 +315,14 @@ impl Eq {
 
     fn update_coefs(&mut self) {
         let mut any = false;
-        for b in 0..EQ_BANDS {
+        for (b, &freq) in EQ_FREQS.iter().enumerate() {
             let on = self.cur[b] != 0.0 && band_usable(self.rate, b);
             if !on && self.active[b] {
-                for c in 0..self.ch {
-                    self.state[b * self.ch + c] = [0.0; 2];
-                }
+                self.state[b * self.ch..(b + 1) * self.ch].fill([0.0; 2]);
             }
             self.active[b] = on;
             self.coefs[b] = if on {
-                Coefs::peaking(self.rate, EQ_FREQS[b], self.cur[b] as f64)
+                Coefs::peaking(self.rate, freq, self.cur[b] as f64)
             } else {
                 Coefs::IDENTITY
             };
@@ -770,7 +768,7 @@ mod tests {
 
     fn run_eq(eq: &mut Eq, input: &[f32]) -> Vec<f32> {
         let mut out = input.to_vec();
-        for f in out.chunks_exact_mut(2) {
+        for f in out.as_chunks_mut::<2>().0 {
             eq.process(f);
         }
         out
@@ -828,7 +826,7 @@ mod tests {
         eq.set_target([0.0, 0.0, 12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 9600);
         y.extend(run_eq(&mut eq, &x[x.len() / 2..]));
         let max_slope = 2.0 * PI * 125.0 / rate as f64 * 0.25 * 4.0; // +12 dB is 4x
-        for w in y.chunks_exact(2).collect::<Vec<_>>().windows(2) {
+        for w in y.as_chunks::<2>().0.windows(2) {
             let d = (w[1][0] - w[0][0]).abs() as f64;
             assert!(d < max_slope * 1.5, "step of {d}");
         }
@@ -854,7 +852,7 @@ mod tests {
             x[i] = 9.0;
         }
         let mut peak = 0.0f32;
-        for f in x.chunks_exact_mut(2) {
+        for f in x.as_chunks_mut::<2>().0 {
             lim.process(f, false);
             peak = peak.max(f[0].abs()).max(f[1].abs());
         }
@@ -868,7 +866,7 @@ mod tests {
         assert_eq!(la, 72);
         let x = sine(48_000, 440.0, 2000, 0.5);
         let mut y = x.clone();
-        for f in y.chunks_exact_mut(2) {
+        for f in y.as_chunks_mut::<2>().0 {
             lim.process(f, false);
         }
         assert!(y[..la * 2].iter().all(|v| *v == 0.0));
@@ -882,7 +880,7 @@ mod tests {
         let mut x = sine(rate, 440.0, rate as usize, 0.5);
         x[200] = 3.0;
         let mut y = x.clone();
-        for f in y.chunks_exact_mut(2) {
+        for f in y.as_chunks_mut::<2>().0 {
             lim.process(f, true);
         }
         // A second later the gain is back to 1.
@@ -898,7 +896,7 @@ mod tests {
         let mut y = x.clone();
         c.set_limiter(true, true);
         let mut min_mid = f32::MAX;
-        for (i, f) in y.chunks_exact_mut(2).enumerate() {
+        for (i, f) in y.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             c.process(f, false);
             if (240..300).contains(&i) {
                 min_mid = min_mid.min(f[0].abs());
@@ -997,7 +995,7 @@ mod tests {
         let mut sink = 0.0f32;
         for _ in 0..blocks {
             buf.copy_from_slice(&block);
-            for f in buf.chunks_exact_mut(2) {
+            for f in buf.as_chunks_mut::<2>().0 {
                 f[0] *= gain;
                 f[1] *= gain;
                 chain.process(f, false);

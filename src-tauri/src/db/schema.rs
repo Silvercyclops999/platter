@@ -367,6 +367,20 @@ CREATE TABLE rating_ops (
 );
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
+    // v8: loudness and silence per track (db::trackaudio). Plex's gain,
+    // albumGain, peak and albumPeak come from track detail on first play
+    // (loudness_at marks the fetch, even when Plex had none); the quiet
+    // lead-in and run-out are measured while a track decodes, for smart
+    // crossfades. Sync never touches these columns.
+    r#"
+ALTER TABLE tracks ADD COLUMN gain_db REAL;
+ALTER TABLE tracks ADD COLUMN album_gain_db REAL;
+ALTER TABLE tracks ADD COLUMN peak REAL;
+ALTER TABLE tracks ADD COLUMN album_peak REAL;
+ALTER TABLE tracks ADD COLUMN loudness_at INTEGER;
+ALTER TABLE tracks ADD COLUMN head_silence_ms INTEGER;
+ALTER TABLE tracks ADD COLUMN tail_silence_ms INTEGER;
+"#,
 ];
 
 #[cfg(test)]
@@ -447,6 +461,26 @@ mod tests {
     }
 
     #[test]
+    fn v8_adds_loudness_and_silence_columns_to_tracks() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        for m in &MIGRATIONS[..7] {
+            c.execute_batch(m).unwrap();
+        }
+        c.pragma_update(None, "user_version", 7).unwrap();
+        migrate(&mut c).unwrap();
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('tracks') WHERE name IN
+                 ('gain_db', 'album_gain_db', 'peak', 'album_peak', 'loudness_at', 'head_silence_ms', 'tail_silence_ms')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 7);
+    }
+
+    #[test]
     fn v6_adds_the_artist_info_cache() {
         let dir = tempfile::tempdir().unwrap();
         let mut c = open_writer(&dir.path().join("t.db")).unwrap();
@@ -468,7 +502,7 @@ mod tests {
     fn v7_likes_migration_adds_rating_columns_and_queue_and_makes_the_next_sync_full() {
         let dir = tempfile::tempdir().unwrap();
         let mut c = open_writer(&dir.path().join("t.db")).unwrap();
-        let before = MIGRATIONS.len() - 1;
+        let before = 6; // v7 is the likes migration
         for m in &MIGRATIONS[..before] {
             c.execute_batch(m).unwrap();
         }

@@ -14,6 +14,8 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::audio::player::PlayerHandle;
+use crate::audio::dsp::{CrossfadeMode, EQ_BANDS, Leveling};
+use crate::audio::eqprofile::{self, EqChoice, EqOutput, EqProfile};
 use crate::audio::queue::ShuffleStyle;
 use crate::bridge::StreamPrefs;
 use crate::db::store::{kv_get, kv_set};
@@ -186,6 +188,30 @@ pub struct Settings {
     pub act_as_plex_player: bool,
     /// Moving playback to or from a player stops it on the device it leaves.
     pub move_stops_old_device: bool,
+    /// Crossfade between songs (synced once settings sync arrives).
+    pub crossfade: CrossfadeMode,
+    /// Length of a fixed crossfade, 1 to 12 s.
+    pub crossfade_seconds: u32,
+    /// Songs of one album played in order never crossfade.
+    pub crossfade_skip_albums: bool,
+    /// Loudness leveling (synced once settings sync arrives).
+    pub leveling: Leveling,
+    /// dB added to every track, -12 to +12. This device only.
+    pub preamp_db: f32,
+    /// Soft limiter so boosts never clip. This device only.
+    pub limiter: bool,
+    /// EQ on. This device only, like the rest of the EQ.
+    pub eq_enabled: bool,
+    /// The active curve, 31 Hz to 16 kHz, in dB.
+    pub eq_bands: [f32; EQ_BANDS],
+    /// The active preset id, `profile:<name>` or `custom`.
+    pub eq_preset: String,
+    /// Saved curves. Changed with the eq_profile commands.
+    pub eq_profiles: Vec<EqProfile>,
+    /// Presets or profiles bound to output devices.
+    pub eq_outputs: Vec<EqOutput>,
+    /// The choice to return to when leaving a bound device.
+    pub eq_fallback: Option<EqChoice>,
 }
 
 impl Default for Settings {
@@ -228,6 +254,18 @@ impl Default for Settings {
             show_plex_players: true,
             act_as_plex_player: false,
             move_stops_old_device: true,
+            crossfade: CrossfadeMode::Smart,
+            crossfade_seconds: 6,
+            crossfade_skip_albums: true,
+            leveling: Leveling::Smart,
+            preamp_db: 0.0,
+            limiter: true,
+            eq_enabled: false,
+            eq_bands: [0.0; EQ_BANDS],
+            eq_preset: "flat".into(),
+            eq_profiles: Vec::new(),
+            eq_outputs: Vec::new(),
+            eq_fallback: None,
         }
     }
 }
@@ -272,6 +310,32 @@ pub struct SettingsPatch {
     pub show_plex_players: Option<bool>,
     pub act_as_plex_player: Option<bool>,
     pub move_stops_old_device: Option<bool>,
+    pub crossfade: Option<CrossfadeMode>,
+    pub crossfade_seconds: Option<u32>,
+    pub crossfade_skip_albums: Option<bool>,
+    pub leveling: Option<Leveling>,
+    pub preamp_db: Option<f32>,
+    pub limiter: Option<bool>,
+    pub eq_enabled: Option<bool>,
+    /// Moving bands makes the curve custom.
+    pub eq_bands: Option<[f32; EQ_BANDS]>,
+    /// Selects a preset or profile (and its curve).
+    pub eq_preset: Option<String>,
+}
+
+impl SettingsPatch {
+    /// Whether the patch touches the player's sound stage.
+    pub fn touches_dsp(&self) -> bool {
+        self.crossfade.is_some()
+            || self.crossfade_seconds.is_some()
+            || self.crossfade_skip_albums.is_some()
+            || self.leveling.is_some()
+            || self.preamp_db.is_some()
+            || self.limiter.is_some()
+            || self.eq_enabled.is_some()
+            || self.eq_bands.is_some()
+            || self.eq_preset.is_some()
+    }
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -329,6 +393,7 @@ impl Settings {
             }
             self.playlist_new_name = name.to_string();
         }
+        eqprofile::apply_patch(self, p)?;
         self.clamp();
         Ok(())
     }
@@ -337,6 +402,12 @@ impl Settings {
     fn clamp(&mut self) {
         self.precache_count = self.precache_count.clamp(PRECACHE_MIN, PRECACHE_MAX);
         self.art_cache_mb = self.art_cache_mb.clamp(ART_CACHE_MIN_MB, ART_CACHE_MAX_MB);
+        eqprofile::clamp(self);
+    }
+
+    /// Crossfade, leveling, EQ and limiter for the player.
+    pub fn dsp(&self) -> crate::audio::dsp::DspSettings {
+        eqprofile::dsp(self)
     }
 
     /// The lowest Plex rating that counts as liked.
@@ -460,6 +531,22 @@ impl SettingsState {
         Ok(s)
     }
 
+    /// Change settings with `f` (it returns whether anything changed) and
+    /// save them. Returns the settings if they changed.
+    pub async fn modify(&self, f: impl FnOnce(&mut Settings) -> AppResult<bool>) -> AppResult<Option<Settings>> {
+        let _guard = self.lock.lock().await;
+        let mut s = self.get().await?;
+        if !f(&mut s)? {
+            return Ok(None);
+        }
+        s.clamp();
+        let (db, saved) = (self.db.clone(), s.clone());
+        tokio::task::spawn_blocking(move || save(&db, &saved))
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))??;
+        Ok(Some(s))
+    }
+
     /// Store the chosen output device (None: the system default).
     pub async fn set_output_device(&self, id: Option<String>) -> AppResult<()> {
         let _guard = self.lock.lock().await;
@@ -490,6 +577,9 @@ async fn apply_to_player(player: &PlayerHandle, s: &Settings, patch: &SettingsPa
         player.set_precache_count(s.precache_count as usize).await?;
     }
     // Turning the loop handles off clears a loop that's set.
+    if patch.touches_dsp() {
+        player.set_dsp(s.dsp()).await?;
+    }
     if patch.ab_loop_handles == Some(false) {
         player.set_ab_loop(None).await?;
     }
@@ -687,6 +777,15 @@ mod tests {
             show_plex_players: Some(false),
             act_as_plex_player: Some(true),
             move_stops_old_device: Some(false),
+            crossfade: Some(CrossfadeMode::Fixed),
+            crossfade_seconds: Some(9),
+            crossfade_skip_albums: Some(false),
+            leveling: Some(Leveling::Album),
+            preamp_db: Some(-3.5),
+            limiter: Some(false),
+            eq_enabled: Some(true),
+            eq_bands: Some([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, -2.0, -1.0]),
+            eq_preset: None,
         })
         .await
         .unwrap();
@@ -734,6 +833,10 @@ mod tests {
         assert!(!s.ab_loop_handles && !s.up_next_line && !s.volume_percent && s.notify_track_change);
         assert!(!s.playlist_ask_duplicates);
         assert_eq!(s.playlist_new_name, "Mix #N");
+        assert_eq!((s.crossfade, s.crossfade_seconds, s.crossfade_skip_albums), (CrossfadeMode::Fixed, 9, false));
+        assert_eq!((s.leveling, s.preamp_db, s.limiter, s.eq_enabled), (Leveling::Album, -3.5, false, true));
+        assert_eq!(s.eq_bands[2], 3.0);
+        assert_eq!(s.eq_preset, "custom");
         assert_eq!((s.liked_means, s.like_control_rows), (LikedMeans::FourUp, LikeControlRows::Always));
         assert_eq!(s.liked_min_rating(), 8.0);
         // Loaded at startup into the live switches.

@@ -33,6 +33,7 @@ pub mod similar;
 pub mod source;
 pub mod store;
 pub mod sync;
+pub mod trackaudio;
 pub mod types;
 
 #[cfg(test)]
