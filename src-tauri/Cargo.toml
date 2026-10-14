@@ -52,14 +52,13 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 mdns-sd = { version = "0.21.5", default-features = false }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
 md-5 = "0.10.6"
+tauri-plugin-notification = "2"
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.8.3", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
-tauri-plugin-notification = "2"
-
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
