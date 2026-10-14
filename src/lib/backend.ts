@@ -40,6 +40,7 @@ import type {
   KeyedInfoSource,
   LibraryItem,
   LikedPage,
+  Lyrics,
   NowPlayingDetails,
   OutputState,
   Page,
@@ -120,6 +121,8 @@ export interface Backend {
   // Now playing
   /** Artist bio, extra credits and lyrics for the now-playing panel. */
   nowPlayingDetails(trackId: string): Promise<NowPlayingDetails>;
+  /** The track's lyrics: Plex first, then LRCLIB when its setting is on. Null when there are none. */
+  lyrics(trackId: string): Promise<Lyrics | null>;
 
   // Search
   search(args: SearchArgs): Promise<SearchResults>;
@@ -285,6 +288,7 @@ export function createTauriBackend(): Backend {
     likedPage: () => call("liked_page"),
     playlistsWithTrack: (trackId) => call("playlists_with_track", { trackId }),
     nowPlayingDetails: (trackId) => call("now_playing_details", { trackId }),
+    lyrics: (trackId) => call("lyrics_get", { trackId }),
 
     search: (args) => call("search", { ...args }),
     searchCompletions: (query, limit) => call("search_completions", { query, limit }),

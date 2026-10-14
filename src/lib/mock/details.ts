@@ -53,11 +53,48 @@ export function mockArtistSummary(artist: Artist): string | null {
   return `${artist.title} ${pick(BIO_OPENINGS)}. ${pick(BIO_MIDDLES)} ${pick(BIO_ENDINGS)}`;
 }
 
-function mockLyrics(r: () => number): Lyrics {
+/** Which kind of lyrics a mock song has. Every kind turns up across an album. */
+export type MockLyricsKind = "words" | "lines" | "plain" | "none";
+
+export function mockLyricsKind(trackId: string): MockLyricsKind {
+  return (["words", "lines", "plain", "none"] as const)[hashString("lyr-" + trackId) % 4];
+}
+
+/** Gap before the first line and after the last. */
+const LEAD_MS = 6_000;
+
+/**
+ * Lyrics for a mock song: synced with word timing, synced by line, plain, or
+ * none, by track id. Timed lyrics spread over the song's length with an
+ * instrumental gap between verses.
+ */
+export function mockLyrics(track: Pick<Track, "id" | "durationMs">): Lyrics | null {
+  const kind = mockLyricsKind(track.id);
+  if (kind === "none") return null;
+  const r = mulberry32(hashString("np-lyrics-" + track.id));
   const verse = () => Array.from({ length: 4 }, () => LYRIC_LINES[Math.floor(r() * LYRIC_LINES.length)]);
   const lines = [...verse(), "", ...verse(), "", ...verse()];
-  const synced = r() < 0.5;
-  return { synced, lines, credit: synced ? "Written by Demo Writer. Lyrics licensed and provided by LyricFind" : undefined };
+  if (kind === "plain") return { synced: false, lines, source: "plex" };
+  const span = Math.max(30_000, track.durationMs - 2 * LEAD_MS);
+  const step = Math.floor(span / lines.length);
+  const timed = lines.map((text, i) => {
+    const startMs = LEAD_MS + i * step;
+    if (kind !== "words" || !text) return { startMs, text };
+    const parts = text.split(" ");
+    const wordStep = Math.floor((step * 0.8) / parts.length);
+    return {
+      startMs,
+      text,
+      words: parts.map((w, j) => ({ startMs: startMs + j * wordStep, text: j < parts.length - 1 ? w + " " : w })),
+    };
+  });
+  return {
+    synced: true,
+    lines,
+    timed,
+    credit: "Written by Demo Writer. Lyrics licensed and provided by LyricFind",
+    source: "plex",
+  };
 }
 
 function mockCredits(track: Track, r: () => number): Contributor[] {
@@ -72,13 +109,12 @@ function mockCredits(track: Track, r: () => number): Contributor[] {
 
 export function mockNowPlayingDetails(track: Track, artist: Artist | undefined): NowPlayingDetails {
   const r = mulberry32(hashString(`np-${track.id}`));
-  const hasLyrics = r() < 0.6;
   return {
     trackId: track.id,
     artist: artist
       ? { id: artist.id, title: artist.title, summary: mockArtistSummary(artist), thumb: artist.thumb, art: artist.art }
       : null,
     credits: mockCredits(track, r),
-    lyrics: hasLyrics ? mockLyrics(r) : null,
+    lyrics: mockLyrics(track),
   };
 }

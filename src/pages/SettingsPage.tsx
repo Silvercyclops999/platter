@@ -71,6 +71,10 @@ const LIKE_ROWS = [
   { value: "always", label: "Always" },
   { value: "off", label: "Off" },
 ] as const satisfies SelectOption<Settings["likeControlRows"]>[];
+const LYRICS_MODE = [
+  { value: "autoShow", label: "Auto-show when available" },
+  { value: "off", label: "Off" },
+] as const satisfies SelectOption<Settings["lyricsMode"]>[];
 const ART_SIZES_MB = [512, 1024, 2048, 5120, 10240, 20480];
 const LEVELING = [
   { value: "smart", label: "Smart" },
@@ -131,6 +135,7 @@ export const SOURCE_NOTICES: { name: string; licence: string }[] = [
   { name: "Discord (status, when Discord is open)", licence: "Discord Developer Terms" },
   { name: "Cover Art Archive (covers on Discord)", licence: "Cover art owners' terms" },
   { name: "Imgur (covers on Discord, with your client ID)", licence: "Imgur API terms" },
+  { name: "LRCLIB (lyrics, when turned on)", licence: "LRCLIB terms" },
 ];
 
 // ------------------------------------------------------------------ rows
@@ -1024,6 +1029,29 @@ export function SettingsPage() {
             control: (ids) => <ImgurKeyControl ids={ids} status={discord} setKey={setImgurKey} />,
           },
         ] satisfies RowDef[])),
+    // Lyrics and the full-window view
+    {
+      key: "lyricsMode",
+      section: "Appearance",
+      title: "Lyrics",
+      description: "Auto-show opens the lyrics view when a song with synced lyrics starts while now playing is open. Off opens it only from the lyrics button.",
+      control: (ids) => select(s, (x) => x.lyricsMode, LYRICS_MODE, ids, (v) => updateSettings({ lyricsMode: v })),
+    },
+    {
+      key: "lyricsLrclib",
+      section: "Appearance",
+      title: "Lyrics from LRCLIB when Plex has none",
+      description:
+        "Looks the song up on LRCLIB, a free lyrics library, sending its artist, title, album and length. Songs it doesn't know are searched by artist and title only. Results are kept for 30 days.",
+      control: (ids) => toggle(s, "lyricsLrclib", ids),
+    },
+    {
+      key: "fullWindowHideControls",
+      section: "Appearance",
+      title: "Full-window view hides controls",
+      description: "After 3 seconds without moving the mouse, the full-window view fades its controls. Moving the mouse or pressing a key brings them back.",
+      control: (ids) => toggle(s, "fullWindowHideControls", ids),
+    },
   ];
 
   const shown = rows.filter((r) => matches(r, query.trim()));

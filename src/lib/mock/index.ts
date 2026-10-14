@@ -61,7 +61,7 @@ import type {
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
 import { mockArtUrl } from "./art";
-import { mockNowPlayingDetails } from "./details";
+import { mockLyrics, mockNowPlayingDetails } from "./details";
 import { credits, globalTop, popularTracks, rankPopular } from "./popular";
 import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
 import { mockBio } from "./bio";
@@ -689,6 +689,16 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       const track = this.trackById(trackId) ?? this.notFound("Track");
       return mockNowPlayingDetails(track, this.fx.artists.find((a) => a.id === track.artistId));
+    });
+  }
+
+  /** Lyrics sources unreachable (app states: the view says there are none). */
+  lyricsDown = false;
+
+  lyrics(trackId: string) {
+    return this.delay(() => {
+      const track = this.trackById(trackId) ?? this.notFound("Track");
+      return this.lyricsDown ? null : mockLyrics(track);
     });
   }
 

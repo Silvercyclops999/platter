@@ -287,13 +287,33 @@ export interface Contributor {
 }
 
 export interface Lyrics {
-  /** The source had timestamps (shown as plain text for now). */
+  /** The source had timestamps; `timed` holds them. */
   synced: boolean;
-  /** Lines without timestamps; "" marks a break between verses. */
+  /** Lines without timestamps, in file order; "" marks a break between verses. */
   lines: string[];
+  /** Timed lines in play order (empty text: an instrumental gap). Absent when not synced. */
+  timed?: LyricLine[];
   /** Writer and provider credit to show under the lyrics. */
   credit?: string;
+  /** Where the lyrics came from (absent from older builds: Plex). */
+  source?: LyricsSource;
 }
+
+export type LyricsSource = "plex" | "lrclib";
+
+export interface LyricLine {
+  startMs: number;
+  text: string;
+  /** Word timing; joined, the words make `text`. Absent when only lines are timed. */
+  words?: LyricWord[];
+}
+
+export interface LyricWord {
+  startMs: number;
+  text: string;
+}
+
+export type LyricsMode = "autoShow" | "off";
 
 /** `now_playing_details`: extras for the now-playing panel. */
 export interface NowPlayingDetails {
@@ -587,6 +607,12 @@ export interface Settings {
   discordUploadArt: boolean;
   /** The top bar shows the Plex profile picture. This device only. */
   showPlexAvatar: boolean;
+  /** The lyrics view opens by itself for songs with synced lyrics. */
+  lyricsMode: LyricsMode;
+  /** Look lyrics up on LRCLIB when Plex has none. */
+  lyricsLrclib: boolean;
+  /** The full-window view hides its controls after 3 s without movement. */
+  fullWindowHideControls: boolean;
   [key: string]: unknown;
 }
 
@@ -677,6 +703,9 @@ export const DEFAULT_SETTINGS: Settings = {
   discordCoverArchive: true,
   discordUploadArt: false,
   showPlexAvatar: true,
+  lyricsMode: "autoShow",
+  lyricsLrclib: false,
+  fullWindowHideControls: true,
 };
 
 // ---------------------------------------------------------------- discord

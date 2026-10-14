@@ -18,6 +18,8 @@ export type Route =
   /** Liked Songs. */
   | { name: "liked" }
   | { name: "settings" }
+  /** Lyrics for the playing song. */
+  | { name: "lyrics" }
   /** A Home shelf's "Show all" grid. */
   | { name: "homeShelf"; shelf: HomeShelfId };
 

@@ -150,7 +150,7 @@ describe("panel content", () => {
     render(<AppShell />);
     await waitFor(() => expect(spy).toHaveBeenCalledWith(solo.id));
     await screen.findByText("Next in queue");
-    expect(screen.queryByText("Lyrics")).toBeNull();
+    expect(within(panel()!).queryByText("Lyrics")).toBeNull();
     expect(screen.queryByText("About the artist")).toBeNull();
     expect(screen.queryByText("Credits")).toBeNull();
   });

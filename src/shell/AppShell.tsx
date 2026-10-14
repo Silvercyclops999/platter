@@ -23,6 +23,8 @@ import {
   solveLayout,
   type SidebarDrag,
 } from "./layout";
+import { FullWindow } from "./FullWindow";
+import { useLyricsAutoShow } from "./lyrics";
 import { MainView } from "./MainView";
 import { NowPlayingExpanded, NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
 import { OutputPanel } from "./OutputPanel";
@@ -48,6 +50,7 @@ function useWindowWidth() {
 export function AppShell() {
   useShortcuts();
   useOpenNowPlayingOnStart();
+  useLyricsAutoShow();
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
@@ -166,6 +169,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <FullWindow />
     </div>
   );
 }

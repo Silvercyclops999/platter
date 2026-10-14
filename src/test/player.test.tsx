@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
 import type { MockBackend } from "../lib/mock";
+import { clearLyricsCache } from "../shell/lyrics";
 import { PlayerBar } from "../shell/PlayerBar";
 import { QueuePanel } from "../shell/QueuePanel";
 import { connectPlayer, usePlayer } from "../stores/player";
@@ -65,9 +66,13 @@ describe("PlayerBar reflects the mock player", () => {
     expect(screen.getByText("-1:50")).toBeInTheDocument();
   });
 
-  it("Phase 3 buttons are present but inert", () => {
+  it("the lyrics button is off for a song without lyrics", async () => {
+    mock.lyricsDown = true;
+    clearLyricsCache();
     render(<PlayerBar />);
-    expect(screen.getByRole("button", { name: "Lyrics" })).toHaveAttribute("aria-disabled", "true");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Lyrics" })).toHaveAttribute("aria-disabled", "true"));
+    mock.lyricsDown = false;
+    clearLyricsCache();
     // The device picker works now (output picker tests cover it).
     expect(screen.getByRole("button", { name: "Connect to a device" })).not.toHaveAttribute("aria-disabled");
   });

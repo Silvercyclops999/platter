@@ -1,6 +1,7 @@
 import {
   EyeOff,
   ListMusic,
+  Maximize2,
   MicVocal,
   MonitorSpeaker,
   Pause,
@@ -27,17 +28,19 @@ import { Tooltip } from "../components/Tooltip";
 import { formatDuration } from "../lib/format";
 import { modKey } from "../lib/platform";
 import { player, usePlayer } from "../stores/player";
-import { nav } from "../stores/router";
+import { fullWindow } from "../stores/fullWindow";
+import { nav, useCurrentEntry } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtras";
+import { toggleLyricsView, useLyrics } from "./lyrics";
 import { normalizeLoop } from "./playerRules";
 
 /** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
 export const SEEK_KEY_STEP = 5_000;
 export const SEEK_PAGE_STEP = 25_000;
 
-function SeekBar() {
+export function SeekBar() {
   const positionMs = usePlayer((s) => s.positionMs);
   const durationMs = usePlayer((s) => s.durationMs);
   const trackId = usePlayer((s) => s.state?.track?.id ?? null);
@@ -134,7 +137,7 @@ export function wheelVolumeDelta(e: { deltaX: number; deltaY: number; deltaMode:
   return d < 0 ? size : -size;
 }
 
-function Volume() {
+export function Volume() {
   const volume = usePlayer((s) => s.state?.volume ?? 0.7);
   const muted = usePlayer((s) => s.state?.muted ?? false);
   const [local, setLocal] = useState<number | null>(null);
@@ -202,6 +205,63 @@ function PrivateSession() {
   );
 }
 
+/** Shuffle, previous, play/pause, next and repeat (the player bar and the full-window view). */
+export function PlayControls() {
+  const state = usePlayer((s) => s.state);
+  const playing = state?.status === "playing" || state?.status === "buffering" || state?.status === "loading";
+  const repeat = state?.repeat ?? "off";
+  const shuffle = state?.shuffle ?? false;
+  return (
+    <div className="player-bar__controls">
+      <IconButton
+        label={shuffle ? "Disable shuffle" : "Enable shuffle"}
+        tooltip={`${shuffle ? "Disable shuffle" : "Enable shuffle"} (${modKey}+S)`}
+        pressed={shuffle}
+        icon={<Shuffle size={18} />}
+        onClick={() => player.setShuffle(!shuffle)}
+      />
+      <IconButton label="Previous" tooltip={`Previous (${modKey}+←)`} icon={<SkipBack size={20} fill="currentColor" />} onClick={() => player.previous()} />
+      <IconButton
+        label={playing ? "Pause" : "Play"}
+        tooltip={`${playing ? "Pause" : "Play"} (Space)`}
+        variant="accent"
+        size="lg"
+        className="player-bar__play"
+        icon={playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="nudge-right" />}
+        onClick={() => player.toggle()}
+      />
+      <IconButton label="Next" tooltip={`Next (${modKey}+→)`} icon={<SkipForward size={20} fill="currentColor" />} onClick={() => player.next()} />
+      <IconButton
+        label={repeat === "off" ? "Enable repeat" : repeat === "all" ? "Enable repeat one" : "Disable repeat"}
+        tooltip={`${repeat === "off" ? "Enable repeat" : repeat === "all" ? "Enable repeat one" : "Disable repeat"} (${modKey}+R)`}
+        pressed={repeat !== "off"}
+        icon={repeat === "one" ? <Repeat1 size={18} /> : <Repeat size={18} />}
+        onClick={() => player.cycleRepeat(repeat)}
+      />
+    </div>
+  );
+}
+
+/** Opens the lyrics view (or goes back from it). Off with a tooltip when the song has none. */
+function LyricsButton() {
+  const trackId = usePlayer((s) => s.state?.track?.id ?? null);
+  const { lyrics, loading } = useLyrics(trackId);
+  const onPage = useCurrentEntry().route.name === "lyrics";
+  const none = !trackId || (!loading && !lyrics);
+  // On the lyrics page it stays live, so there's always a way back.
+  const off = none && !onPage;
+  return (
+    <IconButton
+      label="Lyrics"
+      tooltip={off ? (trackId ? "No lyrics for this song" : "Lyrics") : "Lyrics"}
+      pressed={onPage}
+      softDisabled={off}
+      icon={<MicVocal size={18} />}
+      onClick={toggleLyricsView}
+    />
+  );
+}
+
 /** Bottom player bar. */
 export function PlayerBar() {
   const state = usePlayer((s) => s.state);
@@ -211,9 +271,6 @@ export function PlayerBar() {
   const outputOpen = useUi((s) => s.outputOpen);
   const toggleOutput = useUi((s) => s.toggleOutput);
   const track = state?.track;
-  const playing = state?.status === "playing" || state?.status === "buffering" || state?.status === "loading";
-  const repeat = state?.repeat ?? "off";
-  const shuffle = state?.shuffle ?? false;
 
   return (
     <footer className="player-bar" aria-label="Player">
@@ -225,7 +282,13 @@ export function PlayerBar() {
               className="player-bar__art"
               aria-label="Now playing view"
               aria-pressed={nowPlayingOpen}
-              onClick={() => useUi.getState().toggleNowPlaying()}
+              // A double-click opens the full-window view; its second click
+              // mustn't toggle the panel back.
+              onClick={(e) => e.detail < 2 && useUi.getState().toggleNowPlaying()}
+              onDoubleClick={() => {
+                useUi.getState().toggleNowPlaying();
+                fullWindow.open();
+              }}
             >
               <Art path={track.thumb} size={56} />
             </button>
@@ -258,42 +321,23 @@ export function PlayerBar() {
       </div>
 
       <div className="player-bar__center">
-        <div className="player-bar__controls">
-          <IconButton
-            label={shuffle ? "Disable shuffle" : "Enable shuffle"}
-            tooltip={`${shuffle ? "Disable shuffle" : "Enable shuffle"} (${modKey}+S)`}
-            pressed={shuffle}
-            icon={<Shuffle size={18} />}
-            onClick={() => player.setShuffle(!shuffle)}
-          />
-          <IconButton label="Previous" tooltip={`Previous (${modKey}+←)`} icon={<SkipBack size={20} fill="currentColor" />} onClick={() => player.previous()} />
-          <IconButton
-            label={playing ? "Pause" : "Play"}
-            tooltip={`${playing ? "Pause" : "Play"} (Space)`}
-            variant="accent"
-            size="lg"
-            className="player-bar__play"
-            icon={playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="nudge-right" />}
-            onClick={() => player.toggle()}
-          />
-          <IconButton label="Next" tooltip={`Next (${modKey}+→)`} icon={<SkipForward size={20} fill="currentColor" />} onClick={() => player.next()} />
-          <IconButton
-            label={repeat === "off" ? "Enable repeat" : repeat === "all" ? "Enable repeat one" : "Disable repeat"}
-            tooltip={`${repeat === "off" ? "Enable repeat" : repeat === "all" ? "Enable repeat one" : "Disable repeat"} (${modKey}+R)`}
-            pressed={repeat !== "off"}
-            icon={repeat === "one" ? <Repeat1 size={18} /> : <Repeat size={18} />}
-            onClick={() => player.cycleRepeat(repeat)}
-          />
-        </div>
+        <PlayControls />
         <SeekBar />
       </div>
 
       <div className="player-bar__extras">
         <PrivateSession />
-        <IconButton label="Lyrics" tooltip="Lyrics arrive in Phase 3" softDisabled icon={<MicVocal size={18} />} />
+        <LyricsButton />
         <IconButton label="Queue" pressed={queueOpen} icon={<ListMusic size={18} />} onClick={toggleQueue} />
         <IconButton label="Connect to a device" pressed={outputOpen} icon={<MonitorSpeaker size={18} />} onClick={toggleOutput} />
         <Volume />
+        <IconButton
+          label="Full-window view"
+          tooltip="Full-window view"
+          disabled={!track}
+          icon={<Maximize2 size={16} />}
+          onClick={() => fullWindow.open()}
+        />
       </div>
     </footer>
   );
