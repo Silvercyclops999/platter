@@ -356,7 +356,7 @@ describe("lyrics editor", () => {
     act(() => useLyricsEditor.setState({ track: none }));
     const dlg = await screen.findByRole("dialog", { name: /Add lyrics/ });
     const box = within(dlg).getByRole("textbox", { name: "Lyrics" });
-    await user.type(box, "Keep me");
+    fireEvent.change(box, { target: { value: "Keep me" } });
     await waitFor(() => expect(box).toHaveValue("Keep me"));
     await waitFor(() => expect(within(dlg).getByRole("button", { name: "Save" })).toBeEnabled());
     await user.click(within(dlg).getByRole("button", { name: "Save" }));
