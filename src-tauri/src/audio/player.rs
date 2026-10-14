@@ -20,10 +20,10 @@ use super::cache::{DiskCache, Precacher, cache_key};
 use super::engine::{Engine, EngineConfig, EngineDeps, EngineEvent};
 use super::gate::TransferGate;
 use super::events::{
-    ErrorPayload, EventSink, PlayerState, PlayerStatus, PositionPayload, Problem, SKIPPED_MESSAGE,
-    TrackingEvent, perceptual_gain,
+    ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload, Problem,
+    SKIPPED_MESSAGE, TrackingEvent, perceptual_gain,
 };
-use super::output::AudioOutput;
+use super::output::{AudioOutput, OutputState};
 use super::persist::{self, Persisted};
 use super::queue::{AddAt, ContextInfo, Queue, QueueItem, Repeat, ShuffleStyle};
 use super::source::{PlayContext, TrackLookup, TrackResolver};
@@ -100,6 +100,8 @@ enum Cmd {
     QueueMove(String, usize, Reply<()>),
     QueueClear(Reply<()>),
     QueueJump(String, Reply<()>),
+    Output(oneshot::Sender<OutputState>),
+    SelectOutput(Option<String>, Reply<OutputState>),
     State(oneshot::Sender<PlayerState>),
     Flush(oneshot::Sender<()>),
 }
@@ -337,6 +339,20 @@ impl PlayerHandle {
         if self.tx.send(Cmd::Flush(tx)).is_ok() {
             let _ = rx.await;
         }
+    }
+    /// Output devices, the choice and the device in use.
+    pub async fn output_state(&self) -> AppResult<OutputState> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(Cmd::Output(tx))
+            .map_err(|_| AppError::Internal("player stopped".into()))?;
+        rx.await
+            .map_err(|_| AppError::Internal("player stopped".into()))
+    }
+    /// Plays on `device_id` (None: the system default), keeping position
+    /// and play state.
+    pub async fn select_output(&self, device_id: Option<String>) -> AppResult<OutputState> {
+        self.call(|r| Cmd::SelectOutput(device_id, r)).await
     }
     /// Play-tracking events.
     pub fn subscribe_tracking(&self) -> broadcast::Receiver<TrackingEvent> {
@@ -606,6 +622,14 @@ impl Actor {
                 let _ = tx.send(self.snapshot());
                 return;
             }
+            Cmd::Output(tx) => {
+                let _ = tx.send(self.engine.output_state());
+                return;
+            }
+            Cmd::SelectOutput(id, reply) => {
+                let r = self.select_output(id);
+                let _ = reply.send(r);
+            }
             Cmd::Flush(tx) => {
                 self.dirty = true;
                 self.persist_now();
@@ -768,6 +792,41 @@ impl Actor {
             }
         }
         self.emit_state();
+    }
+
+    /// The output is gone or wouldn't open: pause where we are.
+    fn pause_for_output(&mut self) {
+        self.engine.pause();
+        if self.is_active() {
+            self.status = PlayerStatus::Paused;
+            if let Some(t) = self.current_track() {
+                self.track_event(TrackingEvent::Paused {
+                    track_id: t.id.clone(),
+                    position_ms: self.position_ms(),
+                });
+            }
+            self.mark_dirty();
+        }
+    }
+
+    fn select_output(&mut self, id: Option<String>) -> AppResult<OutputState> {
+        if let Some(id) = &id
+            && !self.engine.output_state().devices.iter().any(|d| &d.id == id)
+        {
+            return Err(AppError::NotFound(format!("output device {id}")));
+        }
+        let r = self.engine.select_output(id);
+        if let Err(e) = &r {
+            self.pause_for_output();
+            self.sink.error(&ErrorPayload {
+                track_id: None,
+                kind: e.kind().into(),
+                message: e.to_string(),
+            });
+        }
+        let state = self.engine.output_state();
+        self.sink.output(&state);
+        r.map(|_| state)
     }
 
     fn do_pause(&mut self) -> AppResult<()> {
@@ -965,18 +1024,26 @@ impl Actor {
                     return;
                 }
             }
-            EngineEvent::DeviceLost(why) => {
+            EngineEvent::DeviceLost { why, fell_back_from } => {
                 tracing::info!("audio device lost: {why}");
                 self.engine.close_output();
-                if self.is_active() {
-                    self.status = PlayerStatus::Paused;
-                    if let Some(t) = self.current_track() {
-                        self.track_event(TrackingEvent::Paused {
-                            track_id: t.id.clone(),
-                            position_ms: self.position_ms(),
-                        });
-                    }
+                self.pause_for_output();
+                self.sink.output(&self.engine.output_state());
+                if let Some(device) = fell_back_from {
+                    self.sink.output_lost(&OutputLost { device });
                 }
+            }
+            EngineEvent::OutputReset(why) => {
+                tracing::info!("audio output reset: {why}");
+                if let Err(e) = self.engine.reopen_output() {
+                    tracing::warn!("audio output did not reopen: {e}");
+                    self.pause_for_output();
+                }
+                self.sink.output(&self.engine.output_state());
+            }
+            EngineEvent::OutputChanged => {
+                self.sink.output(&self.engine.output_state());
+                return;
             }
         }
         self.emit_state();

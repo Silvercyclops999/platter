@@ -140,7 +140,12 @@ pub fn run() {
                 tauri::async_runtime::handle().inner().clone(),
                 Arc::new(bridge::PlexStreams(plex.clone(), live.streams.clone())),
                 Arc::new(bridge::CacheLookup(db.clone())),
-                Box::new(audio::output::CpalOutput::new()),
+                {
+                    use audio::output::AudioOutput;
+                    let mut out = audio::output::CpalOutput::new();
+                    out.select(initial.output_device.clone());
+                    Box::new(out)
+                },
                 Arc::new(audio::events::TauriSink(app.handle().clone())),
                 PlayerConfig {
                     persist_path: Some(data_dir.join("queue.json")),
@@ -220,6 +225,8 @@ pub fn run() {
             audio::commands::queue_jump,
             audio::commands::player_state,
             audio::commands::player_problems,
+            audio::commands::output_devices,
+            audio::commands::output_select,
             settings::settings_get,
             settings::settings_set,
             settings::art_cache_info,

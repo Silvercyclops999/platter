@@ -102,6 +102,9 @@ pub struct Settings {
     /// Album and artist headers tint from artwork.
     pub artwork_colours: bool,
     pub reduce_motion: ReduceMotion,
+    /// Chosen output device id; None follows the system default. Changed
+    /// with `output_select`, not `settings_set`.
+    pub output_device: Option<String>,
 }
 
 impl Default for Settings {
@@ -120,6 +123,7 @@ impl Default for Settings {
             art_cache_mb: 2048,
             artwork_colours: true,
             reduce_motion: ReduceMotion::System,
+            output_device: None,
         }
     }
 }
@@ -265,6 +269,20 @@ impl SettingsState {
             .await
             .map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(s)
+    }
+
+    /// Store the chosen output device (None: the system default).
+    pub async fn set_output_device(&self, id: Option<String>) -> AppResult<()> {
+        let _guard = self.lock.lock().await;
+        let mut s = self.get().await?;
+        if s.output_device == id {
+            return Ok(());
+        }
+        s.output_device = id;
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || save(&db, &s))
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?
     }
 }
 
@@ -526,6 +544,27 @@ mod tests {
         assert_eq!(p.popular_source, Some(PopularSource::MyPlays));
         assert_eq!(p.reduce_motion, Some(ReduceMotion::Off));
         assert_eq!(p.report_to_plex, None);
+    }
+
+    #[tokio::test]
+    async fn output_device_is_stored_per_device_and_survives_other_changes() {
+        let (db, dir) = db();
+        let st = SettingsState::new(db.clone(), Live::default());
+        assert_eq!(st.get().await.unwrap().output_device, None);
+        st.set_output_device(Some("wasapi:usb".into())).await.unwrap();
+        // A normal patch keeps it; a patch can't set it.
+        let p: SettingsPatch = serde_json::from_str(r#"{"reportToPlex":false,"outputDevice":"x"}"#).unwrap();
+        st.set(p).await.unwrap();
+        drop(st);
+        drop(db);
+        let db2 = DbHandle::open(dir.path().join("s.db")).unwrap();
+        let s = load(&db2);
+        assert_eq!(s.output_device.as_deref(), Some("wasapi:usb"));
+        assert!(!s.report_to_plex);
+        assert!(serde_json::to_value(Settings::default()).unwrap()["outputDevice"].is_null());
+        let st2 = SettingsState::new(db2, Live::default());
+        st2.set_output_device(None).await.unwrap();
+        assert_eq!(st2.get().await.unwrap().output_device, None);
     }
 
     #[test]

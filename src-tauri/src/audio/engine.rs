@@ -28,7 +28,7 @@ use super::convert::Converter;
 use super::decode::{DecodeError, TrackDecoder, extension_hint};
 use super::gate::{Priority, PriorityCell, TransferGate};
 use super::http::{HttpConfig, HttpSource, HttpStats};
-use super::output::{AudioOutput, OutputCallback, OutputEvent, OutputFormat, Renderer};
+use super::output::{AudioOutput, OutputCallback, OutputEvent, OutputFormat, OutputState, Renderer};
 use super::source::{StreamSource, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
@@ -68,8 +68,17 @@ pub enum EngineEvent {
     Drained,
     /// Output underran while playing (true) / recovered (false).
     Buffering(bool),
-    /// The output device went away; the engine has paused.
-    DeviceLost(String),
+    /// The output device went away; the engine has paused. `fell_back_from`
+    /// names a chosen device; the output now targets the system default.
+    DeviceLost {
+        why: String,
+        fell_back_from: Option<String>,
+    },
+    /// The output stream broke but can be reopened (call
+    /// [`Engine::reopen_output`]); playback state is untouched.
+    OutputReset(String),
+    /// The output moved to another device by itself.
+    OutputChanged,
 }
 
 /// What the loader reports about where the audio came from.
@@ -487,16 +496,19 @@ impl Engine {
         }
         let weak = Arc::downgrade(&self.env.core);
         let cb: OutputCallback = Arc::new(move |ev| {
-            if let Some(core) = weak.upgrade() {
-                let OutputEvent::DeviceLost(why) = ev;
-                {
+            let Some(core) = weak.upgrade() else { return };
+            let ev = match ev {
+                OutputEvent::DeviceLost { why, fell_back_from } => {
                     let mut m = core.mix.lock();
                     m.playing = false;
                     m.gain = 0.0;
                     m.output_open = false;
+                    EngineEvent::DeviceLost { why, fell_back_from }
                 }
-                let _ = core.events.send(EngineEvent::DeviceLost(why));
-            }
+                OutputEvent::Reset(why) => EngineEvent::OutputReset(why),
+                OutputEvent::Rerouted => EngineEvent::OutputChanged,
+            };
+            let _ = core.events.send(ev);
         });
         let renderer: Arc<dyn Renderer> = self.env.core.clone();
         let fmt = self.output.lock().open(renderer, cb)?;
@@ -511,6 +523,35 @@ impl Engine {
     pub fn close_output(&self) {
         self.output.lock().close();
         self.core().mix.lock().output_open = false;
+    }
+
+    /// The output devices, the choice and the device in use.
+    pub fn output_state(&self) -> OutputState {
+        let out = self.output.lock();
+        OutputState::build(out.devices(), out.selected(), out.opened())
+    }
+
+    /// Chooses the output device (None follows the system default). An open
+    /// stream moves there at once, keeping position and play state.
+    pub fn select_output(&self, id: Option<String>) -> AppResult<()> {
+        self.output.lock().select(id);
+        if self.core().mix.lock().output_open {
+            self.reopen_output()?;
+        }
+        Ok(())
+    }
+
+    /// Closes and reopens the output (new device, or a reset stream). Play
+    /// state is untouched; if the device format differs, the audible track
+    /// re-decodes from where it was.
+    pub fn reopen_output(&self) -> AppResult<()> {
+        let pos = self.position();
+        self.close_output();
+        let changed = self.ensure_output()?;
+        if changed && let Some(p) = pos {
+            self.seek_inner(p.position_ms, true);
+        }
+        Ok(())
     }
 
     fn alloc_key(&self) -> u64 {

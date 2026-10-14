@@ -10,11 +10,11 @@ use tokio::sync::broadcast;
 
 use super::engine::EngineConfig;
 use super::events::{
-    ErrorPayload, EventSink, PlayerState, PlayerStatus, PositionPayload, SKIPPED_MESSAGE,
-    TrackingEvent,
+    ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload,
+    SKIPPED_MESSAGE, TrackingEvent,
 };
 use super::http::HttpConfig;
-use super::output::{CaptureHandle, CaptureOutput, OutputFormat};
+use super::output::{CaptureHandle, CaptureOutput, OutputDevice, OutputFormat, OutputState};
 use super::player::{PlayerConfig, PlayerHandle};
 use super::queue::{AddAt, Repeat};
 use super::source::{ContextKind, PlayContext};
@@ -28,9 +28,17 @@ struct Sink {
     states: Mutex<Vec<PlayerState>>,
     positions: Mutex<Vec<PositionPayload>>,
     errors: Mutex<Vec<ErrorPayload>>,
+    outputs: Mutex<Vec<OutputState>>,
+    lost: Mutex<Vec<String>>,
 }
 
 impl EventSink for Sink {
+    fn output(&self, s: &OutputState) {
+        self.outputs.lock().push(s.clone());
+    }
+    fn output_lost(&self, l: &OutputLost) {
+        self.lost.lock().push(l.device.clone());
+    }
     fn state(&self, s: &PlayerState) {
         self.states.lock().push(s.clone());
     }
@@ -837,4 +845,125 @@ async fn shuffle_is_per_context_and_survives_a_restart() {
         .await
         .unwrap();
     assert!(!r.player.state().await.unwrap().shuffle);
+}
+
+// ---------------------------------------------------------------- output devices
+
+fn devices(r: &Rig) {
+    let dev = |id: &str, name: &str, default: bool| OutputDevice {
+        id: id.into(),
+        name: name.into(),
+        is_default: default,
+    };
+    r.cap.set_devices(vec![
+        dev("spk", "Speakers", true),
+        dev("usb", "USB DAC", false),
+    ]);
+}
+
+/// Waits until playback has moved past `ms` (audio is flowing).
+async fn wait_position_past(r: &Rig, ms: u64) -> u64 {
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing && s.position_ms > ms)
+        .await
+        .position_ms
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn output_devices_are_listed_with_the_default_current() {
+    let r = rig(&["a"], 1.0, true, PlayerConfig::default()).await;
+    devices(&r);
+    let s = r.player.output_state().await.unwrap();
+    assert_eq!(s.devices.len(), 2);
+    assert_eq!(s.selected, None);
+    assert_eq!(s.current.unwrap().id, "spk");
+    let err = r.player.select_output(Some("nope".into())).await.unwrap_err();
+    assert!(matches!(err, crate::error::AppError::NotFound(_)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn switching_output_mid_track_keeps_position_and_play_state() {
+    let mut r = rig(&["a"], 4.0, true, PlayerConfig::default()).await;
+    devices(&r);
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    let before = wait_position_past(&r, 500).await;
+    assert_eq!(r.cap.opened_id().as_deref(), Some("spk"));
+
+    let s = r.player.select_output(Some("usb".into())).await.unwrap();
+    assert_eq!(s.selected.as_deref(), Some("usb"));
+    assert_eq!(s.current.as_ref().unwrap().id, "usb");
+    assert_eq!(r.cap.opened_id().as_deref(), Some("usb"));
+    assert_eq!(r.cap.opens(), 2);
+    let now = r.player.state().await.unwrap();
+    assert_eq!(now.status, PlayerStatus::Playing);
+    assert!(now.position_ms >= before, "position went back: {} < {before}", now.position_ms);
+    assert!(now.position_ms < before + 1_000, "position jumped: {}", now.position_ms);
+    // And it plays on from there.
+    wait_position_past(&r, now.position_ms + 200).await;
+    assert!(r.sink.outputs.lock().iter().any(|o| o.selected.as_deref() == Some("usb")));
+    assert!(r.sink.lost.lock().is_empty());
+
+    // Paused: switching keeps it paused.
+    r.player.pause().await.unwrap();
+    r.player.select_output(None).await.unwrap();
+    assert_eq!(r.cap.opened_id().as_deref(), Some("spk"));
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chosen_output_unplugged_falls_back_to_the_default_with_a_notice() {
+    let mut r = rig(&["a"], 4.0, true, PlayerConfig::default()).await;
+    devices(&r);
+    r.player.select_output(Some("usb".into())).await.unwrap();
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    assert_eq!(r.cap.opened_id().as_deref(), Some("usb"));
+    let at = wait_position_past(&r, 300).await;
+
+    r.cap.remove_device("usb");
+    next_tracking(&mut r.tracking, |e| matches!(e, TrackingEvent::Paused { .. })).await;
+    let s = wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    assert!(s.position_ms >= at);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while r.sink.lost.lock().is_empty() {
+        assert!(Instant::now() < deadline, "no output://lost");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(r.sink.lost.lock().clone(), vec!["USB DAC".to_string()]);
+    let o = r.player.output_state().await.unwrap();
+    assert_eq!(o.selected, None);
+    assert_eq!(o.current.unwrap().id, "spk");
+
+    // Play resumes on the system default.
+    r.player.resume().await.unwrap();
+    wait_position_past(&r, s.position_ms + 100).await;
+    assert_eq!(r.cap.opened_id().as_deref(), Some("spk"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn system_default_changes_are_followed_without_stopping() {
+    let mut r = rig(&["a"], 4.0, true, PlayerConfig::default()).await;
+    devices(&r);
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    let before = wait_position_past(&r, 300).await;
+    r.cap.set_default("usb");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while r.cap.opens() < 2 {
+        assert!(Instant::now() < deadline, "never reopened");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(r.cap.opened_id().as_deref(), Some("usb"));
+    let p = wait_position_past(&r, before + 100).await;
+    assert!(p < before + 2_000);
+    assert!(r.sink.lost.lock().is_empty());
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Playing);
+    // A chosen device ignores default changes.
+    r.player.select_output(Some("spk".into())).await.unwrap();
+    let opens = r.cap.opens();
+    r.cap.set_default("spk");
+    r.cap.set_default("usb");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.cap.opens(), opens);
+    assert_eq!(r.cap.opened_id().as_deref(), Some("spk"));
 }

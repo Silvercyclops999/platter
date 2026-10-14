@@ -479,7 +479,7 @@ async fn device_loss_pauses_and_play_reopens() {
     r.cap.lose_device();
     collect_until(
         &mut r.events,
-        |e| matches!(e, EngineEvent::DeviceLost(_)),
+        |e| matches!(e, EngineEvent::DeviceLost { .. }),
         Duration::from_secs(5),
     )
     .await;

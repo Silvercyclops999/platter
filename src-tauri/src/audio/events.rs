@@ -3,12 +3,24 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::output::OutputState;
 use super::queue::{ContextInfo, QueueView, Repeat};
 use crate::model::Track;
 
 pub const EV_STATE: &str = "player://state";
 pub const EV_POSITION: &str = "player://position";
 pub const EV_ERROR: &str = "player://error";
+pub const EV_OUTPUT: &str = "output://changed";
+pub const EV_OUTPUT_LOST: &str = "output://lost";
+
+/// `output://lost` payload: the chosen output device went away and playback
+/// moved to the system default (paused).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputLost {
+    /// The device's name.
+    pub device: String,
+}
 
 /// The message shown when a track can't be played.
 pub const SKIPPED_MESSAGE: &str = "Skipped: file unavailable";
@@ -79,6 +91,10 @@ pub trait EventSink: Send + Sync {
     fn state(&self, state: &PlayerState);
     fn position(&self, pos: &PositionPayload);
     fn error(&self, err: &ErrorPayload);
+    /// Output devices or the device in use changed.
+    fn output(&self, _state: &OutputState) {}
+    /// The chosen output device went away.
+    fn output_lost(&self, _lost: &OutputLost) {}
 }
 
 /// Emits to every webview via Tauri's event system.
@@ -96,6 +112,14 @@ impl<R: tauri::Runtime> EventSink for TauriSink<R> {
     fn error(&self, err: &ErrorPayload) {
         use tauri::Emitter;
         let _ = self.0.emit(EV_ERROR, err);
+    }
+    fn output(&self, state: &OutputState) {
+        use tauri::Emitter;
+        let _ = self.0.emit(EV_OUTPUT, state);
+    }
+    fn output_lost(&self, lost: &OutputLost) {
+        use tauri::Emitter;
+        let _ = self.0.emit(EV_OUTPUT_LOST, lost);
     }
 }
 

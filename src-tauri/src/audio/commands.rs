@@ -6,6 +6,8 @@
 use tauri::State;
 
 use super::events::{PlayerState, Problem};
+use super::output::OutputState;
+use crate::settings::SettingsState;
 use super::player::PlayerHandle;
 use super::queue::{AddAt, Repeat};
 use super::source::PlayContext;
@@ -118,6 +120,25 @@ pub async fn queue_jump(player: State<'_, PlayerHandle>, item_id: String) -> App
 #[tauri::command]
 pub async fn player_state(player: State<'_, PlayerHandle>) -> AppResult<PlayerState> {
     player.state().await
+}
+
+/// Audio output devices, the chosen one and the one in use.
+#[tauri::command]
+pub async fn output_devices(player: State<'_, PlayerHandle>) -> AppResult<OutputState> {
+    player.output_state().await
+}
+
+/// Plays on another output device (`deviceId: null` follows the system
+/// default), keeping position and play state, and remembers the choice.
+#[tauri::command]
+pub async fn output_select(
+    player: State<'_, PlayerHandle>,
+    settings: State<'_, SettingsState>,
+    device_id: Option<String>,
+) -> AppResult<OutputState> {
+    let state = player.select_output(device_id).await?;
+    settings.set_output_device(state.selected.clone()).await?;
+    Ok(state)
 }
 
 /// Not in docs/IPC.md yet: the Problems list ("Skipped: file

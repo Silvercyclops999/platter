@@ -14,6 +14,21 @@ use parking_lot::Mutex;
 
 use super::output::{AudioOutput, CpalOutput, OutputEvent, OutputFormat, Renderer};
 
+/// Lists the real output devices (no sound) and checks each id finds its
+/// device again, which is how a saved choice is reopened.
+#[test]
+#[ignore = "needs a real audio device"]
+fn lists_output_devices_and_ids_round_trip() {
+    use cpal::traits::HostTrait;
+    let list = CpalOutput::new().devices();
+    for d in &list {
+        println!("{}{} ({})", d.name, if d.is_default { " [default]" } else { "" }, d.id);
+        let id: cpal::DeviceId = d.id.parse().expect("id parses");
+        assert!(cpal::default_host().device_by_id(&id).is_some(), "{} not found by id", d.name);
+    }
+    assert!(list.iter().filter(|d| d.is_default).count() <= 1);
+}
+
 struct Tone {
     fmt: Mutex<Option<OutputFormat>>,
     frame: AtomicU64,
