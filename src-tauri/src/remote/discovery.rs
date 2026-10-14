@@ -280,7 +280,7 @@ mod tests {
              "accessToken": "player-token",
              "connections": [
                 {"protocol": "http", "address": "203.0.113.5", "port": 32500, "uri": "http://203.0.113.5:32500", "local": false},
-                {"protocol": "http", "address": "192.168.1.20", "port": 32500, "uri": "http://192.168.1.20:32500", "local": true},
+                {"protocol": "http", "address": "192.0.2.20", "port": 32500, "uri": "http://192.0.2.20:32500", "local": true},
                 {"protocol": "https", "address": "x", "port": 443, "uri": "https://relay.example", "relay": true}
              ]},
             {"name": "Phone", "product": "Plexamp", "platform": "iOS", "device": "iOS", "provides": "client,player",
@@ -298,7 +298,7 @@ mod tests {
         let ids: Vec<_> = f.iter().map(|f| f.player.id.as_str()).collect();
         assert_eq!(ids, ["amp-pc", "amp-phone", "tv"]);
         let pc = &f[0];
-        assert_eq!(pc.direct[0].as_str(), "http://192.168.1.20:32500/");
+        assert_eq!(pc.direct[0].as_str(), "http://192.0.2.20:32500/");
         assert_eq!(pc.direct.len(), 2);
         assert!(pc.token.is_some());
         assert!(!pc.player.online);
@@ -312,15 +312,15 @@ mod tests {
     #[test]
     fn clients_are_online_and_reachable_through_the_server() {
         let body = serde_json::to_vec(&json!({"MediaContainer": {"size": 2, "Server": [
-            {"name": "Desk", "host": "192.168.1.20", "address": "192.168.1.20", "port": "32500",
+            {"name": "Desk", "host": "192.0.2.20", "address": "192.0.2.20", "port": "32500",
              "machineIdentifier": "amp-pc", "product": "Plexamp", "protocol": "plex", "protocolCapabilities": "timeline,playback,playqueues"},
-            {"name": "Web", "address": "192.168.1.30", "port": 32400, "machineIdentifier": "web", "product": "Plex Web", "platform": "Chrome"}
+            {"name": "Web", "address": "192.0.2.30", "port": 32400, "machineIdentifier": "web", "product": "Plex Web", "platform": "Chrome"}
         ]}}))
         .unwrap();
         let f = from_clients(&body, "me");
         assert_eq!(f.len(), 2);
         assert!(f[0].via_server && f[0].player.online);
-        assert_eq!(f[0].direct[0].as_str(), "http://192.168.1.20:32500/");
+        assert_eq!(f[0].direct[0].as_str(), "http://192.0.2.20:32500/");
         assert_eq!(f[1].player.kind, PlayerKind::Browser);
         assert!(from_clients(br#"{"MediaContainer":{"size":0}}"#, "me").is_empty());
     }
@@ -351,7 +351,7 @@ mod tests {
     fn merge_unions_routes_and_sorts_online_first() {
         let clients = from_clients(
             &serde_json::to_vec(&json!({"MediaContainer": {"Server": [
-                {"name": "Desk (LAN)", "address": "192.168.1.20", "port": 32500, "machineIdentifier": "amp-pc", "product": "Plexamp"}
+                {"name": "Desk (LAN)", "address": "192.0.2.20", "port": 32500, "machineIdentifier": "amp-pc", "product": "Plexamp"}
             ]}}))
             .unwrap(),
             "me",
