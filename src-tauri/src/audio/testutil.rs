@@ -39,6 +39,8 @@ pub fn track(id: &str, artist: &str, part: &str) -> Track {
         view_count: 0,
         last_viewed_at: None,
         rating_count: None,
+        rated_at: None,
+        genres: Vec::new(),
     }
 }
 

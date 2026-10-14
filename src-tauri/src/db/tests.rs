@@ -119,6 +119,27 @@ async fn pages_are_browsable_while_sync_runs() {
 }
 
 #[tokio::test]
+async fn likes_made_in_other_plex_apps_arrive_with_any_sync() {
+    let t = open();
+    let src = Arc::new(FakeSource::new(fake::generated(1, 1, 3)));
+    sync(&t.db, &src, false).await;
+    let (a, b) = {
+        let l = src.lib.lock();
+        (l.tracks[0].id.clone(), l.tracks[1].id.clone())
+    };
+    // Liked elsewhere: Plex's rated list has it, but its updatedAt didn't move.
+    src.lib.lock().rated = Some(vec![super::likes::Rated { track_id: a.clone(), rating: 10.0, rated_at: Some(1234) }]);
+    sync(&t.db, &src, false).await;
+    assert_eq!(t.db.read(|c| super::likes::liked_ids(c, 10.0)).unwrap(), vec![a.clone()]);
+    let liked = t.db.read(|c| super::likes::liked_tracks(c, 10.0)).unwrap();
+    assert_eq!(liked[0].rated_at, Some(1234));
+    // Unliked there and another liked.
+    src.lib.lock().rated = Some(vec![super::likes::Rated { track_id: b.clone(), rating: 10.0, rated_at: Some(2000) }]);
+    sync(&t.db, &src, false).await;
+    assert_eq!(t.db.read(|c| super::likes::liked_ids(c, 10.0)).unwrap(), vec![b]);
+}
+
+#[tokio::test]
 async fn incremental_update_applies_changes_and_reindexes() {
     let t = open();
     let src = Arc::new(FakeSource::new(fake::generated(3, 2, 5)));

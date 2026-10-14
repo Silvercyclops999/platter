@@ -56,6 +56,8 @@ pub enum ContextKind {
     Artist,
     Tracks,
     Search,
+    /// Liked Songs (id "liked"), newest like first.
+    Liked,
 }
 
 /// `play_context.context` payload.

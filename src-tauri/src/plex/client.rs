@@ -273,6 +273,9 @@ pub struct PlexMetadata {
     pub last_viewed_at: Option<i64>,
     #[serde(default, deserialize_with = "lenient::opt_f64")]
     pub user_rating: Option<f64>,
+    /// When the user last rated the item, unix seconds.
+    #[serde(default, deserialize_with = "lenient::opt_i64")]
+    pub last_rated_at: Option<i64>,
     /// Global listener count on tracks (from Last.fm), when Plex has one.
     #[serde(default, deserialize_with = "lenient::opt_i64")]
     pub rating_count: Option<i64>,
@@ -691,6 +694,8 @@ impl PlexMetadata {
             view_count: u32_of(self.view_count),
             last_viewed_at: self.last_viewed_at,
             rating_count: self.rating_count.and_then(|n| u32::try_from(n).ok()),
+            rated_at: self.user_rating.and(self.last_rated_at),
+            genres: self.genre.iter().chain(&self.mood).map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
         }
     }
 
@@ -1446,6 +1451,39 @@ impl PlexClient {
         self.send(rb).await.map(|_| ())
     }
 
+    /// `PUT /:/rate?key=…&identifier=…&rating=…`: set the user's rating
+    /// (0 to 10; 10 is five stars, which Platter calls liked). None clears it
+    /// (Plex takes `rating=-1` for that).
+    pub async fn rate(&self, rating_key: &str, rating: Option<f64>) -> AppResult<()> {
+        let key = plain_id(rating_key)?;
+        let value = match rating {
+            Some(r) if r.is_finite() => {
+                let r = r.clamp(0.0, 10.0);
+                if r.fract() == 0.0 { format!("{}", r as i64) } else { format!("{r}") }
+            }
+            Some(_) => return Err(AppError::Invalid("rating must be a number".into())),
+            None => "-1".to_string(),
+        };
+        let rb = self.request(Method::PUT, "/:/rate")?.query(&[
+            ("key", key),
+            ("identifier", LIBRARY_IDENTIFIER),
+            ("rating", value.as_str()),
+        ]);
+        self.send(rb).await.map(|_| ())
+    }
+
+    /// Every rated track in a section with its rating and when it was rated:
+    /// `/library/sections/{id}/all?type=10&userRating>=1`. Small next to the
+    /// whole library, so sync reads it on every pass (a rating made in
+    /// another Plex app doesn't always change the track's `updatedAt`).
+    pub async fn rated_tracks(&self, section: &str) -> AppResult<Vec<(String, f64, Option<i64>)>> {
+        let items = self.list_all(section, MetaType::Track, &[("userRating>", "1".to_string())]).await?;
+        Ok(items
+            .into_iter()
+            .filter_map(|m| m.user_rating.filter(|r| *r > 0.0).map(|r| (m.rating_key, r, m.last_rated_at)))
+            .collect())
+    }
+
     /// `GET /:/scrobble` — mark played.
     pub async fn scrobble(&self, rating_key: &str) -> AppResult<()> {
         let rb = self
@@ -1973,6 +2011,78 @@ mod tests {
         c.playlist_edit("900", None, None).await.unwrap(); // nothing to send
         c.playlist_poster("900", vec![1, 2, 3], "image/jpeg").await.unwrap();
         c.playlist_delete("900").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rate_sends_the_documented_request_and_clears_with_minus_one() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/:/rate"))
+            .and(query_param("key", "42"))
+            .and(query_param("identifier", "com.plexapp.plugins.library"))
+            .and(query_param("rating", "10"))
+            .and(header("x-plex-token", TOKEN))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/:/rate"))
+            .and(query_param("key", "42"))
+            .and(query_param("rating", "-1"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/:/rate"))
+            .and(query_param("key", "43"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+        let c = client(&server);
+        c.rate("42", Some(10.0)).await.unwrap();
+        c.rate("42", None).await.unwrap();
+        assert!(c.rate("43", Some(10.0)).await.is_err(), "a refused rating is an error");
+        assert!(matches!(c.rate("../1", Some(10.0)).await, Err(AppError::Invalid(_))));
+        assert!(matches!(c.rate("42", Some(f64::NAN)).await, Err(AppError::Invalid(_))));
+    }
+
+    #[tokio::test]
+    async fn rated_tracks_reads_ratings_and_when_they_were_set() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/library/sections/7/all"))
+            .and(query_param("type", "10"))
+            .and(query_param("userRating>", "1"))
+            .respond_with(mc(serde_json::json!({ "size": 2, "totalSize": 2, "Metadata": [
+                { "ratingKey": "5", "type": "track", "title": "a", "userRating": 10, "lastRatedAt": 1700000000,
+                  "Genre": [{ "tag": "Hip-Hop" }] },
+                { "ratingKey": "6", "type": "track", "title": "b", "userRating": "6.0" }
+            ]})))
+            .mount(&server)
+            .await;
+        let c = client(&server);
+        let rated = c.rated_tracks("7").await.unwrap();
+        assert_eq!(rated, vec![("5".to_string(), 10.0, Some(1_700_000_000)), ("6".to_string(), 6.0, None)]);
+    }
+
+    #[test]
+    fn tracks_keep_when_they_were_rated_and_their_genres() {
+        let m: PlexMetadata = serde_json::from_value(serde_json::json!({
+            "ratingKey": "5", "type": "track", "title": "a", "userRating": 10, "lastRatedAt": 1700000000,
+            "Genre": [{ "tag": "Hip-Hop" }, { "tag": "Rap" }], "Mood": [{ "tag": "Calm" }]
+        }))
+        .unwrap();
+        let t = m.to_track();
+        assert_eq!(t.rated_at, Some(1_700_000_000));
+        assert_eq!(t.genres, vec!["Hip-Hop", "Rap", "Calm"]);
+        // A cleared rating keeps no stale time.
+        let m: PlexMetadata = serde_json::from_value(serde_json::json!({
+            "ratingKey": "6", "type": "track", "title": "b", "lastRatedAt": 1700000000
+        }))
+        .unwrap();
+        assert_eq!(m.to_track().rated_at, None);
     }
 
     #[tokio::test]

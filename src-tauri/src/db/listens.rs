@@ -45,6 +45,7 @@ pub enum ContextKind {
     Radio,
     Search,
     Tracks,
+    Liked,
 }
 
 impl ContextKind {
@@ -57,6 +58,7 @@ impl ContextKind {
             ContextKind::Radio => "radio",
             ContextKind::Search => "search",
             ContextKind::Tracks => "tracks",
+            ContextKind::Liked => "liked",
         }
     }
 }

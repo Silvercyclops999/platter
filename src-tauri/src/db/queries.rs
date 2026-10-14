@@ -531,7 +531,7 @@ pub fn playlist_page(c: &Connection, id: &str) -> AppResult<PlaylistPage> {
          WHERE pi.playlist_id = ?1 ORDER BY pi.position"
     ))?;
     let rows = st
-        .query_map([&id], |r| Ok((row_track(r)?, r.get::<_, Option<String>>(21)?)))?
+        .query_map([&id], |r| Ok((row_track(r)?, r.get::<_, Option<String>>(super::store::TRACK_NCOLS)?)))?
         .collect::<Result<Vec<_>, _>>()?;
     let (tracks, item_ids) = rows.into_iter().map(|(t, item)| (t, item.unwrap_or_default())).unzip();
     Ok(PlaylistPage { playlist, tracks, item_ids })

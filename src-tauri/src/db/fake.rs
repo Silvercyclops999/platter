@@ -25,6 +25,8 @@ pub struct FakeLibrary {
     pub broken_playlists: Vec<String>,
     /// Artist id -> `Similar` from artist detail.
     pub similar: HashMap<String, Vec<SimilarArtist>>,
+    /// Every rated track as Plex lists it (None: not supported).
+    pub rated: Option<Vec<super::likes::Rated>>,
 }
 
 #[derive(Default)]
@@ -99,6 +101,10 @@ impl LibrarySource for FakeSource {
             ItemKind::Album => l.albums.iter().map(|a| a.id.clone()).collect(),
             ItemKind::Track => l.tracks.iter().map(|t| t.id.clone()).collect(),
         })
+    }
+
+    async fn rated_tracks(&self, _s: &str) -> AppResult<Option<Vec<super::likes::Rated>>> {
+        Ok(self.lib.lock().rated.clone())
     }
 
     async fn history(&self, _s: &str, start: u64, size: u64) -> AppResult<Vec<HistoryEntry>> {
@@ -194,6 +200,8 @@ pub fn track(id: &str, title: &str, album: &Album, disc: u32, n: u32) -> Track {
         view_count: 0,
         last_viewed_at: None,
         rating_count: None,
+        rated_at: None,
+        genres: Vec::new(),
     }
 }
 

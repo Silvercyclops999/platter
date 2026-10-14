@@ -244,6 +244,10 @@ async fn run_ctx(ctx: &Ctx, prev: Option<SyncState>, full: bool) -> AppResult<Sy
     }
     sync_history(ctx, &section.id).await?;
     sync_playlists(ctx, do_full).await?;
+    // Ratings changed in other Plex apps don't always show in updatedAt.
+    if let Err(e) = sync_ratings(ctx, &section.id).await {
+        tracing::warn!("ratings not synced: {e}");
+    }
 
     state.last_sync_at = Some(started);
     let s = state.clone();
@@ -478,6 +482,23 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool) -> AppResult<()> {
                 Ok(())
             })
             .await?;
+    }
+    Ok(())
+}
+
+async fn sync_ratings(ctx: &Ctx, section_id: &str) -> AppResult<()> {
+    let Some(rated) = ctx.source.rated_tracks(section_id).await? else { return Ok(()) };
+    let changed = ctx
+        .db
+        .write_async(move |c| {
+            let tx = c.transaction()?;
+            let changed = super::likes::apply_rated(&tx, &rated)?;
+            tx.commit()?;
+            Ok(changed)
+        })
+        .await?;
+    if !changed.is_empty() {
+        tracing::debug!(n = changed.len(), "ratings changed in Plex");
     }
     Ok(())
 }

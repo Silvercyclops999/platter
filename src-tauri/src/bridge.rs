@@ -205,6 +205,16 @@ impl LibrarySource for PlexLibrary {
         self.plex.client().await?.playlists().await
     }
 
+    async fn rated_tracks(&self, section_id: &str) -> AppResult<Option<Vec<crate::db::likes::Rated>>> {
+        let rated = self.plex.client().await?.rated_tracks(section_id).await?;
+        Ok(Some(
+            rated
+                .into_iter()
+                .map(|(track_id, rating, rated_at)| crate::db::likes::Rated { track_id, rating, rated_at })
+                .collect(),
+        ))
+    }
+
     async fn artist_similar(&self, artist_id: &str) -> AppResult<Vec<SimilarArtist>> {
         let m = self.plex.client().await?.metadata(artist_id).await?;
         Ok(m.similar_artists().into_iter().map(|(id, name)| SimilarArtist { id, name }).collect())
@@ -381,6 +391,7 @@ impl TrackLookup for CacheLookup {
     async fn context(&self, ctx: &PlayContext) -> AppResult<ResolvedContext> {
         let ctx = ctx.clone();
         let popular = self.0.popular_source();
+        let liked_min = crate::settings::load(&self.0).liked_min_rating();
         self.0
             .read_async(move |c| {
                 let id = ctx.id.clone().unwrap_or_default();
@@ -409,6 +420,10 @@ impl TrackLookup for CacheLookup {
                         }
                         ResolvedContext { tracks, title: Some(page.artist.title) }
                     }
+                    ContextKind::Liked => ResolvedContext {
+                        tracks: crate::db::likes::liked_tracks(c, liked_min)?,
+                        title: Some("Liked Songs".into()),
+                    },
                     ContextKind::Tracks | ContextKind::Search => ResolvedContext {
                         tracks: queries::tracks_by_ids(c, &ctx.track_ids.clone().unwrap_or_default())?,
                         title: None,

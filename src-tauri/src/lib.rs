@@ -3,6 +3,7 @@ pub mod audio;
 pub mod bridge;
 pub mod db;
 pub mod error;
+pub mod likes;
 pub mod model;
 pub mod monitor;
 pub mod notify;
@@ -206,6 +207,14 @@ pub fn run() {
             playlists::spawn(playlists.clone());
             app.manage(playlists);
 
+            let likes = likes::Likes::new(
+                db.clone(),
+                Arc::new(likes::PlexRatings(plex.clone())),
+                Arc::new(likes::AppLikeEvents { app: app.handle().clone(), plex: plex.clone() }),
+            );
+            likes::spawn(likes.clone());
+            app.manage(likes);
+
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
             monitor::files::spawn(plex.clone(), db.clone(), player.clone());
@@ -257,6 +266,10 @@ pub fn run() {
             playlists::playlist_update,
             playlists::playlist_set_cover,
             playlists::playlist_delete,
+            likes::likes_set,
+            likes::liked_ids,
+            likes::liked_page,
+            likes::playlists_with_track,
             db::commands::search,
             db::commands::search_completions,
             db::commands::search_recents,

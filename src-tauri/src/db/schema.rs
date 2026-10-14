@@ -347,6 +347,26 @@ CREATE TABLE artist_info (
     PRIMARY KEY (artist_id, source)
 ) WITHOUT ROWID;
 "#,
+    // v7: likes. Tracks keep when they were rated (Plex lastRatedAt: the
+    // Liked Songs "date added") and their own genre and mood tags (its
+    // filter chips); the next sync runs as a full pass to fill both. Rating
+    // writes queue in rating_ops, one per track, until Plex has them; each
+    // keeps the rating it replaced so a refused write can be rolled back.
+    r#"
+ALTER TABLE tracks ADD COLUMN rated_at INTEGER;
+ALTER TABLE tracks ADD COLUMN genres TEXT NOT NULL DEFAULT '[]';
+CREATE INDEX tracks_rated ON tracks (rated_at DESC) WHERE user_rating IS NOT NULL;
+CREATE TABLE rating_ops (
+    seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id      TEXT NOT NULL UNIQUE,
+    rating        REAL,
+    prev_rating   REAL,
+    prev_rated_at INTEGER,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL
+);
+UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
 ];
 
 #[cfg(test)]
@@ -442,6 +462,40 @@ mod tests {
         .unwrap();
         let n: i64 = c.query_row("SELECT count(*) FROM artist_info", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn v7_likes_migration_adds_rating_columns_and_queue_and_makes_the_next_sync_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        let before = MIGRATIONS.len() - 1;
+        for m in &MIGRATIONS[..before] {
+            c.execute_batch(m).unwrap();
+        }
+        c.pragma_update(None, "user_version", before as i64).unwrap();
+        c.execute(
+            "INSERT INTO sync_state (id, section_id, section_uuid, last_sync_at, last_full_sync_at)
+             VALUES (1, '1', 'u', 100, 100)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, part_key, user_rating)
+             VALUES ('t', 'T', 'a', 'A', 'r', 'R', '/p', 10)",
+            [],
+        )
+        .unwrap();
+        migrate(&mut c).unwrap();
+        let (at, genres): (Option<i64>, String) =
+            c.query_row("SELECT rated_at, genres FROM tracks", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((at, genres.as_str()), (None, "[]"));
+        let full: Option<i64> = c.query_row("SELECT last_full_sync_at FROM sync_state", [], |r| r.get(0)).unwrap();
+        assert_eq!(full, None);
+        c.execute("INSERT INTO rating_ops (track_id, rating, created_at) VALUES ('t', NULL, 1)", []).unwrap();
+        assert!(
+            c.execute("INSERT INTO rating_ops (track_id, rating, created_at) VALUES ('t', 10, 2)", []).is_err(),
+            "one queued rating per track"
+        );
     }
 
     #[test]

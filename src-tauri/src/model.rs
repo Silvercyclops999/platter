@@ -92,6 +92,14 @@ pub struct Track {
     /// Missing on unreleased and rare songs. Ranks an artist's popular songs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rating_count: Option<u32>,
+    /// When the user last rated the track, unix seconds (Plex lastRatedAt).
+    /// For a liked song this is when it was liked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rated_at: Option<i64>,
+    /// Plex genre and mood tags on the track itself (the Liked Songs
+    /// filter chips).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

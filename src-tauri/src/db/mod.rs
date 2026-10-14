@@ -11,6 +11,7 @@
 //! - [`search`]   local search
 //! - [`listens`]  local listen log + offline report queue
 //! - [`playlists`] local playlist edits + the queue of edits for Plex
+//! - [`likes`]    liked tracks (Plex ratings) + the queue of rating writes
 //! - [`artcache`] artwork disk cache (LRU, size cap, request coalescing)
 //! - [`commands`] Tauri command fns (registered by the integrator in lib.rs)
 //!
@@ -21,6 +22,7 @@
 pub mod artcache;
 pub mod commands;
 pub mod credits;
+pub mod likes;
 pub mod listens;
 pub mod playlists;
 pub mod queries;

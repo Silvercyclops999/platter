@@ -104,6 +104,14 @@ pub trait LibrarySource: Send + Sync {
             .collect())
     }
 
+    /// Every rated track in the section with its rating and when it was
+    /// rated (`/library/sections/{id}/all?type=10&userRating>=1`). Read on
+    /// every sync so likes made in other Plex apps arrive. None: not
+    /// supported, ratings come only with the track lists.
+    async fn rated_tracks(&self, _section_id: &str) -> AppResult<Option<Vec<super::likes::Rated>>> {
+        Ok(None)
+    }
+
     /// Similar artists from one artist's detail (`/library/metadata/{id}`).
     /// Not part of sync: called when an artist page opens (db::similar).
     async fn artist_similar(&self, _artist_id: &str) -> AppResult<Vec<SimilarArtist>> {

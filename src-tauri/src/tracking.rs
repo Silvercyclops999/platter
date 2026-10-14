@@ -54,6 +54,7 @@ fn log_context(ctx: &Option<ContextInfo>) -> (Option<ContextKind>, Option<String
                 PlayContextKind::Artist => ContextKind::Artist,
                 PlayContextKind::Tracks => ContextKind::Tracks,
                 PlayContextKind::Search => ContextKind::Search,
+                PlayContextKind::Liked => ContextKind::Liked,
             }),
             c.id.clone(),
         ),
@@ -353,6 +354,8 @@ mod tests {
             view_count: 0,
             last_viewed_at: None,
             rating_count: None,
+            rated_at: None,
+            genres: Vec::new(),
         }
     }
 

@@ -73,6 +73,37 @@ pub enum ReduceMotion {
     Off,
 }
 
+/// Which Plex star ratings count as liked. Liking always writes five stars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LikedMeans {
+    /// Five stars (Plex rating 10).
+    #[default]
+    Five,
+    /// Four stars or more (Plex rating 8 and up).
+    FourUp,
+}
+
+impl LikedMeans {
+    pub fn min_rating(self) -> f64 {
+        match self {
+            Self::Five => crate::db::likes::LIKED_RATING,
+            Self::FourUp => 8.0,
+        }
+    }
+}
+
+/// When track rows show the like control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LikeControlRows {
+    /// Liked songs always; the rest on hover or focus.
+    #[default]
+    Hover,
+    Always,
+    Off,
+}
+
 /// Missing fields (settings saved by an older build) take their defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -144,6 +175,10 @@ pub struct Settings {
     pub info_fanart: bool,
     /// Artist photo and bio from TheAudioDB (needs the user's key).
     pub info_audiodb: bool,
+    /// Which star ratings count as liked.
+    pub liked_means: LikedMeans,
+    /// When track rows show the like control.
+    pub like_control_rows: LikeControlRows,
 }
 
 impl Default for Settings {
@@ -181,6 +216,8 @@ impl Default for Settings {
             info_lastfm: false,
             info_fanart: false,
             info_audiodb: false,
+            liked_means: LikedMeans::Five,
+            like_control_rows: LikeControlRows::Hover,
         }
     }
 }
@@ -220,6 +257,8 @@ pub struct SettingsPatch {
     pub info_lastfm: Option<bool>,
     pub info_fanart: Option<bool>,
     pub info_audiodb: Option<bool>,
+    pub liked_means: Option<LikedMeans>,
+    pub like_control_rows: Option<LikeControlRows>,
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -265,6 +304,8 @@ impl Settings {
         set(&mut self.info_lastfm, p.info_lastfm);
         set(&mut self.info_fanart, p.info_fanart);
         set(&mut self.info_audiodb, p.info_audiodb);
+        set(&mut self.liked_means, p.liked_means);
+        set(&mut self.like_control_rows, p.like_control_rows);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -280,6 +321,11 @@ impl Settings {
     fn clamp(&mut self) {
         self.precache_count = self.precache_count.clamp(PRECACHE_MIN, PRECACHE_MAX);
         self.art_cache_mb = self.art_cache_mb.clamp(ART_CACHE_MIN_MB, ART_CACHE_MAX_MB);
+    }
+
+    /// The lowest Plex rating that counts as liked.
+    pub fn liked_min_rating(&self) -> f64 {
+        self.liked_means.min_rating()
     }
 
     pub fn art_cache_bytes(&self) -> u64 {
@@ -556,6 +602,8 @@ mod tests {
         assert!(s.info_wikipedia && !s.info_lastfm && !s.info_fanart && !s.info_audiodb);
         assert!(s.playlist_ask_duplicates);
         assert_eq!(s.playlist_new_name, "My playlist #N");
+        assert_eq!((s.liked_means, s.like_control_rows), (LikedMeans::Five, LikeControlRows::Hover));
+        assert_eq!(s.liked_min_rating(), 10.0);
     }
 
     #[test]
@@ -615,6 +663,8 @@ mod tests {
             info_lastfm: Some(true),
             info_fanart: Some(true),
             info_audiodb: Some(true),
+            liked_means: Some(LikedMeans::FourUp),
+            like_control_rows: Some(LikeControlRows::Always),
         })
         .await
         .unwrap();
@@ -660,6 +710,8 @@ mod tests {
         assert!(!s.ab_loop_handles && !s.up_next_line && !s.volume_percent && s.notify_track_change);
         assert!(!s.playlist_ask_duplicates);
         assert_eq!(s.playlist_new_name, "Mix #N");
+        assert_eq!((s.liked_means, s.like_control_rows), (LikedMeans::FourUp, LikeControlRows::Always));
+        assert_eq!(s.liked_min_rating(), 8.0);
         // Loaded at startup into the live switches.
         assert!(fresh.notify_track_change.load(Ordering::Relaxed));
         assert!(fresh.tracking.private_session.load(Ordering::Relaxed));
