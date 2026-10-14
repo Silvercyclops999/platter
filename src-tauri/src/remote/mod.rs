@@ -13,13 +13,21 @@
 //! - [`playqueue`]: server play queues (create and read).
 //! - [`service`]: the move / follow / return state machine.
 //! - [`target`]: Platter as a player (HTTP companion endpoints and GDM).
+//! - [`lan`]: Cast devices and AirPlay receivers found over mDNS, and the
+//!   link the service follows for them.
+//! - [`cast`]: Google Cast (Plex's receiver with a play queue, or the
+//!   default media receiver).
+//! - [`airplay`]: AirPlay audio, played through a network output.
 //! - [`commands`]: Tauri commands.
 //!
 //! Protocol notes and which calls are confirmed live: docs/PLEX-API.md.
 
+pub mod airplay;
+pub mod cast;
 pub mod commands;
 pub mod companion;
 pub mod discovery;
+pub mod lan;
 pub mod playqueue;
 pub mod service;
 pub mod target;
@@ -34,7 +42,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::watch;
 
-pub use service::{LocalPlayer, RemoteConfig, RemoteEnv, RemoteService, ServerCtx};
+pub use service::{LanEnv, LocalPlayer, RemoteConfig, RemoteEnv, RemoteService, ServerCtx};
 pub use types::{RemoteCommand, RemotePlayer, RemoteSession, RemoteState};
 
 /// The Listen on settings the core reads directly.
@@ -42,6 +50,8 @@ pub use types::{RemoteCommand, RemotePlayer, RemoteSession, RemoteState};
 pub struct RemoteSwitches {
     /// Show Plex players in the device picker.
     pub show_players: Arc<AtomicBool>,
+    /// Show Cast devices and AirPlay receivers (mDNS runs only while on).
+    pub show_cast: Arc<AtomicBool>,
     /// Moving playback stops it on the device it leaves.
     pub stop_old: Arc<AtomicBool>,
     /// Let other Plex apps play on this computer (starts the companion
@@ -53,6 +63,7 @@ impl Default for RemoteSwitches {
     fn default() -> Self {
         Self {
             show_players: Arc::new(AtomicBool::new(true)),
+            show_cast: Arc::new(AtomicBool::new(true)),
             stop_old: Arc::new(AtomicBool::new(true)),
             allow_casting: watch::channel(false).0,
         }
@@ -68,6 +79,12 @@ impl RemoteSwitches {
             *v = allow_casting;
             changed
         });
+    }
+    pub fn set_show_cast(&self, on: bool) {
+        self.show_cast.store(on, Ordering::Relaxed);
+    }
+    pub fn show_cast(&self) -> bool {
+        self.show_cast.load(Ordering::Relaxed)
     }
     pub fn show_players(&self) -> bool {
         self.show_players.load(Ordering::Relaxed)

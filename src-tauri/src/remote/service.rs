@@ -22,6 +22,9 @@ use url::Url;
 
 use super::RemoteSwitches;
 use super::companion::{self, Companion, Route, Timeline};
+use super::airplay::{self, AirPlayLink, AirPlayTarget};
+use super::cast::{self, CastLink};
+use super::lan::{self, LanDevice, LanLink, MdnsSource};
 use super::discovery::{self, Found};
 use super::playqueue;
 use super::types::{
@@ -33,7 +36,9 @@ use crate::audio::queue::Repeat;
 use crate::audio::source::PlayContext;
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
+use crate::audio::netsink::NetRoute;
 use crate::plex::Token;
+use crate::plex::keychain::TokenStore;
 use crate::plex::client::{check_status, map_send_error};
 use crate::plex::identity::ClientIdentity;
 use crate::plex::state::EventSink;
@@ -82,6 +87,24 @@ pub trait LocalPlayer: Send + Sync {
     async fn tracks(&self, ids: &[String]) -> AppResult<Vec<Track>>;
     /// Load a context paused at its start (nothing sounds here).
     async fn load_context(&self, context: PlayContext, start_track_id: Option<String>) -> AppResult<()>;
+    /// The chosen output id (None follows the system default).
+    async fn output_selected(&self) -> AppResult<Option<String>> {
+        Ok(None)
+    }
+    /// Moves the sound to an output (a network one while on AirPlay).
+    async fn select_output(&self, _id: Option<String>) -> AppResult<()> {
+        Err(AppError::Invalid("This player has no outputs to choose.".into()))
+    }
+}
+
+/// What Cast devices and AirPlay receivers need: mDNS, the output route
+/// AirPlay plays through, the keychain for receiver passwords, and TLS.
+#[derive(Clone)]
+pub struct LanEnv {
+    pub mdns: Arc<dyn MdnsSource>,
+    pub route: NetRoute,
+    pub passwords: Arc<dyn TokenStore>,
+    pub tls: Arc<rustls::ClientConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +143,8 @@ impl Default for RemoteConfig {
 struct Active {
     found: Found,
     routes: Vec<Route>,
+    /// A Cast device or AirPlay receiver (Plex players have routes instead).
+    lan: Option<Arc<dyn LanLink>>,
     session: RemoteSession,
     play_queue_id: Option<String>,
     started: Instant,
@@ -143,12 +168,18 @@ struct Inner {
     generation: AtomicU64,
     /// Moves and returns one at a time.
     op: tokio::sync::Mutex<()>,
+    lan: Mutex<Option<LanEnv>>,
 }
 
 /// Cheap to clone; managed by Tauri.
 #[derive(Clone)]
 pub struct RemoteService {
     inner: Arc<Inner>,
+}
+
+/// A stable 64-bit id for this sender (AirPlay wants 16 hex digits).
+fn fnv(s: &str) -> u64 {
+    s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3))
 }
 
 pub fn couldnt_reach(name: &str) -> String {
@@ -189,6 +220,7 @@ impl RemoteService {
                 stopped_on: Mutex::default(),
                 generation: AtomicU64::new(0),
                 op: tokio::sync::Mutex::new(()),
+                lan: Mutex::new(None),
             }),
         })
     }
@@ -204,6 +236,19 @@ impl RemoteService {
     }
     pub fn switches(&self) -> &RemoteSwitches {
         &self.inner.switches
+    }
+
+    /// Turns on Cast and AirPlay devices.
+    pub fn set_lan(&self, lan: LanEnv) {
+        *self.inner.lan.lock() = Some(lan);
+    }
+
+    fn lan(&self) -> AppResult<LanEnv> {
+        self.inner
+            .lan
+            .lock()
+            .clone()
+            .ok_or_else(|| AppError::Invalid("Cast and AirPlay devices aren't available.".into()))
     }
 
     fn emit<T: Serialize>(&self, event: &str, payload: &T) {
@@ -305,14 +350,37 @@ impl RemoteService {
     /// Find players now (picker open, or the background refresh). Empty when
     /// the setting hides them.
     pub async fn players(&self) -> Vec<RemotePlayer> {
-        if !self.inner.switches.show_players() {
+        let plex = self.inner.switches.show_players();
+        let cast = self.inner.switches.show_cast();
+        if !cast && let Some(l) = self.inner.lan.lock().as_ref() {
+            l.mdns.stop();
+        }
+        if !plex && !cast {
             self.inner.players.lock().clear();
             return Vec::new();
         }
-        let found = self.discover().await;
+        let (mut found, lan) = tokio::join!(
+            async {
+                if plex { self.discover().await } else { Vec::new() }
+            },
+            async {
+                if cast { self.lan_devices().await } else { Vec::new() }
+            }
+        );
+        found.extend(lan);
         let list: Vec<RemotePlayer> = found.iter().map(|f| f.player.clone()).collect();
         *self.inner.players.lock() = found;
         self.emit(EV_REMOTE_PLAYERS, &list);
+        list
+    }
+
+    /// Cast devices and AirPlay receivers on this network.
+    async fn lan_devices(&self) -> Vec<Found> {
+        let Ok(lan) = self.lan() else { return Vec::new() };
+        let answers = lan.mdns.scan().await;
+        let has_password = |id: &str| lan.passwords.get(&airplay::password_key(id)).ok().flatten().is_some();
+        let mut list = lan::lan_found(&answers, &has_password);
+        list.sort_by(|a, b| a.player.name.to_lowercase().cmp(&b.player.name.to_lowercase()));
         list
     }
 
@@ -358,6 +426,13 @@ impl RemoteService {
             .as_ref()
             .map(|a| a.found.clone())
             .ok_or_else(|| AppError::Invalid("Nothing is playing on another device.".into()))?;
+        if let Some(link) = self.here_link() {
+            // AirPlay: the queue is here, so just play it.
+            self.inner.local.load_context(context, start_track_id).await?;
+            self.inner.local.resume().await?;
+            link.jumped().await;
+            return Ok(self.state());
+        }
         self.inner.local.load_context(context, start_track_id).await?;
         self.resend(found).await
     }
@@ -373,8 +448,145 @@ impl RemoteService {
             .as_ref()
             .map(|a| a.found.clone())
             .ok_or_else(|| AppError::Invalid("Nothing is playing on another device.".into()))?;
+        if let Some(link) = self.here_link() {
+            self.inner.local.jump_at(item_id, 0, true).await?;
+            link.jumped().await;
+            return Ok(self.state());
+        }
         self.inner.local.jump_at(item_id, 0, false).await?;
         self.resend(found).await
+    }
+
+    /// The active link when its sound comes from this computer (AirPlay).
+    fn here_link(&self) -> Option<Arc<dyn LanLink>> {
+        self.inner
+            .active
+            .lock()
+            .as_ref()
+            .and_then(|a| a.lan.clone())
+            .filter(|l| l.plays_here())
+    }
+
+    /// Move to an AirPlay receiver with its password; kept in the keychain
+    /// once it works.
+    pub async fn move_with_password(&self, player_id: &str, password: String) -> AppResult<RemoteState> {
+        let _op = self.inner.op.lock().await;
+        if self.inner.active.lock().is_some() {
+            self.return_inner(Some(false)).await;
+        }
+        let found = self
+            .inner
+            .players
+            .lock()
+            .iter()
+            .find(|f| f.player.id == player_id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound("That device isn't available any more.".into()))?;
+        let state = self.start_lan(found, Some(password.clone())).await?;
+        if let Ok(lan) = self.lan()
+            && let Ok(t) = Token::new(password)
+            && let Err(e) = lan.passwords.set(&airplay::password_key(player_id), &t)
+        {
+            tracing::warn!("couldn't keep the AirPlay password: {e}");
+        }
+        if let Some(f) = self.inner.players.lock().iter_mut().find(|f| f.player.id == player_id) {
+            f.player.needs_password = false;
+        }
+        Ok(state)
+    }
+
+    /// Start on a Cast device or AirPlay receiver.
+    async fn start_lan(&self, found: Found, password: Option<String>) -> AppResult<RemoteState> {
+        let lan = self.lan()?;
+        let name = found.player.name.clone();
+        if let Some(why) = &found.player.unsupported {
+            return Err(AppError::Invalid(format!("Can't play on {name}: {why}.")));
+        }
+        let st = self.inner.local.state().await?;
+        let Some(track) = st.track.clone() else {
+            return Err(AppError::Invalid("Play something first, then move it.".into()));
+        };
+        let (link, play_queue_id): (Arc<dyn LanLink>, Option<String>) = match found.lan.clone() {
+            Some(LanDevice::Cast(dev)) => {
+                let server = self.inner.env.server().await?;
+                let mut tracks = vec![track.clone()];
+                tracks.extend(st.queue.user_queue.iter().map(|i| i.track.clone()));
+                tracks.extend(st.queue.next_up.iter().map(|i| i.track.clone()));
+                let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+                let pq = playqueue::create(&self.inner.http, &server, &ids, &track.id, st.repeat).await?;
+                let token = match cast::plan::transient_token(&self.inner.http, &server).await {
+                    Some(t) => t,
+                    None => {
+                        tracing::info!("no transient token from the server; the cast device gets the server token");
+                        server.token.clone()
+                    }
+                };
+                let plan = cast::plan::plan(&server, &token, &self.inner.own_id, &pq.id, &tracks, st.position_ms, st.repeat);
+                let link = CastLink::start(&dev, &plan, lan.tls.clone(), self.inner.cfg.timeout)
+                    .await
+                    .map_err(|e| {
+                        tracing::info!(kind = e.kind(), "cast device didn't start");
+                        AppError::Network(couldnt_reach(&name))
+                    })?;
+                if self.inner.switches.stop_old()
+                    && let Err(e) = self.inner.local.pause().await
+                {
+                    tracing::warn!("pausing here after a move failed: {e}");
+                }
+                (Arc::new(link), Some(pq.id))
+            }
+            Some(LanDevice::AirPlay(dev)) => {
+                let password = match password {
+                    Some(p) => Some(p),
+                    None => lan
+                        .passwords
+                        .get(&airplay::password_key(&dev.id))
+                        .ok()
+                        .flatten()
+                        .map(|t| t.expose().to_string()),
+                };
+                let client_id = format!("{:016X}", fnv(&self.inner.own_id));
+                let target = Arc::new(AirPlayTarget::new(dev, password, client_id, self.inner.cfg.timeout, st.volume));
+                let link = AirPlayLink::start(target, self.inner.local.clone(), lan.route.clone())
+                    .await
+                    .map_err(|e| match e {
+                        AppError::Auth(_) => e,
+                        other => {
+                            tracing::info!(kind = other.kind(), "AirPlay receiver didn't start");
+                            AppError::Network(couldnt_reach(&name))
+                        }
+                    })?;
+                (Arc::new(link), None)
+            }
+            None => return Err(AppError::Invalid("Not a Cast or AirPlay device.".into())),
+        };
+        let session = RemoteSession {
+            player_id: found.player.id.clone(),
+            player_name: name,
+            kind: found.player.kind,
+            status: RemoteStatus::Connecting,
+            duration_ms: track.duration_ms,
+            track: Some(track),
+            position_ms: st.position_ms,
+            volume: None,
+            shuffle: st.shuffle,
+            repeat: st.repeat,
+        };
+        *self.inner.active.lock() = Some(Active {
+            found,
+            routes: Vec::new(),
+            lan: Some(link),
+            session,
+            play_queue_id,
+            started: Instant::now(),
+            seen_playing: false,
+            misses: 0,
+        });
+        *self.inner.stopped_on.lock() = None;
+        let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.spawn_follow(generation);
+        self.emit_state();
+        Ok(self.state())
     }
 
     async fn resend(&self, found: Found) -> AppResult<RemoteState> {
@@ -390,6 +602,9 @@ impl RemoteService {
 
     /// Send Platter's queue to `found` and start following it.
     async fn start_on(&self, found: Found) -> AppResult<RemoteState> {
+        if found.lan.is_some() {
+            return self.start_lan(found, None).await;
+        }
         let player_id = found.player.id.clone();
         let player_id = player_id.as_str();
         let name = found.player.name.clone();
@@ -459,6 +674,7 @@ impl RemoteService {
         *self.inner.active.lock() = Some(Active {
             found,
             routes,
+            lan: None,
             session,
             play_queue_id: Some(pq.id),
             started: Instant::now(),
@@ -491,17 +707,14 @@ impl RemoteService {
         };
         self.inner.generation.fetch_add(1, Ordering::SeqCst);
         let id = a.found.player.id.clone();
-        if let Ok(body) = self
-            .inner
-            .companion
-            .send(&id, &a.routes, "/player/timeline/poll", &[("wait", "0".into())])
-            .await
-            && let Some(t) = companion::parse_timeline(&body)
+        if let Some(t) = self.poll_active(&a).await.ok().flatten()
             && t.state != "stopped"
         {
             self.apply_timeline(&mut a, &t).await;
         }
-        if self.inner.switches.stop_old() {
+        if let Some(link) = &a.lan {
+            link.leave(self.inner.switches.stop_old()).await;
+        } else if self.inner.switches.stop_old() {
             let _ = self
                 .inner
                 .companion
@@ -557,13 +770,21 @@ impl RemoteService {
     /// A player bar control while remote.
     pub async fn command(&self, cmd: RemoteCommand) -> AppResult<RemoteState> {
         let _op = self.inner.op.lock().await;
-        let (id, name, routes) = {
+        let (id, name, routes, lan) = {
             let g = self.inner.active.lock();
             let a = g
                 .as_ref()
                 .ok_or_else(|| AppError::Invalid("Nothing is playing on another device.".into()))?;
-            (a.found.player.id.clone(), a.session.player_name.clone(), a.routes.clone())
+            (a.found.player.id.clone(), a.session.player_name.clone(), a.routes.clone(), a.lan.clone())
         };
+        if let Some(link) = lan {
+            if let Err(e) = link.command(&cmd).await {
+                tracing::info!(kind = e.kind(), "device refused a command");
+                return Err(AppError::Network(couldnt_reach(&name)));
+            }
+            self.after_command(&id, cmd);
+            return Ok(self.state());
+        }
         let music = ("type", "music".to_string());
         let (path, params): (&str, Vec<(&str, String)>) = match &cmd {
             RemoteCommand::Play => ("/player/playback/play", vec![music]),
@@ -582,6 +803,12 @@ impl RemoteService {
             tracing::info!(kind = e.kind(), path, "player refused a command");
             return Err(AppError::Network(couldnt_reach(&name)));
         }
+        self.after_command(&id, cmd);
+        Ok(self.state())
+    }
+
+    /// The session as the command left it, until the next status.
+    fn after_command(&self, id: &str, cmd: RemoteCommand) {
         if let Some(a) = self.inner.active.lock().as_mut().filter(|a| a.found.player.id == id) {
             let s = &mut a.session;
             match cmd {
@@ -595,7 +822,33 @@ impl RemoteService {
             }
         }
         self.emit_state();
-        Ok(self.state())
+    }
+
+    /// The active device's timeline: Ok(None) when it stopped, Err when it
+    /// didn't answer.
+    async fn poll_active(&self, a: &Active) -> AppResult<Option<Timeline>> {
+        match &a.lan {
+            Some(link) => link.poll().await,
+            None => self
+                .inner
+                .companion
+                .send(&a.found.player.id, &a.routes, "/player/timeline/poll", &[("wait", "0".into())])
+                .await
+                .map(|body| companion::parse_timeline(&body)),
+        }
+    }
+
+    /// Control comes back here after the device stopped or went away.
+    async fn take_back(&self, a: &Active) {
+        match &a.lan {
+            Some(link) => {
+                link.leave(false).await;
+                if !link.plays_here() {
+                    self.resume_local(a, false).await;
+                }
+            }
+            None => self.resume_local(a, false).await,
+        }
     }
 
     // ---- following ------------------------------------------------------
@@ -655,20 +908,10 @@ impl RemoteService {
                     me.players().await;
                 });
             }
-            let Some((id, routes)) = self
-                .inner
-                .active
-                .lock()
-                .as_ref()
-                .map(|a| (a.found.player.id.clone(), a.routes.clone()))
-            else {
+            let Some(snapshot) = self.inner.active.lock().clone() else {
                 return;
             };
-            let polled = self
-                .inner
-                .companion
-                .send(&id, &routes, "/player/timeline/poll", &[("wait", "0".into())])
-                .await;
+            let polled = self.poll_active(&snapshot).await;
             let _op = self.inner.op.lock().await;
             if !self.current(generation) {
                 return;
@@ -677,9 +920,8 @@ impl RemoteService {
                 return;
             };
             match polled {
-                Ok(body) => {
+                Ok(tl) => {
                     a.misses = 0;
-                    let tl = companion::parse_timeline(&body);
                     let stopped = tl.as_ref().is_none_or(|t| t.state == "stopped");
                     if stopped {
                         if a.seen_playing || a.started.elapsed() >= self.inner.cfg.grace {
@@ -687,7 +929,7 @@ impl RemoteService {
                             self.inner.generation.fetch_add(1, Ordering::SeqCst);
                             self.inner.active.lock().take();
                             *self.inner.stopped_on.lock() = Some(a.session.player_name.clone());
-                            self.resume_local(&a, false).await;
+                            self.take_back(&a).await;
                             self.emit_state();
                             return;
                         }
@@ -703,7 +945,7 @@ impl RemoteService {
                         self.inner.generation.fetch_add(1, Ordering::SeqCst);
                         self.inner.active.lock().take();
                         self.toast_error(couldnt_reach(&a.session.player_name));
-                        self.resume_local(&a, false).await;
+                        self.take_back(&a).await;
                         self.emit_state();
                         return;
                     }

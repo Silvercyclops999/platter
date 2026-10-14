@@ -17,6 +17,22 @@ pub enum PlayerKind {
     Speaker,
     Browser,
     Tv,
+    /// A speaker group (Cast groups).
+    Group,
+}
+
+/// How Platter reaches a device in the picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlayerVia {
+    /// A Plex player, through the Plex companion protocol.
+    #[default]
+    Plex,
+    /// A Google Cast device on this network.
+    Cast,
+    /// An AirPlay receiver on this network (Platter streams the sound).
+    #[serde(rename = "airplay")]
+    AirPlay,
 }
 
 /// One Plex player in the device picker.
@@ -35,6 +51,14 @@ pub struct RemotePlayer {
     /// Seen on the network now (registered with the server, present on
     /// plex.tv, or playing). Others are listed but may not answer.
     pub online: bool,
+    #[serde(default)]
+    pub via: PlayerVia,
+    /// AirPlay receiver with a password Platter doesn't have yet.
+    #[serde(default)]
+    pub needs_password: bool,
+    /// Listed but can't be played on, and why ("Needs AirPlay 2 pairing").
+    #[serde(default)]
+    pub unsupported: Option<String>,
 }
 
 /// Remote playback status.

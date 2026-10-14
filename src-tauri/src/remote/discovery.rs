@@ -30,6 +30,8 @@ pub struct Found {
     pub via_server: bool,
     /// Reached through the Sonos relay.
     pub sonos: bool,
+    /// A Cast or AirPlay device on this network, driven by Platter itself.
+    pub lan: Option<super::lan::LanDevice>,
 }
 
 fn s(v: &Value) -> Option<String> {
@@ -78,11 +80,15 @@ fn found(id: String, name: String, product: String, kind: PlayerKind) -> Found {
             kind,
             playing: None,
             online: false,
+            via: Default::default(),
+            needs_password: false,
+            unsupported: None,
         },
         direct: Vec::new(),
         token: None,
         via_server: false,
         sonos: false,
+        lan: None,
     }
 }
 

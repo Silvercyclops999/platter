@@ -19,6 +19,7 @@ pub mod eqprofile;
 pub mod events;
 pub mod gate;
 pub mod http;
+pub mod netsink;
 pub mod output;
 pub mod persist;
 pub mod player;
