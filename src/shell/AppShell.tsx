@@ -27,6 +27,7 @@ import { MainView } from "./MainView";
 import { NowPlayingExpanded, NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
 import { OutputPanel } from "./OutputPanel";
 import { PlayerBar } from "./PlayerBar";
+import { RemoteStrip } from "./RemoteStrip";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
@@ -158,6 +159,7 @@ export function AppShell() {
         )}
         {expanded && nowPlayingOpen && <NowPlayingExpanded />}
       </div>
+      <RemoteStrip />
       <PlayerBar />
       <CommandPalette />
       <ContextMenuHost />

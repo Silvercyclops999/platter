@@ -14,6 +14,9 @@ import type {
   AbLoop,
   AddPlace,
   RemovedItem,
+  RemoteCommand,
+  RemotePlayer,
+  RemoteState,
   Album,
   AlbumPage,
   AlbumsArgs,
@@ -153,6 +156,21 @@ export interface Backend {
   /** Play on a device (null: the system default), keeping position and play state. */
   outputSelect(deviceId: string | null): Promise<OutputState>;
 
+  // Listen on (docs/IPC.md "Listen on")
+  /** Plex players to play on (empty when the setting hides them). */
+  remotePlayers(): Promise<RemotePlayer[]>;
+  remoteState(): Promise<RemoteState>;
+  /** Move playback to a player at the current position. */
+  remoteMove(playerId: string): Promise<RemoteState>;
+  /** Bring playback back to this computer at the player's position. */
+  remoteReturn(): Promise<RemoteState>;
+  /** Play something on the device playing now (instead of playContext while remote). */
+  remotePlayContext(args: PlayContextArgs): Promise<RemoteState>;
+  /** Jump to a queue entry on the device playing now (instead of queueJump while remote). */
+  remoteQueueJump(itemId: string): Promise<RemoteState>;
+  /** A player bar control while playing on another device. */
+  remoteCommand(command: RemoteCommand): Promise<RemoteState>;
+
   // Health and app states
   health(): Promise<Health>;
   /** Ids of tracks stored on this computer (playable without the server). */
@@ -271,6 +289,13 @@ export function createTauriBackend(): Backend {
     playerState: () => call("player_state"),
     outputDevices: () => call("output_devices"),
     outputSelect: (deviceId) => call("output_select", { deviceId }),
+    remotePlayers: () => call("remote_players"),
+    remoteState: () => call("remote_state"),
+    remoteMove: (playerId) => call("remote_move", { playerId }),
+    remoteReturn: () => call("remote_return"),
+    remoteQueueJump: (itemId) => call("remote_queue_jump", { itemId }),
+    remotePlayContext: (args) => call("remote_play_context", { context: args.context, startTrackId: args.startTrackId }),
+    remoteCommand: (command) => call("remote_command", { command }),
 
     health: () => call("health"),
     cachedTracks: () => call("cached_tracks"),

@@ -527,6 +527,12 @@ export interface Settings {
   likedMeans: LikedMeans;
   /** When track rows show the like control (liked songs always show it unless "off"). */
   likeControlRows: LikeControlRows;
+  /** List Plex players in the device picker. */
+  showPlexPlayers: boolean;
+  /** Answer as a Plex player so other Plex apps can play here. This device only. */
+  actAsPlexPlayer: boolean;
+  /** Moving playback stops it on the device it leaves. */
+  moveStopsOldDevice: boolean;
   [key: string]: unknown;
 }
 
@@ -565,6 +571,9 @@ export const DEFAULT_SETTINGS: Settings = {
   infoAudiodb: false,
   likedMeans: "five",
   likeControlRows: "hover",
+  showPlexPlayers: true,
+  actAsPlexPlayer: false,
+  moveStopsOldDevice: true,
 };
 
 // ---------------------------------------------------------------- artist info
@@ -635,6 +644,59 @@ export interface OutputState {
   current: OutputDevice | null;
 }
 
+// ---------------------------------------------------------------- listen on
+
+/** What a Plex player is, for its icon. */
+export type PlayerKind = "computer" | "phone" | "speaker" | "browser" | "tv";
+
+/** A Plex player in the device picker. */
+export interface RemotePlayer {
+  /** Plex client identifier. */
+  id: string;
+  name: string;
+  /** "Plexamp", "Plex for Windows", "Sonos"... */
+  product: string;
+  kind: PlayerKind;
+  /** What it's playing now ("Song • Artist", "Paused: ..."). */
+  playing: string | null;
+  /** Seen on the network now. Others are listed but may not answer. */
+  online: boolean;
+}
+
+export type RemoteStatus = "connecting" | "playing" | "paused" | "buffering";
+
+/** Playback on another device. */
+export interface RemoteSession {
+  playerId: string;
+  playerName: string;
+  kind: PlayerKind;
+  status: RemoteStatus;
+  track: Track | null;
+  positionMs: number;
+  durationMs: number;
+  /** 0..1 when the player reports it. */
+  volume: number | null;
+  shuffle: boolean;
+  repeat: RepeatMode;
+}
+
+export interface RemoteState {
+  session: RemoteSession | null;
+  /** The device stopped by itself (someone stopped it there); controls are local again. */
+  stoppedOn: string | null;
+}
+
+/** A player bar control while playing on another device. */
+export type RemoteCommand =
+  | { kind: "play" }
+  | { kind: "pause" }
+  | { kind: "next" }
+  | { kind: "previous" }
+  | { kind: "seek"; positionMs: number }
+  | { kind: "volume"; volume: number }
+  | { kind: "shuffle"; on: boolean }
+  | { kind: "repeat"; mode: RepeatMode };
+
 export interface ArtCacheInfo {
   usedBytes: number;
   capBytes: number;
@@ -672,6 +734,10 @@ export interface EventMap {
   "output://changed": OutputState;
   /** The chosen output device went away; playback paused and moved to the system default. */
   "output://lost": { device: string };
+  /** Playback on another device started, changed, stopped or came back. */
+  "remote://state": RemoteState;
+  /** The Plex player list was refreshed. */
+  "remote://players": RemotePlayer[];
   "health://changed": Health;
   toast: ToastEvent;
   "update://ready": { version: string };

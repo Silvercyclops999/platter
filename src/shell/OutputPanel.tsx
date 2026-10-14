@@ -8,6 +8,7 @@ import { loadOutput, selectOutput, useOutput } from "../stores/output";
 import { usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
+import { ListenOn, RemoteCurrent } from "./ListenOn";
 import { streamQuality } from "./streamQuality";
 import "./output.css";
 
@@ -59,6 +60,7 @@ function DeviceRow({ name, sub, onPick, busy }: { name: string; sub?: string; on
 export function OutputPanel() {
   const state = useOutput((s) => s.state);
   const switching = useOutput((s) => s.switching);
+  const remote = usePlayer((s) => s.remote);
   const close = () => useUi.getState().setOutputOpen(false);
 
   useEffect(() => {
@@ -87,7 +89,9 @@ export function OutputPanel() {
           </>
         ) : (
           <>
-            {current ? (
+            {remote ? (
+              <RemoteCurrent session={remote} />
+            ) : current ? (
               <CurrentDevice device={current} followsDefault={followsDefault} />
             ) : (
               <p className="output-empty">No audio output found on this computer.</p>
@@ -120,6 +124,7 @@ export function OutputPanel() {
                 </ul>
               )}
             </section>
+            <ListenOn />
           </>
         )}
       </div>

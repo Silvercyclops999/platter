@@ -2,27 +2,97 @@
  * Player state mirrored from the core: `player://state` replaces the snapshot,
  * `player://position` updates position only (4×/s) so only the seek bar
  * re-renders on ticks.
+ *
+ * Remote mode: while playback is on another device (`remote://state` has a
+ * session), `state` shows that device's song, play state, position, volume,
+ * shuffle and repeat over the local snapshot, and the controls below send
+ * remote commands instead of local ones.
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
-import type { AbLoop, PlayerState, RepeatMode } from "../lib/types";
+import type {
+  AbLoop,
+  PlayContextArgs,
+  PlayerState,
+  PlayerStatus,
+  RemoteCommand,
+  RemoteSession,
+  RemoteState,
+  RepeatMode,
+} from "../lib/types";
 import { toast } from "./toasts";
 
 interface PlayerStore {
+  /** What the player bar shows: the local snapshot, or the remote device's over it. */
   state: PlayerState | null;
+  /** The local player's own snapshot. */
+  local: PlayerState | null;
   positionMs: number;
   durationMs: number;
+  /** Playback on another device, if any. */
+  remote: RemoteSession | null;
+  /** The other device stopped by itself; controls are local again. */
+  stoppedOn: string | null;
   set: (s: PlayerState) => void;
   setPosition: (positionMs: number, durationMs: number) => void;
+  setRemote: (r: RemoteState) => void;
 }
 
-export const usePlayer = create<PlayerStore>()((set) => ({
+const REMOTE_STATUS: Record<RemoteSession["status"], PlayerStatus> = {
+  connecting: "loading",
+  playing: "playing",
+  paused: "paused",
+  buffering: "buffering",
+};
+
+/** The local snapshot with a remote session laid over it. */
+export function withRemote(local: PlayerState | null, r: RemoteSession | null): PlayerState | null {
+  if (!r || !local) return local;
+  return {
+    ...local,
+    status: REMOTE_STATUS[r.status],
+    track: r.track ?? local.track,
+    positionMs: r.positionMs,
+    durationMs: r.durationMs || r.track?.durationMs || local.durationMs,
+    volume: r.volume ?? local.volume,
+    muted: false,
+    shuffle: r.shuffle,
+    repeat: r.repeat,
+    abLoop: null,
+  };
+}
+
+export const usePlayer = create<PlayerStore>()((set, get) => ({
   state: null,
+  local: null,
   positionMs: 0,
   durationMs: 0,
-  set: (s) => set({ state: s, positionMs: s.positionMs, durationMs: s.durationMs }),
-  setPosition: (positionMs, durationMs) => set({ positionMs, durationMs }),
+  remote: null,
+  stoppedOn: null,
+  set: (s) => {
+    const r = get().remote;
+    const shown = withRemote(s, r)!;
+    set({ local: s, state: shown, ...(r ? {} : { positionMs: s.positionMs, durationMs: s.durationMs }) });
+  },
+  // Local position ticks don't move the bar while another device plays.
+  setPosition: (positionMs, durationMs) => {
+    if (!get().remote) set({ positionMs, durationMs });
+  },
+  setRemote: (rs) => {
+    const local = get().local;
+    const shown = withRemote(local, rs.session);
+    set({
+      remote: rs.session,
+      stoppedOn: rs.stoppedOn,
+      state: shown,
+      positionMs: shown?.positionMs ?? 0,
+      durationMs: shown?.durationMs ?? 0,
+    });
+  },
 }));
+
+/** Playing on another device now. */
+export const isRemote = () => usePlayer.getState().remote !== null;
 
 /** Subscribe the store to the core. Returns a cleanup function. */
 export function connectPlayer(b: Backend = backend): () => void {
@@ -35,6 +105,10 @@ export function connectPlayer(b: Backend = backend): () => void {
   );
   // A track that can't be played is skipped by the core; say so.
   b.listen("player://error", (e) => toast.error(e.message)).then((u) => (alive ? unsubs.push(u) : u()));
+  b.remoteState()
+    .then((r) => alive && usePlayer.getState().setRemote(r))
+    .catch(() => {});
+  b.listen("remote://state", (r) => usePlayer.getState().setRemote(r)).then((u) => (alive ? unsubs.push(u) : u()));
   return () => {
     alive = false;
     unsubs.forEach((u) => u());
@@ -69,14 +143,48 @@ export function resetVolumeNudge() {
   drag = null;
 }
 
+/** Send a control to the device playing now; its answer updates the bar at once. */
+const remoteCmd = (c: RemoteCommand) => backend.remoteCommand(c).then((r) => usePlayer.getState().setRemote(r));
+
+/** Level to restore after muting a remote device (players have no mute). */
+let remoteUnmuteTo = 0.5;
+
+/** Volume and mute go to the device playing now. */
+const out = {
+  setVolume: (v: number): Promise<unknown> => (isRemote() ? remoteCmd({ kind: "volume", volume: v }) : backend.setVolume(v)),
+  setMuted: (m: boolean): Promise<unknown> => {
+    if (!isRemote()) return backend.setMuted(m);
+    const cur = usePlayer.getState().remote?.volume ?? 0;
+    if (m) {
+      if (cur > 0) remoteUnmuteTo = cur;
+      return remoteCmd({ kind: "volume", volume: 0 });
+    }
+    return cur > 0 ? Promise.resolve() : remoteCmd({ kind: "volume", volume: remoteUnmuteTo });
+  },
+};
+
+/** Start a context here, or on the device playing now. */
+const play = (args: PlayContextArgs): Promise<unknown> =>
+  isRemote() ? backend.remotePlayContext(args).then((r) => usePlayer.getState().setRemote(r)) : backend.playContext(args);
+
 const round = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 10_000) / 10_000;
 
 /** Player commands with error toasts. */
 export const player = {
-  toggle: () => backend.playToggle().catch(report),
-  next: () => backend.playNext().catch(report),
-  previous: () => backend.playPrevious().catch(report),
+  toggle: () => {
+    if (isRemote()) {
+      const playing = usePlayer.getState().state?.status === "playing";
+      return remoteCmd({ kind: playing ? "pause" : "play" }).catch(report);
+    }
+    return backend.playToggle().catch(report);
+  },
+  next: () => (isRemote() ? remoteCmd({ kind: "next" }) : backend.playNext()).catch(report),
+  previous: () => (isRemote() ? remoteCmd({ kind: "previous" }) : backend.playPrevious()).catch(report),
   seek: (ms: number) => {
+    if (isRemote()) {
+      usePlayer.setState({ positionMs: ms });
+      return remoteCmd({ kind: "seek", positionMs: ms }).catch(report);
+    }
     usePlayer.getState().setPosition(ms, usePlayer.getState().durationMs);
     return backend.playSeek(ms).catch(report);
   },
@@ -87,9 +195,9 @@ export const player = {
     const to = Math.round(Math.min(Math.max(0, positionMs + deltaMs), durationMs));
     return player.seek(to);
   },
-  setVolume: (v: number) => backend.setVolume(v).catch(report),
-  setMuted: (m: boolean) => backend.setMuted(m).catch(report),
-  setShuffle: (s: boolean) => backend.setShuffle(s).catch(report),
+  setVolume: (v: number) => out.setVolume(v).catch(report),
+  setMuted: (m: boolean) => out.setMuted(m).catch(report),
+  setShuffle: (s: boolean) => (isRemote() ? remoteCmd({ kind: "shuffle", on: s }) : backend.setShuffle(s)).catch(report),
   setContextShuffle: (id: string, s: boolean) => backend.setContextShuffle(id, s).catch(report),
   /** Set or clear the A-B loop. Shows at once; a refusal puts the old one back. */
   setAbLoop: (l: AbLoop | null) => {
@@ -101,18 +209,21 @@ export const player = {
       report(e);
     });
   },
-  cycleRepeat: (r: RepeatMode) => backend.setRepeat(r === "off" ? "all" : r === "all" ? "one" : "off").catch(report),
+  cycleRepeat: (r: RepeatMode) => {
+    const mode: RepeatMode = r === "off" ? "all" : r === "all" ? "one" : "off";
+    return (isRemote() ? remoteCmd({ kind: "repeat", mode }) : backend.setRepeat(mode)).catch(report);
+  },
   playAlbum: (id: string, startTrackId?: string, shuffle?: boolean) =>
-    backend.playContext({ context: { kind: "album", id }, startTrackId, shuffle }).catch(report),
+    play({ context: { kind: "album", id }, startTrackId, shuffle }).catch(report),
   playPlaylist: (id: string, startTrackId?: string, shuffle?: boolean) =>
-    backend.playContext({ context: { kind: "playlist", id }, startTrackId, shuffle }).catch(report),
+    play({ context: { kind: "playlist", id }, startTrackId, shuffle }).catch(report),
   /** Liked Songs; `trackIds` plays them in the page's order (a sort or filter). */
   playLiked: (startTrackId?: string, trackIds?: string[], shuffle?: boolean) =>
-    backend.playContext({ context: { kind: "liked", id: "liked", trackIds }, startTrackId, shuffle }).catch(report),
+    play({ context: { kind: "liked", id: "liked", trackIds }, startTrackId, shuffle }).catch(report),
   playArtist: (id: string, startTrackId?: string, shuffle?: boolean) =>
-    backend.playContext({ context: { kind: "artist", id }, startTrackId, shuffle }).catch(report),
+    play({ context: { kind: "artist", id }, startTrackId, shuffle }).catch(report),
   playTracks: (trackIds: string[], startTrackId?: string, kind: "tracks" | "search" = "tracks") =>
-    backend.playContext({ context: { kind, trackIds }, startTrackId }).catch(report),
+    play({ context: { kind, trackIds }, startTrackId }).catch(report),
   queueAdd: (trackIds: string[], at: "next" | "end") => backend.queueAdd(trackIds, at).catch(report),
   queueAlbum: (id: string) =>
     backend
@@ -142,13 +253,13 @@ export const player = {
     try {
       if (v === 0) {
         // Stepped down to 0: mute; the core keeps `base` as the level to restore.
-        await backend.setMuted(true);
+        await out.setMuted(true);
       } else if (base === 0) {
         // Muted: set the new low level first so unmuting doesn't jump to the old one.
-        await backend.setVolume(v);
-        await backend.setMuted(false);
+        await out.setVolume(v);
+        await out.setMuted(false);
       } else {
-        await backend.setVolume(v);
+        await out.setVolume(v);
       }
     } catch (e) {
       report(e);
@@ -159,12 +270,14 @@ export const player = {
     const s = usePlayer.getState().state;
     if (!s) return;
     pendingVolume = null;
+    // Players have no mute: volume 0, then back to the level from before.
+    if (isRemote()) return out.setMuted(s.volume > 0).catch(report);
     try {
       if (s.muted || s.volume <= 0) {
-        if (s.volume <= 0) await backend.setVolume(UNMUTE_FALLBACK);
-        await backend.setMuted(false);
+        if (s.volume <= 0) await out.setVolume(UNMUTE_FALLBACK);
+        await out.setMuted(false);
       } else {
-        await backend.setMuted(true);
+        await out.setMuted(true);
       }
     } catch (e) {
       report(e);
@@ -176,12 +289,12 @@ export const player = {
     if (!s) return Promise.resolve();
     pendingVolume = null;
     if (!drag) drag = { from: s.volume, unmuted: false };
-    if (v <= 0) return backend.setVolume(0).catch(report);
+    if (v <= 0) return out.setVolume(0).catch(report);
     const unmute = s.muted && !drag.unmuted;
     drag.unmuted ||= unmute;
-    return backend
+    return out
       .setVolume(v)
-      .then(() => (unmute ? backend.setMuted(false) : undefined))
+      .then(() => (unmute ? out.setMuted(false) : undefined))
       .catch(report);
   },
   /**
@@ -197,23 +310,24 @@ export const player = {
     try {
       if (v <= 0) {
         // Mute first so restoring the old level is never audible.
-        await backend.setMuted(true);
-        await backend.setVolume(from > 0 ? from : UNMUTE_FALLBACK);
+        await out.setMuted(true);
+        await out.setVolume(from > 0 ? from : UNMUTE_FALLBACK);
       } else {
-        await backend.setVolume(v);
-        if (s.muted) await backend.setMuted(false);
+        await out.setVolume(v);
+        if (s.muted) await out.setMuted(false);
       }
     } catch (e) {
       report(e);
     }
   },
-  toggleShuffle: () => backend.setShuffle(!(usePlayer.getState().state?.shuffle ?? false)).catch(report),
-  cycleRepeatNow: () => {
-    const r = usePlayer.getState().state?.repeat ?? "off";
-    return backend.setRepeat(r === "off" ? "all" : r === "all" ? "one" : "off").catch(report);
-  },
+  toggleShuffle: () => player.setShuffle(!(usePlayer.getState().state?.shuffle ?? false)),
+  cycleRepeatNow: () => player.cycleRepeat(usePlayer.getState().state?.repeat ?? "off"),
   queueRemove: (itemId: string) => backend.queueRemove(itemId).catch(report),
   queueMove: (itemId: string, toIndex: number) => backend.queueMove(itemId, toIndex).catch(report),
   queueClear: () => backend.queueClear().catch(report),
-  queueJump: (itemId: string) => backend.queueJump(itemId).catch(report),
+  queueJump: (itemId: string) =>
+    (isRemote()
+      ? backend.remoteQueueJump(itemId).then((r) => usePlayer.getState().setRemote(r))
+      : backend.queueJump(itemId)
+    ).catch(report),
 };

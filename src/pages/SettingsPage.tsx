@@ -819,6 +819,28 @@ export function SettingsPage() {
         </Button>
       ),
     },
+    // Playback: listen on
+    {
+      key: "showPlexPlayers",
+      section: "Playback",
+      title: "Show Plex players in the device picker",
+      description: "Lists Plexamp, Plex apps and Sonos speakers linked to Plex under Listen on, so you can move what's playing to them.",
+      control: (ids) => toggle(s, "showPlexPlayers", ids),
+    },
+    {
+      key: "moveStopsOldDevice",
+      section: "Playback",
+      title: "Stop on the old device when moving playback",
+      description: "Moving playback to another device pauses it here, and bringing it back stops it there. Off leaves both playing.",
+      control: (ids) => toggle(s, "moveStopsOldDevice", ids),
+    },
+    {
+      key: "actAsPlexPlayer",
+      section: "Playback",
+      title: "Let other Plex apps play on this computer",
+      description: "Platter shows up as a player in Plexamp and other Plex apps on your network, so they can send music here. Opens a network port, so your computer may ask to allow it. This device only.",
+      control: (ids) => toggle(s, "actAsPlexPlayer", ids),
+    },
   ];
 
   const shown = rows.filter((r) => matches(r, query.trim()));

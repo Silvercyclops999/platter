@@ -40,6 +40,7 @@ import type {
   PlayerState,
   QueueContextInfo,
   QueueItem,
+  RemoteCommand,
   RepeatMode,
   ReleaseSection,
   SearchArgs,
@@ -63,6 +64,7 @@ import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { MockHome, type ContextPlay } from "./home";
 import { MockLikes } from "./likes";
 import { MockPlaylists } from "./playlists";
+import { MockRemote } from "./remote";
 
 export interface MockOptions {
   latencyMs: number;
@@ -137,6 +139,8 @@ export class MockBackend implements Backend {
   readonly pl: MockPlaylists;
   /** Likes (test hooks: refuseNextWrite, likeElsewhere, clearAll). */
   readonly likes: MockLikes;
+  /** Listen on (test hooks: stopElsewhere, loseRemote, setPlayers). */
+  readonly remote: MockRemote;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -202,6 +206,19 @@ export class MockBackend implements Backend {
       (message) => this.emit("toast", { kind: "error", message }),
     );
     this.contextPlays = this.seedContextPlays();
+    this.remote = new MockRemote(
+      {
+        local: () => this.snapshot(),
+        pauseLocal: () => this.pauseNow(),
+        resumeAt: (id, ms, play) => this.resumeAt(id, ms, play),
+        emitState: (st) => this.emit("remote://state", st),
+        emitPlayers: (p) => this.emit("remote://players", p),
+        toast: (message) => this.emit("toast", { kind: "error", message }),
+        settings: () => this.settings,
+        later: (ms, fn) => this.later(ms, fn),
+      },
+      this.fx.tracks[7],
+    );
     this.auth = this.opts.signedOut
       ? { state: "signedOut", needsServerPick: false }
       : this.opts.health === "signIn"
@@ -265,6 +282,7 @@ export class MockBackend implements Backend {
     this.timers.forEach(clearTimeout);
     this.timers.clear();
     this.stopTick();
+    this.remote.dispose();
     this.listeners.clear();
   }
 
@@ -1028,6 +1046,65 @@ export class MockBackend implements Backend {
       return s;
     });
   }
+  // ---------------------------------------------------------------- listen on
+
+  remotePlayers() {
+    return this.delay(() => this.remote.players());
+  }
+  remoteState() {
+    return this.delay(() => this.remote.state());
+  }
+  remoteMove(playerId: string) {
+    return this.delay(() => this.remote.move(playerId));
+  }
+  remoteReturn() {
+    return this.delay(() => this.remote.returnHere());
+  }
+  remotePlayContext(args: PlayContextArgs) {
+    return this.delay(() => {
+      this.loadContext(args, false);
+      return this.remote.resend();
+    });
+  }
+  remoteQueueJump(itemId: string) {
+    return this.delay(() => {
+      const it = [...this.userQueue, ...this.ctxOrder].find((i) => i.itemId === itemId) ?? this.notFound("Queue item");
+      this.resumeAt(it.track.id, 0, false);
+      return this.remote.resend();
+    });
+  }
+  remoteCommand(command: RemoteCommand) {
+    return this.delay(() => this.remote.command(command));
+  }
+  /** Local playback onto this song at this spot (back from another device). */
+  private resumeAt(trackId: string, ms: number, play: boolean) {
+    if (this.current?.track.id === trackId) {
+      this.positionMs = ms;
+      if (play) this.resumeNow();
+      else this.pauseNow();
+      this.emitState();
+      return;
+    }
+    const u = this.userQueue.findIndex((i) => i.track.id === trackId);
+    if (u >= 0) {
+      if (this.current) this.pushHistory(this.current);
+      const it = this.userQueue[u];
+      this.userQueue = this.userQueue.slice(u + 1);
+      this.setCurrent(it, play, ms);
+      return;
+    }
+    const c = this.ctxOrder.findIndex((i, k) => k > this.ctxPos && i.track.id === trackId);
+    if (c >= 0) {
+      if (this.current) this.pushHistory(this.current);
+      this.ctxPos = c;
+      this.setCurrent(this.ctxOrder[c], play, ms);
+      return;
+    }
+    this.loadContext({ context: { kind: "tracks", trackIds: [trackId] }, startTrackId: trackId }, play);
+    this.positionMs = ms;
+    this.emitState();
+  }
+
   /** Test/demo hook: an output device is unplugged. If it was the chosen
    *  one, the core pauses, falls back to the system default and says so. */
   unplugOutput(id: string) {
