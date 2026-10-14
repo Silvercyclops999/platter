@@ -28,7 +28,7 @@ import { PlayerBar } from "./PlayerBar";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
-import { TitleBar } from "./TitleBar";
+import { TopBar } from "./TopBar";
 import { useShortcuts } from "./useShortcuts";
 
 function useWindowWidth() {
@@ -41,7 +41,7 @@ function useWindowWidth() {
   return w;
 }
 
-/** Sidebar | main | right panel, over the player bar; custom title bar on Windows. */
+/** Top bar over sidebar | main | right panel, over the player bar. */
 export function AppShell() {
   useShortcuts();
   useOpenNowPlayingOnStart();
@@ -104,7 +104,7 @@ export function AppShell() {
 
   return (
     <div ref={shell} className={`app app--chrome-${chrome} ${queueOpen ? "has-queue" : ""} ${nowPlayingOpen ? "has-now-playing" : ""} ${slot.swap ? "right-swap" : ""} ${rail ? "sidebar-collapsed" : ""}`} style={style}>
-      <TitleBar />
+      <TopBar />
       <div className="app__body">
         {!wideLibrary && <Sidebar collapsed={rail} auto={layout.sidebarAuto} />}
         {/* An auto-collapsed rail has no room to open into, so no handle. */}

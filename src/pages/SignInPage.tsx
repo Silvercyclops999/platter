@@ -6,7 +6,7 @@ import { backend } from "../lib/backend";
 import type { AppError, PinInfo, ServerInfo } from "../lib/types";
 import { useApp } from "../stores/app";
 import { Logo } from "../shell/Logo";
-import { TitleBar } from "../shell/TitleBar";
+import { WindowBar } from "../shell/TopBar";
 
 /** Welcome screen: Sign in with Plex → PIN code → waiting / cancel. */
 export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
@@ -38,7 +38,7 @@ export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
 
   return (
     <div className="welcome">
-      <TitleBar />
+      <WindowBar />
       <div className="welcome__panel" role="main">
         <Logo size={64} />
         <h1 className="welcome__title">{onBack ? "Sign in again" : "Welcome to Platter"}</h1>
@@ -111,7 +111,7 @@ export function ServerPickPage() {
   }, []);
   return (
     <div className="welcome">
-      <TitleBar />
+      <WindowBar />
       <div className="welcome__panel" role="main">
         <Logo size={48} />
         <h1 className="welcome__title">Choose your server</h1>

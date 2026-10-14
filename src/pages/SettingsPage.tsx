@@ -357,6 +357,11 @@ export function SettingsPage() {
       (e) => setUpdate({ kind: "error", message: errText(e) || "Couldn't check for updates" }),
     );
   };
+  const clearRecentSearches = () =>
+    backend.searchRecentsClear().then(
+      () => toast.info("Recent searches cleared"),
+      (e) => toast.error(`Couldn't clear recent searches${errText(e) ? `: ${errText(e)}` : ""}`),
+    );
   const signOut = () => backend.authSignOut().catch((e) => toast.error(`Couldn't sign out${errText(e) ? `: ${errText(e)}` : ""}`));
 
   const artOptions: SelectOption<string>[] = [...new Set([...ART_SIZES_MB, ...(artMb ? [artMb] : [])])]
@@ -510,6 +515,28 @@ export function SettingsPage() {
         <Button size="sm" disabled={syncing} onClick={() => void resync()}>
           Resync library
         </Button>
+      ),
+    },
+    // Search
+    {
+      key: "searchSuggestions",
+      section: "Search",
+      title: "Show suggestions as you type",
+      description: "Completions and matching artists, albums, songs and playlists appear under the search box while you type.",
+      control: (ids) => toggle(s, "searchSuggestions", ids),
+    },
+    {
+      key: "searchRecents",
+      section: "Search",
+      title: "Remember recent searches",
+      description: "Things you open from search show up when you click the empty search box. Kept on this computer only.",
+      control: (ids) => (
+        <>
+          {toggle(s, "searchRecents", ids)}
+          <Button size="sm" onClick={() => void clearRecentSearches()}>
+            Clear recent searches
+          </Button>
+        </>
       ),
     },
     // Appearance

@@ -281,8 +281,10 @@ export interface SearchArgs {
   limit?: number;
 }
 
+export type SearchKind = "artist" | "album" | "track" | "playlist";
+
 export interface SearchHit {
-  kind: "artist" | "album" | "track" | "playlist";
+  kind: SearchKind;
   artist?: Artist | null;
   album?: Album | null;
   track?: Track | null;
@@ -447,6 +449,10 @@ export interface Settings {
   homeShortcuts: boolean;
   /** Home's top takes a colour wash from the shortcuts' artwork (while artworkColours is on). */
   homeColourWash: boolean;
+  /** Completions and direct results under the search box while typing. */
+  searchSuggestions: boolean;
+  /** Remember items opened from search (shown when the empty box is focused). */
+  searchRecents: boolean;
   [key: string]: unknown;
 }
 
@@ -467,6 +473,8 @@ export const DEFAULT_SETTINGS: Settings = {
   outputDevice: null,
   homeShortcuts: true,
   homeColourWash: true,
+  searchSuggestions: true,
+  searchRecents: true,
 };
 
 // ---------------------------------------------------------------- output devices

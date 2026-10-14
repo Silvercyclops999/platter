@@ -11,6 +11,7 @@ import { useArtTint } from "../lib/useTint";
 import { NOTICES, SettingsPage } from "../pages/SettingsPage";
 import { MainView } from "../shell/MainView";
 import { PlayerBar } from "../shell/PlayerBar";
+import { TopBar } from "../shell/TopBar";
 import { useShortcuts } from "../shell/useShortcuts";
 import { useApp } from "../stores/app";
 import { useRouter } from "../stores/router";
@@ -23,7 +24,12 @@ const route = () => useRouter.getState().entries[useRouter.getState().index].rou
 
 function Host() {
   useShortcuts();
-  return <MainView />;
+  return (
+    <>
+      <TopBar />
+      <MainView />
+    </>
+  );
 }
 
 const SIGNED_IN = {
@@ -52,7 +58,7 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Appearance", "Home", "App", "About", "Now playing"]);
+    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Search", "Appearance", "Home", "App", "About", "Now playing"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
@@ -65,6 +71,9 @@ describe("settings page", () => {
     expect(screen.getByRole("combobox", { name: "Artist page Popular" })).toHaveValue("global");
     expect(screen.getByRole("combobox", { name: "Artwork and cache size" })).toHaveValue("2048");
     expect(screen.getByRole("switch", { name: "Artwork colours" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Show suggestions as you type" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Remember recent searches" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "Clear recent searches" })).toBeEnabled();
     expect(screen.getByRole("combobox", { name: "Reduce motion" })).toHaveValue("system");
     expect(screen.getByRole("switch", { name: "Show the shortcut grid" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Colour wash from artwork" })).toHaveAttribute("aria-checked", "true");
@@ -373,7 +382,7 @@ describe("settings navigation", () => {
     expect(route()).toEqual({ name: "settings" });
   });
 
-  it("Ctrl+, opens settings from anywhere, and the header button does too", async () => {
+  it("Ctrl+, opens settings from anywhere, and the app menu does too", async () => {
     useRouter.getState().reset({ name: "home" });
     render(<Host />);
     fireEvent.keyDown(window, { key: ",", ctrlKey: true });
@@ -382,7 +391,8 @@ describe("settings navigation", () => {
 
     useRouter.getState().reset({ name: "home" });
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Settings", level: 1 })).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /^App menu/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Settings/ }));
     expect(route()).toEqual({ name: "settings" });
   });
 });

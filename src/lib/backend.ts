@@ -39,6 +39,8 @@ import type {
   PlaylistPage,
   RepeatMode,
   SearchArgs,
+  SearchHit,
+  SearchKind,
   SearchResults,
   ServerInfo,
   Settings,
@@ -82,9 +84,13 @@ export interface Backend {
 
   // Search
   search(args: SearchArgs): Promise<SearchResults>;
-  recentSearches(): Promise<string[]>;
-  recentSearchAdd(query: string): Promise<void>;
-  recentSearchesClear(): Promise<void>;
+  /** Whole artist, album and track names starting with the typed words. */
+  searchCompletions(query: string, limit?: number): Promise<string[]>;
+  /** Items opened from search, newest first. */
+  searchRecents(): Promise<SearchHit[]>;
+  searchRecentAdd(kind: SearchKind, id: string): Promise<void>;
+  searchRecentRemove(kind: SearchKind, id: string): Promise<void>;
+  searchRecentsClear(): Promise<void>;
 
   // Playback & queue
   playContext(args: PlayContextArgs): Promise<void>;
@@ -181,9 +187,11 @@ export function createTauriBackend(): Backend {
     nowPlayingDetails: (trackId) => call("now_playing_details", { trackId }),
 
     search: (args) => call("search", { ...args }),
-    recentSearches: () => call("recent_searches"),
-    recentSearchAdd: (query) => call("recent_search_add", { query }),
-    recentSearchesClear: () => call("recent_searches_clear"),
+    searchCompletions: (query, limit) => call("search_completions", { query, limit }),
+    searchRecents: () => call("search_recents"),
+    searchRecentAdd: (kind, id) => call("search_recent_add", { kind, id }),
+    searchRecentRemove: (kind, id) => call("search_recent_remove", { kind, id }),
+    searchRecentsClear: () => call("search_recents_clear"),
 
     playContext: (args) => call("play_context", { ...args }),
     playToggle: () => call("play_toggle"),

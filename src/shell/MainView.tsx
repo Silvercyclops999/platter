@@ -1,10 +1,7 @@
-import { ChevronLeft, ChevronRight, Pause, Play, Settings as SettingsIcon } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { IconButton } from "../components/Button";
-import { SearchField } from "../components/SearchField";
-import { backend } from "../lib/backend";
 import { NEUTRAL_HEADER } from "../lib/color";
-import { modKey } from "../lib/platform";
 import type { SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { ArtistPage } from "../pages/ArtistPage";
@@ -15,7 +12,7 @@ import { PlaylistPage } from "../pages/PlaylistPage";
 import { SearchPage } from "../pages/SearchPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { useApp } from "../stores/app";
-import { nav, useCanGoBack, useCanGoForward, useCurrentEntry, useRouter, type Route } from "../stores/router";
+import { useCurrentEntry, type Route } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { HealthBanner } from "./HealthBanner";
 
@@ -111,37 +108,10 @@ function Page({ route }: { route: Route }) {
   }
 }
 
-function HeaderSearch({ query }: { query: string }) {
-  const tick = useUi((s) => s.searchFocusTick);
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (tick > 0) {
-      ref.current?.focus();
-      ref.current?.select();
-    }
-  }, [tick]);
-  useEffect(() => {
-    // Focus on arrival at Search.
-    ref.current?.focus();
-  }, []);
-  return (
-    <SearchField
-      ref={ref}
-      value={query}
-      onChange={(v) => useRouter.getState().replace({ name: "search", query: v })}
-      onSubmit={(v) => v.trim() && backend.recentSearchAdd(v.trim())}
-      className="main-header__search"
-    />
-  );
-}
-
 export function MainView() {
   const entry = useCurrentEntry();
-  const canBack = useCanGoBack();
-  const canForward = useCanGoForward();
   const sync = useApp((s) => s.sync);
   const tint = useUi((s) => s.tint);
-  const tick = useUi((s) => s.searchFocusTick);
   const scroller = useRef<HTMLDivElement>(null);
   const topBar = useRef<HTMLDivElement>(null);
   const [pastHeader, setPastHeader] = useState(false);
@@ -167,11 +137,6 @@ export function MainView() {
     });
   };
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
-
-  // Ctrl/⌘+L → go to Search (the header field focuses itself).
-  useEffect(() => {
-    if (tick > 0 && useRouter.getState().entries[useRouter.getState().index].route.name !== "search") nav.go({ name: "search" });
-  }, [tick]);
 
   // Restore scroll for this history entry.
   useLayoutEffect(() => {
@@ -207,19 +172,7 @@ export function MainView() {
       <HealthBanner />
       <div className="main__viewport">
         <div className="main-header" ref={topBar}>
-          <div className="main-header__nav">
-            <IconButton label="Go back" tooltip="Go back (Alt+←)" tooltipPlacement="bottom" variant="filled" icon={<ChevronLeft size={20} />} disabled={!canBack} onClick={() => nav.back()} />
-            <IconButton
-              label="Go forward"
-              tooltip="Go forward (Alt+→)"
-              tooltipPlacement="bottom"
-              variant="filled"
-              icon={<ChevronRight size={20} />}
-              disabled={!canForward}
-              onClick={() => nav.forward()}
-            />
-          </div>
-          {pageBar && r.name !== "search" && (
+          {pageBar && (
             <div
               className={`main-header__bar ${barShown ? "is-shown" : ""}`}
               data-testid="sticky-bar"
@@ -237,7 +190,6 @@ export function MainView() {
               <span className="main-header__title truncate">{pageBar.title}</span>
             </div>
           )}
-          {r.name === "search" && <HeaderSearch query={r.query ?? ""} />}
           <div className="main-header__end">
             {syncText && (
               <span className="sync-pill" role="status">
@@ -245,15 +197,6 @@ export function MainView() {
                 {syncText}
               </span>
             )}
-            <IconButton
-              label="Settings"
-              tooltip={`Settings (${modKey}+,)`}
-              tooltipPlacement="bottom"
-              variant="filled"
-              aria-current={r.name === "settings" ? "page" : undefined}
-              icon={<SettingsIcon size={18} />}
-              onClick={() => nav.go({ name: "settings" })}
-            />
           </div>
         </div>
         <div

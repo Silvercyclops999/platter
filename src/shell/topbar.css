@@ -1,0 +1,264 @@
+/* Top bar: back / forward, Home and the search pill centred on the window,
+   the app menu, and on Windows the window buttons. The bar is the window's
+   drag area; its controls opt out. */
+
+.topbar {
+  /* Room each side keeps for its own controls; the pill shrinks into what's left. */
+  --topbar-side: 150px;
+  flex: none;
+  position: relative;
+  z-index: 600;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  height: 64px;
+  padding: 0 var(--space-2);
+  background: var(--color-bg-base);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.topbar--windows { --topbar-side: 230px; padding-right: 0; }
+/* Traffic lights sit at the far left on macOS. */
+.topbar--mac { --topbar-side: 170px; padding-left: 84px; }
+
+.topbar button,
+.topbar input,
+.topbar .searchbox__panel,
+.appmenu__panel { -webkit-app-region: no-drag; }
+
+.topbar__start,
+.topbar__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 100%;
+}
+.topbar__end { justify-content: flex-end; gap: var(--space-2); }
+.topbar__logo { display: inline-flex; padding: 0 var(--space-3) 0 var(--space-2); }
+
+/* Back / forward: narrow and borderless, greyed with no history. */
+.topbar__nav.icon-btn { width: 32px; height: 32px; color: var(--color-text-secondary); }
+.topbar__nav.icon-btn:hover:not(:disabled) { color: var(--color-text-primary); }
+.topbar__nav.icon-btn:disabled { opacity: 0.35; cursor: default; }
+.topbar__nav.icon-btn:disabled:hover { background: transparent; transform: none; }
+
+.topbar__centre {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 100%;
+}
+
+/* Round buttons: Home, and the collapsed search. */
+.topbar__round {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-bg-raised2);
+  color: var(--color-text-secondary);
+  transition:
+    background-color var(--motion-very-quick) var(--motion-easing),
+    color var(--motion-very-quick) var(--motion-easing),
+    transform var(--motion-quick) var(--motion-easing);
+}
+.topbar__round:hover { background: var(--color-bg-overlay); color: var(--color-text-primary); transform: scale(1.04); }
+.topbar__round:active { transform: scale(0.98); }
+.topbar__round.is-active { color: var(--color-text-primary); }
+
+/* Avatar and the app menu. */
+.appmenu { position: relative; display: flex; }
+.topbar__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-bg-raised2);
+  transition: transform var(--motion-quick) var(--motion-easing);
+}
+.topbar__avatar:hover,
+.topbar__avatar.is-open { transform: scale(1.04); }
+.topbar__avatar-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+.appmenu__panel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 700;
+  min-width: 240px;
+  padding: var(--space-1);
+  border-radius: var(--radius-row);
+  background: var(--color-bg-overlay);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 240, 220, 0.06);
+  text-align: left;
+}
+.appmenu__panel:focus-visible { outline: none; }
+.appmenu__who {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.appmenu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border-radius: 2px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  text-align: left;
+}
+.appmenu__item:hover,
+.appmenu__item:focus-visible { background: var(--color-state-hover); outline: none; }
+.appmenu__hint { font-family: inherit; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.appmenu__check { color: var(--color-accent); }
+.appmenu__sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
+
+/* Windows window buttons, flush with the top-right corner. */
+.topbar__controls { display: flex; align-self: flex-start; height: 32px; margin-left: var(--space-2); }
+.topbar__winbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  color: var(--color-text-secondary);
+  border-radius: 0;
+  transition: background-color var(--motion-fast) var(--motion-easing), color var(--motion-fast) var(--motion-easing);
+}
+.topbar__winbtn:hover { background: var(--color-state-pressed); color: var(--color-text-primary); }
+.topbar__winbtn--close:hover { background: #c42b1c; color: #fff; }
+.topbar__winbtn:focus-visible { outline-offset: -2px; border-radius: 0; }
+
+/* Sign-in screen: just a drag strip and the window buttons. */
+.windowbar {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  height: 32px;
+  -webkit-app-region: drag;
+}
+.windowbar--mac { height: 28px; }
+.windowbar button { -webkit-app-region: no-drag; }
+
+/* ---------------------------------------------------------------- search pill */
+
+.searchbox {
+  position: relative;
+  width: clamp(240px, calc(100vw - 2 * var(--topbar-side) - 56px), 480px);
+}
+.searchbox .search-field {
+  max-width: none;
+  height: 48px;
+  background: var(--color-bg-raised2);
+}
+
+.searchbox__panel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  right: 0;
+  z-index: 700;
+  max-height: min(560px, calc(100vh - 160px));
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+  border-radius: var(--radius-card);
+  background: var(--color-bg-overlay);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 240, 220, 0.06);
+  text-align: left;
+  animation: rise-in var(--motion-quick) var(--motion-easing);
+}
+.searchbox__head {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+.searchbox__hint {
+  padding: var(--space-1) var(--space-4) var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.searchbox__hint kbd {
+  display: inline-block;
+  min-width: 18px;
+  margin-right: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--color-bg-raised2);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.searchbox__list { margin: 0; padding: 0 var(--space-2); list-style: none; }
+.searchbox__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2);
+  border-radius: var(--radius-row);
+  cursor: pointer;
+}
+.searchbox__row--completion { min-height: 44px; font-size: var(--font-size-md); color: var(--color-text-secondary); }
+.searchbox__row--completion strong { font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.searchbox__row.has-rule { margin-top: var(--space-2); position: relative; }
+.searchbox__row.has-rule::before {
+  content: "";
+  position: absolute;
+  top: calc(-1 * var(--space-1) - 1px);
+  left: var(--space-2);
+  right: var(--space-2);
+  height: 1px;
+  background: var(--color-border);
+}
+.searchbox__row:hover,
+.searchbox__row.is-selected { background: var(--color-state-hover); }
+.searchbox__row.is-selected { box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.1); }
+.searchbox__icon { display: inline-flex; justify-content: center; width: 40px; color: var(--color-text-muted); }
+.searchbox__text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.searchbox__title { font-size: var(--font-size-md); color: var(--color-text-primary); }
+.searchbox__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.searchbox__play,
+.searchbox__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--color-text-secondary);
+  opacity: 0;
+  transition: opacity var(--motion-very-quick) var(--motion-easing);
+}
+.searchbox__play { background: var(--color-accent); color: var(--color-text-on-accent); }
+.searchbox__play svg { margin-left: 2px; }
+.searchbox__remove:hover { color: var(--color-text-primary); }
+.searchbox__row:hover .searchbox__play,
+.searchbox__row.is-selected .searchbox__play,
+.searchbox__row:hover .searchbox__remove,
+.searchbox__row.is-selected .searchbox__remove { opacity: 1; }
+/* The remove button stays findable without hover in the recents list. */
+.searchbox__remove { opacity: 0.6; }

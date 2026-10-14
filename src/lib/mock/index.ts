@@ -40,6 +40,8 @@ import type {
   RepeatMode,
   ReleaseSection,
   SearchArgs,
+  SearchHit,
+  SearchKind,
   SearchResults,
   ServerInfo,
   Settings,
@@ -135,7 +137,9 @@ export class MockBackend implements Backend {
   private healthState: Health;
   private sync: SyncStatus = { phase: "idle", done: 0, total: 0, lastSyncAt: Math.floor(Date.now() / 1000) - 3600 };
   // search
-  private recent: string[] = ["lantern", "Odessa Wren", "saltglass"];
+  /** Items opened from search, newest first. */
+  private recent: { kind: SearchKind; id: string }[] = [];
+  private recentSeeded = false;
   private settings: Settings = { ...DEFAULT_SETTINGS };
   // output devices (invented)
   private outputs: OutputDevice[] = MOCK_OUTPUTS.map((d) => ({ ...d }));
@@ -575,18 +579,87 @@ export class MockBackend implements Backend {
       };
     });
   }
-  recentSearches() {
-    return this.delay(() => this.recent);
-  }
-  recentSearchAdd(query: string) {
+  searchCompletions(query: string, limit = 4) {
     return this.delay(() => {
-      const q = query.trim();
-      if (!q) return;
-      this.recent = [q, ...this.recent.filter((r) => r.toLowerCase() !== q.toLowerCase())].slice(0, 10);
+      const fold = (s: string) =>
+        s
+          .normalize("NFD")
+          .replace(/\p{M}/gu, "")
+          .toLowerCase()
+          .split(/[^\p{L}\p{N}]+/u)
+          .filter(Boolean)
+          .join(" ");
+      const q = fold(query.slice(0, 200));
+      if (!q) return [] as string[];
+      const cands: [string, number][] = [
+        ...this.fx.artists.map((a): [string, number] => [a.title, a.viewCount]),
+        ...this.fx.albums.map((a): [string, number] => [a.title, a.viewCount]),
+        ...this.fx.tracks.map((t): [string, number] => [t.title, t.viewCount]),
+      ];
+      cands.sort((a, b) => b[1] - a[1] || [...a[0]].length - [...b[0]].length);
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const [title] of cands) {
+        const n = fold(title);
+        if (!n.startsWith(q) || seen.has(n)) continue;
+        seen.add(n);
+        out.push(title);
+        if (out.length >= Math.min(limit, 10)) break;
+      }
+      return out;
     });
   }
-  recentSearchesClear() {
+  /** A few remembered items so the dropdown is demoable (not in tests). */
+  private seedRecents() {
+    if (this.recentSeeded) return;
+    this.recentSeeded = true;
+    if (isTestEnv) return;
+    const fx = this.fx;
+    this.recent = [
+      fx.albums[0] && { kind: "album" as const, id: fx.albums[0].id },
+      fx.artists[1] && { kind: "artist" as const, id: fx.artists[1].id },
+      fx.tracks[3] && { kind: "track" as const, id: fx.tracks[3].id },
+      fx.playlists[0] && { kind: "playlist" as const, id: fx.playlists[0].id },
+    ].filter((x): x is { kind: SearchKind; id: string } => !!x);
+  }
+  searchRecents() {
     return this.delay(() => {
+      this.seedRecents();
+      const out: SearchHit[] = [];
+      for (const r of this.recent) {
+        if (r.kind === "artist") {
+          const artist = this.fx.artists.find((a) => a.id === r.id);
+          if (artist) out.push({ kind: "artist", artist });
+        } else if (r.kind === "album") {
+          const album = this.fx.albums.find((a) => a.id === r.id);
+          if (album) out.push({ kind: "album", album });
+        } else if (r.kind === "track") {
+          const track = this.trackById(r.id);
+          if (track) out.push({ kind: "track", track });
+        } else {
+          const playlist = this.fx.playlists.find((p) => p.id === r.id);
+          if (playlist) out.push({ kind: "playlist", playlist });
+        }
+      }
+      return clone(out);
+    });
+  }
+  searchRecentAdd(kind: SearchKind, id: string) {
+    return this.delay(() => {
+      this.seedRecents();
+      if (!id) return;
+      this.recent = [{ kind, id }, ...this.recent.filter((r) => !(r.kind === kind && r.id === id))].slice(0, 20);
+    });
+  }
+  searchRecentRemove(kind: SearchKind, id: string) {
+    return this.delay(() => {
+      this.seedRecents();
+      this.recent = this.recent.filter((r) => !(r.kind === kind && r.id === id));
+    });
+  }
+  searchRecentsClear() {
+    return this.delay(() => {
+      this.recentSeeded = true;
       this.recent = [];
     });
   }

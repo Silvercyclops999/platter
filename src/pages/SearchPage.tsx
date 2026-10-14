@@ -1,274 +1,142 @@
-import { Clock3, Play } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { MoreHorizontal, Pause, Play } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Art } from "../components/Art";
-import { ArtistLinks } from "../components/ArtistLinks";
-import { Shelf, ShelfItem } from "../components/Shelf";
+import { CardSkeleton } from "../components/Card";
+import { openContextMenu } from "../components/ContextMenu";
 import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
-import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
+import { TrackList, TrackRow, TrackRowSkeleton, trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
-import { trackArtistLine } from "../lib/format";
-import type { Album, Artist, Playlist, SearchFilter, SearchHit, SearchResults, Track } from "../lib/types";
+import { modKey } from "../lib/platform";
+import type { SearchFilter, SearchHit, SearchResults } from "../lib/types";
+import type { MenuItem } from "../stores/ui";
 import { player, usePlayer } from "../stores/player";
-import { nav, useRouter } from "../stores/router";
-import { toast } from "../stores/toasts";
-import { AlbumCard, ArtistCard, PlaylistCard } from "./cards";
+import { nav } from "../stores/router";
+import { MAX_QUERY } from "../shell/SearchBox";
+import { hitInfo, hitOf, mixedHits, openHit, playHit, rememberHit, type HitInfo } from "../shell/searchModel";
+import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
+import "./search.css";
 
-/** Longest query sent to the core; anything past it is ignored. */
-export const MAX_QUERY = 200;
-/** Songs shown next to the top result on the All tab. */
-const ALL_SONGS = 4;
+export { MAX_QUERY };
 
-const FILTERS: { id: SearchFilter; label: string }[] = [
+/** Results asked for per kind. */
+const LIMIT = 30;
+
+export const FILTERS: { id: SearchFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "songs", label: "Songs" },
-  { id: "artists", label: "Artists" },
   { id: "albums", label: "Albums" },
+  { id: "artists", label: "Artists" },
   { id: "playlists", label: "Playlists" },
 ];
 
-// ---------------------------------------------------------------- selection + actions
+// ---------------------------------------------------------------- rows
 
-/** One keyboard-selectable result, in on-screen order. */
-export type Pick =
-  | { kind: "top"; hit: SearchHit }
-  | { kind: "song"; track: Track }
-  | { kind: "artist"; artist: Artist }
-  | { kind: "album"; album: Album }
-  | { kind: "playlist"; playlist: Playlist };
-
-/** Results in the order arrows walk them: top result, songs, then shelves. */
-export function picksFor(res: SearchResults, filter: SearchFilter): Pick[] {
-  const out: Pick[] = [];
-  const all = filter === "all";
-  if (all && res.top) out.push({ kind: "top", hit: res.top });
-  if (all || filter === "songs") visibleSongs(res, filter).forEach((track) => out.push({ kind: "song", track }));
-  if (all || filter === "artists") res.artists.forEach((artist) => out.push({ kind: "artist", artist }));
-  if (all || filter === "albums") res.albums.forEach((album) => out.push({ kind: "album", album }));
-  if (all || filter === "playlists") res.playlists.forEach((playlist) => out.push({ kind: "playlist", playlist }));
-  return out;
-}
-
-export function visibleSongs(res: SearchResults, filter: SearchFilter): Track[] {
-  return filter === "all" ? res.songs.slice(0, ALL_SONGS) : filter === "songs" ? res.songs : [];
-}
-
-/** Normalise a pick to the item it stands for. */
-function target(p: Pick): Pick {
-  if (p.kind !== "top") return p;
-  const h = p.hit;
-  if (h.kind === "artist" && h.artist) return { kind: "artist", artist: h.artist };
-  if (h.kind === "album" && h.album) return { kind: "album", album: h.album };
-  if (h.kind === "track" && h.track) return { kind: "song", track: h.track };
-  if (h.kind === "playlist" && h.playlist) return { kind: "playlist", playlist: h.playlist };
-  return p;
-}
-
-/** Play a result. Songs play in a "search" context of the songs on screen. */
-export function playPick(p: Pick, songs: Track[]) {
-  const t = target(p);
-  switch (t.kind) {
-    case "song": {
-      const ids = songs.map((s) => s.id);
-      return player.playTracks(ids.includes(t.track.id) ? ids : [t.track.id], t.track.id, "search");
-    }
-    case "artist":
-      return player.playArtist(t.artist.id);
-    case "album":
-      return player.playAlbum(t.album.id);
-    case "playlist":
-      return player.playPlaylist(t.playlist.id);
+function menuFor(h: SearchHit, playing: boolean, toggle: () => void): MenuItem[] {
+  const i = hitInfo(h)!;
+  const play: MenuItem = { label: playing ? "Pause" : "Play", onSelect: toggle };
+  if (h.kind === "track" && h.track) return trackMenuItems(h.track, { before: [play] });
+  if (h.kind === "album" && h.album) {
+    const a = h.album;
+    return [
+      play,
+      { label: "Add to queue", onSelect: () => void player.queueAlbum(a.id) },
+      { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: a.artistId }) },
+    ];
   }
+  if (h.kind === "playlist") return [play, { label: "Add to queue", onSelect: () => void player.queuePlaylist(i.id) }];
+  return [play];
 }
 
-/** Add a result to the end of the queue (a whole album, playlist or the artist's top songs). */
-export async function queuePick(p: Pick) {
-  const t = target(p);
-  try {
-    let ids: string[] = [];
-    let what = "";
-    switch (t.kind) {
-      case "song":
-        ids = [t.track.id];
-        what = t.track.title;
-        break;
-      case "album":
-        ids = (await backend.albumPage(t.album.id)).tracks.map((x) => x.id);
-        what = t.album.title;
-        break;
-      case "playlist":
-        ids = (await backend.playlistPage(t.playlist.id)).tracks.map((x) => x.id);
-        what = t.playlist.title;
-        break;
-      case "artist":
-        ids = (await backend.artistPage(t.artist.id)).popular.map((x) => x.id);
-        what = `Popular songs by ${t.artist.title}`;
-        break;
-    }
-    if (!ids.length) return;
-    await backend.queueAdd(ids, "end");
-    toast.info(`Added to queue: ${what}`);
-  } catch (e) {
-    const msg = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "";
-    toast.error(msg || "Couldn't add to queue");
-  }
+/** Whether a result is what's playing (a song) or the playing context (the rest). */
+function usePlayingState(i: HitInfo): { current: boolean; playing: boolean } {
+  const ctx = useContextState(i.kind === "track" ? "tracks" : i.kind, i.id);
+  const isTrack = usePlayer((s) => i.kind === "track" && s.state?.track?.id === i.id);
+  const trackPlaying = usePlayer((s) => isTrack && s.state?.status === "playing");
+  return i.kind === "track" ? { current: isTrack, playing: trackPlaying } : { current: ctx.isContext, playing: ctx.playing };
 }
 
-function pickLabel(p: Pick): string {
-  const t = target(p);
-  switch (t.kind) {
-    case "song":
-      return `Song, ${t.track.title} by ${trackArtistLine(t.track)}`;
-    case "artist":
-      return `Artist, ${t.artist.title}`;
-    case "album":
-      return `Album, ${t.album.title} by ${t.album.artistTitle}`;
-    case "playlist":
-      return `Playlist, ${t.playlist.title}`;
-    default:
-      return "";
-  }
+function useHitActions(h: SearchHit, songIds?: string[]) {
+  const i = hitInfo(h)!;
+  const { current, playing } = usePlayingState(i);
+  const toggle = () => {
+    rememberHit(h);
+    if (current) void player.toggle();
+    else void playHit(h, songIds);
+  };
+  const open = () => {
+    rememberHit(h);
+    void openHit(h);
+  };
+  const menu = (e: MouseEvent<HTMLElement>, at?: HTMLElement) => {
+    e.preventDefault();
+    openContextMenu(`Options for ${i.title}`, menuFor(h, playing, toggle), at ?? e);
+  };
+  return { i, current, playing, toggle, open, menu };
 }
 
-/** True for the header search box (the only place result arrows apply). */
-function isSearchBox(el: EventTarget | null): boolean {
-  return el instanceof HTMLInputElement && !!el.closest(".main-header");
-}
-
-// ---------------------------------------------------------------- pieces
-
-function TopResult({ hit, selected, onPlay }: { hit: SearchHit; selected: boolean; onPlay: () => void }) {
-  let title = "";
-  let sub: ReactNode = "";
-  let thumb: string | null | undefined;
-  let open = () => {};
-  let round = false;
-  if (hit.kind === "artist" && hit.artist) {
-    const a = hit.artist;
-    title = a.title;
-    sub = "Artist";
-    thumb = a.thumb;
-    round = true;
-    open = () => nav.go({ name: "artist", id: a.id });
-  } else if (hit.kind === "album" && hit.album) {
-    const a = hit.album;
-    title = a.title;
-    sub = `Album · ${a.artistTitle}`;
-    thumb = a.thumb;
-    open = () => nav.go({ name: "album", id: a.id });
-  } else if (hit.kind === "track" && hit.track) {
-    const t = hit.track;
-    title = t.title;
-    sub = (
-      <>
-        Song · <ArtistLinks track={t} />
-      </>
-    );
-    thumb = t.thumb;
-    open = () => nav.go({ name: "album", id: t.albumId });
-  } else if (hit.kind === "playlist" && hit.playlist) {
-    const p = hit.playlist;
-    title = p.title;
-    sub = "Playlist";
-    thumb = p.thumb;
-    open = () => nav.go({ name: "playlist", id: p.id });
-  }
+/** The highlighted first result: taller, larger art, a big play button. */
+function TopResult({ hit, songIds }: { hit: SearchHit; songIds: string[] }) {
+  const { i, playing, toggle, open, menu } = useHitActions(hit, songIds);
   return (
-    <div className={`top-result card search-pick ${selected ? "is-selected" : ""}`}>
-      <Art path={thumb} size={96} round={round} kind={hit.kind === "artist" ? "artist" : "album"} />
-      <button type="button" className="card__link top-result__title" onClick={open}>
-        <span className="truncate">{title}</span>
-      </button>
-      <div className="top-result__sub truncate">{sub}</div>
-      <button
-        type="button"
-        className="card__play"
-        aria-label={`Play ${title}`}
-        onClick={onPlay}
-      >
-        <Play size={20} fill="currentColor" aria-hidden="true" />
-      </button>
-    </div>
-  );
-}
-
-function SectionHead({ id, title, onShowAll }: { id: string; title: string; onShowAll?: () => void }) {
-  return (
-    <div className="search__section-head">
-      <h2 id={id} className="section-title">
-        {title}
-      </h2>
-      {onShowAll && (
-        <button type="button" className="shelf__all" onClick={onShowAll}>
-          Show all
+    <section className="sr-top" aria-label="Top result" onContextMenu={(e) => menu(e)}>
+      <Art path={i.thumb} size={92} round={i.round} kind={i.kind === "artist" ? "artist" : "album"} />
+      <div className="sr-top__text">
+        <button type="button" className="sr-top__title" onClick={open}>
+          <span className="truncate">{i.title}</span>
         </button>
-      )}
-    </div>
-  );
-}
-
-function Recent() {
-  const [recent, setRecent] = useState<string[] | null>(null);
-  useEffect(() => {
-    let alive = true;
-    backend.recentSearches().then(
-      (r) => alive && setRecent(r),
-      () => alive && setRecent([]),
-    );
-    return () => {
-      alive = false;
-    };
-  }, []);
-  if (recent === null)
-    return (
-      <div className="recent" aria-hidden="true">
-        <Skeleton width={200} height={24} style={{ marginBottom: 12 }} />
-        <div className="recent__list">
-          {[96, 132, 112].map((w, i) => (
-            <Skeleton key={i} width={w} height={36} radius="pill" />
-          ))}
+        <div className="sr-top__sub truncate">
+          <span className="sr-type">{i.typeLabel}</span>
+          {i.byline && <> · {i.byline}</>}
         </div>
       </div>
-    );
-  if (!recent.length)
-    return (
-      <div className="search-empty">
-        <h2 className="section-title">Search your library</h2>
-        <p>Find artists, albums, songs and playlists on your server.</p>
-      </div>
-    );
-  return (
-    <section className="recent" aria-labelledby="recent-h">
-      <div className="recent__head">
-        <h2 id="recent-h" className="section-title">
-          Recent searches
-        </h2>
-        <button
-          type="button"
-          className="shelf__all"
-          onClick={() =>
-            backend.recentSearchesClear().then(
-              () => setRecent([]),
-              () => toast.error("Couldn't clear recent searches"),
-            )
-          }
-        >
-          Clear recent searches
-        </button>
-      </div>
-      <ul className="recent__list">
-        {recent.map((q) => (
-          <li key={q}>
-            <button type="button" className="recent__item" onClick={() => useRouter.getState().replace({ name: "search", query: q })}>
-              <Clock3 size={16} aria-hidden="true" />
-              <span className="truncate">{q}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      <button type="button" className="sr-top__play" aria-label={`${playing ? "Pause" : "Play"} ${i.title}`} onClick={toggle}>
+        {playing ? <Pause size={22} fill="currentColor" aria-hidden="true" /> : <Play size={22} fill="currentColor" aria-hidden="true" />}
+      </button>
     </section>
   );
 }
+
+/** One plain result row: art, title and byline, a grey type label, more options. */
+export function ResultRow({ hit, songIds }: { hit: SearchHit; songIds?: string[] }) {
+  const { i, current, playing, toggle, open, menu } = useHitActions(hit, songIds);
+  const more = useRef<HTMLButtonElement>(null);
+  return (
+    <li className={`sr-row ${current ? "is-current" : ""}`} aria-label={`${i.title}, ${i.typeLabel}${i.byline ? `, ${i.byline}` : ""}`} onContextMenu={(e) => menu(e)} onDoubleClick={toggle}>
+      <span className="sr-row__art">
+        <Art path={i.thumb} size={48} round={i.round} kind={i.kind === "artist" ? "artist" : "album"} />
+        <button
+          type="button"
+          className={`sr-row__play ${i.round ? "is-round" : ""}`}
+          aria-label={`${playing ? "Pause" : "Play"} ${i.title}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle();
+          }}
+        >
+          {playing ? <Pause size={16} fill="currentColor" aria-hidden="true" /> : <Play size={16} fill="currentColor" aria-hidden="true" />}
+        </button>
+      </span>
+      <span className="sr-row__text">
+        <button type="button" className="sr-row__title" onClick={open}>
+          <span className="truncate">{i.title}</span>
+        </button>
+        <span className="sr-row__by truncate">{i.byline || i.typeLabel}</span>
+      </span>
+      <span className="sr-type sr-row__type">{i.typeLabel}</span>
+      <button ref={more} type="button" className="sr-row__more" aria-label={`More options for ${i.title}`} onClick={(e) => menu(e, more.current ?? undefined)}>
+        <MoreHorizontal size={18} aria-hidden="true" />
+      </button>
+    </li>
+  );
+}
+
+function Remember({ hit, children }: { hit: SearchHit; children: ReactNode }) {
+  // Opening or playing a card remembers it as a recent search.
+  return <div onClickCapture={() => rememberHit(hit)}>{children}</div>;
+}
+
+// ---------------------------------------------------------------- loading
 
 function ResultsSkeleton({ filter }: { filter: SearchFilter }) {
   if (filter === "songs")
@@ -280,29 +148,25 @@ function ResultsSkeleton({ filter }: { filter: SearchFilter }) {
       </TrackList>
     );
   if (filter !== "all")
-    return <Shelf title={FILTERS.find((f) => f.id === filter)!.label} loading skeletonKind={filter === "artists" ? "artist" : filter === "playlists" ? "playlist" : "album"} />;
-  return (
-    <div className="search__grid" aria-hidden="true">
-      <div>
-        <Skeleton width={140} height={24} style={{ marginBottom: 12 }} />
-        <Skeleton height={220} radius="card" />
+    return (
+      <div className="sr-grid" aria-hidden="true">
+        {Array.from({ length: 8 }, (_, i) => (
+          <CardSkeleton key={i} kind={filter === "artists" ? "artist" : filter === "playlists" ? "playlist" : "album"} />
+        ))}
       </div>
-      <div>
-        <Skeleton width={90} height={24} style={{ marginBottom: 12 }} />
-        <TrackList label="Loading songs" header={false}>
-          {Array.from({ length: ALL_SONGS }, (_, i) => (
-            <TrackRowSkeleton key={i} showArt showAlbum={false} />
-          ))}
-        </TrackList>
-      </div>
-    </div>
-  );
-}
-
-function PickCell({ selected, children }: { selected: boolean; children: ReactNode }) {
+    );
   return (
-    <div className={`search-pick ${selected ? "is-selected" : ""}`}>
-      {children}
+    <div className="sr-all" aria-hidden="true">
+      <Skeleton height={124} radius="card" />
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className="sr-row sr-row--skeleton">
+          <Skeleton width={48} height={48} />
+          <span className="sr-row__text">
+            <Skeleton width={180} height={14} />
+            <Skeleton width={110} height={12} />
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -315,115 +179,73 @@ interface Shown {
   res: SearchResults;
 }
 
+/** The full results page for a query: type chips, then the results for that type. */
 export function SearchPage({ query }: { query: string }) {
   const [filter, setFilter] = useState<SearchFilter>("all");
   const [shown, setShown] = useState<Shown | null>(null);
-  const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [sel, setSel] = useState(-1);
   const seq = useRef(0);
-  const root = useRef<HTMLDivElement>(null);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
   const q = query.trim().slice(0, MAX_QUERY);
 
-  // Search on every keystroke. Each request gets a sequence number and only
-  // the newest one may update the screen, so a slow answer to an older query
-  // can never replace newer results.
+  // Each request gets a sequence number and only the newest one may update
+  // the screen, so a slow answer to an older query never replaces a newer one.
   useEffect(() => {
     const mine = ++seq.current;
-    setSel(-1);
     if (!q) {
       setShown(null);
-      setLoading(false);
       setFailed(false);
       return;
     }
-    setLoading(true);
-    backend.search({ query: q, filter, limit: filter === "all" ? 10 : 50 }).then(
+    backend.search({ query: q, filter, limit: LIMIT }).then(
       (res) => {
         if (mine !== seq.current) return;
         setShown({ query: q, filter, res });
-        setLoading(false);
         setFailed(false);
       },
       () => {
         if (mine !== seq.current) return;
-        setLoading(false);
         setFailed(true);
       },
     );
   }, [q, filter]);
 
-  // Results for another tab would show the wrong layout: treat them as absent.
+  // Results for another chip would show the wrong layout: treat them as absent.
   const res = shown && shown.filter === filter ? shown.res : null;
-  const picks = useMemo(() => (res ? picksFor(res, filter) : []), [res, filter]);
-  const songs = useMemo(() => (res ? visibleSongs(res, filter) : []), [res, filter]);
-
-  // Keyboard: arrows move through results while typing; Enter plays,
-  // Shift+Enter adds to the queue.
-  const live = useRef({ picks, songs, sel, q });
-  live.current = { picks, songs, sel, q };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!isSearchBox(e.target) || e.altKey || e.ctrlKey || e.metaKey) return;
-      const { picks, songs, sel, q } = live.current;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        if (!picks.length) return;
-        e.preventDefault();
-        // Functional update: several presses can land before the next render.
-        const last = picks.length - 1;
-        const down = e.key === "ArrowDown";
-        setSel((s) => {
-          const next = down ? Math.min(s + 1, last) : Math.max(s - 1, -1);
-          live.current.sel = next;
-          return next;
-        });
-      } else if (e.key === "Enter" && sel >= 0 && picks[sel]) {
-        e.preventDefault();
-        if (q) backend.recentSearchAdd(q).catch(() => {});
-        if (e.shiftKey) queuePick(picks[sel]);
-        else playPick(picks[sel], songs);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // Keep the selection on screen.
-  useEffect(() => {
-    if (sel < 0) return;
-    const el = root.current?.querySelector<HTMLElement>(".search-pick.is-selected, .track-row.is-selected");
-    el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [sel]);
+  const songIds = useMemo(() => (res ? res.songs.map((s) => s.id) : []), [res]);
+  const rows = useMemo(() => (res && filter === "all" ? mixedHits(res) : []), [res, filter]);
 
   if (!q)
     return (
-      <div className="page-pad">
-        <Recent />
+      <div className="page-pad sr">
+        <div className="sr-empty">
+          <h1 className="section-title">Search your library</h1>
+          <p>Find artists, albums, songs and playlists on your server. Use the search box at the top, or press {modKey}+L.</p>
+        </div>
       </div>
     );
 
-  const empty = res && !picks.length;
-  let n = filter === "all" && res?.top ? 1 : 0;
-  const songBase = n;
-  if (res) n += songs.length;
-  const play = (p: Pick) => {
-    backend.recentSearchAdd(q).catch(() => {});
-    playPick(p, songs);
-  };
-  const shelfPicks = <T,>(items: T[]) => {
-    const base = n;
-    n += items.length;
-    return base;
-  };
+  const empty =
+    res &&
+    !res.top &&
+    (filter === "all"
+      ? !res.songs.length && !res.albums.length && !res.artists.length && !res.playlists.length
+      : filter === "songs"
+        ? !res.songs.length
+        : filter === "albums"
+          ? !res.albums.length
+          : filter === "artists"
+            ? !res.artists.length
+            : !res.playlists.length);
 
   return (
-    <div className="page-pad search" ref={root} aria-busy={loading}>
-      <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="search__chips" />
+    <div className="page-pad sr" aria-busy={!res && !failed}>
+      <h1 className="sr-only">Results for “{q}”</h1>
+      <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="sr-chips" />
       {!res ? (
         failed ? (
-          <div className="search-empty">
+          <div className="sr-empty">
             <h2 className="section-title">Search isn't available right now</h2>
             <p>Try again in a moment.</p>
           </div>
@@ -431,108 +253,78 @@ export function SearchPage({ query }: { query: string }) {
           <ResultsSkeleton filter={filter} />
         )
       ) : empty ? (
-        <div className="search-empty">
+        <div className="sr-empty">
           <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
           <p>Check the spelling, or try fewer or different keywords.</p>
         </div>
       ) : (
         <>
-          {filter === "all" && (res.top || songs.length > 0) && (
-            <div className="search__grid">
-              {res.top && (
-                <section aria-labelledby="top-h">
-                  <SectionHead id="top-h" title="Top result" />
-                  <TopResult hit={res.top} selected={sel === 0} onPlay={() => play({ kind: "top", hit: res.top! })} />
-                </section>
-              )}
-              {songs.length > 0 && (
-                <section aria-labelledby="songs-h" className="search__songs">
-                  <SectionHead id="songs-h" title="Songs" onShowAll={res.songs.length >= ALL_SONGS ? () => setFilter("songs") : undefined} />
-                  <TrackList label="Songs" header={false}>
-                    {songs.map((t, i) => (
-                      <TrackRow
-                        key={t.id}
-                        track={t}
-                        index={i + 1}
-                        compact
-                        selected={sel === songBase + i}
-                        active={t.id === nowTrackId}
-                        playing={t.id === nowTrackId && status === "playing"}
-                        onPlay={() => play({ kind: "song", track: t })}
-                      />
-                    ))}
-                  </TrackList>
-                </section>
-              )}
+          {filter === "all" && (
+            <div className="sr-all">
+              {res.top && <TopResult hit={res.top} songIds={songIds} />}
+              <ul className="sr-list" aria-label="Results">
+                {rows.map((h) => (
+                  <ResultRow key={hitInfo(h)!.key} hit={h} songIds={songIds} />
+                ))}
+              </ul>
             </div>
           )}
           {filter === "songs" && (
             <TrackList label="Songs">
-              {songs.map((t, i) => (
+              {res.songs.map((t, i) => (
                 <TrackRow
                   key={t.id}
                   track={t}
                   index={i + 1}
                   showArt
-                  selected={sel === songBase + i}
                   active={t.id === nowTrackId}
                   playing={t.id === nowTrackId && status === "playing"}
-                  onPlay={() => play({ kind: "song", track: t })}
+                  onPlay={() => {
+                    rememberHit(hitOf.track(t));
+                    void player.playTracks(songIds, t.id, "search");
+                  }}
                 />
               ))}
             </TrackList>
           )}
-          {(filter === "all" || filter === "artists") && res.artists.length > 0 && (
-            <Shelf title="Artists" onShowAll={filter === "all" ? () => setFilter("artists") : undefined}>
-              {(() => {
-                const base = shelfPicks(res.artists);
-                return res.artists.map((a, i) => (
-                  <ShelfItem key={a.id}>
-                    <PickCell selected={sel === base + i}>
-                      <ArtistCard artist={a} />
-                    </PickCell>
-                  </ShelfItem>
-                ));
-              })()}
-            </Shelf>
+          {filter === "albums" && (
+            <div className="sr-grid" role="list" aria-label="Albums">
+              {res.albums.map((a) => (
+                <div role="listitem" key={a.id}>
+                  <Remember hit={hitOf.album(a)}>
+                    <AlbumCard album={a} />
+                  </Remember>
+                </div>
+              ))}
+            </div>
           )}
-          {(filter === "all" || filter === "albums") && res.albums.length > 0 && (
-            <Shelf title="Albums" onShowAll={filter === "all" ? () => setFilter("albums") : undefined}>
-              {(() => {
-                const base = shelfPicks(res.albums);
-                return res.albums.map((a, i) => (
-                  <ShelfItem key={a.id}>
-                    <PickCell selected={sel === base + i}>
-                      <AlbumCard album={a} />
-                    </PickCell>
-                  </ShelfItem>
-                ));
-              })()}
-            </Shelf>
+          {filter === "artists" && (
+            <div className="sr-grid" role="list" aria-label="Artists">
+              {res.artists.map((a) => (
+                <div role="listitem" key={a.id}>
+                  <Remember hit={hitOf.artist(a)}>
+                    <ArtistCard artist={a} />
+                  </Remember>
+                </div>
+              ))}
+            </div>
           )}
-          {(filter === "all" || filter === "playlists") && res.playlists.length > 0 && (
-            <Shelf title="Playlists" onShowAll={filter === "all" ? () => setFilter("playlists") : undefined}>
-              {(() => {
-                const base = shelfPicks(res.playlists);
-                return res.playlists.map((p, i) => (
-                  <ShelfItem key={p.id}>
-                    <PickCell selected={sel === base + i}>
-                      <PlaylistCard playlist={p} />
-                    </PickCell>
-                  </ShelfItem>
-                ));
-              })()}
-            </Shelf>
+          {filter === "playlists" && (
+            <div className="sr-grid" role="list" aria-label="Playlists">
+              {res.playlists.map((p) => (
+                <div role="listitem" key={p.id}>
+                  <Remember hit={hitOf.playlist(p)}>
+                    <PlaylistCard playlist={p} />
+                  </Remember>
+                </div>
+              ))}
+            </div>
           )}
-          <p className="search__meta">
-            {res.source === "local" ? "From your library" : "From your server while your library finishes syncing"} ·{" "}
-            {Math.round(res.tookMs)} ms
+          <p className="sr-meta">
+            {res.source === "local" ? "From your library" : "From your server while your library finishes syncing"} · {Math.round(res.tookMs)} ms
           </p>
         </>
       )}
-      <div className="sr-only" aria-live="polite">
-        {sel >= 0 && picks[sel] ? `${pickLabel(picks[sel])}. Enter to play, Shift+Enter to add to queue.` : ""}
-      </div>
     </div>
   );
 }

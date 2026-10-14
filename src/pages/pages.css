@@ -321,64 +321,6 @@
   .track-list__plays { display: none; }
 }
 
-/* ---------------------------------------------------------------- Search */
-.search__chips { margin: 0 var(--space-3) var(--space-6); }
-.search__grid {
-  display: grid;
-  grid-template-columns: minmax(260px, 2fr) minmax(0, 3fr);
-  gap: var(--space-6);
-  margin: 0 var(--space-3) var(--space-8);
-}
-.search__songs .track-list { margin: 0 calc(-1 * var(--space-2)); }
-.top-result {
-  position: relative;
-  gap: var(--space-4);
-  padding: var(--space-6);
-  background: var(--color-state-hover);
-  min-height: 220px;
-}
-.top-result:hover { background: var(--color-state-pressed); }
-.top-result__title { font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); letter-spacing: -0.02em; margin-top: var(--space-2); }
-.top-result__title .truncate { display: block; }
-.top-result__sub { font-size: var(--font-size-md); color: var(--color-text-secondary); margin-top: calc(-1 * var(--space-3)); }
-.top-result .card__play { right: var(--space-6); bottom: var(--space-6); }
-.search__section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
-.search__section-head .section-title { margin-bottom: var(--space-3); }
-/* Keyboard selection from the search box: same look as a focused row. */
-.search .track-row.is-selected,
-.search-pick.is-selected .card,
-.top-result.is-selected {
-  background: var(--color-state-selected);
-  outline: 2px solid var(--color-focus-ring);
-  outline-offset: -2px;
-}
-.search-pick.is-selected .card__play,
-.top-result.is-selected .card__play { opacity: 1; transform: none; }
-.search__meta { margin: 0 var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
-.search .shelf { margin-left: 0; }
-.search-empty { padding: var(--space-12) var(--space-3); color: var(--color-text-secondary); text-align: center; }
-.search-empty .section-title { color: var(--color-text-primary); }
-.recent { margin: 0 var(--space-3); }
-.recent__head { display: flex; align-items: baseline; justify-content: space-between; }
-.recent__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.recent__item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 36px;
-  max-width: 280px;
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-pill);
-  background: var(--color-state-pressed);
-  color: var(--color-text-primary);
-}
-.recent__item:hover { background: rgba(255, 240, 220, 0.16); }
-.recent__item:focus-visible { border-radius: var(--radius-pill); }
-
-@media (max-width: 1000px) {
-  .search__grid { grid-template-columns: 1fr; }
-}
-
 /* ---------------------------------------------------------------- Settings */
 .settings { max-width: 760px; }
 .settings__group { margin: 0 var(--space-3) var(--space-8); }
