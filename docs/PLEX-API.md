@@ -213,3 +213,14 @@ or `X-Plex-Session-Identifier` values don't change it; the newest transfer
 always survives. A single transfer runs at full LAN speed (44 MB FLAC in under
 3 s), so the client must download one file at a time: the playing track first,
 then the next track, then pre-cache, each resuming by Range when preempted.
+
+### 2026-10-13: photo transcode output format
+
+`/photo/:/transcode?url={thumb}&width=320&height=320&minSize=1&upscale=1` on 60
+album thumbs always came back as `image/jpeg`, about 19 KB each. `minSize=1`
+fills the box, so non-square art comes back slightly larger on one side
+(325x320, 320x427). `format=jpeg` changes nothing. `quality=82` makes the JPEGs
+larger (about 23 KB), so the server default is already below that.
+`format=webp&quality=82` returns `image/webp` at about 11 KB, and `format=png`
+returns PNG at about 131 KB. Decoded size in the WebView is the same whatever
+the format, so the app keeps the default JPEG.
