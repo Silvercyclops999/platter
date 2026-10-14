@@ -191,6 +191,9 @@ pub struct ArtistPage {
     pub about: Option<String>,
     /// Plex similar artists that are in this library, in Plex's order.
     pub similar: Vec<Artist>,
+    /// Albums by others with tracks that credit this artist, newest first.
+    #[serde(default)]
+    pub appears_on: Vec<Album>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

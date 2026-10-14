@@ -403,6 +403,15 @@ CREATE TABLE IF NOT EXISTS discord_art (
     expires_at INTEGER NOT NULL
 );
 "#,
+    // v11: artist names that contain a separator ("Tyler, The Maker"),
+    // learned from ListenBrainz artist credits (db::popular), so splitting a
+    // track's artist line keeps them whole. key is the lower-cased name.
+    r#"
+CREATE TABLE IF NOT EXISTS credit_names (
+    key  TEXT PRIMARY KEY,
+    name TEXT NOT NULL
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]
@@ -582,6 +591,19 @@ mod tests {
                 .is_err(),
             "one row per album"
         );
+    }
+
+    #[test]
+    fn v11_adds_learned_credit_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        for m in &MIGRATIONS[..10] {
+            c.execute_batch(m).unwrap();
+        }
+        c.pragma_update(None, "user_version", 10).unwrap();
+        migrate(&mut c).unwrap();
+        c.execute("INSERT INTO credit_names (key, name) VALUES ('a, b', 'A, B')", []).unwrap();
+        assert!(c.execute("INSERT INTO credit_names (key, name) VALUES ('a, b', 'a, B')", []).is_err(), "one row per name");
     }
 
     #[test]

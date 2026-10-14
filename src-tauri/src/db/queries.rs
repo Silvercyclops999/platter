@@ -24,7 +24,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::{AppError, AppResult};
 use crate::model::{Album, Artist, Playlist, ReleaseSection, Track};
 
-use super::credits;
+use super::popular::{self, POPULAR_N};
 use super::release::{SECTION_ORDER, section_key};
 use super::store::{
     ALBUM_COLS, ARTIST_COLS, PLAYLIST_COLS, TRACK_COLS, row_album, row_artist, row_playlist, row_track,
@@ -39,7 +39,6 @@ const SHORTCUT_RECENT: usize = 6;
 /// Most items a "Show all" page lists.
 pub const SHELF_ALL_MAX: usize = 200;
 const JUMP_BACK_WINDOW_S: i64 = 28 * 24 * 3600;
-const POPULAR_N: usize = 10;
 const MORE_BY_N: usize = 12;
 const MAX_PAGE: u32 = 500;
 
@@ -346,10 +345,14 @@ pub fn albums(
 }
 
 /// All artist names and ids (small: two short strings per artist).
+/// Learned names that contain a separator follow with `credit:` ids, so
+/// track lines keep them whole too.
 pub fn artist_names(c: &Connection) -> AppResult<Vec<ArtistName>> {
     let mut st = c.prepare_cached("SELECT id, title FROM artists ORDER BY pk")?;
     let rows = st.query_map([], |r| Ok(ArtistName { id: r.get(0)?, title: r.get(1)? }))?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    let mut out = rows.collect::<Result<Vec<_>, _>>()?;
+    out.extend(popular::learned_names(c)?.into_iter().map(|n| ArtistName { id: popular::credit_id(&n), title: n }));
+    Ok(out)
 }
 
 pub fn playlists(c: &Connection) -> AppResult<Vec<Playlist>> {
@@ -363,13 +366,22 @@ pub fn artist_page(c: &Connection, id: &str) -> AppResult<ArtistPage> {
     artist_page_by(c, id, PopularSource::Global)
 }
 
-/// [`artist_page`] with Popular ranked by `source`.
+/// [`artist_page`] with Popular ranked by `source`. A `credit:` id gives a
+/// credited artist's page (see [`credited_page`]).
 pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppResult<ArtistPage> {
+    if let Some(key) = popular::credit_key(id) {
+        return credited_page(c, id, key, source);
+    }
     let artist = c
         .query_row(&format!("SELECT {ARTIST_COLS} FROM artists ar WHERE ar.id = ?1"), [id], row_artist)
         .optional()?
         .ok_or_else(|| AppError::NotFound(format!("artist {id}")))?;
-    let popular = popular_tracks(c, id, &artist.title, source)?;
+    let mut st = c.prepare_cached(&format!("SELECT {TRACK_COLS} FROM tracks t WHERE t.artist_id = ?1 ORDER BY t.pk"))?;
+    let own = st.query_map([id], row_track)?.collect::<Result<Vec<_>, _>>()?;
+    let credited = popular::credited_tracks(c, &artist.title, Some(id))?;
+    let appears_on = appears_on(c, &credited)?;
+    let global = global_for(c, id, source)?;
+    let popular = popular::rank(own.into_iter().chain(credited).collect(), global.as_ref(), POPULAR_N);
     let all = {
         let mut st = c.prepare_cached(&format!(
             "SELECT {ALBUM_COLS} FROM albums al WHERE al.artist_id = ?1
@@ -390,7 +402,58 @@ pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppRes
         c.query_row("SELECT summary, similar FROM artists WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
     let about = about.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let similar = similar_artists(c, id, &similar_names)?;
-    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar })
+    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar, appears_on })
+}
+
+/// The global top songs when Popular ranks by them.
+fn global_for(c: &Connection, id: &str, source: PopularSource) -> AppResult<Option<popular::GlobalTop>> {
+    match source {
+        PopularSource::Global => popular::global_top(c, id),
+        PopularSource::MyPlays => Ok(None),
+    }
+}
+
+/// Distinct albums of `tracks`, newest first: an artist's "Appears on".
+fn appears_on(c: &Connection, tracks: &[Track]) -> AppResult<Vec<Album>> {
+    let mut seen = HashSet::new();
+    let ids: Vec<String> = tracks.iter().filter(|t| seen.insert(t.album_id.clone())).map(|t| t.album_id.clone()).collect();
+    let mut albums = albums_by_ids(c, &ids)?;
+    albums.sort_by(|a, b| b.year.cmp(&a.year).then(b.added_at.cmp(&a.added_at)));
+    Ok(albums)
+}
+
+/// A page for a name that tracks credit but that has no library artist
+/// (a featured guest). Built from the tracks that credit the name: Popular,
+/// "Appears on" and the plays line. NotFound when nothing credits it.
+pub fn credited_page(c: &Connection, id: &str, key: &str, source: PopularSource) -> AppResult<ArtistPage> {
+    let tracks = popular::credited_tracks(c, key, None)?;
+    if tracks.is_empty() {
+        return Err(AppError::NotFound(format!("artist {id}")));
+    }
+    let title = popular::credited_display_name(c, key)?.unwrap_or_else(|| key.to_string());
+    let plays: u64 = tracks.iter().map(|t| t.view_count as u64).sum();
+    let appears_on = appears_on(c, &tracks)?;
+    let global = global_for(c, id, source)?;
+    let popular = popular::rank(tracks, global.as_ref(), POPULAR_N);
+    let artist = Artist {
+        id: id.to_string(),
+        sort_title: title.clone(),
+        title,
+        thumb: None,
+        art: None,
+        view_count: plays.min(u32::MAX as u64) as u32,
+        summary: None,
+    };
+    Ok(ArtistPage { artist, popular, sections: Vec::new(), plays, about: None, similar: Vec::new(), appears_on })
+}
+
+/// The tracks a credited artist's play context adds after its Popular list.
+/// Empty for library artists.
+pub fn credited_context_tracks(c: &Connection, id: &str) -> AppResult<Vec<Track>> {
+    match popular::credit_key(id) {
+        Some(key) => popular::credited_tracks(c, key, None),
+        None => Ok(Vec::new()),
+    }
 }
 
 /// Most similar artists shown on an artist page.
@@ -414,79 +477,6 @@ fn similar_artists(c: &Connection, id: &str, names_json: &str) -> AppResult<Vec<
             && !out.iter().any(|o| o.id == a.id)
         {
             out.push(a);
-        }
-    }
-    Ok(out)
-}
-
-/// Two copies of one song: same title (any case) and length within this.
-const SAME_SONG_MS: u64 = 2_000;
-
-/// An artist's popular songs: their own tracks plus tracks that credit them
-/// in the track artist line. Songs with a global listener count come first,
-/// most listened first; the rest follow by your own plays, then most recent
-/// play. Repeat copies of a song (same title, about the same length) show
-/// once, keeping the better ranked one. With [`PopularSource::MyPlays`] the
-/// global counts are ignored: your plays, then most recent play.
-fn popular_tracks(c: &Connection, id: &str, title: &str, source: PopularSource) -> AppResult<Vec<Track>> {
-    let mut st = c.prepare_cached(&format!("SELECT {TRACK_COLS} FROM tracks t WHERE t.artist_id = ?1 ORDER BY t.pk"))?;
-    let mut cands = st.query_map([id], row_track)?.collect::<Result<Vec<_>, _>>()?;
-
-    // Other artists' tracks whose artist line mentions the name (the search
-    // index finds them without a table scan), kept only when the line credits
-    // the artist as a whole name.
-    if title.chars().any(char::is_alphanumeric) {
-        let phrase = format!("track_artist : \"{}\"", title.replace('"', "\"\""));
-        let mut st = c.prepare_cached(&format!(
-            "SELECT {TRACK_COLS} FROM tracks_fts JOIN tracks t ON t.pk = tracks_fts.rowid
-             WHERE tracks_fts MATCH ?1 AND t.artist_id <> ?2 ORDER BY t.pk"
-        ))?;
-        let mentioned = st.query_map(params![phrase, id], row_track)?.collect::<Result<Vec<_>, _>>()?;
-        let mut names_in = c.prepare_cached("SELECT title FROM artists WHERE instr(lower(?1), lower(title)) > 0")?;
-        let me = title.to_lowercase();
-        for t in mentioned {
-            let line = t.track_artist.as_deref().unwrap_or_default();
-            let known: Vec<String> = names_in
-                .query_map([line], |r| r.get::<_, String>(0))?
-                .map(|n| n.map(|n| n.to_lowercase()))
-                .collect::<Result<_, _>>()?;
-            let credited = credits::split_credits(line, |k| k == me || known.iter().any(|n| n == k))
-                .iter()
-                .any(|n| n.to_lowercase() == me);
-            if credited {
-                cands.push(t);
-            }
-        }
-    }
-
-    // Stable sort keeps library order for full ties.
-    let global = source == PopularSource::Global;
-    cands.sort_by(|a, b| {
-        let by_count = if global {
-            b.rating_count
-                .is_some()
-                .cmp(&a.rating_count.is_some())
-                .then(b.rating_count.cmp(&a.rating_count))
-        } else {
-            std::cmp::Ordering::Equal
-        };
-        by_count
-            .then(b.view_count.cmp(&a.view_count))
-            .then(b.last_viewed_at.cmp(&a.last_viewed_at))
-    });
-
-    let mut out: Vec<Track> = Vec::with_capacity(POPULAR_N);
-    for t in cands {
-        let dupe = out.iter().any(|o| {
-            o.id == t.id
-                || (o.title.to_lowercase() == t.title.to_lowercase()
-                    && o.duration_ms.abs_diff(t.duration_ms) <= SAME_SONG_MS)
-        });
-        if !dupe {
-            out.push(t);
-            if out.len() == POPULAR_N {
-                break;
-            }
         }
     }
     Ok(out)

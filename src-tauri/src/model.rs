@@ -88,8 +88,8 @@ pub struct Track {
     pub user_rating: Option<f32>,
     pub view_count: u32,
     pub last_viewed_at: Option<i64>,
-    /// Global listener count Plex attaches to a track (Plex ratingCount).
-    /// Missing on unreleased and rare songs. Ranks an artist's popular songs.
+    /// Plex ratingCount. Only on tracks Plex matched to MusicBrainz and not
+    /// on one scale, so it only breaks ties in Popular (db::popular).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rating_count: Option<u32>,
     /// When the user last rated the track, unix seconds (Plex lastRatedAt).

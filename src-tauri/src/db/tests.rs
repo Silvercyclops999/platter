@@ -8,6 +8,7 @@ use parking_lot::Mutex;
 
 use super::fake::{self, FakeLibrary, FakeSource};
 use super::listens::{self, ContextKind, NewReport, PlayStart, ReportKind};
+use super::popular;
 use super::queries::{self, now_s};
 use super::search::{self, recent_add, recent_clear, recent_list, recent_remove};
 use super::source::{HistoryEntry, ItemKind, LibrarySource, SimilarArtist};
@@ -606,8 +607,23 @@ fn ids(v: &[(String, Option<u32>)]) -> Vec<&str> {
     v.iter().map(|(id, _)| id.as_str()).collect()
 }
 
+/// Store a global top list for a page id, as artist info would.
+fn put_global(db: &DbHandle, id: &str, songs: &[(&str, u64)]) {
+    let top = popular::GlobalTop::from_pairs("listenbrainz", songs.iter().map(|(t, n)| (t.to_string(), *n)));
+    let id = id.to_owned();
+    db.write(move |c| {
+        crate::artistinfo::cache::put(c, &id, popular::GLOBAL_ROW, Some(&top), now_s(), 3600)?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn page_ids(db: &DbHandle, id: &str, source: PopularSource) -> Vec<String> {
+    db.read(|c| queries::artist_page_by(c, id, source)).unwrap().popular.into_iter().map(|p| p.id).collect()
+}
+
 #[tokio::test]
-async fn popular_ranks_by_listener_count_then_own_plays() {
+async fn popular_without_a_global_list_ranks_by_plays_not_rating_counts() {
     let own: Vec<Pop> = vec![
         ("t1", "Low Count", Some(1_000), 50, Some(10), None, 200),
         ("t2", "Big Hit", Some(900_000), 0, None, None, 210),
@@ -617,31 +633,28 @@ async fn popular_ranks_by_listener_count_then_own_plays() {
         ("t6", "Never Played", None, 0, None, None, 250),
     ];
     let got = popular_of(popular_library(&own, &[]), "a1").await;
-    assert_eq!(ids(&got), ["t2", "t4", "t1", "t5", "t3", "t6"]);
-    assert_eq!(got[0].1, Some(900_000), "the count reaches the page");
+    // Rating counts only break the tie between unplayed songs.
+    assert_eq!(ids(&got), ["t1", "t5", "t3", "t4", "t2", "t6"]);
 }
 
 #[tokio::test]
-async fn popular_by_my_plays_ignores_global_counts() {
+async fn popular_follows_the_global_list_over_rating_counts() {
+    // One album has huge rating counts; the global list ranks the other one.
     let own: Vec<Pop> = vec![
-        ("t1", "Low Count", Some(1_000), 50, Some(10), None, 200),
-        ("t2", "Big Hit", Some(900_000), 0, None, None, 210),
-        ("t3", "Played A Lot", None, 40, Some(5), None, 220),
-        ("t4", "Mid", Some(50_000), 3, None, None, 230),
-        ("t5", "Played Lately", None, 40, Some(99), None, 240),
+        ("n1", "Deep Cut", Some(318_000), 0, None, None, 200),
+        ("n2", "Filler", Some(133_000), 0, None, None, 210),
+        ("o1", "Famous Single", Some(618), 1, None, None, 220),
+        ("o2", "Fan Favourite (Remastered)", None, 0, None, None, 230),
+        ("o3", "Mine", None, 30, Some(5), None, 240),
     ];
     let t = open();
     sync(&t.db, &Arc::new(FakeSource::new(popular_library(&own, &[]))), false).await;
-    let order = |source| {
-        t.db.read(|c| queries::artist_page_by(c, "a1", source))
-            .unwrap()
-            .popular
-            .into_iter()
-            .map(|p| p.id)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(order(PopularSource::Global), ["t2", "t4", "t1", "t5", "t3"]);
-    assert_eq!(order(PopularSource::MyPlays), ["t1", "t5", "t3", "t4", "t2"]);
+    // No list yet: plays order.
+    assert_eq!(page_ids(&t.db, "a1", PopularSource::Global), ["o3", "o1", "n1", "n2", "o2"]);
+    put_global(&t.db, "a1", &[("Famous Single", 9_000), ("Fan Favourite", 4_000), ("Fan Favourite - 2011 Remaster", 900), ("Deep Cut", 10)]);
+    assert_eq!(page_ids(&t.db, "a1", PopularSource::Global), ["o1", "o2", "n1", "o3", "n2"]);
+    // My plays ignores the list.
+    assert_eq!(page_ids(&t.db, "a1", PopularSource::MyPlays), ["o3", "o1", "n1", "n2", "o2"]);
 
     // The handle carries the choice for the commands and play contexts.
     assert_eq!(t.db.popular_source(), PopularSource::Global);
@@ -661,7 +674,7 @@ async fn popular_includes_whole_name_credits_on_other_artists_tracks() {
     let salt: Vec<Pop> = vec![("s1", "Duet", Some(20), 0, None, Some("Saltglass & Odessa Wren"), 200)];
     let lib = popular_library(&own, &[("Moth & Meridian", &moth), ("Saltglass", &salt)]);
     let got = popular_of(lib.clone(), "a1").await;
-    assert_eq!(ids(&got), ["m1", "s1", "t1", "m3"]);
+    assert_eq!(ids(&got), ["m3", "m1", "s1", "t1"]);
 
     // A name inside a longer known name is not a credit: "Wren" is its own
     // artist, but "Odessa Wren" lines don't credit it.
@@ -674,7 +687,7 @@ async fn popular_includes_whole_name_credits_on_other_artists_tracks() {
     let salt2: Vec<Pop> = vec![("s2", "Trio", Some(5), 0, None, Some("Saltglass, Moth & Meridian"), 200)];
     let lib = popular_library(&[], &[("Moth & Meridian", &moth), ("Saltglass", &salt2)]);
     let got = popular_of(lib, "a2").await;
-    assert_eq!(ids(&got), ["m4", "m2", "m1", "s2", "m3"]);
+    assert_eq!(ids(&got), ["m3", "m4", "m2", "m1", "s2"]);
 }
 
 #[tokio::test]
@@ -688,8 +701,8 @@ async fn popular_collapses_copies_of_the_same_song() {
     ];
     let comp: Vec<Pop> = vec![("c1", "anthem", Some(9_000), 0, None, Some("Various, Odessa Wren"), 202)];
     let got = popular_of(popular_library(&own, &[("Various", &comp)]), "a1").await;
-    // c1 beats t2 (higher count, within 2 s); t4 is a different length.
-    assert_eq!(ids(&got), ["c1", "t4", "t5"]);
+    // t3 (most played) stands for the copies within 2 s; t4 is a different length.
+    assert_eq!(ids(&got), ["t3", "t5", "t4"]);
 }
 
 #[tokio::test]
@@ -705,6 +718,106 @@ async fn popular_fills_to_ten_and_handles_small_catalogs() {
 
     let got = popular_of(popular_library(&own[..3], &[]), "a1").await;
     assert_eq!(ids(&got), ["t0", "t1", "t2"]);
+}
+
+/// Odessa Wren (a1) plus two artists whose tracks credit a guest with no
+/// library entry, "Rue Ellis".
+fn credited_library() -> FakeLibrary {
+    let own: Vec<Pop> = vec![("t1", "Own Song", None, 2, None, None, 200)];
+    let moth: Vec<Pop> = vec![
+        ("m1", "Night Drive", None, 4, None, Some("Moth & Meridian feat. Rue Ellis"), 200),
+        ("m2", "Close Call", None, 0, None, Some("Moth & Meridian, Rue Ellison"), 200),
+        ("m3", "With Wren", None, 1, None, Some("Moth & Meridian, Odessa Wren"), 200),
+    ];
+    let salt: Vec<Pop> = vec![
+        ("s1", "Duet", None, 10, None, Some("Saltglass & rue ellis"), 200),
+        ("s2", "Money", None, 0, None, Some("Saltglass feat. $"), 200),
+        ("s3", "Tyler Song", None, 0, None, Some("Tyler, The Maker feat. Rue Ellis"), 200),
+    ];
+    popular_library(&own, &[("Moth & Meridian", &moth), ("Saltglass", &salt)])
+}
+
+#[tokio::test]
+async fn credited_artist_page_is_built_from_the_tracks_that_credit_them() {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(credited_library())), false).await;
+    let page = t.db.read(|c| queries::artist_page(c, "credit:rue ellis")).unwrap();
+    assert_eq!(page.artist.title, "Rue Ellis", "as written on the first credit");
+    assert_eq!(page.artist.id, "credit:rue ellis");
+    let got: Vec<_> = page.popular.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(got, ["s1", "m1", "s3"], "plays order, Rue Ellison is someone else");
+    assert_eq!(page.plays, 14);
+    let albums: Vec<_> = page.appears_on.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(albums.len(), 2);
+    assert!(albums.contains(&"al2") && albums.contains(&"al3"));
+    assert!(page.sections.is_empty() && page.similar.is_empty() && page.about.is_none());
+
+    // The global list ranks a credited page too, under its own id.
+    put_global(&t.db, "credit:rue ellis", &[("Tyler Song", 50), ("Night Drive", 10)]);
+    assert_eq!(page_ids(&t.db, "credit:rue ellis", PopularSource::Global), ["s3", "m1", "s1"]);
+
+    // Partial names and names nobody credits: not found.
+    for id in ["credit:rue", "credit:nobody", "credit:"] {
+        let err = t.db.read(|c| queries::artist_page(c, id)).unwrap_err();
+        assert!(matches!(err, crate::error::AppError::NotFound(_)), "{id}: {err:?}");
+    }
+
+    // A name with no letters or digits.
+    let page = t.db.read(|c| queries::artist_page(c, "credit:$")).unwrap();
+    assert_eq!(page.popular.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["s2"]);
+
+    // The play context covers every credited track.
+    let all = t.db.read(|c| queries::credited_context_tracks(c, "credit:rue ellis")).unwrap();
+    assert_eq!(all.len(), 3);
+    assert!(t.db.read(|c| queries::credited_context_tracks(c, "a1")).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn library_artist_pages_list_albums_they_appear_on() {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(credited_library())), false).await;
+    let page = t.db.read(|c| queries::artist_page(c, "a1")).unwrap();
+    assert_eq!(page.appears_on.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["al2"]);
+    assert_eq!(page.popular.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["t1", "m3"]);
+}
+
+#[tokio::test]
+async fn learned_names_with_separators_stay_whole() {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(credited_library())), false).await;
+    // Before: "Tyler, The Maker" splits into two names.
+    assert!(t.db.read(|c| queries::artist_page(c, "credit:tyler")).is_ok());
+    t.db.write(|c| {
+        assert_eq!(popular::learn_names(c, ["Tyler, The Maker", "Plain Name", "Odessa Wren"])?, 1, "only names with separators");
+        Ok(())
+    })
+    .unwrap();
+    let page = t.db.read(|c| queries::artist_page(c, "credit:tyler, the maker")).unwrap();
+    assert_eq!(page.artist.title, "Tyler, The Maker");
+    assert!(t.db.read(|c| queries::artist_page(c, "credit:tyler")).is_err());
+    // Rue Ellis on that track is still credited.
+    assert_eq!(page_ids(&t.db, "credit:rue ellis", PopularSource::MyPlays).len(), 3);
+    let names = t.db.read(queries::artist_names).unwrap();
+    assert!(names.contains(&ArtistName { id: "credit:tyler, the maker".into(), title: "Tyler, The Maker".into() }));
+}
+
+#[tokio::test]
+async fn search_lists_credited_artists() {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(credited_library())), false).await;
+    let r = search::search(&t.db, "rue ellis", SearchFilter::All, None).unwrap();
+    let ids: Vec<_> = r.artists.iter().map(|a| a.id.as_str()).collect();
+    assert!(ids.contains(&"credit:rue ellis"), "{ids:?}");
+    assert!(!ids.contains(&"credit:moth & meridian"), "library artists keep their own entry");
+    let hit = r.artists.iter().find(|a| a.id == "credit:rue ellis").unwrap();
+    assert_eq!(hit.title, "Rue Ellis");
+    // Library names still come up as library artists.
+    let r = search::search(&t.db, "saltglass", SearchFilter::All, None).unwrap();
+    assert_eq!(r.artists.first().map(|a| a.id.as_str()), Some("a3"));
+    // Off in Settings: no credited artists.
+    t.db.set_link_featured(false);
+    let r = search::search(&t.db, "rue ellis", SearchFilter::All, None).unwrap();
+    assert!(r.artists.iter().all(|a| !a.id.starts_with("credit:")));
 }
 
 #[tokio::test]

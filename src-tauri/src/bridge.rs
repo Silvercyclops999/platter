@@ -465,6 +465,13 @@ impl TrackLookup for CacheLookup {
                                 }
                             }
                         }
+                        // A credited artist has no albums: the rest of the
+                        // songs that credit them follow Popular.
+                        for t in queries::credited_context_tracks(c, &id)? {
+                            if seen.insert(t.id.clone()) {
+                                tracks.push(t);
+                            }
+                        }
                         ResolvedContext { tracks, title: Some(page.artist.title) }
                     }
                     ContextKind::Liked => ResolvedContext {

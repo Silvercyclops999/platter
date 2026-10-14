@@ -53,6 +53,11 @@ fn separator_spans(line: &str) -> Vec<(usize, usize)> {
     spans
 }
 
+/// Whether a name contains something a split would cut at.
+pub fn has_separator(name: &str) -> bool {
+    !separator_spans(name).is_empty()
+}
+
 /// Non-empty name pieces between separators, as trimmed byte ranges.
 fn parts(line: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();

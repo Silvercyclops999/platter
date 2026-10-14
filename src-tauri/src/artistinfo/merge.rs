@@ -194,6 +194,7 @@ mod tests {
             playcount: Some(90_000),
             tags: vec!["rock".into()],
             bio: Some(bio.into()),
+            mbid: None,
         }
     }
 

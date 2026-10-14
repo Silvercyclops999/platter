@@ -6,6 +6,7 @@
 //!   implements with the Plex client (this module never depends on `plex/`)
 //! - [`store`]    row mapping and upserts
 //! - [`queries`]  every Library read in docs/IPC.md
+//! - [`popular`]  Popular ranking and credited-artist tracks
 //! - [`sync`]     first / incremental / weekly full sync, deletions, library
 //!   replaced detection
 //! - [`search`]   local search
@@ -25,6 +26,7 @@ pub mod credits;
 pub mod likes;
 pub mod listens;
 pub mod playlists;
+pub mod popular;
 pub mod queries;
 pub mod release;
 pub mod schema;
@@ -83,6 +85,8 @@ struct Inner {
     pub(crate) vocab: search::VocabCache,
     /// Popular ranks by your own plays only (Settings).
     popular_by_plays: AtomicBool,
+    /// Names in track lines without a library artist get pages (Settings).
+    link_featured: AtomicBool,
     /// Artist ids with a similar-artists fetch in flight (db::similar).
     similar_in_flight: Mutex<HashSet<String>>,
 }
@@ -108,6 +112,7 @@ impl DbHandle {
                 remote: Mutex::new(None),
                 vocab: search::VocabCache::default(),
                 popular_by_plays: AtomicBool::new(false),
+                link_featured: AtomicBool::new(true),
                 similar_in_flight: Mutex::new(HashSet::new()),
             }),
         })
@@ -157,6 +162,16 @@ impl DbHandle {
         } else {
             PopularSource::Global
         }
+    }
+
+    /// Whether search lists credited artists (the "Link featured artists"
+    /// setting).
+    pub fn set_link_featured(&self, on: bool) {
+        self.inner.link_featured.store(on, Ordering::Release);
+    }
+
+    pub fn link_featured(&self) -> bool {
+        self.inner.link_featured.load(Ordering::Acquire)
     }
 
     /// Mark a similar-artists fetch for `id` as running. False when one

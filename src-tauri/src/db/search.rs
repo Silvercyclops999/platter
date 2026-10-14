@@ -26,6 +26,7 @@ use crate::error::AppResult;
 use crate::model::{Album, Artist, Playlist, Track};
 
 use super::DbHandle;
+use super::popular;
 use super::queries::now_s;
 use super::store::{ALBUM_COLS, ARTIST_COLS, PLAYLIST_COLS, TRACK_COLS, row_album, row_artist, row_playlist, row_track};
 use super::source::RemoteHits;
@@ -305,6 +306,55 @@ fn search_artists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize
     Ok(rank(v, n))
 }
 
+/// Credited artists (names in track artist lines with no library artist)
+/// whose name matches the query, with the plays of the tracks crediting them.
+fn search_credited(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize) -> AppResult<Vec<Scored<Artist>>> {
+    if q.short || n == 0 {
+        return Ok(Vec::new());
+    }
+    let mut st = c.prepare_cached(
+        "SELECT t.track_artist, t.view_count FROM tracks_fts JOIN tracks t ON t.pk = tracks_fts.rowid
+         WHERE tracks_fts MATCH ?1 LIMIT ?2",
+    )?;
+    let rows: Vec<(Option<String>, u32)> = st
+        .query_map(params![format!("track_artist : ({fts})"), TRACK_CANDIDATES], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut in_library = c.prepare_cached("SELECT 1 FROM artists WHERE title = ?1 COLLATE NOCASE LIMIT 1")?;
+    let mut found: Vec<(String, String, u32, Tier)> = Vec::new();
+    for (line, plays) in rows {
+        let Some(line) = line else { continue };
+        for name in popular::line_credits(c, &line)? {
+            let key = name.to_lowercase();
+            if let Some(f) = found.iter_mut().find(|f| f.0 == key) {
+                f.2 = f.2.saturating_add(plays);
+                continue;
+            }
+            let (t, in_title) = tier(q, &name, &[]);
+            if !in_title || in_library.exists([&name])? {
+                continue;
+            }
+            found.push((key, name, plays, t));
+        }
+    }
+    let v = found
+        .into_iter()
+        .map(|(_, name, plays, t)| {
+            let s = score(t, true, plays, None, name.len(), now) + 3.0;
+            let artist = Artist {
+                id: popular::credit_id(&name),
+                sort_title: name.clone(),
+                title: name,
+                thumb: None,
+                art: None,
+                view_count: plays,
+                summary: None,
+            };
+            Scored { item: artist, score: s }
+        })
+        .collect();
+    Ok(rank(v, n))
+}
+
 fn search_albums(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize) -> AppResult<Vec<Scored<Album>>> {
     let sql = candidates_sql(
         ALBUM_COLS,
@@ -378,6 +428,8 @@ fn kind_limit(filter: SearchFilter, limit: Option<u32>, kind: SearchFilter, all_
 }
 
 /// Run a search on a read connection. `generation` keys the vocab cache.
+// The read connection, its cache keys and the request: one call site.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn search_conn(
     c: &Connection,
     vocab: &VocabCache,
@@ -386,6 +438,7 @@ pub(crate) fn search_conn(
     filter: SearchFilter,
     limit: Option<u32>,
     now: i64,
+    credited: bool,
 ) -> AppResult<SearchResults> {
     let start = Instant::now();
     let mut out = SearchResults::default();
@@ -428,7 +481,11 @@ pub(crate) fn search_conn(
 
     let n = n_for(SearchFilter::Artists, ALL_SHELF);
     if n > 0 {
-        let v = search_artists(c, &q, fts, now, n)?;
+        let mut v = search_artists(c, &q, fts, now, n)?;
+        if credited {
+            v.extend(search_credited(c, &q, fts, now, n)?);
+            v = rank(v, n);
+        }
         if let Some(f) = v.first() {
             consider(f.score, SearchHit { kind: SearchKind::Artist, artist: Some(f.item.clone()), album: None, track: None, playlist: None });
         }
@@ -473,7 +530,8 @@ pub(crate) fn warm(db: &DbHandle, c: &Connection) -> AppResult<()> {
 /// Search the local index.
 pub fn search(db: &DbHandle, query: &str, filter: SearchFilter, limit: Option<u32>) -> AppResult<SearchResults> {
     let generation = db.generation();
-    db.read(|c| search_conn(c, &db.inner.vocab, generation, query, filter, limit, now_s()))
+    let credited = db.link_featured();
+    db.read(|c| search_conn(c, &db.inner.vocab, generation, query, filter, limit, now_s(), credited))
 }
 
 // ---------------------------------------------------------------- server fallback

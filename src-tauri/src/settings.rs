@@ -178,6 +178,12 @@ pub struct Settings {
     pub info_fanart: bool,
     /// Artist photo and bio from TheAudioDB (needs the user's key).
     pub info_audiodb: bool,
+    /// Popular songs from ListenBrainz (Last.fm top tracks when it has none
+    /// and Last.fm is on).
+    pub info_listenbrainz: bool,
+    /// Every name in a track's artist line links to a page, featured
+    /// artists without a library entry included.
+    pub link_featured: bool,
     /// Which star ratings count as liked.
     pub liked_means: LikedMeans,
     /// When track rows show the like control.
@@ -274,6 +280,8 @@ impl Default for Settings {
             info_lastfm: false,
             info_fanart: false,
             info_audiodb: false,
+            info_listenbrainz: true,
+            link_featured: true,
             liked_means: LikedMeans::Five,
             like_control_rows: LikeControlRows::Hover,
             show_plex_players: true,
@@ -341,6 +349,8 @@ pub struct SettingsPatch {
     pub info_lastfm: Option<bool>,
     pub info_fanart: Option<bool>,
     pub info_audiodb: Option<bool>,
+    pub info_listenbrainz: Option<bool>,
+    pub link_featured: Option<bool>,
     pub liked_means: Option<LikedMeans>,
     pub like_control_rows: Option<LikeControlRows>,
     pub show_plex_players: Option<bool>,
@@ -427,6 +437,8 @@ impl Settings {
         set(&mut self.info_lastfm, p.info_lastfm);
         set(&mut self.info_fanart, p.info_fanart);
         set(&mut self.info_audiodb, p.info_audiodb);
+        set(&mut self.info_listenbrainz, p.info_listenbrainz);
+        set(&mut self.link_featured, p.link_featured);
         set(&mut self.liked_means, p.liked_means);
         set(&mut self.like_control_rows, p.like_control_rows);
         set(&mut self.show_plex_players, p.show_plex_players);
@@ -544,7 +556,9 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links, Ordering::Relaxed);
-    db.set_popular_source(s.popular_source);
+    // Global with no source for it on quietly ranks by plays.
+    db.set_popular_source(if s.info_listenbrainz || s.info_lastfm { s.popular_source } else { PopularSource::MyPlays });
+    db.set_link_featured(s.link_featured);
     {
         use crate::artistinfo::InfoSource as Src;
         let ai = &live.artist_info;
@@ -552,6 +566,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         ai.set(Src::Lastfm, s.info_lastfm);
         ai.set(Src::Fanart, s.info_fanart);
         ai.set(Src::Audiodb, s.info_audiodb);
+        ai.set(Src::Listenbrainz, s.info_listenbrainz);
     }
     live.platform.set(s.platform());
     live.discord.set(s.discord());
@@ -785,6 +800,7 @@ mod tests {
         assert!(s.ab_loop_handles && s.up_next_line && s.volume_percent);
         assert!(!s.notify_track_change);
         assert!(s.info_wikipedia && !s.info_lastfm && !s.info_fanart && !s.info_audiodb);
+        assert!(s.info_listenbrainz && s.link_featured);
         assert!(s.playlist_ask_duplicates);
         assert_eq!(s.playlist_new_name, "My playlist #N");
         assert_eq!((s.liked_means, s.like_control_rows), (LikedMeans::Five, LikeControlRows::Hover));
@@ -871,6 +887,8 @@ mod tests {
             info_lastfm: Some(true),
             info_fanart: Some(true),
             info_audiodb: Some(true),
+            info_listenbrainz: Some(false),
+            link_featured: Some(false),
             liked_means: Some(LikedMeans::FourUp),
             like_control_rows: Some(LikeControlRows::Always),
             show_plex_players: Some(false),
@@ -906,11 +924,13 @@ mod tests {
             // The artist info service sees the switches at once.
             assert!(!live.artist_info.get(Src::Wikipedia));
             assert!(live.artist_info.get(Src::Lastfm) && live.artist_info.get(Src::Fanart) && live.artist_info.get(Src::Audiodb));
+            assert!(!live.artist_info.get(Src::Listenbrainz));
         }
         assert!(live.tracking.private_session.load(Ordering::Relaxed));
         assert!(!live.tracking.report_to_plex.load(Ordering::Relaxed));
         assert_eq!((live.streams.home(), live.streams.away()), (Some(256), None));
         assert_eq!(db.popular_source(), PopularSource::MyPlays);
+        assert!(!db.link_featured());
         assert_eq!(live.art_cap.load(Ordering::Relaxed), 512 * MB);
         // Media controls, tray and launch at login get the change at once.
         assert_eq!(live.platform.get(), PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true });
@@ -927,6 +947,7 @@ mod tests {
         assert!(s.private_session);
         assert!(s.report_to_plex);
         assert!(!s.info_wikipedia && s.info_lastfm && s.info_fanart && s.info_audiodb);
+        assert!(!s.info_listenbrainz && !s.link_featured);
         assert!(fresh.artist_info.get(crate::artistinfo::InfoSource::Lastfm));
         assert!(!s.show_plex_players && s.act_as_plex_player && !s.move_stops_old_device);
         assert!(!s.share_public_links && !fresh.share_public_links.load(Ordering::Relaxed));
@@ -1099,5 +1120,18 @@ mod tests {
         assert!(!live.remote.show_players() && !live.remote.stop_old());
         assert!(rx.has_changed().unwrap());
         assert!(*rx.borrow_and_update());
+    }
+
+    #[tokio::test]
+    async fn global_popular_with_no_source_on_ranks_by_plays() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DbHandle::open(dir.path().join("s.db")).unwrap();
+        let st = SettingsState::new(db.clone(), Live::default());
+        st.set(SettingsPatch { info_listenbrainz: Some(false), ..Default::default() }).await.unwrap();
+        assert_eq!(db.popular_source(), PopularSource::MyPlays);
+        st.set(SettingsPatch { info_lastfm: Some(true), ..Default::default() }).await.unwrap();
+        assert_eq!(db.popular_source(), PopularSource::Global);
+        st.set(SettingsPatch { link_featured: Some(false), ..Default::default() }).await.unwrap();
+        assert!(!db.link_featured());
     }
 }

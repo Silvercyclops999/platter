@@ -5,6 +5,12 @@
 //! `artistinfo://changed` tells the page to ask again. A source that's offline
 //! or busy is skipped silently and tried on a later page open. A rejected key
 //! turns its source off until a new key is saved or the app restarts.
+//!
+//! The same refresh fetches the global Popular list (ListenBrainz, else
+//! Last.fm top tracks) when Popular ranks by it. Credited artists
+//! (`credit:` ids) have no Plex entry: their name comes from the tracks that
+//! credit them and their MusicBrainz id from a MusicBrainz search; Plex is
+//! never asked about them.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -21,26 +27,38 @@ use super::fanart::Fanart;
 use super::http::InfoHttp;
 use super::lastfm::Lastfm;
 use super::limit::Limiter;
+use super::listenbrainz::ListenBrainz;
 use super::merge::{self, PlexArtist, Sources};
+use super::musicbrainz::MusicBrainz;
 use super::wiki::Wiki;
 use super::{ArtistInfo, AudioDbData, FanartData, Fetch, FetchError, InfoSource, LastfmData, WikiData, fold_name, is_mbid};
-use crate::db::DbHandle;
+use crate::db::popular::{self, GlobalTop};
 use crate::db::queries::now_s;
+use crate::db::{DbHandle, PopularSource};
 use crate::error::{AppError, AppResult};
 use crate::plex::Token;
 use crate::plex::keychain::TokenStore;
 
 /// A well-known artist used to check a newly entered key.
 const PROBE_MBID: &str = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
+/// How long a Popular list (or "none found") is reused.
+pub const POPULAR_TTL_S: i64 = 7 * 24 * 3600;
 
 /// On/off per source (from Settings). Cheap to clone.
 #[derive(Clone)]
-pub struct Switches(Arc<[AtomicBool; 4]>);
+pub struct Switches(Arc<[AtomicBool; 5]>);
 
 impl Default for Switches {
-    /// Wikipedia on, the keyed sources off (the Settings defaults).
+    /// Wikipedia and ListenBrainz on, the keyed sources off (the Settings
+    /// defaults).
     fn default() -> Self {
-        Self(Arc::new([AtomicBool::new(true), AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false)]))
+        Self(Arc::new([
+            AtomicBool::new(true),
+            AtomicBool::new(false),
+            AtomicBool::new(false),
+            AtomicBool::new(false),
+            AtomicBool::new(true),
+        ]))
     }
 }
 
@@ -50,6 +68,7 @@ fn slot(s: InfoSource) -> usize {
         InfoSource::Lastfm => 1,
         InfoSource::Fanart => 2,
         InfoSource::Audiodb => 3,
+        InfoSource::Listenbrainz => 4,
     }
 }
 
@@ -97,6 +116,8 @@ pub struct KeysStatus {
     pub lastfm: KeyState,
     pub fanart: KeyState,
     pub audiodb: KeyState,
+    /// The optional ListenBrainz user token.
+    pub listenbrainz: KeyState,
 }
 
 struct Limiters {
@@ -104,6 +125,8 @@ struct Limiters {
     lastfm: Limiter,
     fanart: Limiter,
     audiodb: Limiter,
+    listenbrainz: Limiter,
+    musicbrainz: Limiter,
 }
 
 impl Default for Limiters {
@@ -114,6 +137,9 @@ impl Default for Limiters {
             fanart: Limiter::per_second(2.0),
             // Paid TheAudioDB keys allow 100 a minute; stay well under.
             audiodb: Limiter::per_second(1.0),
+            listenbrainz: Limiter::per_second(1.0),
+            // MusicBrainz allows one request a second.
+            musicbrainz: Limiter::per_second(1.0),
         }
     }
 }
@@ -144,6 +170,23 @@ struct Snapshot {
     sources: Sources,
     library: HashMap<String, String>,
     stale: Vec<InfoSource>,
+    /// The Popular list is wanted and missing or stale.
+    popular_stale: bool,
+}
+
+/// The artist a page id names: a Plex artist, or a credited artist built
+/// from the tracks that credit the name.
+fn subject(c: &Connection, id: &str) -> AppResult<Option<PlexArtist>> {
+    if let Some(key) = popular::credit_key(id) {
+        return Ok(popular::credited_display_name(c, key)?.map(|title| PlexArtist {
+            id: id.to_owned(),
+            title,
+            summary: None,
+            thumb: None,
+            art: None,
+        }));
+    }
+    plex_artist(c, id)
 }
 
 fn plex_artist(c: &Connection, id: &str) -> AppResult<Option<PlexArtist>> {
@@ -203,7 +246,7 @@ impl ArtistInfoService {
     // ------------------------------------------------------------ keys
 
     fn key(&self, s: InfoSource) -> Option<Token> {
-        if !s.needs_key() {
+        if !s.takes_key() {
             return None;
         }
         if let Some(k) = self.inner.key_cache.lock().get(&s) {
@@ -240,13 +283,14 @@ impl ArtistInfoService {
             lastfm: self.key_state(InfoSource::Lastfm),
             fanart: self.key_state(InfoSource::Fanart),
             audiodb: self.key_state(InfoSource::Audiodb),
+            listenbrainz: self.key_state(InfoSource::Listenbrainz),
         }
     }
 
     /// Save (or with None, remove) a source's key. A new key is checked with
     /// one lookup of a well-known artist; a refusal shows on the Settings row.
     pub async fn set_key(&self, s: InfoSource, key: Option<String>) -> AppResult<KeyState> {
-        if !s.needs_key() {
+        if !s.takes_key() {
             return Err(AppError::Invalid(format!("{} has no key", s.display())));
         }
         let keys = self.inner.keys.clone();
@@ -269,6 +313,18 @@ impl ArtistInfoService {
         };
         self.inner.key_cache.lock().insert(s, token.clone());
         self.inner.rejected.lock().remove(&s);
+        if s == InfoSource::Listenbrainz || s == InfoSource::Lastfm {
+            // Artists ListenBrainz wouldn't answer without a token (or that
+            // had no Last.fm fallback) are asked again.
+            let _ = self
+                .inner
+                .db
+                .write_async(|c| {
+                    c.execute("DELETE FROM artist_info WHERE source = ?1 AND data IS NULL", [popular::GLOBAL_ROW])?;
+                    Ok(())
+                })
+                .await;
+        }
         if let Some(t) = token
             && self.probe(s, t.expose()).await == Err(FetchError::KeyRejected)
         {
@@ -288,6 +344,7 @@ impl ArtistInfoService {
             }
             InfoSource::Fanart => Fanart { http, limiter: &l.fanart, key }.lookup(Some(PROBE_MBID)).await.map(|_| ()),
             InfoSource::Audiodb => AudioDb { http, limiter: &l.audiodb, key }.lookup(Some(PROBE_MBID), "").await.map(|_| ()),
+            InfoSource::Listenbrainz => ListenBrainz { http, limiter: &l.listenbrainz, token: Some(key) }.validate().await,
         }
     }
 
@@ -298,8 +355,10 @@ impl ArtistInfoService {
         self.inner.db.write_async(|c| cache::clear(c)).await
     }
 
-    fn snapshot(&self, c: &Connection, id: &str, now: i64, usable: &[InfoSource]) -> AppResult<Option<Snapshot>> {
-        let Some(plex) = plex_artist(c, id)? else { return Ok(None) };
+    fn snapshot(&self, c: &Connection, id: &str, now: i64, usable: &[InfoSource], popular_wanted: bool) -> AppResult<Option<Snapshot>> {
+        let Some(plex) = subject(c, id)? else { return Ok(None) };
+        let popular_stale =
+            popular_wanted && cache::get(c, id, popular::GLOBAL_ROW)?.as_ref().is_none_or(|r| r.stale(now));
         let mut sources = Sources::default();
         let mut stale = Vec::new();
         for &s in usable {
@@ -313,15 +372,22 @@ impl ArtistInfoService {
                 InfoSource::Lastfm => sources.lastfm = row.parse::<LastfmData>(),
                 InfoSource::Fanart => sources.fanart = row.parse::<FanartData>(),
                 InfoSource::Audiodb => sources.audiodb = row.parse::<AudioDbData>(),
+                InfoSource::Listenbrainz => {}
             }
         }
         let names = sources.wiki.as_ref().map(|w| w.members.clone()).unwrap_or_default();
         let library = library_ids(c, &names)?;
-        Ok(Some(Snapshot { plex, sources, library, stale }))
+        Ok(Some(Snapshot { plex, sources, library, stale, popular_stale }))
     }
 
     fn usable_sources(&self) -> Vec<InfoSource> {
         InfoSource::ALL.into_iter().filter(|s| self.usable(*s)).collect()
+    }
+
+    /// Popular ranks by global popularity and a source for it is usable.
+    fn popular_wanted(&self) -> bool {
+        self.inner.db.popular_source() == PopularSource::Global
+            && (self.usable(InfoSource::Listenbrainz) || self.usable(InfoSource::Lastfm))
     }
 
     /// What the page shows now; refreshes missing or stale sources in the
@@ -344,20 +410,22 @@ impl ArtistInfoService {
     /// missing or stale.
     pub async fn cached(&self, id: &str, now: i64) -> AppResult<(ArtistInfo, bool)> {
         let usable = self.usable_sources();
+        let wanted = self.popular_wanted();
         let me = self.clone();
         let key = id.to_owned();
         let snap = self
             .inner
             .db
-            .read_async(move |c| me.snapshot(c, &key, now, &usable))
+            .read_async(move |c| me.snapshot(c, &key, now, &usable, wanted))
             .await?
             .ok_or_else(|| AppError::NotFound(format!("artist {id}")))?;
         let info = merge::merge(&snap.plex, &snap.sources, &snap.library);
-        Ok((info, !snap.stale.is_empty()))
+        Ok((info, !snap.stale.is_empty() || snap.popular_stale))
     }
 
-    /// The artist's MusicBrainz id: Plex's (cached), else Wikidata's.
-    async fn mbid(&self, id: &str, now: i64) -> Option<String> {
+    /// The artist's MusicBrainz id: Plex's (cached), else Wikidata's. For a
+    /// credited artist, an exact MusicBrainz name match (cached).
+    async fn mbid(&self, id: &str, name: &str, now: i64) -> Option<String> {
         let key = id.to_owned();
         let row = self.inner.db.read_async(move |c| cache::get(c, &key, MBID_ROW)).await.ok().flatten();
         if let Some(r) = &row
@@ -365,10 +433,15 @@ impl ArtistInfoService {
         {
             return r.parse::<String>();
         }
-        let lookup = self.inner.mbid.lock().clone();
-        let fetched = match lookup {
-            Some(l) => l.artist_mbid(id).await,
-            None => Err(AppError::Invalid("no Plex lookup".into())),
+        let fetched = if popular::credit_key(id).is_some() {
+            let mb = MusicBrainz { http: self.inner.http.as_ref(), limiter: &self.inner.limits.musicbrainz };
+            mb.artist_id(name).await.map_err(|e| AppError::Network(format!("{e:?}")))
+        } else {
+            let lookup = self.inner.mbid.lock().clone();
+            match lookup {
+                Some(l) => l.artist_mbid(id).await,
+                None => Err(AppError::Invalid("no Plex lookup".into())),
+            }
         };
         match fetched {
             Ok(m) => {
@@ -381,7 +454,7 @@ impl ArtistInfoService {
                     .await;
                 m
             }
-            // Plex unreachable: use what was cached, stale or not.
+            // Plex or MusicBrainz unreachable: use what was cached, stale or not.
             Err(_) => row.and_then(|r| r.parse::<String>()),
         }
     }
@@ -429,16 +502,17 @@ impl ArtistInfoService {
 
     async fn refresh_inner(&self, id: &str, now: i64) -> AppResult<bool> {
         let usable = self.usable_sources();
+        let wanted = self.popular_wanted();
         let me = self.clone();
         let key = id.to_owned();
-        let Some(snap) = self.inner.db.read_async(move |c| me.snapshot(c, &key, now, &usable)).await? else {
+        let Some(snap) = self.inner.db.read_async(move |c| me.snapshot(c, &key, now, &usable, wanted)).await? else {
             return Ok(false);
         };
-        if snap.stale.is_empty() {
+        if snap.stale.is_empty() && !snap.popular_stale {
             return Ok(false);
         }
         let name = snap.plex.title.clone();
-        let mut mbid = self.mbid(id, now).await;
+        let mut mbid = self.mbid(id, &name, now).await;
         let http = self.inner.http.as_ref();
         let l = &self.inner.limits;
         let lang = self.inner.lang.as_str();
@@ -456,7 +530,6 @@ impl ArtistInfoService {
             mbid = snap.sources.wiki.as_ref().and_then(|w| w.mbid.clone());
         }
 
-        let mbid = mbid.as_deref();
         let want = |s: InfoSource| snap.stale.contains(&s);
         let lastfm_key = self.key(InfoSource::Lastfm);
         let fanart_key = self.key(InfoSource::Fanart);
@@ -471,26 +544,33 @@ impl ArtistInfoService {
         let (lastfm, fanart, audiodb) = futures::join!(
             async {
                 match (&lf, want(InfoSource::Lastfm)) {
-                    (Some(lf), true) => Some(lf.lookup(mbid, &name).await),
+                    (Some(lf), true) => Some(lf.lookup(mbid.as_deref(), &name).await),
                     _ => None,
                 }
             },
             async {
                 match (&fanart_key, want(InfoSource::Fanart)) {
-                    (Some(k), true) => Some(Fanart { http, limiter: &l.fanart, key: k.expose() }.lookup(mbid).await),
+                    (Some(k), true) => Some(Fanart { http, limiter: &l.fanart, key: k.expose() }.lookup(mbid.as_deref()).await),
                     _ => None,
                 }
             },
             async {
                 match (&audiodb_key, want(InfoSource::Audiodb)) {
-                    (Some(k), true) => Some(AudioDb { http, limiter: &l.audiodb, key: k.expose() }.lookup(mbid, &name).await),
+                    (Some(k), true) => Some(AudioDb { http, limiter: &l.audiodb, key: k.expose() }.lookup(mbid.as_deref(), &name).await),
                     _ => None,
                 }
             },
         );
         if let Some(r) = lastfm {
+            if mbid.is_none()
+                && let Ok(Some(d)) = &r
+            {
+                mbid = d.mbid.clone();
+            }
             let max_age = lf.as_ref().and_then(|lf| *lf.max_age.lock());
             changed |= self.record(id, InfoSource::Lastfm, r, max_age, now).await;
+        } else if mbid.is_none() {
+            mbid = snap.sources.lastfm.as_ref().and_then(|d| d.mbid.clone());
         }
         if let Some(r) = fanart {
             changed |= self.record(id, InfoSource::Fanart, r, None, now).await;
@@ -498,7 +578,71 @@ impl ArtistInfoService {
         if let Some(r) = audiodb {
             changed |= self.record(id, InfoSource::Audiodb, r, None, now).await;
         }
+        if snap.popular_stale {
+            changed |= self.refresh_popular(id, mbid.as_deref(), &name, now).await;
+        }
         Ok(changed)
+    }
+
+    /// Fetch and store the global Popular list: ListenBrainz first, Last.fm
+    /// top tracks when ListenBrainz has nothing. Offline or a bad answer
+    /// stores nothing (Popular keeps your plays order and the next page open
+    /// tries again). Returns whether the stored list changed.
+    async fn refresh_popular(&self, id: &str, mbid: Option<&str>, name: &str, now: i64) -> bool {
+        let http = self.inner.http.as_ref();
+        let l = &self.inner.limits;
+        let mut top: Fetch<GlobalTop> = Ok(None);
+        let mut learned: Vec<String> = Vec::new();
+        if self.usable(InfoSource::Listenbrainz)
+            && let Some(m) = mbid
+        {
+            let token = self.key(InfoSource::Listenbrainz);
+            let lb = ListenBrainz { http, limiter: &l.listenbrainz, token: token.as_ref().map(|t| t.expose()) };
+            match lb.top(m).await {
+                Ok(Some(found)) => {
+                    learned = found.credit_names;
+                    top = Ok(Some(found.top));
+                }
+                Ok(None) => {}
+                Err(FetchError::KeyRejected) => self.reject(InfoSource::Listenbrainz),
+                Err(e) => top = Err(e),
+            }
+        }
+        if matches!(top, Ok(None))
+            && self.usable(InfoSource::Lastfm)
+            && let Some(k) = self.key(InfoSource::Lastfm)
+        {
+            let lf = Lastfm { http, limiter: &l.lastfm, key: k.expose(), lang: &self.inner.lang, max_age: Default::default() };
+            match lf.top_tracks(mbid, name).await {
+                Err(FetchError::KeyRejected) => self.reject(InfoSource::Lastfm),
+                r => top = r,
+            }
+        }
+        let found = match top {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::debug!("popular songs unavailable: {e:?}");
+                return false;
+            }
+        };
+        let key = id.to_owned();
+        self.inner
+            .db
+            .write_async(move |c| {
+                let names = learned.iter().map(String::as_str);
+                if popular::learn_names(c, names)? > 0 {
+                    tracing::debug!("learned artist names with separators");
+                }
+                let had = popular::global_top(c, &key)?.is_some();
+                let changed = cache::put(c, &key, popular::GLOBAL_ROW, found.as_ref(), now, POPULAR_TTL_S)?;
+                // A first "none found" changes nothing on the page.
+                Ok(changed && (had || found.is_some()))
+            })
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("popular cache write: {e}");
+                false
+            })
     }
 }
 

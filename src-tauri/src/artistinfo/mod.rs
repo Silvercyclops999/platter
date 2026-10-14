@@ -1,12 +1,15 @@
 //! Optional artist info from outside Plex: Wikipedia and Wikidata, Last.fm,
 //! Fanart.tv and TheAudioDB. Plex stays the main source; these fill gaps on
 //! the artist page (a longer bio, origin, years active, members, tags,
-//! listener counts, a photo or banner when Plex has none).
+//! listener counts, a photo or banner when Plex has none). ListenBrainz (or
+//! Last.fm top tracks) gives the global Popular list, and MusicBrainz the id
+//! of a credited artist that has no Plex entry.
 //!
 //! Layout:
 //! - [`http`]     the `InfoHttp` trait (faked in tests) and the real client
 //! - [`limit`]    per-source pacing and 429/5xx backoff
 //! - [`wiki`], [`lastfm`], [`fanart`], [`audiodb`]  one lookup per source
+//! - [`listenbrainz`] top recordings; [`musicbrainz`] artist id by name
 //! - [`cache`]    SQLite rows per artist and source (`artist_info` table)
 //! - [`merge`]    what the page shows, from Plex plus the cached sources
 //! - [`service`]  lazy fetch, background refresh, keys, switches
@@ -23,7 +26,9 @@ pub mod fanart;
 pub mod http;
 pub mod lastfm;
 pub mod limit;
+pub mod listenbrainz;
 pub mod merge;
+pub mod musicbrainz;
 pub mod service;
 pub mod wiki;
 
@@ -42,9 +47,12 @@ pub enum InfoSource {
     Lastfm,
     Fanart,
     Audiodb,
+    /// Popular songs (not part of the merged info).
+    Listenbrainz,
 }
 
 impl InfoSource {
+    /// The sources merged into [`ArtistInfo`].
     pub const ALL: [InfoSource; 4] = [Self::Wikipedia, Self::Lastfm, Self::Fanart, Self::Audiodb];
 
     /// Row name in the cache table.
@@ -54,11 +62,17 @@ impl InfoSource {
             Self::Lastfm => "lastfm",
             Self::Fanart => "fanart",
             Self::Audiodb => "audiodb",
+            Self::Listenbrainz => crate::db::popular::GLOBAL_ROW,
         }
     }
 
-    /// Whether the source needs the user's API key.
+    /// Whether the source can't work without the user's API key.
     pub fn needs_key(self) -> bool {
+        !matches!(self, Self::Wikipedia | Self::Listenbrainz)
+    }
+
+    /// Whether the source can use a key (ListenBrainz: an optional token).
+    pub fn takes_key(self) -> bool {
         !matches!(self, Self::Wikipedia)
     }
 
@@ -69,6 +83,7 @@ impl InfoSource {
             Self::Lastfm => "lastfm-api-key",
             Self::Fanart => "fanart-api-key",
             Self::Audiodb => "audiodb-api-key",
+            Self::Listenbrainz => "listenbrainz-token",
         }
     }
 
@@ -78,6 +93,7 @@ impl InfoSource {
             Self::Lastfm => "Last.fm",
             Self::Fanart => "Fanart.tv",
             Self::Audiodb => "TheAudioDB",
+            Self::Listenbrainz => "ListenBrainz",
         }
     }
 }
@@ -106,6 +122,8 @@ pub struct LastfmData {
     pub playcount: Option<u64>,
     pub tags: Vec<String>,
     pub bio: Option<String>,
+    /// The artist's MusicBrainz id, when Last.fm has one.
+    pub mbid: Option<String>,
 }
 
 /// Image URLs from Fanart.tv (the most liked of each kind).

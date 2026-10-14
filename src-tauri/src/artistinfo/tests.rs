@@ -283,7 +283,7 @@ async fn keyed_sources_need_a_key_and_a_switch() {
     assert_eq!(info.tags, ["indie"]);
     assert!(info.credits.iter().any(|c| c.text == "Data from Last.fm" && c.url.as_deref() == Some("https://www.last.fm/music/The+Band")));
     // Looked up by MBID, with the key, and nothing from Plex.
-    let url = r.http.urls().into_iter().rfind(|u| u.contains("audioscrobbler")).unwrap();
+    let url = r.http.urls().into_iter().rfind(|u| u.contains("audioscrobbler") && u.contains("artist.getinfo")).unwrap();
     assert!(url.contains(MBID) && url.contains("api_key=good-key"));
 }
 
@@ -408,4 +408,195 @@ async fn clearing_the_cache_forgets_every_answer() {
 async fn unknown_artist_is_not_found() {
     let r = rig(None, None);
     assert!(matches!(r.svc.info("nope").await, Err(AppError::NotFound(_))));
+}
+
+// ---------------------------------------------------------------- popular
+
+fn lb_reply(songs: &[(&str, u64)]) -> String {
+    let items: Vec<_> = songs
+        .iter()
+        .map(|(t, n)| json!({"recording_name": t, "total_listen_count": n, "artists": [{"artist_credit_name": "The Band"}]}))
+        .collect();
+    serde_json::Value::Array(items).to_string()
+}
+
+fn popular_row(db: &DbHandle, id: &str) -> Option<cache::Row> {
+    let id = id.to_owned();
+    db.read(move |c| cache::get(c, &id, crate::db::popular::GLOBAL_ROW)).unwrap()
+}
+
+#[tokio::test]
+async fn popular_list_comes_from_listenbrainz_and_is_cached_for_a_week() {
+    let r = rig(None, Some(MBID));
+    r.svc.switches().set(InfoSource::Wikipedia, false);
+    r.http.route("top-recordings-for-artist", 200, &lb_reply(&[("Hit", 900), ("Hit - Remastered", 100), ("B Side", 50)]));
+    assert!(r.svc.refresh(ARTIST).await.unwrap());
+    assert_eq!(*r.events.0.lock(), [ARTIST], "the page hears about the new list");
+    let url = r.http.urls().into_iter().find(|u| u.contains("listenbrainz")).unwrap();
+    assert!(url.ends_with(&format!("/1/popularity/top-recordings-for-artist/{MBID}")));
+    let row = popular_row(&r.db, ARTIST).unwrap();
+    let top: crate::db::popular::GlobalTop = row.parse().unwrap();
+    assert_eq!(top.songs.iter().map(|s| (s.title.as_str(), s.listens)).collect::<Vec<_>>(), [("Hit", 1000), ("B Side", 50)]);
+    assert_eq!(row.expires_at - row.fetched_at, service::POPULAR_TTL_S);
+    // Within the week: not asked again.
+    let calls = r.http.calls("listenbrainz");
+    let (_, stale) = r.svc.cached(ARTIST, now_s()).await.unwrap();
+    assert!(!stale);
+    r.svc.refresh(ARTIST).await.unwrap();
+    assert_eq!(r.http.calls("listenbrainz"), calls);
+    // A week on it's stale again.
+    let (_, stale) = r.svc.cached(ARTIST, now_s() + service::POPULAR_TTL_S).await.unwrap();
+    assert!(stale);
+}
+
+#[tokio::test]
+async fn listenbrainz_offline_or_a_bad_answer_stores_nothing_and_retries_later() {
+    for setup in ["offline", "malformed", "busy"] {
+        let r = rig(None, Some(MBID));
+        r.svc.switches().set(InfoSource::Wikipedia, false);
+        match setup {
+            "offline" => r.http.fail("listenbrainz"),
+            "malformed" => r.http.route("listenbrainz", 200, r#"{"payload": "not a list"}"#),
+            _ => r.http.route("listenbrainz", 503, ""),
+        }
+        assert!(!r.svc.refresh(ARTIST).await.unwrap(), "{setup}");
+        assert!(popular_row(&r.db, ARTIST).is_none(), "{setup}: nothing cached");
+        let (_, stale) = r.svc.cached(ARTIST, now_s()).await.unwrap();
+        assert!(stale, "{setup}: the next page open tries again");
+        assert!(r.events.0.lock().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn without_a_token_or_a_list_last_fm_top_tracks_fill_in() {
+    let r = rig(None, Some(MBID));
+    r.svc.switches().set(InfoSource::Wikipedia, false);
+    // ListenBrainz wants a token for this artist; none saved, no Last.fm: a miss.
+    r.http.route("listenbrainz", 401, r#"{"code":401,"error":"token"}"#);
+    assert!(!r.svc.refresh(ARTIST).await.unwrap());
+    assert_eq!(popular_row(&r.db, ARTIST).unwrap().data, None);
+    assert!(!r.svc.is_rejected(InfoSource::Listenbrainz));
+
+    // With Last.fm keyed, its top tracks stand in.
+    r.http.route("artist.getinfo", 200, &lastfm_reply());
+    r.http.route(
+        "artist.gettoptracks",
+        200,
+        &json!({"toptracks": {"track": [{"name": "Hit", "playcount": "70"}, {"name": "Other", "playcount": "9"}]}}).to_string(),
+    );
+    r.svc.switches().set(InfoSource::Lastfm, true);
+    r.svc.set_key(InfoSource::Lastfm, Some("k".into())).await.unwrap();
+    assert!(popular_row(&r.db, ARTIST).is_none(), "a new key asks again for artists with no list");
+    assert!(r.svc.refresh(ARTIST).await.unwrap());
+    let top: crate::db::popular::GlobalTop = popular_row(&r.db, ARTIST).unwrap().parse().unwrap();
+    assert_eq!(top.from, "lastfm");
+    assert_eq!(top.songs[0].title, "Hit");
+    let url = r.http.urls().into_iter().find(|u| u.contains("gettoptracks")).unwrap();
+    assert!(url.contains(MBID) && url.contains("limit=100"));
+}
+
+#[tokio::test]
+async fn a_listenbrainz_token_is_checked_sent_and_refused_tokens_switch_it_off() {
+    let r = rig(None, Some(MBID));
+    r.svc.switches().set(InfoSource::Wikipedia, false);
+    r.http.route("validate-token", 200, r#"{"code":200,"valid":true}"#);
+    let st = r.svc.set_key(InfoSource::Listenbrainz, Some("tok".into())).await.unwrap();
+    assert!(st.saved && !st.rejected);
+    assert!(r.svc.keys_status().listenbrainz.saved);
+    r.http.route("top-recordings-for-artist", 200, &lb_reply(&[("Hit", 1)]));
+    r.svc.refresh(ARTIST).await.unwrap();
+    let log = r.http.log.lock().clone();
+    let (url, headers) = log.iter().find(|(u, _)| u.contains("top-recordings")).unwrap();
+    assert!(!url.contains("tok"));
+    assert_eq!(headers, &vec![("Authorization", "Token tok".to_string())]);
+
+    // A refused token: off for the session, the row shows it.
+    r.http.route("validate-token", 200, r#"{"code":200,"valid":false}"#);
+    let st = r.svc.set_key(InfoSource::Listenbrainz, Some("bad".into())).await.unwrap();
+    assert!(st.saved && st.rejected);
+    assert!(!r.svc.usable(InfoSource::Listenbrainz));
+    // No token at all is fine: ListenBrainz still works for cached answers.
+    let st = r.svc.set_key(InfoSource::Listenbrainz, None).await.unwrap();
+    assert!(!st.saved && !st.rejected);
+    assert!(r.svc.usable(InfoSource::Listenbrainz));
+    assert!(r.svc.set_key(InfoSource::Wikipedia, Some("x".into())).await.is_err());
+}
+
+#[tokio::test]
+async fn my_plays_or_both_sources_off_fetch_no_popular_list() {
+    let r = rig(None, Some(MBID));
+    r.svc.switches().set(InfoSource::Wikipedia, false);
+    r.db.set_popular_source(crate::db::PopularSource::MyPlays);
+    r.svc.refresh(ARTIST).await.unwrap();
+    assert_eq!(r.http.calls("listenbrainz"), 0);
+    r.db.set_popular_source(crate::db::PopularSource::Global);
+    r.svc.switches().set(InfoSource::Listenbrainz, false);
+    r.svc.refresh(ARTIST).await.unwrap();
+    assert_eq!(r.http.calls("listenbrainz"), 0);
+}
+
+/// Counts Plex lookups; credited artists must never cause one.
+#[derive(Default)]
+struct CountingMbid(std::sync::atomic::AtomicUsize);
+#[async_trait]
+impl MbidLookup for CountingMbid {
+    async fn artist_mbid(&self, _: &str) -> AppResult<Option<String>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(None)
+    }
+}
+
+/// The band's track crediting a guest who has no library artist.
+fn add_credited_track(db: &DbHandle) {
+    db.write(|c| {
+        c.execute(
+            "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_artist, part_key)
+             VALUES ('t1', 'Night Drive', 'al1', 'LP', ?1, 'The Band', 'The Band feat. Rue Ellis', '/p')",
+            [ARTIST],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+const GUEST: &str = "99999999-2222-3333-4444-555555555555";
+
+#[tokio::test]
+async fn credited_artists_get_info_by_musicbrainz_search_never_plex() {
+    let r = rig(None, Some(MBID));
+    let plex = Arc::new(CountingMbid::default());
+    r.svc.set_mbid_lookup(plex.clone());
+    r.svc.switches().set(InfoSource::Wikipedia, false);
+    add_credited_track(&r.db);
+    r.http.route(
+        "musicbrainz.org/ws/2/artist",
+        200,
+        &json!({"artists": [{"id": GUEST, "name": "Rue Ellis", "score": 100}]}).to_string(),
+    );
+    r.http.route("top-recordings-for-artist", 200, &lb_reply(&[("Night Drive", 5)]));
+    let id = "credit:rue ellis";
+    let (info, stale) = r.svc.cached(id, now_s()).await.unwrap();
+    assert!(stale && info.bio.is_none());
+    assert!(r.svc.refresh(id).await.unwrap());
+    assert_eq!(plex.0.load(std::sync::atomic::Ordering::Relaxed), 0, "no Plex call for a credit id");
+    let mb = r.http.urls().into_iter().find(|u| u.contains("musicbrainz")).unwrap();
+    assert!(mb.contains("Rue+Ellis") || mb.contains("Rue%20Ellis"), "{mb}");
+    assert!(r.http.urls().iter().any(|u| u.ends_with(GUEST)), "popular list by the found id");
+    assert!(popular_row(&r.db, id).unwrap().data.is_some());
+    assert_eq!(*r.events.0.lock(), [id]);
+
+    // Not an exact match: no id, so no ListenBrainz request.
+    let r = rig(None, Some(MBID));
+    r.svc.switches().set(InfoSource::Wikipedia, false);
+    add_credited_track(&r.db);
+    r.http.route(
+        "musicbrainz.org/ws/2/artist",
+        200,
+        &json!({"artists": [{"id": GUEST, "name": "Rue Ellis Trio", "score": 100}]}).to_string(),
+    );
+    r.svc.refresh(id).await.unwrap();
+    assert_eq!(r.http.calls("listenbrainz"), 0);
+
+    // A credit nobody has is not found.
+    assert!(matches!(r.svc.info("credit:nobody").await, Err(AppError::NotFound(_))));
 }

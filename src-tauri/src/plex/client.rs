@@ -276,7 +276,7 @@ pub struct PlexMetadata {
     /// When the user last rated the item, unix seconds.
     #[serde(default, deserialize_with = "lenient::opt_i64")]
     pub last_rated_at: Option<i64>,
-    /// Global listener count on tracks (from Last.fm), when Plex has one.
+    /// `ratingCount` on tracks, when Plex has one (see docs/PLEX-API.md).
     #[serde(default, deserialize_with = "lenient::opt_i64")]
     pub rating_count: Option<i64>,
     #[serde(default, deserialize_with = "lenient::opt_i64")]
