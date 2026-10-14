@@ -297,6 +297,17 @@ ALTER TABLE artists ADD COLUMN similar TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE artists ADD COLUMN similar_fetched_at INTEGER;
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
+    // v4: recent searches are the items opened from search (artist, album,
+    // track or playlist), not query text.
+    r#"
+DROP TABLE recent_searches;
+CREATE TABLE search_recents (
+    kind      TEXT NOT NULL,
+    id        TEXT NOT NULL,
+    opened_at INTEGER NOT NULL,
+    PRIMARY KEY (kind, id)
+);
+"#,
 ];
 
 #[cfg(test)]

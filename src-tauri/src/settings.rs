@@ -110,6 +110,10 @@ pub struct Settings {
     /// Home's top takes a colour wash from the shortcuts' artwork (only
     /// while Artwork colours is on).
     pub home_colour_wash: bool,
+    /// Show completions and direct results under the search box as you type.
+    pub search_suggestions: bool,
+    /// Remember items opened from search (shown when the empty box is focused).
+    pub search_recents: bool,
 }
 
 impl Default for Settings {
@@ -131,6 +135,8 @@ impl Default for Settings {
             output_device: None,
             home_shortcuts: true,
             home_colour_wash: true,
+            search_suggestions: true,
+            search_recents: true,
         }
     }
 }
@@ -154,6 +160,8 @@ pub struct SettingsPatch {
     pub reduce_motion: Option<ReduceMotion>,
     pub home_shortcuts: Option<bool>,
     pub home_colour_wash: Option<bool>,
+    pub search_suggestions: Option<bool>,
+    pub search_recents: Option<bool>,
 }
 
 fn set<T: Copy>(dst: &mut T, v: Option<T>) {
@@ -184,6 +192,8 @@ impl Settings {
         set(&mut self.reduce_motion, p.reduce_motion);
         set(&mut self.home_shortcuts, p.home_shortcuts);
         set(&mut self.home_colour_wash, p.home_colour_wash);
+        set(&mut self.search_suggestions, p.search_suggestions);
+        set(&mut self.search_recents, p.search_recents);
         self.clamp();
         Ok(())
     }
@@ -432,6 +442,7 @@ mod tests {
         assert_eq!(s.popular_source, PopularSource::Global);
         assert_eq!(s.art_cache_mb, 2048);
         assert_eq!(s.reduce_motion, ReduceMotion::System);
+        assert!(s.search_suggestions && s.search_recents);
     }
 
     #[test]
@@ -475,6 +486,8 @@ mod tests {
             reduce_motion: Some(ReduceMotion::On),
             home_shortcuts: Some(false),
             home_colour_wash: Some(false),
+            search_suggestions: Some(false),
+            search_recents: Some(false),
         })
         .await
         .unwrap();
@@ -501,6 +514,7 @@ mod tests {
         assert!(!s.show_format_badge && !s.resume_contexts && !s.artwork_colours);
         assert_eq!((s.precache_count, s.art_cache_mb), (12, 512));
         assert_eq!((s.popular_source, s.reduce_motion), (PopularSource::MyPlays, ReduceMotion::On));
+        assert!(!s.search_suggestions && !s.search_recents);
         // Loaded at startup into the live switches.
         assert!(fresh.tracking.private_session.load(Ordering::Relaxed));
         assert!(fresh.tracking.report_to_plex.load(Ordering::Relaxed));
@@ -549,6 +563,8 @@ mod tests {
         assert_eq!(v["artCacheMb"], 2048);
         assert_eq!(v["artworkColours"], true);
         assert_eq!(v["reduceMotion"], "system");
+        assert_eq!(v["searchSuggestions"], true);
+        assert_eq!(v["searchRecents"], true);
         let p: SettingsPatch = serde_json::from_str(r#"{"shuffleStyle":"standard"}"#).unwrap();
         assert_eq!(p.shuffle_style, Some(ShuffleStyle::Standard));
         let p: SettingsPatch =

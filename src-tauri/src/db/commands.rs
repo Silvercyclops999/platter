@@ -7,8 +7,8 @@
 //! .invoke_handler(tauri::generate_handler![
 //!     dbc::sync_status, dbc::sync_now, dbc::home, dbc::home_shelf, dbc::artists, dbc::artist_names, dbc::albums,
 //!     dbc::playlists, dbc::library_items, dbc::artist_page, dbc::album_page, dbc::playlist_page,
-//!     dbc::search, dbc::recent_searches, dbc::recent_search_add,
-//!     dbc::recent_searches_clear,
+//!     dbc::search, dbc::search_completions, dbc::search_recents,
+//!     dbc::search_recent_add, dbc::search_recent_remove, dbc::search_recents_clear,
 //! ])
 //! ```
 //!
@@ -124,16 +124,27 @@ pub async fn search(
 }
 
 #[tauri::command]
-pub async fn recent_searches(db: State<'_, DbHandle>) -> AppResult<Vec<String>> {
+pub async fn search_completions(db: State<'_, DbHandle>, query: String, limit: Option<u32>) -> AppResult<Vec<String>> {
+    let n = limit.map_or(search::COMPLETIONS_MAX, |l| (l as usize).min(10));
+    db.read_async(move |c| search::completions(c, &query, n)).await
+}
+
+#[tauri::command]
+pub async fn search_recents(db: State<'_, DbHandle>) -> AppResult<Vec<SearchHit>> {
     db.read_async(search::recent_list).await
 }
 
 #[tauri::command]
-pub async fn recent_search_add(db: State<'_, DbHandle>, query: String) -> AppResult<()> {
-    db.write_async(move |c| search::recent_add(c, &query)).await
+pub async fn search_recent_add(db: State<'_, DbHandle>, kind: SearchKind, id: String) -> AppResult<()> {
+    db.write_async(move |c| search::recent_add(c, kind, &id)).await
 }
 
 #[tauri::command]
-pub async fn recent_searches_clear(db: State<'_, DbHandle>) -> AppResult<()> {
+pub async fn search_recent_remove(db: State<'_, DbHandle>, kind: SearchKind, id: String) -> AppResult<()> {
+    db.write_async(move |c| search::recent_remove(c, kind, &id)).await
+}
+
+#[tauri::command]
+pub async fn search_recents_clear(db: State<'_, DbHandle>) -> AppResult<()> {
     db.write_async(|c| search::recent_clear(c)).await
 }

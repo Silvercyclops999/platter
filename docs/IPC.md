@@ -114,9 +114,11 @@ is just left out.
 | Command | Args | Returns |
 | --- | --- | --- |
 | `search` | `{ query, filter: "all"|"songs"|"artists"|"albums"|"playlists", limit? }` | `SearchResults { top?: SearchHit, songs: Track[], artists: Artist[], albums: Album[], playlists: Playlist[], tookMs, source: "local"|"server" }` |
-| `recent_searches` | – | `string[]` |
-| `recent_search_add` | `{ query }` | – |
-| `recent_searches_clear` | – | – |
+| `search_completions` | `{ query, limit? }` | `string[]` |
+| `search_recents` | – | `SearchHit[]` |
+| `search_recent_add` | `{ kind, id }` | – |
+| `search_recent_remove` | `{ kind, id }` | – |
+| `search_recents_clear` | – | – |
 
 `SearchHit = { kind: "artist"|"album"|"track"|"playlist", artist?, album?, track?, playlist? }`
 
@@ -124,6 +126,19 @@ Until the first library sync has finished, `search` asks the server instead
 (`/hubs/search`), ranks the answer with the same rules and returns
 `source: "server"`. If the server is slow or unreachable it answers from the
 cache. After the first sync, search never touches the network.
+
+With filter `all`, `limit` applies to every kind; without it, All returns
+four songs and ten of each other kind.
+
+`search_completions` returns up to `limit` (default 4, at most 10) whole
+artist, album and track names that start with the typed words, most played
+first, without duplicates. It only reads the local index.
+
+Recent searches are the items you opened from search, not query text.
+`search_recent_add` puts an item at the top (an item already there moves up)
+and keeps the newest 20. `search_recents` skips items that are no longer in
+the library. Settings `searchSuggestions` and `searchRecents` turn the
+dropdown parts off; the UI checks them.
 
 ## Playback and queue
 | Command | Args |
@@ -249,6 +264,8 @@ The rest of the fields, with their defaults:
 | `outputDevice` | device id or null, null | Read only here. Set with `output_select`; null follows the system default. |
 | `homeShortcuts` | bool, true | Home shows the grid of recent and most played shortcuts. |
 | `homeColourWash` | bool, true | Home's top takes its colour from the shortcuts' artwork. Only applies while `artworkColours` is on. |
+| `searchSuggestions` | bool, true | Show completions and direct results under the search box while typing. |
+| `searchRecents` | bool, true | Show items opened from search when the empty search box is focused, and remember new ones. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

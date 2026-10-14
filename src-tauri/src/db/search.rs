@@ -41,7 +41,6 @@ const OTHER_CANDIDATES: i64 = 120;
 const ALL_SONGS: usize = 4;
 const ALL_SHELF: usize = 10;
 const FILTER_DEFAULT: usize = 50;
-const RECENT_MAX: i64 = 20;
 const VOCAB_RELOAD_MIN: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------- text
@@ -369,7 +368,9 @@ fn search_playlists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usi
 /// How many results of `kind` a search with `filter`/`limit` returns.
 fn kind_limit(filter: SearchFilter, limit: Option<u32>, kind: SearchFilter, all_n: usize) -> usize {
     match (filter, limit) {
-        (SearchFilter::All, Some(l)) if kind != SearchFilter::Songs => (l as usize).clamp(1, 50),
+        // An explicit limit applies to every kind; without one, All gives the
+        // short lists (four songs).
+        (SearchFilter::All, Some(l)) => (l as usize).clamp(1, 50),
         (SearchFilter::All, _) => all_n,
         (f, l) if f == kind => l.map(|l| l as usize).unwrap_or(FILTER_DEFAULT).clamp(1, 200),
         _ => 0,
@@ -620,45 +621,142 @@ pub async fn search_with_fallback(
     }
 }
 
+// ---------------------------------------------------------------- completions
+
+/// Query completions shown above the direct results while typing.
+pub const COMPLETIONS_MAX: usize = 4;
+/// Names read per kind before de-duplicating.
+const COMPLETION_CANDIDATES: i64 = 24;
+
+/// Whole artist, album and track names that start with the typed words,
+/// most played first, de-duplicated case- and diacritic-insensitively.
+/// Playlist names are left out: a completion runs a search, and a playlist
+/// name rarely finds more than the playlist itself.
+pub fn completions(c: &Connection, query: &str, limit: usize) -> AppResult<Vec<String>> {
+    let q = parse_query(query, |_| Vec::new());
+    if q.fts.is_none() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    // A phrase anchored at the start of the title, its last word a prefix.
+    let fts = format!("title : ^{}*", quote(&q.tokens.join(" ")));
+    let mut cands: Vec<(String, u32)> = Vec::new();
+    for table in ["artists", "albums", "tracks"] {
+        let sql = format!(
+            "SELECT title, view_count FROM {table} WHERE pk IN (
+                SELECT rowid FROM {table}_fts WHERE {table}_fts MATCH ?1
+             ) ORDER BY view_count DESC LIMIT ?2"
+        );
+        let mut st = c.prepare_cached(&sql)?;
+        let rows = st.query_map(params![fts, COMPLETION_CANDIDATES], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?)))?;
+        for r in rows {
+            cands.push(r?);
+        }
+    }
+    // Stable sort: on equal plays, shorter names first, then artists before
+    // albums before tracks.
+    cands.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.chars().count().cmp(&b.0.chars().count())));
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (title, _) in cands {
+        let norm = tokens(&normalize(&title)).join(" ");
+        if !norm.starts_with(&q.norm) || !seen.insert(norm) {
+            continue;
+        }
+        out.push(title);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 // ---------------------------------------------------------------- recents
+
+/// Items opened from search that are remembered.
+pub const RECENTS_MAX: i64 = 20;
+
+fn kind_str(k: SearchKind) -> &'static str {
+    match k {
+        SearchKind::Artist => "artist",
+        SearchKind::Album => "album",
+        SearchKind::Track => "track",
+        SearchKind::Playlist => "playlist",
+    }
+}
+
+/// Remember an item opened from search: newest first, one entry per item,
+/// capped at [`RECENTS_MAX`].
+pub fn recent_add(c: &Connection, kind: SearchKind, id: &str) -> AppResult<()> {
+    if id.is_empty() {
+        return Ok(());
+    }
+    // Delete and insert (not upsert) so a reopened item also gets a new
+    // rowid, which breaks ties between opens in the same millisecond.
+    recent_remove(c, kind, id)?;
+    c.execute(
+        "INSERT INTO search_recents (kind, id, opened_at) VALUES (?1, ?2, ?3)",
+        params![kind_str(kind), id, now_ms()],
+    )?;
+    c.execute(
+        "DELETE FROM search_recents WHERE rowid NOT IN (
+            SELECT rowid FROM search_recents ORDER BY opened_at DESC, rowid DESC LIMIT ?1)",
+        [RECENTS_MAX],
+    )?;
+    Ok(())
+}
+
+pub fn recent_remove(c: &Connection, kind: SearchKind, id: &str) -> AppResult<()> {
+    c.execute("DELETE FROM search_recents WHERE kind = ?1 AND id = ?2", params![kind_str(kind), id])?;
+    Ok(())
+}
+
+/// Remembered items, newest first. Items no longer in the library are
+/// skipped (they come back if the item does).
+pub fn recent_list(c: &Connection) -> AppResult<Vec<SearchHit>> {
+    let mut st = c.prepare_cached("SELECT kind, id FROM search_recents ORDER BY opened_at DESC, rowid DESC")?;
+    let keys = st
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let hit = |kind| SearchHit { kind, artist: None, album: None, track: None, playlist: None };
+    let mut out = Vec::new();
+    for (kind, id) in keys {
+        let found = match kind.as_str() {
+            "artist" => one(c, &format!("SELECT {ARTIST_COLS} FROM artists ar WHERE ar.id = ?1"), &id, row_artist)?
+                .map(|a| SearchHit { artist: Some(a), ..hit(SearchKind::Artist) }),
+            "album" => one(c, &format!("SELECT {ALBUM_COLS} FROM albums al WHERE al.id = ?1"), &id, row_album)?
+                .map(|a| SearchHit { album: Some(a), ..hit(SearchKind::Album) }),
+            "track" => one(c, &format!("SELECT {TRACK_COLS} FROM tracks t WHERE t.id = ?1"), &id, row_track)?
+                .map(|t| SearchHit { track: Some(t), ..hit(SearchKind::Track) }),
+            "playlist" => one(c, &format!("SELECT {PLAYLIST_COLS} FROM playlists p WHERE p.id = ?1"), &id, row_playlist)?
+                .map(|p| SearchHit { playlist: Some(p), ..hit(SearchKind::Playlist) }),
+            _ => None,
+        };
+        out.extend(found);
+    }
+    Ok(out)
+}
+
+fn one<T>(
+    c: &Connection,
+    sql: &str,
+    id: &str,
+    row: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+) -> AppResult<Option<T>> {
+    let mut st = c.prepare_cached(sql)?;
+    let mut rows = st.query_map([id], row)?;
+    Ok(rows.next().transpose()?)
+}
+
+pub fn recent_clear(c: &Connection) -> AppResult<()> {
+    c.execute("DELETE FROM search_recents", [])?;
+    Ok(())
+}
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-/// Remember a query: trimmed, deduped case/diacritic-insensitively (latest
-/// wins), newest first, capped at 20.
-pub fn recent_add(c: &Connection, query: &str) -> AppResult<()> {
-    let q: String = query.trim().chars().take(MAX_QUERY_CHARS).collect();
-    if q.is_empty() {
-        return Ok(());
-    }
-    let norm = tokens(&normalize(&q)).join(" ");
-    let norm = if norm.is_empty() { q.to_lowercase() } else { norm };
-    c.execute("DELETE FROM recent_searches WHERE norm = ?1 OR query = ?2", params![norm, q])?;
-    c.execute(
-        "INSERT INTO recent_searches (query, norm, searched_at) VALUES (?1, ?2, ?3)",
-        params![q, norm, now_ms()],
-    )?;
-    c.execute(
-        "DELETE FROM recent_searches WHERE rowid NOT IN (
-            SELECT rowid FROM recent_searches ORDER BY searched_at DESC, rowid DESC LIMIT ?1)",
-        [RECENT_MAX],
-    )?;
-    Ok(())
-}
-
-pub fn recent_list(c: &Connection) -> AppResult<Vec<String>> {
-    let mut st = c.prepare_cached("SELECT query FROM recent_searches ORDER BY searched_at DESC, rowid DESC")?;
-    Ok(st.query_map([], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?)
-}
-
-pub fn recent_clear(c: &Connection) -> AppResult<()> {
-    c.execute("DELETE FROM recent_searches", [])?;
-    Ok(())
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use super::fake::{self, FakeLibrary, FakeSource};
 use super::listens::{self, ContextKind, NewReport, PlayStart, ReportKind};
 use super::queries::{self, now_s};
-use super::search::{self, recent_add, recent_clear, recent_list};
+use super::search::{self, recent_add, recent_clear, recent_list, recent_remove};
 use super::source::{HistoryEntry, ItemKind, LibrarySource, SimilarArtist};
 use super::store;
 use super::*;
@@ -221,7 +221,8 @@ async fn library_replaced_wipes_and_rebuilds() {
     t.db.set_events(rec.clone());
     let src = Arc::new(FakeSource::new(fake::generated(4, 2, 3)));
     sync(&t.db, &src, false).await;
-    t.db.write(|c| search::recent_add(c, "keep me")).unwrap();
+    // Remembered before the new library has the album: the entry survives the wipe.
+    t.db.write(|c| search::recent_add(c, SearchKind::Album, "51")).unwrap();
 
     let mut new_lib = FakeLibrary { sections: vec![fake::section("7", "uuid-b")], ..Default::default() };
     let ar = fake::artist("50", "Fresh Artist");
@@ -237,7 +238,9 @@ async fn library_replaced_wipes_and_rebuilds() {
     assert_eq!(count(&t.db, "tracks"), 1);
     let st = t.db.read(store::sync_state).unwrap().unwrap();
     assert_eq!((st.section_id.as_str(), st.section_uuid.as_str()), ("7", "uuid-b"));
-    assert_eq!(t.db.read(search::recent_list).unwrap(), vec!["keep me"]);
+    let recents = t.db.read(search::recent_list).unwrap();
+    assert_eq!(recents.len(), 1);
+    assert_eq!(recents[0].album.as_ref().unwrap().title, "Fresh Album");
     assert!(search::search(&t.db, "artist 0", SearchFilter::Artists, None).unwrap().artists.is_empty());
     assert_eq!(rec.outcomes.lock().last(), Some(&out));
 }
@@ -1112,7 +1115,8 @@ async fn search_uses_server_until_first_sync_finishes() {
     let top = r.top.unwrap();
     assert_eq!(top.kind, SearchKind::Artist);
     assert_eq!(top.artist.unwrap().title, "Love");
-    assert_eq!(r.songs.len(), 4);
+    // An explicit limit applies to every kind, songs included (the results page mixes them).
+    assert_eq!(r.songs.len(), 10);
     assert_eq!(r.songs[0].title, "Love");
     assert_eq!(remote.calls.lock()[0], ("love".to_string(), Some("7".to_string())));
 
@@ -1171,29 +1175,76 @@ fn rank_remote_orders_exact_then_prefix_then_other() {
 }
 
 #[tokio::test]
-async fn recent_searches_dedupe_cap_and_clear() {
-    let t = open();
+async fn search_recents_add_dedupe_remove_cap_and_clear() {
+    let t = search_db().await;
     t.db.write(|c| {
-        recent_add(c, "Beyoncé")?;
-        recent_add(c, "abbey road")?;
-        recent_add(c, "  beyonce ")?; // same as the first once folded
-        recent_add(c, "")?;
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(t.db.read(recent_list).unwrap(), vec!["beyonce", "abbey road"]);
-    t.db.write(|c| {
-        for i in 0..30 {
-            recent_add(c, &format!("query {i}"))?;
-        }
+        recent_add(c, SearchKind::Album, "10")?;
+        recent_add(c, SearchKind::Artist, "2")?;
+        recent_add(c, SearchKind::Track, "100")?;
+        recent_add(c, SearchKind::Playlist, "p1")?;
+        recent_add(c, SearchKind::Album, "10")?; // opened again: moves to the top
+        recent_add(c, SearchKind::Album, "gone")?; // not in the library
+        recent_add(c, SearchKind::Album, "")?;
         Ok(())
     })
     .unwrap();
     let l = t.db.read(recent_list).unwrap();
-    assert_eq!(l.len(), 20);
-    assert_eq!(l[0], "query 29");
+    let keys: Vec<(SearchKind, String)> = l
+        .iter()
+        .map(|h| {
+            let id = match h.kind {
+                SearchKind::Artist => h.artist.as_ref().unwrap().id.clone(),
+                SearchKind::Album => h.album.as_ref().unwrap().id.clone(),
+                SearchKind::Track => h.track.as_ref().unwrap().id.clone(),
+                SearchKind::Playlist => h.playlist.as_ref().unwrap().id.clone(),
+            };
+            (h.kind, id)
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        vec![
+            (SearchKind::Album, "10".to_string()),
+            (SearchKind::Playlist, "p1".to_string()),
+            (SearchKind::Track, "100".to_string()),
+            (SearchKind::Artist, "2".to_string()),
+        ],
+        "newest first, one entry per item, missing items skipped"
+    );
+    assert_eq!(l[0].album.as_ref().unwrap().title, "Lemonade");
+
+    t.db.write(|c| recent_remove(c, SearchKind::Playlist, "p1")).unwrap();
+    assert_eq!(t.db.read(recent_list).unwrap().len(), 3);
+
+    t.db.write(|c| {
+        for i in 0..30 {
+            recent_add(c, SearchKind::Track, &format!("x{i}"))?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let n: i64 = t.db.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM search_recents", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(n, search::RECENTS_MAX);
     t.db.write(|c| recent_clear(c)).unwrap();
     assert!(t.db.read(recent_list).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn search_completions_are_whole_names_starting_with_the_words() {
+    let t = search_db().await;
+    let c = |q: &str| t.db.read(|c| search::completions(c, q, search::COMPLETIONS_MAX)).unwrap();
+    // Most played first, then shorter names; the artist "Love" and the song
+    // "Love" give one completion, and four is the most.
+    assert_eq!(c("love"), vec!["Lovesick Blues", "Lovesick Blues (Live)", "Love", "Love Song"]);
+    // Several words, the last one a prefix; diacritics and case don't matter.
+    assert_eq!(c("lovesick bl"), vec!["Lovesick Blues", "Lovesick Blues (Live)"]);
+    assert_eq!(c("BEYONCE"), vec!["Beyoncé"]);
+    assert_eq!(c("hoppipol"), vec!["Hoppípolla"]);
+    // Only names that start with the words: "Glove Box" and "The Beatles" don't.
+    assert!(c("glo").contains(&"Glove Box".to_string()));
+    assert!(c("beat").is_empty());
+    assert!(c("").is_empty());
+    assert!(c("\"*:(").is_empty());
 }
 
 // ---------------------------------------------------------------- listens
