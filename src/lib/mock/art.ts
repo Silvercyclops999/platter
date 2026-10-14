@@ -15,7 +15,8 @@ export function mockArtUrl(path: string): string {
   const h2 = (h1 + 30 + Math.floor(r() * 120)) % 360;
   const sat = 45 + Math.floor(r() * 35);
   const angle = Math.floor(r() * 360);
-  const isArtist = /\/library\/metadata\/1\d\d\//.test(path);
+  // Outside-source images (/ext/...) are artist photos and backgrounds.
+  const isArtist = /\/library\/metadata\/1\d\d\//.test(path) || path.startsWith("/ext/");
   const isPlaylist = path.startsWith("/playlists/");
   const motif = Math.floor(r() * 4);
 
@@ -49,7 +50,7 @@ export function mockArtUrl(path: string): string {
 <circle cx="150" cy="170" r="30" fill="hsl(${h1} 90% 80% / .35)"/>`;
   }
 
-  if (isArtist && /\/art\//.test(path)) {
+  if (isArtist && (/\/art\//.test(path) || path.includes("background"))) {
     // Wide background art: soft bands of colour, no portrait.
     const wide = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">
 <defs><linearGradient id="g" gradientTransform="rotate(${angle} .5 .5)">

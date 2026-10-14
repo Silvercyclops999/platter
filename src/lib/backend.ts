@@ -22,6 +22,7 @@ import type {
   ArtCacheInfo,
   Artist,
   ArtistName,
+  ArtistInfo,
   ArtistPage,
   ArtistsArgs,
   AuthStatus,
@@ -31,6 +32,9 @@ import type {
   HomeData,
   HomeItem,
   HomeShelfId,
+  InfoKeyState,
+  InfoKeysStatus,
+  KeyedInfoSource,
   LibraryItem,
   NowPlayingDetails,
   OutputState,
@@ -160,6 +164,17 @@ export interface Backend {
   updateCheck(): Promise<UpdateInfo>;
   updateInstallOnRestart(): Promise<void>;
 
+  // Artist info (outside sources)
+  /** Outside info for an artist; `artistinfo://changed` fires when more arrives. */
+  artistInfo(id: string): Promise<ArtistInfo>;
+  artistInfoKeys(): Promise<InfoKeysStatus>;
+  /** Save a source's key in the keychain (null removes it); answers whether it was refused. */
+  artistInfoKeySet(source: KeyedInfoSource, key: string | null): Promise<InfoKeyState>;
+  /** Forget cached artist info; resolves to how many artists had some. */
+  artistInfoCacheClear(): Promise<number>;
+  /** Open a source or licence link in the default browser. */
+  openInfoLink(url: string): Promise<void>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -253,6 +268,11 @@ export function createTauriBackend(): Backend {
     openProjectPage: () => call("open_project_page"),
     updateCheck: () => call("update_check"),
     updateInstallOnRestart: () => call("update_install_on_restart"),
+    artistInfo: (id) => call("artist_info", { id }),
+    artistInfoKeys: () => call("artist_info_keys"),
+    artistInfoKeySet: (source, key) => call("artist_info_key_set", { source, key }),
+    artistInfoCacheClear: () => call("artist_info_cache_clear"),
+    openInfoLink: (url) => call("open_info_link", { url }),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

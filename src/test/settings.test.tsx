@@ -8,7 +8,7 @@ import { NEUTRAL_HEADER } from "../lib/color";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { useArtTint } from "../lib/useTint";
-import { NOTICES, SettingsPage } from "../pages/SettingsPage";
+import { NOTICES, SettingsPage, SOURCE_NOTICES } from "../pages/SettingsPage";
 import { MainView } from "../shell/MainView";
 import { PlayerBar } from "../shell/PlayerBar";
 import { TopBar } from "../shell/TopBar";
@@ -58,7 +58,7 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Search", "Appearance", "Home", "App", "About", "Now playing"]);
+    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Search", "Appearance", "Home", "App", "Integrations", "About", "Now playing"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
@@ -320,7 +320,7 @@ describe("settings page", () => {
     expect(open).toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Open-source notices" }));
     const dialog = screen.getByRole("dialog", { name: "Open-source notices" });
-    expect(within(dialog).getAllByRole("listitem")).toHaveLength(NOTICES.length);
+    expect(within(dialog).getAllByRole("listitem")).toHaveLength(NOTICES.length + SOURCE_NOTICES.length);
     expect(within(dialog).getByText("Tauri")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

@@ -15,13 +15,17 @@ import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
+import { AboutCard, useArtistInfo } from "./ArtistAbout";
 import {
   POPULAR_FIRST,
   POPULAR_MORE,
+  aboutText,
   artistSections,
+  bannerPath,
   discographyChips,
   discographyItems,
   headerVariant,
+  listenersLine,
   playsLine,
   type DiscographyFilter,
 } from "./artist";
@@ -51,7 +55,10 @@ function ArtistView({ id }: { id: string }) {
   }, [id]);
   const data = loaded && similar ? { ...loaded, similar } : loaded;
   const artist = data?.artist;
-  const variant = artist ? headerVariant(artist) : "photo";
+  const info = useArtistInfo(id);
+  const banner = artist ? bannerPath(artist, info) : null;
+  const variant = artist ? headerVariant(artist, banner) : "photo";
+  const about = data ? aboutText(data.about, info) : null;
   useArtTint(null, artist ? (artist.art ?? artist.thumb) : undefined);
   const { isContext: isThis, playing: isThisPlaying } = useContextState("artist", id);
   const play = () => (isThis ? player.toggle() : player.playArtist(id));
@@ -60,7 +67,7 @@ function ArtistView({ id }: { id: string }) {
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this artist: {error.message}</p>;
 
-  const sections = data ? artistSections(data) : [];
+  const sections = data ? artistSections({ ...data, about, listeners: info?.listeners }) : [];
   const text = artist ? (
     <>
       <span className="detail-header__type">Artist</span>
@@ -69,6 +76,7 @@ function ArtistView({ id }: { id: string }) {
       </h1>
       <div className="detail-header__meta">
         <span>{playsLine(data!.plays)}</span>
+        {info?.listeners != null && <span className="artist-listeners">{listenersLine(info.listeners)}</span>}
       </div>
     </>
   ) : (
@@ -87,7 +95,7 @@ function ArtistView({ id }: { id: string }) {
           className={`artist-banner ${compact ? "artist-banner--compact" : ""}`}
           data-variant="banner"
         >
-          <BannerImage path={artist.art!} box={header} />
+          <BannerImage path={banner!} box={header} />
           <div ref={column} className="detail-header__text artist-banner__text">
             {text}
           </div>
@@ -132,7 +140,7 @@ function ArtistView({ id }: { id: string }) {
               case "discography":
                 return <Discography key={s} sections={data.sections} />;
               case "about":
-                return <About key={s} artist={data.artist} about={data.about!} plays={data.plays} />;
+                return <AboutCard key={s} artist={data.artist} about={about} plays={data.plays} info={info} />;
               case "fansAlsoLike":
                 return <FansAlsoLike key={s} artists={data.similar} />;
             }
@@ -323,36 +331,6 @@ function Discography({ sections }: { sections: ArtistPageSection[] }) {
       {chipRow}
       <div className="discography__grid" role="list">
         {cards(Infinity)}
-      </div>
-    </section>
-  );
-}
-
-/** Biographies longer than this start clamped, with "Read more". */
-const ABOUT_CLAMP_CHARS = 280;
-
-function About({ artist, about, plays }: { artist: Artist; about: string; plays: number }) {
-  const [open, setOpen] = useState(false);
-  const headingId = useId();
-  const long = about.length > ABOUT_CLAMP_CHARS;
-  return (
-    <section className="detail-section artist-about" aria-labelledby={headingId}>
-      <h2 id={headingId} className="section-title">
-        About
-      </h2>
-      <div className="about-card">
-        <div className="about-card__photo">
-          <Art path={artist.thumb} size={160} round kind="artist" />
-        </div>
-        <div className="about-card__text">
-          <p className="about-card__plays">{playsLine(plays)}</p>
-          <p className={`about-card__bio ${long && !open ? "is-clamped" : ""}`}>{about}</p>
-          {long && (
-            <button type="button" className="see-more about-card__more" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-              {open ? "Show less" : "Read more"}
-            </button>
-          )}
-        </div>
       </div>
     </section>
   );

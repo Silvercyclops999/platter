@@ -500,6 +500,14 @@ export interface Settings {
   playlistAskDuplicates: boolean;
   /** Name for new playlists; "#N" becomes the next free number. */
   playlistNewName: string;
+  /** Artist info from Wikipedia and Wikidata. */
+  infoWikipedia: boolean;
+  /** Artist info from Last.fm (needs a key, kept in the keychain). */
+  infoLastfm: boolean;
+  /** Artist images from Fanart.tv (needs a key). */
+  infoFanart: boolean;
+  /** Artist photo and bio from TheAudioDB (needs a key). */
+  infoAudiodb: boolean;
   [key: string]: unknown;
 }
 
@@ -532,7 +540,61 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyTrackChange: false,
   playlistAskDuplicates: true,
   playlistNewName: "My playlist #N",
+  infoWikipedia: true,
+  infoLastfm: false,
+  infoFanart: false,
+  infoAudiodb: false,
 };
+
+// ---------------------------------------------------------------- artist info
+
+/** An outside artist info source. */
+export type InfoSource = "wikipedia" | "lastfm" | "fanart" | "audiodb";
+/** A source that needs the user's API key. */
+export type KeyedInfoSource = Exclude<InfoSource, "wikipedia">;
+
+export interface InfoMember {
+  name: string;
+  /** Set when the member is an artist in this library. */
+  artistId: string | null;
+}
+
+/** A "where this came from" line in the About dialog. */
+export interface InfoCredit {
+  source: "wikipedia" | "wikidata" | "lastfm" | "fanart" | "audiodb";
+  text: string;
+  url: string | null;
+  licence: string | null;
+  licenceUrl: string | null;
+}
+
+/** Outside info for an artist page (Plex first, sources filling gaps). */
+export interface ArtistInfo {
+  id: string;
+  bio: string | null;
+  bioSource: "plex" | "wikipedia" | "lastfm" | "audiodb" | null;
+  origin: string | null;
+  yearsActive: string | null;
+  members: InfoMember[];
+  tags: string[];
+  /** Last.fm listeners and plays. */
+  listeners: number | null;
+  scrobbles: number | null;
+  /** Art path for a photo, only when Plex has none. */
+  photo: string | null;
+  /** Art path for the header banner, only when Plex has no background art. */
+  banner: string | null;
+  logo: string | null;
+  credits: InfoCredit[];
+}
+
+export interface InfoKeyState {
+  saved: boolean;
+  /** The service refused the key this session. */
+  rejected: boolean;
+}
+
+export type InfoKeysStatus = Record<KeyedInfoSource, InfoKeyState>;
 
 // ---------------------------------------------------------------- output devices
 
@@ -580,6 +642,8 @@ export interface EventMap {
   "library://changed": null;
   /** One artist's page data changed outside a sync (similar artists fetched). */
   "artist://changed": { id: string };
+  /** New outside info arrived for an artist (artistInfo can be asked again). */
+  "artistinfo://changed": { id: string };
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

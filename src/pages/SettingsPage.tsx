@@ -1,5 +1,5 @@
 import { Server } from "lucide-react";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
@@ -27,6 +27,7 @@ import { NowPlayingSettings } from "../shell/NowPlayingSettings";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { updateSettings, useSettings } from "../stores/settings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
+import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
@@ -95,7 +96,25 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "souvlaki", licence: "MIT" },
 ];
 
+/** Outside sources for artist info, each under its own terms (shown under About). */
+export const SOURCE_NOTICES: { name: string; licence: string }[] = [
+  { name: "Wikipedia (artist bios)", licence: "CC BY-SA 4.0" },
+  { name: "Wikidata (artist facts)", licence: "CC0" },
+  { name: "Last.fm (with your key)", licence: "Last.fm API terms" },
+  { name: "Fanart.tv (with your key)", licence: "Fanart.tv terms" },
+  { name: "TheAudioDB (with your key)", licence: "TheAudioDB terms" },
+];
+
 // ------------------------------------------------------------------ rows
+
+/** A Settings row note in the error colour (a refused API key). */
+function errorNote(text: string | undefined): ReactNode {
+  return text ? (
+    <span className="info-key__error" role="alert">
+      {text}
+    </span>
+  ) : undefined;
+}
 
 interface RowDef {
   key: string;
@@ -106,6 +125,8 @@ interface RowDef {
   note?: ReactNode;
   /** A separate line below the description. */
   footnote?: string;
+  /** A named group inside the section (shown as a small heading). */
+  group?: string;
   control: (ids: { title: string; desc: string }) => ReactNode;
 }
 
@@ -295,6 +316,15 @@ function NoticesDialog({ open, onClose }: { open: boolean; onClose: () => void }
           </li>
         ))}
       </ul>
+      <p className="confirm__body notices__sub">Artist info comes from these sources when you turn them on.</p>
+      <ul className="notices">
+        {SOURCE_NOTICES.map((n) => (
+          <li key={n.name} className="notices__item">
+            <span className="notices__name">{n.name}</span>
+            <span className="notices__licence">{n.licence}</span>
+          </li>
+        ))}
+      </ul>
       <div className="confirm__actions">
         <Button variant="primary" onClick={onClose}>
           Close
@@ -310,7 +340,7 @@ type UpdateState = { kind: "idle" } | { kind: "checking" } | { kind: "done"; inf
 
 function matches(row: RowDef, q: string): boolean {
   if (!q) return true;
-  const hay = `${row.section} ${row.title} ${row.description}`.toLowerCase();
+  const hay = `${row.section} ${row.group ?? ""} ${row.title} ${row.description}`.toLowerCase();
   return q
     .toLowerCase()
     .split(/\s+/)
@@ -331,6 +361,7 @@ export function SettingsPage() {
   const [update, setUpdate] = useState<UpdateState>({ kind: "idle" });
   const [dialog, setDialog] = useState<"signOut" | "server" | "notices" | null>(null);
 
+  const { keys: infoKeys, setKey: setInfoKey } = useInfoKeys();
   const artMb = s?.artCacheMb;
   useEffect(() => {
     let alive = true;
@@ -363,6 +394,11 @@ export function SettingsPage() {
       (e) => setUpdate({ kind: "error", message: errText(e) || "Couldn't check for updates" }),
     );
   };
+  const clearArtistInfo = () =>
+    backend.artistInfoCacheClear().then(
+      () => toast.info("Artist info cleared"),
+      (e) => toast.error(`Couldn't clear artist info${errText(e) ? `: ${errText(e)}` : ""}`),
+    );
   const clearRecentSearches = () =>
     backend.searchRecentsClear().then(
       () => toast.info("Recent searches cleared"),
@@ -710,10 +746,59 @@ export function SettingsPage() {
       description: "The name a new playlist gets. #N becomes the next free number, so you get My playlist #1, #2 and so on.",
       control: (ids) => <PlaylistNameSetting ids={ids} />,
     },
+    // Integrations: artist info
+    {
+      key: "infoWikipedia",
+      section: "Integrations",
+      group: "Artist info",
+      title: "Wikipedia and Wikidata",
+      description: "Longer artist bios, where an artist is from, years active and band members. Only the artist's name or MusicBrainz id is sent.",
+      control: (ids) => toggle(s, "infoWikipedia", ids),
+    },
+    {
+      key: "infoLastfm",
+      section: "Integrations",
+      group: "Artist info",
+      title: "Last.fm",
+      description: "Listener counts, tags and a bio when Wikipedia has none. Needs your own free Last.fm API key, kept in this computer's keychain.",
+      note: errorNote(keyNote("lastfm", infoKeys)),
+      control: (ids) => <InfoKeyControl source="lastfm" ids={ids} keys={infoKeys} setKey={setInfoKey} />,
+    },
+    {
+      key: "infoFanart",
+      section: "Integrations",
+      group: "Artist info",
+      title: "Fanart.tv",
+      description: "Banners, logos and photos for artists Plex has no art for. Needs your Fanart.tv API key, kept in this computer's keychain.",
+      note: errorNote(keyNote("fanart", infoKeys)),
+      control: (ids) => <InfoKeyControl source="fanart" ids={ids} keys={infoKeys} setKey={setInfoKey} />,
+    },
+    {
+      key: "infoAudiodb",
+      section: "Integrations",
+      group: "Artist info",
+      title: "TheAudioDB",
+      description: "A photo and bio when nothing else has one. Needs your own TheAudioDB key; its shared test key isn't for use in apps.",
+      note: errorNote(keyNote("audiodb", infoKeys)),
+      control: (ids) => <InfoKeyControl source="audiodb" ids={ids} keys={infoKeys} setKey={setInfoKey} />,
+    },
+    {
+      key: "infoCache",
+      section: "Integrations",
+      group: "Artist info",
+      title: "Clear artist info cache",
+      description: "Artist info is kept on this computer for 30 days. Clearing it fetches everything again as you open artists.",
+      control: () => (
+        <Button size="sm" onClick={() => void clearArtistInfo()}>
+          Clear artist info
+        </Button>
+      ),
+    },
   ];
 
   const shown = rows.filter((r) => matches(r, query.trim()));
-  const sections = [...new Set(shown.map((r) => r.section))];
+  // About stays last; later sections (Integrations) go in before it.
+  const sections = [...new Set(shown.map((r) => r.section))].sort((a, b) => Number(a === "About") - Number(b === "About"));
 
   return (
     <div className="page-pad settings">
@@ -730,8 +815,11 @@ export function SettingsPage() {
             </h2>
             {shown
               .filter((r) => r.section === section)
-              .map((r) => (
-                <Row key={r.key} row={r} />
+              .map((r, i, list) => (
+                <Fragment key={r.key}>
+                  {r.group && r.group !== list[i - 1]?.group && <h3 className="settings__subheading">{r.group}</h3>}
+                  <Row row={r} />
+                </Fragment>
               ))}
           </section>
         );

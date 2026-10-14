@@ -31,6 +31,7 @@ import type {
   EventName,
   Health,
   HomeShelfId,
+  KeyedInfoSource,
   LibraryItem,
   OutputDevice,
   OutputState,
@@ -57,6 +58,7 @@ import { mockNowPlayingDetails } from "./details";
 import { popularTracks } from "./popular";
 import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
 import { mockBio } from "./bio";
+import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { MockHome, type ContextPlay } from "./home";
 import { MockPlaylists } from "./playlists";
@@ -151,6 +153,9 @@ export class MockBackend implements Backend {
   private outputSelected: string | null = null;
   /** Bytes in the (pretend) artwork cache. */
   private artUsed = 412 * 1024 * 1024;
+  /** Outside artist info: keys entered in Settings, and artists already "fetched". */
+  private infoKeys: MockInfoKeys = { keys: {}, rejected: new Set() };
+  private infoFetched = new Set<string>();
 
   // player
   private status: PlayerState["status"] = "idle";
@@ -506,7 +511,7 @@ export class MockBackend implements Backend {
       const idx = this.fx.artists.indexOf(artist);
       // Most artists have a biography; every third has none. Similar artists
       // are the next two in the library; the last few have none.
-      const about = idx % 3 === 2 ? null : mockBio(artist.title, idx);
+      const about = this.plexBio(idx, artist.title);
       const similar = idx >= this.fx.artists.length - 3 ? [] : [1, 2].map((d) => this.fx.artists[(idx + d) % this.fx.artists.length]);
       return { artist, popular, sections, plays, about, similar };
     });
@@ -1246,6 +1251,46 @@ export class MockBackend implements Backend {
   }
   updateInstallOnRestart() {
     return this.delay(() => undefined);
+  }
+
+  // ---------------------------------------------------------------- artist info
+
+  /** Plex bio as artistPage gives it (every third artist has none). */
+  private plexBio(idx: number, title: string): string | null {
+    return idx % 3 === 2 ? null : mockBio(title, idx);
+  }
+
+  artistInfo(id: string) {
+    return this.delay(() => {
+      const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
+      const idx = this.fx.artists.indexOf(artist);
+      // In the browser the first open answers with Plex only, then the
+      // "background fetch" lands, like the core.
+      const fetched = !this.opts.timelines || this.infoFetched.has(id);
+      if (!fetched) {
+        this.infoFetched.add(id);
+        this.later(600, () => this.emit("artistinfo://changed", { id }));
+      }
+      return mockArtistInfo(artist, idx, this.plexBio(idx, artist.title), this.fx.artists, this.settings, this.infoKeys, fetched);
+    });
+  }
+  artistInfoKeys() {
+    return this.delay(() => mockKeysStatus(this.infoKeys));
+  }
+  artistInfoKeySet(source: KeyedInfoSource, key: string | null) {
+    return this.delay(() => mockSetKey(this.infoKeys, source, key));
+  }
+  artistInfoCacheClear() {
+    return this.delay(() => {
+      const n = this.infoFetched.size;
+      this.infoFetched.clear();
+      return n;
+    });
+  }
+  openInfoLink(url: string) {
+    return this.delay(() => {
+      if (typeof window !== "undefined" && !isTestEnv) window.open(url, "_blank", "noopener");
+    });
   }
 }
 

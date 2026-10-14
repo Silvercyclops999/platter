@@ -1,0 +1,27 @@
+/* Settings: the Artist info rows (API key fields and errors). */
+
+.settings__subheading {
+  margin: var(--space-4) 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+}
+
+.info-key { display: flex; align-items: center; gap: var(--space-2); }
+.info-key__field {
+  width: 200px;
+  height: 32px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-overlay);
+  box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.16);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+.info-key__field::placeholder { color: var(--color-text-muted); }
+.info-key__field:hover { box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.32); }
+.info-key__field:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+
+.info-key__error { color: var(--color-error); }

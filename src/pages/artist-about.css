@@ -1,0 +1,123 @@
+/* Artist page About card (as a button) and the About dialog. */
+
+.about-card--button {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+  transition: background-color var(--motion-very-quick) ease-out;
+}
+.about-card--button:hover { background: var(--color-state-pressed); }
+.about-card--button:active { background: var(--color-state-selected); }
+.about-card--button:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.about-card__listeners {
+  margin: calc(var(--space-2) * -1) 0 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+.about-card--button .about-card__more {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+.about-card--button:hover .about-card__more { text-decoration: underline; }
+
+/* Header meta: plays line, then the listener line after a dot. */
+.artist-listeners::before { content: "•"; margin-right: 6px; }
+
+.about-dialog {
+  width: min(640px, calc(100vw - 48px));
+  padding: var(--space-6) var(--space-8) var(--space-8);
+}
+.about-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+.about-dialog__titles { min-width: 0; }
+.about-dialog__logo { display: block; max-height: 64px; max-width: 240px; margin-bottom: var(--space-3); object-fit: contain; }
+.about-dialog__title {
+  margin: 0;
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-display);
+  line-height: 1.15;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.about-dialog__stats {
+  display: flex;
+  flex-wrap: wrap;
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+.about-dialog__stats span + span::before { content: "•"; margin: 0 var(--space-2); }
+
+.about-dialog__bio p {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-md);
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+}
+
+.about-facts {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-6) 0 0;
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+.about-facts__row { display: grid; grid-template-columns: 120px 1fr; gap: var(--space-4); }
+.about-facts dt { font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); color: var(--color-text-muted); }
+.about-facts dd { margin: 0; font-size: var(--font-size-md); color: var(--color-text-primary); }
+.about-members { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin: 0; padding: 0; list-style: none; }
+.about-members li { color: var(--color-text-secondary); }
+.about-members li:not(:last-child)::after { content: ","; color: var(--color-text-secondary); }
+
+.about-tags { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-6) 0 0; padding: 0; list-style: none; }
+.about-tags__tag {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-state-selected);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.about-credits {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-6) 0 0;
+  padding: var(--space-4) 0 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.about-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: 2px;
+}
+.about-link:hover { color: var(--color-text-primary); text-decoration: underline; }
+.about-link:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.about-link--plain { color: var(--color-text-primary); }
+
+@container main (max-width: 640px) {
+  .about-facts__row { grid-template-columns: 1fr; gap: var(--space-1); }
+}
+@media (max-width: 640px) {
+  .about-dialog { padding: var(--space-4) var(--space-4) var(--space-6); }
+  .about-facts__row { grid-template-columns: 1fr; gap: var(--space-1); }
+}
