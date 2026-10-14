@@ -113,7 +113,7 @@ export function ArtistPage({ id }: { id: string }) {
                     track={t}
                     index={i + 1}
                     showArt
-                    showArtist={false}
+                    showArtist={!!t.trackArtist || t.artistId !== id}
                     active={t.id === nowTrackId}
                     playing={t.id === nowTrackId && status === "playing"}
                     onPlay={() => player.playArtist(id, t.id)}
