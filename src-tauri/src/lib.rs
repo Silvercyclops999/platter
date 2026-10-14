@@ -47,8 +47,13 @@ fn watch_library(plex: PlexState, db: DbHandle) {
                 None => true, // missed events; assume something changed
             };
             if relevant {
-                if let Some(PlexEvent::LibraryUpdate { section_id, item_type, state, .. }) = &ev {
-                    tracing::debug!(?section_id, ?item_type, ?state, "library change");
+                match &ev {
+                    Some(PlexEvent::LibraryUpdate { section_id, item_type, state, .. }) => {
+                        tracing::debug!(?section_id, ?item_type, ?state, "library change")
+                    }
+                    Some(PlexEvent::Activity { kind, .. }) => tracing::debug!(kind, "library activity ended"),
+                    Some(PlexEvent::Connected) => tracing::debug!("server connected; resync"),
+                    _ => tracing::debug!("missed server events; resync"),
                 }
                 *mark.lock() = Some(std::time::Instant::now());
             }
