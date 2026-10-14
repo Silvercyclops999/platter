@@ -129,6 +129,7 @@ describe("art sizes", () => {
     expect(artPixelSize(232, 1)).toBe(240);
     expect(artPixelSize(232, 2)).toBe(480);
     expect(artPixelSize(232, 1.5)).toBe(400);
+    expect(artPixelSize(176, 1.5)).toBe(280);
     expect(artBucket(2000)).toBe(2560);
     expect(artBucket(99999)).toBe(4096);
   });

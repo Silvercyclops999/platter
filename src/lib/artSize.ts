@@ -8,8 +8,9 @@
  * times the memory for no visible gain.
  */
 
-/** Pixel sizes art is ever requested at (steps of roughly 1.25×). */
-export const ART_STEPS = [32, 40, 48, 64, 80, 96, 128, 160, 192, 240, 320, 400, 480, 640, 800, 960, 1280] as const;
+/** Pixel sizes art is ever requested at (steps of roughly 1.25×, with an
+ * extra 280 so 1.5× displays don't round card art up to 320). */
+export const ART_STEPS = [32, 40, 48, 64, 80, 96, 128, 160, 192, 240, 280, 320, 400, 480, 640, 800, 960, 1280] as const;
 
 const MAX_PX = 4096;
 
