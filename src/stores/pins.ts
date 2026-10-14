@@ -12,7 +12,7 @@ export interface Pin {
   thumb: string | null;
 }
 
-const KEY = "platter.pins.v1";
+const KEY = "platter.pins.v1"; // gitleaks:allow (localStorage key name, not a secret)
 
 function load(): Pin[] {
   try {

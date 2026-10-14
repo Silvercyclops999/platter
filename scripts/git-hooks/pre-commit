@@ -26,7 +26,12 @@ printf '%s' "$diff" | grep -qE '(X-Plex-Token|PLEX_TOKEN|accessToken|authToken)[
 printf '%s' "$diff" | grep -qE '[0-9a-f]{32}\.plex\.direct' && fail "a real plex.direct hostname is in staged changes"
 printf '%s' "$diff" | grep -qE '[0-9a-zA-Z._%+-]+@gmail\.com' && fail "a personal email address is in staged changes"
 
-# 4. gitleaks, when installed.
+# 4. gitleaks, when installed (also finds a winget install on Windows).
+if ! command -v gitleaks >/dev/null 2>&1 && [ -n "$LOCALAPPDATA" ]; then
+  for d in "$LOCALAPPDATA"/Microsoft/WinGet/Packages/Gitleaks.Gitleaks_*; do
+    [ -x "$d/gitleaks.exe" ] && PATH="$PATH:$d"
+  done
+fi
 if command -v gitleaks >/dev/null 2>&1; then
   gitleaks git --staged --no-banner --redact -c .gitleaks.toml >/dev/null 2>&1 || {
     gitleaks git --staged --no-banner --redact -c .gitleaks.toml >&2; fail "gitleaks found a secret"; }
