@@ -104,12 +104,13 @@ describe("artist page", () => {
     expect(container.querySelector(".detail-header__art .art--round")).not.toBeNull();
   });
 
-  it("hides About and Fans also like when Plex has neither", async () => {
+  it("hides Fans also like when Plex has none, and keeps About saying there's no bio", async () => {
     const a = artistAt(11);
     render(<ArtistPage id={a.id} />);
     await screen.findByRole("heading", { level: 1, name: a.title });
     const appears = (await mock.artistPage(a.id)).appearsOn.length ? ["Appears on"] : [];
-    expect(headings()).toEqual(["Popular", "Discography", ...appears]);
+    expect(headings()).toEqual(["Popular", "Discography", "About", ...appears]);
+    expect(within(screen.getByRole("button", { name: `About ${a.title}` })).getByText("No biography available.")).toBeInTheDocument();
   });
 
   it("shows five popular songs, ten after See more, and back", async () => {

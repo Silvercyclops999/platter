@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS, type ArtistInfo } from "../lib/types";
 import { ArtistPage } from "../pages/ArtistPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { keyNote } from "../pages/ArtistInfoSettings";
-import { aboutFacts, aboutText, artistSections, bannerPath, bioParagraphs, headerVariant, listenersLine, photoPath } from "../pages/artist";
+import { aboutFacts, aboutText, artistSections, bannerPath, bioParagraphs, bioSegments, galleryPaths, headerVariant, listenersLine, NO_BIO, photoPath } from "../pages/artist";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -43,6 +43,9 @@ describe("artist info decisions", () => {
     banner: null,
     logo: null,
     credits: [],
+    gallery: [],
+    links: [],
+    bioLinks: [],
     ...p,
   });
 
@@ -76,6 +79,34 @@ describe("artist info decisions", () => {
     const base = { popular: [], sections: [], about: null, similar: [] };
     expect(artistSections(base)).toEqual([]);
     expect(artistSections({ ...base, listeners: 10 })).toEqual(["about"]);
+    // Without a bio, a photo or plays still keep the card (it says there's no bio).
+    expect(artistSections({ ...base, photo: "/p" })).toEqual(["about"]);
+    expect(artistSections({ ...base, plays: 3 })).toEqual(["about"]);
+  });
+
+  it("links each library artist the bio names once, whole words only", () => {
+    const links = [
+      { text: "Mara Quill", artistId: "5" },
+      { text: "Owls", artistId: "6" },
+    ];
+    const used = new Set<string>();
+    expect(bioSegments("With Mara Quill and the Owlsome Owls.", links, used)).toEqual([
+      { text: "With " },
+      { text: "Mara Quill", artistId: "5" },
+      { text: " and the Owlsome " },
+      { text: "Owls", artistId: "6" },
+      { text: "." },
+    ]);
+    // Later paragraphs don't link them again.
+    expect(bioSegments("Mara Quill again.", links, used)).toEqual([{ text: "Mara Quill again." }]);
+    expect(bioSegments("Plain.", [], new Set())).toEqual([{ text: "Plain." }]);
+  });
+
+  it("gallery: the core's list, else the one photo there is", () => {
+    expect(galleryPaths({ thumb: "/t" }, info({ gallery: ["/t", "/ext/a"] }))).toEqual(["/t", "/ext/a"]);
+    expect(galleryPaths({ thumb: "/t" }, null)).toEqual(["/t"]);
+    expect(galleryPaths({ thumb: null }, info({ photo: "/ext/p" }))).toEqual(["/ext/p"]);
+    expect(galleryPaths({ thumb: null }, null)).toEqual([]);
   });
 
   it("names the service that refused a key", () => {
@@ -120,6 +151,69 @@ describe("artist page with outside info", () => {
     open.mockRestore();
   });
 
+  it("the dialog: gallery with arrows, stats and links beside the bio, names linked, closes outside", async () => {
+    const user = userEvent.setup();
+    await turnOn("lastfm");
+    await turnOn("fanart");
+    const open = vi.spyOn(backend, "openInfoLink");
+    const a = artistAt(2);
+    render(<ArtistPage id={a.id} />);
+    await vi.waitFor(async () => {
+      const i = await backend.artistInfo(a.id);
+      expect(i.gallery.length).toBeGreaterThan(2);
+    });
+    await user.click(await screen.findByRole("button", { name: `About ${a.title}` }));
+    const dialog = screen.getByRole("dialog", { name: `About ${a.title}` });
+
+    // Gallery: one photo at a time, arrows and arrow keys step through.
+    const gallery = await within(dialog).findByRole("group", { name: /^Photos of / });
+    expect(gallery).toHaveAccessibleName(expect.stringMatching(/, 1 of \d+$/));
+    await user.click(within(dialog).getByRole("button", { name: "Next photo" }));
+    expect(gallery).toHaveAccessibleName(expect.stringMatching(/, 2 of \d+$/));
+    fireEvent.keyDown(gallery, { key: "ArrowLeft" });
+    expect(gallery).toHaveAccessibleName(expect.stringMatching(/, 1 of \d+$/));
+    fireEvent.keyDown(gallery, { key: "ArrowLeft" });
+    // Back past the first: the last photo.
+    expect(gallery.getAttribute("aria-label")).toMatch(/, (\d+) of \1$/);
+
+    // Side column: Last.fm numbers and your plays, facts, links.
+    const side = within(dialog).getByRole("complementary", { name: "Stats and links" });
+    expect(within(side).getByText("listeners on Last.fm")).toBeInTheDocument();
+    expect(within(side).getByText(/plays? in your library/)).toBeInTheDocument();
+    expect(within(side).getByText("Years active")).toBeInTheDocument();
+    const links = within(side).getByRole("list", { name: "Links" });
+    await user.click(within(links).getByRole("button", { name: "Instagram" }));
+    expect(open).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/www\.instagram\.com\//), a.id);
+    expect(within(links).getByRole("button", { name: "Wikipedia" })).toBeInTheDocument();
+
+    // A library artist the bio names links to their page.
+    const info = await backend.artistInfo(a.id);
+    expect(info.bioLinks.length).toBe(1);
+    const named = within(dialog).getByRole("button", { name: info.bioLinks[0].text });
+    expect(named).toHaveClass("about-bio-link");
+    await user.click(named);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const r = useRouter.getState();
+    expect(r.entries[r.index].route).toEqual({ name: "artist", id: info.bioLinks[0].artistId });
+    open.mockRestore();
+  });
+
+  it("closes with a click outside, Esc or the close button", async () => {
+    const user = userEvent.setup();
+    const a = artistAt(2);
+    render(<ArtistPage id={a.id} />);
+    const card = await screen.findByRole("button", { name: `About ${a.title}` });
+    await user.click(card);
+    fireEvent.mouseDown(document.querySelector(".dialog-backdrop")!);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(card);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(card);
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("keeps a long Plex bio and credits no outside text", async () => {
     const user = userEvent.setup();
     const a = artistAt(0); // long Plex bio
@@ -154,8 +248,9 @@ describe("artist page with outside info", () => {
     const a = artistAt(2);
     render(<ArtistPage id={a.id} />);
     await screen.findByRole("heading", { level: 1, name: a.title });
-    // No Plex bio, no outside sources: no About section at all.
-    expect(screen.queryByRole("button", { name: `About ${a.title}` })).toBeNull();
+    // No Plex bio, no outside sources: the card stays, saying so.
+    const card = await screen.findByRole("button", { name: `About ${a.title}` });
+    expect(within(card).getByText(NO_BIO)).toBeInTheDocument();
     expect(screen.queryByText(/listeners on Last\.fm$/)).toBeNull();
   });
 

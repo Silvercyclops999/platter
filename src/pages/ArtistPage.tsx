@@ -73,7 +73,10 @@ function ArtistView({ id }: { id: string }) {
 
   if (error && !data) return <p className="page-pad page-error">Couldn't load this artist: {error.message}</p>;
 
-  const sections = data ? artistSections({ ...data, about, listeners: info?.listeners }) : [];
+  // A library artist keeps About without a bio; a credited name needs something to say.
+  const sections = data
+    ? artistSections({ ...data, about, listeners: info?.listeners, photo: credited ? null : photoPath(data.artist, info), plays: credited ? 0 : data.plays })
+    : [];
   const text = artist ? (
     <>
       <span className="detail-header__type">Artist</span>

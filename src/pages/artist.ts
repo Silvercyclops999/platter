@@ -1,6 +1,6 @@
 /** Artist page decisions, kept apart from the component so they can be tested. */
 import { SECTION_LABELS } from "../lib/format";
-import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, ReleaseSection } from "../lib/types";
+import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, BioLink, ReleaseSection } from "../lib/types";
 
 /** Popular songs shown at first, and after "See more". */
 export const POPULAR_FIRST = 5;
@@ -102,15 +102,21 @@ export type ArtistSectionId = "popular" | "discography" | "about" | "fansAlsoLik
 
 /**
  * Sections in page order, leaving out the ones with nothing to show. About
- * shows with a bio or a Last.fm listener count.
+ * shows with a bio, a Last.fm listener count, a photo or plays (without a
+ * bio it says so).
  */
 export function artistSections(
-  page: Pick<ArtistPage, "popular" | "sections" | "about" | "similar"> & { appearsOn?: Album[]; listeners?: number | null },
+  page: Pick<ArtistPage, "popular" | "sections" | "about" | "similar"> & {
+    appearsOn?: Album[];
+    listeners?: number | null;
+    photo?: string | null;
+    plays?: number;
+  },
 ): ArtistSectionId[] {
   const out: ArtistSectionId[] = [];
   if (page.popular.length) out.push("popular");
   if (page.sections.some((s) => s.albums.length)) out.push("discography");
-  if (page.about?.trim() || page.listeners) out.push("about");
+  if (page.about?.trim() || page.listeners || page.photo || page.plays) out.push("about");
   if (page.similar.length) out.push("fansAlsoLike");
   if (page.appearsOn?.length) out.push("appearsOn");
   return out;
@@ -120,3 +126,53 @@ export function artistSections(
 export function playsLine(plays: number): string {
   return `${plays.toLocaleString("en-US")} ${plays === 1 ? "play" : "plays"} in your library`;
 }
+
+/** Said in the About card and dialog when no source has a bio. */
+export const NO_BIO = "No biography available.";
+
+/**
+ * The About dialog's photos: the gallery the core put together, else the
+ * one photo there is (Plex's, or a source's), else none.
+ */
+export function galleryPaths(artist: Pick<Artist, "thumb">, info?: Pick<ArtistInfo, "gallery" | "photo"> | null): string[] {
+  if (info?.gallery?.length) return info.gallery;
+  const one = photoPath(artist, info);
+  return one ? [one] : [];
+}
+
+/** A run of bio text, linked to a library artist or not. */
+export interface BioSegment {
+  text: string;
+  artistId?: string;
+}
+
+const isWordChar = (c: string | undefined) => !!c && /[\p{L}\p{N}]/u.test(c);
+
+/**
+ * A bio paragraph split so the library artists it names can be linked, each
+ * only at its first mention in the whole bio (`used` carries that across
+ * paragraphs). Matches whole words only.
+ */
+export function bioSegments(text: string, links: BioLink[], used: Set<string>): BioSegment[] {
+  const out: BioSegment[] = [];
+  let rest = text;
+  for (;;) {
+    let best: { at: number; link: BioLink } | null = null;
+    for (const link of links) {
+      if (used.has(link.artistId) || !link.text) continue;
+      let at = rest.indexOf(link.text);
+      while (at >= 0 && (isWordChar(rest[at - 1]) || isWordChar(rest[at + link.text.length]))) at = rest.indexOf(link.text, at + 1);
+      if (at >= 0 && (!best || at < best.at || (at === best.at && link.text.length > best.link.text.length))) best = { at, link };
+    }
+    if (!best) break;
+    if (best.at > 0) out.push({ text: rest.slice(0, best.at) });
+    out.push({ text: best.link.text, artistId: best.link.artistId });
+    used.add(best.link.artistId);
+    rest = rest.slice(best.at + best.link.text.length);
+  }
+  if (rest) out.push({ text: rest });
+  return out;
+}
+
+/** "48,210" for the About dialog's big numbers. */
+export const bigNumber = (n: number) => n.toLocaleString("en-US");
