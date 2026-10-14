@@ -86,7 +86,7 @@ describe("the Listen on section", () => {
   it("is hidden when the setting is off", async () => {
     act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false, showCastDevices: false } }));
     render(<AppShell />);
-    await within(picker()).findByRole("heading", { name: "Select another output" });
+    await within(picker()).findByRole("heading", { name: "This computer" });
     expect(within(picker()).queryByRole("region", { name: "Listen on" })).toBeNull();
   });
 

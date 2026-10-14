@@ -96,3 +96,18 @@
 .output-row__name.truncate,
 .output-row__sub.truncate { white-space: normal; overflow-wrap: anywhere; }
 .output-empty { margin: 0; padding: var(--space-2) 0; color: var(--color-text-secondary); font-size: var(--font-size-md); }
+
+/* Compact one-line rows for the computer's outputs; full name in the tooltip. */
+.output-row__name--one.truncate,
+.output-row__sub--one.truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.output-row--compact { padding-block: var(--space-2); }
+.output-disclosure {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  width: 100%; min-width: 0; margin-top: var(--space-2); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card); background: var(--color-surface-raised, var(--color-state-hover));
+  color: var(--color-text-primary); font-size: var(--font-size-md); text-align: left;
+}
+.output-disclosure:hover { background: var(--color-state-pressed); }
+.output-disclosure__chev { flex: none; transition: transform var(--motion-quick, 150ms) ease; }
+.output-disclosure[aria-expanded="true"] .output-disclosure__chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .output-disclosure__chev { transition: none; } }

@@ -89,10 +89,11 @@ describe("devices from the core", () => {
   it("shows the current device card and the other outputs", async () => {
     render(<AppShell />);
     fireEvent.click(toggle());
+    fireEvent.click(await within(picker()!).findByRole("button", { name: /^Sound output/ }));
     const p = picker()!;
-    expect(await within(p).findByText(SPEAKERS.name)).toBeInTheDocument();
+    expect((await within(p).findAllByTitle(SPEAKERS.name))[0]).toBeInTheDocument();
     expect(within(p).getByText("Current device, system default")).toBeInTheDocument();
-    expect(within(p).getByText(/^This computer/)).toBeInTheDocument();
+    expect(within(p).getAllByText(/^This computer/).length).toBeGreaterThan(0);
     expect(within(p).getByRole("button", { name: `Play on ${HEADPHONES.name}` })).toBeInTheDocument();
     expect(within(p).getByRole("button", { name: "Play on Living Room Receiver (HDMI)" })).toBeInTheDocument();
     // Following the default already: no separate System default row.
@@ -111,10 +112,11 @@ describe("devices from the core", () => {
 
     render(<AppShell />);
     fireEvent.click(toggle());
+    fireEvent.click(await within(picker()!).findByRole("button", { name: /^Sound output/ }));
     await user.click(await within(picker()!).findByRole("button", { name: `Play on ${HEADPHONES.name}` }));
     await waitFor(() => expect(useOutput.getState().state?.selected).toBe(HEADPHONES.id));
     const p = picker()!;
-    expect(within(p).getByText(HEADPHONES.name)).toBeInTheDocument();
+    expect(within(p).getAllByTitle(HEADPHONES.name)[0]).toBeInTheDocument();
     expect(within(p).getByRole("button", { name: "Play on System default" })).toBeInTheDocument();
     const after = await mock.playerState();
     expect(after.status).toBe("playing");
@@ -136,7 +138,8 @@ describe("devices from the core", () => {
     await waitFor(() => expect(usePlayer.getState().state?.status).toBe("playing"));
     render(<AppShell />);
     fireEvent.click(toggle());
-    expect(await within(picker()!).findByText(HEADPHONES.name)).toBeInTheDocument();
+    fireEvent.click(await within(picker()!).findByRole("button", { name: /^Sound output/ }));
+    expect((await within(picker()!).findAllByTitle(HEADPHONES.name))[0]).toBeInTheDocument();
 
     act(() => mock.unplugOutput(HEADPHONES.id));
     await waitFor(() =>
@@ -145,7 +148,7 @@ describe("devices from the core", () => {
     expect(outputLostMessage(HEADPHONES.name)).toBe("Headphones (USB Audio DAC) disconnected. Switched to the system default.");
     await waitFor(() => expect(usePlayer.getState().state?.status).toBe("paused"));
     const p = picker()!;
-    await waitFor(() => expect(within(p).getByText(SPEAKERS.name)).toBeInTheDocument());
+    await waitFor(() => expect(within(p).getAllByTitle(SPEAKERS.name)[0]).toBeInTheDocument());
     expect(within(p).queryByText(HEADPHONES.name)).toBeNull();
     expect(useOutput.getState().state?.selected).toBeNull();
   });
@@ -153,6 +156,7 @@ describe("devices from the core", () => {
   it("an unplugged device that wasn't chosen just leaves the list", async () => {
     render(<AppShell />);
     fireEvent.click(toggle());
+    fireEvent.click(await within(picker()!).findByRole("button", { name: /^Sound output/ }));
     await within(picker()!).findByRole("button", { name: `Play on ${HEADPHONES.name}` });
     act(() => mock.unplugOutput(HEADPHONES.id));
     await waitFor(() => expect(within(picker()!).queryByRole("button", { name: `Play on ${HEADPHONES.name}` })).toBeNull());
