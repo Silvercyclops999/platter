@@ -72,7 +72,7 @@ describe("Share submenu", () => {
         <ContextMenuHost />
       </>,
     );
-    fireEvent.contextMenu(screen.getByRole("listitem", { name: new RegExp(released.title) }), { clientX: 5, clientY: 5 });
+    fireEvent.contextMenu(screen.getByRole("row", { name: new RegExp(released.title) }), { clientX: 5, clientY: 5 });
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByRole("menuitem", { name: "Share" })).toHaveAttribute("aria-haspopup", "menu");
   });

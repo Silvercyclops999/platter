@@ -7,16 +7,19 @@
 
 /* "Disc N" row that starts each disc of a multi-disc album. */
 .album-disc {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-4);
   height: 56px;
   padding: 0 var(--space-4);
   margin-top: var(--space-2);
   color: var(--color-text-secondary);
 }
 .album-disc:first-child { margin-top: 0; }
+.album-disc__cell {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  height: 100%;
+}
 .album-disc__icon { display: flex; justify-content: flex-end; }
 .album-disc__label { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); }
 

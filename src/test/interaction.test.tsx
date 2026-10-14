@@ -15,6 +15,7 @@ import { useShortcuts } from "../shell/useShortcuts";
 import { resetVolumeNudge, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { useUi } from "../stores/ui";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 const route = () => useRouter.getState().entries[useRouter.getState().index].route;
@@ -47,7 +48,7 @@ function List3({ onPlay = vi.fn() }: { onPlay?: () => void }) {
   );
 }
 
-const rows = () => screen.getAllByRole("listitem");
+const rows = () => body(screen.getAllByRole("row"));
 const selectedTitles = () => rows().filter((r) => r.dataset.selected === "true").map((r) => r.dataset.trackId);
 
 describe("track row selection", () => {
@@ -145,7 +146,7 @@ describe("track row selection", () => {
     const row = rows()[0];
     expect(row).toHaveClass("is-active");
     expect(row.querySelector(".eq")).not.toBeNull();
-    await user.click(screen.getByRole("button", { name: `Pause ${t.title}` }));
+    await user.click(screen.getByRole("button", { name: new RegExp(`^Pause ${t.title} by `) }));
     expect(toggle).toHaveBeenCalled();
     expect(onPlay).not.toHaveBeenCalled();
   });

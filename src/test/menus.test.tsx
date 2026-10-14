@@ -28,7 +28,7 @@ function row() {
       <ContextMenuHost />
     </>,
   );
-  return screen.getByRole("listitem", { name: new RegExp(t1.title) });
+  return screen.getByRole("row", { name: new RegExp(t1.title) });
 }
 
 describe("track menu", () => {
@@ -53,7 +53,7 @@ describe("track menu", () => {
 
   it("the options button opens the menu aligned to the button", async () => {
     const r = row();
-    fireEvent.click(within(r).getByRole("button", { name: `More options for ${t1.title}` }));
+    fireEvent.click(within(r).getByRole("button", { name: new RegExp(`^More options for ${t1.title} by `) }));
     await screen.findByRole("menu");
     expect(useUi.getState().menu?.anchor).toBeDefined();
   });

@@ -14,6 +14,7 @@ import { useShortcuts } from "../shell/useShortcuts";
 import { SettingsPage } from "../pages/SettingsPage";
 import { useRouter } from "../stores/router";
 import { useUi } from "../stores/ui";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 const route = () => useRouter.getState().entries[useRouter.getState().index].route;
@@ -155,7 +156,7 @@ describe("track lists are one Tab stop", () => {
       </TrackList>
     );
   }
-  const rows = () => screen.getAllByRole("listitem");
+  const rows = () => body(screen.getAllByRole("row"));
 
   it("only one row is tabbable, and it follows focus", async () => {
     const user = userEvent.setup();

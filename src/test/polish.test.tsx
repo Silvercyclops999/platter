@@ -79,7 +79,7 @@ describe("toasts", () => {
   it("a toast about a song, album or playlist shows its cover in place of the icon", () => {
     render(<Toaster />);
     act(() => void toast.info("Added to Road Trip", { path: mock.fx.albums[0].thumb, kind: "playlist" }));
-    const t = screen.getByRole("status");
+    const t = within(screen.getByRole("status", { name: "Notifications" })).getByText("Added to Road Trip").closest<HTMLElement>(".toast")!;
     expect(t).toHaveClass("toast--art");
     expect(t.querySelector(".toast__art .art")).not.toBeNull();
     expect(t.querySelector(".toast__icon")).toBeNull();
@@ -89,7 +89,7 @@ describe("toasts", () => {
     render(<Toaster />);
     act(() => void toast.info("Lyrics saved"));
     act(() => void toast.info("Added to queue", { path: null }));
-    for (const t of screen.getAllByRole("status")) {
+    for (const t of Array.from(screen.getByRole("status", { name: "Notifications" }).querySelectorAll(".toast"))) {
       expect(t).not.toHaveClass("toast--art");
       expect(t.querySelector(".toast__icon")).not.toBeNull();
     }

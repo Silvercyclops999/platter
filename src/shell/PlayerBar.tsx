@@ -26,7 +26,7 @@ import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Slider } from "../components/Slider";
 import { Tooltip } from "../components/Tooltip";
-import { formatDuration } from "../lib/format";
+import { formatDuration, trackArtistLine } from "../lib/format";
 import { modKey } from "../lib/platform";
 import { dropOnQueue, endSongDrag, startSongDrag, tracksDrag, useSongDrop } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
@@ -84,13 +84,13 @@ export function SeekBar() {
       </span>
       <div className="seek__bar">
         <Slider
-          label="Seek"
+          label={hasTrack ? "Seek" : "Seek, nothing playing"}
           value={Math.min(shown, durationMs)}
           max={Math.max(durationMs, 1)}
           step={SEEK_KEY_STEP}
           pageStep={SEEK_PAGE_STEP}
           disabled={!hasTrack}
-          valueText={(v) => `${formatDuration(v)} of ${formatDuration(durationMs)}`}
+          valueText={(v) => (hasTrack ? `${formatDuration(v)} of ${formatDuration(durationMs)}` : "Nothing playing")}
           // Pressing seeks at once; while held the time stays at the pointer,
           // and letting go commits where it ended. A press outside a loop's
           // span clears the loop (the core does that on the seek).
@@ -255,9 +255,11 @@ function LyricsButton() {
   const on = useFullWindow((s) => s.open && s.mode === "lyrics");
   const none = !trackId || (!loading && !lyrics);
   const off = none && !on;
+  // Off, the name says why, so a screen reader hears the reason too.
+  const reason = trackId ? "No lyrics for this song" : "Lyrics, nothing playing";
   return (
     <IconButton
-      label="Lyrics"
+      label={off ? reason : "Lyrics"}
       tooltip={off ? (trackId ? "No lyrics for this song" : "Lyrics") : "Lyrics"}
       pressed={on}
       softDisabled={off}
@@ -272,7 +274,7 @@ function ExpandButton({ disabled }: { disabled: boolean }) {
   const open = useFullWindow((s) => s.open);
   return (
     <IconButton
-      label="Expanded view"
+      label={disabled && !open ? "Expanded view, nothing playing" : "Expanded view"}
       tooltip={open ? "Close expanded view" : "Expanded view"}
       pressed={open}
       disabled={disabled && !open}
@@ -294,6 +296,27 @@ function QueueButton() {
   );
 }
 
+/**
+ * A polite "Now playing: <title> by <artist>" line for screen readers when
+ * the song changes (not on first load, which would talk over the app).
+ */
+function NowPlayingAnnouncer({ text }: { text: string | null }) {
+  const [said, setSaid] = useState("");
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    setSaid(text ?? "");
+  }, [text]);
+  return (
+    <span className="sr-only" aria-live="polite" aria-atomic="true" data-testid="now-playing-announcer">
+      {said}
+    </span>
+  );
+}
+
 /** Bottom player bar. */
 export function PlayerBar() {
   const state = usePlayer((s) => s.state);
@@ -308,9 +331,12 @@ export function PlayerBar() {
       ? { draggable: true, onDragStart: (e: React.DragEvent) => void startSongDrag(e, tracksDrag([track])), onDragEnd: endSongDrag }
       : null;
 
+  const nowText = track ? `Now playing: ${track.title} by ${trackArtistLine(track)}` : null;
+
   return (
-    <footer className="player-bar" aria-label="Player">
-      <div className="player-bar__now" {...dragNow}>
+    <aside className="player-bar" aria-label="Player">
+      <NowPlayingAnnouncer text={nowText} />
+      <div className="player-bar__now" role="region" aria-label={nowText ?? "Nothing playing"} {...dragNow}>
         {track ? (
           <>
             <button
@@ -370,6 +396,6 @@ export function PlayerBar() {
         <Volume />
         <ExpandButton disabled={!track} />
       </div>
-    </footer>
+    </aside>
   );
 }

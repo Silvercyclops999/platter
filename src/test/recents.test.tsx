@@ -9,6 +9,7 @@ import { RecentsPage } from "../pages/RecentsPage";
 import { dayLabel, entryLines, groupByDay } from "../pages/recents";
 import { AppMenu } from "../shell/TopBar";
 import { useRouter } from "../stores/router";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 const route = () => useRouter.getState().entries[useRouter.getState().index].route;
@@ -101,7 +102,7 @@ describe("Recents page", () => {
     expect(expand).toHaveAttribute("aria-expanded", "false");
     await user.click(expand);
     expect(within(rows[0]).getByRole("button", { name: `Hide songs for ${album!.title}` })).toHaveAttribute("aria-expanded", "true");
-    await waitFor(() => expect(within(rows[0]).getAllByRole("listitem").filter((r) => r.classList.contains("track-row"))).toHaveLength(3));
+    await waitFor(() => expect(body(within(rows[0]).getAllByRole("row")).filter((r) => r.classList.contains("track-row"))).toHaveLength(3));
     vi.useRealTimers();
   });
 

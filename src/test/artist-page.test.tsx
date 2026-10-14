@@ -8,6 +8,7 @@ import type { Album, ArtistPageSection, ReleaseSection } from "../lib/types";
 import { ArtistPage } from "../pages/ArtistPage";
 import { useRouter } from "../stores/router";
 import { artistSections, discographyChips, discographyItems, headerVariant, playsLine } from "../pages/artist";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 
@@ -118,12 +119,12 @@ describe("artist page", () => {
     const user = userEvent.setup();
     render(<ArtistPage id={artistAt(0).id} />);
     await screen.findByRole("button", { name: "See more" });
-    const list = screen.getByRole("list", { name: "Popular tracks" });
-    expect(within(list).getAllByRole("listitem")).toHaveLength(5);
+    const list = screen.getByRole("grid", { name: "Popular tracks" });
+    expect(body(within(list).getAllByRole("row"))).toHaveLength(5);
     await user.click(screen.getByRole("button", { name: "See more" }));
-    expect(within(list).getAllByRole("listitem")).toHaveLength(10);
+    expect(body(within(list).getAllByRole("row"))).toHaveLength(10);
     await user.click(screen.getByRole("button", { name: "Show less" }));
-    expect(within(list).getAllByRole("listitem")).toHaveLength(5);
+    expect(body(within(list).getAllByRole("row"))).toHaveLength(5);
   });
 
   it("switches the discography row with chips that act like tabs", async () => {
@@ -196,13 +197,13 @@ describe("artist page", () => {
     const a = artistAt(0);
     render(<ArtistPage id={a.id} />);
     await screen.findByRole("heading", { level: 1, name: a.title });
-    const list = screen.getByRole("list", { name: "Popular tracks" });
+    const list = screen.getByRole("grid", { name: "Popular tracks" });
     const real = mock.artistPage.bind(mock);
     const hit = mock.fx.tracks.find((t) => t.artistId !== a.id)!;
     const spy = vi.spyOn(mock, "artistPage").mockImplementation(async (id) => ({ ...(await real(id)), popular: [{ ...hit, title: "Global Number One" }] }));
     try {
       act(() => mock.emit("artistinfo://changed", { id: a.id }));
-      expect(await screen.findByRole("listitem", { name: /Global Number One/ })).toBeInTheDocument();
+      expect(await screen.findByRole("row", { name: /Global Number One/ })).toBeInTheDocument();
       expect(list).toBeInTheDocument();
     } finally {
       spy.mockRestore();
@@ -227,8 +228,8 @@ describe("credited artist page", () => {
     );
     await screen.findByRole("heading", { level: 1, name: "Juno Ashby" });
     expect(headings()).toEqual(["Popular", "Appears on"]);
-    const list = screen.getByRole("list", { name: "Popular tracks" });
-    expect(within(list).getAllByRole("listitem", { name: new RegExp(track.title) }).length).toBeGreaterThan(0);
+    const list = screen.getByRole("grid", { name: "Popular tracks" });
+    expect(within(list).getAllByRole("row", { name: new RegExp(track.title) }).length).toBeGreaterThan(0);
     const appears = screen.getByRole("heading", { name: "Appears on" }).closest("section")!;
     expect(within(appears).getAllByText(track.albumTitle).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "More options for Juno Ashby" }));

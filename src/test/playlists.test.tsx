@@ -25,6 +25,7 @@ import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 const route = () => useRouter.getState().entries[useRouter.getState().index].route;
@@ -191,7 +192,7 @@ describe("add to playlist submenu", () => {
         <Hosts />
       </>,
     );
-    fireEvent.contextMenu(screen.getByRole("listitem"), { clientX: 10, clientY: 10 });
+    fireEvent.contextMenu(body(screen.getAllByRole("row"))[0], { clientX: 10, clientY: 10 });
     await user.click(await screen.findByRole("menuitem", { name: "Add to playlist" }));
     return screen.findByRole("menu", { name: "Add to playlist" });
   }
@@ -280,11 +281,11 @@ function dt() {
 
 /** Rows can still be dragged (onto playlists, the queue), but not reordered here. */
 function expectNoReorder() {
-  const rows = screen.getAllByRole("listitem");
+  const rows = body(screen.getAllByRole("row"));
   const transfer = dt();
   fireEvent.dragStart(rows[1], { dataTransfer: transfer });
   fireEvent.dragOver(rows[0], { dataTransfer: transfer, clientY: 0 });
-  for (const r of screen.getAllByRole("listitem")) expect(r).not.toHaveClass("is-drop-before", "is-drop-after");
+  for (const r of body(screen.getAllByRole("row"))) expect(r).not.toHaveClass("is-drop-before", "is-drop-after");
   fireEvent.dragEnd(rows[1], { dataTransfer: transfer });
 }
 
@@ -293,9 +294,9 @@ describe("reorder", () => {
   it("drag a row in custom order: a drop line shows and the list renumbers", async () => {
     const p = await makePlaylist("Drag me", 4);
     page(p.id);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(4));
     const before = rowTitles();
-    const rows = screen.getAllByRole("listitem");
+    const rows = body(screen.getAllByRole("row"));
     expect(rows[3]).toHaveAttribute("draggable", "true");
     const transfer = dt();
     fireEvent.dragStart(rows[3], { dataTransfer: transfer });
@@ -304,16 +305,16 @@ describe("reorder", () => {
     fireEvent.drop(rows[0], { dataTransfer: transfer, clientY: 0 });
     expect(rowTitles()).toEqual([before[3], before[0], before[1], before[2]]);
     await waitFor(async () => expect(await tracksOf(p.id)).toEqual([before[3], before[0], before[1], before[2]]));
-    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent(/^1/);
+    expect(body(screen.getAllByRole("row"))[0]).toHaveTextContent(/^1/);
   });
 
   it("Alt+Shift+Up and Down move the selected rows", async () => {
     const user = userEvent.setup();
     const p = await makePlaylist("Keys", 3);
     page(p.id);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(3));
     const before = rowTitles();
-    const row = screen.getAllByRole("listitem")[0];
+    const row = body(screen.getAllByRole("row"))[0];
     await user.click(row.querySelector(".track-row__title")!);
     await user.keyboard("{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}");
     expect(rowTitles()).toEqual([before[1], before[0], before[2]]);
@@ -326,12 +327,12 @@ describe("reorder", () => {
     const user = userEvent.setup();
     const p = await makePlaylist("Sorted", 3);
     page(p.id);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(3));
     await user.click(screen.getByRole("button", { name: "Sort songs: Custom order" }));
     await user.click(screen.getByRole("menuitemradio", { name: "Title" }));
     expectNoReorder();
     const stored = await tracksOf(p.id);
-    await user.click(screen.getAllByRole("listitem")[0].querySelector(".track-row__title")!);
+    await user.click(body(screen.getAllByRole("row"))[0].querySelector(".track-row__title")!);
     await user.keyboard("{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}");
     expect(await tracksOf(p.id)).toEqual(stored);
   });
@@ -342,9 +343,9 @@ describe("remove", () => {
     const user = userEvent.setup();
     const p = await makePlaylist("Undo me", 3);
     page(p.id);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(3));
     const before = rowTitles();
-    fireEvent.contextMenu(screen.getAllByRole("listitem")[1], { clientX: 5, clientY: 5 });
+    fireEvent.contextMenu(body(screen.getAllByRole("row"))[1], { clientX: 5, clientY: 5 });
     const menu = await screen.findByRole("menu");
     const labels = within(menu).getAllByRole("menuitem").map((m) => m.textContent);
     expect(labels.slice(0, 4)).toEqual(["Add to playlist", "Add to Liked Songs", "Remove from this playlist", "Add to queue"]);
@@ -360,9 +361,9 @@ describe("remove", () => {
     const user = userEvent.setup();
     const p = await makePlaylist("Multi", 4);
     page(p.id);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(4));
     const before = rowTitles();
-    const rows = screen.getAllByRole("listitem");
+    const rows = body(screen.getAllByRole("row"));
     await user.click(rows[0].querySelector(".track-row__title")!);
     await user.keyboard("{Shift>}");
     await user.click(rows[1].querySelector(".track-row__title")!);
@@ -432,7 +433,7 @@ describe("smart playlists", () => {
   it("are read only: no edits, no drag, no remove; the menu has play, queue and duplicate", async () => {
     const user = userEvent.setup();
     page(SMART);
-    await waitFor(() => expect(screen.getAllByRole("listitem").length).toBeGreaterThan(1));
+    await waitFor(() => expect(body(screen.getAllByRole("row")).length).toBeGreaterThan(1));
     expect(screen.getByText("Smart playlist")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Most Played" })).not.toBeInTheDocument();
     expectNoReorder();
@@ -440,7 +441,7 @@ describe("smart playlists", () => {
     const menu = await screen.findByRole("menu");
     expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Add to queue", "Duplicate", "Share", "Pin to sidebar"]);
     await user.keyboard("{Escape}");
-    fireEvent.contextMenu(screen.getAllByRole("listitem")[0], { clientX: 5, clientY: 5 });
+    fireEvent.contextMenu(body(screen.getAllByRole("row"))[0], { clientX: 5, clientY: 5 });
     const rowMenu = await screen.findByRole("menu");
     expect(within(rowMenu).queryByRole("menuitem", { name: "Remove from this playlist" })).not.toBeInTheDocument();
   });
@@ -461,7 +462,7 @@ describe("app states", () => {
   it("Plex refuses a playlist write: toast, and the playlist shows as Plex has it", async () => {
     const p = await makePlaylist("Refused", 2);
     page(p.id);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(2));
     mock.pl.refuseNextWrite();
     await act(() => backend.playlistUpdate(p.id, { title: "Never" }));
     await waitFor(() => expect(toastText()).toContain(`Plex didn't accept a change to "Refused". Showing it as it is in Plex.`));
@@ -473,7 +474,7 @@ describe("app states", () => {
     const p = await makePlaylist("Gone soon", 1);
     act(() => useRouter.getState().navigate({ name: "playlist", id: p.id }));
     page(p.id);
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(1));
     act(() => mock.pl.deleteElsewhere(p.id));
     await waitFor(() => expect(route().name).toBe("home"));
     expect(toastText()).toContain("This playlist was deleted.");

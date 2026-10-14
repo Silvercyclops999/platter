@@ -12,6 +12,7 @@ import { connectPlayer, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 const toasts = () => useToasts.getState().toasts;
@@ -64,9 +65,9 @@ describe("album page", () => {
     const album = live();
     const tracks = mock.fx.tracksByAlbum.get(album.id)!;
     render(<AlbumPage id={album.id} />);
-    const list = await screen.findByRole("list", { name: `${album.title} tracks` });
-    await waitFor(() => expect(within(list).getByRole("listitem", { name: "Disc 1" })).toBeInTheDocument());
-    const items = within(list).getAllByRole("listitem");
+    const list = await screen.findByRole("grid", { name: `${album.title} tracks` });
+    await waitFor(() => expect(within(list).getByRole("row", { name: "Disc 1" })).toBeInTheDocument());
+    const items = body(within(list).getAllByRole("row"));
     const disc2 = items.findIndex((i) => i.getAttribute("aria-label") === "Disc 2");
     expect(items[0]).toHaveAccessibleName("Disc 1");
     expect(disc2).toBe(tracks.filter((x) => x.discNumber === 1).length + 1);
@@ -78,9 +79,9 @@ describe("album page", () => {
   it("has no disc rows on a one-disc album", async () => {
     const album = single();
     render(<AlbumPage id={album.id} />);
-    const list = await screen.findByRole("list", { name: `${album.title} tracks` });
-    await waitFor(() => expect(within(list).getAllByRole("listitem").length).toBe(mock.fx.tracksByAlbum.get(album.id)!.length));
-    expect(within(list).queryByRole("listitem", { name: /^Disc / })).toBeNull();
+    const list = await screen.findByRole("grid", { name: `${album.title} tracks` });
+    await waitFor(() => expect(body(within(list).getAllByRole("row")).length).toBe(mock.fx.tracksByAlbum.get(album.id)!.length));
+    expect(within(list).queryByRole("row", { name: /^Disc / })).toBeNull();
   });
 
   it("shows the release date and label under the tracklist, and hides them when Plex has neither", async () => {
@@ -94,7 +95,7 @@ describe("album page", () => {
 
     vi.spyOn(backend, "albumPage").mockResolvedValueOnce({ ...page, released: null, studio: null });
     const again = render(<AlbumPage id={album.id} />);
-    await screen.findByRole("list", { name: `${album.title} tracks` });
+    await screen.findByRole("grid", { name: `${album.title} tracks` });
     expect(again.container.querySelector(".album-footer")).toBeNull();
     expect(container.querySelector(".album-footer")).toBeNull();
   });
@@ -102,14 +103,14 @@ describe("album page", () => {
   it("shows the artist photo in the meta line", async () => {
     const album = single();
     const { container } = render(<AlbumPage id={album.id} />);
-    await screen.findByRole("list", { name: `${album.title} tracks` });
+    await screen.findByRole("grid", { name: `${album.title} tracks` });
     await waitFor(() => expect(container.querySelector(".detail-header__artist-photo")).not.toBeNull());
   });
 
   it("names the plays column and shows a clock over the durations", async () => {
     const album = single();
     const { container } = render(<AlbumPage id={album.id} />);
-    await screen.findByRole("list", { name: `${album.title} tracks` });
+    await screen.findByRole("grid", { name: `${album.title} tracks` });
     expect(container.querySelector(".track-list__plays")).toHaveTextContent("Plays");
     expect(container.querySelector(".track-list__dur svg")).not.toBeNull();
   });
@@ -123,7 +124,7 @@ describe("album page", () => {
         <ContextMenuHost />
       </>,
     );
-    await screen.findByRole("list", { name: `${album.title} tracks` });
+    await screen.findByRole("grid", { name: `${album.title} tracks` });
     expect(container.querySelector(".album-tracks--list")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "View as: List" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Compact" }));
@@ -152,7 +153,7 @@ describe("album page", () => {
         <ContextMenuHost />
       </>,
     );
-    await screen.findByRole("list", { name: `${album.title} tracks` });
+    await screen.findByRole("grid", { name: `${album.title} tracks` });
     await user.click(screen.getByRole("button", { name: `More options for ${album.title}` }));
     await user.click(await screen.findByRole("menuitem", { name: "Add to queue" }));
     await waitFor(() => expect(toasts().map((x) => x.message)).toEqual([`Added ${n} songs to queue`]));
@@ -170,7 +171,7 @@ describe("album page", () => {
         <ContextMenuHost />
       </>,
     );
-    const row = await screen.findByRole("listitem", { name: new RegExp(first.title) });
+    const row = await screen.findByRole("row", { name: new RegExp(first.title) });
     fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
     await user.click(await screen.findByRole("menuitem", { name: "Add to queue" }));
     await waitFor(() => expect(toasts().map((x) => x.message)).toEqual(["Added to queue"]));
@@ -223,11 +224,11 @@ describe("queue panel", () => {
       act(() => useUi.setState({ menu: null }));
       return labels;
     };
-    const now = within(screen.getByRole("region", { name: "Now playing" })).getByRole("listitem");
+    const now = within(screen.getByRole("region", { name: "Now playing" })).getByRole("row");
     expect(await menuOf(now)).not.toContain("Remove from queue");
-    const queued = within(screen.getByRole("region", { name: "Next in queue" })).getByRole("listitem");
+    const queued = within(screen.getByRole("region", { name: "Next in queue" })).getByRole("row");
     expect(await menuOf(queued)).toContain("Remove from queue");
-    const ctxRow = within(screen.getByRole("region", { name: `Next from: ${album.title}` })).getAllByRole("listitem")[0];
+    const ctxRow = body(within(screen.getByRole("region", { name: `Next from: ${album.title}` })).getAllByRole("row"))[0];
     expect(await menuOf(ctxRow)).toContain("Remove from queue");
 
     fireEvent.contextMenu(ctxRow, { clientX: 10, clientY: 10 });
@@ -248,9 +249,9 @@ describe("queue panel", () => {
     const play = vi.spyOn(backend, "playContext").mockResolvedValue();
     render(<QueuePanel />);
     await user.click(screen.getByRole("tab", { name: "Recently played" }));
-    const list = await screen.findByRole("list", { name: "Recently played" });
-    expect(within(list).getAllByRole("listitem").map((i) => i.getAttribute("data-track-id"))).toEqual([a.id, b.id, a.id]);
-    fireEvent.doubleClick(within(list).getAllByRole("listitem")[1]);
+    const list = await screen.findByRole("grid", { name: "Recently played" });
+    expect(body(within(list).getAllByRole("row")).map((i) => i.getAttribute("data-track-id"))).toEqual([a.id, b.id, a.id]);
+    fireEvent.doubleClick(body(within(list).getAllByRole("row"))[1]);
     await waitFor(() => expect(play).toHaveBeenCalled());
     expect(play.mock.calls[0][0]).toMatchObject({ context: { kind: "tracks", trackIds: [a.id, b.id, a.id] }, startTrackId: b.id });
   });

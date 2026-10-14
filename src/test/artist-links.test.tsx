@@ -45,7 +45,7 @@ function renderRow(onPlay = vi.fn()) {
       <ContextMenuHost />
     </>,
   );
-  return { onPlay, row: screen.getByRole("listitem", { name: new RegExp(featured.title) }) };
+  return { onPlay, row: screen.getByRole("row", { name: new RegExp(featured.title) }) };
 }
 
 describe("artist links in a track row", () => {
@@ -130,7 +130,7 @@ describe("artist links in the player bar", () => {
         <ContextMenuHost />
       </>,
     );
-    const bar = screen.getByRole("contentinfo", { name: "Player" });
+    const bar = screen.getByRole("complementary", { name: "Player" });
     expect(within(bar).getByRole("link", { name: t1.artistTitle })).toBeInTheDocument();
     fireEvent.click(within(bar).getByRole("link", { name: amp.title }));
     expect(route()).toEqual({ name: "artist", id: amp.id });

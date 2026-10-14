@@ -95,6 +95,8 @@ function useContextKey(): { key: string | null; playing: boolean } {
 interface ItemProps {
   e: LibEntry;
   index: number;
+  /** Items in the whole list, so a screen reader says "item 3 of 69". */
+  setSize: number;
   tabIndex: number;
   selected: boolean;
   /** This item is the play context (playing or paused). */
@@ -157,7 +159,7 @@ function PlayOverlay({ e, playing, className }: { e: LibEntry; playing: boolean;
 const pinGlyph = <PinIcon size={12} className="lib-pin" aria-label="Pinned" />;
 
 /** Default and compact list rows (sidebar and wide). */
-function Row({ e, index, tabIndex, selected, isContext, playing, filtered, onMenu, compact, wide, showArt }: ItemProps & { compact: boolean; wide: boolean; showArt: boolean }) {
+function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filtered, onMenu, compact, wide, showArt }: ItemProps & { compact: boolean; wide: boolean; showArt: boolean }) {
   const sub = subtitle(e, filtered);
   const added = wide ? addedLabel(e.addedAt) : "";
   const played = wide ? playedLabel(e.playedAt) : "";
@@ -166,6 +168,8 @@ function Row({ e, index, tabIndex, selected, isContext, playing, filtered, onMen
     <div
       className={`lib-row ${compact ? "lib-row--compact" : ""} ${wide ? "lib-row--wide" : ""} ${selected ? "is-selected" : ""} ${dnd.className}`}
       role="listitem"
+      aria-posinset={index + 1}
+      aria-setsize={setSize}
       {...dnd.props}
       onContextMenu={(ev) => {
         ev.preventDefault();
@@ -227,13 +231,15 @@ function Row({ e, index, tabIndex, selected, isContext, playing, filtered, onMen
 }
 
 /** Grid and compact grid cells. */
-function Cell({ e, index, tabIndex, selected, isContext, playing, filtered, onMenu, compact }: ItemProps & { compact: boolean }) {
+function Cell({ e, index, setSize, tabIndex, selected, isContext, playing, filtered, onMenu, compact }: ItemProps & { compact: boolean }) {
   const sub = subtitle(e, filtered);
   const dnd = useItemDnd(e);
   return (
     <div
       className={`lib-cell ${compact ? "lib-cell--compact" : ""} ${selected ? "is-selected" : ""} ${dnd.className}`}
       role="listitem"
+      aria-posinset={index + 1}
+      aria-setsize={setSize}
       {...dnd.props}
       onContextMenu={(ev) => {
         ev.preventDefault();
@@ -269,11 +275,11 @@ function Cell({ e, index, tabIndex, selected, isContext, playing, filtered, onMe
 }
 
 /** A rail tile: art only, with the title and subtitle in a tooltip. */
-function Tile({ e, index, tabIndex, selected, onMenu }: ItemProps) {
+function Tile({ e, index, setSize, tabIndex, selected, onMenu }: ItemProps) {
   const sub = subtitle(e, false);
   const dnd = useItemDnd(e);
   return (
-    <div className={`lib-tile-wrap ${dnd.className}`} role="listitem" onDoubleClick={() => !e.unavailable && void playEntry(e)} {...dnd.props}>
+    <div className={`lib-tile-wrap ${dnd.className}`} role="listitem" aria-posinset={index + 1} aria-setsize={setSize} onDoubleClick={() => !e.unavailable && void playEntry(e)} {...dnd.props}>
       <Tooltip
         placement="right"
         label={
@@ -470,6 +476,7 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
     const p: ItemProps = {
       e,
       index: i,
+      setSize: n,
       tabIndex: i === tabStop ? 0 : -1,
       selected: i === selectedIndex,
       isContext: ctx.key === key && !e.unavailable,

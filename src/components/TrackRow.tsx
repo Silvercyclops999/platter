@@ -274,6 +274,10 @@ export interface TrackRowProps {
   onDrop?: (e: React.DragEvent) => void;
   /** Drop indicator line above/below this row while dragging. */
   dropEdge?: "before" | "after" | null;
+  /** Position in the whole list for screen readers (header row is 1), when
+   *  only some rows are on the page (virtual lists); otherwise the list
+   *  numbers its rows itself. */
+  rowIndex?: number;
 }
 
 /**
@@ -309,6 +313,7 @@ export function TrackRow({
   onDragEnd,
   onDrop,
   dropEdge,
+  rowIndex,
 }: TrackRowProps) {
   const sel = useContext(SelectionContext);
   const key = rowKey ?? track.id;
@@ -317,11 +322,12 @@ export function TrackRow({
   // Dimmed while only music on this computer can play and this isn't.
   const unavailable = useApp((s) => isUnavailable(track.id, s));
   const badges = useTrackBadges(track.id);
-  const label = `${track.title}${badges.explicit ? ", explicit" : ""} by ${trackArtistLine(track)}${unavailable ? ", not available right now" : ""}`;
+  const artists = trackArtistLine(track);
+  const label = `${track.title}${badges.explicit ? ", explicit" : ""} by ${artists}${unavailable ? ", not available right now" : ""}`;
   // The hover button on the current track pauses / resumes instead of restarting.
   const playButton = () => (active ? player.toggle() : onPlay());
   const PlayIcon = active && playing ? Pause : Play;
-  const playLabel = `${active && playing ? "Pause" : "Play"} ${track.title}`;
+  const playLabel = `${active && playing ? "Pause" : "Play"} ${track.title} by ${artists}`;
   const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
 
   // A drag takes the whole selection when this row is part of it, otherwise
@@ -405,10 +411,12 @@ export function TrackRow({
 
   return (
     <div
-      role="listitem"
+      role="row"
       tabIndex={sel ? (sel.tabStop === key ? 0 : -1) : 0}
       aria-label={label}
       aria-current={active ? "true" : undefined}
+      aria-selected={sel ? picked || selected === true : undefined}
+      aria-rowindex={rowIndex}
       data-row-key={key}
       data-track-id={track.id}
       data-selected={picked || undefined}
@@ -437,7 +445,7 @@ export function TrackRow({
       onDrop={onDrop}
     >
       {!compact && (
-        <div className="track-row__num">
+        <div className="track-row__num" role="gridcell">
           {playing ? (
             <span className="eq" aria-hidden="true">
               <i />
@@ -461,7 +469,7 @@ export function TrackRow({
           </button>
         </div>
       )}
-      <div className="track-row__main">
+      <div className="track-row__main" role="gridcell">
         {(showArt || compact) && (
           <span className="track-row__art">
             <Art path={track.thumb} size={compact ? 48 : 40} />
@@ -511,7 +519,7 @@ export function TrackRow({
         </div>
       </div>
       {showAlbum && !compact && (
-        <div className="track-row__album truncate">
+        <div className="track-row__album truncate" role="gridcell">
           <TextLink tabIndex={-1} onActivate={() => nav.go({ name: "album", id: track.albumId })}>
             {track.albumTitle}
           </TextLink>
@@ -519,17 +527,19 @@ export function TrackRow({
       )}
       {!compact &&
         (added !== undefined ? (
-          <div className="track-row__added">{added}</div>
+          <div className="track-row__added" role="gridcell">
+            {added}
+          </div>
         ) : showPlays ? (
-          <div className="track-row__plays tabular">
+          <div className="track-row__plays tabular" role="gridcell">
             {track.viewCount.toLocaleString()}
           </div>
         ) : (
-          <div className="track-row__badges">
+          <div className="track-row__badges" role="gridcell">
             <QualityBadge track={track} />
           </div>
         ))}
-      <div className="track-row__end">
+      <div className="track-row__end" role="gridcell">
         {!compact && <SaveButton track={track} place="row" quietWhenLiked={likedQuiet} />}
         <span className="track-row__duration tabular">{formatDuration(track.durationMs)}</span>
         {trailing}
@@ -551,7 +561,7 @@ export function TrackRow({
           type="button"
           tabIndex={-1}
           className="track-row__hover-btn"
-          aria-label={`More options for ${track.title}`}
+          aria-label={`More options for ${track.title} by ${artists}`}
           onClick={(e) => {
             e.stopPropagation();
             openMenu(e.currentTarget);
@@ -564,7 +574,11 @@ export function TrackRow({
   );
 }
 
-/** Container for TrackRows: header row, arrow-key navigation and selection scope. */
+/**
+ * Container for TrackRows: header row, arrow-key navigation and selection
+ * scope. For screen readers it is a grid named `label` with its row and
+ * column counts, each row numbered and marked selected or not.
+ */
 export function TrackList({
   children,
   label,
@@ -572,6 +586,7 @@ export function TrackList({
   showPlays = false,
   header = true,
   addedColumn = false,
+  rowCount,
   multiMenu = (_keys: string[], ids: string[], tracks: Track[]) => multiTrackMenuItems(ids, tracks),
 }: {
   children: ReactNode;
@@ -583,6 +598,8 @@ export function TrackList({
   addedColumn?: boolean;
   /** Menu for a multi-selection: row keys and track ids in list order. */
   multiMenu?: (keys: string[], trackIds: string[], tracks: Track[]) => MenuItem[];
+  /** Total songs when only some rows are on the page (virtual lists; rows then pass `rowIndex`). */
+  rowCount?: number;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const buildMulti = useRef(multiMenu);
@@ -597,29 +614,54 @@ export function TrackList({
     const keys = Array.from(rows, (el) => el.dataset.rowKey!);
     if (!tabStop || !keys.includes(tabStop)) setTabStop(keys[0]);
   });
+  // Row and column counts for screen readers ("row 12 of 61").
+  useLayoutEffect(() => {
+    const grid = root.current;
+    if (!grid) return;
+    const rows = Array.from(grid.querySelectorAll<HTMLElement>('[role="row"]'));
+    const body = rows.filter((r) => !r.classList.contains("track-list__head"));
+    if (rowCount === undefined) rows.forEach((r, i) => r.setAttribute("aria-rowindex", String(i + 1)));
+    grid.setAttribute("aria-rowcount", String(rowCount === undefined ? rows.length : rowCount + (header ? 1 : 0)));
+    const cells = (body.find((r) => r.classList.contains("track-row")) ?? rows[0])?.querySelectorAll(':scope > [role="gridcell"], :scope > [role="columnheader"]').length;
+    if (cells) grid.setAttribute("aria-colcount", String(cells));
+    // Nothing to read yet (loading): say so rather than show an empty grid.
+    if (body.length) grid.removeAttribute("aria-busy");
+    else grid.setAttribute("aria-busy", "true");
+  });
   return (
     <SelectionContext.Provider value={selection}>
-      <div className="track-list" data-tracklist ref={root}>
+      <div className="track-list" data-tracklist ref={root} role="grid" aria-label={label} aria-multiselectable="true">
         {header && (
-          <div className={`track-list__head ${showAlbum ? "" : "track-row--no-album"} ${showPlays ? "track-row--plays" : ""} ${addedColumn ? "track-row--added" : ""}`} aria-hidden="true">
-            <span className="track-row__num">#</span>
-            <span>Title</span>
-            {showAlbum && <span className="track-list__album">Album</span>}
-            {addedColumn ? (
-              <span className="track-list__added">Date added</span>
-            ) : showPlays ? (
-              <span className="track-list__plays">Plays</span>
-            ) : (
-              <span className="track-list__badges" />
+          <div className={`track-list__head ${showAlbum ? "" : "track-row--no-album"} ${showPlays ? "track-row--plays" : ""} ${addedColumn ? "track-row--added" : ""}`} role="row">
+            <span className="track-row__num" role="columnheader" aria-label="Number">
+              #
+            </span>
+            <span role="columnheader">Title</span>
+            {showAlbum && (
+              <span className="track-list__album" role="columnheader">
+                Album
+              </span>
             )}
-            <span className="track-list__dur" title="Duration">
-              <Clock3 size={16} />
+            {addedColumn ? (
+              <span className="track-list__added" role="columnheader">
+                Date added
+              </span>
+            ) : showPlays ? (
+              <span className="track-list__plays" role="columnheader">
+                Plays
+              </span>
+            ) : (
+              <span className="track-list__badges" role="columnheader">
+                <span className="sr-only">Quality</span>
+              </span>
+            )}
+            <span className="track-list__dur" title="Duration" role="columnheader">
+              <Clock3 size={16} aria-hidden="true" />
+              <span className="sr-only">Duration</span>
             </span>
           </div>
         )}
-        <div role="list" aria-label={label}>
-          {children}
-        </div>
+        <div role="rowgroup">{children}</div>
       </div>
     </SelectionContext.Provider>
   );

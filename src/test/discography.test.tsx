@@ -14,6 +14,7 @@ import {
   typeOptions,
   validType,
 } from "../pages/discography";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 
@@ -84,9 +85,9 @@ describe("discography page", () => {
     expect(first).toHaveAccessibleName(newest.title);
     expect(within(first).getByText(releaseLine(newest))).toBeInTheDocument();
     expect(within(first).getAllByRole("button", { name: `Play ${newest.title}` })[0]).toBeInTheDocument();
-    const list = await within(first).findByRole("list", { name: `${newest.title} tracks` });
-    await within(list).findAllByRole("listitem");
-    expect(within(list).getAllByRole("listitem")).toHaveLength(mock.fx.tracksByAlbum.get(newest.id)!.length);
+    const list = await within(first).findByRole("grid", { name: `${newest.title} tracks` });
+    await within(list).findAllByRole("row").then(body);
+    expect(body(within(list).getAllByRole("row"))).toHaveLength(mock.fx.tracksByAlbum.get(newest.id)!.length);
   });
 
   it("switches to a grid from the sort and view menu, and remembers it", async () => {

@@ -6,6 +6,7 @@ import type { MockBackend } from "../lib/mock";
 import { PlayerBar, SEEK_PAGE_STEP, wheelVolumeDelta } from "../shell/PlayerBar";
 import { QueuePanel } from "../shell/QueuePanel";
 import { connectPlayer, resetVolumeNudge, usePlayer } from "../stores/player";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 let disconnect: () => void;
@@ -219,6 +220,6 @@ describe("clear queue", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "Next in queue" })).toBeNull());
     expect(screen.queryByRole("dialog")).toBeNull();
     const next = screen.getByRole("region", { name: `Next from: ${album.title}` });
-    expect(within(next).getAllByRole("listitem")).toHaveLength(tracks.length - 1);
+    expect(body(within(next).getAllByRole("row"))).toHaveLength(tracks.length - 1);
   });
 });

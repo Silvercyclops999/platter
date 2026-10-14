@@ -82,6 +82,38 @@ export function restoreScroll(el: HTMLElement, top: number, onDone: () => void, 
   return stop;
 }
 
+/** The main region's name on pages with a fixed title; others use their heading. */
+const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
+  home: "Home",
+  search: "Search",
+  library: "Your Library",
+  liked: "Liked Songs",
+  settings: "Settings",
+  recents: "Recents",
+};
+
+/**
+ * The main region is named after the page ("Home", an album's title), so a
+ * screen reader says where you are after moving. Pages that load their
+ * title use their level 1 heading once it shows.
+ */
+function useMainLabel(route: Route, entryKey: number, page: React.RefObject<HTMLDivElement | null>): string {
+  const [heading, setHeading] = useState<string | null>(null);
+  const fixed = PAGE_LABELS[route.name];
+  useEffect(() => {
+    const el = page.current;
+    setHeading(null);
+    if (!el || fixed) return;
+    const read = () => setHeading(el.querySelector("h1")?.textContent?.trim() || null);
+    read();
+    if (typeof MutationObserver === "undefined") return;
+    const mo = new MutationObserver(read);
+    mo.observe(el, { subtree: true, childList: true, characterData: true });
+    return () => mo.disconnect();
+  }, [entryKey, fixed, page]);
+  return fixed ?? heading ?? "Main content";
+}
+
 function syncLabel(s: SyncStatus | null): string | null {
   if (!s || s.phase === "idle") return null;
   const what = s.phase === "incremental" ? "changes" : s.phase;
@@ -132,6 +164,8 @@ export function MainView() {
   const pageBar = useUi((s) => s.pageBar);
   const restoring = useRef(false);
   const frame = useRef(0);
+  const page = useRef<HTMLDivElement>(null);
+  const mainLabel = useMainLabel(entry.route, entry.key, page);
 
   // Scroll-linked header state, at most once per frame: the bar background
   // goes straight to a CSS variable (no re-render); the sticky title only
@@ -182,7 +216,7 @@ export function MainView() {
   const barShown = !!pageBar && pastHeader;
 
   return (
-    <main className="main" style={{ "--tint": colors.vivid, "--tint-shade": colors.shade } as CSSProperties} aria-label="Main content">
+    <main id="main" className="main" style={{ "--tint": colors.vivid, "--tint-shade": colors.shade } as CSSProperties} aria-label={mainLabel}>
       <HealthBanner />
       <div className="main__viewport">
         <div className="main-header" ref={topBar}>
@@ -222,7 +256,7 @@ export function MainView() {
             scheduleSync();
           }}
         >
-          <div className="page" key={entry.key}>
+          <div className="page" key={entry.key} ref={page}>
             <Page route={r} />
           </div>
         </div>

@@ -61,6 +61,7 @@ export function SaveButton({ track, place, quietWhenLiked }: SaveButtonProps) {
         className={`save-btn save-btn--${place} ${liked ? "is-liked" : ""} ${quietWhenLiked ? "is-quiet" : ""} ${place === "row" && rows === "always" ? "is-always" : ""}`}
         aria-label={liked ? `${track.title} is in Liked Songs. Add to playlist` : `Add ${track.title} to Liked Songs`}
         aria-haspopup={liked ? "dialog" : undefined}
+        aria-pressed={liked}
         data-liked={liked || undefined}
         onClick={onClick}
         onDoubleClick={(e) => e.stopPropagation()}

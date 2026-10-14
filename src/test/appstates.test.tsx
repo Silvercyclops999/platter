@@ -24,6 +24,7 @@ import { PlayerBar } from "../shell/PlayerBar";
 import { connectPlayer, usePlayer } from "../stores/player";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 const SERVER = { name: "Basement Server", version: "1.42.2" };
@@ -165,7 +166,7 @@ describe("tracks that can't play are dimmed", () => {
         <TrackRow track={b} index={2} onPlay={() => {}} />
       </TrackList>,
     );
-    const rows = screen.getAllByRole("listitem");
+    const rows = body(screen.getAllByRole("row"));
     expect(rows[0]).not.toHaveClass("is-unavailable");
     expect(rows[1]).toHaveClass("is-unavailable");
     expect(rows[1]).toHaveAccessibleName(/not available right now/);

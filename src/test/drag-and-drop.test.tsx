@@ -40,6 +40,7 @@ import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 const SMART = "503";
@@ -126,7 +127,7 @@ describe("drag sources", () => {
   it("a row carries its song, and gets the selected highlight", () => {
     const tracks = mock.fx.tracks.slice(0, 3);
     render(<List tracks={tracks} />);
-    const rows = screen.getAllByRole("listitem");
+    const rows = body(screen.getAllByRole("row"));
     expect(rows[1]).toHaveAttribute("draggable", "true");
     const t = dt();
     fireEvent.dragStart(rows[1], { dataTransfer: t });
@@ -142,7 +143,7 @@ describe("drag sources", () => {
   it("a row in a selection carries the whole selection in list order", () => {
     const tracks = mock.fx.tracks.slice(0, 4);
     render(<List tracks={tracks} />);
-    const rows = screen.getAllByRole("listitem");
+    const rows = body(screen.getAllByRole("row"));
     fireEvent.click(rows[3]);
     fireEvent.click(rows[0], { ctrlKey: true, metaKey: true });
     fireEvent.click(rows[2], { ctrlKey: true, metaKey: true });
@@ -161,7 +162,7 @@ describe("drag sources", () => {
   it("a row outside the selection carries only itself", () => {
     const tracks = mock.fx.tracks.slice(0, 3);
     render(<List tracks={tracks} />);
-    const rows = screen.getAllByRole("listitem");
+    const rows = body(screen.getAllByRole("row"));
     fireEvent.click(rows[0]);
     fireEvent.click(rows[1], { ctrlKey: true, metaKey: true });
     fireEvent.dragStart(rows[2], { dataTransfer: dt() });
@@ -232,7 +233,7 @@ describe("drop targets in the library", () => {
     const smart = (await backend.playlists()).find((p) => p.id === SMART)!;
     const t = dt();
     render(<List tracks={[liked]} />);
-    fireEvent.dragStart(screen.getAllByRole("listitem").find((r) => r.classList.contains("track-row"))!, { dataTransfer: t });
+    fireEvent.dragStart(body(screen.getAllByRole("row")).find((r) => r.classList.contains("track-row"))!, { dataTransfer: t });
     expect(libRow(mine.title)).not.toHaveClass("is-drop-dim");
     expect(libRow(smart.title)).toHaveClass("is-drop-dim");
     expect(libRow("Liked Songs")).toHaveClass("is-drop-dim");
@@ -323,7 +324,7 @@ describe("the queue", () => {
     await act(async () => usePlayer.getState().set(await mock.playerState()));
     return others;
   }
-  const userRows = () => within(screen.getByRole("region", { name: "Next in queue" })).getAllByRole("listitem");
+  const userRows = () => body(within(screen.getByRole("region", { name: "Next in queue" })).getAllByRole("row"));
 
   afterEach(async () => {
     await act(() => mock.queueClear());
@@ -339,7 +340,7 @@ describe("the queue", () => {
         <List tracks={[mock.fx.tracks[9]]} />
       </>,
     );
-    const source = screen.getByRole("list", { name: "Songs" }).querySelector(".track-row")!;
+    const source = screen.getByRole("grid", { name: "Songs" }).querySelector(".track-row")!;
     const t = dt();
     fireEvent.dragStart(source, { dataTransfer: t });
     // Over the bottom half of the first row: after it.
@@ -363,7 +364,7 @@ describe("the queue", () => {
       </>,
     );
     const t = dt();
-    fireEvent.dragStart(screen.getByRole("list", { name: "Songs" }).querySelector(".track-row")!, { dataTransfer: t });
+    fireEvent.dragStart(screen.getByRole("grid", { name: "Songs" }).querySelector(".track-row")!, { dataTransfer: t });
     const body = document.querySelector(".queue-panel__body")!;
     fireEvent.dragOver(body, { dataTransfer: t });
     expect(document.querySelector(".queue-drop-line")).not.toBeNull();
@@ -381,7 +382,7 @@ describe("the queue", () => {
         <Toaster />
       </>,
     );
-    const rows = Array.from(screen.getByRole("list", { name: "Songs" }).querySelectorAll<HTMLElement>(".track-row"));
+    const rows = Array.from(screen.getByRole("grid", { name: "Songs" }).querySelectorAll<HTMLElement>(".track-row"));
     fireEvent.click(rows[0]);
     fireEvent.click(rows[1], { ctrlKey: true, metaKey: true });
     const t = dt();

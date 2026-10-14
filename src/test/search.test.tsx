@@ -82,7 +82,7 @@ describe("results page", () => {
     await user.click(screen.getByRole("button", { name: "Songs" }));
     expect(screen.getByRole("button", { name: "Songs" })).toHaveAttribute("aria-pressed", "true");
     expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ filter: "songs" }));
-    expect((await screen.findAllByRole("listitem", { name: /by Odessa Wren/ })).length).toBeGreaterThan(4);
+    expect((await screen.findAllByRole("row", { name: /by Odessa Wren/ })).length).toBeGreaterThan(4);
     expect(screen.queryByRole("region", { name: "Top result" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Artists" }));

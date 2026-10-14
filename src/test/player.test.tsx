@@ -8,6 +8,7 @@ import { clearLyricsCache } from "../shell/lyrics";
 import { PlayerBar } from "../shell/PlayerBar";
 import { QueuePanel } from "../shell/QueuePanel";
 import { connectPlayer, usePlayer } from "../stores/player";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 let disconnect: () => void;
@@ -70,7 +71,8 @@ describe("PlayerBar reflects the mock player", () => {
     mock.lyricsDown = true;
     clearLyricsCache();
     render(<PlayerBar />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Lyrics" })).toHaveAttribute("aria-disabled", "true"));
+    // Its name says why it's off.
+    await waitFor(() => expect(screen.getByRole("button", { name: "No lyrics for this song" })).toHaveAttribute("aria-disabled", "true"));
     mock.lyricsDown = false;
     clearLyricsCache();
     // The device picker works now (output picker tests cover it).
@@ -96,7 +98,7 @@ describe("QueuePanel", () => {
     expect(screen.getByRole("button", { name: "Clear queue" })).toBeInTheDocument();
 
     const next = screen.getByRole("region", { name: `Next from: ${album.title}` });
-    expect(within(next).getAllByRole("listitem")).toHaveLength(tracks.length - 2);
+    expect(body(within(next).getAllByRole("row"))).toHaveLength(tracks.length - 2);
 
     // Next plays the user-queued track before the context continues.
     await act(() => mock.playNext());

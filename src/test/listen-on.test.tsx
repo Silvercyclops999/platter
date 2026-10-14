@@ -140,7 +140,7 @@ describe("remote mode", () => {
   it("player bar controls go to the player", async () => {
     await moveToDesk();
     await waitFor(() => expect(usePlayer.getState().state?.status).toBe("playing"), { timeout: 2000 });
-    const bar = screen.getByRole("contentinfo", { name: "Player" });
+    const bar = screen.getByRole("complementary", { name: "Player" });
     fireEvent.click(within(bar).getByRole("button", { name: "Pause" }));
     await waitFor(() => expect(mock.remote.state().session?.status).toBe("paused"));
     expect(usePlayer.getState().local?.status).toBe("paused");
@@ -237,7 +237,7 @@ describe("app states", () => {
   it("player stopped by someone else: the strip says so and controls are local again", async () => {
     await moveToDesk();
     act(() => mock.remote.stopElsewhere());
-    expect(await screen.findByRole("status")).toHaveTextContent("Stopped on Studio Desk");
+    await waitFor(() => expect(screen.getAllByRole("status").some((s) => s.textContent?.includes("Stopped on Studio Desk"))).toBe(true));
     expect(usePlayer.getState().remote).toBeNull();
     // Play now plays here.
     await act(() => player.toggle());

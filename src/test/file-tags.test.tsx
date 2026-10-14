@@ -17,6 +17,7 @@ import { useRouter } from "../stores/router";
 import { connectPlayer, usePlayer } from "../stores/player";
 import { PlayerBar } from "../shell/PlayerBar";
 import { loadSettings, updateSettings } from "../stores/settings";
+import { body } from "./rows";
 
 const mock = backend as MockBackend;
 let disconnect: (() => void) | null = null;
@@ -95,10 +96,10 @@ describe("badges", () => {
     const album = mock.fx.albums[0];
     render(<AlbumPage id={album.id} />);
     const first = mock.fx.tracksByAlbum.get(album.id)![0];
-    const row = await screen.findByRole("listitem", { name: new RegExp(`^${first.title}, explicit by`) });
+    const row = await screen.findByRole("row", { name: new RegExp(`^${first.title}, explicit by`) });
     expect(within(row).getByRole("img", { name: "Explicit" })).toHaveTextContent("E");
     const second = mock.fx.tracksByAlbum.get(album.id)![1];
-    const plain = screen.getAllByRole("listitem").find((r) => r.dataset.trackId === second.id)!;
+    const plain = body(screen.getAllByRole("row")).find((r) => r.dataset.trackId === second.id)!;
     expect(within(plain).queryByRole("img", { name: "Explicit" })).toBeNull();
   });
 
@@ -106,8 +107,8 @@ describe("badges", () => {
     const build = mock.fx.albums.find((a) => a.format === null && !mock.tags.hiddenAlbums().has(a.id))!;
     render(<AlbumPage id={build.id} />);
     const tracks = mock.fx.tracksByAlbum.get(build.id)!;
-    await screen.findAllByRole("listitem");
-    const rowOf = (id: string) => screen.getAllByRole("listitem").find((r) => r.dataset.trackId === id)!;
+    await screen.findAllByRole("row").then(body);
+    const rowOf = (id: string) => body(screen.getAllByRole("row")).find((r) => r.dataset.trackId === id)!;
     expect(within(rowOf(tracks[0].id)).getByText("Leak")).toHaveAttribute("title", "Version: Leak");
     expect(within(rowOf(tracks[tracks.length - 1].id)).getByText("Snippet")).toBeInTheDocument();
   });
@@ -122,7 +123,7 @@ describe("badges", () => {
         ))}
       </TrackList>,
     );
-    const rowOf = (id: string) => screen.getAllByRole("listitem").find((r) => r.dataset.trackId === id)!;
+    const rowOf = (id: string) => body(screen.getAllByRole("row")).find((r) => r.dataset.trackId === id)!;
     // The first song is a lossy file tagged as from a lossless source; the snippet is tagged LQ.
     expect(fileQualityClass(tracks[0])).not.toBe("lossless");
     expect(within(rowOf(tracks[0].id)).getByText("Lossless")).toHaveAttribute("title", "Source quality: Lossless");
@@ -149,7 +150,7 @@ describe("badges", () => {
   it("released songs show no version badge", async () => {
     const album = mock.fx.albums[1];
     render(<AlbumPage id={album.id} />);
-    await screen.findAllByRole("listitem");
+    await screen.findAllByRole("row").then(body);
     for (const v of ["Leak", "Demo", "Snippet", "Session"]) expect(screen.queryByText(v)).toBeNull();
   });
 });
@@ -193,7 +194,7 @@ describe("editions", () => {
 
   it("albums outside a group have no picker", async () => {
     render(<AlbumPage id={mock.fx.albums[0].id} />);
-    await screen.findAllByRole("listitem");
+    await screen.findAllByRole("row").then(body);
     expect(screen.queryByRole("combobox", { name: "Edition" })).toBeNull();
   });
 });

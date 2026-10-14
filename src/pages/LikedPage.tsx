@@ -351,7 +351,7 @@ function LikedTable({
 
   return (
     <div ref={root} className={`liked__list liked__list--${view}`}>
-      <TrackList label="Liked Songs tracks" addedColumn>
+      <TrackList label="Liked Songs tracks" addedColumn rowCount={loading ? undefined : rows.length}>
         {loading ? (
           Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showArt />)
         ) : (
@@ -367,6 +367,7 @@ function LikedTable({
                   <TrackRow
                     track={t}
                     index={r.index + 1}
+                    rowIndex={r.index + 2}
                     showArt={view === "list"}
                     active={t.id === nowTrackId}
                     playing={t.id === nowTrackId && playing}

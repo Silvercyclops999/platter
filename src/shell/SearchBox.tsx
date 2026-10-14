@@ -215,6 +215,7 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
 
   return (
     <div
+      role="search"
       className={`searchbox ${collapsed ? "searchbox--expanded" : ""} ${shown ? "is-open" : ""}`}
       ref={root}
       onBlur={(e) => {

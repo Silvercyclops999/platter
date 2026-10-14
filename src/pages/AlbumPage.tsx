@@ -190,11 +190,13 @@ export function AlbumPage({ id }: { id: string }) {
               ? discGroups(data.tracks).map((g) => (
                   <Fragment key={g.disc ?? "all"}>
                     {g.disc !== null && (
-                      <div className="album-disc" role="listitem" aria-label={`Disc ${g.disc}`}>
-                        <span className="album-disc__icon">
-                          <Disc3 size={16} aria-hidden="true" />
+                      <div className="album-disc" role="row" aria-label={`Disc ${g.disc}`}>
+                        <span className="album-disc__cell" role="gridcell">
+                          <span className="album-disc__icon">
+                            <Disc3 size={16} aria-hidden="true" />
+                          </span>
+                          <span className="album-disc__label">Disc {g.disc}</span>
                         </span>
-                        <span className="album-disc__label">Disc {g.disc}</span>
                       </div>
                     )}
                     {g.tracks.map((t) => (
