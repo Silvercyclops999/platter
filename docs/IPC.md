@@ -50,6 +50,7 @@ Event `auth://changed` → `AuthStatus`.
 | `sync_now` | `{ full?: bool }` | – |
 | `home` | – | `HomeData { recentlyPlayed: Album[], recentlyAdded: Album[], jumpBackIn: Album[] }` |
 | `artists` | `{ sort: "name"|"recent"|"plays", offset, limit }` | `Page<Artist>` |
+| `artist_names` | – | `{ id, title }[]` (every artist) |
 | `albums` | `{ sort: "name"|"artist"|"year"|"recent"|"plays", offset, limit, section?: ReleaseSection }` | `Page<Album>` |
 | `playlists` | – | `Playlist[]` |
 | `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[] }` |
@@ -57,6 +58,12 @@ Event `auth://changed` → `AuthStatus`.
 | `playlist_page` | `{ id }` | `{ playlist, tracks: Track[] }` |
 
 `Page<T> = { items: T[], total }`.
+`artist_names` feeds the artist links in track lines: the UI loads it once,
+keeps it, and loads it again after `library://changed`. A track's
+`ratingCount` (global listener count, absent when Plex has none) ranks the
+artist page's `popular` list: songs with a count first, highest first, then
+the rest by your own plays. `popular` also has songs where the artist is
+credited in the track artist line, at most 10, one copy per song.
 `SyncStatus = { phase: "idle"|"artists"|"albums"|"tracks"|"incremental", done, total, lastSyncAt? }`
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.

@@ -71,6 +71,14 @@ export interface Track {
   userRating: number | null;
   viewCount: number;
   lastViewedAt: number | null;
+  /** Global listener count from Plex; absent when it has none. */
+  ratingCount?: number;
+}
+
+/** A library artist's name and id (`artist_names`). */
+export interface ArtistName {
+  id: string;
+  title: string;
 }
 
 export interface Playlist {

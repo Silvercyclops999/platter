@@ -36,6 +36,7 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["sync_now", (b) => b.syncNow(true), { full: true }],
   ["home", (b) => b.home(), undefined],
   ["artists", (b) => b.artists({ sort: "name", offset: 0, limit: 50 }), { sort: "name", offset: 0, limit: 50 }],
+  ["artist_names", (b) => b.artistNames(), undefined],
   ["albums", (b) => b.albums({ sort: "year", offset: 10, limit: 5, section: "live" }), { sort: "year", offset: 10, limit: 5, section: "live" }],
   ["playlists", (b) => b.playlists(), undefined],
   ["artist_page", (b) => b.artistPage("7"), { id: "7" }],

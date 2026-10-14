@@ -41,7 +41,9 @@ import type {
   SyncStatus,
   Track,
 } from "../types";
+import { buildArtistLookup } from "../credits";
 import { mockArtUrl } from "./art";
+import { popularTracks } from "./popular";
 import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 
@@ -339,6 +341,9 @@ export class MockBackend implements Backend {
       return { items: list.slice(args.offset, args.offset + args.limit), total: list.length };
     });
   }
+  artistNames() {
+    return this.delay(() => this.fx.artists.map((a) => ({ id: a.id, title: a.title })));
+  }
   private allAlbums(): Album[] {
     const base = this.fx.albums;
     const n = this.opts.albumCount;
@@ -379,10 +384,7 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
       const albums = this.fx.albums.filter((a) => a.artistId === id);
-      const popular = this.fx.tracks
-        .filter((t) => t.artistId === id)
-        .sort((a, b) => b.viewCount - a.viewCount)
-        .slice(0, 10);
+      const popular = popularTracks(this.fx.tracks, artist, buildArtistLookup(this.fx.artists));
       const order: ReleaseSection[] = ["albums", "singlesEps", "live", "compilations", "soundtracks", "remixes", "demos", "mixtapes"];
       const sections = order
         .map((section) => ({

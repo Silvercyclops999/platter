@@ -4,7 +4,8 @@
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
-import type { AuthStatus, Health, Playlist, SyncStatus } from "../lib/types";
+import { buildArtistLookup, type ArtistLookup } from "../lib/credits";
+import type { ArtistName, AuthStatus, Health, Playlist, SyncStatus } from "../lib/types";
 import { loadSettings } from "./settings";
 import { useToasts } from "./toasts";
 
@@ -16,6 +17,9 @@ interface AppStore {
   libraryVersion: number;
   /** Track ids stored on this computer; fetched while only those can play. */
   cached: Set<string>;
+  /** Library artist names → ids, for the artist links in track lines. */
+  artistLookup: ArtistLookup;
+  setArtistNames: (names: ArtistName[]) => void;
   setAuth: (a: AuthStatus) => void;
   setHealth: (h: Health) => void;
   setSync: (s: SyncStatus) => void;
@@ -31,6 +35,8 @@ export const useApp = create<AppStore>()((set, get) => ({
   playlists: null,
   libraryVersion: 0,
   cached: new Set(),
+  artistLookup: new Map(),
+  setArtistNames: (names) => set({ artistLookup: buildArtistLookup(names) }),
   setAuth: (auth) => set({ auth }),
   setHealth: (health) => set({ health }),
   setSync: (sync) => set({ sync }),
@@ -74,6 +80,9 @@ export function connectApp(b: Backend = backend): () => void {
   loadSettings(b);
   const loadPlaylists = () => b.playlists().then((p) => alive && useApp.getState().setPlaylists(p)).catch(() => {});
   loadPlaylists();
+  const loadArtistNames = () =>
+    b.artistNames().then((n) => alive && useApp.getState().setArtistNames(n)).catch(() => {});
+  loadArtistNames();
 
   keep(b.listen("auth://changed", (a) => useApp.getState().setAuth(a)));
   keep(b.listen("health://changed", onHealth));
@@ -82,6 +91,7 @@ export function connectApp(b: Backend = backend): () => void {
     b.listen("library://changed", () => {
       useApp.getState().bumpLibrary();
       loadPlaylists();
+      loadArtistNames();
     }),
   );
   keep(b.listen("toast", (t) => useToasts.getState().push(t, t.kind === "error" ? 6000 : 4000)));

@@ -493,6 +493,20 @@ async fn popular_fills_to_ten_and_handles_small_catalogs() {
 }
 
 #[tokio::test]
+async fn artist_names_lists_every_artist() {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(sectioned_library())), false).await;
+    let names = t.db.read(queries::artist_names).unwrap();
+    assert_eq!(
+        names,
+        vec![
+            ArtistName { id: "1".into(), title: "Archive Artist".into() },
+            ArtistName { id: "2".into(), title: "Other Artist".into() },
+        ]
+    );
+}
+
+#[tokio::test]
 async fn full_sync_stores_rating_count_and_keeps_it_when_missing_later() {
     let t = open();
     let mut lib = sectioned_library();

@@ -5,7 +5,7 @@
 //! use platter_lib::db::commands as dbc;
 //! .manage(db_handle)
 //! .invoke_handler(tauri::generate_handler![
-//!     dbc::sync_status, dbc::sync_now, dbc::home, dbc::artists, dbc::albums,
+//!     dbc::sync_status, dbc::sync_now, dbc::home, dbc::artists, dbc::artist_names, dbc::albums,
 //!     dbc::playlists, dbc::artist_page, dbc::album_page, dbc::playlist_page,
 //!     dbc::search, dbc::recent_searches, dbc::recent_search_add,
 //!     dbc::recent_searches_clear,
@@ -67,6 +67,11 @@ pub async fn albums(
 ) -> AppResult<Page<crate::model::Album>> {
     let (sort, offset, limit) = (sort.unwrap_or_default(), offset.unwrap_or(0), limit.unwrap_or(100));
     db.read_async(move |c| queries::albums(c, sort, offset, limit, section)).await
+}
+
+#[tauri::command]
+pub async fn artist_names(db: State<'_, DbHandle>) -> AppResult<Vec<ArtistName>> {
+    db.read_async(queries::artist_names).await
 }
 
 #[tauri::command]

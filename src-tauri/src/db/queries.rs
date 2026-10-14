@@ -172,6 +172,13 @@ pub fn albums(
     Ok(Page { items, total: total as u64 })
 }
 
+/// All artist names and ids (small: two short strings per artist).
+pub fn artist_names(c: &Connection) -> AppResult<Vec<ArtistName>> {
+    let mut st = c.prepare_cached("SELECT id, title FROM artists ORDER BY pk")?;
+    let rows = st.query_map([], |r| Ok(ArtistName { id: r.get(0)?, title: r.get(1)? }))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 pub fn playlists(c: &Connection) -> AppResult<Vec<Playlist>> {
     let mut st = c.prepare_cached(&format!(
         "SELECT {PLAYLIST_COLS} FROM playlists p ORDER BY p.title COLLATE NOCASE"

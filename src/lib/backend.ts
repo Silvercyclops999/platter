@@ -16,6 +16,7 @@ import type {
   AlbumsArgs,
   AppError,
   Artist,
+  ArtistName,
   ArtistPage,
   ArtistsArgs,
   AuthStatus,
@@ -56,6 +57,8 @@ export interface Backend {
   syncNow(full?: boolean): Promise<void>;
   home(): Promise<HomeData>;
   artists(args: ArtistsArgs): Promise<Page<Artist>>;
+  /** Every artist name and id (builds the artist links in track lines). */
+  artistNames(): Promise<ArtistName[]>;
   albums(args: AlbumsArgs): Promise<Page<Album>>;
   playlists(): Promise<Playlist[]>;
   artistPage(id: string): Promise<ArtistPage>;
@@ -138,6 +141,7 @@ export function createTauriBackend(): Backend {
     syncNow: (full) => call("sync_now", { full }),
     home: () => call("home"),
     artists: (args) => call("artists", { ...args }),
+    artistNames: () => call("artist_names"),
     albums: (args) => call("albums", { ...args }),
     playlists: () => call("playlists"),
     artistPage: (id) => call("artist_page", { id }),

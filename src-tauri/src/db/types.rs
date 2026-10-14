@@ -12,6 +12,15 @@ pub struct Page<T> {
     pub total: u64,
 }
 
+/// Every library artist's name and id: the UI splits track artist lines
+/// into links with it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistName {
+    pub id: String,
+    pub title: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncPhase {

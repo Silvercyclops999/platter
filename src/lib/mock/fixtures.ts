@@ -292,6 +292,14 @@ export function buildFixtures(seed = 7): Fixtures {
     });
   });
 
+  // Global listener counts on a bit under half the released tracks, like a
+  // real library. Derived from the id so the random stream above is untouched.
+  const unreleased = new Set(albums.filter((a) => a.format === null).map((a) => a.id));
+  for (const t of tracks) {
+    const h = hashString(`count:${t.id}`);
+    if (!unreleased.has(t.albumId) && h % 100 < 44) t.ratingCount = 500 + (h % 2_000_000);
+  }
+
   return { artists, albums, tracks, playlists, playlistTracks, tracksByAlbum };
 }
 
