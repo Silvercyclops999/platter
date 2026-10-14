@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, Copy, House, Minus, Square, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, House, Minus, Square, WifiOff, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -10,6 +10,7 @@ import { nav, useCanGoBack, useCanGoForward, useCurrentEntry } from "../stores/r
 import { updateSettings, useSettings } from "../stores/settings";
 import { createPlaylist } from "../stores/playlists";
 import { toast, useToasts } from "../stores/toasts";
+import { offlineMessage } from "./bannerView";
 import { Logo } from "./Logo";
 import { SearchBox } from "./SearchBox";
 import "./topbar.css";
@@ -272,6 +273,32 @@ export function AppMenu() {
 }
 
 /**
+ * A small offline icon while the server can't be reached; its tooltip says
+ * what's wrong. It goes away by itself on reconnect.
+ */
+export function OfflineIndicator() {
+  const health = useApp((s) => s.health);
+  const [now, setNow] = useState(() => Date.now());
+  const offline = health?.status === "offline";
+  // Keep "Last seen N min ago" current.
+  useEffect(() => {
+    if (!offline) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, [offline]);
+  const message = offlineMessage(health, now);
+  if (!message) return null;
+  return (
+    <Tooltip label={message} placement="bottom" wrap>
+      <span className="topbar__offline" role="img" aria-label={`Offline. ${message}`} tabIndex={0} data-testid="offline-indicator">
+        <WifiOff size={16} strokeWidth={2.25} aria-hidden="true" />
+      </span>
+    </Tooltip>
+  );
+}
+
+/**
  * The top bar, which is also the window's drag area: back and forward on the
  * left, Home and the search pill centred on the window, the app menu on the
  * right (then the window buttons on Windows; traffic lights sit at the left
@@ -326,6 +353,7 @@ export function TopBar() {
         <SearchBox collapsed={narrow} />
       </div>
       <div className="topbar__end" data-tauri-drag-region>
+        <OfflineIndicator />
         <AppMenu />
         {chrome === "windows" && <WindowControls />}
       </div>

@@ -803,12 +803,15 @@ on the local network. Media from another server is refused.
 | --- | --- |
 | `health` | `Health` |
 | `cached_tracks` | `string[]` (ids of tracks stored on this computer) |
+| `cached_library` | `{ albums: Album[], artistIds: string[], playlistIds: string[] }`, everything with a song stored on this computer (albums most recently played first) |
+| `open_local_network_settings` | `null`. macOS only: opens System Settings at Privacy & Security, Local Network, and checks the connection again |
 
 `Health = { status: "local"|"remote"|"relay"|"offline"|"starting"|"updating"|"noAuth", serverName?, connection?, latencyMs?, serverVersion?, lastSeenAt? (Unix ms), scan?: { done, total }, banner?: { kind, message }, filesAvailable: bool, cachedOnly: bool }`
 
 `banner.kind` is one of `offline`, `noInternet`, `starting`, `updating`,
 `startTimeout`, `relay`, `signIn`, `accessRemoved`, `filesUnavailable`,
-`noMusicLibrary`, `diskFull`; `message` is the text to show. `scan` counts new
+`noMusicLibrary`, `diskFull`, `localNetwork`; `message` is the text to show.
+`offline` and `noInternet` show as the top bar's offline icon, not a banner. `scan` counts new
 tracks while Plex scans ("Adding new music… 120 of 340"). `cachedOnly` is true
 while only music already on this computer can play; the UI then asks
 `cached_tracks` and dims the rest. See docs/APP-STATES.md.

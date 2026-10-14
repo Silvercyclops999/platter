@@ -1,5 +1,5 @@
 /** Home page decisions: chips, which shelves show, the time-of-day heading. */
-import type { HomeData, HomeItem, HomeShelfId } from "../lib/types";
+import type { CachedLibrary, HomeData, HomeItem, HomeShelfId } from "../lib/types";
 
 export type HomeFilter = "all" | "albums" | "artists" | "playlists";
 
@@ -57,6 +57,35 @@ export function visibleShelves(data: HomeData, filter: HomeFilter): { id: HomeSh
 /** The shortcut grid's tiles for a chip (none when the setting is off). */
 export function gridItems(data: HomeData, filter: HomeFilter, enabled: boolean): HomeItem[] {
   return enabled ? filterItems(data.shortcuts, filter).slice(0, 8) : [];
+}
+
+/** Whether a Home item has anything stored on this computer. */
+export function playableOffline(item: HomeItem, lib: CachedLibrary): boolean {
+  switch (item.kind) {
+    case "album":
+      return lib.albums.some((a) => a.id === item.album.id);
+    case "artist":
+      return lib.artistIds.includes(item.artist.id);
+    case "playlist":
+      return lib.playlistIds.includes(item.playlist.id);
+  }
+}
+
+/**
+ * Home while the server can't be reached: only what can still play. Items
+ * with nothing on this computer leave (they come back on reconnect).
+ */
+export function offlineHome(data: HomeData, lib: CachedLibrary): HomeData {
+  const keep = (i: HomeItem) => playableOffline(i, lib);
+  const albums = new Set(lib.albums.map((a) => a.id));
+  return {
+    shortcuts: data.shortcuts.filter(keep),
+    recentlyPlayed: data.recentlyPlayed.filter(keep),
+    jumpBackIn: data.jumpBackIn.filter((a) => albums.has(a.id)),
+    playlists: data.playlists.filter((p) => lib.playlistIds.includes(p.id)),
+    recentlyAdded: data.recentlyAdded.filter((a) => albums.has(a.id)),
+    topArtists: data.topArtists.filter((a) => lib.artistIds.includes(a.id)),
+  };
 }
 
 /** The screen-reader heading, by time of day. */

@@ -4,6 +4,7 @@ import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { backend } from "../lib/backend";
 import { useApp } from "../stores/app";
+import { toast } from "../stores/toasts";
 import { useUi } from "../stores/ui";
 import { healthBanner, type BannerAction } from "./bannerView";
 
@@ -11,6 +12,7 @@ const ACTION_LABEL: Record<BannerAction, string> = {
   signIn: "Sign in",
   signOut: "Use another account",
   libraryGuide: "How to add one",
+  localNetwork: "Open Settings",
 };
 
 function LibraryGuide({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -53,6 +55,7 @@ export function HealthBanner() {
   const run = (a: BannerAction) => {
     if (a === "signIn") useUi.getState().setSignInOpen(true);
     else if (a === "signOut") void backend.authSignOut().catch(() => {});
+    else if (a === "localNetwork") void backend.openLocalNetworkSettings().catch(() => toast.error("Couldn't open System Settings"));
     else setGuide(true);
   };
 

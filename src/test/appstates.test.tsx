@@ -5,14 +5,18 @@
  */
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { TrackList, TrackRow } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { demoHealth, HEALTH_DEMOS, type HealthDemo } from "../lib/mock/health";
+import { demoHealth, HEALTH_DEMOS, LOCAL_NETWORK_BLOCKED, type HealthDemo } from "../lib/mock/health";
+import { OFFLINE_NOTHING_PLAYS, OFFLINE_SEARCH, OFFLINE_SKIPPED, offlineLeftOutMessage } from "../lib/offline";
+import { HomePage } from "../pages/HomePage";
+import { SearchPage } from "../pages/SearchPage";
 import type { Health } from "../lib/types";
-import { agoText, healthBanner } from "../shell/bannerView";
+import { agoText, healthBanner, offlineMessage } from "../shell/bannerView";
+import { OfflineIndicator } from "../shell/TopBar";
 import { HealthBanner } from "../shell/HealthBanner";
 import { routeBadge, statusInfo } from "../shell/StatusDot";
 import { connectApp, isUnavailable, useApp } from "../stores/app";
@@ -34,8 +38,9 @@ const EXPECTED: Record<HealthDemo, { message: string; kind: string; action?: str
     kind: "warning",
     message: "Connected through Plex Relay, so quality is reduced. Turn on Remote Access in Plex for full quality.",
   },
-  offline: { kind: "offline", message: "Your server is offline. Last seen 4 min ago." },
-  noInternet: { kind: "offline", message: "You're offline." },
+  // Plain offline needs nothing from the user: the top bar icon says it.
+  offline: null,
+  noInternet: null,
   starting: { kind: "progress", message: "Server is starting…" },
   updating: { kind: "progress", message: "Server is updating…" },
   startTimeout: { kind: "error", message: "Your server is taking too long to come back. Check that Plex is running." },
@@ -45,6 +50,8 @@ const EXPECTED: Record<HealthDemo, { message: string; kind: string; action?: str
   filesUnavailable: { kind: "error", message: "Your server is up, but your music files aren't available." },
   noMusicLibrary: { kind: "info", message: "No music library found.", action: "libraryGuide" },
   diskFull: { kind: "warning", message: "Not enough space." },
+  localNetwork: { kind: "warning", message: LOCAL_NETWORK_BLOCKED, action: "localNetwork" },
+  localNetworkRemote: { kind: "warning", message: LOCAL_NETWORK_BLOCKED, action: "localNetwork" },
   scanning: { kind: "progress", message: "Adding new music… 120 of 340" },
 };
 
@@ -59,8 +66,15 @@ describe("banner for each app state", () => {
     expect(v).toEqual({ kind: want.kind, message: want.message, action: want.action });
   });
 
-  it("keeps 'Last seen' current", () => {
-    expect(healthBanner(h("offline"), NOW + 6 * 60_000)!.message).toBe("Your server is offline. Last seen 10 min ago.");
+  it("the offline icon says what's wrong and keeps 'Last seen' current", () => {
+    expect(offlineMessage(h("offline"), NOW + 6 * 60_000)).toBe("Your server is offline. Last seen 10 min ago.");
+    expect(offlineMessage(h("noInternet"), NOW)).toBe("You're offline.");
+    expect(offlineMessage(h("localNetwork"), NOW)).toBe(LOCAL_NETWORK_BLOCKED);
+    for (const d of ["local", "remote", "relay", "localNetworkRemote", "signIn", "filesUnavailable"] as HealthDemo[])
+      expect(offlineMessage(h(d), NOW), d).toBeNull();
+    expect(LOCAL_NETWORK_BLOCKED).toBe(
+      "macOS is blocking Platter from your home network. Open System Settings, Privacy & Security, Local Network, and turn on Platter.",
+    );
     expect(agoText(30_000)).toBe("just now");
     expect(agoText(3 * 3_600_000)).toBe("3 h ago");
   });
@@ -99,10 +113,28 @@ describe("HealthBanner component", () => {
     expect(within(dlg).getAllByText(/Add Library/).length).toBeGreaterThan(0);
   });
 
-  it("offline banners are alerts", () => {
+  it("plain offline shows a top bar icon, not a banner, and it leaves on reconnect", async () => {
+    const user = userEvent.setup();
     act(() => useApp.setState({ health: demoHealth("offline", SERVER) }));
+    const { container } = render(<HealthBanner />);
+    expect(container).toBeEmptyDOMElement();
+    render(<OfflineIndicator />);
+    const icon = screen.getByTestId("offline-indicator");
+    expect(icon).toHaveAccessibleName(/^Offline\. Your server is offline\. Last seen \d+ min ago\.$/);
+    await user.hover(icon);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/Your server is offline/);
+    act(() => useApp.setState({ health: demoHealth("local", SERVER) }));
+    expect(screen.queryByTestId("offline-indicator")).toBeNull();
+  });
+
+  it("macOS blocking the home network: banner with a button to the settings", async () => {
+    const user = userEvent.setup();
+    const before = mock.localNetworkOpened;
+    act(() => useApp.setState({ health: h("localNetwork") }));
     render(<HealthBanner />);
-    expect(screen.getByRole("alert")).toHaveTextContent(/Your server is offline\. Last seen \d+ min ago\./);
+    expect(screen.getByText(LOCAL_NETWORK_BLOCKED)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Settings" }));
+    await waitFor(() => expect(mock.localNetworkOpened).toBe(before + 1));
   });
 
   it("Sign in opens the sign-in screen", async () => {
@@ -174,6 +206,59 @@ describe("wired to the core", () => {
   it("a skipped track shows 'Skipped: file unavailable'", async () => {
     act(() => mock.emit("player://error", { trackId: "x", kind: "notFound", message: "Skipped: file unavailable" }));
     await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Skipped: file unavailable"));
+  });
+
+  it("offline: songs failing one after another are told once, in plain words", async () => {
+    act(() => mock.setHealth("offline"));
+    for (const id of ["x", "y", "z"])
+      act(() => mock.emit("player://error", { trackId: id, kind: "network", message: "Skipped: file unavailable" }));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain(OFFLINE_SKIPPED));
+    const msgs = useToasts.getState().toasts.map((t) => t.message);
+    expect(msgs.filter((m) => m === OFFLINE_SKIPPED)).toHaveLength(1);
+    expect(msgs).not.toContain("Skipped: file unavailable");
+    act(() => mock.setHealth("local"));
+  });
+
+  it("offline: play keeps to songs on this computer, says so once, and refuses when none can", async () => {
+    act(() => mock.setHealth("offline"));
+    const cached = new Set(mock.fx.albums.slice(0, 2).map((a) => a.id));
+    const kept = mock.fx.tracks.find((t) => cached.has(t.albumId))!;
+    const gone = mock.fx.tracks.filter((t) => !cached.has(t.albumId)).slice(0, 2);
+    await mock.playContext({ context: { kind: "tracks", trackIds: [gone[0].id, kept.id, gone[1].id] }, startTrackId: gone[0].id });
+    await waitFor(() => expect(usePlayer.getState().state?.track?.id).toBe(kept.id));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain(offlineLeftOutMessage(2)));
+    await mock.playContext({ context: { kind: "tracks", trackIds: gone.map((t) => t.id) } });
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain(OFFLINE_NOTHING_PLAYS));
+    expect(useToasts.getState().toasts.filter((t) => t.message === offlineLeftOutMessage(2))).toHaveLength(1);
+    // Back online: every song plays again.
+    act(() => mock.setHealth("local"));
+    await mock.playContext({ context: { kind: "tracks", trackIds: [gone[0].id] } });
+    await waitFor(() => expect(usePlayer.getState().state?.track?.id).toBe(gone[0].id));
+    await mock.playPause();
+  });
+
+  it("offline: Home keeps to what can play and comes back whole on reconnect", async () => {
+    act(() => mock.setHealth("offline"));
+    render(<HomePage />);
+    const shelf = await screen.findByRole("region", { name: "On this computer" });
+    const cachedTitles = mock.fx.albums.slice(0, 2).map((a) => a.title);
+    for (const t of cachedTitles) expect(within(shelf).getAllByText(t).length).toBeGreaterThan(0);
+    // Albums with nothing on this computer leave every shelf.
+    const other = mock.fx.albums.slice(2).map((a) => a.title);
+    const shown = screen.getAllByRole("region").flatMap((r) => other.filter((t) => within(r).queryAllByText(t).length > 0));
+    expect(shown).toEqual([]);
+    act(() => mock.setHealth("local"));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "On this computer" })).toBeNull());
+  });
+
+  it("offline: search says the server is needed for what the local index can't answer", async () => {
+    act(() => mock.setHealth("offline"));
+    const spy = vi.spyOn(mock, "search").mockRejectedValueOnce({ kind: "network", message: "offline" });
+    render(<SearchPage query="zzz nothing matches" />);
+    expect(await screen.findByText(OFFLINE_SEARCH)).toBeInTheDocument();
+    spy.mockRestore();
+    act(() => mock.setHealth("local"));
+    await waitFor(() => expect(screen.queryByText(OFFLINE_SEARCH)).toBeNull());
   });
 
   it("headphones unplugged → paused; Play resumes", async () => {

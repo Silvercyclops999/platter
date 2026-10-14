@@ -1,16 +1,17 @@
-import { Disc3 } from "lucide-react";
+import { Disc3, WifiOff } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Button } from "../components/Button";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { FilterChips } from "../components/Tabs";
 import { artUrl, backend } from "../lib/backend";
 import { headerColorsFromImageUrl, headerColorsFromServer } from "../lib/color";
-import type { HomeItem } from "../lib/types";
+import type { CachedLibrary, HomeItem } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
+import { useApp } from "../stores/app";
 import { useSettings } from "../stores/settings";
 import { nav } from "../stores/router";
 import { HomeItemCard, homeItemInfo } from "./cards";
-import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, visibleShelves, type HomeFilter } from "./home";
+import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, offlineHome, visibleShelves, type HomeFilter } from "./home";
 import { ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
 import "./home.css";
 
@@ -70,8 +71,38 @@ function HomeChips({ value, onChange }: { value: HomeFilter; onChange: (f: HomeF
   );
 }
 
+/**
+ * While only music on this computer can play, what that covers (refetched
+ * as the cached list changes); null otherwise or while it loads.
+ */
+function useCachedLibrary(): CachedLibrary | null {
+  const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
+  const cached = useApp((s) => s.cached);
+  const [lib, setLib] = useState<CachedLibrary | null>(null);
+  useEffect(() => {
+    if (!cachedOnly) {
+      setLib(null);
+      return;
+    }
+    let alive = true;
+    backend.cachedLibrary().then(
+      (l) => alive && setLib(l),
+      () => alive && setLib({ albums: [], artistIds: [], playlistIds: [] }),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [cachedOnly, cached]);
+  return cachedOnly ? lib : null;
+}
+
 export function HomePage() {
-  const { data, error } = useLoad(() => backend.home(), []);
+  const { data: full, error } = useLoad(() => backend.home(), []);
+  const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
+  const lib = useCachedLibrary();
+  // Offline: Home keeps to what can still play, and comes back whole on reconnect.
+  const data = full && cachedOnly ? (lib ? offlineHome(full, lib) : undefined) : full;
+  const offlineAlbums = cachedOnly && lib ? lib.albums : [];
   const [filter, setFilter] = useState<HomeFilter>("all");
   const [hovered, setHovered] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -89,7 +120,9 @@ export function HomePage() {
     root.current?.closest(".main__scroll")?.scrollTo({ top: 0 });
   };
 
-  const libraryEmpty = data && data.shortcuts.length === 0 && visibleShelves(data, "all").length === 0;
+  const libraryEmpty =
+    data && data.shortcuts.length === 0 && visibleShelves(data, "all").length === 0 && offlineAlbums.length === 0;
+  const showOfflineShelf = offlineAlbums.length > 0 && (filter === "all" || filter === "albums");
   const filterEmpty = data && !libraryEmpty && tiles.length === 0 && shelves.length === 0;
   const kindLabel = HOME_FILTERS.find((f) => f.id === filter)?.label.toLowerCase();
 
@@ -105,6 +138,14 @@ export function HomePage() {
       <HomeChips value={filter} onChange={pick} />
       {error && !data ? (
         <p className="page-error">Couldn't load Home: {error.message}</p>
+      ) : libraryEmpty && cachedOnly ? (
+        <div className="empty-state" role="status">
+          <WifiOff size={40} strokeWidth={1.5} aria-hidden="true" />
+          <h2 className="empty-state__title">Nothing on this computer yet</h2>
+          <p className="empty-state__text">
+            Platter can't reach your server right now. Songs you play are kept on this computer, so next time they can play here too.
+          </p>
+        </div>
       ) : libraryEmpty ? (
         <div className="empty-state" role="status">
           <Disc3 size={40} strokeWidth={1.5} aria-hidden="true" />
@@ -132,7 +173,16 @@ export function HomePage() {
               </div>
             )
           )}
-          {filterEmpty && (
+          {showOfflineShelf && (
+            <Shelf title="On this computer" skeletonKind="album">
+              {offlineAlbums.map((album) => (
+                <ShelfItem key={`offline-${album.id}`}>
+                  <HomeItemCard item={{ kind: "album", album }} />
+                </ShelfItem>
+              ))}
+            </Shelf>
+          )}
+          {filterEmpty && !showOfflineShelf && (
             <p className="home__empty" role="status">
               No {kindLabel} to show yet.
             </p>

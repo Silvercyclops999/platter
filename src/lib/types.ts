@@ -481,7 +481,16 @@ export type HealthBannerKind =
   | "accessRemoved"
   | "filesUnavailable"
   | "noMusicLibrary"
-  | "diskFull";
+  | "diskFull"
+  | "localNetwork";
+
+/** What can still play without the server (`cached_library`). */
+export interface CachedLibrary {
+  /** Albums with a song on this computer, most recently played first. */
+  albums: Album[];
+  artistIds: string[];
+  playlistIds: string[];
+}
 
 export interface HealthBanner {
   kind: HealthBannerKind | (string & {});

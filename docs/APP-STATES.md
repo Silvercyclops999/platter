@@ -9,8 +9,30 @@ The core owns the decision. `PlexState` keeps a health state machine
 watchers in `src-tauri/src/monitor/` into a `Health` snapshot with one banner
 (kind + message). The UI shows that banner at the top of the main view
 (`src/shell/HealthBanner.tsx`), the status dot in the sidebar, and toasts.
+Plain offline gets no banner, since there's nothing to do about it: a small
+icon in the top bar (`OfflineIndicator` in `src/shell/TopBar.tsx`) says what's
+wrong in its tooltip. Banners are kept for states that need an action.
 While `Health.cachedOnly` is true, track rows that aren't stored on this
 computer are dimmed (`cached_tracks` command).
+
+Offline here means Plex can't be reached (no network, server down, or
+blocked). While it lasts, Platter keeps to what's in the audio pre-cache:
+
+- Play leaves out songs that aren't on this computer. Clicking one starts at
+  the next song that is, and the first play that leaves songs out says so
+  once ("Skipped 3 songs that aren't on this computer. They play again when
+  Platter can reach your server."). If none can play, the play is refused
+  with a reason. Queued songs that fail one after another are reported once,
+  not one toast each.
+- Home shows an "On this computer" shelf and keeps only the shortcuts and
+  shelf items with a song stored here (`cached_library` command).
+- Search results from the local index still show. When only the server could
+  answer, the page says "You're offline. Search works again when Platter can
+  reach your server."
+- The now playing panel drops About the artist and the server's credits.
+
+Everything comes back by itself on reconnect: Home refetches, search runs
+again, and the icon goes away.
 
 Rust tests run with `cargo test` in `src-tauri`; UI tests with `npm test`.
 To see a banner in a browser, run `npx vite` and open `/?health=<state>`
@@ -21,13 +43,14 @@ are in `docs/screenshots/app-states/`.
 
 | Situation | Detected in | User sees | Tests | Status |
 | --- | --- | --- | --- | --- |
-| Server offline or unreachable | 30 s ping in `plex/state.rs`; a failed ping re-races every address from plex.tv before calling it offline | Banner "Your server is offline. Last seen 4 min ago." (age kept current by the UI), red dot. Uncached tracks dimmed, cached ones play. Toast "Your server is back." when it returns | `health::offline_after_failed_rediscover_with_last_seen`, `state::server_down_with_internet_says_server_offline`, `state::server_back_after_offline_is_announced`, `state::offline_server_then_health_tick`, `engine_tests::plays_from_disk_cache_when_server_is_gone`; UI `appstates` offline banner, dimming, back toast | Done |
+| Server offline or unreachable | 30 s ping in `plex/state.rs`; a failed ping re-races every address from plex.tv before calling it offline | Offline icon in the top bar with the tooltip "Your server is offline. Last seen 4 min ago." (age kept current by the UI), red dot. Uncached tracks dimmed and left out of play with one toast; cached ones play. Home, search and the now playing panel keep to what works offline. Toast "Your server is back." when it returns | `health::offline_after_failed_rediscover_with_last_seen`, `state::server_down_with_internet_says_server_offline`, `state::server_back_after_offline_is_announced`, `state::offline_server_then_health_tick`, `engine_tests::plays_from_disk_cache_when_server_is_gone`, `player_tests::offline_play_leaves_out_songs_that_need_the_server`, `player_tests::playable_part_wraps_round_to_find_a_start`, `bridge::tests::offline_plays_keep_to_cached_songs_and_say_so_once`, `cached::tests::cached_library_lists_what_still_plays`; UI `appstates` offline icon, dimming, offline play, skipped once, Home, search, back toast; `now-playing` offline sections | Done |
+| macOS blocks the home network (Local Network privacy) | `discovery::race_detailed`: every local address fails within 500 ms with "no route to host", "network unreachable" or "not permitted", while plex.tv answers. Only counted on macOS. Remote and relay addresses are raced at the same time, so music falls back to them | Banner "macOS is blocking Platter from your home network. Open System Settings, Privacy & Security, Local Network, and turn on Platter." with Open Settings (opens that pane). Shown both when nothing else connects (with the offline icon) and when playing over remote or relay. While connected that way, each 30 s check and each return to the window races again, so turning access on moves back to local by itself | `discovery::tests::instant_no_route_or_not_permitted_is_a_refusal`, `discovery::tests::a_closed_port_is_not_a_blocked_network`, `health::local_network_blocked_with_nothing_else_says_how_to_fix_it`, `health::local_network_blocked_but_remote_works_keeps_playing_and_says_so`, `health::no_route_at_all_is_offline_not_a_blocked_network`; UI `appstates` localNetwork banner and Open Settings | Done, needs a check on a Mac with Local Network turned off |
 | Server starting, restarting or updating | HTTP 503 on ping, server shutdown and update notifications | "Server is starting…" or "Server is updating…"; after 2 minutes "Your server is taking too long to come back. Check that Plex is running." | `health::starting_waits_then_errors_after_two_minutes`, `health::updating_shows_updating`, `health::shutdown_notice_opens_restart_window`; UI `appstates` starting/updating/startTimeout | Done |
 | Only remote reachable | Connection race picks remote | "Remote" badge by the server name, blue dot. Streams at 320 kbps unless the file is already that small | `health::remote_only_shows_remote_without_banner`, `bridge::stream_quality_follows_the_connection`; UI `appstates` status dot | Done (320 kbps is the away-from-home default until a quality setting exists) |
 | Only relay reachable | Connection race picks relay | "Relay" badge plus a tip banner. Files above 128 kbps (or of unknown bitrate) are transcoded to 128 kbps MP3 | `health::relay_only_shows_relay_tip`, `bridge::stream_quality_follows_the_connection`; UI `appstates` relay | Done |
 | Server address changed | Ping fails, re-race with fresh addresses from plex.tv | Nothing | `health::address_changed_rediscovers_silently`, `state::health_tick_rediscovers_new_address` | Done |
 | plex.tv down | Sign-in restore falls back to the cached server list | Nothing if the server answers | `state::restore_with_plex_tv_down_uses_cached_server`, `health::plex_tv_down_with_cached_server_is_silent` | Done |
-| Computer offline or Wi-Fi switch | `monitor/net.rs` checks the default route every 5 s (no packets sent); a failed re-race where plex.tv is also unreachable | "You're offline." at once when the route disappears. A route change reconnects right away. Pre-cached music keeps playing | `net::wifi_switch_and_cable_pull`, `net::starting_without_network_reports_lost`, `health::no_internet_says_you_are_offline`, `health::no_network_route_is_offline_at_once`, `state::computer_offline_says_you_are_offline`, `state::network_lost_is_immediate_and_reconnect_recovers` | Done |
+| Computer offline or Wi-Fi switch | `monitor/net.rs` checks the default route every 5 s (no packets sent); a failed re-race where plex.tv is also unreachable | Offline icon with the tooltip "You're offline." at once when the route disappears. A route change reconnects right away. Pre-cached music keeps playing | `net::wifi_switch_and_cable_pull`, `net::starting_without_network_reports_lost`, `health::no_internet_says_you_are_offline`, `health::no_network_route_is_offline_at_once`, `state::computer_offline_says_you_are_offline`, `state::network_lost_is_immediate_and_reconnect_recovers` | Done |
 | Stream drops mid-song | Audio engine HTTP reader | At most a brief pause; resumes from the last byte | `engine_tests::dropped_connection_resumes_without_changing_audio`, `engine_tests::http_source_resumes_byte_exact` | Done |
 
 ## Account

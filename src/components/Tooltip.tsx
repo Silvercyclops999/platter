@@ -4,6 +4,7 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type FocusEvent,
@@ -28,16 +29,21 @@ export interface TooltipProps {
   delayMs?: number;
   /** Also expose the label as aria-describedby (when it adds info beyond the accessible name). */
   describe?: boolean;
+  /** Long text: wrap at the tooltip's max width instead of one line. */
+  wrap?: boolean;
 }
 
 /** Short hover delay before a tooltip appears; it then fades in (quick) and leaves instantly. */
 export const TOOLTIP_DELAY_MS = 200;
 
 /** Hover/focus tooltip. Wraps a single focusable child. */
-export function Tooltip({ label, children, placement = "top", delayMs = TOOLTIP_DELAY_MS, describe = false }: TooltipProps) {
+export function Tooltip({ label, children, placement = "top", delayMs = TOOLTIP_DELAY_MS, describe = false, wrap = false }: TooltipProps) {
   const id = useId();
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tip = useRef<HTMLDivElement>(null);
+  // Horizontal nudge that keeps a wide tooltip inside the window.
+  const [nudge, setNudge] = useState(0);
   const child = Children.only(children);
   const props = (isValidElement(child) ? child.props : {}) as AnyProps;
 
@@ -73,6 +79,14 @@ export function Tooltip({ label, children, placement = "top", delayMs = TOOLTIP_
     };
   }, [pos]);
   useEffect(() => clear, []);
+  useLayoutEffect(() => {
+    setNudge(0);
+    if (!pos || !tip.current) return;
+    const r = tip.current.getBoundingClientRect();
+    const edge = 8;
+    if (r.right > window.innerWidth - edge) setNudge(window.innerWidth - edge - r.right);
+    else if (r.left < edge) setNudge(edge - r.left);
+  }, [pos]);
 
   const cloned = cloneElement(child as ReactElement<AnyProps>, {
     onMouseEnter: (e: MouseEvent<HTMLElement>) => {
@@ -112,8 +126,9 @@ export function Tooltip({ label, children, placement = "top", delayMs = TOOLTIP_
           <div
             id={id}
             role="tooltip"
-            className={`tooltip tooltip--${placement}`}
-            style={{ left: pos.x, top: pos.y }}
+            ref={tip}
+            className={`tooltip tooltip--${placement} ${wrap ? "tooltip--wrap" : ""}`}
+            style={{ left: pos.x + nudge, top: pos.y }}
           >
             {label}
           </div>,

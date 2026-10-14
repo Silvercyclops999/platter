@@ -8,9 +8,11 @@ import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
 import { TrackList, TrackRow, TrackRowSkeleton, trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
+import { isOffline, OFFLINE_SEARCH } from "../lib/offline";
 import { modKey } from "../lib/platform";
 import type { SearchFilter, SearchHit, SearchResults } from "../lib/types";
 import type { MenuItem } from "../stores/ui";
+import { useApp } from "../stores/app";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { MAX_QUERY } from "../shell/SearchBox";
@@ -191,6 +193,7 @@ export function SearchPage({ query }: { query: string }) {
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
   const q = query.trim().slice(0, MAX_QUERY);
+  const offline = useApp((s) => isOffline(s.health));
 
   // Each request gets a sequence number and only the newest one may update
   // the screen, so a slow answer to an older query never replaces a newer one.
@@ -212,7 +215,8 @@ export function SearchPage({ query }: { query: string }) {
         setFailed(true);
       },
     );
-  }, [q, filter]);
+    // Reconnecting searches again, so server answers come back by themselves.
+  }, [q, filter, offline]);
 
   // Results for another chip would show the wrong layout: treat them as absent.
   const res = shown && shown.filter === filter ? shown.res : null;
@@ -246,7 +250,13 @@ export function SearchPage({ query }: { query: string }) {
     <div className="page-pad sr" aria-busy={!res && !failed}>
       <h1 className="sr-only">Results for “{q}”</h1>
       <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="sr-chips" />
-      {!res ? (
+      {offline && (failed || res?.source === "server" || empty) ? (
+        // Only the server could answer this: say why, and that it comes back.
+        <div className="sr-empty" role="status">
+          <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
+          <p>{OFFLINE_SEARCH}</p>
+        </div>
+      ) : !res ? (
         failed ? (
           <div className="sr-empty">
             <h2 className="section-title">Search isn't available right now</h2>

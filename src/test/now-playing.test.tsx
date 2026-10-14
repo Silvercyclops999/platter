@@ -13,6 +13,8 @@ import {
   nextInQueue,
 } from "../shell/nowPlaying";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
+import { demoHealth } from "../lib/mock/health";
+import { useApp } from "../stores/app";
 import { usePlayer } from "../stores/player";
 import { FULL_WINDOW_PREFS_DEFAULT, useFullWindow } from "../stores/fullWindow";
 import { useRouter } from "../stores/router";
@@ -169,6 +171,24 @@ describe("panel content", () => {
     expect(screen.getByText("Credits")).toBeInTheDocument();
     expect(screen.getByText("Main artist • Composer")).toBeInTheDocument();
     expect(screen.getByText("Writer • Lyricist")).toBeInTheDocument();
+  });
+
+  it("offline: sections that need the server step aside, and come back on reconnect", async () => {
+    details(FULL);
+    const server = { name: "Basement Server", version: "1.42.2" };
+    act(() => useApp.setState({ health: demoHealth("offline", server) }));
+    try {
+      useUi.getState().setNowPlayingOpen(true);
+      render(<AppShell />);
+      expect(await screen.findByText("First line")).toBeInTheDocument();
+      expect(screen.queryByText("About the artist")).toBeNull();
+      expect(screen.queryByText("Writer • Lyricist")).toBeNull();
+      act(() => useApp.setState({ health: demoHealth("local", server) }));
+      expect(await screen.findByText("About the artist")).toBeInTheDocument();
+      expect(screen.getByText("Writer • Lyricist")).toBeInTheDocument();
+    } finally {
+      act(() => useApp.setState({ health: null }));
+    }
   });
 
   it("opens full lyrics and the full bio in the panel, with a way back", async () => {

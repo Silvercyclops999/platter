@@ -300,3 +300,20 @@
 .searchbox__row.is-selected .searchbox__remove { opacity: 1; }
 /* The remove button stays findable without hover in the recents list. */
 .searchbox__remove { opacity: 0.6; }
+
+/* Offline: a small quiet icon instead of a banner; the tooltip says why. */
+.topbar__offline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-info);
+  color: var(--color-text-on-accent);
+  animation: topbar-offline-in var(--motion-fast) ease-out;
+}
+.topbar__offline:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+@keyframes topbar-offline-in { from { opacity: 0; transform: scale(0.8); } }
+@media (prefers-reduced-motion: reduce) { .topbar__offline { animation: none; } }

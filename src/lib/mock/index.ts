@@ -24,6 +24,7 @@
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
+  CachedLibrary,
   AbLoop,
   AddPlace,
   Album,
@@ -72,6 +73,7 @@ import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mulberry32, ty
 import { mockBio } from "./bio";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
+import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
 import * as eq from "./eq";
 import { MockHome, type ContextPlay } from "./home";
 import { MockLikes } from "./likes";
@@ -191,6 +193,10 @@ export class MockBackend implements Backend {
   private auth: AuthStatus;
   // health / sync
   private healthState: Health;
+  /** The offline "skipped songs" toast was shown (once per offline spell). */
+  private offlineTold = false;
+  /** Times the Local Network settings were asked for (tests). */
+  localNetworkOpened = 0;
   private sync: SyncStatus = { phase: "idle", done: 0, total: 0, lastSyncAt: Math.floor(Date.now() / 1000) - 3600 };
   // search
   /** Items opened from search, newest first. */
@@ -425,10 +431,51 @@ export class MockBackend implements Backend {
   }
 
   /** Mock: the first two albums are on this computer (pre-cached). */
+  private cachedIds(): string[] {
+    const albums = new Set(this.fx.albums.slice(0, 2).map((a) => a.id));
+    return this.fx.tracks.filter((t) => albums.has(t.albumId)).map((t) => t.id);
+  }
   cachedTracks() {
+    return this.delay(() => this.cachedIds());
+  }
+  cachedLibrary() {
+    return this.delay((): CachedLibrary => {
+      const ids = new Set(this.cachedIds());
+      const tracks = this.fx.tracks.filter((t) => ids.has(t.id));
+      const albumIds = new Set(tracks.map((t) => t.albumId));
+      return {
+        albums: this.fx.albums.filter((a) => albumIds.has(a.id)),
+        artistIds: [...new Set(tracks.map((t) => t.artistId))],
+        playlistIds: this.fx.playlists
+          .filter((p) => (this.fx.playlistTracks.get(p.id) ?? []).some((id) => ids.has(id)))
+          .map((p) => p.id),
+      };
+    });
+  }
+  /** The core's offline play rule; null while everything can play. */
+  private keepPlayable(tracks: Track[], start: string | null): { tracks: Track[]; start: string | null } | null {
+    if (!this.healthState.cachedOnly) {
+      this.offlineTold = false;
+      return null;
+    }
+    const ok = new Set(this.cachedIds());
+    const kept = tracks.filter((t) => ok.has(t.id));
+    const leftOut = tracks.length - kept.length;
+    let from = start;
+    if (start && !ok.has(start)) {
+      const at = Math.max(0, tracks.findIndex((t) => t.id === start));
+      from = [...tracks.slice(at), ...tracks.slice(0, at)].find((t) => ok.has(t.id))?.id ?? null;
+    }
+    if (kept.length && leftOut > 0 && !this.offlineTold) {
+      this.offlineTold = true;
+      this.emit("toast", { kind: "info", message: offlineLeftOutMessage(leftOut) });
+    }
+    return { tracks: kept, start: from };
+  }
+  /** Test/demo hook: macOS refusing the home network (see setHealth). */
+  openLocalNetworkSettings() {
     return this.delay(() => {
-      const albums = new Set(this.fx.albums.slice(0, 2).map((a) => a.id));
-      return this.fx.tracks.filter((t) => albums.has(t.albumId)).map((t) => t.id);
+      this.localNetworkOpened += 1;
     });
   }
 
@@ -1074,10 +1121,23 @@ export class MockBackend implements Backend {
     const resolved = this.contextTracks(args);
     const info = resolved.info;
     // Like the core: explicit songs (when filtered) and hidden edits leave, with one toast.
-    const { tracks, message } = this.tags.forPlay(resolved.tracks);
+    const forPlay = this.tags.forPlay(resolved.tracks);
+    const { message } = forPlay;
+    let tracks = forPlay.tracks;
     if (!tracks.length) {
       if (message) this.emit("toast", { kind: "error", message: "Nothing here can play: every song is left out by your explicit content or fan edit settings." });
       return;
+    }
+    // Like the core: while the server is out of reach, only songs on this
+    // computer play; a start song that can't moves to the next that can.
+    const offline = this.keepPlayable(tracks, args.startTrackId ?? null);
+    if (offline) {
+      if (!offline.tracks.length) {
+        this.emit("toast", { kind: "error", message: OFFLINE_NOTHING_PLAYS });
+        return;
+      }
+      tracks = offline.tracks;
+      args = { ...args, startTrackId: offline.start ?? undefined };
     }
     if (message && play) this.emit("toast", { kind: "info", message });
     this.notePosition(); // where the outgoing context was left

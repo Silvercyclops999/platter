@@ -108,6 +108,7 @@
 .tooltip--top { transform: translate(-50%, -100%); }
 .tooltip--bottom { transform: translate(-50%, 0); }
 .tooltip--right { transform: translate(0, -50%); }
+.tooltip--wrap { white-space: normal; width: max-content; line-height: 1.35; }
 
 @keyframes fade-in {
   from { opacity: 0; }

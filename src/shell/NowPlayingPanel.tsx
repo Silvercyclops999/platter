@@ -6,6 +6,7 @@ import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { SaveButton } from "../components/SaveButton";
 import { trackMenuItems } from "../components/TrackRow";
+import { isOffline } from "../lib/offline";
 import type { NowPlayingDetails, Track } from "../lib/types";
 import { useApp } from "../stores/app";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
@@ -206,7 +207,9 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
   const lyricsOn = useUi((s) => s.nowPlayingPrefs.lyricsCard);
   const colors = useCoverColors(track.thumb);
   const lyrics = lyricsOn && details?.lyrics?.lines.length ? details.lyrics : null;
-  const about = details?.artist?.summary ? details.artist : null;
+  // Offline: sections that need the server (about the artist, its credits) step aside.
+  const offline = useApp((s) => isOffline(s.health));
+  const about = !offline && details?.artist?.summary ? details.artist : null;
 
   if (view === "lyrics" && lyrics) {
     return (
@@ -238,7 +241,7 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
       <TrackTitle track={track} />
       {lyrics && <LyricsCard lines={lyrics.lines} tint={colors?.shade ?? null} onOpen={() => setView("lyrics")} />}
       {about && <AboutCard details={about} onOpen={() => setView("bio")} />}
-      <CreditsCard track={track} details={details} />
+      <CreditsCard track={track} details={offline ? null : details} />
       <NextCard />
     </div>
   );

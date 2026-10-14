@@ -11,6 +11,7 @@ import { listen as tauriListen } from "@tauri-apps/api/event";
 import { artPixelSize } from "./artSize";
 import { createMockBackend } from "./mock";
 import type {
+  CachedLibrary,
   AbLoop,
   AddPlace,
   RemovedItem,
@@ -203,6 +204,10 @@ export interface Backend {
   health(): Promise<Health>;
   /** Ids of tracks stored on this computer (playable without the server). */
   cachedTracks(): Promise<string[]>;
+  /** Albums, artists and playlists with a song on this computer. */
+  cachedLibrary(): Promise<CachedLibrary>;
+  /** macOS only: opens System Settings at Privacy & Security, Local Network. */
+  openLocalNetworkSettings(): Promise<void>;
 
   // Settings
   settingsGet(): Promise<Settings>;
@@ -378,6 +383,8 @@ export function createTauriBackend(): Backend {
 
     health: () => call("health"),
     cachedTracks: () => call("cached_tracks"),
+    cachedLibrary: () => call("cached_library"),
+    openLocalNetworkSettings: () => call("open_local_network_settings"),
     settingsGet: () => call("settings_get"),
     settingsSet: (patch) => call("settings_set", { patch }),
     eqProfileSave: (name) => call("eq_profile_save", { name }),

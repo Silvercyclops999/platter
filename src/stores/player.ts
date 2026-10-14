@@ -21,6 +21,8 @@ import type {
   RepeatMode,
   QueueAt,
 } from "../lib/types";
+import { OFFLINE_SKIPPED } from "../lib/offline";
+import { useApp } from "./app";
 import { toast } from "./toasts";
 
 interface PlayerStore {
@@ -104,8 +106,21 @@ export function connectPlayer(b: Backend = backend): () => void {
   b.listen("player://position", (p) => usePlayer.getState().setPosition(p.positionMs, p.durationMs)).then((u) =>
     alive ? unsubs.push(u) : u(),
   );
-  // A track that can't be played is skipped by the core; say so.
-  b.listen("player://error", (e) => toast.error(e.message)).then((u) => (alive ? unsubs.push(u) : u()));
+  // A track that can't be played is skipped by the core; say so. While the
+  // server is out of reach every queued song that isn't on this computer
+  // fails in turn, so that's said once, in plain words, until it's back.
+  let offlineSkipShown = false;
+  unsubs.push(
+    useApp.subscribe((s) => {
+      if (!s.health?.cachedOnly) offlineSkipShown = false;
+    }),
+  );
+  b.listen("player://error", (e) => {
+    if (!useApp.getState().health?.cachedOnly) return toast.error(e.message);
+    if (offlineSkipShown) return;
+    offlineSkipShown = true;
+    toast.error(OFFLINE_SKIPPED);
+  }).then((u) => (alive ? unsubs.push(u) : u()));
   b.remoteState()
     .then((r) => alive && usePlayer.getState().setRemote(r))
     .catch(() => {});

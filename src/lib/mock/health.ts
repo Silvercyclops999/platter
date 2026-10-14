@@ -4,6 +4,10 @@
  */
 import type { Health, HealthStatus } from "../types";
 
+/** macOS Local Network privacy keeping Platter off the home network. */
+export const LOCAL_NETWORK_BLOCKED =
+  "macOS is blocking Platter from your home network. Open System Settings, Privacy & Security, Local Network, and turn on Platter.";
+
 export type HealthDemo =
   | HealthStatus
   | "noInternet"
@@ -13,7 +17,9 @@ export type HealthDemo =
   | "filesUnavailable"
   | "noMusicLibrary"
   | "diskFull"
-  | "scanning";
+  | "scanning"
+  | "localNetwork"
+  | "localNetworkRemote";
 
 export const HEALTH_DEMOS: HealthDemo[] = [
   "local",
@@ -30,6 +36,8 @@ export const HEALTH_DEMOS: HealthDemo[] = [
   "noMusicLibrary",
   "diskFull",
   "scanning",
+  "localNetwork",
+  "localNetworkRemote",
 ];
 
 const STATUS: Record<HealthDemo, HealthStatus> = {
@@ -48,6 +56,8 @@ const STATUS: Record<HealthDemo, HealthStatus> = {
   noMusicLibrary: "local",
   diskFull: "local",
   scanning: "local",
+  localNetwork: "offline",
+  localNetworkRemote: "remote",
 };
 
 const BANNER: Partial<Record<HealthDemo, { kind: string; message: string }>> = {
@@ -65,6 +75,8 @@ const BANNER: Partial<Record<HealthDemo, { kind: string; message: string }>> = {
   filesUnavailable: { kind: "filesUnavailable", message: "Your server is up, but your music files aren't available." },
   noMusicLibrary: { kind: "noMusicLibrary", message: "No music library found." },
   diskFull: { kind: "diskFull", message: "Not enough space." },
+  localNetwork: { kind: "localNetwork", message: LOCAL_NETWORK_BLOCKED },
+  localNetworkRemote: { kind: "localNetwork", message: LOCAL_NETWORK_BLOCKED },
 };
 
 export function isHealthDemo(v: string | null): v is HealthDemo {

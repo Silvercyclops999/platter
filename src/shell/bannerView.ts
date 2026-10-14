@@ -2,12 +2,13 @@
  * What the banner at the top of the main view says for each app state. The
  * core decides the state and the wording (Health.banner); this maps it to a
  * tone and an action button, keeps "Last seen N min ago" current, and shows
- * library scan progress when nothing else needs saying.
+ * library scan progress when nothing else needs saying. Plain offline has
+ * no banner: a small icon in the top bar says it (`offlineMessage`).
  */
 import type { BannerKind } from "../components/Banner";
 import type { Health } from "../lib/types";
 
-export type BannerAction = "signIn" | "signOut" | "libraryGuide";
+export type BannerAction = "signIn" | "signOut" | "libraryGuide" | "localNetwork";
 
 export interface BannerView {
   kind: BannerKind;
@@ -36,25 +37,41 @@ const TONE: Record<string, BannerKind> = {
   filesUnavailable: "error",
   noMusicLibrary: "info",
   diskFull: "warning",
+  localNetwork: "warning",
 };
 
 const ACTION: Record<string, BannerAction> = {
   signIn: "signIn",
   accessRemoved: "signOut",
   noMusicLibrary: "libraryGuide",
+  localNetwork: "localNetwork",
 };
+
+/** States with nothing for the user to do: the top bar icon covers them. */
+const QUIET = new Set(["offline", "noInternet"]);
+
+/** The core's message, with "Last seen" kept current. */
+function messageOf(h: Health, now: number): string {
+  const b = h.banner!;
+  // The core's text is as of when it was sent; keep the age current.
+  if (b.kind === "offline" && h.lastSeenAt) return `Your server is offline. Last seen ${agoText(now - h.lastSeenAt)}.`;
+  return b.message;
+}
+
+/**
+ * What the top bar's offline icon says (its tooltip), or null while the
+ * server can be reached. Shown for every offline state, banner or not.
+ */
+export function offlineMessage(h: Health | null, now: number = Date.now()): string | null {
+  if (!h || h.status !== "offline") return null;
+  return h.banner ? messageOf(h, now) : "Can't reach your server right now.";
+}
 
 export function healthBanner(h: Health | null, now: number = Date.now()): BannerView | null {
   if (!h) return null;
   const b = h.banner;
-  if (b) {
-    let message = b.message;
-    // The core's text is as of when it was sent; keep the age current.
-    if (b.kind === "offline" && h.lastSeenAt) {
-      message = `Your server is offline. Last seen ${agoText(now - h.lastSeenAt)}.`;
-    }
-    return { kind: TONE[b.kind] ?? "info", message, action: ACTION[b.kind] };
-  }
+  if (b && QUIET.has(b.kind)) return null;
+  if (b) return { kind: TONE[b.kind] ?? "info", message: messageOf(h, now), action: ACTION[b.kind] };
   if (h.scan && h.scan.total > 0) {
     return {
       kind: "progress",
