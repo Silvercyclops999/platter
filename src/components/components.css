@@ -672,7 +672,7 @@
 .track-row:hover .track-row__art-play.is-playing .track-row__art-glyph { display: block; }
 .track-row:hover .track-row__art-play.is-playing .eq { display: none; }
 .eq--on-art i { background: var(--color-text-primary); }
-.track-row__text { min-width: 0; display: flex; flex-direction: column; }
+.track-row__text { min-width: 0; flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; }
 .track-row__title { color: var(--color-text-primary); font-size: var(--font-size-lg); line-height: 1.35; }
 .track-row__artist { font-size: var(--font-size-sm); line-height: 1.4; }
 .track-row__album { font-size: var(--font-size-md); }

@@ -214,6 +214,7 @@
 .lib-item--compact { padding: 6px var(--space-2); }
 .lib-item__compact { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: var(--font-size-md); }
 .lib-item__compact .lib-item__sub { display: inline; flex: none; }
+.lib-item__compact .lib-item__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-empty { padding: var(--space-4) var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.45; }
 .sidebar__lib-list {
   flex: 1;
@@ -239,8 +240,9 @@
 .lib-item__text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .lib-item__title { font-size: var(--font-size-md); color: var(--color-text-primary); line-height: 1.35; }
 .lib-item__title.is-active { color: var(--color-accent); }
-.lib-item__sub { display: flex; align-items: center; gap: 4px; font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.4; }
+.lib-item__sub { display: block; font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.4; }
 .lib-item__pin { color: var(--color-accent); flex: none; }
+.lib-item__sub .lib-item__pin { vertical-align: -1px; margin-right: 4px; }
 .sidebar__status {
   border-top: 1px solid rgba(255, 240, 220, 0.07);
   margin: var(--space-1) calc(-1 * var(--space-3)) 0;
@@ -429,6 +431,7 @@
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
 }
+.queue-section__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .queue-section__ctx { color: var(--color-text-primary); }
 .queue-section__action {
   font-size: var(--font-size-sm);
