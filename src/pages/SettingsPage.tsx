@@ -89,6 +89,8 @@ interface RowDef {
   description: string;
   /** Extra line under the description (state, notes). Not searched. */
   note?: ReactNode;
+  /** A separate line below the description. */
+  footnote?: string;
   control: (ids: { title: string; desc: string }) => ReactNode;
 }
 
@@ -110,6 +112,7 @@ function Row({ row }: { row: RowDef }) {
             </>
           )}
         </p>
+        {row.footnote && <p className="setting-row__desc">{row.footnote}</p>}
       </div>
       <div className="setting-row__control">{row.control(ids)}</div>
     </div>
@@ -530,7 +533,8 @@ export function SettingsPage() {
       key: "about",
       section: "About",
       title: `Platter${version ? ` ${version}` : ""}`,
-      description: `A music player for your Plex library. Free software under the ${info?.licence ?? "GPL-3.0-or-later"} licence.`,
+      description: `A music player for Plex. Free software under the ${info?.licence ?? "GPL-3.0-or-later"} licence.`,
+      footnote: "Not affiliated with or endorsed by Plex, Inc.",
       control: () => (
         <>
           <Button size="sm" onClick={() => setDialog("notices")}>

@@ -75,6 +75,8 @@ describe("settings page", () => {
     expect(await screen.findByText("You have version 0.1.0.")).toBeInTheDocument();
     expect(await screen.findByText("Using 412 MB.")).toBeInTheDocument();
     expect(screen.getByText(/GPL-3.0-or-later/)).toBeInTheDocument();
+    expect(screen.getByText(/A music player for Plex\./)).toBeInTheDocument();
+    expect(screen.getByText("Not affiliated with or endorsed by Plex, Inc.")).toBeInTheDocument();
   });
 
   it("each row has a description for screen readers", () => {
