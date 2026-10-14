@@ -173,6 +173,8 @@ export interface TrackRowProps {
   showAlbum?: boolean;
   /** Show the artist line under the title (off on single-artist albums when equal). */
   showArtist?: boolean;
+  /** Album tables: a play count column in place of the quality column. */
+  showPlays?: boolean;
   menuItems?: MenuItem[];
   /** Hover action that removes the row (queue). */
   onRemove?: () => void;
@@ -207,6 +209,7 @@ export function TrackRow({
   showArt = false,
   showAlbum = true,
   showArtist = true,
+  showPlays = false,
   menuItems,
   onRemove,
   trailing,
@@ -291,7 +294,7 @@ export function TrackRow({
       data-track-id={track.id}
       data-selected={picked || undefined}
       title={unavailable ? "Not available right now" : undefined}
-      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${showAlbum ? "" : "track-row--no-album"} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
+      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
       onClick={onClick}
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).closest("button")) return;
@@ -392,11 +395,16 @@ export function TrackRow({
           </button>
         </div>
       )}
-      {!compact && (
-        <div className="track-row__badges">
-          <QualityBadge track={track} />
-        </div>
-      )}
+      {!compact &&
+        (showPlays ? (
+          <div className="track-row__plays tabular">
+            {track.viewCount.toLocaleString()}
+          </div>
+        ) : (
+          <div className="track-row__badges">
+            <QualityBadge track={track} />
+          </div>
+        ))}
       <div className="track-row__end">
         {!compact && (
           <button type="button" tabIndex={-1} className="track-row__hover-btn" aria-label="Like (coming in Phase 2)" aria-disabled="true">
@@ -441,12 +449,14 @@ export function TrackList({
   children,
   label,
   showAlbum = true,
+  showPlays = false,
   header = true,
   multiMenu = (_keys: string[], ids: string[]) => multiTrackMenuItems(ids),
 }: {
   children: ReactNode;
   label: string;
   showAlbum?: boolean;
+  showPlays?: boolean;
   header?: boolean;
   /** Menu for a multi-selection: row keys and track ids in list order. */
   multiMenu?: (keys: string[], trackIds: string[]) => MenuItem[];
@@ -460,11 +470,11 @@ export function TrackList({
     <SelectionContext.Provider value={selection}>
       <div className="track-list" data-tracklist ref={root}>
         {header && (
-          <div className={`track-list__head ${showAlbum ? "" : "track-row--no-album"}`} aria-hidden="true">
+          <div className={`track-list__head ${showAlbum ? "" : "track-row--no-album"} ${showPlays ? "track-row--plays" : ""}`} aria-hidden="true">
             <span className="track-row__num">#</span>
             <span>Title</span>
-            {showAlbum && <span>Album</span>}
-            <span className="track-list__badges" />
+            {showAlbum && <span className="track-list__album">Album</span>}
+            {showPlays ? <span className="track-list__plays">Plays</span> : <span className="track-list__badges" />}
             <span className="track-list__dur">Time</span>
           </div>
         )}
@@ -476,9 +486,9 @@ export function TrackList({
   );
 }
 
-export function TrackRowSkeleton({ showArt = false, showAlbum = true }: { showArt?: boolean; showAlbum?: boolean }) {
+export function TrackRowSkeleton({ showArt = false, showAlbum = true, showPlays = false }: { showArt?: boolean; showAlbum?: boolean; showPlays?: boolean }) {
   return (
-    <div className={`track-row track-row--skeleton ${showAlbum ? "" : "track-row--no-album"}`} aria-hidden="true">
+    <div className={`track-row track-row--skeleton ${showAlbum ? "" : "track-row--no-album"} ${showPlays ? "track-row--plays" : ""}`} aria-hidden="true">
       <div className="track-row__num">
         <Skeleton width={12} height={12} />
       </div>
@@ -490,11 +500,11 @@ export function TrackRowSkeleton({ showArt = false, showAlbum = true }: { showAr
         </div>
       </div>
       {showAlbum && (
-        <div>
+        <div className="track-row__album">
           <Skeleton width="50%" height={12} />
         </div>
       )}
-      <div />
+      <div className={showPlays ? "track-row__plays" : "track-row__badges"} />
       <div className="track-row__end">
         <Skeleton width={32} height={12} />
       </div>

@@ -608,6 +608,10 @@
   padding: 0 var(--space-4);
 }
 .track-row--no-album { grid-template-columns: 32px minmax(0, 1fr) 92px minmax(108px, auto); }
+/* Album tables: number, title, plays, time. */
+:is(.track-row, .track-list__head).track-row--plays { grid-template-columns: 32px minmax(0, 1fr) 128px minmax(108px, auto); }
+.track-row__plays,
+.track-list__plays { text-align: right; padding-right: var(--space-4); }
 .track-list__head {
   height: 36px;
   margin-bottom: var(--space-2);

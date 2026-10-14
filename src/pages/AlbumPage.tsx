@@ -123,7 +123,7 @@ export function AlbumPage({ id }: { id: string }) {
           />
         </div>
 
-        <TrackList label={album ? `${album.title} tracks` : "Tracks"} showAlbum={false}>
+        <TrackList label={album ? `${album.title} tracks` : "Tracks"} showAlbum={false} showPlays>
           {data
             ? data.tracks.map((t) => (
                 <TrackRow
@@ -131,13 +131,14 @@ export function AlbumPage({ id }: { id: string }) {
                   track={t}
                   index={t.trackNumber}
                   showAlbum={false}
+                  showPlays
                   showArtist={!!t.trackArtist || t.artistId !== album!.artistId}
                   active={t.id === nowTrackId}
                   playing={t.id === nowTrackId && status === "playing"}
                   onPlay={() => player.playAlbum(id, t.id)}
                 />
               ))
-            : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showAlbum={false} />)}
+            : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showAlbum={false} showPlays />)}
         </TrackList>
 
         {album && data!.moreByArtist.length > 0 && (

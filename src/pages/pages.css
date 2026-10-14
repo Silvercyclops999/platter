@@ -1,6 +1,18 @@
 /* Page layouts. */
 
-.page-pad { padding: 72px var(--space-6) var(--space-8); }
+/* Page content stops growing at about 1850 px and centres: on very wide
+   main columns the side padding takes up the rest. cqw is the main column
+   (the "main" container in shell.css). */
+.page {
+  --page-x: max(var(--space-6), calc((100cqw - 1850px) / 2));
+  /* Card width steps up once the main column is wide. */
+  --card-width: 180px;
+}
+@container main (min-width: 1000px) {
+  .page { --card-width: 200px; }
+}
+.page-pad { padding: 72px var(--page-x) var(--space-8); }
+.settings.page-pad { padding-left: var(--space-6); padding-right: var(--space-6); }
 .page-title {
   margin: 0 var(--space-3) var(--space-6);
   font-size: var(--font-size-3xl);
@@ -61,7 +73,7 @@
   align-items: flex-end;
   gap: var(--space-6);
   min-height: 340px;
-  padding: 80px var(--space-6) var(--space-6);
+  padding: 80px var(--page-x) var(--space-6);
   /* Colour from the art in layers: a dark shade band, with the vivid colour
      fading to clear over it from the top. */
   background:
@@ -101,11 +113,21 @@
 .detail-header__artist { font-weight: var(--font-weight-bold); }
 .detail-header__muted { color: rgba(244, 239, 232, 0.72); }
 .detail-header__badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
-/* Under the header, a short fade from the shade (partly see-through) into
-   the page background, behind the action row. */
+/* Under the header, a short fade from the shade into the page background,
+   behind the action row. It starts at the header's full shade so there's no
+   line where the two meet, and eases out over several stops so the fade has
+   no visible kink. */
 .detail-body {
-  padding: var(--space-6) var(--space-6) var(--space-8);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--tint-shade) 62%, transparent) 0, transparent 216px);
+  padding: var(--space-6) var(--page-x) var(--space-8);
+  background: linear-gradient(
+    180deg,
+    var(--tint-shade) 0,
+    color-mix(in srgb, var(--tint-shade) 80%, transparent) 32px,
+    color-mix(in srgb, var(--tint-shade) 55%, transparent) 88px,
+    color-mix(in srgb, var(--tint-shade) 25%, transparent) 156px,
+    color-mix(in srgb, var(--tint-shade) 7%, transparent) 204px,
+    transparent 232px
+  );
 }
 .action-row { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-6); }
 .action-row .icon-btn--xl { width: 56px; height: 56px; }
@@ -133,13 +155,28 @@
 }
 .see-more:hover { color: var(--color-text-primary); }
 
-@media (max-width: 1100px) {
+/* Track table columns drop as the main column narrows: the quality column
+   first, then album. Album tables (number, title, plays, time) only lose
+   plays at the very narrowest. Compact rows (queue) aren't in the main
+   column and keep their own grid. */
+@container main (max-width: 900px) {
   .track-row,
   .track-list__head { grid-template-columns: 32px minmax(0, 5fr) minmax(0, 3fr) minmax(88px, auto); }
   .track-row--no-album { grid-template-columns: 32px minmax(0, 1fr) minmax(88px, auto); }
   .track-row__badges,
   .track-list__badges { display: none; }
-  .track-row--compact { grid-template-columns: minmax(0, 1fr) auto; }
+}
+@container main (max-width: 640px) {
+  .track-row,
+  .track-list__head,
+  .track-row--no-album { grid-template-columns: 32px minmax(0, 1fr) minmax(88px, auto); }
+  .track-row__album,
+  .track-list__album { display: none; }
+}
+@container main (max-width: 480px) {
+  :is(.track-row, .track-list__head).track-row--plays { grid-template-columns: 32px minmax(0, 1fr) minmax(88px, auto); }
+  .track-row__plays,
+  .track-list__plays { display: none; }
 }
 
 /* ---------------------------------------------------------------- Search */
