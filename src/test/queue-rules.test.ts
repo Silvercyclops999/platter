@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MockBackend } from "../lib/mock";
 import type { PlayerState, Track } from "../lib/types";
 
-// The mock mirrors the core's queue rules (spec 04, Queue), so screens and
+// The mock mirrors the core's queue rules, so screens and
 // Playwright see the same behaviour as the app.
 
 let mock: MockBackend;
