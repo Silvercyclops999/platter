@@ -71,8 +71,10 @@ pub enum LanDevice {
     AirPlay(AirPlayDevice),
 }
 
-/// Picker entries for the devices in `answers`.
-pub fn lan_found(answers: &[MdnsAnswer], has_password: &dyn Fn(&str) -> bool) -> Vec<Found> {
+/// Picker entries for the devices in `answers`. Computers' own AirPlay
+/// receivers are always left out; `show_locked` keeps receivers that need a
+/// password or a pairing code.
+pub fn lan_found(answers: &[MdnsAnswer], has_password: &dyn Fn(&str) -> bool, show_locked: bool) -> Vec<Found> {
     let mut out: Vec<Found> = Vec::new();
     for a in answers {
         let (player, lan) = if a.service.starts_with("_googlecast.") {
@@ -80,8 +82,12 @@ pub fn lan_found(answers: &[MdnsAnswer], has_password: &dyn Fn(&str) -> bool) ->
             (d.player(), LanDevice::Cast(d))
         } else if a.service.starts_with("_raop.") {
             let Some(d) = super::airplay::from_mdns(a) else { continue };
+            let stored = has_password(&d.id);
+            if d.computer || (!show_locked && d.locked(stored)) {
+                continue;
+            }
             let mut p = d.player();
-            p.needs_password = d.password && !has_password(&d.id);
+            p.needs_password = d.password && !stored;
             (p, LanDevice::AirPlay(d))
         } else {
             continue;
@@ -96,6 +102,8 @@ pub fn lan_found(answers: &[MdnsAnswer], has_password: &dyn Fn(&str) -> bool) ->
             via_server: false,
             sonos: false,
             lan: Some(lan),
+            peer: None,
+            last_seen: None,
         });
     }
     out
@@ -113,6 +121,7 @@ pub fn lan_player(id: String, name: String, product: String, kind: super::types:
         via,
         needs_password: false,
         unsupported: None,
+        unreachable: false,
     }
 }
 
@@ -153,7 +162,7 @@ pub struct MdnsSd {
 /// How long the first scan waits for devices to answer.
 pub const FIRST_SCAN: Duration = Duration::from_millis(1500);
 
-fn answer_of(r: &mdns_sd::ResolvedService) -> MdnsAnswer {
+pub(crate) fn answer_of(r: &mdns_sd::ResolvedService) -> MdnsAnswer {
     let instance = r
         .fullname
         .strip_suffix(&r.ty_domain)
@@ -288,7 +297,7 @@ mod tests {
             // Same device answering twice.
             answer(CAST_SERVICE, "Chromecast-abc", "192.0.2.30", 8009, &[("id", "abc"), ("fn", "Living Room TV"), ("md", "Chromecast")]),
         ];
-        let found = lan_found(&answers, &|_| false);
+        let found = lan_found(&answers, &|_| false, true);
         assert_eq!(found.len(), 3);
         let tv = &found[0].player;
         assert_eq!((tv.id.as_str(), tv.name.as_str(), tv.kind, tv.via), ("cast:abc", "Living Room TV", PlayerKind::Tv, PlayerVia::Cast));
@@ -297,8 +306,31 @@ mod tests {
         assert_eq!((k.id.as_str(), k.name.as_str(), k.via), ("airplay:AABBCCDDEEFF", "Kitchen", PlayerVia::AirPlay));
         assert!(k.needs_password);
         // A stored password: no prompt.
-        let found = lan_found(&answers, &|id| id == "airplay:AABBCCDDEEFF");
+        let found = lan_found(&answers, &|id| id == "airplay:AABBCCDDEEFF", true);
         assert!(!found[2].player.needs_password);
+    }
+
+    #[test]
+    fn computers_and_locked_receivers_are_hidden() {
+        let answers = vec![
+            answer(RAOP_SERVICE, "A1@Studio Mac", "192.0.2.41", 7000, &[("am", "Mac14,2"), ("pw", "true")]),
+            answer(RAOP_SERVICE, "A2@Old iMac", "192.0.2.42", 7000, &[("am", "iMac21,1")]),
+            answer(RAOP_SERVICE, "A3@Laptop", "192.0.2.43", 7000, &[("am", "MacBookAir10,1")]),
+            answer(RAOP_SERVICE, "A4@PC receiver", "192.0.2.44", 7000, &[("ft", "0x5A7FFFF7,0x1E")]),
+            answer(RAOP_SERVICE, "A5@Den TV", "192.0.2.45", 7000, &[("am", "AppleTV11,1"), ("ft", "0x5A7FFFF7,0x1E")]),
+            answer(RAOP_SERVICE, "A6@Kitchen", "192.0.2.46", 7000, &[("am", "AudioAccessory5,1"), ("pw", "true")]),
+            answer(RAOP_SERVICE, "A7@Bedroom", "192.0.2.47", 7000, &[("am", "AudioAccessory1,1"), ("sf", "0x8")]),
+            answer(RAOP_SERVICE, "A8@Patio", "192.0.2.48", 7000, &[("am", "AirPort10,115")]),
+        ];
+        let ids = |show_locked: bool, stored: &dyn Fn(&str) -> bool| -> Vec<String> {
+            lan_found(&answers, stored, show_locked).into_iter().map(|f| f.player.name).collect()
+        };
+        // Default: no computers, nothing that asks for a password or a code.
+        assert_eq!(ids(false, &|_| false), ["Den TV", "Patio"]);
+        // Shown on request; computers still never.
+        assert_eq!(ids(true, &|_| false), ["Den TV", "Kitchen", "Bedroom", "Patio"]);
+        // A password kept from before doesn't count as locked.
+        assert_eq!(ids(false, &|id| id == "airplay:A6"), ["Den TV", "Kitchen", "Patio"]);
     }
 
     #[test]
@@ -324,7 +356,7 @@ mod live {
         tokio::time::sleep(Duration::from_secs(4)).await;
         let answers = m.scan().await;
         m.stop();
-        let found = lan_found(&answers, &|_| false);
+        let found = lan_found(&answers, &|_| false, true);
         let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
         for f in &found {
             let key = format!(
@@ -336,6 +368,10 @@ mod live {
             );
             *counts.entry(key).or_default() += 1;
         }
-        println!("mdns answers: {}, devices: {counts:?}", answers.len());
+        let computers = answers
+            .iter()
+            .filter(|a| a.service.starts_with("_raop.") && super::super::airplay::from_mdns(a).is_some_and(|d| d.computer))
+            .count();
+        println!("mdns answers: {}, devices: {counts:?}, computers' AirPlay hidden: {computers}", answers.len());
     }
 }

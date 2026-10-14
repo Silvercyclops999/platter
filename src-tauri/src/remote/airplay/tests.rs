@@ -157,6 +157,7 @@ fn the_target_probes_and_opens_through_the_network_output() {
         addr: fake.addr,
         password: false,
         unsupported: None,
+        computer: false,
     };
     let t = AirPlayTarget::new(dev, None, "0123456789ABCDEF".into(), Duration::from_secs(2), 0.8);
     t.probe().unwrap();

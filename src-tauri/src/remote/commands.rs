@@ -8,12 +8,15 @@ use async_trait::async_trait;
 use tauri::State;
 use tokio::sync::watch;
 
+use super::peer::directory::{MdnsPeers, PeerDirectory};
+use super::peer::runtime::{self, RuntimeConfig};
+use super::peer::{self};
 use super::service::{LocalPlayer, RemoteEnv, RemoteService, ServerCtx};
 use super::target::{self, PlayerTarget, TargetInfo};
 use super::types::{RemoteCommand, RemotePlayer, RemoteState};
 use crate::audio::events::PlayerState;
 use crate::audio::player::PlayerHandle;
-use crate::audio::queue::Repeat;
+use crate::audio::queue::{ContextInfo, Repeat};
 use crate::audio::source::{ContextKind, PlayContext};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
@@ -81,7 +84,17 @@ pub async fn remote_command(remote: State<'_, RemoteService>, command: RemoteCom
 // ---- bindings ---------------------------------------------------------------
 
 /// Plex for the service: the selected server and the account token.
-pub struct PlexRemoteEnv(pub PlexState);
+pub struct PlexRemoteEnv(pub PlexState, pub AccountId);
+
+/// The account's id, looked up once per token.
+#[derive(Default)]
+pub struct AccountId(parking_lot::Mutex<Option<(String, String)>>);
+
+impl PlexRemoteEnv {
+    pub fn new(plex: PlexState) -> Self {
+        Self(plex, AccountId::default())
+    }
+}
 
 #[async_trait]
 impl RemoteEnv for PlexRemoteEnv {
@@ -106,6 +119,21 @@ impl RemoteEnv for PlexRemoteEnv {
     }
     async fn account_token(&self) -> Option<Token> {
         self.0.account_token().await
+    }
+    async fn account_id(&self) -> Option<String> {
+        let token = self.0.account_token().await?;
+        let key = crate::remote::peer::auth::hex(&crate::remote::peer::auth::hmac_sha256(b"account-id-cache", token.expose().as_bytes()));
+        if let Some((k, id)) = self.1.0.lock().as_ref()
+            && *k == key
+        {
+            return Some(id.clone());
+        }
+        let user = self.0.plex_tv().user(&token).await.ok()?;
+        if user.uuid.is_empty() {
+            return None;
+        }
+        *self.1.0.lock() = Some((key, user.uuid.clone()));
+        Some(user.uuid)
     }
 }
 
@@ -161,6 +189,33 @@ impl LocalPlayer for PlayerHandle {
     async fn select_output(&self, id: Option<String>) -> AppResult<()> {
         PlayerHandle::select_output(self, id).await.map(|_| ())
     }
+    async fn adopt(
+        &self,
+        context: Option<ContextInfo>,
+        ids: Vec<String>,
+        user: Vec<String>,
+        shuffle: bool,
+        repeat: Repeat,
+        ms: u64,
+        play: bool,
+    ) -> AppResult<()> {
+        self.adopt_queue(context, ids, user, shuffle, repeat, ms, play).await
+    }
+}
+
+/// Show this computer to the user's other Platter devices while the
+/// setting is on, and find theirs.
+pub fn spawn_peers(remote: &RemoteService, platform: String, version: String) {
+    let dir: Arc<dyn PeerDirectory> = Arc::new(MdnsPeers::new());
+    remote.set_peers(dir.clone());
+    let (port, _) = watch::channel(None);
+    tauri::async_runtime::spawn(runtime::run(
+        remote.clone(),
+        dir,
+        Arc::new(peer::lan_addrs),
+        RuntimeConfig::app(platform, version),
+        port,
+    ));
 }
 
 /// Start or stop Platter-as-a-player as the setting changes.

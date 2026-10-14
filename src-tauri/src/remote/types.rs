@@ -33,6 +33,8 @@ pub enum PlayerVia {
     /// An AirPlay receiver on this network (Platter streams the sound).
     #[serde(rename = "airplay")]
     AirPlay,
+    /// Another Platter device signed in to the same Plex account.
+    Platter,
 }
 
 /// One Plex player in the device picker.
@@ -59,6 +61,10 @@ pub struct RemotePlayer {
     /// Listed but can't be played on, and why ("Needs AirPlay 2 pairing").
     #[serde(default)]
     pub unsupported: Option<String>,
+    /// A Platter device Plex says is on, that doesn't answer directly
+    /// (another network, or a firewall on that computer).
+    #[serde(default)]
+    pub unreachable: bool,
 }
 
 /// Remote playback status.

@@ -62,6 +62,8 @@ pub struct AirPlayDevice {
     pub password: bool,
     /// Why Platter can't play on it, if it can't.
     pub unsupported: Option<String>,
+    /// A computer's own AirPlay receiver (a Mac), not a speaker.
+    pub computer: bool,
 }
 
 pub const UNSUPPORTED_ENCRYPTION: &str = "Needs AirPlay encryption Platter doesn't support";
@@ -80,6 +82,22 @@ fn hex_or_dec(s: &str) -> Option<u64> {
     match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         Some(h) => u64::from_str_radix(h, 16).ok(),
         None => s.parse().ok(),
+    }
+}
+
+/// Feature flags: video, and screen mirroring.
+const FT_VIDEO: u64 = 1;
+const FT_SCREEN: u64 = 1 << 7;
+
+/// A computer's own AirPlay receiver: a Mac model ("Mac14,2",
+/// "MacBookAir10,1", "iMac21,1"), or no model at all with video and screen
+/// mirroring (receiver apps on PCs). Apple TVs and speakers say what they are.
+pub fn is_computer(model: Option<&str>, features: Option<&str>) -> bool {
+    match model.map(|m| m.trim().to_ascii_lowercase()) {
+        Some(m) if !m.is_empty() => m.starts_with("mac") || m.starts_with("imac"),
+        _ => features
+            .and_then(|f| hex_or_dec(f.split(',').next().unwrap_or("")))
+            .is_some_and(|f| f & FT_VIDEO != 0 && f & FT_SCREEN != 0),
     }
 }
 
@@ -107,10 +125,16 @@ pub fn from_mdns(a: &MdnsAnswer) -> Option<AirPlayDevice> {
         addr,
         password: a.txt("pw").is_some_and(|v| v.eq_ignore_ascii_case("true") || v == "1"),
         unsupported: unsupported.map(str::to_string),
+        computer: is_computer(a.txt("am"), a.txt("ft")),
     })
 }
 
 impl AirPlayDevice {
+    /// Needs a password Platter doesn't have, or a pairing code.
+    pub fn locked(&self, has_password: bool) -> bool {
+        (self.password && !has_password) || self.unsupported.as_deref() == Some(UNSUPPORTED_PIN)
+    }
+
     pub fn player(&self) -> RemotePlayer {
         let tv = self.model.as_deref().is_some_and(|m| m.to_ascii_lowercase().contains("appletv"));
         let kind = if tv { PlayerKind::Tv } else { PlayerKind::Speaker };

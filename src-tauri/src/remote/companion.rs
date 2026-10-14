@@ -250,12 +250,15 @@ mod tests {
                 via: Default::default(),
                 needs_password: false,
                 unsupported: None,
+                unreachable: false,
             },
             direct: direct.iter().map(|u| Url::parse(u).unwrap()).collect(),
             token: None,
             via_server,
             sonos,
             lan: None,
+            peer: None,
+            last_seen: None,
         }
     }
 

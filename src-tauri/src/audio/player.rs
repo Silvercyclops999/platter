@@ -123,6 +123,17 @@ enum Cmd {
     },
     /// Like QueueJump, but starts at a position and plays or stays paused.
     JumpAt(String, u64, bool, Reply<()>),
+    /// Take over a queue from another device (see `Queue::adopt`).
+    Adopt {
+        info: ContextInfo,
+        tracks: Vec<Track>,
+        user: Vec<Track>,
+        shuffle: bool,
+        repeat: Repeat,
+        start_ms: u64,
+        play: bool,
+        reply: Reply<()>,
+    },
 }
 
 /// Cloneable handle; register it with `tauri::Builder::manage`.
@@ -425,6 +436,32 @@ impl PlayerHandle {
             reply,
         })
         .await
+    }
+    /// Takes over a queue from another Platter: `ids` is the playing song
+    /// then what comes next, `user` the user queue, started at `start_ms`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn adopt_queue(
+        &self,
+        context: Option<ContextInfo>,
+        ids: Vec<String>,
+        user: Vec<String>,
+        shuffle: bool,
+        repeat: Repeat,
+        start_ms: u64,
+        play: bool,
+    ) -> AppResult<()> {
+        let tracks = self.lookup.tracks(&ids).await?;
+        if tracks.is_empty() {
+            return Err(AppError::NotFound("tracks".into()));
+        }
+        let user = if user.is_empty() { Vec::new() } else { self.lookup.tracks(&user).await? };
+        let info = context.unwrap_or(ContextInfo {
+            kind: ContextKind::Tracks,
+            id: None,
+            title: None,
+        });
+        self.call(|reply| Cmd::Adopt { info, tracks, user, shuffle, repeat, start_ms, play, reply })
+            .await
     }
     /// Jumps to a queue entry at `position_ms`, playing or paused.
     pub async fn queue_jump_at(&self, item_id: String, position_ms: u64, play: bool) -> AppResult<()> {
@@ -979,6 +1016,26 @@ impl Actor {
                 self.failures_in_row = 0;
                 let _ = self.queue.set_context_at(info, tracks, start, None);
                 let r = self.start_current(play, start_ms);
+                let _ = reply.send(r);
+            }
+            Cmd::Adopt {
+                info,
+                tracks,
+                user,
+                shuffle,
+                repeat,
+                start_ms,
+                play,
+                reply,
+            } => {
+                self.queue.note_position(self.position_ms());
+                self.end_current_as_skip();
+                self.skip_ids.clear();
+                self.failures_in_row = 0;
+                let _ = self.queue.adopt(info, tracks, user, shuffle, repeat);
+                let r = self.start_current(play, start_ms);
+                self.update_next();
+                self.mark_dirty();
                 let _ = reply.send(r);
             }
             Cmd::JumpAt(id, ms, play, reply) => {

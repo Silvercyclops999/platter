@@ -18,6 +18,7 @@
 //! - [`cast`]: Google Cast (Plex's receiver with a play queue, or the
 //!   default media receiver).
 //! - [`airplay`]: AirPlay audio, played through a network output.
+//! - [`peer`]: the user's other Platter devices (announce, find, control).
 //! - [`commands`]: Tauri commands.
 //!
 //! Protocol notes and which calls are confirmed live: docs/PLEX-API.md.
@@ -28,6 +29,7 @@ pub mod commands;
 pub mod companion;
 pub mod discovery;
 pub mod lan;
+pub mod peer;
 pub mod playqueue;
 pub mod service;
 pub mod target;
@@ -57,6 +59,13 @@ pub struct RemoteSwitches {
     /// Let other Plex apps play on this computer (starts the companion
     /// server and the network announcement).
     pub allow_casting: watch::Sender<bool>,
+    /// Show this computer to the user's other Platter devices (announce
+    /// and answer the control API).
+    pub announce: watch::Sender<bool>,
+    /// The name other devices see (the setting, or the OS name).
+    pub name: watch::Sender<String>,
+    /// List AirPlay receivers that need a password or pairing.
+    pub show_airplay_locked: Arc<AtomicBool>,
 }
 
 impl Default for RemoteSwitches {
@@ -66,6 +75,9 @@ impl Default for RemoteSwitches {
             show_cast: Arc::new(AtomicBool::new(true)),
             stop_old: Arc::new(AtomicBool::new(true)),
             allow_casting: watch::channel(false).0,
+            announce: watch::channel(true).0,
+            name: watch::channel(String::new()).0,
+            show_airplay_locked: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -79,6 +91,30 @@ impl RemoteSwitches {
             *v = allow_casting;
             changed
         });
+    }
+    /// The Platter device settings: announce, name (empty: the OS name),
+    /// and AirPlay receivers with a password.
+    pub fn set_peer(&self, announce: bool, name: &str, airplay_locked: bool) {
+        self.announce.send_if_modified(|v| {
+            let changed = *v != announce;
+            *v = announce;
+            changed
+        });
+        let name = peer::display_name(name);
+        self.name.send_if_modified(|v| {
+            let changed = *v != name;
+            *v = name;
+            changed
+        });
+        self.show_airplay_locked.store(airplay_locked, Ordering::Relaxed);
+    }
+    /// The name other devices see.
+    pub fn computer_name(&self) -> String {
+        let n = self.name.borrow().clone();
+        if n.is_empty() { peer::os_computer_name() } else { n }
+    }
+    pub fn show_airplay_locked(&self) -> bool {
+        self.show_airplay_locked.load(Ordering::Relaxed)
     }
     pub fn set_show_cast(&self, on: bool) {
         self.show_cast.store(on, Ordering::Relaxed);

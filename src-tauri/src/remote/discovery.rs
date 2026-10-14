@@ -32,6 +32,10 @@ pub struct Found {
     pub sonos: bool,
     /// A Cast or AirPlay device on this network, driven by Platter itself.
     pub lan: Option<super::lan::LanDevice>,
+    /// Another Platter device's control API.
+    pub peer: Option<super::peer::PeerDevice>,
+    /// When plex.tv last saw it (unix seconds).
+    pub last_seen: Option<i64>,
 }
 
 fn s(v: &Value) -> Option<String> {
@@ -83,12 +87,15 @@ fn found(id: String, name: String, product: String, kind: PlayerKind) -> Found {
             via: Default::default(),
             needs_password: false,
             unsupported: None,
+            unreachable: false,
         },
         direct: Vec::new(),
         token: None,
         via_server: false,
         sonos: false,
         lan: None,
+        peer: None,
+        last_seen: None,
     }
 }
 
@@ -113,6 +120,36 @@ struct PlayerResource {
     access_token: Value,
     #[serde(default)]
     connections: Vec<Value>,
+    #[serde(default)]
+    last_seen_at: Value,
+}
+
+/// plex.tv times: unix seconds, or an ISO date ("2026-10-14T09:30:00Z").
+fn seen_at(v: &Value) -> Option<i64> {
+    match v {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.parse().ok().or_else(|| iso_seconds(s)),
+        _ => None,
+    }
+}
+
+/// Seconds since 1970 for "YYYY-MM-DDTHH:MM:SSZ" (UTC; fractions ignored).
+fn iso_seconds(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, mo, d, h, mi, se) = (n(0..4)?, n(5..7)?, n(8..10)?, n(11..13)?, n(14..16)?, n(17..19)?);
+    // Days from civil (Howard Hinnant).
+    let y2 = if mo <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + mi * 60 + se)
 }
 
 /// Players from plex.tv `GET /api/v2/resources` (JSON array). `own_id` (this
@@ -140,6 +177,7 @@ pub fn from_resources(body: &[u8], own_id: &str) -> Vec<Found> {
             );
             let mut f = found(id, name, product, kind);
             f.player.online = b(&r.presence);
+            f.last_seen = seen_at(&r.last_seen_at);
             f.token = s(&r.access_token).and_then(|t| Token::new(t).ok());
             let mut conns: Vec<ResourceConnection> = r
                 .connections
@@ -249,6 +287,7 @@ pub fn merge(lists: Vec<Vec<Found>>, playing: &HashMap<String, String>) -> Vec<F
                 if o.token.is_none() {
                     o.token = f.token;
                 }
+                o.last_seen = o.last_seen.max(f.last_seen);
                 for u in f.direct {
                     if !o.direct.contains(&u) {
                         o.direct.push(u);

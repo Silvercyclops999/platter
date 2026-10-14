@@ -789,6 +789,31 @@ impl Queue {
         self.user.clear();
     }
 
+    /// Takes over a queue from another device: `tracks` is the playing song
+    /// then what comes next, in play order; `user` is the user queue. Shuffle
+    /// and repeat are set as they were there, and the order is kept as given
+    /// even with shuffle on (it was already shuffled there).
+    pub fn adopt(
+        &mut self,
+        info: ContextInfo,
+        tracks: Vec<Track>,
+        user: Vec<Track>,
+        shuffle: bool,
+        repeat: Repeat,
+    ) -> Option<QueueItem> {
+        let plain = ContextInfo { id: None, ..info.clone() };
+        let first = self.set_context_at(plain, tracks, Some(0), Some(false)).map(|(i, _)| i);
+        self.context = Some(info);
+        self.user.clear();
+        for t in user {
+            let item_id = self.new_id();
+            self.user.push_back(QueueItem { item_id, track: t, source: ItemSource::User });
+        }
+        self.shuffle = shuffle;
+        self.repeat = repeat;
+        first
+    }
+
     pub fn set_repeat(&mut self, r: Repeat) {
         self.repeat = r;
     }
@@ -895,6 +920,22 @@ mod tests {
         assert_eq!(ids(&q.view().user_queue), vec!["a", "x", "y", "b", "z"]);
         q.add(vec![track("f", "B", "/p")], AddAt::Index(0));
         assert_eq!(ids(&q.view().user_queue)[0], "f");
+    }
+
+    #[test]
+    fn adopting_a_queue_keeps_its_order_user_queue_shuffle_and_repeat() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx(), tracks(3), Some(0), Some(false));
+        q.add(vec![track("old", "B", "/p")], AddAt::End);
+        let order = vec![track("t3", "A", "/p"), track("t1", "A", "/p"), track("t2", "A", "/p")];
+        q.adopt(ctx(), order, vec![track("u", "B", "/p")], true, Repeat::All);
+        assert_eq!(cur(&q), "t3");
+        assert_eq!(ids(&q.view().user_queue), vec!["u"], "the old user queue is replaced");
+        assert_eq!(ids(&q.view().next_up), vec!["t1", "t2"], "shuffled order kept as sent");
+        assert!(q.shuffle());
+        assert_eq!(q.repeat(), Repeat::All);
+        assert_eq!(q.context().and_then(|c| c.id.as_deref()), Some("al"));
+        assert!(!q.shuffle_pref("al"), "the context's own shuffle choice is left alone");
     }
 
     #[test]

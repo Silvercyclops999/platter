@@ -33,6 +33,8 @@ pub const REPO_URL: &str = "https://github.com/Silvercyclops999/platter";
 pub const LICENCE: &str = "GPL-3.0-or-later";
 
 pub const PRECACHE_MIN: u32 = 1;
+/// The longest name this computer can show to other devices.
+pub const COMPUTER_NAME_MAX: usize = 60;
 pub const PRECACHE_MAX: u32 = 50;
 pub const ART_CACHE_MIN_MB: u32 = 128;
 pub const ART_CACHE_MAX_MB: u32 = 51_200;
@@ -298,6 +300,14 @@ pub struct Settings {
     pub transcribe_model: crate::lyrics::transcribe::model::ModelKind,
     /// Show lyrics transcribed on this computer.
     pub show_auto_lyrics: bool,
+    /// Announce this computer to the user's other Platter devices on the
+    /// network and through Plex, and let them play here (this device only).
+    pub show_to_my_devices: bool,
+    /// The name other devices see. Empty means the OS computer name
+    /// (this device only).
+    pub computer_name: String,
+    /// List AirPlay receivers that need a password or pairing.
+    pub show_airplay_locked: bool,
 }
 
 impl Default for Settings {
@@ -380,6 +390,9 @@ impl Default for Settings {
             transcribe_lyrics: false,
             transcribe_model: Default::default(),
             show_auto_lyrics: true,
+            show_to_my_devices: true,
+            computer_name: String::new(),
+            show_airplay_locked: false,
         }
     }
 }
@@ -462,6 +475,10 @@ pub struct SettingsPatch {
     pub transcribe_lyrics: Option<bool>,
     pub transcribe_model: Option<crate::lyrics::transcribe::model::ModelKind>,
     pub show_auto_lyrics: Option<bool>,
+    pub show_to_my_devices: Option<bool>,
+    /// Trimmed; empty goes back to the OS computer name.
+    pub computer_name: Option<String>,
+    pub show_airplay_locked: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -554,6 +571,15 @@ impl Settings {
         set(&mut self.transcribe_lyrics, p.transcribe_lyrics);
         set(&mut self.transcribe_model, p.transcribe_model);
         set(&mut self.show_auto_lyrics, p.show_auto_lyrics);
+        set(&mut self.show_to_my_devices, p.show_to_my_devices);
+        set(&mut self.show_airplay_locked, p.show_airplay_locked);
+        if let Some(name) = &p.computer_name {
+            let name = name.trim();
+            if name.chars().count() > COMPUTER_NAME_MAX {
+                return Err(AppError::Invalid("Computer names can be up to 60 characters.".into()));
+            }
+            self.computer_name = name.to_string();
+        }
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -703,6 +729,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     }
     live.remote.set(s.show_plex_players, s.move_stops_old_device, s.act_as_plex_player);
     live.remote.set_show_cast(s.show_cast_devices);
+    live.remote.set_peer(s.show_to_my_devices, &s.computer_name, s.show_airplay_locked);
     let cap = s.art_cache_bytes();
     let old = live.art_cap.swap(cap, Ordering::Relaxed);
     if let Some(art) = &live.art
@@ -1094,6 +1121,9 @@ mod tests {
             transcribe_lyrics: Some(true),
             transcribe_model: Some(crate::lyrics::transcribe::model::ModelKind::Medium),
             show_auto_lyrics: Some(false),
+            show_to_my_devices: Some(false),
+            computer_name: Some("Den".into()),
+            show_airplay_locked: Some(true),
         })
         .await
         .unwrap();
@@ -1309,6 +1339,37 @@ mod tests {
         assert!(!live.remote.show_players() && !live.remote.stop_old());
         assert!(rx.has_changed().unwrap());
         assert!(*rx.borrow_and_update());
+    }
+
+    #[test]
+    fn platter_device_settings_default_and_reach_the_switches() {
+        let s = Settings::default();
+        assert!(s.show_to_my_devices && s.computer_name.is_empty() && !s.show_airplay_locked);
+        let (db, _d) = db();
+        let live = Live::default();
+        publish(&s, &live, &db);
+        assert!(*live.remote.announce.borrow());
+        let mut rx = live.remote.announce.subscribe();
+        let mut s = load(&db);
+        s.apply(&SettingsPatch {
+            show_to_my_devices: Some(false),
+            computer_name: Some("  Studio  ".into()),
+            show_airplay_locked: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(s.computer_name, "Studio");
+        publish(&s, &live, &db);
+        assert!(rx.has_changed().unwrap());
+        assert!(!*rx.borrow_and_update());
+        assert_eq!(live.remote.computer_name(), "Studio");
+        assert!(live.remote.show_airplay_locked());
+        let long = "x".repeat(COMPUTER_NAME_MAX + 1);
+        assert!(s.apply(&SettingsPatch { computer_name: Some(long), ..Default::default() }).is_err());
+        // Empty goes back to the OS name.
+        s.apply(&SettingsPatch { computer_name: Some(" ".into()), ..Default::default() }).unwrap();
+        publish(&s, &live, &db);
+        assert_eq!(live.remote.computer_name(), crate::remote::peer::os_computer_name());
     }
 
     #[tokio::test]

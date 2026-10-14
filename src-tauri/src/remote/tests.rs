@@ -44,6 +44,9 @@ impl RemoteEnv for Env {
     async fn account_token(&self) -> Option<Token> {
         Some(Token::new("account-token").unwrap())
     }
+    async fn account_id(&self) -> Option<String> {
+        Some("acct-1".into())
+    }
 }
 
 fn item(id: &str) -> QueueItem {
@@ -165,6 +168,26 @@ impl LocalPlayer for Local {
     }
     async fn output_selected(&self) -> AppResult<Option<String>> {
         Ok(self.output.lock().clone())
+    }
+    async fn adopt(
+        &self,
+        _context: Option<crate::audio::queue::ContextInfo>,
+        ids: Vec<String>,
+        user: Vec<String>,
+        shuffle: bool,
+        repeat: Repeat,
+        ms: u64,
+        play: bool,
+    ) -> AppResult<()> {
+        let rest: Vec<&str> = ids[1..].iter().map(String::as_str).collect();
+        let fresh = Local::playing(&ids[0], &rest, ms);
+        let mut st = fresh.state.lock().clone();
+        st.status = if play { PlayerStatus::Playing } else { PlayerStatus::Paused };
+        st.shuffle = shuffle;
+        st.repeat = repeat;
+        *self.state.lock() = st;
+        self.push(format!("adopt {} | {} | shuffle {shuffle} {repeat:?} at {ms} {play}", ids.join(","), user.join(",")));
+        Ok(())
     }
     /// Like the engine with its output open: a network id connects the
     /// route's target, anything else closes it.
@@ -700,6 +723,8 @@ mod lan_devices {
             passwords: passwords.clone(),
             tls: crate::remote::cast::conn::tls_config().unwrap(),
         });
+        // These tests cover the password prompt, so locked speakers are listed.
+        r.switches.show_airplay_locked.store(true, Ordering::SeqCst);
         Lan { r, mdns, passwords }
     }
 
@@ -874,5 +899,424 @@ mod lan_devices {
         let e = l.r.remote.move_to("airplay:EEFF").await.unwrap_err();
         assert_eq!(e.to_string(), "network: Couldn't reach Gone");
         assert_eq!(*l.r.local.output.lock(), None);
+    }
+}
+
+// ---- Platter to Platter ----------------------------------------------------------
+
+/// Two (or more) Platter instances in this process, on a pretend network,
+/// listening on loopback only. Nothing reaches a real device.
+mod peers {
+    use super::*;
+    use std::net::Ipv4Addr;
+    use tokio::sync::watch;
+
+    use crate::remote::peer::auth::{PeerKey, account_tag, nonce, now_ms, sign};
+    use crate::remote::peer::client::{NOT_SAME_ACCOUNT, PeerClient, PeerError};
+    use crate::remote::peer::directory::{MemoryDirectory, MemoryLan};
+    use crate::remote::peer::runtime::{self, RuntimeConfig};
+    use crate::remote::peer::{self, PATH_HELLO, SERVICE};
+    use crate::remote::types::{PlayerKind, PlayerVia};
+
+    /// A Plex account as one instance sees it.
+    struct Acct {
+        base: Url,
+        token: &'static str,
+        id: &'static str,
+        machine: &'static str,
+    }
+
+    #[async_trait]
+    impl RemoteEnv for Acct {
+        async fn server(&self) -> AppResult<ServerCtx> {
+            Ok(ServerCtx {
+                base: self.base.clone(),
+                token: Token::new("server-token").unwrap(),
+                machine_id: self.machine.into(),
+            })
+        }
+        async fn account_token(&self) -> Option<Token> {
+            Some(Token::new(self.token).unwrap())
+        }
+        async fn account_id(&self) -> Option<String> {
+            Some(self.id.into())
+        }
+    }
+
+    struct Peer {
+        remote: RemoteService,
+        local: Arc<Local>,
+        events: Arc<Events>,
+        switches: RemoteSwitches,
+        port: watch::Receiver<Option<u16>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for Peer {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    struct Opts {
+        id: &'static str,
+        name: &'static str,
+        token: &'static str,
+        account: &'static str,
+        machine: &'static str,
+        publish_to: Option<Url>,
+    }
+
+    impl Opts {
+        fn new(id: &'static str, name: &'static str) -> Self {
+            Self { id, name, token: "account-token", account: "acct-1", machine: "srv", publish_to: None }
+        }
+    }
+
+    async fn start(server: &MockServer, lan: &Arc<MemoryLan>, local: Arc<Local>, o: Opts) -> Peer {
+        let events = Arc::new(Events::default());
+        let switches = RemoteSwitches::default();
+        switches.set_peer(true, o.name, false);
+        let env = Arc::new(Acct { base: Url::parse(&server.uri()).unwrap(), token: o.token, id: o.account, machine: o.machine });
+        let remote = RemoteService::new(env, local.clone(), events.clone(), &ClientIdentity::with_id(o.id), switches.clone(), cfg(server)).unwrap();
+        let dir = Arc::new(MemoryDirectory::new(lan.clone()));
+        remote.set_peers(dir.clone());
+        let (tx, mut port) = watch::channel(None);
+        let rc = RuntimeConfig {
+            first_port: 0,
+            tries: 1,
+            recheck: Duration::from_millis(50),
+            publish_to: o.publish_to,
+            platform: "Windows".into(),
+            version: "0.3.0".into(),
+        };
+        let task = tokio::spawn(runtime::run(remote.clone(), dir, Arc::new(|| vec![Ipv4Addr::LOCALHOST]), rc, tx));
+        tokio::time::timeout(Duration::from_secs(5), port.wait_for(Option::is_some)).await.unwrap().unwrap();
+        Peer { remote, local, events, switches, port, task }
+    }
+
+    impl Peer {
+        fn port(&self) -> u16 {
+            self.port.borrow().unwrap()
+        }
+        fn base(&self) -> Url {
+            Url::parse(&format!("http://127.0.0.1:{}", self.port())).unwrap()
+        }
+    }
+
+    /// A Plex server and a phone-like Plex player, like the other tests.
+    async fn net() -> (Rig, Arc<MemoryLan>) {
+        (rig().await, MemoryLan::new())
+    }
+
+    fn idle() -> Arc<Local> {
+        let l = Local::playing("z", &[], 0);
+        l.state.lock().status = PlayerStatus::Paused;
+        l
+    }
+
+    #[tokio::test]
+    async fn platter_devices_of_the_same_account_list_first() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        // Another account's Platter on the same network.
+        lan.insert(crate::remote::lan::answer(
+            SERVICE,
+            "other",
+            "127.0.0.1",
+            b.port(),
+            &[("id", "other"), ("name", "Neighbour"), ("acct", &account_tag("acct-2"))],
+        ));
+        let list = a.remote.players().await;
+        let ids: Vec<_> = list.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["mac", "amp"], "own device first, foreign and self left out");
+        let mac = &list[0];
+        assert_eq!((mac.name.as_str(), mac.kind, mac.via), ("Studio Mac", PlayerKind::Computer, PlayerVia::Platter));
+        assert_eq!(mac.product, "Platter");
+        assert_eq!(mac.playing.as_deref(), Some("Paused: Track z • A"));
+        assert!(mac.online && !mac.unreachable && mac.unsupported.is_none());
+        // And the other way round.
+        let list = b.remote.players().await;
+        assert_eq!(list[0].name, "Studio PC");
+        assert!(list[0].playing.as_deref().is_some_and(|p| p.starts_with("Track a •")));
+    }
+
+    #[tokio::test]
+    async fn the_name_setting_and_the_switch_reach_the_announcement() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        b.switches.set_peer(true, "Couch Mac", false);
+        wait_for("renamed", || {
+            lan.answers()
+                .iter()
+                .any(|x| x.txt.get("name").map(String::as_str) == Some("Couch Mac"))
+        })
+        .await;
+        assert_eq!(a.remote.players().await[0].name, "Couch Mac");
+        // Off: it leaves the network and stops answering.
+        let port = b.port();
+        b.switches.set_peer(false, "Couch Mac", false);
+        let mut rx = b.port.clone();
+        tokio::time::timeout(Duration::from_secs(5), rx.wait_for(Option::is_none)).await.unwrap().unwrap();
+        assert_eq!(lan.len(), 1, "only the PC is announced");
+        assert!(a.remote.players().await.iter().all(|p| p.id != "mac"));
+        let gone = reqwest::Client::new().get(format!("http://127.0.0.1:{port}{PATH_HELLO}")).send().await;
+        assert!(gone.is_err(), "the control port is closed");
+    }
+
+    #[tokio::test]
+    async fn moving_to_another_platter_and_back() {
+        let (r, lan) = net().await;
+        {
+            let mut st = r.local.state.lock();
+            st.queue.user_queue = vec![item("u")];
+            st.repeat = Repeat::All;
+        }
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        a.remote.players().await;
+        let st = a.remote.move_to("mac").await.unwrap();
+        let s = st.session.unwrap();
+        assert_eq!((s.player_name.as_str(), s.kind, s.status), ("Studio Mac", PlayerKind::Computer, RemoteStatus::Connecting));
+        // The Mac took the same queue at the same spot, and the PC paused.
+        assert_eq!(b.local.log(), ["adopt a,b,c | u | shuffle false All at 61000 true"]);
+        assert_eq!(a.local.log(), ["pause"]);
+        assert!(requests(&r.server, "/playQueues").await.is_empty(), "no server play queue between Platters");
+
+        wait_for("following", || a.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+        let s = a.remote.state().session.unwrap();
+        assert_eq!((s.position_ms, s.repeat, s.volume), (61_000, Repeat::All, Some(0.5)));
+
+        // Controls go to the Mac.
+        a.remote.command(RemoteCommand::Seek { position_ms: 90_000 }).await.unwrap();
+        a.remote.command(RemoteCommand::Pause).await.unwrap();
+        assert_eq!(&b.local.log()[1..], ["seek 90000", "pause"]);
+        wait_for("paused there", || a.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Paused && s.position_ms == 90_000)).await;
+
+        // Bring it back: the Mac stops, the PC carries on from its spot, paused like the Mac.
+        let st = a.remote.return_here().await.unwrap();
+        assert!(st.session.is_none());
+        assert_eq!(b.local.log().last().map(String::as_str), Some("pause"));
+        let log = a.local.log();
+        assert!(log.contains(&"seek 90000".to_string()), "{log:?}");
+        assert_eq!(log.last().map(String::as_str), Some("pause"));
+        assert!(a.events.toasts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_other_platter_stopping_or_vanishing_hands_back() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        a.remote.players().await;
+        a.remote.move_to("mac").await.unwrap();
+        wait_for("following", || a.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+        // The Mac quits: the PC gets control back, with a toast, paused.
+        drop(b);
+        wait_for("handed back", || a.remote.state().session.is_none()).await;
+        assert_eq!(a.events.toasts(), ["Couldn't reach Studio Mac"]);
+        assert_eq!(a.local.state.lock().status, PlayerStatus::Paused);
+    }
+
+    #[tokio::test]
+    async fn requests_must_be_signed_by_the_same_account() {
+        let (r, lan) = net().await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        let http = reqwest::Client::new();
+        let url = format!("{}platter/v1/play", b.base());
+        // Unsigned.
+        let resp = http.post(&url).body("{}").send().await.unwrap();
+        assert_eq!(resp.status(), 401);
+        // Another account's key.
+        let theirs = PeerClient::new(http.clone(), "x".into(), PeerKey::from_token(&Token::new("not-yours").unwrap()));
+        assert_eq!(
+            theirs.hello(&b.base(), "mac", Duration::from_secs(2)).await,
+            Err(PeerError::Refused(NOT_SAME_ACCOUNT.into()))
+        );
+        let req = peer::PlayRequest {
+            server_id: "srv".into(),
+            current: "a".into(),
+            user_queue: vec![],
+            next_up: vec![],
+            context: None,
+            position_ms: 0,
+            shuffle: false,
+            repeat: Repeat::Off,
+            play: true,
+        };
+        assert!(theirs.play(&b.base(), "mac", &req, Duration::from_secs(2)).await.is_err());
+        // A good request replayed.
+        let key = PeerKey::from_token(&Token::new("account-token").unwrap());
+        let body = serde_json::to_vec(&req).unwrap();
+        let auth = sign(&key, "POST", "/platter/v1/play", "pc", "mac", now_ms(), &nonce(), &body);
+        let send = || http.post(&url).header("x-platter-auth", auth.clone()).body(body.clone()).send();
+        assert_eq!(send().await.unwrap().status(), 200);
+        assert_eq!(send().await.unwrap().status(), 401, "replayed");
+        // Signed for another device.
+        let other = sign(&key, "GET", PATH_HELLO, "pc", "someone-else", now_ms(), &nonce(), b"");
+        let resp = http.get(format!("{}platter/v1/hello", b.base())).header("x-platter-auth", other).send().await.unwrap();
+        assert_eq!(resp.status(), 401);
+        assert_eq!(b.local.log().len(), 1, "only the good request did anything");
+    }
+
+    #[tokio::test]
+    async fn same_account_tag_but_a_different_key_is_listed_but_not_playable() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let _b = start(&r.server, &lan, idle(), Opts { token: "other-device-token", ..Opts::new("mac", "Studio Mac") }).await;
+        let list = a.remote.players().await;
+        assert_eq!(list[0].unsupported.as_deref(), Some(NOT_SAME_ACCOUNT));
+        let e = a.remote.move_to("mac").await.unwrap_err();
+        assert!(matches!(e, AppError::Auth(_)), "{e}");
+        assert!(a.local.log().is_empty(), "nothing paused here");
+    }
+
+    #[tokio::test]
+    async fn a_platter_on_another_server_says_so() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts { machine: "srv-2", ..Opts::new("mac", "Studio Mac") }).await;
+        a.remote.players().await;
+        let e = a.remote.move_to("mac").await.unwrap_err();
+        assert_eq!(e.to_string(), "invalid: That computer plays from a different Plex server.");
+        assert!(b.local.log().is_empty() && a.local.log().is_empty());
+    }
+
+    /// Seen on the network but its port doesn't answer: what a firewall does.
+    #[tokio::test]
+    async fn an_unreachable_platter_is_marked_and_a_move_stays_here() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        lan.insert(crate::remote::lan::answer(
+            SERVICE,
+            "mac",
+            "127.0.0.1",
+            1,
+            &[("id", "mac"), ("name", "Studio Mac"), ("acct", &account_tag("acct-1"))],
+        ));
+        let list = a.remote.players().await;
+        let mac = list.iter().find(|p| p.id == "mac").unwrap();
+        assert!(mac.unreachable, "listed, but can't be reached");
+        assert_eq!(list.last().map(|p| p.id.as_str()), Some("amp"));
+        let e = a.remote.move_to("mac").await.unwrap_err();
+        assert_eq!(e.to_string(), "network: Couldn't reach Studio Mac");
+        assert!(a.local.log().is_empty(), "playback here carries on");
+        assert!(a.remote.state().session.is_none());
+    }
+
+    /// Plex knows the other Platter (it registered with the server as a
+    /// player) but it can't be reached directly: the move goes through Plex.
+    #[tokio::test]
+    async fn not_on_this_network_falls_back_to_the_plex_path() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/clients"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer": {"size": 1, "Server": [
+                {"name": "Studio Mac", "address": "127.0.0.1", "port": 1, "machineIdentifier": "mac",
+                 "product": "Platter", "protocolCapabilities": "timeline,playback,playqueues"}
+            ]}})))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/playQueues"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer": {"playQueueID": 55}})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex_playback())
+            .and(header("x-plex-target-client-identifier", "mac"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("<Response code=\"200\" status=\"OK\"/>"))
+            .mount(&server)
+            .await;
+        let lan = MemoryLan::new();
+        let local = Local::playing("a", &["b"], 5_000);
+        let a = start(&server, &lan, local.clone(), Opts::new("pc", "Studio PC")).await;
+        let list = a.remote.players().await;
+        assert_eq!(list.len(), 1);
+        assert_eq!((list[0].via, list[0].unreachable), (PlayerVia::Platter, true));
+        let st = a.remote.move_to("mac").await.unwrap();
+        assert_eq!(st.session.unwrap().player_name, "Studio Mac");
+        let pm = requests(&server, "/player/playback/playMedia").await;
+        assert_eq!(pm.len(), 1, "sent through the server");
+        assert_eq!(q(&pm[0])["offset"], "5000");
+        assert_eq!(local.log(), ["pause"]);
+    }
+
+    #[tokio::test]
+    async fn platters_plex_lists_count_only_when_recently_seen() {
+        let r = rig().await;
+        let lan = MemoryLan::new();
+        let now = (now_ms() / 1000) as i64;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/resources"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"name": "Old Laptop", "product": "Platter", "provides": "player", "clientIdentifier": "old",
+                 "presence": false, "lastSeenAt": now - 3 * 86_400,
+                 "connections": [{"protocol": "http", "address": "127.0.0.1", "port": 1, "uri": "http://127.0.0.1:1", "local": true}]},
+                {"name": "Studio Mac", "product": "Platter", "provides": "player", "clientIdentifier": "mac",
+                 "presence": false, "lastSeenAt": now - 60, "connections": []}
+            ])))
+            .mount(&r.server)
+            .await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let list = a.remote.players().await;
+        let ids: Vec<_> = list.iter().map(|p| (p.id.as_str(), p.unreachable)).collect();
+        assert_eq!(ids, [("mac", true), ("amp", false)], "the laptop that's been off for days isn't listed");
+    }
+
+    #[tokio::test]
+    async fn the_addresses_are_published_to_plex() {
+        let r = rig().await;
+        Mock::given(method("PUT"))
+            .and(path("/devices/pc"))
+            .and(header("x-plex-token", "account-token"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&r.server)
+            .await;
+        let lan = MemoryLan::new();
+        let a = start(
+            &r.server,
+            &lan,
+            r.local.clone(),
+            Opts { publish_to: Some(Url::parse(&r.server.uri()).unwrap()), ..Opts::new("pc", "Studio PC") },
+        )
+        .await;
+        let port = a.port();
+        let mut puts = Vec::new();
+        for _ in 0..100 {
+            puts = r.server.received_requests().await.unwrap_or_default().into_iter().filter(|x| x.method.as_str() == "PUT").collect();
+            if !puts.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(puts.len(), 1);
+        assert_eq!(q(&puts[0])["Connection[][uri]"], format!("http://127.0.0.1:{port}"));
+    }
+
+    #[tokio::test]
+    async fn a_platter_hides_its_own_airplay_receiver() {
+        use crate::plex::keychain::MemoryStore;
+        use crate::remote::LanEnv;
+        use crate::remote::lan::{RAOP_SERVICE, StaticMdns};
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let _b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        let mdns = Arc::new(StaticMdns::default());
+        // A receiver at the Mac's address that doesn't say it's a Mac.
+        *mdns.answers.lock() = vec![
+            crate::remote::lan::answer(RAOP_SERVICE, "AA@Studio Mac", "127.0.0.1", 7000, &[]),
+            crate::remote::lan::answer(RAOP_SERVICE, "BB@Kitchen", "192.0.2.40", 7000, &[]),
+        ];
+        a.remote.set_lan(LanEnv {
+            mdns,
+            route: Default::default(),
+            passwords: Arc::new(MemoryStore::new()),
+            tls: crate::remote::cast::conn::tls_config().unwrap(),
+        });
+        let ids: Vec<String> = a.remote.players().await.into_iter().map(|p| p.id).collect();
+        assert_eq!(ids, ["mac", "amp", "airplay:BB"]);
     }
 }

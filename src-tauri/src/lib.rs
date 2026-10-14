@@ -254,7 +254,7 @@ pub fn run() {
 
             // Listen on: other Plex players, and Platter as one (setting).
             let remote = remote::RemoteService::new(
-                Arc::new(remote::commands::PlexRemoteEnv(plex.clone())),
+                Arc::new(remote::commands::PlexRemoteEnv::new(plex.clone())),
                 Arc::new(player.clone()),
                 Arc::new(plex::state::TauriSink(app.handle().clone())),
                 plex.identity(),
@@ -274,6 +274,10 @@ pub fn run() {
                         platform_version: id.platform_version.clone(),
                     },
                 );
+            }
+            {
+                let id = plex.identity();
+                remote::commands::spawn_peers(&remote, id.platform.clone(), id.version.clone());
             }
             remote.set_lan(remote::LanEnv {
                 mdns: Arc::new(remote::lan::MdnsSd::new()),

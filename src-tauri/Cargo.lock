@@ -3707,6 +3707,7 @@ dependencies = [
  "fs4",
  "futures",
  "hound",
+ "if-addrs",
  "keyring",
  "md-5",
  "mdns-sd",
