@@ -113,6 +113,15 @@
 .detail-header__artist { font-weight: var(--font-weight-bold); }
 .detail-header__muted { color: rgba(244, 239, 232, 0.72); }
 .detail-header__badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
+/* The header colour can be light; give badges their own dark plate so they
+   stay readable on any art. */
+.detail-header__badges .badge {
+  background: rgba(10, 8, 6, 0.55);
+  border-color: rgba(255, 240, 220, 0.22);
+  color: var(--color-text-secondary);
+}
+.detail-header__badges .badge--hires { color: var(--color-accent-hover); }
+.detail-header__badges .badge--version { color: #9CCBF8; }
 /* Under the header, a short fade from the shade into the page background,
    behind the action row. It starts at the header's full shade so there's no
    line where the two meet, and eases out over several stops so the fade has

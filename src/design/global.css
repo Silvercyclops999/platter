@@ -88,7 +88,7 @@ img {
 }
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(255 240 220 / calc(var(--sb-alpha) * 0.24)) transparent;
+  scrollbar-color: rgb(255 240 220 / calc(var(--sb-alpha) * 0.4)) transparent;
 }
 .sb { transition: --sb-alpha var(--motion-quick) ease; }
 .sb-on { --sb-alpha: 1; }
@@ -104,7 +104,7 @@ img {
   border-radius: 999px;
 }
 .sb-on::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 240, 220, 0.24);
+  background-color: rgba(255, 240, 220, 0.4);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
