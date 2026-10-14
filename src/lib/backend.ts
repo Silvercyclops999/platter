@@ -56,6 +56,7 @@ import type {
   ServerInfo,
   Settings,
   DeepLinkOpen,
+  DiscordStatus,
   ShareInfo,
   ShareKind,
   SyncStatus,
@@ -222,6 +223,11 @@ export interface Backend {
   /** The platter:// link opened last, once (null when none is waiting). */
   deepLinkTake(): Promise<DeepLinkOpen | null>;
 
+  // Discord status (docs/IPC.md "Discord")
+  discordStatus(): Promise<DiscordStatus>;
+  /** Save the Imgur client ID in the keychain (null removes it); answers whether Imgur refused it. */
+  discordImgurKeySet(key: string | null): Promise<InfoKeyState>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -339,6 +345,8 @@ export function createTauriBackend(): Backend {
     shareInfo: (kind, id, atSeconds) => call("share_info", { kind, id, atSeconds }),
     sharePublicLink: (kind, id) => call("share_public_link", { kind, id }),
     deepLinkTake: () => call("deep_link_take"),
+    discordStatus: () => call("discord_status"),
+    discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

@@ -70,6 +70,7 @@ import { MockLikes } from "./likes";
 import { MockPlaylists } from "./playlists";
 import { MockRemote } from "./remote";
 import { MockShare } from "./share";
+import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 
 export interface MockOptions {
   latencyMs: number;
@@ -86,6 +87,8 @@ export interface MockOptions {
   updateAvailable?: boolean;
   /** A platter:// link to open after start. */
   link?: string;
+  /** Discord status demo: no app id, Discord closed, or a failed upload. */
+  discord?: DiscordDemo;
 }
 
 const isTestEnv = (() => {
@@ -119,6 +122,7 @@ export function optionsFromUrl(search: string): MockOptions {
     autoApproveMs: isTestEnv ? null : 6000,
     updateAvailable: p.get("update") === "1",
     link: p.get("link") ?? undefined,
+    discord: isDiscordDemo(p.get("discord")) ? (p.get("discord") as DiscordDemo) : undefined,
   };
 }
 
@@ -151,6 +155,8 @@ export class MockBackend implements Backend {
   readonly remote: MockRemote;
   /** Sharing (test hooks: openLink, failNext). */
   readonly share: MockShare;
+  /** Discord status (test hooks: setConnected, setAvailable, failUpload). */
+  readonly discord: MockDiscord;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -222,6 +228,7 @@ export class MockBackend implements Backend {
       (id) => this.fx.playlists.some((p) => p.id === id),
       () => this.emit("deeplink://open", null),
     );
+    this.discord = new MockDiscord(this.opts.discord, (s) => this.emit("discord://status", s));
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
     this.remote = new MockRemote(
@@ -1484,6 +1491,15 @@ export class MockBackend implements Backend {
   }
   deepLinkTake() {
     return this.delay(() => this.share.take());
+  }
+
+  // ---------------------------------------------------------------- discord
+
+  discordStatus() {
+    return this.delay(() => this.discord.status());
+  }
+  discordImgurKeySet(key: string | null) {
+    return this.delay(() => this.discord.setKey(key));
   }
 }
 

@@ -30,6 +30,7 @@ import { updateSettings, useSettings } from "../stores/settings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
+import { discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
@@ -125,6 +126,9 @@ export const SOURCE_NOTICES: { name: string; licence: string }[] = [
   { name: "TheAudioDB (with your key)", licence: "TheAudioDB terms" },
   { name: "iTunes Search (finding public links)", licence: "Apple iTunes Search API terms" },
   { name: "song.link (shared link pages)", licence: "Songlink terms" },
+  { name: "Discord (status, when Discord is open)", licence: "Discord Developer Terms" },
+  { name: "Cover Art Archive (covers on Discord)", licence: "Cover art owners' terms" },
+  { name: "Imgur (covers on Discord, with your client ID)", licence: "Imgur API terms" },
 ];
 
 // ------------------------------------------------------------------ rows
@@ -387,6 +391,8 @@ export function SettingsPage() {
   const [dialog, setDialog] = useState<"signOut" | "server" | "notices" | null>(null);
 
   const { keys: infoKeys, setKey: setInfoKey } = useInfoKeys();
+  const { status: discord, setKey: setImgurKey } = useDiscordStatus();
+  const discordOff = !!discord && !discord.available;
   const artMb = s?.artCacheMb;
   useEffect(() => {
     let alive = true;
@@ -921,6 +927,70 @@ export function SettingsPage() {
         "Share menus can copy a song.link page that opens the song or album in any music service. Platter finds it with iTunes Search, sending only the artist, title and album. Unreleased music never gets one. Off leaves only Platter links.",
       control: (ids) => toggle(s, "sharePublicLinks", ids),
     },
+    // Integrations: Discord
+    {
+      key: "discordStatus",
+      section: "Integrations",
+      group: "Discord",
+      title: "Show what you're playing on Discord",
+      description: "Your Discord profile shows the song, artist, album and cover while music plays. Needs the Discord app open on this computer. A private session hides it. This device only.",
+      note: discordNote(discord, s?.discordStatus),
+      control: (ids) => (discordOff ? null : toggle(s, "discordStatus", ids)),
+    },
+    ...(discordOff
+      ? []
+      : ([
+          {
+            key: "discordClearOnPause",
+            section: "Integrations",
+            group: "Discord",
+            title: "Clear status when paused",
+            description: "Pausing removes the status. Off keeps the song on your profile, marked as paused.",
+            control: (ids) => toggle(s, "discordClearOnPause", ids),
+          },
+          {
+            key: "discordShowUnreleased",
+            section: "Integrations",
+            group: "Discord",
+            title: "Show unreleased songs",
+            description: "Off shows nothing on Discord while an unreleased song plays.",
+            control: (ids) => toggle(s, "discordShowUnreleased", ids),
+          },
+          {
+            key: "discordUnreleasedArt",
+            section: "Integrations",
+            group: "Discord",
+            title: "Show unreleased cover art",
+            description: "Off shows the Platter icon instead of the cover for unreleased songs, so their art is never looked up or uploaded.",
+            control: (ids) => toggle(s, "discordUnreleasedArt", ids),
+          },
+          {
+            key: "discordFindSong",
+            section: "Integrations",
+            group: "Discord",
+            title: "Find this song button",
+            description: "Adds a button that opens the song's song.link page, for released songs only.",
+            note: s && !s.sharePublicLinks ? "Turn on Public links for released music to use this." : undefined,
+            control: (ids) => toggle(s, "discordFindSong", ids),
+          },
+          {
+            key: "discordCoverArchive",
+            section: "Integrations",
+            group: "Discord",
+            title: "Covers from Cover Art Archive",
+            description: "Finds a public copy of the album's cover by its MusicBrainz id. Only the id is sent.",
+            control: (ids) => toggle(s, "discordCoverArchive", ids),
+          },
+          {
+            key: "discordUploadArt",
+            section: "Integrations",
+            group: "Discord",
+            title: "Upload other covers to Imgur",
+            description: "Covers Cover Art Archive doesn't have are uploaded once to Imgur so Discord can show them. Anyone with the link can see an uploaded cover. Needs your own Imgur client ID, kept in this computer's keychain.",
+            note: errorNote(imgurNote(discord)),
+            control: (ids) => <ImgurKeyControl ids={ids} status={discord} setKey={setImgurKey} />,
+          },
+        ] satisfies RowDef[])),
   ];
 
   const shown = rows.filter((r) => matches(r, query.trim()));

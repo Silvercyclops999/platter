@@ -563,6 +563,20 @@ export interface Settings {
   sharePublicLinks: boolean;
   /** List Cast devices and AirPlay receivers under Listen on (mDNS stays off when off). */
   showCastDevices: boolean;
+  /** Show what's playing on Discord (this device only). */
+  discordStatus: boolean;
+  /** Unreleased songs show on Discord (off: nothing while one plays). */
+  discordShowUnreleased: boolean;
+  /** Unreleased songs show their cover on Discord (off: the app icon). */
+  discordUnreleasedArt: boolean;
+  /** Pausing clears the Discord status (off: it shows as paused). */
+  discordClearOnPause: boolean;
+  /** A Find this song button (song.link) for released songs. */
+  discordFindSong: boolean;
+  /** Covers from Cover Art Archive by MusicBrainz id. */
+  discordCoverArchive: boolean;
+  /** Covers uploaded to Imgur with the user's client ID. */
+  discordUploadArt: boolean;
   [key: string]: unknown;
 }
 
@@ -643,7 +657,28 @@ export const DEFAULT_SETTINGS: Settings = {
   eqLastOutput: null,
   sharePublicLinks: true,
   showCastDevices: true,
+  discordStatus: true,
+  discordShowUnreleased: true,
+  discordUnreleasedArt: true,
+  discordClearOnPause: true,
+  discordFindSong: true,
+  discordCoverArchive: true,
+  discordUploadArt: false,
 };
+
+// ---------------------------------------------------------------- discord
+
+/** `discord_status` and the `discord://status` event. */
+export interface DiscordStatus {
+  /** This build has a Discord app id (without one the feature is hidden). */
+  available: boolean;
+  /** Talking to the Discord app right now. */
+  connected: boolean;
+  /** The Imgur client ID: saved in the keychain, refused by Imgur. */
+  imgurKey: InfoKeyState;
+  /** The last cover upload failed, so Discord shows the Platter icon. */
+  uploadFailed: boolean;
+}
 
 // ---------------------------------------------------------------- sharing
 
@@ -854,6 +889,8 @@ export interface EventMap {
   "likes://changed": { ids: string[] };
   /** A platter:// link was opened; take it with deepLinkTake. */
   "deeplink://open": null;
+  /** Discord connected or went away, or a cover upload failed. */
+  "discord://status": DiscordStatus;
 }
 
 export type EventName = keyof EventMap;
