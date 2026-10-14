@@ -48,6 +48,7 @@ import { mockArtUrl } from "./art";
 import { mockNowPlayingDetails } from "./details";
 import { popularTracks } from "./popular";
 import { BROKEN_TRACK_TITLE_SUFFIX, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
+import { mockBio } from "./bio";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 
 export interface MockOptions {
@@ -426,7 +427,13 @@ export class MockBackend implements Backend {
           albums: albums.filter((a) => a.section === section).sort((a, b) => (b.year ?? 9999) - (a.year ?? 9999)),
         }))
         .filter((s) => s.albums.length > 0);
-      return { artist, popular, sections };
+      const plays = this.fx.tracks.filter((t) => t.artistId === id).reduce((n, t) => n + t.viewCount, 0);
+      const idx = this.fx.artists.indexOf(artist);
+      // Most artists have a biography; every third has none. Similar artists
+      // are the next two in the library; the last few have none.
+      const about = idx % 3 === 2 ? null : mockBio(artist.title, idx);
+      const similar = idx >= this.fx.artists.length - 3 ? [] : [1, 2].map((d) => this.fx.artists[(idx + d) % this.fx.artists.length]);
+      return { artist, popular, sections, plays, about, similar };
     });
   }
   albumPage(id: string) {

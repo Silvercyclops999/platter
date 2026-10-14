@@ -49,6 +49,20 @@ export function mockArtUrl(path: string): string {
 <circle cx="150" cy="170" r="30" fill="hsl(${h1} 90% 80% / .35)"/>`;
   }
 
+  if (isArtist && /\/art\//.test(path)) {
+    // Wide background art: soft bands of colour, no portrait.
+    const wide = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">
+<defs><linearGradient id="g" gradientTransform="rotate(${angle} .5 .5)">
+<stop offset="0" stop-color="hsl(${h1} ${sat}% 38%)"/><stop offset="1" stop-color="hsl(${h2} ${sat}% 16%)"/>
+</linearGradient></defs>
+<rect width="1600" height="900" fill="url(#g)"/>
+<circle cx="${1000 + Math.floor(r() * 400)}" cy="380" r="260" fill="hsl(${h2} ${sat}% 70% / .18)"/>
+<ellipse cx="1150" cy="900" rx="420" ry="300" fill="hsl(${h1} ${sat}% 10% / .45)"/></svg>`;
+    const u = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(wide)}`;
+    cache.set(path, u);
+    return u;
+  }
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
 <defs><linearGradient id="g" gradientTransform="rotate(${angle} .5 .5)">
 <stop offset="0" stop-color="hsl(${h1} ${sat}% 42%)"/><stop offset="1" stop-color="hsl(${h2} ${sat}% 22%)"/>

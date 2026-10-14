@@ -178,7 +178,8 @@ export function buildFixtures(seed = 7): Fixtures {
       title: name,
       sortTitle: sortTitle(name),
       thumb: `/library/metadata/${artistId}/thumb/1`,
-      art: `/library/metadata/${artistId}/art/1`,
+      // Every other artist has background art, so both artist page headers show up.
+      art: ai % 2 === 0 ? `/library/metadata/${artistId}/art/1` : null,
       viewCount: Math.floor(r() * 900),
     });
     const genre = GENRES[ai % GENRES.length];

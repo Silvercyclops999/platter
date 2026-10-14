@@ -180,6 +180,12 @@ export interface ArtistPage {
   artist: Artist;
   popular: Track[];
   sections: ArtistPageSection[];
+  /** Sum of play counts over the artist's own tracks. */
+  plays: number;
+  /** Plex artist biography; null when it has none. */
+  about: string | null;
+  /** Plex similar artists that are in this library. */
+  similar: Artist[];
 }
 
 export interface AlbumPage {
