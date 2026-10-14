@@ -242,10 +242,10 @@ impl Queue {
         if !self.shuffle {
             return;
         }
-        if let Some(id) = self.context.as_ref().and_then(|c| c.id.clone()) {
-            if !self.shuffle_pref(&id) {
-                self.store_shuffle_pref(&id, true);
-            }
+        if let Some(id) = self.context.as_ref().and_then(|c| c.id.clone())
+            && !self.shuffle_pref(&id)
+        {
+            self.store_shuffle_pref(&id, true);
         }
     }
 
