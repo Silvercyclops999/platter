@@ -206,7 +206,7 @@ impl Connector for LocalDiscord {
 fn socket_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"]
         .iter()
-        .filter_map(|k| std::env::var_os(k))
+        .filter_map(std::env::var_os)
         .filter(|v| !v.is_empty())
         .map(Into::into)
         .collect();

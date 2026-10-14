@@ -19,7 +19,7 @@ pub mod tray;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::watch;
@@ -322,7 +322,7 @@ fn session_factory<R: Runtime>(app: &AppHandle<R>) -> Box<dyn media::SessionFact
             let _ = tx.send(session::OsSession::create(hwnd, cb));
         })
         .map_err(|e| e.to_string())?;
-        let s = rx.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())??;
+        let s = rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|e| e.to_string())??;
         Ok(Box::new(s))
     })
 }
