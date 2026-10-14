@@ -90,6 +90,48 @@ describe("settings page", () => {
     expect(screen.getByText("Not affiliated with or endorsed by Plex, Inc.")).toBeInTheDocument();
   });
 
+  it("app rows for the system media controls, tray and launch at login", async () => {
+    const user = userEvent.setup();
+    const set = vi.spyOn(backend, "settingsSet");
+    render(<SettingsPage />);
+    const session = screen.getByRole("switch", { name: "Show in the system media controls" });
+    const keys = screen.getByRole("switch", { name: "Media keys" });
+    const tray = screen.getByRole("switch", { name: /^Close to the (tray|menu bar)$/ });
+    const login = screen.getByRole("switch", { name: "Open Platter when you sign in" });
+    expect(session).toHaveAttribute("aria-checked", "true");
+    expect(keys).toHaveAttribute("aria-checked", "true");
+    expect(tray).toHaveAttribute("aria-checked", "false");
+    expect(login).toHaveAttribute("aria-checked", "false");
+    expect(keys).toHaveAccessibleDescription(/your computer sends these keys there/);
+
+    await user.click(session);
+    expect(set).toHaveBeenCalledWith({ mediaSession: false });
+    expect(keys).not.toHaveAccessibleDescription(/your computer sends these keys there/);
+    await user.click(keys);
+    expect(set).toHaveBeenCalledWith({ mediaKeys: false });
+    await user.click(tray);
+    expect(set).toHaveBeenCalledWith({ closeToTray: true });
+    await user.click(login);
+    expect(set).toHaveBeenCalledWith({ launchAtLogin: true });
+
+    useSettings.setState({ settings: null });
+    await loadSettings();
+    expect(useSettings.getState().settings).toMatchObject({
+      mediaSession: false,
+      mediaKeys: false,
+      closeToTray: true,
+      launchAtLogin: true,
+    });
+  });
+
+  it("finds the app rows by search", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "lock screen");
+    expect(screen.getByRole("switch", { name: "Show in the system media controls" })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Media keys" })).not.toBeInTheDocument();
+  });
+
   it("each row has a description for screen readers", () => {
     render(<SettingsPage />);
     const sw = screen.getByRole("switch", { name: "Artwork colours" });

@@ -266,9 +266,19 @@ The rest of the fields, with their defaults:
 | `homeColourWash` | bool, true | Home's top takes its colour from the shortcuts' artwork. Only applies while `artworkColours` is on. |
 | `searchSuggestions` | bool, true | Show completions and direct results under the search box while typing. |
 | `searchRecents` | bool, true | Show items opened from search when the empty search box is focused, and remember new ones. |
+| `mediaSession` | bool, true | Show the current track in the system media controls (the Windows media flyout and lock screen, macOS Now Playing) and take play, pause, next, previous and seek from them. |
+| `mediaKeys` | bool, true | Hardware media keys control Platter in the background. While `mediaSession` is on the OS sends the keys to that session; with it off, Platter registers the keys itself. |
+| `closeToTray` | bool, false | Shows a tray icon (menu bar item on macOS). Closing the window hides it instead of quitting. Turning it off brings a hidden window back. |
+| `launchAtLogin` | bool, false | Starts Platter at sign-in, hidden in the tray when `closeToTray` is on, otherwise minimised. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
+
+The last four only touch the core's platform layer (`src-tauri/src/platform/`).
+It follows the player through the same state and position events the UI gets
+and sends OS requests back as ordinary player commands, so they add no
+commands or events. Cover art goes to the OS as a local file copied from the
+art cache, never as a server URL.
 
 ## Updates
 | Command | Returns |

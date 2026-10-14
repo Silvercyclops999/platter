@@ -453,6 +453,14 @@ export interface Settings {
   searchSuggestions: boolean;
   /** Remember items opened from search (shown when the empty box is focused). */
   searchRecents: boolean;
+  /** Media keys work while Platter is in the background. This device only. */
+  mediaKeys: boolean;
+  /** Show in the system media controls (media flyout, lock screen, Now Playing). This device only. */
+  mediaSession: boolean;
+  /** Closing the window hides it to the tray / menu bar. This device only. */
+  closeToTray: boolean;
+  /** Start Platter when you sign in to the computer. This device only. */
+  launchAtLogin: boolean;
   [key: string]: unknown;
 }
 
@@ -475,6 +483,10 @@ export const DEFAULT_SETTINGS: Settings = {
   homeColourWash: true,
   searchSuggestions: true,
   searchRecents: true,
+  mediaKeys: true,
+  mediaSession: true,
+  closeToTray: false,
+  launchAtLogin: false,
 };
 
 // ---------------------------------------------------------------- output devices

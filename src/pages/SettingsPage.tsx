@@ -9,7 +9,7 @@ import { Switch } from "../components/Switch";
 import { useSidebarArt } from "../stores/ui";
 import { backend } from "../lib/backend";
 import { formatBytes } from "../lib/format";
-import { modKey } from "../lib/platform";
+import { modKey, platform } from "../lib/platform";
 import type {
   AppError,
   AppInfo,
@@ -58,6 +58,9 @@ const MOTION = [
 ] as const satisfies SelectOption<ReduceMotion>[];
 const ART_SIZES_MB = [512, 1024, 2048, 5120, 10240, 20480];
 
+/** Where the app lives while its window is closed. */
+const TRAY = platform === "mac" ? "menu bar" : "tray";
+
 const CONNECTION_LABEL: Record<ConnectionKind, string> = {
   local: "Local connection",
   remote: "Remote access",
@@ -87,6 +90,7 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "rusqlite", licence: "MIT" },
   { name: "SQLite", licence: "Public domain" },
   { name: "keyring", licence: "MIT or Apache-2.0" },
+  { name: "souvlaki", licence: "MIT" },
 ];
 
 // ------------------------------------------------------------------ rows
@@ -610,6 +614,38 @@ export function SettingsPage() {
             Check for updates
           </Button>
         ),
+    },
+    {
+      key: "mediaSession",
+      section: "App",
+      title: "Show in the system media controls",
+      description:
+        platform === "mac"
+          ? "Shows the song, artist and cover in Control Center and on the lock screen, with play, pause, next and previous."
+          : "Shows the song, artist and cover in your computer's media controls and on the lock screen, with play, pause, next and previous.",
+      control: (ids) => toggle(s, "mediaSession", ids),
+    },
+    {
+      key: "mediaKeys",
+      section: "App",
+      title: "Media keys",
+      description: "The play, next and previous keys on your keyboard or headset control Platter, even when it's in the background.",
+      note: s?.mediaSession ? "While Platter is in the system media controls, your computer sends these keys there." : undefined,
+      control: (ids) => toggle(s, "mediaKeys", ids),
+    },
+    {
+      key: "closeToTray",
+      section: "App",
+      title: `Close to the ${TRAY}`,
+      description: `Closing the window keeps Platter playing in the ${TRAY}. Click its icon to bring the window back, or quit from its menu.`,
+      control: (ids) => toggle(s, "closeToTray", ids),
+    },
+    {
+      key: "launchAtLogin",
+      section: "App",
+      title: "Open Platter when you sign in",
+      description: `Starts Platter when you sign in to your computer. It starts hidden in the ${TRAY} if Close to the ${TRAY} is on, otherwise minimised.`,
+      control: (ids) => toggle(s, "launchAtLogin", ids),
     },
     // About
     {
