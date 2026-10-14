@@ -107,6 +107,17 @@ enum Cmd {
     SelectOutput(Option<String>, Reply<OutputState>),
     State(oneshot::Sender<PlayerState>),
     Flush(oneshot::Sender<()>),
+    /// Like SetContext, but starts at `start_ms` and plays or stays paused.
+    SetContextAt {
+        info: ContextInfo,
+        tracks: Vec<Track>,
+        start_track_id: Option<String>,
+        start_ms: u64,
+        play: bool,
+        reply: Reply<()>,
+    },
+    /// Like QueueJump, but starts at a position and plays or stays paused.
+    JumpAt(String, u64, bool, Reply<()>),
 }
 
 /// Cloneable handle; register it with `tauri::Builder::manage`.
@@ -348,6 +359,42 @@ impl PlayerHandle {
         if self.tx.send(Cmd::Flush(tx)).is_ok() {
             let _ = rx.await;
         }
+    }
+    /// Starts a context at `start_track_id` and `start_ms`, playing or
+    /// paused (moving playback back from another device).
+    pub async fn play_context_at(
+        &self,
+        context: PlayContext,
+        start_track_id: Option<String>,
+        start_ms: u64,
+        play: bool,
+    ) -> AppResult<()> {
+        let resolved = self.lookup.context(&context).await?;
+        if resolved.tracks.is_empty() {
+            return Err(AppError::Invalid("nothing to play".into()));
+        }
+        let info = ContextInfo {
+            kind: context.kind,
+            id: context.id.clone(),
+            title: resolved.title,
+        };
+        self.call(|reply| Cmd::SetContextAt {
+            info,
+            tracks: resolved.tracks,
+            start_track_id,
+            start_ms,
+            play,
+            reply,
+        })
+        .await
+    }
+    /// Jumps to a queue entry at `position_ms`, playing or paused.
+    pub async fn queue_jump_at(&self, item_id: String, position_ms: u64, play: bool) -> AppResult<()> {
+        self.call(|r| Cmd::JumpAt(item_id, position_ms, play, r)).await
+    }
+    /// Looks tracks up by id (cache first), in the order given.
+    pub async fn lookup_tracks(&self, ids: &[String]) -> AppResult<Vec<Track>> {
+        self.lookup.tracks(ids).await
     }
     /// Output devices, the choice and the device in use.
     pub async fn output_state(&self) -> AppResult<OutputState> {
@@ -851,6 +898,38 @@ impl Actor {
                     .queue
                     .jump(&id)
                     .and_then(|_| self.start_current(true, 0));
+                let _ = reply.send(r);
+            }
+            Cmd::SetContextAt {
+                info,
+                tracks,
+                start_track_id,
+                start_ms,
+                play,
+                reply,
+            } => {
+                self.queue.note_position(self.position_ms());
+                self.end_current_as_skip();
+                let start = start_track_id
+                    .as_ref()
+                    .and_then(|id| tracks.iter().position(|t| &t.id == id));
+                self.skip_ids.clear();
+                self.failures_in_row = 0;
+                let _ = self.queue.set_context_at(info, tracks, start, None);
+                let r = self.start_current(play, start_ms);
+                let _ = reply.send(r);
+            }
+            Cmd::JumpAt(id, ms, play, reply) => {
+                if self.queue.find(&id).is_none() {
+                    let _ = reply.send(Err(AppError::NotFound(format!("queue item {id}"))));
+                    return;
+                }
+                self.end_current_as_skip();
+                self.failures_in_row = 0;
+                let r = self
+                    .queue
+                    .jump(&id)
+                    .and_then(|_| self.start_current(play, ms));
                 let _ = reply.send(r);
             }
         }

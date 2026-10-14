@@ -1026,3 +1026,21 @@ async fn ab_loop_clears_on_track_change_and_on_request() {
     r.player.resume().await.unwrap();
     assert_eq!(r.player.state().await.unwrap().ab_loop, ab(500, 2_500));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn context_and_jump_can_start_at_a_position_paused() {
+    let r = rig(&["a", "b", "c"], 3.0, true, PlayerConfig::default()).await;
+    r.player
+        .play_context_at(ctx(&["a", "b", "c"]), Some("b".into()), 1_500, false)
+        .await
+        .unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(s.status, PlayerStatus::Paused);
+    assert_eq!(tid(&s.track), "b");
+    assert_eq!(s.position_ms, 1_500);
+    let c = s.queue.next_up[0].item_id.clone();
+    r.player.queue_jump_at(c, 1_000, false).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!((tid(&s.track), s.status, s.position_ms), ("c".to_string(), PlayerStatus::Paused, 1_000));
+    assert!(r.player.queue_jump_at("missing".into(), 0, true).await.is_err());
+}
