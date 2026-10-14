@@ -247,6 +247,13 @@ UltraBlurColors only on /library/metadata/{id}. Similar entries there look
 like `{id, filter, tag}`. The app reads Similar from the detail call when an
 artist page opens and keeps it for a week, so sync stays one paged list call.
 
+### 2026-10-14: artist MusicBrainz ids
+
+On 5 sampled artists, list items have only `guid` (`plex://artist/…`) and no
+`Guid` array. Artist detail (`/library/metadata/{id}`) has `Guid` with one
+`mbid://<36-char uuid>` entry, with or without `includeGuids=1`. The artist
+info lookups read the MBID from that detail call and cache it for 30 days.
+
 ### 2026-10-14: playlist writes
 
 Read-only checks on the real server:

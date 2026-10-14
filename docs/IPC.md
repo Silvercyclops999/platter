@@ -135,6 +135,38 @@ PNG or WebP under 10 MB. Smart playlists can't be edited (`invalid`).
 `playlist_duplicates` lets the UI ask before adding a song that's already
 there (setting `playlistAskDuplicates`).
 
+## Artist info
+| Command | Args | Returns |
+| --- | --- | --- |
+| `artist_info` | `{ id }` | `ArtistInfo` |
+| `artist_info_keys` | – | `{ lastfm, fanart, audiodb: { saved, rejected } }` |
+| `artist_info_key_set` | `{ source: "lastfm"|"fanart"|"audiodb", key: string|null }` | `{ saved, rejected }` |
+| `artist_info_cache_clear` | – | number of artists that had cached info |
+| `open_info_link` | `{ url }` | – (opens a source or licence page in the default browser) |
+
+`ArtistInfo = { id, bio?, bioSource?: "plex"|"wikipedia"|"lastfm"|"audiodb", origin?, yearsActive?, members: { name, artistId? }[], tags: string[], listeners?, scrobbles?, photo?, banner?, logo?, credits: { source, text, url?, licence?, licenceUrl? }[] }`
+
+Optional outside sources fill gaps that Plex leaves: Wikipedia and Wikidata
+(no key, on by default), Last.fm, Fanart.tv and TheAudioDB (each needs the
+user's own key and is off until one is saved). `artist_info` answers from a
+local cache at once and fetches missing or month-old entries in the
+background, then emits `artistinfo://changed` with `{ id }`. Only the
+artist's name or MusicBrainz id is sent. Sources that are off, failing or
+whose key was refused are left out, along with their credits.
+
+`bio` is Plex's summary when it is longer than 300 characters, else the
+first of Wikipedia, Last.fm and TheAudioDB with more text than Plex has, else
+Plex's. `photo` is set only when Plex has no artist thumb, and `banner` only
+when Plex has no background art. `photo`, `banner` and `logo` are art paths
+(`/ext/<image url>`) served by the `art` protocol and cached like Plex art.
+`members` link to library artists by name. `credits` lists one line per
+source whose data is shown, with its link and licence.
+
+Keys are kept in the OS keychain, never in settings. Saving a key checks it
+with one lookup; `rejected` means the service refused it, which turns that
+source off until another key is saved or the app restarts. `open_info_link`
+only opens https links on the sources' and Creative Commons' sites.
+
 ## Now playing
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -329,6 +361,10 @@ The rest of the fields, with their defaults:
 | `notifyTrackChange` | bool, false | Desktop notification when a new track starts. Not shown while the window has focus, in a private session, or when the previous track change was under 5 s ago. Clicking it brings the window forward. This device only. |
 | `playlistAskDuplicates` | bool, true | Ask before adding a song that's already in the playlist. |
 | `playlistNewName` | text, `"My playlist #N"` | Name for new playlists; `#N` becomes the next free number. Up to 100 characters. |
+| `infoWikipedia` | bool, true | Artist info from Wikipedia and Wikidata. |
+| `infoLastfm` | bool, false | Artist info from Last.fm. Only used while a key is saved and wasn't refused. |
+| `infoFanart` | bool, false | Artist images from Fanart.tv. Same key rule. |
+| `infoAudiodb` | bool, false | Artist photo and bio from TheAudioDB. Same key rule. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
