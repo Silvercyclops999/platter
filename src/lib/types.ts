@@ -189,7 +189,7 @@ export type HomeItem =
   | { kind: "playlist"; playlist: Playlist };
 
 export interface HomeData {
-  /** Up to 8 shortcut tiles: recent first, then most played, de-duplicated. */
+  /** Up to 8 shortcut tiles: what's played most lately first, then long-time favourites, de-duplicated (Liked Songs is added by the UI). */
   shortcuts: HomeItem[];
   /** Albums, artists and playlists by most recent play. */
   recentlyPlayed: HomeItem[];

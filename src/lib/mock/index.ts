@@ -560,10 +560,10 @@ export class MockBackend implements Backend {
     tick();
   }
   home() {
-    return this.delay(() => new MockHome(this.fx, this.contextPlays).home());
+    return this.delay(() => new MockHome(this.fx, this.contextPlays, this.listens).home());
   }
   homeShelf(shelf: HomeShelfId, limit?: number) {
-    return this.delay(() => new MockHome(this.fx, this.contextPlays).shelf(shelf, limit));
+    return this.delay(() => new MockHome(this.fx, this.contextPlays, this.listens).shelf(shelf, limit));
   }
   /** Invented history: a few playlist and artist plays around the newest album play. */
   private seedContextPlays(): ContextPlay[] {

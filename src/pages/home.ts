@@ -54,9 +54,17 @@ export function visibleShelves(data: HomeData, filter: HomeFilter): { id: HomeSh
   return HOME_SHELVES.map((s) => ({ ...s, items: filterItems(shelfItems(data, s.id), filter) })).filter((s) => s.items.length > 0);
 }
 
-/** The shortcut grid's tiles for a chip (none when the setting is off). */
-export function gridItems(data: HomeData, filter: HomeFilter, enabled: boolean): HomeItem[] {
-  return enabled ? filterItems(data.shortcuts, filter).slice(0, 8) : [];
+/** Tiles in the shortcut grid, Liked Songs included. */
+export const GRID_TILES = 8;
+
+/** Liked Songs leads the grid on All and Playlists once something is liked. */
+export function showsLikedTile(filter: HomeFilter, likedCount: number, enabled: boolean): boolean {
+  return enabled && likedCount > 0 && (filter === "all" || filter === "playlists");
+}
+
+/** The shortcut grid's tiles for a chip (none when the setting is off), one fewer when Liked Songs leads. */
+export function gridItems(data: HomeData, filter: HomeFilter, enabled: boolean, liked = false): HomeItem[] {
+  return enabled ? filterItems(data.shortcuts, filter).slice(0, GRID_TILES - (liked ? 1 : 0)) : [];
 }
 
 /** Whether a Home item has anything stored on this computer. */

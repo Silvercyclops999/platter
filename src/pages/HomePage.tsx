@@ -11,8 +11,9 @@ import { useApp } from "../stores/app";
 import { useSettings } from "../stores/settings";
 import { nav } from "../stores/router";
 import { HomeItemCard, homeItemInfo } from "./cards";
-import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, offlineHome, visibleShelves, type HomeFilter } from "./home";
-import { ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
+import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, offlineHome, showsLikedTile, visibleShelves, type HomeFilter } from "./home";
+import { LikedTile, ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
+import { useLikes } from "../stores/likes";
 import "./home.css";
 
 /**
@@ -109,7 +110,10 @@ export function HomePage() {
   const showGrid = useSettings((s) => s.settings?.homeShortcuts !== false);
   const washOn = useSettings((s) => s.settings?.artworkColours !== false && s.settings?.homeColourWash !== false);
 
-  const tiles = data ? gridItems(data, filter, showGrid) : [];
+  // Offline, Liked Songs keeps its tile only while something liked can play.
+  const likedCount = useLikes((s) => s.ids.size);
+  const liked = !!data && !cachedOnly && showsLikedTile(filter, likedCount, showGrid);
+  const tiles = data ? gridItems(data, filter, showGrid, liked) : [];
   const shelves = data ? visibleShelves(data, filter) : [];
   const washItem = tiles.find((t) => homeItemInfo(t).key === hovered) ?? tiles[0];
   const wash = useWashColour(washItem, washOn);
@@ -123,7 +127,7 @@ export function HomePage() {
   const libraryEmpty =
     data && data.shortcuts.length === 0 && visibleShelves(data, "all").length === 0 && offlineAlbums.length === 0;
   const showOfflineShelf = offlineAlbums.length > 0 && (filter === "all" || filter === "albums");
-  const filterEmpty = data && !libraryEmpty && tiles.length === 0 && shelves.length === 0;
+  const filterEmpty = data && !libraryEmpty && tiles.length === 0 && !liked && shelves.length === 0;
   const kindLabel = HOME_FILTERS.find((f) => f.id === filter)?.label.toLowerCase();
 
   return (
@@ -164,8 +168,9 @@ export function HomePage() {
               ))}
             </div>
           ) : (
-            tiles.length > 0 && (
+            (tiles.length > 0 || liked) && (
               <div className="home-grid" role="list" aria-label="Shortcuts" onPointerLeave={() => setHovered(null)}>
+                {liked && <LikedTile onHover={() => setHovered(null)} />}
                 {tiles.map((t) => {
                   const key = homeItemInfo(t).key;
                   return <ShortcutTile key={key} item={t} onHover={() => setHovered(key)} />;

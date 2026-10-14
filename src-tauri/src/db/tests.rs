@@ -1120,11 +1120,12 @@ async fn home_recents_credit_the_artist_or_playlist_a_play_started_from() {
         vec![s("artist", &artist2), s("playlist", "p1"), s("album", &lib.albums[3].id)],
         "the playlist's and the artist's albums don't show on their own",
     );
-    // Shortcuts: the recents, then most played (album, artist, playlist in
-    // turn), without repeats.
+    // Shortcuts: what's hot (the playlist played twice beats the artist
+    // played once, a bit more recently), then most played (album, artist,
+    // playlist in turn), without repeats.
     assert_eq!(
         keys(&home.shortcuts),
-        vec![s("artist", &artist2), s("playlist", "p1"), s("album", &lib.albums[3].id), s("artist", &lib.artists[0].id)],
+        vec![s("playlist", "p1"), s("artist", &artist2), s("album", &lib.albums[3].id), s("artist", &lib.artists[0].id)],
     );
     assert_eq!(home.top_artists.iter().map(|a| a.id.clone()).collect::<Vec<_>>(), vec![lib.artists[0].id.clone(), artist2.clone()]);
     assert_eq!(home.playlists.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["p1", "p2"], "played first, then by title");
@@ -1136,17 +1137,52 @@ async fn home_recents_credit_the_artist_or_playlist_a_play_started_from() {
 }
 
 #[test]
-fn shortcuts_take_eight_recent_first_then_most_played() {
+fn shortcuts_take_eight_hot_first_then_favourites_then_the_rest() {
     let al = |id: &str| HomeItem::Album { album: fake::album(id, id, &fake::artist("a", "A"), 2000, None, &[]) };
     let ar = |id: &str| HomeItem::Artist { artist: fake::artist(id, id) };
-    let recent: Vec<_> = (0..10).map(|i| al(&format!("r{i}"))).collect();
-    let most = vec![al("r0"), ar("x"), al("m1")];
-    let got: Vec<_> = queries::shortcuts(&recent, &most).iter().map(|i| i.key().1.to_string()).collect();
-    assert_eq!(got, vec!["r0", "r1", "r2", "r3", "r4", "r5", "x", "m1"]);
-    // Fewer than eight known: show what there is.
-    let got = queries::shortcuts(&recent[..2], &[]);
-    assert_eq!(got.len(), 2);
-    assert!(queries::shortcuts(&[], &[]).is_empty());
+    let hot: Vec<_> = (0..6).map(|i| al(&format!("h{i}"))).collect();
+    let most = vec![al("h0"), ar("x"), al("m1")];
+    let recent = vec![al("r0"), al("h5")];
+    let got: Vec<_> = queries::shortcuts(&hot, &most, &recent).iter().map(|i| i.key().1.to_string()).collect();
+    assert_eq!(got, vec!["h0", "h1", "h2", "h3", "x", "m1", "h4", "h5"]);
+    // Few hot items: favourites, then older recent ones fill.
+    let got: Vec<_> = queries::shortcuts(&hot[..1], &most, &recent).iter().map(|i| i.key().1.to_string()).collect();
+    assert_eq!(got, vec!["h0", "x", "m1", "r0", "h5"]);
+    assert!(queries::shortcuts(&[], &[], &[]).is_empty());
+}
+
+#[tokio::test]
+async fn shortcuts_rank_by_recent_plays_with_frequency_beating_a_single_play() {
+    let t = open();
+    let lib = fake::generated(4, 1, 4);
+    let now = now_s();
+    sync(&t.db, &Arc::new(FakeSource::new(lib.clone())), false).await;
+    let tracks_of = |i: usize| lib.tracks.iter().filter(|t| t.album_id == lib.albums[i].id).map(|t| t.id.clone()).collect::<Vec<_>>();
+    // Album 0: one play a minute ago. Album 1: four plays two hours ago.
+    // Album 2: four plays five days ago (fading). Album 3: one play from
+    // Liked Songs (doesn't count) and one skip (doesn't count).
+    local_play(&t.db, &tracks_of(0)[0], now - 60, ContextKind::Album, Some(&lib.albums[0].id));
+    for id in tracks_of(1) {
+        local_play(&t.db, &id, now - 7200, ContextKind::Album, Some(&lib.albums[1].id));
+    }
+    for id in tracks_of(2) {
+        local_play(&t.db, &id, now - 5 * 86400, ContextKind::Album, Some(&lib.albums[2].id));
+    }
+    local_play(&t.db, &tracks_of(3)[0], now - 30, ContextKind::Liked, None);
+    t.db.write(|c| {
+        let p = listens::start_play(c, &play(&tracks_of(3)[1], now * 1000 - 20_000, 200_000, false))?;
+        listens::end_play(c, p, now * 1000 - 15_000, 5_000, 5_000, false).map(|_| ())
+    })
+    .unwrap();
+    let home = t.db.read(|c| queries::home(c, now)).unwrap();
+    let ids: Vec<_> = home.shortcuts.iter().map(|i| i.key().1.to_string()).collect();
+    assert_eq!(&ids[..3], &[lib.albums[1].id.clone(), lib.albums[0].id.clone(), lib.albums[2].id.clone()]);
+    // Another round of album 0 today moves it to the front.
+    for id in tracks_of(0) {
+        local_play(&t.db, &id, now - 30, ContextKind::Album, Some(&lib.albums[0].id));
+    }
+    let home = t.db.read(|c| queries::home(c, now)).unwrap();
+    assert_eq!(home.shortcuts[0].key().1, lib.albums[0].id);
 }
 
 // ---------------------------------------------------------------- search

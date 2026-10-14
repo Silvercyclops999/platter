@@ -5,8 +5,12 @@
 //!   play, merging Plex history (`play_history`, all devices) with the local
 //!   listen log (catches offline plays not yet reported, and knows which
 //!   artist or playlist a play started from). See [`recently_played`].
-//! - **Shortcuts**: the grid of 8 at the top: recent items first, then the
-//!   most played albums, artists and playlists, de-duplicated.
+//! - **Shortcuts**: the grid of 8 at the top (the UI puts Liked Songs
+//!   before them): what you're into right now first, then long-time
+//!   favourites, then other recent items, de-duplicated. "Right now" ranks
+//!   albums, artists and playlists by their plays in the last week, each
+//!   play worth half as much per day of age, so a few plays today beat one,
+//!   and the order changes as you listen. See [`hot_keys`].
 //! - **Your playlists**: most recently played here first, then by title.
 //! - **Your top artists**: artists by play count.
 //! - **Recently added**: albums by `added_at`, newest first.
@@ -34,8 +38,13 @@ use super::types::*;
 pub const HOME_ROW: usize = 12;
 /// Tiles in Home's shortcut grid.
 pub const HOME_SHORTCUTS: usize = 8;
-/// Recent items that lead the shortcut grid before most played ones join.
-const SHORTCUT_RECENT: usize = 6;
+/// Items you're into right now that lead the shortcut grid before long-time
+/// favourites join (with Liked Songs first, about half the grid).
+const SHORTCUT_HOT: usize = 4;
+/// Plays older than this don't count towards "right now".
+const HOT_WINDOW_S: i64 = 7 * 24 * 3600;
+/// A play's weight halves every this many seconds.
+const HOT_HALF_LIFE_S: f64 = 24.0 * 3600.0;
 /// Most items a "Show all" page lists.
 pub const SHELF_ALL_MAX: usize = 200;
 const JUMP_BACK_WINDOW_S: i64 = 28 * 24 * 3600;
@@ -193,14 +202,54 @@ fn most_played(c: &Connection, per_kind: usize) -> AppResult<Vec<HomeItem>> {
     }
 }
 
-/// The shortcut grid: up to [`SHORTCUT_RECENT`] recent items lead, most
-/// played ones follow, and further recent items fill any gap. No repeats.
-pub fn shortcuts(recent: &[HomeItem], most: &[HomeItem]) -> Vec<HomeItem> {
+/// Albums, artists and playlists by how much they were played lately:
+/// each play in the last [`HOT_WINDOW_S`] adds a weight that halves every
+/// [`HOT_HALF_LIFE_S`]. Plays started from an artist or playlist count for
+/// it, other plays for the song's album; plays from Liked Songs don't count
+/// (Liked Songs has its own tile). Plex history from other devices counts
+/// for the album unless it is a play from here already in the listen log.
+fn hot_keys(c: &Connection, now: i64, limit: usize) -> AppResult<Vec<(String, String)>> {
+    let since = now - HOT_WINDOW_S;
+    let mut st = c.prepare_cached(
+        "SELECT CASE WHEN l.context_kind IN ('artist', 'playlist') AND l.context_id IS NOT NULL
+                     THEN l.context_kind ELSE 'album' END,
+                CASE WHEN l.context_kind IN ('artist', 'playlist') AND l.context_id IS NOT NULL
+                     THEN l.context_id ELSE t.album_id END,
+                l.started_at / 1000
+         FROM listen_log l JOIN tracks t ON t.id = l.rating_key
+         WHERE l.started_at >= ?1 * 1000 AND l.skipped = 0 AND coalesce(l.context_kind, '') != 'liked'
+         UNION ALL
+         SELECT 'album', t.album_id, h.viewed_at FROM play_history h JOIN tracks t ON t.id = h.rating_key
+         WHERE h.viewed_at >= ?1 AND NOT EXISTS (
+             SELECT 1 FROM listen_log l
+             WHERE l.rating_key = h.rating_key
+               AND h.viewed_at BETWEEN l.started_at / 1000 - 60
+                   AND coalesce(l.ended_at, l.started_at + l.duration_ms) / 1000 + 600
+         )",
+    )?;
+    let rows = st.query_map([since], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?;
+    let mut score: HashMap<(String, String), (f64, i64)> = HashMap::new();
+    for row in rows {
+        let (kind, id, at) = row?;
+        let age = (now - at).max(0) as f64;
+        let e = score.entry((kind, id)).or_insert((0.0, i64::MIN));
+        e.0 += 0.5f64.powf(age / HOT_HALF_LIFE_S);
+        e.1 = e.1.max(at);
+    }
+    let mut ranked: Vec<_> = score.into_iter().collect();
+    ranked.sort_by(|(ka, (sa, la)), (kb, (sb, lb))| sb.total_cmp(sa).then(lb.cmp(la)).then(ka.cmp(kb)));
+    Ok(ranked.into_iter().take(limit).map(|(k, _)| k).collect())
+}
+
+/// The shortcut grid: up to [`SHORTCUT_HOT`] items you're into right now
+/// lead, long-time favourites follow, then the rest of the hot items and
+/// other recent ones fill any gap. No repeats, mixed types.
+pub fn shortcuts(hot: &[HomeItem], most: &[HomeItem], recent: &[HomeItem]) -> Vec<HomeItem> {
     let mut seen = HashSet::new();
     let mut out = Vec::with_capacity(HOME_SHORTCUTS);
-    let lead = recent.iter().take(SHORTCUT_RECENT);
-    let rest = recent.iter().skip(SHORTCUT_RECENT);
-    for item in lead.chain(most.iter()).chain(rest) {
+    let lead = hot.iter().take(SHORTCUT_HOT);
+    let rest = hot.iter().skip(SHORTCUT_HOT);
+    for item in lead.chain(most.iter()).chain(rest).chain(recent.iter()) {
         if out.len() >= HOME_SHORTCUTS {
             break;
         }
@@ -263,7 +312,8 @@ fn first_recent_albums(recent: &[HomeItem]) -> HashSet<String> {
 pub fn home(c: &Connection, now: i64) -> AppResult<HomeData> {
     let mut recently_played = recently_played(c, HOME_ROW.max(HOME_SHORTCUTS))?;
     let most = most_played(c, HOME_SHORTCUTS)?;
-    let shortcuts = shortcuts(&recently_played, &most);
+    let hot = items_by_keys(c, &hot_keys(c, now, HOME_SHORTCUTS)?)?;
+    let shortcuts = shortcuts(&hot, &most, &recently_played);
     let jump_back_in = jump_back_in(c, now, &first_recent_albums(&recently_played), HOME_ROW)?;
     recently_played.truncate(HOME_ROW);
     Ok(HomeData {

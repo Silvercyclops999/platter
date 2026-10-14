@@ -1,14 +1,18 @@
 import { Pause, Play } from "lucide-react";
+import type { ReactNode } from "react";
 import { Art } from "../components/Art";
+import { LikedCover } from "../components/LikedCover";
 import type { Album, Artist, HomeItem, Playlist } from "../lib/types";
-import { useAlbumActions, useArtistActions, usePlaylistActions, type ItemActions } from "./cards";
+import { player } from "../stores/player";
+import { nav } from "../stores/router";
+import { useAlbumActions, useArtistActions, useContextState, usePlaylistActions, type ItemActions } from "./cards";
 
 interface TileProps {
   /** Pointer or keyboard focus arrived on the tile (drives the colour wash). */
   onHover: () => void;
 }
 
-function Tile({ kind, title, thumb, actions, onHover }: TileProps & { kind: HomeItem["kind"]; title: string; thumb: string | null; actions: ItemActions }) {
+function Tile({ kind, title, art, actions, onHover }: TileProps & { kind: HomeItem["kind"] | "liked"; title: string; art: ReactNode; actions: Omit<ItemActions, "onContextMenu"> & Partial<Pick<ItemActions, "onContextMenu">> }) {
   return (
     <div
       role="listitem"
@@ -18,9 +22,7 @@ function Tile({ kind, title, thumb, actions, onHover }: TileProps & { kind: Home
       onFocus={onHover}
       onContextMenu={actions.onContextMenu}
     >
-      <span className="shortcut__art">
-        <Art path={thumb} size={kind === "artist" ? 56 : 64} round={kind === "artist"} kind={kind} />
-      </span>
+      <span className="shortcut__art">{art}</span>
       <button type="button" className="shortcut__link" onClick={actions.open} title={title}>
         <span className="shortcut__title">{title}</span>
       </button>
@@ -40,13 +42,27 @@ function Tile({ kind, title, thumb, actions, onHover }: TileProps & { kind: Home
 }
 
 function AlbumTile({ album, onHover }: TileProps & { album: Album }) {
-  return <Tile kind="album" title={album.title} thumb={album.thumb} actions={useAlbumActions(album)} onHover={onHover} />;
+  return <Tile kind="album" title={album.title} art={<Art path={album.thumb} size={64} />} actions={useAlbumActions(album)} onHover={onHover} />;
 }
 function ArtistTile({ artist, onHover }: TileProps & { artist: Artist }) {
-  return <Tile kind="artist" title={artist.title} thumb={artist.thumb} actions={useArtistActions(artist)} onHover={onHover} />;
+  return <Tile kind="artist" title={artist.title} art={<Art path={artist.thumb} size={56} round kind="artist" />} actions={useArtistActions(artist)} onHover={onHover} />;
 }
 function PlaylistTile({ playlist, onHover }: TileProps & { playlist: Playlist }) {
-  return <Tile kind="playlist" title={playlist.title} thumb={playlist.thumb} actions={usePlaylistActions(playlist)} onHover={onHover} />;
+  return <Tile kind="playlist" title={playlist.title} art={<Art path={playlist.thumb} size={64} kind="playlist" />} actions={usePlaylistActions(playlist)} onHover={onHover} />;
+}
+
+/** Liked Songs, always the first tile once something is liked. */
+export function LikedTile({ onHover }: TileProps) {
+  const { isContext, playing } = useContextState("liked", "liked");
+  return (
+    <Tile
+      kind="liked"
+      title="Liked Songs"
+      art={<LikedCover size={64} />}
+      actions={{ playing, open: () => nav.go({ name: "liked" }), play: () => (isContext ? player.toggle() : player.playLiked()) }}
+      onHover={onHover}
+    />
+  );
 }
 
 /**

@@ -74,9 +74,12 @@ Event `auth://changed` → `AuthStatus`.
 `{ kind: "playlist", playlist }`. Home rows hold 12 items. Recently played
 counts a play started from an artist or a playlist for that artist or
 playlist, not for each song's album; Plex history from other devices counts
-for the album. `shortcuts` holds up to 8: the first 6 recently played, then
-the most played album, artist and playlist in turn, then more recent ones,
-with no repeats. `playlists` puts the ones played on this computer first,
+for the album. `shortcuts` holds up to 8: the 4 albums, artists and playlists
+played most in the last week (each play's weight halves every day, so
+several plays today beat one, and plays from Liked Songs don't count), then
+the most played album, artist and playlist in turn, then the rest of those
+and other recent ones, with no repeats. The UI puts Liked Songs first and
+shows 7 of them when anything is liked. `playlists` puts the ones played on this computer first,
 newest first, then the rest by title. `topArtists` is artists by play count,
 played ones only.
 

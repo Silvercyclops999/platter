@@ -129,7 +129,7 @@ impl HomeItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeData {
-    /// Up to 8 shortcut tiles: recent first, then most played, de-duplicated.
+    /// Up to 8 shortcut tiles: hot first, then most played, de-duplicated.
     pub shortcuts: Vec<HomeItem>,
     /// Albums, artists and playlists by most recent play.
     pub recently_played: Vec<HomeItem>,

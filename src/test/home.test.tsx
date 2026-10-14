@@ -3,12 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { shortcuts } from "../lib/mock/home";
+import { MockHome, shortcuts } from "../lib/mock/home";
+import type { MockListen } from "../lib/mock/recents";
+import { useLikes } from "../stores/likes";
 import { DEFAULT_SETTINGS, type Album, type Artist, type HomeData, type HomeItem, type Playlist } from "../lib/types";
 import homeCss from "../pages/home.css?raw";
 import { HomePage } from "../pages/HomePage";
 import { HomeShelfPage } from "../pages/HomeShelfPage";
-import { gridItems, greeting, visibleShelves } from "../pages/home";
+import { gridItems, greeting, showsLikedTile, visibleShelves } from "../pages/home";
 import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 
@@ -109,26 +111,48 @@ describe("home decisions", () => {
 
   it("shows at most 8 tiles, what there is when fewer, none with the setting off", () => {
     expect(gridItems(data({ shortcuts: [...data().shortcuts, A(20)] }), "all", true)).toHaveLength(8);
+    // Liked Songs takes the first of the 8.
+    expect(gridItems(data(), "all", true, true)).toHaveLength(7);
     expect(gridItems(data({ shortcuts: [A(1), R(2), P(3)] }), "all", true)).toHaveLength(3);
     expect(gridItems(data(), "albums", true).every((i) => i.kind === "album")).toBe(true);
     expect(gridItems(data(), "all", false)).toEqual([]);
   });
 
-  it("the shortcut grid leads with recent items, then most played, without repeats", () => {
-    const recent = [A(1), A(2), A(3), A(4), A(5), A(6), A(7), A(8), A(9)];
-    const got = shortcuts(recent, [A(1), R(1), P(1)]);
+  it("the shortcut grid leads with what's hot, then favourites, then the rest, without repeats", () => {
+    const hot = [A(1), A(2), A(3), A(4), A(5), A(6)];
+    const got = shortcuts(hot, [A(1), R(1), P(1)], [A(9)]);
     expect(got.map((i) => (i.kind === "album" ? i.album.id : i.kind === "artist" ? i.artist.id : i.playlist.id))).toEqual([
       "al1",
       "al2",
       "al3",
       "al4",
-      "al5",
-      "al6",
       "ar1",
       "pl1",
+      "al5",
+      "al6",
     ]);
-    expect(shortcuts([A(1)], [A(1)])).toHaveLength(1);
+    expect(shortcuts([A(1)], [A(1)], [A(1), A(2)])).toHaveLength(2);
     expect(shortcuts([], [])).toEqual([]);
+  });
+
+  it("Liked Songs leads the grid on All and Playlists once something is liked", () => {
+    expect(showsLikedTile("all", 3, true)).toBe(true);
+    expect(showsLikedTile("playlists", 3, true)).toBe(true);
+    expect(showsLikedTile("albums", 3, true)).toBe(false);
+    expect(showsLikedTile("all", 0, true)).toBe(false);
+    expect(showsLikedTile("all", 3, false)).toBe(false);
+  });
+
+  it("mock ranking: several plays today beat one, and older plays fade", () => {
+    const m = new MockHome(mock.fx, [], []);
+    const [a, b, c] = mock.fx.albums;
+    const tr = (al: Album) => mock.fx.tracks.filter((t) => t.albumId === al.id);
+    const now = Date.now();
+    const l = (al: Album, agoMs: number, n: number): MockListen[] =>
+      tr(al).slice(0, n).map((t) => ({ trackId: t.id, at: now - agoMs, end: now - agoMs + 1000, kind: "album", id: al.id }));
+    const hot = new MockHome(mock.fx, [], [...l(a, 60_000, 1), ...l(b, 3_600_000, 3), ...l(c, 6 * 86_400_000, 3)]).hot(8, now);
+    expect(hot.map((i) => (i.kind === "album" ? i.album.id : ""))).toEqual([b.id, a.id, c.id]);
+    expect(m.hot(8, now)).toEqual([]);
   });
 
   it("the heading follows the time of day", () => {
@@ -212,6 +236,24 @@ describe("home page", () => {
     const shelf = screen.getByRole("heading", { name: "Your top artists" }).closest("section")!;
     await user.click(within(shelf as HTMLElement).getByRole("button", { name: "Show all" }));
     expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "homeShelf", shelf: "topArtists" });
+  });
+
+  it("Liked Songs is the first tile once something is liked, and plays or opens Liked Songs", async () => {
+    const user = userEvent.setup();
+    const play = vi.spyOn(backend, "playContext").mockResolvedValue();
+    useLikes.setState({ ids: new Set(["t1"]), loaded: true });
+    renderHome(data());
+    await waitFor(() => expect(tiles()).toHaveLength(8));
+    expect(within(tiles()[0]).getByRole("button", { name: "Liked Songs" })).toBeInTheDocument();
+    expect(within(tiles()[7]).getByRole("button", { name: "Playlist 7" })).toBeInTheDocument();
+    await user.click(within(tiles()[0]).getByRole("button", { name: "Play Liked Songs" }));
+    expect(play).toHaveBeenCalledWith(expect.objectContaining({ context: expect.objectContaining({ kind: "liked" }) }));
+    await user.click(within(tiles()[0]).getByRole("button", { name: "Liked Songs" }));
+    expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "liked" });
+    // Not on the Albums chip.
+    await user.click(screen.getByRole("button", { name: "Albums" }));
+    expect(screen.queryByRole("button", { name: "Play Liked Songs" })).toBeNull();
+    useLikes.setState({ ids: new Set(), loaded: true });
   });
 
   it("Recently played's Show all opens Recents", async () => {

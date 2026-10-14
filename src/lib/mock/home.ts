@@ -1,15 +1,19 @@
 /**
  * Home rows for the mock backend, following the core's rules (db/queries.rs):
  * recently played mixes albums, artists and playlists; the shortcut grid is
- * up to 6 recent items, then the most played (album, artist, playlist in
- * turn), then more recent ones, 8 at most and no repeats.
+ * up to 4 items played most this week (each play's weight halving per day),
+ * then the most played (album, artist, playlist in turn), then the rest of
+ * those and more recent ones, 8 at most and no repeats.
  */
 import type { Album, Artist, HomeData, HomeItem, HomeShelfId, Playlist } from "../types";
 import type { Fixtures } from "./fixtures";
+import type { MockListen } from "./recents";
 
 export const HOME_ROW = 12;
 export const HOME_SHORTCUTS = 8;
-const SHORTCUT_RECENT = 6;
+const SHORTCUT_HOT = 4;
+const HOT_WINDOW_MS = 7 * 86_400_000;
+const HOT_HALF_LIFE_MS = 86_400_000;
 export const SHELF_ALL_MAX = 200;
 
 /** A play started from an album, artist or playlist (unix seconds). */
@@ -22,10 +26,10 @@ export interface ContextPlay {
 export const homeKey = (i: HomeItem): string =>
   `${i.kind}:${i.kind === "album" ? i.album.id : i.kind === "artist" ? i.artist.id : i.playlist.id}`;
 
-export function shortcuts(recent: HomeItem[], most: HomeItem[]): HomeItem[] {
+export function shortcuts(hot: HomeItem[], most: HomeItem[], recent: HomeItem[] = []): HomeItem[] {
   const seen = new Set<string>();
   const out: HomeItem[] = [];
-  for (const item of [...recent.slice(0, SHORTCUT_RECENT), ...most, ...recent.slice(SHORTCUT_RECENT)]) {
+  for (const item of [...hot.slice(0, SHORTCUT_HOT), ...most, ...hot.slice(SHORTCUT_HOT), ...recent]) {
     if (out.length >= HOME_SHORTCUTS) break;
     const k = homeKey(item);
     if (seen.has(k)) continue;
@@ -39,7 +43,28 @@ export class MockHome {
   constructor(
     private fx: Fixtures,
     private plays: ContextPlay[],
+    private listens: MockListen[] = [],
   ) {}
+
+  /** Albums, artists and playlists by plays this week, newer plays worth more. */
+  hot(limit: number, now = Date.now()): HomeItem[] {
+    const score = new Map<string, { kind: ContextPlay["kind"]; id: string; s: number; last: number }>();
+    for (const l of this.listens) {
+      if (l.kind === "liked" || l.at < now - HOT_WINDOW_MS) continue;
+      const ctx = l.kind === "artist" || l.kind === "playlist" ? { kind: l.kind, id: l.id ?? "" } : { kind: "album" as const, id: this.fx.tracks.find((t) => t.id === l.trackId)?.albumId ?? "" };
+      if (!ctx.id) continue;
+      const k = `${ctx.kind}:${ctx.id}`;
+      const e = score.get(k) ?? { ...ctx, s: 0, last: 0 };
+      e.s += 0.5 ** (Math.max(0, now - l.at) / HOT_HALF_LIFE_MS);
+      e.last = Math.max(e.last, l.at);
+      score.set(k, e);
+    }
+    return [...score.values()]
+      .sort((a, b) => b.s - a.s || b.last - a.last)
+      .map((e) => this.find(e.kind, e.id))
+      .filter((i): i is HomeItem => !!i)
+      .slice(0, limit);
+  }
 
   private find(kind: ContextPlay["kind"], id: string): HomeItem | null {
     if (kind === "album") {
@@ -122,7 +147,7 @@ export class MockHome {
   home(): HomeData {
     const recent = this.recentlyPlayed(Math.max(HOME_ROW, HOME_SHORTCUTS));
     return {
-      shortcuts: shortcuts(recent, this.mostPlayed(HOME_SHORTCUTS)),
+      shortcuts: shortcuts(this.hot(HOME_SHORTCUTS), this.mostPlayed(HOME_SHORTCUTS), recent),
       recentlyPlayed: recent.slice(0, HOME_ROW),
       jumpBackIn: this.jumpBackIn(HOME_ROW),
       playlists: this.playlists(HOME_ROW),
