@@ -135,6 +135,37 @@ PNG or WebP under 10 MB. Smart playlists can't be edited (`invalid`).
 `playlist_duplicates` lets the UI ask before adding a song that's already
 there (setting `playlistAskDuplicates`).
 
+## Likes
+| Command | Args | Returns |
+| --- | --- | --- |
+| `likes_set` | `{ trackIds, liked }` | `string[]` (the ids whose state changed) |
+| `liked_ids` | – | `string[]`, newest like first |
+| `liked_page` | – | `{ tracks: Track[], totalDurationMs }`, newest like first |
+| `playlists_with_track` | `{ trackId }` | `string[]` playlist ids, most recently changed first |
+
+A liked song is a Plex user rating, so other Plex apps see the same likes.
+Liking sets the rating to 10 (five stars), even over a lower rating;
+unliking clears it. Which ratings count as liked is the `likedMeans` setting
+(five stars, or four and up). Liking a song that already counts as liked
+leaves its rating alone.
+
+Every change is applied to the local cache at once and queued for Plex, one
+write per song, replayed in order as soon as the server is reachable and
+every 15 seconds after that. If Plex refuses a write, the song's rating goes
+back to what Plex has, a `toast` says so, and `likes://changed` fires again.
+Each sync also reads every rated track from Plex, so likes made in other
+Plex apps arrive with the next sync (the server's library events start one).
+A song with a write still queued keeps its local rating.
+
+`Track` carries `ratedAt` (unix seconds, when it was last rated: the "date
+added" of a liked song) and `genres` (the track's own Plex genre and mood
+tags, the Liked Songs filter chips). Both are left out when empty.
+
+Event `likes://changed` → `{ ids: string[] }` after a like or unlike here, a
+rollback, or a change read from Plex. Liked Songs plays with
+`play_context` kind `"liked"` and id `"liked"`; with `trackIds` it plays those
+in that order (the page's sort or filter).
+
 ## Artist info
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -216,7 +247,7 @@ dropdown parts off; the UI checks them.
 ## Playback and queue
 | Command | Args |
 | --- | --- |
-| `play_context` | `{ context: { kind: "album"|"playlist"|"artist"|"tracks"|"search", id?, trackIds? }, startTrackId?, shuffle? }` |
+| `play_context` | `{ context: { kind: "album"|"playlist"|"artist"|"tracks"|"search"|"liked", id?, trackIds? }, startTrackId?, shuffle? }` |
 | `play_toggle`, `play_pause`, `play_resume`, `play_next`, `play_previous` | – |
 | `play_seek` | `{ positionMs }` |
 | `set_volume` | `{ volume: 0..1 }` (linear slider value; core applies the perceptual curve) |
@@ -365,6 +396,8 @@ The rest of the fields, with their defaults:
 | `infoLastfm` | bool, false | Artist info from Last.fm. Only used while a key is saved and wasn't refused. |
 | `infoFanart` | bool, false | Artist images from Fanart.tv. Same key rule. |
 | `infoAudiodb` | bool, false | Artist photo and bio from TheAudioDB. Same key rule. |
+| `likedMeans` | `"five"` or `"fourUp"`, `"five"` | Which Plex ratings count as liked: five stars (10), or four stars and up (8 or more). Liking always writes five stars. |
+| `likeControlRows` | `"hover"`, `"always"` or `"off"`, `"hover"` | When song rows show the like control. Liked songs always show their tick unless it's `"off"`; the player bar and now playing always show it. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

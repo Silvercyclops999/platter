@@ -282,3 +282,26 @@ fake only). Check once on a throwaway playlist, then delete it:
 - Whether `updatedAt` changes on every edit (the sync refetches a playlist's
   items when count, duration or `updatedAt` change; a reorder alone only
   changes `updatedAt`).
+
+### 2026-10-14: ratings (likes)
+
+Read-only checks on the real server:
+- Track list items (`/library/sections/{id}/all?type=10`) carry `userRating`
+  and `lastRatedAt` (unix seconds) on rated tracks, and `Genre` tags (up to
+  two; about 99% of tracks had one). `Mood` wasn't on any list item, so the
+  Liked Songs chips are mostly genres.
+- The filter `userRating>=1` (sent as query key `userRating>` with value `1`)
+  returns only rated tracks; `userRating>=10` returns only five-star ones.
+  It's a small list, so every sync reads it to pick up likes made in other
+  Plex apps.
+- On the one rated track, `updatedAt` was later than `lastRatedAt`, so a
+  rating doesn't reliably show up in the incremental `updatedAt` filter.
+  That's why ratings get their own pass.
+
+Not tried against a real server yet (unit tested against wiremock and a
+fake only). Check once on a song you don't mind rating, then put it back:
+- `PUT /:/rate?key={ratingKey}&identifier=com.plexapp.plugins.library&rating=10`
+  sets five stars and `lastRatedAt`.
+- `rating=-1` clears the rating (the app's unlike).
+- Whether a rating change sends a websocket `timeline` event (the app syncs
+  on those, so likes from other apps would show without waiting).
