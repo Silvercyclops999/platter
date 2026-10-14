@@ -1,0 +1,34 @@
+#!/bin/sh
+# Blocks commits that would leak secrets or personal server details.
+# Turn it on with: git config core.hooksPath scripts/git-hooks
+fail() { echo "pre-commit: BLOCKED: $1" >&2; exit 1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# 1. Secret-bearing files must never be staged.
+for f in $staged; do
+  case "$f" in
+    *.env.example) ;;
+    .env|*/.env|.env.*|*/.env.*|env.txt|*.env.txt|*.key|*.pem|*.p12|*.pfx) fail "secret file staged: $f" ;;
+  esac
+done
+
+diff=$(git diff --cached -U0 --no-color | grep '^+' | grep -v '^+++')
+
+# 2. The real dev token (read locally, never printed).
+if [ -f .env ]; then
+  tok=$(grep '^PLEX_TOKEN=' .env | cut -d= -f2- | tr -d '\r\n ')
+  if [ -n "$tok" ] && printf '%s' "$diff" | grep -qF "$tok"; then fail "the Plex token from .env is in the staged changes"; fi
+fi
+
+# 3. Token-shaped values and personal server addresses.
+printf '%s' "$diff" | grep -qE '(X-Plex-Token|PLEX_TOKEN|accessToken|authToken)["'"'"' :=]+[A-Za-z0-9_-]{18,}' && fail "token-shaped value in staged changes"
+printf '%s' "$diff" | grep -qE '[0-9a-f]{32}\.plex\.direct' && fail "a real plex.direct hostname is in staged changes"
+printf '%s' "$diff" | grep -qE '[0-9a-zA-Z._%+-]+@gmail\.com' && fail "a personal email address is in staged changes"
+
+# 4. gitleaks, when installed.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --staged --no-banner --redact -c .gitleaks.toml >/dev/null 2>&1 || {
+    gitleaks git --staged --no-banner --redact -c .gitleaks.toml >&2; fail "gitleaks found a secret"; }
+fi
+exit 0

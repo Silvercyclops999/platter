@@ -1,0 +1,47 @@
+# secrets
+.env
+.env.*
+env.txt
+*.env.txt
+!.env.example
+
+# deps / builds
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# local-only MCP / tool config
+.mcp.local.json
+.playwright-mcp/
+
+# local data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+cache/
+downloads/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# logs / misc
+*.log
+dist-ssr
+*.local
+src-tauri/gen/schemas
+test-results/
+playwright-report/
+
+
+# Private planning + AI tooling (own private repo) and local agent config
+dev/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.claude/
+*.tsbuildinfo

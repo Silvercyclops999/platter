@@ -1,0 +1,15 @@
+#!/bin/sh
+# Refuses to push commits whose author or committer email isn't a GitHub
+# noreply address, so personal emails never end up in the public repo.
+z40=0000000000000000000000000000000000000000
+while read local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$z40" ] && continue
+  if [ "$remote_sha" = "$z40" ]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
+  bad=$(git log --format='%h %ae %ce' "$range" | awk '$2 !~ /@users\.noreply\.github\.com$/ || $3 !~ /@users\.noreply\.github\.com$/ { print }' | grep -v ' noreply@anthropic.com' )
+  if [ -n "$bad" ]; then
+    echo "pre-push: BLOCKED: commits with a non-noreply author/committer email:" >&2
+    echo "$bad" | awk '{print "  " $1}' >&2
+    exit 1
+  fi
+done
+exit 0

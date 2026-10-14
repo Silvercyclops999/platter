@@ -1,0 +1,41 @@
+name: Bug report
+description: Something doesn't work the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't paste your Plex token, your server address, or logs that contain either.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Platter version
+      placeholder: e.g. 0.1.0
+    validations: { required: true }
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows 11, Windows 10, macOS (Apple Silicon), macOS (Intel)]
+    validations: { required: true }
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How the app reaches your server (status dot)
+      options: [Local, Remote, Relay, Offline, Not sure]
+  - type: input
+    id: pms
+    attributes:
+      label: Plex Media Server version
+      placeholder: e.g. 1.43.4
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Library size, file formats involved, screenshots (no personal info).
