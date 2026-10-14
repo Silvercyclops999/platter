@@ -23,7 +23,7 @@ export default defineConfig(() => ({
     // Only this checkout's own .claude and dev folders: a worktree lives under
     // .claude itself, so a "**/.claude/**" glob would stop it watching anything.
     watch: {
-      ignored: ["**/src-tauri/**", path.resolve(__dirname, ".claude") + "/**", path.resolve(__dirname, "dev") + "/**"],
+      ignored: ["**/src-tauri/**", path.resolve(import.meta.dirname, ".claude") + "/**", path.resolve(import.meta.dirname, "dev") + "/**"],
     },
   },
 
