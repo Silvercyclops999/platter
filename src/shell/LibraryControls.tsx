@@ -2,6 +2,7 @@
 import { AlignJustify, Grid3x3, LayoutGrid, List, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { IconButton } from "../components/Button";
+import { useRovingRow } from "../components/roving";
 import { openContextMenu } from "../components/ContextMenu";
 import {
   KIND_LABEL,
@@ -19,13 +20,14 @@ import {
   type LibView,
   VIEW_LABEL,
 } from "../stores/library";
-import type { MenuItem } from "../stores/ui";
+import { useUi, type MenuItem } from "../stores/ui";
 
 export function LibraryChips({ filter, sub, kinds }: { filter: LibFilter; sub: LibSub | null; kinds: LibKind[] }) {
   const chips = chipRow(filter, sub, kinds);
+  const roving = useRovingRow();
   if (chips.length === 0) return null;
   return (
-    <div role="group" aria-label="Show in library" className="lib-chips">
+    <div role="group" aria-label="Show in library" className="lib-chips" {...roving}>
       {chips.map((c) => {
         const press = () => {
           const next = pressChip(c, filter, sub);
@@ -76,6 +78,16 @@ export function LibrarySearch({
   useEffect(() => {
     if (open) input.current?.focus();
   }, [open]);
+  // Ctrl/⌘+F opens the field and focuses it.
+  const filterTick = useUi((s) => s.libraryFilterTick);
+  const seenTick = useRef(filterTick);
+  useEffect(() => {
+    if (filterTick === seenTick.current) return;
+    seenTick.current = filterTick;
+    setOpen(true);
+    input.current?.focus();
+    input.current?.select();
+  }, [filterTick]);
   if (!open && !alwaysOpen && !query)
     return <IconButton size="sm" label={placeholder} icon={<Search size={16} />} onClick={() => setOpen(true)} className="lib-search-btn" />;
   return (

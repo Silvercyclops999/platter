@@ -11,7 +11,9 @@ import { updateSettings, useSettings } from "../stores/settings";
 import { createPlaylist } from "../stores/playlists";
 import { toast, useToasts } from "../stores/toasts";
 import { offlineMessage } from "./bannerView";
+import { useUi } from "../stores/ui";
 import { Logo } from "./Logo";
+import { shortcutLabel } from "./shortcuts";
 import { SearchBox } from "./SearchBox";
 import "./topbar.css";
 
@@ -230,6 +232,10 @@ export function AppMenu() {
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "settings" }))}>
             <span>Settings</span>
             <kbd className="appmenu__hint">{modKey}+,</kbd>
+          </button>
+          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => useUi.getState().setShortcutsOpen(true))}>
+            <span>Keyboard shortcuts</span>
+            <kbd className="appmenu__hint">{shortcutLabel("help")}</kbd>
           </button>
           <button
             type="button"

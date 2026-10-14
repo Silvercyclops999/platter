@@ -27,16 +27,23 @@ export function useTrackCredits(track: CreditTrack): Credit[] {
  * artists, and featured names with a generated page). Links are
  * inline text (not buttons) so the whole line ellipsizes as one when it runs
  * out of room. Clicks and keys stay on the link, so a row around it neither
- * plays nor selects.
+ * plays nor selects. Inside a track row the links aren't Tab stops
+ * (`linkTabIndex` -1); arrows reach them from the row.
  */
-export function ArtistLinks({ track, className = "" }: { track: CreditTrack; className?: string }) {
+export function ArtistLinks({ track, className = "", linkTabIndex = 0 }: { track: CreditTrack; className?: string; linkTabIndex?: number }) {
   const credits = useTrackCredits(track);
   return (
     <span className={`artist-line ${className}`}>
       {credits.map((c, i) => (
         <Fragment key={`${c.name}-${i}`}>
           {i > 0 && ", "}
-          {c.id ? <TextLink onActivate={() => nav.go({ name: "artist", id: c.id! })}>{c.name}</TextLink> : c.name}
+          {c.id ? (
+            <TextLink tabIndex={linkTabIndex} onActivate={() => nav.go({ name: "artist", id: c.id! })}>
+              {c.name}
+            </TextLink>
+          ) : (
+            c.name
+          )}
         </Fragment>
       ))}
     </span>

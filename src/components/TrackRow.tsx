@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,7 @@ import { ArchiveQualityBadge, archiveQualityLabel, ExplicitBadge, VersionBadge, 
 import { useTrackBadges } from "../stores/fileTags";
 import { openContextMenu } from "./ContextMenu";
 import { addToPlaylistItem } from "./PlaylistPicker";
+import { isTypeAheadKey, linkStep, rowStep, typeAhead } from "./listKeys";
 import { SaveButton } from "./SaveButton";
 import { shareItem } from "./ShareMenu";
 import { Skeleton } from "./Skeleton";
@@ -136,6 +138,9 @@ interface Selection {
   multiMenu: (key: string) => { label: string; items: MenuItem[] } | null;
   /** The selected rows' tracks in list order. */
   pickedTracks: () => Track[];
+  /** The list is one Tab stop: the row that has tabindex 0. */
+  tabStop: string | null;
+  setTabStop: (key: string) => void;
 }
 
 const SelectionContext = createContext<Selection | null>(null);
@@ -149,6 +154,7 @@ function useSelection(
   buildMulti: (keys: string[], trackIds: string[]) => MenuItem[],
 ): Selection {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [tabStop, setTabStop] = useState<string | null>(null);
   const anchor = useRef<string | null>(null);
 
   const ordered = useCallback(() => rowKeys(root.current).map((el) => el.dataset.rowKey!), [root]);
@@ -215,8 +221,10 @@ function useSelection(
           .filter((el) => selected.has(el.dataset.rowKey!))
           .map((el) => tracksIn.get(el))
           .filter((t): t is Track => !!t),
+      tabStop,
+      setTabStop,
     }),
-    [selected, click, clear, ordered, root, buildMulti],
+    [selected, click, clear, ordered, root, buildMulti, tabStop],
   );
 }
 
@@ -347,41 +355,58 @@ export function TrackRow({
     e.preventDefault();
     openMenu(e);
   };
+  // Keyboard: the list is one Tab stop. Up / Down / Home / End move between
+  // rows and the selection follows (Shift extends it); Right steps into the
+  // row's links and Left / Right walk them; letters jump by title.
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return;
+    const row = e.currentTarget;
+    const target = e.target as HTMLElement;
+    const plain = !e.altKey && !isMod(e);
+    if (plain && !e.shiftKey) {
+      const link = linkStep(row, target, e.key);
+      if (link) {
+        e.preventDefault();
+        link.focus();
+        return;
+      }
+    }
+    const rowMove = plain && (e.key === "ArrowDown" || e.key === "ArrowUp" || (!e.shiftKey && (e.key === "Home" || e.key === "End")));
+    if (target !== row && !rowMove) return;
     if (e.key === "Enter") {
       e.preventDefault();
       onPlay();
     } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
       e.preventDefault();
-      openMenu(e.currentTarget);
+      openMenu(row);
     } else if (e.key === "Escape" && sel?.selected.size) {
       e.preventDefault();
       sel.clear();
     } else if (isMod(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a" && sel) {
       e.preventDefault();
       sel.selectAll();
-    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      // Move between rows in the same list; the selection follows (Shift extends it).
-      const list = e.currentTarget.closest("[data-tracklist]");
-      const rows = Array.from(list?.querySelectorAll<HTMLElement>(".track-row[data-row-key]") ?? []);
-      const i = rows.indexOf(e.currentTarget);
-      const next = rows[i + (e.key === "ArrowDown" ? 1 : -1)];
-      if (next) {
-        e.preventDefault();
-        next.focus();
-        if (sel && (e.shiftKey || sel.selected.size)) {
-          if (e.shiftKey && !sel.selected.size) sel.click(key, "one");
-          sel.click(next.dataset.rowKey!, e.shiftKey ? "range" : "one");
-        }
-      }
+    } else if (rowMove) {
+      const next = rowStep(row, e.key);
+      if (!next) return;
+      e.preventDefault();
+      next.focus();
+      if (!sel) return;
+      if (e.shiftKey) {
+        if (!sel.selected.size) sel.click(key, "one");
+        sel.click(next.dataset.rowKey!, "range");
+      } else sel.click(next.dataset.rowKey!, "one");
+    } else if (sel && isTypeAheadKey(e)) {
+      const next = typeAhead(row, e.key, (el) => tracksIn.get(el)?.title ?? "");
+      if (!next) return;
+      e.preventDefault();
+      if (next !== row) next.focus();
+      sel.click(next.dataset.rowKey!, "one");
     }
   };
 
   return (
     <div
       role="listitem"
-      tabIndex={0}
+      tabIndex={sel ? (sel.tabStop === key ? 0 : -1) : 0}
       aria-label={label}
       aria-current={active ? "true" : undefined}
       data-row-key={key}
@@ -398,6 +423,9 @@ export function TrackRow({
         onPlay();
       }}
       onKeyDown={onKeyDown}
+      onFocus={(e) => {
+        if (e.target === e.currentTarget && sel && sel.tabStop !== key) sel.setTabStop(key);
+      }}
       onContextMenu={onContextMenu}
       draggable={draggable || songDrags || undefined}
       onDragStart={draggable || songDrags ? dragStart : undefined}
@@ -475,10 +503,10 @@ export function TrackRow({
             (badges.explicit ? (
               <div className="track-row__sub">
                 <ExplicitBadge />
-                <ArtistLinks track={track} className="track-row__artist truncate" />
+                <ArtistLinks track={track} className="track-row__artist truncate" linkTabIndex={-1} />
               </div>
             ) : (
-              <ArtistLinks track={track} className="track-row__artist truncate" />
+              <ArtistLinks track={track} className="track-row__artist truncate" linkTabIndex={-1} />
             ))}
         </div>
       </div>
@@ -561,6 +589,14 @@ export function TrackList({
   buildMulti.current = multiMenu;
   const stableBuild = useCallback((k: string[], ids: string[]) => buildMulti.current(k, ids, tracksFor(root.current, ids)), []);
   const selection = useSelection(root, stableBuild);
+  // Keep exactly one row as the list's Tab stop: the last focused, else the first.
+  const { tabStop, setTabStop } = selection;
+  useLayoutEffect(() => {
+    const rows = root.current?.querySelectorAll<HTMLElement>(".track-row[data-row-key]");
+    if (!rows?.length) return;
+    const keys = Array.from(rows, (el) => el.dataset.rowKey!);
+    if (!tabStop || !keys.includes(tabStop)) setTabStop(keys[0]);
+  });
   return (
     <SelectionContext.Provider value={selection}>
       <div className="track-list" data-tracklist ref={root}>

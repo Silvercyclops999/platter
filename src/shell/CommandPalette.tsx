@@ -1,4 +1,4 @@
-import { CornerDownLeft, Disc3, House, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, User, Volume1, Volume2 } from "lucide-react";
+import { CornerDownLeft, Disc3, House, Keyboard, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, User, Volume1, Volume2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
@@ -9,6 +9,7 @@ import type { SearchResults } from "../lib/types";
 import { player } from "../stores/player";
 import { nav } from "../stores/router";
 import { useUi } from "../stores/ui";
+import { shortcutLabel } from "./shortcuts";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
 
 interface Cmd {
@@ -21,14 +22,15 @@ interface Cmd {
 }
 
 const NAV_COMMANDS: Cmd[] = [
-  { id: "go-home", label: "Go to Home", icon: <House size={16} />, group: "Navigation", run: () => nav.go({ name: "home" }) },
+  { id: "go-home", label: "Go to Home", hint: shortcutLabel("home"), icon: <House size={16} />, group: "Navigation", run: () => nav.go({ name: "home" }) },
   { id: "go-search", label: "Go to Search", hint: `${modKey}+L`, icon: <Search size={16} />, group: "Navigation", run: () => useUi.getState().focusSearch() },
   { id: "go-albums", label: "Library: Albums", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "albums" }) },
   { id: "go-artists", label: "Library: Artists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "artists" }) },
   { id: "go-playlists", label: "Library: Playlists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "playlists" }) },
   { id: "go-settings", label: "Open settings", hint: `${modKey}+,`, icon: <Settings size={16} />, group: "Navigation", run: () => nav.go({ name: "settings" }) },
-  { id: "go-back", label: "Go back", hint: "Alt+←", icon: <CornerDownLeft size={16} />, group: "Navigation", run: () => nav.back() },
-  { id: "toggle-queue", label: "Toggle queue", icon: <ListMusic size={16} />, group: "Playback", run: () => useUi.getState().toggleQueue() },
+  { id: "go-back", label: "Go back", hint: shortcutLabel("back"), icon: <CornerDownLeft size={16} />, group: "Navigation", run: () => nav.back() },
+  { id: "shortcuts", label: "Keyboard shortcuts", hint: shortcutLabel("help"), icon: <Keyboard size={16} />, group: "Navigation", run: () => useUi.getState().setShortcutsOpen(true) },
+  { id: "toggle-queue", label: "Toggle queue", hint: shortcutLabel("queue"), icon: <ListMusic size={16} />, group: "Playback", run: () => useUi.getState().toggleQueue() },
   { id: "play-pause", label: "Play / pause", hint: "Space", icon: <Music size={16} />, group: "Playback", run: () => player.toggle() },
   { id: "next", label: "Next track", hint: `${modKey}+→`, icon: <Music size={16} />, group: "Playback", run: () => player.next() },
   { id: "previous", label: "Previous track", hint: `${modKey}+←`, icon: <Music size={16} />, group: "Playback", run: () => player.previous() },

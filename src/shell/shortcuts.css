@@ -1,0 +1,76 @@
+/* Keyboard shortcuts window. */
+.dialog.shortcuts {
+  display: flex;
+  flex-direction: column;
+  width: min(540px, calc(100vw - 48px));
+  height: min(560px, calc(100vh - 96px));
+  overflow: hidden;
+}
+.shortcuts__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-6) var(--space-4);
+}
+.shortcuts__title { margin: 0; font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.shortcuts__sub { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.shortcuts__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-6) var(--space-6);
+}
+.shortcuts__body:focus-visible { outline-offset: -2px; }
+.shortcuts__section + .shortcuts__section { margin-top: var(--space-6); }
+.shortcuts__section-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+.shortcuts__list { margin: 0; }
+.shortcuts__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 36px;
+  border-bottom: 1px solid rgba(255, 240, 220, 0.06);
+}
+.shortcuts__row:last-child { border-bottom: 0; }
+.shortcuts__action { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.shortcuts__keys { display: flex; flex: none; gap: var(--space-1); margin: 0; }
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--color-state-pressed);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+/* Skip link: off screen until it has keyboard focus. */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  z-index: 900;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--color-text-primary);
+  color: var(--color-bg-base);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  text-decoration: none;
+  transform: translate(-50%, -200%);
+}
+.skip-link:focus-visible { transform: translate(-50%, 0); }

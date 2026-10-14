@@ -141,6 +141,12 @@ interface UiState extends PanelWidths {
   setNowPlayingOpen: (v: boolean) => void;
   setNowPlayingPrefs: (p: Partial<NowPlayingPrefs>) => void;
   paletteOpen: boolean;
+  /** The keyboard shortcuts window is open. */
+  shortcutsOpen: boolean;
+  setShortcutsOpen: (v: boolean) => void;
+  /** Bumped to ask the library's filter field to open and take focus (Ctrl/⌘+F). */
+  libraryFilterTick: number;
+  focusLibraryFilter: () => void;
   /** Bumped to ask the search field to take focus (Ctrl/⌘+L). */
   searchFocusTick: number;
   menu: ContextMenuState | null;
@@ -197,6 +203,10 @@ export const useUi = create<UiState>()((set, get) => ({
     saveNowPlayingPrefs(nowPlayingPrefs);
   },
   paletteOpen: false,
+  shortcutsOpen: false,
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  libraryFilterTick: 0,
+  focusLibraryFilter: () => set({ libraryFilterTick: get().libraryFilterTick + 1 }),
   searchFocusTick: 0,
   menu: null,
   tint: null,

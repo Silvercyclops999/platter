@@ -39,6 +39,8 @@ import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { useShortcuts } from "./useShortcuts";
+import { ShortcutsHelp } from "./ShortcutsHelp";
+import { skipToMain, useShellTabOrder } from "./focusOrder";
 
 function useWindowWidth() {
   const [w, setW] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1280));
@@ -71,6 +73,7 @@ export function AppShell() {
   const rightWidth = useUi((s) => s.rightWidth);
   const width = useWindowWidth();
   const shell = useRef<HTMLDivElement>(null);
+  useShellTabOrder(shell);
   const layout = solveLayout({ windowWidth: width, sidebarWidth, rightWidth, rightOpen, sidebarCollapsed });
   const rail = layout.sidebarMode === "rail";
   // Wide library mode: the library page spans from the left edge, so no sidebar.
@@ -115,6 +118,16 @@ export function AppShell() {
 
   return (
     <div ref={shell} className={`app app--chrome-${chrome} ${queueOpen ? "has-queue" : ""} ${nowPlayingOpen ? "has-now-playing" : ""} ${slot.swap ? "right-swap" : ""} ${rail ? "sidebar-collapsed" : ""}`} style={style}>
+      <a
+        href="#main"
+        className="skip-link"
+        onClick={(e) => {
+          e.preventDefault();
+          skipToMain();
+        }}
+      >
+        Skip to main content
+      </a>
       <TopBar />
       <div className="app__body">
         {!wideLibrary && <Sidebar collapsed={rail} auto={layout.sidebarAuto} />}
@@ -169,6 +182,7 @@ export function AppShell() {
       <RemoteStrip />
       <PlayerBar />
       <CommandPalette />
+      <ShortcutsHelp />
       <ContextMenuHost />
       <SavedInHost />
       <Toaster />

@@ -1,4 +1,5 @@
 import { useRef, type KeyboardEvent } from "react";
+import { useRovingRow } from "./roving";
 
 export interface TabItem<T extends string> {
   id: T;
@@ -59,10 +60,12 @@ export interface FilterChipsProps<T extends string> {
   className?: string;
 }
 
-/** Pill filter chips (single select). */
+/** Pill filter chips (single select), one Tab stop with arrows inside. */
 export function FilterChips<T extends string>({ label, items, value, onChange, className = "" }: FilterChipsProps<T>) {
+  // One Tab stop for the row; arrows move between chips.
+  const roving = useRovingRow();
   return (
-    <div role="group" aria-label={label} className={`chips ${className}`}>
+    <div role="group" aria-label={label} className={`chips ${className}`} {...roving}>
       {items.map((t) => (
         <button
           key={t.id}

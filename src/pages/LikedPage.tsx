@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { LikedCover } from "../components/LikedCover";
+import { useRovingRow } from "../components/roving";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
@@ -116,6 +117,7 @@ export function LikedPage() {
     return [...data.tracks, ...[...ghosts.values()].filter((t) => !have.has(t.id))];
   }, [data, ghosts]);
   const chips = useMemo(() => likedChips(data?.tracks ?? []), [data]);
+  const chipRoving = useRovingRow();
   const activeChip = chip && chips.some((c) => c.tag === chip) ? chip : null;
   const rows = useMemo(() => likedRows(all, { sort: prefs.sort, chip: activeChip, query }), [all, prefs.sort, activeChip, query]);
   const counted = activeChip ? rows.filter((t) => liked.has(t.id)) : (data?.tracks ?? []);
@@ -244,7 +246,7 @@ export function LikedPage() {
           )}
         </div>
         {!empty && chips.length > 0 && (
-          <div role="group" aria-label="Filter by genre or mood" className="chips liked__chips">
+          <div role="group" aria-label="Filter by genre or mood" className="chips liked__chips" {...chipRoving}>
             {activeChip ? (
               <>
                 <button type="button" className="chip chip--clear liked__chip-clear" aria-label="Clear filter" onClick={() => setChip(null)}>

@@ -79,12 +79,14 @@ describe("artist links in a track row", () => {
     expect(onPlay).not.toHaveBeenCalled();
   });
 
-  it("is keyboard focusable and opens on Enter", async () => {
+  it("is reached with Right from the row (not a Tab stop of its own) and opens on Enter", async () => {
     const user = userEvent.setup();
     const { row, onPlay } = renderRow();
     const link = within(row).getByRole("link", { name: t1.artistTitle });
-    expect(link).toHaveAttribute("tabindex", "0");
-    link.focus();
+    expect(link).toHaveAttribute("tabindex", "-1");
+    row.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(link).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(route()).toEqual({ name: "artist", id: t1.artistId });
     expect(onPlay).not.toHaveBeenCalled();

@@ -6,7 +6,8 @@ import { SearchField } from "../components/SearchField";
 import { Select, type SelectOption } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
-import { useSidebarArt } from "../stores/ui";
+import { useSidebarArt, useUi } from "../stores/ui";
+import { shortcutLabel } from "../shell/shortcuts";
 import { backend } from "../lib/backend";
 import { formatBytes } from "../lib/format";
 import { modKey, platform } from "../lib/platform";
@@ -772,6 +773,17 @@ export function SettingsPage() {
       title: "Open Platter when you sign in",
       description: `Starts Platter when you sign in to your computer. It starts hidden in the ${TRAY} if Close to the ${TRAY} is on, otherwise minimised.`,
       control: (ids) => toggle(s, "launchAtLogin", ids),
+    },
+    {
+      key: "keyboardShortcuts",
+      section: "App",
+      title: "Keyboard shortcuts",
+      description: `Every shortcut, for playback, getting around and the layout. ${shortcutLabel("help")} opens the list from anywhere.`,
+      control: () => (
+        <Button size="sm" onClick={() => useUi.getState().setShortcutsOpen(true)}>
+          Show shortcuts
+        </Button>
+      ),
     },
     {
       key: "notifyTrackChange",
