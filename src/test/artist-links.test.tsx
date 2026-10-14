@@ -87,7 +87,7 @@ describe("artist links in a track row", () => {
 describe("track menu", () => {
   it("has one 'Go to' item per linked artist, in line order, where 'Go to artist' was", () => {
     const labels = trackMenuItems(featured).map((i) => i.label);
-    expect(labels).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", `Go to ${t1.artistTitle}`, `Go to ${amp.title}`, "Go to album", "Copy song title"]);
+    expect(labels).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", `Go to ${t1.artistTitle}`, `Go to ${amp.title}`, "Go to album", "Share", "Copy song title"]);
   });
 
   it("each item goes to its artist", () => {

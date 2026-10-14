@@ -58,7 +58,7 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Search", "Appearance", "Home", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "About", "Now playing"]);
+    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Search", "Appearance", "Home", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "About", "Now playing"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");

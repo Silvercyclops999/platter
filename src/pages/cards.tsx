@@ -3,6 +3,7 @@ import type { MouseEvent } from "react";
 import { Card } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
+import { shareItem } from "../components/ShareMenu";
 import { releaseTypeLabel } from "../lib/format";
 import type { Album, Artist, HomeItem, PlayContextKind, Playlist } from "../lib/types";
 import { usePins } from "../stores/pins";
@@ -41,6 +42,7 @@ export function useAlbumActions(album: Album): ItemActions {
           { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
           addToPlaylistItem(albumSongs(album.id)),
           { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
+          shareItem("album", album.id),
           {
             label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
             onSelect: () =>
@@ -67,6 +69,7 @@ export function useArtistActions(artist: Artist): ItemActions {
         `Options for ${artist.title}`,
         [
           { label: playing ? "Pause" : "Play", onSelect: play },
+          shareItem("artist", artist.id),
           {
             label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
             onSelect: () => usePins.getState().toggle({ kind: "artist", id: artist.id, title: artist.title, subtitle: "Artist", thumb: artist.thumb }),
@@ -94,6 +97,7 @@ export function usePlaylistActions(playlist: Playlist): ItemActions {
           { label: playing ? "Pause" : "Play", onSelect: play },
           { label: "Add to queue", onSelect: () => player.queuePlaylist(playlist.id) },
           ...playlistEditItems(playlist),
+          shareItem("playlist", playlist.id),
           {
             label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
             onSelect: () =>

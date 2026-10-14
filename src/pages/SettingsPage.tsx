@@ -113,13 +113,15 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "souvlaki", licence: "MIT" },
 ];
 
-/** Outside sources for artist info, each under its own terms (shown under About). */
+/** Outside services (artist info, public share links), each under its own terms (shown under About). */
 export const SOURCE_NOTICES: { name: string; licence: string }[] = [
   { name: "Wikipedia (artist bios)", licence: "CC BY-SA 4.0" },
   { name: "Wikidata (artist facts)", licence: "CC0" },
   { name: "Last.fm (with your key)", licence: "Last.fm API terms" },
   { name: "Fanart.tv (with your key)", licence: "Fanart.tv terms" },
   { name: "TheAudioDB (with your key)", licence: "TheAudioDB terms" },
+  { name: "iTunes Search (finding public links)", licence: "Apple iTunes Search API terms" },
+  { name: "song.link (shared link pages)", licence: "Songlink terms" },
 ];
 
 // ------------------------------------------------------------------ rows
@@ -336,7 +338,7 @@ function NoticesDialog({ open, onClose }: { open: boolean; onClose: () => void }
           </li>
         ))}
       </ul>
-      <p className="confirm__body notices__sub">Artist info comes from these sources when you turn them on.</p>
+      <p className="confirm__body notices__sub">Artist info and public share links come from these services when they are on.</p>
       <ul className="notices">
         {SOURCE_NOTICES.map((n) => (
           <li key={n.name} className="notices__item">
@@ -899,6 +901,15 @@ export function SettingsPage() {
         "Shape the sound with ten bands from 31 Hz to 16 kHz. Drag the points, or focus one and use the arrow keys (Shift for bigger steps). Pick a preset, save your own, and give an output device its own profile. This device only.",
       control: (ids) => toggle(s, "eqEnabled", ids),
       block: () => <EqEditor />,
+    },
+    // Sharing
+    {
+      key: "sharePublicLinks",
+      section: "Sharing",
+      title: "Public links for released music",
+      description:
+        "Share menus can copy a song.link page that opens the song or album in any music service. Platter finds it with iTunes Search, sending only the artist, title and album. Unreleased music never gets one. Off leaves only Platter links.",
+      control: (ids) => toggle(s, "sharePublicLinks", ids),
     },
   ];
 

@@ -1,0 +1,124 @@
+/**
+ * Mock sharing: Platter links built like the core's, invented public links
+ * (no network), demos refused, and platter:// links opened through a test
+ * hook (`openLink`) the way the OS hands them to the core.
+ *
+ * Some songs and albums have no public match, picked by id so the demo is
+ * stable: those show the "Couldn't find" toast.
+ */
+import type { DeepLinkOpen, PublicLinkState, Settings, ShareInfo, ShareKind } from "../types";
+import type { Fixtures } from "./fixtures";
+
+const SERVER_TAG = "5e7c0a11";
+const WORD: Record<ShareKind, string> = { track: "song", album: "album", artist: "artist", playlist: "playlist" };
+
+function hash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+
+/** Ids with no confident match in the (pretend) store. */
+export function mockHasNoMatch(id: string): boolean {
+  return hash(id) % 5 === 0;
+}
+
+const fail = (kind: string, message: string) => ({ kind, message });
+
+export class MockShare {
+  private pending: DeepLinkOpen | null = null;
+  /** Test hook: the next lookup fails like a dropped connection. */
+  failNext = false;
+  /** Lookups made (test hook). */
+  lookups = 0;
+
+  constructor(
+    private fx: Fixtures,
+    private settings: () => Settings,
+    private playlistExists: (id: string) => boolean,
+    private waiting: () => void,
+  ) {}
+
+  private album(id: string) {
+    return this.fx.albums.find((a) => a.id === id);
+  }
+
+  private exists(kind: ShareKind, id: string): boolean {
+    switch (kind) {
+      case "track":
+        return this.fx.tracks.some((t) => t.id === id);
+      case "album":
+        return !!this.album(id);
+      case "artist":
+        return this.fx.artists.some((a) => a.id === id);
+      case "playlist":
+        return this.playlistExists(id);
+    }
+  }
+
+  private unreleased(kind: ShareKind, id: string): boolean {
+    const albumId = kind === "track" ? this.fx.tracks.find((t) => t.id === id)?.albumId : id;
+    const a = albumId ? this.album(albumId) : undefined;
+    return !!a && (a.format?.includes("demo") || a.subformats.some((s) => s.includes("demo")));
+  }
+
+  private status(kind: ShareKind, id: string): PublicLinkState {
+    if (kind === "artist" || kind === "playlist") return "none";
+    if (this.unreleased(kind, id)) return "unreleased";
+    return this.settings().sharePublicLinks ? "available" : "off";
+  }
+
+  info(kind: ShareKind, id: string, atSeconds?: number): ShareInfo {
+    if (!this.exists(kind, id)) throw fail("notFound", "This isn't in your library");
+    const q = [kind === "track" && atSeconds != null ? `t=${Math.max(0, Math.floor(atSeconds))}` : null, `s=${SERVER_TAG}`].filter(Boolean);
+    return { appLink: `platter://${WORD[kind]}/${encodeURIComponent(id)}?${q.join("&")}`, public: this.status(kind, id) };
+  }
+
+  publicLink(kind: ShareKind, id: string): string {
+    if (!this.exists(kind, id)) throw fail("notFound", "This isn't in your library");
+    const st = this.status(kind, id);
+    if (st === "unreleased") throw fail("invalid", "Not released");
+    if (st === "off") throw fail("invalid", "Public links are off in Settings");
+    if (st === "none") throw fail("invalid", "Only songs and albums get public links");
+    this.lookups++;
+    if (this.failNext) {
+      this.failNext = false;
+      throw fail("network", "Couldn't reach the link search. Try again in a minute.");
+    }
+    if (mockHasNoMatch(id)) throw fail("notFound", kind === "album" ? "Couldn't find this album online" : "Couldn't find this song online");
+    const n = 1_000_000_000 + (hash(`${kind}:${id}`) % 900_000_000);
+    return kind === "album" ? `https://album.link/i/${n}` : `https://song.link/i/${n}`;
+  }
+
+  /** Read a platter:// link like the core does (enough for the demo). */
+  resolve(raw: string): DeepLinkOpen {
+    const none = (status: DeepLinkOpen["status"]): DeepLinkOpen => ({ status, kind: null, id: null, albumId: null, atSeconds: null });
+    const m = /^platter:\/\/(song|track|album|artist|playlist)\/([A-Za-z0-9_-]{1,64})\/?(?:\?(.*))?$/i.exec(raw.trim());
+    if (!m) return none("invalid");
+    const kind: ShareKind = m[1].toLowerCase() === "song" || m[1].toLowerCase() === "track" ? "track" : (m[1].toLowerCase() as ShareKind);
+    const id = m[2];
+    const params = new URLSearchParams(m[3] ?? "");
+    const s = params.get("s");
+    if (s && s !== SERVER_TAG) return none("notInLibrary");
+    if (!this.exists(kind, id)) return none("notInLibrary");
+    const t = params.get("t");
+    const atSeconds = kind === "track" && t && /^\d+$/.test(t) ? Number(t) : null;
+    const albumId = kind === "track" ? (this.fx.tracks.find((x) => x.id === id)?.albumId ?? null) : null;
+    return { status: "open", kind, id, albumId, atSeconds };
+  }
+
+  /** Test/demo hook: the OS opened a platter:// link. */
+  openLink(raw: string) {
+    this.pending = this.resolve(raw);
+    this.waiting();
+  }
+
+  take(): DeepLinkOpen | null {
+    const p = this.pending;
+    this.pending = null;
+    return p;
+  }
+}

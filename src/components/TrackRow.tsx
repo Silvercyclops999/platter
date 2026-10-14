@@ -27,6 +27,7 @@ import { QualityBadge } from "./Badge";
 import { openContextMenu } from "./ContextMenu";
 import { addToPlaylistItem } from "./PlaylistPicker";
 import { SaveButton } from "./SaveButton";
+import { shareItem } from "./ShareMenu";
 import { Skeleton } from "./Skeleton";
 
 /** Whether the album page for `albumId` is the one showing. */
@@ -78,6 +79,7 @@ export function trackMenuItems(
     ...(extra.afterQueue ?? []),
     ...goToArtistItems(track),
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
+    shareItem("track", track.id),
     {
       label: "Copy song title",
       onSelect: () => {

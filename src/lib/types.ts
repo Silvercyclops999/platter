@@ -559,6 +559,8 @@ export interface Settings {
   eqFallback?: { preset: string; bands: number[] } | null;
   /** The output device the EQ last followed. Read only. */
   eqLastOutput?: string | null;
+  /** Share menus find public links for released music (iTunes Search and song.link). */
+  sharePublicLinks: boolean;
   [key: string]: unknown;
 }
 
@@ -637,7 +639,38 @@ export const DEFAULT_SETTINGS: Settings = {
   eqOutputs: [],
   eqFallback: null,
   eqLastOutput: null,
+  sharePublicLinks: true,
 };
+
+// ---------------------------------------------------------------- sharing
+
+/** What a share or a platter:// link points at. */
+export type ShareKind = "track" | "album" | "artist" | "playlist";
+
+/**
+ * Whether an item can get a public link: "available" (released music),
+ * "unreleased" (never), "off" (turned off in Settings) or "none" (artists
+ * and playlists only get Platter links).
+ */
+export type PublicLinkState = "available" | "unreleased" | "off" | "none";
+
+/** `share_info`: the Platter link and whether a public link can be had. */
+export interface ShareInfo {
+  /** platter:// link, with ?t= when a start time was asked for. */
+  appLink: string;
+  public: PublicLinkState;
+}
+
+/** A platter:// link that was opened (`deep_link_take`). */
+export interface DeepLinkOpen {
+  status: "open" | "notInLibrary" | "invalid";
+  kind: ShareKind | null;
+  id: string | null;
+  /** For a song: its album, the page that opens. */
+  albumId: string | null;
+  /** For a song: where to start when the user presses play. */
+  atSeconds: number | null;
+}
 
 // ---------------------------------------------------------------- artist info
 
@@ -808,6 +841,8 @@ export interface EventMap {
   "settings://changed": Settings;
   /** These songs were liked or unliked (here, rolled back, or from Plex). */
   "likes://changed": { ids: string[] };
+  /** A platter:// link was opened; take it with deepLinkTake. */
+  "deeplink://open": null;
 }
 
 export type EventName = keyof EventMap;

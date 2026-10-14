@@ -2,6 +2,7 @@
 import { useEffect, useMemo } from "react";
 import type { MenuItem } from "../stores/ui";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
+import { shareItem } from "../components/ShareMenu";
 import { createPlaylist } from "../stores/playlists";
 import { useLikes } from "../stores/likes";
 import type { Playlist } from "../lib/types";
@@ -187,6 +188,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
     items.push(...playlistEditItems(pl));
     items.push({ label: "Create playlist", separator: true, onSelect: () => void createPlaylist() });
   }
+  items.push(shareItem(e.kind, e.id));
   items.push({ ...pin, separator: true });
   if (opts.move) {
     const m = opts.move;

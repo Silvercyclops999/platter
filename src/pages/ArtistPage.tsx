@@ -3,6 +3,7 @@ import { useEffect, useId, useState, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
+import { shareItem } from "../components/ShareMenu";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
@@ -246,6 +247,7 @@ function ActionRow({ id, data, playing, onPlay }: { id: string; data: ArtistPage
             `Options for ${artist.title}`,
             [
               { label: "Add popular songs to queue", onSelect: () => player.queueAdd(data!.popular.map((t) => t.id), "end") },
+              shareItem("artist", artist.id),
               { label: pinned ? "Unpin from sidebar" : "Pin to sidebar", onSelect: togglePin },
             ],
             e.currentTarget,

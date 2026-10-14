@@ -381,6 +381,16 @@ ALTER TABLE tracks ADD COLUMN loudness_at INTEGER;
 ALTER TABLE tracks ADD COLUMN head_silence_ms INTEGER;
 ALTER TABLE tracks ADD COLUMN tail_silence_ms INTEGER;
 "#,
+    // v9: public share links found for songs and albums (share::cache). One
+    // row per lookup, keyed by the folded search fields; url NULL = no match.
+    r#"
+CREATE TABLE share_links (
+    key        TEXT PRIMARY KEY,
+    url        TEXT,
+    fetched_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+"#,
 ];
 
 #[cfg(test)]
@@ -529,6 +539,18 @@ mod tests {
         assert!(
             c.execute("INSERT INTO rating_ops (track_id, rating, created_at) VALUES ('t', 10, 2)", []).is_err(),
             "one queued rating per track"
+        );
+    }
+
+    #[test]
+    fn share_links_migration_adds_the_link_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        migrate(&mut c).unwrap();
+        c.execute("INSERT INTO share_links (key, url, fetched_at, expires_at) VALUES ('k', NULL, 1, 2)", []).unwrap();
+        assert!(
+            c.execute("INSERT INTO share_links (key, url, fetched_at, expires_at) VALUES ('k', 'u', 1, 2)", []).is_err(),
+            "one row per lookup"
         );
     }
 

@@ -12,6 +12,7 @@ pub mod playlists;
 pub mod plex;
 pub mod remote;
 pub mod settings;
+pub mod share;
 pub mod tracking;
 pub mod updates;
 
@@ -108,6 +109,10 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        // First, so a second launch (a platter:// link on Windows) hands its
+        // link to the copy already running and quits before doing anything.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| share::commands::focus_main(app)))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -138,6 +143,7 @@ pub fn run() {
             // Artist info sources share one HTTP client with the art cache,
             // which also serves their images.
             let info_http: Arc<dyn artistinfo::http::InfoHttp> = Arc::new(artistinfo::http::ReqwestHttp::new()?);
+            let share_http = info_http.clone();
             let art = ArtCache::open(
                 cache_dir.join("art"),
                 initial.art_cache_bytes(),
@@ -247,6 +253,17 @@ pub fn run() {
             }
             app.manage(remote);
 
+            // Share links, and platter:// links opened from elsewhere.
+            let share = share::ShareService::new(
+                db.clone(),
+                share_http,
+                Arc::new(share::commands::PlexServerId(plex.clone())),
+                live.share_public_links.clone(),
+            );
+            share.set_events(Arc::new(app.handle().clone()));
+            share::commands::install(app.handle(), &share);
+            app.manage(share);
+
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
             monitor::files::spawn(plex.clone(), db.clone(), player.clone());
@@ -355,6 +372,9 @@ pub fn run() {
             monitor::cached::cached_tracks,
             updates::update_check,
             updates::update_install_on_restart,
+            share::commands::share_info,
+            share::commands::share_public_link,
+            share::commands::deep_link_take,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event

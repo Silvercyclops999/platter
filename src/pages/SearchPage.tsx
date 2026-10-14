@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 import { Art } from "../components/Art";
 import { CardSkeleton } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
+import { shareItem } from "../components/ShareMenu";
 import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
 import { TrackList, TrackRow, TrackRowSkeleton, trackMenuItems } from "../components/TrackRow";
@@ -42,9 +43,11 @@ function menuFor(h: SearchHit, playing: boolean, toggle: () => void): MenuItem[]
       play,
       { label: "Add to queue", onSelect: () => void player.queueAlbum(a.id) },
       { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: a.artistId }) },
+      shareItem("album", a.id),
     ];
   }
-  if (h.kind === "playlist") return [play, { label: "Add to queue", onSelect: () => void player.queuePlaylist(i.id) }];
+  if (h.kind === "playlist") return [play, { label: "Add to queue", onSelect: () => void player.queuePlaylist(i.id) }, shareItem("playlist", i.id)];
+  if (h.kind === "artist") return [play, shareItem("artist", i.id)];
   return [play];
 }
 

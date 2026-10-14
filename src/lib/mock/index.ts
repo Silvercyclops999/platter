@@ -14,6 +14,8 @@
  *                   instead of generated SVGs, for memory checks that serve
  *                   real JPEGs at the requested size (scripts/measure-memory.mjs)
  *   ?update=1       "Check for updates" finds a new version (ready to install)
+ *   ?link=<url>     open a platter:// link a moment after start, as if the
+ *                   OS had handed it over (url-encoded)
  *   ?health=offline start in a given app state (see HEALTH_DEMOS in ./health:
  *                   offline, noInternet, starting, updating, startTimeout,
  *                   relay, remote, signIn, accessRemoved, filesUnavailable,
@@ -49,6 +51,7 @@ import type {
   SearchResults,
   ServerInfo,
   Settings,
+  ShareKind,
   SyncStatus,
   Track,
 } from "../types";
@@ -66,6 +69,7 @@ import { MockHome, type ContextPlay } from "./home";
 import { MockLikes } from "./likes";
 import { MockPlaylists } from "./playlists";
 import { MockRemote } from "./remote";
+import { MockShare } from "./share";
 
 export interface MockOptions {
   latencyMs: number;
@@ -80,6 +84,8 @@ export interface MockOptions {
   autoApproveMs: number | null;
   /** "Check for updates" finds a new version. */
   updateAvailable?: boolean;
+  /** A platter:// link to open after start. */
+  link?: string;
 }
 
 const isTestEnv = (() => {
@@ -112,6 +118,7 @@ export function optionsFromUrl(search: string): MockOptions {
     health: isHealthDemo(p.get("health")) ? (p.get("health") as HealthDemo) : undefined,
     autoApproveMs: isTestEnv ? null : 6000,
     updateAvailable: p.get("update") === "1",
+    link: p.get("link") ?? undefined,
   };
 }
 
@@ -142,6 +149,8 @@ export class MockBackend implements Backend {
   readonly likes: MockLikes;
   /** Listen on (test hooks: stopElsewhere, loseRemote, setPlayers). */
   readonly remote: MockRemote;
+  /** Sharing (test hooks: openLink, failNext). */
+  readonly share: MockShare;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -207,6 +216,14 @@ export class MockBackend implements Backend {
       (message) => this.emit("toast", { kind: "error", message }),
     );
     this.contextPlays = this.seedContextPlays();
+    this.share = new MockShare(
+      this.fx,
+      () => this.settings,
+      (id) => this.fx.playlists.some((p) => p.id === id),
+      () => this.emit("deeplink://open", null),
+    );
+    const link = this.opts.link;
+    if (link) this.later(1500, () => this.share.openLink(link));
     this.remote = new MockRemote(
       {
         local: () => this.snapshot(),
@@ -1452,6 +1469,18 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       if (typeof window !== "undefined" && !isTestEnv) window.open(url, "_blank", "noopener");
     });
+  }
+
+  // ---------------------------------------------------------------- sharing
+
+  shareInfo(kind: ShareKind, id: string, atSeconds?: number) {
+    return this.delay(() => this.share.info(kind, id, atSeconds));
+  }
+  sharePublicLink(kind: ShareKind, id: string) {
+    return this.delay(() => this.share.publicLink(kind, id));
+  }
+  deepLinkTake() {
+    return this.delay(() => this.share.take());
   }
 }
 

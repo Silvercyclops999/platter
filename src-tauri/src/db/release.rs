@@ -50,6 +50,15 @@ pub fn release_section<S: AsRef<str>>(format: Option<&str>, subformats: &[S]) ->
     }
 }
 
+/// Whether an album counts as unreleased, so it never gets a public link.
+///
+/// The one place that decides it: today a demo release type (format or any
+/// subformat). Archive tags will join here once tags are read.
+pub fn is_unreleased<S: AsRef<str>>(format: Option<&str>, subformats: &[S]) -> bool {
+    let demo = |s: &str| s.to_ascii_lowercase().contains("demo");
+    format.is_some_and(demo) || subformats.iter().any(|s| demo(s.as_ref()))
+}
+
 /// Stable string stored in SQLite.
 pub fn section_key(s: ReleaseSection) -> &'static str {
     match s {
@@ -96,6 +105,16 @@ mod tests {
         assert_eq!(release_section(Some("Album"), &["Mixtape/Street"]), ReleaseSection::Mixtapes);
         assert_eq!(release_section(Some("EP"), &["Live"]), ReleaseSection::Live);
         assert_eq!(release_section(None, &["Live", "Demo"]), ReleaseSection::Demos);
+    }
+
+    #[test]
+    fn demos_are_unreleased() {
+        let none: [&str; 0] = [];
+        assert!(!is_unreleased(None, &none));
+        assert!(!is_unreleased(Some("album"), &["live", "compilation"]));
+        assert!(is_unreleased(Some("album"), &["demo"]));
+        assert!(is_unreleased(None, &["Live", "Demo"]));
+        assert!(is_unreleased(Some("Demo"), &none));
     }
 
     #[test]

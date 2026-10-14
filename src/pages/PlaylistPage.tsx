@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEven
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
+import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem, playlistEditItems } from "../components/PlaylistPicker";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton, likeItem, trackMenuItems } from "../components/TrackRow";
@@ -243,6 +244,7 @@ export function PlaylistPage({ id }: { id: string }) {
       [
         { label: "Add to queue", disabled: empty, onSelect: () => player.queueAdd(shown!.tracks.map((t) => t.id), "end") },
         ...playlistEditItems(pl),
+        shareItem("playlist", pl.id),
         {
           label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
           onSelect: () =>

@@ -6,6 +6,7 @@ import { AppShell } from "./shell/AppShell";
 import { connectApp, useApp } from "./stores/app";
 import { connectLikes } from "./stores/likes";
 import { connectPlayer } from "./stores/player";
+import { connectShare } from "./stores/share";
 import { useSettings } from "./stores/settings";
 import { useUi } from "./stores/ui";
 
@@ -18,6 +19,7 @@ export default function App() {
   useEffect(() => connectApp(), []);
   useEffect(() => connectPlayer(), []);
   useEffect(() => connectLikes(), []);
+  useEffect(() => connectShare(), []);
   const auth = useApp((s) => s.auth);
   const signInOpen = useUi((s) => s.signInOpen);
   useEffect(() => {

@@ -1,0 +1,9 @@
+/* Share submenu (ShareMenu.tsx). Items reuse the context menu's rows. */
+.share-menu { display: flex; flex-direction: column; min-width: 200px; }
+.share-menu__item[aria-disabled="true"] { cursor: default; }
+.share-menu__item[aria-disabled="true"]:hover { background: transparent; }
+.share-menu__note {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}

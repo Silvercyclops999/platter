@@ -55,6 +55,9 @@ import type {
   SearchResults,
   ServerInfo,
   Settings,
+  DeepLinkOpen,
+  ShareInfo,
+  ShareKind,
   SyncStatus,
   UpdateInfo,
 } from "./types";
@@ -209,6 +212,14 @@ export interface Backend {
   /** Open a source or licence link in the default browser. */
   openInfoLink(url: string): Promise<void>;
 
+  // Sharing (docs/IPC.md "Sharing")
+  /** The Platter link (with a start time for songs) and whether a public link can be had. */
+  shareInfo(kind: ShareKind, id: string, atSeconds?: number): Promise<ShareInfo>;
+  /** Find the public link for a released song or album (notFound when there's no sure match). */
+  sharePublicLink(kind: ShareKind, id: string): Promise<string>;
+  /** The platter:// link opened last, once (null when none is waiting). */
+  deepLinkTake(): Promise<DeepLinkOpen | null>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -322,6 +333,9 @@ export function createTauriBackend(): Backend {
     artistInfoKeySet: (source, key) => call("artist_info_key_set", { source, key }),
     artistInfoCacheClear: () => call("artist_info_cache_clear"),
     openInfoLink: (url) => call("open_info_link", { url }),
+    shareInfo: (kind, id, atSeconds) => call("share_info", { kind, id, atSeconds }),
+    sharePublicLink: (kind, id) => call("share_public_link", { kind, id }),
+    deepLinkTake: () => call("deep_link_take"),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

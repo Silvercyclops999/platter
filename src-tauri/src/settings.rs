@@ -214,6 +214,9 @@ pub struct Settings {
     pub eq_fallback: Option<EqChoice>,
     /// The output device the EQ last followed.
     pub eq_last_output: Option<String>,
+    /// Share menus find public links for released music (iTunes Search and
+    /// song.link). Off leaves only Platter links.
+    pub share_public_links: bool,
 }
 
 impl Default for Settings {
@@ -269,6 +272,7 @@ impl Default for Settings {
             eq_outputs: Vec::new(),
             eq_fallback: None,
             eq_last_output: None,
+            share_public_links: true,
         }
     }
 }
@@ -324,6 +328,7 @@ pub struct SettingsPatch {
     pub eq_bands: Option<[f32; EQ_BANDS]>,
     /// Selects a preset or profile (and its curve).
     pub eq_preset: Option<String>,
+    pub share_public_links: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -389,6 +394,7 @@ impl Settings {
         set(&mut self.show_plex_players, p.show_plex_players);
         set(&mut self.act_as_plex_player, p.act_as_plex_player);
         set(&mut self.move_stops_old_device, p.move_stops_old_device);
+        set(&mut self.share_public_links, p.share_public_links);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -465,6 +471,8 @@ pub struct Live {
     pub artist_info: crate::artistinfo::Switches,
     /// Listen on: players in the picker, Platter as a player, stop on move.
     pub remote: crate::remote::RemoteSwitches,
+    /// Public links for released music in the Share menus.
+    pub share_public_links: Arc<AtomicBool>,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -473,6 +481,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.tracking.report_to_plex.store(s.report_to_plex, Ordering::Relaxed);
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
+    live.share_public_links.store(s.share_public_links, Ordering::Relaxed);
     db.set_popular_source(s.popular_source);
     {
         use crate::artistinfo::InfoSource as Src;
@@ -716,6 +725,7 @@ mod tests {
         assert_eq!(s.playlist_new_name, "My playlist #N");
         assert_eq!((s.liked_means, s.like_control_rows), (LikedMeans::Five, LikeControlRows::Hover));
         assert_eq!(s.liked_min_rating(), 10.0);
+        assert!(s.share_public_links);
     }
 
     #[test]
@@ -789,9 +799,11 @@ mod tests {
             eq_enabled: Some(true),
             eq_bands: Some([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, -2.0, -1.0]),
             eq_preset: None,
+            share_public_links: Some(false),
         })
         .await
         .unwrap();
+        assert!(!live.share_public_links.load(Ordering::Relaxed));
         {
             use crate::artistinfo::InfoSource as Src;
             // The artist info service sees the switches at once.
@@ -820,6 +832,7 @@ mod tests {
         assert!(!s.info_wikipedia && s.info_lastfm && s.info_fanart && s.info_audiodb);
         assert!(fresh.artist_info.get(crate::artistinfo::InfoSource::Lastfm));
         assert!(!s.show_plex_players && s.act_as_plex_player && !s.move_stops_old_device);
+        assert!(!s.share_public_links && !fresh.share_public_links.load(Ordering::Relaxed));
         assert!(!fresh.remote.show_players() && *fresh.remote.allow_casting.borrow());
         assert_eq!(s.volume, 0.25);
         assert_eq!(s.shuffle_style, ShuffleStyle::Standard);
@@ -903,6 +916,7 @@ mod tests {
         assert_eq!(v["notifyTrackChange"], false);
         assert_eq!(v["infoWikipedia"], true);
         assert_eq!(v["infoLastfm"], false);
+        assert_eq!(v["sharePublicLinks"], true);
         let p: SettingsPatch = serde_json::from_str(r#"{"shuffleStyle":"standard"}"#).unwrap();
         assert_eq!(p.shuffle_style, Some(ShuffleStyle::Standard));
         let p: SettingsPatch =
