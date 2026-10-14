@@ -49,6 +49,8 @@ export interface TrackRowProps {
   /** Extra trailing content (e.g. remove button in the queue). */
   trailing?: ReactNode;
   compact?: boolean;
+  /** Highlighted by keyboard navigation that lives elsewhere (search box arrows). */
+  selected?: boolean;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -72,6 +74,7 @@ export function TrackRow({
   menuItems,
   trailing,
   compact,
+  selected,
   draggable,
   onDragStart,
   onDragOver,
@@ -111,7 +114,7 @@ export function TrackRow({
       tabIndex={0}
       aria-label={label}
       aria-current={active ? "true" : undefined}
-      className={`track-row ${active ? "is-active" : ""} ${showAlbum ? "" : "track-row--no-album"} ${compact ? "track-row--compact" : ""}`}
+      className={`track-row ${active ? "is-active" : ""} ${showAlbum ? "" : "track-row--no-album"} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""}`}
       onDoubleClick={onPlay}
       onKeyDown={onKeyDown}
       onContextMenu={onContextMenu}

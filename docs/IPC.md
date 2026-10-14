@@ -64,6 +64,11 @@ after any sync writes, so open pages refetch.
 
 `SearchHit = { kind: "artist"|"album"|"track"|"playlist", artist?, album?, track?, playlist? }`
 
+Until the first library sync has finished, `search` asks the server instead
+(`/hubs/search`), ranks the answer with the same rules and returns
+`source: "server"`. If the server is slow or unreachable it answers from the
+cache. After the first sync, search never touches the network.
+
 ## Playback and queue
 | Command | Args |
 | --- | --- |
@@ -103,6 +108,12 @@ Event `health://changed` → `Health`. Event `toast` → `{ kind: "info"|"error"
 | --- | --- |
 | `settings_get` | – → `Settings { privateSession, reportToPlex, volume, ... }` |
 | `settings_set` | `{ patch: Partial<Settings> }` |
+
+`privateSession` (default false) stops plays being written to the local
+listen log. `reportToPlex` (default true) controls timeline and scrobble
+reports; when it's off nothing is sent or queued. `volume` is the same 0..1
+value as `set_volume`; setting it here also moves the player. Settings are
+stored in the local database and apply immediately.
 
 ## Updates
 | Command | Returns |

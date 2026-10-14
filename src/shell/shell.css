@@ -316,6 +316,28 @@
 .seek__time { min-width: 40px; font-size: var(--font-size-xs); color: var(--color-text-secondary); text-align: right; }
 .seek__time--end { text-align: left; }
 .player-bar__extras { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); min-width: 0; }
+.private-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  margin-right: var(--space-2);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  transition: background-color var(--motion-fast) var(--motion-easing);
+}
+.private-pill:hover { background: var(--color-state-selected); }
+.private-pill:focus-visible { border-radius: var(--radius-pill); }
+@media (max-width: 1180px) {
+  .private-pill { width: 28px; padding: 0; justify-content: center; margin-right: var(--space-1); }
+  .private-pill__label { display: none; }
+}
 .volume { display: flex; align-items: center; gap: var(--space-1); }
 .volume__slider { width: 96px; }
 

@@ -12,7 +12,8 @@ export type Route =
   | { name: "library"; tab: LibraryTab }
   | { name: "artist"; id: string }
   | { name: "album"; id: string }
-  | { name: "playlist"; id: string };
+  | { name: "playlist"; id: string }
+  | { name: "settings" };
 
 export interface HistoryEntry {
   key: number;

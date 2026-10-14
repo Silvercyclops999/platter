@@ -1,4 +1,5 @@
 import {
+  EyeOff,
   Heart,
   ListMusic,
   MicVocal,
@@ -19,10 +20,12 @@ import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Slider } from "../components/Slider";
+import { Tooltip } from "../components/Tooltip";
 import { formatDuration, trackArtistLine } from "../lib/format";
 import { modKey } from "../lib/platform";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
+import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 
 function SeekBar() {
@@ -87,6 +90,20 @@ function Volume() {
         }}
       />
     </div>
+  );
+}
+
+/** Shown while a private session is on; opens Settings. */
+function PrivateSession() {
+  const on = useSettings((s) => s.settings?.privateSession ?? false);
+  if (!on) return null;
+  return (
+    <Tooltip label="Plays aren't saved to your history. Click to change." describe>
+      <button type="button" className="private-pill" aria-label="Private session is on" onClick={() => nav.go({ name: "settings" })}>
+        <EyeOff size={14} aria-hidden="true" />
+        <span className="private-pill__label">Private session</span>
+      </button>
+    </Tooltip>
   );
 }
 
@@ -167,6 +184,7 @@ export function PlayerBar() {
       </div>
 
       <div className="player-bar__extras">
+        <PrivateSession />
         <IconButton label="Lyrics" tooltip="Lyrics arrive in Phase 3" softDisabled icon={<MicVocal size={18} />} />
         <IconButton label="Queue" pressed={queueOpen} icon={<ListMusic size={18} />} onClick={toggleQueue} />
         <IconButton label="Connect to a device" tooltip="Devices arrive in Phase 3" softDisabled icon={<MonitorSpeaker size={18} />} />

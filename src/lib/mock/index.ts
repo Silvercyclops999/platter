@@ -765,6 +765,7 @@ export class MockBackend implements Backend {
   settingsSet(patch: Partial<Settings>) {
     return this.delay(() => {
       this.settings = { ...this.settings, ...patch };
+      if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
     });
   }
   updateCheck() {

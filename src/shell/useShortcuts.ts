@@ -11,7 +11,8 @@ function isTyping(el: EventTarget | null): boolean {
 
 /**
  * Global keyboard + mouse shortcuts:
- *   Ctrl/⌘+K command palette · Ctrl/⌘+L search · Alt+←/→ back/forward ·
+ *   Ctrl/⌘+K command palette · Ctrl/⌘+L search · Ctrl/⌘+, settings ·
+ *   Alt+←/→ back/forward ·
  *   mouse back/forward buttons · Space play/pause · Ctrl/⌘+←/→ prev/next.
  */
 export function useShortcuts() {
@@ -28,6 +29,12 @@ export function useShortcuts() {
         e.preventDefault();
         ui.setPaletteOpen(false);
         ui.focusSearch();
+        return;
+      }
+      if (isMod(e) && !e.shiftKey && !e.altKey && e.key === ",") {
+        e.preventDefault();
+        ui.setPaletteOpen(false);
+        nav.go({ name: "settings" });
         return;
       }
       if (e.altKey && !isMod(e) && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {

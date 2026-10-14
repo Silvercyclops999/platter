@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
 import type { AuthStatus, Health, Playlist, SyncStatus } from "../lib/types";
+import { loadSettings } from "./settings";
 import { useToasts } from "./toasts";
 
 interface AppStore {
@@ -42,6 +43,7 @@ export function connectApp(b: Backend = backend): () => void {
   b.authStatus().then((a) => alive && s.setAuth(a)).catch(() => {});
   b.health().then((h) => alive && s.setHealth(h)).catch(() => {});
   b.syncStatus().then((x) => alive && s.setSync(x)).catch(() => {});
+  loadSettings(b);
   const loadPlaylists = () => b.playlists().then((p) => alive && useApp.getState().setPlaylists(p)).catch(() => {});
   loadPlaylists();
 

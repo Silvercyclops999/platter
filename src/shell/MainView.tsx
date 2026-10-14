@@ -1,9 +1,10 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Settings as SettingsIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Banner } from "../components/Banner";
 import { IconButton } from "../components/Button";
 import { SearchField } from "../components/SearchField";
 import { backend } from "../lib/backend";
+import { modKey } from "../lib/platform";
 import type { Health, SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { ArtistPage } from "../pages/ArtistPage";
@@ -11,6 +12,7 @@ import { HomePage } from "../pages/HomePage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { SearchPage } from "../pages/SearchPage";
+import { SettingsPage } from "../pages/SettingsPage";
 import { useApp } from "../stores/app";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry, useRouter, type Route } from "../stores/router";
 import { useUi } from "../stores/ui";
@@ -51,6 +53,8 @@ function Page({ route }: { route: Route }) {
       return <AlbumPage id={route.id} />;
     case "playlist":
       return <PlaylistPage id={route.id} />;
+    case "settings":
+      return <SettingsPage />;
   }
 }
 
@@ -58,7 +62,10 @@ function HeaderSearch({ query }: { query: string }) {
   const tick = useUi((s) => s.searchFocusTick);
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (tick > 0) ref.current?.focus();
+    if (tick > 0) {
+      ref.current?.focus();
+      ref.current?.select();
+    }
   }, [tick]);
   useEffect(() => {
     // Focus on arrival at Search.
@@ -144,6 +151,15 @@ export function MainView() {
                 {syncText}
               </span>
             )}
+            <IconButton
+              label="Settings"
+              tooltip={`Settings (${modKey}+,)`}
+              tooltipPlacement="bottom"
+              variant="filled"
+              aria-current={r.name === "settings" ? "page" : undefined}
+              icon={<SettingsIcon size={18} />}
+              onClick={() => nav.go({ name: "settings" })}
+            />
           </div>
         </div>
         <div

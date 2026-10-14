@@ -147,6 +147,18 @@
 .top-result__title .truncate { display: block; }
 .top-result__sub { font-size: var(--font-size-md); color: var(--color-text-secondary); margin-top: calc(-1 * var(--space-3)); }
 .top-result .card__play { right: var(--space-6); bottom: var(--space-6); }
+.search__section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
+.search__section-head .section-title { margin-bottom: var(--space-3); }
+/* Keyboard selection from the search box: same look as a focused row. */
+.search .track-row.is-selected,
+.search-pick.is-selected .card,
+.top-result.is-selected {
+  background: var(--color-state-selected);
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+.search-pick.is-selected .card__play,
+.top-result.is-selected .card__play { opacity: 1; transform: none; }
 .search__meta { margin: 0 var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .search .shelf { margin-left: 0; }
 .search-empty { padding: var(--space-12) var(--space-3); color: var(--color-text-secondary); text-align: center; }
@@ -171,6 +183,27 @@
 @media (max-width: 1000px) {
   .search__grid { grid-template-columns: 1fr; }
 }
+
+/* ---------------------------------------------------------------- Settings */
+.settings { max-width: 760px; }
+.settings__group { margin: 0 var(--space-3) var(--space-8); }
+.settings__heading {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid rgba(255, 240, 220, 0.08);
+}
+.setting-row:last-child { border-bottom: 0; }
+.setting-row__text { flex: 1; min-width: 0; }
+.setting-row__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.setting-row__desc { margin-top: var(--space-1); font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: 1.45; }
+.settings__hint { margin: 0 var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 
 /* ---------------------------------------------------------------- Welcome / sign-in */
 .welcome {

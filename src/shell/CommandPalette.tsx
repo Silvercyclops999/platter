@@ -1,4 +1,4 @@
-import { CornerDownLeft, Disc3, House, LibraryBig, ListMusic, Music, Search, User } from "lucide-react";
+import { CornerDownLeft, Disc3, House, LibraryBig, ListMusic, Music, Search, Settings, User } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
@@ -25,6 +25,7 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "go-albums", label: "Library: Albums", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "albums" }) },
   { id: "go-artists", label: "Library: Artists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "artists" }) },
   { id: "go-playlists", label: "Library: Playlists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "playlists" }) },
+  { id: "go-settings", label: "Open settings", hint: `${modKey}+,`, icon: <Settings size={16} />, group: "Navigation", run: () => nav.go({ name: "settings" }) },
   { id: "go-back", label: "Go back", hint: "Alt+←", icon: <CornerDownLeft size={16} />, group: "Navigation", run: () => nav.back() },
   { id: "toggle-queue", label: "Toggle queue", icon: <ListMusic size={16} />, group: "Playback", run: () => useUi.getState().toggleQueue() },
   { id: "play-pause", label: "Play / pause", hint: "Space", icon: <Music size={16} />, group: "Playback", run: () => player.toggle() },
