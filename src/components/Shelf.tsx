@@ -11,6 +11,8 @@ export interface ShelfProps {
   children?: ReactNode;
   loading?: boolean;
   skeletonKind?: "album" | "artist" | "playlist";
+  /** Shown between the heading and the row (filter chips). */
+  filters?: ReactNode;
 }
 
 /**
@@ -20,7 +22,7 @@ export interface ShelfProps {
  * cards far out of view keep their box and skeleton but hold no decoded
  * image. Art is requested at the cards' real rendered width.
  */
-export function Shelf({ title, onShowAll, children, loading, skeletonKind = "album" }: ShelfProps) {
+export function Shelf({ title, onShowAll, children, loading, skeletonKind = "album", filters }: ShelfProps) {
   const id = useId();
   const row = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
@@ -88,6 +90,7 @@ export function Shelf({ title, onShowAll, children, loading, skeletonKind = "alb
           )}
         </div>
       </header>
+      {filters}
       <FluidArtSize.Provider value={artWidth}>
         <div className="shelf__row" ref={row} onScroll={measure} role="list">
           {loading

@@ -15,11 +15,12 @@ export function useContextState(kind: PlayContextKind, id: string): { isContext:
   return { isContext, playing };
 }
 
-export function AlbumCard({ album, subtitle = "artist" }: { album: Album; subtitle?: "artist" | "year" }) {
+export function AlbumCard({ album, subtitle = "artist", note }: { album: Album; subtitle?: "artist" | "year"; note?: string }) {
   const pinned = usePins((s) => s.isPinned("album", album.id));
   const { isContext, playing } = useContextState("album", album.id);
-  const sub =
-    subtitle === "year"
+  const sub = note
+    ? `${note} · ${releaseTypeLabel(album)}`
+    : subtitle === "year"
       ? `${album.year ?? "Unreleased"} · ${releaseTypeLabel(album)}`
       : `${album.year ? album.year + " · " : ""}${album.artistTitle}`;
   const onContextMenu = (e: MouseEvent<HTMLElement>) => {
