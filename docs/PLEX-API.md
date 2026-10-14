@@ -451,3 +451,13 @@ anything that plays on a real device needs an OK first). Check once:
 - After a burst of a few dozen lyrics requests the server started answering
   404 for every lyrics stream (ones that had returned 200 minutes before).
   The app treats a failed lyrics stream as "no lyrics" without caching it.
+### 2026-10-14: file header reads for tags
+
+`cargo test live_tags -- --ignored --nocapture` read 9 parts (3 FLAC, 3 MP3,
+3 MP4) one at a time with nothing playing. Every part answered
+`Range: bytes=0-65535` with `206` and a `Content-Range` total. FLAC and MP3
+needed only that read; all three MP4s needed one more (the `moov` atom, or its
+`udta`, sits past the first 64 KB). None of the sampled files carried
+`ARCHIVE_*` tags or an explicit flag yet, so the scan finds nothing to show
+until the library is tagged. Not checked yet: that the part key's middle number
+changes when a file is retagged (the tag cache relies on it to read again).

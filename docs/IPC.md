@@ -320,6 +320,53 @@ until the next start or a new client ID. The client ID lives in the keychain;
 saving one checks it with one request that uploads nothing, and `rejected`
 is set when Imgur refuses it then or on an upload.
 
+## File tags
+| Command | Args | Returns |
+| --- | --- | --- |
+| `tags_index` | – | `TagIndex { tracks, albums, groups }` |
+| `tag_scan_status` | – | `TagScanStatus { enabled, running, done, total, failed, paused }` |
+
+Events: `tags://progress` → `TagScanStatus` as the scan moves (at most a few
+times a second), and `tags://changed` (no payload) after each batch of files,
+when badges, editions and filters should be read again.
+
+Plex doesn't expose `ARCHIVE_*` tags or the explicit flag (docs/TAGGING.md),
+so the core reads them from each file's header through the track's part URL
+(`/library/parts/{id}/{stamp}/file.ext`, token in a header). The first read
+is `Range: bytes=0-65535`. When the tags lie further in (a big cover picture
+before them, or an MP4 whose `moov` atom follows the audio) the parser names
+the next bytes it needs and one more 64 KB read (or the block's own size, up
+to 1 MB) follows, at most six per file. Formats: FLAC Vorbis comments (with or
+without an ID3 tag in front), ID3v2.2 to 2.4 `TXXX`, MP4 `rtng` and `----`
+items, Ogg Vorbis, Opus and FLAC comments. Kept: `ARCHIVE_VERSION`, `_ERA`,
+`_QUALITY`, `_DATE`, `_EDITION`, `_GROUP`, `_SOURCE`, `_FLAGS` and explicit
+(`ITUNESADVISORY` 1 or 4, `EXPLICIT=1`, M4A `rtng` 1 or 4; 2 means clean).
+
+Reads go one at a time through the player's transfer gate at the lowest
+priority, below pre-caching, and only while playback has nothing left to
+download. Any playback transfer that wants the gate cuts the read, which is
+sent again later. A server that ignores Range gets a whole-file read only for
+files under 2 MB; bigger ones are skipped. Results are cached in SQLite by
+part key, which carries the part's update stamp, so a changed file is read
+again and its old row dropped. A file that can't be read (404, bad data) is
+marked and left until it changes. Network or server trouble, or a relay-only
+connection, pauses the scan (`paused`) and it tries again a minute later.
+
+`tracks` maps track ids to `{ explicit?, version?, quality?, edit? }` (only
+songs with something to show). `albums` maps album ids to `{ explicit?,
+version?, group?, edition? }`: explicit when any song is, the most common
+version, edition and group. `groups` maps a group key to its editions
+`{ albumId, title, label, year }[]`, two or more, the face first. The face is
+the edition labelled Standard, else a released one, else the earliest.
+
+`ARCHIVE_VERSION` joins the unreleased check for sharing and Discord: any of
+unreleased, leak, demo, snippet, session, build or alternate counts. With
+`groupEditions` on, `albums`, `artist_page`, `home` and `home_shelf` leave out
+editions behind their face, and `album_page` leaves its own editions out of
+More by. Play contexts and album pages follow `explicitContent` and
+`showFanEdits` (see Settings). A context that loses every song fails with
+`invalid`.
+
 ## Now playing
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -673,6 +720,10 @@ The rest of the fields, with their defaults:
 | `lyricsMode` | `"autoShow"\|"off"`, `"autoShow"` | Auto-show opens the lyrics view when a song with synced lyrics starts while now playing is open. Off opens it only from its button. |
 | `lyricsLrclib` | bool, false | `lyrics_get` asks LRCLIB when Plex has no lyrics (sends artist, title, album and length; the search sends artist and title). Off sends nothing. |
 | `fullWindowHideControls` | bool, true | The full-window view fades its controls after 3 s without mouse movement or a key. |
+| `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
+| `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |
+| `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |
+| `groupEditions` | bool, true | Albums sharing `ARCHIVE_GROUP` list as one album (the face) in the library, artist pages and Home's album shelves. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
