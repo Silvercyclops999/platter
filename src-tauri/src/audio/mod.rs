@@ -13,7 +13,9 @@ pub mod cache;
 pub mod commands;
 pub mod convert;
 pub mod decode;
+pub mod dsp;
 pub mod engine;
+pub mod eqprofile;
 pub mod events;
 pub mod gate;
 pub mod http;
@@ -30,6 +32,8 @@ pub use source::{PlayContext, StreamSource, TrackLookup, TrackResolver};
 
 #[cfg(test)]
 mod engine_tests;
+#[cfg(test)]
+mod dsp_tests;
 #[cfg(test)]
 mod player_tests;
 #[cfg(test)]

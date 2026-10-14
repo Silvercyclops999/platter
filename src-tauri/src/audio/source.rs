@@ -7,6 +7,7 @@ use std::fmt;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub use super::dsp::TrackAudio;
 use crate::error::AppResult;
 use crate::model::Track;
 
@@ -45,6 +46,14 @@ pub trait TrackResolver: Send + Sync {
     /// A transcoded fallback (e.g. MP3/AAC or FLAC from the universal
     /// transcoder) used when the original can't be decoded.
     async fn transcode(&self, track: &Track) -> AppResult<StreamSource>;
+    /// Loudness data (Plex gain and peak) and silence measured on an earlier
+    /// play, if known. Fetched while the stream opens; None plays the track
+    /// with only the preamp.
+    async fn audio_info(&self, _track: &Track) -> Option<TrackAudio> {
+        None
+    }
+    /// Stores a track's measured quiet lead-in and run-out for next time.
+    fn save_silence(&self, _track_id: &str, _head_ms: u64, _tail_ms: u64) {}
 }
 
 /// The kinds of context playback can start from (docs/IPC.md `play_context`).

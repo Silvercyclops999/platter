@@ -11,8 +11,10 @@
 //! The mixer pulls samples from the front segment and moves to the next one
 //! in the same output buffer, so album transitions have no gap. Each segment
 //! knows its track, so the position clock always reports the *audible*
-//! track. Phase 2 crossfade/loudness slot in as a per-segment gain/DSP stage
-//! in [`Core::render`] without changing this structure.
+//! track. Each segment carries its loudness leveling gain; near the end of
+//! a track the next one can fade in over it (the outgoing segment moves to
+//! `Mix::fading` and the next becomes the front). The mixed audio then runs
+//! through the EQ and limiter ([`super::dsp`]).
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -26,12 +28,16 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use super::cache::{DiskCache, PrecacheHost, cache_key};
 use super::convert::Converter;
 use super::decode::{DecodeError, TrackDecoder, extension_hint};
+use super::dsp::{self, Chain, Crossfade, DspSettings, SilenceMeter, TrackAudio, level_gain};
 use super::gate::{Priority, PriorityCell, TransferGate};
 use super::http::{HttpConfig, HttpSource, HttpStats};
 use super::output::{AudioOutput, OutputCallback, OutputEvent, OutputFormat, OutputState, Renderer};
 use super::source::{StreamSource, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
+
+/// How long a loader waits for a track's loudness data.
+const INFO_WAIT: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -128,6 +134,19 @@ struct Segment {
     /// Replaying the loop's saved audio. While it runs, `samples` hold the
     /// audio from `Replay::resume_frame` on.
     replay: Option<Replay>,
+    /// Loudness data and remembered silence (from the resolver).
+    audio: Option<TrackAudio>,
+    /// Quiet lead-in / run-out measured while decoding (output frames).
+    head: Option<u64>,
+    tail: Option<u64>,
+    /// Leveling gain (linear), ramping towards `lg_target`.
+    lg: f32,
+    lg_target: f32,
+    lg_step: f32,
+    /// Highest level this track reaches after its target gain.
+    peak: f32,
+    /// Whether to crossfade into the next track has been decided.
+    xf_decided: bool,
 }
 
 /// Most samples an A-B loop keeps for gapless replay (about a minute of
@@ -193,7 +212,59 @@ impl Segment {
             origin: None,
             ab: None,
             replay: None,
+            audio: None,
+            head: None,
+            tail: None,
+            lg: 1.0,
+            lg_target: 1.0,
+            lg_step: 0.0,
+            peak: dsp::UNKNOWN_PEAK,
+            xf_decided: false,
         }
+    }
+
+    /// Sets the leveling gain: at once, or ramped over `frames`.
+    fn set_gain(&mut self, g: f32, peak: f32, frames: usize) {
+        self.lg_target = g;
+        self.peak = peak;
+        if frames == 0 || self.lg == g {
+            self.lg = g;
+            self.lg_step = 0.0;
+        } else {
+            self.lg_step = (g - self.lg) / frames as f32;
+        }
+    }
+
+    /// Applies (and advances) the leveling gain on one frame.
+    #[inline]
+    fn apply_gain(&mut self, o: &mut [f32]) {
+        if self.lg != 1.0 {
+            for s in o.iter_mut() {
+                *s *= self.lg;
+            }
+        }
+        if self.lg != self.lg_target {
+            self.lg += self.lg_step;
+            let past = if self.lg_step > 0.0 {
+                self.lg >= self.lg_target
+            } else {
+                self.lg <= self.lg_target
+            };
+            if past || self.lg_step == 0.0 {
+                self.lg = self.lg_target;
+            }
+        }
+    }
+
+    /// Quiet lead-in in frames: measured, else remembered.
+    fn head_frames(&self, rate: u64) -> Option<u64> {
+        self.head
+            .or_else(|| self.audio.and_then(|a| a.head_ms).map(|ms| ms * rate / 1000))
+    }
+
+    fn tail_frames(&self, rate: u64) -> Option<u64> {
+        self.tail
+            .or_else(|| self.audio.and_then(|a| a.tail_ms).map(|ms| ms * rate / 1000))
     }
 
     /// Track frame of the next sample to play.
@@ -278,6 +349,53 @@ struct Pending {
     track: Track,
 }
 
+/// The outgoing track during a crossfade: its last `len` frames play under
+/// the start of the new front segment.
+struct Fading {
+    seg: Segment,
+    len: usize,
+    pos: usize,
+    /// The outgoing track fades over the last `a_fade` frames of the
+    /// overlap; the incoming one over its first `b_fade`.
+    a_fade: usize,
+    b_fade: usize,
+}
+
+impl Fading {
+    fn a_gain(&self) -> f32 {
+        let start = self.len - self.a_fade;
+        if self.pos < start {
+            1.0
+        } else {
+            dsp::fade_out(self.pos - start, self.a_fade)
+        }
+    }
+    fn b_gain(&self) -> f32 {
+        if self.pos < self.b_fade {
+            dsp::fade_in(self.pos, self.b_fade)
+        } else {
+            1.0
+        }
+    }
+}
+
+/// Same album, and `b` is the track right after `a` in album order.
+fn album_in_order(a: &Track, b: &Track) -> bool {
+    !a.album_id.is_empty()
+        && a.album_id == b.album_id
+        && ((b.disc_number == a.disc_number && b.track_number == a.track_number + 1)
+            || (b.disc_number == a.disc_number + 1 && b.track_number <= 1))
+}
+
+/// What fetching the next frame from the segments found.
+enum Fetch {
+    Got,
+    /// The front segment isn't decoded far enough yet.
+    Underrun,
+    /// No segments left.
+    Empty,
+}
+
 struct Mix {
     format: OutputFormat,
     output_open: bool,
@@ -292,6 +410,16 @@ struct Mix {
     underrun: bool,
     drained_sent: bool,
     handoff: Option<Handoff>,
+    /// Crossfade, leveling, EQ and limiter settings.
+    dsp: DspSettings,
+    /// EQ and limiter.
+    chain: Chain,
+    /// The outgoing track while a crossfade runs.
+    fading: Option<Fading>,
+    /// The album playing in album order, if any (leveling picks album gain).
+    album_ctx: Option<String>,
+    /// Loudest the EQ curve gets (linear), for the limiter's skip test.
+    eq_max: f32,
 }
 
 impl Mix {
@@ -318,30 +446,245 @@ impl Mix {
 
     /// Moves the next few ms of audible audio into a faded-out tail so a
     /// flush/seek doesn't click.
+    /// A running crossfade ends here too (its outgoing track is mixed into
+    /// the tail).
     fn make_tail(&mut self, cfg: &EngineConfig) {
         let n = self.declick_frames(cfg);
         if n == 0 || !self.playing || self.gain <= 0.0 {
+            self.drop_fading();
             return;
         }
         let ch = self.ch();
-        let Some(front) = self.segments.front() else { return };
-        let avail = (front.samples.len() / ch).min(n);
+        let Some(front) = self.segments.front() else {
+            self.drop_fading();
+            return;
+        };
+        let mut avail = (front.samples.len() / ch).min(n);
+        let (ga, gb, lga) = match &self.fading {
+            Some(fd) => {
+                avail = avail.min(fd.seg.samples.len() / ch);
+                (fd.a_gain(), fd.b_gain(), fd.seg.lg)
+            }
+            None => (0.0, 1.0, 0.0),
+        };
         let mut tail = VecDeque::with_capacity(avail * ch);
         for f in 0..avail {
             let g = 1.0 - (f + 1) as f32 / (avail + 1) as f32;
             for c in 0..ch {
-                tail.push_back(front.samples[f * ch + c] * g);
+                let mut v = front.samples[f * ch + c] * front.lg * gb;
+                if let Some(fd) = &self.fading {
+                    v += fd.seg.samples[f * ch + c] * lga * ga;
+                }
+                tail.push_back(v * g);
             }
         }
         self.tail = tail;
         self.fade_in = n;
+        self.drop_fading();
+    }
+
+    fn drop_fading(&mut self) {
+        if let Some(fd) = self.fading.take() {
+            fd.seg.ctl.cancel.store(true, Ordering::SeqCst);
+        }
     }
 
     fn cancel_all(&mut self) {
         for s in self.segments.drain(..) {
             s.ctl.cancel.store(true, Ordering::SeqCst);
         }
+        self.drop_fading();
         self.handoff = None;
+    }
+
+    /// Recomputes leveling gains: on every segment (a setting changed;
+    /// audible ones ramp), or only on those not audible yet (the context
+    /// changed, which applies from the next track).
+    fn update_gains(&mut self, all: bool) {
+        let ramp = self.chain.ramp_frames();
+        let dsp = self.dsp;
+        let ctx = self.album_ctx.as_deref();
+        let fading = self.fading.as_mut().map(|f| &mut f.seg);
+        for s in self.segments.iter_mut().chain(fading) {
+            if !all && s.started {
+                continue;
+            }
+            let album = ctx.is_some_and(|c| c == s.track.album_id);
+            let (g, peak) = level_gain(s.audio.as_ref(), &dsp, album);
+            s.set_gain(g, peak, if s.started { ramp } else { 0 });
+        }
+    }
+
+    /// Whether the mix can reach the limiter's ceiling (if not, its gain
+    /// work is skipped).
+    fn can_clip(&self) -> bool {
+        let level = |s: &Segment| s.peak / s.lg_target.max(1e-9) * s.lg.max(s.lg_target);
+        let mut sum: f32 = self.segments.front().map_or(0.0, level);
+        if let Some(fd) = &self.fading {
+            sum += level(&fd.seg);
+        }
+        let tail = self.tail.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        sum.max(tail) * self.eq_max > dsp::LIMIT_CEILING
+    }
+
+    /// How many frames the front and the next segment should overlap.
+    fn overlap_frames(&self, a: &Segment, b: &Segment) -> u64 {
+        let rate = self.format.sample_rate as u64;
+        // A fixed fade takes at most half of either track; a smart overlap
+        // (quiet parts only) at most the whole of either.
+        let part = |t: &Track, div: u64| if t.duration_ms > 0 { t.duration_ms * rate / (1000 * div) } else { u64::MAX };
+        let cap = |frames: u64, div: u64| frames.min(part(&a.track, div)).min(part(&b.track, div));
+        if self.dsp.album_gapless && album_in_order(&a.track, &b.track) {
+            return 0;
+        }
+        match self.dsp.crossfade {
+            Crossfade::Off => 0,
+            Crossfade::Fixed { ms } => cap(ms * rate / 1000, 2),
+            Crossfade::Smart => {
+                let tail = a.tail_frames(rate).unwrap_or(0);
+                let head = b.head_frames(rate).unwrap_or(0);
+                cap((tail + head).min(dsp::SMART_OVERLAP_CAP_MS * rate / 1000), 1)
+            }
+        }
+    }
+
+    /// Whether a crossfade into the next segment starts at this frame. It's
+    /// decided once per track, when its remaining audio first fits the
+    /// overlap: if the next track isn't decoded that far yet, the change is
+    /// gapless instead.
+    fn crossfade_due(&mut self) -> bool {
+        if self.dsp.crossfade == Crossfade::Off || self.fading.is_some() || self.segments.len() < 2 {
+            return false;
+        }
+        let ch = self.ch();
+        let (a, b) = (&self.segments[0], &self.segments[1]);
+        if !a.done || !a.started || a.xf_decided || a.replay.is_some() || a.ab.is_some() {
+            return false;
+        }
+        let rem = (a.samples.len() / ch) as u64;
+        if rem == 0 || rem > self.overlap_frames(a, b) {
+            return false;
+        }
+        let ready = (b.samples.len() / ch) as u64 >= rem && b.replay.is_none();
+        self.segments[0].xf_decided = true;
+        ready
+    }
+
+    /// Moves the front segment to `fading` and makes the next one audible.
+    fn start_crossfade(&mut self, events: &mut Vec<EngineEvent>) {
+        let ch = self.ch();
+        let rate = self.format.sample_rate as u64;
+        let Some(a) = self.segments.pop_front() else { return };
+        let len = a.samples.len() / ch;
+        let head = self.segments.front().and_then(|b| b.head_frames(rate)).unwrap_or(0);
+        let (a_fade, b_fade) = match self.dsp.crossfade {
+            Crossfade::Fixed { .. } => (len, len),
+            _ => (
+                a.tail_frames(rate).unwrap_or(0).min(len as u64) as usize,
+                head.min(len as u64) as usize,
+            ),
+        };
+        events.push(EngineEvent::Ended {
+            key: a.key,
+            tag: a.tag.clone(),
+            listened_ms: self.frames_to_ms(a.listened + len as u64),
+        });
+        if let Some(b) = self.segments.front_mut() {
+            b.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
+            if !b.started {
+                b.started = true;
+                events.push(EngineEvent::Started {
+                    key: b.key,
+                    tag: b.tag.clone(),
+                });
+            }
+        }
+        self.fading = Some(Fading {
+            seg: a,
+            len,
+            pos: 0,
+            a_fade,
+            b_fade,
+        });
+    }
+
+    /// Mixes the outgoing track's next frame under `o` (the front's frame).
+    #[inline]
+    fn mix_fading(&mut self, o: &mut [f32]) {
+        let ch = o.len();
+        let Some(fd) = self.fading.as_mut() else { return };
+        let (ga, gb) = (fd.a_gain(), fd.b_gain());
+        let lga = fd.seg.lg;
+        for s in o.iter_mut() {
+            let x = fd.seg.samples.pop_front().unwrap_or(0.0);
+            *s = *s * gb + x * lga * ga;
+        }
+        fd.pos += 1;
+        if fd.pos >= fd.len || fd.seg.samples.len() < ch {
+            self.drop_fading();
+        }
+    }
+
+    /// Takes the next frame of the front segment into `o` (leveling gain
+    /// applied), retiring finished segments on the way.
+    #[inline]
+    fn next_frame(&mut self, o: &mut [f32], events: &mut Vec<EngineEvent>) -> Fetch {
+        let ch = self.ch();
+        loop {
+            let Some(front) = self.segments.front_mut() else { return Fetch::Empty };
+            if let Some(r) = front.replay.as_mut() {
+                if r.at + ch <= r.clip.len() {
+                    o.copy_from_slice(&r.clip[r.at..r.at + ch]);
+                    r.at += ch;
+                    front.consumed += 1;
+                    front.listened += 1;
+                    front.record(o);
+                    front.apply_gain(o);
+                    return Fetch::Got;
+                }
+                front.end_replay();
+            }
+            if front.samples.len() >= ch {
+                if !front.started {
+                    front.started = true;
+                    events.push(EngineEvent::Started {
+                        key: front.key,
+                        tag: front.tag.clone(),
+                    });
+                }
+                for s in o.iter_mut() {
+                    *s = front.samples.pop_front().unwrap_or(0.0);
+                }
+                front.consumed += 1;
+                front.listened += 1;
+                front.record(o);
+                front.apply_gain(o);
+                return Fetch::Got;
+            }
+            if front.done {
+                let seg = self.segments.pop_front().expect("front exists");
+                seg.ctl.cancel.store(true, Ordering::SeqCst);
+                if !seg.started {
+                    events.push(EngineEvent::Started {
+                        key: seg.key,
+                        tag: seg.tag.clone(),
+                    });
+                }
+                // The next track is now the audible one: its stream
+                // gets top transfer priority.
+                if let Some(next) = self.segments.front() {
+                    next.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
+                }
+                let listened_ms = self.frames_to_ms(seg.listened);
+                events.push(EngineEvent::Ended {
+                    key: seg.key,
+                    tag: seg.tag,
+                    listened_ms,
+                });
+                continue;
+            }
+            return Fetch::Underrun;
+        }
     }
 
     /// Appends samples to a segment regardless of its state (the delayed
@@ -422,6 +765,33 @@ impl Mix {
         }
     }
 
+    /// A segment's loudness data arrived: set its gain (ramped if it's
+    /// already audible).
+    fn set_audio(&mut self, key: u64, info: Option<TrackAudio>) {
+        let ramp = self.chain.ramp_frames();
+        let dsp = self.dsp;
+        let ctx = self.album_ctx.clone();
+        let Some(s) = self.seg_mut(key) else { return };
+        s.audio = info;
+        let album = ctx.is_some_and(|c| c == s.track.album_id);
+        let (g, peak) = level_gain(info.as_ref(), &dsp, album);
+        s.set_gain(g, peak, if s.started { ramp } else { 0 });
+    }
+
+    /// Measured silence for a segment (output frames).
+    fn set_silence(&mut self, key: u64, generation: u64, head: Option<u64>, tail: Option<u64>) {
+        if let Some(s) = self.seg_mut(key)
+            && s.generation == generation
+        {
+            if head.is_some() {
+                s.head = head;
+            }
+            if tail.is_some() {
+                s.tail = tail;
+            }
+        }
+    }
+
     /// No next track after all: flush the parked resampler into its track.
     fn flush_handoff(&mut self) {
         if let Some(mut h) = self.handoff.take() {
@@ -443,11 +813,13 @@ pub(crate) struct Core {
 impl Renderer for Core {
     fn render(&self, out: &mut [f32]) -> usize {
         let mut events: Vec<EngineEvent> = Vec::new();
-        let mut m = self.mix.lock();
+        let mut guard = self.mix.lock();
+        let m = &mut *guard;
         let ch = m.ch();
         let frames = out.len() / ch;
         let ramp_step = 1.0 / m.ms_to_frames(self.cfg.ramp_ms).max(1) as f32;
         let fade_len = m.declick_frames(&self.cfg).max(1);
+        let quiet = !m.can_clip();
         let mut filled = 0;
         let mut consumed_any = false;
         let mut underrun = false;
@@ -456,106 +828,75 @@ impl Renderer for Core {
             let o = &mut out[f * ch..(f + 1) * ch];
             // Volume smoothing (~20 ms) avoids zipper noise.
             m.volume += (m.volume_target - m.volume) * 0.002;
-            if !m.tail.is_empty() {
-                let v = m.volume * m.gain;
+            let from_tail = !m.tail.is_empty();
+            let mut flush = false;
+            if from_tail {
                 for s in o.iter_mut() {
-                    *s = m.tail.pop_front().unwrap_or(0.0) * v;
+                    *s = m.tail.pop_front().unwrap_or(0.0);
                 }
-                filled += 1;
-                f += 1;
-                continue;
-            }
-            if !m.playing && m.gain <= 0.0 {
-                break;
-            }
-            // A-B loop: at B, go back to A.
-            if let Some(w) = m.segments.front().and_then(Segment::wrap_due) {
-                m.wrap_front(w, &self.cfg);
-                consumed_any = true;
-                if !m.tail.is_empty() {
-                    continue;
-                }
-            }
-            // Find audio in the front segment, retiring finished ones.
-            let mut got = false;
-            while let Some(front) = m.segments.front_mut() {
-                if let Some(r) = front.replay.as_mut() {
-                    if r.at + ch <= r.clip.len() {
-                        o.copy_from_slice(&r.clip[r.at..r.at + ch]);
-                        r.at += ch;
-                        front.consumed += 1;
-                        front.listened += 1;
-                        front.record(o);
-                        got = true;
-                        break;
-                    }
-                    front.end_replay();
-                }
-                if front.samples.len() >= ch {
-                    if !front.started {
-                        front.started = true;
-                        events.push(EngineEvent::Started {
-                            key: front.key,
-                            tag: front.tag.clone(),
-                        });
-                    }
-                    for s in o.iter_mut() {
-                        *s = front.samples.pop_front().unwrap_or(0.0);
-                    }
-                    front.consumed += 1;
-                    front.listened += 1;
-                    front.record(o);
-                    got = true;
+            } else {
+                if !m.playing && m.gain <= 0.0 {
                     break;
                 }
-                if front.done {
-                    let seg = m.segments.pop_front().expect("front exists");
-                    seg.ctl.cancel.store(true, Ordering::SeqCst);
-                    if !seg.started {
-                        events.push(EngineEvent::Started {
-                            key: seg.key,
-                            tag: seg.tag.clone(),
-                        });
-                    }
-                    // The next track is now the audible one: its stream
-                    // gets top transfer priority.
-                    if let Some(next) = m.segments.front() {
-                        next.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
-                    }
-                    let listened_ms = m.frames_to_ms(seg.listened);
-                    events.push(EngineEvent::Ended {
-                        key: seg.key,
-                        tag: seg.tag,
-                        listened_ms,
-                    });
+                // A-B loop: at B, go back to A.
+                if let Some(w) = m.segments.front().and_then(Segment::wrap_due) {
+                    m.wrap_front(w, &self.cfg);
                     consumed_any = true;
-                    continue;
+                    if !m.tail.is_empty() {
+                        continue;
+                    }
                 }
-                // Front isn't decoded far enough yet.
-                underrun = true;
-                break;
-            }
-            if !got {
-                if m.segments.is_empty() && m.next.is_none() && !m.drained_sent {
-                    m.drained_sent = true;
-                    events.push(EngineEvent::Drained);
+                if m.crossfade_due() {
+                    m.start_crossfade(&mut events);
                 }
-                break;
+                consumed_any = true;
+                match m.next_frame(o, &mut events) {
+                    Fetch::Got => {}
+                    Fetch::Underrun => {
+                        underrun = true;
+                        break;
+                    }
+                    Fetch::Empty if m.fading.is_some() => o.fill(0.0),
+                    Fetch::Empty if m.chain.pending() => flush = true,
+                    Fetch::Empty => {
+                        if m.next.is_none() && !m.drained_sent {
+                            m.drained_sent = true;
+                            events.push(EngineEvent::Drained);
+                        }
+                        break;
+                    }
+                }
+                if !flush {
+                    m.mix_fading(o);
+                    // Post-seek fade-in.
+                    if m.fade_in > 0 {
+                        let g = 1.0 - m.fade_in as f32 / (fade_len + 1) as f32;
+                        for s in o.iter_mut() {
+                            *s *= g;
+                        }
+                        m.fade_in -= 1;
+                    }
+                }
             }
-            consumed_any = true;
-            // Gain: pause ramp, post-seek fade-in, volume.
-            if m.playing {
-                m.gain = (m.gain + ramp_step).min(1.0);
+            if flush {
+                m.chain.flush(o);
             } else {
-                m.gain = (m.gain - ramp_step).max(0.0);
+                m.chain.process(o, quiet);
             }
-            let mut g = m.gain * m.volume;
-            if m.fade_in > 0 {
-                g *= 1.0 - m.fade_in as f32 / (fade_len + 1) as f32;
-                m.fade_in -= 1;
+            // Pause ramp and volume, after the chain so audio held in the
+            // limiter's delay ramps with everything else.
+            if !from_tail {
+                if m.playing {
+                    m.gain = (m.gain + ramp_step).min(1.0);
+                } else {
+                    m.gain = (m.gain - ramp_step).max(0.0);
+                }
             }
-            for s in o.iter_mut() {
-                *s *= g;
+            let g = m.gain * m.volume;
+            if g != 1.0 {
+                for s in o.iter_mut() {
+                    *s *= g;
+                }
             }
             filled += 1;
             f += 1;
@@ -567,7 +908,7 @@ impl Renderer for Core {
             m.underrun = underrun;
             events.push(EngineEvent::Buffering(underrun));
         }
-        drop(m);
+        drop(guard);
         if consumed_any {
             self.cv.notify_all();
         }
@@ -658,6 +999,11 @@ impl Engine {
                 underrun: false,
                 drained_sent: true,
                 handoff: None,
+                dsp: DspSettings::default(),
+                chain: Chain::new(48_000, 2),
+                fading: None,
+                album_ctx: None,
+                eq_max: 1.0,
             }),
             cv: Condvar::new(),
             events: tx,
@@ -724,8 +1070,56 @@ impl Engine {
         m.output_open = true;
         if changed {
             m.rescale_loops();
+            m.chain.configure(fmt.sample_rate, fmt.channels as usize);
+            if let Some(bands) = m.dsp.eq {
+                m.eq_max = dsp::eq_max_gain(&bands, fmt.sample_rate);
+            }
         }
         Ok(changed)
+    }
+
+    /// Applies crossfade, leveling, EQ and limiter settings. Gain and EQ
+    /// changes ramp; the limiter switches with a short dip.
+    pub fn set_dsp(&self, s: DspSettings) {
+        let mut m = self.core().mix.lock();
+        let old = m.dsp;
+        m.dsp = s;
+        if old.leveling != s.leveling || old.preamp_db != s.preamp_db {
+            m.update_gains(true);
+        }
+        if old.eq != s.eq {
+            let target = s.eq.unwrap_or([0.0; dsp::EQ_BANDS]);
+            let live = m.output_open && m.playing;
+            let ramp = if live { m.chain.ramp_frames() } else { 0 };
+            let rate = m.format.sample_rate;
+            let cur = m.chain.eq.current();
+            m.eq_max = dsp::eq_max_gain(&target, rate).max(dsp::eq_max_gain(&cur, rate));
+            m.chain.eq.set_target(target, ramp);
+        }
+        if old.limiter != s.limiter {
+            let live = m.output_open && m.playing && !m.segments.is_empty();
+            m.chain.set_limiter(s.limiter, live);
+        }
+    }
+
+    pub fn dsp(&self) -> DspSettings {
+        self.core().mix.lock().dsp
+    }
+
+    /// The album playing in album order (None: anything else). Leveling's
+    /// Smart mode uses album gain for its tracks, from the next track on.
+    pub fn set_album_context(&self, album_id: Option<String>) {
+        let mut m = self.core().mix.lock();
+        if m.album_ctx != album_id {
+            m.album_ctx = album_id;
+            m.update_gains(false);
+        }
+    }
+
+    /// Leveling gain of the audible track (linear target), for tests.
+    #[cfg(test)]
+    pub(crate) fn front_gain(&self) -> Option<f32> {
+        self.core().mix.lock().segments.front().map(|s| s.lg_target)
     }
 
     /// Releases the device (after it was lost, or on shutdown).
@@ -1128,7 +1522,9 @@ fn push_samples(core: &Core, key: u64, generation: u64, ctl: &LoaderCtl, data: &
         if ctl.cancel.load(Ordering::SeqCst) {
             return Push::Cancelled;
         }
-        let cap = m.ms_to_frames(core.cfg.buffer_ahead_ms) as usize;
+        // Crossfades need the next track's head decoded while the overlap
+        // of the current one is still buffered.
+        let cap = m.ms_to_frames(core.cfg.buffer_ahead_ms + 2 * m.dsp.max_overlap_ms()) as usize;
         let buffered = m.buffered_frames();
         let Some(seg) = m.seg_mut(key) else { return Push::Cancelled };
         if seg.generation != generation {
@@ -1176,6 +1572,12 @@ fn fail(env: &Env, key: u64, track: &Track, error: AppError) {
 
 fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<LoaderCtl>) {
     let core = env.core.clone();
+    // Loudness data comes while the stream opens.
+    let info_task = {
+        let resolver = env.resolver.clone();
+        let t = track.clone();
+        env.rt.spawn(async move { resolver.audio_info(&t).await })
+    };
     // 1. Open: cache → original stream → transcoder.
     let mut transcoded = false;
     let mut opened = match open_track(&env, &track, false, &ctl.prio) {
@@ -1193,12 +1595,21 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
     if ctl.cancel.load(Ordering::SeqCst) {
         return;
     }
+    // Its gain must be known before the track is heard; without an answer
+    // in time it plays with the preamp only.
+    let info = env
+        .rt
+        .block_on(async { tokio::time::timeout(INFO_WAIT, info_task).await })
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten();
     let mut generation = 0u64;
     let mut seek_to = (start_ms > 0).then_some(start_ms);
     let mut out_fmt;
     {
         let mut m = core.mix.lock();
         out_fmt = m.format;
+        m.set_audio(key, info);
         if let Some(seg) = m.seg_mut(key) {
             seg.stats = opened.stats.clone();
             seg.origin = Some(opened.origin);
@@ -1251,6 +1662,9 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
     let mut out: Vec<f32> = Vec::with_capacity(16 * 1024);
     let mut pushed_any = false;
     let mut cached = false;
+    // Quiet lead-in / run-out, for smart crossfades.
+    let mut meter = SilenceMeter::new(out_fmt.sample_rate, out_fmt.channels as usize, 0);
+    let mut head_known = false;
 
     'decode: loop {
         if ctl.cancel.load(Ordering::SeqCst) {
@@ -1262,6 +1676,9 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             if fmt != out_fmt {
                 out_fmt = fmt;
             }
+            let base = ms * out_fmt.sample_rate as u64 / 1000;
+            meter = SilenceMeter::new(out_fmt.sample_rate, out_fmt.channels as usize, base);
+            head_known = false;
             conv = Converter::new(
                 opened.dec.rate,
                 opened.dec.channels,
@@ -1306,7 +1723,16 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     continue;
                 }
                 match push_samples(&core, key, generation, &ctl, slice) {
-                    Push::Ok => pushed_any = true,
+                    Push::Ok => {
+                        pushed_any = true;
+                        meter.push(slice);
+                        if !head_known
+                            && let Some(h) = meter.head(dsp::SMART_OVERLAP_CAP_MS * out_fmt.sample_rate as u64 / 1000)
+                        {
+                            head_known = true;
+                            core.mix.lock().set_silence(key, generation, Some(h), None);
+                        }
+                    }
                     Push::Cancelled => return,
                     Push::Stale => {
                         if let Some((g, ms)) = ctl.seek.lock().take() {
@@ -1353,8 +1779,17 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                             }
                             continue 'decode;
                         }
-                        Push::Ok => {}
+                        Push::Ok => meter.push(&out),
                     }
+                }
+                meter.finish();
+                let (head, tail) = (meter.head(0), meter.tail());
+                core.mix.lock().set_silence(key, generation, head, tail);
+                if meter.whole()
+                    && let (Some(h), Some(t)) = (head, tail)
+                {
+                    let rate = out_fmt.sample_rate.max(1) as u64;
+                    env.resolver.save_silence(&track.id, h * 1000 / rate, t * 1000 / rate);
                 }
                 mark_done(&env, key, generation);
                 // Save a fully streamed file to the disk cache.
