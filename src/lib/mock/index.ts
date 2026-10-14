@@ -8,6 +8,9 @@
  *   ?latency=ms     delay every command (default 120; 0 in tests)
  *   ?signedOut=1    start on the sign-in screen
  *   ?albums=5000    pad the album list to N items (virtual grid perf check)
+ *   ?httpArt=1      art URLs in the Windows app's form (http://art.localhost/…?w=&h=)
+ *                   instead of generated SVGs, for memory checks that serve
+ *                   real JPEGs at the requested size (scripts/measure-memory.mjs)
  *   ?health=offline start in a given app state (see HEALTH_DEMOS in ./health:
  *                   offline, noInternet, starting, updating, startTimeout,
  *                   relay, remote, signIn, accessRemoved, filesUnavailable,
@@ -44,6 +47,8 @@ export interface MockOptions {
   latencyMs: number;
   signedOut: boolean;
   albumCount?: number;
+  /** Art URLs in the app's http://art.localhost form (see the header). */
+  httpArt?: boolean;
   /** Run startup timelines (health "starting" → "local", incremental sync). */
   timelines: boolean;
   health?: HealthDemo;
@@ -65,6 +70,7 @@ export function optionsFromUrl(search: string): MockOptions {
     latencyMs: p.has("latency") ? Number(p.get("latency")) : isTestEnv ? 0 : 120,
     signedOut: p.get("signedOut") === "1",
     albumCount: p.has("albums") ? Number(p.get("albums")) : undefined,
+    httpArt: p.get("httpArt") === "1",
     timelines: !isTestEnv,
     health: isHealthDemo(p.get("health")) ? (p.get("health") as HealthDemo) : undefined,
     autoApproveMs: isTestEnv ? null : 6000,
@@ -172,7 +178,8 @@ export class MockBackend implements Backend {
     return Promise.resolve(() => set!.delete(fn));
   }
 
-  artUrl(path: string): string {
+  artUrl(path: string, w: number, h: number): string {
+    if (this.opts.httpArt) return `http://art.localhost/${encodeURIComponent(path)}?w=${Math.round(w)}&h=${Math.round(h)}`;
     return mockArtUrl(path);
   }
 
