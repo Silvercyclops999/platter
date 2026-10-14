@@ -2,6 +2,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import process from "node:process";
+import path from "node:path";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -19,7 +20,11 @@ export default defineConfig(() => ({
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     // 3. tell Vite to ignore watching `src-tauri`
-    watch: { ignored: ["**/src-tauri/**", "**/.claude/**", "**/dev/**"] },
+    // Only this checkout's own .claude and dev folders: a worktree lives under
+    // .claude itself, so a "**/.claude/**" glob would stop it watching anything.
+    watch: {
+      ignored: ["**/src-tauri/**", path.resolve(__dirname, ".claude") + "/**", path.resolve(__dirname, "dev") + "/**"],
+    },
   },
 
   test: {
