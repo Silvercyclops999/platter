@@ -153,6 +153,11 @@ describe("settings page", () => {
     expect(set).toHaveBeenCalledWith({ reportToPlex: false });
     await user.click(screen.getByRole("switch", { name: "Show format badge" }));
     expect(set).toHaveBeenCalledWith({ showFormatBadge: false });
+    const avatar = screen.getByRole("switch", { name: "Show my Plex profile picture" });
+    expect(avatar).toHaveAttribute("aria-checked", "true");
+    expect(avatar).toHaveAccessibleDescription(/This device only/);
+    await user.click(avatar);
+    expect(set).toHaveBeenCalledWith({ showPlexAvatar: false });
     await user.click(screen.getByRole("switch", { name: "Albums and playlists resume where you left off" }));
     expect(set).toHaveBeenCalledWith({ resumeContexts: false });
     await user.click(screen.getByRole("switch", { name: "Artwork colours" }));
@@ -165,6 +170,7 @@ describe("settings page", () => {
       privateSession: true,
       reportToPlex: false,
       showFormatBadge: false,
+      showPlexAvatar: false,
       resumeContexts: false,
       artworkColours: false,
     });

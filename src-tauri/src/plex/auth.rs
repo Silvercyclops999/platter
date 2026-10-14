@@ -49,9 +49,35 @@ pub struct PlexUser {
     pub username: String,
     #[serde(default)]
     pub title: String,
+    /// Profile picture on plex.tv (`/users/<id>/avatar?c=<n>`, which
+    /// redirects to an image on assets.plex.tv). Public; needs no token.
+    #[serde(default, deserialize_with = "lenient::string")]
+    pub thumb: String,
 }
 
 impl PlexUser {
+    /// The profile picture as an art path for the art cache, or None when
+    /// it's missing or not on a plex.tv host. Any token in the URL is
+    /// dropped so the webview never sees one.
+    pub fn avatar_art_path(&self) -> Option<String> {
+        let mut u = Url::parse(self.thumb.trim()).ok()?;
+        let kept: Vec<(String, String)> = u
+            .query_pairs()
+            .filter(|(k, _)| !k.eq_ignore_ascii_case("x-plex-token"))
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        if kept.is_empty() {
+            u.set_query(None);
+        } else {
+            u.query_pairs_mut().clear().extend_pairs(kept);
+        }
+        u.set_fragment(None);
+        let path = format!("{}{}", crate::artistinfo::art::EXT_PREFIX, u);
+        let ok = crate::artistinfo::art::ext_url(&path)
+            .is_some_and(|e| e.host_str().is_some_and(|h| h == "plex.tv" || h.ends_with(".plex.tv")));
+        ok.then_some(path)
+    }
+
     pub fn display_name(&self) -> String {
         if !self.username.is_empty() {
             self.username.clone()
@@ -425,6 +451,58 @@ mod tests {
         let tok = Token::new("acct").unwrap();
         assert_eq!(t.user(&tok).await.unwrap().display_name(), "someone");
         assert!(t.resources(&tok).await.unwrap().is_empty());
+    }
+
+    fn user_with(thumb: &str) -> PlexUser {
+        PlexUser {
+            uuid: "u".into(),
+            username: "someone".into(),
+            title: String::new(),
+            thumb: thumb.into(),
+        }
+    }
+
+    #[test]
+    fn avatar_becomes_an_ext_art_path_without_token() {
+        assert_eq!(
+            user_with("https://plex.tv/users/abc123/avatar?c=1700000000")
+                .avatar_art_path()
+                .as_deref(),
+            Some("/ext/https://plex.tv/users/abc123/avatar?c=1700000000")
+        );
+        assert_eq!(
+            user_with("https://plex.tv/users/abc/avatar?X-Plex-Token=secret&c=5")
+                .avatar_art_path()
+                .as_deref(),
+            Some("/ext/https://plex.tv/users/abc/avatar?c=5")
+        );
+        assert_eq!(
+            user_with("https://assets.plex.tv/avatars/a.png?x-plex-token=secret")
+                .avatar_art_path()
+                .as_deref(),
+            Some("/ext/https://assets.plex.tv/avatars/a.png")
+        );
+    }
+
+    #[test]
+    fn avatar_off_plex_or_missing_is_none() {
+        for bad in [
+            "",
+            "not a url",
+            "http://plex.tv/users/a/avatar",
+            "https://evil.example/a.png",
+            "https://plex.tv.evil.example/a.png",
+        ] {
+            assert_eq!(user_with(bad).avatar_art_path(), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn user_thumb_may_be_null_or_missing() {
+        let u: PlexUser = serde_json::from_value(serde_json::json!({"username": "a", "thumb": null})).unwrap();
+        assert_eq!(u.avatar_art_path(), None);
+        let u: PlexUser = serde_json::from_value(serde_json::json!({"username": "a"})).unwrap();
+        assert_eq!(u.thumb, "");
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { backend } from "../lib/backend";
+import { artUrl, backend } from "../lib/backend";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { Sidebar } from "../shell/Sidebar";
 import { TOPBAR_COLLAPSE_WIDTH, TopBar } from "../shell/TopBar";
@@ -189,5 +189,66 @@ describe("sidebar", () => {
     expect(screen.queryByRole("button", { name: "Home" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Your Library" })).toBeInTheDocument();
+  });
+});
+
+describe("profile picture", () => {
+  const AVATAR = "/ext/https://plex.tv/users/abc/avatar?c=1";
+  const face = () => document.querySelector(".topbar__avatar-face") as HTMLElement;
+  const img = () => face().querySelector("img");
+
+  beforeEach(() => {
+    useApp.setState({ auth: { state: "signedIn", username: "listener", avatar: AVATAR, needsServerPick: false } });
+  });
+
+  it("shows the letter until the picture loads, then the picture", () => {
+    render(<TopBar />);
+    expect(face()).toHaveTextContent("L");
+    expect(face()).toHaveAttribute("data-avatar", "letter");
+    expect(img()).toHaveAttribute("src", artUrl(AVATAR, 32));
+    fireEvent.load(img()!);
+    expect(face()).toHaveAttribute("data-avatar", "image");
+    expect(img()).toHaveClass("is-loaded");
+    // The accessible name still comes from the username.
+    expect(screen.getByRole("button", { name: "App menu, signed in as listener" })).toBeInTheDocument();
+  });
+
+  it("goes through the art scheme, never straight to plex.tv", () => {
+    const spy = vi.spyOn(backend, "artUrl").mockImplementation((p, w, h) => `http://art.localhost/${encodeURIComponent(p)}?w=${w}&h=${h}`);
+    render(<TopBar />);
+    expect(spy).toHaveBeenCalledWith(AVATAR, expect.any(Number), expect.any(Number));
+    expect(img()?.getAttribute("src")).toMatch(/^http:\/\/art\.localhost\//);
+  });
+
+  it("falls back to the letter when the picture fails", () => {
+    render(<TopBar />);
+    fireEvent.error(img()!);
+    expect(img()).toBeNull();
+    expect(face()).toHaveTextContent("L");
+    expect(face()).toHaveAttribute("data-avatar", "letter");
+  });
+
+  it("shows the letter when the account has no picture", () => {
+    useApp.setState({ auth: { state: "signedIn", username: "listener", avatar: null, needsServerPick: false } });
+    render(<TopBar />);
+    expect(img()).toBeNull();
+    expect(face()).toHaveTextContent("L");
+  });
+
+  it("the setting turns it off", () => {
+    render(<TopBar />);
+    expect(img()).not.toBeNull();
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexAvatar: false } }));
+    expect(img()).toBeNull();
+    expect(face()).toHaveTextContent("L");
+  });
+
+  it("the app menu shows it next to the username", async () => {
+    const user = userEvent.setup();
+    render(<TopBar />);
+    await user.click(screen.getByRole("button", { name: /^App menu/ }));
+    const who = document.querySelector(".appmenu__who") as HTMLElement;
+    expect(who).toHaveTextContent("listener");
+    expect(who.querySelector("img")).toHaveAttribute("src", artUrl(AVATAR, 28));
   });
 });

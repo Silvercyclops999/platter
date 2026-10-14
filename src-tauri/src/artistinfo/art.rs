@@ -14,8 +14,16 @@ use crate::error::{AppError, AppResult};
 
 pub const EXT_PREFIX: &str = "/ext/";
 
-/// Image hosts the info sources serve from.
-const ALLOWED_HOSTS: &[&str] = &["assets.fanart.tv", "r2.theaudiodb.com", "www.theaudiodb.com", "theaudiodb.com"];
+/// Image hosts the info sources serve from, plus plex.tv for the account's
+/// profile picture (it redirects to assets.plex.tv and needs no token).
+const ALLOWED_HOSTS: &[&str] = &[
+    "assets.fanart.tv",
+    "r2.theaudiodb.com",
+    "www.theaudiodb.com",
+    "theaudiodb.com",
+    "plex.tv",
+    "assets.plex.tv",
+];
 
 /// Largest image accepted from a source.
 const MAX_BYTES: usize = 12 * 1024 * 1024;
@@ -88,5 +96,20 @@ mod tests {
         assert!(art.fetch("/ext/https://evil.example/a.jpg", 10, 10).await.is_err());
         assert!(art.fetch("/ext/http://assets.fanart.tv/a.jpg", 10, 10).await.is_err());
         assert_eq!(http.urls(), ["https://assets.fanart.tv/fanart/music/a.jpg"]);
+    }
+
+    #[tokio::test]
+    async fn plex_avatar_is_fetched_from_plex_tv() {
+        let http = Arc::new(FakeHttp::new());
+        http.route_resp(
+            "plex.tv",
+            HttpResponse { status: 200, body: vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A].into(), ..Default::default() },
+        );
+        let art = RoutedArt { plex: Arc::new(PlexOnly), http: http.clone() };
+        let img = art.fetch("/ext/https://plex.tv/users/abc/avatar?c=1", 64, 64).await.unwrap();
+        assert_eq!(img.content_type, "image/png");
+        assert_eq!(http.urls(), ["https://plex.tv/users/abc/avatar?c=1"]);
+        assert!(ext_url("/ext/https://assets.plex.tv/avatars/a.png").is_some());
+        assert!(ext_url("/ext/https://other.plex.tv/a.png").is_none());
     }
 }

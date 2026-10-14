@@ -34,7 +34,15 @@ the URL.
 | `servers_list` | – | `ServerInfo[]` |
 | `server_select` | `{ machineId }` | – |
 
-`AuthStatus = { state: "signedOut" | "pending" | "signedIn", username?, server?: ServerInfo, needsServerPick: bool, reauthRequired: bool }`
+`AuthStatus = { state: "signedOut" | "pending" | "signedIn", username?, avatar?, server?: ServerInfo, needsServerPick: bool, reauthRequired: bool }`
+
+`avatar` is the Plex account's profile picture as an art path
+(`/ext/https://plex.tv/users/<id>/avatar?c=<n>`), served by the `art`
+protocol and cached like other art. The core reads it from plex.tv's user
+call at sign-in and start. It only accepts plex.tv hosts and drops any token
+from the URL, and the picture is fetched without one (plex.tv redirects to
+the image on assets.plex.tv). For a Plex Home it is the signed-in user's
+picture. Missing when the account has none.
 
 `reauthRequired` means Plex rejected the saved sign-in (expired or revoked).
 The app stays open so music on this computer keeps playing, and the health
@@ -599,6 +607,7 @@ The rest of the fields, with their defaults:
 | `discordFindSong` | bool, true | The Find this song button. Also needs `sharePublicLinks`. |
 | `discordCoverArchive` | bool, true | Covers from Cover Art Archive by MusicBrainz release id. |
 | `discordUploadArt` | bool, false | Upload covers Cover Art Archive lacks to Imgur. Only used while a client ID is saved and wasn't refused. |
+| `showPlexAvatar` | bool, true | The app menu button shows the Plex profile picture (`AuthStatus.avatar`). Off shows the first letter of the username. This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

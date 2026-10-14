@@ -235,6 +235,8 @@ pub struct Settings {
     pub discord_cover_archive: bool,
     /// Upload covers to Imgur with the user's client id (kept in the keychain).
     pub discord_upload_art: bool,
+    /// The top bar shows the Plex profile picture (this device only).
+    pub show_plex_avatar: bool,
 }
 
 impl Default for Settings {
@@ -299,6 +301,7 @@ impl Default for Settings {
             discord_find_song: true,
             discord_cover_archive: true,
             discord_upload_art: false,
+            show_plex_avatar: true,
         }
     }
 }
@@ -363,6 +366,7 @@ pub struct SettingsPatch {
     pub discord_find_song: Option<bool>,
     pub discord_cover_archive: Option<bool>,
     pub discord_upload_art: Option<bool>,
+    pub show_plex_avatar: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -437,6 +441,7 @@ impl Settings {
         set(&mut self.discord_find_song, p.discord_find_song);
         set(&mut self.discord_cover_archive, p.discord_cover_archive);
         set(&mut self.discord_upload_art, p.discord_upload_art);
+        set(&mut self.show_plex_avatar, p.show_plex_avatar);
         if let Some(name) = &p.playlist_new_name {
             let name = name.trim();
             if name.chars().count() > crate::db::playlists::TITLE_MAX {
@@ -787,6 +792,7 @@ mod tests {
         assert!(s.share_public_links);
         assert!(s.discord_status && s.discord_show_unreleased && s.discord_unreleased_art && s.discord_clear_on_pause);
         assert!(s.discord_find_song && s.discord_cover_archive && !s.discord_upload_art);
+        assert!(s.show_plex_avatar);
     }
 
     #[test]
@@ -888,6 +894,7 @@ mod tests {
             discord_find_song: Some(false),
             discord_cover_archive: Some(false),
             discord_upload_art: Some(true),
+            show_plex_avatar: Some(false),
         })
         .await
         .unwrap();
@@ -931,6 +938,7 @@ mod tests {
         assert_eq!((s.precache_count, s.art_cache_mb), (12, 512));
         assert_eq!((s.popular_source, s.reduce_motion), (PopularSource::MyPlays, ReduceMotion::On));
         assert!(!s.search_suggestions && !s.search_recents);
+        assert!(!s.show_plex_avatar);
         assert!(!s.media_keys && !s.media_session && s.close_to_tray && s.launch_at_login);
         assert_eq!(
             fresh.platform.get(),
@@ -988,6 +996,7 @@ mod tests {
         assert_eq!(v["qualityHome"], "original");
         assert_eq!(v["qualityAway"], "320");
         assert_eq!(v["showFormatBadge"], true);
+        assert_eq!(v["showPlexAvatar"], true);
         assert_eq!(v["resumeContexts"], true);
         assert_eq!(v["precacheCount"], 5);
         assert_eq!(v["popularSource"], "global");

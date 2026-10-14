@@ -400,3 +400,14 @@ anything that plays on a real device needs an OK first). Check once:
   the real server (it creates a token). Platter falls back to the server
   token when it gets no answer; check that the transient token comes back
   and that the receiver accepts it.
+
+### 2026-10-14: account profile picture
+- `GET plex.tv/api/v2/user` returns `thumb` as
+  `https://plex.tv/users/<id>/avatar?c=<n>`. The `c` value changes when the
+  picture does, so it works as a cache key.
+- That URL needs no token. Without one it answers 302 to a PNG on
+  `assets.plex.tv` (about 400 KB, full size). Platter fetches it through the
+  art cache, which scales it down.
+- On a Plex Home account the same call has `home: true`, `homeSize` and
+  `homeAdmin`, and `thumb` is the picture of the user the token belongs to.
+  Switching Home users isn't handled yet.

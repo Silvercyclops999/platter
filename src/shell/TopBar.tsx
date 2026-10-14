@@ -1,9 +1,9 @@
 import { Check, ChevronLeft, ChevronRight, Copy, House, Minus, Square, X } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Tooltip } from "../components/Tooltip";
-import { backend } from "../lib/backend";
+import { artUrl, backend } from "../lib/backend";
 import { chrome, modKey } from "../lib/platform";
 import { useApp } from "../stores/app";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry } from "../stores/router";
@@ -102,9 +102,38 @@ function checkForUpdates() {
   );
 }
 
+/**
+ * A round face: the Plex profile picture when there is one, over the
+ * fallback (the username's first letter), which shows while the picture
+ * loads or when it fails.
+ */
+function AvatarFace({ path, size, fallback, className }: { path: string | null; size: number; fallback: ReactNode; className: string }) {
+  const src = artUrl(path, size);
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const showImg = !!src && failed !== src;
+  return (
+    <span aria-hidden="true" className={className} data-avatar={showImg && loaded === src ? "image" : "letter"}>
+      {fallback}
+      {showImg && (
+        <img
+          className={`avatar-img ${loaded === src ? "is-loaded" : ""}`}
+          src={src}
+          alt=""
+          draggable={false}
+          onLoad={() => setLoaded(src)}
+          onError={() => setFailed(src)}
+        />
+      )}
+    </span>
+  );
+}
+
 /** The avatar button and its app menu. */
 export function AppMenu() {
   const username = useApp((s) => s.auth?.username ?? null);
+  const showAvatar = useSettings((s) => s.settings?.showPlexAvatar !== false);
+  const avatar = useApp((s) => (showAvatar ? (s.auth?.avatar ?? null) : null));
   const privateSession = useSettings((s) => !!s.settings?.privateSession);
   const [open, setOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
@@ -182,16 +211,15 @@ export function AppMenu() {
           }}
           onPointerDown={() => (viaKeyboard.current = false)}
         >
-          <span aria-hidden="true" className="topbar__avatar-face">
-            {initial || <Logo size={20} />}
-          </span>
+          <AvatarFace path={avatar} size={32} className="topbar__avatar-face" fallback={initial || <Logo size={20} />} />
         </button>
       </Tooltip>
       {open && (
         <div className="appmenu__panel" role="menu" aria-label="App menu" ref={menu} tabIndex={-1} onKeyDown={onMenuKey}>
           {username && (
             <div className="appmenu__who" aria-hidden="true">
-              {username}
+              <AvatarFace path={avatar} size={28} className="appmenu__who-face" fallback={initial} />
+              <span className="appmenu__who-name">{username}</span>
             </div>
           )}
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => void createPlaylist())}>

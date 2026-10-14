@@ -37,6 +37,9 @@ pub struct ServerInfo {
 pub struct AuthStatus {
     pub state: AuthState,
     pub username: Option<String>,
+    /// The account's profile picture as an `/ext/` art path for the
+    /// art:// scheme (never a plex.tv URL with a token).
+    pub avatar: Option<String>,
     pub server: Option<ServerInfo>,
     pub needs_server_pick: bool,
     /// Plex rejected the saved sign-in. The app stays open (cached music
@@ -49,6 +52,7 @@ impl AuthStatus {
         AuthStatus {
             state: AuthState::SignedOut,
             username: None,
+            avatar: None,
             server: None,
             needs_server_pick: false,
             reauth_required: false,
@@ -136,6 +140,7 @@ mod tests {
         let s = AuthStatus {
             state: AuthState::SignedIn,
             username: Some("u".into()),
+            avatar: Some("/ext/https://plex.tv/users/a/avatar".into()),
             server: Some(ServerInfo {
                 machine_id: "m".into(),
                 name: "n".into(),
@@ -150,6 +155,7 @@ mod tests {
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["state"], "signedIn");
         assert_eq!(v["needsServerPick"], false);
+        assert_eq!(v["avatar"], "/ext/https://plex.tv/users/a/avatar");
         assert_eq!(v["reauthRequired"], true);
         assert_eq!(v["server"]["machineId"], "m");
         assert_eq!(v["server"]["connection"], "relay");

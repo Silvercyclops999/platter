@@ -126,6 +126,9 @@ export function optionsFromUrl(search: string): MockOptions {
   };
 }
 
+/** Profile picture path. The mock art draws an abstract silhouette for it. */
+const AVATAR = "/ext/https://plex.tv/users/mock/avatar?c=1";
+
 const SERVER: ServerInfo = {
   machineId: "mock-machine-01",
   name: "Basement Server",
@@ -247,8 +250,8 @@ export class MockBackend implements Backend {
     this.auth = this.opts.signedOut
       ? { state: "signedOut", needsServerPick: false }
       : this.opts.health === "signIn"
-        ? { state: "signedOut", username: "listener", needsServerPick: false, reauthRequired: true }
-        : { state: "signedIn", username: "listener", server: SERVER, needsServerPick: false };
+        ? { state: "signedOut", username: "listener", avatar: AVATAR, needsServerPick: false, reauthRequired: true }
+        : { state: "signedIn", username: "listener", avatar: AVATAR, server: SERVER, needsServerPick: false };
     const startStatus = this.opts.health ?? (this.opts.timelines ? "starting" : "local");
     this.healthState = this.makeHealth(startStatus);
 
@@ -359,7 +362,7 @@ export class MockBackend implements Backend {
 
   /** Test/demo hook: Plex rejected the saved sign-in (expired or revoked). */
   expireSignIn() {
-    this.auth = { state: "signedOut", username: "listener", needsServerPick: false, reauthRequired: true };
+    this.auth = { state: "signedOut", username: "listener", avatar: AVATAR, needsServerPick: false, reauthRequired: true };
     this.emit("auth://changed", this.auth);
     this.setHealth("signIn");
   }
@@ -390,7 +393,7 @@ export class MockBackend implements Backend {
   /** Test/demo hook: the user approved the PIN in their browser. */
   approvePin() {
     if (this.auth.state !== "pending") return;
-    this.auth = { state: "signedIn", username: "listener", server: SERVER, needsServerPick: false };
+    this.auth = { state: "signedIn", username: "listener", avatar: AVATAR, server: SERVER, needsServerPick: false };
     this.emit("auth://changed", this.auth);
   }
   authCancel() {

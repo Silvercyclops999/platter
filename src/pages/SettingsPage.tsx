@@ -473,6 +473,13 @@ export function SettingsPage() {
         </>
       ),
     },
+    {
+      key: "showPlexAvatar",
+      section: "Account",
+      title: "Show my Plex profile picture",
+      description: "Shows your Plex account's picture on the app menu button. Off shows the first letter of your name. This device only.",
+      control: (ids) => toggle(s, "showPlexAvatar", ids),
+    },
     // Audio quality
     {
       key: "qualityHome",

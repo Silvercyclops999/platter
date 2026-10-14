@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::sync::{Notify, RwLock, broadcast, mpsc, watch};
 
-use super::auth::{self, Pin, PlexTv};
+use super::auth::{self, Pin, PlexTv, PlexUser};
 use super::client::PlexClient;
 use super::discovery::{
     self, DiscoveredServer, DiscoveryCache, Probe, RaceConfig, ServerList, load_servers,
@@ -76,6 +76,8 @@ struct Current {
 struct Session {
     account: Option<Token>,
     username: Option<String>,
+    /// The account's profile picture as an `/ext/` art path (no token).
+    avatar: Option<String>,
     servers: Vec<DiscoveredServer>,
     current: Option<Current>,
     cache: DiscoveryCache,
@@ -266,6 +268,7 @@ impl PlexState {
             }
             st.reauth_required = s.reauth;
             st.username = if s.reauth { s.username.clone() } else { None };
+            st.avatar = if s.reauth { s.avatar.clone() } else { None };
             return st;
         }
         let server = s.current.as_ref().map(|c| {
@@ -277,6 +280,7 @@ impl PlexState {
         AuthStatus {
             state: AuthState::SignedIn,
             username: s.username.clone(),
+            avatar: s.avatar.clone(),
             needs_server_pick: server.is_none() && !s.servers.is_empty(),
             server,
             reauth_required: false,
@@ -467,17 +471,12 @@ impl PlexState {
     /// possible.
     pub async fn complete_sign_in(&self, token: Token) -> AppResult<()> {
         self.inner.store.set(ACCOUNT_TOKEN, &token)?;
-        let username = self
-            .inner
-            .tv
-            .user(&token)
-            .await
-            .ok()
-            .map(|u| u.display_name());
+        let user = self.inner.tv.user(&token).await.ok();
         {
             let mut s = self.inner.session.write().await;
             s.account = Some(token.clone());
-            s.username = username;
+            s.username = user.as_ref().map(PlexUser::display_name);
+            s.avatar = user.as_ref().and_then(PlexUser::avatar_art_path);
             s.reauth = false;
         }
         self.refresh_and_pick(&token).await
@@ -499,7 +498,11 @@ impl PlexState {
         let t2 = token.clone();
         spawn(async move {
             if let Ok(u) = me.inner.tv.user(&t2).await {
-                me.inner.session.write().await.username = Some(u.display_name());
+                {
+                    let mut s = me.inner.session.write().await;
+                    s.username = Some(u.display_name());
+                    s.avatar = u.avatar_art_path();
+                }
                 me.emit_auth().await;
             }
         });
@@ -577,6 +580,7 @@ impl PlexState {
             let mut s = self.inner.session.write().await;
             s.account = None;
             s.username = None;
+            s.avatar = None;
             s.servers.clear();
             s.current = None;
             s.reauth = false;
@@ -1074,7 +1078,7 @@ mod tests {
             .and(path("/api/v2/user"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({"username": "listener"})),
+                    .set_body_json(serde_json::json!({"username": "listener", "thumb": "https://plex.tv/users/abc/avatar?c=7"})),
             )
             .mount(&tv)
             .await;
@@ -1134,6 +1138,7 @@ mod tests {
 
         let a = wait_signed_in(&st).await;
         assert_eq!(a.username.as_deref(), Some("listener"));
+        assert_eq!(a.avatar.as_deref(), Some("/ext/https://plex.tv/users/abc/avatar?c=7"));
         let srv = a.server.unwrap();
         assert_eq!(srv.machine_id, "m1");
         assert_eq!(srv.connection, Some(ConnectionKind::Local));

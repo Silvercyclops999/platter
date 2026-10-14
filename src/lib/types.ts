@@ -151,6 +151,8 @@ export interface ServerInfo {
 export interface AuthStatus {
   state: "signedOut" | "pending" | "signedIn";
   username?: string | null;
+  /** The account's profile picture as an art path (fetched through the art cache). */
+  avatar?: string | null;
   server?: ServerInfo | null;
   needsServerPick: boolean;
   /** Plex rejected the saved sign-in: keep the app open with a sign-in banner. */
@@ -577,6 +579,8 @@ export interface Settings {
   discordCoverArchive: boolean;
   /** Covers uploaded to Imgur with the user's client ID. */
   discordUploadArt: boolean;
+  /** The top bar shows the Plex profile picture. This device only. */
+  showPlexAvatar: boolean;
   [key: string]: unknown;
 }
 
@@ -664,6 +668,7 @@ export const DEFAULT_SETTINGS: Settings = {
   discordFindSong: true,
   discordCoverArchive: true,
   discordUploadArt: false,
+  showPlexAvatar: true,
 };
 
 // ---------------------------------------------------------------- discord
