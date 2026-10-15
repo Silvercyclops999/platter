@@ -59,7 +59,7 @@ pub fn now_s() -> i64 {
         .unwrap_or(0)
 }
 
-fn albums_by_ids(c: &Connection, ids: &[String]) -> AppResult<Vec<Album>> {
+pub fn albums_by_ids(c: &Connection, ids: &[String]) -> AppResult<Vec<Album>> {
     let mut st = c.prepare_cached(&format!("SELECT {ALBUM_COLS} FROM albums al WHERE al.id = ?1"))?;
     let mut out = Vec::with_capacity(ids.len());
     for id in ids {
@@ -502,7 +502,7 @@ pub fn artist_page_with(c: &Connection, id: &str, source: PopularSource, hidden:
         .iter()
         .filter_map(|s| {
             let albums: Vec<Album> = all.iter().filter(|a| a.section == *s).cloned().collect();
-            (!albums.is_empty()).then_some(ArtistSection { section: *s, albums })
+            (!albums.is_empty()).then_some(ArtistSection { section: *s, albums, custom: None })
         })
         .collect();
     let plays: i64 =
@@ -512,7 +512,7 @@ pub fn artist_page_with(c: &Connection, id: &str, source: PopularSource, hidden:
     let about = about.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let similar = similar_artists(c, id, &similar_names)?;
     let popular_pending = popular_pending(c, id, source)?;
-    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar, appears_on, popular_pending })
+    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar, appears_on, popular_pending, eras: Vec::new() })
 }
 
 /// Popular ranks by the global list and none was ever stored for `id` (a
@@ -576,7 +576,7 @@ pub fn credited_page(
         summary: None,
     };
     let popular_pending = popular_pending(c, id, source)?;
-    Ok(ArtistPage { artist, popular, sections: Vec::new(), plays, about: None, similar: Vec::new(), appears_on, popular_pending })
+    Ok(ArtistPage { artist, popular, sections: Vec::new(), plays, about: None, similar: Vec::new(), appears_on, popular_pending, eras: Vec::new() })
 }
 
 /// The tracks a credited artist's play context adds after its Popular list.
@@ -636,7 +636,7 @@ pub fn album_page(c: &Connection, id: &str) -> AppResult<AlbumPage> {
         .query_row("SELECT thumb FROM artists WHERE id = ?1", [&album.artist_id], |r| r.get::<_, Option<String>>(0))
         .optional()?
         .flatten();
-    Ok(AlbumPage { album, tracks, total_duration_ms, more_by_artist, artist_thumb, released, studio })
+    Ok(AlbumPage { album, tracks, total_duration_ms, more_by_artist, artist_thumb, released, studio, archive: None })
 }
 
 pub fn album_tracks(c: &Connection, album_id: &str) -> AppResult<Vec<Track>> {

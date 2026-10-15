@@ -184,13 +184,10 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
             let version: Option<String> = r.get(10)?;
             let matched: Option<bool> = r.get(11)?;
             let mb: Option<bool> = r.get(12)?;
+            let id: String = r.get(0)?;
             raw.albums.push(RawAlbum {
-                id: r.get(0)?,
-                artist_id: r.get(1)?,
-                thumb: r.get(2)?,
-                added_at: r.get(3)?,
-                tags,
-                unreleased: crate::db::release::is_unreleased(
+                unreleased: crate::db::release::album_unreleased(
+                    &id,
                     format.as_deref(),
                     &subformats,
                     matched,
@@ -198,6 +195,11 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
                     version.as_deref(),
                     mb,
                 ),
+                id,
+                artist_id: r.get(1)?,
+                thumb: r.get(2)?,
+                added_at: r.get(3)?,
+                tags,
             });
         }
     }
@@ -211,8 +213,17 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
         while let Some(r) = rows.next()? {
             let flags: Option<String> = r.get(10)?;
             let version: Option<String> = r.get(11)?;
+            let id: String = r.get(0)?;
+            // A song's own mark decides for it; its album's status comes from the album row.
+            let marked = crate::db::release::mark_of(&crate::db::release::mark_key("track", &id));
+            let tagged = version.as_deref().is_some_and(crate::db::release::version_is_unreleased);
+            let unreleased = match (version.as_deref().filter(|v| !v.trim().is_empty()), marked) {
+                (Some(_), _) => tagged,
+                (None, Some(m)) => m == crate::db::release::Mark::Unreleased,
+                (None, None) => false,
+            };
             raw.tracks.push(RawTrack {
-                id: r.get(0)?,
+                id,
                 artist_id: r.get(1)?,
                 album_id: r.get(2)?,
                 track_number: r.get(3)?,
@@ -223,7 +234,7 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
                 last_viewed_at: r.get(8)?,
                 explicit: r.get::<_, Option<i64>>(9)? == Some(1),
                 edit: crate::tags::is_edit(flags.as_deref()),
-                unreleased: version.as_deref().is_some_and(crate::db::release::version_is_unreleased),
+                unreleased,
             });
         }
     }

@@ -735,6 +735,9 @@ impl PlexMetadata {
             rated_at: self.user_rating.and(self.last_rated_at),
             genres: self.genre.iter().chain(&self.mood).map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
             mbid: self.mbid(),
+            file: part.and_then(|p| p.file.clone()).filter(|f| !f.is_empty()),
+            other_versions: None,
+            song_status: None,
         }
     }
 

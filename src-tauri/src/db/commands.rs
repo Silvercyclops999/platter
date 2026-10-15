@@ -128,22 +128,37 @@ pub async fn library_items(db: State<'_, DbHandle>) -> AppResult<Vec<LibraryItem
 
 #[tauri::command]
 pub async fn artist_page(
+    app: tauri::AppHandle,
     db: State<'_, DbHandle>,
     info: State<'_, crate::artistinfo::ArtistInfoService>,
     hidden: State<'_, crate::hidden::Hidden>,
     id: String,
 ) -> AppResult<ArtistPage> {
+    use tauri::Manager;
     let source = db.popular_source();
     let key = id.clone();
     let view = db.tag_view();
     let server = db.server_view();
     let hidden = hidden.ids().get();
     let started = std::time::Instant::now();
+    // The user's own sections for this artist's albums.
+    let custom = match app.try_state::<crate::sync::commands::SyncService>() {
+        Some(s) => {
+            let artist = id.clone();
+            s.store.run(move |s| crate::archive::marks::custom_map(s, Some(&artist))).await.unwrap_or_default()
+        }
+        None => Default::default(),
+    };
     let mut page = db
         .read_async(move |c| {
             let mut page = queries::artist_page_with(c, &key, source, Some(&hidden))?;
             super::merge::ViewFilter::load(c, &server)?.artist_page(c, &mut page)?;
             crate::tags::view::artist_page(c, &mut page, view)?;
+            crate::archive::sections::apply(c, &mut page, &custom)?;
+            if super::popular::credit_key(&key).is_none() {
+                page.eras = crate::archive::eras::artist_eras(c, &key, view.show_edits)?;
+            }
+            crate::archive::versions::annotate(c, &mut page.popular, view.show_edits)?;
             Ok(page)
         })
         .await?;
@@ -165,6 +180,8 @@ pub async fn album_page(db: State<'_, DbHandle>, id: String) -> AppResult<AlbumP
     db.read_async(move |c| {
         let mut page = queries::album_page(c, &id)?;
         crate::tags::view::album_page(c, &mut page, view)?;
+        crate::archive::versions::annotate(c, &mut page.tracks, view.show_edits)?;
+        page.archive = crate::archive::eras::album_archive(c, &id)?;
         Ok(page)
     })
     .await
@@ -172,7 +189,13 @@ pub async fn album_page(db: State<'_, DbHandle>, id: String) -> AppResult<AlbumP
 
 #[tauri::command]
 pub async fn playlist_page(db: State<'_, DbHandle>, id: String) -> AppResult<PlaylistPage> {
-    db.read_async(move |c| queries::playlist_page(c, &id)).await
+    let view = db.tag_view();
+    db.read_async(move |c| {
+        let mut page = queries::playlist_page(c, &id)?;
+        crate::archive::versions::annotate(c, &mut page.tracks, view.show_edits)?;
+        Ok(page)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -186,7 +209,13 @@ pub async fn search(
     let server = db.server_view();
     let f = db.read_async(move |c| super::merge::ViewFilter::load(c, &server)).await?;
     f.search(&mut out);
-    Ok(out)
+    // One row per song, the released version first (archive::versions).
+    let show = db.tag_view().show_edits;
+    db.read_async(move |c| {
+        crate::archive::versions::group_search(c, &mut out, show)?;
+        Ok(out)
+    })
+    .await
 }
 
 #[tauri::command]

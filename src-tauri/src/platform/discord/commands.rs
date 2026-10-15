@@ -12,7 +12,7 @@ use super::{Config, DiscordHandle, DiscordStatus, DiscordSwitches, Library, Stat
 use crate::artistinfo::http::InfoHttp;
 use crate::artistinfo::service::KeyState;
 use crate::audio::events::TrackingEvent;
-use crate::db::release::is_unreleased;
+use crate::db::release;
 use crate::db::{ArtCache, DbHandle};
 use crate::error::AppResult;
 use crate::plex::PlexState;
@@ -65,7 +65,7 @@ pub fn album_unreleased(c: &rusqlite::Connection, id: &str) -> AppResult<Option<
         .optional()?;
     Ok(row.map(|(format, subs, version, studio, matched, mb)| {
         let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
-        is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb)
+        release::album_unreleased(id, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb)
     }))
 }
 

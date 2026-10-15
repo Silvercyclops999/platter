@@ -14,7 +14,7 @@ use rusqlite::{Connection, ToSql, params, params_from_iter};
 
 use super::{Context, Match, SongKey, compare, fold};
 use crate::db::merge::{Rank, quality};
-use crate::db::release::is_unreleased;
+use crate::db::release::track_unreleased;
 use crate::error::AppResult;
 
 /// What an album says about its songs' release status.
@@ -80,7 +80,9 @@ fn insert(c: &Connection, filter: &str, args: &[&dyn ToSql]) -> AppResult<usize>
         }
         let al = &albums[&album_id];
         let version = file_version.or_else(|| al.version.clone());
-        let unreleased = is_unreleased(
+        let unreleased = track_unreleased(
+            &id,
+            &album_id,
             al.format.as_deref(),
             &al.subformats,
             al.matched,

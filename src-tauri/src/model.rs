@@ -21,6 +21,9 @@ pub enum ReleaseSection {
     Remixes,
     Demos,
     Mixtapes,
+    /// Unreleased material (release status, not a release type): set on the
+    /// artist page only, never stored by a sync.
+    Unreleased,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,6 +131,56 @@ pub struct Track {
     /// the UI.
     #[serde(skip)]
     pub mbid: Option<String>,
+    /// The file's path on the server (Plex Part `file`). Stored for the
+    /// folder name hints on release status; not sent to the UI.
+    #[serde(skip)]
+    pub file: Option<String>,
+    /// How many other versions of the song the library has
+    /// (`archive::versions`), on pages that fill it in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_versions: Option<u32>,
+    /// The song's own release status, on pages that fill it in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub song_status: Option<SongStatus>,
+}
+
+/// One song's release status (`archive::songs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SongStatus {
+    Released,
+    /// Tagged or marked unreleased.
+    Unreleased,
+    /// On an album that's probably unreleased, and no released song in the
+    /// library has its title.
+    ProbablyUnreleased,
+    /// On an album that's probably unreleased, with the title of a released
+    /// song in the library: probably another version of it. Still unreleased.
+    ProbablyAlternate,
+}
+
+impl SongStatus {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Released => "released",
+            Self::Unreleased => "unreleased",
+            Self::ProbablyUnreleased => "probablyUnreleased",
+            Self::ProbablyAlternate => "probablyAlternate",
+        }
+    }
+
+    pub fn from_key(k: &str) -> Self {
+        match k {
+            "released" => Self::Released,
+            "probablyUnreleased" => Self::ProbablyUnreleased,
+            "probablyAlternate" => Self::ProbablyAlternate,
+            _ => Self::Unreleased,
+        }
+    }
+
+    pub fn is_released(self) -> bool {
+        self == Self::Released
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

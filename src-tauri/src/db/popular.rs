@@ -326,7 +326,16 @@ pub fn copy_info(c: &Connection, t: &Track) -> AppResult<CopyInfo> {
             Ok(CopyInfo {
                 year: r.get(0)?,
                 section: section.as_deref().map(super::release::section_from_key),
-                unreleased: super::release::is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb),
+                unreleased: super::release::track_unreleased(
+                    &t.id,
+                    &t.album_id,
+                    format.as_deref(),
+                    &subs,
+                    matched,
+                    studio.as_deref(),
+                    version.as_deref(),
+                    mb,
+                ),
             })
         })
         .optional()?;
@@ -343,7 +352,7 @@ fn section_pref(s: Option<ReleaseSection>) -> u8 {
         ReleaseSection::Remixes => 4,
         ReleaseSection::Live => 5,
         ReleaseSection::Mixtapes => 6,
-        ReleaseSection::Demos => 7,
+        ReleaseSection::Demos | ReleaseSection::Unreleased => 7,
     }
 }
 

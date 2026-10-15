@@ -37,7 +37,7 @@ use crate::artistinfo::http::InfoHttp;
 use crate::artistinfo::limit::Limiter;
 use crate::db::DbHandle;
 use crate::db::queries::now_s;
-use crate::db::release::is_unreleased;
+use crate::db::release::{album_unreleased, track_unreleased};
 use crate::error::{AppError, AppResult};
 pub use link::ShareKind;
 use matching::{AlbumQuery, SongQuery};
@@ -148,6 +148,8 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
                     let studio: Option<String> = r.get(9)?;
                     let matched: Option<bool> = r.get(10)?;
                     let mb: Option<bool> = r.get(11)?;
+                    let album_id: String = r.get(1)?;
+                    let unreleased = track_unreleased(id, &album_id, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb);
                     Ok(Item::Track {
                         song: SongQuery {
                             artist: track_artist.filter(|a| !a.trim().is_empty()).unwrap_or_else(|| album_artist.clone()),
@@ -156,8 +158,8 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
                             album: r.get(2)?,
                             duration_ms: r.get(5)?,
                         },
-                        album_id: r.get(1)?,
-                        unreleased: is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb),
+                        album_id,
+                        unreleased,
                     })
                 },
             )
@@ -177,7 +179,7 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
                     let mb: Option<bool> = r.get(8)?;
                     Ok(Item::Album {
                         album: AlbumQuery { title: r.get(0)?, artist: r.get(1)?, track_count: r.get(2)? },
-                        unreleased: is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb),
+                        unreleased: album_unreleased(id, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb),
                     })
                 },
             )

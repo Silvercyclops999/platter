@@ -23,17 +23,19 @@ pub async fn album_credits(info: State<'_, ArtistInfoService>, id: String) -> Ap
     info.album_credits(&id).await
 }
 
-/// An album's release status (tagged unreleased, probably unreleased,
-/// released but Plex missed the match, released) and the reasons for it.
-/// `releasestatus://changed` fires when the MusicBrainz check changes it.
+/// An album's release status (tagged unreleased, confirmed, probably
+/// unreleased, released but Plex missed the match, released) with every
+/// piece of evidence and the user's mark (`archive::status`).
+/// `releasestatus://changed` fires when the MusicBrainz check or a mark
+/// changes it.
 #[tauri::command]
 pub async fn album_release_status(
     info: State<'_, ArtistInfoService>,
     id: String,
-) -> AppResult<super::releasecheck::AlbumReleaseStatus> {
+) -> AppResult<crate::archive::status::AlbumReleaseStatus> {
     let key = id.clone();
     info.db()
-        .read_async(move |c| super::releasecheck::album_status(c, &key))
+        .read_async(move |c| crate::archive::status::album_status(c, &key))
         .await?
         .ok_or_else(|| AppError::NotFound(format!("album {id}")))
 }

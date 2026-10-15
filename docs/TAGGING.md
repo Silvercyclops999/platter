@@ -31,11 +31,22 @@ writing tag code. The forum thread that originally documented it is gone.
 | ARCHIVE_VERSION | released, alternate, demo, session, leak, snippet, remix, live, build | Version badge, Other versions grouping |
 | ARCHIVE_ERA | free text | Era cards and filters |
 | ARCHIVE_QUALITY | lossless, cdq, lq, snippet | Quality badge |
-| ARCHIVE_DATE | YYYY-MM-DD (recorded or leaked) | Era timeline, sorting |
+| ARCHIVE_DATE | YYYY, YYYY-MM or YYYY-MM-DD (recorded or leaked) | Era dates, build order, sorting |
 | ARCHIVE_EDITION | e.g. Standard, Deluxe, Build v2 | Edition picker label |
 | ARCHIVE_GROUP | shared key across editions/builds of one album | Collapses them into one album card |
 | ARCHIVE_SOURCE | free text | Source note |
 | ARCHIVE_FLAGS | fanedit, aiedit | Hidden by default when set |
+
+ARCHIVE_DATE is read in exactly those three forms, such as `2019`, `2019-05`
+or `2019-05-31`. Anything else, like `Summer 2019` or `05/2019`, is ignored,
+and the era falls back to the album years.
+
+Songs count as versions of each other when the album artist (or the song's
+own artist) matches and the titles match once version notes like `(Demo)`,
+`- Snippet`, `[v2]` or `(Remastered 2011)` and featured artists are set
+aside. Albums sharing an ARCHIVE_GROUP join their songs by title too. `Part
+II` and `Part 2` are different titles, and generic titles like `Intro` only
+match on the same album.
 
 ## How material shows up
 

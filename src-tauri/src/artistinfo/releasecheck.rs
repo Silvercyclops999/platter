@@ -210,7 +210,11 @@ pub async fn check_one(svc: &ArtistInfoService, cand: &Candidate, now: i64) -> R
                 // to Cover Art Archive.
                 c.execute("DELETE FROM discord_art WHERE album_id = ?1", params![id])?;
             }
-            Ok(before.map_or(after, |b| b != after))
+            let changed = before.map_or(after, |b| b != after);
+            if changed {
+                crate::archive::refresh_for_albums(c, std::slice::from_ref(&id))?;
+            }
+            Ok(changed)
         })
         .await
         .map_err(|e: AppError| FetchError::Unavailable(e.to_string()))?;

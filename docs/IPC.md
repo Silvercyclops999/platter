@@ -401,13 +401,20 @@ by title). Unreleased albums are never looked up (`none`). MusicBrainz is
 asked at most once a second with a user agent that names the app; a failed
 lookup waits ten minutes before it's tried again.
 
-`AlbumReleaseStatus = { id, status: "taggedUnreleased"|"probablyUnreleased"|"plexMissed"|"released", reasons: string[] }`.
-`reasons` are plain sentences for the album page's "Why?". Tags decide
-first: a demo release type or an unreleased `ARCHIVE_VERSION` is
-`taggedUnreleased`, and any other release type or version tag is
-`released`. An album Plex couldn't match with no tags is
-`probablyUnreleased` (while `countUnmatchedUnreleased` is on), unless the
-MusicBrainz check found it, which makes it `plexMissed`, a released album.
+`AlbumReleaseStatus = { id, artistId, status: "taggedUnreleased"|"confirmedUnreleased"|"probablyUnreleased"|"plexMissed"|"released", reasons: string[], evidence: Evidence[], mark: "unreleased"|"released"|null, score }`
+with `Evidence = { kind: "tag"|"mark"|"markOverridden"|"unmatched"|"untyped"|"musicbrainz"|"notChecked"|"folder"|"duration", text, weight, decides }`.
+`reasons` are the evidence as plain sentences. Tags decide first: a demo
+release type or an unreleased `ARCHIVE_VERSION` is `taggedUnreleased`, and
+any other version tag is `released`. The user's mark comes next
+(`confirmedUnreleased` or `released`); a mark a tag disagrees with is listed
+as `markOverridden`. Then any other release type is `released`. An album
+Plex couldn't match with no tags is `probablyUnreleased` (while
+`countUnmatchedUnreleased` is on), unless the MusicBrainz check found it,
+which makes it `plexMissed`, a released album. Folder names on the songs'
+paths (`archiveFolderKeywords`) and most songs being under a minute add
+weight to the list but never change the status. `score` is the weights
+summed. The status of every album is also stored in `album_status` after
+each sync, tag scan, mark and change to the settings that feed it.
 
 The MusicBrainz check (`checkUnmatchedMusicbrainz`, needs MusicBrainz on)
 runs in the background after each library sync. For each album Plex couldn't
@@ -469,6 +476,55 @@ source off until another key is saved or the app restarts. `open_info_link`
 only opens https links on the sources', Creative Commons' and the profile
 sites. With `artistId` it also opens a link listed in that artist's `links`
 (their official website).
+
+## Archive
+| Command | Args | Returns |
+| --- | --- | --- |
+| `release_mark_set` | `{ kind: "album"|"track", id, mark: "unreleased"|"released"|null }` | – |
+| `track_versions` | `{ id }` (song) | `VersionItem[]` |
+| `era_page` | `{ artistId, name }` | `EraPage` |
+| `album_section_set` | `{ albumId, artistId, name: string|null }` | – |
+| `artist_sections` | `{ artistId }` | the artist's own section names, A to Z |
+
+Nothing here writes to Plex or to files. Marks and sections are app state in
+the sync store (`releaseMarks`, keyed `album:<id>` or `track:<id>`, and
+`albumSections`, keyed by album id), so they sync with the library group.
+A song's own mark beats its album's. After a mark, statuses are worked out
+again for that artist and `releasestatus://changed` (`{ id }`, the album) and
+`artist://changed` fire. Marks or sections from another device emit
+`archive://changed`.
+
+Songs are grouped with their other versions in `versions` after each sync,
+tag scan and mark: the same album artist or song artist and the same title
+once version notes and credits are folded away, a shared `ARCHIVE_GROUP` with
+the same title, or the same recording id or Plex track id. Generic titles
+("Intro") and one-letter titles only join on the same album. Each song gets
+its own status: `released`, `unreleased`, `probablyUnreleased`, or
+`probablyAlternate` for a song on a probably unreleased album whose title a
+released song has. That is still unreleased.
+
+Tracks on album, artist (Popular), playlist and search pages carry
+`otherVersions?` (other versions, leaving out fan and AI edits unless shown
+and copies on another server) and `songStatus?`.
+
+`VersionItem = { track, status, version?, quality?, date?, era?, edition?, year?, current }`,
+released versions first, then the newest by `ARCHIVE_DATE` or album year.
+
+`search` shows one row per song. A song with other versions shows as its
+released version when it has one, whatever ranked first, and the rest go in
+`versions` under that song's id. The top result follows the same rule.
+
+`artist_page` sections follow the release status: unreleased albums go to
+`unreleased` (with `demos` split out when an artist has both demos and other
+unreleased material), and albums moved to the user's own sections come last
+with `custom` set to the name. `eras: Era[]` lists the artist's eras, oldest
+first:
+`Era = { name, start?, end?, trackCount, albumCount, cover?, coverAlbumId?, albumIds, trackIds }`.
+Dates come from `ARCHIVE_DATE`, else the album years.
+
+`EraPage = { artist, era, groups: { album, date?, edition?, tracks }[] }`,
+newest build first. `album_page` adds `archive?: { era?, date?, edition?, source? }`
+for unreleased albums with archive tags.
 
 ## Sharing
 | Command | Args | Returns |

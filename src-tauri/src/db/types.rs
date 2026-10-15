@@ -179,6 +179,10 @@ pub enum AlbumSort {
 pub struct ArtistSection {
     pub section: ReleaseSection,
     pub albums: Vec<Album>,
+    /// A section of the user's own, by name (`section` is then Albums and
+    /// means nothing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -201,6 +205,9 @@ pub struct ArtistPage {
     /// rather than plays order that reshuffles when the list lands.
     #[serde(default)]
     pub popular_pending: bool,
+    /// The artist's eras (ARCHIVE_ERA), oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub eras: Vec<crate::archive::eras::Era>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -218,6 +225,9 @@ pub struct AlbumPage {
     pub released: Option<String>,
     #[serde(default)]
     pub studio: Option<String>,
+    /// Era, date, edition and source for an unreleased build's banner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive: Option<crate::archive::eras::AlbumArchive>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -283,4 +293,8 @@ pub struct SearchResults {
     pub playlists: Vec<Playlist>,
     pub took_ms: f64,
     pub source: SearchSource,
+    /// Other versions of the songs in `songs`, under the song's id
+    /// (`archive::versions::group_search`).
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub versions: std::collections::HashMap<String, Vec<Track>>,
 }

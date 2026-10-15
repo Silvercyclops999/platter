@@ -1113,7 +1113,7 @@ pub fn album_subject(c: &Connection, id: &str) -> AppResult<Option<AlbumSubject>
     let Some((title, artist, format, subformats, version, matched, studio, mb)) = row else { return Ok(None) };
     let subformats: Vec<String> = subformats.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let unreleased =
-        crate::db::release::is_unreleased(format.as_deref(), &subformats, matched, studio.as_deref(), version.as_deref(), mb);
+        crate::db::release::album_unreleased(id, format.as_deref(), &subformats, matched, studio.as_deref(), version.as_deref(), mb);
     let mut stmt = c.prepare_cached(
         "SELECT id, title, disc_number, track_number FROM tracks WHERE album_id = ?1 ORDER BY disc_number, track_number",
     )?;

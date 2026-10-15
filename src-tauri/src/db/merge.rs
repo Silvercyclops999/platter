@@ -199,7 +199,7 @@ impl ViewFilter {
         for a in extra.into_iter().filter(|a| self.shows(&a.id) && seen.insert(a.id.clone())) {
             match page.sections.iter_mut().find(|s| s.section == a.section) {
                 Some(s) => s.albums.push(a),
-                None => page.sections.push(super::types::ArtistSection { section: a.section, albums: vec![a] }),
+                None => page.sections.push(super::types::ArtistSection { section: a.section, albums: vec![a], custom: None }),
             }
         }
         let order = |s: &crate::model::ReleaseSection| super::release::SECTION_ORDER.iter().position(|x| x == s).unwrap_or(usize::MAX);

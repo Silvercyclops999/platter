@@ -623,7 +623,7 @@ impl EditHooks for AppEditHooks {
                     .optional()?;
                 Ok(row.map(|(format, subs, version, studio, matched, mb)| {
                     let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
-                    crate::db::release::is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb)
+                    crate::db::release::album_unreleased(&id, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb)
                 }))
             })
             .await

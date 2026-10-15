@@ -229,6 +229,9 @@ pub fn track(id: &str, title: &str, album: &Album, disc: u32, n: u32) -> Track {
         view_count: 0,
         last_viewed_at: None,
         rating_count: None,
+        file: None,
+        other_versions: None,
+        song_status: None,
         rated_at: None,
         genres: Vec::new(),
     }

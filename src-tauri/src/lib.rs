@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod artistinfo;
 pub mod audio;
 pub mod bookmarks;
@@ -247,6 +248,48 @@ fn marks_library_dirty(ev: &PlexEvent, music_section: Option<&str>) -> bool {
     }
 }
 
+/// Release status marks and artist page sections another device changed:
+/// load the marks again, work statuses out again and tell the pages.
+fn follow_archive(app: tauri::AppHandle, store: &sync::SyncStore, db: DbHandle) {
+    use tauri::Emitter;
+    let mut rx = store.subscribe();
+    let store = store.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let c = match rx.recv().await {
+                Ok(c) if c.remote => c,
+                Ok(_) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => sync::Changed {
+                    namespaces: sync::store::NAMESPACES.iter().map(|s| s.to_string()).collect(),
+                    remote: true,
+                },
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            let has = |ns: &str| c.namespaces.iter().any(|n| n == ns);
+            if has(sync::store::RELEASE_MARKS.name()) {
+                let s = store.clone();
+                if let Err(e) = s.run(archive::marks::load).await {
+                    tracing::warn!("release marks not loaded: {e}");
+                }
+                let res = db
+                    .write_async(|c| {
+                        archive::in_tx(c, |c| {
+                            crate::identity::index::rebuild(c)?;
+                            archive::refresh_all(c)
+                        })
+                    })
+                    .await;
+                if let Err(e) = res {
+                    tracing::warn!("archive refresh failed: {e}");
+                }
+            }
+            if has(sync::store::RELEASE_MARKS.name()) || has(sync::store::ALBUM_SECTIONS.name()) {
+                let _ = app.emit("archive://changed", serde_json::json!({}));
+            }
+        }
+    });
+}
+
 /// Hidden items, bookmarks and Platter smart playlists another device
 /// changed (through the sync file): read them again and tell the UI.
 fn follow_sync_store(store: &sync::SyncStore, hidden: hidden::Hidden, bookmarks: bookmarks::Bookmarks, smart: smart::Smart) {
@@ -412,6 +455,11 @@ pub fn run() {
             mix_service.set_options(initial.mix_options());
             // App-only state that can travel in the sync file (sync::).
             let sync_store = sync::SyncStore::new(db.clone(), plex.identity().client_id.clone());
+            // Release status marks feed the unreleased rule from the start.
+            if let Err(e) = archive::marks::load(&sync_store) {
+                tracing::warn!("release marks not loaded: {e}");
+            }
+            follow_archive(app.handle().clone(), &sync_store, db.clone());
             // Hidden songs and artists: mixes, radio, autoplay and shuffle skip them.
             let hidden = hidden::Hidden::new(
                 Arc::new(hidden::SyncHidden(sync_store.clone())),
@@ -1006,6 +1054,11 @@ pub fn run() {
             artistinfo::commands::artist_info,
             artistinfo::commands::album_credits,
             artistinfo::commands::album_release_status,
+            archive::commands::release_mark_set,
+            archive::commands::track_versions,
+            archive::commands::era_page,
+            archive::commands::album_section_set,
+            archive::commands::artist_sections,
             feed::commands::feed_status,
             feed::deck::commands::deck_status,
             feed::deck::commands::deck_revoke,

@@ -283,7 +283,18 @@ impl TagScanner {
             // ISRCs, recording ids and versions feed the song index: redo
             // the rows of just these songs' artists (after album_tags, whose
             // versions decide release status).
-            if let Err(e) = self.0.db.write_async(move |c| crate::identity::index::refresh_for_tracks(c, &read_ids)).await {
+            // Then release status, versions and eras for the same artists.
+            let refreshed = self
+                .0
+                .db
+                .write_async(move |c| {
+                    crate::archive::in_tx(c, |c| {
+                        crate::identity::index::refresh_for_tracks(c, &read_ids)?;
+                        crate::archive::refresh_for_tracks(c, &read_ids)
+                    })
+                })
+                .await;
+            if let Err(e) = refreshed {
                 tracing::warn!("song index refresh failed: {e}");
             }
         }

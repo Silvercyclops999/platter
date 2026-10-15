@@ -526,7 +526,18 @@ pub struct Settings {
     pub allow_stream_deck: bool,
     /// Library import sources turned on (ids from `import::sources`).
     pub import_sources: Vec<String>,
+    /// Folder names on a song's path that hint it's unreleased. They only
+    /// add weight to "Why?", never decide on their own.
+    pub archive_folder_keywords: Vec<String>,
+    /// Era cards (ARCHIVE_ERA) on artist pages.
+    pub show_era_cards: bool,
+    /// "+N versions" on song rows that have other versions.
+    pub show_version_counts: bool,
 }
+
+/// Most folder keywords kept, and the longest one.
+pub const FOLDER_KEYWORDS_MAX: usize = 20;
+pub const FOLDER_KEYWORD_LEN_MAX: usize = 40;
 
 /// Longest model name accepted.
 pub const AI_MODEL_MAX: usize = 100;
@@ -705,6 +716,9 @@ impl Default for Settings {
             now_playing_feed_port: crate::feed::DEFAULT_PORT,
             allow_stream_deck: false,
             import_sources: Vec::new(),
+            archive_folder_keywords: crate::db::release::default_folder_keywords(),
+            show_era_cards: true,
+            show_version_counts: true,
         }
     }
 }
@@ -799,6 +813,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "powerKeys",
     "hintKey",
     "importSources",
+    "archiveFolderKeywords",
+    "showEraCards",
+    "showVersionCounts",
 ];
 
 /// Settings kept on this device only.
@@ -1027,6 +1044,9 @@ pub struct SettingsPatch {
     pub now_playing_feed_port: Option<u16>,
     pub allow_stream_deck: Option<bool>,
     pub import_sources: Option<Vec<String>>,
+    pub archive_folder_keywords: Option<Vec<String>>,
+    pub show_era_cards: Option<bool>,
+    pub show_version_counts: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -1227,6 +1247,19 @@ impl Settings {
         if let Some(v) = &p.mix_exclude_albums {
             self.mix_exclude_albums = tidy(v);
         }
+        if let Some(v) = &p.archive_folder_keywords {
+            let v = tidy(v);
+            if v.len() > FOLDER_KEYWORDS_MAX
+                || v.iter().any(|k| k.chars().count() > FOLDER_KEYWORD_LEN_MAX || k.chars().any(|c| c.is_control() || c == '/' || c == '\\'))
+            {
+                return Err(AppError::Invalid(format!(
+                    "Up to {FOLDER_KEYWORDS_MAX} folder names, each a word or two without slashes."
+                )));
+            }
+            self.archive_folder_keywords = v;
+        }
+        set(&mut self.show_era_cards, p.show_era_cards);
+        set(&mut self.show_version_counts, p.show_version_counts);
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -1582,9 +1615,16 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.sync.set(s.sync_config());
     live.discord.set(s.discord());
     db.set_tag_view(s.tag_view());
+    let before = (crate::db::release::count_unmatched(), crate::db::release::use_musicbrainz());
     crate::db::release::set_count_unmatched(s.count_unmatched_unreleased);
     // Stored answers keep counting while offline; only new lookups stop.
     crate::db::release::set_use_musicbrainz(s.check_unmatched_musicbrainz && s.info_musicbrainz);
+    let keywords = crate::db::release::set_folder_keywords(s.archive_folder_keywords.clone());
+    let after = (crate::db::release::count_unmatched(), crate::db::release::use_musicbrainz());
+    // Stored statuses follow what feeds the rule.
+    if keywords || before != after {
+        crate::archive::refresh_soon(db);
+    }
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
         scan.set_enabled(s.read_file_tags);
     }
@@ -2135,6 +2175,40 @@ mod tests {
         s.apply(&SettingsPatch { count_unmatched_unreleased: Some(true), ..Default::default() }).unwrap();
         publish(&s, &live, &db);
         assert!(crate::db::release::count_unmatched());
+    }
+
+    #[test]
+    fn archive_settings_default_validate_and_reach_the_rule() {
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = Settings::default();
+        assert!(s.show_era_cards && s.show_version_counts, "on by default");
+        assert_eq!(s.archive_folder_keywords, ["Unreleased", "Leaks", "Demos", "Sessions", "Snippets"]);
+        for k in ["archiveFolderKeywords", "showEraCards", "showVersionCounts"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        s.apply(&SettingsPatch {
+            archive_folder_keywords: Some(vec![" Vault ".into(), "vault".into(), "".into(), "Bounces".into()]),
+            show_era_cards: Some(false),
+            show_version_counts: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(s.archive_folder_keywords, ["Vault", "Bounces"], "trimmed, once each");
+        assert!(!s.show_era_cards && !s.show_version_counts);
+        publish(&s, &live, &db);
+        assert_eq!(crate::db::release::folder_keywords(), ["Vault", "Bounces"]);
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["showEraCards"], false);
+        assert_eq!(json["archiveFolderKeywords"][0], "Vault");
+        for bad in [vec!["a/b".to_string()], vec!["x".repeat(41)], (0..21).map(|i| format!("k{i}")).collect()] {
+            assert!(s.apply(&SettingsPatch { archive_folder_keywords: Some(bad), ..Default::default() }).is_err());
+        }
+        // An empty list turns the hint off.
+        s.apply(&SettingsPatch { archive_folder_keywords: Some(Vec::new()), ..Default::default() }).unwrap();
+        publish(&s, &live, &db);
+        assert!(crate::db::release::folder_keywords().is_empty());
+        crate::db::release::set_folder_keywords(crate::db::release::default_folder_keywords());
     }
 
     #[test]

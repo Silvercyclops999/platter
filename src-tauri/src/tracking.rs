@@ -405,6 +405,9 @@ mod tests {
             view_count: 0,
             last_viewed_at: None,
             rating_count: None,
+            file: None,
+            other_versions: None,
+            song_status: None,
             rated_at: None,
             genres: Vec::new(),
         }

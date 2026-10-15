@@ -92,6 +92,9 @@ pub fn row_track(r: &Row<'_>) -> rusqlite::Result<Track> {
         rating_count: r.get(20)?,
         rated_at: r.get(21)?,
         genres: json_vec(r.get(22)?),
+        file: None,
+        other_versions: None,
+        song_status: None,
     })
 }
 
@@ -205,9 +208,9 @@ pub fn upsert_tracks_in(tx: &Transaction<'_>, items: &[Track], gen_: i64, src: &
         "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_artist,
            track_number, disc_number, duration_ms, thumb, part_key, codec, container, bitrate,
            bit_depth, sample_rate, user_rating, view_count, last_viewed_at, seen_gen, rating_count,
-           rated_at, genres, src, mbid)
+           rated_at, genres, src, mbid, file)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-           ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+           ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, album_id = excluded.album_id,
            album_title = excluded.album_title, artist_id = excluded.artist_id,
            artist_title = excluded.artist_title, track_artist = excluded.track_artist,
@@ -221,6 +224,7 @@ pub fn upsert_tracks_in(tx: &Transaction<'_>, items: &[Track], gen_: i64, src: &
            rating_count = COALESCE(excluded.rating_count, tracks.rating_count),
            genres = excluded.genres, src = excluded.src,
            mbid = COALESCE(excluded.mbid, tracks.mbid),
+           file = COALESCE(excluded.file, tracks.file),
            -- A like made here that hasn't reached Plex yet wins over Plex.
            user_rating = CASE WHEN EXISTS (SELECT 1 FROM rating_ops o WHERE o.track_id = excluded.id)
                          THEN tracks.user_rating ELSE excluded.user_rating END,
@@ -254,7 +258,8 @@ pub fn upsert_tracks_in(tx: &Transaction<'_>, items: &[Track], gen_: i64, src: &
             t.rated_at,
             serde_json::to_string(&t.genres).unwrap_or_else(|_| "[]".into()),
             src,
-            t.mbid
+            t.mbid,
+            t.file
         ])?;
     }
     Ok(())

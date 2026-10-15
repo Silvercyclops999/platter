@@ -884,6 +884,34 @@ INSERT OR IGNORE INTO stats_dirty
 INSERT OR IGNORE INTO stats_dirty
     SELECT DISTINCT CAST(julianday(date(played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER) FROM imported_plays;
 "#,
+    // v29: the archive (archive::). Tracks keep their file's path on the
+    // server (folder name hints; the next sync runs as a full pass to fill
+    // it). album_status holds each album's release status with the evidence
+    // behind it (JSON) and its weight. versions puts every song in a group
+    // with its other versions (group_key), with the song's own release
+    // status and, for a probable alternate, the released song it's like.
+    // Both are rebuilt after syncs, tag scans and marks.
+    r#"
+ALTER TABLE tracks ADD COLUMN file TEXT;
+CREATE TABLE IF NOT EXISTS album_status (
+    album_id  TEXT PRIMARY KEY,
+    artist_id TEXT NOT NULL,
+    status    TEXT NOT NULL,
+    evidence  TEXT NOT NULL DEFAULT '[]',
+    score     INTEGER NOT NULL DEFAULT 0
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS album_status_artist ON album_status (artist_id);
+CREATE TABLE IF NOT EXISTS versions (
+    track_id  TEXT PRIMARY KEY,
+    group_key TEXT NOT NULL,
+    artist_id TEXT NOT NULL,
+    status    TEXT NOT NULL,
+    alt_of    TEXT
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS versions_group ON versions (group_key);
+CREATE INDEX IF NOT EXISTS versions_artist ON versions (artist_id);
+UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
 ];
 
 #[cfg(test)]

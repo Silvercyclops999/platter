@@ -247,6 +247,7 @@ async fn sync_extra_libraries(db: &DbHandle, main_tag: Option<&str>, full: bool,
             }
             super::merge::rebuild(&tx)?;
             crate::identity::index::rebuild(&tx)?;
+            crate::archive::refresh_all(&tx)?;
             tx.commit()?;
             Ok(dropped)
         })
