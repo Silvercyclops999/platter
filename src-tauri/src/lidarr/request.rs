@@ -121,6 +121,15 @@ pub struct MissingItem {
     pub year: Option<i32>,
     /// A request made for it, if any.
     pub request: Option<RequestState>,
+    /// Its front cover from the Cover Art Archive, small, as an art path.
+    pub thumb: Option<String>,
+}
+
+/// The art path of a release group's small front cover (the Cover Art
+/// Archive answers 404 when it has none, and the card keeps its placeholder).
+pub fn cover_thumb(rgid: &str) -> Option<String> {
+    crate::artistinfo::is_mbid(rgid)
+        .then(|| format!("{}https://coverartarchive.org/release-group/{}/front-250", crate::artistinfo::art::EXT_PREFIX, rgid.to_ascii_lowercase()))
 }
 
 /// The folded way a typed name is compared.
@@ -560,6 +569,7 @@ impl Lidarr {
                 request: records.iter().find(|r| r.release_group_id == g.id).map(|r| r.state),
                 year: g.first_release.get(..4).and_then(|y| y.parse().ok()),
                 kind: g.primary.clone().unwrap_or_default(),
+                thumb: cover_thumb(&g.id),
                 release_group_id: g.id,
                 title: g.title,
             })

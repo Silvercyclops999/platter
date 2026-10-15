@@ -1,7 +1,8 @@
 import { Ellipsis, Pause, Pin, PinOff, Play, Shuffle } from "lucide-react";
-import { useEffect, useId, useState, type RefObject } from "react";
+import { Suspense, lazy, useEffect, useId, useState, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
+import { CardSkeleton } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { shareItem } from "../components/ShareMenu";
 import { plexEditItem } from "../components/PlexEditMenu";
@@ -23,7 +24,10 @@ import { nav } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
-import { MissingReleaseCard, missingFor, useMissingReleases } from "./LidarrRequest";
+import { missingFor, useMissingReleases } from "./lidarrShared";
+
+/** Cards for releases the library lacks (and their request dialog), loaded once an artist has some. */
+const MissingReleaseCard = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.MissingReleaseCard })));
 import {
   POPULAR_FIRST,
   POPULAR_MORE,
@@ -383,7 +387,9 @@ function Discography({ id, sections, artist }: { id: string; sections: ArtistPag
         {artist &&
           missingFor(missing.items, filter).map((item) => (
             <ShelfItem key={`missing-${item.releaseGroupId}`}>
-              <MissingReleaseCard item={item} artist={artist} artistId={id} onChanged={missing.reload} />
+              <Suspense fallback={<CardSkeleton />}>
+                <MissingReleaseCard item={item} artist={artist} artistId={id} onChanged={missing.reload} />
+              </Suspense>
             </ShelfItem>
           ))}
       </Shelf>

@@ -1621,6 +1621,8 @@ export interface LidarrStatus {
   headerNames: string[];
   /** Addresses that would send the key unencrypted over the internet. */
   unencrypted: string[];
+  /** Set up, with a key, and the last setup check passed: Request shows. */
+  ready: boolean;
 }
 
 export type LidarrLevel = "red" | "amber" | "ok";
@@ -1709,6 +1711,34 @@ export interface LidarrMissingItem {
   kind: string;
   year: number | null;
   request: LidarrRequestState | null;
+  /** The small front cover from the Cover Art Archive, as an art path. */
+  thumb: string | null;
+}
+
+/** A MusicBrainz release group Lidarr could be asked for. */
+export interface LidarrGroup {
+  id: string;
+  title: string;
+  primary: string | null;
+  secondary: string[];
+  firstRelease: string;
+}
+
+/** `lidarr_pick`: the release group to request for an album or song, or why there's none. */
+export interface LidarrPicked {
+  group: LidarrGroup | null;
+  artist: string;
+  refusal: { kind: string } | null;
+  reason: string | null;
+}
+
+export interface LidarrPickInput {
+  artist: string;
+  artistId?: string | null;
+  title: string;
+  /** A song (its album is picked) rather than an album. */
+  song: boolean;
+  isrc?: string | null;
 }
 
 /** `lidarr_missing_releases`: for the artist page. */

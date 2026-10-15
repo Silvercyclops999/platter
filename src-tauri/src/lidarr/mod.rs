@@ -145,6 +145,9 @@ pub struct LidarrStatus {
     pub header_names: Vec<String>,
     /// Addresses that would send the key unencrypted over the internet.
     pub unencrypted: Vec<String>,
+    /// Set up, with a key, and the last setup check for this address passed:
+    /// Request buttons show (each request still checks again first).
+    pub ready: bool,
 }
 
 #[derive(Clone)]
@@ -223,10 +226,13 @@ impl Lidarr {
 
     pub fn status(&self) -> LidarrStatus {
         let (home, away) = self.urls();
+        let has_key = self.inner.keys.get(KEY_ACCOUNT).ok().flatten().is_some();
+        let set = !home.trim().is_empty() || !away.trim().is_empty();
         LidarrStatus {
             url_set: !home.trim().is_empty(),
             away_set: !away.trim().is_empty(),
-            has_key: self.inner.keys.get(KEY_ACCOUNT).ok().flatten().is_some(),
+            has_key,
+            ready: set && has_key && self.last_check().is_some_and(|l| l.passed),
             header_names: self.headers().into_iter().map(|(n, _)| n).collect(),
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
         }

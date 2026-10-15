@@ -2,6 +2,8 @@ import type {
   AppError,
   LidarrFinding,
   LidarrMissing,
+  LidarrPickInput,
+  LidarrPicked,
   LidarrPreview,
   LidarrReport,
   LidarrRequest,
@@ -28,6 +30,22 @@ const MISSING_BY_DEFAULT = [
   { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000002", title: "Low Tide EP", kind: "ep", year: 2017 },
   { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000003", title: "Northern Rooms", kind: "album", year: 2022 },
 ];
+/** The small cover path the core gives a release group (null: the archive has none). */
+export const coverThumb = (rgid: string) => `/ext/https://coverartarchive.org/release-group/${rgid}/front-250`;
+
+/**
+ * Mock MusicBrainz for songs on the Missing list: the album each comes from,
+ * by folded title. Glass Orchard only exists as a bootleg.
+ */
+const SONG_ALBUMS: Record<string, { id: string; title: string; year: string } | "bootleg"> = {
+  "paper boats": { id: "7a2d0c55-0000-4000-8000-000000000011", title: "Low Water", year: "2016" },
+  undertow: { id: "7a2d0c55-0000-4000-8000-000000000011", title: "Low Water", year: "2016" },
+  "neon driveway": { id: "7a2d0c55-0000-4000-8000-000000000012", title: "Night Errands", year: "2019" },
+  "thin ice waltz": { id: "7a2d0c55-0000-4000-8000-000000000013", title: "Winter Rooms", year: "2012" },
+  "field notes": { id: "7a2d0c55-0000-4000-8000-000000000014", title: "Field Notes", year: "2020" },
+  "glass orchard": "bootleg",
+};
+
 export const isLidarrDemo = (v: string | null): v is LidarrDemo => !!v && (LIDARR_DEMOS as string[]).includes(v);
 
 const invalid = (message: string): AppError => ({ kind: "invalid", message });
@@ -130,8 +148,32 @@ export class MockLidarr {
     if (!s.showMissingReleases || !this.setUp(s) || !this.lastPassed) return { shown: false, items: [] };
     return {
       shown: true,
-      items: MISSING_BY_DEFAULT.map((m) => ({ ...m, request: this.requests.find((r) => r.releaseGroupId === m.releaseGroupId)?.state ?? null })),
+      items: MISSING_BY_DEFAULT.map((m) => ({
+        ...m,
+        request: this.requests.find((r) => r.releaseGroupId === m.releaseGroupId)?.state ?? null,
+        // The EP has no cover in the archive: its card keeps the placeholder.
+        thumb: m.kind === "ep" ? null : coverThumb(m.releaseGroupId),
+      })),
     };
+  }
+
+  /** The release group to request for a song or album (official ones only), or why there's none. */
+  pick(s: Settings, input: LidarrPickInput): LidarrPicked {
+    if (!this.setUp(s)) throw invalid("Set up Lidarr in Settings first.");
+    const key = input.title.trim().replace(/\s+/g, " ").toLowerCase();
+    const hit = input.song ? SONG_ALBUMS[key] : Object.values(SONG_ALBUMS).find((g) => g !== "bootleg" && g.title.toLowerCase() === key);
+    if (hit === "bootleg") {
+      return {
+        group: null,
+        artist: input.artist,
+        refusal: { kind: "notOfficial" },
+        reason: "MusicBrainz lists this only as a bootleg or promo, not an official release. Platter never asks Lidarr for those.",
+      };
+    }
+    if (!hit) {
+      return { group: null, artist: input.artist, refusal: { kind: "notFound" }, reason: "MusicBrainz doesn't have an official release for this, so Lidarr can't get it." };
+    }
+    return { group: { id: hit.id, title: hit.title, primary: "album", secondary: [], firstRelease: hit.year }, artist: input.artist, refusal: null, reason: null };
   }
 
   private destination(artist: string) {
@@ -208,6 +250,7 @@ export class MockLidarr {
       hasKey: this.hasKey,
       headerNames: this.headers.map(([n]) => n),
       unencrypted: [s.lidarrUrl, s.lidarrAwayUrl].filter((u) => u && unencrypted(u)),
+      ready: this.setUp(s) && this.lastPassed,
     };
   }
 

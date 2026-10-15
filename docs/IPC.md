@@ -1196,7 +1196,7 @@ Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` setting
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `lidarr_status` | – | `{ urlSet, awaySet, hasKey, headerNames: string[], unencrypted: string[] }` |
+| `lidarr_status` | – | `{ urlSet, awaySet, hasKey, headerNames: string[], unencrypted: string[], ready }`; `ready` is true when Lidarr is set up with a key and its last check for this address passed |
 | `lidarr_key_set` | `{ key: string \| null }` | the same, after saving or removing the key |
 | `lidarr_headers_set` | `{ text: string \| null }` (`Name: value` lines; blank removes) | the same; `invalid` for a bad line, a reserved header or more than 5 |
 | `lidarr_check` | – | `LidarrReport`, or `network` (unreachable), `auth` (key refused), `invalid` (too old, not Lidarr, not set up), `decode` |
@@ -1206,7 +1206,7 @@ Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` setting
 | `lidarr_request` | `{ input: LidarrRequestInput }` | `LidarrRequest`. Kept waiting (`state: "queued"`) when Lidarr can't be reached; the first request ever needs `typed` to be the album's name |
 | `lidarr_requests` | `{ refresh: boolean }` | `LidarrRequest[]`, newest first; `refresh` reads their state from Lidarr's queue and history |
 | `lidarr_request_cancel` | `{ id }` | `LidarrRequest[]`; only waiting or finished requests, else `invalid` |
-| `lidarr_missing_releases` | `{ artistId, artist }` | `{ shown, items: { releaseGroupId, title, kind: "album"\|"ep", year, request }[] }`; `shown` is false unless the setting is on, Lidarr is set up and its last check passed |
+| `lidarr_missing_releases` | `{ artistId, artist }` | `{ shown, items: { releaseGroupId, title, kind: "album"\|"ep", year, request, thumb }[] }`; `thumb` is the small front cover as an art path (`/ext/https://coverartarchive.org/release-group/<id>/front-250`), which fails to load when the archive has none; `shown` is false unless the setting is on, Lidarr is set up and its last check passed |
 
 `LidarrReport = { version, findings: { id, level: "red"|"amber"|"ok", title, detail, fix: string|null, emptyRoot: { path, confirmed }|null }[], passed, checkedAt, route: "home"|"away"|null }`.
 Findings come red first, then amber, then OK. `passed` is false while any finding is red.

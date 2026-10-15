@@ -29,6 +29,7 @@
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
+  LidarrPickInput,
   LidarrRequestInput,
   CachedLibrary,
   ListenOp,
@@ -2637,6 +2638,9 @@ export class MockBackend implements Backend {
   lidarrRequestCancel(id: string) {
     return this.delay(() => this.lidarr.cancel(id));
   }
+  lidarrPick(input: LidarrPickInput) {
+    return this.delay(() => this.lidarr.pick(this.settings, input));
+  }
   lidarrMissingReleases(artistId: string, _artist: string) {
     return this.delay(() => this.lidarr.missing(this.settings, artistId));
   }
@@ -2669,6 +2673,9 @@ export class MockBackend implements Backend {
       if (!importLinkAllowed(url)) throw { kind: "invalid", message: "link not allowed" };
       this.importLinksOpened.push(url);
     });
+  }
+  importListRemove(listId: string, songId: number) {
+    return this.delay(() => this.importMock.removeFromList(listId, songId));
   }
   importForget(source: ImportSourceId) {
     return this.delay(() => this.importMock.forget(source));

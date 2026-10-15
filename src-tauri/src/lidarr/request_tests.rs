@@ -490,7 +490,9 @@ async fn missing_releases_need_the_setting_and_a_green_check() {
     let r = rig();
     // No check yet: hidden.
     assert!(!r.lidarr.missing_releases("ar1", "Northlight").await.unwrap().shown);
+    assert!(!r.lidarr.status().ready, "Request stays off before a green check");
     r.lidarr.check().await.unwrap();
+    assert!(r.lidarr.status().ready);
     let m = r.lidarr.missing_releases("ar1", "Northlight").await.unwrap();
     assert!(m.shown);
     let titles: Vec<&str> = m.items.iter().map(|i| i.title.as_str()).collect();
@@ -498,6 +500,13 @@ async fn missing_releases_need_the_setting_and_a_green_check() {
     assert_eq!(titles, vec!["Tides", "Small Hours", "Second Wind"]);
     assert_eq!(m.items[2].year, Some(2021));
     assert_eq!(m.items[1].kind, "ep");
+    // Each has its small cover from the Cover Art Archive, fetched through the art cache.
+    assert_eq!(
+        m.items[2].thumb.as_deref(),
+        Some(format!("/ext/https://coverartarchive.org/release-group/{RG_SECOND}/front-250").as_str())
+    );
+    assert!(m.items.iter().all(|i| crate::artistinfo::art::ext_url(i.thumb.as_deref().unwrap()).is_some()));
+    assert_eq!(super::request::cover_thumb("not an id"), None);
     r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
     let m = r.lidarr.missing_releases("ar1", "Northlight").await.unwrap();
     assert_eq!(m.items[2].request, Some(RequestState::Searching));
@@ -511,6 +520,7 @@ async fn missing_releases_need_the_setting_and_a_green_check() {
     r.web.st.lock().red = true;
     r.lidarr.check().await.unwrap();
     assert!(!r.lidarr.missing_releases("ar1", "Northlight").await.unwrap().shown);
+    assert!(!r.lidarr.status().ready, "a red check turns Request off again");
     assert!(r.mb.count("/release?artist=") >= 1);
 }
 

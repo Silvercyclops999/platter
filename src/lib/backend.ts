@@ -100,6 +100,8 @@ import type {
   ListenOp,
   AiStatus,
   LidarrMissing,
+  LidarrPickInput,
+  LidarrPicked,
   LidarrPreview,
   LidarrReport,
   LidarrRequest,
@@ -535,6 +537,8 @@ export interface Backend {
   lidarrCheck(): Promise<LidarrReport>;
   /** Say an empty Lidarr root folder is (or isn't) separate from the Plex music folder. */
   lidarrConfirmRoot(path: string, confirmed: boolean): Promise<void>;
+  /** Which official release group to request for an album, or the album a song comes from (MusicBrainz), or why there's none. */
+  lidarrPick(input: LidarrPickInput): Promise<LidarrPicked>;
   /** What a Lidarr request will do and where its files will land. Runs the full check; reads only. */
   lidarrRequestPreview(input: LidarrRequestInput): Promise<LidarrPreview>;
   /** Send a request to Lidarr (or keep it waiting when Lidarr can't be reached). */
@@ -560,6 +564,8 @@ export interface Backend {
   importOpenLink(url: string): Promise<void>;
   /** Forget everything imported from a source. */
   importForget(source: ImportSourceId): Promise<void>;
+  /** Take one song out of an imported list. */
+  importListRemove(listId: string, songId: number): Promise<void>;
 
   // Miniplayer window
   miniplayerState(): Promise<MiniplayerState>;
@@ -834,6 +840,8 @@ export function createTauriBackend(): Backend {
     importMissing: () => call("import_missing"),
     importOpenLink: (url) => call("import_open_link", { url }),
     importForget: (source) => call("import_forget", { source }),
+    importListRemove: (listId, songId) => call("import_list_remove", { listId, songId }),
+    lidarrPick: ({ artist, artistId, title, song, isrc }) => call("lidarr_pick", { artist, artistId: artistId ?? null, title, song, isrc: isrc ?? null }),
     lidarrRequestPreview: (input) => call("lidarr_request_preview", { input }),
     lidarrRequest: (input) => call("lidarr_request", { input }),
     lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),

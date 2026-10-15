@@ -7,12 +7,15 @@
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { ArtistPage } from "../pages/ArtistPage";
-import { missingFor } from "../pages/LidarrRequest";
+import { missingFor } from "../pages/lidarrShared";
+import { MissingReleaseCard } from "../pages/LidarrRequest";
+import { ImportPage } from "../pages/ImportPage";
+import { coverThumb } from "../lib/mock/lidarr";
 import { SettingsPage } from "../pages/SettingsPage";
 import { useApp } from "../stores/app";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -49,6 +52,24 @@ describe("missing official releases on the artist page", () => {
     expect(screen.queryByLabelText("Low Tide EP, not in your library")).toBeNull();
   });
 
+  it("shows each release's real cover, dimmed, from the cover archive through the art cache", async () => {
+    await setUp("ready");
+    const art = vi.spyOn(mock, "artUrl");
+    render(<ArtistPage id={artist().id} />);
+    const paper = await screen.findByLabelText("Paper Lanterns, not in your library");
+    expect(paper.querySelector(".missing-release__art img, .missing-release__art .art__skeleton")).not.toBeNull();
+    const asked = art.mock.calls.map((c) => c[0]);
+    expect(asked).toContain(coverThumb("6f1c0c55-0000-4000-8000-000000000001"));
+    expect(asked.every((p) => !p.startsWith("http"))).toBe(true);
+  });
+
+  it("keeps the placeholder for a release with no cover", () => {
+    render(<MissingReleaseCard item={{ releaseGroupId: "x", title: "Low Tide EP", kind: "ep", year: 2017, request: null, thumb: null }} artist="A" artistId="1" onChanged={() => {}} />);
+    const card = screen.getByLabelText("Low Tide EP, not in your library");
+    expect(card.querySelector(".art__fallback")).not.toBeNull();
+    expect(card.querySelector("img")).toBeNull();
+  });
+
   it("stays hidden with the setting off, without Lidarr, or before a green check", async () => {
     await setUp("ready", { showMissingReleases: false });
     const { unmount } = render(<ArtistPage id={artist().id} />);
@@ -74,8 +95,8 @@ describe("missing official releases on the artist page", () => {
 
   it("filters by the discography chip", () => {
     const items = [
-      { releaseGroupId: "a", title: "A", kind: "album", year: 1, request: null },
-      { releaseGroupId: "e", title: "E", kind: "ep", year: 1, request: null },
+      { releaseGroupId: "a", title: "A", kind: "album", year: 1, request: null, thumb: null },
+      { releaseGroupId: "e", title: "E", kind: "ep", year: 1, request: null, thumb: null },
     ];
     expect(missingFor(items, "popular").map((i) => i.title)).toEqual(["A"]);
     expect(missingFor(items, "albums").map((i) => i.title)).toEqual(["A"]);
@@ -156,5 +177,48 @@ describe("Settings > Lidarr requests", () => {
     expect(document.querySelector('[data-setting="showMissingReleases"]')).not.toBeNull();
     await user.click(within(list).getByRole("button", { name: "Cancel Paper Lanterns" }));
     await screen.findByText(/No requests yet/);
+  });
+});
+
+describe("Request from the Missing list", () => {
+  async function missingPage(demo: "ready" | "demo") {
+    await setUp(demo, { importSources: ["streaming", "transfer"] });
+    mock.importMock.reset();
+    mock.importMock.run("streaming", "my_data.zip");
+    mock.importMock.run("transfer", "library.csv");
+    render(<ImportPage view="missing" />);
+    return screen.findByRole("list", { name: "Missing songs" });
+  }
+  const rowFor = (list: HTMLElement, title: string) => within(list).getAllByRole("listitem").find((r) => r.getAttribute("aria-label")?.startsWith(`${title} by`))!;
+
+  it("finds the song's album and goes through the usual preview and confirm", async () => {
+    const user = userEvent.setup();
+    const pick = vi.spyOn(mock, "lidarrPick");
+    const list = await missingPage("ready");
+    const row = rowFor(list, "Paper Boats");
+    await user.click(await within(row).findByRole("button", { name: "Request Paper Boats" }));
+    expect(pick).toHaveBeenCalledWith({ artist: "Harbor Lights", title: "Paper Boats", song: true });
+    const dialog = await screen.findByRole("dialog", { name: "Request Low Water" });
+    await within(dialog).findByText("/downloads/lidarr/Harbor Lights");
+    await user.type(within(dialog).getByRole("textbox"), "Low Water");
+    await user.click(within(dialog).getByRole("button", { name: "Request" }));
+    await within(rowFor(screen.getByRole("list", { name: "Missing songs" }), "Paper Boats")).findByText("Searching");
+    expect(mock.lidarr.requests[0]).toMatchObject({ title: "Low Water", artist: "Harbor Lights", releaseGroupId: "7a2d0c55-0000-4000-8000-000000000011" });
+  });
+
+  it("says why when there's no official release to ask for", async () => {
+    const user = userEvent.setup();
+    const list = await missingPage("ready");
+    await user.click(await within(rowFor(list, "Glass Orchard")).findByRole("button", { name: "Request Glass Orchard" }));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message).join(" ")).toMatch(/bootleg or promo/));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mock.lidarr.requests).toEqual([]);
+  });
+
+  it("has no Request until Lidarr's check is green", async () => {
+    const list = await missingPage("demo");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(within(list).queryByRole("button", { name: /^Request / })).toBeNull();
+    expect(within(rowFor(list, "Paper Boats")).getByRole("button", { name: "Search Bandcamp for Paper Boats" })).toBeInTheDocument();
   });
 });

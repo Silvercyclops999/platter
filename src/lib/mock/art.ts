@@ -15,8 +15,8 @@ export function mockArtUrl(path: string): string {
   const h2 = (h1 + 30 + Math.floor(r() * 120)) % 360;
   const sat = 45 + Math.floor(r() * 35);
   const angle = Math.floor(r() * 360);
-  // Outside-source images (/ext/...) are artist photos and backgrounds.
-  const isArtist = /\/library\/metadata\/1\d\d\//.test(path) || path.startsWith("/ext/");
+  // Outside-source images (/ext/...) are artist photos and backgrounds, except release covers.
+  const isArtist = /\/library\/metadata\/1\d\d\//.test(path) || (path.startsWith("/ext/") && !path.includes("coverartarchive.org"));
   const isPlaylist = path.startsWith("/playlists/");
   const motif = Math.floor(r() * 4);
 

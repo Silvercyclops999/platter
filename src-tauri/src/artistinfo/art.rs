@@ -25,6 +25,9 @@ const ALLOWED_HOSTS: &[&str] = &[
     "assets.plex.tv",
     // Previews of the artwork a server offers for an item.
     "images.plex.tv",
+    // Covers of official releases the library lacks (answered by a redirect
+    // to the archive that holds the image).
+    "coverartarchive.org",
 ];
 
 /// Largest image accepted from a source.
@@ -113,5 +116,28 @@ mod tests {
         assert_eq!(http.urls(), ["https://plex.tv/users/abc/avatar?c=1"]);
         assert!(ext_url("/ext/https://assets.plex.tv/avatars/a.png").is_some());
         assert!(ext_url("/ext/https://other.plex.tv/a.png").is_none());
+    }
+
+    #[tokio::test]
+    async fn release_covers_come_from_the_cover_archive() {
+        let http = Arc::new(FakeHttp::new());
+        http.route_resp(
+            "coverartarchive.org",
+            HttpResponse { status: 200, body: vec![0xFF, 0xD8, 0xFF, 0xE0].into(), ..Default::default() },
+        );
+        let art = RoutedArt { plex: Arc::new(PlexOnly), http: http.clone() };
+        let path = "/ext/https://coverartarchive.org/release-group/6f1c0c55-0000-4000-8000-000000000001/front-250";
+        assert_eq!(art.fetch(path, 200, 200).await.unwrap().content_type, "image/jpeg");
+        assert!(ext_url("/ext/http://coverartarchive.org/release-group/x/front-250").is_none());
+        assert!(ext_url("/ext/https://coverartarchive.org.evil.example/x").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_release_with_no_cover_is_not_found() {
+        let http = Arc::new(FakeHttp::new());
+        http.route_resp("coverartarchive.org", HttpResponse { status: 404, ..Default::default() });
+        let art = RoutedArt { plex: Arc::new(PlexOnly), http };
+        let err = art.fetch("/ext/https://coverartarchive.org/release-group/x/front-250", 200, 200).await.unwrap_err();
+        assert!(matches!(err, AppError::NotFound(_)));
     }
 }

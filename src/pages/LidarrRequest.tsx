@@ -1,61 +1,18 @@
 import { CircleAlert, Clock, Download } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
-import type { AppError, LidarrMissing, LidarrMissingItem, LidarrPreview, LidarrRequest, LidarrRequestInput, LidarrRequestState } from "../lib/types";
-import { useSettings } from "../stores/settings";
+import type { AppError, LidarrMissingItem, LidarrPreview, LidarrRequest, LidarrRequestInput } from "../lib/types";
+import { STATE_LABEL } from "./lidarrShared";
 import { toast } from "../stores/toasts";
 import "./lidarr-request.css";
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
-export const STATE_LABEL: Record<LidarrRequestState, string> = {
-  queued: "Waiting to send",
-  requested: "Requested",
-  searching: "Searching",
-  downloading: "Downloading",
-  imported: "Imported",
-  failed: "Failed",
-};
-
 const KIND_LABEL: Record<string, string> = { album: "Album", ep: "EP" };
-
-/**
- * An artist's official releases the library lacks (from MusicBrainz). Empty
- * unless the setting is on, Lidarr is set up and its last check passed.
- */
-export function useMissingReleases(artistId: string, artist: string | undefined) {
-  const on = useSettings((s) => s.settings?.showMissingReleases !== false);
-  const home = useSettings((s) => s.settings?.lidarrUrl);
-  const away = useSettings((s) => s.settings?.lidarrAwayUrl);
-  const [missing, setMissing] = useState<LidarrMissing | null>(null);
-  const load = useCallback(() => {
-    if (!artist || !on || !(home || away)) {
-      setMissing(null);
-      return () => {};
-    }
-    let alive = true;
-    backend.lidarrMissingReleases(artistId, artist).then(
-      (m) => alive && setMissing(m),
-      () => alive && setMissing(null),
-    );
-    return () => {
-      alive = false;
-    };
-  }, [artistId, artist, on, home, away]);
-  useEffect(load, [load]);
-  return { items: missing?.shown ? missing.items : [], reload: load };
-}
-
-/** The missing releases a discography filter shows: albums under Albums, EPs under Singles and EPs. */
-export function missingFor(items: LidarrMissingItem[], filter: string): LidarrMissingItem[] {
-  if (filter === "popular" || filter === "albums") return items.filter((i) => i.kind === "album");
-  if (filter === "singlesEps") return items.filter((i) => i.kind === "ep");
-  return [];
-}
 
 /** A dimmed card for a release the library lacks, with Request (or where its request stands). */
 export function MissingReleaseCard({
@@ -74,7 +31,7 @@ export function MissingReleaseCard({
   return (
     <div className="card card--album missing-release" aria-label={`${item.title}, not in your library`}>
       <div className="card__art missing-release__art">
-        <Art path={null} fluid kind="album" />
+        <Art path={item.thumb} fluid kind="album" />
       </div>
       <span className="card__title missing-release__title truncate">{item.title}</span>
       <span className="card__subtitle missing-release__sub">
