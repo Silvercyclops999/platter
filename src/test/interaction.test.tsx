@@ -169,6 +169,40 @@ describe("cards", () => {
     expect(route()).toEqual({ name: "album", id: album.id });
   });
 
+  it("a double-click on a card opens the album and plays nothing", async () => {
+    const spy = vi.spyOn(backend, "playContext");
+    const album = mock.fx.albums.find((a) => (mock.fx.tracksByAlbum.get(a.id)?.length ?? 0) >= 2)!;
+    render(
+      <>
+        <AlbumCard album={album} />
+        <MainView />
+      </>,
+    );
+    // First click opens the album page.
+    const link = screen.getByRole("button", { name: album.title });
+    fireEvent.mouseDown(link, { detail: 1 });
+    fireEvent.mouseUp(link, { detail: 1 });
+    fireEvent.click(link, { detail: 1 });
+    expect(route()).toEqual({ name: "album", id: album.id });
+    const first = mock.fx.tracksByAlbum.get(album.id)![0];
+    const row = await waitFor(() => {
+      const r = document.querySelector<HTMLElement>(`.track-row[data-track-id="${first.id}"]`);
+      expect(r).not.toBeNull();
+      return r!;
+    });
+    // The second click lands on a song row of the page that just opened.
+    fireEvent.mouseDown(row, { detail: 2 });
+    fireEvent.mouseUp(row, { detail: 2 });
+    fireEvent.click(row, { detail: 2 });
+    fireEvent.doubleClick(row, { detail: 2 });
+    expect(spy).not.toHaveBeenCalled();
+    // A real double-click on the row still plays it.
+    fireEvent.mouseDown(row, { detail: 1 });
+    fireEvent.mouseDown(row, { detail: 2 });
+    fireEvent.doubleClick(row, { detail: 2 });
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ context: { kind: "album", id: album.id }, startTrackId: first.id }));
+  });
+
   it("the playing album's card shows Pause, and its menu has Add to queue", async () => {
     const user = userEvent.setup();
     const album = mock.fx.albums[0];

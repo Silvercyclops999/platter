@@ -40,6 +40,7 @@ import { shareItem } from "./ShareMenu";
 import { sessionItems } from "../stores/social";
 import { bookmarkTrackItem, dontPlayArtistItem } from "../stores/curate";
 import { Skeleton } from "./Skeleton";
+import { useOwnDoubleClick } from "../lib/doubleClick";
 
 /** Whether the album page for `albumId` is the one showing. */
 export function onAlbumPage(albumId: string): boolean {
@@ -368,6 +369,7 @@ export function TrackRow({
     openContextMenu(`Options for ${track.title}`, items, at);
   };
 
+  const dbl = useOwnDoubleClick();
   const onClick = (e: MouseEvent<HTMLDivElement>) => {
     if (!sel || (e.target as HTMLElement).closest("button")) return;
     sel.click(key, e.shiftKey ? "range" : isMod(e) ? "toggle" : "one");
@@ -441,7 +443,10 @@ export function TrackRow({
       }}
       className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${entering ? "is-entering" : ""} ${dimmed ? "is-dimmed" : ""} ${added !== undefined ? "track-row--added" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
       onClick={onClick}
+      onMouseDown={dbl.onMouseDown}
       onDoubleClick={(e) => {
+        // The second click of a card double-click that opened this page.
+        if (dbl.stray()) return;
         if ((e.target as HTMLElement).closest("button")) return;
         onPlay();
       }}

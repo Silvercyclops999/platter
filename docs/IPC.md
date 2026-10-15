@@ -1280,10 +1280,15 @@ context that isn't playing. `play_context` without `shuffle` uses that
 context's stored value; passing `shuffle` sets it.
 
 Queue rules the core applies:
-- Without `startTrackId`, a context starts at its resume point (the track and
-  position it was left at) when shuffle is off, at track 1 if it was never
-  played, and on a random track when shuffle is on. Resume points and shuffle
-  values are saved with the queue, for the 200 most recently used contexts.
+- Without `startTrackId`, an album or playlist (Liked Songs and mixes too)
+  starts at its resume point (the track and position it was left at) when
+  shuffle is off, at track 1 if it was never played, and on a random track
+  when shuffle is on. A point expires an hour after the context was last
+  listened to, and is cleared when its last song plays to the end (pausing
+  near the end keeps it). Shuffled listening leaves the point alone. Starting
+  a chosen track moves the point there. Artists, radio and search results
+  never resume. Resume points and shuffle values are saved with the queue,
+  for the 200 most recently used contexts.
 - `play_previous` within the first 3 s goes to the previous position in the
   context's play order (the shuffled order when shuffled). Queued songs are
   never a target; on a playing queued song it drops that song and goes back
@@ -1382,7 +1387,9 @@ Events:
 `OutputState = { devices: OutputDevice[], selected: string | null, current: OutputDevice | null }`
 `OutputDevice = { id, name, isDefault }`
 
-`id` is the OS's stable device id. `selected` is the chosen device, or null
+`devices` is every output the system reports, in its order: virtual devices
+included, inputs and disconnected devices left out. The device in use is
+always in it. `id` is the OS's stable device id. `selected` is the chosen device, or null
 when playback follows the system default. `current` is the device playing, or
 the one the next play would open. Switching moves the open stream at once and
 keeps the position and play state. The choice is saved as the

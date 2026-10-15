@@ -56,6 +56,27 @@ pub struct ResumePoint {
     pub index: usize,
     pub track_id: String,
     pub position_ms: u64,
+    /// When this context was last listened to (Unix ms). Points saved
+    /// before this was kept have none and count as expired.
+    #[serde(default)]
+    pub listened_at_ms: Option<i64>,
+}
+
+/// A resume point older than this starts its context over.
+pub const RESUME_EXPIRY_MS: i64 = 60 * 60 * 1000;
+
+/// Context kinds that keep a resume point: albums and playlists (Liked Songs
+/// and mixes are playlists too). Artist play always starts at its first top
+/// song; radio, search results and loose tracks start where asked.
+pub fn resumable(kind: ContextKind) -> bool {
+    matches!(kind, ContextKind::Album | ContextKind::Playlist | ContextKind::Liked | ContextKind::Mix)
+}
+
+fn system_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -174,6 +195,9 @@ pub struct Queue {
     /// still recorded, so turning it back on picks up where things were.
     #[serde(skip)]
     ignore_resume: bool,
+    /// Fixed clock for tests (Unix ms); None reads the system clock.
+    #[serde(skip)]
+    clock: Option<i64>,
     #[serde(skip)]
     rng: QRng,
 }
@@ -233,8 +257,23 @@ impl Queue {
         self.ignore_resume = !on;
     }
 
+    /// Sets a fixed clock (Unix ms) for tests; None goes back to the system clock.
+    pub fn set_clock(&mut self, now_ms: Option<i64>) {
+        self.clock = now_ms;
+    }
+
+    fn now_ms(&self) -> i64 {
+        self.clock.unwrap_or_else(system_now_ms)
+    }
+
     fn context_id(&self) -> Option<&str> {
         self.context.as_ref()?.id.as_deref()
+    }
+
+    /// The playing context's id, if it keeps a resume point.
+    fn resumable_id(&self) -> Option<&str> {
+        let c = self.context.as_ref()?;
+        if resumable(c.kind) { c.id.as_deref() } else { None }
     }
 
     fn order_at(&self, p: isize) -> Option<usize> {
@@ -338,42 +377,91 @@ impl Queue {
         }
     }
 
+    fn clear_resume(&mut self, id: &str) {
+        self.resume.retain(|(k, _)| k != id);
+    }
+
     /// Records where the current context is (call on track change, pause
     /// and position saves). While a user-queue entry plays, the context
-    /// would pick up at its next track.
+    /// would pick up at its next track. Only albums and playlists keep a
+    /// point, and only while shuffle is off: shuffled listening leaves the
+    /// unshuffled point as it was. Songs added after the context (autoplay)
+    /// don't count as being in it.
+    ///
+    /// The point's time moves only when the point does, so a context left
+    /// paused keeps the time it was paused at and still expires.
     pub fn note_position(&mut self, position_ms: u64) {
-        let Some(id) = self.context_id().map(str::to_owned) else {
+        if self.shuffle {
+            return;
+        }
+        let Some(id) = self.resumable_id().map(str::to_owned) else {
             return;
         };
         let Some(cur) = self.current.as_ref() else {
             return;
         };
-        let rp = if cur.source == ItemSource::Context {
+        let (index, position_ms) = if cur.source == ItemSource::Context {
             match self.order_at(self.pos) {
-                Some(i) if self.items[i].item_id == cur.item_id => ResumePoint {
-                    index: i,
-                    track_id: cur.track.id.clone(),
-                    position_ms,
-                },
+                Some(i) if self.items[i].item_id == cur.item_id => (i, position_ms),
                 _ => return,
             }
         } else {
-            match self.order_at(self.pos + 1) {
-                Some(i) => ResumePoint {
-                    index: i,
-                    track_id: self.items[i].track.id.clone(),
-                    position_ms: 0,
-                },
+            let from = (self.pos + 1).max(0) as usize;
+            let rest = self.order.get(from..).unwrap_or_default();
+            match rest.iter().copied().find(|&i| self.items[i].source == ItemSource::Context) {
+                Some(i) => (i, 0),
                 None => return,
             }
         };
-        self.store_resume(id, rp);
+        let track_id = self.items[index].track.id.clone();
+        let same = self.resume_point(&id).filter(|rp| {
+            rp.index == index && rp.track_id == track_id && rp.position_ms == position_ms
+        });
+        let listened_at_ms = match same {
+            Some(rp) => rp.listened_at_ms,
+            None => Some(self.now_ms()),
+        };
+        self.store_resume(
+            id,
+            ResumePoint {
+                index,
+                track_id,
+                position_ms,
+                listened_at_ms,
+            },
+        );
     }
 
-    /// Index and position to resume `id` at, if its stored track is still
-    /// in `self.items` (same slot, or else the first slot with that track).
+    /// The last song of the context finished on its own (repeat and
+    /// shuffle off): the next play of it starts over.
+    fn finish_if_last(&mut self) {
+        if self.repeat != Repeat::Off || self.shuffle {
+            return;
+        }
+        let Some(cur) = self.current.as_ref() else {
+            return;
+        };
+        if cur.source != ItemSource::Context
+            || self.order_at(self.pos).is_none_or(|i| self.items[i].item_id != cur.item_id)
+        {
+            return;
+        }
+        let from = (self.pos + 1) as usize;
+        let more = self.order[from..].iter().any(|&i| self.items[i].source == ItemSource::Context);
+        if !more && let Some(id) = self.context_id().map(str::to_owned) {
+            self.clear_resume(&id);
+        }
+    }
+
+    /// Index and position to resume `id` at, if its point hasn't expired
+    /// and its stored track is still in `self.items` (same slot, or else
+    /// the first slot with that track).
     fn resume_start(&self, id: &str) -> Option<(usize, u64)> {
         let rp = self.resume_point(id)?;
+        let fresh = rp.listened_at_ms.is_some_and(|t| self.now_ms() - t <= RESUME_EXPIRY_MS);
+        if !fresh {
+            return None;
+        }
         let at = |i: usize| self.items.get(i).is_some_and(|it| it.track.id == rp.track_id);
         if at(rp.index) {
             return Some((rp.index, rp.position_ms));
@@ -460,10 +548,12 @@ impl Queue {
             return None;
         }
         let mut offset = 0;
+        let chosen = matches!(start, Some(s) if s < n);
+        let resume_id = id.as_deref().filter(|_| self.context.as_ref().is_some_and(|c| resumable(c.kind)));
         let start = match start {
             Some(s) if s < n => s,
             _ if self.shuffle => self.rng.0.random_range(0..n),
-            _ => match id.as_deref().filter(|_| !self.ignore_resume).and_then(|id| self.resume_start(id)) {
+            _ => match resume_id.filter(|_| !self.ignore_resume).and_then(|id| self.resume_start(id)) {
                 Some((i, ms)) => {
                     offset = ms;
                     i
@@ -481,6 +571,10 @@ impl Queue {
         }
         let item = self.items[start].clone();
         self.set_current(item.clone(), true);
+        if chosen {
+            // Starting a chosen song (a double-click) moves the point there.
+            self.note_position(0);
+        }
         Some((item, offset))
     }
 
@@ -648,6 +742,7 @@ impl Queue {
             self.note_played(&cur);
             return Some(cur);
         }
+        self.finish_if_last();
         self.step(true)
     }
 
@@ -660,6 +755,7 @@ impl Queue {
         }
         let max = self.items.len() + self.user.len() + 1;
         for _ in 0..max {
+            self.finish_if_last();
             match self.step(false) {
                 Some(c) if c.item_id == item_id => return true,
                 Some(_) => {}
@@ -721,6 +817,13 @@ impl Queue {
     /// order, with the rest listed as upcoming. `None` with no context.
     pub fn rewind(&mut self) -> Option<QueueItem> {
         let first = *self.order.first()?;
+        // Played to the end: the next play starts over. Shuffled listening
+        // leaves the point alone.
+        if !self.shuffle
+            && let Some(id) = self.context_id().map(str::to_owned)
+        {
+            self.clear_resume(&id);
+        }
         self.pos = 0;
         let item = self.items[first].clone();
         if let Some(old) = self.current.replace(item.clone()) {
@@ -1735,13 +1838,196 @@ mod tests {
         assert!(starts.len() > 3, "{starts:?}");
     }
 
+    const MIN: i64 = 60_000;
+    const T0: i64 = 1_800_000_000_000;
+
+    fn kctx(kind: ContextKind, id: &str) -> ContextInfo {
+        ContextInfo {
+            kind,
+            id: Some(id.into()),
+            title: None,
+        }
+    }
+
+    /// Leaves album x on t2 at 42 s at time T0, then plays y.
+    fn left_at_t2() -> Queue {
+        let mut q = Queue::with_seed(1);
+        q.set_clock(Some(T0));
+        q.set_context(ctx_id("x"), tracks(5), Some(2), None);
+        q.note_position(42_000);
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        q
+    }
+
+    #[test]
+    fn a_point_resumes_within_the_hour_and_expires_after_it() {
+        let mut q = left_at_t2();
+        q.set_clock(Some(T0 + 59 * MIN));
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(5), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t2", 42_000));
+
+        let mut q = left_at_t2();
+        q.set_clock(Some(T0 + 61 * MIN));
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(5), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t0", 0));
+    }
+
+    #[test]
+    fn the_hour_counts_from_the_last_listen_not_the_first() {
+        let mut q = Queue::with_seed(1);
+        q.set_clock(Some(T0));
+        q.set_context(ctx_id("x"), tracks(5), Some(2), None);
+        q.note_position(1_000);
+        q.set_clock(Some(T0 + 50 * MIN));
+        q.note_position(2_000);
+        // Paused there: saving the same point again doesn't refresh it.
+        q.set_clock(Some(T0 + 55 * MIN));
+        q.note_position(2_000);
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        q.set_clock(Some(T0 + 50 * MIN + 59 * MIN));
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(5), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t2", 2_000));
+        assert_eq!(q.resume_point("x").unwrap().listened_at_ms, Some(T0 + 50 * MIN));
+    }
+
+    #[test]
+    fn points_saved_without_a_time_count_as_expired() {
+        let q = left_at_t2();
+        let mut v = serde_json::to_value(&q).unwrap();
+        for entry in v["resume"].as_array_mut().unwrap() {
+            entry[1].as_object_mut().unwrap().remove("listenedAtMs");
+        }
+        let mut old: Queue = serde_json::from_value(v).unwrap();
+        let rp = old.resume_point("x").unwrap();
+        assert_eq!((rp.track_id.as_str(), rp.position_ms, rp.listened_at_ms), ("t2", 42_000, None));
+        let (item, ms) = old.set_context_at(ctx_id("x"), tracks(5), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t0", 0));
+    }
+
+    #[test]
+    fn pausing_near_the_end_still_resumes() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(3), Some(2), None);
+        // 20 s before the end of the last song.
+        q.note_position(160_000);
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(3), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t2", 160_000));
+    }
+
+    #[test]
+    fn playing_to_the_end_starts_over_next_time() {
+        // Repeat off, nothing after: the queue rewinds.
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(3), Some(2), None);
+        q.note_position(160_000);
+        assert!(q.advance_auto().is_none());
+        assert!(q.resume_point("x").is_none(), "cleared when the last song finished");
+        q.rewind();
+        q.note_position(0);
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(3), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t0", 0));
+
+        // Autoplay carries on with other songs: those don't become the point.
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(3), Some(2), None);
+        q.note_position(160_000);
+        q.extend_context(vec![track("other", "B", "/p")], ItemSource::Autoplay);
+        let next = q.advance_auto().unwrap();
+        assert_eq!(next.source, ItemSource::Autoplay);
+        q.note_position(30_000);
+        assert!(q.resume_point("x").is_none());
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(3), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t0", 0));
+    }
+
+    #[test]
+    fn repeat_all_keeps_the_point_going_round() {
+        let mut q = Queue::with_seed(1);
+        q.set_repeat(Repeat::All);
+        q.set_context(ctx_id("x"), tracks(3), Some(2), None);
+        q.note_position(1_000);
+        let next = q.advance_auto().unwrap();
+        assert_eq!(next.track.id, "t0");
+        q.note_position(5_000);
+        let rp = q.resume_point("x").unwrap();
+        assert_eq!((rp.track_id.as_str(), rp.position_ms), ("t0", 5_000));
+    }
+
+    #[test]
+    fn shuffle_on_leaves_the_unshuffled_point_alone() {
+        let mut q = Queue::with_seed(3);
+        q.set_context(ctx_id("x"), tracks(10), Some(5), Some(false));
+        q.note_position(135_000);
+        // Two shuffled plays, listened to and skipped through.
+        for _ in 0..2 {
+            q.set_context_at(ctx_id("x"), tracks(10), None, Some(true)).unwrap();
+            q.note_position(20_000);
+            q.advance_auto();
+            q.note_position(4_000);
+            q.set_context(ctx_id("y"), tracks(3), None, None);
+        }
+        // Nor does a shuffled play that runs to its end.
+        q.set_context_at(ctx_id("x"), tracks(10), None, Some(true)).unwrap();
+        while q.advance_auto().is_some() {}
+        q.rewind();
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        // A double-click with shuffle on doesn't move it either.
+        q.set_context_at(ctx_id("x"), tracks(10), Some(8), Some(true)).unwrap();
+        q.note_position(1_000);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(10), None, Some(false)).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t5", 135_000));
+    }
+
+    #[test]
+    fn a_double_clicked_song_becomes_the_point() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx_id("x"), tracks(10), Some(2), None);
+        q.note_position(85_000);
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        // Double-click song 7 on x's page; something else plays before it's heard.
+        q.set_context(ctx_id("x"), tracks(10), Some(6), None);
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        let (item, ms) = q.set_context_at(ctx_id("x"), tracks(10), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t6", 0));
+    }
+
+    #[test]
+    fn artist_play_never_resumes() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(kctx(ContextKind::Artist, "a"), tracks(5), Some(2), None);
+        q.note_position(60_000);
+        assert!(q.resume_point("a").is_none(), "artists keep no point");
+        q.set_context(ctx_id("y"), tracks(3), None, None);
+        let (item, ms) = q.set_context_at(kctx(ContextKind::Artist, "a"), tracks(5), None, None).unwrap();
+        assert_eq!((item.track.id.as_str(), ms), ("t0", 0));
+    }
+
+    #[test]
+    fn playlists_liked_songs_and_mixes_resume_like_albums() {
+        for kind in [ContextKind::Playlist, ContextKind::Liked, ContextKind::Mix] {
+            let mut q = Queue::with_seed(1);
+            q.set_context(kctx(kind, "p"), tracks(5), Some(3), None);
+            q.note_position(7_000);
+            q.set_context(ctx_id("y"), tracks(3), None, None);
+            let (item, ms) = q.set_context_at(kctx(kind, "p"), tracks(5), None, None).unwrap();
+            assert_eq!((item.track.id.as_str(), ms), ("t3", 7_000), "{kind:?}");
+        }
+        for kind in [ContextKind::Radio, ContextKind::Search, ContextKind::Tracks] {
+            assert!(!resumable(kind), "{kind:?}");
+        }
+    }
+
     #[test]
     fn context_memory_is_capped_dropping_the_least_recent() {
         let mut q = Queue::with_seed(1);
         for i in 0..CONTEXT_MEMORY_CAP + 5 {
             let id = format!("c{i}");
-            q.set_context(ctx_id(&id), tracks(2), Some(1), Some(true));
+            q.set_context(ctx_id(&id), tracks(2), Some(1), Some(false));
             q.note_position(1);
+            q.set_context_shuffle(&id, true);
         }
         assert!(q.resume_point("c0").is_none());
         assert!(q.resume_point("c4").is_none());

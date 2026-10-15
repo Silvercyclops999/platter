@@ -380,6 +380,18 @@ describe("library sidebar", () => {
     expect(within(rows()[0]).getByLabelText("Pinned")).toBeInTheDocument();
   });
 
+  it("the play button starts the album the same way the page's play button does", async () => {
+    const user = userEvent.setup();
+    const play = vi.spyOn(backend, "playContext").mockResolvedValue();
+    await renderSidebar();
+    await user.click(screen.getByRole("button", { name: "Albums" }));
+    const first = rows()[0];
+    await user.click(within(first).getByRole("button", { name: /^Play / }));
+    expect(play).toHaveBeenCalledTimes(1);
+    // No start song and no shuffle flag: the core picks the resume point.
+    expect(play).toHaveBeenCalledWith({ context: { kind: "album", id: expect.any(String) }, startTrackId: undefined, shuffle: undefined });
+  });
+
   it("colours the playing context's title, also when paused", async () => {
     const album = mock.fx.albums[0];
     await renderSidebar();
