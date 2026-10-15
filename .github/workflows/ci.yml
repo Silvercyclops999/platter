@@ -1,10 +1,11 @@
 name: ci
 
-# Lint and tests on every push and PR to main. Linux only, since those are the
-# cheapest Actions minutes. Windows and macOS builds run on tags (release.yml).
+# Lint and tests on every push and PR to main, and on check/* branches (push
+# one to test work here instead of on a desktop). Linux only, since those are
+# the cheapest Actions minutes. Windows and macOS builds run on tags (release.yml).
 on:
   push:
-    branches: [main]
+    branches: [main, 'check/**']
   pull_request:
     branches: [main]
 

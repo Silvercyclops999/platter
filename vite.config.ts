@@ -41,6 +41,8 @@ export default defineConfig(() => ({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     testTimeout: 15000,
+    // Every core by default; a few workers keep a desktop cool. CI uses them all.
+    maxWorkers: process.env.CI ? undefined : 4,
     include: ["src/**/*.test.{ts,tsx}"],
     // Process CSS so `?raw` imports (token tests) see real file contents.
     css: true,
