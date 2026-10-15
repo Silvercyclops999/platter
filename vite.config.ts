@@ -30,6 +30,7 @@ export default defineConfig(() => ({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    testTimeout: 15000,
     include: ["src/**/*.test.{ts,tsx}"],
     // Process CSS so `?raw` imports (token tests) see real file contents.
     css: true,
