@@ -107,6 +107,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           PLATTER_DISCORD_APP_ID: ${{ secrets.PLATTER_DISCORD_APP_ID }}
+          PLATTER_ACOUSTID_KEY: ${{ secrets.PLATTER_ACOUSTID_KEY }}
         with:
           owner: ${{ vars.RELEASES_OWNER || github.repository_owner }}
           repo: ${{ vars.RELEASES_REPO || github.event.repository.name }}

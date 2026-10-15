@@ -33,6 +33,7 @@ pub mod share;
 pub mod sid;
 pub mod smart;
 pub mod social;
+pub mod soundid;
 pub mod stats;
 pub mod sync;
 pub mod tags;
@@ -956,6 +957,24 @@ pub fn run() {
             plex.start(app.handle().clone());
             watch_library(app.handle().clone(), plex.clone(), db.clone());
             doctor::spawn(app.handle().clone(), db.clone(), Arc::new(backend::routed::RoutedParts(backends.clone())), tags::fetch::Reader::new(audio::http::http_client(), player.transfer_gate(), Some(player.transfer_host())));
+            {
+                // Identify by sound: off until turned on in Settings.
+                let sound = soundid::SoundId::new(
+                    db.clone(),
+                    Arc::new(backend::routed::RoutedParts(backends.clone())),
+                    tags::fetch::Reader::new(audio::http::http_client(), player.transfer_gate(), Some(player.transfer_host())),
+                    Arc::new(soundid::acoustid::AcoustId::new(audio::http::http_client())),
+                    Arc::new(plex::keychain::KeyringStore::new()),
+                    soundid::app_key(),
+                );
+                let handle = app.handle().clone();
+                sound.set_on_change(Arc::new(move || {
+                    use tauri::Emitter;
+                    let _ = handle.emit(soundid::EV_CHANGED, ());
+                }));
+                sound.spawn();
+                app.manage(sound);
+            }
             monitor::files::spawn(
                 plex.clone(),
                 db.clone(),
@@ -1170,6 +1189,9 @@ pub fn run() {
             doctor::commands::doctor_count,
             doctor::commands::doctor_ignore,
             doctor::commands::doctor_run,
+            soundid::commands::sound_id_status,
+            soundid::commands::sound_id_key_set,
+            soundid::commands::track_sounds_like,
             plexedit::commands::plex_edit_merge_albums,
             feed::commands::feed_status,
             feed::deck::commands::deck_status,

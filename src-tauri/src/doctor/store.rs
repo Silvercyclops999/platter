@@ -136,6 +136,7 @@ pub fn cover_findings(c: &Connection, px: u32) -> AppResult<Vec<Finding>> {
             tracks: Vec::new(),
             others: Vec::new(),
             table: Vec::new(),
+            suggest: None,
         });
     }
     Ok(out)
@@ -147,6 +148,9 @@ pub fn all(c: &Connection, o: &Options) -> AppResult<Vec<Finding>> {
     let mut out: Vec<Finding> = stored(c)?.into_iter().filter(|f| o.checks.on(f.kind)).collect();
     if o.checks.covers {
         out.extend(cover_findings(c, o.cover_px)?);
+    }
+    if o.checks.sounds_like {
+        out.extend(super::sounds::findings(c)?);
     }
     out.sort_by(|a, b| {
         a.kind

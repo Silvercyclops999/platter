@@ -313,6 +313,7 @@ pub fn song_key(s: &SongRow) -> SongKey {
         album_fold: fold_album(&s.album_title),
         duration_ms: s.duration_ms.max(0) as u64,
         unreleased: s.unreleased,
+        sound_mbid: None,
     }
 }
 
@@ -372,6 +373,7 @@ fn why_same(t: Tier) -> &'static str {
         Tier::Isrc => "the same ISRC",
         Tier::RecordingMbid => "the same MusicBrainz recording",
         Tier::PlexTrackMbid => "the same Plex match",
+        Tier::Fingerprint => "the same sound (an audio fingerprint)",
         Tier::Text | Tier::TextOtherVersion => "the same title and length",
     }
 }
@@ -407,6 +409,7 @@ fn base(kind: Kind, id: String, artist_id: &str, a: &AlbumRow, title: String, te
         tracks: Vec::new(),
         others: Vec::new(),
         table: Vec::new(),
+        suggest: None,
     }
 }
 

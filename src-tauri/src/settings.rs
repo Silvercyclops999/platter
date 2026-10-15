@@ -560,6 +560,11 @@ pub struct Settings {
     pub auto_request: bool,
     /// Most automatic requests a day (this device).
     pub auto_request_cap: u32,
+    /// Fingerprint songs on this computer and look them up on AcoustID
+    /// (only the fingerprint and length are sent). This device only.
+    pub identify_by_sound: bool,
+    /// Which songs: untagged only, or all (this device).
+    pub sound_id_scope: crate::soundid::Scope,
 }
 
 /// Most folder keywords kept, and the longest one.
@@ -758,6 +763,8 @@ impl Default for Settings {
             radar_notify: true,
             auto_request: false,
             auto_request_cap: crate::radar::DEFAULT_CAP,
+            identify_by_sound: false,
+            sound_id_scope: crate::soundid::Scope::Untagged,
         }
     }
 }
@@ -920,6 +927,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "notifyNewReleases",
     "autoRequest",
     "autoRequestCap",
+    "identifyBySound",
+    "soundIdScope",
     "discordListenAlong",
     "syncEnabled",
     "syncFolder",
@@ -1111,6 +1120,8 @@ pub struct SettingsPatch {
     pub radar_notify: Option<bool>,
     pub auto_request: Option<bool>,
     pub auto_request_cap: Option<u32>,
+    pub identify_by_sound: Option<bool>,
+    pub sound_id_scope: Option<crate::soundid::Scope>,
 }
 
 impl SettingsPatch {
@@ -1343,6 +1354,8 @@ impl Settings {
         set(&mut self.release_radar, p.release_radar);
         set(&mut self.radar_notify, p.radar_notify);
         set(&mut self.auto_request, p.auto_request);
+        set(&mut self.identify_by_sound, p.identify_by_sound);
+        set(&mut self.sound_id_scope, p.sound_id_scope);
         if let Some(cap) = p.auto_request_cap {
             if !crate::radar::CAP_CHOICES.contains(&cap) {
                 return Err(AppError::Invalid("Pick one of the daily limits offered.".into()));
@@ -1493,6 +1506,11 @@ impl Settings {
     }
 
     /// How file tags shape lists and play contexts.
+    /// What identifying by sound follows: on only while not offline.
+    pub fn sound_id_options(&self) -> crate::soundid::Options {
+        crate::soundid::Options { on: self.identify_by_sound && !self.go_offline, scope: self.sound_id_scope }
+    }
+
     pub fn doctor_options(&self) -> crate::doctor::Options {
         crate::doctor::Options { on: self.library_doctor, checks: self.doctor_checks, cover_px: self.doctor_cover_px }
     }
@@ -1739,6 +1757,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         crate::archive::refresh_soon(db);
     }
     crate::doctor::set_options(s.doctor_options());
+    crate::soundid::set_options(s.sound_id_options());
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
         scan.set_enabled(s.read_file_tags);
     }
@@ -3056,5 +3075,28 @@ mod tests {
         let mut stored = stored;
         stored.clamp();
         assert_eq!(stored.auto_request_cap, 3);
+    }
+
+    #[test]
+    fn identify_by_sound_settings_defaults_and_where_they_live() {
+        use crate::soundid::Scope;
+        let s = Settings::default();
+        assert!(!s.identify_by_sound, "off until the user turns it on");
+        assert_eq!(s.sound_id_scope, Scope::Untagged);
+        assert!(!s.sound_id_options().on);
+        assert!(DEVICE_SETTINGS.contains(&"identifyBySound") && DEVICE_SETTINGS.contains(&"soundIdScope"), "per device");
+        let mut s = s;
+        s.apply(&serde_json::from_str(r#"{"identifyBySound":true,"soundIdScope":"all"}"#).unwrap()).unwrap();
+        assert!(s.identify_by_sound);
+        assert_eq!(s.sound_id_options(), crate::soundid::Options { on: true, scope: Scope::All });
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["soundIdScope"], "all");
+        // Going offline stops it without changing the setting.
+        s.go_offline = true;
+        assert!(!s.sound_id_options().on && s.identify_by_sound);
+        // Older stored settings without the fields get the defaults.
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!old.identify_by_sound);
+        assert_eq!(old.sound_id_scope, Scope::Untagged);
     }
 }

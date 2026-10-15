@@ -29,12 +29,13 @@ struct AlbumInfo {
 
 const SOURCE: &str = "SELECT t.id, t.title, t.artist_id, t.artist_title, t.track_artist, t.album_title, t.duration_ms,
             t.mbid, f.isrc, f.recording_mbid, f.version, t.album_id,
-            al.format, al.subformats, al.matched, al.studio, mc.found, at.version, al.id IS NOT NULL
+            al.format, al.subformats, al.matched, al.studio, mc.found, at.version, al.id IS NOT NULL, si.recording_mbid
      FROM tracks t
      LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'
      LEFT JOIN albums al ON al.id = t.album_id
      LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
-     LEFT JOIN album_tags at ON at.album_id = t.album_id";
+     LEFT JOIN album_tags at ON at.album_id = t.album_id
+     LEFT JOIN sound_ids si ON si.track_id = t.id AND si.part_key = t.part_key AND si.status = 'ok'";
 
 /// Adds the rows of the songs `SOURCE` + `filter` selects.
 fn insert(c: &Connection, filter: &str, args: &[&dyn ToSql]) -> AppResult<usize> {
@@ -42,8 +43,8 @@ fn insert(c: &Connection, filter: &str, args: &[&dyn ToSql]) -> AppResult<usize>
     let mut ins = c.prepare_cached(
         "INSERT OR REPLACE INTO song_index
              (track_id, artist_fold, title_fold, version_fold, album_fold, artist_id, duration_ms,
-              isrc, recording_mbid, plex_mbid, unreleased)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+              isrc, recording_mbid, plex_mbid, unreleased, sound_mbid)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
     )?;
     let mut albums: HashMap<String, AlbumInfo> = HashMap::new();
     let mut folded_albums: HashMap<String, String> = HashMap::new();
@@ -62,6 +63,7 @@ fn insert(c: &Connection, filter: &str, args: &[&dyn ToSql]) -> AppResult<usize>
         let rec: Option<String> = r.get(9)?;
         let file_version: Option<String> = r.get(10)?;
         let album_id: String = r.get(11)?;
+        let sound: Option<String> = r.get(19)?;
         if !albums.contains_key(&album_id) {
             let subs: Option<String> = r.get(13)?;
             let known: bool = r.get(18)?;
@@ -117,6 +119,7 @@ fn insert(c: &Connection, filter: &str, args: &[&dyn ToSql]) -> AppResult<usize>
                 rec.as_deref().and_then(crate::tags::clean_mbid),
                 plex_mbid.as_deref().map(|m| m.trim().to_ascii_lowercase()).filter(|m| !m.is_empty()),
                 unreleased as i64,
+                sound.as_deref().and_then(crate::tags::clean_mbid),
             ])?;
         }
     }
@@ -175,7 +178,7 @@ struct Row {
 }
 
 const COLS: &str = "SELECT s.track_id, s.artist_fold, s.title_fold, s.version_fold, s.album_fold, s.duration_ms,
-            s.isrc, s.recording_mbid, s.plex_mbid, s.unreleased, t.codec, t.bit_depth, t.sample_rate, t.bitrate
+            s.isrc, s.recording_mbid, s.plex_mbid, s.unreleased, t.codec, t.bit_depth, t.sample_rate, t.bitrate, s.sound_mbid
      FROM song_index s JOIN tracks t ON t.id = s.track_id";
 
 fn read_rows(c: &Connection, filter: &str, args: &[&dyn ToSql], out: &mut Vec<Row>) -> AppResult<()> {
@@ -194,6 +197,7 @@ fn read_rows(c: &Connection, filter: &str, args: &[&dyn ToSql], out: &mut Vec<Ro
                 plex_track_mbid: r.get(8)?,
                 unreleased: r.get::<_, i64>(9)? != 0,
                 album_artist_fold: None,
+                sound_mbid: r.get(14)?,
             },
             quality: quality(r.get::<_, Option<String>>(10)?.as_deref(), r.get(11)?, r.get(12)?, r.get(13)?),
         })
@@ -222,6 +226,12 @@ pub fn lookup(c: &Connection, key: &SongKey, ctx: Context, ranks: &HashMap<Strin
     }
     if let Some(v) = &key.plex_track_mbid {
         read_rows(c, "s.plex_mbid = ?1", &[v], &mut rows)?;
+    }
+    if let Some(v) = &key.recording_mbid {
+        read_rows(c, "s.sound_mbid = ?1", &[v], &mut rows)?;
+    }
+    if let Some(v) = &key.sound_mbid {
+        read_rows(c, "s.recording_mbid = ?1 OR s.sound_mbid = ?1", &[v], &mut rows)?;
     }
     if !key.title_fold.is_empty() {
         for a in key.artists() {

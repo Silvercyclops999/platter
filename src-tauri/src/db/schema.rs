@@ -942,6 +942,28 @@ CREATE TABLE IF NOT EXISTS doctor_covers (
     checked_at INTEGER NOT NULL
 ) WITHOUT ROWID;
 "#,
+    // v31: identify by sound (soundid::). sound_ids keeps, per song and the
+    // file it was made from, its fingerprint until the lookup is done, then
+    // the MusicBrainz recording it sounds like (or none). song_index gets
+    // that recording as sound_mbid, the matcher's fingerprint tier.
+    r#"
+CREATE TABLE IF NOT EXISTS sound_ids (
+    track_id       TEXT PRIMARY KEY,
+    part_key       TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    fingerprint    TEXT,
+    duration_s     INTEGER,
+    recording_mbid TEXT,
+    title          TEXT,
+    artist         TEXT,
+    album          TEXT,
+    score          REAL,
+    checked_at     INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS sound_ids_status ON sound_ids (status);
+ALTER TABLE song_index ADD COLUMN sound_mbid TEXT;
+CREATE INDEX IF NOT EXISTS song_index_sound ON song_index (sound_mbid) WHERE sound_mbid IS NOT NULL;
+"#,
 ];
 
 #[cfg(test)]

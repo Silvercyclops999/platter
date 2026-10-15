@@ -7,6 +7,8 @@
 //!   files, album tags that differ, albums split in two, missing album
 //!   artists, low-quality copies, albums MusicBrainz knows that Plex missed)
 //! - [`covers`]   each album cover's size, read from the image's first bytes
+//! - [`sounds`]   songs whose sound was identified as another recording
+//!   than their tags say (`soundid::`), with the tags it suggests
 //! - [`store`]    findings kept per artist, and the list the page shows
 //! - [`commands`] the Tauri commands
 //!
@@ -19,6 +21,7 @@
 pub mod checks;
 pub mod commands;
 pub mod covers;
+pub mod sounds;
 pub mod store;
 
 #[cfg(test)]
@@ -62,11 +65,21 @@ pub enum Kind {
     LowQuality,
     /// Plex couldn't match it, but MusicBrainz has the release.
     Unmatched,
+    /// An untagged or mislabelled file: its sound matched another recording.
+    SoundsLike,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 7] =
-        [Kind::Duplicate, Kind::Cover, Kind::AlbumTags, Kind::SplitAlbum, Kind::AlbumArtist, Kind::LowQuality, Kind::Unmatched];
+    pub const ALL: [Kind; 8] = [
+        Kind::Duplicate,
+        Kind::Cover,
+        Kind::AlbumTags,
+        Kind::SplitAlbum,
+        Kind::AlbumArtist,
+        Kind::LowQuality,
+        Kind::Unmatched,
+        Kind::SoundsLike,
+    ];
 
     /// Stable string stored in SQLite.
     pub fn key(self) -> &'static str {
@@ -78,6 +91,7 @@ impl Kind {
             Kind::AlbumArtist => "albumArtist",
             Kind::LowQuality => "lowQuality",
             Kind::Unmatched => "unmatched",
+            Kind::SoundsLike => "soundsLike",
         }
     }
 
@@ -101,6 +115,8 @@ pub enum Fix {
     OpenAlbum,
     /// Show each song's tags (they're changed in a tagger for now).
     Tags,
+    /// Show the tags its sound suggests next to its own (nothing is written).
+    SuggestedTags,
 }
 
 /// Another album a finding names: the other half of a split album, or the
@@ -122,6 +138,25 @@ pub struct TagRow {
     pub album: Option<String>,
     pub album_artist: Option<String>,
     pub year: Option<i32>,
+}
+
+/// The tags a song's sound suggests, next to what it has (IPC
+/// `DoctorSuggestedTags`). Shown only; nothing is written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedTags {
+    pub track_id: String,
+    /// What the file says now.
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    /// What its sound matched on MusicBrainz.
+    pub new_title: String,
+    pub new_artist: String,
+    pub new_album: Option<String>,
+    pub recording_mbid: String,
+    /// 0 to 100.
+    pub score: u8,
 }
 
 /// One thing worth fixing (IPC `DoctorFinding`).
@@ -151,6 +186,9 @@ pub struct Finding {
     /// Each song's tags (album tag and album artist findings).
     #[serde(default)]
     pub table: Vec<TagRow>,
+    /// The tags its sound suggests (sounds-like findings).
+    #[serde(default)]
+    pub suggest: Option<SuggestedTags>,
 }
 
 /// A finding the user chose to ignore (sync store).
@@ -177,6 +215,8 @@ pub struct Checks {
     pub album_artist: bool,
     pub low_quality: bool,
     pub unmatched: bool,
+    /// Songs identified by sound as another recording than their tags say.
+    pub sounds_like: bool,
 }
 
 impl Default for Checks {
@@ -189,6 +229,7 @@ impl Default for Checks {
             album_artist: true,
             low_quality: true,
             unmatched: true,
+            sounds_like: true,
         }
     }
 }
@@ -203,6 +244,7 @@ impl Checks {
             Kind::AlbumArtist => self.album_artist,
             Kind::LowQuality => self.low_quality,
             Kind::Unmatched => self.unmatched,
+            Kind::SoundsLike => self.sounds_like,
         }
     }
 }

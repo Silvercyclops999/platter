@@ -59,6 +59,7 @@ pub fn tier_name(t: Tier) -> &'static str {
         Tier::Isrc => "isrc",
         Tier::RecordingMbid => "recordingId",
         Tier::PlexTrackMbid => "trackId",
+        Tier::Fingerprint => "fingerprint",
         Tier::Text => "names",
         Tier::TextOtherVersion => "otherVersion",
     }
@@ -114,7 +115,7 @@ pub fn decide(cands: &[Candidate], album_known: bool) -> Outcome {
         return unsure();
     }
     match m.tier {
-        Tier::Isrc | Tier::RecordingMbid | Tier::PlexTrackMbid => matched(m.confidence),
+        Tier::Isrc | Tier::RecordingMbid | Tier::PlexTrackMbid | Tier::Fingerprint => matched(m.confidence),
         // Lengths agreed.
         Tier::Text if m.confidence >= 85 => matched(m.confidence),
         Tier::Text => {

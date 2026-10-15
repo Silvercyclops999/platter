@@ -5,14 +5,17 @@
 //!
 //! - [`fold`]    the folding rules for artist, title and version notes
 //! - [`SongKey`] what a song is known by: ISRC, the recording id from file
-//!   tags, else Plex's track id, and the folded names and length
+//!   tags, else Plex's track id, the recording its sound was identified as
+//!   (`soundid::`), and the folded names and length
 //! - [`compare`] the ranked matcher: which tier matched, how sure it is,
 //!   and whether it is the same recording or another version of the song
 //! - [`index`]   a table of every synced song by folded artist and title,
 //!   for fast lookups across servers
 //!
 //! Songs whose release status is unreleased (`db::release`) never match
-//! anything. That rule is here and nowhere else.
+//! anything. That rule is here and nowhere else. It covers the fingerprint
+//! tier too: an unreleased song that sounds like a released recording only
+//! gets a "sounds like" hint (`soundid::store::sounds_like`), never a match.
 
 pub mod fold;
 pub mod index;
@@ -40,6 +43,9 @@ pub struct SongKey {
     /// MusicBrainz track id Plex matched. It names one release's track, so
     /// it only matches the same release.
     pub plex_track_mbid: Option<String>,
+    /// MusicBrainz recording id its audio fingerprint matched on AcoustID
+    /// (`soundid::`), when it was identified by sound.
+    pub sound_mbid: Option<String>,
     /// The song's own artist (the album artist when the song has none).
     pub artist_fold: String,
     /// The album artist when it differs, a second name to match on (remix
@@ -96,7 +102,14 @@ impl SongKey {
             album_fold: fold::fold_album(&t.album_title),
             duration_ms: t.duration_ms,
             unreleased,
+            sound_mbid: None,
         }
+    }
+
+    /// With the recording its sound was identified as.
+    pub fn with_sound(mut self, mbid: Option<&str>) -> Self {
+        self.sound_mbid = mbid.and_then(crate::tags::clean_mbid);
+        self
     }
 
     fn artists(&self) -> impl Iterator<Item = &str> {
@@ -112,6 +125,9 @@ pub enum Tier {
     Isrc,
     RecordingMbid,
     PlexTrackMbid,
+    /// The recording one song's audio fingerprint matched is the other's
+    /// recording (from its tags or its own fingerprint).
+    Fingerprint,
     /// Artist, title and version notes, with lengths within the slack.
     Text,
     /// Artist and title only: another version of the song.
@@ -159,8 +175,9 @@ fn same_id(a: &Option<String>, b: &Option<String>) -> bool {
 /// Whether `a` and `b` are the same song, and how. None when they aren't,
 /// or when either is unreleased.
 ///
-/// Tiers in order: ISRC, MusicBrainz recording id, Plex's track id, then
-/// the folded names. Names match when an artist name of each is the same
+/// Tiers in order: ISRC, MusicBrainz recording id, Plex's track id, the
+/// recording a fingerprint matched, then the folded names. A fingerprint
+/// never goes against recording ids both files' tags give. Names match when an artist name of each is the same
 /// and the titles are; a bare generic title ("Intro") also needs the same
 /// album. Matching names with the same version notes and lengths within
 /// the slack are the same recording; a missing length (0) leaves the names
@@ -181,6 +198,14 @@ pub fn compare(a: &SongKey, b: &SongKey, ctx: Context) -> Option<Match> {
     if same_id(&a.plex_track_mbid, &b.plex_track_mbid) {
         return same(Tier::PlexTrackMbid, 95);
     }
+    let tagged_differ = matches!((&a.recording_mbid, &b.recording_mbid), (Some(x), Some(y)) if x != y);
+    if !tagged_differ
+        && (same_id(&a.sound_mbid, &b.recording_mbid)
+            || same_id(&a.recording_mbid, &b.sound_mbid)
+            || same_id(&a.sound_mbid, &b.sound_mbid))
+    {
+        return same(Tier::Fingerprint, 92);
+    }
     if a.title_fold.is_empty() || a.title_fold != b.title_fold {
         return None;
     }
@@ -191,7 +216,7 @@ pub fn compare(a: &SongKey, b: &SongKey, ctx: Context) -> Option<Match> {
         return None;
     }
     let other = |confidence| Some(Match { tier: Tier::TextOtherVersion, confidence, kind: MatchKind::OtherVersion });
-    let recordings_differ = matches!((&a.recording_mbid, &b.recording_mbid), (Some(x), Some(y)) if x != y);
+    let recordings_differ = tagged_differ;
     if fold::version_core(&a.version_fold) != fold::version_core(&b.version_fold) {
         return other(60);
     }

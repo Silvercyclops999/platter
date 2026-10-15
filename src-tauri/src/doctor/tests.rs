@@ -416,6 +416,7 @@ fn ignored_findings_move_to_their_own_list() {
         tracks: Vec::new(),
         others: Vec::new(),
         table: Vec::new(),
+        suggest: None,
     };
     let mut ig = HashMap::new();
     ig.insert("cover:2".to_string(), Ignored { kind: Kind::Cover, title: "t".into(), at: 1 });
