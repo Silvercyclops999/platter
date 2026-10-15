@@ -49,11 +49,12 @@ impl Write for LogFile {
     }
 }
 
-/// Removes what mustn't be in a shareable log: `X-Plex-Token` values,
-/// `*.plex.direct` host names and IPv4 addresses.
+/// Removes what mustn't be in a shareable log: `X-Plex-Token`, `api_key`
+/// and `Token="..."` values, `*.plex.direct` host names and IPv4 addresses.
 pub fn redact(line: &str) -> String {
+    let line = redact_quoted_token(line);
     let mut out = String::with_capacity(line.len());
-    for word in split_keep(line) {
+    for word in split_keep(&line) {
         out.push_str(&redact_word(word));
     }
     out
@@ -79,14 +80,30 @@ fn split_keep(s: &str) -> Vec<&str> {
     parts
 }
 
+/// A `Token="..."` field (a Jellyfin authorization header) keeps its name only.
+fn redact_quoted_token(line: &str) -> String {
+    const KEY: &str = "token=\"";
+    let mut out = line.to_string();
+    let mut from = 0;
+    while let Some(i) = out[from..].to_ascii_lowercase().find(KEY).map(|i| i + from) {
+        let start = i + KEY.len();
+        let end = out[start..].find('"').map_or(out.len(), |e| start + e);
+        out.replace_range(start..end, "<token>");
+        from = start + "<token>".len();
+    }
+    out
+}
+
 fn redact_word(w: &str) -> String {
     let mut w = w.to_string();
-    // Token in a query string, any case.
-    let lower = w.to_ascii_lowercase();
-    if let Some(i) = lower.find("x-plex-token=") {
-        let from = i + "x-plex-token=".len();
-        let end = w[from..].find(['&', '#']).map_or(w.len(), |e| from + e);
-        w.replace_range(from..end, "<token>");
+    // Tokens and keys in a query string, any case.
+    for key in ["x-plex-token=", "api_key=", "apikey=", "accesstoken="] {
+        let lower = w.to_ascii_lowercase();
+        if let Some(i) = lower.find(key) {
+            let from = i + key.len();
+            let end = w[from..].find(['&', '#']).map_or(w.len(), |e| from + e);
+            w.replace_range(from..end, "<token>");
+        }
     }
     // plex.direct host names (they hold the server's address and id).
     while let Some(i) = w.to_ascii_lowercase().find(".plex.direct") {
@@ -209,6 +226,9 @@ mod tests {
         assert!(!r.contains("abcDEF123") && !r.contains("plex.direct") && !r.contains("10.0.0.5"), "{r}");
         assert!(r.contains("https://<server>:32400/library?X-Plex-Token=<token>&x=1"), "{r}");
         assert!(r.contains("local <ip>") && r.contains("version 1.2.3"), "{r}");
+        let jf = super::redact("auth MediaBrowser Client=\"Platter\", Token=\"jf-secret\" and /socket?api_key=k2&deviceId=d");
+        assert!(!jf.contains("jf-secret") && !jf.contains("k2"), "{jf}");
+        assert!(jf.contains("Token=\"<token>\"") && jf.contains("api_key=<token>&deviceId=d"), "{jf}");
         assert_eq!(super::redact("Café ok
 "), "Café ok
 ");

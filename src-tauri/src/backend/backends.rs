@@ -54,6 +54,8 @@ struct Inner {
     sink: Mutex<Option<Arc<dyn EventSink>>>,
     /// `servers.json` and the folder it's kept in, once set.
     records: Mutex<Option<(std::path::PathBuf, ServersFile)>>,
+    /// Plex libraries included besides the main one (from Settings).
+    plex_extras: Mutex<Vec<crate::db::sync::ExtraLibrary>>,
 }
 
 const NO_SERVER: &str = "Your server is offline.";
@@ -85,6 +87,7 @@ impl Backends {
                 status,
                 sink: Mutex::new(None),
                 records: Mutex::new(None),
+                plex_extras: Mutex::new(Vec::new()),
             }),
         }
     }
@@ -111,12 +114,68 @@ impl Backends {
         let (Some(tag), Some(name)) = (p.tag().await, MusicServer::name(p.as_ref()).await) else { return false };
         let mut g = self.inner.records.lock();
         let Some((dir, file)) = g.as_mut() else { return false };
-        let record = ServerRecord { tag: tag.clone(), kind: BackendKind::Plex, name, url: None, user: None };
-        let changed = file.upsert(record) | file.set_primary(&tag);
+        let record = ServerRecord::new(&tag, BackendKind::Plex, &name);
+        // The connected Plex server stays primary unless another kind of
+        // server was made primary.
+        let plex_primary = file.primary.as_deref().and_then(|p| file.get(p)).is_none_or(|r| r.kind == BackendKind::Plex);
+        let mut changed = file.upsert(record);
+        if plex_primary {
+            changed |= file.set_primary(&tag);
+        }
         if changed && let Err(e) = file.save(dir) {
             tracing::warn!("servers not saved: {e}");
         }
         changed
+    }
+
+    /// Signed out of Plex: its servers leave the saved list (another kind of
+    /// server becomes primary). True when the list changed.
+    pub fn forget_plex(&self) -> bool {
+        let mut g = self.inner.records.lock();
+        let Some((dir, file)) = g.as_mut() else { return false };
+        let plex: Vec<String> = file.servers.iter().filter(|r| r.kind == BackendKind::Plex).map(|r| r.tag.clone()).collect();
+        let mut changed = false;
+        for t in plex {
+            changed |= file.remove(&t);
+        }
+        if changed && let Err(e) = file.save(dir) {
+            tracing::warn!("servers not saved: {e}");
+        }
+        changed
+    }
+
+    /// Change the saved list (then save it). Returns what `f` returns.
+    pub fn edit_records<T>(&self, f: impl FnOnce(&mut ServersFile) -> T) -> AppResult<T> {
+        let mut g = self.inner.records.lock();
+        let (dir, file) = g.as_mut().ok_or_else(|| AppError::Internal("server list not loaded".into()))?;
+        let out = f(file);
+        file.save(dir)?;
+        Ok(out)
+    }
+
+    /// The registered server with this tag (not the Plex account).
+    pub fn server(&self, tag: &str) -> Option<Arc<dyn MusicServer>> {
+        self.inner.servers.read().get(tag).cloned()
+    }
+
+    /// Plex libraries included besides the main one.
+    pub fn set_plex_extras(&self, libs: Vec<crate::db::sync::ExtraLibrary>) {
+        *self.inner.plex_extras.lock() = libs;
+    }
+
+    /// Every library to sync besides the main one: the Plex ones from
+    /// Settings, then each other server's included libraries.
+    pub fn extra_libraries(&self) -> Vec<crate::db::sync::ExtraLibrary> {
+        let mut out = self.inner.plex_extras.lock().clone();
+        let mut servers: Vec<(String, Arc<dyn MusicServer>)> =
+            self.inner.servers.read().iter().map(|(t, s)| (t.clone(), s.clone())).collect();
+        servers.sort_by(|a, b| a.0.cmp(&b.0));
+        for (tag, s) in servers {
+            for (view, source) in s.libraries() {
+                out.push(crate::db::sync::ExtraLibrary { src: crate::db::store::src_of(&tag, &view), tag: tag.clone(), source });
+            }
+        }
+        out
     }
 
     /// Add a server under its tag (replacing one with the same tag).
@@ -151,9 +210,33 @@ impl Backends {
         }
     }
 
-    /// The server with the main library.
+    /// The primary server: the one Settings names, when it's in use; else
+    /// the Plex account.
     pub fn primary(&self) -> AppResult<Arc<dyn MusicServer>> {
+        let named = self.inner.records.lock().as_ref().and_then(|(_, f)| f.primary.clone());
+        if let Some(tag) = named
+            && let Some(s) = self.server(&tag)
+        {
+            return Ok(s);
+        }
         self.default_server().ok_or_else(|| AppError::Network(NO_SERVER.into()))
+    }
+
+    /// The server whose library is the main one in the cache: the Plex
+    /// account while one is set up (so its library stays as it was), else
+    /// the primary server.
+    pub fn main_server(&self) -> AppResult<Arc<dyn MusicServer>> {
+        let plex_set_up = {
+            let g = self.inner.records.lock();
+            match g.as_ref() {
+                Some((_, f)) => f.servers.is_empty() || f.servers.iter().any(|r| r.kind == BackendKind::Plex),
+                None => true,
+            }
+        };
+        if plex_set_up && let Some(p) = self.default_server() {
+            return Ok(p);
+        }
+        self.primary()
     }
 
     /// The server an item (id or image path) belongs to.

@@ -44,6 +44,20 @@ pub struct ServerRecord {
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// The account's id on the server (not a secret; the token is in the
+    /// keychain).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    /// The music libraries included from this server; None: all of them.
+    /// (Plex libraries are kept in Settings.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub libraries: Option<Vec<String>>,
+}
+
+impl ServerRecord {
+    pub fn new(tag: &str, kind: BackendKind, name: &str) -> Self {
+        Self { tag: tag.into(), kind, name: name.into(), url: None, user: None, user_id: None, libraries: None }
+    }
 }
 
 /// The file. Fields this build doesn't know are dropped on the next save,
@@ -130,7 +144,7 @@ mod tests {
     use super::*;
 
     fn plex(machine: &str, name: &str) -> ServerRecord {
-        ServerRecord { tag: BackendKind::Plex.tag(machine), kind: BackendKind::Plex, name: name.into(), url: None, user: None }
+        ServerRecord::new(&BackendKind::Plex.tag(machine), BackendKind::Plex, name)
     }
 
     #[test]
@@ -157,6 +171,8 @@ mod tests {
             name: "Den".into(),
             url: Some("http://den.example:8096".into()),
             user: Some("me".into()),
+            user_id: Some("u1".into()),
+            libraries: None,
         };
         assert!(f.upsert(jf.clone()));
         assert_eq!(f.primary.as_deref(), Some(crate::sid::tag("m1").as_str()), "the first added");

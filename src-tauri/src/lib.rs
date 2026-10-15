@@ -12,6 +12,7 @@ pub mod feed;
 pub mod hidden;
 pub mod identity;
 pub mod import;
+pub mod jellyfin;
 pub mod libraries;
 pub mod lidarr;
 pub mod likes;
@@ -433,7 +434,8 @@ pub fn run() {
                     });
                 });
             }
-            db.set_source(backends.primary()?.library());
+            // The main library comes from whichever server has it now.
+            db.set_source(Arc::new(backend::routed::RoutedLibrary(backends.clone())));
             db.set_events(Arc::new(monitor::library::SyncHealth {
                 inner: Arc::new(app.handle().clone()),
                 plex: plex.clone(),
@@ -472,9 +474,24 @@ pub fn run() {
                     downloads: downloads.clone(),
                 }),
             )?;
+            // Jellyfin servers saved earlier sign in with their tokens.
+            let jellyfin = jellyfin::Jellyfin::new(jellyfin::manager::Deps {
+                backends: backends.clone(),
+                db: Some(db.clone()),
+                dir: data_dir.clone(),
+                store: Arc::new(plex::keychain::KeyringStore::new()),
+                http: jellyfin::client::http(),
+                device_id: plex.identity().client_id.clone(),
+                prefs: stream_prefs.clone(),
+                offline: plex.offline_switch(),
+                live: true,
+            });
+            jellyfin.restore();
+            app.manage(jellyfin);
             let live = settings::Live {
                 art: Some(art.clone()),
                 plex: Some(plex.clone()),
+                backends: Some(backends.clone()),
                 streams: stream_prefs.clone(),
                 ..Default::default()
             };
@@ -1003,6 +1020,16 @@ pub fn run() {
             libraries::library_sources,
             libraries::library_servers,
             backend::commands::backend_caps,
+            jellyfin::commands::servers_saved,
+            jellyfin::commands::server_set_primary,
+            jellyfin::commands::server_remove,
+            jellyfin::commands::server_libraries,
+            jellyfin::commands::server_libraries_set,
+            jellyfin::commands::jellyfin_check,
+            jellyfin::commands::jellyfin_quick_start,
+            jellyfin::commands::jellyfin_quick_poll,
+            jellyfin::commands::jellyfin_quick_cancel,
+            jellyfin::commands::jellyfin_sign_in_password,
             plex::details::now_playing_details,
             lyrics::commands::lyrics_get,
             lyrics::commands::lyrics_own_get,

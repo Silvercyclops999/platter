@@ -1632,6 +1632,8 @@ pub struct Live {
     pub downloads: Arc<parking_lot::Mutex<Option<downloads::Downloads>>>,
     /// The Plex connection (Go offline stops it).
     pub plex: Option<crate::plex::PlexState>,
+    /// The music servers (their libraries sync with the Plex ones).
+    pub backends: Option<crate::backend::Backends>,
     /// The mix engine, once it exists.
     pub mixes: Arc<parking_lot::Mutex<Option<crate::mixes::MixService>>>,
     /// Friend activity, What's New and listening sessions.
@@ -1702,7 +1704,14 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     db.set_link_featured(s.link_featured);
     db.set_server_view(crate::db::merge::ServerView::parse(&s.server_view));
     if let Some(plex) = &live.plex {
-        db.set_extra_libraries(crate::libraries::extra_libraries(plex, &s.libraries));
+        let plex_extras = crate::libraries::extra_libraries(plex, &s.libraries);
+        match &live.backends {
+            Some(b) => {
+                b.set_plex_extras(plex_extras);
+                db.set_extra_libraries(b.extra_libraries());
+            }
+            None => db.set_extra_libraries(plex_extras),
+        }
     }
     {
         use crate::artistinfo::InfoSource as Src;

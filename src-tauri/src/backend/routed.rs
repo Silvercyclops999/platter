@@ -9,7 +9,10 @@ use async_trait::async_trait;
 use super::Backends;
 use crate::audio::dsp::TrackAudio;
 use crate::audio::source::{StreamSource, TrackResolver};
-use crate::db::source::{ArtBytes, ArtFetcher, PlaylistEntry, RemoteHits, RemoteSearch};
+use crate::db::source::{
+    ArtBytes, ArtFetcher, Changes, HistoryEntry, ItemKind, LibrarySource, MusicSection, PlaylistEntry, RemoteHits,
+    RemoteSearch, SimilarArtist,
+};
 use crate::downloads::{DownloadSource, Fetch};
 use crate::error::{AppError, AppResult};
 use crate::likes::LikeRemote;
@@ -18,6 +21,69 @@ use crate::playlists::PlaylistRemote;
 use crate::plex::types::ConnectionKind;
 use crate::tags::scan::PartSource;
 use crate::tracking::{PlayReport, PlayReporter};
+
+/// The main library, from whichever server has it now
+/// ([`Backends::main_server`]). Every method passes through.
+pub struct RoutedLibrary(pub Backends);
+
+impl RoutedLibrary {
+    fn lib(&self) -> AppResult<std::sync::Arc<dyn LibrarySource>> {
+        Ok(self.0.main_server()?.library())
+    }
+}
+
+#[async_trait]
+impl LibrarySource for RoutedLibrary {
+    async fn server_tag(&self) -> Option<String> {
+        self.lib().ok()?.server_tag().await
+    }
+    async fn music_sections(&self) -> AppResult<Vec<MusicSection>> {
+        self.lib()?.music_sections().await
+    }
+    async fn count(&self, section_id: &str, kind: ItemKind) -> AppResult<u64> {
+        self.lib()?.count(section_id, kind).await
+    }
+    async fn artists(&self, section_id: &str, start: u64, size: u64) -> AppResult<Vec<crate::model::Artist>> {
+        self.lib()?.artists(section_id, start, size).await
+    }
+    async fn albums(&self, section_id: &str, start: u64, size: u64) -> AppResult<Vec<crate::model::Album>> {
+        self.lib()?.albums(section_id, start, size).await
+    }
+    async fn tracks(&self, section_id: &str, start: u64, size: u64) -> AppResult<Vec<Track>> {
+        self.lib()?.tracks(section_id, start, size).await
+    }
+    async fn changed_since(&self, section_id: &str, since: i64) -> AppResult<Changes> {
+        self.lib()?.changed_since(section_id, since).await
+    }
+    async fn items(&self, section_id: &str, ids: &[String]) -> AppResult<Option<Changes>> {
+        self.lib()?.items(section_id, ids).await
+    }
+    async fn all_ids(&self, section_id: &str, kind: ItemKind) -> AppResult<Vec<String>> {
+        self.lib()?.all_ids(section_id, kind).await
+    }
+    async fn history(&self, section_id: &str, start: u64, size: u64) -> AppResult<Vec<HistoryEntry>> {
+        self.lib()?.history(section_id, start, size).await
+    }
+    async fn playlists(&self) -> AppResult<Vec<Playlist>> {
+        self.lib()?.playlists().await
+    }
+    async fn playlist_items(&self, playlist_id: &str) -> AppResult<Vec<String>> {
+        self.lib()?.playlist_items(playlist_id).await
+    }
+    async fn playlist_entries(&self, playlist_id: &str) -> AppResult<Vec<PlaylistEntry>> {
+        self.lib()?.playlist_entries(playlist_id).await
+    }
+    async fn liked_tracks(&self, section_id: &str) -> AppResult<Option<Vec<crate::db::likes::Rated>>> {
+        self.lib()?.liked_tracks(section_id).await
+    }
+    async fn rated_tracks(&self, section_id: &str) -> AppResult<Option<Vec<crate::db::likes::Rated>>> {
+        self.lib()?.rated_tracks(section_id).await
+    }
+    async fn artist_similar(&self, artist_id: &str) -> AppResult<Vec<SimilarArtist>> {
+        // An artist page asks the artist's own server.
+        self.0.for_id(artist_id)?.library().artist_similar(artist_id).await
+    }
+}
 
 /// Server-side search on the primary server.
 pub struct RoutedSearch(pub Backends);
@@ -76,8 +142,14 @@ impl DownloadSource for RoutedDownloads {
         self.0.for_id(&track.id)?.downloads().fetch(track, kbps).await
     }
 
+    /// A conversion session named with its server's tag goes to that
+    /// server; others to the Plex account (which names none).
     async fn finished(&self, fetch: &Fetch) {
-        if let Ok(s) = self.0.primary() {
+        let server = match fetch.session.as_deref() {
+            Some(s) => self.0.for_id(s),
+            None => self.0.primary(),
+        };
+        if let Ok(s) = server {
             s.downloads().finished(fetch).await;
         }
     }

@@ -72,6 +72,11 @@ pub async fn auth_cancel(state: State<'_, PlexState>) -> AppResult<()> {
 #[tauri::command]
 pub async fn auth_sign_out(app: AppHandle, state: State<'_, PlexState>, home: State<'_, super::home::Home>) -> AppResult<()> {
     state.sign_out().await?;
+    // Other kinds of server (if any) carry the library on their own now.
+    if let Some(b) = tauri::Manager::try_state::<crate::backend::Backends>(&app) {
+        b.forget_plex();
+        b.changed();
+    }
     // Signing out as another Home user goes back to the user who signed in.
     if home.signed_out()? {
         app.request_restart();

@@ -644,12 +644,26 @@ impl TrackLookup for CacheLookup {
         let avoid: std::collections::HashSet<String> = req.avoid.iter().cloned().collect();
         let n = req.n;
         let smart = req.smart.then(|| (req.seed_ids.clone(), req.avoid_artists.iter().cloned().collect::<std::collections::HashSet<_>>()));
+        // A radio on a server that makes radio of its own mixes in the
+        // server's picks.
+        let server_seed = match (&seed, req.kind, req.smart) {
+            (Seed::Track(id) | Seed::Artist(id), ContextKind::Radio, false) => Some(id.clone()),
+            _ => None,
+        };
+        let avoid_server = avoid.clone();
         let ids = tokio::task::spawn_blocking(move || match smart {
             Some((seeds, artists)) => mixes.suggestion_ids(&seeds, &avoid, &artists, n),
             None => mixes.radio_ids(&seed, &avoid, n, false),
         })
             .await
             .map_err(|e| crate::error::AppError::Internal(format!("radio task: {e}")))??;
+        let ids = match (server_seed, &self.1) {
+            (Some(seed), Some(servers)) => {
+                let from_server = server_radio(servers, &seed, n * 2).await;
+                blend_radio(&from_server, ids, &avoid_server, n)
+            }
+            _ => ids,
+        };
         let view = self.0.tag_view();
         let mut tracks = self
             .0
@@ -663,6 +677,56 @@ impl TrackLookup for CacheLookup {
             tracks.retain(|t| ok.contains(&t.id));
         }
         Ok(tracks)
+    }
+}
+
+/// The seed's server's own radio picks (empty when it makes none or can't
+/// be reached).
+async fn server_radio(servers: &crate::backend::Backends, seed: &str, n: usize) -> Vec<String> {
+    let Ok(server) = servers.for_id(seed) else { return Vec::new() };
+    if !server.caps().has(crate::backend::Caps::SERVER_RADIO) {
+        return Vec::new();
+    }
+    let Some(radio) = server.radio() else { return Vec::new() };
+    match radio.mix(seed, n).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::debug!("server radio unavailable: {}", e.kind());
+            Vec::new()
+        }
+    }
+}
+
+/// The server's picks and Platter's own, taken in turn, without repeats or
+/// songs to avoid, up to `n`.
+pub fn blend_radio(server: &[String], local: Vec<String>, avoid: &std::collections::HashSet<String>, n: usize) -> Vec<String> {
+    let mut out = Vec::with_capacity(n);
+    let mut seen = std::collections::HashSet::new();
+    let mut from_server = server.iter().filter(|i| !avoid.contains(*i));
+    let mut own = local.iter();
+    while out.len() < n {
+        let (x, y) = (own.next(), from_server.next());
+        if x.is_none() && y.is_none() {
+            break;
+        }
+        for id in [x, y].into_iter().flatten() {
+            if out.len() < n && seen.insert(id.clone()) {
+                out.push(id.clone());
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod blend_tests {
+    #[test]
+    fn server_picks_and_own_take_turns() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let avoid = ["x".to_string()].into_iter().collect();
+        assert_eq!(super::blend_radio(&s(&["x", "a", "b"]), s(&["1", "a", "2"]), &avoid, 4), s(&["1", "a", "b", "2"]));
+        assert_eq!(super::blend_radio(&[], s(&["1", "2"]), &avoid, 5), s(&["1", "2"]), "no server picks: as before");
+        assert_eq!(super::blend_radio(&s(&["a"]), Vec::new(), &avoid, 5), s(&["a"]));
     }
 }
 

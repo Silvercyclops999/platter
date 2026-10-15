@@ -7,6 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::{BackendKind, Caps};
+use crate::error::AppResult;
 use crate::audio::source::TrackResolver;
 use crate::db::source::{ArtFetcher, LibrarySource, RemoteSearch};
 use crate::downloads::DownloadSource;
@@ -15,6 +16,13 @@ use crate::playlists::PlaylistRemote;
 use crate::plex::types::ConnectionKind;
 use crate::tags::scan::PartSource;
 use crate::tracking::PlayReporter;
+
+/// Radio the server makes itself from a song, album or artist.
+#[async_trait]
+pub trait ServerRadio: Send + Sync {
+    /// Up to `n` song ids like the seed (an id from this server).
+    async fn mix(&self, seed_id: &str, n: usize) -> AppResult<Vec<String>>;
+}
 
 #[async_trait]
 pub trait MusicServer: Send + Sync {
@@ -39,6 +47,11 @@ pub trait MusicServer: Send + Sync {
 
     /// The main library, for the sync engine.
     fn library(&self) -> Arc<dyn LibrarySource>;
+    /// Each included library on its own (its id and reader), for syncing
+    /// besides the main one. Plex keeps its own list in Settings.
+    fn libraries(&self) -> Vec<(String, Arc<dyn LibrarySource>)> {
+        Vec::new()
+    }
     /// Server-side search while the first sync runs.
     fn search(&self) -> Arc<dyn RemoteSearch>;
     /// Resized artwork.
@@ -62,6 +75,10 @@ pub trait MusicServer: Send + Sync {
 
     /// Lyrics the server keeps ([`Caps::LYRICS`]).
     fn lyrics(&self) -> Option<Arc<dyn crate::lyrics::ServerLyrics>> {
+        None
+    }
+    /// Songs like a seed, made by the server ([`Caps::SERVER_RADIO`]).
+    fn radio(&self) -> Option<Arc<dyn ServerRadio>> {
         None
     }
     /// Smart playlists saved on the server ([`Caps::SERVER_SMART_PLAYLISTS`]).
