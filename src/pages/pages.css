@@ -116,7 +116,7 @@
 /* The header colour can be light; give badges their own dark plate so they
    stay readable on any art. */
 .detail-header__badges .badge {
-  background: rgba(10, 8, 6, 0.55);
+  background: color-mix(in srgb, var(--color-bg-base) 60%, transparent);
   border-color: color-mix(in srgb, var(--color-ink) 22%, transparent);
   color: var(--color-text-secondary);
 }

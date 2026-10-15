@@ -17,6 +17,7 @@
 
   /* Background layers */
   --color-bg-base: #0E0D0C;
+  --color-bg-base: #0E0D0C;
   --color-bg-raised: #171513;
   --color-bg-raised2: #201D1A;
   --color-bg-overlay: #2A2622;
@@ -120,6 +121,34 @@
 
 :root[data-theme-base="light"] {
   color-scheme: light;
+}
+
+/* Views drawn over artwork colour (expanded now playing and lyrics, text on
+   photos, and the miniplayer, which floats over other windows) keep light
+   text on every theme: on a light theme they take the Dark theme's surface,
+   text, line and accent tokens. */
+:root[data-theme-base="light"] :is(.fw, .np-about__heading.on-photo, .mix-header--photo, .pl-cover__hint, .mini),
+:root[data-theme-base="light"].fw-open :is(.topbar, .player-bar) {
+  --color-ink: #FFF0DC;
+  --color-text-primary: #F4EFE8;
+  --color-text-secondary: #B8AFA4;
+  --color-text-muted: #8A8178;
+  --color-text-on-accent: #121110;
+  --color-accent: #ECE4D3;
+  --color-accent-hover: #FFFDF8;
+  --color-accent-pressed: #D6CCB8;
+  --color-focus-ring: #FFFDF8;
+  --color-state-hover: rgba(255, 240, 220, 0.06);
+  --color-state-pressed: rgba(255, 240, 220, 0.10);
+  --color-state-selected: rgba(255, 240, 220, 0.12);
+  --color-playing: #F0957A;
+  --color-bg-base: #0E0D0C;
+  --color-bg-raised: #171513;
+  --color-bg-raised2: #201D1A;
+  --color-bg-overlay: #2A2622;
+  --color-border: #2F2A25;
+  color-scheme: dark;
+  color: var(--color-text-primary);
 }
 
 /* Reduced motion (OS setting, mirrored onto data-reduced-motion by

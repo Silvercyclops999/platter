@@ -90,6 +90,14 @@ describe("built-in themes", () => {
     expect(Object.values(THEME_TOKENS).every((k) => k === "colour" || k === "length")).toBe(true);
   });
 
+  it("views over artwork take the Dark theme's own values on light themes", () => {
+    const start = css.indexOf(':root[data-theme-base="light"] :is(');
+    const block = css.slice(start, css.indexOf("}", start));
+    const pinned = [...block.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)];
+    expect(pinned.length).toBeGreaterThan(10);
+    for (const [, name, value] of pinned) expect(value.toLowerCase(), name).toBe(BUILTIN_THEMES.dark.tokens[name]?.toLowerCase());
+  });
+
   it.each(BUILTIN_IDS)("%s meets AA text contrast on every surface", (id) => {
     const t = BUILTIN_THEMES[id].tokens;
     const surfaces = ["color-bg-base", "color-bg-raised", "color-bg-raised2", "color-bg-overlay"];
@@ -318,7 +326,8 @@ describe("theme settings", () => {
     await user.click(row("Theme file").getByRole("button", { name: "Import" }));
     await waitFor(() => expect(useSettings.getState().settings?.themeFile?.name).toBe("Orchard"));
     expect(within(screen.getByRole("combobox", { name: "Theme file" })).getByRole("option", { name: "Orchard" })).toBeInTheDocument();
-    expect(useToasts.getState().toasts.at(-1)?.message).toMatch(/Added Orchard/);
+    const toasts = useToasts.getState().toasts;
+    expect(toasts[toasts.length - 1]?.message).toMatch(/Added Orchard/);
     expect(row("Theme file").getByRole("button", { name: "Open themes folder" })).toBeEnabled();
   });
 

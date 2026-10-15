@@ -134,6 +134,8 @@ export interface MockOptions {
   platterUnreachable?: boolean;
   /** Start with downloads in place (and the limit reached, for "full"). */
   downloads?: "demo" | "full";
+  /** Start on this theme (?theme=light). */
+  theme?: Settings["theme"];
 }
 
 const isTestEnv = (() => {
@@ -172,6 +174,7 @@ export function optionsFromUrl(search: string): MockOptions {
     feedPortInUse: Number(p.get("feedPortInUse")) || undefined,
     platterUnreachable: p.get("platter") === "unreachable",
     downloads: p.get("downloads") === "demo" || p.get("downloads") === "full" ? (p.get("downloads") as "demo" | "full") : undefined,
+    theme: (["dark", "light", "system", "midnight", "forest", "sand"] as const).find((t) => t === p.get("theme")),
   };
 }
 
@@ -361,6 +364,7 @@ export class MockBackend implements Backend {
       durationMs: (id) => this.trackById(id)?.durationMs ?? 200_000,
       offline: () => !!this.healthState?.cachedOnly,
     });
+    if (this.opts.theme) this.settings = { ...this.settings, theme: this.opts.theme };
     if (this.opts.downloads) {
       this.downloads.seedDone("album", this.fx.albums[0].id, this.fx.albums[0].title);
       this.downloads.seedDone("liked", "", "Liked Songs");
