@@ -23,6 +23,8 @@ const ALLOWED_HOSTS: &[&str] = &[
     "theaudiodb.com",
     "plex.tv",
     "assets.plex.tv",
+    // Previews of the artwork a server offers for an item.
+    "images.plex.tv",
 ];
 
 /// Largest image accepted from a source.

@@ -202,6 +202,42 @@ impl ArtCache {
         Ok(())
     }
 
+    /// Drop every cached size of one item's art (`/library/metadata/{id}/…`,
+    /// with its server's tag), so a new cover or photo shows at once. Returns
+    /// how many entries went. Blocking.
+    pub fn forget_item(&self, id: &str) -> AppResult<usize> {
+        let tag = crate::sid::tag_of(id);
+        let key = crate::sid::key(id);
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(AppError::Invalid(format!("not an item id: {id:.32}")));
+        }
+        let path = format!("/library/metadata/{key}/");
+        let path = match tag {
+            Some(t) => format!("{t}:{path}"),
+            None => path,
+        };
+        let prefix = crate::sid::storage_form(&path).to_string();
+        let rows: Vec<(String, String, i64)> = {
+            let idx = self.inner.index.lock();
+            let mut st = idx.prepare_cached("SELECT key, file, size FROM art")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<Result<Vec<(String, String, i64)>, _>>()?
+                .into_iter()
+                .filter(|(k, _, _)| k.split_once(':').is_some_and(|(_, p)| p.starts_with(&prefix)))
+                .collect()
+        };
+        for (key, file, size) in &rows {
+            match std::fs::remove_file(self.inner.dir.join(file)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == ErrorKind::NotFound => {}
+                Err(e) => tracing::warn!("art cache forget {file}: {e}"),
+            }
+            self.inner.index.lock().execute("DELETE FROM art WHERE key = ?1", [key])?;
+            self.inner.total.fetch_sub((*size).max(0) as u64, Ordering::AcqRel);
+        }
+        Ok(rows.len())
+    }
+
     /// Evict least recently used entries until the total is ≤ `target`.
     fn evict_to(&self, target: u64) -> AppResult<()> {
         while self.size() > target {
@@ -614,5 +650,25 @@ mod tests {
         c.get_or_fetch("99999999:/library/metadata/1/thumb/2", 300, 300).await.unwrap();
         assert_eq!(f.calls.load(Ordering::SeqCst), 2);
         crate::sid::set_legacy(None);
+    }
+
+    #[tokio::test]
+    async fn forgets_every_size_of_one_items_art() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = fetcher(100, 0);
+        let c = ArtCache::open(dir.path(), DEFAULT_CAP_BYTES, f.clone()).unwrap();
+        let t = "0a1b2c3d";
+        c.get_or_fetch(&format!("{t}:/library/metadata/5/thumb/1"), 300, 300).await.unwrap();
+        c.get_or_fetch(&format!("{t}:/library/metadata/5/thumb/1"), 64, 64).await.unwrap();
+        c.get_or_fetch(&format!("{t}:/library/metadata/55/thumb/1"), 64, 64).await.unwrap();
+        c.get_or_fetch("99999999:/library/metadata/5/thumb/1", 64, 64).await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 4);
+        assert_eq!(c.forget_item(&format!("{t}:5")).unwrap(), 2);
+        assert_eq!(c.size(), 200, "item 55 and the other server's item 5 stay");
+        c.get_or_fetch(&format!("{t}:/library/metadata/5/thumb/1"), 300, 300).await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 5, "fetched again");
+        c.get_or_fetch(&format!("{t}:/library/metadata/55/thumb/1"), 64, 64).await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 5, "still cached");
+        assert!(c.forget_item("abc").is_err());
     }
 }

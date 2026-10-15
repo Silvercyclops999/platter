@@ -20,6 +20,7 @@ pub mod notify;
 pub mod platform;
 pub mod playlists;
 pub mod plex;
+pub mod plexedit;
 pub mod remote;
 pub mod scrobble;
 pub mod settings;
@@ -784,6 +785,11 @@ pub fn run() {
             mixes::service::spawn_schedule(mix_service.clone());
             app.manage(mix_service);
 
+            app.manage(plexedit::PlexEditor::new(
+                data_dir.join("plex-edits"),
+                Arc::new(plexedit::PlexEditServers(plex.clone())),
+                Arc::new(plexedit::AppEditHooks { db: db.clone(), art: art.clone() }),
+            ));
             app.manage(plex);
             app.manage(db);
             // The now-playing feed for widgets, on 127.0.0.1 while its setting is on.
@@ -857,6 +863,21 @@ pub fn run() {
             playlists::playlist_update,
             playlists::playlist_set_cover,
             playlists::playlist_delete,
+            plexedit::commands::plex_edit_access,
+            plexedit::commands::plex_edit_item,
+            plexedit::commands::plex_edit_images,
+            plexedit::commands::plex_edit_select_image,
+            plexedit::commands::plex_edit_upload_image,
+            plexedit::commands::plex_edit_image_link,
+            plexedit::commands::plex_edit_matches,
+            plexedit::commands::plex_edit_match,
+            plexedit::commands::plex_edit_unmatch,
+            plexedit::commands::plex_edit_details,
+            plexedit::commands::plex_edit_merge,
+            plexedit::commands::plex_edit_split,
+            plexedit::commands::plex_edit_refresh,
+            plexedit::commands::plex_edit_undo,
+            plexedit::commands::plex_edit_history,
             likes::likes_set,
             likes::liked_ids,
             likes::liked_page,

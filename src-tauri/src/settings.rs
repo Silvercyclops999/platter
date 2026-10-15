@@ -378,6 +378,13 @@ pub struct Settings {
     pub check_unmatched_musicbrainz: bool,
     /// Albums sharing ARCHIVE_GROUP show as one card with an edition picker.
     pub group_editions: bool,
+    /// Edit in Plex (covers, matches, details, merge) on servers this
+    /// account owns or administers.
+    pub plex_edit_show: bool,
+    /// Fields edited in Plex are locked so a refresh doesn't undo them.
+    pub plex_edit_lock: bool,
+    /// Fix match shows on unreleased albums (always with a warning).
+    pub plex_edit_match_unreleased: bool,
     /// Drag songs, albums and playlists onto playlists, Liked Songs and the queue.
     pub drag_and_drop: bool,
     /// Transcribe songs without lyrics on this computer (this device only).
@@ -612,6 +619,9 @@ impl Default for Settings {
             count_unmatched_unreleased: true,
             check_unmatched_musicbrainz: true,
             group_editions: true,
+            plex_edit_show: true,
+            plex_edit_lock: true,
+            plex_edit_match_unreleased: true,
             drag_and_drop: true,
             transcribe_lyrics: false,
             transcribe_model: Default::default(),
@@ -726,6 +736,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "countUnmatchedUnreleased",
     "checkUnmatchedMusicbrainz",
     "groupEditions",
+    "plexEditShow",
+    "plexEditLock",
+    "plexEditMatchUnreleased",
     "dragAndDrop",
     "showAutoLyrics",
     "homeMixes",
@@ -914,6 +927,9 @@ pub struct SettingsPatch {
     pub count_unmatched_unreleased: Option<bool>,
     pub check_unmatched_musicbrainz: Option<bool>,
     pub group_editions: Option<bool>,
+    pub plex_edit_show: Option<bool>,
+    pub plex_edit_lock: Option<bool>,
+    pub plex_edit_match_unreleased: Option<bool>,
     pub drag_and_drop: Option<bool>,
     pub transcribe_lyrics: Option<bool>,
     pub transcribe_model: Option<crate::lyrics::transcribe::model::ModelKind>,
@@ -1120,6 +1136,9 @@ impl Settings {
         set(&mut self.count_unmatched_unreleased, p.count_unmatched_unreleased);
         set(&mut self.check_unmatched_musicbrainz, p.check_unmatched_musicbrainz);
         set(&mut self.group_editions, p.group_editions);
+        set(&mut self.plex_edit_show, p.plex_edit_show);
+        set(&mut self.plex_edit_lock, p.plex_edit_lock);
+        set(&mut self.plex_edit_match_unreleased, p.plex_edit_match_unreleased);
         set(&mut self.drag_and_drop, p.drag_and_drop);
         set(&mut self.transcribe_lyrics, p.transcribe_lyrics);
         set(&mut self.transcribe_model, p.transcribe_model);
@@ -2691,5 +2710,20 @@ mod tests {
         s.apply(&serde_json::from_str(r#"{"serverView":"all"}"#).unwrap()).unwrap();
         publish(&s, &live, &db);
         assert_eq!(db.server_view(), crate::db::merge::ServerView::All);
+    }
+
+    #[test]
+    fn plex_edit_settings_default_on_and_travel() {
+        let s = Settings::default();
+        assert!(s.plex_edit_show && s.plex_edit_lock && s.plex_edit_match_unreleased);
+        for k in ["plexEditShow", "plexEditLock", "plexEditMatchUnreleased"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k}");
+        }
+        let mut s = s;
+        s.apply(&SettingsPatch { plex_edit_lock: Some(false), plex_edit_match_unreleased: Some(false), ..Default::default() }).unwrap();
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["plexEditLock"], false);
+        assert_eq!(v["plexEditMatchUnreleased"], false);
+        assert_eq!(v["plexEditShow"], true);
     }
 }

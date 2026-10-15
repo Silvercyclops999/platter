@@ -996,7 +996,7 @@ impl PlexClient {
         Ok(u)
     }
 
-    fn request(&self, method: Method, path: &str) -> AppResult<RequestBuilder> {
+    pub(crate) fn request(&self, method: Method, path: &str) -> AppResult<RequestBuilder> {
         Ok(self.http.request(method, self.url(path)?))
     }
 

@@ -20,6 +20,7 @@ pub mod client;
 pub mod commands;
 pub mod details;
 pub mod discovery;
+pub mod edit;
 pub mod health;
 pub mod home;
 pub mod identity;
