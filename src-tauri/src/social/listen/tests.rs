@@ -246,7 +246,9 @@ fn peer(name: &str, relay: &FakeNtfy) -> Peer {
 }
 
 async fn eventually(what: &str, mut f: impl FnMut() -> bool) {
-    for _ in 0..400 {
+    // A hang guard: it returns as soon as `f` holds.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
         if f() {
             return;
         }

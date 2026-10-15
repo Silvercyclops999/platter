@@ -68,7 +68,8 @@ fn a_session_sets_up_streams_flushes_and_tears_down() {
     // The receiver asks for the time and gets an answer.
     let port = fake.rec.lock().client_timing.unwrap();
     let probe = UdpSocket::bind("127.0.0.1:0").unwrap();
-    probe.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    // A hang guard: the answer comes straight back.
+    probe.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
     let mut req = [0u8; 32];
     req[0] = 0x80;
     req[1] = 0xd2;

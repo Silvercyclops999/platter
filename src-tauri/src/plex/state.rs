@@ -1197,8 +1197,11 @@ mod tests {
     }
 
     fn cfg() -> RaceConfig {
+        // Every server here is on 127.0.0.1 and either answers or refuses at
+        // once, so the timeout only decides when a loaded machine's slow
+        // answer is taken as "unreachable", which these tests never want.
         RaceConfig {
-            timeout: Duration::from_millis(800),
+            timeout: Duration::from_secs(5),
             grace: Duration::from_millis(100),
         }
     }
