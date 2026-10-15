@@ -1,0 +1,95 @@
+/* Downloads: the action-row control, the row mark, and the Settings storage meter. */
+
+/* ---------------------------------------------------------------- control */
+.dl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.dl-btn__pct {
+  min-width: 3ch;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+}
+.dl-btn--none .dl-btn__button { color: var(--color-text-secondary); }
+.dl-btn--none .dl-btn__button:hover { color: var(--color-text-primary); }
+.dl-btn--downloading .dl-btn__button,
+.dl-btn--queued .dl-btn__button { color: var(--color-text-primary); }
+.dl-btn--error .dl-btn__button { color: var(--color-warning); }
+/* The downloaded disc carries its own colour; no active dot under it. */
+.dl-btn--downloaded .icon-btn.is-active::after { display: none; }
+
+.dl-glyph__disc { fill: var(--color-accent); transition: fill var(--motion-quick) var(--motion-easing); }
+.dl-glyph__arrow-on { stroke: var(--color-text-on-accent); }
+.icon-btn:hover .dl-glyph__disc { fill: var(--color-accent-hover); }
+.dl-btn--downloaded .dl-glyph { animation: dl-pop var(--motion-medium) var(--motion-easing); }
+@keyframes dl-pop {
+  0% { transform: scale(calc(1 - 0.3 * var(--motion-move))); }
+  60% { transform: scale(calc(1 + 0.1 * var(--motion-move))); }
+  100% { transform: scale(1); }
+}
+
+.dl-ring__track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--color-text-secondary) 45%, transparent);
+  stroke-width: 1.75;
+}
+.dl-ring__fill {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--motion-medium) var(--motion-easing);
+}
+/* Waiting: the track turns slowly, dashed. */
+.dl-ring--waiting .dl-ring__track {
+  stroke-dasharray: 3 3.4;
+  transform-origin: 12px 12px;
+  animation: dl-wait 3s linear infinite;
+}
+@keyframes dl-wait {
+  to { transform: rotate(360deg); }
+}
+:root[data-reduced-motion="true"] .dl-ring--waiting .dl-ring__track { animation: none; }
+
+/* ---------------------------------------------------------------- row mark */
+.dl-mark {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.track-row__title-line .dl-mark,
+.track-row__sub .dl-mark { margin-right: -2px; }
+
+.dl-mark--lib { width: 12px; height: 12px; margin-right: var(--space-1); }
+
+/* ---------------------------------------------------------------- Settings storage meter */
+.dl-meter {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  height: 6px;
+  margin-top: var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-text-secondary) 22%, transparent);
+}
+.dl-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width var(--motion-medium) var(--motion-easing);
+}
+.dl-meter--full .dl-meter__fill { background: var(--color-warning); }
+.dl-folder {
+  display: block;
+  margin-top: var(--space-1);
+  overflow: hidden;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

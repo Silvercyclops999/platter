@@ -9,7 +9,7 @@ import {
   LIB_VIEWS,
   SORT_LABEL,
   SUB_LABEL,
-  chipRow,
+  chipRowWithDownloads,
   pressChip,
   searchPlaceholder,
   useLibraryView,
@@ -22,16 +22,29 @@ import {
 } from "../stores/library";
 import { useUi, type MenuItem } from "../stores/ui";
 
-export function LibraryChips({ filter, sub, kinds }: { filter: LibFilter; sub: LibSub | null; kinds: LibKind[] }) {
-  const chips = chipRow(filter, sub, kinds);
+export function LibraryChips({
+  filter,
+  sub,
+  kinds,
+  downloaded = { available: false, on: false },
+}: {
+  filter: LibFilter;
+  sub: LibSub | null;
+  kinds: LibKind[];
+  downloaded?: { available: boolean; on: boolean };
+}) {
+  const chips = chipRowWithDownloads(filter, sub, kinds, downloaded);
   const roving = useRovingRow();
   if (chips.length === 0) return null;
   return (
     <div role="group" aria-label="Show in library" className="lib-chips" {...roving}>
       {chips.map((c) => {
         const press = () => {
+          const lib = useLibraryView.getState();
+          if (c.kind === "downloaded") return lib.setDownloaded(!downloaded.on);
+          if (c.kind === "clear") lib.setDownloaded(false);
           const next = pressChip(c, filter, sub);
-          useLibraryView.getState().setFilter(next.filter, next.sub);
+          lib.setFilter(next.filter, next.sub);
         };
         if (c.kind === "clear")
           return (
@@ -39,10 +52,10 @@ export function LibraryChips({ filter, sub, kinds }: { filter: LibFilter; sub: L
               <X size={16} aria-hidden="true" />
             </button>
           );
-        const label = c.kind === "type" ? KIND_LABEL[c.type] : SUB_LABEL[c.sub];
+        const label = c.kind === "type" ? KIND_LABEL[c.type] : c.kind === "sub" ? SUB_LABEL[c.sub] : "Downloaded";
         return (
           <button
-            key={c.kind === "type" ? c.type : c.sub}
+            key={c.kind === "type" ? c.type : c.kind === "sub" ? c.sub : "downloaded"}
             type="button"
             aria-pressed={c.selected}
             className={`chip chip--sm ${c.selected ? "is-selected" : ""}`}

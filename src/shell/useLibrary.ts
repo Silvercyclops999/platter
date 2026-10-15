@@ -4,6 +4,7 @@ import type { MenuItem } from "../stores/ui";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { shareItem } from "../components/ShareMenu";
 import { createPlaylist } from "../stores/playlists";
+import { downloadMenuItems, useDownloads } from "../stores/downloads";
 import { useLikes } from "../stores/likes";
 import type { Playlist } from "../lib/types";
 import { useApp } from "../stores/app";
@@ -59,6 +60,8 @@ export interface LibraryModel {
   sub: LibSub | null;
   sort: LibSort;
   loading: boolean;
+  /** The Downloaded chip: shown when anything is downloaded; on by itself while offline. */
+  downloaded: { available: boolean; on: boolean };
 }
 
 /** Pins (kept fresh from the library) followed by everything else. */
@@ -116,20 +119,41 @@ export function useLibraryModel(query: string): LibraryModel {
   const customOrder = useLibraryView((s) => s.customOrder);
   const owner = useApp((s) => s.auth?.username ?? null);
   const pins = usePins((s) => s.pins);
+  const dlItems = useDownloads((s) => s.status?.items);
+  const dlChoice = useLibraryView((s) => s.downloaded);
+  const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
+  // Going offline or back online hands the chip back to the connection.
+  useEffect(() => useLibraryView.getState().setDownloaded(null), [cachedOnly]);
 
-  const all = useMemo(
-    () => (items === null ? [] : [likedEntry(owner), ...mergePins(toEntries(items, owner), pins)]),
-    [items, owner, pins],
-  );
+  const all = useMemo(() => {
+    if (items === null) return [];
+    const keys = new Set((dlItems ?? []).map((i) => `${i.kind}:${i.kind === "liked" ? "" : i.id}`));
+    const mark = (e: LibEntry): LibEntry => {
+      const on = keys.has(e.liked ? "liked:" : `${e.kind}:${e.id}`);
+      return on ? { ...e, downloaded: true } : e;
+    };
+    return [likedEntry(owner), ...mergePins(toEntries(items, owner), pins)].map(mark);
+  }, [items, owner, pins, dlItems]);
+  const dlAvailable = all.some((e) => e.downloaded);
+  const downloadedOnly = dlChoice ?? (cachedOnly && dlAvailable);
   const kinds = items === null ? LIB_KINDS : LIB_KINDS.filter((k) => all.some((e) => e.kind === k));
   // A saved filter for a type that's no longer there shows everything.
   const activeFilter: LibFilter = filter !== "all" && !kinds.includes(filter) ? "all" : filter;
   const activeSub = activeFilter === "all" ? null : sub;
   const shown = useMemo(
-    () => libraryEntries(all, { filter: activeFilter, sub: activeSub, sort, query, recents, customOrder }),
-    [all, activeFilter, activeSub, sort, query, recents, customOrder],
+    () => libraryEntries(all, { filter: activeFilter, sub: activeSub, sort, query, recents, customOrder, downloadedOnly }),
+    [all, activeFilter, activeSub, sort, query, recents, customOrder, downloadedOnly],
   );
-  return { all, shown, kinds, filter: activeFilter, sub: activeSub, sort: effectiveSort(sort, activeFilter), loading: items === null };
+  return {
+    all,
+    shown,
+    kinds,
+    filter: activeFilter,
+    sub: activeSub,
+    sort: effectiveSort(sort, activeFilter),
+    loading: items === null,
+    downloaded: { available: dlAvailable, on: downloadedOnly },
+  };
 }
 
 export function playEntry(e: LibEntry) {
@@ -170,6 +194,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
     return [
       play,
       { label: "Add to queue", onSelect: () => void player.addToQueue([...useLikes.getState().ids].map((id) => ({ id, thumb: null }))) },
+      ...downloadMenuItems({ kind: "liked", id: "", title: "Liked Songs" }),
       { label: "Create playlist", separator: true, onSelect: () => void createPlaylist() },
     ];
   const items: MenuItem[] = [play];
@@ -188,6 +213,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
     items.push(...playlistEditItems(pl));
     items.push({ label: "Create playlist", separator: true, onSelect: () => void createPlaylist() });
   }
+  if (e.kind === "album" || e.kind === "playlist") items.push(...downloadMenuItems({ kind: e.kind, id: e.id, title: e.title }));
   items.push(shareItem(e.kind, e.id, e.thumb));
   items.push({ ...pin, separator: true });
   if (opts.move) {

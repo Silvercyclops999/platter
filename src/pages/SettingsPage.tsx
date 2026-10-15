@@ -16,6 +16,7 @@ import type {
   AppInfo,
   ArtCacheInfo,
   ConnectionKind,
+  DownloadQuality,
   PopularSource,
   ReduceMotion,
   ServerInfo,
@@ -35,6 +36,7 @@ import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
 import { catboxNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
+import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
 import { BatchControl, BatchNote, ModelControl, TranscribeNote } from "./TranscribeSettings";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
@@ -52,6 +54,13 @@ const QUALITY_LABEL: Record<StreamQuality, string> = {
 };
 const opts = <T extends string>(values: T[], label: Record<T, string>): SelectOption<T>[] =>
   values.map((value) => ({ value, label: label[value] }));
+const DOWNLOAD_QUALITY = opts<DownloadQuality>(["original", "320", "192", "128"], {
+  original: "Original",
+  "320": "320 kbps MP3",
+  "192": "192 kbps MP3",
+  "128": "128 kbps MP3",
+});
+const DOWNLOAD_LIMITS_GB = [5, 10, 20, 50, 100, 200, 500];
 const HOME_QUALITY = opts<StreamQuality>(["original", "320", "256", "192", "128"], QUALITY_LABEL);
 const AWAY_QUALITY = opts<StreamQuality>(["320", "original", "192", "128"], QUALITY_LABEL);
 const SHUFFLE = [
@@ -414,6 +423,11 @@ export function SettingsPage() {
   const [dialog, setDialog] = useState<"signOut" | "server" | "notices" | null>(null);
 
   const { keys: infoKeys, setKey: setInfoKey } = useInfoKeys();
+  const downloads = useDownloadStatus();
+  const limitGb = s?.downloadLimitGb;
+  const limitOptions: SelectOption<string>[] = [...new Set([...DOWNLOAD_LIMITS_GB, ...(limitGb ? [limitGb] : [])])]
+    .sort((a, b) => a - b)
+    .map((gb) => ({ value: String(gb), label: `${gb} GB` }));
   const { status: discord, setKey: setImgurKey } = useDiscordStatus();
   const discordOff = !!discord && !discord.available;
   const artMb = s?.artCacheMb;
@@ -526,6 +540,14 @@ export function SettingsPage() {
       control: (ids) => select(s, (x) => x.qualityAway, AWAY_QUALITY, ids, (v) => updateSettings({ qualityAway: v })),
     },
     {
+      key: "downloadQuality",
+      section: "Audio quality",
+      title: "Download quality",
+      description:
+        "Original keeps each file as it is. The others are MP3s made by your server, which take less space. Applies to new downloads. This device only.",
+      control: (ids) => select(s, (x) => x.downloadQuality, DOWNLOAD_QUALITY, ids, (v) => updateSettings({ downloadQuality: v })),
+    },
+    {
       key: "showFormatBadge",
       section: "Audio quality",
       title: "Show format badge",
@@ -598,8 +620,34 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "linkFeatured", ids),
     },
     {
+      key: "downloadsStorage",
+      section: "Storage",
+      title: downloadsTitle(downloads?.usedBytes),
+      description: "Albums, playlists and Liked Songs kept on this computer so they play without your server.",
+      note: <StorageNote />,
+      control: () => <RemoveAllControl />,
+    },
+    {
+      key: "downloadLimit",
+      section: "Storage",
+      title: "Download storage limit",
+      description: "Downloads stop at this size and a banner says so. Remove some or raise the limit to carry on. This device only.",
+      control: (ids) =>
+        s ? (
+          <Select
+            value={String(s.downloadLimitGb)}
+            options={limitOptions}
+            onChange={(v) => updateSettings({ downloadLimitGb: Number(v) })}
+            labelledBy={ids.title}
+            describedBy={ids.desc}
+          />
+        ) : (
+          loading
+        ),
+    },
+    {
       key: "artCache",
-      section: "Library",
+      section: "Storage",
       title: "Artwork and cache size",
       description: "Cover art is kept on this computer up to this size. Clearing it frees the space; art downloads again as you browse.",
       note: art ? `Using ${formatBytes(art.usedBytes)}.` : undefined,
@@ -621,6 +669,37 @@ export function SettingsPage() {
           </Button>
         </>
       ),
+    },
+    {
+      key: "downloadFolder",
+      section: "Storage",
+      title: "Download location",
+      description: "The folder downloads are kept in. Changing it moves them there. This device only.",
+      note: <FolderNote />,
+      control: () => <ChangeFolderControl />,
+    },
+    {
+      key: "downloadHomeOnly",
+      section: "Downloads and offline",
+      title: "Download only on your home network",
+      description: "Downloads wait while you reach your server over remote access or the Plex relay. This device only.",
+      note: <QueueNote />,
+      control: (ids) => toggle(s, "downloadHomeOnly", ids),
+    },
+    {
+      key: "downloadLiked",
+      section: "Downloads and offline",
+      title: "Download Liked Songs",
+      description: "Keeps Liked Songs on this computer. Songs you like later download too. This device only.",
+      control: (ids) => toggle(s, "downloadLiked", ids),
+    },
+    {
+      key: "goOffline",
+      section: "Downloads and offline",
+      title: "Go offline",
+      description:
+        "Platter stops using the network: no server, artist info, lyrics lookups, Discord status, share links or update checks. Only music on this computer plays. Also in the app menu. This device only.",
+      control: (ids) => toggle(s, "goOffline", ids),
     },
     {
       key: "resync",

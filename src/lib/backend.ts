@@ -61,6 +61,8 @@ import type {
   Settings,
   DeepLinkOpen,
   DiscordStatus,
+  DownloadKind,
+  DownloadStatus,
   ShareInfo,
   ShareKind,
   SyncStatus,
@@ -282,6 +284,19 @@ export interface Backend {
   /** The song was transcribed and no words were found. */
   transcribeFoundNothing(trackId: string): Promise<boolean>;
 
+  // Downloads (docs/IPC.md "Downloads")
+  downloadsStatus(): Promise<DownloadStatus>;
+  /** Ids of every downloaded song. */
+  downloadedTracks(): Promise<string[]>;
+  /** Turn an album's, playlist's, Liked Songs' or mix's download on or off. A mix sends its songs. */
+  downloadsSet(kind: DownloadKind, id: string, on: boolean, opts?: { title?: string; trackIds?: string[] }): Promise<DownloadStatus>;
+  /** Failed and missing songs try again (one item's, or all). */
+  downloadsRetry(kind?: DownloadKind, id?: string): Promise<void>;
+  /** Delete every download; resolves to the bytes freed. */
+  downloadsRemoveAll(): Promise<number>;
+  /** Pick a new folder (the files move there); null when cancelled. */
+  downloadsChooseFolder(): Promise<string | null>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -422,6 +437,13 @@ export function createTauriBackend(): Backend {
     transcribeUnreleased: () => call("transcribe_unreleased"),
     transcribeCancel: (trackId) => call("transcribe_cancel", { trackId: trackId ?? null }),
     transcribeFoundNothing: (trackId) => call("transcribe_found_nothing", { trackId }),
+    downloadsStatus: () => call("downloads_status"),
+    downloadedTracks: () => call("downloaded_tracks"),
+    downloadsSet: (kind, id, on, opts) =>
+      call("downloads_set", { kind, id, on, title: opts?.title ?? null, trackIds: opts?.trackIds ?? null }),
+    downloadsRetry: (kind, id) => call("downloads_retry", { kind: kind ?? null, id: id ?? null }),
+    downloadsRemoveAll: () => call("downloads_remove_all"),
+    downloadsChooseFolder: () => call("downloads_choose_folder"),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

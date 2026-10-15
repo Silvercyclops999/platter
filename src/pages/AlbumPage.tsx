@@ -7,6 +7,8 @@ import { openContextMenu } from "../components/ContextMenu";
 import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem } from "../components/PlaylistPicker";
 import { CoverPopup } from "../components/CoverPopup";
+import { DownloadButton } from "../components/DownloadButton";
+import { downloadMenuItems } from "../stores/downloads";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
@@ -139,6 +141,7 @@ export function AlbumPage({ id }: { id: string }) {
             icon={<Shuffle size={22} />}
             onClick={() => player.setContextShuffle(id, !shuffle)}
           />
+          <DownloadButton kind="album" id={id} title={album?.title ?? "this album"} disabled={!album} />
           <IconButton
             label={`More options for ${album?.title ?? "album"}`}
             size="lg"
@@ -151,6 +154,7 @@ export function AlbumPage({ id }: { id: string }) {
                 [
                   { label: "Add to queue", onSelect: () => void player.addToQueue(data!.tracks, album.thumb) },
                   addToPlaylistItem(() => data?.tracks.map((t) => t.id) ?? []),
+                  ...downloadMenuItems({ kind: "album", id: album.id, title: album.title }),
                   { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
                   shareItem("album", album.id, album.thumb),
                   {

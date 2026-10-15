@@ -58,7 +58,7 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Search", "Appearance", "Home", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "About", "Now playing"]);
+    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Storage", "Downloads and offline", "Search", "Appearance", "Home", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "About", "Now playing"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
@@ -79,6 +79,12 @@ describe("settings page", () => {
     expect(screen.getByRole("switch", { name: "Colour wash from artwork" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("button", { name: "Resync library" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "Download quality" })).toHaveValue("original");
+    expect(screen.getByRole("combobox", { name: "Download storage limit" })).toHaveValue("20");
+    expect(screen.getByRole("switch", { name: "Download only on your home network" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Download Liked Songs" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Go offline" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("button", { name: "Change location" })).toBeEnabled();
 
     // Account, version and art cache usage arrive from the core.
     expect(screen.getByText("Signed in as listener")).toBeInTheDocument();

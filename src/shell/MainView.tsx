@@ -18,6 +18,7 @@ import { useApp } from "../stores/app";
 import { useCurrentEntry, type Route } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { HealthBanner } from "./HealthBanner";
+import { DownloadsBanner } from "../components/DownloadButton";
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
@@ -218,6 +219,7 @@ export function MainView() {
   return (
     <main id="main" className="main" style={{ "--tint": colors.vivid, "--tint-shade": colors.shade } as CSSProperties} aria-label={mainLabel}>
       <HealthBanner />
+      <DownloadsBanner />
       <div className="main__viewport">
         <div className="main-header" ref={topBar}>
           {pageBar && (

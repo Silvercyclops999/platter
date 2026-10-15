@@ -58,7 +58,7 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
                 <IconButton size="sm" label="Expand Your Library" icon={<Maximize2 size={16} />} onClick={() => nav.go({ name: "library" })} />
               </span>
             </div>
-            <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} />
+            <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} />
             <div className="lib-tools">
               <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} />
               <LibrarySortView filter={model.filter} sort={model.sort} view={view} setView={(v) => useLibraryView.getState().setView(v)} />

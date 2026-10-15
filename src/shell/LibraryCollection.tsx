@@ -12,6 +12,7 @@ import { LikedCover } from "../components/LikedCover";
 import { openContextMenu } from "../components/ContextMenu";
 import { Skeleton } from "../components/Skeleton";
 import { Tooltip } from "../components/Tooltip";
+import { DownloadedGlyph } from "../components/DownloadButton";
 import { addedLabel, playedLabel } from "../lib/relativeTime";
 import { albumDrag, dropOnLiked, dropOnPlaylist, endSongDrag, libraryDropRule, playlistDrag, startSongDrag, useSongDrop } from "../stores/drag";
 import { KIND_LABEL, subtitle, typeLabel, type LibEntry, type LibView } from "../stores/library";
@@ -200,9 +201,10 @@ function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filter
         ) : (
           <span className="lib-row__text">
             <span className={`lib-row__title ${isContext ? "is-playing" : ""}`}>{e.title}</span>
-            {(sub || e.pinned) && (
+            {(sub || e.pinned || e.downloaded) && (
               <span className="lib-row__sub">
                 {e.pinned && pinGlyph}
+                {e.downloaded && <DownloadedGlyph />}
                 <span className="lib-row__subtext">{sub}</span>
               </span>
             )}
@@ -265,6 +267,7 @@ function Cell({ e, index, setSize, tabIndex, selected, isContext, playing, filte
             <span className={`lib-cell__title ${isContext ? "is-playing" : ""}`}>{e.title}</span>
             <span className="lib-cell__sub">
               {e.pinned && pinGlyph}
+              {e.downloaded && <DownloadedGlyph />}
               <span className="lib-cell__subtext">{sub || " "}</span>
             </span>
           </>

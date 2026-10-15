@@ -102,6 +102,9 @@ interface LibraryViewState extends Saved {
   setView: (v: LibView) => void;
   setWideView: (v: LibView) => void;
   setCustomOrder: (ids: string[]) => void;
+  /** The Downloaded chip: on, off, or null to follow the connection (on while offline). Not saved. */
+  downloaded: boolean | null;
+  setDownloaded: (on: boolean | null) => void;
   /** Remember that an item was just opened or played (drives the Recents sort). */
   touch: (kind: LibKind, id: string, at?: number) => void;
 }
@@ -134,6 +137,8 @@ export const useLibraryView = create<LibraryViewState>()((set, get) => {
     setView: (view) => update({ view }),
     setWideView: (wideView) => update({ wideView }),
     setCustomOrder: (customOrder) => update({ customOrder }),
+    downloaded: null,
+    setDownloaded: (downloaded) => set({ downloaded }),
     touch: (kind, id, at = Date.now()) => {
       const entries = Object.entries({ ...get().recents, [`${kind}:${id}`]: at });
       // Keep the map bounded: drop the oldest.
@@ -148,7 +153,25 @@ export const useLibraryView = create<LibraryViewState>()((set, get) => {
 export type Chip =
   | { kind: "clear" }
   | { kind: "type"; type: LibKind; selected: boolean }
-  | { kind: "sub"; sub: LibSub; selected: boolean };
+  | { kind: "sub"; sub: LibSub; selected: boolean }
+  | { kind: "downloaded"; selected: boolean };
+
+/**
+ * The chip row with the Downloaded chip added (when anything is downloaded).
+ * It works alongside a type chip: on, the type's sub-chips hide.
+ */
+export function chipRowWithDownloads(
+  filter: LibFilter,
+  sub: LibSub | null,
+  kinds: LibKind[],
+  downloaded: { available: boolean; on: boolean },
+): Chip[] {
+  if (!downloaded.available && !downloaded.on) return chipRow(filter, sub, kinds);
+  const dl: Chip = { kind: "downloaded", selected: downloaded.on };
+  if (!downloaded.on) return [...chipRow(filter, sub, kinds), dl];
+  if (filter === "all") return [{ kind: "clear" }, dl, ...kinds.map((type): Chip => ({ kind: "type", type, selected: false }))];
+  return [{ kind: "clear" }, { kind: "type", type: filter, selected: true }, dl];
+}
 
 /**
  * The chip row. Unfiltered: one chip per type the library has. With a type
@@ -170,6 +193,8 @@ export function pressChip(chip: Chip, filter: LibFilter, sub: LibSub | null): { 
   switch (chip.kind) {
     case "clear":
       return { filter: "all", sub: null };
+    case "downloaded":
+      return { filter, sub };
     case "type":
       // Pressing the selected type clears everything.
       return filter === chip.type ? { filter: "all", sub: null } : { filter: chip.type, sub: null };
@@ -204,6 +229,8 @@ export interface LibEntry {
   unavailable?: boolean;
   /** Liked Songs (always pinned first; opens its own page). */
   liked?: boolean;
+  /** Kept on this computer (downloads). */
+  downloaded?: boolean;
 }
 
 /** Library items as rows. Playlists are the signed-in user's own, so they're the creator. */
@@ -276,6 +303,8 @@ export interface EntryOpts {
   /** "kind:id" → last opened or played (ms). */
   recents: Record<string, number>;
   customOrder?: string[];
+  /** Only downloaded items. */
+  downloadedOnly?: boolean;
 }
 
 /** Custom order only exists under the Playlists filter; elsewhere it reads as Recents. */
@@ -302,6 +331,7 @@ export function libraryEntries(items: LibEntry[], opts: EntryOpts): LibEntry[] {
   const keep = (e: LibEntry) =>
     (opts.filter === "all" || e.kind === opts.filter) &&
     (sub === null || (sub === "smart" ? e.smart : !e.smart)) &&
+    (!opts.downloadedOnly || !!e.downloaded) &&
     matchesQuery(e, opts.query);
   const pinned = items.filter((e) => e.pinned && keep(e));
   const sort = effectiveSort(opts.sort, opts.filter);

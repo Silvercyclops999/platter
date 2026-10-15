@@ -496,7 +496,8 @@ export type HealthBannerKind =
   | "filesUnavailable"
   | "noMusicLibrary"
   | "diskFull"
-  | "localNetwork";
+  | "localNetwork"
+  | "goneOffline";
 
 /** What can still play without the server (`cached_library`). */
 export interface CachedLibrary {
@@ -693,8 +694,22 @@ export interface Settings {
   computerName: string;
   /** List AirPlay devices that need a password or pairing. */
   showAirplayLocked: boolean;
+  /** Downloads: the file as it is, or an MP3. This device only. */
+  downloadQuality: DownloadQuality;
+  /** Downloads stop at this size, in GB. This device only. */
+  downloadLimitGb: number;
+  /** Where downloads go; empty is the app's own folder. Changed with downloadsChooseFolder. */
+  downloadFolder: string;
+  /** Download only over the local connection to your server. This device only. */
+  downloadHomeOnly: boolean;
+  /** Keep Liked Songs downloaded; new likes download too. This device only. */
+  downloadLiked: boolean;
+  /** No network use at all; only music on this computer plays. This device only. */
+  goOffline: boolean;
   [key: string]: unknown;
 }
+
+export type DownloadQuality = "original" | "320" | "192" | "128";
 
 export type ExplicitContent = "allowed" | "filtered";
 
@@ -803,7 +818,52 @@ export const DEFAULT_SETTINGS: Settings = {
   showToMyDevices: true,
   computerName: "",
   showAirplayLocked: false,
+  downloadQuality: "original",
+  downloadLimitGb: 20,
+  downloadFolder: "",
+  downloadHomeOnly: true,
+  downloadLiked: false,
+  goOffline: false,
 };
+
+// ---------------------------------------------------------------- downloads
+
+/** What can be downloaded as a whole (docs/IPC.md "Downloads"). */
+export type DownloadKind = "album" | "playlist" | "liked" | "mix";
+export type DownloadItemState = "queued" | "downloading" | "downloaded" | "error";
+/** Why the download queue is waiting. */
+export type DownloadPause = "offline" | "notHome" | "full" | "noSpace";
+
+export interface DownloadItem {
+  kind: DownloadKind;
+  /** Empty for Liked Songs. */
+  id: string;
+  title: string;
+  state: DownloadItemState;
+  total: number;
+  done: number;
+  /** Songs that failed after every retry. */
+  failed: number;
+  /** Finished songs whose file has gone from disk. */
+  missing: number;
+  /** 0 to 1, counting the song in flight. */
+  progress: number;
+  /** Bytes removing it would free. */
+  bytes: number;
+  error?: string | null;
+}
+
+export interface DownloadStatus {
+  items: DownloadItem[];
+  usedBytes: number;
+  limitBytes: number;
+  freeBytes?: number | null;
+  folder: string;
+  paused?: DownloadPause | null;
+  /** Songs waiting to be fetched. */
+  queued: number;
+  current?: { trackId: string; received: number; total?: number | null } | null;
+}
 
 // ---------------------------------------------------------------- transcription
 
@@ -1136,6 +1196,10 @@ export interface EventMap {
   "transcribe://status": TranscribeStatus;
   /** A song was transcribed (`found`: words came out). */
   "transcribe://done": { trackId: string; found: boolean };
+  /** Download progress, the queue's state and storage. */
+  "downloads://status": DownloadStatus;
+  /** The set of downloaded songs changed; ask downloadedTracks again. */
+  "downloads://changed": null;
 }
 
 export type EventName = keyof EventMap;

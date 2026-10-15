@@ -20,11 +20,14 @@
  *   ?health=offline start in a given app state (see HEALTH_DEMOS in ./health:
  *                   offline, noInternet, starting, updating, startTimeout,
  *                   relay, remote, signIn, accessRemoved, filesUnavailable,
- *                   noMusicLibrary, diskFull, scanning)
+ *                   noMusicLibrary, diskFull, scanning, goneOffline)
+ *   ?downloads=demo the first album and Liked Songs start downloaded
+ *   ?downloads=full as demo, with the storage limit already reached
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
   CachedLibrary,
+  DownloadKind,
   AbLoop,
   AddPlace,
   Album,
@@ -84,6 +87,7 @@ import { MockShare } from "./share";
 import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 import { MockFileTags } from "./fileTags";
 import { MockTranscribe } from "./transcribe";
+import { MockDownloads } from "./downloads";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -109,6 +113,8 @@ export interface MockOptions {
   tagScan?: boolean;
   /** The other Platter computer is seen through Plex but doesn't answer. */
   platterUnreachable?: boolean;
+  /** Start with downloads in place (and the limit reached, for "full"). */
+  downloads?: "demo" | "full";
 }
 
 const isTestEnv = (() => {
@@ -145,6 +151,7 @@ export function optionsFromUrl(search: string): MockOptions {
     discord: isDiscordDemo(p.get("discord")) ? (p.get("discord") as DiscordDemo) : undefined,
     tagScan: p.get("tagScan") === "1",
     platterUnreachable: p.get("platter") === "unreachable",
+    downloads: p.get("downloads") === "demo" || p.get("downloads") === "full" ? (p.get("downloads") as "demo" | "full") : undefined,
   };
 }
 
@@ -186,6 +193,8 @@ export class MockBackend implements Backend {
   readonly tags: MockFileTags;
   /** Lyrics transcription (test hooks: failNextDownload, failNextSong, silent, stepMs). */
   readonly transcribe: MockTranscribe;
+  /** Downloads (test hooks: failNext, loseFile, connection, stepMs, steps). */
+  readonly downloads: MockDownloads;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -298,6 +307,29 @@ export class MockBackend implements Backend {
           .map((t) => t.id)
           .filter((id) => !this.own.has(id)),
     });
+    this.downloads = new MockDownloads({
+      settings: () => this.settings,
+      emitStatus: (st) => this.emit("downloads://status", st),
+      emitChanged: () => this.emit("downloads://changed", null),
+      later: (ms, fn) => this.later(ms, fn),
+      itemTracks: (kind, id) => {
+        if (kind === "album") return this.fx.tracksByAlbum.get(id)?.map((t) => t.id) ?? null;
+        if (kind === "playlist") return this.fx.playlists.some((p) => p.id === id) ? [...(this.fx.playlistTracks.get(id) ?? [])] : null;
+        if (kind === "liked") return this.likes.ids();
+        return null;
+      },
+      durationMs: (id) => this.trackById(id)?.durationMs ?? 200_000,
+      offline: () => !!this.healthState?.cachedOnly,
+    });
+    if (this.opts.downloads) {
+      this.downloads.seedDone("album", this.fx.albums[0].id, this.fx.albums[0].title);
+      this.downloads.seedDone("liked", "", "Liked Songs");
+      this.settings = { ...this.settings, downloadLiked: true };
+      if (this.opts.downloads === "full") {
+        this.settings = { ...this.settings, downloadLimitGb: 1 };
+        this.downloads.usedOffset = 1024 ** 3;
+      }
+    }
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
     this.remote = new MockRemote(
@@ -423,6 +455,7 @@ export class MockBackend implements Backend {
     const wasOffline = this.healthState.banner?.kind === "offline" || this.healthState.banner?.kind === "noInternet";
     this.healthState = { ...this.makeHealth(demo), ...patch };
     this.emit("health://changed", this.healthState);
+    this.downloads?.poke();
     const s = this.healthState.status;
     if (wasOffline && (s === "local" || s === "remote" || s === "relay")) this.emit("toast", { kind: "info", message: "Your server is back." });
   }
@@ -434,10 +467,12 @@ export class MockBackend implements Backend {
     this.setHealth("signIn");
   }
 
-  /** Mock: the first two albums are on this computer (pre-cached). */
+  /** Mock: the first two albums are on this computer (pre-cached), and whatever is downloaded. */
   private cachedIds(): string[] {
     const albums = new Set(this.fx.albums.slice(0, 2).map((a) => a.id));
-    return this.fx.tracks.filter((t) => albums.has(t.albumId)).map((t) => t.id);
+    const ids = new Set(this.fx.tracks.filter((t) => albums.has(t.albumId)).map((t) => t.id));
+    for (const id of this.downloads.downloadedIds()) ids.add(id);
+    return [...ids];
   }
   cachedTracks() {
     return this.delay(() => this.cachedIds());
@@ -1654,6 +1689,14 @@ export class MockBackend implements Backend {
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
       if (patch.readFileTags !== undefined) this.tags.settingsChanged();
       if (patch.transcribeLyrics !== undefined || patch.transcribeModel !== undefined) this.transcribe.settingsChanged();
+      if (patch.downloadLiked !== undefined && patch.downloadLiked !== this.downloads.isOn("liked", ""))
+        this.downloads.set("liked", "", patch.downloadLiked, "Liked Songs");
+      next.downloadLimitGb = Math.min(4096, Math.max(1, Math.round(next.downloadLimitGb)));
+      // Only downloadsChooseFolder changes the folder.
+      next.downloadFolder = this.settings.downloadFolder;
+      if (patch.goOffline !== undefined && patch.goOffline !== (this.healthState.banner?.kind === "goneOffline"))
+        this.later(0, () => this.setHealth(patch.goOffline ? "goneOffline" : "local"));
+      this.later(0, () => this.downloads.poke());
       if (patch.abLoopHandles === false && this.abLoop) {
         this.abLoop = null;
         this.emitState();
@@ -1833,6 +1876,38 @@ export class MockBackend implements Backend {
   }
   transcribeFoundNothing(trackId: string) {
     return this.delay(() => this.transcribe.foundNothing(trackId));
+  }
+
+  // ---------------------------------------------------------------- downloads
+
+  downloadsStatus() {
+    return this.delay(() => this.downloads.status());
+  }
+  downloadedTracks() {
+    return this.delay(() => this.downloads.downloadedIds());
+  }
+  downloadsSet(kind: DownloadKind, id: string, on: boolean, opts?: { title?: string; trackIds?: string[] }) {
+    return this.delay(() => {
+      // Liked Songs is the "Download Liked Songs" setting.
+      if (kind === "liked") this.settings = { ...this.settings, downloadLiked: on };
+      return this.downloads.set(kind, id, on, opts?.title, opts?.trackIds);
+    });
+  }
+  downloadsRetry(kind?: DownloadKind, id?: string) {
+    return this.delay(() => this.downloads.retry(kind, id));
+  }
+  downloadsRemoveAll() {
+    return this.delay(() => {
+      this.settings = { ...this.settings, downloadLiked: false };
+      return this.downloads.removeAll();
+    });
+  }
+  downloadsChooseFolder() {
+    return this.delay(() => {
+      const folder = this.downloads.chooseFolder();
+      this.settings = { ...this.settings, downloadFolder: folder };
+      return folder as string | null;
+    });
   }
 }
 

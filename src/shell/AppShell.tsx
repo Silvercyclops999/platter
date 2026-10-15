@@ -28,6 +28,8 @@ import { FullWindow } from "./FullWindow";
 import { useLyricsAutoShow } from "./lyrics";
 import { LyricsEditorHost } from "./LyricsEditor";
 import { startTranscribe } from "../stores/transcribe";
+import { startDownloads } from "../stores/downloads";
+import { DownloadDialogs } from "../components/DownloadButton";
 import { loadOwnLyricsIds } from "../stores/lyricsEditor";
 import { MainView } from "./MainView";
 import { NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
@@ -59,6 +61,7 @@ export function AppShell() {
   useLyricsAutoShow();
   useEffect(() => void loadOwnLyricsIds(), []);
   useEffect(() => void startTranscribe(), []);
+  useEffect(() => void startDownloads(), []);
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
@@ -187,6 +190,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <DownloadDialogs />
       <DragAnnouncer />
       <LyricsEditorHost />
       <FullWindow />

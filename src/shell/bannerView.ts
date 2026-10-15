@@ -38,6 +38,7 @@ const TONE: Record<string, BannerKind> = {
   noMusicLibrary: "info",
   diskFull: "warning",
   localNetwork: "warning",
+  goneOffline: "offline",
 };
 
 const ACTION: Record<string, BannerAction> = {
@@ -47,8 +48,8 @@ const ACTION: Record<string, BannerAction> = {
   localNetwork: "localNetwork",
 };
 
-/** States with nothing for the user to do: the top bar icon covers them. */
-const QUIET = new Set(["offline", "noInternet"]);
+/** States with nothing for the user to do: the top bar icon covers them (Go offline is undone from the app menu). */
+const QUIET = new Set(["offline", "noInternet", "goneOffline"]);
 
 /** The core's message, with "Last seen" kept current. */
 function messageOf(h: Health, now: number): string {

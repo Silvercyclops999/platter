@@ -54,6 +54,8 @@ const EXPECTED: Record<HealthDemo, { message: string; kind: string; action?: str
   localNetwork: { kind: "warning", message: LOCAL_NETWORK_BLOCKED, action: "localNetwork" },
   localNetworkRemote: { kind: "warning", message: LOCAL_NETWORK_BLOCKED, action: "localNetwork" },
   scanning: { kind: "progress", message: "Adding new music… 120 of 340" },
+  // Go offline: the top bar icon says it; the app menu turns it off.
+  goneOffline: null,
 };
 
 describe("banner for each app state", () => {

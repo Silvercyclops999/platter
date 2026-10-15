@@ -8,6 +8,10 @@ import type { Health, HealthStatus } from "../types";
 export const LOCAL_NETWORK_BLOCKED =
   "macOS is blocking Platter from your home network. Open System Settings, Privacy & Security, Local Network, and turn on Platter.";
 
+/** Go offline is on (the core's wording). */
+export const GONE_OFFLINE =
+  "You're offline. Only music on this computer plays. Turn off Go offline in the app menu to use your server again.";
+
 export type HealthDemo =
   | HealthStatus
   | "noInternet"
@@ -19,7 +23,8 @@ export type HealthDemo =
   | "diskFull"
   | "scanning"
   | "localNetwork"
-  | "localNetworkRemote";
+  | "localNetworkRemote"
+  | "goneOffline";
 
 export const HEALTH_DEMOS: HealthDemo[] = [
   "local",
@@ -38,6 +43,7 @@ export const HEALTH_DEMOS: HealthDemo[] = [
   "scanning",
   "localNetwork",
   "localNetworkRemote",
+  "goneOffline",
 ];
 
 const STATUS: Record<HealthDemo, HealthStatus> = {
@@ -58,6 +64,7 @@ const STATUS: Record<HealthDemo, HealthStatus> = {
   scanning: "local",
   localNetwork: "offline",
   localNetworkRemote: "remote",
+  goneOffline: "offline",
 };
 
 const BANNER: Partial<Record<HealthDemo, { kind: string; message: string }>> = {
@@ -77,6 +84,7 @@ const BANNER: Partial<Record<HealthDemo, { kind: string; message: string }>> = {
   diskFull: { kind: "diskFull", message: "Not enough space." },
   localNetwork: { kind: "localNetwork", message: LOCAL_NETWORK_BLOCKED },
   localNetworkRemote: { kind: "localNetwork", message: LOCAL_NETWORK_BLOCKED },
+  goneOffline: { kind: "goneOffline", message: GONE_OFFLINE },
 };
 
 export function isHealthDemo(v: string | null): v is HealthDemo {

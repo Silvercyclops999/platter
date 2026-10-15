@@ -4,6 +4,8 @@ import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { shareItem } from "../components/ShareMenu";
+import { DownloadButton } from "../components/DownloadButton";
+import { downloadMenuItems } from "../stores/downloads";
 import { addToPlaylistItem, playlistEditItems } from "../components/PlaylistPicker";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton, likeItem, queueable, trackMenuItems } from "../components/TrackRow";
@@ -245,6 +247,7 @@ export function PlaylistPage({ id }: { id: string }) {
       [
         { label: "Add to queue", disabled: empty, onSelect: () => void player.addToQueue(shown!.tracks, pl.thumb) },
         ...playlistEditItems(pl),
+        ...(empty ? [] : downloadMenuItems({ kind: "playlist", id: pl.id, title: pl.title })),
         shareItem("playlist", pl.id, pl.thumb),
         {
           label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
@@ -346,6 +349,7 @@ export function PlaylistPage({ id }: { id: string }) {
                 icon={<Shuffle size={22} />}
                 onClick={() => player.setContextShuffle(id, !shuffle)}
               />
+              <DownloadButton kind="playlist" id={id} title={pl?.title ?? "this playlist"} disabled={!pl} />
             </>
           )}
           <IconButton

@@ -138,6 +138,7 @@ export function AppMenu() {
   const showAvatar = useSettings((s) => s.settings?.showPlexAvatar !== false);
   const avatar = useApp((s) => (showAvatar ? (s.auth?.avatar ?? null) : null));
   const privateSession = useSettings((s) => !!s.settings?.privateSession);
+  const goOffline = useSettings((s) => !!s.settings?.goOffline);
   const [open, setOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -249,6 +250,16 @@ export function AppMenu() {
           >
             <span>Private session</span>
             {privateSession && <Check size={16} className="appmenu__check" aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={goOffline}
+            className="appmenu__item"
+            onClick={run(() => void updateSettings({ goOffline: !goOffline }))}
+          >
+            <span>Go offline</span>
+            {goOffline && <Check size={16} className="appmenu__check" aria-hidden="true" />}
           </button>
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(checkForUpdates)}>
             <span>Check for updates</span>

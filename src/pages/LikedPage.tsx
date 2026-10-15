@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { LikedCover } from "../components/LikedCover";
+import { DownloadButton } from "../components/DownloadButton";
 import { ChipRow } from "../components/Tabs";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
@@ -205,6 +206,7 @@ export function LikedPage() {
                 icon={<Shuffle size={22} />}
                 onClick={() => player.setContextShuffle(LIKED_ID, !shuffle)}
               />
+              <DownloadButton kind="liked" id="" title={TITLE} disabled={!data} />
               <div className="liked__tools">
                 <div className={`liked-find ${findOpen ? "is-open" : ""}`}>
                   {findOpen ? (
