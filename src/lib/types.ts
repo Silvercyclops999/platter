@@ -995,6 +995,12 @@ export interface Settings {
   showEraCards: boolean;
   /** "+N versions" on song rows. */
   showVersionCounts: boolean;
+  /** The library doctor checks the library in the background (a count shows in the app menu). */
+  libraryDoctor: boolean;
+  /** Which library doctor checks run. */
+  doctorChecks: DoctorChecks;
+  /** Covers smaller than this on their longest side count as small (300, 500, 600, 800, 1000 or 1400). */
+  doctorCoverPx: number;
   /** Dark, Light, Match system, or another built-in theme. */
   theme: ThemeSetting;
   /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
@@ -1232,6 +1238,17 @@ export const DEFAULT_SETTINGS: Settings = {
   archiveFolderKeywords: ["Unreleased", "Leaks", "Demos", "Sessions", "Snippets"],
   showEraCards: true,
   showVersionCounts: true,
+  libraryDoctor: true,
+  doctorChecks: {
+    duplicates: true,
+    covers: true,
+    albumTags: true,
+    splitAlbums: true,
+    albumArtist: true,
+    lowQuality: true,
+    unmatched: true,
+  },
+  doctorCoverPx: 600,
   theme: "dark",
   accent: "ivory",
   themeFile: null,
@@ -2042,6 +2059,62 @@ export interface Evidence {
   decides: boolean;
 }
 
+// ---------------------------------------------------------------- library doctor
+
+/** What a library doctor finding is about. */
+export type DoctorKind = "duplicate" | "cover" | "albumTags" | "splitAlbum" | "albumArtist" | "lowQuality" | "unmatched";
+
+/** The app flow a finding's fix opens. */
+export type DoctorFix = "cover" | "match" | "mergeAlbums" | "openAlbum" | "tags";
+
+/** Which library doctor checks run (Settings). */
+export interface DoctorChecks {
+  duplicates: boolean;
+  covers: boolean;
+  albumTags: boolean;
+  splitAlbums: boolean;
+  albumArtist: boolean;
+  lowQuality: boolean;
+  unmatched: boolean;
+}
+
+/** One thing worth fixing. */
+export interface DoctorFinding {
+  /** Stable: the kind and the items it's about. */
+  id: string;
+  kind: DoctorKind;
+  artistId: string;
+  artist: string;
+  albumId: string;
+  album: string;
+  thumb: string | null;
+  title: string;
+  /** What's wrong and what the fix does. */
+  text: string;
+  /** What it's based on, for "Why?". */
+  evidence: string[];
+  fix: DoctorFix;
+  tracks: string[];
+  /** The other half of a split album, or the album with the better copy. */
+  others: { id: string; title: string; thumb: string | null }[];
+  /** Each song's own tags (album tag and album artist findings). */
+  table: { trackId: string; title: string; album: string | null; albumArtist: string | null; year: number | null }[];
+}
+
+/** `doctor_report`. */
+export interface DoctorReport {
+  on: boolean;
+  findings: DoctorFinding[];
+  ignored: DoctorFinding[];
+  count: number;
+  running: boolean;
+  /** Unix seconds. */
+  checkedAt: number | null;
+  /** Files whose album tags are read, of all files. */
+  tagsRead: number;
+  tagsTotal: number;
+}
+
 /** `album_release_status`; `releasestatus://changed` fires when it changes. */
 export interface AlbumReleaseStatus {
   id: string;
@@ -2253,6 +2326,8 @@ export interface EventMap {
   "releasestatus://changed": { id: string };
   /** Release marks or the user's sections changed on another device. */
   "archive://changed": Record<string, never>;
+  /** Library doctor findings or what's ignored changed: the badge count and whether a check is going. */
+  "doctor://changed": { count: number; running: boolean };
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

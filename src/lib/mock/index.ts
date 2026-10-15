@@ -87,6 +87,8 @@ import type {
   ImageKind,
   MatchCandidate,
   ReleaseMark,
+  DoctorFinding,
+  DoctorKind,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
@@ -136,6 +138,7 @@ import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
 import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
 import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "../statsTypes";
 import { MockArchive } from "./archive";
+import { MockDoctor } from "./doctor";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -263,6 +266,8 @@ export class MockBackend implements Backend {
   readonly downloads: MockDownloads;
   /** Edit in Plex (test hooks: shared, failNext). */
   readonly plexEdit: MockPlexEdit;
+  /** The library doctor's findings (test hooks: ignored, fixed, running, reset). */
+  readonly doctor: MockDoctor;
   /** Mixes and radio, made from the fixtures. */
   readonly mixes: MockMixes;
   /** The archive: release status and marks, versions, sections, eras (and its demo artist). */
@@ -396,6 +401,7 @@ export class MockBackend implements Backend {
       () => this.settings,
       () => this.later(0, () => this.emit("library://changed", null)),
     );
+    this.doctor = new MockDoctor(this.fx, () => this.settings);
     this.tags = new MockFileTags(
       this.fx,
       () => this.settings,
@@ -1065,19 +1071,27 @@ export class MockBackend implements Backend {
     return this.delay(() => this.plexEdit.images(id, which));
   }
   plexEditSelectImage(id: string, kind: EditKind, which: ImageKind, key: string) {
-    return this.delay(() => this.plexEdit.selectImage(id, kind, which, key));
+    return this.delay(() => this.doctorFixed(this.plexEdit.selectImage(id, kind, which, key), id, which === "poster" ? "cover" : null));
   }
   plexEditUploadImage(id: string, kind: EditKind, which: ImageKind, bytes: Uint8Array, contentType: string) {
-    return this.delay(() => this.plexEdit.uploadImage(id, kind, which, bytes, contentType));
+    return this.delay(() => this.doctorFixed(this.plexEdit.uploadImage(id, kind, which, bytes, contentType), id, which === "poster" ? "cover" : null));
   }
   plexEditImageLink(id: string, kind: EditKind, which: ImageKind, url: string) {
-    return this.delay(() => this.plexEdit.imageLink(id, kind, which, url));
+    return this.delay(() => this.doctorFixed(this.plexEdit.imageLink(id, kind, which, url), id, which === "poster" ? "cover" : null));
+  }
+  /** A fix from the library doctor ran: its finding goes away. */
+  private doctorFixed<T>(out: T, albumId: string, fix: DoctorFinding["fix"] | null): T {
+    if (fix && this.doctor.resolve(albumId, fix)) this.emitDoctor();
+    return out;
+  }
+  private emitDoctor() {
+    this.later(0, () => this.emit("doctor://changed", { count: this.doctor.count(), running: this.doctor.running }));
   }
   plexEditMatches(id: string, title?: string, year?: number | null) {
     return this.delay(() => this.plexEdit.matches(id, title, year));
   }
   plexEditMatch(id: string, kind: EditKind, candidate: MatchCandidate) {
-    return this.delay(() => this.plexEdit.match(id, kind, candidate));
+    return this.delay(() => this.doctorFixed(this.plexEdit.match(id, kind, candidate), id, "match"));
   }
   plexEditUnmatch(id: string, kind: EditKind) {
     return this.delay(() => this.plexEdit.unmatch(id, kind));
@@ -1087,6 +1101,9 @@ export class MockBackend implements Backend {
   }
   plexEditMerge(target: string, others: string[], photoFrom?: string | null) {
     return this.delay(() => this.plexEdit.merge(target, others, photoFrom));
+  }
+  plexEditMergeAlbums(target: string, others: string[]) {
+    return this.delay(() => this.doctorFixed(this.plexEdit.mergeAlbums(target, others), target, "mergeAlbums"));
   }
   plexEditSplit(id: string) {
     return this.delay(() => this.plexEdit.split(id));
@@ -2177,6 +2194,10 @@ export class MockBackend implements Backend {
       if (patch.listenInviteHours !== undefined && ![1, 24, 168].includes(patch.listenInviteHours)) {
         throw { kind: "invalid", message: "Invites expire after 1 hour, 24 hours or 7 days." };
       }
+      if (patch.doctorCoverPx !== undefined && ![300, 500, 600, 800, 1000, 1400].includes(patch.doctorCoverPx)) {
+        throw { kind: "invalid", message: "Pick one of the cover sizes offered." };
+      }
+      if (patch.doctorChecks !== undefined) next.doctorChecks = { ...DEFAULT_SETTINGS.doctorChecks, ...patch.doctorChecks };
       if (patch.listenRelay !== undefined) {
         const r = patch.listenRelay.trim().replace(/\/+$/, "");
         if (r && !/^https?:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(r)) throw { kind: "invalid", message: "The relay is a web address like https://ntfy.example.com." };
@@ -2427,6 +2448,31 @@ export class MockBackend implements Backend {
   }
   artistSections(artistId: string) {
     return this.delay(() => this.archive.sectionNames(artistId));
+  }
+
+  // ---------------------------------------------------------------- library doctor
+
+  doctorReport() {
+    return this.delay(() => this.doctor.report());
+  }
+  doctorCount() {
+    return this.delay(() => this.doctor.count());
+  }
+  doctorIgnore(id: string, kind: DoctorKind, title: string, ignore: boolean) {
+    return this.delay(() => {
+      this.doctor.ignore(id, kind, title, ignore);
+      this.emitDoctor();
+    });
+  }
+  doctorRun() {
+    return this.delay(() => {
+      this.doctor.running = true;
+      this.emitDoctor();
+      this.later(1200, () => {
+        this.doctor.running = false;
+        this.emitDoctor();
+      });
+    });
   }
   artistInfoKeys() {
     return this.delay(() => mockKeysStatus(this.infoKeys));

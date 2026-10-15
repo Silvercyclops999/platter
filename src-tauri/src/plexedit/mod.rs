@@ -694,6 +694,8 @@ impl EditHooks for AppEditHooks {
         if resync && let Err(e) = self.db.start_sync(false) {
             tracing::debug!("edit: sync start failed: {e}");
         }
+        // A fix from the library doctor (cover, match, merge): check again.
+        crate::doctor::poke();
     }
 
     fn settings(&self) -> EditSettings {

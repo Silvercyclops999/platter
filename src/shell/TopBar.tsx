@@ -10,6 +10,7 @@ import { miniplayer, useMiniplayer } from "../stores/miniplayer";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { createPlaylist } from "../stores/playlists";
+import { badgeText, useDoctorCount } from "../stores/doctor";
 import { toast, useToasts } from "../stores/toasts";
 import { offlineCallout } from "./bannerView";
 import { useUi } from "../stores/ui";
@@ -146,6 +147,8 @@ export function AppMenu() {
   const privateSession = useSettings((s) => !!s.settings?.privateSession);
   const goOffline = useSettings((s) => !!s.settings?.goOffline);
   const statsPage = useSettings((s) => s.settings?.statsPage !== false);
+  const doctorOn = useSettings((s) => s.settings?.libraryDoctor !== false);
+  const doctorCount = useDoctorCount();
   const miniOpen = useMiniplayer((s) => s.open);
   const [open, setOpen] = useState(false);
   const confirmSignOut = useUi((s) => s.signOutOpen);
@@ -247,6 +250,22 @@ export function AppMenu() {
           {statsPage && (
             <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "stats" }))}>
               <span>Stats</span>
+            </button>
+          )}
+          {doctorOn && (
+            <button
+              type="button"
+              role="menuitem"
+              className="appmenu__item"
+              aria-label={doctorCount > 0 ? `Library doctor, ${doctorCount} to fix` : "Library doctor"}
+              onClick={run(() => nav.go({ name: "doctor" }))}
+            >
+              <span>Library doctor</span>
+              {doctorCount > 0 && (
+                <span className="doctor-badge" aria-hidden="true">
+                  {badgeText(doctorCount)}
+                </span>
+              )}
             </button>
           )}
           <button

@@ -31,6 +31,8 @@ import type {
   AlbumCredits,
   AlbumReleaseStatus,
   EraPage,
+  DoctorKind,
+  DoctorReport,
   ReleaseMark,
   VersionItem,
   ArtistPage,
@@ -242,6 +244,8 @@ export interface Backend {
   plexEditDetails(id: string, fields: EditFields): Promise<EditChange>;
   /** Merge `others` into `target` (which keeps its name); the photo comes from `photoFrom` when given. */
   plexEditMerge(target: string, others: string[], photoFrom?: string | null): Promise<EditChange>;
+  /** Merge albums Plex shows apart into `target` (undo splits them again). */
+  plexEditMergeAlbums(target: string, others: string[]): Promise<EditChange>;
   plexEditSplit(id: string): Promise<EditChange>;
   plexEditRefresh(id: string, kind: EditKind): Promise<EditChange>;
   plexEditUndo(changeId: string): Promise<EditChange>;
@@ -403,6 +407,16 @@ export interface Backend {
   albumSectionSet(albumId: string, artistId: string, name: string | null): Promise<void>;
   /** An artist's own section names. */
   artistSections(artistId: string): Promise<string[]>;
+
+  // Library doctor (nothing here writes to Plex or files)
+  /** Every finding, with what's ignored; `doctor://changed` fires when they change. */
+  doctorReport(): Promise<DoctorReport>;
+  /** How many findings to fix (the badge). */
+  doctorCount(): Promise<number>;
+  /** Ignore a finding (it follows you through the sync file), or bring it back. */
+  doctorIgnore(id: string, kind: DoctorKind, title: string, ignore: boolean): Promise<void>;
+  /** Check every artist again soon. */
+  doctorRun(): Promise<void>;
   artistInfoKeys(): Promise<InfoKeysStatus>;
   /** Save a source's key in the keychain (null removes it); answers whether it was refused. */
   artistInfoKeySet(source: KeyedInfoSource, key: string | null): Promise<InfoKeyState>;
@@ -720,6 +734,7 @@ export function createTauriBackend(): Backend {
     plexEditUnmatch: (id, kind) => call("plex_edit_unmatch", { id, kind }),
     plexEditDetails: (id, fields) => call("plex_edit_details", { id, fields }),
     plexEditMerge: (target, others, photoFrom) => call("plex_edit_merge", { target, others, photoFrom: photoFrom ?? null }),
+    plexEditMergeAlbums: (target, others) => call("plex_edit_merge_albums", { target, others }),
     plexEditSplit: (id) => call("plex_edit_split", { id }),
     plexEditRefresh: (id, kind) => call("plex_edit_refresh", { id, kind }),
     plexEditUndo: (changeId) => call("plex_edit_undo", { changeId }),
@@ -809,6 +824,10 @@ export function createTauriBackend(): Backend {
     eraPage: (artistId, name) => call("era_page", { artistId, name }),
     albumSectionSet: (albumId, artistId, name) => call("album_section_set", { albumId, artistId, name }),
     artistSections: (artistId) => call("artist_sections", { artistId }),
+    doctorReport: () => call("doctor_report"),
+    doctorCount: () => call("doctor_count"),
+    doctorIgnore: (id, kind, title, ignore) => call("doctor_ignore", { id, kind, title, ignore }),
+    doctorRun: () => call("doctor_run"),
     artistInfoKeys: () => call("artist_info_keys"),
     artistInfoKeySet: (source, key) => call("artist_info_key_set", { source, key }),
     artistInfoCacheClear: () => call("artist_info_cache_clear"),

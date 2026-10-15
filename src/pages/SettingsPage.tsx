@@ -39,6 +39,7 @@ import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { StreamDeckSettings, streamDeckMatches } from "./StreamDeckSettings";
 import { MixExclusions } from "./MixExclusions";
 import { FolderKeywords } from "./ArchiveSettings";
+import { COVER_PX_OPTIONS, DoctorChecksList, DoctorNote } from "./DoctorSettings";
 import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { FeedNote, FeedPortField, useFeedStatus } from "./FeedSettings";
@@ -1983,6 +1984,35 @@ export function SettingsPage() {
       description:
         "Artists whose songs are tagged with two or more eras get a row of era cards under Popular. Picking one shows only that era, released and unreleased.",
       control: (ids) => toggle(s, "showEraCards", ids),
+    },
+    // Library: the library doctor
+    {
+      key: "libraryDoctor",
+      section: "Library",
+      group: "Library doctor",
+      title: "Run library doctor",
+      description:
+        "Checks your library in the background, after each sync and when new tags are read, and lists what's worth fixing with a fix for each. Nothing changes until you pick a fix and confirm it. The count shows in the app menu.",
+      note: <DoctorNote on={s?.libraryDoctor !== false} />,
+      control: (ids) => toggle(s, "libraryDoctor", ids),
+    },
+    {
+      key: "doctorChecks",
+      section: "Library",
+      group: "Library doctor",
+      title: "What to check",
+      description:
+        "Duplicate files, missing or small covers, album tags that differ, albums split in two, missing album artists, songs you have a better copy of, and albums Plex didn't match. Turning one off takes its findings out of the list and the count.",
+      control: () => null,
+      block: () => (s ? <DoctorChecksList settings={s} /> : <Skeleton width={240} height={32} />),
+    },
+    {
+      key: "doctorCoverPx",
+      section: "Library",
+      group: "Library doctor",
+      title: "Small cover size",
+      description: "Covers smaller than this on their longest side count as small. Covers look soft in full window below about 600 pixels.",
+      control: (ids) => select(s, (x) => String(x.doctorCoverPx ?? 600), COVER_PX_OPTIONS, ids, (v) => updateSettings({ doctorCoverPx: Number(v) })),
     },
     // Library: drag and drop
     {

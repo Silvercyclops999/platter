@@ -29,6 +29,7 @@ const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ d
 const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
 const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
 const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
+const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
@@ -158,6 +159,8 @@ function Page({ route }: { route: Route }) {
       return <BookmarksPage />;
     case "stats":
       return <StatsPage />;
+    case "doctor":
+      return <DoctorPage />;
     case "import":
       return <ImportPage key={route.view ?? "home"} view={route.view} />;
     case "liked":

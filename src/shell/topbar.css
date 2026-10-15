@@ -170,6 +170,20 @@
 .appmenu__item:focus-visible { background: var(--color-state-hover); outline: none; }
 .appmenu__hint { font-family: inherit; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .appmenu__check { color: var(--color-accent); }
+/* The count next to Library doctor in the app menu. */
+.doctor-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
 .appmenu__sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
 
 /* Plex Home users at the top of the app menu. */

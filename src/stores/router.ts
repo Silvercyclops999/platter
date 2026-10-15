@@ -43,7 +43,9 @@ export type Route =
   /** Listening stats for a range of days. */
   | { name: "stats" }
   /** Library import: the reports and review queue, one imported list (`list:<id>`), or the Missing songs (`missing`). */
-  | { name: "import"; view?: string };
+  | { name: "import"; view?: string }
+  /** The library doctor: things worth fixing in the library. */
+  | { name: "doctor" };
 
 export interface HistoryEntry {
   key: number;

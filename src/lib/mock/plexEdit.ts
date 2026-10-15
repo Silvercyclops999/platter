@@ -290,6 +290,37 @@ export class MockPlexEdit {
     });
   }
 
+  /** Merge albums shown apart into `target`: their songs move over. */
+  mergeAlbums(target: string, others: string[]): EditChange {
+    this.write();
+    const keep = this.fx.albums.find((a) => a.id === target);
+    if (!keep) throw { kind: "notFound", message: "That album is gone from the server." };
+    if (!others.length || others.includes(target)) throw { kind: "invalid", message: "Pick another album to merge with." };
+    const gone = this.fx.albums.filter((a) => others.includes(a.id));
+    const moved = this.fx.tracks.filter((t) => others.includes(t.albumId)).map((t) => ({ t, albumId: t.albumId, albumTitle: t.albumTitle }));
+    const before = new Map(this.fx.tracksByAlbum);
+    const count = keep.trackCount;
+    for (const { t } of moved) {
+      t.albumId = target;
+      t.albumTitle = keep.title;
+    }
+    this.fx.tracksByAlbum.set(target, [...(this.fx.tracksByAlbum.get(target) ?? []), ...moved.map((m) => m.t)]);
+    for (const o of others) this.fx.tracksByAlbum.delete(o);
+    this.fx.albums = this.fx.albums.filter((a) => !others.includes(a.id));
+    keep.trackCount = count + moved.length;
+    const label = others.length === 1 ? `Merged the two parts of ${keep.title}` : `Merged ${others.length + 1} parts of ${keep.title}`;
+    return this.record(target, "album", "merge", label, () => {
+      for (const m of moved) {
+        m.t.albumId = m.albumId;
+        m.t.albumTitle = m.albumTitle;
+      }
+      this.fx.tracksByAlbum.clear();
+      for (const [k, v] of before) this.fx.tracksByAlbum.set(k, v);
+      this.fx.albums = [...this.fx.albums, ...gone];
+      keep.trackCount = count;
+    });
+  }
+
   split(id: string): EditChange {
     this.write();
     this.find(id);
