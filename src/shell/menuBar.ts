@@ -15,7 +15,7 @@ import { folders } from "../stores/folders";
 import { fullWindow } from "../stores/fullWindow";
 import { miniplayer } from "../stores/miniplayer";
 import { nav } from "../stores/router";
-import { useSettings } from "../stores/settings";
+import { updateSettings, useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { SHORTCUTS, type ShortcutDef } from "./shortcuts";
 import { checkForUpdates } from "./TopBar";
@@ -38,6 +38,14 @@ export const MENU_ACTIONS: Record<string, MenuAction> = {
   },
   newPlaylist: { run: () => void createPlaylist() },
   newFolder: { run: () => void folders.create() },
+  /** The same switch as the app menu's; the core moves the menu's check. */
+  goOffline: { run: () => void updateSettings({ goOffline: !useSettings.getState().settings?.goOffline }) },
+  signOut: {
+    run: () => {
+      useUi.getState().setPaletteOpen(false);
+      useUi.getState().setSignOutOpen(true);
+    },
+  },
   search: {
     shortcut: "search",
     run: () => {

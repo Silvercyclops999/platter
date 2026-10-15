@@ -8,6 +8,8 @@ import { SHORTCUTS } from "../shell/shortcuts";
 import { useShortcuts } from "../shell/useShortcuts";
 import { player } from "../stores/player";
 import { useRouter } from "../stores/router";
+import { loadSettings, useSettings } from "../stores/settings";
+import { DEFAULT_SETTINGS } from "../lib/types";
 import { useUi } from "../stores/ui";
 // The core's menu table, as text.
 import menubarSource from "../../src-tauri/src/platform/menubar.rs?raw";
@@ -19,7 +21,9 @@ const route = () => useRouter.getState().entries[useRouter.getState().index].rou
 function coreItems(): [string, string | null][] {
   const src: string = menubarSource;
   const re = /(?:ui|play)\(\s*(?:"menu-[^"]+"|[A-Z_]+_ID),\s*"[^"]+",\s*(None|Some\("([^"]+)"\)),\s*"(\w+)"/g;
-  return [...src.matchAll(re)].map((m) => [m[3], m[2] ?? null]);
+  // Items written out in full (Go Offline).
+  const full = /accelerator: (None|Some\("([^"]+)"\)), check: \w+, action: Action::Ui \{ name: "(\w+)"/g;
+  return [...src.matchAll(re), ...src.matchAll(full)].map((m) => [m[3], m[2] ?? null]);
 }
 
 /** A shortcut's Mac keys written the way the core writes accelerators. */
@@ -125,6 +129,42 @@ describe("menu bar", () => {
     act(() => mock.emit("menu://action", { action: "shuffle" }));
     expect(shuffle).toHaveBeenCalledTimes(1);
     stop();
+  });
+
+  it("File › Go Offline flips the same setting as the app menu", async () => {
+    await mock.settingsSet({ ...DEFAULT_SETTINGS });
+    useSettings.setState({ settings: null });
+    await loadSettings();
+    expect(coreItems().map(([a]) => a)).toContain("goOffline");
+    const stop = connectMenuBar(mock);
+    await act(async () => {
+      await Promise.resolve();
+      mock.emit("menu://action", { action: "goOffline" });
+    });
+    await vi.waitFor(() => expect(useSettings.getState().settings?.goOffline).toBe(true));
+    await vi.waitFor(async () => expect((await mock.health()).banner?.kind).toBe("goneOffline"));
+    await act(async () => mock.emit("menu://action", { action: "goOffline" }));
+    await vi.waitFor(() => expect(useSettings.getState().settings?.goOffline).toBe(false));
+    stop();
+  });
+
+  it("File › Sign Out… asks first, like the app menu", async () => {
+    render(<AppShell />);
+    await act(async () => {
+      await Promise.resolve();
+      mock.emit("menu://action", { action: "signOut" });
+    });
+    expect(useUi.getState().signOutOpen).toBe(true);
+    expect(await screen.findByRole("dialog", { name: "Sign out of Plex?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(useUi.getState().signOutOpen).toBe(false);
+  });
+
+  it("Help's issue page, logs and About are done by the core, not the page", () => {
+    const src: string = menubarSource;
+    expect(src).toMatch(/"Report an Issue…".*Action::ReportIssue/);
+    expect(src).toMatch(/"Show Logs in Finder".*Action::ShowLogs/);
+    for (const name of ["reportIssue", "showLogs"]) expect(MENU_ACTIONS[name]).toBeUndefined();
   });
 
   it("ignores actions it doesn't know", async () => {

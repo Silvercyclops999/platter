@@ -32,6 +32,8 @@ const KEY: &str = "app.settings";
 
 /// The project page opened from About.
 pub const REPO_URL: &str = "https://github.com/Silvercyclops999/platter";
+/// Where problems get reported (Help, Report an Issue).
+pub const ISSUES_URL: &str = "https://github.com/Silvercyclops999/platter/issues";
 pub const LICENCE: &str = "GPL-3.0-or-later";
 
 pub const PRECACHE_MIN: u32 = 1;
@@ -1216,6 +1218,7 @@ impl Settings {
             media_session: self.media_session,
             close_to_tray: self.close_to_tray,
             launch_at_login: self.launch_at_login,
+            go_offline: self.go_offline,
         }
     }
 
@@ -2266,7 +2269,7 @@ mod tests {
         assert!(!db.link_featured());
         assert_eq!(live.art_cap.load(Ordering::Relaxed), 512 * MB);
         // Media controls, tray and launch at login get the change at once.
-        assert_eq!(live.platform.get(), PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true });
+        assert_eq!(live.platform.get(), PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true, go_offline: false });
 
         // Partial patch leaves other fields alone.
         st.set(SettingsPatch { report_to_plex: Some(true), ..Default::default() }).await.unwrap();
@@ -2305,7 +2308,7 @@ mod tests {
         assert!(!s.media_keys && !s.media_session && s.close_to_tray && s.launch_at_login);
         assert_eq!(
             fresh.platform.get(),
-            PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true }
+            PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true, go_offline: false }
         );
         assert!(!s.ab_loop_handles && !s.up_next_line && !s.volume_percent && s.notify_track_change);
         assert!(!s.playlist_ask_duplicates);

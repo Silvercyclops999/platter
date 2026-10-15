@@ -9,6 +9,7 @@ pub mod art;
 pub mod commands;
 pub mod discord;
 pub mod keys;
+pub mod logs;
 pub mod media;
 pub mod menubar;
 pub mod miniplayer;
@@ -40,11 +41,13 @@ pub struct PlatformSettings {
     pub media_session: bool,
     pub close_to_tray: bool,
     pub launch_at_login: bool,
+    /// Go offline (the menu bar's check follows it).
+    pub go_offline: bool,
 }
 
 impl Default for PlatformSettings {
     fn default() -> Self {
-        Self { media_keys: true, media_session: true, close_to_tray: false, launch_at_login: false }
+        Self { media_keys: true, media_session: true, close_to_tray: false, launch_at_login: false, go_offline: false }
     }
 }
 
@@ -281,6 +284,7 @@ impl Platform {
                     }
                 }
                 sync_autostart(&app, s.launch_at_login);
+                app.state::<menubar::MenuBar<R>>().set_offline(s.go_offline);
                 first = false;
                 if rx.changed().await.is_err() {
                     break;

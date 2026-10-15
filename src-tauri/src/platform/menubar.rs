@@ -5,7 +5,8 @@
 //! The menus are one table ([`MENUS`]) so tests can check ids, labels and
 //! keys on any OS. Most items hand an action name to the UI as the
 //! `menu://action` event, which runs the same code as the app's own
-//! buttons and shortcuts. Quit and the project page are done here.
+//! buttons and shortcuts. Quit, the project and issue pages and the log
+//! folder are done here.
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -32,6 +33,10 @@ pub enum Action {
     Quit,
     /// Open the project page in the browser.
     OpenRepo,
+    /// Open the issues page in the browser.
+    ReportIssue,
+    /// Show the log folder in Finder.
+    ShowLogs,
 }
 
 /// Items macOS provides itself.
@@ -78,7 +83,7 @@ pub struct Item {
     pub id: &'static str,
     pub label: &'static str,
     pub accelerator: Option<&'static str>,
-    /// Shows a checkmark that follows playback.
+    /// Shows a checkmark that follows playback (or Go offline).
     pub check: bool,
     pub action: Action,
 }
@@ -116,6 +121,7 @@ const fn play(id: &'static str, label: &'static str, accelerator: Option<&'stati
 pub const PLAY_PAUSE_ID: &str = "menu-play-pause";
 pub const SHUFFLE_ID: &str = "menu-shuffle";
 pub const REPEAT_ID: &str = "menu-repeat";
+pub const GO_OFFLINE_ID: &str = "menu-go-offline";
 
 /// Every menu, in menu bar order. Keys match the app's own shortcuts
 /// (Space for play/pause is the webview's, so that item shows none).
@@ -144,6 +150,10 @@ pub const MENUS: &[MenuDef] = &[
         entries: &[
             ui("menu-new-playlist", "New Playlist", Some("Cmd+N"), "newPlaylist"),
             ui("menu-new-folder", "New Playlist Folder", Some("Shift+Cmd+N"), "newFolder"),
+            Entry::Separator,
+            // The same switch as the profile menu's; the check follows the setting.
+            Entry::Item(Item { id: GO_OFFLINE_ID, label: "Go Offline", accelerator: None, check: true, action: Action::Ui { name: "goOffline", front: false } }),
+            ui("menu-sign-out", "Sign Out…", None, "signOut"),
             Entry::Separator,
             Entry::Native(Native::CloseWindow),
         ],
@@ -207,7 +217,12 @@ pub const MENUS: &[MenuDef] = &[
         role: Role::Help,
         entries: &[
             ui("menu-shortcuts", "Keyboard Shortcuts", Some("Cmd+/"), "shortcuts"),
+            Entry::Separator,
+            Entry::Item(Item { id: "menu-report-issue", label: "Report an Issue…", accelerator: None, check: false, action: Action::ReportIssue }),
+            Entry::Item(Item { id: "menu-show-logs", label: "Show Logs in Finder", accelerator: None, check: false, action: Action::ShowLogs }),
+            Entry::Separator,
             Entry::Item(Item { id: "menu-github", label: "Platter on GitHub", accelerator: None, check: false, action: Action::OpenRepo }),
+            Entry::Native(Native::About),
         ],
     },
 ];
@@ -246,53 +261,78 @@ pub fn play_pause_label(v: &MenuView) -> &'static str {
     if v.playing { "Pause" } else { "Play" }
 }
 
+/// Everything the menus' checks and the play/pause label follow.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MenuChecks {
+    pub view: MenuView,
+    /// Go offline is on.
+    pub offline: bool,
+}
+
+impl MenuChecks {
+    /// Player state changed. Returns whether anything did.
+    pub fn set_view(&mut self, v: MenuView) -> bool {
+        std::mem::replace(&mut self.view, v) != v
+    }
+
+    /// The Go offline setting changed. Returns whether it did.
+    pub fn set_offline(&mut self, on: bool) -> bool {
+        std::mem::replace(&mut self.offline, on) != on
+    }
+}
+
 struct Live<R: Runtime> {
     play_pause: MenuItem<R>,
     shuffle: CheckMenuItem<R>,
     repeat: CheckMenuItem<R>,
+    go_offline: CheckMenuItem<R>,
 }
 
 impl<R: Runtime> Live<R> {
-    fn show(&self, v: &MenuView) {
-        let _ = self.play_pause.set_text(play_pause_label(v));
-        let _ = self.shuffle.set_checked(v.shuffle);
-        let _ = self.repeat.set_checked(v.repeat);
+    fn show(&self, c: &MenuChecks) {
+        let _ = self.play_pause.set_text(play_pause_label(&c.view));
+        let _ = self.shuffle.set_checked(c.view.shuffle);
+        let _ = self.repeat.set_checked(c.view.repeat);
+        let _ = self.go_offline.set_checked(c.offline);
     }
 }
 
-/// The menu bar's items that follow playback (none on Windows).
+/// The menu bar's items that follow playback and Go offline (none on Windows).
 pub struct MenuBar<R: Runtime> {
     live: Mutex<Option<Live<R>>>,
-    view: Mutex<MenuView>,
+    checks: Mutex<MenuChecks>,
 }
 
 impl<R: Runtime> Default for MenuBar<R> {
     fn default() -> Self {
-        Self { live: Mutex::new(None), view: Mutex::new(MenuView::default()) }
+        Self { live: Mutex::new(None), checks: Mutex::new(MenuChecks::default()) }
     }
 }
 
 impl<R: Runtime> MenuBar<R> {
     /// Player state changed.
     pub fn update(&self, v: MenuView) {
-        {
-            let mut cur = self.view.lock();
-            if *cur == v {
-                return;
-            }
-            *cur = v;
+        let changed = self.checks.lock().set_view(v);
+        if changed {
+            self.reshow();
         }
-        if let Some(live) = self.live.lock().as_ref() {
-            live.show(&v);
+    }
+
+    /// The Go offline setting changed.
+    pub fn set_offline(&self, on: bool) {
+        let changed = self.checks.lock().set_offline(on);
+        if changed {
+            self.reshow();
         }
     }
 
     /// Put the checkmarks back to the player's state. A check item flips
-    /// itself when clicked; the player's next state sets it for real.
+    /// itself when clicked; the player's next state (or the setting) sets
+    /// it for real.
     fn reshow(&self) {
-        let v = *self.view.lock();
+        let c = *self.checks.lock();
         if let Some(live) = self.live.lock().as_ref() {
-            live.show(&v);
+            live.show(&c);
         }
     }
 }
@@ -303,8 +343,9 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     {
         match build(app) {
             Ok((menu, live)) => {
-                live.show(&app.state::<MenuBar<R>>().view.lock());
-                *app.state::<MenuBar<R>>().live.lock() = Some(live);
+                let bar = app.state::<MenuBar<R>>();
+                *bar.live.lock() = Some(live);
+                bar.reshow();
                 if let Err(e) = app.set_menu(menu) {
                     tracing::warn!("menu bar: {e}");
                 }
@@ -322,12 +363,9 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     let Some(action) = action_for(id) else { return };
     match action {
         Action::Quit => app.exit(0),
-        Action::OpenRepo => {
-            use tauri_plugin_opener::OpenerExt;
-            if let Err(e) = app.opener().open_url(crate::settings::REPO_URL, None::<&str>) {
-                tracing::warn!("open project page: {e}");
-            }
-        }
+        Action::OpenRepo => open_url(app, crate::settings::REPO_URL),
+        Action::ReportIssue => open_url(app, crate::settings::ISSUES_URL),
+        Action::ShowLogs => super::logs::show(app),
         Action::Ui { name, front } => {
             if front {
                 super::show_window(app);
@@ -340,6 +378,13 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     }
 }
 
+fn open_url<R: Runtime>(app: &AppHandle<R>, url: &str) {
+    use tauri_plugin_opener::OpenerExt;
+    if let Err(e) = app.opener().open_url(url, None::<&str>) {
+        tracing::warn!("open {url}: {e}");
+    }
+}
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<(tauri::menu::Menu<R>, Live<R>)> {
     use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
@@ -347,6 +392,7 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<(tauri::menu::Menu<R>,
     let mut play_pause = None;
     let mut shuffle = None;
     let mut repeat = None;
+    let mut go_offline = None;
     let menu = Menu::new(app)?;
     for def in MENUS {
         let sub = Submenu::new(app, def.title, true)?;
@@ -389,6 +435,7 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<(tauri::menu::Menu<R>,
                     match i.id {
                         SHUFFLE_ID => shuffle = Some(item),
                         REPEAT_ID => repeat = Some(item),
+                        GO_OFFLINE_ID => go_offline = Some(item),
                         _ => {}
                     }
                 }
@@ -414,6 +461,7 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<(tauri::menu::Menu<R>,
         play_pause: play_pause.ok_or_else(missing)?,
         shuffle: shuffle.ok_or_else(missing)?,
         repeat: repeat.ok_or_else(missing)?,
+        go_offline: go_offline.ok_or_else(missing)?,
     };
     Ok((menu, live))
 }
@@ -463,6 +511,7 @@ pub fn normalize(accel: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::PlatformSettings;
     use crate::platform::media::tests::{state, track};
     use std::collections::HashSet;
 
@@ -563,6 +612,10 @@ mod tests {
         assert_eq!(action_for("menu-shortcuts"), Some(Action::Ui { name: "shortcuts", front: true }));
         assert_eq!(action_for("menu-quit"), Some(Action::Quit));
         assert_eq!(action_for("menu-github"), Some(Action::OpenRepo));
+        assert_eq!(action_for(GO_OFFLINE_ID), Some(Action::Ui { name: "goOffline", front: false }));
+        assert_eq!(action_for("menu-sign-out"), Some(Action::Ui { name: "signOut", front: true }));
+        assert_eq!(action_for("menu-report-issue"), Some(Action::ReportIssue));
+        assert_eq!(action_for("menu-show-logs"), Some(Action::ShowLogs));
         // The tray's ids and unknown ones do nothing here.
         assert_eq!(action_for("tray-quit"), None);
         assert_eq!(action_for("nope"), None);
@@ -571,6 +624,53 @@ mod tests {
             .filter_map(|i| if let Action::Ui { name, .. } = i.action { Some(name) } else { None })
             .collect();
         assert_eq!(names.iter().collect::<HashSet<_>>().len(), names.len());
+    }
+
+    fn labels(title: &str) -> Vec<String> {
+        let m = MENUS.iter().find(|m| m.title == title).unwrap();
+        m.entries
+            .iter()
+            .map(|e| match e {
+                Entry::Item(i) => i.label.to_string(),
+                Entry::Native(n) => format!("{n:?}"),
+                Entry::Separator => "-".into(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn file_has_go_offline_and_sign_out() {
+        assert_eq!(
+            labels("File"),
+            ["New Playlist", "New Playlist Folder", "-", "Go Offline", "Sign Out…", "-", "CloseWindow"]
+        );
+        let go = items().find(|i| i.id == GO_OFFLINE_ID).unwrap();
+        assert!(go.check, "Go Offline shows a checkmark");
+        assert_eq!(go.accelerator, None);
+    }
+
+    #[test]
+    fn help_reports_issues_shows_logs_and_about() {
+        assert_eq!(
+            labels("Help"),
+            ["Keyboard Shortcuts", "-", "Report an Issue…", "Show Logs in Finder", "-", "Platter on GitHub", "About"]
+        );
+        assert!(crate::settings::ISSUES_URL.starts_with(crate::settings::REPO_URL));
+        assert!(crate::settings::ISSUES_URL.ends_with("/issues"));
+    }
+
+    #[test]
+    fn the_go_offline_check_follows_the_setting() {
+        let mut c = MenuChecks::default();
+        assert!(!c.offline);
+        assert!(c.set_offline(true));
+        assert!(!c.set_offline(true), "no change, no redraw");
+        // Playback changes leave it alone.
+        assert!(c.set_view(MenuView { playing: true, shuffle: false, repeat: false }));
+        assert!(c.offline);
+        assert!(c.set_offline(false));
+        assert!(!c.offline && c.view.playing);
+        assert!(!PlatformSettings::default().go_offline);
     }
 
     #[test]
