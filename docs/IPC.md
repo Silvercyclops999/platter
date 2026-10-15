@@ -1209,8 +1209,9 @@ user's own when they prefer them, the server's, the user's own, LRCLIB's
 exact lookup, every LRCLIB search hit with the same artist and title
 (closest length first), then a transcription. When `lyricsCheckAudio` is on
 and a speech model is installed, Platter transcribes a 30 second window of
-the song on this computer (starting just before the first sung line, at the
-lowest priority, never ahead of playback's transfer) and compares the words
+the song on this computer (starting just before the first sung line, reading
+it at the lowest priority, never ahead of playback's transfer, and with the
+background thread budget and busy pause of Lyrics transcription) and compares the words
 heard with each candidate in turn until one matches. Lyrics the user wrote
 and transcriptions aren't checked. Results are kept per song, candidate and
 text, so a check runs once. The audio never leaves the computer.
@@ -1291,18 +1292,21 @@ Free space is checked first (the model plus 256 MB). Models never ship in the
 installer.
 
 `TranscribeStatus = { enabled, available, unavailableReason?, model, models,
-current?, queued, batch, paused?, error? }`. `available` is false in a build
+current?, queued, batch, secsPerSong?, paused?, error? }`. `available` is false in a build
 without the recognizer, or on an x86 processor without AVX2. `models` lists
 `{ kind, sizeBytes, installed, downloading, doneBytes }` for each model, so
 the size shows before downloading. `current = { trackId, stage, percent,
 background }`, stage one of `waitingForModel`, `reading`, `decoding`,
 `transcribing` (percent counts the last). `batch = { done, total }` counts
-songs since the queue was last empty. `paused` is `battery`
-or `offline` (background songs only). `error = { kind,
+songs since the queue was last empty. `secsPerSong` is about how long each
+song of a run of more than one takes, the rest between songs included, once
+one is done. `paused` is `battery`, `offline` or `busy` (songs nobody is
+waiting on only; `battery` for the background batch only). `error = { kind,
 message, trackId? }` with kind `download`, `checksum`, `disk` or
 `transcribe`; it clears when something new starts.
 
-`transcribe_track` puts the song first and runs it now, battery or not.
+`transcribe_track` puts the song first and runs it now, battery or busy or
+not; a background song waiting for a pause to end gives way to it.
 `transcribe_album` queues the album's songs that have no lyrics in the app,
 and `transcribe_unreleased` every unreleased song (the same rule as sharing:
 demo release types or an unreleased `ARCHIVE_VERSION`) without them, in the
@@ -1316,11 +1320,46 @@ A song's file comes from the pre-cache when it's there; otherwise it's read
 like the tag scan reads, through the player's transfer gate at the lowest
 priority in 1 MB range requests, only while playback has nothing left to
 download, never over the relay. It's decoded with the player's decoder,
-mixed to mono and resampled to 16 kHz. The one song asked for now uses up
-to four processor threads; albums, the background batch and the lyrics check
-use two. The batch waits while the computer is on battery. A slow connection
-doesn't pause it: a song playback just fetched is read from disk, and before
-reading a song from the server it waits for playback's own download to end.
+mixed to mono and resampled to 16 kHz. The batch waits while the computer is
+on battery. A slow connection never pauses anything: a song playback just
+fetched is read from disk, and before reading a song from the server it waits
+for playback's own download to end.
+
+The speech model runs in a helper process: the same Platter binary started
+with `--speech-worker`, which exits before any of the app starts (no window,
+tray, single-instance lock or link handling). The app sends it a request
+(model file, model kind, threads, language) and the song's 16 kHz samples on
+its stdin; it answers on stdout with a hello, progress, then the segments, a
+failure or cancelled. Each frame is a marker byte, a kind byte (`J` JSON, `S`
+samples), a 32-bit little-endian length and the body. A cancel is a message of
+its own. The helper starts when work arrives, stays while there is work, and
+ends a minute after the last run, which frees the model's memory; it also ends
+when its stdin closes (the app quit). On Windows it starts without a window at
+below normal priority (idle priority when `transcribeProcessor` is `light`),
+with power throttling (EcoQoS) on; on macOS it runs as a background process,
+and the model runs on the GPU with Metal; on Linux it's niced. The player's
+own process is never lowered. A helper that crashes or answers nonsense fails
+that song ("The speech model stopped unexpectedly on this song.") and the
+queue goes on with a new one; after three crashes in a session albums, the
+batch and the lyrics check stop until Platter restarts (the error says so),
+and songs asked for still run.
+
+Threads follow `transcribeProcessor`: `light` gives albums, the batch and the
+lyrics check two and the one song asked for four; `balanced` four for both;
+`fast` half the logical cores, at most eight. Never more than half the
+logical cores. With `transcribeFasterAway`, while there has been no keyboard
+or mouse input for 5 minutes and the computer isn't on battery, background
+work gets at least the `balanced` count; when input comes back, a song
+running with the extra threads starts again with the usual count. Background
+songs rest 5 s between each other.
+
+With `transcribePauseBusy`, background work (albums, the batch, the lyrics
+check) waits (`paused: busy`) while other programs use more than half the
+processor averaged over about 10 s (Platter and its helper left out), while a
+fullscreen Direct3D game or presentation mode is in front (Windows), or while
+macOS reports a thermal state of Fair or worse; it goes on after 30 s without
+any of them. The computer is read every 3 s, and only while background speech
+work is queued; nothing is read while the queue is empty.
 
 Words found are saved as enhanced LRC (a time per line and per word) in the
 song's own lyrics (`lyrics_own_*`) with `auto` set to the model, so the
@@ -2469,7 +2508,10 @@ The rest of the fields, with their defaults:
 | `lyricsLiveTiming` | bool, false | Live versions keep the timing of lyrics found by artist and title (still marked `borrowedTiming`). Off shows them unsynced. |
 | `lyricsShowAdd` | bool, true | The expanded view's lyrics mode offers Add lyrics for a song with none. The track menu keeps Add lyrics either way. |
 | `transcribeLyrics` | bool, false | Transcribe songs without lyrics on this computer (Transcribe this song, the album menu, the unreleased batch). See Lyrics transcription. This device only. |
-| `transcribeModel` | `"small"` or `"medium"`, `"small"` | The speech model. Medium is more accurate and about three times slower. This device only. |
+| `transcribeModel` | `"small"` or `"medium"`, `"small"` | The speech model. Medium is a little more accurate, much slower, and works the processor much harder. This device only. |
+| `transcribeProcessor` | `"light"`, `"balanced"` or `"fast"`, `"light"` | Processor threads for transcription and the lyrics check (see Lyrics transcription). This device only. |
+| `transcribePauseBusy` | bool, true | Albums, the batch and the lyrics check wait while the computer is busy (`paused: busy`). This device only. |
+| `transcribeFasterAway` | bool, true | Background speech work may use the `balanced` thread count while nobody is at the computer and it's plugged in. This device only. |
 | `showAutoLyrics` | bool, true | `lyrics_get` returns transcriptions the user hasn't edited. Off hides them; they stay saved. |
 | `lyricsCheckAudio` | bool, true | Check lyrics against the song with the speech model, once it's installed. Off shows lyrics as not checked. This device only. |
 | `lyricsFixTiming` | bool, true | Checked lyrics are moved or stretched to the timing measured in the song. This device only. |
