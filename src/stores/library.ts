@@ -233,6 +233,22 @@ export interface LibEntry {
   downloaded?: boolean;
   /** An artist you follow. */
   followed?: boolean;
+  /** A library folder (Platter's own; Plex has none). */
+  folder?: FolderInfo;
+  /** How far in it sits under open folders (drilled-in lists). */
+  depth?: number;
+}
+
+export interface FolderInfo {
+  id: string;
+  /** Playlists directly inside. */
+  count: number;
+  depth: number;
+  /** Open in place (folders inside a drilled-in folder). */
+  expanded: boolean;
+  hasChildren: boolean;
+  /** Inside the folder the sidebar is drilled into: it opens in place. */
+  nested: boolean;
 }
 
 /** Library items as rows. Playlists are the signed-in user's own, so they're the creator. */
@@ -254,7 +270,8 @@ export function toEntries(items: LibraryItem[], owner: string | null): LibEntry[
 }
 
 /** "Playlist", "Smart playlist", "Album", "EP", "Single", "Artist". */
-export function typeLabel(e: Pick<LibEntry, "kind" | "smart" | "format">): string {
+export function typeLabel(e: Pick<LibEntry, "kind" | "smart" | "format" | "folder">): string {
+  if (e.folder) return "Folder";
   if (e.kind === "playlist") return e.smart ? "Smart playlist" : "Playlist";
   if (e.kind === "artist") return "Artist";
   return e.format === "ep" ? "EP" : e.format === "single" ? "Single" : "Album";
@@ -267,6 +284,7 @@ export function typeLabel(e: Pick<LibEntry, "kind" | "smart" | "format">): strin
  */
 export function subtitle(e: LibEntry, filtered: boolean): string {
   if (e.unavailable) return "Not available";
+  if (e.folder) return e.folder.count === 1 ? "1 playlist" : `${e.folder.count} playlists`;
   if (filtered) return e.kind === "artist" ? "" : (e.creator ?? "");
   const t = typeLabel(e);
   return e.kind !== "artist" && e.creator ? `${t} · ${e.creator}` : t;

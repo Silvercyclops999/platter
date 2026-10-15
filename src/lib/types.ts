@@ -741,6 +741,18 @@ export interface Settings {
   listenGuestsAdd: boolean;
   /** Discord shows a listening session you host. */
   discordListenAlong: boolean;
+  /** Keep app-only state in a sync file in a folder. This device only. */
+  syncEnabled: boolean;
+  /** The folder the sync file goes in. Changed with syncFileUseFolder / syncFileChooseFolder. This device only. */
+  syncFolder: string;
+  /** What to sync: settings marked Synced. This device only. */
+  syncSettings: boolean;
+  /** What to sync: library folders and pins. This device only. */
+  syncLibrary: boolean;
+  /** What to sync: followed artists and hidden items. This device only. */
+  syncFollows: boolean;
+  /** What to sync: lyrics you wrote. This device only. */
+  syncLyrics: boolean;
   [key: string]: unknown;
 }
 
@@ -877,7 +889,93 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyNewReleases: false,
   listenGuestsAdd: true,
   discordListenAlong: true,
+  syncEnabled: false,
+  syncFolder: "",
+  syncSettings: true,
+  syncLibrary: true,
+  syncFollows: true,
+  syncLyrics: true,
 };
+
+// ---------------------------------------------------------------- sync file, folders and keys
+
+/** The sync file's state (docs/IPC.md "Sync, folders and keys"). */
+export type SyncFileState = "off" | "signedOut" | "ok" | "folderMissing" | "unreadable" | "newer" | "error";
+
+export interface SyncFileStatus {
+  state: SyncFileState;
+  folder: string | null;
+  /** The file's full path. */
+  file: string | null;
+  /** ms since the epoch. */
+  lastSyncedAt: number | null;
+  /** Devices that write the file, this one first. */
+  devices: { name: string; lastSeen: number; thisDevice: boolean }[];
+  /** Conflicted copies merged in by the last pass. */
+  mergedCopies: number;
+  /** Plain words for a problem. */
+  message: string | null;
+}
+
+/** A cloud folder found on this computer. */
+export interface CloudFolder {
+  provider: string;
+  path: string;
+}
+
+/** A pin as the core keeps it. */
+export interface PinRecord {
+  kind: "album" | "artist" | "playlist";
+  id: string;
+  title: string;
+  subtitle: string;
+  thumb: string | null;
+  /** ms; newest first. */
+  pinnedAt?: number;
+}
+
+export interface LibraryFolder {
+  id: string;
+  name: string;
+  /** The folder it's in; null at the top of the library. */
+  parent: string | null;
+  createdAt: number;
+}
+
+export interface LibraryFolders {
+  /** Newest first. */
+  folders: LibraryFolder[];
+  /** Playlist id → folder id. */
+  items: Record<string, string>;
+}
+
+/** Keys that can be copied between devices. */
+export type KeyKind = "listenbrainz" | "lastfm" | "fanart" | "audiodb" | "imgur" | "catbox";
+
+export type ReceivePhase = "idle" | "waiting" | "receiving" | "received" | "expired" | "locked";
+
+export interface KeyReceiveState {
+  phase: ReceivePhase;
+  code: string | null;
+  /** The code as a QR code: rows of "0" and "1" (dark). */
+  qr: { size: number; rows: string[] } | null;
+  expiresAt: number | null;
+  /** The sending device's name. */
+  from: string | null;
+  received: KeyKind[];
+}
+
+export interface KeySendOutcome {
+  device: string;
+  sent: KeyKind[];
+}
+
+/** What changed in the sync store (namespaces: settings, pins, folders, folderItems, follows, hidden, bookmarks, lyrics). */
+export interface SyncStoreChanged {
+  namespaces: string[];
+  /** From the sync file (another device). */
+  remote: boolean;
+}
 
 // ---------------------------------------------------------------- downloads
 
@@ -1371,6 +1469,12 @@ export interface EventMap {
   "whatsnew://changed": { unseen: number };
   /** A listening session started, changed or ended. */
   "listen://state": ListenView;
+  /** The sync file's state changed. */
+  "sync-file://status": SyncFileStatus;
+  /** Pins, folders or other app-only state changed (here or from the sync file). */
+  "syncstore://changed": SyncStoreChanged;
+  /** The Copy keys dialog's state (a code, keys arriving, expiry). */
+  "keys://receive": KeyReceiveState;
 }
 
 export type EventName = keyof EventMap;

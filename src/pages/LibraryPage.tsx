@@ -1,4 +1,4 @@
-import { Minimize2 } from "lucide-react";
+import { ChevronLeft, Minimize2 } from "lucide-react";
 import { useLayoutEffect, useState } from "react";
 import { IconButton } from "../components/Button";
 import { LibraryCollection, LibraryTableHead } from "../shell/LibraryCollection";
@@ -7,6 +7,8 @@ import { useLibraryLoader, useLibraryModel, useLibraryRecents } from "../shell/u
 import { useLibraryView, type LibKind } from "../stores/library";
 import { nav, useRouter, type LibraryTab } from "../stores/router";
 import { useUi } from "../stores/ui";
+import { folders } from "../stores/folders";
+import "../shell/folders.css";
 
 const TAB_KIND: Record<LibraryTab, LibKind> = { albums: "album", artists: "artist", playlists: "playlist" };
 
@@ -42,7 +44,14 @@ export function LibraryPage({ tab }: { tab?: LibraryTab }) {
   return (
     <div className="page-pad library-wide">
       <div className="library-wide__head">
-        <h1 className="library-wide__title">Your Library</h1>
+        {model.drill ? (
+          <button type="button" className="lib-head__back library-wide__title" aria-label={`Back from ${model.drill.name}`} onClick={() => folders.back()}>
+            <ChevronLeft size={24} aria-hidden="true" />
+            <span className="lib-head__back-name">{model.drill.name}</span>
+          </button>
+        ) : (
+          <h1 className="library-wide__title">Your Library</h1>
+        )}
         <IconButton label="Minimize Your Library" icon={<Minimize2 size={18} />} onClick={minimizeLibrary} />
       </div>
       <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} />

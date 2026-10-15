@@ -1,0 +1,66 @@
+/* Library folders: folder tiles, nested rows, the drilled-in header, the
+   move-to-folder picker and the rename field. */
+
+.lib-folder-art {
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--radius-row);
+  background: var(--color-bg-overlay);
+  color: var(--color-text-secondary);
+}
+.lib-folder-art--fluid { width: 100%; aspect-ratio: 1; border-radius: var(--radius-card, 6px); }
+
+/* Rows inside open folders step in. */
+.lib-row[style*="--lib-depth"] { padding-left: calc(var(--space-2) + var(--lib-depth) * 16px); }
+.lib-row__chevron {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+  padding-left: var(--space-2);
+  color: var(--color-text-secondary);
+}
+.lib-row--folder:hover .lib-row__chevron { color: var(--color-text-primary); }
+
+/* The drilled-in header: back arrow and the folder's name, Create and ⋯. */
+.lib-head__back {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 36px;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  border-radius: var(--radius-row);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+.lib-head__back:hover { background: var(--color-state-hover); }
+.lib-head__back:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
+.lib-head__back-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-head__back svg { flex: none; color: var(--color-text-secondary); }
+.lib-drill-empty { margin: var(--space-4) var(--space-2); font-size: var(--font-size-md); color: var(--color-text-secondary); }
+
+/* Move to folder picker. */
+.context-menu__sub:has(.folder-picker) { width: 260px; max-width: 260px; }
+.folder-picker { display: flex; flex-direction: column; }
+.folder-picker .context-menu__item { justify-content: flex-start; gap: var(--space-3); }
+.folder-picker .context-menu__item svg { flex: none; color: var(--color-text-secondary); }
+.folder-picker .context-menu__item[aria-disabled="true"] { color: var(--color-text-muted); cursor: default; }
+.folder-picker__list { max-height: min(360px, 50vh); overflow-y: auto; }
+
+/* Rename: one field, the name selected. */
+.folder-rename__input {
+  width: 100%;
+  height: 40px;
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-md);
+}
+.folder-rename__input:focus { outline: none; border-color: rgba(255, 240, 220, 0.28); background: var(--color-bg-overlay); }
+.folder-rename__input:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }

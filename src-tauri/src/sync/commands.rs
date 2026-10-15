@@ -21,9 +21,17 @@ use crate::remote::RemoteService;
 use crate::settings::SettingsState;
 
 pub const EV_STATUS: &str = "sync-file://status";
-pub const EV_CHANGED: &str = "sync://changed";
+pub const EV_CHANGED: &str = "syncstore://changed";
 pub const EV_KEYS: &str = "keys://receive";
-pub const EV_SETTINGS: &str = "settings://changed";
+pub const EV_SETTINGS: &str = crate::audio::commands::EV_SETTINGS;
+
+/// Tell the window the settings changed (with all of them, like the output
+/// device follower does).
+async fn emit_settings(app: &AppHandle, settings: &SettingsState) {
+    if let Ok(s) = settings.get().await {
+        let _ = app.emit(EV_SETTINGS, &s);
+    }
+}
 
 /// Managed state.
 #[derive(Clone)]
@@ -128,7 +136,7 @@ impl KeyVault for AppVault {
                         Ok(changed)
                     })
                     .await?;
-                let _ = self.app.emit(EV_SETTINGS, ());
+                emit_settings(&self.app, &settings).await;
                 Ok(())
             }
             KeyKind::Imgur => {
@@ -187,7 +195,7 @@ pub fn spawn_listener(store: SyncStore, a: Appliers) {
                         if let Err(e) = crate::settings::apply_patch(&a.settings, &a.player, &a.downloads, &a.mixes, patch).await {
                             tracing::warn!("synced settings not applied: {e}");
                         }
-                        let _ = a.app.emit(EV_SETTINGS, ());
+                        emit_settings(&a.app, &a.settings).await;
                     }
                     Ok(None) => {}
                     Err(e) => tracing::warn!("synced settings not read: {e}"),
@@ -244,7 +252,7 @@ async fn use_folder(sync: &SyncService, settings: &SettingsState, app: &AppHandl
             Ok(true)
         })
         .await?;
-    let _ = app.emit(EV_SETTINGS, ());
+    emit_settings(app, settings).await;
     sync.engine.sync_now().await;
     Ok(sync.engine.status())
 }

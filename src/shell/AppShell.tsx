@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { DragAnnouncer } from "../components/DragAnnouncer";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
+import { FolderDialogs } from "./FolderMenus";
 import { SavedInHost } from "../components/SavedInMenu";
 import { Toaster } from "../components/Toast";
 import { Tooltip } from "../components/Tooltip";
@@ -196,6 +197,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <FolderDialogs />
       <DownloadDialogs />
       <DragAnnouncer />
       <LyricsEditorHost />

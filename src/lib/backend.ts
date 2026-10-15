@@ -69,6 +69,14 @@ import type {
   ShareInfo,
   ShareKind,
   SyncStatus,
+  SyncFileStatus,
+  CloudFolder,
+  PinRecord,
+  LibraryFolder,
+  LibraryFolders,
+  KeyKind,
+  KeyReceiveState,
+  KeySendOutcome,
   UpdateInfo,
   TagIndex,
   TagScanStatus,
@@ -337,6 +345,41 @@ export interface Backend {
   /** Add songs to the session's queue (a guest's go to the host). */
   listenAdd(trackIds: string[]): Promise<void>;
 
+  // Sync file, library folders and keys (docs/IPC.md "Sync, folders and keys")
+  syncFileStatus(): Promise<SyncFileStatus>;
+  /** Run a sync pass now. */
+  syncFileNow(): Promise<SyncFileStatus>;
+  /** OneDrive, iCloud Drive, Google Drive and Dropbox folders found on this computer. */
+  syncFileFolders(): Promise<CloudFolder[]>;
+  /** Sync with this folder and turn sync on. */
+  syncFileUseFolder(path: string): Promise<SyncFileStatus>;
+  /** Pick a folder in a dialog and sync with it; null when cancelled. */
+  syncFileChooseFolder(): Promise<SyncFileStatus | null>;
+  /** Start a new sync file when the old one can't be read (it's kept aside). */
+  syncFileReplace(): Promise<SyncFileStatus>;
+  pinsGet(): Promise<PinRecord[]>;
+  /** Pin, or unpin when pinned; resolves to every pin, newest first. */
+  pinsToggle(pin: PinRecord): Promise<PinRecord[]>;
+  /** Pins an older build kept in the window's storage (taken once). */
+  pinsImport(pins: PinRecord[]): Promise<PinRecord[]>;
+  foldersGet(): Promise<LibraryFolders>;
+  /** A new folder ("New Folder" unless named), at the top or inside `parent`. */
+  folderCreate(name?: string | null, parent?: string | null): Promise<LibraryFolder>;
+  folderRename(id: string, name: string): Promise<void>;
+  /** Delete a folder; what was in it moves up. Playlists are never deleted. */
+  folderDelete(id: string): Promise<void>;
+  folderMove(id: string, parent: string | null): Promise<void>;
+  /** Put a playlist in a folder (null: back to the top). */
+  playlistFolderSet(playlistId: string, folderId: string | null): Promise<void>;
+  /** The keys this device has. */
+  keysAvailable(): Promise<KeyKind[]>;
+  /** Show a code to copy keys to this device. */
+  keysReceiveStart(): Promise<KeyReceiveState>;
+  keysReceiveState(): Promise<KeyReceiveState>;
+  keysReceiveCancel(): Promise<void>;
+  /** Send the ticked keys to the device showing `code`. */
+  keysSend(code: string, kinds: KeyKind[]): Promise<KeySendOutcome>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -492,6 +535,26 @@ export function createTauriBackend(): Backend {
     downloadsChooseFolder: () => call("downloads_choose_folder"),
     friendActivity: (fresh) => call("friend_activity", { fresh: fresh ?? null }),
     followsList: () => call("follows_list"),
+    syncFileStatus: () => call("sync_file_status"),
+    syncFileNow: () => call("sync_file_now"),
+    syncFileFolders: () => call("sync_file_folders"),
+    syncFileUseFolder: (path) => call("sync_file_use_folder", { path }),
+    syncFileChooseFolder: () => call("sync_file_choose_folder"),
+    syncFileReplace: () => call("sync_file_replace"),
+    pinsGet: () => call("pins_get"),
+    pinsToggle: (pin) => call("pins_toggle", { pin }),
+    pinsImport: (pins) => call("pins_import", { pins }),
+    foldersGet: () => call("folders_get"),
+    folderCreate: (name, parent) => call("folder_create", { name: name ?? null, parent: parent ?? null }),
+    folderRename: (id, name) => call("folder_rename", { id, name }),
+    folderDelete: (id) => call("folder_delete", { id }),
+    folderMove: (id, parent) => call("folder_move", { id, parent }),
+    playlistFolderSet: (playlistId, folderId) => call("playlist_folder_set", { playlistId, folderId }),
+    keysAvailable: () => call("keys_available"),
+    keysReceiveStart: () => call("keys_receive_start"),
+    keysReceiveState: () => call("keys_receive_state"),
+    keysReceiveCancel: () => call("keys_receive_cancel"),
+    keysSend: (code, kinds) => call("keys_send", { code, kinds }),
     followSet: (artist, on) => call("follow_set", { id: artist.id, title: artist.title, thumb: artist.thumb ?? null, on }),
     whatsNew: () => call("whats_new"),
     whatsNewSeen: () => call("whats_new_seen"),

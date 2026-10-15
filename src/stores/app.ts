@@ -9,6 +9,8 @@ import type { ArtistName, AuthStatus, Health, Playlist, SyncStatus } from "../li
 import { outputLostMessage, useOutput } from "./output";
 import { loadSettings, useSettings } from "./settings";
 import { useToasts } from "./toasts";
+import { loadPins } from "./pins";
+import { loadFolders, onStoreChanged } from "./folders";
 
 interface AppStore {
   auth: AuthStatus | null;
@@ -79,6 +81,8 @@ export function connectApp(b: Backend = backend): () => void {
   b.health().then((h) => alive && onHealth(h)).catch(() => {});
   b.syncStatus().then((x) => alive && s.setSync(x)).catch(() => {});
   loadSettings(b);
+  void loadPins(b);
+  void loadFolders(b);
   const loadPlaylists = () => b.playlists().then((p) => alive && useApp.getState().setPlaylists(p)).catch(() => {});
   loadPlaylists();
   const loadArtistNames = () =>
@@ -107,6 +111,8 @@ export function connectApp(b: Backend = backend): () => void {
   keep(b.listen("output://changed", (o) => useOutput.getState().set(o)));
   // The core moved the EQ to the profile bound to a new output device.
   keep(b.listen("settings://changed", (s) => useSettings.getState().setLocal(s)));
+  // Pins and folders changed (here, or another device through the sync file).
+  keep(b.listen("syncstore://changed", (c) => onStoreChanged(c, b)));
   keep(b.listen("output://lost", (l) => useToasts.getState().push({ kind: "info", message: outputLostMessage(l.device) }, 6000)));
   keep(
     b.listen("update://ready", (u) =>

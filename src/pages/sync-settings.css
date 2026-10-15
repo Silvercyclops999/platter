@@ -1,0 +1,60 @@
+/* Settings, Sync: the folder chooser and the key copy dialogs. */
+
+.dialog.sync-folders,
+.dialog.keys-dialog { width: min(480px, calc(100vw - 48px)); }
+.sync-folders__list { display: flex; flex-direction: column; gap: var(--space-1); margin: 0 0 var(--space-4); }
+.sync-folders__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-row);
+  background: var(--color-state-hover);
+  color: var(--color-text-primary);
+  text-align: left;
+}
+.sync-folders__item:hover:not(:disabled) { background: var(--color-state-pressed); }
+.sync-folders__item:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
+.sync-folders__item svg { flex: none; color: var(--color-text-secondary); }
+.sync-folders__text { display: flex; flex-direction: column; min-width: 0; }
+.sync-folders__name { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); }
+.sync-folders__path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.sync-folders__none { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+/* The code to show: QR code beside the digits. */
+.keys-code { display: flex; align-items: center; gap: var(--space-6); margin: 0 0 var(--space-4); }
+.keys-qr { width: 132px; height: 132px; flex: none; border-radius: 4px; }
+.keys-code__digits {
+  margin: 0;
+  font-size: 40px;
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--color-text-primary);
+}
+.keys-code__left { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+
+/* The code to type and the keys to send. */
+.keys-send__label { display: block; margin: 0 0 var(--space-2); padding: 0; font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); color: var(--color-text-secondary); }
+.keys-send__code {
+  width: 160px;
+  height: 44px;
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-xl);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+.keys-send__code:focus { outline: none; border-color: rgba(255, 240, 220, 0.28); background: var(--color-bg-overlay); }
+.keys-send__code:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+.keys-send__keys { display: flex; flex-direction: column; gap: var(--space-2); margin: 0 0 var(--space-4); padding: 0; border: 0; }
+.keys-send__key { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-md); color: var(--color-text-primary); cursor: pointer; }
+.keys-send__key input { width: 16px; height: 16px; accent-color: var(--color-accent); }
+.keys-send__none { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.keys-send__error { margin: 0 0 var(--space-3); font-size: var(--font-size-sm); color: var(--color-error); }

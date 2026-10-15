@@ -124,7 +124,7 @@ describe("helpers", () => {
 });
 
 describe("create", () => {
-  it("the sidebar's + makes the next 'My playlist #N', opens it and puts focus on the name", async () => {
+  it("the sidebar's + then Playlist makes the next 'My playlist #N', opens it and puts focus on the name", async () => {
     const user = userEvent.setup();
     render(
       <>
@@ -132,7 +132,8 @@ describe("create", () => {
         <Hosts />
       </>,
     );
-    await user.click(screen.getByRole("button", { name: "Create playlist" }));
+    await user.click(screen.getByRole("button", { name: "Create playlist or folder" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Playlist" }));
     await waitFor(() => expect(route().name).toBe("playlist"));
     const r = route() as { name: "playlist"; id: string };
     const made = (await backend.playlists()).find((p) => p.id === r.id)!;

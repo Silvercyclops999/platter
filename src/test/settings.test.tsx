@@ -58,7 +58,7 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Storage", "Downloads and offline", "Search", "Appearance", "Home", "Mixes", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "Social", "About", "Now playing"]);
+    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Storage", "Downloads and offline", "Sync", "Search", "Appearance", "Home", "Mixes", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "Social", "About", "Now playing"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
@@ -85,6 +85,11 @@ describe("settings page", () => {
     expect(screen.getByRole("switch", { name: "Download Liked Songs" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("switch", { name: "Go offline" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("button", { name: "Change location" })).toBeEnabled();
+    // Sync is off until a folder is chosen; what to sync is all on.
+    expect(screen.getByRole("switch", { name: "Sync with a folder" })).toHaveAttribute("aria-checked", "false");
+    for (const name of ["Settings", "Library folders and pins", "Followed artists and hidden items", "Lyrics you wrote"])
+      expect(screen.getByRole("switch", { name })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
     expect(screen.getByRole("combobox", { name: "When the queue ends" })).toHaveValue("keepPlaying");
     expect(screen.getByRole("switch", { name: "Smart shuffle" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("switch", { name: "Show made-for-you mixes on Home" })).toHaveAttribute("aria-checked", "true");

@@ -1,6 +1,6 @@
 /** Data, recents and menus shared by the library sidebar, its rail and wide mode. */
 import { useEffect, useMemo } from "react";
-import type { MenuItem } from "../stores/ui";
+import { useUi, type MenuItem } from "../stores/ui";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { shareItem } from "../components/ShareMenu";
 import { createPlaylist } from "../stores/playlists";
@@ -24,6 +24,8 @@ import {
   type LibSub,
 } from "../stores/library";
 import { usePins } from "../stores/pins";
+import { folders, useFolders, withFolders } from "../stores/folders";
+import { folderMenu, moveToFolderItem } from "./FolderMenus";
 import { player, usePlayer } from "../stores/player";
 import { nav, useCurrentEntry } from "../stores/router";
 
@@ -63,6 +65,8 @@ export interface LibraryModel {
   loading: boolean;
   /** The Downloaded chip: shown when anything is downloaded; on by itself while offline. */
   downloaded: { available: boolean; on: boolean };
+  /** The folder the list is drilled into. */
+  drill: import("../lib/types").LibraryFolder | null;
 }
 
 /** Pins (kept fresh from the library) followed by everything else. */
@@ -111,7 +115,8 @@ export function likedEntry(owner: string | null): LibEntry {
   };
 }
 
-export function useLibraryModel(query: string): LibraryModel {
+/** `drillable`: the list follows the folder the sidebar is drilled into (not the rail). */
+export function useLibraryModel(query: string, drillable = true): LibraryModel {
   const items = useLibraryView((s) => s.items);
   const filter = useLibraryView((s) => s.filter);
   const sub = useLibraryView((s) => s.sub);
@@ -143,9 +148,20 @@ export function useLibraryModel(query: string): LibraryModel {
   // A saved filter for a type that's no longer there shows everything.
   const activeFilter: LibFilter = filter !== "all" && !kinds.includes(filter) ? "all" : filter;
   const activeSub = activeFilter === "all" ? null : sub;
+  const tree = useFolders((s) => s.tree);
+  const drill = useFolders((s) => s.drill);
+  const expanded = useFolders((s) => s.expanded);
+  // Folders group playlists while nothing narrows the list to albums,
+  // artists, smart playlists, downloads or a search.
+  const grouping = !query.trim() && (activeFilter === "all" || activeFilter === "playlist") && activeSub !== "smart" && !downloadedOnly;
   const shown = useMemo(
-    () => libraryEntries(all, { filter: activeFilter, sub: activeSub, sort, query, recents, customOrder, downloadedOnly }),
-    [all, activeFilter, activeSub, sort, query, recents, customOrder, downloadedOnly],
+    () =>
+      withFolders(libraryEntries(all, { filter: activeFilter, sub: activeSub, sort, query, recents, customOrder, downloadedOnly }), tree, {
+        active: grouping,
+        drill: drillable ? drill : null,
+        expanded,
+      }),
+    [all, activeFilter, activeSub, sort, query, recents, customOrder, downloadedOnly, tree, drill, expanded, grouping, drillable],
   );
   return {
     all,
@@ -156,10 +172,12 @@ export function useLibraryModel(query: string): LibraryModel {
     sort: effectiveSort(sort, activeFilter),
     loading: items === null,
     downloaded: { available: dlAvailable, on: downloadedOnly },
+    drill: grouping && drillable ? (tree.folders.find((f) => f.id === drill) ?? null) : null,
   };
 }
 
 export function playEntry(e: LibEntry) {
+  if (e.folder) return;
   const ctx = usePlayer.getState().state?.queue.context;
   if (e.liked) return ctx?.kind === "liked" ? player.toggle() : player.playLiked();
   if (ctx?.kind === e.kind && ctx.id === e.id) return player.toggle();
@@ -168,6 +186,12 @@ export function playEntry(e: LibEntry) {
 }
 
 export function openEntry(e: LibEntry) {
+  if (e.folder) {
+    if (e.folder.nested) return folders.toggleExpanded(e.folder.id);
+    // From the rail, the sidebar opens to show the folder.
+    if (useUi.getState().sidebarCollapsed) useUi.getState().setSidebar({ collapsed: false });
+    return folders.open(e.folder.id);
+  }
   if (e.liked) return nav.go({ name: "liked" });
   nav.go({ name: e.kind, id: e.id });
 }
@@ -187,6 +211,7 @@ export function movePlaylist(all: LibEntry[], shown: LibEntry[], id: string, by:
 
 /** Right-click menu for a row: the Phase 1 actions for its type. */
 export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: boolean; down: boolean; run: (by: -1 | 1) => void } }): MenuItem[] {
+  if (e.folder) return folderMenu(e.folder.id);
   const pin: MenuItem = {
     label: e.pinned ? "Unpin" : "Pin",
     onSelect: () => usePins.getState().toggle({ kind: e.kind, id: e.id, title: e.title, subtitle: subtitle(e, false), thumb: e.thumb }),
@@ -214,7 +239,9 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
     const known = useApp.getState().playlists?.find((p) => p.id === e.id);
     const pl: Playlist = known ?? { id: e.id, title: e.title, smart: e.smart, trackCount: 0, durationMs: 0, thumb: e.thumb ?? null };
     items.push(...playlistEditItems(pl));
+    items.push(moveToFolderItem({ kind: "playlist", id: e.id, title: e.title }));
     items.push({ label: "Create playlist", separator: true, onSelect: () => void createPlaylist() });
+    items.push({ label: "Create folder", onSelect: () => void folders.create(null) });
   }
   if (e.kind === "album" || e.kind === "playlist") items.push(...downloadMenuItems({ kind: e.kind, id: e.id, title: e.title }));
   if (e.kind === "album" || e.kind === "playlist") items.push(startSessionItem(() => void playEntry(e)));

@@ -5,7 +5,7 @@
  * what's on screen.
  */
 import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
-import { Pause, Pin as PinIcon, Play, Volume2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, Pause, Pin as PinIcon, Play, Volume2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Art, FluidArtSize } from "../components/Art";
 import { LikedCover } from "../components/LikedCover";
@@ -21,6 +21,24 @@ import { sameRoute, useCurrentEntry } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { entryMenu, movePlaylist, openEntry, playEntry, type LibraryModel } from "./useLibrary";
+import { folders } from "../stores/folders";
+import "./folders.css";
+
+/** A folder's tile: a folder glyph on a plain square. */
+function FolderArt({ size, fluid = false }: { size?: number; fluid?: boolean }) {
+  const s = fluid ? undefined : size;
+  return (
+    <span className={`lib-folder-art ${fluid ? "lib-folder-art--fluid" : ""}`} style={s ? { width: s, height: s } : undefined} aria-hidden="true">
+      <Folder size={fluid ? 40 : Math.round((s ?? 48) * 0.45)} />
+    </span>
+  );
+}
+
+/** Where an item sits under open folders. */
+const depthStyle = (e: LibEntry) => {
+  const d = e.folder?.depth ?? e.depth ?? 0;
+  return d > 0 ? { ["--lib-depth" as string]: d } : undefined;
+};
 
 export type CollectionMode = "sidebar" | "rail" | "wide";
 
@@ -114,13 +132,20 @@ interface ItemProps {
  */
 function useItemDnd(e: LibEntry) {
   const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
+  const folder = e.folder;
   const drop = useSongDrop(
-    e.liked ? "liked" : `${e.kind}:${e.id}`,
+    folder ? `folder:${folder.id}` : e.liked ? "liked" : `${e.kind}:${e.id}`,
     e.title,
-    (songs) => libraryDropRule(e, songs),
-    (songs) => (e.liked ? dropOnLiked(songs) : dropOnPlaylist(e.id, songs)),
+    // A folder takes playlists dragged onto it (they move inside).
+    (songs) => (folder ? (songs.playlistId ? "ok" : "dim") : libraryDropRule(e, songs)),
+    (songs) =>
+      folder
+        ? songs.playlistId && folders.place(songs.playlistId, folder.id, songs.title)
+        : e.liked
+          ? dropOnLiked(songs)
+          : dropOnPlaylist(e.id, songs),
   );
-  const source = songDrags && !e.unavailable && !e.liked && (e.kind === "album" || e.kind === "playlist");
+  const source = songDrags && !folder && !e.unavailable && !e.liked && (e.kind === "album" || e.kind === "playlist");
   return {
     className: `${drop.over ? "is-drop-target" : ""} ${drop.dimmed ? "is-drop-dim" : ""}`,
     props: {
@@ -139,7 +164,7 @@ function useItemDnd(e: LibEntry) {
 }
 
 function PlayOverlay({ e, playing, className }: { e: LibEntry; playing: boolean; className: string }) {
-  if (e.unavailable) return null;
+  if (e.unavailable || e.folder) return null;
   return (
     <button
       type="button"
@@ -167,10 +192,11 @@ function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filter
   const dnd = useItemDnd(e);
   return (
     <div
-      className={`lib-row ${compact ? "lib-row--compact" : ""} ${wide ? "lib-row--wide" : ""} ${selected ? "is-selected" : ""} ${dnd.className}`}
+      className={`lib-row ${compact ? "lib-row--compact" : ""} ${wide ? "lib-row--wide" : ""} ${selected ? "is-selected" : ""} ${e.folder ? "lib-row--folder" : ""} ${dnd.className}`}
       role="listitem"
       aria-posinset={index + 1}
       aria-setsize={setSize}
+      style={depthStyle(e)}
       {...dnd.props}
       onContextMenu={(ev) => {
         ev.preventDefault();
@@ -180,7 +206,13 @@ function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filter
     >
       {!compact && showArt && (
         <span className="lib-row__art">
-          {e.liked ? <LikedCover size={LIST_ART} /> : <Art path={e.thumb} size={LIST_ART} round={e.kind === "artist"} kind={e.kind} />}
+          {e.folder ? (
+            <FolderArt size={LIST_ART} />
+          ) : e.liked ? (
+            <LikedCover size={LIST_ART} />
+          ) : (
+            <Art path={e.thumb} size={LIST_ART} round={e.kind === "artist"} kind={e.kind} />
+          )}
           <PlayOverlay e={e} playing={isContext && playing} className="lib-row__play" />
         </span>
       )}
@@ -190,6 +222,7 @@ function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filter
         data-index={index}
         tabIndex={tabIndex}
         aria-current={selected ? "page" : undefined}
+        aria-expanded={e.folder?.nested ? e.folder.expanded : undefined}
         onClick={() => !e.unavailable && openEntry(e)}
       >
         {compact ? (
@@ -213,6 +246,11 @@ function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filter
         {isContext && (
           <span className="lib-row__now" role="img" aria-label="Now playing">
             <Volume2 size={16} aria-hidden="true" />
+          </span>
+        )}
+        {e.folder?.nested && (
+          <span className="lib-row__chevron" aria-hidden="true">
+            {e.folder.expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           </span>
         )}
       </button>
@@ -250,7 +288,7 @@ function Cell({ e, index, setSize, tabIndex, selected, isContext, playing, filte
       onDoubleClick={() => !e.unavailable && void playEntry(e)}
     >
       <span className="lib-cell__art">
-        {e.liked ? <LikedCover fluid /> : <Art path={e.thumb} fluid round={e.kind === "artist"} kind={e.kind} />}
+        {e.folder ? <FolderArt fluid /> : e.liked ? <LikedCover fluid /> : <Art path={e.thumb} fluid round={e.kind === "artist"} kind={e.kind} />}
         <PlayOverlay e={e} playing={isContext && playing} className={`lib-cell__play ${isContext && playing ? "is-on" : ""}`} />
       </span>
       <button
@@ -305,7 +343,13 @@ function Tile({ e, index, setSize, tabIndex, selected, onMenu }: ItemProps) {
             onMenu(e, ev);
           }}
         >
-          {e.liked ? <LikedCover size={RAIL_ART} /> : <Art path={e.thumb} size={RAIL_ART} round={e.kind === "artist"} kind={e.kind} />}
+          {e.folder ? (
+            <FolderArt size={RAIL_ART} />
+          ) : e.liked ? (
+            <LikedCover size={RAIL_ART} />
+          ) : (
+            <Art path={e.thumb} size={RAIL_ART} round={e.kind === "artist"} kind={e.kind} />
+          )}
         </button>
       </Tooltip>
     </div>
@@ -446,10 +490,10 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   };
 
   const onMenu = (e: LibEntry, at: MouseEvent<HTMLElement> | HTMLElement) => {
-    const custom = model.sort === "custom" && e.kind === "playlist" && !e.pinned;
+    const custom = model.sort === "custom" && e.kind === "playlist" && !e.pinned && !e.folder;
     let move;
     if (custom) {
-      const list = entries.filter((x) => x.kind === "playlist" && !x.pinned);
+      const list = entries.filter((x) => x.kind === "playlist" && !x.pinned && !x.folder);
       const i = list.findIndex((x) => x.id === e.id);
       move = { up: i > 0, down: i < list.length - 1, run: (by: -1 | 1) => movePlaylist(model.all, entries, e.id, by) };
     }
@@ -475,14 +519,14 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
 
   const item = (e: LibEntry, i: number) => {
     // Liked Songs plays as its own context kind.
-    const key = e.liked ? "liked:liked" : `${e.kind}:${e.id}`;
+    const key = e.folder ? `folder:${e.id}` : e.liked ? "liked:liked" : `${e.kind}:${e.id}`;
     const p: ItemProps = {
       e,
       index: i,
       setSize: n,
       tabIndex: i === tabStop ? 0 : -1,
       selected: i === selectedIndex,
-      isContext: ctx.key === key && !e.unavailable,
+      isContext: ctx.key === key && !e.unavailable && !e.folder,
       playing: ctx.playing,
       filtered,
       onMenu,

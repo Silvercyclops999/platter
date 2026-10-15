@@ -62,6 +62,8 @@ import type {
   ShareKind,
   SyncStatus,
   OwnLyrics,
+  KeyKind,
+  PinRecord,
   Track,
   TranscribeModel,
   QueueAt,
@@ -75,6 +77,7 @@ import { lyricsFromText } from "../lrc";
 import { credits, globalTop, popularTracks, rankPopular } from "./popular";
 import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
 import { mockBio } from "./bio";
+import { MOCK_CLOUD_FOLDERS, MockSync } from "./sync";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
@@ -205,6 +208,7 @@ export class MockBackend implements Backend {
   private smoothFor: string | null = null;
   /** Friend activity, follows, What's New, listening sessions (test hooks: access, guestJoins, hostGone, hostEnds, addRelease). */
   readonly social: MockSocial;
+  readonly syncFile: MockSync;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -341,6 +345,16 @@ export class MockBackend implements Backend {
         this.downloads.usedOffset = 1024 ** 3;
       }
     }
+    this.syncFile = new MockSync({
+      settings: () => this.settings,
+      setSettings: (patch) => {
+        this.settings = { ...this.settings, ...patch };
+        this.emit("settings://changed", { ...this.settings, volume: this.volume });
+      },
+      emitStatus: (s) => this.emit("sync-file://status", s),
+      emitChanged: (c) => this.emit("syncstore://changed", c),
+      emitKeys: (s) => this.emit("keys://receive", s),
+    });
     this.social = new MockSocial(this.fx, {
       settings: () => this.settings,
       emitFollows: (all) => this.emit("follows://changed", all),
@@ -1808,6 +1822,10 @@ export class MockBackend implements Backend {
       next.downloadLimitGb = Math.min(4096, Math.max(1, Math.round(next.downloadLimitGb)));
       // Only downloadsChooseFolder changes the folder.
       next.downloadFolder = this.settings.downloadFolder;
+      // Only the sync folder commands change the sync folder.
+      next.syncFolder = this.settings.syncFolder;
+      const syncKeys = ["syncEnabled", "syncSettings", "syncLibrary", "syncFollows", "syncLyrics"];
+      if (syncKeys.some((k) => k in patch)) this.later(0, () => this.emit("sync-file://status", this.syncFile.status()));
       if (patch.goOffline !== undefined && patch.goOffline !== (this.healthState.banner?.kind === "goneOffline"))
         this.later(0, () => this.setHealth(patch.goOffline ? "goneOffline" : "local"));
       this.later(0, () => this.downloads.poke());
@@ -1974,6 +1992,70 @@ export class MockBackend implements Backend {
 
   deepLinkTake() {
     return this.delay(() => this.share.take());
+  }
+
+  // ---------------------------------------------------------------- sync file, folders, keys
+
+  syncFileStatus() {
+    return this.delay(() => this.syncFile.status());
+  }
+  syncFileNow() {
+    return this.delay(() => this.syncFile.status());
+  }
+  syncFileFolders() {
+    return this.delay(() => MOCK_CLOUD_FOLDERS);
+  }
+  syncFileUseFolder(path: string) {
+    return this.delay(() => this.syncFile.useFolder(path));
+  }
+  syncFileChooseFolder() {
+    // Stands in for the folder dialog: picks an invented folder.
+    return this.delay(() => this.syncFile.useFolder("C:\\Users\\listener\\Documents\\Synced"));
+  }
+  syncFileReplace() {
+    return this.delay(() => this.syncFile.replace());
+  }
+  pinsGet() {
+    return this.delay(() => this.syncFile.pinsList());
+  }
+  pinsToggle(pin: PinRecord) {
+    return this.delay(() => this.syncFile.pinsToggle(pin));
+  }
+  pinsImport(pins: PinRecord[]) {
+    return this.delay(() => this.syncFile.pinsImport(pins));
+  }
+  foldersGet() {
+    return this.delay(() => this.syncFile.tree());
+  }
+  folderCreate(name?: string | null, parent?: string | null) {
+    return this.delay(() => this.syncFile.create(name, parent));
+  }
+  folderRename(id: string, name: string) {
+    return this.delay(() => this.syncFile.rename(id, name));
+  }
+  folderDelete(id: string) {
+    return this.delay(() => this.syncFile.remove(id));
+  }
+  folderMove(id: string, parent: string | null) {
+    return this.delay(() => this.syncFile.move(id, parent));
+  }
+  playlistFolderSet(playlistId: string, folderId: string | null) {
+    return this.delay(() => this.syncFile.place(playlistId, folderId));
+  }
+  keysAvailable() {
+    return this.delay(() => [...this.syncFile.available]);
+  }
+  keysReceiveStart() {
+    return this.delay(() => this.syncFile.receiveStart());
+  }
+  keysReceiveState() {
+    return this.delay(() => this.syncFile.receiveState());
+  }
+  keysReceiveCancel() {
+    return this.delay(() => this.syncFile.receiveCancel());
+  }
+  keysSend(code: string, kinds: KeyKind[]) {
+    return this.delay(() => this.syncFile.send(code, kinds));
   }
 
   // ---------------------------------------------------------------- discord

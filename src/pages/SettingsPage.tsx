@@ -39,6 +39,7 @@ import { catboxNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus }
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
 import { BatchControl, BatchNote, ModelControl, TranscribeNote } from "./TranscribeSettings";
+import { ChangeSyncFolder, KeyCopyButton, SyncNowControl, SyncSwitch, syncNote, useSyncFile } from "./SyncSettings";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
@@ -439,6 +440,8 @@ export function SettingsPage() {
 
   const { keys: infoKeys, setKey: setInfoKey } = useInfoKeys();
   const downloads = useDownloadStatus();
+  const [syncFile, setSyncFile] = useSyncFile();
+  const syncOn = !!s?.syncEnabled && !!s?.syncFolder;
   const limitGb = s?.downloadLimitGb;
   const limitOptions: SelectOption<string>[] = [...new Set([...DOWNLOAD_LIMITS_GB, ...(limitGb ? [limitGb] : [])])]
     .sort((a, b) => a - b)
@@ -729,6 +732,83 @@ export function SettingsPage() {
       description:
         "Platter stops using the network: no server, artist info, lyrics lookups, Discord status, share links or update checks. Only music on this computer plays. Also in the app menu. This device only.",
       control: (ids) => toggle(s, "goOffline", ids),
+    },
+    // Sync
+    {
+      key: "syncEnabled",
+      section: "Sync",
+      title: "Sync with a folder",
+      description:
+        "Keeps settings, library folders and pins, followed artists and lyrics you wrote the same on your computers, through a folder your cloud app already syncs. Plex keeps likes, playlists and history either way. The file never holds your sign-in or keys. This device only.",
+      note: syncNote(s, syncFile),
+      control: (ids) => <SyncSwitch s={s} ids={ids} />,
+    },
+    ...(syncOn
+      ? [
+          {
+            key: "syncFolder",
+            section: "Sync",
+            title: "Sync folder",
+            description: syncFile?.file ?? s?.syncFolder ?? "",
+            control: () => <ChangeSyncFolder />,
+          },
+          {
+            key: "syncNow",
+            section: "Sync",
+            title: "Sync now",
+            description: "Platter syncs a moment after each change, when another computer changes the file, and every minute. Changes made while the folder can't be reached go out once it can.",
+            control: () => <SyncNowControl status={syncFile} onStatus={setSyncFile} />,
+          },
+        ]
+      : []),
+    {
+      key: "syncSettings",
+      section: "Sync",
+      group: "What to sync",
+      title: "Settings",
+      description: "Settings that aren't marked This device only.",
+      control: (ids) => toggle(s, "syncSettings", ids),
+    },
+    {
+      key: "syncLibrary",
+      section: "Sync",
+      group: "What to sync",
+      title: "Library folders and pins",
+      description: "Your folders, which playlists are in them, and what's pinned in Your Library.",
+      control: (ids) => toggle(s, "syncLibrary", ids),
+    },
+    {
+      key: "syncFollows",
+      section: "Sync",
+      group: "What to sync",
+      title: "Followed artists and hidden items",
+      description: "Artists you follow, and anything you've hidden or snoozed.",
+      control: (ids) => toggle(s, "syncFollows", ids),
+    },
+    {
+      key: "syncLyrics",
+      section: "Sync",
+      group: "What to sync",
+      title: "Lyrics you wrote",
+      description: "Lyrics from the lyrics editor. Lyrics transcribed on this computer stay here until you edit them.",
+      control: (ids) => toggle(s, "syncLyrics", ids),
+    },
+    {
+      key: "keysReceive",
+      section: "Sync",
+      group: "Keys",
+      title: "Copy keys from another device",
+      description:
+        "Brings your ListenBrainz, Last.fm, Fanart.tv, TheAudioDB and Imgur keys over from a computer signed in to the same Plex account, on the same network. Shows a code to type on that computer. Keys go straight to this computer's keychain, never through the sync file.",
+      control: () => <KeyCopyButton kind="receive" />,
+    },
+    {
+      key: "keysSend",
+      section: "Sync",
+      group: "Keys",
+      title: "Send keys to a device",
+      description: "Type the code another of your computers shows, then choose which keys to send it.",
+      control: () => <KeyCopyButton kind="send" />,
     },
     {
       key: "resync",

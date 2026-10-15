@@ -1,8 +1,13 @@
 /**
- * Sidebar pins. App-only state: per device for now (localStorage); the
- * optional sync file (Phase 3) will carry it across devices.
+ * Sidebar pins, kept by the core (`pins_get` / `pins_toggle`) so they travel
+ * in the sync file when it's on. Toggling shows at once; the core's list
+ * comes back when another device changes it. Pins an older build kept in
+ * the window's storage are handed to the core once.
  */
 import { create } from "zustand";
+import { backend, type Backend } from "../lib/backend";
+import type { PinRecord } from "../lib/types";
+import { toast } from "./toasts";
 
 export interface Pin {
   kind: "album" | "artist" | "playlist";
@@ -12,22 +17,26 @@ export interface Pin {
   thumb: string | null;
 }
 
-const KEY = "platter.pins.v1"; // gitleaks:allow (localStorage key name, not a secret)
+export const MAX_PINS = 12;
+/** Where an older build kept pins. */
+const LEGACY_KEY = "platter.pins.v1"; // gitleaks:allow (localStorage key name, not a secret)
 
-function load(): Pin[] {
+const strip = (p: PinRecord): Pin => ({ kind: p.kind, id: p.id, title: p.title, subtitle: p.subtitle ?? "", thumb: p.thumb ?? null });
+
+function legacyPins(): Pin[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(LEGACY_KEY);
     return raw ? (JSON.parse(raw) as Pin[]) : [];
   } catch {
     return [];
   }
 }
 
-function save(pins: Pin[]) {
+function dropLegacy() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(pins));
+    localStorage.removeItem(LEGACY_KEY);
   } catch {
-    /* storage unavailable: pins live for this session only */
+    /* storage unavailable */
   }
 }
 
@@ -38,13 +47,28 @@ interface PinState {
 }
 
 export const usePins = create<PinState>()((set, get) => ({
-  pins: load(),
+  pins: [],
   isPinned: (kind, id) => get().pins.some((p) => p.kind === kind && p.id === id),
   toggle: (p) => {
-    const pins = get().isPinned(p.kind, p.id)
-      ? get().pins.filter((x) => !(x.kind === p.kind && x.id === p.id))
-      : [p, ...get().pins].slice(0, 12);
-    save(pins);
+    const before = get().pins;
+    const pinned = get().isPinned(p.kind, p.id);
+    const pins = pinned ? before.filter((x) => !(x.kind === p.kind && x.id === p.id)) : [p, ...before].slice(0, MAX_PINS);
     set({ pins });
+    backend.pinsToggle(p).catch(() => {
+      set({ pins: before });
+      toast.error(pinned ? "Couldn't unpin that" : "Couldn't pin that");
+    });
   },
 }));
+
+/** Read the pins from the core (moving an older build's pins over first). */
+export async function loadPins(b: Backend = backend): Promise<void> {
+  try {
+    const legacy = legacyPins();
+    const pins = legacy.length ? await b.pinsImport(legacy) : await b.pinsGet();
+    if (legacy.length) dropLegacy();
+    usePins.setState({ pins: pins.map(strip) });
+  } catch {
+    /* keep what's shown */
+  }
+}
