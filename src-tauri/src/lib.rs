@@ -638,6 +638,7 @@ pub fn run() {
                     lrclib: live.lyrics_lrclib.clone(),
                     prefer_own: live.lyrics_prefer_own.clone(),
                     show_auto: live.lyrics_show_auto.clone(),
+                    live_timing: live.lyrics_live_timing.clone(),
                 },
             );
             // Lyrics transcribed on this computer (opt-in, model downloaded on request).

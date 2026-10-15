@@ -13,6 +13,9 @@ pub const BASE: &str = "https://lrclib.net/api";
 /// A search hit's synced lyrics are used only when its length is this close
 /// to the track's; further off they would drift, so the plain text is used.
 pub const SYNC_TOLERANCE_S: f64 = 10.0;
+/// A synced hit this close in length is taken ahead of others within the
+/// tolerance: most likely the same recording, not a remaster or edit.
+pub const SYNC_CLOSE_S: f64 = 3.0;
 
 /// What a lookup sends.
 #[derive(Debug, Clone, PartialEq)]
@@ -109,8 +112,9 @@ pub fn parse_get(body: &[u8]) -> AppResult<Option<String>> {
 }
 
 /// The best search hit for the query: artist and title equal once folded;
-/// synced lyrics within the tolerance first, then the closest length.
-/// Returns the text to keep.
+/// synced lyrics within 3 s of the track's length first, then synced within
+/// the 10 s tolerance, then the closest length. Synced lyrics further off
+/// than the tolerance keep only their words. Returns the text to keep.
 pub fn best_search_hit(q: &Query, body: &[u8]) -> AppResult<Option<String>> {
     let hits: Vec<Record> = decode(body)?;
     let (artist, title) = (exact_key(&q.artist), exact_key(&q.title));
@@ -120,9 +124,14 @@ pub fn best_search_hit(q: &Query, body: &[u8]) -> AppResult<Option<String>> {
         .into_iter()
         .filter(|r| r.usable() && exact_key(&r.artist_name) == artist && exact_key(&r.track_name) == title)
         .map(|r| {
-            let in_sync = r.synced() && diff(&r) <= SYNC_TOLERANCE_S;
-            (r, in_sync)
+            // 0: synced and close, 1: synced within the tolerance, 2: the rest.
+            let tier = match (r.synced(), diff(&r)) {
+                (true, d) if d <= SYNC_CLOSE_S => 0,
+                (true, d) if d <= SYNC_TOLERANCE_S => 1,
+                _ => 2,
+            };
+            (r, tier)
         })
-        .min_by(|(a, a_sync), (b, b_sync)| b_sync.cmp(a_sync).then(diff(a).total_cmp(&diff(b))));
-    Ok(best.and_then(|(r, in_sync)| r.text(in_sync)))
+        .min_by(|(a, a_tier), (b, b_tier)| a_tier.cmp(b_tier).then(diff(a).total_cmp(&diff(b))));
+    Ok(best.and_then(|(r, tier)| r.text(tier < 2)))
 }

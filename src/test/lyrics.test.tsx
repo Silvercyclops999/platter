@@ -10,7 +10,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { mockLyrics, mockLyricsKind } from "../lib/mock/details";
 import { DEFAULT_SETTINGS, type Lyrics, type PlayerState, type Track } from "../lib/types";
-import { LyricsPane, UNSYNCED_NOTE } from "../shell/LyricsView";
+import { BORROWED_NOTE, LyricsPane, UNSYNCED_NOTE } from "../shell/LyricsView";
 import { SettingsPage, SOURCE_NOTICES } from "../pages/SettingsPage";
 import {
   clearLyricsCache,
@@ -224,6 +224,35 @@ describe("plain and missing lyrics", () => {
     expect(screen.queryByText(UNSYNCED_NOTE)).toBeNull();
   });
 
+  const liveTrack = mock.fx.tracks.find(
+    (t) => mockLyricsKind(t.id) === "words" && t.durationMs > 120_000 && !!mock.fx.albums.find((a) => a.id === t.albumId)?.subformats.includes("live"),
+  )!;
+
+  it("a live version with timing from another version shows it unsynced, with a note", async () => {
+    at(liveTrack, 40_000);
+    const seek = vi.spyOn(backend, "playSeek");
+    render(<LyricsPane />);
+    const view = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    const note = within(view).getByText(BORROWED_NOTE);
+    expect(note).toBe(view.querySelector(".lyrics__lines")!.firstElementChild);
+    expect(within(view).queryByText(UNSYNCED_NOTE)).toBeNull();
+    expect(view.querySelector("[aria-current]")).toBeNull();
+    fireEvent.click(view.querySelectorAll("p.lyrics__line")[2]);
+    expect(seek).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
+  });
+
+  it("with borrowed timing turned on, a live version follows along and still says where the timing is from", async () => {
+    await mock.settingsSet({ lyricsLiveTiming: true });
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, lyricsLiveTiming: true } }));
+    at(liveTrack, 40_000);
+    render(<LyricsPane />);
+    const view = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    await waitFor(() => expect(view.querySelector("[aria-current]")).not.toBeNull());
+    expect(within(view).getByText(BORROWED_NOTE)).toHaveClass("lyrics__borrowed");
+    await mock.settingsSet({ lyricsLiveTiming: false });
+  });
+
   it("says so when the song has none", async () => {
     at(none, 0);
     render(<LyricsPane />);
@@ -421,6 +450,28 @@ describe("expanded view mode", () => {
     expect(useFullWindow.getState().mode).toBe("artwork");
     expect(loadFullWindowPrefs().remember).toBe(false);
     localStorage.clear();
+  });
+
+  it("Show borrowed timing on live versions: off by default, saved when turned on", async () => {
+    const user = userEvent.setup();
+    await backend.settingsSet({ ...DEFAULT_SETTINGS });
+    useSettings.setState({ settings: null });
+    await loadSettings();
+    const set = vi.spyOn(backend, "settingsSet");
+    render(<SettingsPage />);
+    const sw = screen.getByRole("switch", { name: "Show borrowed timing on live versions" });
+    expect(sw).not.toBeChecked();
+    await user.click(sw);
+    expect(set).toHaveBeenCalledWith({ lyricsLiveTiming: true });
+    await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  });
+
+  it("turning borrowed timing on asks for lyrics again", async () => {
+    const spy = vi.spyOn(backend, "lyrics");
+    await loadLyrics(words.id);
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, lyricsLiveTiming: true } }));
+    await loadLyrics(words.id);
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 
   it("turning LRCLIB on asks for lyrics again", async () => {

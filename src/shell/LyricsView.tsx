@@ -19,6 +19,8 @@ import "./lyrics-editor.css";
 
 /** Said above lyrics that have no timing. */
 export const UNSYNCED_NOTE = "These lyrics aren't synced to the song yet";
+/** Said for a live version showing lyrics timed to another version. */
+export const BORROWED_NOTE = "Timing is from another version";
 
 /** Colour behind the lyrics: from the cover, or neutral when Artwork colours is off. */
 export function useLyricsBackground(thumb: string | null | undefined): string {
@@ -177,14 +179,26 @@ function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]
   );
 }
 
-function PlainLyrics({ lines, credit, className, footer }: { lines: string[]; credit?: string; className: string; footer?: ReactNode }) {
+function PlainLyrics({
+  lines,
+  credit,
+  className,
+  footer,
+  note = UNSYNCED_NOTE,
+}: {
+  lines: string[];
+  credit?: string;
+  className: string;
+  footer?: ReactNode;
+  note?: string;
+}) {
   const picking = useLyricPick((s) => s.picking);
   const picked = useLyricPick((s) => s.picked);
   return (
     <div className={`lyrics lyrics--plain ${className}`}>
       <div className="lyrics__scroll" tabIndex={0} aria-label="Lyrics">
         <div className="lyrics__lines">
-          <p className="lyrics__unsynced">{UNSYNCED_NOTE}</p>
+          <p className="lyrics__unsynced">{note}</p>
           {lines.map((l, i) =>
             l && picking ? (
               <button
@@ -218,21 +232,33 @@ function PlainLyrics({ lines, credit, className, footer }: { lines: string[]; cr
  * scroll stops following until Sync. Unsynced lyrics
  * say so at the top and are plain text in one tint: no follow, no seeking.
  * Under them: where they came from, and Edit for lyrics the user wrote.
+ * A live version showing lyrics timed to another version says so (and
+ * offers to transcribe the song, when transcription is on).
  */
 export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
   const timed = timedLines(lyrics);
   const cls = "lyrics--full";
   const texts = timed ? timed.map((l) => l.text) : lyrics.lines;
+  const borrowed = !!lyrics.borrowedTiming;
   const footer = (
     <>
+      {borrowed && timed && <p className="lyrics__borrowed">{BORROWED_NOTE}</p>}
       <LyricPickBar track={track} texts={texts} />
       <LyricsSourceLine lyrics={lyrics} track={track} />
+      {borrowed && <TranscribeOffer trackId={track.id} />}
     </>
   );
   return timed ? (
     <SyncedLyrics key={track.id} lines={timed} credit={lyrics.credit} className={cls} footer={footer} />
   ) : (
-    <PlainLyrics key={track.id} lines={lyrics.lines} credit={lyrics.credit} className={cls} footer={footer} />
+    <PlainLyrics
+      key={track.id}
+      lines={lyrics.lines}
+      credit={lyrics.credit}
+      className={cls}
+      footer={footer}
+      note={borrowed ? BORROWED_NOTE : UNSYNCED_NOTE}
+    />
   );
 }
 

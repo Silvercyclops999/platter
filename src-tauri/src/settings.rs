@@ -353,6 +353,9 @@ pub struct Settings {
     pub lyrics_prefer_own: bool,
     /// Songs without lyrics offer "Add lyrics" in the lyrics view.
     pub lyrics_show_add: bool,
+    /// Live versions keep the timing of lyrics found by artist and title
+    /// (usually the studio version's). Off shows them unsynced.
+    pub lyrics_live_timing: bool,
     /// The full-window view hides its controls after 3 s without movement.
     pub full_window_hide_controls: bool,
     /// Read explicit, version and edition tags from the files (this device only).
@@ -561,6 +564,7 @@ impl Default for Settings {
             lyrics_lrclib: false,
             lyrics_prefer_own: false,
             lyrics_show_add: true,
+            lyrics_live_timing: false,
             full_window_hide_controls: true,
             read_file_tags: true,
             explicit_content: ExplicitContent::Allowed,
@@ -670,6 +674,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "lyricsLrclib",
     "lyricsPreferOwn",
     "lyricsShowAdd",
+    "lyricsLiveTiming",
     "fullWindowHideControls",
     "explicitContent",
     "showFanEdits",
@@ -849,6 +854,7 @@ pub struct SettingsPatch {
     pub lyrics_lrclib: Option<bool>,
     pub lyrics_prefer_own: Option<bool>,
     pub lyrics_show_add: Option<bool>,
+    pub lyrics_live_timing: Option<bool>,
     pub full_window_hide_controls: Option<bool>,
     pub read_file_tags: Option<bool>,
     pub explicit_content: Option<ExplicitContent>,
@@ -1047,6 +1053,7 @@ impl Settings {
         set(&mut self.lyrics_lrclib, p.lyrics_lrclib);
         set(&mut self.lyrics_prefer_own, p.lyrics_prefer_own);
         set(&mut self.lyrics_show_add, p.lyrics_show_add);
+        set(&mut self.lyrics_live_timing, p.lyrics_live_timing);
         set(&mut self.full_window_hide_controls, p.full_window_hide_controls);
         set(&mut self.read_file_tags, p.read_file_tags);
         set(&mut self.explicit_content, p.explicit_content);
@@ -1320,6 +1327,8 @@ pub struct Live {
     pub lyrics_prefer_own: Arc<AtomicBool>,
     /// Show lyrics transcribed on this computer.
     pub lyrics_show_auto: Arc<AtomicBool>,
+    /// Live versions keep borrowed lyric timing.
+    pub lyrics_live_timing: Arc<AtomicBool>,
     /// The file tag scan, once it exists (it starts after settings load).
     pub tag_scanner: Arc<parking_lot::Mutex<Option<crate::tags::scan::TagScanner>>>,
     /// Lyrics transcription, once it exists.
@@ -1382,6 +1391,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.lyrics_lrclib.store(s.lyrics_lrclib && on, Ordering::Relaxed);
     live.lyrics_prefer_own.store(s.lyrics_prefer_own, Ordering::Relaxed);
     live.lyrics_show_auto.store(s.show_auto_lyrics, Ordering::Relaxed);
+    live.lyrics_live_timing.store(s.lyrics_live_timing, Ordering::Relaxed);
     if let Some(t) = live.transcriber.lock().as_ref() {
         t.set_options(s.transcribe_lyrics, s.transcribe_model);
     }
@@ -2425,8 +2435,12 @@ mod tests {
         // Own lyrics: Plex's first, and "Add lyrics" offered, until changed.
         assert!(!s.lyrics_prefer_own && s.lyrics_show_add);
         assert!(!live.lyrics_prefer_own.load(Ordering::Relaxed));
-        s.apply(&serde_json::from_str(r#"{"lyricsPreferOwn":true,"lyricsShowAdd":false}"#).unwrap()).unwrap();
+        // Live versions: borrowed timing off until turned on.
+        assert!(!s.lyrics_live_timing && !live.lyrics_live_timing.load(Ordering::Relaxed));
+        assert!(SYNCED_SETTINGS.contains(&"lyricsLiveTiming"));
+        s.apply(&serde_json::from_str(r#"{"lyricsPreferOwn":true,"lyricsShowAdd":false,"lyricsLiveTiming":true}"#).unwrap()).unwrap();
         publish(&s, &live, &db);
+        assert!(live.lyrics_live_timing.load(Ordering::Relaxed));
         assert!(live.lyrics_prefer_own.load(Ordering::Relaxed));
         assert!(!s.lyrics_show_add);
         assert!(!s.full_window_hide_controls);

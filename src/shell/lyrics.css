@@ -150,6 +150,13 @@
 
 /* Share lyrics: picking lines for a card. */
 .lyrics__share { margin: 0 0 var(--space-3); font-size: var(--font-size-sm); }
+/* A live version following timing borrowed from another version. */
+.lyrics__borrowed {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--lyrics-future);
+}
 .lyrics__share .lyrics__source-edit { display: inline-flex; align-items: center; gap: var(--space-1); }
 .lyrics__line--pick { cursor: pointer; border-radius: var(--radius-row); }
 .lyrics__line.is-picked {

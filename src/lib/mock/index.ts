@@ -1004,7 +1004,15 @@ export class MockBackend implements Backend {
       if (mine && own?.auto) mine.source = "auto";
       if (mine && !own?.auto && (own!.prefer || this.settings.lyricsPreferOwn)) return mine;
       const plex = this.lyricsDown ? null : mockLyrics(track);
-      return plex ?? mine;
+      if (!plex) return mine;
+      // A live take with lyrics found by artist and title: the timing is another version's.
+      const album = this.fx.albums.find((a) => a.id === track.albumId);
+      const live = !!album && (album.subformats.includes("live") || /\(live|- live|unplugged/i.test(track.title));
+      if (!plex.synced || !live) return plex;
+      if (this.settings.lyricsLiveTiming) return { ...plex, borrowedTiming: true };
+      // A transcription of this recording beats borrowed timing.
+      if (own?.auto && mine?.synced) return mine;
+      return { ...plex, synced: false, timed: undefined, borrowedTiming: true };
     });
   }
   ownLyrics(trackId: string) {

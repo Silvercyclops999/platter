@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use super::user::{self, OwnLyrics};
-use super::{LyricsService, PlexLyrics};
+use super::{LyricsService, PlexLyrics, Shown};
 use crate::error::{AppError, AppResult};
 use crate::plex::PlexState;
 use crate::plex::details::{Lyrics, fetch_lyrics};
@@ -22,8 +22,8 @@ impl PlexLyrics for PlexSource {
 }
 
 #[tauri::command]
-pub async fn lyrics_get(lyrics: State<'_, LyricsService>, track_id: String) -> AppResult<Option<Lyrics>> {
-    lyrics.get(&track_id).await
+pub async fn lyrics_get(lyrics: State<'_, LyricsService>, track_id: String) -> AppResult<Option<Shown>> {
+    lyrics.shown(&track_id).await
 }
 
 #[tauri::command]

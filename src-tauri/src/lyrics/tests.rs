@@ -45,6 +45,7 @@ struct Fx {
     on: Arc<AtomicBool>,
     prefer: Arc<AtomicBool>,
     show_auto: Arc<AtomicBool>,
+    live_timing: Arc<AtomicBool>,
     db: DbHandle,
     _dir: tempfile::TempDir,
 }
@@ -58,10 +59,12 @@ fn fx() -> Fx {
             INSERT INTO artists (id, title, sort_title) VALUES ('7', 'Test Artist', 'Test Artist');
             INSERT INTO albums (id, title, sort_title, artist_id, artist_title, format, subformats, track_count)
               VALUES ('50', 'First Light', 'First Light', '7', 'Test Artist', 'album', '[]', 10),
-                     ('80', 'Basement Tapes', 'Basement Tapes', '7', 'Test Artist', 'album', '["demo"]', 4);
+                     ('80', 'Basement Tapes', 'Basement Tapes', '7', 'Test Artist', 'album', '["demo"]', 4),
+                     ('60', 'Late Show', 'Late Show', '7', 'Test Artist', 'album', '["Live"]', 12);
             INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, duration_ms, part_key)
               VALUES ('501', 'Opening', '50', 'First Light', '7', 'Test Artist', 200500, '/p/1'),
-                     ('801', 'Opening', '80', 'Basement Tapes', '7', 'Test Artist', 190000, '/p/2');
+                     ('801', 'Opening', '80', 'Basement Tapes', '7', 'Test Artist', 190000, '/p/2'),
+                     ('601', 'Opening', '60', 'Late Show', '7', 'Test Artist', 245000, '/p/3');
             "#,
         )?;
         Ok(())
@@ -72,9 +75,15 @@ fn fx() -> Fx {
     let on = Arc::new(AtomicBool::new(true));
     let prefer = Arc::new(AtomicBool::new(false));
     let show_auto = Arc::new(AtomicBool::new(true));
-    let switches = Switches { lrclib: on.clone(), prefer_own: prefer.clone(), show_auto: show_auto.clone() };
+    let live_timing = Arc::new(AtomicBool::new(false));
+    let switches = Switches {
+        lrclib: on.clone(),
+        prefer_own: prefer.clone(),
+        show_auto: show_auto.clone(),
+        live_timing: live_timing.clone(),
+    };
     let svc = LyricsService::with_gap(db.clone(), http.clone(), plex.clone(), switches, Duration::from_millis(1));
-    Fx { svc, http, plex, on, prefer, show_auto, db, _dir: dir }
+    Fx { svc, http, plex, on, prefer, show_auto, live_timing, db, _dir: dir }
 }
 
 const SYNCED: &str = "[00:01.00]Hello\n[00:02.00]World";
@@ -369,4 +378,161 @@ async fn hidden_transcriptions_leave_no_lyrics() {
     assert_eq!(f.svc.get("501").await.unwrap(), None);
     f.show_auto.store(true, Ordering::Relaxed);
     assert_eq!(f.svc.get("501").await.unwrap().unwrap().source, LyricsSource::Auto);
+}
+
+// ---------------------------------------------------------------- live versions
+
+fn facts(title: &str, album: &str, format: Option<&str>, subs: &[&str], version: Option<&str>) -> live::LiveFacts {
+    live::LiveFacts {
+        title: title.into(),
+        album_title: album.into(),
+        format: format.map(Into::into),
+        subformats: subs.iter().map(|s| (*s).to_owned()).collect(),
+        version: version.map(Into::into),
+    }
+}
+
+#[test]
+fn live_versions_are_recognised() {
+    // The release type, from Plex's album format or subformat.
+    assert!(live::is_live(&facts("The Song", "Late Orchestration", Some("album"), &["Live"], None)));
+    assert!(live::is_live(&facts("The Song", "Concert", Some("Live"), &[], None)));
+    assert!(live::is_live(&facts("The Song", "Concert", Some("album"), &["demo", "live"], None)));
+    // ARCHIVE_VERSION.
+    assert!(live::is_live(&facts("The Song", "Tapes", None, &[], Some("live"))));
+    assert!(live::is_live(&facts("The Song", "Tapes", None, &[], Some(" LIVE "))));
+    // What the titles say.
+    for t in ["The Song (Live)", "The Song [Live at the Hall]", "The Song - Live", "The Song (MTV Unplugged)"] {
+        assert!(live::is_live(&facts(t, "Studio Album", Some("album"), &[], None)), "{t}");
+    }
+    for a in ["Live at the Hall", "Live From Somewhere", "Live in Paris 1999", "Unplugged", "The Tour (Live)"] {
+        assert!(live::is_live(&facts("The Song", a, Some("album"), &[], None)), "{a}");
+    }
+    // Not live.
+    for (t, a) in [
+        ("Live Forever", "Studio Album"),
+        ("The Song (Lively Mix)", "Studio Album"),
+        ("Where We Live", "Alive"),
+        ("The Song", "Delivered"),
+    ] {
+        assert!(!live::is_live(&facts(t, a, Some("album"), &[], None)), "{t} / {a}");
+    }
+    assert!(!live::is_live(&facts("The Song", "Album", Some("album"), &["remix"], Some("released"))));
+}
+
+#[test]
+fn live_check_reads_the_cache() {
+    let f = fx();
+    f.db.read(|c| {
+        assert!(live::track_is_live(c, "601")?);
+        assert!(!live::track_is_live(c, "501")?);
+        assert!(!live::track_is_live(c, "999")?);
+        Ok(())
+    })
+    .unwrap();
+    // The file's ARCHIVE_VERSION makes a studio-album track live.
+    f.db.write(|c| Ok(c.execute("INSERT INTO file_tags (part_key, status, version, scanned_at) VALUES ('/p/1', 'read', 'live', 1)", [])?))
+        .unwrap();
+    assert!(f.db.read(|c| live::track_is_live(c, "501")).unwrap());
+}
+
+fn synced_from(source: LyricsSource) -> Lyrics {
+    let mut l = crate::plex::details::parse_lyrics_text(SYNCED);
+    l.source = source;
+    l
+}
+
+#[tokio::test]
+async fn borrowed_timing_on_a_live_version_shows_unsynced() {
+    let f = fx();
+    // Plex's licensed lyrics are matched by artist and title.
+    f.plex.set("601", Ok(Some(synced_from(LyricsSource::Plex))));
+    let s = f.svc.shown("601").await.unwrap().unwrap();
+    assert!(s.borrowed_timing);
+    assert!(!s.lyrics.synced && s.lyrics.timed.is_empty());
+    assert_eq!(s.lyrics.lines, vec!["Hello", "World"]);
+    let v = serde_json::to_value(&s).unwrap();
+    assert_eq!(v["borrowedTiming"], true);
+    assert_eq!(v["synced"], false);
+    // The same lyrics on the studio version keep their timing.
+    f.plex.set("501", Ok(Some(synced_from(LyricsSource::Plex))));
+    let s = f.svc.shown("501").await.unwrap().unwrap();
+    assert!(!s.borrowed_timing && s.lyrics.synced);
+    assert!(serde_json::to_value(&s).unwrap().get("borrowedTiming").is_none());
+}
+
+#[tokio::test]
+async fn lrclib_timing_on_a_live_version_is_borrowed_too() {
+    let f = fx();
+    f.http.route("api/get", 200, &record("Test Artist", "Opening", 245.0, Some(SYNCED), None).to_string());
+    let s = f.svc.shown("601").await.unwrap().unwrap();
+    assert_eq!(s.lyrics.source, LyricsSource::Lrclib);
+    assert!(s.borrowed_timing && !s.lyrics.synced);
+}
+
+#[tokio::test]
+async fn lyrics_tied_to_the_file_keep_their_sync_on_live_versions() {
+    let f = fx();
+    // A lyrics file next to the song.
+    f.plex.set("601", Ok(Some(synced_from(LyricsSource::File))));
+    let s = f.svc.shown("601").await.unwrap().unwrap();
+    assert!(!s.borrowed_timing && s.lyrics.synced);
+    // Your own lyrics.
+    let f = fx();
+    f.svc.save_own("601", MINE, true).await.unwrap();
+    let s = f.svc.shown("601").await.unwrap().unwrap();
+    assert_eq!(s.lyrics.source, LyricsSource::User);
+    assert!(!s.borrowed_timing && s.lyrics.synced);
+}
+
+#[tokio::test]
+async fn the_setting_keeps_borrowed_timing_but_still_says_so() {
+    let f = fx();
+    f.live_timing.store(true, Ordering::Relaxed);
+    f.plex.set("601", Ok(Some(synced_from(LyricsSource::Plex))));
+    let s = f.svc.shown("601").await.unwrap().unwrap();
+    assert!(s.borrowed_timing && s.lyrics.synced && s.lyrics.timed.len() == 2);
+    // Plain lyrics have no timing to borrow.
+    let f = fx();
+    f.plex.set("601", Ok(Some(plex_lyrics())));
+    let s = f.svc.shown("601").await.unwrap().unwrap();
+    assert!(!s.borrowed_timing);
+    assert_eq!(f.svc.shown("999").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_transcription_beats_borrowed_timing_on_a_live_version() {
+    let f = fx();
+    f.plex.set("601", Ok(Some(synced_from(LyricsSource::Plex))));
+    let now = crate::db::queries::now_s();
+    f.db.write(|c| user::put_auto(c, "601", MINE, "small", now)).unwrap();
+    let s = f.svc.shown("601").await.unwrap().unwrap();
+    assert_eq!(s.lyrics.source, LyricsSource::Auto);
+    assert!(s.lyrics.synced && !s.borrowed_timing);
+    // Hidden transcriptions don't, and on the studio version Plex's still win.
+    f.show_auto.store(false, Ordering::Relaxed);
+    assert!(f.svc.shown("601").await.unwrap().unwrap().borrowed_timing);
+    f.show_auto.store(true, Ordering::Relaxed);
+    f.plex.set("501", Ok(Some(synced_from(LyricsSource::Plex))));
+    f.db.write(|c| user::put_auto(c, "501", MINE, "small", now)).unwrap();
+    assert_eq!(f.svc.shown("501").await.unwrap().unwrap().lyrics.source, LyricsSource::Plex);
+}
+
+#[test]
+fn search_prefers_a_synced_hit_within_3_seconds() {
+    let body = serde_json::json!([
+        record("Test Artist", "Opening", 208.0, Some("[00:01.00]remaster"), None),
+        record("Test Artist", "Opening", 197.5, Some("[00:01.00]same take"), None),
+        record("Test Artist", "Opening", 200.0, None, Some("plain, exact length")),
+    ]);
+    assert_eq!(
+        lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(),
+        Some("[00:01.00]same take")
+    );
+    // Only a synced hit 3 to 10 s off: still synced.
+    let body = serde_json::json!([record("Test Artist", "Opening", 207.0, Some("[00:01.00]near"), None)]);
+    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(), Some("[00:01.00]near"));
+    // The only synced hit is over 10 s off (an extended edit): words only, on any track.
+    let body = serde_json::json!([record("Test Artist", "Opening", 211.0, Some("[00:01.00]Extended"), None)]);
+    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(), Some("Extended"));
 }

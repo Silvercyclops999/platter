@@ -153,6 +153,30 @@ describe("Lyrics view", () => {
     );
   }
 
+  it("offers to transcribe a live version showing borrowed timing, and the result replaces it", async () => {
+    const live = mock.fx.tracks.find(
+      (t) => mockLyricsKind(t.id) === "lines" && !!mock.fx.albums.find((a) => a.id === t.albumId)?.subformats.includes("live"),
+    )!;
+    await turnOn();
+    playing(live);
+    page();
+    await screen.findByText("Timing is from another version");
+    await userEvent.click(await screen.findByRole("button", { name: "Transcribe this song" }));
+    await screen.findByText("Auto-transcribed, may be wrong.", undefined, { timeout: 3000 });
+    expect(screen.queryByText("Timing is from another version")).toBeNull();
+  });
+
+  it("doesn't offer it for a studio song with synced lyrics", async () => {
+    const studio = mock.fx.tracks.find(
+      (t) => mockLyricsKind(t.id) === "lines" && !mock.fx.albums.find((a) => a.id === t.albumId)?.subformats.includes("live") && !/live/i.test(t.title),
+    )!;
+    await turnOn();
+    playing(studio);
+    page();
+    await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    expect(screen.queryByRole("button", { name: "Transcribe this song" })).toBeNull();
+  });
+
   it("offers nothing while transcription is off", async () => {
     playing(none);
     page();

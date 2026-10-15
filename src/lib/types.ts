@@ -383,6 +383,11 @@ export interface Lyrics {
   credit?: string;
   /** Where the lyrics came from (absent from older builds: Plex). */
   source?: LyricsSource;
+  /**
+   * A live version showing lyrics found by artist and title: their timing is
+   * another version's. Unsynced unless lyricsLiveTiming is on.
+   */
+  borrowedTiming?: boolean;
 }
 
 /**
@@ -769,6 +774,8 @@ export interface Settings {
   lyricsPreferOwn: boolean;
   /** Songs without lyrics offer "Add lyrics" in the lyrics view. */
   lyricsShowAdd: boolean;
+  /** Live versions keep the timing of lyrics found by artist and title. */
+  lyricsLiveTiming: boolean;
   /** The full-window view hides its controls after 3 s without movement. */
   fullWindowHideControls: boolean;
   /** Read explicit, version and edition tags from the files (this device only). */
@@ -1031,6 +1038,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lyricsLrclib: false,
   lyricsPreferOwn: false,
   lyricsShowAdd: true,
+  lyricsLiveTiming: false,
   fullWindowHideControls: true,
   readFileTags: true,
   explicitContent: "allowed",

@@ -1688,6 +1688,14 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "lyricsShowAdd", ids),
     },
     {
+      key: "lyricsLiveTiming",
+      section: "Appearance",
+      title: "Show borrowed timing on live versions",
+      description:
+        "Lyrics found by artist and title are usually timed to the studio recording, so on a live version they show without timing. On keeps that timing and follows along anyway. Lyrics files next to the song and your own lyrics always keep theirs.",
+      control: (ids) => toggle(s, "lyricsLiveTiming", ids),
+    },
+    {
       key: "fullWindowHideControls",
       section: "Appearance",
       title: "Expanded view hides controls",

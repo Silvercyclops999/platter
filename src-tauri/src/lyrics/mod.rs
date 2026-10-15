@@ -12,12 +12,14 @@
 //! - [`lrclib`]   the LRCLIB requests and match rules (pure)
 //! - [`cache`]    the `lyrics_cache` table
 //! - [`user`]     the `user_lyrics` table (the lyrics editor's saves)
+//! - [`live`]     whether a track is a live version (borrowed timing)
 //! - [`commands`] the Tauri commands and the Plex side
 //!
 //! Any source being down is silent: the view says there are no lyrics.
 
 pub mod cache;
 pub mod commands;
+pub mod live;
 pub mod lrclib;
 pub mod transcribe;
 pub mod user;
@@ -88,6 +90,23 @@ fn to_lyrics(body: &str, matched: bool) -> Option<Lyrics> {
     Some(l)
 }
 
+/// Sources found by artist and title rather than read from this file: their
+/// timing belongs to whichever version they were written against.
+pub fn borrows_timing(source: LyricsSource) -> bool {
+    matches!(source, LyricsSource::Plex | LyricsSource::Lrclib)
+}
+
+/// `lyrics_get`'s answer: the lyrics, plus whether their timing comes from
+/// another version of the song (a live take shown with studio lyrics).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Shown {
+    #[serde(flatten)]
+    pub lyrics: Lyrics,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub borrowed_timing: bool,
+}
+
 /// Lyrics from Plex, then LRCLIB. Cheap to clone.
 #[derive(Clone)]
 pub struct LyricsService {
@@ -105,6 +124,8 @@ struct Inner {
     prefer_own: Arc<AtomicBool>,
     /// "Show auto-transcribed lyrics" (Settings).
     show_auto: Arc<AtomicBool>,
+    /// "Show borrowed timing on live versions" (Settings).
+    live_timing: Arc<AtomicBool>,
 }
 
 /// The switches lyrics read from Settings.
@@ -113,11 +134,12 @@ pub struct Switches {
     pub lrclib: Arc<AtomicBool>,
     pub prefer_own: Arc<AtomicBool>,
     pub show_auto: Arc<AtomicBool>,
+    pub live_timing: Arc<AtomicBool>,
 }
 
 impl Default for Switches {
     fn default() -> Self {
-        Self { lrclib: Default::default(), prefer_own: Default::default(), show_auto: Arc::new(AtomicBool::new(true)) }
+        Self { lrclib: Default::default(), prefer_own: Default::default(), show_auto: Arc::new(AtomicBool::new(true)), live_timing: Default::default() }
     }
 }
 
@@ -136,6 +158,7 @@ impl LyricsService {
                 lrclib_on: switches.lrclib,
                 prefer_own: switches.prefer_own,
                 show_auto: switches.show_auto,
+                live_timing: switches.live_timing,
             }),
         }
     }
@@ -172,6 +195,50 @@ impl LyricsService {
             return Ok(None);
         }
         self.lrclib(&q).await
+    }
+
+    /// The lyrics as the lyrics view shows them (docs/IPC.md `lyrics_get`).
+    /// On a live version, lyrics found by artist and title (Plex's licensed
+    /// lyrics, LRCLIB) carry another version's timing: they come back
+    /// unsynced and marked `borrowed_timing`, unless "Show borrowed timing
+    /// on live versions" is on (then they keep their times, still marked).
+    /// Lyrics tied to the file (a sidecar file, the user's own, a
+    /// transcription) keep their timing, and a transcription is shown ahead
+    /// of borrowed timing.
+    pub async fn shown(&self, track_id: &str) -> AppResult<Option<Shown>> {
+        let Some(mut lyrics) = self.get(track_id).await? else {
+            return Ok(None);
+        };
+        if !lyrics.synced || !borrows_timing(lyrics.source) {
+            return Ok(Some(Shown { lyrics, borrowed_timing: false }));
+        }
+        let id = track_id.to_owned();
+        let live = self
+            .inner
+            .db
+            .read_async(move |c| live::track_is_live(c, &id))
+            .await
+            .unwrap_or_else(|e| {
+                tracing::debug!(kind = e.kind(), "live check failed");
+                false
+            });
+        if !live {
+            return Ok(Some(Shown { lyrics, borrowed_timing: false }));
+        }
+        if !self.inner.live_timing.load(Ordering::Relaxed) {
+            // A transcription of this very recording (the lyrics view offers
+            // one for these) beats words timed to another version.
+            if self.inner.show_auto.load(Ordering::Relaxed)
+                && let Ok(Some(own)) = self.own(track_id).await
+                && own.auto.is_some()
+                && let Some(t) = own.lyrics().filter(|t| t.synced)
+            {
+                return Ok(Some(Shown { lyrics: t, borrowed_timing: false }));
+            }
+            lyrics.synced = false;
+            lyrics.timed.clear();
+        }
+        Ok(Some(Shown { lyrics, borrowed_timing: true }))
     }
 
     /// Whether a source other than transcription has lyrics for the track

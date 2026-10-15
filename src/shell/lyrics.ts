@@ -50,14 +50,16 @@ export function loadLyrics(trackId: string): Promise<Lyrics | null> {
 
 /**
  * Lyrics for a track; `loading` until known. Turning LRCLIB on or off,
- * preferring your own lyrics, and saving lyrics in the editor ask again.
+ * preferring your own lyrics, borrowed timing on live versions, and saving
+ * lyrics in the editor ask again.
  */
 export function useLyrics(trackId: string | null | undefined): { lyrics: Lyrics | null; loading: boolean } {
   const lrclib = useSettings((s) => s.settings?.lyricsLrclib ?? false);
   const preferOwn = useSettings((s) => s.settings?.lyricsPreferOwn ?? false);
   const showAuto = useSettings((s) => s.settings?.showAutoLyrics ?? true);
+  const liveTiming = useSettings((s) => s.settings?.lyricsLiveTiming ?? false);
   const version = useLyricsEditor((s) => s.version);
-  const sources = `${lrclib}|${preferOwn}|${showAuto}|${version}`;
+  const sources = `${lrclib}|${preferOwn}|${showAuto}|${liveTiming}|${version}`;
   const [state, setState] = useState<{ key: string | null; lyrics: Lyrics | null; loading: boolean }>(() => ({
     key: null,
     lyrics: null,
@@ -84,7 +86,7 @@ export function useLyrics(trackId: string | null | undefined): { lyrics: Lyrics 
 let lastSources: string | undefined;
 useSettings.subscribe((s) => {
   if (!s.settings) return;
-  const v = `${s.settings.lyricsLrclib}|${s.settings.lyricsPreferOwn}|${s.settings.showAutoLyrics}`;
+  const v = `${s.settings.lyricsLrclib}|${s.settings.lyricsPreferOwn}|${s.settings.showAutoLyrics}|${s.settings.lyricsLiveTiming}`;
   if (lastSources !== undefined && v !== lastSources) clearLyricsCache();
   lastSources = v;
 });

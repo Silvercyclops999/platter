@@ -660,13 +660,23 @@ LRCLIB is asked with
 `/api/get` (artist, title, album, length in seconds); when that finds
 nothing, `/api/search` with the artist and title only, taking a result only
 when both match once case, accents and featured artists are folded away
-(synced lyrics within 10 s of the track's length first, then the closest
-length; synced lyrics further off keep their words without the times). LRCLIB
+(synced lyrics within 3 s of the track's length first, then synced within
+10 s, then the closest length; synced lyrics further off keep their words
+without the times). LRCLIB
 answers are cached in SQLite (`lyrics_cache`): found 30 days, none 7 days.
 A source that's down, busy or unreadable gives `null` and isn't cached. Only
 a malformed id is an error (`invalid`).
 
-`Lyrics = { synced, lines: string[], timed?: LyricLine[], credit?, source: "plex"|"file"|"user"|"lrclib" }`.
+Live versions: a track is live when its album's format or a subformat is
+`live`, its ARCHIVE_VERSION is `live`, or the track or album title says so
+("(Live)", "[Live ...]", "- Live", "Unplugged", and for albums "Live at",
+"Live from", "Live in"). Lyrics found by artist and title (`plex` and
+`lrclib`) are timed to some other recording, so on a live version they come
+back with `borrowedTiming: true` and, while `lyricsLiveTiming` is off,
+`synced: false` and no `timed`. A transcription of the song (shown at all)
+goes ahead of them then. `file`, `user` and `auto` lyrics keep their timing.
+
+`Lyrics = { synced, lines: string[], timed?: LyricLine[], credit?, source: "plex"|"file"|"user"|"lrclib", borrowedTiming? }`.
 `source` is `file` when the Plex stream is a file next to the song (the
 stream names Plex's local media agent, or no agent), `plex` when an agent
 such as LyricFind supplied it, `user` for lyrics written in the app.
@@ -1619,6 +1629,7 @@ The rest of the fields, with their defaults:
 | `lyricsMode` | `"autoShow"\|"off"`, `"autoShow"` | Auto-show opens the expanded view in lyrics mode when a song with synced lyrics starts while now playing is open. Off shows lyrics only from the lyrics button. |
 | `lyricsLrclib` | bool, false | `lyrics_get` asks LRCLIB when Plex has no lyrics (sends artist, title, album and length; the search sends artist and title). Off sends nothing. |
 | `lyricsPreferOwn` | bool, false | Lyrics written in the app show ahead of Plex's for every song that has them. Off shows them only when Plex has none, or for songs saved with `prefer`. |
+| `lyricsLiveTiming` | bool, false | Live versions keep the timing of lyrics found by artist and title (still marked `borrowedTiming`). Off shows them unsynced. |
 | `lyricsShowAdd` | bool, true | The expanded view's lyrics mode offers Add lyrics for a song with none. The track menu keeps Add lyrics either way. |
 | `transcribeLyrics` | bool, false | Transcribe songs without lyrics on this computer (Transcribe this song, the album menu, the unreleased batch). See Lyrics transcription. This device only. |
 | `transcribeModel` | `"small"` or `"medium"`, `"small"` | The speech model. Medium is more accurate and about three times slower. This device only. |
