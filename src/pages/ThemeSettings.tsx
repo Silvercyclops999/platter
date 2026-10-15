@@ -12,6 +12,7 @@ import type { AppError, Settings, ThemeFile, ThemeFolder, ThemeSetting } from ".
 import { updateSettings } from "../stores/settings";
 import { useTheme } from "../stores/theme";
 import { toast } from "../stores/toasts";
+import { lookPatch, useLooks } from "../stores/looks";
 import "./theme-settings.css";
 
 type Ids = { title: string; desc: string };
@@ -123,6 +124,7 @@ export function AccentPicker({ s, ids, onProblem }: { s: Settings; ids: Ids; onP
 /** The themes folder's files, reloaded when the window gets focus back (files added by hand). */
 export function useThemeFolder(): [ThemeFolder | null, () => void] {
   const [folder, setFolder] = useState<ThemeFolder | null>(null);
+  const version = useLooks((s) => s.folderVersion);
   const reload = useCallback(() => {
     backend.themesList().then(setFolder, () => setFolder({ folder: "", themes: [], invalid: [] }));
   }, []);
@@ -130,7 +132,7 @@ export function useThemeFolder(): [ThemeFolder | null, () => void] {
     reload();
     window.addEventListener("focus", reload);
     return () => window.removeEventListener("focus", reload);
-  }, [reload]);
+  }, [reload, version]);
   return [folder, reload];
 }
 
@@ -143,14 +145,17 @@ export function ThemeFileControl({ s, ids, folder, reload }: { s: Settings; ids:
   // A file that came through the sync file may not be in this computer's folder.
   if (current && !themes.some((t) => t.file === current.file)) themes.unshift(current);
   const options: SelectOption<string>[] = [{ value: NONE, label: "None" }, ...themes.map((t) => ({ value: t.file, label: t.name }))];
-  const choose = (file: string) => void updateSettings({ themeFile: themes.find((t) => t.file === file) ?? null });
+  const choose = (file: string) => {
+    const t = themes.find((x) => x.file === file);
+    void updateSettings(t ? lookPatch(t) : { themeFile: null });
+  };
   const importFile = () =>
     backend.themesImport().then(
       (t) => {
         reload();
         if (t) {
           toast.info(`Added ${t.name}`);
-          void updateSettings({ themeFile: t });
+          void updateSettings(lookPatch(t));
         }
       },
       (e) => toast.error(`Couldn't add that theme${errText(e) ? `: ${errText(e)}` : ""}`),

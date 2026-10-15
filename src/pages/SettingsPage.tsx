@@ -74,11 +74,19 @@ import {
 import { LidarrRequestsList } from "./LidarrRequest";
 import { useTheme } from "../stores/theme";
 import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNote, useThemeFolder } from "./ThemeSettings";
+import { LookCards } from "./looks/LookCards";
+import { looks } from "../stores/looks";
+import { CLASSIC_LAYOUT, type Layout } from "../design/themes";
 import type { AiProvider } from "../lib/types";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
+
+/** True when a layout is Classic, the default. */
+function layoutIsClassic(l: Layout | undefined): boolean {
+  return !l || JSON.stringify(l) === JSON.stringify(CLASSIC_LAYOUT);
+}
 
 // ------------------------------------------------------------------ options
 
@@ -189,6 +197,9 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "TanStack Virtual", licence: "MIT" },
   { name: "Lucide icons", licence: "ISC" },
   { name: "Inter typeface", licence: "SIL Open Font License 1.1" },
+  { name: "Atkinson Hyperlegible typeface", licence: "SIL Open Font License 1.1" },
+  { name: "Manrope typeface", licence: "SIL Open Font License 1.1" },
+  { name: "Fraunces typeface", licence: "SIL Open Font License 1.1" },
   { name: "Tokio", licence: "MIT" },
   { name: "Serde", licence: "MIT or Apache-2.0" },
   { name: "reqwest", licence: "MIT or Apache-2.0" },
@@ -950,6 +961,58 @@ export function SettingsPage() {
     },
     // Appearance
     {
+      key: "look",
+      section: "Appearance",
+      title: "Look",
+      description: "Ready-made looks. Each one sets colours, type and surfaces in one click; your layout stays as it is.",
+      control: () => null,
+      block: () => <LookCards />,
+    },
+    ...(s?.showLookBuilder !== false
+      ? [
+          {
+            key: "makeOwn",
+            section: "Appearance",
+            title: "Make your own",
+            description: "Build a look with a live preview: colours with contrast checks, corner radius, density, shadows, blur and fonts. Saved looks can be shared as .platter-look files; drop one on the window to add it.",
+            control: () => (
+              <>
+                <Button size="sm" onClick={() => looks.openBuilder("colours")}>
+                  Make your own
+                </Button>
+                <Button size="sm" onClick={() => looks.openPick()}>
+                  Pick a look
+                </Button>
+              </>
+            ),
+          } satisfies RowDef,
+        ]
+      : []),
+    {
+      key: "layout",
+      section: "Appearance",
+      title: "Layout",
+      description: "Where the sidebar and now playing panel go, the player bar's style and buttons, Home's shelves, page headers, song list columns, cover shape and motion. Classic is the default.",
+      note: s && layoutIsClassic(s.layout) ? "Classic layout." : s ? "Your own layout." : undefined,
+      control: () => (
+        <>
+          <Button size="sm" onClick={() => looks.openBuilder("layout")}>
+            Change layout
+          </Button>
+          <Button size="sm" disabled={!s || layoutIsClassic(s.layout)} onClick={() => void updateSettings({ layout: structuredClone(CLASSIC_LAYOUT) })}>
+            Revert to default layout
+          </Button>
+        </>
+      ),
+    },
+    {
+      key: "showLookBuilder",
+      section: "Appearance",
+      title: "Show Make your own",
+      description: "Shows the look builder here in Appearance and in the first-run look picker.",
+      control: (ids) => toggle(s, "showLookBuilder", ids),
+    },
+    {
       key: "theme",
       section: "Appearance",
       title: "Theme",
@@ -976,9 +1039,9 @@ export function SettingsPage() {
     {
       key: "themeFile",
       section: "Appearance",
-      title: "Theme file",
+      title: "Your looks and theme files",
       description:
-        "Use a theme file from the themes folder. Theme files are JSON with a name, a base of dark or light, and token colours. The theme in use travels in the sync file.",
+        "Use a look or theme file from the themes folder. Looks you save, import or drop on the window land there. Files hold only colours, sizes and choices from a fixed list. The one in use travels in the sync file.",
       control: (ids) => (s ? <ThemeFileControl s={s} ids={ids} folder={themeFolder} reload={reloadThemes} /> : loading),
       block: themeFolder?.invalid.length ? () => <ThemeFileProblems folder={themeFolder} /> : undefined,
     },

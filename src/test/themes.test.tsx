@@ -260,10 +260,10 @@ describe("theme settings", () => {
     expect(row("Accent colour").getByRole("radio", { name: "Ivory" })).toHaveAttribute("aria-checked", "true");
     expect(row("Accent colour").getAllByRole("radio")).toHaveLength(7);
     expect(row("Accent colour").getByLabelText("Custom colour")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Theme file" })).toHaveValue(""));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Your looks and theme files" })).toHaveValue(""));
     // The rows sit in Appearance.
     const appearance = screen.getByRole("heading", { level: 2, name: "Appearance" }).closest("section") ?? document.body;
-    expect(within(appearance as HTMLElement).getByText("Theme file")).toBeInTheDocument();
+    expect(within(appearance as HTMLElement).getByText("Your looks and theme files")).toBeInTheDocument();
   });
 
   it("changes the theme and the accent", async () => {
@@ -296,9 +296,9 @@ describe("theme settings", () => {
     fakeScheme(true);
     const un = installTheme();
     render(<SettingsPage />);
-    const pick = await screen.findByRole("combobox", { name: "Theme file" });
-    await waitFor(() => expect(within(pick).getAllByRole("option").map((o) => o.textContent)).toEqual(["None", "Harbour", "Morning paper"]));
-    const problems = row("Theme file");
+    const pick = await screen.findByRole("combobox", { name: "Your looks and theme files" });
+    await waitFor(() => expect(within(pick).getAllByRole("option").map((o) => o.textContent)).toEqual(["None", "Harbour", "Morning paper", "Night shift"]));
+    const problems = row("Your looks and theme files");
     expect(problems.getByText("glow.json").nextSibling).toHaveTextContent("url()");
     expect(problems.getByText("sneaky.json").nextSibling).toHaveTextContent("CSS");
     expect(problems.getByText("extra.json").nextSibling).toHaveTextContent('Unknown token "font-family"');
@@ -322,13 +322,13 @@ describe("theme settings", () => {
   it("imports a theme file and uses it", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
-    await screen.findByRole("combobox", { name: "Theme file" });
-    await user.click(row("Theme file").getByRole("button", { name: "Import" }));
+    await screen.findByRole("combobox", { name: "Your looks and theme files" });
+    await user.click(row("Your looks and theme files").getByRole("button", { name: "Import" }));
     await waitFor(() => expect(useSettings.getState().settings?.themeFile?.name).toBe("Orchard"));
-    expect(within(screen.getByRole("combobox", { name: "Theme file" })).getByRole("option", { name: "Orchard" })).toBeInTheDocument();
+    expect(within(screen.getByRole("combobox", { name: "Your looks and theme files" })).getByRole("option", { name: "Orchard" })).toBeInTheDocument();
     const toasts = useToasts.getState().toasts;
     expect(toasts[toasts.length - 1]?.message).toMatch(/Added Orchard/);
-    expect(row("Theme file").getByRole("button", { name: "Open themes folder" })).toBeEnabled();
+    expect(row("Your looks and theme files").getByRole("button", { name: "Open themes folder" })).toBeEnabled();
   });
 
   it("the core refuses a bad theme file or accent sent to it", async () => {

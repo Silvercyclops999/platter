@@ -1912,15 +1912,18 @@ while only music already on this computer can play; the UI then asks
 
 Event `health://changed` → `Health`. Event `toast` → `{ kind: "info"|"error", message }`.
 
-## Themes
+## Themes and looks
 | Command | Args | Returns |
 | --- | --- | --- |
 | `themes_list` | – | `ThemeFolder` |
-| `themes_import` | – | `ThemeFile`, or null when the file picker was cancelled. The file is checked first and copied into the folder under its theme name |
+| `themes_import` | – | `ThemeFile`, or null when the file picker was cancelled. The file is checked first and copied into the folder under its name |
+| `themes_import_text` | `{ text }` | `ThemeFile`. The text of a file dropped on the window, checked and saved into the folder |
+| `themes_save` | `{ look: ThemeFile, replace: bool }` | `ThemeFile` as saved. With `replace` it writes over its own `.platter-look` file; otherwise it takes a free name |
+| `themes_export` | `{ look: ThemeFile }` | The file name, or null when the save dialog was cancelled |
 | `themes_open_folder` | – | – (shows the folder in Explorer or Finder) |
 
 `ThemeFolder = { folder: string, themes: ThemeFile[], invalid: { file, reason }[] }`.
-`ThemeFile = { file, name, base: "dark" | "light", tokens: Record<string, string> }`.
+`ThemeFile = { file, name, base: "dark" | "light", tokens: Record<string, string>, author?, style?, fonts?, layout?, notes? }`.
 
 Theme files are JSON in a `themes` folder in the app's data folder:
 
@@ -1928,14 +1931,41 @@ Theme files are JSON in a `themes` folder in the app's data folder:
 { "name": "Harbour", "base": "dark", "tokens": { "color-bg-base": "#08121A", "radius-card": "12px" } }
 ```
 
-A file has `name`, `base` and `tokens`, and may have `author`. Tokens start
-from the base's built-in theme. Only the token names in
+A theme file has `name`, `base` and `tokens`, and may have `author`. Tokens
+start from the base's built-in theme. Only the token names in
 `src/design/themes/contract.json` are taken (with or without a leading `--`).
 Colour tokens take `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`,
 `hsl()` or `hsla()`; the radius tokens take a pixel size like `8px`. Files
 over 64 KB, unknown fields or tokens, `url()`, CSS (`;`, braces, comments,
 `var()`) and markup are refused, and the file is listed under `invalid` with
 the reason. The UI applies the same checks again before using a theme.
+
+A look is a `.platter-look` file: a theme with a format `version` (1 for
+now), plus an optional `style`, `fonts` and `layout`. The folder lists both
+kinds.
+
+```json
+{
+  "version": 1,
+  "name": "Dusk",
+  "author": "Sam",
+  "base": "dark",
+  "tokens": { "color-accent": "#AABBCC" },
+  "style": { "density": "compact", "shadow": "subtle", "blur": "low", "border": 1 },
+  "fonts": { "text": "manrope", "headings": "fraunces" },
+  "layout": { "sidebarSide": "right", "playerButtons": ["queue", "volume"], "coverShape": "circle" }
+}
+```
+
+Every value is a choice from the `look` part of the contract: densities,
+shadows, blur levels, a border of 0 to 3 pixels, the bundled fonts, and the
+layout options. Layout lists hold the shown items in order; an item left out
+is hidden. A missing part keeps its default. In a look, names Platter doesn't
+know are left out and listed in `notes`; a value that isn't allowed refuses
+the whole file with the reason, as does a newer format version. Export and
+save write only the look's own fields, so nothing else from this computer
+goes into a shared file. A look held in the `themeFile` setting must have
+nothing left out.
 
 ## Settings and tracking
 | Command | Args |
@@ -1966,9 +1996,12 @@ The rest of the fields, with their defaults:
 | `artCacheMb` | 128 to 51200, 2048 | Artwork cache size. Shrinking it removes the oldest images at once. |
 | `artworkColours` | bool, true | Headers tint from artwork. Off gives every header the same neutral colour. |
 | `reduceMotion` | `"system"`, `"on"`, `"off"` | Follow the OS setting, or force reduced motion on or off. |
-| `theme` | `"dark"` (default), `"light"`, `"system"`, `"midnight"`, `"forest"`, `"sand"` | The theme. System follows the computer's light or dark mode. A theme file in `themeFile` takes its place. See Themes. |
+| `theme` | `"dark"` (default), `"light"`, `"system"`, `"midnight"`, `"forest"`, `"sand"` | The theme. System follows the computer's light or dark mode. A theme file in `themeFile` takes its place. See Themes and looks. |
 | `accent` | string, `"ivory"` | Accent colour: `ivory`, `sage`, `sky`, `lilac`, `amber`, `rose`, `teal`, or a custom colour as `#RRGGBB` (stored in capitals). Anything else is refused. Ivory is each theme's own accent. |
-| `themeFile` | `ThemeFile` or null | The theme file in use, held whole so it travels in the sync file. Checked like a file in the folder; a bad one is refused. Null clears it. |
+| `themeFile` | `ThemeFile` or null | The theme or look file in use, held whole so it travels in the sync file. Checked like a file in the folder; a bad one is refused. Null clears it. |
+| `layout` | `Layout`, Classic | Layout options: `sidebarSide`, `sidebarCollapsed`, `sidebarSections`, `nowPlaying`, `playerStyle`, `playerButtons`, `homeShelves`, `homeGreeting`, `quickAccess`, `headerStyle`, `trackColumns`, `coverShape`, `spinRecord`, `motion`. Checked like a look's layout; a bad one is refused, and a hand-edited bad one goes back to Classic. See Themes and looks. |
+| `showLookBuilder` | bool, true | Appearance shows Make your own. |
+| `lookStepDone` | bool, false | The first-run Pick a look step was shown or skipped. This device only. |
 | `outputDevice` | device id or null, null | Read only here. Set with `output_select`; null follows the system default. |
 | `homeShortcuts` | bool, true | Home shows the grid of recent and most played shortcuts. |
 | `homeColourWash` | bool, true | Home's top takes its colour from the shortcuts' artwork. Only applies while `artworkColours` is on. |

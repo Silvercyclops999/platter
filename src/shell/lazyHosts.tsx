@@ -9,11 +9,14 @@ import { useLyricsEditor } from "../stores/lyricsEditor";
 import { ensureLoaded, usePlexEdit } from "../stores/plexEdit";
 import { useShareCard } from "../stores/shareCard";
 import { useStatsDialog } from "../stores/stats";
+import { useLooks } from "../stores/looks";
 
 const SmartEditor = lazy(() => import("../components/SmartPlaylistEditor").then((m) => ({ default: m.SmartEditorHost })));
 const LyricsEditor = lazy(() => import("./LyricsEditor").then((m) => ({ default: m.LyricsEditorHost })));
 const ShareCard = lazy(() => import("../components/ShareCardDialog").then((m) => ({ default: m.ShareCardHost })));
 const StatsDialog = lazy(() => import("../components/StatsDialog").then((m) => ({ default: m.StatsDialogHost })));
+const LookBuilder = lazy(() => import("../pages/looks/LookBuilder").then((m) => ({ default: m.LookBuilderHost })));
+const PickLook = lazy(() => import("../pages/looks/LookCards").then((m) => ({ default: m.PickLookDialog })));
 const PlexEdit = lazy(() => import("../components/PlexEditDialogs").then((m) => ({ default: m.PlexEditDialogs })));
 
 /** True from the first time `open` is true onwards. */
@@ -66,6 +69,24 @@ export function LazyStatsDialogHost() {
   return show ? (
     <Suspense fallback={null}>
       <StatsDialog />
+    </Suspense>
+  ) : null;
+}
+
+export function LazyLookBuilderHost() {
+  const show = useOnceOpen(useLooks((s) => s.builder !== null));
+  return show ? (
+    <Suspense fallback={null}>
+      <LookBuilder />
+    </Suspense>
+  ) : null;
+}
+
+export function LazyPickLookHost() {
+  const show = useOnceOpen(useLooks((s) => s.pick));
+  return show ? (
+    <Suspense fallback={null}>
+      <PickLook />
     </Suspense>
   ) : null;
 }
