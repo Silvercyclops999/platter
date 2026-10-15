@@ -20,6 +20,7 @@ use super::check::{CheckReport, Level};
 use super::mbpick::{Group, LibraryAlbum, Picked, Picker, Want, library_albums, missing};
 use super::status::{RequestState, map_status};
 use super::write::AddArtist;
+use super::paths::NormPath;
 use super::{Checked, Lidarr};
 use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
@@ -161,6 +162,15 @@ fn join_folder(root: &str, name: &str) -> String {
     format!("{}{sep}{}", root.trim_end_matches(['/', '\\']), name.trim_matches(['/', '\\']))
 }
 
+/// Where a request's files go.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum Dest {
+    /// The library's download folder (any root folder but the staging one).
+    Library,
+    /// The staging folder, for a better copy of a library album.
+    Staging { album_id: String, current: super::quality::Rank, current_label: String },
+}
+
 /// What sending needs from Lidarr, all read.
 struct Plan {
     group: Group,
@@ -194,16 +204,22 @@ impl Lidarr {
         self.save_records(&list)
     }
 
+    /// The staging folder setting, folded; None when upgrades are off.
+    pub(super) fn staging_norm(&self) -> Option<NormPath> {
+        let s = crate::settings::load(&self.inner.db).lidarr_staging_folder;
+        Some(NormPath::parse(&s)).filter(|n| !n.is_empty())
+    }
+
     pub fn typed_confirmed(&self) -> bool {
         self.inner.db.read(|c| kv_get(c, TYPED_KEY)).ok().flatten().is_some()
     }
 
-    fn picker(&self) -> Picker {
+    pub(super) fn picker(&self) -> Picker {
         Picker { mb: self.inner.mb.clone() }
     }
 
     /// The artist a request is for, with its MusicBrainz id when known.
-    async fn want(&self, artist: &str, artist_id: Option<&str>, artist_mbid: Option<&str>) -> Want {
+    pub(super) async fn want(&self, artist: &str, artist_id: Option<&str>, artist_mbid: Option<&str>) -> Want {
         let named = artist_mbid.map(|m| m.trim().to_ascii_lowercase()).filter(|m| crate::artistinfo::is_mbid(m));
         if named.is_some() {
             return Want { name: artist.to_string(), mbid: named, artist_id: artist_id.map(str::to_string) };
@@ -219,7 +235,7 @@ impl Lidarr {
         Want { name: artist.to_string(), mbid, artist_id: artist_id.map(str::to_string) }
     }
 
-    async fn library(&self, want: &Want) -> AppResult<Vec<LibraryAlbum>> {
+    pub(super) async fn library(&self, want: &Want) -> AppResult<Vec<LibraryAlbum>> {
         let (id, name) = (want.artist_id.clone(), want.name.clone());
         self.inner.db.read_async(move |c| library_albums(c, id.as_deref(), &name)).await
     }
@@ -232,11 +248,20 @@ impl Lidarr {
     }
 
     /// Read what a request needs from Lidarr.
-    async fn plan(&self, c: &Checked, group: Group) -> AppResult<Plan> {
+    async fn plan(&self, c: &Checked, group: Group, dest: &Dest) -> AppResult<Plan> {
         let client = &c.client;
         let rgid = group.id.clone();
         let existing = client.album_by_release_group(&rgid).await?;
-        let root = c.snap.roots.iter().filter(|r| r.accessible).min_by_key(|r| r.id).cloned();
+        let staging = self.staging_norm();
+        let is_staging = |r: &super::api::RootFolder| staging.as_ref().is_some_and(|s| NormPath::parse(&r.path) == *s);
+        let root = match dest {
+            // Requests never land in the staging folder.
+            Dest::Library => c.snap.roots.iter().filter(|r| r.accessible && !is_staging(r)).min_by_key(|r| r.id).cloned(),
+            Dest::Staging { .. } => c.snap.roots.iter().find(|r| r.accessible && is_staging(r)).cloned(),
+        };
+        if matches!(dest, Dest::Staging { .. }) && root.is_none() {
+            return Err(AppError::Invalid("Lidarr doesn't have the staging folder as a root folder it can open. Check it in Lidarr, then run the setup check again.".into()));
+        }
         if let Some(a) = &existing {
             let artist = c.snap.artists.iter().find(|x| x.id == a.artist_id).cloned().or_else(|| a.artist.clone()).unwrap_or_default();
             let destination = artist.path.clone();
@@ -276,7 +301,10 @@ impl Lidarr {
 
     /// Where a waiting request will land, from the last check.
     fn guessed_destination(&self, artist: &str) -> Option<String> {
-        self.last_check().and_then(|l| l.roots.first().cloned()).map(|r| join_folder(&r, artist))
+        let staging = self.staging_norm();
+        self.last_check()
+            .and_then(|l| l.roots.into_iter().find(|r| staging.as_ref().is_none_or(|s| NormPath::parse(r) != *s)))
+            .map(|r| join_folder(&r, artist))
     }
 
     /// What a request will do. Reads only.
@@ -308,7 +336,7 @@ impl Lidarr {
         if !c.report.passed {
             return Err(red_error(&c.report));
         }
-        let plan = self.plan(&c, group).await?;
+        let plan = self.plan(&c, group, &Dest::Library).await?;
         p.reachable = true;
         p.route = c.report.route;
         p.destination = Some(plan.destination.clone());
@@ -346,7 +374,7 @@ impl Lidarr {
         Ok(out)
     }
 
-    fn new_record(&self, input: &RequestInput, rgid: String, auto: bool) -> RequestRecord {
+    pub(super) fn new_record(&self, input: &RequestInput, rgid: String, auto: bool) -> RequestRecord {
         let now = (self.inner.clock)();
         RequestRecord {
             id: uuid::Uuid::new_v4().to_string(),
@@ -396,15 +424,60 @@ impl Lidarr {
     /// Send one request: check MusicBrainz and the whole setup again, then
     /// the writes. Network failures come back as errors so the caller keeps
     /// the request waiting.
-    async fn send(&self, mut rec: RequestRecord) -> AppResult<RequestRecord> {
+    async fn send(&self, rec: RequestRecord) -> AppResult<RequestRecord> {
+        self.send_to(rec, &Dest::Library).await
+    }
+
+    /// [`Self::send`] to the library's download folder, or to the staging
+    /// folder for an upgrade (with a quality profile aiming above the
+    /// files there now).
+    pub(super) async fn send_to(&self, mut rec: RequestRecord, dest: &Dest) -> AppResult<RequestRecord> {
         let want = self.want(&rec.artist, rec.artist_id.as_deref(), rec.artist_mbid.as_deref()).await;
         let library = self.library(&want).await?;
-        let group = self.picker().vet_group(&rec.release_group_id, &want, &library).await?;
+        let group = match dest {
+            Dest::Library => self.picker().vet_group(&rec.release_group_id, &want, &library).await?,
+            Dest::Staging { album_id, .. } => self.picker().vet_upgrade_group(&rec.release_group_id, &want, &library, album_id).await?,
+        };
         let c = self.check_full().await?;
         if !c.report.passed {
             return Err(red_error(&c.report));
         }
-        let plan = self.plan(&c, group).await?;
+        let plan = self.plan(&c, group, dest).await?;
+        let staging = self.staging_norm();
+        let in_staging = |path: &str| staging.as_ref().is_some_and(|s| NormPath::parse(path).starts_with(s));
+        let mut quality_choice: Option<i64> = None;
+        match dest {
+            Dest::Library => {
+                if plan.in_lidarr && in_staging(&plan.artist.path) {
+                    return Err(AppError::Invalid(format!(
+                        "Lidarr keeps {} in the staging folder for upgrades, so a request would never reach your library. Platter didn't send it.",
+                        plan.artist.artist_name
+                    )));
+                }
+            }
+            Dest::Staging { current, current_label, .. } => {
+                if plan.in_lidarr && !in_staging(&plan.artist.path) {
+                    return Err(AppError::Invalid(format!(
+                        "Lidarr already has {} in {}, outside the staging folder, so a better copy would land there instead. Platter didn't send anything.",
+                        plan.artist.artist_name, plan.artist.path
+                    )));
+                }
+                if plan.in_lidarr {
+                    let p = plan.artist.quality_profile_id.and_then(|id| c.snap.profiles.iter().find(|p| p.id == id));
+                    if !p.is_some_and(|p| super::quality::qualifies(p, *current)) {
+                        return Err(AppError::Invalid(format!(
+                            "{} uses the {} profile in Lidarr, which doesn't aim higher than {current_label}. Platter never changes profiles, so it didn't send anything.",
+                            plan.artist.artist_name,
+                            p.map(|p| p.name.as_str()).unwrap_or("unknown")
+                        )));
+                    }
+                } else {
+                    let choice = super::quality::choose_profile(&c.snap.profiles, *current, current_label).map_err(AppError::Invalid)?;
+                    rec.notes.push(format!("Asked Lidarr for {} or better with its {} profile.", choice.cutoff, choice.name));
+                    quality_choice = Some(choice.id);
+                }
+            }
+        }
         rec.destination = Some(plan.destination.clone());
         rec.title = plan.group.title.clone();
         rec.updated_at = (self.inner.clock)();
@@ -428,8 +501,8 @@ impl Lidarr {
             (true, None) => plan.artist.id,
             (false, None) => {
                 let root = plan.root.as_ref().ok_or_else(|| AppError::Invalid("Lidarr has no root folder to download into.".into()))?;
-                let quality = root
-                    .default_quality_profile_id
+                let quality = quality_choice
+                    .or(root.default_quality_profile_id)
                     .or_else(|| c.snap.profiles.iter().find(|p| !p.upgrade_allowed).or(c.snap.profiles.first()).map(|p| p.id))
                     .ok_or_else(|| AppError::Invalid("Lidarr has no quality profile.".into()))?;
                 let metadata = match root.default_metadata_profile_id {

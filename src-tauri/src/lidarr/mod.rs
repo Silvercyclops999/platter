@@ -9,14 +9,20 @@ pub mod check;
 pub mod commands;
 pub mod mbpick;
 pub mod paths;
+pub mod quality;
 pub mod request;
 pub mod status;
+pub mod swap;
+pub mod upgrade;
+pub mod upmatch;
 pub mod write;
 
 #[cfg(test)]
 mod request_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod upgrade_tests;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -432,6 +438,7 @@ impl Lidarr {
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
             route: Some(client.route()),
             now: (self.inner.clock)(),
+            staging: Some(crate::settings::load(&self.inner.db).lidarr_staging_folder).filter(|s| !s.trim().is_empty()),
         };
         let mut budget = MAX_LISTINGS;
         for _ in 0..MAX_ROUNDS {

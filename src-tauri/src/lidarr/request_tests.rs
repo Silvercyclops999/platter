@@ -39,7 +39,7 @@ impl ArtistMbid for NoMbid {
     }
 }
 
-struct Mbid;
+pub struct Mbid;
 
 #[async_trait]
 impl ArtistMbid for Mbid {
@@ -118,7 +118,7 @@ impl FakeLidarr {
             }
             (Method::Get, "/artist") => (200, Value::Array(st.artists.clone())),
             (Method::Get, "/config/naming") => (200, json!({"renameTracks": false})),
-            (Method::Get, "/config/metadataprovider") => (200, json!({"writeAudioTags": "newFiles"})),
+            (Method::Get, "/config/metadataprovider") => (200, json!({"writeAudioTags": "no"})),
             (Method::Get, "/config/mediamanagement") => (200, json!({"deleteEmptyFolders": false, "recycleBin": "/recycle"})),
             (Method::Get, "/qualityprofile") => (200, json!([{"id": 2, "name": "Lossless", "upgradeAllowed": false}])),
             (Method::Get, "/importlist") => (200, json!([])),

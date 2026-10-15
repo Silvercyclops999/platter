@@ -85,6 +85,8 @@ pub struct Artist {
     /// The folder name Lidarr would use (lookups).
     #[serde(default)]
     pub folder: Option<String>,
+    #[serde(default)]
+    pub quality_profile_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -123,6 +125,71 @@ pub struct QualityProfile {
     pub name: String,
     #[serde(default)]
     pub upgrade_allowed: bool,
+    /// The quality (or group) id Lidarr stops at.
+    #[serde(default)]
+    pub cutoff: Option<i64>,
+    /// Qualities and groups, lowest first.
+    #[serde(default)]
+    pub items: Vec<ProfileItem>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityRef {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub name: String,
+}
+
+/// One quality in a profile, or a group of them (`items`, with its own id).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileItem {
+    #[serde(default)]
+    pub id: Option<i64>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub quality: Option<QualityRef>,
+    #[serde(default)]
+    pub items: Vec<ProfileItem>,
+    #[serde(default)]
+    pub allowed: bool,
+}
+
+/// One track of an album as Lidarr has it (`GET /track`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LidarrTrack {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+    /// The MusicBrainz recording id.
+    #[serde(default)]
+    pub foreign_recording_id: String,
+    #[serde(default)]
+    pub medium_number: i64,
+    #[serde(default)]
+    pub absolute_track_number: i64,
+    /// Milliseconds.
+    #[serde(default)]
+    pub duration: i64,
+    #[serde(default)]
+    pub track_file_id: i64,
+}
+
+/// A file Lidarr imported (`GET /trackfile`), with its path as Lidarr sees it.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackFile {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -469,6 +536,16 @@ impl LidarrClient {
             .get("/history", &[("albumId", id.as_str()), ("page", "1"), ("pageSize", "20"), ("sortKey", "date"), ("sortDirection", "descending")])
             .await?;
         Ok(p.into_vec())
+    }
+
+    /// An album's tracks, with the files Lidarr matched to them.
+    pub async fn tracks(&self, album_id: i64) -> AppResult<Vec<LidarrTrack>> {
+        self.get("/track", &[("albumId", album_id.to_string().as_str())]).await
+    }
+
+    /// An album's imported files.
+    pub async fn track_files(&self, album_id: i64) -> AppResult<Vec<TrackFile>> {
+        self.get("/trackfile", &[("albumId", album_id.to_string().as_str())]).await
     }
 
     /// One folder's contents, with file sizes.

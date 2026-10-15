@@ -20,6 +20,7 @@ pub mod likes;
 pub mod lyrics;
 pub mod mixes;
 pub mod model;
+pub mod musicshare;
 pub mod monitor;
 pub mod notify;
 pub mod physical;
@@ -712,6 +713,16 @@ pub fn run() {
                 album_wait: std::time::Duration::from_secs(2),
             });
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
+            // Upgrades: better copies through the staging folder, swapped on this computer.
+            let upgrades = lidarr::upgrade::Upgrades::new(lidarr::upgrade::UpgradeDeps {
+                lidarr: lidarr_service.clone(),
+                db: db.clone(),
+                hosts: Arc::new(lidarr::upgrade::DesktopHosts { db: db.clone(), fallback: data_dir.join("upgrade-backups") }),
+                plex: Arc::new(lidarr::upgrade::PlexRescan(plex.clone())),
+                clock: Arc::new(db::queries::now_s),
+            });
+            tauri::async_runtime::spawn(lidarr::upgrade::watch(upgrades.clone()));
+            app.manage(upgrades);
             let radar_lidarr = lidarr_service.clone();
             let discover_lidarr = lidarr_service.clone();
             app.manage(lidarr_service);
@@ -1464,6 +1475,17 @@ pub fn run() {
             lidarr::commands::lidarr_requests,
             lidarr::commands::lidarr_request_cancel,
             lidarr::commands::lidarr_missing_releases,
+            lidarr::commands::lidarr_upgrade_album,
+            lidarr::commands::lidarr_upgrade_request,
+            lidarr::commands::lidarr_upgrade_bulk,
+            lidarr::commands::lidarr_upgrades,
+            lidarr::commands::lidarr_upgrade_offer,
+            lidarr::commands::lidarr_upgrade_swap,
+            lidarr::commands::lidarr_upgrade_undo,
+            lidarr::commands::lidarr_upgrade_clear,
+            lidarr::commands::music_share_get,
+            lidarr::commands::music_share_set,
+            lidarr::commands::music_share_plex_folders,
             radar::commands::release_radar,
             discover::commands::catalogue_search,
             discover::commands::catalogue_artist,

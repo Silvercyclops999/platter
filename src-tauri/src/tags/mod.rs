@@ -2,7 +2,9 @@
 //!
 //! Plex ignores the `ARCHIVE_*` tags and the explicit flag, so Platter reads
 //! them from each file's header through Plex's own part URL with small Range
-//! requests. Nothing is installed on the server and no file is ever written.
+//! requests. Nothing is installed on the server, and the scan never writes.
+//! The one place a file is written is an album upgrade's swap, on a computer
+//! with the music share mapped ([`carry`], `lidarr::swap`).
 //!
 //! - [`parse`]  header parsers (FLAC, ID3v2, MP4, Ogg) over partial reads
 //! - [`fetch`]  Range reads through the player's one-transfer gate
@@ -11,7 +13,10 @@
 //! - [`view`]   shapes library pages by the tags (editions, fan edits)
 //! - [`provenance`] each file's release status, whichever tags carry it
 //! - [`commands`] Tauri commands and events (docs/IPC.md "File tags")
+//! - [`carry`]  carry one file's tags onto another (upgrades)
+//! - [`read_local`] the same parsers over a file on this computer
 
+pub mod carry;
 pub mod commands;
 pub mod fetch;
 pub mod parse;
@@ -208,6 +213,46 @@ impl FileTags {
 
     pub fn has_flag(&self, flag: &str) -> bool {
         has_flag(self.flags.as_deref(), flag)
+    }
+}
+
+/// The tags of a file on this computer, read with the same parsers as the
+/// scan (only the parts of the file the parsers ask for are read).
+pub fn read_local(path: &std::path::Path) -> std::io::Result<FileTags> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    let total = f.metadata()?.len();
+    let mut first = vec![0u8; (parse::MORE_READ * 4).min(total as usize)];
+    f.read_exact(&mut first)?;
+    let mut s = parse::Sparse::new(first, Some(total));
+    s.container = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase());
+    for _ in 0..64 {
+        match parse::parse(&s, false) {
+            parse::Step::Done(t) => return Ok(t),
+            parse::Step::Need { offset, len } => {
+                let len = len.min(parse::MAX_BLOCK * 16).min(total.saturating_sub(offset) as usize);
+                if len == 0 {
+                    break;
+                }
+                let mut b = vec![0u8; len];
+                f.seek(SeekFrom::Start(offset))?;
+                f.read_exact(&mut b)?;
+                s.add(offset, b);
+            }
+        }
+    }
+    match parse::parse(&s, true) {
+        parse::Step::Done(t) => Ok(t),
+        parse::Step::Need { .. } => Ok(FileTags::default()),
+    }
+}
+
+impl FileTags {
+    /// Any `ARCHIVE_*` tag is set.
+    pub fn has_archive(&self) -> bool {
+        [&self.version, &self.era, &self.quality, &self.date, &self.edition, &self.group, &self.source, &self.flags]
+            .iter()
+            .any(|v| v.as_deref().is_some_and(|x| !x.trim().is_empty()))
     }
 }
 

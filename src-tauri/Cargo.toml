@@ -79,6 +79,8 @@ rusty-chromaprint = "0.3.0"
 # Library import: account data downloads come as zip files.
 zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 kakasi = "0.1.0"
+# Upgrades: carry a file's tags onto its better copy (any format to any format).
+lofty = "0.25.4"
 pinyin = { version = "0.11.0", default-features = false, features = ["with_tone"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]

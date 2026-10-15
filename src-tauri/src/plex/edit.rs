@@ -586,6 +586,13 @@ impl PlexClient {
         self.edit_send(rb).await.map(|_| ())
     }
 
+    /// `GET /library/sections/{id}/refresh?path=`: scan one folder of a
+    /// library section (after files in it changed).
+    pub async fn scan_folder(&self, section: &str, path: &str) -> AppResult<()> {
+        let rb = self.request(Method::GET, &format!("/library/sections/{section}/refresh"))?.query(&[("path", path)]);
+        self.edit_send(rb).await.map(|_| ())
+    }
+
     /// `PUT /library/metadata/{id}/refresh`: read the agent and files again.
     pub async fn refresh_item(&self, id: &str) -> AppResult<()> {
         let k = rating_key(self.raw(id)?)?;

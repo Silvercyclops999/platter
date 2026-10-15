@@ -224,6 +224,53 @@ fn title_clash_with_an_edition_is_refused() {
 }
 
 #[test]
+fn titles_clash_by_their_base_whatever_the_edition_or_version_suffix() {
+    let have = |t: &str| vec![lib(t, false)];
+    for owned in [
+        "First Light (Deluxe)",
+        "First Light - v2",
+        "First Light [Leak]",
+        "FIRST LIGHT!",
+        "First  Light (Remastered 2011)",
+        "First Light (10th Anniversary Edition)",
+        "First Light \u{2013} Demo",
+        "First Light (Alt Mix)",
+        "First Light (Expanded Version)",
+    ] {
+        assert!(clash("First Light", &have(owned)).is_some(), "First Light vs {owned}");
+        assert!(matches!(vet(&group(RG_FIRST), &want(), &have(owned), true), Err(Refusal::TitleClash { .. })), "{owned}");
+    }
+    // The other way round: a requested edition against the plain album.
+    assert!(clash("First Light (Deluxe)", &have("First Light")).is_some());
+    assert!(clash("First Light [Leak]", &have("First Light - v2")).is_some());
+    // Different titles don't clash.
+    assert!(clash("First Lights", &have("First Light")).is_none());
+    assert!(clash("Second Wind", &have("First Light (Deluxe)")).is_none());
+}
+
+#[test]
+fn an_upgrade_is_for_the_album_itself_and_clashes_with_anything_else() {
+    let mine = LibraryAlbum { id: "a1".into(), title: "First Light".into(), also: vec![], unreleased: false };
+    // Its own title is no clash.
+    assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), std::slice::from_ref(&mine), "a1"), Ok(()));
+    // Another album with the same base title is, released or not.
+    for other in [lib("First Light (Deluxe)", false), lib("First Light [Leak]", true)] {
+        let lib2 = vec![mine.clone(), other.clone()];
+        assert!(matches!(vet_upgrade(&group(RG_FIRST), &want(), &lib2, "a1"), Err(Refusal::TitleClash { .. })), "{}", other.title);
+    }
+    // The album itself unreleased, or tied to builds by ARCHIVE_GROUP: refused.
+    let unreleased = LibraryAlbum { unreleased: true, ..mine.clone() };
+    assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), &[unreleased], "a1"), Err(Refusal::UnreleasedAlbum));
+    let grouped = LibraryAlbum { also: vec!["first-light".into()], ..mine.clone() };
+    assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), &[grouped], "a1"), Err(Refusal::ArchiveAlbum));
+    // Another release group's title: not this album.
+    assert_eq!(vet_upgrade(&group(RG_SECOND), &want(), std::slice::from_ref(&mine), "a1"), Err(Refusal::OtherTitle));
+    // Bootlegs never, even with the same title.
+    let boot = LibraryAlbum { title: "Basement Tapes".into(), ..mine.clone() };
+    assert_eq!(vet_upgrade(&group(RG_BOOT), &want(), &[boot], "a1"), Err(Refusal::NotOfficial));
+}
+
+#[test]
 fn album_before_ep_before_single_then_earliest() {
     let picked = pick(vec![group(RG_SINGLE), group(RG_EP), group(RG_SECOND)], &want(), &[], false).unwrap();
     assert_eq!(picked.id, RG_SECOND, "the album, though the single came first");

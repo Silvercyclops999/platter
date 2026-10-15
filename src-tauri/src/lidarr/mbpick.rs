@@ -118,6 +118,12 @@ pub enum Refusal {
     Secondary { types: Vec<String> },
     /// Has the title of an album already in the library.
     TitleClash { title: String, unreleased: bool },
+    /// Upgrades: the album counts as unreleased.
+    UnreleasedAlbum,
+    /// Upgrades: the album has ARCHIVE_* tags tying it to builds or editions.
+    ArchiveAlbum,
+    /// Upgrades: MusicBrainz's release has another title than the album.
+    OtherTitle,
 }
 
 impl Refusal {
@@ -132,6 +138,9 @@ impl Refusal {
             Refusal::TitleClash { title, unreleased: true } => format!(
                 "It has the same title as \"{title}\", an unreleased album already in your library. The two could get mixed together, so it can't be requested."
             ),
+            Refusal::UnreleasedAlbum => "This album counts as unreleased, so Platter won't look for another copy of it.".into(),
+            Refusal::ArchiveAlbum => "This album has archive tags tying it to other builds or editions, so Platter won't look for another copy of it.".into(),
+            Refusal::OtherTitle => "MusicBrainz's official release has another title than this album, so Platter can't be sure it's the same one.".into(),
             Refusal::TitleClash { title, unreleased: false } => {
                 format!("It has the same title as \"{title}\", already in your library. The two could get mixed together, so it can't be requested.")
             }
@@ -321,12 +330,37 @@ pub fn vet(g: &Group, want: &Want, library: &[LibraryAlbum], allow_secondary: bo
     Ok(())
 }
 
+/// Whether a group is the official release of library album `album_id`,
+/// for an upgrade: the album itself is released and carries no ARCHIVE_*
+/// group, the group has the album's title, and passes every request rule
+/// against the rest of the library (so it can't share a title with any
+/// other album there, unreleased builds and editions included).
+pub fn vet_upgrade(g: &Group, want: &Want, library: &[LibraryAlbum], album_id: &str) -> Result<(), Refusal> {
+    let target = library.iter().find(|a| a.id == album_id).ok_or(Refusal::NotFound)?;
+    if target.unreleased {
+        return Err(Refusal::UnreleasedAlbum);
+    }
+    if !target.also.is_empty() {
+        return Err(Refusal::ArchiveAlbum);
+    }
+    let me = std::slice::from_ref(target);
+    if clash(&g.title, me).is_none() {
+        return Err(Refusal::OtherTitle);
+    }
+    let others: Vec<LibraryAlbum> = library.iter().filter(|a| a.id != album_id).cloned().collect();
+    vet(g, want, &others, true)
+}
+
 /// The best group that passes, else why the best-ranked one doesn't.
-pub fn pick(mut groups: Vec<Group>, want: &Want, library: &[LibraryAlbum], allow_secondary: bool) -> Result<Group, Refusal> {
+pub fn pick(groups: Vec<Group>, want: &Want, library: &[LibraryAlbum], allow_secondary: bool) -> Result<Group, Refusal> {
+    pick_with(groups, |g| vet(g, want, library, allow_secondary))
+}
+
+fn pick_with(mut groups: Vec<Group>, vet: impl Fn(&Group) -> Result<(), Refusal>) -> Result<Group, Refusal> {
     groups.sort_by_key(rank);
     let mut first_refusal: Option<Refusal> = None;
     for g in groups {
-        match vet(&g, want, library, allow_secondary) {
+        match vet(&g) {
             Ok(()) => return Ok(g),
             Err(r) => {
                 // A title clash is the answer that matters most.
@@ -654,6 +688,22 @@ impl Picker {
         // A live recording may come from a live album.
         let live = fold_title(title).version.contains("live");
         Ok(Picked::from(pick(groups, want, library, live), &want.name))
+    }
+
+    /// The official release of a library album, for an upgrade.
+    pub async fn pick_upgrade(&self, want: &Want, title: &str, library: &[LibraryAlbum], album_id: &str) -> AppResult<Picked> {
+        let Some(v) = self.mb.get(&group_search_url(&want.name, title)).await? else {
+            return Ok(Picked::from(Err(Refusal::NotFound), &want.name));
+        };
+        let groups = self.lookup_all(groups_of_search(&v, title)).await?;
+        Ok(Picked::from(pick_with(groups, |g| vet_upgrade(g, want, library, album_id)), &want.name))
+    }
+
+    /// [`Self::vet_group`] for an upgrade of `album_id`.
+    pub async fn vet_upgrade_group(&self, rgid: &str, want: &Want, library: &[LibraryAlbum], album_id: &str) -> AppResult<Group> {
+        let g = self.group(rgid).await?.ok_or_else(|| Refusal::NotFound.into_error())?;
+        vet_upgrade(&g, want, library, album_id).map_err(Refusal::into_error)?;
+        Ok(g)
     }
 
     /// Check a release group again right before a request.

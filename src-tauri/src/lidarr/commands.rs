@@ -93,3 +93,82 @@ pub async fn lidarr_request_cancel(lidarr: State<'_, Lidarr>, id: String) -> App
 pub async fn lidarr_missing_releases(lidarr: State<'_, Lidarr>, artist_id: String, artist: String) -> AppResult<MissingReleases> {
     lidarr.missing_releases(&artist_id, &artist).await
 }
+
+// ---------------------------------------------------------------- upgrades
+
+use super::upgrade::{AlbumUpgrade, BulkResult, Offer, SwapResult, Under, UpgradeRecord, Upgrades};
+use crate::musicshare::ShareMap;
+
+/// Whether an album's menu offers "Look for a better copy", and its upgrade.
+#[tauri::command]
+pub async fn lidarr_upgrade_album(upgrades: State<'_, Upgrades>, album_id: String) -> AppResult<AlbumUpgrade> {
+    upgrades.for_album(&album_id).await
+}
+
+/// Ask Lidarr for a better copy of an album, into the staging folder.
+#[tauri::command]
+pub async fn lidarr_upgrade_request(upgrades: State<'_, Upgrades>, album_id: String) -> AppResult<UpgradeRecord> {
+    upgrades.request(&album_id).await
+}
+
+/// Ask for better copies of every released album under a quality.
+#[tauri::command]
+pub async fn lidarr_upgrade_bulk(upgrades: State<'_, Upgrades>, under: Under) -> AppResult<BulkResult> {
+    upgrades.bulk(under).await
+}
+
+/// Upgrades on this computer, newest first; refresh follows them in Lidarr.
+#[tauri::command]
+pub async fn lidarr_upgrades(upgrades: State<'_, Upgrades>, refresh: bool) -> AppResult<Vec<UpgradeRecord>> {
+    if refresh {
+        let _ = upgrades.refresh().await;
+    }
+    Ok(upgrades.records())
+}
+
+/// What swapping would do now: songs that upgrade and songs kept, with why.
+#[tauri::command]
+pub async fn lidarr_upgrade_offer(upgrades: State<'_, Upgrades>, id: String) -> AppResult<Offer> {
+    upgrades.offer(&id).await
+}
+
+/// Swap the better copies in (null: every song that upgrades).
+#[tauri::command]
+pub async fn lidarr_upgrade_swap(upgrades: State<'_, Upgrades>, id: String, track_ids: Option<Vec<String>>) -> AppResult<SwapResult> {
+    upgrades.swap(&id, track_ids).await
+}
+
+/// Put the old files of the last swap back exactly.
+#[tauri::command]
+pub async fn lidarr_upgrade_undo(upgrades: State<'_, Upgrades>, id: String) -> AppResult<UpgradeRecord> {
+    upgrades.undo(&id).await
+}
+
+/// Clear an upgrade from the list.
+#[tauri::command]
+pub async fn lidarr_upgrade_clear(upgrades: State<'_, Upgrades>, id: String) -> AppResult<Vec<UpgradeRecord>> {
+    let u = upgrades.inner().clone();
+    blocking(move || u.clear(&id)).await
+}
+
+/// Where this computer reaches the music share (this device only).
+#[tauri::command]
+pub async fn music_share_get(lidarr: State<'_, Lidarr>) -> AppResult<ShareMap> {
+    let db = lidarr.inner.db.clone();
+    blocking(move || Ok(crate::musicshare::load(&db))).await
+}
+
+#[tauri::command]
+pub async fn music_share_set(lidarr: State<'_, Lidarr>, map: ShareMap) -> AppResult<ShareMap> {
+    let db = lidarr.inner.db.clone();
+    blocking(move || crate::musicshare::save(&db, &map)).await
+}
+
+/// Plex's music folders, as Plex sees them (to fill in the share mapping).
+#[tauri::command]
+pub async fn music_share_plex_folders(lidarr: State<'_, Lidarr>) -> AppResult<Vec<String>> {
+    let mut l = lidarr.inner.plex.music_files().await?.locations;
+    l.sort();
+    l.dedup();
+    Ok(l)
+}
