@@ -148,12 +148,29 @@ fn drained(e: &EngineEvent) -> bool {
     matches!(e, EngineEvent::Drained)
 }
 
+/// Waits until `n` segments are loaded and all are decoded to the end. A
+/// crossfade is only decided once the next track is decoded far enough
+/// (otherwise the change is gapless by design), so tests that check the
+/// fade wait for decoding, not for a fixed time.
+async fn wait_decoded(engine: &Engine, n: usize) {
+    // Hang guard only: the loop returns as soon as decoding is done.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let (segs, done) = engine.decoded();
+        if segs >= n && done {
+            return;
+        }
+        assert!(Instant::now() < deadline, "never decoded ({segs} segments, done {done})");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 /// Loads `a` paused with `b` next, lets both decode, then plays to the end.
 async fn play_pair(r: &mut Rig, a: Track, b: Track, s: DspSettings) -> (Vec<EngineEvent>, u64, u64) {
     r.engine.set_dsp(s);
     let key = r.engine.load(a, "ia".into(), 0, false).unwrap();
     let nk = r.engine.set_next(Some((b, "ib".into())), key).unwrap();
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    wait_decoded(&r.engine, 2).await;
     r.engine.play().unwrap();
     (until(&mut r.events, drained).await, key, nk)
 }

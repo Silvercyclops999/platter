@@ -98,10 +98,19 @@ pub fn decode_all(bytes: &[u8], hint: &str) -> (Vec<f32>, u32, usize) {
 /// Captured samples once at least `len` have arrived. The engine reports
 /// "ended"/"drained" from inside the render call, slightly before the
 /// capture thread stores that block, so tests must wait for the data.
+/// The wait only gives up once the capture has stopped growing for 20 s, so
+/// a paced (real-time) capture on a slow machine is never cut short.
 pub async fn settled_samples(cap: &super::output::CaptureHandle, len: usize) -> Vec<f32> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let stall = std::time::Duration::from_secs(20);
+    let mut seen = cap.len_frames(1);
+    let mut deadline = std::time::Instant::now() + stall;
     loop {
-        if cap.samples().len() >= len || std::time::Instant::now() > deadline {
+        let now_len = cap.len_frames(1);
+        if now_len != seen {
+            seen = now_len;
+            deadline = std::time::Instant::now() + stall;
+        }
+        if now_len >= len || std::time::Instant::now() > deadline {
             // Give any unexpected extra audio a moment to show up too.
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
             return cap.samples();
@@ -113,10 +122,10 @@ pub async fn settled_samples(cap: &super::output::CaptureHandle, len: usize) -> 
 /// Waits until the capture stops growing (e.g. after a pause ramp).
 pub async fn wait_capture_still(cap: &super::output::CaptureHandle) -> usize {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    let mut last = cap.samples().len();
+    let mut last = cap.len_frames(1);
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let now = cap.samples().len();
+        let now = cap.len_frames(1);
         if now == last {
             return now;
         }

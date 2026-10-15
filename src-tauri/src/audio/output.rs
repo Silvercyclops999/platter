@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -228,6 +228,10 @@ struct CaptureShared {
     exclusive: Mutex<Exclusive>,
 }
 
+/// How far a paced capture may fall behind the clock before it stops
+/// trying to catch up.
+const MAX_PACE_DEBT: Duration = Duration::from_millis(50);
+
 /// Test output: pulls as fast as audio is available and records only real
 /// frames (silence from underruns/pauses is not recorded), so a capture is
 /// exactly the sample stream the engine produced.
@@ -374,6 +378,7 @@ impl AudioOutput for CaptureOutput {
             let block = 256;
             let mut buf = vec![0.0f32; block * ch];
             let frame_time = Duration::from_secs_f64(block as f64 / fmt.sample_rate as f64);
+            let mut due = Instant::now();
             while !shared.stop.load(Ordering::SeqCst) {
                 let ev = shared.pending.lock().take();
                 if let Some(ev) = ev {
@@ -387,15 +392,30 @@ impl AudioOutput for CaptureOutput {
                     std::thread::sleep(Duration::from_millis(1));
                     continue;
                 }
-                let filled = renderer.render(&mut buf);
-                if filled > 0 {
-                    shared
-                        .samples
-                        .lock()
-                        .extend_from_slice(&buf[..filled * ch]);
-                }
+                // The capture is locked across the render: events sent from
+                // inside it ("ended", "drained") reach a test before the
+                // block is stored, and reading the capture then waits for it.
+                let filled = {
+                    let mut samples = shared.samples.lock();
+                    let filled = renderer.render(&mut buf);
+                    samples.extend_from_slice(&buf[..filled * ch]);
+                    filled
+                };
                 match pace {
-                    Some(_) => std::thread::sleep(frame_time),
+                    // Paced to the wall clock like a device: each block is
+                    // due one block's time after the last, so oversleeping
+                    // (coarse timers, a loaded machine) doesn't add up into
+                    // slow motion. After a long stall it resumes from now
+                    // rather than rushing to catch up.
+                    Some(_) => {
+                        due += frame_time;
+                        let now = Instant::now();
+                        if due > now {
+                            std::thread::sleep(due - now);
+                        } else if now - due > MAX_PACE_DEBT {
+                            due = now;
+                        }
+                    }
                     None if filled == 0 => std::thread::sleep(Duration::from_micros(500)),
                     None => {}
                 }

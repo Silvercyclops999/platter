@@ -1256,6 +1256,21 @@ impl Engine {
         self.core().mix.lock().segments.front().map(|s| s.lg_target)
     }
 
+    /// How many segments are loaded and whether all of them are decoded to
+    /// the end, so tests can wait for decoding instead of for time.
+    #[cfg(test)]
+    pub(crate) fn decoded(&self) -> (usize, bool) {
+        let m = self.core().mix.lock();
+        (m.segments.len(), m.segments.iter().all(|s| s.done))
+    }
+
+    /// Paused and the pause ramp has run out, so nothing more is rendered.
+    #[cfg(test)]
+    pub(crate) fn ramped_down(&self) -> bool {
+        let m = self.core().mix.lock();
+        !m.playing && m.gain <= 0.0
+    }
+
     /// Releases the device (after it was lost, or on shutdown).
     pub fn close_output(&self) {
         self.output.lock().close();

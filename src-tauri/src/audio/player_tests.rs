@@ -631,7 +631,9 @@ fn position_tick_runs_only_while_playing() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn position_events_flow_while_playing_and_volume_state_updates() {
-    let mut r = rig(&["a"], 2.0, true, PlayerConfig::default()).await;
+    // Progress comes once a second of position ticks; the track is long
+    // enough that it is still playing however slowly the ticks run.
+    let mut r = rig(&["a"], 30.0, true, PlayerConfig::default()).await;
     r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
     next_tracking(&mut r.tracking, started("a")).await;
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -640,7 +642,7 @@ async fn position_events_flow_while_playing_and_volume_state_updates() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     let pos = r.sink.positions.lock().clone();
-    assert!(pos.iter().all(|p| p.duration_ms == 2_000));
+    assert!(pos.iter().all(|p| p.duration_ms == 30_000));
     assert!(pos.last().unwrap().buffered_ms >= pos.last().unwrap().position_ms);
     r.player.set_volume(0.25).await.unwrap();
     r.player.set_muted(true).await.unwrap();

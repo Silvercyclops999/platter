@@ -359,14 +359,24 @@ mod tests {
         let mut out = RoutedOutput::new(Box::new(cap), route);
         out.select(Some("net:airplay:k".into()));
         assert_eq!(out.selected().as_deref(), Some("net:airplay:k"));
+        let opened_at = Instant::now();
         let fmt = out.open(Arc::new(Tone), noop()).unwrap();
         assert_eq!(fmt.sample_rate, 44_100);
         assert_eq!(out.opened().unwrap().name, "Kitchen");
-        std::thread::sleep(Duration::from_millis(120));
+        // Wait for blocks to flow (the limit is only a hang guard).
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while fake.blocks.lock().len() < 5 {
+            assert!(Instant::now() < deadline, "no blocks sent");
+            std::thread::sleep(Duration::from_millis(5));
+        }
         out.close();
+        let elapsed = opened_at.elapsed();
         let blocks = fake.blocks.lock().clone();
-        // ~120 ms plus the lead is ~20 blocks of 8 ms; never seconds ahead.
-        assert!((5..40).contains(&blocks.len()), "{} blocks", blocks.len());
+        // Paced to real time: never more than the time the stream was open
+        // plus the 40 ms lead (and the block that crossed it), however slowly
+        // this thread ran.
+        let most = ((elapsed + Duration::from_millis(40)).as_secs_f64() * 44_100.0 / 352.0) as usize + 1;
+        assert!(blocks.len() <= most, "{} blocks in {elapsed:?} (at most {most})", blocks.len());
         assert!(blocks.iter().all(|b| b.len() == 704 && b[0] == 16384));
         assert_eq!(handle.opens(), 0, "the computer's output stayed closed");
         // Choosing a computer device leaves the target.
@@ -397,7 +407,8 @@ mod tests {
         out.select(Some("net:airplay:k".into()));
         let (tx, rx) = std::sync::mpsc::channel();
         out.open(Arc::new(Tone), Arc::new(move |ev| { let _ = tx.send(ev); })).unwrap();
-        let ev = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        // A hang guard: the event comes after three 8 ms blocks.
+        let ev = rx.recv_timeout(Duration::from_secs(30)).unwrap();
         assert!(matches!(ev, OutputEvent::DeviceLost { fell_back_from: Some(ref n), .. } if n == "Kitchen"));
         assert_eq!(out.selected(), None, "the next open uses this computer");
         out.open(Arc::new(Tone), noop()).unwrap();

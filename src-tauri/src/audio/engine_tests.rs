@@ -520,7 +520,13 @@ async fn pause_ramps_down_and_resume_continues_seamlessly() {
     }
     r.engine.pause();
     // The ramp finishes, then nothing more is consumed.
-    let at_pause = wait_capture_still(&r.cap).await / 2;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !r.engine.ramped_down() {
+        assert!(Instant::now() < deadline, "the pause never ramped down");
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    // (The block that finished the ramp is stored before this reads.)
+    let at_pause = r.cap.len_frames(2);
     assert!(at_pause < total, "paused before the end");
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(r.cap.len_frames(2), at_pause, "nothing consumed while paused");
