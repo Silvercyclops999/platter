@@ -14,10 +14,12 @@
 //! - [`directory`]: announcing and browsing over mDNS (and a fake network
 //!   for tests).
 //! - [`publish`]: telling plex.tv where this computer answers.
+//! - [`keys`]: the requests that copy keys between devices.
 
 pub mod auth;
 pub mod client;
 pub mod directory;
+pub mod keys;
 pub mod publish;
 pub mod runtime;
 pub mod server;

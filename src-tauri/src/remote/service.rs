@@ -198,7 +198,7 @@ struct Inner {
     /// The user's other Platter devices (None until the app sets it up).
     peers: Mutex<Option<Arc<dyn PeerDirectory>>>,
     peer_http: reqwest::Client,
-    /// More routes the control API answers (listening sessions).
+    /// More routes the control API answers (listening sessions, key copy).
     extra: peer::server::ExtraSlot,
 }
 
@@ -304,7 +304,29 @@ impl RemoteService {
         self.inner.env.account_id().await.map(|id| account_tag(&id))
     }
 
-    async fn peer_client(&self) -> Option<PeerClient> {
+    /// The user's other Platter devices this computer knows how to reach:
+    /// the ones announcing on this network and the ones the last device
+    /// list found.
+    pub async fn platter_devices(&self) -> Vec<PeerDevice> {
+        let mut out = self.peer_answers().await;
+        let known: Vec<PeerDevice> = self.inner.players.lock().iter().filter_map(|f| f.peer.clone()).collect();
+        for d in known {
+            match out.iter_mut().find(|o| o.id == d.id) {
+                Some(o) => {
+                    for b in d.bases {
+                        if !o.bases.contains(&b) {
+                            o.bases.push(b);
+                        }
+                    }
+                }
+                None => out.push(d),
+            }
+        }
+        out
+    }
+
+    /// Signed requests to the user's other Platter devices (None when signed out).
+    pub async fn peer_client(&self) -> Option<PeerClient> {
         let token = self.inner.env.account_token().await?;
         Some(PeerClient::new(self.inner.peer_http.clone(), self.inner.own_id.clone(), PeerKey::from_token(&token)))
     }

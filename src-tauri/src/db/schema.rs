@@ -549,6 +549,20 @@ CREATE TABLE IF NOT EXISTS mix_tracks (
 ) WITHOUT ROWID;
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
+    // v19: app-only state that can travel in the sync file (sync::). One row
+    // per entry: a namespace (pins, folders, ...), a key, the value as JSON
+    // (NULL for a deletion, kept as a tombstone), when it changed (ms) and on
+    // which device. Last writer wins per entry.
+    r#"
+CREATE TABLE IF NOT EXISTS sync_entries (
+    ns     TEXT NOT NULL,
+    key    TEXT NOT NULL,
+    value  TEXT,
+    ts     INTEGER NOT NULL,
+    device TEXT NOT NULL,
+    PRIMARY KEY (ns, key)
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

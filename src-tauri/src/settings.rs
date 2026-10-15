@@ -367,6 +367,19 @@ pub struct Settings {
     pub listen_guests_add: bool,
     /// Discord shows a listening session you host.
     pub discord_listen_along: bool,
+    /// Keep app-only state in a sync file in a folder (this device only).
+    pub sync_enabled: bool,
+    /// The folder the sync file goes in (this device only). Changed with
+    /// `sync_file_choose_folder` / `sync_file_use_folder`, not `settings_set`.
+    pub sync_folder: String,
+    /// What to sync: settings marked Synced (this device only).
+    pub sync_settings: bool,
+    /// What to sync: library folders and pins (this device only).
+    pub sync_library: bool,
+    /// What to sync: followed artists and hidden items (this device only).
+    pub sync_follows: bool,
+    /// What to sync: lyrics you wrote (this device only).
+    pub sync_lyrics: bool,
 }
 
 impl Default for Settings {
@@ -473,9 +486,132 @@ impl Default for Settings {
             notify_new_releases: false,
             listen_guests_add: true,
             discord_listen_along: true,
+            sync_enabled: false,
+            sync_folder: String::new(),
+            sync_settings: true,
+            sync_library: true,
+            sync_follows: true,
+            sync_lyrics: true,
         }
     }
 }
+
+/// Settings that travel in the sync file (camelCase names, as on the wire).
+/// Everything else is this device only. Every setting is in exactly one of
+/// the two lists (a test checks).
+pub const SYNCED_SETTINGS: &[&str] = &[
+    "reportToPlex",
+    "shuffleStyle",
+    "qualityHome",
+    "qualityAway",
+    "showFormatBadge",
+    "resumeContexts",
+    "popularSource",
+    "artworkColours",
+    "reduceMotion",
+    "homeShortcuts",
+    "homeColourWash",
+    "searchSuggestions",
+    "abLoopHandles",
+    "upNextLine",
+    "volumePercent",
+    "playlistAskDuplicates",
+    "playlistNewName",
+    "infoWikipedia",
+    "infoLastfm",
+    "infoFanart",
+    "infoAudiodb",
+    "infoListenbrainz",
+    "linkFeatured",
+    "likedMeans",
+    "likeControlRows",
+    "showPlexPlayers",
+    "moveStopsOldDevice",
+    "crossfade",
+    "crossfadeSeconds",
+    "crossfadeSkipAlbums",
+    "leveling",
+    "sharePublicLinks",
+    "showCastDevices",
+    "lyricsMode",
+    "lyricsLrclib",
+    "lyricsPreferOwn",
+    "lyricsShowAdd",
+    "fullWindowHideControls",
+    "explicitContent",
+    "showFanEdits",
+    "groupEditions",
+    "dragAndDrop",
+    "showAutoLyrics",
+    "homeMixes",
+    "mixVariety",
+    "mixExcludeArtists",
+    "mixExcludeGenres",
+    "mixExcludeAlbums",
+    "mixUnreleased",
+    "daylistHours",
+    "queueEnd",
+    "smartShuffle",
+    "showFriendActivity",
+    "shareActivity",
+    "whatsNewAnnouncements",
+    "listenGuestsAdd",
+];
+
+/// Settings kept on this device only.
+pub const DEVICE_SETTINGS: &[&str] = &[
+    "privateSession",
+    "volume",
+    "precacheCount",
+    "artCacheMb",
+    "outputDevice",
+    "searchRecents",
+    "mediaKeys",
+    "mediaSession",
+    "closeToTray",
+    "launchAtLogin",
+    "notifyTrackChange",
+    "actAsPlexPlayer",
+    "preampDb",
+    "limiter",
+    "eqEnabled",
+    "eqBands",
+    "eqPreset",
+    "eqProfiles",
+    "eqOutputs",
+    "eqFallback",
+    "eqLastOutput",
+    "discordStatus",
+    "discordShowUnreleased",
+    "discordUnreleasedArt",
+    "discordClearOnPause",
+    "discordFindSong",
+    "discordCoverArchive",
+    "discordUploadArt",
+    "discordUploadCatbox",
+    "discordStatusLine",
+    "showPlexAvatar",
+    "readFileTags",
+    "transcribeLyrics",
+    "transcribeModel",
+    "showToMyDevices",
+    "computerName",
+    "showAirplayLocked",
+    "downloadQuality",
+    "downloadLimitGb",
+    "downloadFolder",
+    "downloadHomeOnly",
+    "downloadLiked",
+    "goOffline",
+    "notifyNewReleases",
+    "discordListenAlong",
+    "syncEnabled",
+    "syncFolder",
+    "syncSettings",
+    "syncLibrary",
+    "syncFollows",
+    "syncLyrics",
+];
 
 /// A partial update; absent fields are left alone.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -580,6 +716,11 @@ pub struct SettingsPatch {
     pub notify_new_releases: Option<bool>,
     pub listen_guests_add: Option<bool>,
     pub discord_listen_along: Option<bool>,
+    pub sync_enabled: Option<bool>,
+    pub sync_settings: Option<bool>,
+    pub sync_library: Option<bool>,
+    pub sync_follows: Option<bool>,
+    pub sync_lyrics: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -697,6 +838,11 @@ impl Settings {
         set(&mut self.mix_unreleased, p.mix_unreleased);
         set(&mut self.queue_end, p.queue_end);
         set(&mut self.smart_shuffle, p.smart_shuffle);
+        set(&mut self.sync_enabled, p.sync_enabled);
+        set(&mut self.sync_settings, p.sync_settings);
+        set(&mut self.sync_library, p.sync_library);
+        set(&mut self.sync_follows, p.sync_follows);
+        set(&mut self.sync_lyrics, p.sync_lyrics);
         if let Some(h) = p.daylist_hours {
             if !DAYLIST_HOURS.contains(&h) {
                 return Err(AppError::Invalid("The daylist refreshes every 1, 3 or 6 hours.".into()));
@@ -822,6 +968,21 @@ impl Settings {
         }
     }
 
+    /// What the sync engine follows. On with no folder chosen counts as off.
+    pub fn sync_config(&self) -> crate::sync::engine::SyncConfig {
+        let folder = self.sync_folder.trim();
+        crate::sync::engine::SyncConfig {
+            enabled: self.sync_enabled && !folder.is_empty(),
+            folder: (!folder.is_empty()).then(|| std::path::PathBuf::from(folder)),
+            groups: crate::sync::engine::Groups {
+                settings: self.sync_settings,
+                library: self.sync_library,
+                follows: self.sync_follows,
+                lyrics: self.sync_lyrics,
+            },
+        }
+    }
+
     pub fn discord(&self) -> DiscordSettings {
         DiscordSettings {
             // Go offline hides the status too.
@@ -895,6 +1056,8 @@ pub struct Live {
     pub mixes: Arc<parking_lot::Mutex<Option<crate::mixes::MixService>>>,
     /// Friend activity, What's New and listening sessions.
     pub social: crate::social::SocialSwitches,
+    /// The sync file settings the sync engine follows.
+    pub sync: crate::sync::engine::ConfigSwitch,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -943,6 +1106,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         ai.set(Src::Listenbrainz, s.info_listenbrainz && on);
     }
     live.platform.set(s.platform());
+    live.sync.set(s.sync_config());
     live.discord.set(s.discord());
     db.set_tag_view(s.tag_view());
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
@@ -967,13 +1131,42 @@ pub struct SettingsState {
     db: DbHandle,
     live: Live,
     lock: Arc<tokio::sync::Mutex<()>>,
+    /// Synced settings go here after every save (once attached).
+    sync: Arc<parking_lot::Mutex<Option<crate::sync::SyncStore>>>,
 }
 
 impl SettingsState {
     /// Load stored settings and publish them.
     pub fn new(db: DbHandle, live: Live) -> Self {
         publish(&load(&db), &live, &db);
-        Self { db, live, lock: Default::default() }
+        Self { db, live, lock: Default::default(), sync: Default::default() }
+    }
+
+    /// Send synced settings through the sync store from now on. Existing
+    /// choices are seeded the first time.
+    pub async fn attach_sync(&self, store: crate::sync::SyncStore) -> AppResult<()> {
+        let s = self.get().await?;
+        store
+            .run(move |st| {
+                crate::sync::settings::seed(st, &s)?;
+                crate::sync::settings::push(st, &s)
+            })
+            .await?;
+        *self.sync.lock() = Some(store);
+        Ok(())
+    }
+
+    /// The sync settings as they are now.
+    pub fn live(&self) -> &Live {
+        &self.live
+    }
+
+    async fn push_synced(&self, s: &Settings) {
+        let Some(store) = self.sync.lock().clone() else { return };
+        let s = s.clone();
+        if let Err(e) = store.run(move |st| crate::sync::settings::push(st, &s)).await {
+            tracing::warn!("synced settings not stored: {e}");
+        }
     }
 
     pub async fn get(&self) -> AppResult<Settings> {
@@ -998,6 +1191,7 @@ impl SettingsState {
         tokio::task::spawn_blocking(move || publish(&published, &live, &db))
             .await
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        self.push_synced(&s).await;
         Ok(s)
     }
 
@@ -1014,7 +1208,20 @@ impl SettingsState {
         tokio::task::spawn_blocking(move || save(&db, &saved))
             .await
             .map_err(|e| AppError::Internal(e.to_string()))??;
+        self.push_synced(&s).await;
         Ok(Some(s))
+    }
+
+    /// [`modify`](Self::modify), then publish the result.
+    pub async fn modify_and_publish(&self, f: impl FnOnce(&mut Settings) -> AppResult<bool>) -> AppResult<Option<Settings>> {
+        let out = self.modify(f).await?;
+        if let Some(s) = &out {
+            let (live, db, s) = (self.live.clone(), self.db.clone(), s.clone());
+            tokio::task::spawn_blocking(move || publish(&s, &live, &db))
+                .await
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+        Ok(out)
     }
 
     /// Store the chosen output device (None: the system default).
@@ -1085,6 +1292,18 @@ pub async fn settings_set(
     mixes: State<'_, crate::mixes::MixService>,
     patch: SettingsPatch,
 ) -> AppResult<()> {
+    apply_patch(&settings, &player, &downloads, &mixes, patch).await
+}
+
+/// A settings change and everything that follows it (Settings page, or
+/// synced settings arriving from another device).
+pub async fn apply_patch(
+    settings: &SettingsState,
+    player: &PlayerHandle,
+    downloads: &downloads::Downloads,
+    mixes: &crate::mixes::MixService,
+    patch: SettingsPatch,
+) -> AppResult<()> {
     let s = settings.set(patch.clone()).await?;
     // Download Liked Songs is the Liked Songs download itself.
     if let Some(on) = patch.download_liked {
@@ -1097,14 +1316,14 @@ pub async fn settings_set(
     }
     if patch.touches_mixes() {
         // Made again in the background; Home hears `mixes://changed`.
-        let m = mixes.inner().clone();
+        let m = mixes.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = m.ensure_fresh(crate::mixes::service::now_ms()).await {
                 tracing::warn!("mixes not made: {e}");
             }
         });
     }
-    apply_to_player(&player, &s, &patch).await
+    apply_to_player(player, &s, &patch).await
 }
 
 /// Art cache usage for the Settings page.
@@ -1230,6 +1449,47 @@ mod tests {
         assert_eq!(s.daylist_hours, 3);
         assert_eq!(s.queue_end, QueueEnd::KeepPlaying);
         assert!(!s.smart_shuffle, "smart shuffle is opt-in");
+        assert!(!s.sync_enabled && s.sync_folder.is_empty(), "the sync file is opt-in");
+        assert!(s.sync_settings && s.sync_library && s.sync_follows && s.sync_lyrics);
+    }
+
+    #[test]
+    fn every_setting_is_synced_or_this_device_only() {
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        let names: Vec<&String> = v.as_object().unwrap().keys().collect();
+        for n in &names {
+            let synced = SYNCED_SETTINGS.contains(&n.as_str());
+            let device = DEVICE_SETTINGS.contains(&n.as_str());
+            assert!(synced ^ device, "{n} must be in exactly one scope list");
+        }
+        for n in SYNCED_SETTINGS.iter().chain(DEVICE_SETTINGS) {
+            assert!(names.iter().any(|x| x == n), "{n} isn't a setting");
+        }
+        // Every synced setting can be applied as a patch (that's how it arrives).
+        for n in SYNCED_SETTINGS {
+            let mut one = serde_json::Map::new();
+            one.insert(n.to_string(), v[*n].clone());
+            let p: SettingsPatch = serde_json::from_value(serde_json::Value::Object(one)).unwrap();
+            assert_ne!(p, SettingsPatch::default(), "{n} isn't in SettingsPatch");
+        }
+        // Folders, the output and the sync settings themselves stay here.
+        for n in ["syncFolder", "syncEnabled", "downloadFolder", "computerName", "outputDevice", "eqProfiles"] {
+            assert!(DEVICE_SETTINGS.contains(&n));
+        }
+    }
+
+    #[test]
+    fn sync_config_follows_the_settings() {
+        let mut s = Settings::default();
+        assert!(!s.sync_config().enabled);
+        s.sync_enabled = true;
+        assert!(!s.sync_config().enabled, "no folder yet");
+        s.sync_folder = "  /tmp/cloud ".into();
+        let c = s.sync_config();
+        assert!(c.enabled);
+        assert_eq!(c.folder, Some(std::path::PathBuf::from("/tmp/cloud")));
+        s.sync_lyrics = false;
+        assert!(!s.sync_config().groups.lyrics);
     }
 
     #[test]
@@ -1437,6 +1697,7 @@ mod tests {
             notify_new_releases: Some(true),
             listen_guests_add: Some(false),
             discord_listen_along: Some(false),
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -1448,6 +1709,19 @@ mod tests {
         assert!(live.social.private_session.load(Ordering::Relaxed));
         assert!(!live.tracking.share_activity.load(Ordering::Relaxed));
         assert!(!live.discord.get().listen_along);
+        st.set(SettingsPatch {
+            sync_enabled: Some(true),
+            sync_settings: Some(false),
+            sync_library: Some(true),
+            sync_follows: Some(false),
+            sync_lyrics: Some(true),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        // On with no folder chosen counts as off.
+        assert!(!live.sync.get().enabled);
+        assert!(!live.sync.get().groups.settings && live.sync.get().groups.library && !live.sync.get().groups.follows);
         assert!(!live.lyrics_show_auto.load(Ordering::Relaxed));
         assert!(!live.share_public_links.load(Ordering::Relaxed));
         assert!(!live.remote.show_cast());

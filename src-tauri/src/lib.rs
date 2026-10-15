@@ -17,6 +17,7 @@ pub mod remote;
 pub mod settings;
 pub mod share;
 pub mod social;
+pub mod sync;
 pub mod tags;
 pub mod tracking;
 pub mod updates;
@@ -390,10 +391,20 @@ pub fn run() {
             )?;
             app.manage(share);
 
+            // App-only state that can travel in the sync file (sync::).
+            let sync_store = sync::SyncStore::new(db.clone(), plex.identity().client_id.clone());
             // Friend activity, follows and What's New.
             let social = social::Social::new(social::SocialDeps {
                 db: db.clone(),
-                follows: Arc::new(social::follows::KvFollows(db.clone())),
+                follows: {
+                    // Follows live in the sync store; an older build's list moves over once.
+                    match sync::follows::SyncFollows::migrate(&sync_store, &db) {
+                        Ok(n) if n > 0 => tracing::info!(n, "followed artists moved to the sync store"),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!("followed artists not moved: {e}"),
+                    }
+                    Arc::new(sync::follows::SyncFollows { store: sync_store.clone() })
+                },
                 activity: Arc::new(social::commands::PlexActivity { plex: plex.clone(), db: db.clone() }),
                 events: Arc::new(plex::state::TauriSink(app.handle().clone())),
                 notifier: Arc::new(social::commands::OsNotifier(app.handle().clone())),
@@ -449,6 +460,67 @@ pub fn run() {
                 app.manage(transcriber);
             }
             app.manage(lyrics_service);
+
+            // App-only state: the store, the sync file, and copying keys.
+            {
+                use sync::commands as sc;
+                let device = plex.identity().client_id.clone();
+                let store = sync_store.clone();
+                let remote = app.state::<remote::RemoteService>().inner().clone();
+                let switches = remote.switches().clone();
+                let engine = sync::engine::SyncEngine::new(
+                    store.clone(),
+                    Arc::new(sc::RemoteTag(remote.clone())),
+                    live.sync.subscribe(),
+                    Arc::new(move || switches.computer_name()),
+                    Default::default(),
+                );
+                engine.set_events(Arc::new(app.handle().clone()));
+                let vault: Arc<dyn sync::keycopy::KeyVault> = Arc::new(sc::AppVault {
+                    app: app.handle().clone(),
+                    keychain: Arc::new(plex::keychain::KeyringStore::new()),
+                });
+                let keys = sync::keycopy::KeyReceiver::new(device, vault.clone(), Arc::new(sync::store::system_ms));
+                keys.set_events(Arc::new(app.handle().clone()));
+                // Key copy answers on the control port, beside listening sessions.
+                {
+                    use remote::peer::keys::{KeyCopyRoutes, RouteList};
+                    use remote::peer::server::ExtraRoutes;
+                    let copy: Arc<dyn ExtraRoutes> = Arc::new(KeyCopyRoutes::new(
+                        plex.identity().client_id.clone(),
+                        Arc::new(remote::peer::server::EnvKey(remote.env())),
+                        Arc::new(keys.clone()),
+                    ));
+                    let slot = remote.extra_routes();
+                    let mut routes = vec![copy];
+                    routes.extend(slot.read().clone());
+                    *slot.write() = Some(Arc::new(RouteList(routes)));
+                }
+                sc::spawn_listener(
+                    store.clone(),
+                    sc::Appliers {
+                        app: app.handle().clone(),
+                        settings: app_settings.clone(),
+                        player: player.clone(),
+                        downloads: downloads.clone(),
+                        mixes: mix_service.clone(),
+                        db: db.clone(),
+                    },
+                );
+                {
+                    let (store, settings, db, engine) = (store.clone(), app_settings.clone(), db.clone(), engine.clone());
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = settings.attach_sync(store.clone()).await {
+                            tracing::warn!("synced settings not set up: {e}");
+                        }
+                        if let Err(e) = store.run(move |s| sync::lyrics::seed(s, &db)).await {
+                            tracing::warn!("lyrics not added to the sync store: {e}");
+                        }
+                        engine.run().await;
+                    });
+                }
+                app.manage(sc::SyncService { store, engine, keys, vault });
+            }
 
             plex.start(app.handle().clone());
             watch_library(plex.clone(), db.clone());
@@ -610,6 +682,26 @@ pub fn run() {
             social::commands::listen_stop,
             social::commands::listen_join,
             social::commands::listen_add,
+            sync::commands::sync_file_status,
+            sync::commands::sync_file_now,
+            sync::commands::sync_file_folders,
+            sync::commands::sync_file_use_folder,
+            sync::commands::sync_file_choose_folder,
+            sync::commands::sync_file_replace,
+            sync::commands::pins_get,
+            sync::commands::pins_toggle,
+            sync::commands::pins_import,
+            sync::commands::folders_get,
+            sync::commands::folder_create,
+            sync::commands::folder_rename,
+            sync::commands::folder_delete,
+            sync::commands::folder_move,
+            sync::commands::playlist_folder_set,
+            sync::commands::keys_available,
+            sync::commands::keys_receive_start,
+            sync::commands::keys_receive_state,
+            sync::commands::keys_receive_cancel,
+            sync::commands::keys_send,
         ])
         .on_window_event(|window, event| {
             // Back from System Settings: pick up Local Network access at once.

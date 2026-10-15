@@ -61,6 +61,11 @@ md-5 = "0.10.6"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 sha2 = "0.10"
+# Copying keys between devices: a password-authenticated key exchange over
+# the 6-digit code, then the keys sealed with an AEAD, and the code as a QR.
+spake2 = "0.4.0"
+chacha20poly1305 = "0.11.0"
+qrcode = { version = "0.14.1", default-features = false }
 # On-device lyrics transcription (the `transcribe` feature). Builds whisper.cpp
 # from source, so it needs CMake and a C++ compiler.
 whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend"] }

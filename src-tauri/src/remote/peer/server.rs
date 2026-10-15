@@ -75,11 +75,11 @@ pub struct PeerServer {
     extra: ExtraSlot,
 }
 
-fn json_err(code: &str, message: &str) -> String {
+pub(crate) fn json_err(code: &str, message: &str) -> String {
     serde_json::json!({ "error": code, "message": message }).to_string()
 }
 
-fn refused(r: Refused) -> (u16, String) {
+pub(crate) fn refused(r: Refused) -> (u16, String) {
     let (code, msg) = match r {
         Refused::Missing => ("unsigned", "Only your own Platter devices can control this one."),
         Refused::BadSignature => ("notYourAccount", "That device isn't signed in to the same Plex account."),
@@ -90,7 +90,7 @@ fn refused(r: Refused) -> (u16, String) {
     (401, json_err(code, msg))
 }
 
-fn app_err(e: AppError) -> (u16, String) {
+pub(crate) fn app_err(e: AppError) -> (u16, String) {
     let status = match &e {
         AppError::NotFound(_) => 404,
         AppError::Invalid(_) => 409,

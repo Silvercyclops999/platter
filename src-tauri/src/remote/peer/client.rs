@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use url::Url;
 
 use super::auth::{AUTH_HEADER, PeerKey, nonce, now_ms, sign};
+use super::keys::{KeysDeliver, KeysHello, KeysHelloReply, KeysWaiting, PATH_KEYS_DELIVER, PATH_KEYS_HELLO, PATH_KEYS_WAITING};
 use super::{Hello, PATH_COMMAND, PATH_HELLO, PATH_PLAY, PATH_STATE, PATH_STOP, PeerTimeline, PlayRequest};
 use crate::error::{AppError, AppResult};
 use crate::remote::companion::Timeline;
@@ -50,6 +51,11 @@ pub struct PeerClient {
 impl PeerClient {
     pub fn new(http: reqwest::Client, own_id: String, key: PeerKey) -> Self {
         Self { http, own_id, key }
+    }
+
+    /// This computer's device id.
+    pub fn own_id(&self) -> &str {
+        &self.own_id
     }
 
     async fn call<T: DeserializeOwned>(
@@ -126,6 +132,19 @@ impl PeerClient {
 
     pub async fn stop(&self, base: &Url, to: &str, timeout: Duration) -> Result<(), PeerError> {
         self.call::<serde_json::Value>(base, to, PATH_STOP, Some(b"{}".to_vec()), timeout).await.map(|_| ())
+    }
+
+    /// Whether the device is showing a code to copy keys to it.
+    pub async fn keys_waiting(&self, base: &Url, to: &str, timeout: Duration) -> Result<bool, PeerError> {
+        self.call::<KeysWaiting>(base, to, PATH_KEYS_WAITING, None, timeout).await.map(|w| w.waiting)
+    }
+
+    pub async fn keys_hello(&self, base: &Url, to: &str, req: &KeysHello, timeout: Duration) -> Result<KeysHelloReply, PeerError> {
+        self.call(base, to, PATH_KEYS_HELLO, Some(Self::json(req)), timeout).await
+    }
+
+    pub async fn keys_deliver(&self, base: &Url, to: &str, req: &KeysDeliver, timeout: Duration) -> Result<(), PeerError> {
+        self.call::<serde_json::Value>(base, to, PATH_KEYS_DELIVER, Some(Self::json(req)), timeout).await.map(|_| ())
     }
 }
 

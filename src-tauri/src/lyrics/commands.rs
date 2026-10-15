@@ -32,13 +32,32 @@ pub async fn lyrics_own_get(lyrics: State<'_, LyricsService>, track_id: String) 
 }
 
 #[tauri::command]
-pub async fn lyrics_own_save(lyrics: State<'_, LyricsService>, track_id: String, text: String, prefer: bool) -> AppResult<()> {
-    lyrics.save_own(&track_id, &text, prefer).await
+pub async fn lyrics_own_save(
+    lyrics: State<'_, LyricsService>,
+    sync: State<'_, crate::sync::commands::SyncService>,
+    track_id: String,
+    text: String,
+    prefer: bool,
+) -> AppResult<()> {
+    lyrics.save_own(&track_id, &text, prefer).await?;
+    // What was stored (cleaned), so other devices get the same text.
+    if let Some(own) = lyrics.own(&track_id).await? {
+        sync.store
+            .run(move |s| crate::sync::lyrics::saved(s, &own.track_id, &own.text, own.prefer))
+            .await?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn lyrics_own_delete(lyrics: State<'_, LyricsService>, track_id: String) -> AppResult<bool> {
-    lyrics.delete_own(&track_id).await
+pub async fn lyrics_own_delete(
+    lyrics: State<'_, LyricsService>,
+    sync: State<'_, crate::sync::commands::SyncService>,
+    track_id: String,
+) -> AppResult<bool> {
+    let gone = lyrics.delete_own(&track_id).await?;
+    sync.store.run(move |s| crate::sync::lyrics::deleted(s, &track_id)).await?;
+    Ok(gone)
 }
 
 #[tauri::command]
