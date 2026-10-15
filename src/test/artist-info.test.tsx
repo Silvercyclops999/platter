@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS, type ArtistInfo } from "../lib/types";
 import { ArtistPage } from "../pages/ArtistPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { keyNote } from "../pages/ArtistInfoSettings";
-import { aboutFacts, aboutText, artistSections, bannerPath, bioParagraphs, bioSegments, galleryPaths, headerVariant, listenersLine, NO_BIO, photoPath } from "../pages/artist";
+import { aboutFacts, aboutText, artistSections, bannerPath, bioParagraphs, bioSegments, galleryPaths, headerVariant, listenersLine, NO_BIO, photoPath, relatedGroups } from "../pages/artist";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -39,6 +39,8 @@ describe("artist info decisions", () => {
     tags: [],
     listeners: null,
     scrobbles: null,
+    listenersFrom: null,
+    related: [],
     photo: null,
     banner: null,
     logo: null,
@@ -67,6 +69,12 @@ describe("artist info decisions", () => {
   it("formats the listener line and splits paragraphs", () => {
     expect(listenersLine(48210)).toBe("48,210 listeners on Last.fm");
     expect(listenersLine(1)).toBe("1 listener on Last.fm");
+    expect(listenersLine(812, "listenbrainz")).toBe("812 listeners on ListenBrainz");
+    expect(relatedGroups([
+      { name: "A", artistId: null, relation: "Subgroup" },
+      { name: "B", artistId: "2", relation: "Member of" },
+      { name: "C", artistId: null, relation: "Subgroup" },
+    ]).map(([rel, people]) => [rel, people.map((p) => p.name)])).toEqual([["Subgroup", ["A", "C"]], ["Member of", ["B"]]]);
     expect(bioParagraphs("One.\n\nTwo.\nThree.")).toEqual(["One.", "Two.", "Three."]);
     expect(aboutFacts(info({ origin: "Town", yearsActive: "1990–present" }))).toEqual([
       { label: "From", value: "Town" },
@@ -125,8 +133,8 @@ describe("artist page with outside info", () => {
     render(<ArtistPage id={a.id} />);
     const card = await screen.findByRole("button", { name: `About ${a.title}` });
     expect(within(card).getByText(new RegExp(`^${a.title} is a music act formed in`))).toHaveClass("is-clamped");
-    // Without Last.fm, the stats line is the plays in the library.
-    expect(within(card).getByText(/plays in your library$/)).toHaveClass("about-card__stats");
+    // Without Last.fm, the stats line is ListenBrainz's listeners.
+    expect(within(card).getByText(/listeners on ListenBrainz$/)).toHaveClass("about-card__stats");
 
     await user.click(card);
     const dialog = screen.getByRole("dialog", { name: `About ${a.title}` });
@@ -243,7 +251,7 @@ describe("artist page with outside info", () => {
 
   it("each source off hides its data and credits", async () => {
     await turnOn("lastfm");
-    await backend.settingsSet({ infoWikipedia: false, infoLastfm: false });
+    await backend.settingsSet({ infoWikipedia: false, infoLastfm: false, infoMusicbrainz: false, infoListenbrainzStats: false });
     await loadSettings();
     const a = artistAt(2);
     render(<ArtistPage id={a.id} />);
@@ -251,7 +259,45 @@ describe("artist page with outside info", () => {
     // No Plex bio, no outside sources: the card stays, saying so.
     const card = await screen.findByRole("button", { name: `About ${a.title}` });
     expect(within(card).getByText(NO_BIO)).toBeInTheDocument();
-    expect(screen.queryByText(/listeners on Last\.fm$/)).toBeNull();
+    expect(screen.queryByText(/listeners on/)).toBeNull();
+    // Nothing on: the stats line is the plays in the library.
+    expect(within(card).getByText(/plays? in your library$/)).toHaveClass("about-card__stats");
+  });
+
+  it("MusicBrainz members carry their years, related acts link, ListenBrainz fills the listener line", async () => {
+    const user = userEvent.setup();
+    const a = artistAt(2);
+    render(<ArtistPage id={a.id} />);
+    expect(await screen.findAllByText(/listeners on ListenBrainz$/)).toHaveLength(2); // header and About card
+    await user.click(screen.getByRole("button", { name: `About ${a.title}` }));
+    const dialog = screen.getByRole("dialog", { name: `About ${a.title}` });
+    const side = within(dialog).getByRole("complementary", { name: "Stats and links" });
+    expect(within(side).getByText("listeners on ListenBrainz")).toBeInTheDocument();
+    expect(side.querySelectorAll(".about-members__years").length).toBeGreaterThan(0);
+    expect(within(side).getByText("Subgroup")).toBeInTheDocument();
+    const sources = within(dialog).getByRole("list", { name: "Sources" });
+    expect(within(sources).getByRole("button", { name: "Members and relationships from MusicBrainz" })).toBeInTheDocument();
+    expect(within(sources).getByRole("button", { name: "Listener numbers from ListenBrainz" })).toBeInTheDocument();
+    // A related act in the library links to its page.
+    const info = await backend.artistInfo(a.id);
+    const kin = info.related.find((r) => r.artistId)!;
+    await user.click(within(side).getByRole("button", { name: kin.name }));
+    const r = useRouter.getState();
+    expect(r.entries[r.index].route).toEqual({ name: "artist", id: kin.artistId });
+  });
+
+  it("the MusicBrainz and ListenBrainz stats switches are on by default and synced", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    const mb = await within(row("infoMusicbrainz")).findByRole("switch", { name: "MusicBrainz" });
+    const lb = within(row("infoListenbrainzStats")).getByRole("switch", { name: "ListenBrainz (listener numbers)" });
+    expect(mb).toBeChecked();
+    expect(lb).toBeChecked();
+    await user.click(mb);
+    await user.click(lb);
+    expect(useSettings.getState().settings?.infoMusicbrainz).toBe(false);
+    expect(useSettings.getState().settings?.infoListenbrainzStats).toBe(false);
+    expect((await backend.albumCredits(mock.fx.albums[0].id)).state).toBe("off");
   });
 
   it("uses the Fanart.tv banner only when Plex has no background art", async () => {

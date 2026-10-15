@@ -1,6 +1,6 @@
 /** Artist page decisions, kept apart from the component so they can be tested. */
 import { SECTION_LABELS } from "../lib/format";
-import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, BioLink, ReleaseSection } from "../lib/types";
+import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, BioLink, InfoRelated, ReleaseSection } from "../lib/types";
 
 /** Popular songs shown at first, and after "See more". */
 export const POPULAR_FIRST = 5;
@@ -34,9 +34,14 @@ export function aboutText(plex: string | null, info?: Pick<ArtistInfo, "bio"> | 
   return (info?.bio ?? plex)?.trim() || null;
 }
 
-/** "48,210 listeners on Last.fm". */
-export function listenersLine(listeners: number): string {
-  return `${listeners.toLocaleString("en-US")} ${listeners === 1 ? "listener" : "listeners"} on Last.fm`;
+/** Display name of where listener numbers come from. */
+export function listenersSource(from: ArtistInfo["listenersFrom"] | undefined): string {
+  return from === "listenbrainz" ? "ListenBrainz" : "Last.fm";
+}
+
+/** "48,210 listeners on Last.fm" (or on ListenBrainz when Last.fm has none). */
+export function listenersLine(listeners: number, from?: ArtistInfo["listenersFrom"]): string {
+  return `${listeners.toLocaleString("en-US")} ${listeners === 1 ? "listener" : "listeners"} on ${listenersSource(from)}`;
 }
 
 /** Bio paragraphs, for the About dialog. */
@@ -53,6 +58,17 @@ export function aboutFacts(info: Pick<ArtistInfo, "origin" | "yearsActive"> | nu
   if (info?.origin) out.push({ label: "From", value: info.origin });
   if (info?.yearsActive) out.push({ label: "Years active", value: info.yearsActive });
   return out;
+}
+
+/** Related artists grouped by relation ("Member of", "Collaboration"), in first-seen order. */
+export function relatedGroups(related: InfoRelated[]): [string, InfoRelated[]][] {
+  const groups = new Map<string, InfoRelated[]>();
+  for (const r of related) {
+    const g = groups.get(r.relation);
+    if (g) g.push(r);
+    else groups.set(r.relation, [r]);
+  }
+  return [...groups];
 }
 
 export type DiscographyFilter = "popular" | ReleaseSection;

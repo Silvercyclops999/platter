@@ -1,5 +1,5 @@
 /** Album page logic: disc groups, the footer lines and the saved view. */
-import type { Track } from "../lib/types";
+import type { AlbumCreditRow, AlbumCredits, Track } from "../lib/types";
 
 export interface DiscGroup {
   /** null when the album has one disc: no separator row. */
@@ -31,6 +31,33 @@ export function formatReleaseDate(released: string | null | undefined, locale?: 
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
   if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
   return new Date(Date.UTC(y, mo - 1, d)).toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+}
+
+/**
+ * The release date to show: MusicBrainz's original date when it has the full
+ * day, else Plex's.
+ */
+export function releaseDateFor(plex: string | null | undefined, mb: Pick<AlbumCredits, "released"> | null | undefined): string | null {
+  return mb?.released && formatReleaseDate(mb.released) ? mb.released : (plex ?? null);
+}
+
+/** Album credit roles in the order they're listed, with their headings. */
+export const CREDIT_ROLES: { role: string; label: string }[] = [
+  { role: "producer", label: "Produced by" },
+  { role: "writer", label: "Written by" },
+  { role: "composer", label: "Composed by" },
+  { role: "lyricist", label: "Lyrics by" },
+  { role: "mixer", label: "Mixed by" },
+  { role: "engineer", label: "Engineered by" },
+  { role: "mastering", label: "Mastered by" },
+];
+
+/** Album credits grouped by role, people in the core's order. Featured artists stay with their songs. */
+export function albumCreditGroups(c: Pick<AlbumCredits, "credits" | "state">): { role: string; label: string; people: AlbumCreditRow[] }[] {
+  if (c.state !== "found") return [];
+  return CREDIT_ROLES.map(({ role, label }) => ({ role, label, people: c.credits.filter((p) => p.roles.includes(role)) })).filter(
+    (g) => g.people.length > 0,
+  );
 }
 
 /** The label line under the release date: "© 2013 Label", or null without a label. */

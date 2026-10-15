@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { artUrl, backend } from "../lib/backend";
 import { headerColorsFromImageUrl, type HeaderColors } from "../lib/color";
 import { creditKey, type ArtistLookup, type Credit } from "../lib/credits";
-import type { Contributor, CreditRole, NowPlayingDetails, QueueContextInfo, QueueItem, QueueView } from "../lib/types";
+import type { AlbumCreditRow, Contributor, CreditRole, NowPlayingDetails, QueueContextInfo, QueueItem, QueueView } from "../lib/types";
 import type { Route } from "../stores/router";
 
 // ---------------------------------------------------------------- details
@@ -87,6 +87,40 @@ export function buildCredits(trackCredits: Credit[], extra: Contributor[], looku
     }
   }
   return rows;
+}
+
+/** Labels for MusicBrainz credit roles. */
+export const MB_ROLE_LABEL: Record<string, string> = {
+  producer: "Producer",
+  writer: "Writer",
+  composer: "Composer",
+  lyricist: "Lyricist",
+  featured: "Featured",
+  mixer: "Mixing",
+  engineer: "Engineer",
+  mastering: "Mastering",
+};
+
+/**
+ * Add a song's MusicBrainz credits to the card's rows, merged by name. A
+ * featured artist already in the artist line keeps just that row.
+ */
+export function withAlbumCredits(rows: CreditRow[], extra: AlbumCreditRow[] | undefined): CreditRow[] {
+  if (!extra?.length) return rows;
+  const out = rows.map((r) => ({ ...r, roles: [...r.roles] }));
+  for (const c of extra) {
+    const key = creditKey(c.name);
+    if (!key) continue;
+    let row = out.find((r) => creditKey(r.name) === key);
+    const roles = c.roles.filter((r) => !(row && r === "featured")).map((r) => MB_ROLE_LABEL[r] ?? r);
+    if (!roles.length) continue;
+    if (!row) {
+      row = { name: c.name.trim(), id: c.artistId, roles: [] };
+      out.push(row);
+    }
+    for (const label of roles) if (!row.roles.includes(label)) row.roles.push(label);
+  }
+  return out;
 }
 
 /** The card is only worth showing when it says more than the artist line does. */

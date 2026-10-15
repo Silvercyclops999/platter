@@ -27,3 +27,11 @@
 .album-footer { margin-top: var(--space-6); padding: 0 var(--space-4); color: var(--color-text-secondary); }
 .album-footer__date { font-size: var(--font-size-md); }
 .album-footer__label { margin-top: var(--space-1); font-size: var(--font-size-xs); }
+.album-credits { margin-top: var(--space-8); padding: 0 var(--space-4); }
+.album-credits__list { display: grid; gap: var(--space-3); margin: var(--space-4) 0 0; }
+.album-credits__row { display: grid; grid-template-columns: minmax(120px, 160px) 1fr; gap: var(--space-4); align-items: baseline; }
+.album-credits__row dt { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.album-credits__row dd { margin: 0; min-width: 0; }
+.album-credits__people { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin: 0; padding: 0; list-style: none; font-size: var(--font-size-sm); }
+.album-credits__people li:not(:last-child)::after { content: ","; color: var(--color-text-secondary); }
+.album-credits__source { margin-top: var(--space-4); font-size: var(--font-size-xs); color: var(--color-text-secondary); }

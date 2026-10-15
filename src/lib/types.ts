@@ -613,6 +613,10 @@ export interface Settings {
   infoAudiodb: boolean;
   /** Popular songs from ListenBrainz (a token is optional). */
   infoListenbrainz: boolean;
+  /** MusicBrainz: album dates and credits, members with years, related artists. */
+  infoMusicbrainz: boolean;
+  /** ListenBrainz listener numbers when Last.fm has none. */
+  infoListenbrainzStats: boolean;
   /** Every name in a track's artist line links to a page, featured artists included. */
   linkFeatured: boolean;
   /** Which star ratings count as liked. Liking always writes five stars. */
@@ -900,6 +904,8 @@ export const DEFAULT_SETTINGS: Settings = {
   infoFanart: false,
   infoAudiodb: false,
   infoListenbrainz: true,
+  infoMusicbrainz: true,
+  infoListenbrainzStats: true,
   linkFeatured: true,
   likedMeans: "five",
   likeControlRows: "hover",
@@ -1558,11 +1564,21 @@ export interface InfoMember {
   name: string;
   /** Set when the member is an artist in this library. */
   artistId: string | null;
+  /** "1991–present", "1991–2004" (MusicBrainz), when known. */
+  years?: string;
+}
+
+/** Another artist this one is related to (MusicBrainz). */
+export interface InfoRelated {
+  name: string;
+  artistId: string | null;
+  /** "Member of", "Subgroup", "Collaboration", "Formerly", and so on. */
+  relation: string;
 }
 
 /** A "where this came from" line in the About dialog. */
 export interface InfoCredit {
-  source: "wikipedia" | "wikidata" | "lastfm" | "fanart" | "audiodb";
+  source: "wikipedia" | "wikidata" | "lastfm" | "fanart" | "audiodb" | "musicbrainz" | "listenbrainz";
   text: string;
   url: string | null;
   licence: string | null;
@@ -1578,9 +1594,13 @@ export interface ArtistInfo {
   yearsActive: string | null;
   members: InfoMember[];
   tags: string[];
-  /** Last.fm listeners and plays. */
+  /** Last.fm listeners and plays, else ListenBrainz's. */
   listeners: number | null;
   scrobbles: number | null;
+  /** Where the listener numbers come from. */
+  listenersFrom: "lastfm" | "listenbrainz" | null;
+  /** Other artists this one is related to (MusicBrainz). */
+  related: InfoRelated[];
   /** Art path for a photo, only when Plex has none. */
   photo: string | null;
   /** Art path for the header banner, only when Plex has no background art. */
@@ -1593,6 +1613,33 @@ export interface ArtistInfo {
   links: InfoLink[];
   /** Library artists the bio names, as written there. */
   bioLinks: BioLink[];
+}
+
+/** One person credited on an album or a song (MusicBrainz). */
+export interface AlbumCreditRow {
+  name: string;
+  /** A library artist with this name. */
+  artistId: string | null;
+  /** "producer", "writer", "composer", "lyricist", "featured", "mixer", "engineer", "mastering". */
+  roles: string[];
+}
+
+/** An album's original release date, label and credits from MusicBrainz. */
+export interface AlbumCredits {
+  albumId: string;
+  /** off: the setting is off. pending: being looked up (`albumcredits://changed` follows). none: no sure match. */
+  state: "off" | "pending" | "none" | "found";
+  /** The original release date ("1997-05-21", "1997-05" or "1997"). */
+  released: string | null;
+  /** This edition's date, when it differs from the original. */
+  editionDate: string | null;
+  label: string | null;
+  /** Everyone credited on the album (featured artists stay with their songs). */
+  credits: AlbumCreditRow[];
+  /** Per-song credits for the songs that matched the library. */
+  tracks: { trackId: string; credits: AlbumCreditRow[] }[];
+  /** The release on musicbrainz.org. */
+  url: string | null;
 }
 
 export interface InfoLink {
@@ -1728,6 +1775,8 @@ export interface EventMap {
   "artistinfo://changed": { id: string };
   /** A fetch of the global Popular list finished, found or not. */
   "artistinfo://popular": { id: string };
+  /** An album's MusicBrainz credits were looked up (found or not). */
+  "albumcredits://changed": { id: string };
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

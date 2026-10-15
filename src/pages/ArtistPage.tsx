@@ -105,7 +105,7 @@ function ArtistView({ id }: { id: string }) {
       </h1>
       <div className="detail-header__meta">
         <span>{playsLine(data!.plays)}</span>
-        {info?.listeners != null && <span className="artist-listeners">{listenersLine(info.listeners)}</span>}
+        {info?.listeners != null && <span className="artist-listeners">{listenersLine(info.listeners, info.listenersFrom)}</span>}
       </div>
     </>
   ) : (

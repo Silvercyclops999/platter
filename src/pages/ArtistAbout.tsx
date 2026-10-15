@@ -8,7 +8,7 @@ import type { Artist, ArtistInfo, InfoCredit, InfoLink } from "../lib/types";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
-import { aboutFacts, bigNumber, bioParagraphs, bioSegments, galleryPaths, listenersLine, NO_BIO, photoPath, playsLine } from "./artist";
+import { aboutFacts, bigNumber, bioParagraphs, bioSegments, galleryPaths, listenersLine, listenersSource, NO_BIO, photoPath, playsLine, relatedGroups } from "./artist";
 import "./artist-about.css";
 
 /**
@@ -19,7 +19,7 @@ import "./artist-about.css";
 export function useArtistInfo(id: string): ArtistInfo | null {
   const [info, setInfo] = useState<ArtistInfo | null>(null);
   const switches = useSettings((s) =>
-    s.settings ? [s.settings.infoWikipedia, s.settings.infoLastfm, s.settings.infoFanart, s.settings.infoAudiodb].join() : "",
+    s.settings ? [s.settings.infoWikipedia, s.settings.infoLastfm, s.settings.infoFanart, s.settings.infoAudiodb, s.settings.infoMusicbrainz, s.settings.infoListenbrainzStats].join() : "",
   );
   useEffect(() => {
     let alive = true;
@@ -53,7 +53,7 @@ export function AboutCard({ artist, about, plays, info }: { artist: Artist; abou
   const [open, setOpen] = useState(false);
   const headingId = useId();
   const photo = photoPath(artist, info);
-  const stats = info?.listeners != null ? listenersLine(info.listeners) : playsLine(plays);
+  const stats = info?.listeners != null ? listenersLine(info.listeners, info.listenersFrom) : playsLine(plays);
   return (
     <section className="detail-section artist-about" aria-labelledby={headingId}>
       <h2 id={headingId} className="section-title">
@@ -198,6 +198,8 @@ export function AboutDialog({
   const titleId = useId();
   const facts = aboutFacts(info);
   const members = info?.members ?? [];
+  const related = info?.related ?? [];
+  const where = listenersSource(info?.listenersFrom);
   const tags = info?.tags ?? [];
   const credits = info?.credits ?? [];
   const links: InfoLink[] = info?.links ?? [];
@@ -228,11 +230,11 @@ export function AboutDialog({
 
         <div className="about-dialog__cols">
           <aside className="about-side" aria-label="Stats and links">
-            {info?.listeners != null && <Stat value={bigNumber(info.listeners)} label={info.listeners === 1 ? "listener on Last.fm" : "listeners on Last.fm"} />}
-            {info?.scrobbles != null && <Stat value={bigNumber(info.scrobbles)} label="plays on Last.fm" />}
+            {info?.listeners != null && <Stat value={bigNumber(info.listeners)} label={`${info.listeners === 1 ? "listener" : "listeners"} on ${where}`} />}
+            {info?.scrobbles != null && <Stat value={bigNumber(info.scrobbles)} label={`plays on ${where}`} />}
             <Stat value={bigNumber(plays)} label={plays === 1 ? "play in your library" : "plays in your library"} />
 
-            {(facts.length > 0 || members.length > 0) && (
+            {(facts.length > 0 || members.length > 0 || related.length > 0) && (
               <dl className="about-facts">
                 {facts.map((f) => (
                   <div key={f.label} className="about-facts__row">
@@ -254,12 +256,33 @@ export function AboutDialog({
                             ) : (
                               m.name
                             )}
+                            {m.years && <span className="about-members__years"> {m.years}</span>}
                           </li>
                         ))}
                       </ul>
                     </dd>
                   </div>
                 )}
+                {relatedGroups(related).map(([relation, people]) => (
+                  <div key={relation} className="about-facts__row">
+                    <dt>{relation}</dt>
+                    <dd>
+                      <ul className="about-members">
+                        {people.map((r) => (
+                          <li key={r.name}>
+                            {r.artistId ? (
+                              <button type="button" className="about-link about-link--plain" onClick={() => go(r.artistId!)}>
+                                {r.name}
+                              </button>
+                            ) : (
+                              r.name
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                ))}
               </dl>
             )}
 

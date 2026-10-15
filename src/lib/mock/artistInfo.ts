@@ -5,7 +5,7 @@
  * what's shown) so the About card and dialog can be checked in a browser.
  * Nothing here comes from a real service.
  */
-import type { Artist, ArtistInfo, BioLink, InfoCredit, InfoKeyState, InfoKeysStatus, InfoLink, KeyedInfoSource, Settings } from "../types";
+import type { Artist, ArtistInfo, BioLink, InfoCredit, InfoKeyState, InfoKeysStatus, InfoLink, InfoMember, InfoRelated, KeyedInfoSource, Settings } from "../types";
 
 const TOWNS = ["Harbourside", "Millbrook", "North Fenwick", "Calder Vale", "Port Ellery", "Ashgrove"];
 const GENRE_TAGS = [
@@ -80,6 +80,8 @@ export function mockArtistInfo(
   const lastfmOn = fetched && usable(keys, "lastfm", settings.infoLastfm);
   const fanartOn = fetched && usable(keys, "fanart", settings.infoFanart);
   const audiodbOn = fetched && usable(keys, "audiodb", settings.infoAudiodb);
+  const mbOn = fetched && settings.infoMusicbrainz;
+  const lbStatsOn = fetched && settings.infoListenbrainzStats;
 
   // Every fourth artist isn't on Wikipedia at all.
   const onWiki = idx % 4 !== 3;
@@ -93,14 +95,30 @@ export function mockArtistInfo(
   const friend = library[(idx + 5) % library.length];
   const friendName = friend && friend.id !== artist.id ? friend.title : null;
   const wikiBio = wikiOn && onWiki ? longBio(artist.title, idx, town, start, friendName) : null;
-  const members =
-    wikiOn && onWiki && isBand
+  // MusicBrainz members carry their years and go first; Wikidata's have none.
+  const mbMembers = mbOn && onWiki && isBand;
+  const members: InfoMember[] =
+    (wikiOn || mbMembers) && onWiki && isBand
       ? [
-          { name: `${FIRST[idx % FIRST.length]} ${LAST[idx % LAST.length]}`, artistId: null },
-          { name: `${FIRST[(idx + 3) % FIRST.length]} ${LAST[(idx + 2) % LAST.length]}`, artistId: null },
-          ...(idx % 2 === 0 && other && other.id !== artist.id ? [{ name: other.title, artistId: other.id }] : []),
+          { name: `${FIRST[idx % FIRST.length]} ${LAST[idx % LAST.length]}`, artistId: null, ...(mbMembers ? { years: `${start}–present` } : {}) },
+          {
+            name: `${FIRST[(idx + 3) % FIRST.length]} ${LAST[(idx + 2) % LAST.length]}`,
+            artistId: null,
+            ...(mbMembers ? { years: `${start}–${start + 6}` } : {}),
+          },
+          ...(idx % 2 === 0 && other && other.id !== artist.id ? [{ name: other.title, artistId: other.id, ...(mbMembers ? { years: `${start + 4}–present` } : {}) }] : []),
         ]
       : [];
+  // Related acts: another library artist (not one the bio or members name), and one outside it.
+  const kin = library[(idx + 7) % library.length];
+  const related: InfoRelated[] = mbOn
+    ? [
+        ...(kin && kin.id !== artist.id && kin.id !== other?.id && kin.id !== friend?.id
+          ? [{ name: kin.title, artistId: kin.id, relation: isBand ? "Collaboration" : "Member of" }]
+          : []),
+        { name: `${artist.title} Ensemble`, artistId: null, relation: "Subgroup" },
+      ]
+    : [];
   const lastfmBio = lastfmOn ? `${artist.title} is an act from ${town}. Their music is often described as warm and unhurried.` : null;
   const audiodbBio = audiodbOn ? `${artist.title} formed in ${town}. A short bio from a fan-made database.` : null;
 
@@ -125,7 +143,9 @@ export function mockArtistInfo(
   const slug = encodeURIComponent(artist.title.replace(/ /g, "_"));
   const origin = wikiOn && onWiki ? town : null;
   const yearsActive = wikiOn && onWiki ? (ended ? `${start}–${ended}` : `${start}–present`) : null;
-  const listeners = lastfmOn ? 1200 + ((idx * 7919) % 480_000) : null;
+  // Last.fm's numbers, else ListenBrainz's (smaller: fewer people use it).
+  const listenersFrom: ArtistInfo["listenersFrom"] = lastfmOn ? "lastfm" : lbStatsOn && onWiki ? "listenbrainz" : null;
+  const listeners = lastfmOn ? 1200 + ((idx * 7919) % 480_000) : listenersFrom ? 40 + ((idx * 613) % 9_000) : null;
   const tags = lastfmOn ? GENRE_TAGS[idx % GENRE_TAGS.length] : [];
   const banner = fanartOn && !artist.art ? `/ext/fanart/${artist.id}/artistbackground` : null;
   const photo = !artist.thumb && fanartOn ? `/ext/fanart/${artist.id}/artistthumb` : null;
@@ -156,7 +176,7 @@ export function mockArtistInfo(
       licence: "CC BY-SA 4.0",
       licenceUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     });
-  if (origin || yearsActive || members.length)
+  if (origin || yearsActive || (members.length && !mbMembers))
     credits.push({
       source: "wikidata",
       text: "Facts from Wikidata",
@@ -171,6 +191,22 @@ export function mockArtistInfo(
       url: `https://www.last.fm/music/${encodeURIComponent(artist.title)}`,
       licence: bioSource === "lastfm" ? "CC BY-SA" : null,
       licenceUrl: bioSource === "lastfm" ? "https://creativecommons.org/licenses/by-sa/3.0/" : null,
+    });
+  if (mbMembers || related.length)
+    credits.push({
+      source: "musicbrainz",
+      text: "Members and relationships from MusicBrainz",
+      url: `https://musicbrainz.org/artist/00000000-0000-4000-8000-${String(1000 + idx).padStart(12, "0")}`,
+      licence: "CC0",
+      licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
+    });
+  if (listenersFrom === "listenbrainz")
+    credits.push({
+      source: "listenbrainz",
+      text: "Listener numbers from ListenBrainz",
+      url: `https://listenbrainz.org/artist/00000000-0000-4000-8000-${String(1000 + idx).padStart(12, "0")}/`,
+      licence: "CC0",
+      licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
     });
   if (banner || photo || logo || (fanartOn && gallery.some((g) => g.startsWith("/ext/"))))
     credits.push({ source: "fanart", text: "Images from Fanart.tv", url: "https://fanart.tv", licence: null, licenceUrl: null });
@@ -187,6 +223,8 @@ export function mockArtistInfo(
     tags,
     listeners,
     scrobbles: listeners ? listeners * 23 : null,
+    listenersFrom,
+    related,
     photo,
     banner,
     logo,

@@ -1177,6 +1177,22 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "infoListenbrainz", ids),
     },
     {
+      key: "infoMusicbrainz",
+      section: "Integrations",
+      group: "Artist info",
+      title: "MusicBrainz",
+      description: "Exact release dates and credits (producers, writers, featured artists) on album pages and in song credits, plus band members with their years and related artists. Only the album's or artist's MusicBrainz id, or their names, are sent.",
+      control: (ids) => toggle(s, "infoMusicbrainz", ids),
+    },
+    {
+      key: "infoListenbrainzStats",
+      section: "Integrations",
+      group: "Artist info",
+      title: "ListenBrainz (listener numbers)",
+      description: "Shows how many people listen to an artist on ListenBrainz when Last.fm is off or has no numbers. Only the artist's MusicBrainz id is sent.",
+      control: (ids) => toggle(s, "infoListenbrainzStats", ids),
+    },
+    {
       key: "infoListenbrainzToken",
       section: "Integrations",
       group: "Artist info",

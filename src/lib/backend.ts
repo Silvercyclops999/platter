@@ -28,6 +28,7 @@ import type {
   Artist,
   ArtistName,
   ArtistInfo,
+  AlbumCredits,
   ArtistPage,
   ArtistsArgs,
   AuthStatus,
@@ -286,6 +287,8 @@ export interface Backend {
   // Artist info (outside sources)
   /** Outside info for an artist; `artistinfo://changed` fires when more arrives. */
   artistInfo(id: string): Promise<ArtistInfo>;
+  /** An album's MusicBrainz date and credits; `albumcredits://changed` fires when a lookup finishes. */
+  albumCredits(id: string): Promise<AlbumCredits>;
   artistInfoKeys(): Promise<InfoKeysStatus>;
   /** Save a source's key in the keychain (null removes it); answers whether it was refused. */
   artistInfoKeySet(source: KeyedInfoSource, key: string | null): Promise<InfoKeyState>;
@@ -591,6 +594,7 @@ export function createTauriBackend(): Backend {
     updateCheck: () => call("update_check"),
     updateInstallOnRestart: () => call("update_install_on_restart"),
     artistInfo: (id) => call("artist_info", { id }),
+    albumCredits: (id) => call("album_credits", { id }),
     artistInfoKeys: () => call("artist_info_keys"),
     artistInfoKeySet: (source, key) => call("artist_info_key_set", { source, key }),
     artistInfoCacheClear: () => call("artist_info_cache_clear"),

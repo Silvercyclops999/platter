@@ -8,6 +8,7 @@ import { SaveButton } from "../components/SaveButton";
 import { trackMenuItems } from "../components/TrackRow";
 import { isOffline } from "../lib/offline";
 import type { NowPlayingDetails, Track } from "../lib/types";
+import { songCredits, useAlbumCredits } from "../lib/useAlbumCredits";
 import { useApp } from "../stores/app";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { player, usePlayer } from "../stores/player";
@@ -15,6 +16,7 @@ import { nav } from "../stores/router";
 import { useUi } from "../stores/ui";
 import {
   buildCredits,
+  withAlbumCredits,
   contextRoute,
   CREDITS_PREVIEW,
   creditsWorthShowing,
@@ -111,7 +113,8 @@ function CreditsCard({ track, details }: { track: Track; details: NowPlayingDeta
   const lookup = useApp((s) => s.artistLookup);
   const trackCredits = useTrackCredits(track);
   const [all, setAll] = useState(false);
-  const rows = buildCredits(trackCredits, details?.credits ?? [], lookup);
+  const album = useAlbumCredits(track.albumId);
+  const rows = withAlbumCredits(buildCredits(trackCredits, details?.credits ?? [], lookup), songCredits(album, track.id));
   if (!creditsWorthShowing(rows)) return null;
   const shown = all ? rows : rows.slice(0, CREDITS_PREVIEW);
   return (

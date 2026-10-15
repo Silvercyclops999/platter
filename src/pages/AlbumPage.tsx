@@ -15,17 +15,29 @@ import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { formatLongDuration, plural, releaseTypeLabel } from "../lib/format";
+import type { AlbumCredits } from "../lib/types";
+import { useAlbumCredits } from "../lib/useAlbumCredits";
 import { useLoad } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
-import { copyText } from "../stores/toasts";
+import { copyText, toast } from "../stores/toasts";
 import { transcribe, useTranscribe } from "../stores/transcribe";
 import { AlbumCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { EditionPicker } from "./EditionPicker";
-import { ALBUM_VIEW_LABEL, discGroups, formatReleaseDate, labelLine, loadAlbumView, saveAlbumView, type AlbumView } from "./album";
+import {
+  ALBUM_VIEW_LABEL,
+  albumCreditGroups,
+  discGroups,
+  formatReleaseDate,
+  labelLine,
+  loadAlbumView,
+  releaseDateFor,
+  saveAlbumView,
+  type AlbumView,
+} from "./album";
 import "./album.css";
 
 export function AlbumPage({ id }: { id: string }) {
@@ -38,6 +50,7 @@ export function AlbumPage({ id }: { id: string }) {
   const { isContext, playing: isThisPlaying } = useContextState("album", id);
   const pinned = usePins((s) => s.isPinned("album", id));
   const transcribeOn = useTranscribe((s) => !!s.status?.enabled && s.status.available);
+  const mb = useAlbumCredits(album ? id : null);
   const play = () => (isContext ? player.toggle() : player.playAlbum(id));
   usePageBar(album?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(album?.title);
@@ -225,7 +238,9 @@ export function AlbumPage({ id }: { id: string }) {
           </TrackList>
         </div>
 
-        {album && <AlbumFooter released={data!.released} studio={data!.studio} year={album.year} />}
+        {album && <AlbumFooter released={releaseDateFor(data!.released, mb)} studio={data!.studio || mb?.label} year={album.year} />}
+
+        {mb && <AlbumCreditsSection credits={mb} />}
 
         {album && data!.moreByArtist.length > 0 && (
           <div className="detail-more">
@@ -247,7 +262,56 @@ export function AlbumPage({ id }: { id: string }) {
   );
 }
 
-/** Under the tracklist: the full release date, then the label line. Hidden when Plex has neither. */
+/**
+ * Credits from MusicBrainz: each role once, with the people under it (library
+ * artists link to their page), and where the credits came from.
+ */
+function AlbumCreditsSection({ credits }: { credits: AlbumCredits }) {
+  const groups = albumCreditGroups(credits);
+  if (!groups.length) return null;
+  return (
+    <section className="album-credits" aria-labelledby="album-credits-title">
+      <h2 id="album-credits-title" className="section-title">
+        Credits
+      </h2>
+      <dl className="album-credits__list">
+        {groups.map((g) => (
+          <div key={g.role} className="album-credits__row">
+            <dt>{g.label}</dt>
+            <dd>
+              <ul className="album-credits__people">
+                {g.people.map((p) => (
+                  <li key={p.name}>
+                    {p.artistId ? (
+                      <button type="button" className="link" onClick={() => nav.go({ name: "artist", id: p.artistId! })}>
+                        {p.name}
+                      </button>
+                    ) : (
+                      p.name
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {credits.url && (
+        <p className="album-credits__source">
+          <button
+            type="button"
+            className="link"
+            onClick={() => void backend.openInfoLink(credits.url!).catch(() => toast.error("Couldn't open the browser"))}
+          >
+            Credits from MusicBrainz
+          </button>
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Under the tracklist: the full release date, then the label line. Hidden when there's neither. */
 function AlbumFooter({ released, studio, year }: { released?: string | null; studio?: string | null; year: number | null }) {
   const date = formatReleaseDate(released);
   const label = labelLine(studio, year);

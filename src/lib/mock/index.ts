@@ -87,6 +87,7 @@ import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mulberry32, ty
 import { mockBio } from "./bio";
 import { MOCK_CLOUD_FOLDERS, MockSync } from "./sync";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
+import { mockAlbumCredits } from "./albumCredits";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
 import * as eq from "./eq";
@@ -254,6 +255,7 @@ export class MockBackend implements Backend {
   /** Outside artist info: keys entered in Settings, and artists already "fetched". */
   private infoKeys: MockInfoKeys = { keys: {}, rejected: new Set() };
   private infoFetched = new Set<string>();
+  private albumCreditsFetched = new Set<string>();
   /** Artists whose global Popular list has "arrived" (browser timelines only). */
   private popularFetched = new Set<string>();
 
@@ -1993,6 +1995,8 @@ export class MockBackend implements Backend {
           tags: [],
           listeners: null,
           scrobbles: null,
+          listenersFrom: null,
+          related: [],
           photo: null,
           banner: null,
           logo: null,
@@ -2021,6 +2025,20 @@ export class MockBackend implements Backend {
       return mockArtistInfo(artist, idx, this.plexBio(idx, artist.title), this.fx.artists, this.settings, this.infoKeys, fetched);
     });
   }
+  albumCredits(id: string) {
+    return this.delay(() => {
+      const album = this.fx.albums.find((a) => a.id === id) ?? this.notFound("Album");
+      const tracks = this.fx.tracksByAlbum.get(id) ?? [];
+      const answer = mockAlbumCredits(album, tracks, this.fx.artists, this.settings.infoMusicbrainz);
+      // In the browser the first open is "pending", then the lookup lands, like the core.
+      if (answer.state === "found" && this.opts.timelines && !this.albumCreditsFetched.has(id)) {
+        this.albumCreditsFetched.add(id);
+        this.later(700, () => this.emit("albumcredits://changed", { id }));
+        return { ...answer, state: "pending" as const, released: null, editionDate: null, label: null, credits: [], tracks: [], url: null };
+      }
+      return answer;
+    });
+  }
   artistInfoKeys() {
     return this.delay(() => mockKeysStatus(this.infoKeys));
   }
@@ -2035,6 +2053,7 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       const n = this.infoFetched.size;
       this.infoFetched.clear();
+      this.albumCreditsFetched.clear();
       this.popularFetched.clear();
       return n;
     });

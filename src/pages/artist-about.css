@@ -172,6 +172,7 @@
 .about-members { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin: 0; padding: 0; list-style: none; }
 .about-members li { color: var(--color-text-secondary); }
 .about-members li:not(:last-child)::after { content: ","; color: var(--color-text-secondary); }
+.about-members__years { color: var(--color-text-muted); font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; }
 
 .about-tags { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
 .about-tags__tag {
