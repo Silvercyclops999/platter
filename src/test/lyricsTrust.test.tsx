@@ -109,7 +109,9 @@ describe("the check note", () => {
   });
 
   it("offers the speech model when lyrics can't be checked yet", async () => {
-    const download = vi.spyOn(backend, "transcribeModelDownload");
+    // Only the request matters here; a real mock download would send status
+    // updates that land after the "installed" state set below.
+    const download = vi.spyOn(backend, "transcribeModelDownload").mockResolvedValue(undefined);
     useTranscribe.setState({ status: status(false) });
     at(lines, 0);
     render(<LyricsPane />);
@@ -120,6 +122,7 @@ describe("the check note", () => {
     // Installed, or checking turned off: no offer.
     act(() => useTranscribe.setState({ status: status(true) }));
     expect(screen.queryByText(/so Platter can check lyrics/)).toBeNull();
+    download.mockRestore();
   });
 });
 
