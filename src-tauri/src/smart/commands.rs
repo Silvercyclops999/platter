@@ -157,9 +157,22 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> AppResult<T> + Send + '
     tokio::task::spawn_blocking(f).await.map_err(|e| AppError::Internal(e.to_string()))?
 }
 
+/// `tz_offset_min`: the UI's time zone, minutes east of UTC (date ranges are local days).
 #[tauri::command]
-pub async fn smart_preview(smart: State<'_, Smart>, rules: SmartRules, picks: Option<Vec<String>>) -> AppResult<Preview> {
+pub async fn smart_preview(smart: State<'_, Smart>, rules: SmartRules, picks: Option<Vec<String>>, tz_offset_min: Option<i32>) -> AppResult<Preview> {
+    if let Some(m) = tz_offset_min {
+        smart.set_tz(m);
+    }
     smart.preview(rules, picks.unwrap_or_default()).await
+}
+
+/// Describe a playlist: the words become rules on this computer.
+#[tauri::command]
+pub async fn smart_describe(smart: State<'_, Smart>, text: String, tz_offset_min: Option<i32>) -> AppResult<super::describe::Described> {
+    if let Some(m) = tz_offset_min {
+        smart.set_tz(m);
+    }
+    smart.describe(&text).await
 }
 
 #[tauri::command]
@@ -174,7 +187,10 @@ pub async fn smart_list(smart: State<'_, Smart>) -> AppResult<Vec<SmartSummary>>
 }
 
 #[tauri::command]
-pub async fn smart_page(smart: State<'_, Smart>, id: String) -> AppResult<SmartPage> {
+pub async fn smart_page(smart: State<'_, Smart>, id: String, tz_offset_min: Option<i32>) -> AppResult<SmartPage> {
+    if let Some(m) = tz_offset_min {
+        smart.set_tz(m);
+    }
     smart.page(&id).await
 }
 

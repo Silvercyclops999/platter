@@ -38,6 +38,18 @@ pub enum Field {
     Explicit,
     /// The file tags' version ("remaster", "demo"...).
     Version,
+    /// The file tags' era (ARCHIVE_ERA).
+    Era,
+    /// Demos, leaks and other unreleased versions.
+    Unreleased,
+    /// FLAC, ALAC, WAV and other lossless files.
+    Lossless,
+    /// Times skipped (listen history).
+    Skips,
+    /// Every song on its album has been played.
+    Finished,
+    /// Any play in the listen history (not just the newest).
+    Played,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -51,6 +63,8 @@ pub enum Op {
     Lt,
     InLast,
     NotInLast,
+    /// Between two local calendar days, both included ("2026-06-01..2026-08-31").
+    Between,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,11 +82,11 @@ impl Field {
     pub fn kind(self) -> Kind {
         match self {
             Field::Genre | Field::Style | Field::Mood => Kind::Tag,
-            Field::Artist | Field::Album | Field::Version => Kind::Text,
-            Field::Year | Field::PlayCount | Field::Rating | Field::Duration => Kind::Number,
+            Field::Artist | Field::Album | Field::Version | Field::Era => Kind::Text,
+            Field::Year | Field::PlayCount | Field::Rating | Field::Duration | Field::Skips => Kind::Number,
             Field::Decade => Kind::Decade,
-            Field::AddedAt | Field::LastPlayed | Field::PlayedHere => Kind::Date,
-            Field::Liked | Field::Explicit => Kind::Bool,
+            Field::AddedAt | Field::LastPlayed | Field::PlayedHere | Field::Played => Kind::Date,
+            Field::Liked | Field::Explicit | Field::Unreleased | Field::Lossless | Field::Finished => Kind::Bool,
             Field::ReleaseType => Kind::Choice,
         }
     }
@@ -96,7 +110,33 @@ impl Field {
             Field::ReleaseType => "Release type",
             Field::Explicit => "Explicit",
             Field::Version => "Version",
+            Field::Era => "Era",
+            Field::Unreleased => "Unreleased",
+            Field::Lossless => "Lossless",
+            Field::Skips => "Skips",
+            Field::Finished => "Album finished",
+            Field::Played => "Played",
         }
+    }
+}
+
+impl Field {
+    /// Filled on this computer only (Plex has nothing to filter it on).
+    pub fn local_only(self) -> bool {
+        matches!(
+            self,
+            Field::PlayedHere
+                | Field::Duration
+                | Field::ReleaseType
+                | Field::Explicit
+                | Field::Version
+                | Field::Era
+                | Field::Unreleased
+                | Field::Lossless
+                | Field::Skips
+                | Field::Finished
+                | Field::Played
+        )
     }
 }
 
@@ -106,7 +146,7 @@ impl Kind {
             Kind::Tag | Kind::Decade | Kind::Choice => &[Op::Is, Op::IsNot],
             Kind::Text => &[Op::Is, Op::IsNot, Op::Contains, Op::NotContains],
             Kind::Number => &[Op::Is, Op::IsNot, Op::Gt, Op::Lt],
-            Kind::Date => &[Op::InLast, Op::NotInLast],
+            Kind::Date => &[Op::InLast, Op::NotInLast, Op::Between],
             Kind::Bool => &[Op::Is],
         }
     }
@@ -214,6 +254,26 @@ pub fn parse_span(v: &str) -> Option<i64> {
     Some(n * s)
 }
 
+/// A calendar day.
+pub type Day = (i32, u32, u32);
+
+/// "2026-06-01..2026-08-31": two local calendar days, the first not after
+/// the second.
+pub fn parse_range(v: &str) -> Option<(Day, Day)> {
+    let (a, b) = v.trim().split_once("..")?;
+    let day = |s: &str| {
+        let d = crate::archive::eras::parse_date(s)?;
+        Some((d.year, d.month? as u32, d.day? as u32))
+    };
+    let (a, b) = (day(a)?, day(b)?);
+    (a <= b).then_some((a, b))
+}
+
+/// The range value for two days.
+pub fn range_value(a: Day, b: Day) -> String {
+    format!("{:04}-{:02}-{:02}..{:04}-{:02}-{:02}", a.0, a.1, a.2, b.0, b.1, b.2)
+}
+
 pub const RELEASE_TYPES: &[&str] = &["albums", "singlesEps", "live", "compilations", "soundtracks", "remixes", "demos", "mixtapes"];
 
 fn bad(msg: impl Into<String>) -> AppError {
@@ -234,6 +294,7 @@ impl Rule {
             Kind::Tag | Kind::Text => !v.is_empty(),
             Kind::Number => v.parse::<f64>().is_ok_and(|n| n >= 0.0 && (self.field != Field::Rating || n <= 5.0)),
             Kind::Decade => v.parse::<i32>().is_ok_and(|y| y % 10 == 0 && (1000..=2990).contains(&y)),
+            Kind::Date if self.op == Op::Between => parse_range(v).is_some(),
             Kind::Date => parse_span(v).is_some(),
             Kind::Bool => v == "true" || v == "false",
             Kind::Choice => RELEASE_TYPES.contains(&v),
@@ -274,8 +335,10 @@ impl SmartRules {
             }
         };
         for r in &self.rules {
-            if matches!(r.field, Field::PlayedHere | Field::Duration | Field::ReleaseType | Field::Explicit | Field::Version) {
+            if r.field.local_only() {
                 add(format!("{} isn't something Plex can filter on", r.field.label()));
+            } else if r.op == Op::Between {
+                add("Plex can't filter between two dates".into());
             }
         }
         if matches!(self.limit, Some(Limit { unit: LimitUnit::Hours, .. })) {

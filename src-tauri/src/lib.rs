@@ -1331,6 +1331,7 @@ pub fn run() {
             smart::commands::smart_delete,
             smart::commands::smart_plex_rules,
             smart::commands::smart_prompt,
+            smart::commands::smart_describe,
             smart::commands::ai_status,
             smart::commands::ai_key_set,
             scrobble::commands::scrobble_status,

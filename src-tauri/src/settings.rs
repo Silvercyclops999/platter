@@ -495,6 +495,8 @@ pub struct Settings {
     pub stats_compare: bool,
     /// Song lineage: "Lineage" in song menus, the versions panel and Your stats.
     pub show_lineage: bool,
+    /// "Describe a playlist" in the create menu and the smart playlist editor.
+    pub show_describe_playlist: bool,
     /// Compare plays both versions at matched loudness when the server has it.
     pub compare_level_match: bool,
     /// Scrobble to Last.fm (once signed in).
@@ -757,6 +759,7 @@ impl Default for Settings {
             monthly_stats_on_profile: true,
             stats_compare: false,
             show_lineage: true,
+            show_describe_playlist: true,
             compare_level_match: true,
             scrobble_lastfm: false,
             scrobble_listenbrainz: false,
@@ -885,6 +888,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "monthlyStatsOnProfile",
     "statsCompare",
     "showLineage",
+    "showDescribePlaylist",
     "compareLevelMatch",
     "scrobbleUnreleased",
     "aiModel",
@@ -1131,6 +1135,7 @@ pub struct SettingsPatch {
     pub monthly_stats_on_profile: Option<bool>,
     pub stats_compare: Option<bool>,
     pub show_lineage: Option<bool>,
+    pub show_describe_playlist: Option<bool>,
     pub compare_level_match: Option<bool>,
     pub scrobble_lastfm: Option<bool>,
     pub scrobble_listenbrainz: Option<bool>,
@@ -1458,6 +1463,7 @@ impl Settings {
         set(&mut self.monthly_stats_on_profile, p.monthly_stats_on_profile);
         set(&mut self.stats_compare, p.stats_compare);
         set(&mut self.show_lineage, p.show_lineage);
+        set(&mut self.show_describe_playlist, p.show_describe_playlist);
         set(&mut self.compare_level_match, p.compare_level_match);
         set(&mut self.scrobble_lastfm, p.scrobble_lastfm);
         set(&mut self.scrobble_listenbrainz, p.scrobble_listenbrainz);
@@ -2533,6 +2539,16 @@ mod tests {
         s.apply(&SettingsPatch { lidarr_away_url: Some("https://lidarr.example.com/".into()), ..Default::default() }).unwrap();
         assert_eq!(s.lidarr_away_url, "https://lidarr.example.com");
         assert!(s.apply(&SettingsPatch { lidarr_away_url: Some("lidarr.example.com".into()), ..Default::default() }).is_err());
+    }
+
+    #[test]
+    fn describe_playlist_setting_defaults_on_syncs_and_applies() {
+        let mut s = Settings::default();
+        assert!(s.show_describe_playlist);
+        assert!(SYNCED_SETTINGS.contains(&"showDescribePlaylist"));
+        let p: SettingsPatch = serde_json::from_str(r#"{"showDescribePlaylist":false}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.show_describe_playlist);
     }
 
     #[test]

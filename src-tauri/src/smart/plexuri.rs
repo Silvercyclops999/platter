@@ -52,7 +52,8 @@ pub fn plex_field(r: &Rule) -> Option<String> {
             Field::PlayCount => "track.viewCount",
             Field::LastPlayed => "track.lastViewedAt",
             Field::Rating | Field::Liked => "track.userRating",
-            Field::PlayedHere | Field::Duration | Field::ReleaseType | Field::Explicit | Field::Version => return None,
+            // Filled on this computer only (Field::local_only).
+            _ => return None,
         }
         .to_string(),
     )

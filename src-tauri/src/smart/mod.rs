@@ -4,6 +4,7 @@
 //! - [`plexuri`] rules to and from Plex's smart playlist query
 //! - [`eval`]    rules evaluated on this computer (preview, Platter playlists)
 //! - [`prompt`]  a typed description turned into rules and picks (AI provider)
+//! - [`describe`] a typed description turned into rules on this computer
 //! - [`commands`] Tauri commands (docs/IPC.md "Smart playlists")
 //!
 //! Rules Plex can express are saved as a Plex smart playlist, so every Plex
@@ -15,11 +16,14 @@
 //! Platter smart playlist instead and the answer says why.
 
 pub mod commands;
+pub mod describe;
 pub mod eval;
 pub mod plexuri;
 pub mod prompt;
 pub mod rules;
 
+#[cfg(test)]
+mod describe_tests;
 #[cfg(test)]
 mod tests;
 
@@ -235,6 +239,8 @@ pub struct SmartDeps {
 pub struct Smart {
     inner: Arc<SmartDeps>,
     lock: Arc<tokio::sync::Mutex<()>>,
+    /// The UI's time zone, minutes east of UTC (date ranges are local days).
+    tz: Arc<std::sync::atomic::AtomicI32>,
 }
 
 fn is_platter(id: &str) -> bool {
@@ -263,11 +269,20 @@ fn refused(e: &AppError) -> bool {
 
 impl Smart {
     pub fn new(d: SmartDeps) -> Self {
-        Self { inner: Arc::new(d), lock: Default::default() }
+        Self { inner: Arc::new(d), lock: Default::default(), tz: Default::default() }
     }
 
     fn now(&self) -> i64 {
         (self.inner.clock)()
+    }
+
+    /// The UI's time zone, minutes east of UTC.
+    pub fn set_tz(&self, tz_min: i32) {
+        self.tz.store(tz_min.clamp(-14 * 60, 14 * 60), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn tz(&self) -> i32 {
+        self.tz.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn db(&self) -> &DbHandle {
@@ -302,7 +317,7 @@ impl Smart {
     /// The songs these rules (and picks) give, in order.
     fn songs(&self, rows: &[eval::Row], rules: &SmartRules, picks: &[String], seed: u64) -> Vec<(String, u64)> {
         let now = self.now();
-        let hit = eval::evaluate(rows, rules, now, self.liked_min(), seed);
+        let hit = eval::evaluate_tz(rows, rules, now, self.liked_min(), seed, self.tz());
         let mut out: Vec<(String, u64)> = Vec::new();
         for p in picks {
             if let Some(r) = rows.iter().find(|r| r.id == *p) {
@@ -562,6 +577,17 @@ impl Smart {
         };
         let tags = self.tag_ids(&section, plexuri::parsed_tag_fields(&parsed)).await?;
         plexuri::rules_from(&parsed, self.liked_min(), &tags)
+    }
+
+    /// A description turned into rules on this computer, from the library's
+    /// own names. Nothing is sent anywhere.
+    pub async fn describe(&self, text: &str) -> AppResult<describe::Described> {
+        if text.trim().is_empty() {
+            return Err(AppError::Invalid("Describe the playlist first.".into()));
+        }
+        let rows = self.rows().await?;
+        let vocab = describe::Vocabulary::from_rows(&rows);
+        Ok(describe::describe(text, &vocab, describe::local_day(self.now(), self.tz())))
     }
 
     /// A description turned into rules and picks (the AI provider in Settings).

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use rusqlite::Connection;
 
-use super::rules::{Field, Kind, LimitUnit, Op, Rule, SmartRules, SortBy, parse_span};
+use super::rules::{Day, Field, Kind, LimitUnit, Op, Rule, SmartRules, SortBy, parse_range, parse_span};
 use crate::error::AppResult;
 
 /// One song as the rules see it.
@@ -40,6 +40,22 @@ pub struct Row {
     pub version: Option<String>,
     /// Demos and archive versions (never sent to an AI provider).
     pub unreleased: bool,
+    pub album_id: String,
+    /// The file tags' era.
+    pub era: Option<String>,
+    pub lossless: bool,
+    /// Times skipped in the listen history.
+    pub skips: u32,
+    /// Every play in the listen history (skips left out), unix seconds.
+    pub plays_at: Vec<i64>,
+    /// Every song on the album has been played.
+    pub album_finished: bool,
+}
+
+/// FLAC, ALAC, WAV and the other lossless codecs Plex reports.
+pub fn lossless_codec(codec: Option<&str>) -> bool {
+    let c = codec.unwrap_or("").to_ascii_lowercase();
+    matches!(c.as_str(), "flac" | "alac" | "wav" | "pcm" | "aiff" | "ape" | "wavpack" | "wv" | "tta" | "dsd")
 }
 
 fn json_vec(s: &str) -> Vec<String> {
@@ -48,20 +64,37 @@ fn json_vec(s: &str) -> Vec<String> {
 
 /// Every song in the cache.
 pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
+    // The listen log keeps unix ms; rules compare seconds.
     let mut here: HashMap<String, i64> = HashMap::new();
     {
         let mut st = c.prepare("SELECT rating_key, max(started_at) FROM listen_log GROUP BY rating_key")?;
         let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         for r in rows {
             let (k, at) = r?;
-            here.insert(k, at);
+            here.insert(k, at / 1000);
+        }
+    }
+    let mut history: HashMap<String, (Vec<i64>, u32)> = HashMap::new();
+    {
+        let sql = format!("WITH plays AS ({}) SELECT rating_key, played_at, skipped FROM plays WHERE rating_key IS NOT NULL", crate::db::listens::ALL_PLAYS);
+        let mut st = c.prepare(&sql)?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?;
+        for r in rows {
+            let (k, at, skipped) = r?;
+            let e = history.entry(k).or_default();
+            if skipped != 0 {
+                e.1 += 1;
+            } else {
+                e.0.push(at / 1000);
+            }
         }
     }
     let mut st = c.prepare(
         "SELECT t.id, t.artist_id, t.artist_title, t.track_artist, t.album_title, t.disc_number, t.track_number,
                 al.year, coalesce(al.added_at, 0), t.view_count, t.last_viewed_at, t.user_rating, t.duration_ms,
                 coalesce(al.section, 'albums'), coalesce(al.genres, '[]'), coalesce(al.styles, '[]'),
-                coalesce(al.moods, '[]'), t.genres, f.explicit, f.version, al.format, coalesce(al.subformats, '[]'), t.title, al.studio, al.matched, mc.found, t.album_id
+                coalesce(al.moods, '[]'), t.genres, f.explicit, f.version, al.format, coalesce(al.subformats, '[]'), t.title, al.studio, al.matched, mc.found, t.album_id,
+                f.era, t.codec
          FROM tracks t
          LEFT JOIN albums al ON al.id = t.album_id
          LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
@@ -94,8 +127,17 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
             version.as_deref(),
             mb,
         );
+        let era: Option<String> = r.get(27)?;
+        let codec: Option<String> = r.get(28)?;
+        let (plays_at, skips) = history.remove(&id).unwrap_or_default();
         out.push(Row {
             played_here: here.get(&id).copied(),
+            album_id,
+            era: era.filter(|e| !e.trim().is_empty()),
+            lossless: lossless_codec(codec.as_deref()),
+            skips,
+            plays_at,
+            album_finished: false,
             id,
             title: r.get(22)?,
             artist_id: r.get(1)?,
@@ -119,7 +161,31 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
             unreleased,
         });
     }
+    mark_finished(&mut out);
     Ok(out)
+}
+
+/// Albums whose every song has a play.
+pub fn mark_finished(rows: &mut [Row]) {
+    let mut open: HashMap<String, bool> = HashMap::new();
+    for r in rows.iter() {
+        let played = r.plays > 0 || !r.plays_at.is_empty();
+        let e = open.entry(r.album_id.clone()).or_insert(true);
+        *e = *e && played;
+    }
+    for r in rows.iter_mut() {
+        r.album_finished = open.get(&r.album_id).copied().unwrap_or(false);
+    }
+}
+
+/// Unix seconds when a local calendar day starts. `tz_min`: minutes east of UTC.
+pub fn day_start(d: Day, tz_min: i32) -> i64 {
+    crate::stats::days_from_civil(d.0 as i64, d.1, d.2) * 86_400 - tz_min as i64 * 60
+}
+
+fn next_day(d: Day) -> Day {
+    let (y, m, dd) = crate::stats::civil_from_days(crate::stats::days_from_civil(d.0 as i64, d.1, d.2) + 1);
+    (y as i32, m, dd)
 }
 
 fn fold(s: &str) -> String {
@@ -161,6 +227,11 @@ fn date(op: Op, at: Option<i64>, span: i64, now: i64) -> bool {
 /// Whether a song matches one rule. `liked_min` is the Plex rating that
 /// counts as liked.
 pub fn matches(r: &Rule, row: &Row, now: i64, liked_min: f64) -> bool {
+    matches_tz(r, row, now, liked_min, 0)
+}
+
+/// [`matches`] with the time zone date ranges are read in (minutes east of UTC).
+pub fn matches_tz(r: &Rule, row: &Row, now: i64, liked_min: f64, tz_min: i32) -> bool {
     let v = r.value.trim();
     match r.field.kind() {
         Kind::Tag => {
@@ -181,6 +252,7 @@ pub fn matches(r: &Rule, row: &Row, now: i64, liked_min: f64) -> bool {
                 text(r.op, &have, v)
             }
             Field::Album => text(r.op, &[row.album.as_str()], v),
+            Field::Era => text(r.op, &row.era.as_deref().into_iter().collect::<Vec<_>>(), v),
             _ => text(r.op, &row.version.as_deref().into_iter().collect::<Vec<_>>(), v),
         },
         Kind::Number => {
@@ -190,6 +262,7 @@ pub fn matches(r: &Rule, row: &Row, now: i64, liked_min: f64) -> bool {
                 Field::PlayCount => number(r.op, Some(row.plays as f64), want),
                 // Stars against Plex's 0 to 10.
                 Field::Rating => number(r.op, Some(row.rating.unwrap_or(0.0) / 2.0), want),
+                Field::Skips => number(r.op, Some(row.skips as f64), want),
                 _ => number(r.op, Some(row.duration_ms as f64 / 60_000.0), want),
             }
         }
@@ -199,18 +272,27 @@ pub fn matches(r: &Rule, row: &Row, now: i64, liked_min: f64) -> bool {
             if r.op == Op::Is { is } else { !is }
         }
         Kind::Date => {
-            let span = parse_span(v).unwrap_or(0);
-            let at = match r.field {
-                Field::AddedAt => Some(row.added_at).filter(|a| *a > 0),
-                Field::LastPlayed => row.last_played,
-                _ => row.played_here,
+            let times: Vec<i64> = match r.field {
+                Field::AddedAt => Some(row.added_at).filter(|a| *a > 0).into_iter().collect(),
+                Field::LastPlayed => row.last_played.into_iter().collect(),
+                Field::Played => row.plays_at.clone(),
+                _ => row.played_here.into_iter().collect(),
             };
-            date(r.op, at, span, now)
+            if r.op == Op::Between {
+                let Some((a, b)) = parse_range(v) else { return false };
+                let (from, to) = (day_start(a, tz_min), day_start(next_day(b), tz_min));
+                return times.iter().any(|t| (from..to).contains(t));
+            }
+            let span = parse_span(v).unwrap_or(0);
+            date(r.op, times.iter().max().copied(), span, now)
         }
         Kind::Bool => {
             let want = v == "true";
             let is = match r.field {
                 Field::Liked => row.rating.is_some_and(|x| x >= liked_min),
+                Field::Unreleased => row.unreleased,
+                Field::Lossless => row.lossless,
+                Field::Finished => row.album_finished,
                 _ => row.explicit,
             };
             is == want
@@ -235,13 +317,18 @@ fn mix(seed: u64, s: &str) -> u64 {
 /// The songs, in order, after rules, sort and limit. `seed` decides a
 /// random order.
 pub fn evaluate<'a>(rows: &'a [Row], rules: &SmartRules, now: i64, liked_min: f64, seed: u64) -> Vec<&'a Row> {
+    evaluate_tz(rows, rules, now, liked_min, seed, 0)
+}
+
+/// [`evaluate`] with the time zone date ranges are read in (minutes east of UTC).
+pub fn evaluate_tz<'a>(rows: &'a [Row], rules: &SmartRules, now: i64, liked_min: f64, seed: u64, tz_min: i32) -> Vec<&'a Row> {
     let mut hit: Vec<&Row> = rows
         .iter()
         .filter(|row| {
             if rules.rules.is_empty() {
                 return true;
             }
-            let mut each = rules.rules.iter().map(|r| matches(r, row, now, liked_min));
+            let mut each = rules.rules.iter().map(|r| matches_tz(r, row, now, liked_min, tz_min));
             if rules.match_all { each.all(|b| b) } else { each.any(|b| b) }
         })
         .collect();

@@ -1413,13 +1413,14 @@ line by line. A 429 shows as `limited`, anything else that fails as
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `smart_preview` | `{ rules: SmartRules, picks: string[] \| null }` | `SmartPreview` |
+| `smart_preview` | `{ rules: SmartRules, picks: string[] \| null, tzOffsetMin? }` | `SmartPreview` |
 | `smart_save` | `{ request: SmartSaveRequest }` | `SmartSaved` |
 | `smart_list` | – | `SmartSummary[]` (Platter smart playlists) |
-| `smart_page` | `{ id }` (a `smart:` id) | `SmartPage` |
+| `smart_page` | `{ id, tzOffsetMin? }` (a `smart:` id) | `SmartPage` |
 | `smart_delete` | `{ id }` (a `smart:` id) | – |
 | `smart_plex_rules` | `{ id }` (a Plex smart playlist) | `SmartRules`, or `invalid` when its rules don't map to the editor |
 | `smart_prompt` | `{ prompt }` | `{ title, rules: SmartRules, picks: Track[] }` |
+| `smart_describe` | `{ text, tzOffsetMin? }` | `{ title, rules: SmartRules, unknown: string[], choices: { text, index, others: SmartRule[] }[], notes: string[] }` |
 | `ai_status` | – | `{ provider: "none"\|"anthropic", model, hasKey, ready }` |
 | `ai_key_set` | `{ key: string \| null }` | the same, after saving or removing the key |
 | `hidden_list` | – | `HiddenItem[]`, newest first |
@@ -1439,9 +1440,14 @@ line by line. A 429 shows as `limited`, anything else that fails as
 Fields: `genre`, `style`, `mood` (is, isNot), `artist`, `album`, `version`
 (is, isNot, contains, notContains), `year`, `playCount`, `rating` (stars),
 `duration` (minutes) (is, isNot, gt, lt), `decade` (is, isNot, a year like
-1990), `addedAt`, `lastPlayed`, `playedHere` (inLast, notInLast, with `30d`,
-`2w`, `6m` or `1y`), `liked`, `explicit` (is, `"true"` or `"false"`) and
-`releaseType` (is, isNot, a release section key). Sorts: `none`, `random`,
+1990), `addedAt`, `lastPlayed`, `playedHere`, `played` (inLast, notInLast,
+with `30d`, `2w`, `6m` or `1y`; or between, with two local days like
+`2026-06-01..2026-08-31`), `liked`, `explicit`, `unreleased`, `lossless`,
+`finished` (is, `"true"` or `"false"`), `era` (like `artist`), `skips` (like
+`playCount`) and `releaseType` (is, isNot, a release section key). `played`
+is any play in the listen history, `skips` counts skips there, and `finished`
+means every song on the album has been played. `tzOffsetMin` (minutes east of
+UTC) is the time zone between ranges are read in. Sorts: `none`, `random`,
 `mostPlayed`, `leastPlayed`, `recentlyAdded`, `recentlyPlayed`, `rating`.
 `extra` keeps Plex options the editor doesn't show (one copy per song, other
 sorts) so saving a Plex playlist back doesn't lose them.
@@ -1455,8 +1461,9 @@ empty means Plex can hold them.
 and `SmartSaved = { id, platter, note? }`. A new rule set Plex can express is
 created as a Plex smart playlist (see docs/PLEX-API.md "Smart playlists") and
 read back into the cache, so it shows with the other playlists. Rules Plex
-can't express (`playedHere`, `duration`, `releaseType`, `explicit`,
-`version`, a limit in hours, a daily or weekly update), prompt picks, or
+can't express (`playedHere`, `played`, `duration`, `releaseType`,
+`explicit`, `version`, `era`, `unreleased`, `lossless`, `skips`, `finished`,
+a between range, a limit in hours, a daily or weekly update), prompt picks, or
 `platter: true` make a Platter smart playlist with a `smart:` id. When Plex
 refuses a rule set it's saved as a Platter one and `note` says so. Offline, a
 Plex one can't be made and the answer is a `network` error. Editing a Plex
@@ -1477,6 +1484,16 @@ and mood names and its years, for rules; then with up to 150 songs those
 rules find (title, artist, album, year; unreleased music left out), for the
 best 50 in order. Both answers are JSON in a fixed shape. The editor shows the
 rules and picks before anything is saved.
+
+`smart_describe` reads a description on this computer and sends nothing
+anywhere. Words are matched against the library's own genre, style, mood,
+artist, album, era and version names (case, accents and hyphens folded),
+then against fixed phrases for dates ("2016", "the 90s", "last summer"),
+plays ("haven't played lately", "never skipped"), length ("under 3
+minutes"), quality, release type and released or unreleased. Words that
+match nothing come back in `unknown`. When words could mean more than one
+rule, `choices` gives the other readings for the rule at `index`. The editor
+shows the rules before anything is saved.
 
 `HiddenItem = { kind, id, title, subtitle?, thumb?, hiddenAt (unix s) }`.
 Hidden songs and artists (an artist hides every song whose album artist it

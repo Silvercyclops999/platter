@@ -239,11 +239,11 @@ fn match_all_any_limits_and_sorts() {
 // ---- the service ------------------------------------------------------------------
 
 #[derive(Default)]
-struct FakePlex {
+pub(super) struct FakePlex {
     online: Mutex<bool>,
     refuse: Mutex<bool>,
-    created: Mutex<Vec<(String, String)>>,
-    updated: Mutex<Vec<(String, String)>>,
+    pub(super) created: Mutex<Vec<(String, String)>>,
+    pub(super) updated: Mutex<Vec<(String, String)>>,
     content: Mutex<String>,
 }
 
@@ -285,10 +285,10 @@ impl EventSink for NoEvents {
     fn emit(&self, _: &str, _: serde_json::Value) {}
 }
 
-struct Rig {
-    smart: Smart,
-    plex: Arc<FakePlex>,
-    web: Arc<FakeWeb>,
+pub(super) struct Rig {
+    pub(super) smart: Smart,
+    pub(super) plex: Arc<FakePlex>,
+    pub(super) web: Arc<FakeWeb>,
     keys: Arc<MemoryStore>,
     db: DbHandle,
     now: Arc<Mutex<i64>>,
@@ -311,6 +311,17 @@ fn add_track(db: &DbHandle, id: &str, album: &str, genre: &str, plays: u32, sect
         Ok(())
     })
     .unwrap();
+}
+
+/// The rig, with FLAC files.
+pub(super) fn rig_for_describe() -> Rig {
+    let r = rig();
+    r.db.write(|c| {
+        c.execute("UPDATE tracks SET codec = 'flac'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    r
 }
 
 fn rig() -> Rig {
