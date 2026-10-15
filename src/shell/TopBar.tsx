@@ -92,7 +92,8 @@ export function WindowBar() {
   );
 }
 
-function checkForUpdates() {
+/** Check for an update now and say what came of it (app menu and menu bar). */
+export function checkForUpdates() {
   toast.info("Checking for updates…");
   backend.updateCheck().then(
     (u) => {

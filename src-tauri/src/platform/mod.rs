@@ -10,6 +10,7 @@ pub mod commands;
 pub mod discord;
 pub mod keys;
 pub mod media;
+pub mod menubar;
 pub mod miniplayer;
 pub mod power;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -115,6 +116,7 @@ pub struct Tap {
     inner: Arc<dyn EventSink>,
     tx: mpsc::Sender<Msg>,
     tray: watch::Sender<tray::TrayView>,
+    menu: watch::Sender<menubar::MenuView>,
 }
 
 impl EventSink for Tap {
@@ -124,6 +126,10 @@ impl EventSink for Tap {
         self.tray.send_if_modified(|v| {
             let next = tray::tray_view(state);
             std::mem::replace(v, next.clone()) != next
+        });
+        self.menu.send_if_modified(|v| {
+            let next = menubar::menu_view(state);
+            std::mem::replace(v, next) != next
         });
     }
     fn position(&self, pos: &PositionPayload) {
@@ -146,23 +152,31 @@ pub struct Platform {
     tx: mpsc::Sender<Msg>,
     rx: mpsc::Receiver<Msg>,
     tray: watch::Sender<tray::TrayView>,
+    menu: watch::Sender<menubar::MenuView>,
 }
 
 impl Platform {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
-        Self { tx, rx, tray: watch::channel(tray::TrayView::default()).0 }
+        Self {
+            tx,
+            rx,
+            tray: watch::channel(tray::TrayView::default()).0,
+            menu: watch::channel(menubar::MenuView::default()).0,
+        }
     }
 
     /// The sink to give the player, wrapping the UI's sink.
     pub fn tap(&self, inner: Arc<dyn EventSink>) -> Arc<dyn EventSink> {
-        Arc::new(Tap { inner, tx: self.tx.clone(), tray: self.tray.clone() })
+        Arc::new(Tap { inner, tx: self.tx.clone(), tray: self.tray.clone(), menu: self.menu.clone() })
     }
 
     /// Start the worker, tray, keys and launch at login.
     pub fn start<R: Runtime>(self, app: &AppHandle<R>, player: PlayerHandle, art: ArtCache, cover_dir: PathBuf, switches: Switches) {
-        let Self { tx, rx, tray: tray_tx } = self;
+        let Self { tx, rx, tray: tray_tx, menu: menu_tx } = self;
         app.manage(tray::Tray::<R>::default());
+        app.manage(menubar::MenuBar::<R>::default());
+        menubar::install(app);
 
         // OS commands: player commands run on the async runtime; window
         // commands on the app.
@@ -205,9 +219,11 @@ impl Platform {
             let tx = tx.clone();
             let player = player.clone();
             let tray_tx = tray_tx.clone();
+            let menu_tx = menu_tx.clone();
             tauri::async_runtime::spawn(async move {
                 if let Ok(s) = player.state().await {
                     tray_tx.send_replace(tray::tray_view(&s));
+                    menu_tx.send_replace(menubar::menu_view(&s));
                     let _ = tx.send(Msg::State(Box::new(s)));
                 }
             });
@@ -221,6 +237,21 @@ impl Platform {
                 loop {
                     let v = rx.borrow_and_update().clone();
                     app.state::<tray::Tray<R>>().update(v);
+                    if rx.changed().await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+
+        // The menu bar's checkmarks follow playback (macOS).
+        {
+            let app = app.clone();
+            let mut rx = menu_tx.subscribe();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let v = *rx.borrow_and_update();
+                    app.state::<menubar::MenuBar<R>>().update(v);
                     if rx.changed().await.is_err() {
                         break;
                     }
@@ -420,17 +451,20 @@ mod tests {
     }
 
     #[test]
-    fn tap_copies_state_to_the_worker_and_tray() {
+    fn tap_copies_state_to_the_worker_tray_and_menu_bar() {
         use crate::audio::events::PlayerStatus;
         use media::tests::{state, track};
         let p = Platform::new();
         let sink = p.tap(Arc::new(Null));
         let mut tray_rx = p.tray.subscribe();
+        let mut menu_rx = p.menu.subscribe();
         sink.state(&state(Some(track("1")), PlayerStatus::Playing, 0));
         sink.position(&PositionPayload { position_ms: 1, duration_ms: 2, buffered_ms: 0 });
         assert!(matches!(p.rx.try_recv(), Ok(Msg::State(_))));
         assert!(matches!(p.rx.try_recv(), Ok(Msg::Position(_))));
         assert!(tray_rx.has_changed().unwrap());
+        assert!(menu_rx.has_changed().unwrap());
+        assert!(menu_rx.borrow_and_update().playing);
         assert_eq!(tray_rx.borrow_and_update().label, "Song 1 · Album Artist");
     }
 }

@@ -510,6 +510,32 @@ any `miniplayer*` setting is sent to both windows as `settings://changed`.
 When the window can't be made, `miniplayer_set` fails with `internal` ("The
 miniplayer couldn't open.").
 
+## Menu bar (macOS)
+On a Mac the core builds the menu bar: Platter, File, Edit, Playback, View,
+Window and Help. The table of items is in `src-tauri/src/platform/menubar.rs`.
+Windows has no menu bar and never sends this event.
+
+Event `menu://action` → `{ action }` when an item is picked. `action` is one
+of `checkUpdates`, `settings`, `newPlaylist`, `newFolder`, `search`,
+`filterLibrary`, `playPause`, `next`, `previous`, `volumeUp`, `volumeDown`,
+`shuffle`, `repeat`, `miniplayer`, `fullWindow`, `lyrics`, `queue`,
+`toggleLibrary` and `shortcuts`. The UI runs the same code as its own buttons
+and shortcuts (`src/shell/menuBar.ts`). Anything but a playback item or
+Miniplayer brings the main window forward first.
+
+Items with keys use the app's own shortcuts (Cmd+, for Settings, Cmd+Left
+and Cmd+Right for previous and next, and so on); New Playlist (Cmd+N) and New
+Playlist Folder (Shift+Cmd+N) are the only keys the menu adds. Play/Pause
+shows no key, since Space belongs to the page. When the page has already
+handled a key press, the menu's copy of the same press within half a second
+is skipped, so a key never acts twice.
+
+Quit Platter and Platter on GitHub are done in the core: Quit saves the queue
+first, like the tray's Quit, and the project page opens in the browser. About,
+Services, Hide, the Edit items, Close Window and the Window menu are the
+system's own. Play/Pause, Shuffle and Repeat follow `player://state` (the
+label reads Pause while playing; Shuffle and Repeat show a checkmark when on).
+
 ## Now-playing feed
 | Command | Args | Returns |
 | --- | --- | --- |

@@ -48,6 +48,7 @@ import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { useShortcuts } from "./useShortcuts";
+import { connectMenuBar } from "./menuBar";
 import { ShortcutsHelp } from "./ShortcutsHelp";
 import { PowerHints } from "./PowerHints";
 import { skipToMain, useShellTabOrder } from "./focusOrder";
@@ -65,6 +66,7 @@ function useWindowWidth() {
 /** Top bar over sidebar | main | right panel, over the player bar. */
 export function AppShell() {
   useShortcuts();
+  useEffect(() => connectMenuBar(), []);
   useOpenNowPlayingOnStart();
   useLyricsAutoShow();
   useEffect(() => void loadOwnLyricsIds(), []);

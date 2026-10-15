@@ -1966,6 +1966,8 @@ export interface EventMap {
   "scrobble://status": { queued: number };
   /** The miniplayer window opened or closed. */
   "miniplayer://changed": MiniplayerState;
+  /** A menu bar item was picked (macOS): the UI action to run. */
+  "menu://action": { action: string };
 }
 
 export type EventName = keyof EventMap;
