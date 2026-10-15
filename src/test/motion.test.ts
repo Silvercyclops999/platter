@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import componentsCss from "../components/components.css?raw";
 import globalCss from "../design/global.css?raw";
 import { duration, installReducedMotion, prefersReducedMotion } from "../design/motion";
-import { SCROLLBAR_IDLE_MS, installOverlayScrollbars, thumbBox } from "../design/scrollbars";
+import { SCROLLBAR_IDLE_MS, covered, installOverlayScrollbars, thumbBox } from "../design/scrollbars";
 import tokensCss from "../design/tokens.css?raw";
 import pagesCss from "../pages/pages.css?raw";
 import shellCss from "../shell/shell.css?raw";
@@ -157,6 +157,28 @@ describe("overlay scrollbars", () => {
     } finally {
       stop();
       el.remove();
+    }
+  });
+});
+
+describe("scroll thumbs under menus", () => {
+  it("counts a thumb as covered when another element is on top of its spot", () => {
+    const scroller = document.createElement("div");
+    const row = document.createElement("div");
+    scroller.appendChild(row);
+    const menu = document.createElement("div");
+    document.body.append(scroller, menu);
+    const box = { top: 10, left: 100, height: 50 };
+    const orig = document.elementsFromPoint;
+    try {
+      document.elementsFromPoint = () => [row, scroller];
+      expect(covered(scroller, box)).toBe(false);
+      document.elementsFromPoint = () => [menu, row, scroller];
+      expect(covered(scroller, box)).toBe(true);
+    } finally {
+      document.elementsFromPoint = orig;
+      scroller.remove();
+      menu.remove();
     }
   });
 });

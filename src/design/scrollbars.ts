@@ -61,10 +61,28 @@ function place(el: Element, thumb: HTMLElement): void {
     thumb.style.display = "none";
     return;
   }
+  if (covered(el, box)) {
+    thumb.style.display = "none";
+    return;
+  }
   thumb.style.display = "";
   thumb.style.top = `${box.top}px`;
   thumb.style.left = `${box.left}px`;
   thumb.style.height = `${box.height}px`;
+}
+
+/** Whether something else (a menu, dialog or popover) is over the spot the
+ * thumb would take. The thumb layer sits above everything, so without this
+ * a thumb shows through menus that open over its scroller. */
+export function covered(el: Element, box: { top: number; left: number; height: number }): boolean {
+  const doc = el.ownerDocument;
+  if (typeof doc.elementsFromPoint !== "function") return false;
+  const x = box.left + 4;
+  for (const y of [box.top + 2, box.top + box.height / 2, box.top + box.height - 2]) {
+    const top = doc.elementsFromPoint(x, y).find((n) => !n.classList.contains("sb-thumb") && !n.classList.contains("sb-layer"));
+    if (top && top !== el && !el.contains(top)) return true;
+  }
+  return false;
 }
 
 function thumbFor(el: Element): HTMLElement {
