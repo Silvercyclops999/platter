@@ -92,6 +92,11 @@ objc2-core-audio = { version = "0.3.2", default-features = false, features = ["s
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# Line tables only: full debug info grew past what the Windows linker's
+# program database can hold (LNK1140). Backtraces keep file and line.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 codegen-units = 1
 lto = true

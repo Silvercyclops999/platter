@@ -62,6 +62,11 @@ export function FriendActivityPanel() {
     }, ACTIVITY_REFRESH_MS);
     return () => clearInterval(t);
   }, []);
+  // Times are measured from when the activity arrived, not from when the
+  // panel opened, so "11 min" never reads as "10 min".
+  useEffect(() => {
+    if (panel) setNow(Date.now() / 1000);
+  }, [panel]);
   const close = () => useUi.getState().setActivityOpen(false);
 
   let body;
