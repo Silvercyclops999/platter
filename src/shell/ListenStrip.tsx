@@ -136,8 +136,25 @@ export function InviteDialog() {
   const open = useSocial((s) => s.inviteOpen);
   const inv = useSocial((s) => s.listen.invite);
   const [copied, setCopied] = useState(false);
+  const [renewed, setRenewed] = useState(false);
   const copyBtn = useRef<HTMLButtonElement>(null);
-  useEffect(() => setCopied(false), [inv?.link]);
+  const linkBox = useRef<HTMLInputElement>(null);
+  const firstLink = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    setCopied(false);
+    // Links of one session share their start; show the end, where a new
+    // link differs, and say a new one was made.
+    const el = linkBox.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+    if (!open) {
+      firstLink.current = undefined;
+      setRenewed(false);
+    } else if (firstLink.current === undefined) {
+      firstLink.current = inv?.link;
+    } else if (inv?.link && inv.link !== firstLink.current) {
+      setRenewed(true);
+    }
+  }, [inv?.link, open]);
   return (
     <Dialog open={open} onClose={closeInvite} label="Invite people to listen along" className="confirm invite-dialog" initialFocus={copyBtn}>
       <h2 className="confirm__title">Invite people to listen along</h2>
@@ -150,7 +167,7 @@ export function InviteDialog() {
           <div className="invite-dialog__code">
             {inv.qr && <QrCode qr={inv.qr} label="QR code for the invite link" className="invite-dialog__qr" />}
             <div className="invite-dialog__link">
-              <input className="setting-text" readOnly value={inv.link} aria-label="Invite link" onFocus={(e) => e.currentTarget.select()} />
+              <input ref={linkBox} className="setting-text" readOnly value={inv.link} aria-label="Invite link" onFocus={(e) => e.currentTarget.select()} />
               <Button
                 ref={copyBtn}
                 size="sm"
@@ -165,6 +182,11 @@ export function InviteDialog() {
               </Button>
             </div>
           </div>
+          {renewed && (
+            <p className="invite-dialog__renewed" role="status">
+              New link made.
+            </p>
+          )}
         </>
       ) : (
         <p className="confirm__body" role="status">

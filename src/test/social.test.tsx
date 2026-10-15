@@ -243,6 +243,7 @@ describe("listening sessions", () => {
     expect(copied).toEqual([MOCK_INVITE]);
     await userEvent.click(within(dialog).getByRole("button", { name: "New link" }));
     await waitFor(() => expect((within(dialog).getByRole("textbox", { name: "Invite link" }) as HTMLInputElement).value).not.toBe(MOCK_INVITE));
+    expect(within(dialog).getByRole("status")).toHaveTextContent("New link made.");
     await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     // The card goes while in a session.
