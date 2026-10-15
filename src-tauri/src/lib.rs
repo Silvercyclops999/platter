@@ -8,6 +8,7 @@ pub mod error;
 pub mod feed;
 pub mod hidden;
 pub mod identity;
+pub mod import;
 pub mod libraries;
 pub mod lidarr;
 pub mod likes;
@@ -800,6 +801,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_open_link, import::commands::import_forget,
             plex::commands::auth_status,
             plex::commands::auth_start,
             plex::commands::auth_cancel,

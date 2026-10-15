@@ -1,0 +1,16 @@
+{
+  "tracks": [
+    { "artist": "The Paper Kites", "album": "Lights Out", "track": "Northern Lights", "uri": "service:track:aaa1" },
+    { "artist": "Echo Field", "album": "Static", "track": "Ghost Town", "uri": "service:track:aaa2" },
+    { "artist": "Nobody Here", "album": "Elsewhere", "track": "Not In The Library", "uri": "service:track:aaa3" }
+  ],
+  "albums": [
+    { "artist": "Echo Field", "album": "Static", "uri": "service:album:bbb1" },
+    { "artist": "Nobody Here", "album": "Elsewhere", "uri": "service:album:bbb2" }
+  ],
+  "shows": [{ "name": "A Podcast", "publisher": "Someone", "uri": "service:show:ccc1" }],
+  "episodes": [],
+  "bannedTracks": [],
+  "artists": [{ "name": "Echo Field", "uri": "service:artist:ddd1" }],
+  "somethingNew": { "ignored": true }
+}

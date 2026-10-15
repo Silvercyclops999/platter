@@ -1,0 +1,78 @@
+[
+  {
+    "ts": "2024-03-01T18:04:37Z",
+    "platform": "desktop-os-fixture",
+    "ms_played": 221000,
+    "conn_country": "ZZ",
+    "ip_addr": "192.0.2.10",
+    "ip_addr_decrypted": "192.0.2.10",
+    "user_agent_decrypted": "fixture-agent/1.0",
+    "master_metadata_track_name": "Northern Lights",
+    "master_metadata_album_artist_name": "The Paper Kites",
+    "master_metadata_album_album_name": "Lights Out",
+    "episode_name": null,
+    "episode_show_name": null,
+    "reason_start": "trackdone",
+    "reason_end": "trackdone",
+    "shuffle": false,
+    "skipped": false,
+    "offline": false,
+    "offline_timestamp": 0,
+    "incognito_mode": false
+  },
+  {
+    "ts": "2024-03-03T21:00:00Z",
+    "platform": "phone-os-fixture",
+    "ms_played": 190000,
+    "conn_country": "ZZ",
+    "ip_addr_decrypted": "198.51.100.7",
+    "user_agent_decrypted": "fixture-agent/2.0",
+    "master_metadata_track_name": "Secret Listening",
+    "master_metadata_album_artist_name": "Echo Field",
+    "master_metadata_album_album_name": "Static",
+    "incognito_mode": true
+  },
+  {
+    "ts": "2024-03-04T07:15:00Z",
+    "platform": "phone-os-fixture",
+    "ms_played": 1500000,
+    "conn_country": "ZZ",
+    "ip_addr_decrypted": "198.51.100.7",
+    "master_metadata_track_name": null,
+    "master_metadata_album_artist_name": null,
+    "master_metadata_album_album_name": null,
+    "episode_name": "Episode 4",
+    "episode_show_name": "A Podcast",
+    "incognito_mode": false
+  },
+  {
+    "ts": "2024-03-05T10:00:00Z",
+    "platform": "phone-os-fixture",
+    "ms_played": 200000,
+    "conn_country": "ZZ",
+    "master_metadata_track_name": null,
+    "master_metadata_album_artist_name": null,
+    "master_metadata_album_album_name": null,
+    "episode_name": null,
+    "incognito_mode": false
+  },
+  {
+    "ts": "2024-03-06T12:30:15.250Z",
+    "ms_played": 204000,
+    "ip_addr_decrypted": "203.0.113.5",
+    "master_metadata_track_name": "Ghost Town",
+    "master_metadata_album_artist_name": "Echo Field",
+    "master_metadata_album_album_name": "Static",
+    "audiobook_title": null,
+    "incognito_mode": false,
+    "a_field_from_a_newer_export": { "nested": [1, 2, 3] }
+  },
+  {
+    "ts": "2024-03-06T12:40:00Z",
+    "ms_played": 4000,
+    "master_metadata_track_name": "Ghost Town",
+    "master_metadata_album_artist_name": "Echo Field",
+    "master_metadata_album_album_name": "Static",
+    "incognito_mode": false
+  }
+]

@@ -1,0 +1,125 @@
+//! Library import: playlists, liked songs, saved albums and listening
+//! history from files other services let you download, matched to the
+//! library.
+//!
+//! - [`files`]    reads what the user picked: one file, a folder, or a zip
+//! - [`sources`]  the parsers, one per kind of file, behind [`sources::Parser`]
+//! - [`matching`] every imported song through `identity::` (ISRC, then names
+//!   and length, then names alone) into matched, unsure or missing
+//! - [`store`]    the import tables, the review queue and the Missing list
+//! - [`commands`] Tauri commands
+//!
+//! Nothing here writes to Plex. Saving an imported playlist to Plex or liking
+//! its songs there goes through the usual playlist and like commands, and
+//! only when the user asks.
+//!
+//! Privacy: parsers copy out the song, the time and how long it played, and
+//! nothing else. Network addresses, countries, devices and the like in
+//! history files are never read into anything that is kept. Plays marked
+//! private are dropped.
+
+pub mod commands;
+pub mod files;
+pub mod matching;
+pub mod sources;
+pub mod store;
+
+#[cfg(test)]
+mod tests;
+
+use serde::Serialize;
+
+/// A song as an import file names it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SongIn {
+    pub artist: String,
+    pub title: String,
+    pub album: Option<String>,
+    /// Length, when the file has it.
+    pub duration_ms: Option<u64>,
+    pub isrc: Option<String>,
+    /// The service's own id for the song (kept for re-imports, never matched on).
+    pub service_id: Option<String>,
+}
+
+/// A playlist from an import file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlaylistIn {
+    pub name: String,
+    pub songs: Vec<SongIn>,
+}
+
+/// A saved album.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumIn {
+    pub artist: String,
+    pub album: String,
+}
+
+/// One play from a history file: the song, when and for how long. Nothing
+/// else from the record is kept.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlayIn {
+    /// When the play ended, unix ms (history files log the end).
+    pub ended_at: i64,
+    pub ms_played: u64,
+    pub song: SongIn,
+}
+
+/// What was left out, and why.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Skipped {
+    /// Plays marked private (incognito).
+    pub private_plays: u64,
+    /// Podcast, episode and audiobook records.
+    pub podcasts: u64,
+    /// Records with no song name (some history files have them).
+    pub no_metadata: u64,
+    /// Plays under 30 seconds (skips).
+    pub short_plays: u64,
+    /// Rows with no title or no artist.
+    pub incomplete_rows: u64,
+    /// Files that couldn't be read as anything this source knows.
+    pub unknown_files: u64,
+}
+
+/// Everything a parser found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Parsed {
+    pub playlists: Vec<PlaylistIn>,
+    /// Liked songs; None when the files had no liked list (an earlier
+    /// import's likes then stay as they were).
+    pub liked: Option<Vec<SongIn>>,
+    /// Saved albums; None when the files had none.
+    pub albums: Option<Vec<AlbumIn>>,
+    pub plays: Vec<PlayIn>,
+    pub skipped: Skipped,
+}
+
+impl Parsed {
+    /// Whether nothing at all came out.
+    pub fn is_empty(&self) -> bool {
+        self.playlists.is_empty() && self.liked.is_none() && self.albums.is_none() && self.plays.is_empty()
+    }
+
+    /// Adds another file's results.
+    pub fn absorb(&mut self, other: Parsed) {
+        self.playlists.extend(other.playlists);
+        if let Some(l) = other.liked {
+            self.liked.get_or_insert_with(Vec::new).extend(l);
+        }
+        if let Some(a) = other.albums {
+            self.albums.get_or_insert_with(Vec::new).extend(a);
+        }
+        self.plays.extend(other.plays);
+        let s = &mut self.skipped;
+        let o = other.skipped;
+        s.private_plays += o.private_plays;
+        s.podcasts += o.podcasts;
+        s.no_metadata += o.no_metadata;
+        s.short_plays += o.short_plays;
+        s.incomplete_rows += o.incomplete_rows;
+        s.unknown_files += o.unknown_files;
+    }
+}

@@ -1,0 +1,24 @@
+{
+  "playlists": [
+    {
+      "name": "Road Trip",
+      "lastModifiedDate": "2024-05-01",
+      "collaborators": [],
+      "items": [
+        { "track": { "trackName": "Northern Lights", "artistName": "The Paper Kites", "albumName": "Lights Out", "trackUri": "service:track:aaa1" }, "episode": null, "localTrack": null, "addedDate": "2024-04-01" },
+        { "track": { "trackName": "Not In The Library", "artistName": "Nobody Here", "albumName": "Elsewhere", "trackUri": "service:track:aaa3" }, "episode": null, "addedDate": "2024-04-02" },
+        { "track": null, "episode": { "episodeName": "Episode 4", "showName": "A Podcast", "episodeUri": "service:episode:eee1" }, "addedDate": "2024-04-03" }
+      ],
+      "description": null,
+      "numberOfFollowers": 0
+    },
+    {
+      "name": "Rainy Day",
+      "lastModifiedDate": "2024-06-01",
+      "items": [
+        { "track": { "trackName": "Not In The Library", "artistName": "Nobody Here", "albumName": "Elsewhere", "trackUri": "service:track:aaa3" } },
+        { "track": { "trackName": "Also Missing", "artistName": "Nobody Here", "albumName": "Elsewhere", "trackUri": "service:track:aaa4" } }
+      ]
+    }
+  ]
+}

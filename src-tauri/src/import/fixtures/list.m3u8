@@ -1,0 +1,9 @@
+#EXTM3U
+#PLAYLIST:Night Drive
+#EXTINF:221,The Paper Kites - Northern Lights
+https://example.invalid/stream/1
+#EXTINF:-1,Low Tide - Quiet, Please
+/music/Low%20Tide/Shoreline/02.flac
+/music/Echo Field/Static/03 - Echo Field - Ghost Town.mp3
+#EXTINF:180,No separator here
+song.mp3

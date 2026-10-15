@@ -692,6 +692,73 @@ CREATE INDEX IF NOT EXISTS song_index_isrc ON song_index (isrc) WHERE isrc IS NO
 CREATE INDEX IF NOT EXISTS song_index_rec ON song_index (recording_mbid) WHERE recording_mbid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS song_index_mbid ON song_index (plex_mbid) WHERE plex_mbid IS NOT NULL;
 "#,
+    // v27: library import (import::). One row per source the user imported
+    // from, the songs its files named (each matched once: matched, unsure
+    // or missing, plus the review decision), its playlists and their
+    // songs in order, its liked songs and its saved albums. Plays go to
+    // imported_plays.
+    r#"
+CREATE TABLE IF NOT EXISTS import_sources (
+    source      TEXT PRIMARY KEY,
+    imported_at INTEGER NOT NULL,
+    file_name   TEXT,
+    stats       TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS import_songs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source      TEXT NOT NULL,
+    song_key    TEXT NOT NULL,
+    artist      TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    album       TEXT,
+    duration_ms INTEGER,
+    isrc        TEXT,
+    service_id  TEXT,
+    artist_fold TEXT NOT NULL,
+    title_fold  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'missing',
+    track_id    TEXT,
+    tier        TEXT,
+    confidence  INTEGER NOT NULL DEFAULT 0,
+    candidates  TEXT NOT NULL DEFAULT '[]',
+    reviewed    INTEGER NOT NULL DEFAULT 0,
+    matched_at  INTEGER,
+    UNIQUE (source, song_key)
+);
+CREATE INDEX IF NOT EXISTS import_songs_status ON import_songs (status);
+CREATE INDEX IF NOT EXISTS import_songs_name ON import_songs (artist_fold, title_fold);
+CREATE TABLE IF NOT EXISTS import_playlists (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    name_key    TEXT NOT NULL,
+    imported_at INTEGER NOT NULL,
+    UNIQUE (source, name_key)
+);
+CREATE TABLE IF NOT EXISTS import_playlist_items (
+    playlist_id INTEGER NOT NULL REFERENCES import_playlists (id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    song_id     INTEGER NOT NULL REFERENCES import_songs (id) ON DELETE CASCADE,
+    PRIMARY KEY (playlist_id, position)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS import_playlist_items_song ON import_playlist_items (song_id);
+CREATE TABLE IF NOT EXISTS import_likes (
+    source   TEXT NOT NULL,
+    song_id  INTEGER NOT NULL REFERENCES import_songs (id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (source, song_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS import_likes_song ON import_likes (song_id);
+CREATE TABLE IF NOT EXISTS import_albums (
+    source      TEXT NOT NULL,
+    artist_fold TEXT NOT NULL,
+    album_fold  TEXT NOT NULL,
+    artist      TEXT NOT NULL,
+    album       TEXT NOT NULL,
+    found       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (source, artist_fold, album_fold)
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

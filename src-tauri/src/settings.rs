@@ -497,6 +497,8 @@ pub struct Settings {
     pub now_playing_feed: bool,
     /// The feed's port (this device only).
     pub now_playing_feed_port: u16,
+    /// Library import sources turned on (ids from `import::sources`).
+    pub import_sources: Vec<String>,
 }
 
 /// Longest model name accepted.
@@ -664,6 +666,7 @@ impl Default for Settings {
             hint_key: HintKey::F,
             now_playing_feed: false,
             now_playing_feed_port: crate::feed::DEFAULT_PORT,
+            import_sources: Vec::new(),
         }
     }
 }
@@ -749,6 +752,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "lidarrAwayUrl",
     "powerKeys",
     "hintKey",
+    "importSources",
 ];
 
 /// Settings kept on this device only.
@@ -964,6 +968,7 @@ pub struct SettingsPatch {
     pub hint_key: Option<HintKey>,
     pub now_playing_feed: Option<bool>,
     pub now_playing_feed_port: Option<u16>,
+    pub import_sources: Option<Vec<String>>,
 }
 
 impl SettingsPatch {
@@ -1220,6 +1225,11 @@ impl Settings {
                 return Err(AppError::Invalid("Playlist names can be up to 100 characters.".into()));
             }
             self.playlist_new_name = name.to_string();
+        }
+        if let Some(ids) = &p.import_sources {
+            // Known sources only, each once, in the order they're listed.
+            self.import_sources =
+                crate::import::sources::SOURCES.iter().map(|s| s.id).filter(|id| ids.iter().any(|x| x == id)).map(String::from).collect();
         }
         eqprofile::apply_patch(self, p)?;
         self.clamp();
