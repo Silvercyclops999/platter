@@ -419,6 +419,19 @@ pub fn run() {
                 Some(db.clone()),
             ));
             backends.set_event_sink(Arc::new(plex::state::TauriSink(app.handle().clone())));
+            backends.keep_records_in(data_dir.clone());
+            {
+                // Sign-in and server changes: record the server, and the UI
+                // asks what it can do again.
+                let b = backends.clone();
+                app.listen_any(plex::types::EVENT_AUTH_CHANGED, move |_| {
+                    let b = b.clone();
+                    tauri::async_runtime::spawn(async move {
+                        b.remember_plex().await;
+                        b.changed();
+                    });
+                });
+            }
             db.set_source(backends.primary()?.library());
             db.set_events(Arc::new(monitor::library::SyncHealth {
                 inner: Arc::new(app.handle().clone()),
@@ -953,6 +966,7 @@ pub fn run() {
             plex::commands::home_remember_set,
             libraries::library_sources,
             libraries::library_servers,
+            backend::commands::backend_caps,
             plex::details::now_playing_details,
             lyrics::commands::lyrics_get,
             lyrics::commands::lyrics_own_get,

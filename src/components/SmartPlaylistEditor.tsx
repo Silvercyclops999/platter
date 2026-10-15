@@ -9,6 +9,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
 import type { AppError, SmartField, SmartOp, SmartPreview, SmartRule, SmartRules, SmartSort, SmartUpdate } from "../lib/types";
+import { hasCap } from "../stores/caps";
 import { closeSmartEditor, isPlatterSmart, useCurate, type SmartEditorState } from "../stores/curate";
 import { nav } from "../stores/router";
 import { toast } from "../stores/toasts";
@@ -274,6 +275,8 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
         rules: asked,
         picks: pickIds,
         prompt: promptText.trim() || null,
+        // A server that can't keep smart playlists: keep it on this computer.
+        ...(initial.id || hasCap("serverSmartPlaylists") ? {} : { platter: true }),
       });
       closeSmartEditor();
       if (saved.note) toast.info(saved.note);

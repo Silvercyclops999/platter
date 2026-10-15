@@ -15,6 +15,7 @@ import { toast, useToasts } from "../stores/toasts";
 import { offlineCallout } from "./bannerView";
 import { useUi } from "../stores/ui";
 import { useSocial } from "../stores/social";
+import { useCap } from "../stores/caps";
 import "./social.css";
 import { Logo } from "./Logo";
 import { shortcutLabel } from "./shortcuts";
@@ -435,8 +436,9 @@ export function WhatsNewButton() {
 /** Two people: shows or hides friend activity in the right panel. */
 export function FriendActivityButton() {
   const shown = useSettings((s) => s.settings?.showFriendActivity !== false);
+  const can = useCap("friendActivity");
   const open = useUi((s) => s.activityOpen);
-  if (!shown) return null;
+  if (!shown || !can) return null;
   return (
     <Tooltip label="Friend activity" placement="bottom">
       <button

@@ -77,7 +77,8 @@ import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNo
 import { LookCards } from "./looks/LookCards";
 import { looks } from "../stores/looks";
 import { CLASSIC_LAYOUT, type Layout } from "../design/themes";
-import type { AiProvider } from "../lib/types";
+import type { AiProvider, CapName } from "../lib/types";
+import { ensureCaps, useCaps, useServerName } from "../stores/caps";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
@@ -275,6 +276,8 @@ interface RowDef {
   control: (ids: { title: string; desc: string }) => ReactNode;
   /** A wide part under the row (the EQ editor). */
   block?: () => ReactNode;
+  /** Shown only when a server in use can do this. */
+  cap?: CapName;
 }
 
 function Row({ row }: { row: RowDef }) {
@@ -501,6 +504,9 @@ export function SettingsPage() {
   const scrobble = useScrobble();
   const ai = useAi();
   const lidarr = useLidarr();
+  ensureCaps();
+  const caps = useCaps((x) => x.all.caps);
+  const serverName = useServerName();
   const s = useSettings((x) => x.settings);
   const [sidebarArt, setSidebarArt] = useSidebarArt();
   const rememberMode = useFullWindow((x) => x.prefs.remember);
@@ -715,11 +721,11 @@ export function SettingsPage() {
       control: (ids) => (s ? <PrecacheField value={s.precacheCount} ids={ids} /> : loading),
     },
     {
-      key: "reportToPlex",
+      key: "reportPlays",
       section: "Playback",
-      title: "Report plays to Plex",
-      description: "Lets Plex count plays and show what's playing in your other Plex apps.",
-      control: (ids) => toggle(s, "reportToPlex", ids),
+      title: "Report plays to your server",
+      description: `Lets ${serverName ?? "your server"} count plays and show what's playing in your other apps.`,
+      control: (ids) => toggle(s, "reportPlays", ids),
     },
     {
       key: "privateSession",
@@ -854,7 +860,7 @@ export function SettingsPage() {
       section: "Sync",
       title: "Sync with a folder",
       description:
-        "Keeps settings, library folders and pins, followed artists and lyrics you wrote the same on your computers, through a folder your cloud app already syncs. Plex keeps likes, playlists and history either way. The file never holds your sign-in or keys. This device only.",
+        "Keeps settings, library folders and pins, followed artists and lyrics you wrote the same on your computers, through a folder your cloud app already syncs. Your server keeps likes, playlists and history either way. The file never holds your sign-in or keys. This device only.",
       note: syncNote(s, syncFile),
       control: (ids) => <SyncSwitch s={s} ids={ids} />,
     },
@@ -929,7 +935,7 @@ export function SettingsPage() {
       key: "resync",
       section: "Library",
       title: "Resync library",
-      description: "Reads your whole library from Plex again. Use it if something looks out of date. Progress shows at the top.",
+      description: `Reads your whole library from ${serverName ?? "your server"} again. Use it if something looks out of date. Progress shows at the top.`,
       note: syncing ? "Syncing now." : undefined,
       control: () => (
         <Button size="sm" disabled={syncing} onClick={() => void resync()}>
@@ -1432,6 +1438,7 @@ export function SettingsPage() {
     {
       key: "showPlexPlayers",
       section: "Playback",
+      cap: "remotePlayers",
       title: "Show Plex players in the device picker",
       description: "Lists Plexamp, Plex apps and Sonos speakers linked to Plex under Listen on, so you can move what's playing to them.",
       control: (ids) => toggle(s, "showPlexPlayers", ids),
@@ -1446,6 +1453,7 @@ export function SettingsPage() {
     {
       key: "actAsPlexPlayer",
       section: "Playback",
+      cap: "remotePlayers",
       title: "Let other Plex apps play on this computer",
       description: "Platter shows up as a player in Plexamp and other Plex apps on your network, so they can send music here. Opens a network port, so your computer may ask to allow it. This device only.",
       control: (ids) => toggle(s, "actAsPlexPlayer", ids),
@@ -1557,6 +1565,7 @@ export function SettingsPage() {
     {
       key: "showFriendActivity",
       section: "Social",
+      cap: "friendActivity",
       group: "Friend activity",
       title: "Show friend activity",
       description:
@@ -1737,6 +1746,7 @@ export function SettingsPage() {
           {
             key: "lidarrCheck",
             section: "Integrations",
+            cap: "realFilePaths",
             group: "Lidarr",
             title: "Check Lidarr's setup",
             description:
@@ -2125,7 +2135,7 @@ export function SettingsPage() {
     },
   ];
 
-  const shown = rows.filter((r) => matches(r, query.trim()));
+  const shown = rows.filter((r) => (!r.cap || caps[r.cap]) && matches(r, query.trim()));
   // About stays last; later sections (Integrations) go in before it.
   const sections = [...new Set(shown.map((r) => r.section))].sort((a, b) => Number(a === "About") - Number(b === "About"));
 
@@ -2161,7 +2171,7 @@ export function SettingsPage() {
       )}
       {nowPlayingMatches(query) && <NowPlayingSettings />}
       {importMatches(query) && <LibraryImportSettings />}
-      {plexEditMatches(query) && <PlexEditSettings />}
+      {caps.metadataEdit && plexEditMatches(query) && <PlexEditSettings />}
       {streamDeckMatches(query) && <StreamDeckSettings />}
       <p className="settings__hint">Shortcut: {modKey}+,</p>
       <ConfirmDialog

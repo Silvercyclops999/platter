@@ -312,6 +312,35 @@ async fn plex_requests_stay_exactly_the_same() {
     plex.sign_out().await.unwrap();
 }
 
+#[tokio::test]
+async fn the_connected_server_is_recorded_without_secrets() {
+    let (plex, _server, _tv, dir) = connected().await;
+    let b = crate::backend::Backends::with_plex(crate::backend::plex::PlexServer::new(plex.clone(), Arc::default(), None));
+    assert!(!b.remember_plex().await, "nowhere to keep records yet");
+    b.keep_records_in(dir.path().to_path_buf());
+    assert!(b.remember_plex().await);
+    assert!(!b.remember_plex().await, "nothing new");
+    let tag = crate::sid::tag(MACHINE);
+    let saved = crate::backend::ServersFile::load(dir.path());
+    assert_eq!(saved.primary.as_deref(), Some(tag.as_str()));
+    assert_eq!(saved.servers.len(), 1);
+    assert_eq!(saved.servers[0].kind, crate::backend::BackendKind::Plex);
+    assert_eq!(saved.servers[0].name, "Home");
+    let text = std::fs::read_to_string(dir.path().join(crate::backend::registry::SERVERS_FILE)).unwrap();
+    assert!(!text.contains(ACCT), "no token");
+    assert!(!text.contains(MACHINE), "only the tag");
+
+    // What the UI is told: Plex can do everything Platter uses it for.
+    let caps = crate::backend::commands::BackendCaps::of(&b).await;
+    assert_eq!(caps.servers.len(), 1);
+    assert!(caps.servers[0].primary);
+    assert_eq!(caps.servers[0].name.as_deref(), Some("Home"));
+    assert_eq!(caps.servers[0].tag.as_deref(), Some(tag.as_str()));
+    assert_eq!(caps.caps, crate::backend::plex::plex_caps() - crate::backend::Caps::SERVER_SMART_PLAYLISTS
+        - crate::backend::Caps::FRIEND_ACTIVITY - crate::backend::Caps::FRIEND_HISTORY, "no library cache here");
+    plex.sign_out().await.unwrap();
+}
+
 /// Recorded against the code before the backend layer.
 const EXPECTED: &str = r#"# sections
 GET /library/sections

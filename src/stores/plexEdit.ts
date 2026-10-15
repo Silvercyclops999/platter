@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { backend } from "../lib/backend";
 import { serverTagOf } from "../lib/ids";
 import type { AppError, EditAccess, EditChange, EditKind } from "../lib/types";
+import { hasCap, useCap } from "./caps";
 import { useSettings } from "./settings";
 import { toast, useToasts } from "./toasts";
 
@@ -73,7 +74,7 @@ export function canEditId(access: EditAccess | null, show: boolean, id: string):
 export function canEditNow(id: string): boolean {
   ensureLoaded();
   const show = useSettings.getState().settings?.plexEditShow !== false;
-  return canEditId(usePlexEdit.getState().access, show, id);
+  return canEditId(usePlexEdit.getState().access, show, id) && hasCap("metadataEdit", id);
 }
 
 /** [`canEditId`] as a hook. */
@@ -81,7 +82,8 @@ export function useCanEdit(id: string | null | undefined): boolean {
   ensureLoaded();
   const access = usePlexEdit((s) => s.access);
   const show = useSettings((s) => s.settings?.plexEditShow !== false);
-  return !!id && canEditId(access, show, id);
+  const editable = useCap("metadataEdit", id);
+  return !!id && editable && canEditId(access, show, id);
 }
 
 export function errText(e: unknown): string {

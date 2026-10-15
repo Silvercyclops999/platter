@@ -4,6 +4,7 @@
 
 pub mod backends;
 pub mod caps;
+pub mod commands;
 pub mod plex;
 pub mod registry;
 pub mod routed;

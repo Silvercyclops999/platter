@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import type { PlayerKind, RemotePlayer, RemoteSession } from "../lib/types";
+import { useCap } from "../stores/caps";
 import { usePlayer } from "../stores/player";
 import { moveTo, returnHere, useRemote, watchPlayers } from "../stores/remote";
 import { useSettings } from "../stores/settings";
@@ -145,7 +146,9 @@ function FirewallNote({ name }: { name: string }) {
 /** "Listen on": your other Platter computers, Plex players, Cast devices and
  * AirPlay speakers to move playback to, and this computer while remote. */
 export function ListenOn() {
-  const showPlex = useSettings((s) => s.settings?.showPlexPlayers ?? true);
+  // The server's own players, when it has any.
+  const serverPlayers = useCap("remotePlayers");
+  const showPlex = useSettings((s) => s.settings?.showPlexPlayers ?? true) && serverPlayers;
   const showCast = useSettings((s) => s.settings?.showCastDevices ?? true);
   const showLocked = useSettings((s) => s.settings?.showAirplayLocked ?? false);
   const players = useRemote((s) => s.players);

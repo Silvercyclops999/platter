@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { Switch } from "../components/Switch";
+import { useServerName } from "../stores/caps";
 import { useUi } from "../stores/ui";
 
 function Row({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -23,6 +24,7 @@ function Row({ title, description, checked, onChange }: { title: string; descrip
 export function NowPlayingSettings() {
   const prefs = useUi((s) => s.nowPlayingPrefs);
   const set = useUi((s) => s.setNowPlayingPrefs);
+  const server = useServerName() ?? "your server";
   return (
     <section className="settings__group" aria-labelledby="settings-now-playing">
       <h2 id="settings-now-playing" className="settings__heading">
@@ -36,7 +38,7 @@ export function NowPlayingSettings() {
       />
       <Row
         title="Lyrics card in now playing"
-        description="Shows the first lines of a song's lyrics in the now playing view, when Plex has lyrics for it."
+        description={`Shows the first lines of a song's lyrics in the now playing view, when ${server} has lyrics for it.`}
         checked={prefs.lyricsCard}
         onChange={(v) => set({ lyricsCard: v })}
       />

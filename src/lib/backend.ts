@@ -38,6 +38,7 @@ import type {
   ArtistPage,
   ArtistsArgs,
   AuthStatus,
+  BackendCaps,
   EventMap,
   EventName,
   Health,
@@ -180,6 +181,8 @@ export interface Backend {
   librarySources(): Promise<LibrarySources>;
   /** The servers the library has music from (the sidebar switcher). Doesn't ask the servers. */
   libraryServers(): Promise<LibraryServers>;
+  /** What the servers in use can do, and their names. */
+  backendCaps(): Promise<BackendCaps>;
 
   // Library
   syncStatus(): Promise<SyncStatus>;
@@ -701,6 +704,7 @@ export function createTauriBackend(): Backend {
     homeRememberSet: (on) => call("home_remember_set", { on }),
     librarySources: () => call("library_sources"),
     libraryServers: () => call("library_servers"),
+    backendCaps: () => call("backend_caps"),
 
     syncStatus: () => call("sync_status"),
     syncNow: (full) => call("sync_now", { full }),

@@ -226,8 +226,8 @@ function ShareCard({ subject, onClose }: { subject: CardSubject; onClose: () => 
         )}
         <p className="sharecard__note">
           {publicState === "unreleased"
-            ? "Unreleased music never gets a song.link line. The QR code works for people on your Plex server."
-            : "The QR code works for people on your Plex server. Nothing is uploaded."}
+            ? "Unreleased music never gets a song.link line. The QR code works for people on your server."
+            : "The QR code works for people on your server. Nothing is uploaded."}
         </p>
       </div>
       <div className="sharecard__actions">

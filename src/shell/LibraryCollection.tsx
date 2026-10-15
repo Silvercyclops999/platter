@@ -22,6 +22,7 @@ import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { entryMenu, movePlaylist, openEntry, playEntry, type LibraryModel } from "./useLibrary";
 import { folders } from "../stores/folders";
+import { useServerName } from "../stores/caps";
 import "./folders.css";
 
 /** A folder's tile: a folder glyph on a plain square. */
@@ -360,6 +361,7 @@ function Tile({ e, index, setSize, tabIndex, selected, onMenu }: ItemProps) {
 }
 
 function Empty({ model, query, mode }: { model: LibraryModel; query: string; mode: CollectionMode }) {
+  const server = useServerName();
   if (mode === "rail") return null;
   const q = query.trim();
   if (q)
@@ -372,7 +374,7 @@ function Empty({ model, query, mode }: { model: LibraryModel; query: string; mod
   return (
     <p className="lib-empty" role="status">
       {model.all.length === 0
-        ? "Albums, artists and playlists from your Plex library show up here after the first sync."
+        ? `Albums, artists and playlists from ${server ?? "your server"} show up here after the first sync.`
         : model.filter === "all"
           ? "Nothing here yet."
           : `No ${model.sub === "smart" ? "smart playlists" : model.sub === "byYou" ? "playlists by you" : KIND_LABEL[model.filter].toLowerCase()} yet.`}

@@ -126,6 +126,32 @@ they go to the server that has the file. A playlist lives on one server: new
 ones go to the server with their songs, and songs from another server can't
 be added to it.
 
+### Servers
+| Command | Args | Returns |
+| --- | --- | --- |
+| `backend_caps` | – | `BackendCaps { caps: Caps, servers: ServerCaps[] }` |
+
+`ServerCaps = { tag?, kind: "plex" | "jellyfin" | "subsonic", name?, primary, caps: Caps }`.
+`Caps` is an object with every capability name set to true or false:
+`liveUpdates`, `incrementalSync`, `likeDates`, `starRatings`, `playlistMove`,
+`playlistPoster`, `playlistSummary`, `serverSmartPlaylists`, `transcode`,
+`lyrics`, `syncedLyrics`, `serverRadio`, `sonic`, `playQueueHandoff`,
+`resumeQueue`, `remotePlayers`, `friendActivity`, `friendHistory`,
+`metadataEdit`, `homeUsers`, `realFilePaths`, `checkFiles`, `loudness`,
+`releaseTypes`, `serverHistory`, `backdatedScrobble`, `trackDetails`.
+The top level `caps` is what any server in use can do. The UI hides a
+feature when the item's server lacks what it needs (an id's tag names its
+server; ids without one belong to the primary server), and assumes
+everything is there until the first answer. Plex has every capability except
+`resumeQueue`, `backdatedScrobble` and `serverRadio`. `home_users` comes back
+empty and `now_playing_details` fails with `notFound` for servers without
+`homeUsers` and `trackDetails`.
+
+`backends://changed` (no payload) fires when a server is added or removed
+and after every `auth://changed`; the UI asks `backend_caps` again. The
+servers Platter knows are kept in `servers.json` next to the library cache,
+with each server's tag, kind and name and never a token or password.
+
 ## Library
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1970,14 +1996,16 @@ nothing left out.
 ## Settings and tracking
 | Command | Args |
 | --- | --- |
-| `settings_get` | – → `Settings { privateSession, reportToPlex, volume, shuffleStyle, ... }` |
+| `settings_get` | – → `Settings { privateSession, reportPlays, volume, shuffleStyle, ... }` |
 | `settings_set` | `{ patch: Partial<Settings> }` |
 | `art_cache_info` | – → `{ usedBytes, capBytes }` |
 | `art_cache_clear` | – → bytes freed (number) |
 
 `privateSession` (default false) stops plays being written to the local
-listen log. `reportToPlex` (default true) controls timeline and scrobble
-reports; when it's off nothing is sent or queued. `volume` is the same 0..1
+listen log. `reportPlays` (default true) controls now-playing and finished
+play reports to each song's server; when it's off nothing is sent or queued.
+Earlier builds called it `reportToPlex`; that name is still read, and the
+sync file keeps it so older builds share the setting. `volume` is the same 0..1
 value as `set_volume`; setting it here also moves the player. `shuffleStyle`
 is `"spread"` (default: keeps an artist's songs apart and pushes recently
 played ones back) or `"standard"` (plain random order). Settings are

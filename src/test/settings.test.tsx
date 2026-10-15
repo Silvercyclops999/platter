@@ -66,7 +66,7 @@ describe("settings page", () => {
     expect(screen.getByRole("combobox", { name: "Shuffle style" })).toHaveValue("spread");
     expect(screen.getByRole("switch", { name: "Albums and playlists resume where you left off" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("spinbutton", { name: "Pre-cache ahead" })).toHaveValue(5);
-    expect(screen.getByRole("switch", { name: "Report plays to Plex" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Report plays to your server" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Private session" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("combobox", { name: "Artist page Popular" })).toHaveValue("global");
     expect(screen.getByRole("combobox", { name: "Artwork and cache size" })).toHaveValue("2048");
@@ -182,12 +182,12 @@ describe("settings page", () => {
     const set = vi.spyOn(backend, "settingsSet");
     render(<SettingsPage />);
     const priv = screen.getByRole("switch", { name: "Private session" });
-    const report = screen.getByRole("switch", { name: "Report plays to Plex" });
+    const report = screen.getByRole("switch", { name: "Report plays to your server" });
     await user.click(priv);
     expect(priv).toHaveAttribute("aria-checked", "true");
     expect(set).toHaveBeenCalledWith({ privateSession: true });
     await user.click(report);
-    expect(set).toHaveBeenCalledWith({ reportToPlex: false });
+    expect(set).toHaveBeenCalledWith({ reportPlays: false });
     await user.click(screen.getByRole("switch", { name: "Show format badge" }));
     expect(set).toHaveBeenCalledWith({ showFormatBadge: false });
     const avatar = screen.getByRole("switch", { name: "Show my Plex profile picture" });
@@ -205,7 +205,7 @@ describe("settings page", () => {
     await loadSettings();
     expect(useSettings.getState().settings).toMatchObject({
       privateSession: true,
-      reportToPlex: false,
+      reportPlays: false,
       showFormatBadge: false,
       showPlexAvatar: false,
       resumeContexts: false,

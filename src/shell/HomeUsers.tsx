@@ -4,6 +4,7 @@ import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { backend } from "../lib/backend";
 import type { AppError, HomeUser, HomeUsers } from "../lib/types";
+import { useCap } from "../stores/caps";
 import { toast } from "../stores/toasts";
 import { AvatarFace } from "./TopBar";
 
@@ -12,8 +13,10 @@ const NO_HOME: HomeUsers = { users: [], remember: true };
 /** The account's Plex Home users, loaded when `open` (the app menu, Settings). */
 export function useHomeUsers(open: boolean): HomeUsers {
   const [home, setHome] = useState<HomeUsers>(NO_HOME);
+  // Only servers with Home users have any.
+  const allowed = useCap("homeUsers");
   useEffect(() => {
-    if (!open) return;
+    if (!open || !allowed) return;
     let alive = true;
     backend.homeUsers().then(
       (h) => alive && setHome(h),
@@ -22,8 +25,8 @@ export function useHomeUsers(open: boolean): HomeUsers {
     return () => {
       alive = false;
     };
-  }, [open]);
-  return home;
+  }, [open, allowed]);
+  return allowed ? home : NO_HOME;
 }
 
 /** Switch now, or ask for the PIN first when the user has one. */

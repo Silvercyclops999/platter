@@ -191,11 +191,13 @@ pub const DAYLIST_HOURS: [u32; 3] = [1, 3, 6];
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
-    /// Skip the local listen log (Plex still gets reports unless
-    /// `report_to_plex` is off).
+    /// Skip the local listen log (the server still gets reports unless
+    /// `report_plays` is off).
     pub private_session: bool,
-    /// Send timeline and scrobble reports to Plex.
-    pub report_to_plex: bool,
+    /// Send now-playing and finished-play reports to each song's server.
+    /// Saved as `reportToPlex` by earlier builds.
+    #[serde(alias = "reportToPlex")]
+    pub report_plays: bool,
     /// Linear slider value, 0..1.
     pub volume: f32,
     /// How shuffle orders tracks (spread keeps an artist's songs apart).
@@ -577,7 +579,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             private_session: false,
-            report_to_plex: true,
+            report_plays: true,
             volume: 0.7,
             shuffle_style: ShuffleStyle::Spread,
             quality_home: StreamQuality::Original,
@@ -745,7 +747,7 @@ impl Default for Settings {
 /// Everything else is this device only. Every setting is in exactly one of
 /// the two lists (a test checks).
 pub const SYNCED_SETTINGS: &[&str] = &[
-    "reportToPlex",
+    "reportPlays",
     "shuffleStyle",
     "qualityHome",
     "qualityAway",
@@ -918,7 +920,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPatch {
     pub private_session: Option<bool>,
-    pub report_to_plex: Option<bool>,
+    #[serde(alias = "reportToPlex")]
+    pub report_plays: Option<bool>,
     pub volume: Option<f32>,
     pub shuffle_style: Option<ShuffleStyle>,
     pub quality_home: Option<StreamQuality>,
@@ -1131,7 +1134,7 @@ impl Settings {
             self.volume = v.clamp(0.0, 1.0);
         }
         set(&mut self.private_session, p.private_session);
-        set(&mut self.report_to_plex, p.report_to_plex);
+        set(&mut self.report_plays, p.report_plays);
         set(&mut self.shuffle_style, p.shuffle_style);
         set(&mut self.quality_home, p.quality_home);
         set(&mut self.quality_away, p.quality_away);
@@ -1609,7 +1612,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         d.set_prefs(s.download_prefs());
     }
     live.tracking.private_session.store(s.private_session, Ordering::Relaxed);
-    live.tracking.report_to_plex.store(s.report_to_plex, Ordering::Relaxed);
+    live.tracking.report_plays.store(s.report_plays, Ordering::Relaxed);
     live.tracking.share_activity.store(s.share_activity, Ordering::Relaxed);
     {
         let so = &live.social;
@@ -2008,7 +2011,7 @@ mod tests {
         let (db, _d) = db();
         let s = load(&db);
         assert_eq!(s, Settings::default());
-        assert!(s.report_to_plex);
+        assert!(s.report_plays);
         assert!(!s.private_session);
         assert_eq!(s.quality_home, StreamQuality::Original);
         assert_eq!(s.quality_away, StreamQuality::Kbps320);
@@ -2335,7 +2338,7 @@ mod tests {
         .unwrap();
         let s = load(&db);
         assert!(s.private_session);
-        assert!(!s.report_to_plex);
+        assert!(!s.report_plays);
         assert_eq!(s.shuffle_style, ShuffleStyle::Standard);
         let d = Settings::default();
         assert_eq!(
@@ -2425,7 +2428,7 @@ mod tests {
         let st = SettingsState::new(db.clone(), live.clone());
         st.set(SettingsPatch {
             private_session: Some(true),
-            report_to_plex: Some(false),
+            report_plays: Some(false),
             volume: Some(0.25),
             shuffle_style: Some(ShuffleStyle::Standard),
             quality_home: Some(StreamQuality::Kbps256),
@@ -2573,7 +2576,7 @@ mod tests {
             assert!(!live.artist_info.get(Src::Listenbrainz));
         }
         assert!(live.tracking.private_session.load(Ordering::Relaxed));
-        assert!(!live.tracking.report_to_plex.load(Ordering::Relaxed));
+        assert!(!live.tracking.report_plays.load(Ordering::Relaxed));
         assert_eq!((live.streams.home(), live.streams.away()), (Some(256), None));
         assert_eq!(db.popular_source(), PopularSource::MyPlays);
         assert!(!db.link_featured());
@@ -2582,7 +2585,7 @@ mod tests {
         assert_eq!(live.platform.get(), PlatformSettings { media_keys: false, media_session: false, close_to_tray: true, launch_at_login: true, go_offline: false });
 
         // Partial patch leaves other fields alone.
-        st.set(SettingsPatch { report_to_plex: Some(true), ..Default::default() }).await.unwrap();
+        st.set(SettingsPatch { report_plays: Some(true), ..Default::default() }).await.unwrap();
         drop(st);
         drop(db);
 
@@ -2591,7 +2594,7 @@ mod tests {
         let st2 = SettingsState::new(db2.clone(), fresh.clone());
         let s = st2.get().await.unwrap();
         assert!(s.private_session);
-        assert!(s.report_to_plex);
+        assert!(s.report_plays);
         assert!(s.transcribe_lyrics && !s.show_auto_lyrics);
         assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Medium);
         assert!(!fresh.lyrics_show_auto.load(Ordering::Relaxed));
@@ -2632,7 +2635,7 @@ mod tests {
         // Loaded at startup into the live switches.
         assert!(fresh.notify_track_change.load(Ordering::Relaxed));
         assert!(fresh.tracking.private_session.load(Ordering::Relaxed));
-        assert!(fresh.tracking.report_to_plex.load(Ordering::Relaxed));
+        assert!(fresh.tracking.report_plays.load(Ordering::Relaxed));
         assert_eq!(fresh.streams.home(), Some(256));
         assert_eq!(db2.popular_source(), PopularSource::MyPlays);
     }
@@ -2657,7 +2660,7 @@ mod tests {
         db.write(|c| kv_set(c, KEY, r#"{"privateSession":true,"somethingNew":1,"precacheCount":999}"#)).unwrap();
         let s = load(&db);
         assert!(s.private_session);
-        assert!(s.report_to_plex);
+        assert!(s.report_plays);
         assert_eq!(s.precache_count, PRECACHE_MAX);
         db.write(|c| kv_set(c, KEY, "not json")).unwrap();
         assert_eq!(load(&db), Settings::default());
@@ -2667,7 +2670,7 @@ mod tests {
     fn wire_format_is_camel_case() {
         let v = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(v["privateSession"], false);
-        assert_eq!(v["reportToPlex"], true);
+        assert_eq!(v["reportPlays"], true);
         assert_eq!(v["shuffleStyle"], "spread");
         assert_eq!(v["qualityHome"], "original");
         assert_eq!(v["qualityAway"], "320");
@@ -2699,7 +2702,7 @@ mod tests {
         assert_eq!(p.quality_away, Some(StreamQuality::Kbps128));
         assert_eq!(p.popular_source, Some(PopularSource::MyPlays));
         assert_eq!(p.reduce_motion, Some(ReduceMotion::Off));
-        assert_eq!(p.report_to_plex, None);
+        assert_eq!(p.report_plays, None);
     }
 
     #[tokio::test]
@@ -2716,7 +2719,7 @@ mod tests {
         let db2 = DbHandle::open(dir.path().join("s.db")).unwrap();
         let s = load(&db2);
         assert_eq!(s.output_device.as_deref(), Some("wasapi:usb"));
-        assert!(!s.report_to_plex);
+        assert!(!s.report_plays);
         assert!(serde_json::to_value(Settings::default()).unwrap()["outputDevice"].is_null());
         let st2 = SettingsState::new(db2, Live::default());
         st2.set_output_device(None).await.unwrap();

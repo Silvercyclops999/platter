@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
 
-use super::Caps;
 use super::plex::PlexServer;
+use super::{BackendKind, Caps, ServerRecord, ServersFile};
 use super::server::MusicServer;
 use crate::error::{AppError, AppResult};
 use crate::plex::PlexState;
@@ -52,6 +52,8 @@ struct Inner {
     fallback: Option<Arc<dyn MusicServer>>,
     status: Option<Arc<dyn AppStatus>>,
     sink: Mutex<Option<Arc<dyn EventSink>>>,
+    /// `servers.json` and the folder it's kept in, once set.
+    records: Mutex<Option<(std::path::PathBuf, ServersFile)>>,
 }
 
 const NO_SERVER: &str = "Your server is offline.";
@@ -82,12 +84,39 @@ impl Backends {
                 fallback,
                 status,
                 sink: Mutex::new(None),
+                records: Mutex::new(None),
             }),
         }
     }
 
     pub fn set_event_sink(&self, sink: Arc<dyn EventSink>) {
         *self.inner.sink.lock() = Some(sink);
+    }
+
+    /// Keep `servers.json` in `dir` (read now, written on changes).
+    pub fn keep_records_in(&self, dir: std::path::PathBuf) {
+        let file = ServersFile::load(&dir);
+        *self.inner.records.lock() = Some((dir, file));
+    }
+
+    /// The saved server records.
+    pub fn records(&self) -> ServersFile {
+        self.inner.records.lock().as_ref().map(|(_, f)| f.clone()).unwrap_or_default()
+    }
+
+    /// Record the connected Plex server (its tag and name, no secrets) as
+    /// the primary server. True when the saved list changed.
+    pub async fn remember_plex(&self) -> bool {
+        let Some(p) = self.plex().cloned() else { return false };
+        let (Some(tag), Some(name)) = (p.tag().await, MusicServer::name(p.as_ref()).await) else { return false };
+        let mut g = self.inner.records.lock();
+        let Some((dir, file)) = g.as_mut() else { return false };
+        let record = ServerRecord { tag: tag.clone(), kind: BackendKind::Plex, name, url: None, user: None };
+        let changed = file.upsert(record) | file.set_primary(&tag);
+        if changed && let Err(e) = file.save(dir) {
+            tracing::warn!("servers not saved: {e}");
+        }
+        changed
     }
 
     /// Add a server under its tag (replacing one with the same tag).

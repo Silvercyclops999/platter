@@ -698,7 +698,8 @@ export type LikeControlRows = "hover" | "always" | "off";
 
 export interface Settings {
   privateSession: boolean;
-  reportToPlex: boolean;
+  /** Report plays to each song's server (was reportToPlex). */
+  reportPlays: boolean;
   volume: number;
   shuffleStyle: ShuffleStyle;
   qualityHome: StreamQuality;
@@ -1089,7 +1090,7 @@ export const EQ_PRESETS: { id: string; name: string; bands: number[] }[] = [
 
 export const DEFAULT_SETTINGS: Settings = {
   privateSession: false,
-  reportToPlex: true,
+  reportPlays: true,
   volume: 0.7,
   shuffleStyle: "spread",
   qualityHome: "original",
@@ -2311,11 +2312,67 @@ export interface UpdateInfo {
   notes?: string | null;
 }
 
+// ---------------------------------------------------------------- servers (docs/IPC.md "Servers")
+
+/** What a music server can do. Features hide by these, never by the kind of server. */
+export type CapName =
+  | "liveUpdates"
+  | "incrementalSync"
+  | "likeDates"
+  | "starRatings"
+  | "playlistMove"
+  | "playlistPoster"
+  | "playlistSummary"
+  | "serverSmartPlaylists"
+  | "transcode"
+  | "lyrics"
+  | "syncedLyrics"
+  | "serverRadio"
+  | "sonic"
+  | "playQueueHandoff"
+  | "resumeQueue"
+  | "remotePlayers"
+  | "friendActivity"
+  | "friendHistory"
+  | "metadataEdit"
+  | "homeUsers"
+  | "realFilePaths"
+  | "checkFiles"
+  | "loudness"
+  | "releaseTypes"
+  | "serverHistory"
+  | "backdatedScrobble"
+  | "trackDetails";
+
+export type Caps = Record<CapName, boolean>;
+
+export type BackendKind = "plex" | "jellyfin" | "subsonic";
+
+/** One server in use (backend_caps). */
+export interface ServerCaps {
+  /** The prefix its ids carry; null while not connected. */
+  tag: string | null;
+  kind: BackendKind;
+  /** The name its owner gave it. */
+  name: string | null;
+  /** The server with the main library. */
+  primary: boolean;
+  caps: Caps;
+}
+
+/** `backend_caps`: what any server in use can do, and each server. */
+export interface BackendCaps {
+  caps: Caps;
+  servers: ServerCaps[];
+}
+
 // ---------------------------------------------------------------- events
 
 /** Every event in docs/IPC.md → its payload. */
 export interface EventMap {
   "auth://changed": AuthStatus;
+  /** The servers in use or what they can do changed: ask backend_caps again. */
+  "backends://changed": Record<string, never>;
   /** A Home user switch went through; the app restarts as them. */
   "home://changed": { restarting: boolean };
   "sync://progress": SyncStatus;

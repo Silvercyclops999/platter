@@ -9,6 +9,7 @@ import { artUrl, backend } from "../lib/backend";
 import { headerColorsFromImageUrl, type HeaderColors } from "../lib/color";
 import { creditKey, type ArtistLookup, type Credit } from "../lib/credits";
 import type { AlbumCreditRow, Contributor, CreditRole, NowPlayingDetails, QueueContextInfo, QueueItem, QueueView } from "../lib/types";
+import { hasCap } from "../stores/caps";
 import type { Route } from "../stores/router";
 
 // ---------------------------------------------------------------- details
@@ -36,6 +37,11 @@ export function useNowPlayingDetails(trackId: string | null | undefined): { deta
   useEffect(() => {
     if (!trackId || cache.has(trackId)) return;
     let alive = true;
+    // A server without song details: nothing to ask for.
+    if (!hasCap("trackDetails", trackId)) {
+      setState({ id: trackId, details: null, loading: false });
+      return;
+    }
     backend.nowPlayingDetails(trackId).then(
       (d) => {
         cache.set(trackId, d);

@@ -35,7 +35,7 @@ const TIMELINE_EVERY_MS: u64 = 10_000;
 #[derive(Clone)]
 pub struct TrackingSettings {
     pub private_session: Arc<AtomicBool>,
-    pub report_to_plex: Arc<AtomicBool>,
+    pub report_plays: Arc<AtomicBool>,
     pub share_activity: Arc<AtomicBool>,
 }
 
@@ -43,7 +43,7 @@ impl Default for TrackingSettings {
     fn default() -> Self {
         Self {
             private_session: Arc::new(AtomicBool::new(false)),
-            report_to_plex: Arc::new(AtomicBool::new(true)),
+            report_plays: Arc::new(AtomicBool::new(true)),
             share_activity: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -203,7 +203,7 @@ impl Tracker {
     }
 
     fn reporting(&self) -> bool {
-        self.settings.report_to_plex.load(Ordering::Relaxed)
+        self.settings.report_plays.load(Ordering::Relaxed)
     }
 
     /// Now-playing timelines go out (they make the live session friends see).
@@ -522,7 +522,7 @@ mod tests {
         let rec = Arc::new(Recorder::default());
         let settings = TrackingSettings::default();
         settings.private_session.store(private, Ordering::Relaxed);
-        settings.report_to_plex.store(report, Ordering::Relaxed);
+        settings.report_plays.store(report, Ordering::Relaxed);
         let tracker = Tracker::with_reporter(rec.clone(), db.clone(), settings);
         Rig { tracker, rec, db, _dir: dir }
     }
@@ -645,7 +645,7 @@ mod tests {
     async fn flags_change_take_effect_immediately() {
         let r = rig(false, true);
         r.tracker.settings.private_session.store(true, Ordering::Relaxed);
-        r.tracker.settings.report_to_plex.store(false, Ordering::Relaxed);
+        r.tracker.settings.report_plays.store(false, Ordering::Relaxed);
         full_play(&r.tracker).await;
         assert_eq!(listen_rows(&r.db), 0);
         assert!(r.rec.timelines.lock().is_empty());

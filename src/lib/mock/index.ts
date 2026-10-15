@@ -120,6 +120,7 @@ import * as eq from "./eq";
 import * as hifi from "./hifi";
 import { MockHome, type ContextPlay } from "./home";
 import { MockHomeUsers } from "./homeUsers";
+import { mockBackendCaps } from "./servers";
 import { MockLibraries } from "./libraries";
 import { MockLikes } from "./likes";
 import { buildRecents, seedListens, type MockListen } from "./recents";
@@ -763,6 +764,9 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       this.homeUsersMock.remember = on;
     });
+  }
+  backendCaps() {
+    return this.delay(() => mockBackendCaps(this.auth.server?.name ?? null));
   }
   librarySources() {
     return this.delay(() => this.librariesMock.sources(this.settings.libraries));
