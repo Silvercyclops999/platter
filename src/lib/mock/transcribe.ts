@@ -49,11 +49,14 @@ export class MockTranscribe {
   private batch = { done: 0, total: 0 };
   private error: TranscribeStatus["error"];
   private running = false;
+  /** Bumped by reset, so a job still stepping from before stops. */
+  private generation = 0;
 
   constructor(private hooks: MockTranscribeHooks) {}
 
   /** Back to a fresh install (tests). */
   reset() {
+    this.generation++;
     this.installed.clear();
     this.download = null;
     this.queue = [];
@@ -235,7 +238,10 @@ export class MockTranscribe {
     this.running = true;
     this.emit();
     const id = job.trackId;
+    const generation = this.generation;
     const step = (pct: number) => {
+      // Reset meanwhile (the next test): this job is gone.
+      if (generation !== this.generation) return;
       if (this.current?.trackId !== id) {
         this.running = false;
         this.pump();

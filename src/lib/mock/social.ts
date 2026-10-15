@@ -26,6 +26,8 @@ export interface SocialHooks {
   emitBadge: (unseen: number) => void;
   emitListen: (v: ListenView) => void;
   later: (ms: number, fn: () => void) => void;
+  /** The browser demo (its timelines run): someone opens a new session's invite by themselves. Tests join with guestJoins. */
+  demo: () => boolean;
   queueAdd: (ids: string[]) => void;
   /** Play, pause, skip or seek on the mock player (a guest's request reaching the host). */
   control: (op: ListenOp) => void;
@@ -199,8 +201,8 @@ export class MockSocial {
         status: "live",
         relay: "ok",
       });
-      // Someone opens the link a moment later.
-      this.hooks.later(1500, () => this.guestJoins(MOCK_FRIENDS[0]));
+      // In the demo someone opens the link a moment later.
+      if (this.hooks.demo()) this.hooks.later(1500, () => this.guestJoins(MOCK_FRIENDS[0]));
     }
     return this.listenState();
   }

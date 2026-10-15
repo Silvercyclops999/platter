@@ -540,6 +540,7 @@ export class MockBackend implements Backend {
       emitBadge: (unseen) => this.emit("whatsnew://changed", { unseen: this.settings.whatsNewAnnouncements ? unseen : 0 }),
       emitListen: (v) => this.emit("listen://state", v),
       later: (ms, fn) => this.later(ms, fn),
+      demo: () => !!this.opts.timelines,
       queueAdd: (ids) => void this.queueAdd(ids, "end"),
       control: (op) => {
         if (op.op === "play") void this.act(() => this.resumeNow());
