@@ -1,0 +1,60 @@
+/* Settings: Lidarr's connection rows and the setup check's findings. */
+
+.lidarr-headers { display: flex; align-items: flex-end; gap: var(--space-2); }
+.lidarr-headers__field {
+  width: 260px;
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-row);
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  resize: vertical;
+}
+.lidarr-headers__field::placeholder { color: var(--color-text-muted); }
+.lidarr-headers__field:focus { outline: none; border-color: color-mix(in srgb, var(--color-ink) 28%, transparent); }
+.lidarr-headers__field:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+
+.lidarr-check { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
+.lidarr-check__summary { margin: 0; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.lidarr-check__summary.is-blocked { color: var(--color-error-text); }
+.lidarr-check__meta,
+.lidarr-check__note { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.lidarr-check__note { margin-top: var(--space-1); }
+.lidarr-check__error {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-error-surface);
+  color: var(--color-error-text);
+  font-size: var(--font-size-md);
+}
+
+.lidarr-findings { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.lidarr-finding {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+  box-shadow: inset 3px 0 0 var(--lidarr-level, transparent);
+}
+.lidarr-finding--red { --lidarr-level: var(--color-error); background: color-mix(in srgb, var(--color-error) 9%, var(--color-bg-raised)); }
+.lidarr-finding--amber { --lidarr-level: var(--color-warning); }
+.lidarr-finding__icon { flex: none; display: flex; padding-top: 1px; color: var(--lidarr-level, var(--color-success)); }
+.lidarr-finding--ok .lidarr-finding__icon { color: var(--color-success); }
+.lidarr-finding__text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.lidarr-finding__title { margin: 0; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); overflow-wrap: anywhere; }
+.lidarr-finding__detail { margin: 0; font-size: var(--font-size-sm); line-height: 1.5; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.lidarr-finding__fix { margin: 0; font-size: var(--font-size-sm); line-height: 1.5; color: var(--color-text-primary); }
+.lidarr-finding__actions { display: flex; gap: var(--space-2); padding-top: var(--space-1); }
+
+/* OK items are a quiet list. */
+.lidarr-findings--ok { gap: 0; }
+.lidarr-findings--ok .lidarr-finding { padding: var(--space-1) var(--space-4); background: none; box-shadow: none; }
+.lidarr-findings--ok .lidarr-finding__title { font-weight: var(--font-weight-regular, 400); color: var(--color-text-secondary); }
+.lidarr-findings--ok .lidarr-finding__detail:empty { display: none; }

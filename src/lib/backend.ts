@@ -99,6 +99,8 @@ import type {
   ListenView,
   ListenOp,
   AiStatus,
+  LidarrReport,
+  LidarrStatus,
   Bookmark,
   HiddenItem,
   HideRequest,
@@ -479,6 +481,16 @@ export interface Backend {
   lastfmSignOut(): Promise<ScrobbleStatus>;
   /** Check the ListenBrainz token (after saving it). */
   listenbrainzCheck(): Promise<ScrobbleStatus>;
+  /** Lidarr: what's set up (addresses are in settings, the key and proxy headers in the keychain). */
+  lidarrStatus(): Promise<LidarrStatus>;
+  /** Save (or with null remove) Lidarr's API key in the OS keychain. */
+  lidarrKeySet(key: string | null): Promise<LidarrStatus>;
+  /** Save extra headers for the away address as Name: value lines (null or blank removes them). */
+  lidarrHeadersSet(text: string | null): Promise<LidarrStatus>;
+  /** The read-only setup check (home address first, then away). */
+  lidarrCheck(): Promise<LidarrReport>;
+  /** Say an empty Lidarr root folder is (or isn't) separate from the Plex music folder. */
+  lidarrConfirmRoot(path: string, confirmed: boolean): Promise<void>;
 
   // Miniplayer window
   miniplayerState(): Promise<MiniplayerState>;
@@ -723,6 +735,11 @@ export function createTauriBackend(): Backend {
     lastfmSignInFinish: () => call("lastfm_sign_in_finish"),
     lastfmSignOut: () => call("lastfm_sign_out"),
     listenbrainzCheck: () => call("listenbrainz_check"),
+    lidarrStatus: () => call("lidarr_status"),
+    lidarrKeySet: (key) => call("lidarr_key_set", { key }),
+    lidarrHeadersSet: (text) => call("lidarr_headers_set", { text }),
+    lidarrCheck: () => call("lidarr_check"),
+    lidarrConfirmRoot: (path, confirmed) => call("lidarr_confirm_root", { path, confirmed }),
     miniplayerState: () => call("miniplayer_state"),
     miniplayerSet: (open) => call("miniplayer_set", { open }),
     windowLabel: () => getCurrentWindow().label,

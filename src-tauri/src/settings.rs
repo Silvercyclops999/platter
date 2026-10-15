@@ -474,6 +474,12 @@ pub struct Settings {
     pub ai_provider: crate::smart::prompt::AiProvider,
     /// The provider's model.
     pub ai_model: String,
+    /// Lidarr's address (empty: Lidarr isn't set up). Its API key is in the
+    /// keychain.
+    pub lidarr_url: String,
+    /// Lidarr's away address (a reverse proxy, tunnel or VPN), tried when the
+    /// home one doesn't answer. Empty: none.
+    pub lidarr_away_url: String,
     /// The miniplayer window stays above other windows (this device only).
     pub miniplayer_on_top: bool,
     /// The miniplayer's card takes a colour from the cover (this device only).
@@ -495,6 +501,25 @@ pub struct Settings {
 
 /// Longest model name accepted.
 pub const AI_MODEL_MAX: usize = 100;
+
+/// Lidarr's address as stored: an http(s) address with no query, sign-in or
+/// trailing slash; blank clears it.
+pub fn lidarr_url(u: &str) -> AppResult<String> {
+    let u = u.trim().trim_end_matches('/');
+    if u.is_empty() {
+        return Ok(String::new());
+    }
+    let bad = || AppError::Invalid("Lidarr's address is a web address like http://192.168.1.20:8686.".into());
+    let parsed = url::Url::parse(u).map_err(|_| bad())?;
+    let ok = matches!(parsed.scheme(), "http" | "https")
+        && parsed.host_str().is_some_and(|h| !h.is_empty())
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.query().is_none()
+        && parsed.fragment().is_none()
+        && u.len() <= 300;
+    if ok { Ok(u.to_string()) } else { Err(bad()) }
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -629,6 +654,8 @@ impl Default for Settings {
             scrobble_unreleased: false,
             ai_provider: crate::smart::prompt::AiProvider::None,
             ai_model: crate::smart::prompt::DEFAULT_MODEL.to_string(),
+            lidarr_url: String::new(),
+            lidarr_away_url: String::new(),
             miniplayer_on_top: true,
             miniplayer_tint: true,
             miniplayer_queue: false,
@@ -718,6 +745,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "bookmarksInLibrary",
     "scrobbleUnreleased",
     "aiModel",
+    "lidarrUrl",
+    "lidarrAwayUrl",
     "powerKeys",
     "hintKey",
 ];
@@ -926,6 +955,8 @@ pub struct SettingsPatch {
     pub scrobble_unreleased: Option<bool>,
     pub ai_provider: Option<crate::smart::prompt::AiProvider>,
     pub ai_model: Option<String>,
+    pub lidarr_url: Option<String>,
+    pub lidarr_away_url: Option<String>,
     pub miniplayer_on_top: Option<bool>,
     pub miniplayer_tint: Option<bool>,
     pub miniplayer_queue: Option<bool>,
@@ -1169,6 +1200,12 @@ impl Settings {
                 return Err(AppError::Invalid("Model names are letters, numbers, dots and dashes.".into()));
             }
             self.ai_model = if m.is_empty() { crate::smart::prompt::DEFAULT_MODEL.to_string() } else { m.to_string() };
+        }
+        if let Some(u) = &p.lidarr_url {
+            self.lidarr_url = lidarr_url(u)?;
+        }
+        if let Some(u) = &p.lidarr_away_url {
+            self.lidarr_away_url = lidarr_url(u)?;
         }
         if let Some(name) = &p.computer_name {
             let name = name.trim();
@@ -2102,6 +2139,25 @@ mod tests {
         assert_eq!((s.discord().upload_covers, s.discord().cover_host), (true, CoverHost::X0));
         assert!(serde_json::from_str::<SettingsPatch>(r#"{"discordCoverHost":"imgur"}"#).is_err());
         assert!(DEVICE_SETTINGS.contains(&"discordUploadCovers") && DEVICE_SETTINGS.contains(&"discordCoverHost"));
+    }
+
+    #[test]
+    fn lidarr_address_is_checked_and_tidied() {
+        let mut s = Settings::default();
+        assert!(s.lidarr_url.is_empty(), "Lidarr is off until set up");
+        s.apply(&SettingsPatch { lidarr_url: Some(" http://192.168.1.20:8686/ ".into()), ..Default::default() }).unwrap();
+        assert_eq!(s.lidarr_url, "http://192.168.1.20:8686");
+        s.apply(&SettingsPatch { lidarr_url: Some("https://nas.local/lidarr".into()), ..Default::default() }).unwrap();
+        assert_eq!(s.lidarr_url, "https://nas.local/lidarr");
+        for bad in ["nas:8686", "ftp://nas", "http://user:pw@nas:8686", "http://nas:8686/?apikey=x", "http://"] {
+            assert!(s.apply(&SettingsPatch { lidarr_url: Some(bad.into()), ..Default::default() }).is_err(), "{bad}");
+        }
+        assert_eq!(s.lidarr_url, "https://nas.local/lidarr", "a bad address leaves the old one");
+        s.apply(&SettingsPatch { lidarr_url: Some("  ".into()), ..Default::default() }).unwrap();
+        assert!(s.lidarr_url.is_empty());
+        s.apply(&SettingsPatch { lidarr_away_url: Some("https://lidarr.example.com/".into()), ..Default::default() }).unwrap();
+        assert_eq!(s.lidarr_away_url, "https://lidarr.example.com");
+        assert!(s.apply(&SettingsPatch { lidarr_away_url: Some("lidarr.example.com".into()), ..Default::default() }).is_err());
     }
 
     #[test]

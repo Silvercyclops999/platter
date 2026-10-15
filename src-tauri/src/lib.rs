@@ -9,6 +9,7 @@ pub mod feed;
 pub mod hidden;
 pub mod identity;
 pub mod libraries;
+pub mod lidarr;
 pub mod likes;
 pub mod lyrics;
 pub mod mixes;
@@ -491,6 +492,14 @@ pub fn run() {
                 scrobble::spawn(scrobbler.clone(), player.subscribe_tracking());
                 app.manage(scrobble::commands::ScrobbleState::new(scrobbler, lastfm, listenbrainz, db.clone()));
             }
+            // Lidarr: the read-only setup check.
+            app.manage(lidarr::Lidarr::new(lidarr::LidarrDeps {
+                web: web_out.clone(),
+                keys: keychain.clone(),
+                db: db.clone(),
+                plex: Arc::new(lidarr::PlexMusicFiles(plex.clone())),
+                clock: Arc::new(db::queries::now_s),
+            }));
             let smart_service = smart::Smart::new(smart::SmartDeps {
                 db: db.clone(),
                 store: Arc::new(smart::SyncSmart { store: sync_store.clone(), db: db.clone() }),
@@ -986,6 +995,11 @@ pub fn run() {
             scrobble::commands::lastfm_sign_in_finish,
             scrobble::commands::lastfm_sign_out,
             scrobble::commands::listenbrainz_check,
+            lidarr::commands::lidarr_status,
+            lidarr::commands::lidarr_key_set,
+            lidarr::commands::lidarr_headers_set,
+            lidarr::commands::lidarr_check,
+            lidarr::commands::lidarr_confirm_root,
             platform::miniplayer::miniplayer_state,
             platform::miniplayer::miniplayer_set,
         ])

@@ -883,6 +883,10 @@ export interface Settings {
   aiProvider: AiProvider;
   /** The provider's model. */
   aiModel: string;
+  /** Lidarr's home address (empty: Lidarr isn't set up). Its API key is in the keychain. */
+  lidarrUrl: string;
+  /** Lidarr's away address, tried when the home one doesn't answer (empty: none). */
+  lidarrAwayUrl: string;
   /** The miniplayer window stays above other windows (this device only). */
   miniplayerOnTop: boolean;
   /** The miniplayer's card takes a colour from the cover (this device only). */
@@ -1100,6 +1104,8 @@ export const DEFAULT_SETTINGS: Settings = {
   scrobbleUnreleased: false,
   aiProvider: "none",
   aiModel: "claude-opus-5-5",
+  lidarrUrl: "",
+  lidarrAwayUrl: "",
   miniplayerOnTop: true,
   miniplayerTint: true,
   miniplayerQueue: false,
@@ -1589,6 +1595,42 @@ export interface AiStatus {
   hasKey: boolean;
   /** Prompted playlists show. */
   ready: boolean;
+}
+
+/** `lidarr_status`: what's set up, before any check. */
+export interface LidarrStatus {
+  urlSet: boolean;
+  awaySet: boolean;
+  hasKey: boolean;
+  /** Names of the saved proxy headers (values never leave the keychain). */
+  headerNames: string[];
+  /** Addresses that would send the key unencrypted over the internet. */
+  unencrypted: string[];
+}
+
+export type LidarrLevel = "red" | "amber" | "ok";
+
+export interface LidarrFinding {
+  id: string;
+  level: LidarrLevel;
+  title: string;
+  detail: string;
+  /** What to change in Lidarr. */
+  fix: string | null;
+  /** Set on an empty root folder the user can vouch for. */
+  emptyRoot: { path: string; confirmed: boolean } | null;
+}
+
+/** `lidarr_check`: the read-only setup check. */
+export interface LidarrReport {
+  version: string;
+  /** Red first, then amber, then OK. */
+  findings: LidarrFinding[];
+  /** No red findings. */
+  passed: boolean;
+  checkedAt: number;
+  /** Which address answered. */
+  route: "home" | "away" | null;
 }
 
 export interface ScrobbleStatus {

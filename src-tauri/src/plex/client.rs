@@ -365,6 +365,16 @@ pub struct Directory {
     pub refreshing: bool,
     #[serde(default)]
     pub fast_key: Option<String>,
+    /// A library section's folders on the server (`Location[].path`), in
+    /// the server's own path form.
+    #[serde(default, rename = "Location")]
+    pub locations: Vec<SectionLocation>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SectionLocation {
+    #[serde(default)]
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -444,6 +454,8 @@ pub struct LibrarySection {
     pub scanned_at: Option<i64>,
     pub updated_at: Option<i64>,
     pub refreshing: bool,
+    /// The section's folders as the server sees them.
+    pub locations: Vec<String>,
 }
 
 impl LibrarySection {
@@ -1070,6 +1082,7 @@ impl PlexClient {
                 scanned_at: d.scanned_at,
                 updated_at: d.updated_at,
                 refreshing: d.refreshing,
+                locations: d.locations.into_iter().map(|l| l.path).filter(|p| !p.trim().is_empty()).collect(),
             })
             .collect())
     }
@@ -2057,7 +2070,8 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/library/sections"))
             .respond_with(mc(serde_json::json!({"Directory": [
-                {"key": "3", "type": "artist", "title": "Music", "uuid": "u-1", "agent": "tv.plex.agents.music"},
+                {"key": "3", "type": "artist", "title": "Music", "uuid": "u-1", "agent": "tv.plex.agents.music",
+                 "Location": [{"id": 1, "path": "/data/music"}, {"id": 2, "path": "/data/lidarr"}, {"id": 3, "path": " "}]},
                 {"key": "1", "type": "movie", "title": "Movies"}
             ]})))
             .mount(&server)
@@ -2082,6 +2096,7 @@ mod tests {
         let music = c.music_sections().await.unwrap();
         assert_eq!(music.len(), 1);
         assert_eq!(music[0].uuid.as_deref(), Some("u-1"));
+        assert_eq!(music[0].locations, vec!["/data/music".to_string(), "/data/lidarr".to_string()]);
         let prefs = c.section_prefs("3").await.unwrap();
         assert_eq!(prefs.respect_tags, Some(true));
         assert_eq!(prefs.music_analysis, Some(false));

@@ -118,6 +118,7 @@ import { MockDownloads } from "./downloads";
 import { MockMixes } from "./mixes";
 import { MockSocial } from "./social";
 import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
+import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -149,6 +150,8 @@ export interface MockOptions {
   downloads?: "demo" | "full";
   /** Start on this theme (?theme=light). */
   theme?: Settings["theme"];
+  /** What the faked Lidarr looks like (?lidarr=clear). */
+  lidarr?: LidarrDemo;
 }
 
 const isTestEnv = (() => {
@@ -187,6 +190,7 @@ export function optionsFromUrl(search: string): MockOptions {
     feedPortInUse: Number(p.get("feedPortInUse")) || undefined,
     platterUnreachable: p.get("platter") === "unreachable",
     downloads: p.get("downloads") === "demo" || p.get("downloads") === "full" ? (p.get("downloads") as "demo" | "full") : undefined,
+    lidarr: isLidarrDemo(p.get("lidarr")) ? (p.get("lidarr") as LidarrDemo) : undefined,
     theme: (["dark", "light", "system", "midnight", "forest", "sand"] as const).find((t) => t === p.get("theme")),
   };
 }
@@ -245,6 +249,8 @@ export class MockBackend implements Backend {
   readonly smart: MockSmart;
   /** Scrobbling (test hook: reject). */
   readonly scrobble: MockScrobble;
+  /** Lidarr's setup check (test hook: setDemo). */
+  readonly lidarr: MockLidarr;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -451,6 +457,7 @@ export class MockBackend implements Backend {
       track: (id) => this.trackById(id),
       album: (id) => this.fx.albums.find((a) => a.id === id),
     });
+    this.lidarr = new MockLidarr(this.opts.lidarr);
     this.scrobble = new MockScrobble((queued) => this.emit("scrobble://status", { queued }));
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
@@ -2068,6 +2075,12 @@ export class MockBackend implements Backend {
         next.listenRelay = r;
       }
       if (patch.listenName !== undefined) next.listenName = patch.listenName.trim();
+      for (const k of ["lidarrUrl", "lidarrAwayUrl"] as const) {
+        if (patch[k] === undefined) continue;
+        const u = patch[k].trim().replace(/\/+$/, "");
+        if (u && !/^https?:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(u)) throw { kind: "invalid", message: "Lidarr's address is a web address like http://192.168.1.20:8686." };
+        next[k] = u;
+      }
       if (patch.nowPlayingFeedPort !== undefined) {
         const port = patch.nowPlayingFeedPort;
         if (!Number.isInteger(port) || port < 1024 || port > 65535) throw { kind: "invalid", message: "Pick a port from 1024 to 65535." };
@@ -2516,6 +2529,21 @@ export class MockBackend implements Backend {
   }
   listenbrainzCheck() {
     return this.delay(() => this.scrobble.check());
+  }
+  lidarrStatus() {
+    return this.delay(() => this.lidarr.status(this.settings));
+  }
+  lidarrKeySet(key: string | null) {
+    return this.delay(() => this.lidarr.setKey(this.settings, key));
+  }
+  lidarrHeadersSet(text: string | null) {
+    return this.delay(() => this.lidarr.setHeaders(this.settings, text));
+  }
+  lidarrCheck() {
+    return this.delay(() => this.lidarr.check(this.settings, Math.floor(Date.now() / 1000)));
+  }
+  lidarrConfirmRoot(path: string, confirmed: boolean) {
+    return this.delay(() => this.lidarr.confirmRoot(this.settings, path, confirmed));
   }
 
   // ---------------------------------------------------------------- discord

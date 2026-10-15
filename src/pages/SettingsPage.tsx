@@ -57,6 +57,14 @@ import {
   useScrobble,
 } from "./CurateSettings";
 import { loadAi } from "../stores/curate";
+import {
+  LidarrCheckButton,
+  LidarrFindings,
+  LidarrHeadersControl,
+  LidarrKeyControl,
+  LidarrUrlField,
+  useLidarr,
+} from "./LidarrSettings";
 import { useTheme } from "../stores/theme";
 import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNote, useThemeFolder } from "./ThemeSettings";
 import type { AiProvider } from "../lib/types";
@@ -473,6 +481,7 @@ function matches(row: RowDef, q: string): boolean {
 export function SettingsPage() {
   const scrobble = useScrobble();
   const ai = useAi();
+  const lidarr = useLidarr();
   const s = useSettings((x) => x.settings);
   const [sidebarArt, setSidebarArt] = useSidebarArt();
   const rememberMode = useFullWindow((x) => x.prefs.remember);
@@ -1573,6 +1582,62 @@ export function SettingsPage() {
             title: "Model",
             description: "The Claude model prompted playlists use.",
             control: (ids) => <AiModelField ids={ids} />,
+          },
+        ] satisfies RowDef[])
+      : []),
+    // Integrations: Lidarr (only its address and key fields until both are set)
+    {
+      key: "lidarrUrl",
+      section: "Integrations",
+      group: "Lidarr",
+      title: "Lidarr home address",
+      description:
+        "Lidarr's address on your home network, with its port and any URL base, like http://192.168.1.20:8686. Platter tries it first. Empty keeps Lidarr off.",
+      control: (ids) => <LidarrUrlField field="lidarrUrl" placeholder="http://192.168.1.20:8686" ids={ids} />,
+    },
+    {
+      key: "lidarrAwayUrl",
+      section: "Integrations",
+      group: "Lidarr",
+      title: "Lidarr away address",
+      description:
+        "Optional. How Lidarr is reached away from home, through a reverse proxy, a tunnel or a VPN you set up. Tried when the home address doesn't answer. Use https so the key travels encrypted.",
+      control: (ids) => <LidarrUrlField field="lidarrAwayUrl" placeholder="https://lidarr.example.com" ids={ids} />,
+    },
+    {
+      key: "lidarrKey",
+      section: "Integrations",
+      group: "Lidarr",
+      title: "Lidarr API key",
+      description: "From Lidarr's Settings > General. Kept in this computer's keychain, never in settings or logs.",
+      note: lidarr.status?.hasKey ? "Saved." : undefined,
+      control: (ids) => <LidarrKeyControl lidarr={lidarr} ids={ids} />,
+    },
+    ...(lidarr.status?.awaySet
+      ? ([
+          {
+            key: "lidarrHeaders",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Extra headers for the away address",
+            description:
+              "Optional. Headers your proxy needs, one per line as Name: value (for example a Cloudflare Access service token). Sent only to the away address and kept in this computer's keychain.",
+            note: lidarr.status.headerNames.length ? `Saved: ${lidarr.status.headerNames.join(", ")}.` : undefined,
+            control: (ids) => <LidarrHeadersControl lidarr={lidarr} ids={ids} />,
+          },
+        ] satisfies RowDef[])
+      : []),
+    ...(lidarr.ready
+      ? ([
+          {
+            key: "lidarrCheck",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Check Lidarr's setup",
+            description:
+              "Reads Lidarr's folders and settings and compares them with your Plex music, by contents as well as paths, to make sure Lidarr can never touch your existing library. Only reads; nothing in Lidarr changes.",
+            control: () => <LidarrCheckButton lidarr={lidarr} />,
+            block: () => <LidarrFindings lidarr={lidarr} />,
           },
         ] satisfies RowDef[])
       : []),
