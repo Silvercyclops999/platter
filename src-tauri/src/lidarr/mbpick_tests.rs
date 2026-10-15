@@ -170,7 +170,7 @@ pub fn want() -> Want {
 }
 
 fn lib(title: &str, unreleased: bool) -> LibraryAlbum {
-    LibraryAlbum { title: title.into(), also: vec![], unreleased }
+    LibraryAlbum { id: format!("lib-{title}"), title: title.into(), also: vec![], unreleased }
 }
 
 /// What the library has by Northlight: a released album, an edition and
@@ -219,7 +219,7 @@ fn title_clash_with_an_unreleased_build_is_refused() {
 fn title_clash_with_an_edition_is_refused() {
     assert_eq!(vet(&group(RG_TIDES), &want(), &library(), true), Err(Refusal::TitleClash { title: "Tides (Deluxe Edition)".into(), unreleased: false }));
     // An ARCHIVE_* group name counts as a title too.
-    let tagged = vec![LibraryAlbum { title: "Untitled 4".into(), also: vec!["Second Wind".into()], unreleased: true }];
+    let tagged = vec![LibraryAlbum { id: "u4".into(), title: "Untitled 4".into(), also: vec!["Second Wind".into()], unreleased: true }];
     assert!(matches!(vet(&group(RG_SECOND), &want(), &tagged, true), Err(Refusal::TitleClash { unreleased: true, .. })));
 }
 
@@ -289,7 +289,7 @@ async fn musicbrainz_answers_are_cached_and_paced() {
     http.route("musicbrainz.org/ws/2/release-group/", 200, &group_json());
     let now = Arc::new(Mutex::new(1_000_i64));
     let n = now.clone();
-    let mb = MbCached { http: http.clone(), limiter: Arc::new(Limiter::per_second(100.0)), db, clock: Arc::new(move || *n.lock()) };
+    let mb = MbCached { http: http.clone(), limiter: Arc::new(Limiter::per_second(100.0)), db, clock: Arc::new(move || *n.lock()), ttl: CACHE_TTL };
     let url = group_url(RG_SECOND);
     assert!(mb.get(&url).await.unwrap().is_some());
     assert!(mb.get(&url).await.unwrap().is_some());
@@ -326,6 +326,54 @@ fn library_albums_by_id_or_folded_name() {
     titles.sort();
     assert_eq!(titles, vec![("First Light", false), ("Night Demos", true), ("Quiet Sketches", true)]);
     assert_eq!(got.iter().find(|a| a.title == "Quiet Sketches").unwrap().also, vec!["Sketchbook"]);
+    assert_eq!(got.iter().find(|a| a.title == "First Light").unwrap().id, "a1");
+}
+
+#[test]
+fn library_albums_follow_the_users_marks_and_song_versions() {
+    use crate::db::release::{Mark, mark_key, set_marks};
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("k.db")).unwrap();
+    db.write(|c| {
+        c.execute_batch(
+            "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, format, subformats, matched) VALUES
+               ('a1', 'First Light', 'First Light', 'ar1', 'Northlight', 'Album', '[]', 1),
+               ('a2', 'Night Demos', 'Night Demos', 'ar1', 'Northlight', NULL, '[]', 0),
+               ('a3', 'Tides', 'Tides', 'ar1', 'Northlight', 'Album', '[]', 1),
+               ('a4', 'Harbor', 'Harbor', 'ar1', 'Northlight', 'Album', '[]', 1);
+             INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, part_key) VALUES
+               ('t1', 'Low', 'a3', 'Tides', 'ar1', 'Northlight', '/p/t1'),
+               ('t2', 'Pier', 'a4', 'Harbor', 'ar1', 'Northlight', '/p/t2'),
+               ('t3', 'Dock', 'a4', 'Harbor', 'ar1', 'Northlight', '/p/t3');
+             INSERT INTO file_tags (part_key, status, version, scanned_at) VALUES ('/p/t1', 'ok', 'leak', 1);",
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let state = |marks: Vec<(String, Mark)>| {
+        set_marks(marks.into_iter().collect());
+        let got = db.read(|c| library_albums(c, Some("ar1"), "Northlight")).unwrap();
+        let mut v: Vec<(String, bool)> = got.into_iter().map(|a| (a.title, a.unreleased)).collect();
+        v.sort();
+        v
+    };
+    let plain = state(vec![]);
+    assert_eq!(
+        plain,
+        vec![("First Light".into(), false), ("Harbor".into(), false), ("Night Demos".into(), true), ("Tides".into(), true)],
+        "a leaked song's version makes its album count as unreleased"
+    );
+    let marked = state(vec![
+        (mark_key("album", "a1"), Mark::Unreleased),
+        (mark_key("album", "a2"), Mark::Released),
+        (mark_key("track", "t3"), Mark::Unreleased),
+    ]);
+    assert_eq!(
+        marked,
+        vec![("First Light".into(), true), ("Harbor".into(), true), ("Night Demos".into(), false), ("Tides".into(), true)],
+        "marks on albums and on songs count"
+    );
+    set_marks(Default::default());
 }
 
 #[test]

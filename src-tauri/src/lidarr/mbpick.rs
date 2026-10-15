@@ -92,6 +92,8 @@ impl Want {
 /// An album by the artist already in the library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryAlbum {
+    /// The library album's id.
+    pub id: String,
     pub title: String,
     /// Other names it goes by (its ARCHIVE_* group), checked as well.
     pub also: Vec<String>,
@@ -356,38 +358,55 @@ pub fn missing(groups: Vec<Group>, want: &Want, library: &[LibraryAlbum]) -> Vec
 /// Albums by the artist in the library: by library artist id, and by
 /// folded artist name (the same artist on another server or spelled
 /// another way).
+///
+/// Whether each counts as unreleased follows the archive's rule with the
+/// user's marks: an album marked unreleased (or released) counts that way,
+/// and an album holding any song that counts as unreleased (its own mark,
+/// or its file's ARCHIVE_VERSION) counts as unreleased too.
 pub fn library_albums(c: &Connection, artist_id: Option<&str>, artist_name: &str) -> AppResult<Vec<LibraryAlbum>> {
+    use crate::db::release::{album_unreleased, track_unreleased};
     let want = fold_artist(artist_name);
     let mut st = c.prepare(
-        "SELECT al.title, al.artist_id, al.artist_title, al.format, al.subformats, at.version, at.grp, al.matched, al.studio, mc.found
+        "SELECT al.id, al.title, al.artist_id, al.artist_title, al.format, al.subformats, at.version, at.grp, al.matched, al.studio, mc.found
          FROM albums al
          LEFT JOIN album_tags at ON at.album_id = al.id
          LEFT JOIN album_mb_check mc ON mc.album_id = al.id",
     )?;
     let rows = st.query_map([], |r| {
         Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, Option<String>>(3)?,
+            (r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?),
             r.get::<_, Option<String>>(4)?,
             r.get::<_, Option<String>>(5)?,
             r.get::<_, Option<String>>(6)?,
-            r.get::<_, Option<bool>>(7)?,
-            r.get::<_, Option<String>>(8)?,
-            r.get::<_, Option<bool>>(9)?,
+            r.get::<_, Option<String>>(7)?,
+            r.get::<_, Option<bool>>(8)?,
+            r.get::<_, Option<String>>(9)?,
+            r.get::<_, Option<bool>>(10)?,
         ))
     })?;
+    let mut songs = c.prepare_cached("SELECT t.id, ft.version FROM tracks t LEFT JOIN file_tags ft ON ft.part_key = t.part_key WHERE t.album_id = ?1")?;
     let mut out = Vec::new();
     for row in rows {
-        let (title, aid, artist, format, subs, version, grp, matched, studio, mb) = row?;
+        let ((id, title, aid, artist), format, subs, version, grp, matched, studio, mb) = row?;
         let ours = artist_id.is_some_and(|a| a == aid) || (!want.is_empty() && fold_artist(&artist) == want);
         if !ours {
             continue;
         }
         let subs: Vec<String> = subs.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-        let unreleased = crate::db::release::is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb);
-        out.push(LibraryAlbum { title, also: grp.into_iter().filter(|g| !g.trim().is_empty()).collect(), unreleased });
+        let (format, studio, version) = (format.as_deref(), studio.as_deref(), version.as_deref());
+        let mut unreleased = album_unreleased(&id, format, &subs, matched, studio, version, mb);
+        if !unreleased {
+            let list = songs.query_map([&id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?;
+            for song in list {
+                let (tid, file_version) = song?;
+                let v = file_version.as_deref().filter(|v| !v.trim().is_empty()).or(version);
+                if track_unreleased(&tid, &id, format, &subs, matched, studio, v, mb) {
+                    unreleased = true;
+                    break;
+                }
+            }
+        }
+        out.push(LibraryAlbum { id, title, also: grp.into_iter().filter(|g| !g.trim().is_empty()).collect(), unreleased });
     }
     Ok(out)
 }
@@ -406,6 +425,9 @@ pub struct MbCached {
     pub limiter: Arc<Limiter>,
     pub db: DbHandle,
     pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// How long an answer is kept (seconds): [`CACHE_TTL`] for requests,
+    /// shorter for the release radar's daily look.
+    pub ttl: i64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -422,7 +444,7 @@ impl MbGet for MbCached {
         let k = key.clone();
         let hit: Option<Cached> = self.db.read_async(move |c| kv_get(c, &k)).await.ok().flatten().and_then(|s| serde_json::from_str(&s).ok());
         if let Some(h) = &hit
-            && now - h.at < CACHE_TTL
+            && now - h.at < self.ttl
         {
             return Ok(h.body.clone());
         }
