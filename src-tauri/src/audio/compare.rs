@@ -7,6 +7,11 @@
 //! loudness leveling is on (track gain) when the setting asks for it and
 //! the server has loudness data for both, else off; the user's own sound
 //! settings come back when Compare closes.
+//!
+//! Compare never disturbs the user's listening: the first switch sets the
+//! whole play state aside ([`PlayerHandle::hold`]) and closing puts it back
+//! exactly ([`PlayerHandle::unhold`]). Nothing played in between is
+//! reported, logged, scrobbled or saved as a resume point.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -164,7 +169,11 @@ pub async fn compare_prepare(
     let fetched = player.fetch_whole(&[a.clone(), b.clone()], &emit, &keep).await;
     if let Err(e) = fetched {
         if keep() {
+            // A failed prepare leaves nothing behind: the listening comes back.
+            *compare.session.lock() = None;
             player.release_whole();
+            player.unhold().await?;
+            player.set_dsp(settings.get().await?.dsp()).await?;
         }
         return Err(e);
     }
@@ -203,6 +212,8 @@ pub async fn compare_switch(
         let s = g.as_ref().ok_or_else(|| AppError::Invalid("Compare isn't open.".into()))?;
         (s.side.map(|f| (f, s.track(f).id.clone())), s.track(side).clone(), s.side.map(|f| s.len(f)), s.len(side), s.loop_for(side))
     };
+    // The first time Compare plays, the user's listening is set aside.
+    player.hold().await?;
     let st = player.state().await?;
     let playing_from = from.is_some_and(|(_, id)| st.track.as_ref().is_some_and(|t| t.id == id));
     let position_ms = match from_len {
@@ -252,16 +263,16 @@ pub async fn compare_loop(player: State<'_, PlayerHandle>, compare: State<'_, Co
     Ok(now)
 }
 
-/// Closes Compare: the files go back to the cache's normal turnover and
-/// the user's own sound settings come back. Playback carries on.
+/// Closes Compare: the files go back to the cache's normal turnover, the
+/// user's own sound settings come back, and so does their listening, just
+/// as it was before Compare first played.
 #[tauri::command]
 pub async fn compare_end(player: State<'_, PlayerHandle>, settings: State<'_, SettingsState>, compare: State<'_, CompareState>) -> AppResult<()> {
     compare.generation.fetch_add(1, Ordering::SeqCst);
-    let was = compare.session.lock().take();
+    compare.session.lock().take();
     player.release_whole();
-    if was.is_some() {
-        player.set_ab_loop(None).await?;
-    }
+    // The queue, position, loop and play or pause as they were.
+    player.unhold().await?;
     player.set_dsp(settings.get().await?.dsp()).await?;
     Ok(())
 }

@@ -586,6 +586,15 @@ side is at (the start the first time), keeping play or pause unless `play`
 says otherwise, and returns `{ side, positionMs, abLoop }`. The loop region
 is kept in A's time and carried into B by the same mapping.
 
+Compare leaves the user's listening alone. The first `compare_switch` sets
+the whole play state aside: queue, context, position, shuffle, repeat, loop
+and play or pause. A song that was playing is reported paused. Until
+`compare_end` (or a failed `compare_prepare`) nothing is reported to the
+server, written to the listen log, scrobbled, or saved as a resume point or
+queue file. Closing puts the play state back exactly, and a song that was
+playing carries on as the same play. Now-playing outputs that follow
+`player://state` show the compared song meanwhile and go back after.
+
 ## Library doctor
 | Command | Args | Returns |
 | --- | --- | --- |

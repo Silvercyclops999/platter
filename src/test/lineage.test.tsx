@@ -243,6 +243,36 @@ describe("Compare", () => {
     off();
   });
 
+  it("puts the listening back as it was, and the compared plays never count", async () => {
+    const album = mock.fx.albums.find((a) => a.artistId !== ARCHIVE_ARTIST_ID)!;
+    await backend.playContext({ context: { kind: "album", id: album.id } });
+    await backend.setRepeat("all");
+    await backend.playSeek(20_000);
+    const before = await backend.playerState();
+    const recents = JSON.stringify(await backend.recents());
+    await backend.comparePrepare(trackNamed("Glasshouse").id, trackNamed("Glasshouse (Live)").id);
+    await backend.compareSwitch("a", true);
+    await backend.compareSwitch("b");
+    expect((await backend.playerState()).track?.id).toBe(trackNamed("Glasshouse (Live)").id);
+    await backend.compareEnd();
+    const after = await backend.playerState();
+    expect(after.track?.id).toBe(before.track?.id);
+    expect(after.queue).toEqual(before.queue);
+    expect([after.status, after.repeat, after.shuffle]).toEqual([before.status, before.repeat, before.shuffle]);
+    expect(after.positionMs).toBeGreaterThanOrEqual(before.positionMs);
+    expect(JSON.stringify(await backend.recents())).toBe(recents);
+  });
+
+  it("a failed prepare leaves the listening alone", async () => {
+    const album = mock.fx.albums.find((a) => a.artistId !== ARCHIVE_ARTIST_ID)!;
+    await backend.playContext({ context: { kind: "album", id: album.id } });
+    const before = await backend.playerState();
+    mock.compareFails = true;
+    await expect(backend.comparePrepare(trackNamed("Glasshouse").id, trackNamed("Glasshouse (Live)").id)).rejects.toMatchObject({ kind: "network" });
+    const after = await backend.playerState();
+    expect([after.track?.id, after.queue]).toEqual([before.track?.id, before.queue]);
+  });
+
   it("closing Compare gives the sound settings back", async () => {
     const end = vi.spyOn(backend, "compareEnd");
     const { user } = await openCompare("Glasshouse", "Glasshouse (Live)");

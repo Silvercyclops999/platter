@@ -1477,3 +1477,108 @@ async fn compare_needs_the_cache() {
     let err = r.player.fetch_whole(&[a], &|_, _| {}, &|| true).await.unwrap_err();
     assert_eq!(err.kind(), "invalid");
 }
+
+/// Every tracking event that arrives within `ms`.
+async fn drain_tracking(rx: &mut broadcast::Receiver<TrackingEvent>, ms: u64) -> Vec<TrackingEvent> {
+    let mut out = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(ms);
+    while let Ok(Ok(e)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+        out.push(e);
+    }
+    out
+}
+
+fn mentions(e: &TrackingEvent, id: &str) -> bool {
+    match e {
+        TrackingEvent::TrackStarted { track, .. } | TrackingEvent::TrackEnded { track, .. } => track.id == id,
+        TrackingEvent::Progress { track_id, .. }
+        | TrackingEvent::Paused { track_id, .. }
+        | TrackingEvent::Resumed { track_id, .. }
+        | TrackingEvent::Seeked { track_id, .. } => track_id == id,
+        #[allow(unreachable_patterns)]
+        _ => false,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn compare_puts_the_listening_back_exactly_and_reports_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("queue.json");
+    let mut r = rig(
+        &["a", "b", "c", "x"],
+        3.0,
+        true,
+        PlayerConfig { persist_path: Some(path.clone()), persist_debounce: Duration::from_millis(10), ..Default::default() },
+    )
+    .await;
+    r.player.play_context(ctx(&["a", "b", "c"]), Some("b".into()), Some(false)).await.unwrap();
+    r.player.set_repeat(Repeat::All).await.unwrap();
+    r.player.queue_add(vec!["c".into()], AddAt::Next).await.unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let before = r.player.state().await.unwrap();
+    assert_eq!(before.status, PlayerStatus::Playing);
+    drain_tracking(&mut r.tracking, 20).await;
+
+    // Compare starts: the playing song is reported paused, then silence.
+    r.player.hold().await.unwrap();
+    let e = next_tracking(&mut r.tracking, |e| !matches!(e, TrackingEvent::Progress { .. })).await;
+    assert!(matches!(&e, TrackingEvent::Paused { track_id, .. } if track_id == "b"), "{e:?}");
+    r.player.play_context_at(ctx(&["x"]), Some("x".into()), 500, true).await.unwrap();
+    wait_state(&r.player, |s| tid(&s.track) == "x" && s.status == PlayerStatus::Playing).await;
+    r.player.set_ab_loop(Some(AbLoop { a_ms: 500, b_ms: 2_000 })).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    r.player.play_context_at(ctx(&["x"]), Some("x".into()), 1_000, true).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    r.player.flush().await;
+    let during = drain_tracking(&mut r.tracking, 50).await;
+    assert!(during.is_empty(), "nothing is reported while comparing: {during:?}");
+    // The saved queue (resume point, queue file) is still the user's.
+    let saved = super::persist::load(&path).unwrap();
+    assert_eq!(saved.queue.current().unwrap().track.id, "b");
+
+    // Compare closes: the same queue, context, position, repeat, playing.
+    r.player.unhold().await.unwrap();
+    let after = wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    assert_eq!(tid(&after.track), "b");
+    assert_eq!(after.queue, before.queue);
+    assert_eq!(after.repeat, Repeat::All);
+    assert_eq!(after.shuffle, before.shuffle);
+    assert_eq!(after.ab_loop, None);
+    assert!(after.position_ms + 50 >= before.position_ms, "{} vs {}", after.position_ms, before.position_ms);
+    // It carries on as the same play: a resume, never a new start, and
+    // the compared song is never mentioned.
+    let back = drain_tracking(&mut r.tracking, 500).await;
+    assert!(back.iter().any(|e| matches!(e, TrackingEvent::Resumed { track_id, .. } if track_id == "b")), "{back:?}");
+    assert!(!back.iter().any(|e| matches!(e, TrackingEvent::TrackStarted { .. })), "{back:?}");
+    assert!(!back.iter().any(|e| mentions(e, "x")), "{back:?}");
+    r.player.flush().await;
+    assert_eq!(super::persist::load(&path).unwrap().queue.current().unwrap().track.id, "b");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn compare_from_a_paused_song_comes_back_paused() {
+    let mut r = rig(&["a", "x"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.pause().await.unwrap();
+    let before = wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    drain_tracking(&mut r.tracking, 50).await;
+    r.player.hold().await.unwrap();
+    r.player.hold().await.unwrap(); // twice keeps the first
+    r.player.play_context_at(ctx(&["x"]), Some("x".into()), 0, true).await.unwrap();
+    wait_state(&r.player, |s| tid(&s.track) == "x" && s.status == PlayerStatus::Playing).await;
+    r.player.unhold().await.unwrap();
+    let after = r.player.state().await.unwrap();
+    assert_eq!((tid(&after.track), after.status, after.position_ms), ("a".into(), PlayerStatus::Paused, before.position_ms));
+    assert_eq!(after.queue, before.queue);
+    assert!(drain_tracking(&mut r.tracking, 100).await.is_empty(), "a paused song stays quiet");
+    // Play carries on the same play.
+    r.player.resume().await.unwrap();
+    let ev = drain_tracking(&mut r.tracking, 500).await;
+    assert!(ev.iter().any(|e| matches!(e, TrackingEvent::Resumed { track_id, .. } if track_id == "a")), "{ev:?}");
+    assert!(!ev.iter().any(|e| matches!(e, TrackingEvent::TrackStarted { .. })), "{ev:?}");
+    // Nothing held: unhold does nothing.
+    r.player.unhold().await.unwrap();
+    assert_eq!(tid(&r.player.state().await.unwrap().track), "a");
+}

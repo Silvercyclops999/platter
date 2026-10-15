@@ -172,6 +172,11 @@ enum Cmd {
     JumpAt(String, u64, bool, Reply<()>),
     /// Keep playing similar music when the queue ends.
     SetAutoplay(bool, Reply<()>),
+    /// Set the listening aside (Compare): keep the whole play state and
+    /// stop reporting plays until [`Cmd::Unhold`].
+    Hold(Reply<()>),
+    /// Put the set-aside play state back and report plays again.
+    Unhold(Reply<()>),
     /// Smart shuffle for a context by id (None: the playing one). On turns
     /// shuffle on too; off turns shuffle off, keeping the shuffled order.
     SetSmartShuffle(Option<String>, bool, Reply<()>),
@@ -348,6 +353,8 @@ impl PlayerHandle {
             idle_at: None,
             ticks: 0,
             ab: None,
+            held: None,
+            continuing: false,
             outputs: outputs.clone(),
         };
         rt.spawn(actor.run(rx, engine_rx));
@@ -694,6 +701,19 @@ impl PlayerHandle {
         self.call(|reply| Cmd::Adopt { info, tracks, user, shuffle, repeat, start_ms, play, reply })
             .await
     }
+    /// Sets the user's listening aside (Compare): the queue, context,
+    /// position, shuffle, repeat and play or pause are kept, and from now
+    /// until [`PlayerHandle::unhold`] nothing is reported or saved as a play.
+    /// A playing song is reported paused. Holding twice keeps the first.
+    pub async fn hold(&self) -> AppResult<()> {
+        self.call(Cmd::Hold).await
+    }
+    /// Puts the set-aside listening back exactly, and reports plays again
+    /// (a song that was playing carries on as the same play). Nothing
+    /// happens when nothing is held.
+    pub async fn unhold(&self) -> AppResult<()> {
+        self.call(Cmd::Unhold).await
+    }
     /// Jumps to a queue entry at `position_ms`, playing or paused.
     pub async fn queue_jump_at(&self, item_id: String, position_ms: u64, play: bool) -> AppResult<()> {
         self.call(|r| Cmd::JumpAt(item_id, position_ms, play, r)).await
@@ -782,6 +802,24 @@ struct Actor {
     /// The A-B loop and the queue entry it belongs to.
     ab: Option<(String, AbLoop)>,
     outputs: broadcast::Sender<OutputState>,
+    /// The listening set aside while Compare plays (nothing is reported or
+    /// saved meanwhile).
+    held: Option<Held>,
+    /// The loaded entry carries on a play that was already reported: when
+    /// it's audible again that's a resume, not a new play.
+    continuing: bool,
+}
+
+/// Everything about the user's listening that Compare could change.
+#[derive(Clone)]
+struct Held {
+    queue: Queue,
+    position_ms: u64,
+    playing: bool,
+    /// The current entry was audible (its play was reported as started).
+    started: bool,
+    ab: Option<(String, AbLoop)>,
+    transitions_for: Option<String>,
 }
 
 /// Whether the position tick runs in this state: only while something plays.
@@ -851,7 +889,7 @@ impl Actor {
     /// playing) is a moment it should be updated.
     fn mark_dirty(&mut self) {
         self.queue.note_position(self.position_ms());
-        if self.config.persist_path.is_some() {
+        if self.config.persist_path.is_some() && self.held.is_none() {
             self.dirty = true;
             self.persist_at = Some(Instant::now() + self.config.persist_debounce);
         }
@@ -859,7 +897,7 @@ impl Actor {
 
     fn persist_now(&mut self) {
         self.persist_at = None;
-        if !self.dirty {
+        if !self.dirty || self.held.is_some() {
             return;
         }
         self.dirty = false;
@@ -965,7 +1003,61 @@ impl Actor {
     }
 
     fn track_event(&self, e: TrackingEvent) {
-        let _ = self.tracking.send(e);
+        // While the listening is set aside nothing counts as a play.
+        if self.held.is_none() {
+            let _ = self.tracking.send(e);
+        }
+    }
+
+    fn hold(&mut self) {
+        if self.held.is_some() {
+            return;
+        }
+        let position_ms = self.position_ms();
+        self.queue.note_position(position_ms);
+        // Save what's there now, then nothing more until it's put back.
+        self.dirty = self.config.persist_path.is_some();
+        self.persist_now();
+        let started = self.cur_started && !self.cur_ended;
+        let playing = self.is_active();
+        if playing
+            && started
+            && let Some(t) = self.current_track()
+        {
+            self.track_event(TrackingEvent::Paused { track_id: t.id.clone(), position_ms });
+        }
+        self.held = Some(Held {
+            queue: self.queue.clone(),
+            position_ms,
+            playing,
+            started,
+            ab: self.ab.clone(),
+            transitions_for: self.transitions_for.clone(),
+        });
+    }
+
+    fn unhold(&mut self) -> AppResult<()> {
+        let Some(h) = self.held.clone() else { return Ok(()) };
+        // Still held: the compared song's end isn't reported.
+        self.end_current_as_skip();
+        self.skip_ids.clear();
+        self.failures_in_row = 0;
+        self.refilling = None;
+        self.queue = h.queue;
+        self.ab = h.ab;
+        self.transitions_for = h.transitions_for;
+        self.apply_dsp();
+        let r = self.start_current(h.playing, h.position_ms);
+        self.held = None;
+        if r.is_ok() && self.cur_key.is_some() {
+            self.continuing = h.started;
+            if h.started && !h.playing {
+                // Paused mid-song, as it was: a later Play resumes that play.
+                self.cur_started = true;
+            }
+        }
+        self.mark_dirty();
+        r
     }
 
     fn apply_gain(&self) {
@@ -1036,6 +1128,9 @@ impl Actor {
     /// Radio running low, or the last song of a context playing with "keep
     /// playing similar music" on: ask for more in the background.
     fn maybe_refill(&mut self) {
+        if self.held.is_some() {
+            return;
+        }
         let Some(ctx) = self.queue.context().cloned() else { return };
         let Some(key) = self.refill_key() else { return };
         if self.refilling.is_some() || self.refill_dead.as_deref() == Some(key.as_str()) {
@@ -1226,6 +1321,7 @@ impl Actor {
         };
         self.cur_started = false;
         self.cur_ended = false;
+        self.continuing = false;
         self.next_key = None;
         self.restore_pos = start_ms;
         self.sync_album_context();
@@ -1305,6 +1401,15 @@ impl Actor {
                 self.engine.set_correction_bypass(on);
                 let _ = reply.send(Ok(()));
                 return;
+            }
+            Cmd::Hold(reply) => {
+                self.hold();
+                let _ = reply.send(Ok(()));
+                return;
+            }
+            Cmd::Unhold(reply) => {
+                let r = self.unhold();
+                let _ = reply.send(r);
             }
             Cmd::Flush(tx) => {
                 self.dirty = true;
@@ -1897,12 +2002,18 @@ impl Actor {
     }
 
     fn on_track_audible(&mut self) {
+        let was_started = self.cur_started;
         self.cur_started = true;
         self.failures_in_row = 0;
         if self.status == PlayerStatus::Loading || self.engine.is_playing() {
             self.status = PlayerStatus::Playing;
         }
-        if let Some(item) = self.queue.current().cloned() {
+        if std::mem::take(&mut self.continuing) {
+            // The play set aside for Compare carries on.
+            if !was_started && let Some(t) = self.current_track() {
+                self.track_event(TrackingEvent::Resumed { track_id: t.id.clone(), position_ms: self.position_ms() });
+            }
+        } else if let Some(item) = self.queue.current().cloned() {
             self.track_event(TrackingEvent::TrackStarted {
                 track: item.track,
                 item_id: item.item_id,

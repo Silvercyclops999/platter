@@ -1229,6 +1229,7 @@ export class MockBackend implements Backend {
 
   /** A play for the listen log, credited to the context it came from. */
   private logListen(track: Track) {
+    if (this.compareHeld) return; // Compare plays never count
     const c = this.ctxInfo;
     const kind: MockListen["kind"] =
       c && (c.kind === "album" || c.kind === "artist" || c.kind === "playlist") && c.id ? c.kind : c?.kind === "liked" ? "liked" : "songs";
@@ -1503,6 +1504,7 @@ export class MockBackend implements Backend {
 
   /** Remember where the current context is (track change, pause, ticks). */
   private notePosition() {
+    if (this.compareHeld) return;
     const id = this.ctxInfo?.id;
     const cur = this.current;
     if (!id || !cur) return;
@@ -1607,7 +1609,7 @@ export class MockBackend implements Backend {
     this.notePosition(); // where the outgoing context was left
     const id = info.id ?? null;
     const kind = args.context.kind;
-    if (play && id && (kind === "album" || kind === "artist" || kind === "playlist"))
+    if (play && id && !this.compareHeld && (kind === "album" || kind === "artist" || kind === "playlist"))
       this.contextPlays.push({ kind, id, at: Math.floor(Date.now() / 1000) });
     if (args.shuffle !== undefined) {
       this.shuffle = args.shuffle;
@@ -2486,6 +2488,51 @@ export class MockBackend implements Backend {
   compareFails = false;
   private compare: { a: Track; b: Track; side: CompareSide | null; ab: AbLoop | null; run: number } | null = null;
   private compareRun = 0;
+  /** The user's listening, set aside the first time Compare plays. */
+  private compareHeld: {
+    status: PlayerState["status"];
+    positionMs: number;
+    shuffle: boolean;
+    repeat: RepeatMode;
+    abLoop: AbLoop | null;
+    current: QueueItem | null;
+    userQueue: QueueItem[];
+    ctxOriginal: QueueItem[];
+    ctxOrder: QueueItem[];
+    ctxPos: number;
+    history: QueueItem[];
+    ctxInfo: QueueContextInfo | null;
+  } | null = null;
+
+  private holdListening() {
+    if (this.compareHeld) return;
+    this.notePosition();
+    const playing = this.status === "playing" || this.status === "loading" || this.status === "buffering";
+    this.compareHeld = {
+      status: playing ? "playing" : this.status,
+      positionMs: this.positionMs,
+      shuffle: this.shuffle,
+      repeat: this.repeat,
+      abLoop: this.abLoop,
+      current: this.current,
+      userQueue: [...this.userQueue],
+      ctxOriginal: [...this.ctxOriginal],
+      ctxOrder: [...this.ctxOrder],
+      ctxPos: this.ctxPos,
+      history: [...this.history],
+      ctxInfo: this.ctxInfo,
+    };
+  }
+
+  private unholdListening() {
+    const h = this.compareHeld;
+    if (!h) return;
+    this.compareHeld = null;
+    Object.assign(this, h);
+    if (h.status === "playing") this.startTick();
+    else this.stopTick();
+    this.emitState();
+  }
 
   comparePrepare(aId: string, bId: string): Promise<CompareReady> {
     const run = ++this.compareRun;
@@ -2500,7 +2547,12 @@ export class MockBackend implements Backend {
       const tick = () => {
         if (run !== this.compareRun) return reject({ kind: "invalid", message: "Compare was closed." });
         const side: CompareSide = i < steps.length ? "a" : "b";
-        if (this.compareFails && side === "b") return reject({ kind: "network", message: `Couldn't get ${b.title}: http 404` });
+        if (this.compareFails && side === "b") {
+          // Like the core: a failed prepare leaves the listening as it was.
+          this.compare = null;
+          this.unholdListening();
+          return reject({ kind: "network", message: `Couldn't get ${b.title}: http 404` });
+        }
         this.emit("compare://progress", { side, fraction: steps[i % steps.length] });
         i += 1;
         if (i < steps.length * 2) return this.later(step, tick);
@@ -2528,6 +2580,7 @@ export class MockBackend implements Backend {
       const ab = c.ab && side === "b" ? compareMapLoop(c.ab, c.a.durationMs, c.b.durationMs) : c.ab;
       if (ab && (pos < ab.aMs || pos >= ab.bMs)) pos = ab.aMs;
       const wasPlaying = this.status === "playing";
+      this.holdListening();
       this.loadContext({ context: { kind: "tracks", trackIds: [to.id] }, startTrackId: to.id }, play ?? (!playingFrom || wasPlaying));
       this.positionMs = pos;
       this.abLoop = ab;
@@ -2551,11 +2604,8 @@ export class MockBackend implements Backend {
   compareEnd() {
     return this.delay(() => {
       this.compareRun += 1;
-      if (this.compare) {
-        this.abLoop = null;
-        this.emitState();
-      }
       this.compare = null;
+      this.unholdListening();
     });
   }
 
