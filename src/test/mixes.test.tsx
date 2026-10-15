@@ -1,12 +1,13 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { TrackRow } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { DEFAULT_SETTINGS } from "../lib/types";
+import { DEFAULT_SETTINGS, type MixSummary } from "../lib/types";
 import { HomePage } from "../pages/HomePage";
+import { MixArt } from "../pages/MixCard";
 import { MixPage } from "../pages/MixPage";
 import { PlayControls } from "../shell/PlayerBar";
 import { useApp } from "../stores/app";
@@ -57,6 +58,31 @@ describe("home mix shelves", () => {
     render(<HomePage />);
     await screen.findByRole("heading", { name: "Recently played" });
     expect(screen.queryByRole("heading", { name: "Made for you" })).toBeNull();
+  });
+});
+
+describe("mix art", () => {
+  it("a photo that fails to load falls back to the cover collage", () => {
+    const mix: MixSummary = {
+      id: "daily:1",
+      kind: "daily",
+      title: "Daily Mix 1",
+      description: "",
+      color: "#336699",
+      art: "0a1b2c3d:/library/metadata/5/thumb/1",
+      covers: ["0a1b2c3d:/library/metadata/6/thumb/1"],
+      artistIds: [],
+      tag: null,
+      trackCount: 10,
+      durationMs: 1,
+      nextUpdateAt: null,
+    };
+    const { container } = render(<MixArt mix={mix} />);
+    const photo = container.querySelector("img.mix-art__photo");
+    expect(photo).not.toBeNull();
+    fireEvent.error(photo!);
+    expect(container.querySelector("img.mix-art__photo")).toBeNull();
+    expect(container.querySelector(".mix-art__collage")).not.toBeNull();
   });
 });
 

@@ -1769,4 +1769,67 @@ mod tests {
         assert!(h.banner.is_none());
         st.sign_out().await.unwrap();
     }
+
+    const JPEG: [u8; 6] = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2];
+
+    /// Signed in to a server that plex.tv lists only as a remote or relay
+    /// address (away from home); its photo transcoder serves one image.
+    async fn away_from_home(relay: bool) -> (MockServer, MockServer, tempfile::TempDir, PlexState) {
+        use wiremock::matchers::query_param;
+        let server = pms("m1", true).await;
+        Mock::given(method("GET"))
+            .and(path("/photo/:/transcode"))
+            .and(query_param("url", "/library/metadata/1/thumb/2"))
+            .and(header("x-plex-token", ACCT))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(JPEG.to_vec()))
+            .mount(&server)
+            .await;
+        let mut r = resource("m1", &server.uri());
+        r["connections"] = serde_json::json!([{"protocol": "http", "uri": server.uri(), "local": false, "relay": relay}]);
+        let tv = plex_tv(serde_json::json!([r])).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new());
+        store.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+        let (st, _rec) = state(dir.path(), &tv.uri(), store);
+        st.restore().await.unwrap();
+        let want = if relay { HealthStatus::Relay } else { HealthStatus::Remote };
+        assert_eq!(st.health().status, want);
+        (server, tv, dir, st)
+    }
+
+    /// The art URL the UI makes for a path (`convertFileSrc(path, "art")`).
+    fn ui_art_uri(path: &str) -> String {
+        let enc = percent_encoding::utf8_percent_encode(path, percent_encoding::NON_ALPHANUMERIC);
+        format!("http://art.localhost/{enc}?w=300&h=300")
+    }
+
+    async fn art_away_from_home(relay: bool) {
+        use crate::db::artcache::{ArtCache, DEFAULT_CAP_BYTES, parse_art_uri};
+        let (server, _tv, dir, st) = away_from_home(relay).await;
+        // Items read from the server carry its tag, and so do their images.
+        let thumb = format!("{}:/library/metadata/1/thumb/2", crate::sid::tag("m1"));
+        let fetcher = Arc::new(crate::bridge::PlexArt(st.clone()));
+        let cache = ArtCache::open(dir.path().join("art"), DEFAULT_CAP_BYTES, fetcher.clone()).unwrap();
+        let (p, w, h) = parse_art_uri(&ui_art_uri(&thumb)).unwrap();
+        let art = cache.get_or_fetch(&p, w, h).await.unwrap();
+        assert_eq!(&art.bytes[..], &JPEG);
+        assert_eq!(art.content_type, "image/jpeg");
+        // The server stops answering: the cached cover is still shown.
+        drop(server);
+        drop(cache);
+        let cache = ArtCache::open(dir.path().join("art"), DEFAULT_CAP_BYTES, fetcher).unwrap();
+        let again = cache.get_or_fetch(&p, w, h).await.unwrap();
+        assert_eq!(&again.bytes[..], &JPEG);
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn art_loads_over_remote_access() {
+        art_away_from_home(false).await;
+    }
+
+    #[tokio::test]
+    async fn art_loads_over_the_relay() {
+        art_away_from_home(true).await;
+    }
 }

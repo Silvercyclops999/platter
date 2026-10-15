@@ -163,12 +163,15 @@ impl ArtCache {
 
     /// Cached bytes for a key, touching its LRU stamp. Blocking.
     pub fn lookup(&self, path: &str, w: u32, h: u32) -> AppResult<Option<ArtBytes>> {
-        let key = cache_key(path, w, h);
+        self.lookup_key(&cache_key(path, w, h))
+    }
+
+    fn lookup_key(&self, key: &str) -> AppResult<Option<ArtBytes>> {
         let row: Option<(String, String)> = self
             .inner
             .index
             .lock()
-            .query_row("SELECT file, content_type FROM art WHERE key = ?1", [&key], |r| {
+            .query_row("SELECT file, content_type FROM art WHERE key = ?1", [key], |r| {
                 Ok((r.get(0)?, r.get(1)?))
             })
             .optional()?;
@@ -180,7 +183,7 @@ impl ArtCache {
                 Ok(Some(ArtBytes { bytes: Bytes::from(bytes), content_type }))
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {
-                self.forget(&key)?;
+                self.forget(key)?;
                 Ok(None)
             }
             Err(e) => Err(e.into()),
@@ -251,15 +254,18 @@ impl ArtCache {
     /// cached. On disk-full: evict a quarter of the cache (at least 2× the
     /// image) and retry once.
     pub fn store(&self, path: &str, w: u32, h: u32, art: &ArtBytes) -> AppResult<()> {
+        self.store_key(&cache_key(path, w, h), art)
+    }
+
+    fn store_key(&self, key: &str, art: &ArtBytes) -> AppResult<()> {
         let size = art.bytes.len() as u64;
         let cap = self.cap();
         if size > cap {
             return Ok(());
         }
-        let key = cache_key(path, w, h);
-        self.forget(&key)?;
+        self.forget(key)?;
         self.evict_to(cap.saturating_sub(size))?;
-        let file = file_name(&key);
+        let file = file_name(key);
         let full = self.inner.dir.join(&file);
         if let Err(e) = self.write_file(&full, &art.bytes) {
             if !is_disk_full(&e) {
@@ -284,22 +290,26 @@ impl ArtCache {
 
     /// Cached image, or fetch it once (concurrent callers for the same key
     /// share the fetch), store it, and return it.
+    /// The path is a server path (`/library/...`, `/ext/...`), or one with
+    /// its server's tag in front (`<tag>:/library/...`).
     pub async fn get_or_fetch(&self, path: &str, w: u32, h: u32) -> AppResult<ArtBytes> {
-        if path.is_empty() || path.len() > MAX_PATH_LEN || !path.starts_with('/') {
+        if path.is_empty() || path.len() > MAX_PATH_LEN || !crate::sid::key(path).starts_with('/') {
             return Err(AppError::Invalid(format!("bad art path: {path:.64}")));
         }
         let (w, h) = (w.clamp(1, MAX_DIM), h.clamp(1, MAX_DIM));
+        // Worked out here, not on the blocking thread, so the key always
+        // sees the legacy server tag.
+        let key = cache_key(path, w, h);
         {
             let me = self.clone();
-            let p = path.to_owned();
-            let hit = tokio::task::spawn_blocking(move || me.lookup(&p, w, h))
+            let k = key.clone();
+            let hit = tokio::task::spawn_blocking(move || me.lookup_key(&k))
                 .await
                 .map_err(|e| AppError::Internal(format!("art task: {e}")))??;
             if let Some(hit) = hit {
                 return Ok(hit);
             }
         }
-        let key = cache_key(path, w, h);
         let fut = {
             let mut inflight = self.inner.inflight.lock();
             if let Some(f) = inflight.get(&key) {
@@ -309,7 +319,7 @@ impl ArtCache {
                 let p = path.to_owned();
                 let k = key.clone();
                 let f: BoxFuture<'static, Result<ArtBytes, Arc<AppError>>> = async move {
-                    let res = me.fetch_and_store(p, w, h).await;
+                    let res = me.fetch_and_store(p, w, h, k.clone()).await;
                     me.inner.inflight.lock().remove(&k);
                     res.map_err(Arc::new)
                 }
@@ -322,14 +332,14 @@ impl ArtCache {
         fut.await.map_err(|e| clone_err(&e))
     }
 
-    async fn fetch_and_store(&self, path: String, w: u32, h: u32) -> AppResult<ArtBytes> {
+    async fn fetch_and_store(&self, path: String, w: u32, h: u32, key: String) -> AppResult<ArtBytes> {
         let mut art = self.inner.fetcher.fetch(&path, w, h).await?;
         if art.content_type.is_empty() || art.content_type == "application/octet-stream" {
             art.content_type = sniff_content_type(&art.bytes).to_owned();
         }
         let me = self.clone();
         let a = art.clone();
-        let stored = tokio::task::spawn_blocking(move || me.store(&path, w, h, &a))
+        let stored = tokio::task::spawn_blocking(move || me.store_key(&key, &a))
             .await
             .map_err(|e| AppError::Internal(format!("art task: {e}")))?;
         if let Err(e) = stored {
@@ -341,7 +351,8 @@ impl ArtCache {
 }
 
 /// Parse `art://localhost/<urlencoded path>?w=&h=` (or the Windows form
-/// `http://art.localhost/...`) into (path, w, h).
+/// `http://art.localhost/...`) into (path, w, h). A path with its server's
+/// tag (`<tag>:/library/...`) comes back as it is.
 pub fn parse_art_uri(uri: &str) -> Option<(String, u32, u32)> {
     let url = url::Url::parse(uri).ok()?;
     let raw = url.path().trim_start_matches('/');
@@ -349,7 +360,11 @@ pub fn parse_art_uri(uri: &str) -> Option<(String, u32, u32)> {
     if decoded.is_empty() {
         return None;
     }
-    let path = if decoded.starts_with('/') { decoded } else { format!("/{decoded}") };
+    let path = if decoded.starts_with('/') || crate::sid::tag_of(&decoded).is_some() {
+        decoded
+    } else {
+        format!("/{decoded}")
+    };
     let mut w = None;
     let mut h = None;
     for (k, v) in url.query_pairs() {
@@ -531,5 +546,73 @@ mod tests {
         assert_eq!(p, ("/library/metadata/1/thumb/2".into(), 4096, 4096));
         assert!(parse_art_uri("art://localhost/").is_none());
         assert_eq!(sniff_content_type(b"\x89PNG...."), "image/png");
+    }
+
+    /// The UI's art URL for a path: `encodeURIComponent(path)` after the
+    /// scheme's host, as `convertFileSrc` makes it.
+    fn ui_uri(base: &str, path: &str, px: u32) -> String {
+        const KEEP: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+            .remove(b'-')
+            .remove(b'_')
+            .remove(b'.')
+            .remove(b'!')
+            .remove(b'~')
+            .remove(b'*')
+            .remove(b'\'')
+            .remove(b'(')
+            .remove(b')');
+        format!("{base}{}?w={px}&h={px}", percent_encoding::utf8_percent_encode(path, KEEP))
+    }
+
+    #[test]
+    fn parses_paths_that_carry_their_server() {
+        let tagged = "0a1b2c3d:/library/metadata/1/thumb/2";
+        for base in ["art://localhost/", "http://art.localhost/"] {
+            let p = parse_art_uri(&ui_uri(base, tagged, 300)).unwrap();
+            assert_eq!(p, (tagged.to_string(), 300, 300), "{base}");
+        }
+        // Outside links stay as they are.
+        let ext = "/ext/https://example.com/a.jpg";
+        assert_eq!(parse_art_uri(&ui_uri("art://localhost/", ext, 64)).unwrap().0, ext);
+    }
+
+    #[tokio::test]
+    async fn serves_and_caches_paths_that_carry_their_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = fetcher(1000, 0);
+        let c = ArtCache::open(dir.path(), DEFAULT_CAP_BYTES, f.clone()).unwrap();
+        let uri = ui_uri("http://art.localhost/", "0a1b2c3d:/library/metadata/1/thumb/2", 300);
+        let (path, w, h) = parse_art_uri(&uri).unwrap();
+        let a = c.get_or_fetch(&path, w, h).await.unwrap();
+        assert_eq!(a.bytes.len(), 1000);
+        c.get_or_fetch(&path, w, h).await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 1, "second request is a cache hit");
+        // Still not a path: refused.
+        assert!(c.get_or_fetch("0a1b2c3d:library", 1, 1).await.is_err());
+        assert!(c.get_or_fetch("0a1b2c3d:", 1, 1).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn art_cached_before_ids_carried_their_server_still_hits() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = fetcher(1000, 0);
+        // An older build cached the plain path.
+        crate::sid::set_legacy(None);
+        let c = ArtCache::open(dir.path(), DEFAULT_CAP_BYTES, f.clone()).unwrap();
+        c.get_or_fetch("/library/metadata/1/thumb/2", 300, 300).await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 1);
+        drop(c);
+        // The library is now tagged with that server; the UI asks for the
+        // tagged path, which must find the same file.
+        crate::sid::set_legacy(Some("0a1b2c3d".into()));
+        let c = ArtCache::open(dir.path(), DEFAULT_CAP_BYTES, f.clone()).unwrap();
+        let uri = ui_uri("art://localhost/", "0a1b2c3d:/library/metadata/1/thumb/2", 300);
+        let (path, w, h) = parse_art_uri(&uri).unwrap();
+        c.get_or_fetch(&path, w, h).await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 1, "served from the old cache entry");
+        // Another server's art is its own entry.
+        c.get_or_fetch("99999999:/library/metadata/1/thumb/2", 300, 300).await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 2);
+        crate::sid::set_legacy(None);
     }
 }

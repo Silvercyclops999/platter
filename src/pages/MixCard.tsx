@@ -1,5 +1,5 @@
 import { Pause, Play } from "lucide-react";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useState } from "react";
 import { Art } from "../components/Art";
 import { artUrl } from "../lib/backend";
 import type { MixSummary } from "../lib/types";
@@ -30,6 +30,8 @@ export function openMix(mix: Pick<MixSummary, "id" | "kind">) {
  * daylist is a soft gradient instead.
  */
 export function MixArt({ mix, size = 200 }: { mix: MixSummary; size?: number }) {
+  // A photo that fails to load falls back to the cover collage.
+  const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
   if (mix.kind === "daylist") {
     const [a, b] = daylistGradient(new Date().getHours());
     return (
@@ -38,11 +40,18 @@ export function MixArt({ mix, size = 200 }: { mix: MixSummary; size?: number }) 
       </span>
     );
   }
-  const photo = mix.kind === "topSongs" ? null : mix.art;
+  const photo = mix.kind === "topSongs" || mix.art === failedPhoto ? null : mix.art;
   return (
     <span className="mix-art" style={{ "--mix-color": mix.color } as CSSProperties} aria-hidden="true">
       {photo ? (
-        <img className="mix-art__photo" src={artUrl(photo, size)} alt="" loading="lazy" draggable={false} />
+        <img
+          className="mix-art__photo"
+          src={artUrl(photo, size)}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          onError={() => setFailedPhoto(photo)}
+        />
       ) : (
         <span className="mix-art__collage">
           {Array.from({ length: 4 }, (_, i) => (
