@@ -565,7 +565,16 @@ pub struct Settings {
     pub identify_by_sound: bool,
     /// Which songs: untagged only, or all (this device).
     pub sound_id_scope: crate::soundid::Scope,
+    /// Minutes between checks of a Subsonic server for library changes
+    /// (this device only).
+    pub subsonic_check_minutes: u32,
+    /// Keep the queue on servers that hold one, so another app can pick it
+    /// up there.
+    pub save_queue_on_server: bool,
 }
+
+/// Minutes between Subsonic change checks the setting offers.
+pub const SUBSONIC_CHECK_CHOICES: [u32; 5] = [1, 5, 15, 30, 60];
 
 /// Most folder keywords kept, and the longest one.
 pub const FOLDER_KEYWORDS_MAX: usize = 20;
@@ -765,6 +774,8 @@ impl Default for Settings {
             auto_request_cap: crate::radar::DEFAULT_CAP,
             identify_by_sound: false,
             sound_id_scope: crate::soundid::Scope::Untagged,
+            subsonic_check_minutes: crate::subsonic::manager::DEFAULT_POLL_MINUTES,
+            save_queue_on_server: true,
         }
     }
 }
@@ -871,6 +882,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "doctorCoverPx",
     "releaseRadar",
     "radarNotify",
+    "saveQueueOnServer",
 ];
 
 /// Settings kept on this device only.
@@ -947,6 +959,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "nowPlayingFeed",
     "nowPlayingFeedPort",
     "allowStreamDeck",
+    "subsonicCheckMinutes",
 ];
 
 /// A partial update; absent fields are left alone.
@@ -1122,6 +1135,8 @@ pub struct SettingsPatch {
     pub auto_request_cap: Option<u32>,
     pub identify_by_sound: Option<bool>,
     pub sound_id_scope: Option<crate::soundid::Scope>,
+    pub subsonic_check_minutes: Option<u32>,
+    pub save_queue_on_server: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -1362,6 +1377,13 @@ impl Settings {
             }
             self.auto_request_cap = cap;
         }
+        if let Some(m) = p.subsonic_check_minutes {
+            if !SUBSONIC_CHECK_CHOICES.contains(&m) {
+                return Err(AppError::Invalid("Pick one of the times offered.".into()));
+            }
+            self.subsonic_check_minutes = m;
+        }
+        set(&mut self.save_queue_on_server, p.save_queue_on_server);
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -1450,6 +1472,9 @@ impl Settings {
         }
         if !crate::doctor::COVER_PX_CHOICES.contains(&self.doctor_cover_px) {
             self.doctor_cover_px = crate::doctor::DEFAULT_COVER_PX;
+        }
+        if !SUBSONIC_CHECK_CHOICES.contains(&self.subsonic_check_minutes) {
+            self.subsonic_check_minutes = crate::subsonic::manager::DEFAULT_POLL_MINUTES;
         }
         if !crate::radar::CAP_CHOICES.contains(&self.auto_request_cap) {
             self.auto_request_cap = crate::radar::DEFAULT_CAP;
@@ -1664,6 +1689,10 @@ pub struct Live {
     pub feed: crate::feed::FeedSwitch,
     /// The Stream Deck control API.
     pub deck: crate::feed::deck::DeckSwitch,
+    /// Minutes between Subsonic change checks.
+    pub subsonic_check_minutes: Arc<std::sync::atomic::AtomicU32>,
+    /// Keep the queue on servers that hold one.
+    pub save_queue_on_server: Arc<AtomicBool>,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -1678,6 +1707,8 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     }
     live.tracking.private_session.store(s.private_session, Ordering::Relaxed);
     live.tracking.report_plays.store(s.report_plays, Ordering::Relaxed);
+    live.subsonic_check_minutes.store(s.subsonic_check_minutes, Ordering::Relaxed);
+    live.save_queue_on_server.store(s.save_queue_on_server, Ordering::Relaxed);
     live.tracking.share_activity.store(s.share_activity, Ordering::Relaxed);
     {
         let so = &live.social;

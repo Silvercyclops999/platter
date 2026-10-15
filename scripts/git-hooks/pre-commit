@@ -24,6 +24,11 @@ fi
 # 3. Token-shaped values and personal server addresses.
 printf '%s' "$diff" | grep -qE '(X-Plex-Token|PLEX_TOKEN|accessToken|authToken)["'"'"' :=]+[A-Za-z0-9_-]{18,}' && fail "token-shaped value in staged changes"
 printf '%s' "$diff" | grep -qE '[0-9a-f]{32}\.plex\.direct' && fail "a real plex.direct hostname is in staged changes"
+# A Subsonic sign-in in an address: an API key, a password, or a password
+# token with its salt. Test values are short.
+printf '%s' "$diff" | grep -qE '[?&](apiKey|api_key)=[A-Za-z0-9_-]{20,}' && fail "an API key in an address is in staged changes"
+printf '%s' "$diff" | grep -qE '[?&]p=(enc:)?[^&"<> ]{6,}' && fail "a password in an address is in staged changes"
+printf '%s' "$diff" | grep -qE '[?&]t=[0-9a-f]{32}&s=[A-Za-z0-9]{4,}' && fail "a password token in an address is in staged changes"
 printf '%s' "$diff" | grep -qE '[0-9a-zA-Z._%+-]+@gmail\.com' && fail "a personal email address is in staged changes"
 
 # 4. gitleaks, when installed (also finds a winget install on Windows).

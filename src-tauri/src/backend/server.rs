@@ -24,6 +24,30 @@ pub trait ServerRadio: Send + Sync {
     async fn mix(&self, seed_id: &str, n: usize) -> AppResult<Vec<String>>;
 }
 
+/// A queue kept on the server, for picking up in another app.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedQueue {
+    /// Song ids (this server's), in order.
+    pub track_ids: Vec<String>,
+    /// Index of the song that was playing.
+    pub current: usize,
+    pub position_ms: u64,
+    /// The app that saved it.
+    pub changed_by: Option<String>,
+    /// When, unix seconds.
+    pub changed_at: Option<i64>,
+}
+
+/// The play queue saved on the server ([`Caps::RESUME_QUEUE`]).
+#[async_trait]
+pub trait ResumeQueue: Send + Sync {
+    /// Keep this queue (song ids of this server) on the server.
+    async fn save(&self, track_ids: &[String], current: usize, position_ms: u64) -> AppResult<()>;
+    /// The queue saved last, by any app. None when there's none.
+    async fn load(&self) -> AppResult<Option<SavedQueue>>;
+}
+
 #[async_trait]
 pub trait MusicServer: Send + Sync {
     fn kind(&self) -> BackendKind;
@@ -105,6 +129,10 @@ pub trait MusicServer: Send + Sync {
     /// The server's other players: handoff, and playing as one of them
     /// ([`Caps::REMOTE_PLAYERS`], [`Caps::PLAY_QUEUE_HANDOFF`]).
     fn remote(&self) -> Option<Arc<dyn crate::remote::RemoteEnv>> {
+        None
+    }
+    /// The queue saved on the server ([`Caps::RESUME_QUEUE`]).
+    fn resume(&self) -> Option<Arc<dyn ResumeQueue>> {
         None
     }
 }

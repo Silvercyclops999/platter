@@ -7,6 +7,7 @@ pub mod caps;
 pub mod commands;
 pub mod plex;
 pub mod registry;
+pub mod resume;
 pub mod routed;
 pub mod server;
 

@@ -5,10 +5,13 @@ use tauri::State;
 
 use super::manager::{Jellyfin, QuickCode, QuickPoll, SavedServer, ServerCheck, ServerLibrary};
 use crate::error::AppResult;
+use crate::subsonic::Subsonic;
 
 #[tauri::command]
-pub async fn servers_saved(jf: State<'_, Jellyfin>) -> AppResult<Vec<SavedServer>> {
-    Ok(jf.saved())
+pub async fn servers_saved(jf: State<'_, Jellyfin>, os: State<'_, Subsonic>) -> AppResult<Vec<SavedServer>> {
+    let mut list = jf.saved();
+    os.patch(&mut list);
+    Ok(list)
 }
 
 #[tauri::command]
@@ -17,18 +20,27 @@ pub async fn server_set_primary(jf: State<'_, Jellyfin>, tag: String) -> AppResu
 }
 
 #[tauri::command]
-pub async fn server_remove(jf: State<'_, Jellyfin>, tag: String) -> AppResult<()> {
+pub async fn server_remove(jf: State<'_, Jellyfin>, os: State<'_, Subsonic>, tag: String) -> AppResult<()> {
+    if os.owns(&tag) {
+        return os.remove(&tag).await;
+    }
     jf.remove(&tag).await
 }
 
 #[tauri::command]
-pub async fn server_libraries(jf: State<'_, Jellyfin>, tag: String) -> AppResult<Vec<ServerLibrary>> {
+pub async fn server_libraries(jf: State<'_, Jellyfin>, os: State<'_, Subsonic>, tag: String) -> AppResult<Vec<ServerLibrary>> {
+    if os.owns(&tag) {
+        return os.libraries(&tag).await;
+    }
     jf.libraries(&tag).await
 }
 
 /// `ids` null includes every library.
 #[tauri::command]
-pub async fn server_libraries_set(jf: State<'_, Jellyfin>, tag: String, ids: Option<Vec<String>>) -> AppResult<()> {
+pub async fn server_libraries_set(jf: State<'_, Jellyfin>, os: State<'_, Subsonic>, tag: String, ids: Option<Vec<String>>) -> AppResult<()> {
+    if os.owns(&tag) {
+        return os.set_libraries(&tag, ids);
+    }
     jf.set_libraries(&tag, ids)
 }
 

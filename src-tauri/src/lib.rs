@@ -34,6 +34,7 @@ pub mod sid;
 pub mod smart;
 pub mod social;
 pub mod soundid;
+pub mod subsonic;
 pub mod stats;
 pub mod sync;
 pub mod tags;
@@ -497,6 +498,22 @@ pub fn run() {
                 ..Default::default()
             };
             *live.downloads.lock() = Some(downloads.clone());
+            // Navidrome and other Subsonic servers saved earlier sign in with
+            // their keys, and are checked for changes every few minutes.
+            live.subsonic_check_minutes.store(initial.subsonic_check_minutes, std::sync::atomic::Ordering::Relaxed);
+            live.save_queue_on_server.store(initial.save_queue_on_server, std::sync::atomic::Ordering::Relaxed);
+            let subsonic = subsonic::Subsonic::new(subsonic::manager::Deps {
+                backends: backends.clone(),
+                db: Some(db.clone()),
+                store: Arc::new(plex::keychain::KeyringStore::new()),
+                http: subsonic::client::http(),
+                prefs: stream_prefs.clone(),
+                offline: plex.offline_switch(),
+                poll_minutes: live.subsonic_check_minutes.clone(),
+                live: true,
+            });
+            subsonic.restore();
+            app.manage(subsonic);
             // Mixes, radio and the daylist, made here from the cache.
             let mix_service = mixes::MixService::new(db.clone());
             mix_service.set_options(initial.mix_options());
@@ -616,6 +633,8 @@ pub fn run() {
                 tracking::Tracker::new(backends.clone(), db.clone(), live.tracking.clone()),
                 player.subscribe_tracking(),
             );
+            // The queue kept on servers that hold one, for other apps to pick up.
+            backend::resume::spawn_saver(backends.clone(), player.clone(), player.subscribe_tracking(), live.save_queue_on_server.clone());
             // Scrobbling to Last.fm and ListenBrainz, and the AI provider.
             let web_out: Arc<dyn web::Web> = Arc::new(web::Switched { inner: Arc::new(web::ReqwestWeb::new()?), off: plex.offline_switch() });
             let keychain: Arc<dyn plex::keychain::TokenStore> = Arc::new(plex::keychain::KeyringStore::new());
@@ -1049,6 +1068,11 @@ pub fn run() {
             jellyfin::commands::jellyfin_quick_poll,
             jellyfin::commands::jellyfin_quick_cancel,
             jellyfin::commands::jellyfin_sign_in_password,
+            subsonic::commands::subsonic_check,
+            subsonic::commands::subsonic_sign_in,
+            backend::resume::resume_queues,
+            backend::resume::resume_queue_play,
+            backend::resume::resume_queue_save,
             plex::details::now_playing_details,
             lyrics::commands::lyrics_get,
             lyrics::commands::lyrics_own_get,

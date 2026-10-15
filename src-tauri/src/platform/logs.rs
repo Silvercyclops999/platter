@@ -49,8 +49,9 @@ impl Write for LogFile {
     }
 }
 
-/// Removes what mustn't be in a shareable log: `X-Plex-Token`, `api_key`
-/// and `Token="..."` values, `*.plex.direct` host names and IPv4 addresses.
+/// Removes what mustn't be in a shareable log: `X-Plex-Token`, `api_key`,
+/// `apiKey` and `Token="..."` values, a Subsonic sign-in's `t`, `s` and `p`
+/// parameters, `*.plex.direct` host names and IPv4 addresses.
 pub fn redact(line: &str) -> String {
     let line = redact_quoted_token(line);
     let mut out = String::with_capacity(line.len());
@@ -103,6 +104,24 @@ fn redact_word(w: &str) -> String {
             let from = i + key.len();
             let end = w[from..].find(['&', '#']).map_or(w.len(), |e| from + e);
             w.replace_range(from..end, "<token>");
+        }
+    }
+    // A Subsonic sign-in: the password token, its salt, or a password,
+    // as query parameters of their own (`?t=`, `&s=`, `&p=`).
+    for key in ["t=", "s=", "p="] {
+        let mut from = 0;
+        loop {
+            let lower = w.to_ascii_lowercase();
+            let Some(i) = lower[from..].find(key).map(|i| i + from) else { break };
+            let at_param = i > 0 && matches!(w.as_bytes()[i - 1], b'?' | b'&');
+            let start = i + key.len();
+            if !at_param {
+                from = start;
+                continue;
+            }
+            let end = w[start..].find(['&', '#']).map_or(w.len(), |e| start + e);
+            w.replace_range(start..end, "<token>");
+            from = start + "<token>".len();
         }
     }
     // plex.direct host names (they hold the server's address and id).
@@ -229,6 +248,12 @@ mod tests {
         let jf = super::redact("auth MediaBrowser Client=\"Platter\", Token=\"jf-secret\" and /socket?api_key=k2&deviceId=d");
         assert!(!jf.contains("jf-secret") && !jf.contains("k2"), "{jf}");
         assert!(jf.contains("Token=\"<token>\"") && jf.contains("api_key=<token>&deviceId=d"), "{jf}");
+        let os = super::redact("GET /rest/stream?id=s1&format=raw&u=me&t=abcd1234ef&s=c19b2d&v=1.16.1 x?apiKey=KEY9&p=pw1&f=json");
+        for secret in ["abcd1234ef", "c19b2d", "KEY9", "pw1"] {
+            assert!(!os.contains(secret), "{os}");
+        }
+        assert!(os.contains("format=raw&u=me&t=<token>&s=<token>&v=1.16.1") && os.contains("apiKey=<token>&p=<token>&f=json"), "{os}");
+        assert_eq!(super::redact("start=5&last=2 sets=1"), "start=5&last=2 sets=1", "only whole parameter names");
         assert_eq!(super::redact("Café ok
 "), "Café ok
 ");

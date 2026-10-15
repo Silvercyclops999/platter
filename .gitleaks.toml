@@ -16,6 +16,12 @@ description = "Real plex.direct hostname (identifies a home server)"
 regex = '''[0-9a-f]{32}\.plex\.direct'''
 keywords = ["plex.direct"]
 
+[[rules]]
+id = "subsonic-sign-in"
+description = "Subsonic API key, password or password token in an address"
+regex = '''[?&](?:apiKey=[A-Za-z0-9_-]{20,}|p=(?:enc:)?[^&"'<>\s]{6,}|t=[0-9a-f]{32}&s=[A-Za-z0-9]{4,})'''
+keywords = ["apikey=", "p=", "t="]
+
 [allowlist]
 paths = ['''package-lock\.json''', '''Cargo\.lock''']
 # Storage key names such as "platter.pins.v1" look like keys to the generic rule.
