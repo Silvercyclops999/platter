@@ -22,6 +22,12 @@ interface ToastState {
 }
 
 let seq = 1;
+/**
+ * Toasts go away by themselves. The UI tests turn this off (src/test/setup.ts)
+ * so a toast is still there when a test looks for it, however slow the run;
+ * the toast tests turn it back on to check the timing.
+ */
+export const toastExpiry = { on: true };
 /** Each toast's dismiss timer, so a repeat can restart it. */
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 
@@ -39,7 +45,7 @@ export const useToasts = create<ToastState>()((set, get) => ({
       : // Keep at most 3 on screen.
         [...get().toasts, { ...t, id }].slice(-3);
     set({ toasts: next });
-    if (ttlMs > 0) timers.set(id, setTimeout(() => get().dismiss(id), ttlMs));
+    if (ttlMs > 0 && toastExpiry.on) timers.set(id, setTimeout(() => get().dismiss(id), ttlMs));
     return id;
   },
   dismiss: (id) => {

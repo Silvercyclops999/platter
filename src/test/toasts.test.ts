@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toast, useToasts } from "../stores/toasts";
+import { toast, toastExpiry, useToasts } from "../stores/toasts";
 
 const toasts = () => useToasts.getState().toasts;
 
 describe("toasts", () => {
   beforeEach(() => {
+    toastExpiry.on = true;
     vi.useFakeTimers();
     useToasts.setState({ toasts: [] });
   });
   afterEach(() => {
+    toastExpiry.on = false;
     vi.useRealTimers();
   });
 

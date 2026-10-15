@@ -1,10 +1,27 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
+import { toastExpiry, useToasts } from "../stores/toasts";
 
-// Vitest runs without globals, so Testing Library can't auto-register cleanup.
-afterEach(() => cleanup());
+afterEach(() => {
+  // Vitest runs without globals, so Testing Library can't auto-register cleanup.
+  cleanup();
+  // A test that failed with fake timers on would hand them to every test
+  // after it, which then hang waiting for time that never passes.
+  vi.useRealTimers();
+  // No test starts with another one's toasts.
+  useToasts.setState({ toasts: [] });
+});
 
-// findBy* and waitFor wait up to 3 s instead of 1 s: the full suite runs many
-// files at once, and a busy machine made one-second waits fail at random.
-configure({ asyncUtilTimeout: 3000 });
+// findBy* and waitFor give up after 10 s. Tests wait for a condition, never
+// for time, so this is a hang guard and not a budget: a passing wait returns
+// as soon as its condition holds, and a lost update never comes however long
+// the wait. Ten seconds covers the full suite running beside a build on a
+// busy machine or a slow CI runner. Don't pass a shorter `timeout` to one
+// wait; that only brings the flakiness back.
+configure({ asyncUtilTimeout: 10_000 });
+
+// Toasts stay until a test clears them: a 4 s lifetime is a real timer that a
+// slow run outlasts between showing a toast and checking it (src/test/toasts.test.ts
+// covers the timing with fake timers).
+toastExpiry.on = false;
