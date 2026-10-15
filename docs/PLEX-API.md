@@ -495,3 +495,20 @@ The album list (`/library/sections/{id}/all?type=9`) carries
 Here every one of 86 albums had a date and 44 had a studio. The app stores both
 for the album page footer and takes the first ten characters of the date, in
 case a time follows it.
+
+### 2026-10-14: downloads
+
+Downloads use the same two requests as playback, one file at a time through
+the transfer gate. Original quality is a plain `GET` of the part with the token
+as a header, resumed with `Range: bytes=N-` after a break (the part answers
+`206` with a `Content-Range` total, see the direct stream note above). MP3
+qualities use `start.mp3` with `musicBitrate` and `maxAudioBitrate` set to
+320, 192 or 128 and a fresh session id, then `stop` with that session. A
+transcode has no length and no Range, so a broken one starts over.
+
+With nothing playing, `GET /music/:/transcode/universal/decision` with the same
+query as `start.mp3` (192 kbps, one FLAC track at 892 kbps) answered `400` with
+an HTML body, with and without `X-Plex-Session-Identifier` and a client
+profile. So the app doesn't ask for a decision first; it relies on the
+`start.mp3` check from the first log entry. Not checked yet: a full MP3
+download's size against the bitrate estimate the storage limit uses.

@@ -110,6 +110,14 @@ client ID are kept the same way.
 The library cache, artwork cache, search history and listen log live in the
 app's data folder, as do the cover links found for Discord and lyrics found on LRCLIB.
 
+Downloads are copies of songs from your own Plex server, kept in the app's
+data folder (or a folder you pick) with their album covers. They never go
+anywhere else, and Remove all downloads in Settings deletes them.
+
+Go offline (in the app menu) stops network use: nothing goes to your
+server, plex.tv, GitHub or the services above until you turn it off. The one
+exception is a speech model download you start yourself in Settings.
+
 ## What is never collected
 
 There's no analytics, telemetry or crash reporting that leaves your machine.

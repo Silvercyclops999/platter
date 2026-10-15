@@ -540,6 +540,51 @@ the editor clears `auto`. `lyrics_get` returns transcriptions with `source:
 no words found are remembered (`transcribe_found_nothing`) so the batch
 skips them.
 
+## Downloads
+| Command | Args | Returns |
+| --- | --- | --- |
+| `downloads_status` | – | `DownloadStatus` |
+| `downloaded_tracks` | – | `string[]`, ids of every downloaded song |
+| `downloads_set` | `{ kind: "album"\|"playlist"\|"liked"\|"mix", id, on: bool, title: string \| null, trackIds: string[] \| null }` | `DownloadStatus` |
+| `downloads_retry` | `{ kind \| null, id \| null }` | – |
+| `downloads_remove_all` | – | bytes freed (number) |
+| `downloads_choose_folder` | – | the new folder, or null when the picker was cancelled |
+
+`DownloadStatus = { items: DownloadItem[], usedBytes, limitBytes, freeBytes?, folder, paused?: "offline"|"notHome"|"full"|"noSpace", queued, current?: { trackId, received, total? } }`
+
+`DownloadItem = { kind, id, title, state: "queued"|"downloading"|"downloaded"|"error", total, done, failed, missing, progress (0 to 1), bytes, error? }`
+
+Events: `downloads://status` → `DownloadStatus` on every change (progress at
+most four times a second), and `downloads://changed` (no payload) when the set
+of downloaded songs changes; the UI asks `downloaded_tracks` again.
+
+Whole albums, playlists, Liked Songs and mixes download, never single songs.
+Albums, playlists and Liked Songs take their songs from the library cache and
+follow it: every 30 seconds (and after each change made here) new songs queue
+and removed songs' files are deleted unless another downloaded item still
+holds them. A mix has no list in the cache, so `downloads_set` for a mix needs
+`trackIds`; calling it again with a new list updates it. Liked Songs' id is
+ignored, and turning it on or off also sets `downloadLiked`.
+
+Files are named by track id in the downloads folder (the app data folder's
+`downloads`, or the one picked with `downloads_choose_folder`, which moves the
+files). Original quality is the Plex part as it is, fetched with GET and
+resumed with Range; an MP3 quality asks the universal transcoder and stops its
+session afterwards. One file at a time goes through the player's transfer gate
+at the lowest priority, after playback's own streams and the pre-cache. Album
+covers are kept beside the files, so they show when the artwork cache has let
+them go. A downloaded file plays before the pre-cache or the server, and counts
+as on this computer for `cached_tracks` and `cached_library`.
+
+The queue waits (`paused`) while the server can't be reached or `goOffline` is
+on (`offline`), away from the home network while `downloadHomeOnly` is on
+(`notHome`; home means the local connection to the server), at the storage
+limit (`full`), or when the disk has no room (`noSpace`). Failed songs retry
+after 30 seconds, 2 minutes, 10 minutes and an hour; after five tries the item
+shows `error` until `downloads_retry`. A downloaded file deleted from disk is
+noticed when it would play and at startup, and counts as `missing` until
+retried. The queue survives restarts.
+
 ## Search
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -825,8 +870,8 @@ on the local network. Media from another server is refused.
 
 `banner.kind` is one of `offline`, `noInternet`, `starting`, `updating`,
 `startTimeout`, `relay`, `signIn`, `accessRemoved`, `filesUnavailable`,
-`noMusicLibrary`, `diskFull`, `localNetwork`; `message` is the text to show.
-`offline` and `noInternet` show as the top bar's offline icon, not a banner. `scan` counts new
+`noMusicLibrary`, `diskFull`, `localNetwork`, `goneOffline`; `message` is the text to show.
+`offline`, `noInternet` and `goneOffline` show as the top bar's offline icon, not a banner. `scan` counts new
 tracks while Plex scans ("Adding new music… 120 of 340"). `cachedOnly` is true
 while only music already on this computer can play; the UI then asks
 `cached_tracks` and dims the rest. See docs/APP-STATES.md.
@@ -929,6 +974,12 @@ The rest of the fields, with their defaults:
 | `showToMyDevices` | bool, true | Announce this computer to the user's other Platter computers, open the control port and publish its addresses to plex.tv. Off withdraws the announcement and closes the port. Independent of `actAsPlexPlayer`. This device only. |
 | `computerName` | string, `""` | The name other devices see, up to 60 characters, trimmed. Empty uses the OS computer name. This device only. |
 | `showAirplayLocked` | bool, false | List AirPlay receivers that need a password or a pairing code. Computers' own receivers are never listed. |
+| `downloadQuality` | `"original"`, `"320"`, `"192"` or `"128"`, `"original"` | Original keeps the file as it is; the others are MP3s from the server's transcoder. Applies to new downloads. This device only. |
+| `downloadLimitGb` | number, 20 | Downloads stop at this size, 1 to 4096. This device only. |
+| `downloadFolder` | string, `""` | Where downloads go; empty is the app data folder. Changed with `downloads_choose_folder`, not `settings_set`. This device only. |
+| `downloadHomeOnly` | bool, true | Downloads wait while the server is reached over remote access or the relay. This device only. |
+| `downloadLiked` | bool, false | Keep Liked Songs downloaded; new likes download too. The same as the Liked Songs download toggle. This device only. |
+| `goOffline` | bool, false | No network use: no requests to the server or plex.tv, no artist info, LRCLIB, share link lookups, Discord status, Listen on discovery or update checks. Health shows `offline` with the `goneOffline` banner and `cachedOnly`, so only music on this computer plays. Off reconnects as at startup. This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
