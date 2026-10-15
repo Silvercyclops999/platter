@@ -31,7 +31,7 @@ import { usePins } from "../stores/pins";
 import { folders, useFolders, withFolders } from "../stores/folders";
 import { folderMenu, moveToFolderItem } from "./FolderMenus";
 import { player, usePlayer } from "../stores/player";
-import { nav, useCurrentEntry } from "../stores/router";
+import { nav } from "../stores/router";
 
 /** Load the library items, and again after every library change. */
 export function useLibraryLoader() {
@@ -41,14 +41,11 @@ export function useLibraryLoader() {
   }, [version]);
 }
 
-/** Opening an item, or starting to play it, moves it up the Recents sort. */
+/** Starting to play an item moves it up the Recents sort. Only opening it
+ * doesn't, so the list doesn't jump under the pointer. */
 export function useLibraryRecents() {
-  const r = useCurrentEntry().route;
   const ctx = usePlayer((s) => s.state?.queue.context);
   const ctxKey = ctx && (ctx.kind === "album" || ctx.kind === "artist" || ctx.kind === "playlist") && ctx.id ? `${ctx.kind}:${ctx.id}` : null;
-  useEffect(() => {
-    if (r.name === "album" || r.name === "artist" || r.name === "playlist") useLibraryView.getState().touch(r.name, r.id);
-  }, [r]);
   useEffect(() => {
     if (!ctxKey) return;
     const [kind, id] = ctxKey.split(":") as [LibKind, string];
