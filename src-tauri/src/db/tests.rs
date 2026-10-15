@@ -2025,3 +2025,52 @@ async fn popular_leaves_out_hidden_songs_and_artists() {
     let guest = t.db.read(|c| queries::artist_page_with(c, "credit:odessa wren", PopularSource::MyPlays, Some(&h)));
     assert!(guest.unwrap().popular.is_empty());
 }
+
+// ---------------------------------------------------------------- art fallback
+
+/// Plex sends some albums' tracks with empty `thumb` and `parentThumb`. Their
+/// rows, the queue and now playing (all read through `TRACK_COLS`) show the
+/// album's cover, then the artist's, with the server tag kept.
+#[tokio::test]
+async fn songs_without_art_of_their_own_show_their_albums_cover() {
+    let t = open();
+    let mut lib = fake::generated(1, 2, 2);
+    let plain: Vec<String> = lib.tracks.iter().map(|t| t.id.clone()).collect();
+    lib.playlists.push((fake::playlist("p1", "Mix", 2), vec![plain[0].clone(), plain[2].clone()]));
+    let mut lib = fake::tagged(lib, "0a1b2c3d");
+    let bare = lib.albums[0].id.clone();
+    let no_cover = lib.albums[1].id.clone();
+    for tr in lib.tracks.iter_mut() {
+        if tr.album_id == bare {
+            tr.thumb = None;
+        }
+        if tr.album_id == no_cover {
+            tr.thumb = Some(String::new());
+        }
+    }
+    lib.albums[1].thumb = None;
+    let ids: Vec<String> = lib.tracks.iter().map(|t| t.id.clone()).collect();
+    let playlist = lib.playlists[0].0.id.clone();
+    let album_cover = lib.albums[0].thumb.clone().unwrap();
+    let artist_photo = lib.artists[0].thumb.clone().unwrap();
+    assert!(album_cover.starts_with("0a1b2c3d:/library/metadata/"));
+    let src = Arc::new(FakeSource::new(lib));
+    sync(&t.db, &src, false).await;
+    // The cache itself holds no art for these songs.
+    let stored: Option<String> = t
+        .db
+        .read(|c| Ok(c.query_row("SELECT thumb FROM tracks WHERE id = ?1", [&ids[0]], |r| r.get(0))?))
+        .unwrap();
+    assert_eq!(stored, None);
+
+    let album = t.db.read(|c| queries::album_tracks(c, &bare)).unwrap();
+    assert_eq!(album.len(), 2);
+    assert!(album.iter().all(|s| s.thumb.as_deref() == Some(album_cover.as_str())), "album rows");
+    let page = t.db.read(|c| queries::playlist_page(c, &playlist)).unwrap();
+    let thumbs: Vec<_> = page.tracks.iter().map(|s| s.thumb.clone().unwrap_or_default()).collect();
+    assert_eq!(thumbs, vec![album_cover.clone(), artist_photo.clone()], "playlist rows; no album cover falls to the artist");
+    // What the player, queue, now playing and media controls look songs up by.
+    let looked_up = t.db.read(|c| queries::tracks_by_ids(c, &ids)).unwrap();
+    assert_eq!(looked_up[0].thumb.as_deref(), Some(album_cover.as_str()));
+    assert_eq!(looked_up[2].thumb.as_deref(), Some(artist_photo.as_str()));
+}

@@ -16,8 +16,16 @@ pub const ARTIST_COLS: &str = "ar.id, ar.title, ar.sort_title, ar.thumb, ar.art,
 pub const ALBUM_COLS: &str = "al.id, al.title, al.sort_title, al.artist_id, al.artist_title, al.year, \
      al.thumb, al.format, al.subformats, al.section, al.genres, al.track_count, al.added_at, \
      al.view_count, al.last_viewed_at, al.tint";
+/// A song's art is its own, else its album's cover, else its artist's. Some
+/// servers send songs with no image of their own (Plex leaves `thumb` and
+/// `parentThumb` empty on the tracks of some albums), so the cover is looked
+/// up when read, which also mends caches synced before.
 pub const TRACK_COLS: &str = "t.id, t.title, t.album_id, t.album_title, t.artist_id, t.artist_title, \
-     t.track_artist, t.track_number, t.disc_number, t.duration_ms, t.thumb, t.part_key, t.codec, \
+     t.track_artist, t.track_number, t.disc_number, t.duration_ms, \
+     coalesce(nullif(t.thumb, ''), \
+       (SELECT nullif(art_al.thumb, '') FROM albums art_al WHERE art_al.id = t.album_id), \
+       (SELECT nullif(art_ar.thumb, '') FROM artists art_ar WHERE art_ar.id = t.artist_id)), \
+     t.part_key, t.codec, \
      t.container, t.bitrate, t.bit_depth, t.sample_rate, t.user_rating, t.view_count, t.last_viewed_at, t.rating_count, \
      t.rated_at, t.genres";
 /// How many columns [`TRACK_COLS`] selects (extra columns after it start here).
