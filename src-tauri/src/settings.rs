@@ -400,6 +400,15 @@ pub struct Settings {
     pub ai_provider: crate::smart::prompt::AiProvider,
     /// The provider's model.
     pub ai_model: String,
+    /// The miniplayer window stays above other windows (this device only).
+    pub miniplayer_on_top: bool,
+    /// The miniplayer's card takes a colour from the cover (this device only).
+    pub miniplayer_tint: bool,
+    /// The miniplayer lists what's up next when it's tall enough (this device only).
+    pub miniplayer_queue: bool,
+    /// Where the miniplayer was last, in logical pixels. Kept by the core,
+    /// read only here.
+    pub miniplayer_bounds: Option<crate::platform::miniplayer::WindowBounds>,
 }
 
 /// Longest model name accepted.
@@ -524,6 +533,10 @@ impl Default for Settings {
             scrobble_unreleased: false,
             ai_provider: crate::smart::prompt::AiProvider::None,
             ai_model: crate::smart::prompt::DEFAULT_MODEL.to_string(),
+            miniplayer_on_top: true,
+            miniplayer_tint: true,
+            miniplayer_queue: false,
+            miniplayer_bounds: None,
         }
     }
 }
@@ -653,6 +666,10 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "scrobbleLastfm",
     "scrobbleListenbrainz",
     "aiProvider",
+    "miniplayerOnTop",
+    "miniplayerTint",
+    "miniplayerQueue",
+    "miniplayerBounds",
 ];
 
 /// A partial update; absent fields are left alone.
@@ -773,6 +790,16 @@ pub struct SettingsPatch {
     pub scrobble_unreleased: Option<bool>,
     pub ai_provider: Option<crate::smart::prompt::AiProvider>,
     pub ai_model: Option<String>,
+    pub miniplayer_on_top: Option<bool>,
+    pub miniplayer_tint: Option<bool>,
+    pub miniplayer_queue: Option<bool>,
+}
+
+impl SettingsPatch {
+    /// Whether the patch changes the miniplayer (both windows hear about it).
+    pub fn touches_miniplayer(&self) -> bool {
+        self.miniplayer_on_top.is_some() || self.miniplayer_tint.is_some() || self.miniplayer_queue.is_some()
+    }
 }
 
 impl SettingsPatch {
@@ -854,6 +881,9 @@ impl Settings {
         set(&mut self.act_as_plex_player, p.act_as_plex_player);
         set(&mut self.move_stops_old_device, p.move_stops_old_device);
         set(&mut self.share_public_links, p.share_public_links);
+        set(&mut self.miniplayer_on_top, p.miniplayer_on_top);
+        set(&mut self.miniplayer_tint, p.miniplayer_tint);
+        set(&mut self.miniplayer_queue, p.miniplayer_queue);
         set(&mut self.show_cast_devices, p.show_cast_devices);
         set(&mut self.discord_status, p.discord_status);
         set(&mut self.discord_show_unreleased, p.discord_show_unreleased);
@@ -1390,9 +1420,17 @@ pub async fn settings_set(
     player: State<'_, PlayerHandle>,
     downloads: State<'_, downloads::Downloads>,
     mixes: State<'_, crate::mixes::MixService>,
+    app: AppHandle,
     patch: SettingsPatch,
 ) -> AppResult<()> {
-    apply_patch(&settings, &player, &downloads, &mixes, patch).await
+    let mini = patch.touches_miniplayer();
+    apply_patch(&settings, &player, &downloads, &mixes, patch).await?;
+    if mini {
+        // The miniplayer has its own window; tell both, and keep it on top or not.
+        let s = settings.get().await?;
+        crate::platform::miniplayer::settings_changed(&app, &s);
+    }
+    Ok(())
 }
 
 /// A settings change and everything that follows it (Settings page, or

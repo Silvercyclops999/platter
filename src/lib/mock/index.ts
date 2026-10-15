@@ -23,6 +23,7 @@
  *                   noMusicLibrary, diskFull, scanning, goneOffline)
  *   ?downloads=demo the first album and Liked Songs start downloaded
  *   ?downloads=full as demo, with the storage limit already reached
+ *   ?view=miniplayer show the miniplayer window's page
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
@@ -2083,6 +2084,37 @@ export class MockBackend implements Backend {
 
   deepLinkTake() {
     return this.delay(() => this.share.take());
+  }
+
+  // ---------------------------------------------------------------- miniplayer
+
+  /** The miniplayer window is open (pretend: no second window in the browser). */
+  miniplayerOpen = false;
+  /** Test hook: the next open fails like a window that couldn't be made. */
+  miniplayerFailsNext = false;
+  miniplayerState() {
+    return this.delay(() => ({ open: this.miniplayerOpen }));
+  }
+  miniplayerSet(open: boolean) {
+    return this.delay(() => {
+      if (open && this.miniplayerFailsNext) {
+        this.miniplayerFailsNext = false;
+        throw { kind: "internal", message: "The miniplayer couldn't open." };
+      }
+      if (open !== this.miniplayerOpen) {
+        this.miniplayerOpen = open;
+        this.emit("miniplayer://changed", { open });
+      }
+      return { open };
+    });
+  }
+  /** `?view=miniplayer` shows the miniplayer page in the browser. */
+  windowLabel() {
+    const view = typeof location !== "undefined" ? new URLSearchParams(location.search).get("view") : null;
+    return view === "miniplayer" ? "miniplayer" : "main";
+  }
+  windowResizeFromCorner() {
+    return Promise.resolve();
   }
 
   // ---------------------------------------------------------------- sync file, folders, keys

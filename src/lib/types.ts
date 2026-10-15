@@ -779,7 +779,28 @@ export interface Settings {
   aiProvider: AiProvider;
   /** The provider's model. */
   aiModel: string;
+  /** The miniplayer window stays above other windows (this device only). */
+  miniplayerOnTop: boolean;
+  /** The miniplayer's card takes a colour from the cover (this device only). */
+  miniplayerTint: boolean;
+  /** The miniplayer lists what's up next when it's tall enough (this device only). */
+  miniplayerQueue: boolean;
+  /** Where the miniplayer was last (logical pixels). Kept by the core; read only. */
+  miniplayerBounds?: WindowBounds | null;
   [key: string]: unknown;
+}
+
+/** A window's place and size in logical pixels. */
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Whether the miniplayer window is open. */
+export interface MiniplayerState {
+  open: boolean;
 }
 
 export type DownloadQuality = "original" | "320" | "192" | "128";
@@ -930,6 +951,10 @@ export const DEFAULT_SETTINGS: Settings = {
   scrobbleUnreleased: false,
   aiProvider: "none",
   aiModel: "claude-opus-5-5",
+  miniplayerOnTop: true,
+  miniplayerTint: true,
+  miniplayerQueue: false,
+  miniplayerBounds: null,
 };
 
 // ---------------------------------------------------------------- sync file, folders and keys
@@ -1723,6 +1748,8 @@ export interface EventMap {
   "smart://changed": SmartSummary[];
   /** Scrobbles waiting to be sent, or a service's sign-in changed. */
   "scrobble://status": { queued: number };
+  /** The miniplayer window opened or closed. */
+  "miniplayer://changed": MiniplayerState;
 }
 
 export type EventName = keyof EventMap;

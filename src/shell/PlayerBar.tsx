@@ -4,6 +4,7 @@ import {
   Maximize2,
   MicVocal,
   MonitorSpeaker,
+  PictureInPicture2,
   Pause,
   Play,
   Repeat,
@@ -32,6 +33,7 @@ import { modKey } from "../lib/platform";
 import { dropOnQueue, endSongDrag, startSongDrag, tracksDrag, useSongDrop } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
+import { miniplayer, useMiniplayer } from "../stores/miniplayer";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
@@ -297,6 +299,19 @@ function ExpandButton({ disabled }: { disabled: boolean }) {
   );
 }
 
+/** Opens the miniplayer window, or closes it while it's open. */
+function MiniplayerButton() {
+  const open = useMiniplayer((s) => s.open);
+  return (
+    <IconButton
+      label={open ? "Close miniplayer" : "Open miniplayer"}
+      pressed={open}
+      icon={<PictureInPicture2 size={16} />}
+      onClick={() => void miniplayer.toggle()}
+    />
+  );
+}
+
 /** The queue button; songs dropped on it go to the end of the queue. */
 function QueueButton() {
   const queueOpen = useUi((s) => s.queueOpen);
@@ -407,6 +422,7 @@ export function PlayerBar() {
         <QueueButton />
         <IconButton label="Connect to a device" pressed={outputOpen} icon={<MonitorSpeaker size={18} />} onClick={toggleOutput} />
         <Volume />
+        <MiniplayerButton />
         <ExpandButton disabled={!track} />
       </div>
     </aside>

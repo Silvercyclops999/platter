@@ -8,6 +8,7 @@
  */
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { artPixelSize } from "./artSize";
 import { createMockBackend } from "./mock";
 import type {
@@ -44,6 +45,7 @@ import type {
   InfoKeysStatus,
   KeyedInfoSource,
   LibraryItem,
+  MiniplayerState,
   LikedPage,
   Lyrics,
   OwnLyrics,
@@ -435,6 +437,15 @@ export interface Backend {
   /** Check the ListenBrainz token (after saving it). */
   listenbrainzCheck(): Promise<ScrobbleStatus>;
 
+  // Miniplayer window
+  miniplayerState(): Promise<MiniplayerState>;
+  /** Open or close the miniplayer; answers whether it's open now. */
+  miniplayerSet(open: boolean): Promise<MiniplayerState>;
+  /** Which window this UI is in ("main" or "miniplayer"). */
+  windowLabel(): string;
+  /** Start resizing this window from its bottom-right corner (the grip). */
+  windowResizeFromCorner(): Promise<void>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -642,6 +653,10 @@ export function createTauriBackend(): Backend {
     lastfmSignInFinish: () => call("lastfm_sign_in_finish"),
     lastfmSignOut: () => call("lastfm_sign_out"),
     listenbrainzCheck: () => call("listenbrainz_check"),
+    miniplayerState: () => call("miniplayer_state"),
+    miniplayerSet: (open) => call("miniplayer_set", { open }),
+    windowLabel: () => getCurrentWindow().label,
+    windowResizeFromCorner: () => getCurrentWindow().startResizeDragging("SouthEast"),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

@@ -7,7 +7,7 @@ import { Tooltip } from "./Tooltip";
 import "./likes.css";
 
 /** The not-liked glyph: an outlined circle with a plus. */
-function PlusGlyph() {
+export function PlusGlyph() {
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" className="save-btn__glyph">
       <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -17,7 +17,7 @@ function PlusGlyph() {
 }
 
 /** The liked glyph: a filled accent circle with a tick. */
-function TickGlyph() {
+export function TickGlyph() {
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" className="save-btn__glyph save-btn__glyph--tick">
       <circle cx="8" cy="8" r="8" className="save-btn__disc" />

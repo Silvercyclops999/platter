@@ -326,6 +326,27 @@ resolved in the core, kept until the UI takes it with `deep_link_take`, and
 announced with event `deeplink://open` (no payload). A song opens its album;
 with `atSeconds`, the player seeks there once when that song starts playing.
 
+## Miniplayer
+| Command | Args | Returns |
+| --- | --- | --- |
+| `miniplayer_state` | – | `{ open }` |
+| `miniplayer_set` | `{ open }` | `{ open }` |
+
+Event `miniplayer://changed` → `{ open }` when the window opens or closes
+(from either window, or because the main window closed).
+
+The miniplayer is a second window, label `miniplayer`, with no frame and its
+own capability (`capabilities/miniplayer.json`: dragging and resizing only).
+It loads the same page as the main window, which sees the label and shows
+just the miniplayer, fed by the same `player://` events. It opens at 340 x 365
+in the bottom-right corner of the main window's screen, or where it was last
+when that place is still on a screen (`miniplayerBounds`, saved a moment
+after it stops moving and when it closes). It is always on top while
+`miniplayerOnTop` is on; changing that setting applies at once. A change to
+any `miniplayer*` setting is sent to both windows as `settings://changed`.
+When the window can't be made, `miniplayer_set` fails with `internal` ("The
+miniplayer couldn't open.").
+
 ## Discord
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1417,6 +1438,10 @@ The rest of the fields, with their defaults:
 | `scrobbleUnreleased` | bool, false | Unreleased music scrobbles too. |
 | `aiProvider` | `"none"` (default), `"anthropic"` | The AI provider for prompted playlists. None hides them. This device only (the key is in this computer's keychain). |
 | `aiModel` | string, `"claude-opus-5-5"` | The provider's model. Letters, numbers, dots, dashes; empty goes back to the default. |
+| `miniplayerOnTop` | bool, true | The miniplayer window stays above other windows. This device only. |
+| `miniplayerTint` | bool, true | The miniplayer's card takes a colour from the cover. This device only. |
+| `miniplayerQueue` | bool, false | The miniplayer lists the next songs when it's at least 480 tall. This device only. |
+| `miniplayerBounds` | `{ x, y, width, height }` or null, read only | Where the miniplayer was last, in logical pixels. Kept by the core. This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

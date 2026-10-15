@@ -1552,6 +1552,32 @@ export function SettingsPage() {
         <Switch checked={rememberMode} onChange={fullWindow.setRemember} labelledBy={ids.title} describedBy={ids.desc} />
       ),
     },
+    // The miniplayer window
+    {
+      key: "miniplayerOnTop",
+      section: "Appearance",
+      group: "Miniplayer",
+      title: "Miniplayer always on top",
+      description:
+        "The miniplayer stays above other windows. Open it from the player bar or the app menu. It keeps its size and place on this computer. This device only.",
+      control: (ids) => toggle(s, "miniplayerOnTop", ids),
+    },
+    {
+      key: "miniplayerTint",
+      section: "Appearance",
+      group: "Miniplayer",
+      title: "Miniplayer background colour",
+      description: "The miniplayer's card takes a colour from the cover. Also in the miniplayer's own settings. This device only.",
+      control: (ids) => toggle(s, "miniplayerTint", ids),
+    },
+    {
+      key: "miniplayerQueue",
+      section: "Appearance",
+      group: "Miniplayer",
+      title: "Show the queue in the miniplayer",
+      description: "Lists the next few songs under the art when the miniplayer is tall enough. This device only.",
+      control: (ids) => toggle(s, "miniplayerQueue", ids),
+    },
     // Library: tags read from the files
     {
       key: "readFileTags",

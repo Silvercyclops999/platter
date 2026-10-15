@@ -6,6 +6,7 @@ import { Tooltip } from "../components/Tooltip";
 import { artUrl, backend } from "../lib/backend";
 import { chrome, modKey } from "../lib/platform";
 import { useApp } from "../stores/app";
+import { miniplayer, useMiniplayer } from "../stores/miniplayer";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { createPlaylist } from "../stores/playlists";
@@ -141,6 +142,7 @@ export function AppMenu() {
   const avatar = useApp((s) => (showAvatar ? (s.auth?.avatar ?? null) : null));
   const privateSession = useSettings((s) => !!s.settings?.privateSession);
   const goOffline = useSettings((s) => !!s.settings?.goOffline);
+  const miniOpen = useMiniplayer((s) => s.open);
   const [open, setOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -233,6 +235,16 @@ export function AppMenu() {
           </button>
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "recents" }))}>
             <span>Recents</span>
+          </button>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={miniOpen}
+            className="appmenu__item"
+            onClick={run(() => void miniplayer.toggle())}
+          >
+            <span>Miniplayer</span>
+            {miniOpen && <Check size={16} className="appmenu__check" aria-hidden="true" />}
           </button>
           <div className="appmenu__sep" role="separator" />
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "settings" }))}>

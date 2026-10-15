@@ -103,7 +103,7 @@ describe("app menu", () => {
     const menu = screen.getByRole("menu", { name: "App menu" });
     expect(avatar).toHaveAttribute("aria-expanded", "true");
     const items = [...menu.querySelectorAll('[role^="menuitem"]')].map((i) => i.textContent);
-    expect(items).toEqual(["Create playlist", "Recents", `Settings${"Ctrl+,"}`, `Keyboard shortcuts${"Ctrl+/"}`, "Private session", "Go offline", "Check for updates", "Sign out"]);
+    expect(items).toEqual(["Create playlist", "Recents", "Miniplayer", `Settings${"Ctrl+,"}`, `Keyboard shortcuts${"Ctrl+/"}`, "Private session", "Go offline", "Check for updates", "Sign out"]);
   });
 
   it("Escape closes it and returns focus to the avatar", async () => {
@@ -140,12 +140,14 @@ describe("app menu", () => {
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Recents" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Miniplayer" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: /Settings/ })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: /Keyboard shortcuts/ })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemcheckbox", { name: "Private session" })).toHaveFocus();
-    await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}");
+    await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toHaveFocus();
   });
 

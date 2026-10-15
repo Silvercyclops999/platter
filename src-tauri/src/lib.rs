@@ -166,6 +166,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(updates::Updates::default())
+        .manage(platform::miniplayer::Miniplayer::default())
         .register_asynchronous_uri_scheme_protocol("art", |ctx, req, responder| {
             let cache = ctx.app_handle().state::<ArtCache>().inner().clone();
             db::artcache::respond(cache, req.uri().to_string(), responder);
@@ -814,8 +815,11 @@ pub fn run() {
             scrobble::commands::lastfm_sign_in_finish,
             scrobble::commands::lastfm_sign_out,
             scrobble::commands::listenbrainz_check,
+            platform::miniplayer::miniplayer_state,
+            platform::miniplayer::miniplayer_set,
         ])
         .on_window_event(|window, event| {
+            platform::miniplayer::on_window_event(window, event);
             // Back from System Settings: pick up Local Network access at once.
             if let tauri::WindowEvent::Focused(true) = event
                 && window.label() == "main"

@@ -1,0 +1,270 @@
+/* The miniplayer window: a top strip, the art on a tinted card, and the
+   controls over the art while it's pointed at. Sized from the window. */
+
+html:has(.mini),
+body:has(.mini) {
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg-base);
+}
+
+.mini {
+  --mini-tint: var(--color-bg-raised2);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  user-select: none;
+}
+
+.mini__strip {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-1);
+  background: #000;
+  -webkit-app-region: drag;
+}
+.mini__strip .icon-btn { -webkit-app-region: no-drag; color: var(--color-text-secondary); }
+.mini__strip .icon-btn:hover { color: var(--color-text-primary); }
+.mini__handle {
+  display: flex;
+  justify-content: center;
+  color: var(--color-text-muted);
+  cursor: grab;
+}
+
+.mini__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.mini__card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+  transition: background-color var(--motion-long) var(--motion-easing);
+}
+.mini.is-tinted .mini__card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--mini-tint) 70%, transparent), color-mix(in srgb, var(--mini-tint) 35%, var(--color-bg-raised)));
+}
+
+.mini__art-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini__art {
+  position: relative;
+  border-radius: var(--radius-row);
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.mini__art .art { border-radius: var(--radius-row); }
+
+/* Controls: hidden at rest, at once on hover (an instant fade, per the reference). */
+.mini__scrim {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-very-quick) linear;
+}
+.mini__art.is-active .mini__scrim,
+.mini__art:focus-within .mini__scrim {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mini__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--color-text-primary);
+}
+.mini__row .icon-btn:not(.mini__play) { color: var(--color-text-primary); }
+.mini__row .icon-btn.is-active:not(.mini__play) { color: var(--color-accent); }
+.mini__row .mini__play.icon-btn {
+  width: 56px;
+  height: 56px;
+  margin: 0 var(--space-1);
+}
+.mini__row .mini__play.icon-btn:hover:not([aria-disabled="true"]) { transform: scale(calc(1 + 0.04 * var(--motion-move))); }
+
+/* Narrow windows: tighter buttons so the row still fits. */
+@container (max-width: 260px) {
+  .mini__row .mini__play.icon-btn { width: 44px; height: 44px; }
+}
+.mini__art { container-type: inline-size; }
+@container (max-width: 250px) {
+  .mini__row { gap: 0; }
+  .mini__row .icon-btn:not(.mini__play) { width: 28px; height: 28px; }
+}
+
+.mini__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0 var(--space-2) var(--space-2);
+}
+.mini__times {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+.mini__bar {
+  position: relative;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+}
+.mini__bar::before { content: ""; position: absolute; inset: -6px 0; }
+.mini__bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--color-text-primary);
+}
+
+.mini__mute { position: relative; display: inline-flex; }
+.mini-volume {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  padding: var(--space-3) var(--space-2);
+  border-radius: var(--radius-pill);
+  background: rgba(20, 18, 16, 0.95);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+}
+.mini-volume__track {
+  position: relative;
+  width: 4px;
+  height: 84px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  touch-action: none;
+}
+.mini-volume__track::before { content: ""; position: absolute; inset: 0 -8px; }
+.mini-volume__track:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 6px; }
+.mini-volume__fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: inherit;
+  background: var(--color-accent);
+}
+.mini-volume__knob {
+  position: absolute;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, 50%);
+}
+
+.mini__meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mini__text { flex: 1; min-width: 0; }
+.mini__title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  line-height: 1.3;
+}
+.mini__artist {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+.mini__like { flex: none; }
+.mini__empty { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-md); }
+
+.mini__grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: nwse-resize;
+  -webkit-app-region: no-drag;
+}
+
+/* Up next, under the card when the window is tall enough. */
+.mini-queue { flex: none; padding: 0 var(--space-1); }
+.mini-queue__title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+.mini-queue__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.mini-queue__row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.mini-queue__text { display: flex; flex-direction: column; min-width: 0; }
+.mini-queue__song { font-size: var(--font-size-sm); }
+.mini-queue__artist { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+
+/* The settings panel swaps in for the content. */
+.mini-settings {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+.mini-settings__title { margin: 0 0 var(--space-1); font-size: var(--font-size-lg); font-weight: 700; }
+.mini-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--font-size-md);
+}
+.mini-settings__note { margin: 0; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.mini-settings__done { align-self: flex-start; margin-top: auto; }
+
+/* Toasts in a small window sit across the bottom. */
+.mini .toaster { left: var(--space-2); right: var(--space-2); bottom: var(--space-2); transform: none; }

@@ -6,13 +6,44 @@ import { AppShell } from "./shell/AppShell";
 import { connectApp, useApp } from "./stores/app";
 import { connectFileTags } from "./stores/fileTags";
 import { connectLikes } from "./stores/likes";
+import { connectMiniplayer, isMiniplayerWindow } from "./stores/miniplayer";
 import { connectPlayer } from "./stores/player";
 import { connectShare } from "./stores/share";
-import { useSettings } from "./stores/settings";
+import { loadSettings, useSettings } from "./stores/settings";
+import { Miniplayer } from "./shell/Miniplayer";
+import { backend } from "./lib/backend";
 import { useUi } from "./stores/ui";
 
-/** Root: wires stores to the core, then gates on auth. */
+/**
+ * The miniplayer window: only the player, likes and settings stores, fed by
+ * the same core events as the main window.
+ */
+export function MiniplayerApp() {
+  useEffect(() => installReducedMotion(), []);
+  const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
+  useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
+  useEffect(() => connectPlayer(), []);
+  useEffect(() => connectLikes(), []);
+  useEffect(() => {
+    void loadSettings();
+    let un: (() => void) | null = null;
+    let alive = true;
+    backend.listen("settings://changed", (s) => useSettings.getState().setLocal(s)).then((u) => (alive ? (un = u) : u()));
+    return () => {
+      alive = false;
+      un?.();
+    };
+  }, []);
+  return <Miniplayer />;
+}
+
+/** Root: the miniplayer window gets its own page; the main window wires everything. */
 export default function App() {
+  return isMiniplayerWindow() ? <MiniplayerApp /> : <MainApp />;
+}
+
+/** The main window: wires stores to the core, then gates on auth. */
+function MainApp() {
   useEffect(() => installReducedMotion(), []);
   const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
   useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
@@ -22,6 +53,7 @@ export default function App() {
   useEffect(() => connectLikes(), []);
   useEffect(() => connectShare(), []);
   useEffect(() => connectFileTags(), []);
+  useEffect(() => connectMiniplayer(), []);
   const auth = useApp((s) => s.auth);
   const signInOpen = useUi((s) => s.signInOpen);
   useEffect(() => {
