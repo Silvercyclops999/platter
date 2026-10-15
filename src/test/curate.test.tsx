@@ -117,6 +117,19 @@ describe("smart playlist editor", () => {
     expect(useCurate.getState().editor).not.toBeNull();
   });
 
+  it("keeps the save error when the song count answers late", async () => {
+    const user = userEvent.setup();
+    mock.smart.offline = true;
+    const dialog = await openEditor();
+    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Later");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/server is offline/);
+    // A rule change makes the count ask again; its answer mustn't clear the error.
+    await user.type(within(dialog).getByRole("textbox", { name: "Rule 1 value" }), genre());
+    await new Promise((r) => setTimeout(r, 400));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(/server is offline/);
+  });
+
   it("adds and removes rules, matches any, and limits", async () => {
     const user = userEvent.setup();
     const dialog = await openEditor();

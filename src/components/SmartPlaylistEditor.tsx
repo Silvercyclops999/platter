@@ -209,6 +209,9 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
   const [promptText, setPromptText] = useState(initial.promptText);
   const [prompting, setPrompting] = useState(false);
   const [preview, setPreview] = useState<SmartPreview | null>(null);
+  // Two slots: what the live count says about the rules, and what the last
+  // action (save, make rules) said. A late count must never clear the second.
+  const [ruleError, setRuleError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -222,8 +225,8 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
     let alive = true;
     const t = setTimeout(() => {
       backend.smartPreview(asked, pickIds).then(
-        (p) => alive && (setPreview(p), setError(null)),
-        (e) => alive && setError(errText(e) || "Check the rules"),
+        (p) => alive && (setPreview(p), setRuleError(null)),
+        (e) => alive && setRuleError(errText(e) || "Check the rules"),
       );
     }, 200);
     return () => {
@@ -263,6 +266,7 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
       return;
     }
     setSaving(true);
+    setError(null);
     try {
       const saved = await backend.smartSave({
         id: initial.id,
@@ -410,9 +414,9 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
           {preview ? previewLine(preview) : "Counting songs"}
         </p>
         <p className="smart-ed__note">{where}</p>
-        {error && (
+        {(error ?? ruleError) && (
           <p className="smart-ed__error" role="alert">
-            {error}
+            {error ?? ruleError}
           </p>
         )}
         <div className="confirm__actions">
