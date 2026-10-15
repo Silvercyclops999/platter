@@ -82,11 +82,19 @@ impl OutputState {
         selected: Option<String>,
         opened: Option<OutputDevice>,
     ) -> Self {
+        let mut devices = devices;
         let current = match opened {
             // The listed entry has a fresh default flag.
             Some(o) => Some(devices.iter().find(|d| d.id == o.id).cloned().unwrap_or(o)),
             None => pick_device(&devices, selected.as_deref()),
         };
+        // The device playing is always listed, even if the system's list
+        // missed it this time.
+        if let Some(c) = &current
+            && !devices.iter().any(|d| d.id == c.id)
+        {
+            devices.insert(0, c.clone());
+        }
         Self {
             devices,
             selected,
@@ -388,15 +396,64 @@ impl CpalOutput {
     }
 }
 
-fn cpal_device_info(device: &cpal::Device, default_id: Option<&str>) -> Option<OutputDevice> {
+/// One device as the system reports it, before it becomes a list entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Enumerated {
+    /// The system's stable id, if it gave one.
+    pub id: Option<String>,
+    /// The system's name, if it gave one.
+    pub name: Option<String>,
+    /// It can play sound (inputs report false).
+    pub output: bool,
+}
+
+impl Enumerated {
+    fn entry(&self, default_id: Option<&str>) -> Option<OutputDevice> {
+        let name = self.name.clone().or_else(|| self.id.clone())?;
+        let id = self.id.clone().unwrap_or_else(|| name.clone());
+        Some(OutputDevice {
+            is_default: default_id == Some(id.as_str()),
+            id,
+            name,
+        })
+    }
+}
+
+/// The output list from what the system reports: every device that can play
+/// sound, in the system's order, virtual ones included and each once. The
+/// default output is always in it and marked, even when the system's own
+/// output check skipped it (a device that is busy can fail that check).
+pub fn list_outputs(all: Vec<Enumerated>, default: Option<Enumerated>) -> Vec<OutputDevice> {
+    let default_entry = default.as_ref().and_then(|d| d.entry(None));
+    let default_id = default_entry.as_ref().map(|d| d.id.clone());
+    let mut out: Vec<OutputDevice> = Vec::new();
+    for e in all.iter().filter(|e| e.output) {
+        if let Some(d) = e.entry(default_id.as_deref())
+            && !out.iter().any(|o| o.id == d.id)
+        {
+            out.push(d);
+        }
+    }
+    if let Some(mut d) = default_entry
+        && !out.iter().any(|o| o.id == d.id)
+    {
+        d.is_default = true;
+        out.insert(0, d);
+    }
+    out
+}
+
+fn cpal_enumerated(device: &cpal::Device, output: bool) -> Enumerated {
     use cpal::traits::DeviceTrait;
-    let name = device.description().ok()?.name().to_string();
-    let id = device.id().map(|i| i.to_string()).unwrap_or_else(|_| name.clone());
-    Some(OutputDevice {
-        is_default: default_id == Some(id.as_str()),
-        id,
-        name,
-    })
+    Enumerated {
+        id: device.id().ok().map(|i| i.to_string()),
+        name: device.description().ok().map(|d| d.name().to_string()),
+        output,
+    }
+}
+
+fn cpal_device_info(device: &cpal::Device, default_id: Option<&str>) -> Option<OutputDevice> {
+    cpal_enumerated(device, true).entry(default_id)
 }
 
 fn cpal_default_id(host: &cpal::Host) -> Option<String> {
@@ -408,17 +465,17 @@ fn cpal_default_id(host: &cpal::Host) -> Option<String> {
 
 /// Lists output devices. Runs on the calling thread.
 fn cpal_list() -> Vec<OutputDevice> {
-    use cpal::traits::HostTrait;
+    use cpal::traits::{DeviceTrait, HostTrait};
     let host = cpal::default_host();
-    let default_id = cpal_default_id(&host);
-    let Ok(devices) = host.output_devices() else {
-        return Vec::new();
+    let default = host.default_output_device().map(|d| cpal_enumerated(&d, true));
+    let all: Vec<Enumerated> = match host.devices() {
+        Ok(devices) => devices.map(|d| { let out = d.supports_output(); cpal_enumerated(&d, out) }).collect(),
+        Err(e) => {
+            tracing::warn!("could not list audio devices: {e}");
+            Vec::new()
+        }
     };
-    let mut out: Vec<OutputDevice> = devices
-        .filter_map(|d| cpal_device_info(&d, default_id.as_deref()))
-        .collect();
-    out.dedup_by(|a, b| a.id == b.id);
-    out
+    list_outputs(all, default)
 }
 
 /// Lists on a short-lived thread, so COM setup on Windows stays off the
@@ -712,6 +769,72 @@ mod tests {
         // Open: the opened device, with a fresh default flag.
         let s = OutputState::build(list, None, Some(dev("usb", true)));
         assert_eq!(s.current, Some(dev("usb", false)));
+    }
+
+    fn en(id: &str, name: &str, output: bool) -> Enumerated {
+        Enumerated {
+            id: Some(id.into()),
+            name: Some(name.into()),
+            output,
+        }
+    }
+
+    #[test]
+    fn list_keeps_every_output_with_the_default_marked() {
+        // Mac-style: built-in speakers (default and in use), a meeting
+        // app's virtual device, a loopback cable, the built-in microphone.
+        let all = vec![
+            en("BuiltInMicrophoneDevice", "MacBook Pro Microphone", false),
+            en("BuiltInSpeakerDevice", "MacBook Pro Speakers", true),
+            en("MSLoopbackDriverDevice_UID", "Microsoft Teams Audio", true),
+            en("BlackHole2ch_UID", "BlackHole 2ch", true),
+        ];
+        let def = en("BuiltInSpeakerDevice", "MacBook Pro Speakers", true);
+        let list = list_outputs(all, Some(def));
+        let names: Vec<&str> = list.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["MacBook Pro Speakers", "Microsoft Teams Audio", "BlackHole 2ch"]);
+        let defaults: Vec<&str> = list.iter().filter(|d| d.is_default).map(|d| d.id.as_str()).collect();
+        assert_eq!(defaults, ["BuiltInSpeakerDevice"]);
+    }
+
+    #[test]
+    fn list_adds_the_default_when_the_output_check_skipped_it() {
+        // The speakers in use failed the system's output check, so only the
+        // virtual device came back.
+        let all = vec![
+            en("BuiltInSpeakerDevice", "MacBook Pro Speakers", false),
+            en("MSLoopbackDriverDevice_UID", "Microsoft Teams Audio", true),
+        ];
+        let list = list_outputs(all, Some(en("BuiltInSpeakerDevice", "MacBook Pro Speakers", true)));
+        assert_eq!(
+            list[0],
+            OutputDevice { id: "BuiltInSpeakerDevice".into(), name: "MacBook Pro Speakers".into(), is_default: true }
+        );
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn list_has_each_device_once_and_names_unnamed_ones() {
+        let all = vec![
+            en("a", "Speakers", true),
+            en("b", "Headphones", true),
+            en("a", "Speakers", true),
+            Enumerated { id: Some("c".into()), name: None, output: true },
+            Enumerated { id: None, name: None, output: true },
+        ];
+        let list = list_outputs(all, None);
+        let ids: Vec<&str> = list.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert_eq!(list[2].name, "c");
+        assert!(list.iter().all(|d| !d.is_default));
+    }
+
+    #[test]
+    fn state_lists_the_device_in_use_even_if_the_list_missed_it() {
+        let s = OutputState::build(vec![dev("teams", false)], None, Some(dev("spk", true)));
+        let ids: Vec<&str> = s.devices.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, ["spk", "teams"]);
+        assert_eq!(s.current.unwrap().id, "spk");
     }
 
     #[test]

@@ -12,7 +12,7 @@ import { AppShell } from "../shell/AppShell";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { RELAY_MAX_KBPS, streamQuality } from "../shell/streamQuality";
 import { connectApp } from "../stores/app";
-import { outputLostMessage, useOutput } from "../stores/output";
+import { outputChoices, outputLostMessage, useOutput } from "../stores/output";
 import { connectPlayer, usePlayer } from "../stores/player";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
@@ -94,10 +94,16 @@ describe("devices from the core", () => {
     expect((await within(p).findAllByTitle(SPEAKERS.name))[0]).toBeInTheDocument();
     expect(within(p).getByText("Current device, system default")).toBeInTheDocument();
     expect(within(p).getAllByText(/^This computer/).length).toBeGreaterThan(0);
-    expect(within(p).getByRole("button", { name: `Play on ${HEADPHONES.name}` })).toBeInTheDocument();
-    expect(within(p).getByRole("button", { name: "Play on Living Room Receiver (HDMI)" })).toBeInTheDocument();
-    // Following the default already: no separate System default row.
-    expect(within(p).queryByRole("button", { name: "Play on System default" })).toBeNull();
+    // System default first and marked, then every device, the current one included.
+    const rows = within(p.querySelector("#output-others-list") as HTMLElement).getAllByRole("button");
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual([
+      `Play on System default (${SPEAKERS.name})`,
+      `Play on ${SPEAKERS.name}`,
+      `Play on ${HEADPHONES.name}`,
+      "Play on Living Room Receiver (HDMI)",
+    ]);
+    expect(rows[0]).toHaveAttribute("aria-current", "true");
+    expect(rows.slice(1).every((r) => !r.hasAttribute("aria-current"))).toBe(true);
     // No network tips in this phase.
     expect(within(p).queryByText(/wi-?fi|network/i)).toBeNull();
   });
@@ -117,7 +123,8 @@ describe("devices from the core", () => {
     await waitFor(() => expect(useOutput.getState().state?.selected).toBe(HEADPHONES.id));
     const p = picker()!;
     expect(within(p).getAllByTitle(HEADPHONES.name)[0]).toBeInTheDocument();
-    expect(within(p).getByRole("button", { name: "Play on System default" })).toBeInTheDocument();
+    expect(within(p).getByRole("button", { name: `Play on ${HEADPHONES.name}` })).toHaveAttribute("aria-current", "true");
+    expect(within(p).getByRole("button", { name: `Play on System default (${SPEAKERS.name})` })).not.toHaveAttribute("aria-current");
     const after = await mock.playerState();
     expect(after.status).toBe("playing");
     expect(after.positionMs).toBeGreaterThanOrEqual(before);
@@ -125,7 +132,7 @@ describe("devices from the core", () => {
     expect((await mock.settingsGet()).outputDevice).toBe(HEADPHONES.id);
 
     // And back to following the system default.
-    await user.click(within(p).getByRole("button", { name: "Play on System default" }));
+    await user.click(within(p).getByRole("button", { name: `Play on System default (${SPEAKERS.name})` }));
     await waitFor(() => expect(useOutput.getState().state?.selected).toBeNull());
     await act(() => mock.playPause());
   });
@@ -161,6 +168,69 @@ describe("devices from the core", () => {
     act(() => mock.unplugOutput(HEADPHONES.id));
     await waitFor(() => expect(within(picker()!).queryByRole("button", { name: `Play on ${HEADPHONES.name}` })).toBeNull());
     expect(useToasts.getState().toasts).toHaveLength(0);
+  });
+});
+
+describe("Mac-style device list", () => {
+  const MAC = [
+    { id: "BuiltInSpeakerDevice", name: "MacBook Pro Speakers", isDefault: true },
+    { id: "MSLoopbackDriverDevice_UID", name: "Microsoft Teams Audio", isDefault: false },
+    { id: "BlackHole2ch_UID", name: "BlackHole 2ch", isDefault: false },
+  ];
+
+  it("the panel lists the current speakers and virtual devices, not just the others", async () => {
+    mock.setOutputs(MAC);
+    render(<AppShell />);
+    fireEvent.click(toggle());
+    fireEvent.click(await within(picker()!).findByRole("button", { name: /^Sound output: MacBook Pro Speakers/ }));
+    const rows = within(picker()!.querySelector("#output-others-list") as HTMLElement).getAllByRole("button");
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual([
+      "Play on System default (MacBook Pro Speakers)",
+      "Play on MacBook Pro Speakers",
+      "Play on Microsoft Teams Audio",
+      "Play on BlackHole 2ch",
+    ]);
+    expect(rows[0]).toHaveAttribute("aria-current", "true");
+  });
+
+  it("Settings shows the same list", async () => {
+    mock.setOutputs(MAC);
+    render(
+      <>
+        <span id="t">Output device</span>
+        <span id="d">Where music plays</span>
+        <OutputDeviceSelect ids={{ title: "t", desc: "d" }} />
+      </>,
+    );
+    const select = await screen.findByRole("combobox", { name: "Output device" });
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "System default (MacBook Pro Speakers)",
+      "MacBook Pro Speakers",
+      "Microsoft Teams Audio",
+      "BlackHole 2ch",
+    ]);
+  });
+});
+
+describe("outputChoices", () => {
+  const spk = { id: "spk", name: "Speakers", isDefault: true };
+  const teams = { id: "teams", name: "Microsoft Teams Audio", isDefault: false };
+
+  it("keeps the device in use even when the list left it out", () => {
+    const c = outputChoices({ devices: [teams], selected: null, current: spk });
+    expect(c.map((x) => x.label)).toEqual(["System default (Speakers)", "Speakers", "Microsoft Teams Audio"]);
+    expect(c.filter((x) => x.selected).map((x) => x.id)).toEqual([null]);
+  });
+
+  it("marks a chosen device, and a chosen one that's unplugged", () => {
+    expect(outputChoices({ devices: [spk, teams], selected: "teams", current: teams }).filter((x) => x.selected).map((x) => x.id)).toEqual(["teams"]);
+    const gone = outputChoices({ devices: [spk], selected: "usb", current: spk });
+    expect(gone.map((x) => x.label)).toEqual(["System default (Speakers)", "Speakers", "Disconnected device"]);
+    expect(gone.filter((x) => x.selected).map((x) => x.id)).toEqual(["usb"]);
+  });
+
+  it("lists a device once", () => {
+    expect(outputChoices({ devices: [spk, spk, teams], selected: null, current: spk })).toHaveLength(3);
   });
 });
 

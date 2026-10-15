@@ -1,10 +1,10 @@
-import { ChevronDown, Laptop, Speaker, X } from "lucide-react";
+import { Check, ChevronDown, Laptop, Speaker, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import type { OutputDevice } from "../lib/types";
 import { useApp } from "../stores/app";
-import { loadOutput, selectOutput, useOutput } from "../stores/output";
+import { loadOutput, outputChoices, selectOutput, useOutput } from "../stores/output";
 import { usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
@@ -53,12 +53,20 @@ function CurrentDevice({ device, followsDefault }: { device: OutputDevice; follo
   );
 }
 
-function DeviceRow({ name, sub, onPick, busy }: { name: string; sub?: string; onPick: () => void; busy: boolean }) {
+function DeviceRow({ name, title, sub, onPick, busy, selected }: { name: string; title?: string; sub?: string; onPick: () => void; busy: boolean; selected: boolean }) {
   const parts = splitDeviceName(name);
   const line = busy ? "Switching…" : [parts.detail, sub].filter(Boolean).join(" • ");
   return (
     <li>
-      <button type="button" className="output-row output-row--compact" aria-label={`Play on ${name}`} title={name} aria-busy={busy || undefined} onClick={onPick}>
+      <button
+        type="button"
+        className={`output-row output-row--compact ${selected ? "is-selected" : ""}`}
+        aria-label={`Play on ${title ?? name}`}
+        aria-current={selected ? "true" : undefined}
+        title={title ?? name}
+        aria-busy={busy || undefined}
+        onClick={onPick}
+      >
         <span className="output-row__icon" aria-hidden="true">
           <Speaker size={18} />
         </span>
@@ -66,12 +74,17 @@ function DeviceRow({ name, sub, onPick, busy }: { name: string; sub?: string; on
           <span className="output-row__name output-row__name--one truncate">{parts.name}</span>
           {line && <span className="output-row__sub output-row__sub--one truncate">{line}</span>}
         </span>
+        {selected && (
+          <span className="output-row__check" aria-hidden="true">
+            <Check size={18} />
+          </span>
+        )}
       </button>
     </li>
   );
 }
 
-/** Right panel: the output in use, and the computer's other outputs to switch to. */
+/** Right panel: the output in use, and the computer's outputs to switch to. */
 export function OutputPanel() {
   const state = useOutput((s) => s.state);
   const switching = useOutput((s) => s.switching);
@@ -86,8 +99,7 @@ export function OutputPanel() {
 
   const current = state?.current ?? null;
   const followsDefault = state?.selected == null;
-  const systemDefault = state?.devices.find((d) => d.isDefault) ?? null;
-  const others = state ? state.devices.filter((d) => d.id !== current?.id) : [];
+  const choices = state ? outputChoices(state) : [];
   const [outputsOpen, setOutputsOpen] = useState(false);
 
   return (
@@ -129,27 +141,30 @@ export function OutputPanel() {
                 </span>
                 <ChevronDown size={16} aria-hidden="true" className="output-disclosure__chev" />
               </button>
-              {!outputsOpen ? null : others.length === 0 && followsDefault ? (
-                <p className="output-empty">No other outputs found on this computer.</p>
-              ) : (
+              {outputsOpen && (
                 <ul className="output-list" id="output-others-list">
-                  {!followsDefault && (
-                    <DeviceRow
-                      name="System default"
-                      sub={systemDefault ? `Follows your computer, now ${systemDefault.name}` : "Follows your computer's setting"}
-                      busy={switching === null}
-                      onPick={() => void selectOutput(null)}
-                    />
+                  {choices.map((c) =>
+                    c.id === null ? (
+                      <DeviceRow
+                        key="system-default"
+                        name="System default"
+                        title={c.label}
+                        sub={c.defaultName ? splitDeviceName(c.defaultName).name : "Follows your computer's setting"}
+                        selected={c.selected}
+                        busy={switching === null}
+                        onPick={() => void selectOutput(null)}
+                      />
+                    ) : (
+                      <DeviceRow
+                        key={c.id}
+                        name={c.label}
+                        sub={c.isDefault ? "Your computer's default" : undefined}
+                        selected={c.selected}
+                        busy={switching === c.id}
+                        onPick={() => void selectOutput(c.id)}
+                      />
+                    ),
                   )}
-                  {others.map((d) => (
-                    <DeviceRow
-                      key={d.id}
-                      name={d.name}
-                      sub={d.isDefault ? "Your computer's default" : undefined}
-                      busy={switching === d.id}
-                      onPick={() => void selectOutput(d.id)}
-                    />
-                  ))}
                 </ul>
               )}
             </section>

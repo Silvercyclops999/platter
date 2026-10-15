@@ -111,3 +111,5 @@
 .output-disclosure__chev { flex: none; transition: transform var(--motion-quick, 150ms) ease; }
 .output-disclosure[aria-expanded="true"] .output-disclosure__chev { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .output-disclosure__chev { transition: none; } }
+.output-row.is-selected .output-row__name { color: var(--color-accent); }
+.output-row__check { flex: none; margin-left: auto; display: grid; place-items: center; color: var(--color-accent); }

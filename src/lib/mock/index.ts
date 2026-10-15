@@ -1759,6 +1759,11 @@ export class MockBackend implements Backend {
       eqLastOutput: null,
     });
   }
+  /** Test hook: replaces the device list (what the system reports). */
+  setOutputs(devices: OutputDevice[]) {
+    this.outputs = devices.map((d) => ({ ...d }));
+    this.emitOutput();
+  }
   /** Test hook: the starting devices, following the system default. */
   resetOutputs() {
     this.outputs = MOCK_OUTPUTS.map((d) => ({ ...d }));
