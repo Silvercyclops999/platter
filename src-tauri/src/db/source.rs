@@ -36,10 +36,11 @@ pub struct Changes {
     pub tracks: Vec<Track>,
 }
 
-/// One row of Plex play history (`/status/sessions/history/all`).
+/// One row of the server's play history (Plex:
+/// `/status/sessions/history/all`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryEntry {
-    pub rating_key: String,
+    pub track_id: String,
     /// Unix seconds.
     pub viewed_at: i64,
 }
@@ -119,10 +120,17 @@ pub trait LibrarySource: Send + Sync {
             .collect())
     }
 
-    /// Every rated track in the section with its rating and when it was
-    /// rated (`/library/sections/{id}/all?type=10&userRating>=1`). Read on
-    /// every sync so likes made in other Plex apps arrive. None: not
-    /// supported, ratings come only with the track lists.
+    /// Every liked (or, on a server with star ratings, rated) track in the
+    /// section with its rating and when it was liked. Read on every sync so
+    /// likes made in other apps arrive. A server with likes only gives
+    /// [`super::likes::LIKED_RATING`]. None: not supported, likes come only
+    /// with the track lists. Defaults to [`Self::rated_tracks`].
+    async fn liked_tracks(&self, section_id: &str) -> AppResult<Option<Vec<super::likes::Rated>>> {
+        self.rated_tracks(section_id).await
+    }
+
+    /// Star ratings, for servers that have them (Plex:
+    /// `/library/sections/{id}/all?type=10&userRating>=1`).
     async fn rated_tracks(&self, _section_id: &str) -> AppResult<Option<Vec<super::likes::Rated>>> {
         Ok(None)
     }

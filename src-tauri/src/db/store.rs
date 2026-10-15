@@ -366,7 +366,7 @@ pub fn insert_history(tx: &Transaction<'_>, items: &[HistoryEntry]) -> AppResult
         "INSERT OR IGNORE INTO play_history (rating_key, viewed_at) VALUES (?1, ?2)",
     )?;
     for h in items {
-        st.execute(params![h.rating_key, h.viewed_at])?;
+        st.execute(params![h.track_id, h.viewed_at])?;
     }
     Ok(())
 }

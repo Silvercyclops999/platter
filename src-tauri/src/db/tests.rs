@@ -1041,12 +1041,12 @@ async fn home_rows_from_history_and_listens() {
     let mut h = Vec::new();
     // Album (0,0): finished long ago. Album (1,1): played lately, unfinished.
     for n in 0..4 {
-        h.push(HistoryEntry { rating_key: tr(0, 0, n), viewed_at: now - 60 * 86400 });
+        h.push(HistoryEntry { track_id: tr(0, 0, n), viewed_at: now - 60 * 86400 });
     }
     for i in 0..5 {
-        h.push(HistoryEntry { rating_key: tr(1, 1, 0), viewed_at: now - 86400 * (i + 1) });
+        h.push(HistoryEntry { track_id: tr(1, 1, 0), viewed_at: now - 86400 * (i + 1) });
     }
-    h.push(HistoryEntry { rating_key: tr(2, 0, 1), viewed_at: now - 3600 });
+    h.push(HistoryEntry { track_id: tr(2, 0, 1), viewed_at: now - 3600 });
     lib.history = h;
     let local_track = tr(3, 2, 0);
     let src = Arc::new(FakeSource::new(lib.clone()));
@@ -1120,9 +1120,9 @@ async fn home_recents_credit_the_artist_or_playlist_a_play_started_from() {
     // Plex history: album (1,1) an hour ago, plus the playlist's tracks as
     // reported to Plex from this computer.
     lib.history = vec![
-        HistoryEntry { rating_key: tr(1, 1, 0), viewed_at: now - 3600 },
-        HistoryEntry { rating_key: pl_tracks[0].clone(), viewed_at: now - 600 + 200 },
-        HistoryEntry { rating_key: pl_tracks[1].clone(), viewed_at: now - 300 + 200 },
+        HistoryEntry { track_id: tr(1, 1, 0), viewed_at: now - 3600 },
+        HistoryEntry { track_id: pl_tracks[0].clone(), viewed_at: now - 600 + 200 },
+        HistoryEntry { track_id: pl_tracks[1].clone(), viewed_at: now - 300 + 200 },
     ];
     let artist2 = lib.artists[2].id.clone();
     let src = Arc::new(FakeSource::new(lib.clone()));
@@ -1717,7 +1717,7 @@ mod bench {
         let now = now_s();
         for _ in 0..1_000 {
             let k = lib.tracks[rng.below(lib.tracks.len())].id.clone();
-            lib.history.push(HistoryEntry { rating_key: k, viewed_at: now - rng.below(40 * 86400) as i64 });
+            lib.history.push(HistoryEntry { track_id: k, viewed_at: now - rng.below(40 * 86400) as i64 });
         }
         lib
     }

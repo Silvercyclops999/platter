@@ -294,7 +294,7 @@ impl LibrarySource for PlexLibrary {
             .items
             .into_iter()
             .map(|h| HistoryEntry {
-                rating_key: h.rating_key,
+                track_id: h.rating_key,
                 viewed_at: h.viewed_at,
             })
             .collect())
@@ -524,11 +524,16 @@ fn unix_now() -> i64 {
 }
 
 /// Resolves play contexts from the local cache.
-/// Contexts and tracks from the cache. With a `PlexState`, a toast says when
+/// Contexts and tracks from the cache. With the servers, a toast says when
 /// the explicit filter or hidden fan edits left songs out of a context.
 /// The third part says which songs can play while the server is out of reach.
 /// The fourth makes radio and similar music (none: those find nothing).
-pub struct CacheLookup(pub DbHandle, pub Option<PlexState>, pub OfflinePlay, pub Option<crate::mixes::MixService>);
+pub struct CacheLookup(
+    pub DbHandle,
+    pub Option<crate::backend::Backends>,
+    pub OfflinePlay,
+    pub Option<crate::mixes::MixService>,
+);
 
 /// While only music on this computer can play, plays keep to the songs in
 /// the audio cache, and the first play that leaves songs out says so once.
@@ -607,20 +612,20 @@ impl TrackLookup for CacheLookup {
                 "Nothing here can play: every song is left out by your explicit content or fan edit settings.".into(),
             ));
         }
-        if let (Some(m), Some(plex)) = (message, &self.1) {
-            plex.toast("info", m);
+        if let (Some(m), Some(servers)) = (message, &self.1) {
+            servers.toast("info", m);
         }
         Ok(resolved)
     }
 
     async fn playable_now(&self) -> Option<std::collections::HashSet<String>> {
-        let plex = self.1.as_ref()?;
-        self.2.playable(plex.cached_only()).await
+        let servers = self.1.as_ref()?;
+        self.2.playable(servers.cached_only()).await
     }
 
     fn left_out_offline(&self, n: usize) {
-        if let (Some(m), Some(plex)) = (self.2.notice(n), &self.1) {
-            plex.toast("info", m);
+        if let (Some(m), Some(servers)) = (self.2.notice(n), &self.1) {
+            servers.toast("info", m);
         }
     }
 

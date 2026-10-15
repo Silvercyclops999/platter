@@ -508,7 +508,7 @@ pub fn run() {
                 Arc::new(backend::routed::RoutedStreams(backends.clone())),
                 Arc::new(bridge::CacheLookup(
                     db.clone(),
-                    Some(plex.clone()),
+                    Some(backends.clone()),
                     bridge::OfflinePlay::new(audio_dir.clone()).with_downloads(local_files.clone()),
                     Some(mix_service.clone()),
                 )),
@@ -581,11 +581,7 @@ pub fn run() {
             ));
             os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone());
             tracking::spawn(
-                tracking::Tracker::with_reporter(
-                    Arc::new(backend::routed::RoutedPlays(backends.clone())),
-                    db.clone(),
-                    live.tracking.clone(),
-                ),
+                tracking::Tracker::new(backends.clone(), db.clone(), live.tracking.clone()),
                 player.subscribe_tracking(),
             );
             // Scrobbling to Last.fm and ListenBrainz, and the AI provider.

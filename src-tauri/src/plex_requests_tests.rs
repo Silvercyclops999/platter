@@ -13,15 +13,15 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use crate::audio::source::TrackResolver;
 use crate::db::source::{ArtFetcher, ItemKind, LibrarySource, RemoteSearch};
 use crate::downloads::DownloadSource;
-use crate::likes::RatingRemote;
+use crate::likes::LikeRemote;
 use crate::model::Track;
 use crate::playlists::PlaylistRemote;
 use crate::plex::PlexState;
-use crate::plex::client::{PlaybackState, PlexMetadata, TimelineReport};
+use crate::plex::client::{PlaybackState, PlexMetadata};
 use crate::plex::discovery::RaceConfig;
 use crate::plex::keychain::{ACCOUNT_TOKEN, MemoryStore, TokenStore};
 use crate::plex::token::Token;
-use crate::tracking::PlayReporter;
+use crate::tracking::{PlayReport, PlayReporter};
 
 const ACCT: &str = "account-secret-token";
 const MACHINE: &str = "m1";
@@ -31,7 +31,7 @@ struct Wiring {
     library: Arc<dyn LibrarySource>,
     search: Arc<dyn RemoteSearch>,
     art: Arc<dyn ArtFetcher>,
-    likes: Arc<dyn RatingRemote>,
+    likes: Arc<dyn LikeRemote>,
     plays: Arc<dyn PlayReporter>,
     playlists: Arc<dyn PlaylistRemote>,
     streams: Arc<dyn TrackResolver>,
@@ -251,24 +251,21 @@ async fn plex_requests_stay_exactly_the_same() {
 
     // Likes.
     assert!(w.likes.online().await);
-    w.likes.rate(&id("42"), Some(crate::db::likes::LIKED_RATING)).await.unwrap();
-    w.likes.rate(&id("42"), None).await.unwrap();
+    w.likes.set_liked(&id("42"), true).await.unwrap();
+    w.likes.set_liked(&id("42"), false).await.unwrap();
     log.push(("likes".into(), since(&server, &mut from).await));
 
     // Play reports.
     assert!(w.plays.online().await);
     w.plays
-        .timeline(&TimelineReport {
-            rating_key: id("42"),
-            state: PlaybackState::Playing,
-            time_ms: 1000,
-            duration_ms: 200_000,
-            play_queue_item_id: None,
-        })
+        .timeline(&PlayReport { track_id: id("42"), state: PlaybackState::Playing, time_ms: 1000, duration_ms: 200_000 })
         .await
         .unwrap();
-    w.plays.scrobble(&id("42")).await.unwrap();
+    w.plays.scrobble(&id("42"), None).await.unwrap();
     log.push(("plays".into(), since(&server, &mut from).await));
+    // A play sent later carries its time; Plex can't take one, so it's the same request.
+    w.plays.scrobble(&id("42"), Some(1_700_000_000)).await.unwrap();
+    assert_eq!(since(&server, &mut from).await, vec!["GET /:/scrobble?key=42&identifier=com.plexapp.plugins.library"]);
 
     // Playlist edits.
     assert!(w.playlists.online().await);

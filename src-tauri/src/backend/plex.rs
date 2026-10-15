@@ -15,7 +15,7 @@ use crate::bridge::{PlexArt, PlexLibrary, PlexSearch, PlexStreams, StreamPrefs};
 use crate::db::DbHandle;
 use crate::db::source::{ArtFetcher, LibrarySource, RemoteSearch};
 use crate::downloads::DownloadSource;
-use crate::likes::RatingRemote;
+use crate::likes::LikeRemote;
 use crate::playlists::PlaylistRemote;
 use crate::plex::PlexState;
 use crate::plex::types::ConnectionKind;
@@ -115,7 +115,7 @@ impl MusicServer for PlexServer {
         self.parts.clone()
     }
 
-    fn likes(&self) -> Arc<dyn RatingRemote> {
+    fn likes(&self) -> Arc<dyn LikeRemote> {
         self.likes.clone()
     }
 

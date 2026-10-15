@@ -10,7 +10,7 @@ use super::{BackendKind, Caps};
 use crate::audio::source::TrackResolver;
 use crate::db::source::{ArtFetcher, LibrarySource, RemoteSearch};
 use crate::downloads::DownloadSource;
-use crate::likes::RatingRemote;
+use crate::likes::LikeRemote;
 use crate::playlists::PlaylistRemote;
 use crate::plex::types::ConnectionKind;
 use crate::tags::scan::PartSource;
@@ -50,7 +50,7 @@ pub trait MusicServer: Send + Sync {
     /// File reads for the tag scan.
     fn parts(&self) -> Arc<dyn PartSource>;
     /// Like and unlike.
-    fn likes(&self) -> Arc<dyn RatingRemote>;
+    fn likes(&self) -> Arc<dyn LikeRemote>;
     /// Playlist edits.
     fn playlists(&self) -> Arc<dyn PlaylistRemote>;
     /// Now playing and finished plays.

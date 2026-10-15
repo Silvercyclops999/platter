@@ -12,13 +12,12 @@ use crate::audio::source::{StreamSource, TrackResolver};
 use crate::db::source::{ArtBytes, ArtFetcher, PlaylistEntry, RemoteHits, RemoteSearch};
 use crate::downloads::{DownloadSource, Fetch};
 use crate::error::AppResult;
-use crate::likes::RatingRemote;
+use crate::likes::LikeRemote;
 use crate::model::{Playlist, Track};
 use crate::playlists::PlaylistRemote;
-use crate::plex::client::TimelineReport;
 use crate::plex::types::ConnectionKind;
 use crate::tags::scan::PartSource;
-use crate::tracking::PlayReporter;
+use crate::tracking::{PlayReport, PlayReporter};
 
 /// Server-side search on the primary server.
 pub struct RoutedSearch(pub Backends);
@@ -98,7 +97,7 @@ impl PartSource for RoutedParts {
 pub struct RoutedLikes(pub Backends);
 
 #[async_trait]
-impl RatingRemote for RoutedLikes {
+impl LikeRemote for RoutedLikes {
     async fn online(&self) -> bool {
         match self.0.primary() {
             Ok(s) => s.likes().online().await,
@@ -106,8 +105,8 @@ impl RatingRemote for RoutedLikes {
         }
     }
 
-    async fn rate(&self, track_id: &str, rating: Option<f64>) -> AppResult<()> {
-        self.0.for_id(track_id)?.likes().rate(track_id, rating).await
+    async fn set_liked(&self, track_id: &str, liked: bool) -> AppResult<()> {
+        self.0.for_id(track_id)?.likes().set_liked(track_id, liked).await
     }
 }
 
@@ -172,12 +171,12 @@ impl PlayReporter for RoutedPlays {
         }
     }
 
-    async fn timeline(&self, r: &TimelineReport) -> AppResult<()> {
-        self.0.for_id(&r.rating_key)?.plays().timeline(r).await
+    async fn timeline(&self, r: &PlayReport) -> AppResult<()> {
+        self.0.for_id(&r.track_id)?.plays().timeline(r).await
     }
 
-    async fn scrobble(&self, rating_key: &str) -> AppResult<()> {
-        self.0.for_id(rating_key)?.plays().scrobble(rating_key).await
+    async fn scrobble(&self, track_id: &str, at: Option<i64>) -> AppResult<()> {
+        self.0.for_id(track_id)?.plays().scrobble(track_id, at).await
     }
 }
 

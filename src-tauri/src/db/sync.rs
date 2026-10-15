@@ -600,7 +600,7 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool, owner: Option<&str>) -> Ap
 }
 
 async fn sync_ratings(ctx: &Ctx, section_id: &str) -> AppResult<()> {
-    let Some(rated) = ctx.source.rated_tracks(section_id).await? else { return Ok(()) };
+    let Some(rated) = ctx.source.liked_tracks(section_id).await? else { return Ok(()) };
     let src = ctx.src.clone();
     let changed = ctx
         .db

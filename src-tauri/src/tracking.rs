@@ -1,11 +1,12 @@
-//! Play tracking: turns the player's tracking events into Plex
-//! timeline/scrobble reports and rows in the local listen log.
+//! Play tracking: turns the player's tracking events into now-playing and
+//! play reports for each track's server, and rows in the local listen log.
 //!
-//! Plex gets `/:/timeline` on play, pause, resume, seek, stop and every 10 s
-//! while playing, and `/:/scrobble` once per play when the listen log says the
-//! threshold was crossed. Scrobbles that fail (offline) are queued in SQLite
-//! and replayed when the server is reachable again. Plex's scrobble has no
-//! timestamp parameter, so replayed plays count at replay time.
+//! The server hears about play, pause, resume, seek, stop and every 10 s
+//! while playing (Plex: `/:/timeline`), and gets one finished play per play
+//! when the listen log says the threshold was crossed (Plex: `/:/scrobble`).
+//! Plays that fail (offline) are queued in SQLite and replayed when the
+//! server is reachable again, with the time they happened. Plex's scrobble
+//! has no timestamp parameter, so replayed plays count at replay time there.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,7 +23,8 @@ use crate::db::listens::{self, ContextKind, NewReport, PlaySnapshot, PlayStart, 
 use crate::db::queries::now_s;
 use crate::plex::PlexState;
 use crate::error::AppResult;
-use crate::plex::client::{PlaybackState, TimelineReport};
+pub use crate::plex::client::PlaybackState;
+use crate::plex::client::TimelineReport;
 
 const TIMELINE_EVERY_MS: u64 = 10_000;
 
@@ -66,16 +68,25 @@ fn log_context(ctx: &Option<ContextInfo>) -> (Option<ContextKind>, Option<String
     }
 }
 
-/// What to send to Plex for one tracking event. Pure, so it's testable.
+/// Where a track is in its play, for its server's now-playing view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayReport {
+    pub track_id: String,
+    pub state: PlaybackState,
+    pub time_ms: u64,
+    pub duration_ms: u64,
+}
+
+/// What to send to the server for one tracking event. Pure, so it's testable.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Report {
-    Timeline(TimelineReport),
+    Timeline(PlayReport),
 }
 
 /// Per-play state kept between events.
 #[derive(Default)]
 struct Current {
-    rating_key: String,
+    track_id: String,
     item_id: String,
     duration_ms: u64,
     play_id: Option<i64>,
@@ -83,21 +94,20 @@ struct Current {
 }
 
 fn timeline(c: &Current, state: PlaybackState, time_ms: u64) -> Report {
-    Report::Timeline(TimelineReport {
-        rating_key: c.rating_key.clone(),
+    Report::Timeline(PlayReport {
+        track_id: c.track_id.clone(),
         state,
         time_ms,
         duration_ms: c.duration_ms,
-        play_queue_item_id: None,
     })
 }
 
-/// Decide the Plex reports for an event, updating `cur`.
+/// Decide the server reports for an event, updating `cur`.
 fn reports_for(cur: &mut Current, ev: &TrackingEvent) -> Vec<Report> {
     match ev {
         TrackingEvent::TrackStarted { track, item_id, .. } => {
             *cur = Current {
-                rating_key: track.id.clone(),
+                track_id: track.id.clone(),
                 item_id: item_id.clone(),
                 duration_ms: track.duration_ms,
                 play_id: None,
@@ -105,7 +115,7 @@ fn reports_for(cur: &mut Current, ev: &TrackingEvent) -> Vec<Report> {
             };
             vec![timeline(cur, PlaybackState::Playing, 0)]
         }
-        TrackingEvent::Progress { track_id, position_ms, .. } if *track_id == cur.rating_key => {
+        TrackingEvent::Progress { track_id, position_ms, .. } if *track_id == cur.track_id => {
             let due = cur
                 .last_timeline_ms
                 .is_none_or(|last| position_ms.abs_diff(last) >= TIMELINE_EVERY_MS);
@@ -116,14 +126,14 @@ fn reports_for(cur: &mut Current, ev: &TrackingEvent) -> Vec<Report> {
                 vec![]
             }
         }
-        TrackingEvent::Paused { track_id, position_ms } if *track_id == cur.rating_key => {
+        TrackingEvent::Paused { track_id, position_ms } if *track_id == cur.track_id => {
             vec![timeline(cur, PlaybackState::Paused, *position_ms)]
         }
-        TrackingEvent::Resumed { track_id, position_ms } if *track_id == cur.rating_key => {
+        TrackingEvent::Resumed { track_id, position_ms } if *track_id == cur.track_id => {
             cur.last_timeline_ms = Some(*position_ms);
             vec![timeline(cur, PlaybackState::Playing, *position_ms)]
         }
-        TrackingEvent::Seeked { track_id, to_ms, .. } if *track_id == cur.rating_key => {
+        TrackingEvent::Seeked { track_id, to_ms, .. } if *track_id == cur.track_id => {
             cur.last_timeline_ms = Some(*to_ms);
             vec![timeline(cur, PlaybackState::Playing, *to_ms)]
         }
@@ -138,14 +148,17 @@ fn reports_for(cur: &mut Current, ev: &TrackingEvent) -> Vec<Report> {
     }
 }
 
-/// Where play reports go. The app uses the connected Plex server; tests use
-/// a recorder.
+/// Where play reports go. The app sends each to the track's server
+/// (`crate::backend`); tests use a recorder.
 #[async_trait]
 pub trait PlayReporter: Send + Sync {
     /// True when a server is connected right now.
     async fn online(&self) -> bool;
-    async fn timeline(&self, r: &TimelineReport) -> AppResult<()>;
-    async fn scrobble(&self, rating_key: &str) -> AppResult<()>;
+    /// Now playing, paused or stopped, and where.
+    async fn timeline(&self, r: &PlayReport) -> AppResult<()>;
+    /// A finished play. `at` (unix seconds) is when it happened, for a play
+    /// sent later; servers that can't take a date count it now.
+    async fn scrobble(&self, track_id: &str, at: Option<i64>) -> AppResult<()>;
 }
 
 #[async_trait]
@@ -154,12 +167,20 @@ impl PlayReporter for PlexState {
         self.client().await.is_ok()
     }
 
-    async fn timeline(&self, r: &TimelineReport) -> AppResult<()> {
-        self.client_for(&r.rating_key).await?.timeline(r).await
+    async fn timeline(&self, r: &PlayReport) -> AppResult<()> {
+        let report = TimelineReport {
+            rating_key: r.track_id.clone(),
+            state: r.state,
+            time_ms: r.time_ms,
+            duration_ms: r.duration_ms,
+            play_queue_item_id: None,
+        };
+        self.client_for(&r.track_id).await?.timeline(&report).await
     }
 
-    async fn scrobble(&self, rating_key: &str) -> AppResult<()> {
-        self.client_for(rating_key).await?.scrobble(rating_key).await
+    /// Plex's scrobble has no date: a play sent later counts now.
+    async fn scrobble(&self, track_id: &str, _at: Option<i64>) -> AppResult<()> {
+        self.client_for(track_id).await?.scrobble(track_id).await
     }
 }
 
@@ -172,8 +193,9 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    pub fn new(plex: PlexState, db: DbHandle, settings: TrackingSettings) -> Self {
-        Self::with_reporter(Arc::new(plex), db, settings)
+    /// Reports go to each track's server.
+    pub fn new(backends: crate::backend::Backends, db: DbHandle, settings: TrackingSettings) -> Self {
+        Self::with_reporter(Arc::new(crate::backend::routed::RoutedPlays(backends)), db, settings)
     }
 
     pub fn with_reporter(plex: Arc<dyn PlayReporter>, db: DbHandle, settings: TrackingSettings) -> Self {
@@ -189,7 +211,7 @@ impl Tracker {
         self.settings.share_activity.load(Ordering::Relaxed) && !self.settings.private_session.load(Ordering::Relaxed)
     }
 
-    async fn send_timeline(&self, r: TimelineReport) {
+    async fn send_timeline(&self, r: PlayReport) {
         if !self.reporting() || !self.sharing_now() {
             return;
         }
@@ -198,11 +220,11 @@ impl Tracker {
         }
     }
 
-    async fn scrobble(&self, play_id: Option<i64>, rating_key: String) {
+    async fn scrobble(&self, play_id: Option<i64>, track_id: String) {
         if !self.reporting() {
             return;
         }
-        let sent = self.plex.scrobble(&rating_key).await.is_ok();
+        let sent = self.plex.scrobble(&track_id, None).await.is_ok();
         let db = self.db.clone();
         let _ = db
             .write_async(move |c| {
@@ -216,7 +238,7 @@ impl Tracker {
                         &NewReport {
                             play_id,
                             kind: ReportKind::Scrobble,
-                            rating_key,
+                            rating_key: track_id,
                             state: None,
                             time_ms: None,
                             duration_ms: None,
@@ -253,7 +275,7 @@ impl Tracker {
         let mut sent = Vec::new();
         for r in pending {
             let ok = match r.kind {
-                ReportKind::Scrobble => self.plex.scrobble(&r.rating_key).await.is_ok(),
+                ReportKind::Scrobble => self.plex.scrobble(&r.rating_key, Some(r.at)).await.is_ok(),
                 ReportKind::Timeline => true, // stale timelines are dropped
             };
             if !ok {
@@ -312,12 +334,12 @@ impl Tracker {
                 cur.play_id =
                     Some(self.db.write_async(move |c| listens::start_play_with(c, &start, Some(&snap))).await?);
             }
-            TrackingEvent::Progress { track_id, position_ms, .. } if *track_id == cur.rating_key => {
+            TrackingEvent::Progress { track_id, position_ms, .. } if *track_id == cur.track_id => {
                 if let Some(id) = cur.play_id {
                     let ms = *position_ms;
                     let upd = self.db.write_async(move |c| listens::progress(c, id, ms)).await?;
                     if upd.scrobble_now {
-                        self.scrobble(Some(id), cur.rating_key.clone()).await;
+                        self.scrobble(Some(id), cur.track_id.clone()).await;
                     }
                 }
             }
@@ -477,12 +499,12 @@ mod tests {
         async fn online(&self) -> bool {
             true
         }
-        async fn timeline(&self, r: &TimelineReport) -> AppResult<()> {
+        async fn timeline(&self, r: &PlayReport) -> AppResult<()> {
             self.timelines.lock().push(r.state);
             Ok(())
         }
-        async fn scrobble(&self, rating_key: &str) -> AppResult<()> {
-            self.scrobbles.lock().push(rating_key.to_string());
+        async fn scrobble(&self, track_id: &str, _at: Option<i64>) -> AppResult<()> {
+            self.scrobbles.lock().push(track_id.to_string());
             Ok(())
         }
     }

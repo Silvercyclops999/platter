@@ -1,10 +1,11 @@
-//! Likes: a liked song is one with a five-star Plex rating, so every Plex
-//! app sees the same likes.
+//! Likes live on each song's server, so every app on that server sees the
+//! same likes. On Plex a liked song is one with a five-star rating.
 //!
 //! A like or unlike is applied to the local cache at once (db::likes) and
-//! the rating write is queued; the queue replays whenever the server is
-//! reachable, like playlist edits. If Plex refuses a write, the rating goes
-//! back to what Plex has, a toast says so, and the UI hears about it.
+//! the write is queued; the queue replays whenever the server is
+//! reachable, like playlist edits. If the server refuses a write, the like
+//! goes back to what the server has, a toast says so, and the UI hears
+//! about it.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,14 +30,35 @@ pub const EVENT_LIKES_CHANGED: &str = "likes://changed";
 
 // ---------------------------------------------------------------- outside world
 
-/// Where rating writes go. The app uses the connected Plex server; tests use
-/// a fake.
+/// Where like writes go. The app sends each to the song's server
+/// (`crate::backend`); tests use a fake.
+#[async_trait]
+pub trait LikeRemote: Send + Sync {
+    /// True when a server is connected right now.
+    async fn online(&self) -> bool;
+    /// Like or unlike a track.
+    async fn set_liked(&self, track_id: &str, liked: bool) -> AppResult<()>;
+}
+
+/// A server with star ratings (Plex).
 #[async_trait]
 pub trait RatingRemote: Send + Sync {
     /// True when a server is connected right now.
     async fn online(&self) -> bool;
     /// Set (Some) or clear (None) a track's rating.
     async fn rate(&self, track_id: &str, rating: Option<f64>) -> AppResult<()>;
+}
+
+/// On a server with star ratings, liked is five stars and unliked clears
+/// the rating.
+#[async_trait]
+impl<T: RatingRemote + ?Sized> LikeRemote for T {
+    async fn online(&self) -> bool {
+        RatingRemote::online(self).await
+    }
+    async fn set_liked(&self, track_id: &str, liked: bool) -> AppResult<()> {
+        self.rate(track_id, liked.then_some(LIKED_RATING)).await
+    }
 }
 
 /// What the UI hears about.
@@ -100,7 +122,7 @@ pub struct Likes {
 
 struct Inner {
     db: DbHandle,
-    remote: Arc<dyn RatingRemote>,
+    remote: Arc<dyn LikeRemote>,
     events: Arc<dyn LikeEvents>,
     /// Start a replay after each change (off in tests, which replay by hand).
     auto_replay: bool,
@@ -114,11 +136,11 @@ fn transient(e: &AppError) -> bool {
 }
 
 impl Likes {
-    pub fn new(db: DbHandle, remote: Arc<dyn RatingRemote>, events: Arc<dyn LikeEvents>) -> Self {
+    pub fn new(db: DbHandle, remote: Arc<dyn LikeRemote>, events: Arc<dyn LikeEvents>) -> Self {
         Self::build(db, remote, events, true)
     }
 
-    pub fn build(db: DbHandle, remote: Arc<dyn RatingRemote>, events: Arc<dyn LikeEvents>, auto_replay: bool) -> Self {
+    pub fn build(db: DbHandle, remote: Arc<dyn LikeRemote>, events: Arc<dyn LikeEvents>, auto_replay: bool) -> Self {
         Self {
             inner: Arc::new(Inner { db, remote, events, auto_replay, replaying: Default::default(), queued: Default::default() }),
         }
@@ -221,7 +243,7 @@ impl Likes {
 
     // ------------------------------------------------------------ replay
 
-    /// Send queued writes to Plex, oldest first. Stops (keeping the write)
+    /// Send queued writes to the server, oldest first. Stops (keeping the write)
     /// when the server can't be reached; a refused write is rolled back with
     /// a toast.
     pub async fn replay(&self) {
@@ -238,7 +260,8 @@ impl Likes {
         };
         let mut rolled_back: Vec<String> = Vec::new();
         for op in queue {
-            match self.inner.remote.rate(&op.track_id, op.rating).await {
+            // A queued like is five stars, an unlike none (Likes::set).
+            match self.inner.remote.set_liked(&op.track_id, op.rating.is_some()).await {
                 Ok(()) => {
                     let o = op.clone();
                     let _ = self.db().write_async(move |c| local::sent(c, &o)).await;
