@@ -242,7 +242,12 @@ describe("bookmarks", () => {
 
     render(<BookmarksPage />);
     await user.click(await screen.findByRole("button", { name: `Play ${t.title} from 1:35` }));
-    await waitFor(async () => expect((await backend.playerState()).positionMs).toBe(95_000));
+    // The mock keeps playing, so allow the few seconds it may have moved on.
+    await waitFor(async () => {
+      const at = (await backend.playerState()).positionMs;
+      expect(at).toBeGreaterThanOrEqual(95_000);
+      expect(at).toBeLessThan(99_000);
+    });
     // A page bookmark opens its page.
     const page = useCurate.getState().bookmarks.find((b) => b.kind === "page")!;
     await user.click(screen.getByRole("button", { name: `Open ${page.title}` }));
