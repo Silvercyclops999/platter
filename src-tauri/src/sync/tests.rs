@@ -430,18 +430,23 @@ fn follows_move_from_the_old_list_once_and_then_live_in_the_store() {
 // ------------------------------------------------------------ pins
 
 #[test]
-fn pins_toggle_keep_twelve_and_import_once() {
+fn pins_hold_four_of_any_kind_and_import_once() {
     let d = Dev::new("pc");
-    for i in 0..14 {
-        d.at(1_000 + i);
-        pins::toggle(&d.store, pin("album", &i.to_string())).unwrap();
+    for (i, kind) in ["playlist", "album", "artist", "folder"].iter().enumerate() {
+        d.at(1_000 + i as u64);
+        pins::toggle(&d.store, pin(kind, &i.to_string())).unwrap();
     }
     let list = pins::list(&d.store).unwrap();
-    assert_eq!(list.len(), 12);
-    assert_eq!(list[0].id, "13", "newest first");
-    assert!(!list.iter().any(|p| p.id == "0" || p.id == "1"), "the oldest went");
-    let list = pins::toggle(&d.store, pin("album", "13")).unwrap();
-    assert_eq!(list[0].id, "12");
+    assert_eq!(list.iter().map(|p| p.kind.as_str()).collect::<Vec<_>>(), ["folder", "artist", "album", "playlist"], "newest first");
+    // A fifth is refused, and nothing is dropped.
+    let full = pins::toggle(&d.store, pin("album", "x")).unwrap_err();
+    assert!(full.to_string().contains("up to 4"), "{full}");
+    assert_eq!(pins::list(&d.store).unwrap().len(), 4);
+    // Unpinning makes room.
+    let list = pins::toggle(&d.store, pin("folder", "3")).unwrap();
+    assert_eq!(list[0].id, "2");
+    d.at(2_000);
+    assert_eq!(pins::toggle(&d.store, pin("album", "x")).unwrap()[0].id, "x");
     assert!(pins::toggle(&d.store, pin("track", "1")).is_err());
     // Import only happens into a store that never had pins.
     let fresh = Dev::new("mac");
@@ -450,6 +455,21 @@ fn pins_toggle_keep_twelve_and_import_once() {
     pins::toggle(&fresh.store, pin("artist", "a")).unwrap();
     pins::toggle(&fresh.store, pin("album", "b")).unwrap();
     assert!(pins::import(&fresh.store, vec![pin("album", "c")]).unwrap().is_empty());
+}
+
+#[test]
+fn folder_pins_travel_in_the_sync_file() {
+    let cloud = tempfile::tempdir().unwrap();
+    let pc = Dev::new("pc");
+    let mac = Dev::new("mac");
+    pc.at(5_000);
+    pins::toggle(&pc.store, pin("folder", "f1")).unwrap();
+    pc.pass(cloud.path()).unwrap();
+    mac.at(6_000);
+    mac.pass(cloud.path()).unwrap();
+    let got = pins::list(&mac.store).unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!((got[0].kind.as_str(), got[0].id.as_str()), ("folder", "f1"));
 }
 
 // ------------------------------------------------------------ folders

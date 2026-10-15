@@ -9,6 +9,7 @@ import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import type { LibraryFolders } from "../lib/types";
 import { ancestors, folders, useFolders } from "../stores/folders";
+import { usePins } from "../stores/pins";
 import { createPlaylist } from "../stores/playlists";
 import type { MenuItem, SubmenuContext } from "../stores/ui";
 import "./folders.css";
@@ -118,6 +119,7 @@ export async function createPlaylistIn(folderId: string | null) {
 export function folderMenu(id: string): MenuItem[] {
   const f = useFolders.getState().tree.folders.find((x) => x.id === id);
   if (!f) return [];
+  const pinned = usePins.getState().isPinned("folder", id);
   return [
     { label: "Rename", onSelect: () => folders.startRename(id) },
     { label: "Delete", onSelect: () => folders.askDelete(id) },
@@ -131,6 +133,10 @@ export function folderMenu(id: string): MenuItem[] {
       },
     },
     moveToFolderItem({ kind: "folder", id, title: f.name }),
+    {
+      label: pinned ? "Unpin folder" : "Pin folder",
+      onSelect: () => usePins.getState().toggle({ kind: "folder", id, title: f.name, subtitle: "Folder", thumb: null }),
+    },
   ];
 }
 

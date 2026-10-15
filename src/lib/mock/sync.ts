@@ -34,7 +34,7 @@ export const MOCK_CLOUD_FOLDERS: CloudFolder[] = [
   { provider: "Dropbox", path: "C:\\Users\\listener\\Dropbox" },
 ];
 
-const MAX_PINS = 12;
+const MAX_PINS = 4;
 const TTL_MS = 5 * 60 * 1000;
 const IDLE: KeyReceiveState = { phase: "idle", code: null, qr: null, expiresAt: null, from: null, received: [] };
 
@@ -147,14 +147,15 @@ export class MockSync {
   // ---------------------------------------------------------------- pins
 
   pinsList(): PinRecord[] {
-    return [...this.pins].sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).slice(0, MAX_PINS);
+    return [...this.pins].sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
   }
 
   pinsToggle(pin: PinRecord): PinRecord[] {
-    if (!["album", "artist", "playlist"].includes(pin.kind)) throw { kind: "invalid", message: "Only albums, artists and playlists can be pinned." };
+    if (!["album", "artist", "playlist", "folder"].includes(pin.kind)) throw { kind: "invalid", message: "Only playlists, albums, artists and folders can be pinned." };
     const i = this.pins.findIndex((p) => p.kind === pin.kind && p.id === pin.id);
     if (i >= 0) this.pins.splice(i, 1);
-    else this.pins = [{ ...pin, pinnedAt: Date.now() + this.seq++ }, ...this.pins].slice(0, MAX_PINS);
+    else if (this.pins.length >= MAX_PINS) throw { kind: "invalid", message: "You can pin up to 4 items. Unpin one first." };
+    else this.pins = [{ ...pin, pinnedAt: Date.now() + this.seq++ }, ...this.pins];
     this.changed("pins");
     return this.pinsList();
   }

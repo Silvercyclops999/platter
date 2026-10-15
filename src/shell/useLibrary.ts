@@ -74,9 +74,11 @@ export interface LibraryModel {
 }
 
 /** Pins (kept fresh from the library) followed by everything else. */
-export function mergePins(entries: LibEntry[], pins: ReturnType<typeof usePins.getState>["pins"]): LibEntry[] {
+export function mergePins(entries: LibEntry[], all: ReturnType<typeof usePins.getState>["pins"]): LibEntry[] {
   const key = (k: string, id: string) => `${k}:${id}`;
   const byKey = new Map(entries.map((e) => [key(e.kind, e.id), e]));
+  // Folder pins show where folders do (see withFolders).
+  const pins = all.filter((p): p is typeof p & { kind: LibEntry["kind"] } => p.kind !== "folder");
   const pinned = pins.map((p): LibEntry => {
     const live = byKey.get(key(p.kind, p.id));
     if (live) return { ...live, pinned: true };
@@ -166,7 +168,9 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
   const recents = useLibraryView((s) => s.recents);
   const customOrder = useLibraryView((s) => s.customOrder);
   const owner = useApp((s) => s.auth?.username ?? null);
-  const pins = usePins((s) => s.pins);
+  const pinsOn = useSettings((s) => s.settings?.pinsInLibrary !== false);
+  const allPins = usePins((s) => s.pins);
+  const pins = useMemo(() => (pinsOn ? allPins : []), [pinsOn, allPins]);
   const dlItems = useDownloads((s) => s.status?.items);
   const followIds = useSocial((s) => s.followIds);
   const ownedIds = useOwnedIds();
@@ -211,8 +215,9 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
         active: grouping,
         drill: drillable ? drill : null,
         expanded,
+        pins,
       }),
-    [all, activeFilter, activeSub, sort, query, recents, customOrder, downloadedOnly, tree, drill, expanded, grouping, drillable],
+    [pins, all, activeFilter, activeSub, sort, query, recents, customOrder, downloadedOnly, tree, drill, expanded, grouping, drillable],
   );
   return {
     all,

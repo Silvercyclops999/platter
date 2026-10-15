@@ -1048,6 +1048,7 @@ export interface Settings {
   syncLyrics: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
+  pinsInLibrary: boolean;
   /** The Stats page (profile menu and library row). */
   statsPage: boolean;
   /** The stats strip on song, artist and album pages (and "Your stats" in menus). */
@@ -1359,6 +1360,7 @@ export const DEFAULT_SETTINGS: Settings = {
   syncFollows: true,
   syncLyrics: true,
   bookmarksInLibrary: true,
+  pinsInLibrary: true,
   statsPage: true,
   statsStrip: true,
   monthlyStatsOnProfile: true,
@@ -1449,7 +1451,7 @@ export interface CloudFolder {
 
 /** A pin as the core keeps it. */
 export interface PinRecord {
-  kind: "album" | "artist" | "playlist";
+  kind: "album" | "artist" | "playlist" | "folder";
   id: string;
   title: string;
   subtitle: string;

@@ -91,6 +91,24 @@ describe("folders in the library list", () => {
     ]);
   });
 
+  it("a pinned folder sits among the pins, in pin order, under Liked Songs", () => {
+    const pinnedAlbum = [entries[0], e("album", "a1", { pinned: true }), ...entries.slice(2)];
+    const pins = [
+      { kind: "folder", id: "f0" },
+      { kind: "album", id: "a1" },
+    ];
+    const out = withFolders(pinnedAlbum, tree, { active: true, drill: null, expanded: [], pins });
+    expect(out.map((x) => [x.id, x.pinned])).toEqual([
+      ["liked", true],
+      ["f0", true],
+      ["a1", true],
+      ["f1", false],
+      ["p3", false],
+      ["gone", false],
+    ]);
+    expect(out[1].folder).toBeTruthy();
+  });
+
   it("searching or filtering to albums shows the plain list", () => {
     expect(withFolders(entries, tree, { active: false, drill: "f1", expanded: [] })).toBe(entries);
   });
@@ -177,7 +195,7 @@ describe("library folders", () => {
     act(() => folders.open(f.id));
     await user.click(screen.getByRole("button", { name: "More options for Road trips" }));
     const menu = await screen.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Rename", "Delete", "Create playlist", "Create folder", "Move to folder"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Rename", "Delete", "Create playlist", "Create folder", "Move to folder", "Pin folder"]);
     await user.click(within(menu).getByRole("menuitem", { name: "Rename" }));
     const field = await screen.findByRole("textbox", { name: "Folder name" });
     await waitFor(() => expect(field).toHaveValue("Road trips"));
@@ -219,6 +237,50 @@ describe("pins", () => {
     expect(usePins.getState().pins.map((p) => p.id)).toEqual(["r1"]);
     expect(localStorage.getItem("platter.pins.v1")).toBeNull();
     expect((await backend.pinsGet()).map((p) => p.id)).toEqual(["r1"]);
+  });
+});
+
+describe("pins of every kind", () => {
+  it("holds 4; a fifth is refused with a note and nothing is sent", async () => {
+    const toggle = vi.spyOn(backend, "pinsToggle");
+    render(<Toaster />);
+    const kinds = ["playlist", "album", "artist", "folder"] as const;
+    for (const [i, kind] of kinds.entries()) {
+      act(() => usePins.getState().toggle({ kind, id: `x${i}`, title: `T${i}`, subtitle: "", thumb: null }));
+      await toggle.mock.results[i].value;
+    }
+    expect(usePins.getState().pins).toHaveLength(4);
+    act(() => usePins.getState().toggle({ kind: "album", id: "x9", title: "T9", subtitle: "", thumb: null }));
+    expect(usePins.getState().pins).toHaveLength(4);
+    expect(toggle).toHaveBeenCalledTimes(4);
+    expect(await screen.findByText("You can pin up to 4 items. Unpin one first.")).toBeInTheDocument();
+    // The core says the same if asked directly.
+    await expect(backend.pinsToggle({ kind: "album", id: "x9", title: "T9", subtitle: "", thumb: null })).rejects.toMatchObject({ kind: "invalid" });
+  });
+
+  it("a folder is pinned from its menu and shows first; deleting it drops the pin", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    const made = await act(() => folders.create(null));
+    await waitFor(() => expect(titles()).toContain("New Folder"));
+    fireEvent.contextMenu(within(list()).getAllByRole("listitem").find((r) => r.textContent?.includes("New Folder"))!);
+    await user.click(await screen.findByRole("menuitem", { name: "Pin folder" }));
+    expect(usePins.getState().isPinned("folder", made!.id)).toBe(true);
+    // Under Liked Songs, Bookmarks and Stats, marked pinned.
+    await waitFor(() => expect(titles()[3]).toBe("New Folder"));
+    expect(within(within(list()).getAllByRole("listitem")[3]).getByLabelText("Pinned")).toBeInTheDocument();
+    await act(() => folders.remove(made!.id));
+    await waitFor(() => expect(usePins.getState().pins).toHaveLength(0));
+  });
+
+  it("Show pins at the top of Your Library is on by default and turns off", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    const sw = await screen.findByRole("switch", { name: "Show pins at the top of Your Library" });
+    expect(sw).toBeChecked();
+    await user.click(sw);
+    await waitFor(() => expect(useSettings.getState().settings?.pinsInLibrary).toBe(false));
+    expect((await backend.settingsGet()).pinsInLibrary).toBe(false);
   });
 });
 

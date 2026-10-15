@@ -11,7 +11,7 @@ import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
 import type { LibraryFolder, LibraryFolders, SyncStoreChanged } from "../lib/types";
 import type { LibEntry } from "./library";
-import { loadPins } from "./pins";
+import { loadPins, usePins } from "./pins";
 import { toast } from "./toasts";
 
 const EMPTY: LibraryFolders = { folders: [], items: {} };
@@ -68,6 +68,8 @@ export const folders = {
     const s = useFolders.getState();
     const gone = s.tree.folders.find((f) => f.id === id);
     const ok = await run("Couldn't delete the folder", () => backend.folderDelete(id).then(() => true));
+    // A deleted folder doesn't keep its pin.
+    if (ok && gone && usePins.getState().isPinned("folder", id)) usePins.getState().toggle({ kind: "folder", id, title: gone.name, subtitle: "Folder", thumb: null });
     // Back to the top when the open folder (or one above it) went.
     if (ok && (s.drill === id || (s.drill && ancestors(s.tree, s.drill).includes(id)))) useFolders.setState({ drill: gone?.parent ?? null });
   },
@@ -132,6 +134,8 @@ export interface FolderView {
   active: boolean;
   drill: string | null;
   expanded: string[];
+  /** The sidebar pins, newest first: pinned folders sit among them. */
+  pins?: { kind: string; id: string }[];
 }
 
 /**
@@ -157,8 +161,22 @@ export function withFolders(entries: LibEntry[], tree: LibraryFolders, view: Fol
   const drill = view.drill && known.has(view.drill) ? view.drill : null;
   if (drill) return contents(drill, 0);
   const placed = (e: LibEntry) => e.kind === "playlist" && !e.liked && !e.pinned && !!tree.items[e.id] && known.has(tree.items[e.id]);
-  const pinned = entries.filter((e) => e.pinned);
-  const top = children(null).map((f) => folderEntry(f, inFolder(f.id).length, 0, false, true, false));
+  const pinOrder = (view.pins ?? []).map((p) => `${p.kind}:${p.id}`);
+  const pinnedFolders = new Set((view.pins ?? []).filter((p) => p.kind === "folder" && known.has(p.id)).map((p) => p.id));
+  const folderRow = (f: LibraryFolder): LibEntry => ({ ...folderEntry(f, inFolder(f.id).length, 0, false, true, false), pinned: pinnedFolders.has(f.id) });
+  const rank = (e: LibEntry) => {
+    const i = pinOrder.indexOf(e.folder ? `folder:${e.id}` : `${e.kind}:${e.id}`);
+    return i < 0 ? pinOrder.length : i;
+  };
+  // Liked Songs and the other built-in rows stay first; then the pins in pin order.
+  const builtIn = entries.filter((e) => e.pinned && (e.liked || e.bookmarks || e.stats));
+  const pinned = [...entries.filter((e) => e.pinned && !(e.liked || e.bookmarks || e.stats)), ...tree.folders.filter((f) => pinnedFolders.has(f.id)).map(folderRow)]
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => rank(a.e) - rank(b.e) || a.i - b.i)
+    .map(({ e }) => e);
+  const top = children(null)
+    .filter((f) => !pinnedFolders.has(f.id))
+    .map(folderRow);
   const rest = entries.filter((e) => !e.pinned && !placed(e));
-  return [...pinned, ...top, ...rest];
+  return [...builtIn, ...pinned, ...top, ...rest];
 }

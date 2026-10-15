@@ -1,5 +1,5 @@
 /**
- * Sidebar pins, kept by the core (`pins_get` / `pins_toggle`) so they travel
+ * Sidebar pins (playlists, albums, artists and folders), kept by the core (`pins_get` / `pins_toggle`) so they travel
  * in the sync file when it's on. Toggling shows at once; the core's list
  * comes back when another device changes it. Pins an older build kept in
  * the window's storage are handed to the core once.
@@ -10,14 +10,15 @@ import type { PinRecord } from "../lib/types";
 import { toast } from "./toasts";
 
 export interface Pin {
-  kind: "album" | "artist" | "playlist";
+  kind: "album" | "artist" | "playlist" | "folder";
   id: string;
   title: string;
   subtitle: string;
   thumb: string | null;
 }
 
-export const MAX_PINS = 12;
+/** A handful, not a second library. */
+export const MAX_PINS = 4;
 /** Where an older build kept pins. */
 const LEGACY_KEY = "platter.pins.v1"; // gitleaks:allow (localStorage key name, not a secret)
 
@@ -52,7 +53,11 @@ export const usePins = create<PinState>()((set, get) => ({
   toggle: (p) => {
     const before = get().pins;
     const pinned = get().isPinned(p.kind, p.id);
-    const pins = pinned ? before.filter((x) => !(x.kind === p.kind && x.id === p.id)) : [p, ...before].slice(0, MAX_PINS);
+    if (!pinned && before.length >= MAX_PINS) {
+      toast.error(`You can pin up to ${MAX_PINS} items. Unpin one first.`);
+      return;
+    }
+    const pins = pinned ? before.filter((x) => !(x.kind === p.kind && x.id === p.id)) : [p, ...before];
     set({ pins });
     backend.pinsToggle(p).catch(() => {
       set({ pins: before });

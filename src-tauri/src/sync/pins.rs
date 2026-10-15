@@ -1,17 +1,20 @@
-//! Library pins: up to [`MAX_PINS`] albums, artists or playlists kept at
-//! the top of the library sidebar, newest first.
+//! Library pins: up to [`MAX_PINS`] playlists, albums, artists or library
+//! folders kept at the top of the library sidebar, newest first.
 
 use serde::{Deserialize, Serialize};
 
 use super::store::{Op, PINS, SyncStore};
 use crate::error::{AppError, AppResult};
 
-pub const MAX_PINS: usize = 12;
+pub const MAX_PINS: usize = 4;
+
+/// What the core says when the pins are full.
+pub const FULL: &str = "You can pin up to 4 items. Unpin one first.";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pin {
-    /// album, artist or playlist.
+    /// album, artist, playlist or folder.
     pub kind: String,
     pub id: String,
     pub title: String,
@@ -29,21 +32,21 @@ fn key(kind: &str, id: &str) -> String {
 }
 
 fn valid(p: &Pin) -> AppResult<()> {
-    if !matches!(p.kind.as_str(), "album" | "artist" | "playlist") || p.id.is_empty() {
-        return Err(AppError::Invalid("Only albums, artists and playlists can be pinned.".into()));
+    if !matches!(p.kind.as_str(), "album" | "artist" | "playlist" | "folder") || p.id.is_empty() {
+        return Err(AppError::Invalid("Only playlists, albums, artists and folders can be pinned.".into()));
     }
     Ok(())
 }
 
-/// The pins, newest first.
+/// The pins, newest first. Pins kept from before the limit came down stay
+/// until they're unpinned.
 pub fn list(store: &SyncStore) -> AppResult<Vec<Pin>> {
     let mut pins: Vec<Pin> = store.list(&PINS)?.into_iter().map(|(_, p)| p).collect();
     pins.sort_by(|a, b| b.pinned_at.cmp(&a.pinned_at).then_with(|| a.title.cmp(&b.title)));
-    pins.truncate(MAX_PINS);
     Ok(pins)
 }
 
-/// Pin, or unpin when it's pinned. Pinning past the limit drops the oldest.
+/// Pin, or unpin when it's pinned. Pinning when the pins are full is refused.
 pub fn toggle(store: &SyncStore, mut pin: Pin) -> AppResult<Vec<Pin>> {
     valid(&pin)?;
     let k = key(&pin.kind, &pin.id);
@@ -51,14 +54,11 @@ pub fn toggle(store: &SyncStore, mut pin: Pin) -> AppResult<Vec<Pin>> {
         store.remove(&PINS, &k)?;
         return list(store);
     }
-    pin.pinned_at = store.now();
-    let mut ops = vec![Op::put(&PINS, &k, &pin)?];
-    let mut all = list(store)?;
-    all.insert(0, pin);
-    for old in all.iter().skip(MAX_PINS) {
-        ops.push(Op::remove(&PINS, key(&old.kind, &old.id)));
+    if list(store)?.len() >= MAX_PINS {
+        return Err(AppError::Invalid(FULL.into()));
     }
-    store.write_many(ops)?;
+    pin.pinned_at = store.now();
+    store.write_many(vec![Op::put(&PINS, &k, &pin)?])?;
     list(store)
 }
 

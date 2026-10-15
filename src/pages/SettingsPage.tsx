@@ -1354,6 +1354,13 @@ export function SettingsPage() {
       description: "A Bookmarks row under Liked Songs lists the songs and pages you bookmarked. Bookmark the playing song with Alt+Shift+M.",
       control: (ids) => toggle(s, "bookmarksInLibrary", ids),
     },
+    {
+      key: "pinsInLibrary",
+      section: "Library",
+      title: "Show pins at the top of Your Library",
+      description: "Up to 4 playlists, albums, artists or folders you pin stay above everything else. Pin one from its menu. Pins sync with your other devices.",
+      control: (ids) => toggle(s, "pinsInLibrary", ids),
+    },
     // Library: stats
     {
       key: "statsPage",

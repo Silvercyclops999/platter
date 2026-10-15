@@ -595,6 +595,8 @@ pub struct Settings {
     pub show_physical_collection: bool,
     /// "Missing from the shelf": albums played most that aren't owned.
     pub shelf_missing_list: bool,
+    /// Pins sit at the top of the library sidebar.
+    pub pins_in_library: bool,
 }
 
 /// Minutes between Subsonic change checks the setting offers.
@@ -810,6 +812,7 @@ impl Default for Settings {
             dismissed_artists: Vec::new(),
             show_physical_collection: true,
             shelf_missing_list: false,
+            pins_in_library: true,
         }
     }
 }
@@ -925,6 +928,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "dismissedArtists",
     "showPhysicalCollection",
     "shelfMissingList",
+    "pinsInLibrary",
 ];
 
 /// Settings kept on this device only.
@@ -1191,6 +1195,7 @@ pub struct SettingsPatch {
     pub dismissed_artists: Option<Vec<crate::discover::Dismissed>>,
     pub show_physical_collection: Option<bool>,
     pub shelf_missing_list: Option<bool>,
+    pub pins_in_library: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -1444,6 +1449,7 @@ impl Settings {
         set(&mut self.catalogue_search, p.catalogue_search);
         set(&mut self.fans_also_like_catalogue, p.fans_also_like_catalogue);
         set(&mut self.home_new_to_you, p.home_new_to_you);
+        set(&mut self.pins_in_library, p.pins_in_library);
         if let Some(list) = &p.dismissed_artists {
             self.dismissed_artists = crate::discover::tidy_dismissed(list);
         }
@@ -3279,5 +3285,15 @@ mod tests {
         assert!(!s.show_physical_collection && s.shelf_missing_list);
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(old.show_physical_collection && !old.shelf_missing_list);
+    }
+
+    #[test]
+    fn pins_in_library_is_on_and_synced() {
+        let mut s = Settings::default();
+        assert!(s.pins_in_library);
+        assert!(SYNCED_SETTINGS.contains(&"pinsInLibrary"));
+        s.apply(&serde_json::from_str(r#"{"pinsInLibrary":false}"#).unwrap()).unwrap();
+        assert!(!s.pins_in_library);
+        assert!(serde_json::from_str::<Settings>("{}").unwrap().pins_in_library, "older settings read as on");
     }
 }
