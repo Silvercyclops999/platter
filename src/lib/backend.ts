@@ -115,6 +115,8 @@ import type {
   LidarrRequest,
   LidarrRequestInput,
   LidarrStatus,
+  RadarPage,
+  AutoArtist,
   Bookmark,
   HiddenItem,
   HideRequest,
@@ -613,6 +615,16 @@ export interface Backend {
   /** An artist's official releases the library lacks, for the artist page. */
   lidarrMissingReleases(artistId: string, artist: string): Promise<LidarrMissing>;
 
+  // Release radar (MusicBrainz, about once a day; `radar://changed` when it changes)
+  /** New releases from followed and most played artists. */
+  releaseRadar(): Promise<RadarPage>;
+  /** Look now instead of waiting for the daily look. */
+  releaseRadarCheck(): Promise<RadarPage>;
+  /** Artists with auto-request on. */
+  radarAutoArtists(): Promise<AutoArtist[]>;
+  /** Turn auto-request on or off for an artist (on also turns auto-request on in Settings). */
+  radarAutoSet(id: string, name: string, on: boolean): Promise<AutoArtist[]>;
+
   // Library import (nothing here writes to Plex)
   importOverview(): Promise<ImportOverview>;
   /** File or folder picker for an import; null when cancelled. */
@@ -959,6 +971,10 @@ export function createTauriBackend(): Backend {
     lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),
     lidarrRequestCancel: (id) => call("lidarr_request_cancel", { id }),
     lidarrMissingReleases: (artistId, artist) => call("lidarr_missing_releases", { artistId, artist }),
+    releaseRadar: () => call("release_radar"),
+    releaseRadarCheck: () => call("release_radar_check"),
+    radarAutoArtists: () => call("radar_auto_artists"),
+    radarAutoSet: (id, name, on) => call("radar_auto_set", { id, name, on }),
     miniplayerState: () => call("miniplayer_state"),
     miniplayerSet: (open) => call("miniplayer_set", { open }),
     windowLabel: () => getCurrentWindow().label,

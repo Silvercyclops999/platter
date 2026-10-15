@@ -137,6 +137,7 @@ import { MockSocial } from "./social";
 import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
+import { MockRadar } from "./radar";
 import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
 import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "../statsTypes";
 import { MockArchive } from "./archive";
@@ -174,6 +175,8 @@ export interface MockOptions {
   theme?: Settings["theme"];
   /** What the faked Lidarr looks like (?lidarr=clear). */
   lidarr?: LidarrDemo;
+  /** The release radar has found nothing yet (?radar=empty). */
+  radarEmpty?: boolean;
   /** Start with two import sources on and imported (?import=demo). */
   importDemo?: boolean;
   /** No demo listening history for stats (?stats=empty). */
@@ -219,6 +222,7 @@ export function optionsFromUrl(search: string): MockOptions {
     platterUnreachable: p.get("platter") === "unreachable",
     downloads: p.get("downloads") === "demo" || p.get("downloads") === "full" ? (p.get("downloads") as "demo" | "full") : undefined,
     lidarr: isLidarrDemo(p.get("lidarr")) ? (p.get("lidarr") as LidarrDemo) : undefined,
+    radarEmpty: p.get("radar") === "empty",
     theme: (["dark", "light", "system", "midnight", "forest", "sand"] as const).find((t) => t === p.get("theme")),
     importDemo: p.get("import") === "demo",
     statsEmpty: p.get("stats") === "empty",
@@ -292,6 +296,8 @@ export class MockBackend implements Backend {
   readonly scrobble: MockScrobble;
   /** Lidarr's setup check (test hook: setDemo). */
   readonly lidarr: MockLidarr;
+  /** The release radar (test hooks: setEmpty, reset). */
+  readonly radar: MockRadar;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -525,6 +531,20 @@ export class MockBackend implements Backend {
       album: (id) => this.fx.albums.find((a) => a.id === id),
     });
     this.lidarr = new MockLidarr(this.opts.lidarr);
+    this.radar = new MockRadar(
+      this.fx,
+      {
+        settings: () => this.settings,
+        setSettings: (patch) => {
+          this.settings = { ...this.settings, ...patch };
+          this.emit("settings://changed", { ...this.settings, volume: this.volume });
+        },
+        requests: () => this.lidarr.list(),
+        lidarrReady: () => this.lidarr.status(this.settings).ready,
+        emit: () => this.emit("radar://changed", null),
+      },
+      this.opts.radarEmpty,
+    );
     this.scrobble = new MockScrobble((queued) => this.emit("scrobble://status", { queued }));
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
@@ -2203,6 +2223,9 @@ export class MockBackend implements Backend {
       if (patch.doctorCoverPx !== undefined && ![300, 500, 600, 800, 1000, 1400].includes(patch.doctorCoverPx)) {
         throw { kind: "invalid", message: "Pick one of the cover sizes offered." };
       }
+      if (patch.autoRequestCap !== undefined && ![1, 2, 3, 5, 10].includes(patch.autoRequestCap)) {
+        throw { kind: "invalid", message: "Pick one of the daily limits offered." };
+      }
       if (patch.doctorChecks !== undefined) next.doctorChecks = { ...DEFAULT_SETTINGS.doctorChecks, ...patch.doctorChecks };
       if (patch.listenRelay !== undefined) {
         const r = patch.listenRelay.trim().replace(/\/+$/, "");
@@ -2768,6 +2791,18 @@ export class MockBackend implements Backend {
   }
   lidarrStatus() {
     return this.delay(() => this.lidarr.status(this.settings));
+  }
+  releaseRadar() {
+    return this.delay(() => this.radar.page());
+  }
+  releaseRadarCheck() {
+    return this.delay(() => this.radar.check());
+  }
+  radarAutoArtists() {
+    return this.delay(() => this.radar.autoArtists());
+  }
+  radarAutoSet(id: string, name: string, on: boolean) {
+    return this.delay(() => this.radar.setAuto(id, name, on));
   }
   lidarrKeySet(key: string | null) {
     return this.delay(() => this.lidarr.setKey(this.settings, key));

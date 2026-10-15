@@ -16,6 +16,7 @@ import { HomeItemCard, homeItemInfo } from "./cards";
 import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, offlineHome, showsLikedTile, visibleShelves, type HomeFilter } from "./home";
 import { LikedTile, ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
 import { MixCard } from "./MixCard";
+import { RadarShelf } from "./ReleaseRadar";
 import { useLikes } from "../stores/likes";
 import "./home.css";
 
@@ -116,8 +117,21 @@ function useMixShelves(on: boolean): MixShelves | null {
       un?.();
     };
   }, [on]);
-  const { data } = useLoad(() => (on ? backend.mixesHome() : Promise.resolve(null)), [on, version]);
-  return on ? (data ?? null) : null;
+  // The shelves stay up while new mixes load, so they never blink out.
+  const libraryVersion = useApp((s) => s.libraryVersion);
+  const [data, setData] = useState<MixShelves | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    let alive = true;
+    backend.mixesHome().then(
+      (m) => alive && setData(m),
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [on, version, libraryVersion]);
+  return on ? data : null;
 }
 
 function MixShelf({ title, mixes }: { title: string; mixes: MixSummary[] }) {
@@ -147,6 +161,7 @@ export function HomePage() {
   const washOn = useSettings((s) => s.settings?.artworkColours !== false && s.settings?.homeColourWash !== false);
   const mixesOn = useSettings((s) => s.settings?.homeMixes !== false);
   const mixes = useMixShelves(mixesOn && !cachedOnly);
+  const radarOn = useSettings((s) => s.settings?.releaseRadar !== false);
   const showMixes = !!mixes && filter === "all";
 
   // Offline, Liked Songs keeps its tile only while something liked can play.
@@ -260,6 +275,7 @@ export function HomePage() {
                   </Shelf>
                 );
               })}
+          {data && radarOn && filter === "all" && <RadarShelf />}
         </>
       )}
     </div>

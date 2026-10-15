@@ -183,8 +183,9 @@ describe("home page", () => {
     await user.click(screen.getByRole("button", { name: "Albums" }));
     expect(shelfTitles()).toEqual(["Recently played", "Jump back in", "Recently added"]);
     await user.click(screen.getByRole("button", { name: "All" }));
-    // Five shelves and the three mix shelves (those show on All only).
-    expect(shelfTitles()).toHaveLength(8);
+    // Five shelves, the three mix shelves and the release radar (those show on All only).
+    await waitFor(() => expect(shelfTitles()).toHaveLength(9));
+    expect(shelfTitles()).toContain("Release radar");
   });
 
   it("a chip with nothing to show says so", async () => {

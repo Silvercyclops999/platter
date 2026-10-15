@@ -227,6 +227,7 @@ export function LidarrRequestsList() {
               <p className="lidarr-requests__title">
                 {r.title} <span className="lidarr-requests__artist">· {r.artist}</span>
               </p>
+              {r.auto && <p className="lidarr-requests__meta">{r.state === "failed" ? "Auto-request couldn't request it." : "Requested by auto-request."}</p>}
               {r.destination && <p className="lidarr-requests__meta">{r.destination}</p>}
               {r.message && <p className="lidarr-requests__meta">{r.message}</p>}
               {r.notes.map((n) => (

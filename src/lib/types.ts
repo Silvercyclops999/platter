@@ -998,6 +998,14 @@ export interface Settings {
   doctorChecks: DoctorChecks;
   /** Covers smaller than this on their longest side count as small (300, 500, 600, 800, 1000 or 1400). */
   doctorCoverPx: number;
+  /** Release radar: new releases from followed and most played artists, on Home and its own page. */
+  releaseRadar: boolean;
+  /** A notification when the release radar finds new releases. */
+  radarNotify: boolean;
+  /** Auto-request new albums for the artists it's on for (this device). */
+  autoRequest: boolean;
+  /** Most automatic requests a day: 1, 2, 3, 5 or 10 (this device). */
+  autoRequestCap: number;
   /** Dark, Light, Match system, or another built-in theme. */
   theme: ThemeSetting;
   /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
@@ -1252,6 +1260,10 @@ export const DEFAULT_SETTINGS: Settings = {
     unmatched: true,
   },
   doctorCoverPx: 600,
+  releaseRadar: true,
+  radarNotify: true,
+  autoRequest: false,
+  autoRequestCap: 3,
   theme: "dark",
   accent: "ivory",
   themeFile: null,
@@ -1827,6 +1839,50 @@ export interface LidarrRequest {
   message: string | null;
   /** What Platter did along the way. */
   notes: string[];
+  /** Made by auto-request for a new release. */
+  auto: boolean;
+}
+
+/** One release on the release radar. */
+export interface RadarItem {
+  releaseGroupId: string;
+  title: string;
+  artist: string;
+  artistId: string | null;
+  /** "album", "ep" or "single". */
+  kind: string;
+  /** First release date: "YYYY-MM-DD", "YYYY-MM" or "YYYY". */
+  date: string;
+  /** The front cover from the Cover Art Archive, as an art path. */
+  thumb: string | null;
+  /** The library album it matches ("In your library"). */
+  libraryAlbumId: string | null;
+  request: LidarrRequestState | null;
+  /** The request was made by auto-request. */
+  auto: boolean;
+  /** Why it can't be requested. */
+  refusal: string | null;
+  /** Found by the latest look. */
+  new: boolean;
+}
+
+/** `release_radar`. */
+export interface RadarPage {
+  /** The setting is on. */
+  shown: boolean;
+  items: RadarItem[];
+  checkedAt: number | null;
+  checking: boolean;
+  lidarrReady: boolean;
+  /** Artists looked at. */
+  artists: number;
+}
+
+/** An artist with auto-request on (this device). */
+export interface AutoArtist {
+  id: string;
+  name: string;
+  enabledAt: number;
 }
 
 /** One official release the library lacks. */
@@ -2436,6 +2492,8 @@ export interface EventMap {
   "follows://changed": FollowedArtist[];
   /** How many What's New items are unseen. */
   "whatsnew://changed": { unseen: number };
+  /** The release radar found something, a look started or ended, or auto-request changed. */
+  "radar://changed": null;
   /** A listening session started, changed or ended. */
   "listen://state": ListenView;
   /** Something to tell the user about the session (a request the host turned down). */

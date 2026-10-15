@@ -1416,8 +1416,26 @@ The home address is tried first (for 4 seconds when an away address is set), the
 
 `LidarrRequestInput = { releaseGroupId, title, artist, artistId?, typed? }`.
 `LidarrPreview = { releaseGroupId, title, artist, destination, destinationIsGuess, needsTyped, existing, reachable, route, addsArtist }`.
-`LidarrRequest = { id, releaseGroupId, title, artist, artistId, state, destination, lidarrAlbumId, addedArtist, alreadyInLidarr, createdAt, updatedAt, message, notes }`, with `state` one of `queued`, `requested`, `searching`, `downloading`, `imported`, `failed`.
+`LidarrRequest = { id, releaseGroupId, title, artist, artistId, state, destination, lidarrAlbumId, addedArtist, alreadyInLidarr, createdAt, updatedAt, message, notes, auto }`, with `state` one of `queued`, `requested`, `searching`, `downloading`, `imported`, `failed`. `auto` is true for a request auto-request made; one it refused stays as `failed` with why in `message`.
 Requests are kept on this device. Waiting ones are retried every 5 minutes in the background, full check first.
+
+## Release radar
+
+New official albums, EPs and singles from followed artists and the ten artists played most in the last 90 days. About once a day, when MusicBrainz is on, Platter asks MusicBrainz's release group search for a few artists at a time (by MusicBrainz id, first released in the last 90 days or later), through the shared one-a-second limiter, with answers cached for 18 hours. Only release groups that pass the same rules as a request are kept: at least one official release, album, EP or single, credited to the artist alone, no secondary type. What was found is kept on this device. An artist's first look announces nothing.
+
+Auto-request is per artist (and the `autoRequest` setting for all of them). It asks Lidarr for new albums found after it was turned on for the artist, oldest first, at most `autoRequestCap` a day (refused ones don't count, the rest wait for the next day), through the same path as `lidarr_request` without the typed name: MusicBrainz guards, then the whole setup check. A release asked for once is never asked for again. A summary notification follows.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `release_radar` | – | `RadarPage` |
+| `release_radar_check` | – | `RadarPage` after a look now; `network` when MusicBrainz can't be asked |
+| `radar_auto_artists` | – | `{ id, name, enabledAt }[]` |
+| `radar_auto_set` | `{ id, name, on }` | the same list; turning one on also turns the `autoRequest` setting on (and sends `settings://changed`) |
+
+`RadarPage = { shown, items: RadarItem[], checkedAt, checking, lidarrReady, artists }`. `shown` is false while the `releaseRadar` setting is off.
+`RadarItem = { releaseGroupId, title, artist, artistId, kind: "album"|"ep"|"single", date, thumb, libraryAlbumId, request, auto, refusal, new }`, newest first. `libraryAlbumId` is the library album with the same title ("In your library"); `refusal` says why it can't be requested when it shares a title with an album that counts as unreleased (the user's marks included); `request` is the state of a request for it; `new` marks what the latest look found. `thumb` is the Cover Art Archive front cover as an art path.
+
+Event: `radar://changed` (no payload) when a look starts or ends or auto-request changes.
 
 ## Sync, folders and keys
 
@@ -2147,6 +2165,10 @@ The rest of the fields, with their defaults:
 | `libraryDoctor` | bool, true | The library doctor checks the library in the background and shows a count in the app menu. |
 | `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched }`, all true | Which library doctor checks run. |
 | `doctorCoverPx` | 300, 500, 600 (default), 800, 1000 or 1400 | Covers smaller than this on their longest side count as small. |
+| `releaseRadar` | bool, true | The release radar looks for new releases about once a day and shows them on Home and its page. Synced. |
+| `radarNotify` | bool, true | A notification when the release radar finds something new (not in a private session). Synced. |
+| `autoRequest` | bool, false | Auto-request new albums for the artists it's on for. Turning it on for an artist turns this on. This device only. |
+| `autoRequestCap` | 1, 2, 3 (default), 5 or 10 | Most automatic requests a day. This device only. |
 | `scrobbleLastfm` | bool, false | Scrobble to Last.fm once signed in. This device only. |
 | `scrobbleListenbrainz` | bool, false | Scrobble to ListenBrainz with the user token. This device only. |
 | `scrobbleUnreleased` | bool, false | Unreleased music scrobbles too. |

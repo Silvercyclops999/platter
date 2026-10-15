@@ -28,6 +28,7 @@ const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
 const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
+const ReleaseRadarPage = lazy(() => import("../pages/ReleaseRadar").then((m) => ({ default: m.ReleaseRadarPage })));
 const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
 const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
 
@@ -103,6 +104,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   settings: "Settings",
   recents: "Recents",
   whatsNew: "What's New",
+  releaseRadar: "Release radar",
   stats: "Stats",
 };
 
@@ -171,6 +173,8 @@ function Page({ route }: { route: Route }) {
       return <RecentsPage />;
     case "whatsNew":
       return <WhatsNewPage />;
+    case "releaseRadar":
+      return <ReleaseRadarPage />;
     case "homeShelf":
       return <HomeShelfPage shelf={route.shelf} />;
     case "artistShelf":

@@ -28,7 +28,9 @@ import { nav, useRouter } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
-import { missingFor, useMissingReleases } from "./lidarrShared";
+import { missingFor, useLidarrReady, useMissingReleases } from "./lidarrShared";
+import { useAutoOn, useAutoRequest } from "../stores/radar";
+import { AutoRequestDialog } from "./AutoRequestDialog";
 
 /** Cards for releases the library lacks (and their request dialog), loaded once an artist has some. */
 const MissingReleaseCard = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.MissingReleaseCard })));
@@ -269,8 +271,20 @@ function ActionRow({
   const name = artist?.title ?? "artist";
   const following = useSocial((s) => s.followIds.has(id));
   const toggleFollow = () => artist && void setFollow({ id, title: artist.title, thumb: artist.thumb }, !following);
+  // Auto-request: only with the release radar on and Lidarr ready.
+  const radarOn = useSettings((s) => s.settings?.releaseRadar !== false);
+  const lidarrReady = useLidarrReady();
+  const autoOn = useAutoOn(id);
+  const [askAuto, setAskAuto] = useState(false);
+  const toggleAuto = () => {
+    if (!artist) return;
+    if (autoOn) void useAutoRequest.getState().set(id, artist.title, false);
+    else setAskAuto(true);
+  };
+  const autoItem = radarOn && lidarrReady ? [{ label: "Auto-request new albums", checked: autoOn, onSelect: toggleAuto }] : [];
   return (
     <div className="action-row">
+      {artist && askAuto && <AutoRequestDialog id={id} name={artist.title} open onClose={() => setAskAuto(false)} />}
       <IconButton
         label={playing ? `Pause ${name}` : `Play ${name}`}
         variant="accent"
@@ -318,6 +332,7 @@ function ActionRow({
             `Options for ${artist.title}`,
             [
               { label: following ? "Unfollow" : "Follow", onSelect: toggleFollow },
+              ...autoItem,
               { label: "Add popular songs to queue", onSelect: () => void player.addToQueue(data!.popular, artist.thumb) },
               { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${artist.id}` }) },
               dontPlayArtistItem({ id: artist.id, title: artist.title, thumb: artist.thumb }),

@@ -224,6 +224,7 @@ export class MockLidarr {
       updatedAt: now,
       message: p.reachable ? null : "Sends when Platter can reach Lidarr.",
       notes: p.reachable && p.addsArtist ? [`Added ${input.artist} to Lidarr with only this album to download.`] : [],
+      auto: false,
     };
     this.requests = [r, ...this.requests];
     this.typedOnce = true;

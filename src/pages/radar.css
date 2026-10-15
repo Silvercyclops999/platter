@@ -1,0 +1,50 @@
+/* Release radar: the Home shelf's cards and the page. */
+
+.radar-card { gap: 0; }
+.radar-card__art { position: relative; }
+.radar-card--missing .radar-card__art .art { box-shadow: none; }
+.radar-card__badge {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 1;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+.radar-card__badge--soon { background: color-mix(in srgb, var(--color-bg-base) 78%, transparent); color: var(--color-text-primary); }
+.radar-card__meta { margin-top: 2px; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.radar-card__action { position: relative; z-index: 2; display: flex; min-height: 32px; align-items: center; margin-top: var(--space-2); }
+.radar-card__blocked { color: var(--color-text-secondary); cursor: help; }
+
+.radar-page__head { margin-bottom: var(--space-4); }
+.radar-page__head .page-title { margin-bottom: var(--space-1); }
+.radar-page__sub { padding: 0 var(--space-3); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.radar-page__line { margin: 0; font-size: var(--font-size-md); color: var(--color-text-secondary); }
+.radar-page__chips { margin: 0 var(--space-3) var(--space-6); }
+
+@keyframes radar-spin { to { transform: rotate(360deg); } }
+:root:not([data-reduced-motion="true"]) .radar-page .spin { animation: radar-spin 900ms linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .radar-page .spin { animation: none; }
+}
+
+/* Settings: artists with auto-request on. */
+.auto-artists { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: var(--space-2) 0 0; list-style: none; }
+.auto-artists__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+}
+.auto-artists__empty { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }

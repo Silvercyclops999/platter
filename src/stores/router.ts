@@ -28,6 +28,8 @@ export type Route =
   | { name: "recents" }
   /** New releases by followed artists (the top bar's bell). */
   | { name: "whatsNew" }
+  /** New releases on MusicBrainz from followed and most played artists. */
+  | { name: "releaseRadar" }
   /** Lyrics for the playing song: never a page, it opens the expanded view in lyrics mode. */
   | { name: "lyrics" }
   /** A Home shelf's "Show all" grid. */

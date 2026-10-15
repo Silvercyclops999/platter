@@ -72,6 +72,7 @@ import {
   useLidarr,
 } from "./LidarrSettings";
 import { LidarrRequestsList } from "./LidarrRequest";
+import { AUTO_CAP_OPTIONS, AutoArtistsList } from "./AutoRequestDialog";
 import { useTheme } from "../stores/theme";
 import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNote, useThemeFolder } from "./ThemeSettings";
 import { LookCards } from "./looks/LookCards";
@@ -1598,6 +1599,23 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "notifyNewReleases", ids),
     },
     {
+      key: "releaseRadar",
+      section: "Social",
+      group: "Release radar",
+      title: "Release radar",
+      description:
+        "New albums, EPs and singles from artists you follow and play most, looked up on MusicBrainz about once a day, as a shelf on Home and a page. Only their names and MusicBrainz ids are sent.",
+      control: (ids) => toggle(s, "releaseRadar", ids),
+    },
+    {
+      key: "radarNotify",
+      section: "Social",
+      group: "Release radar",
+      title: "Notify me about what the radar finds",
+      description: "A desktop notification when the release radar finds something new. Not during a private session.",
+      control: (ids) => (s?.releaseRadar === false ? null : toggle(s, "radarNotify", ids)),
+    },
+    {
       key: "listenGuestsControl",
       section: "Social",
       group: "Listening sessions",
@@ -1762,6 +1780,32 @@ export function SettingsPage() {
             description:
               "Artist pages list official albums and EPs you don't have, dimmed at the end, with Request. Only while Lidarr's setup check passes. Anything sharing a title with an album in your library, unreleased ones included, is left out.",
             control: (ids) => toggle(s, "showMissingReleases", ids),
+          },
+          {
+            key: "autoRequest",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Auto-request new albums",
+            description:
+              "For artists you turn it on for (from the artist page's menu), new official albums the release radar finds are requested on their own, after the same setup check as any request. Bootlegs, promos and anything sharing a title with an album in your library are never requested. This device only.",
+            control: (ids) => toggle(s, "autoRequest", ids),
+          },
+          {
+            key: "autoRequestCap",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Most automatic requests a day",
+            description: "Albums past the limit wait for the next day. A summary notification says what was requested.",
+            control: (ids) => select(s, (x) => String(x.autoRequestCap ?? 3), AUTO_CAP_OPTIONS, ids, (v) => updateSettings({ autoRequestCap: Number(v) })),
+          },
+          {
+            key: "autoRequestArtists",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Artists with auto-request",
+            description: "Turning one off stops new requests for that artist. Requests already sent stay in Lidarr.",
+            control: () => null,
+            block: () => <AutoArtistsList />,
           },
           {
             key: "lidarrRequests",
