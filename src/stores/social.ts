@@ -162,11 +162,18 @@ export function sessionItems(trackIds: () => string[], play: () => void): MenuIt
   ];
 }
 
+/**
+ * Listening sessions are switched off while their transport is rebuilt to go
+ * through a relay, so participants never connect to each other directly.
+ * Tests switch it on to keep covering the flow.
+ */
+export const listenAlong = { enabled: false };
+
 /** "Start a listening session": plays the item, then hosts. Only while there's no session. */
 export function startSessionItem(play: () => void): MenuItem {
   return {
     label: "Start a listening session",
-    when: () => useSocial.getState().listen.role === "none",
+    when: () => listenAlong.enabled && useSocial.getState().listen.role === "none",
     onSelect: () => {
       play();
       void startSession();

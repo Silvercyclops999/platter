@@ -8,6 +8,10 @@ import type { MockBackend } from "../lib/mock";
 import { useRouter } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { body } from "./rows";
+import { listenAlong } from "../stores/social";
+
+// Sessions are off in the app until the relay transport lands; keep covering them.
+listenAlong.enabled = true;
 
 const mock = backend as MockBackend;
 const [t1, t2] = mock.fx.tracks;

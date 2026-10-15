@@ -8,6 +8,10 @@ import { PlayerBar } from "../shell/PlayerBar";
 import { usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { useUi } from "../stores/ui";
+import { listenAlong } from "../stores/social";
+
+// Sessions are off in the app until the relay transport lands; keep covering them.
+listenAlong.enabled = true;
 
 const mock = backend as MockBackend;
 const [t1] = mock.fx.tracks;

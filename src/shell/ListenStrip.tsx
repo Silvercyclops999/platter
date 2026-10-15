@@ -1,7 +1,7 @@
 import { Link, UsersRound, X } from "lucide-react";
 import { useState } from "react";
 import { Button, IconButton } from "../components/Button";
-import { copyInvite, endSession, startSession, useSocial } from "../stores/social";
+import { copyInvite, endSession, listenAlong, startSession, useSocial } from "../stores/social";
 import "./social.css";
 
 /** "Alex", "Alex and Sam", "Alex, Sam and 2 more". */
@@ -67,7 +67,7 @@ function cardDismissed(): boolean {
 export function SessionCard({ dismissable = false }: { dismissable?: boolean }) {
   const role = useSocial((s) => s.listen.role);
   const [hidden, setHidden] = useState(() => dismissable && cardDismissed());
-  if (role !== "none" || hidden) return null;
+  if (!listenAlong.enabled || role !== "none" || hidden) return null;
   const dismiss = () => {
     setHidden(true);
     try {

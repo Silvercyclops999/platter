@@ -29,6 +29,10 @@ import { openDeepLink } from "../stores/share";
 import { resetSocial, startSocial, useSocial } from "../stores/social";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
+import { listenAlong } from "../stores/social";
+
+// Sessions are off in the app until the relay transport lands; keep covering them.
+listenAlong.enabled = true;
 
 const mock = backend as MockBackend;
 const toasts = () => useToasts.getState().toasts.map((t) => t.message);

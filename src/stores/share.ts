@@ -12,7 +12,7 @@ import { formatDuration } from "../lib/format";
 import type { AppError, DeepLinkOpen, ShareKind } from "../lib/types";
 import { player, usePlayer } from "./player";
 import { nav } from "./router";
-import { joinSession } from "./social";
+import { joinSession, listenAlong } from "./social";
 import { toast, useToasts, type ToastArt } from "./toasts";
 
 export const LINK_COPIED = "Link copied";
@@ -147,6 +147,10 @@ async function songTitle(albumId: string, trackId: string, b: Backend): Promise<
 /** Show what a link points at. */
 export async function openDeepLink(o: DeepLinkOpen, b: Backend = backend): Promise<void> {
   if (o.join) {
+    if (!listenAlong.enabled) {
+      toast.info("Listening sessions are coming back in an update soon.");
+      return;
+    }
     await joinSession(o.join, b);
     return;
   }

@@ -30,6 +30,10 @@ import { usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
+import { listenAlong } from "../stores/social";
+
+// Sessions are off in the app until the relay transport lands; keep covering them.
+listenAlong.enabled = true;
 
 const mock = backend as MockBackend;
 const route = () => useRouter.getState().entries[useRouter.getState().index].route;
