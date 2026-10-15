@@ -237,7 +237,11 @@ never logged.
 Your Plex token is kept in the OS keychain (Windows Credential Manager or
 macOS Keychain). It's never written to a plain file or to the logs. API keys
 and the ListenBrainz token you enter for artist info sources, AirPlay speaker passwords and the Imgur
-client ID are kept the same way.
+client ID are kept the same way. On macOS they all share one keychain item
+(named "vault" under app.platter.player) so the system asks for permission
+at most once. The app data folder holds a small file, keychain-owner.json,
+that lists which keychain items this build has saved again. It holds no
+secrets.
 
 The library cache, artwork cache, search history and listen log live in the
 app's data folder, as do the cover links found for Discord and lyrics found on LRCLIB.

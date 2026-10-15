@@ -1020,3 +1020,26 @@ async fn an_album_plex_missed_gets_the_cover_of_the_release_the_check_found() {
     assert_eq!(r.resolve(&req(false)).await, ArtOutcome::Url(GROUP_COVER.into()));
     assert_eq!(http.calls("musicbrainz.org"), 0);
 }
+
+#[test]
+fn the_pushed_status_leaves_the_imgur_key_unread_until_something_needs_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("d.db")).unwrap();
+    let keys = Arc::new(crate::plex::keychain::CountingStore::default());
+    keys.set(super::art::IMGUR_ACCOUNT, &crate::plex::token::Token::new("cid").unwrap()).unwrap();
+    let r = ArtResolver::new(
+        db,
+        Arc::new(FakeHttp::new()),
+        Arc::new(FakeUpload::default()),
+        Arc::new(Mbids(None, AtomicUsize::new(0))),
+        Arc::new(Covers),
+        keys.clone(),
+    );
+    assert_eq!(r.known_key_state(), None);
+    assert_eq!(keys.total_reads(), 0);
+    // The Settings page asks: one read, then it's known.
+    assert!(r.key_state().saved);
+    assert_eq!(r.known_key_state().map(|k| k.saved), Some(true));
+    assert!(r.key_state().saved);
+    assert_eq!(keys.reads_of(super::art::IMGUR_ACCOUNT), 1);
+}

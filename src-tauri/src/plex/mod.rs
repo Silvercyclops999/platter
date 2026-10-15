@@ -5,6 +5,7 @@
 //! - [`token`]: the `Token` secret type (redacting `Debug`, never displayed).
 //! - [`identity`]: per-install client identifier + `X-Plex-*` headers.
 //! - [`keychain`]: `TokenStore` trait, OS keychain impl, in-memory impl.
+//! - [`keystore`]: the per-run keychain cache and the macOS single-item layout.
 //! - [`auth`]: plex.tv PIN flow, user and resources calls.
 //! - [`discovery`]: server list, connection race (local > remote > relay), disk cache.
 //! - [`client`]: `PlexClient`, the typed Plex Media Server API.
@@ -23,6 +24,7 @@ pub mod health;
 pub mod home;
 pub mod identity;
 pub mod keychain;
+pub mod keystore;
 pub mod notifications;
 pub mod state;
 pub mod token;

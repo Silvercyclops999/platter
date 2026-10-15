@@ -232,6 +232,12 @@ impl ArtResolver {
         k.clone().flatten()
     }
 
+    /// The key state if the key was read already, without reading it.
+    pub fn known_key_state(&self) -> Option<KeyState> {
+        let saved = self.key.lock().as_ref()?.is_some();
+        Some(KeyState { saved, rejected: *self.rejected.lock() })
+    }
+
     pub fn key_state(&self) -> KeyState {
         KeyState { saved: self.key().is_some(), rejected: *self.rejected.lock() }
     }

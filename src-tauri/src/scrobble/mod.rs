@@ -445,6 +445,10 @@ impl Scrobbler {
         let _one = self.inner.sending.lock().await;
         let now = self.now();
         let Ok(mut q) = self.queued() else { return };
+        // Nothing waiting: don't touch the services (and their keychain entries).
+        if q.is_empty() {
+            return;
+        }
         let before = q.len();
         q.retain(|x| now - x.listen.started_at <= QUEUE_MAX_AGE_S);
         for s in self.targets() {

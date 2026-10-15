@@ -1,11 +1,15 @@
 //! Token storage. The real store is the OS keychain (Windows Credential
-//! Manager / macOS Keychain) via `keyring`; tests use [`MemoryStore`].
+//! Manager / macOS Keychain) via `keyring`, behind a per-run cache (see
+//! [`super::keystore`]); tests use [`MemoryStore`].
 //! Tokens never touch disk in plain text and are never logged.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::Mutex;
 
+use super::keystore::{Backend, CachedStore, Layout, Options};
 use super::token::Token;
 use crate::error::{AppError, AppResult};
 
@@ -43,41 +47,134 @@ pub fn profile_account(profile: Option<&str>, account: &str) -> String {
     }
 }
 
-/// OS keychain store.
-#[derive(Debug, Default)]
+/// Where the keychain owner marker goes (the app data folder). Set once at
+/// startup with [`init`]; without it, items are never re-saved.
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// One cache per service, shared by every [`KeyringStore`] in the process,
+/// so an entry is read from the OS at most once a run.
+static SHARED: OnceLock<Mutex<HashMap<String, Arc<CachedStore>>>> = OnceLock::new();
+
+/// Call before the first keychain use.
+pub fn init(data_dir: &Path) {
+    let _ = DATA_DIR.set(data_dir.to_path_buf());
+}
+
+/// The owner marker file.
+pub fn marker_path() -> Option<PathBuf> {
+    DATA_DIR.get().map(|d| d.join("keychain-owner.json"))
+}
+
+/// The build's signing identity on macOS: the team id the release build was
+/// signed with. Unsigned and ad-hoc builds have none.
+pub fn signing_owner() -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    option_env!("APPLE_TEAM_ID").map(str::trim).filter(|t| !t.is_empty()).map(|t| format!("developer-id:{t}"))
+}
+
+/// Accounts older builds saved as items of their own. Others (AirPlay
+/// passwords, ones added later) move into the macOS vault when first read.
+pub fn known_accounts() -> Vec<String> {
+    let mut out: Vec<String> = vec![
+        ACCOUNT_TOKEN.into(),
+        SERVER_TOKEN.into(),
+        crate::smart::prompt::ANTHROPIC_KEY_ACCOUNT.into(),
+        crate::platform::discord::art::IMGUR_ACCOUNT.into(),
+        crate::scrobble::lastfm::KEY_ACCOUNT.into(),
+        crate::scrobble::lastfm::SECRET_ACCOUNT.into(),
+        crate::scrobble::lastfm::SESSION_ACCOUNT.into(),
+        crate::scrobble::listenbrainz::TOKEN_ACCOUNT.into(),
+    ];
+    for s in crate::artistinfo::InfoSource::ALL {
+        if s.takes_key() {
+            out.push(s.key_account().into());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The layout for this OS: one item on macOS, one entry per account elsewhere.
+pub fn os_layout() -> Layout {
+    if cfg!(target_os = "macos") { Layout::Vault } else { Layout::PerAccount }
+}
+
+/// OS keychain store. Every store for the same service shares one cache.
+#[derive(Clone)]
 pub struct KeyringStore {
-    service: String,
+    inner: Arc<CachedStore>,
+    /// The Home user whose entries this store reads (None: the user who
+    /// signed in).
     profile: Option<String>,
+}
+
+impl Default for KeyringStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl KeyringStore {
     /// The app's store, namespaced to this run's Home user.
     pub fn new() -> Self {
-        KeyringStore {
-            service: KEYRING_SERVICE.to_string(),
-            profile: PROFILE.get().cloned().flatten(),
-        }
+        Self::for_profile(PROFILE.get().cloned().flatten().as_deref())
     }
 
     /// A store for one Home user's entries (switching writes the new user's
     /// token there).
     pub fn for_profile(profile: Option<&str>) -> Self {
-        KeyringStore {
-            service: KEYRING_SERVICE.to_string(),
-            profile: profile.map(str::to_string),
-        }
+        KeyringStore { profile: profile.map(str::to_string), ..Self::with_service(KEYRING_SERVICE) }
     }
 
     pub fn with_service(service: &str) -> Self {
-        KeyringStore {
-            service: service.to_string(),
-            profile: None,
-        }
+        let mut all = SHARED.get_or_init(Mutex::default).lock();
+        let inner = all
+            .entry(service.to_string())
+            .or_insert_with(|| {
+                Arc::new(CachedStore::new(
+                    Arc::new(OsKeychain { service: service.to_string() }),
+                    Options {
+                        layout: os_layout(),
+                        legacy: known_accounts(),
+                        owner: signing_owner(),
+                        marker: Arc::new(marker_path),
+                    },
+                ))
+            })
+            .clone();
+        KeyringStore { inner, profile: None }
     }
 
+    fn account(&self, account: &str) -> String {
+        profile_account(self.profile.as_deref(), account)
+    }
+}
+
+impl TokenStore for KeyringStore {
+    fn get(&self, account: &str) -> AppResult<Option<Token>> {
+        self.inner.get(&self.account(account))
+    }
+
+    fn set(&self, account: &str, token: &Token) -> AppResult<()> {
+        self.inner.set(&self.account(account), token)
+    }
+
+    fn delete(&self, account: &str) -> AppResult<()> {
+        self.inner.delete(&self.account(account))
+    }
+}
+
+/// The OS keychain itself, one item per account, through `keyring`.
+struct OsKeychain {
+    service: String,
+}
+
+impl OsKeychain {
     fn entry(&self, account: &str) -> AppResult<keyring::Entry> {
-        let account = profile_account(self.profile.as_deref(), account);
-        keyring::Entry::new(&self.service, &account).map_err(map_keyring)
+        keyring::Entry::new(&self.service, account).map_err(map_keyring)
     }
 }
 
@@ -94,22 +191,20 @@ fn map_keyring(e: keyring::Error) -> AppError {
     AppError::Internal(what.into())
 }
 
-impl TokenStore for KeyringStore {
-    fn get(&self, account: &str) -> AppResult<Option<Token>> {
+impl Backend for OsKeychain {
+    fn read(&self, account: &str) -> AppResult<Option<String>> {
         match self.entry(account)?.get_password() {
-            Ok(s) => Ok(Token::new(s).ok()),
+            Ok(s) => Ok(Some(s)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(map_keyring(e)),
         }
     }
 
-    fn set(&self, account: &str, token: &Token) -> AppResult<()> {
-        self.entry(account)?
-            .set_password(token.expose())
-            .map_err(map_keyring)
+    fn write(&self, account: &str, value: &str) -> AppResult<()> {
+        self.entry(account)?.set_password(value).map_err(map_keyring)
     }
 
-    fn delete(&self, account: &str) -> AppResult<()> {
+    fn remove(&self, account: &str) -> AppResult<()> {
         match self.entry(account)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(map_keyring(e)),
@@ -145,6 +240,42 @@ impl TokenStore for MemoryStore {
     }
 }
 
+/// A store that counts reads per account, for tests that check what's
+/// read and when.
+#[cfg(test)]
+#[derive(Default)]
+pub struct CountingStore {
+    pub inner: MemoryStore,
+    pub reads: Mutex<HashMap<String, usize>>,
+}
+
+#[cfg(test)]
+impl CountingStore {
+    pub fn reads_of(&self, account: &str) -> usize {
+        self.reads.lock().get(account).copied().unwrap_or(0)
+    }
+
+    pub fn total_reads(&self) -> usize {
+        self.reads.lock().values().sum()
+    }
+}
+
+#[cfg(test)]
+impl TokenStore for CountingStore {
+    fn get(&self, account: &str) -> AppResult<Option<Token>> {
+        *self.reads.lock().entry(account.to_string()).or_default() += 1;
+        self.inner.get(account)
+    }
+
+    fn set(&self, account: &str, token: &Token) -> AppResult<()> {
+        self.inner.set(account, token)
+    }
+
+    fn delete(&self, account: &str) -> AppResult<()> {
+        self.inner.delete(account)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,10 +296,30 @@ mod tests {
     }
 
     #[test]
-    fn home_users_get_their_own_keychain_names() {
-        assert_eq!(profile_account(None, ACCOUNT_TOKEN), "plex-token");
-        assert_eq!(profile_account(Some("0a1b2c3d"), ACCOUNT_TOKEN), "u.0a1b2c3d.plex-token");
-        assert_ne!(profile_account(Some("a"), ACCOUNT_TOKEN), profile_account(Some("b"), ACCOUNT_TOKEN));
+    fn every_older_secret_is_known() {
+        let k = known_accounts();
+        for a in [
+            "plex-token",
+            "plex-server-token",
+            "anthropic-api-key",
+            "imgur-client-id",
+            "lastfm-api-key",
+            "lastfm-api-secret",
+            "lastfm-session",
+            "listenbrainz-token",
+            "fanart-api-key",
+            "audiodb-api-key",
+        ] {
+            assert!(k.iter().any(|x| x == a), "{a} missing");
+        }
+        assert!(!k.iter().any(|x| x.ends_with("-unused")));
+    }
+
+    #[test]
+    fn stores_for_one_service_share_a_cache() {
+        let a = KeyringStore::with_service("app.platter.player.share-test");
+        let b = KeyringStore::with_service("app.platter.player.share-test");
+        assert!(Arc::ptr_eq(&a.inner, &b.inner));
     }
 
     #[test]

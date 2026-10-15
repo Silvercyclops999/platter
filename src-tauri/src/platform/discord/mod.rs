@@ -150,7 +150,13 @@ pub trait Library: Send + Sync {
 #[async_trait]
 pub trait CoverArt: Send + Sync {
     async fn resolve(&self, req: &ArtRequest) -> ArtOutcome;
+    /// Reads the keychain the first time.
     fn key_state(&self) -> KeyState;
+    /// The key state without touching the keychain: None until something
+    /// needed the key.
+    fn known_key_state(&self) -> Option<KeyState> {
+        Some(self.key_state())
+    }
 }
 
 #[async_trait]
@@ -160,6 +166,9 @@ impl CoverArt for ArtResolver {
     }
     fn key_state(&self) -> KeyState {
         ArtResolver::key_state(self)
+    }
+    fn known_key_state(&self) -> Option<KeyState> {
+        ArtResolver::known_key_state(self)
     }
 }
 
@@ -224,10 +233,21 @@ impl DiscordHandle {
         DiscordStatus { available: self.available, imgur_key: self.art.key_state(), ..*self.live.lock() }
     }
 
+    /// The status pushed when something changes. It leaves the keychain alone
+    /// (connecting at startup shouldn't read the Imgur key); the Settings
+    /// page asked with [`Self::status`] first, so its key state is known.
+    pub fn pushed_status(&self) -> DiscordStatus {
+        DiscordStatus {
+            available: self.available,
+            imgur_key: self.art.known_key_state().unwrap_or_default(),
+            ..*self.live.lock()
+        }
+    }
+
     /// After the client id changed: a new key clears the upload failure.
     pub fn key_changed(&self) {
         self.live.lock().upload_failed = false;
-        self.sink.changed(&self.status());
+        self.sink.changed(&self.pushed_status());
     }
 }
 
@@ -397,7 +417,7 @@ impl Runner {
             *l != before
         };
         if changed {
-            self.deps.status.changed(&self.handle.status());
+            self.deps.status.changed(&self.handle.pushed_status());
         }
     }
 

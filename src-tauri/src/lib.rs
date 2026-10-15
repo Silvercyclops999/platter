@@ -276,6 +276,7 @@ pub fn run() {
             let (profile, data_dir) = plex::home::startup(&root_dir);
             plex::keychain::set_profile(profile.clone());
             std::fs::create_dir_all(&data_dir)?;
+            plex::keychain::init(&root_dir);
             let audio_dir = cache_dir.join("audio");
 
             let plex = PlexState::new(data_dir.clone())?;

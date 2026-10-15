@@ -285,3 +285,30 @@ async fn a_service_thats_off_gets_nothing() {
     assert!(r.web.bodies("audioscrobbler").is_empty());
     assert_eq!(scrobbles(&r).1.len(), 1);
 }
+
+#[tokio::test]
+async fn nothing_waiting_means_no_keychain_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("s.db")).unwrap();
+    let web = Arc::new(FakeWeb::new());
+    let keys = Arc::new(crate::plex::keychain::CountingStore::default());
+    let lf = Arc::new(Lastfm::new(web.clone(), keys.clone()));
+    let lb = Arc::new(ListenBrainz::new(web.clone(), keys.clone()));
+    let switches = ScrobbleSwitches::default();
+    switches.lastfm.store(true, Ordering::Relaxed);
+    switches.listenbrainz.store(true, Ordering::Relaxed);
+    let s = Scrobbler::new(ScrobbleDeps {
+        db,
+        services: vec![lf, lb],
+        switches,
+        unreleased: Arc::new(Unrel(vec![])),
+        notice: Arc::new(Notices::default()),
+        events: Arc::new(NoEvents),
+        clock: Arc::new(|| NOW),
+    });
+    // The minute timer with an empty queue.
+    for _ in 0..3 {
+        s.replay().await;
+    }
+    assert_eq!(keys.total_reads(), 0);
+}
