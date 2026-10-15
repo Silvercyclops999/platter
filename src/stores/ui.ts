@@ -148,6 +148,9 @@ interface UiState extends PanelWidths {
   /** The keyboard shortcuts window is open. */
   shortcutsOpen: boolean;
   setShortcutsOpen: (v: boolean) => void;
+  /** "Sign out of Plex?" is asking (the app menu, or File on the Mac menu bar). */
+  signOutOpen: boolean;
+  setSignOutOpen: (v: boolean) => void;
   /** Bumped to ask the library's filter field to open and take focus (Ctrl/⌘+F). */
   libraryFilterTick: number;
   focusLibraryFilter: () => void;
@@ -213,6 +216,8 @@ export const useUi = create<UiState>()((set, get) => ({
   paletteOpen: false,
   shortcutsOpen: false,
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  signOutOpen: false,
+  setSignOutOpen: (signOutOpen) => set({ signOutOpen }),
   libraryFilterTick: 0,
   focusLibraryFilter: () => set({ libraryFilterTick: get().libraryFilterTick + 1 }),
   searchFocusTick: 0,

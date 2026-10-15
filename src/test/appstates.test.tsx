@@ -15,7 +15,7 @@ import { OFFLINE_NOTHING_PLAYS, OFFLINE_SEARCH, OFFLINE_SKIPPED, offlineLeftOutM
 import { HomePage } from "../pages/HomePage";
 import { SearchPage } from "../pages/SearchPage";
 import type { Health } from "../lib/types";
-import { agoText, healthBanner, offlineMessage } from "../shell/bannerView";
+import { agoText, healthBanner, offlineCallout } from "../shell/bannerView";
 import { OfflineIndicator } from "../shell/TopBar";
 import { HealthBanner } from "../shell/HealthBanner";
 import { routeBadge, statusInfo } from "../shell/StatusDot";
@@ -69,12 +69,26 @@ describe("banner for each app state", () => {
     expect(v).toEqual({ kind: want.kind, message: want.message, action: want.action });
   });
 
-  it("the offline icon says what's wrong and keeps 'Last seen' current", () => {
-    expect(offlineMessage(h("offline"), NOW + 6 * 60_000)).toBe("Your server is offline. Last seen 10 min ago.");
-    expect(offlineMessage(h("noInternet"), NOW)).toBe("You're offline.");
-    expect(offlineMessage(h("localNetwork"), NOW)).toBe(LOCAL_NETWORK_BLOCKED);
+  it("the offline callout says why for each cause and keeps 'last seen' current", () => {
+    const offline = "Platter is offline.";
+    expect(offlineCallout(h("noInternet"), NOW)).toEqual({ title: offline, body: "Check your connection; it reconnects by itself." });
+    expect(offlineCallout(h("offline"), NOW + 6 * 60_000)).toEqual({
+      title: offline,
+      body: "Can't reach your server (last seen 10 min ago). Platter reconnects by itself.",
+    });
+    expect(offlineCallout({ ...h("offline"), lastSeenAt: null }, NOW)!.body).toBe("Can't reach your server. Platter reconnects by itself.");
+    expect(offlineCallout(h("localNetwork"), NOW)).toEqual({ title: offline, body: LOCAL_NETWORK_BLOCKED });
+    // Chosen by the user: says so, and where to turn it off.
+    expect(offlineCallout(h("goneOffline"), NOW)).toEqual({
+      title: "You chose Go offline.",
+      body: "Only music on this computer plays. Turn it off in your profile menu.",
+    });
+    expect(offlineCallout(h("goneOffline"), NOW, true)!.body).toBe(
+      "Only music on this computer plays. Turn it off in your profile menu, or File › Go Offline.",
+    );
     for (const d of ["local", "remote", "relay", "localNetworkRemote", "signIn", "filesUnavailable"] as HealthDemo[])
-      expect(offlineMessage(h(d), NOW), d).toBeNull();
+      expect(offlineCallout(h(d), NOW), d).toBeNull();
+    expect(offlineCallout(null)).toBeNull();
     expect(LOCAL_NETWORK_BLOCKED).toBe(
       "macOS is blocking Platter from your home network. Open System Settings, Privacy & Security, Local Network, and turn on Platter.",
     );
@@ -116,18 +130,65 @@ describe("HealthBanner component", () => {
     expect(within(dlg).getAllByText(/Add Library/).length).toBeGreaterThan(0);
   });
 
-  it("plain offline shows a top bar icon, not a banner, and it leaves on reconnect", async () => {
+  it("plain offline shows a top bar button, not a banner, and it leaves on reconnect", async () => {
     const user = userEvent.setup();
-    act(() => useApp.setState({ health: demoHealth("offline", SERVER) }));
+    act(() => useApp.setState({ health: demoHealth("noInternet", SERVER) }));
     const { container } = render(<HealthBanner />);
     expect(container).toBeEmptyDOMElement();
     render(<OfflineIndicator />);
-    const icon = screen.getByTestId("offline-indicator");
-    expect(icon).toHaveAccessibleName(/^Offline\. Your server is offline\. Last seen \d+ min ago\.$/);
-    await user.hover(icon);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(/Your server is offline/);
+    const button = screen.getByRole("button", { name: "You're offline" });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    // No tooltip.
+    await user.hover(button);
+    await new Promise((r) => setTimeout(r, 700));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    // A click opens the callout and does nothing else.
+    await user.click(button);
+    const callout = screen.getByRole("dialog", { name: "Platter is offline." });
+    expect(callout).toHaveTextContent("Check your connection; it reconnects by itself.");
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    // Reconnecting takes the button and the open callout away.
     act(() => useApp.setState({ health: demoHealth("local", SERVER) }));
     expect(screen.queryByTestId("offline-indicator")).toBeNull();
+    expect(screen.queryByTestId("offline-callout")).toBeNull();
+    // Offline again: the callout starts closed.
+    act(() => useApp.setState({ health: demoHealth("noInternet", SERVER) }));
+    expect(screen.getByTestId("offline-indicator")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("the offline callout closes on the button, a click elsewhere, or Escape", async () => {
+    const user = userEvent.setup();
+    act(() => useApp.setState({ health: demoHealth("offline", SERVER) }));
+    render(
+      <>
+        <OfflineIndicator />
+        <p>elsewhere</p>
+      </>,
+    );
+    const button = screen.getByTestId("offline-indicator");
+    await user.click(button);
+    expect(screen.getByTestId("offline-callout")).toHaveTextContent(/Can't reach your server/);
+    // Clicking inside keeps it.
+    await user.click(screen.getByTestId("offline-callout"));
+    expect(screen.getByTestId("offline-callout")).toBeInTheDocument();
+    await user.click(button);
+    expect(screen.queryByTestId("offline-callout")).toBeNull();
+    await user.click(button);
+    await user.click(screen.getByText("elsewhere"));
+    expect(screen.queryByTestId("offline-callout")).toBeNull();
+    await user.click(button);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("offline-callout")).toBeNull();
+    expect(button).toHaveFocus();
+  });
+
+  it("Go offline: the callout says it was chosen and where to turn it off", async () => {
+    const user = userEvent.setup();
+    act(() => useApp.setState({ health: demoHealth("goneOffline", SERVER) }));
+    render(<OfflineIndicator />);
+    await user.click(screen.getByRole("button", { name: "You're offline" }));
+    const callout = screen.getByRole("dialog", { name: "You chose Go offline." });
+    expect(callout).toHaveTextContent("Turn it off in your profile menu");
   });
 
   it("macOS blocking the home network: banner with a button to the settings", async () => {

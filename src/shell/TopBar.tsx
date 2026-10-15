@@ -1,17 +1,17 @@
 import { Bell, Check, ChevronLeft, ChevronRight, Copy, House, Minus, Square, UsersRound, WifiOff, X } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Tooltip } from "../components/Tooltip";
 import { artUrl, backend } from "../lib/backend";
-import { chrome, modKey } from "../lib/platform";
+import { chrome, modKey, platform } from "../lib/platform";
 import { useApp } from "../stores/app";
 import { miniplayer, useMiniplayer } from "../stores/miniplayer";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { createPlaylist } from "../stores/playlists";
 import { toast, useToasts } from "../stores/toasts";
-import { offlineMessage } from "./bannerView";
+import { offlineCallout } from "./bannerView";
 import { useUi } from "../stores/ui";
 import { useSocial } from "../stores/social";
 import "./social.css";
@@ -147,7 +147,8 @@ export function AppMenu() {
   const goOffline = useSettings((s) => !!s.settings?.goOffline);
   const miniOpen = useMiniplayer((s) => s.open);
   const [open, setOpen] = useState(false);
-  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const confirmSignOut = useUi((s) => s.signOutOpen);
+  const setConfirmSignOut = useUi((s) => s.setSignOutOpen);
   const homeUsers = useHomeUsers(open).users;
   const [pinFor, setPinFor] = useState<HomeUser | null>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -314,28 +315,73 @@ export function AppMenu() {
 }
 
 /**
- * A small offline icon while the server can't be reached; its tooltip says
- * what's wrong. It goes away by itself on reconnect.
+ * A small round offline button while the server can't be reached. It has no
+ * tooltip: a click opens a callout under it saying why and what to do, and
+ * nothing else. A click elsewhere, the button again, or Escape closes it.
+ * Button and callout go away by themselves on reconnect.
  */
 export function OfflineIndicator() {
   const health = useApp((s) => s.health);
   const [now, setNow] = useState(() => Date.now());
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const id = useId();
   const offline = health?.status === "offline";
-  // Keep "Last seen N min ago" current.
+  // Keep "last seen N min ago" current.
   useEffect(() => {
-    if (!offline) return;
+    if (!offline) {
+      setOpen(false);
+      return;
+    }
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, [offline]);
-  const message = offlineMessage(health, now);
-  if (!message) return null;
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      button.current?.focus();
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
+  const callout = offlineCallout(health, now, platform === "mac");
+  if (!callout) return null;
   return (
-    <Tooltip label={message} placement="bottom" wrap>
-      <span className="topbar__offline" role="img" aria-label={`Offline. ${message}`} tabIndex={0} data-testid="offline-indicator">
+    <div className="topbar__offline-wrap" ref={wrap}>
+      <button
+        ref={button}
+        type="button"
+        className="topbar__offline"
+        aria-label="You're offline"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        data-testid="offline-indicator"
+        onClick={() => setOpen((o) => !o)}
+      >
         <WifiOff size={16} strokeWidth={2.25} aria-hidden="true" />
-      </span>
-    </Tooltip>
+      </button>
+      {open && (
+        <div id={id} className="offline-callout" role="dialog" aria-labelledby={`${id}-title`} data-testid="offline-callout">
+          <p id={`${id}-title`} className="offline-callout__title">
+            {callout.title}
+          </p>
+          <p className="offline-callout__body">{callout.body}</p>
+        </div>
+      )}
+    </div>
   );
 }
 

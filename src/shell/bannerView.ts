@@ -3,7 +3,7 @@
  * core decides the state and the wording (Health.banner); this maps it to a
  * tone and an action button, keeps "Last seen N min ago" current, and shows
  * library scan progress when nothing else needs saying. Plain offline has
- * no banner: a small icon in the top bar says it (`offlineMessage`).
+ * no banner: a small button in the top bar says it (`offlineCallout`).
  */
 import type { BannerKind } from "../components/Banner";
 import type { Health } from "../lib/types";
@@ -59,13 +59,30 @@ function messageOf(h: Health, now: number): string {
   return b.message;
 }
 
+export interface OfflineCallout {
+  title: string;
+  body: string;
+}
+
 /**
- * What the top bar's offline icon says (its tooltip), or null while the
- * server can be reached. Shown for every offline state, banner or not.
+ * What the callout under the top bar's offline button says, or null while
+ * the server can be reached (the button goes away). Shown for every offline
+ * state, banner or not. `mac` adds the menu bar route for Go offline.
  */
-export function offlineMessage(h: Health | null, now: number = Date.now()): string | null {
+export function offlineCallout(h: Health | null, now: number = Date.now(), mac = false): OfflineCallout | null {
   if (!h || h.status !== "offline") return null;
-  return h.banner ? messageOf(h, now) : "Can't reach your server right now.";
+  const kind = h.banner?.kind;
+  if (kind === "goneOffline") {
+    const where = mac ? "your profile menu, or File › Go Offline" : "your profile menu";
+    return { title: "You chose Go offline.", body: `Only music on this computer plays. Turn it off in ${where}.` };
+  }
+  const title = "Platter is offline.";
+  if (kind === "localNetwork") return { title, body: h.banner!.message };
+  if (kind === "offline") {
+    const seen = h.lastSeenAt ? ` (last seen ${agoText(now - h.lastSeenAt)})` : "";
+    return { title, body: `Can't reach your server${seen}. Platter reconnects by itself.` };
+  }
+  return { title, body: "Check your connection; it reconnects by itself." };
 }
 
 export function healthBanner(h: Health | null, now: number = Date.now()): BannerView | null {
