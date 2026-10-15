@@ -1192,7 +1192,7 @@ the same events.
 
 ## Lidarr
 
-Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` settings. The API key and any extra proxy headers are in the OS keychain and never cross back to the UI. Everything here only reads from Lidarr: every request is a GET.
+Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` settings. The API key and any extra proxy headers are in the OS keychain and never cross back to the UI. The check only reads from Lidarr. Requests send exactly three kinds of write: `POST /api/v1/artist` (monitored, but with `monitorNewItems` and `addOptions.monitor` set to `none` and no search), `PUT /api/v1/album/monitor` and `POST /api/v1/command` with `AlbumSearch`. Before any of them the release group is checked on MusicBrainz again and the whole setup check runs again; a red finding stops the request.
 
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1201,10 +1201,21 @@ Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` setting
 | `lidarr_headers_set` | `{ text: string \| null }` (`Name: value` lines; blank removes) | the same; `invalid` for a bad line, a reserved header or more than 5 |
 | `lidarr_check` | – | `LidarrReport`, or `network` (unreachable), `auth` (key refused), `invalid` (too old, not Lidarr, not set up), `decode` |
 | `lidarr_confirm_root` | `{ path, confirmed }` | – (the user says an empty root folder is separate from the Plex music folder) |
+| `lidarr_pick` | `{ artist, artistId?, title, song: boolean, isrc? }` | `{ group: { id, title, primary, secondary, firstRelease }\|null, artist, refusal, reason }`: the release group to request for an album or song, or why there is none |
+| `lidarr_request_preview` | `{ input: LidarrRequestInput }` | `LidarrPreview`; reads only. `invalid` for a red check, a refused release group (bootleg, promo, someone else's, a title already in the library) or "Lidarr doesn't know this album"; `server` when Lidarr's metadata service is down |
+| `lidarr_request` | `{ input: LidarrRequestInput }` | `LidarrRequest`. Kept waiting (`state: "queued"`) when Lidarr can't be reached; the first request ever needs `typed` to be the album's name |
+| `lidarr_requests` | `{ refresh: boolean }` | `LidarrRequest[]`, newest first; `refresh` reads their state from Lidarr's queue and history |
+| `lidarr_request_cancel` | `{ id }` | `LidarrRequest[]`; only waiting or finished requests, else `invalid` |
+| `lidarr_missing_releases` | `{ artistId, artist }` | `{ shown, items: { releaseGroupId, title, kind: "album"\|"ep", year, request }[] }`; `shown` is false unless the setting is on, Lidarr is set up and its last check passed |
 
 `LidarrReport = { version, findings: { id, level: "red"|"amber"|"ok", title, detail, fix: string|null, emptyRoot: { path, confirmed }|null }[], passed, checkedAt, route: "home"|"away"|null }`.
 Findings come red first, then amber, then OK. `passed` is false while any finding is red.
 The home address is tried first (for 4 seconds when an away address is set), then the away address.
+
+`LidarrRequestInput = { releaseGroupId, title, artist, artistId?, typed? }`.
+`LidarrPreview = { releaseGroupId, title, artist, destination, destinationIsGuess, needsTyped, existing, reachable, route, addsArtist }`.
+`LidarrRequest = { id, releaseGroupId, title, artist, artistId, state, destination, lidarrAlbumId, addedArtist, alreadyInLidarr, createdAt, updatedAt, message, notes }`, with `state` one of `queued`, `requested`, `searching`, `downloading`, `imported`, `failed`.
+Requests are kept on this device. Waiting ones are retried every 5 minutes in the background, full check first.
 
 ## Sync, folders and keys
 
