@@ -14,6 +14,8 @@ import { useLoad } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
 import type { Album, Artist, ArtistPage as ArtistPageData, ArtistPageSection } from "../lib/types";
 import { usePins } from "../stores/pins";
+import { setFollow, useSocial } from "../stores/social";
+import "../shell/social.css";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
@@ -229,6 +231,8 @@ function ActionRow({
   const togglePin = () =>
     artist && usePins.getState().toggle({ kind: "artist", id: artist.id, title: artist.title, subtitle: "Artist", thumb: artist.thumb });
   const name = artist?.title ?? "artist";
+  const following = useSocial((s) => s.followIds.has(id));
+  const toggleFollow = () => artist && void setFollow({ id, title: artist.title, thumb: artist.thumb }, !following);
   return (
     <div className="action-row">
       <IconButton
@@ -246,6 +250,16 @@ function ActionRow({
         icon={<Shuffle size={22} />}
         onClick={() => player.setContextShuffle(id, !shuffle)}
       />
+      <button
+        type="button"
+        className="follow-pill"
+        aria-pressed={following}
+        aria-label={following ? `Following ${name}` : `Follow ${name}`}
+        disabled={!artist}
+        onClick={toggleFollow}
+      >
+        {following ? "Following" : "Follow"}
+      </button>
       <Button
         size="sm"
         className="artist-pin"
@@ -267,6 +281,7 @@ function ActionRow({
           openContextMenu(
             `Options for ${artist.title}`,
             [
+              { label: following ? "Unfollow" : "Follow", onSelect: toggleFollow },
               { label: "Add popular songs to queue", onSelect: () => void player.addToQueue(data!.popular, artist.thumb) },
               { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${artist.id}` }) },
               ...(credited ? [] : [shareItem("artist", artist.id, artist.thumb)]),

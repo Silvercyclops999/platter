@@ -136,6 +136,10 @@ interface UiState extends PanelWidths {
   outputReturn: "queue" | "nowPlaying" | null;
   toggleOutput: () => void;
   setOutputOpen: (v: boolean) => void;
+  /** The right slot shows friend activity. */
+  activityOpen: boolean;
+  toggleActivity: () => void;
+  setActivityOpen: (v: boolean) => void;
   nowPlayingPrefs: NowPlayingPrefs;
   toggleNowPlaying: () => void;
   setNowPlayingOpen: (v: boolean) => void;
@@ -183,20 +187,24 @@ export const useUi = create<UiState>()((set, get) => ({
   nowPlayingPrefs: loadNowPlayingPrefs(),
   outputOpen: false,
   outputReturn: null,
+  activityOpen: false,
+  toggleActivity: () => get().setActivityOpen(!get().activityOpen),
+  setActivityOpen: (v) =>
+    set(v ? { activityOpen: true, queueOpen: false, nowPlayingOpen: false, outputOpen: false, outputReturn: null } : { activityOpen: false }),
   toggleOutput: () => get().setOutputOpen(!get().outputOpen),
   setOutputOpen: (v) => {
     const s = get();
     if (v === s.outputOpen) return;
     if (v) {
       const outputReturn = s.queueOpen ? "queue" : s.nowPlayingOpen ? "nowPlaying" : null;
-      set({ outputOpen: true, outputReturn, queueOpen: false, nowPlayingOpen: false });
+      set({ outputOpen: true, outputReturn, queueOpen: false, nowPlayingOpen: false, activityOpen: false });
     } else {
       set({ outputOpen: false, outputReturn: null, queueOpen: s.outputReturn === "queue", nowPlayingOpen: s.outputReturn === "nowPlaying" });
     }
   },
   toggleNowPlaying: () => get().setNowPlayingOpen(!get().nowPlayingOpen),
   setNowPlayingOpen: (v) =>
-    set(v ? { nowPlayingOpen: true, queueOpen: false, outputOpen: false, outputReturn: null } : { nowPlayingOpen: false }),
+    set(v ? { nowPlayingOpen: true, queueOpen: false, outputOpen: false, outputReturn: null, activityOpen: false } : { nowPlayingOpen: false }),
   setNowPlayingPrefs: (p) => {
     const nowPlayingPrefs = { ...get().nowPlayingPrefs, ...p };
     set({ nowPlayingPrefs });
@@ -221,7 +229,7 @@ export const useUi = create<UiState>()((set, get) => ({
   toggleQueue: () => get().setQueueOpen(!get().queueOpen),
   // The queue takes the right slot from the now-playing panel.
   setQueueOpen: (v) =>
-    set(v ? { queueOpen: true, nowPlayingOpen: false, outputOpen: false, outputReturn: null } : { queueOpen: false }),
+    set(v ? { queueOpen: true, nowPlayingOpen: false, outputOpen: false, outputReturn: null, activityOpen: false } : { queueOpen: false }),
   setPaletteOpen: (v) => set({ paletteOpen: v }),
   focusSearch: () => set({ searchFocusTick: get().searchFocusTick + 1 }),
   openMenu: (m) =>

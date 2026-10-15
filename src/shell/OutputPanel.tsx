@@ -9,6 +9,7 @@ import { usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { ListenOn, RemoteCurrent } from "./ListenOn";
+import { SessionCard } from "./ListenStrip";
 import { streamQuality } from "./streamQuality";
 import "./output.css";
 
@@ -152,6 +153,7 @@ export function OutputPanel() {
                 </ul>
               )}
             </section>
+            {!remote && <SessionCard />}
           </>
         )}
       </div>

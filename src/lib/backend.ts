@@ -76,6 +76,10 @@ import type {
   TranscribeStatus,
   QueueAt,
   Track,
+  ActivityPanel,
+  FollowedArtist,
+  WhatsNew,
+  ListenView,
 } from "./types";
 
 export type Unlisten = () => void;
@@ -314,6 +318,25 @@ export interface Backend {
   /** Pick a new folder (the files move there); null when cancelled. */
   downloadsChooseFolder(): Promise<string | null>;
 
+  // Social (docs/IPC.md "Friend activity, following and listening sessions")
+  /** Who else on the server listened lately (owner only). `fresh` skips the 20 s cache. */
+  friendActivity(fresh?: boolean): Promise<ActivityPanel>;
+  followsList(): Promise<FollowedArtist[]>;
+  /** Follow or unfollow an artist (library or credited); resolves to the whole list. */
+  followSet(artist: { id: string; title: string; thumb?: string | null }, on: boolean): Promise<FollowedArtist[]>;
+  whatsNew(): Promise<WhatsNew>;
+  /** What's New was seen: its items stop being new. */
+  whatsNewSeen(): Promise<void>;
+  listenState(): Promise<ListenView>;
+  /** Host a listening session; the view carries the invite link. */
+  listenStart(): Promise<ListenView>;
+  /** End the session you host, or leave the one you're in. */
+  listenStop(): Promise<void>;
+  /** Join from an invite link. */
+  listenJoin(link: string): Promise<ListenView>;
+  /** Add songs to the session's queue (a guest's go to the host). */
+  listenAdd(trackIds: string[]): Promise<void>;
+
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
 
@@ -467,6 +490,16 @@ export function createTauriBackend(): Backend {
     downloadsRetry: (kind, id) => call("downloads_retry", { kind: kind ?? null, id: id ?? null }),
     downloadsRemoveAll: () => call("downloads_remove_all"),
     downloadsChooseFolder: () => call("downloads_choose_folder"),
+    friendActivity: (fresh) => call("friend_activity", { fresh: fresh ?? null }),
+    followsList: () => call("follows_list"),
+    followSet: (artist, on) => call("follow_set", { id: artist.id, title: artist.title, thumb: artist.thumb ?? null, on }),
+    whatsNew: () => call("whats_new"),
+    whatsNewSeen: () => call("whats_new_seen"),
+    listenState: () => call("listen_state"),
+    listenStart: () => call("listen_start"),
+    listenStop: () => call("listen_stop"),
+    listenJoin: (link) => call("listen_join", { link }),
+    listenAdd: (trackIds) => call("listen_add", { trackIds }),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

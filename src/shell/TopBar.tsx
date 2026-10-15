@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, Copy, House, Minus, Square, WifiOff, X } from "lucide-react";
+import { Bell, Check, ChevronLeft, ChevronRight, Copy, House, Minus, Square, UsersRound, WifiOff, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -12,6 +12,8 @@ import { createPlaylist } from "../stores/playlists";
 import { toast, useToasts } from "../stores/toasts";
 import { offlineMessage } from "./bannerView";
 import { useUi } from "../stores/ui";
+import { useSocial } from "../stores/social";
+import "./social.css";
 import { Logo } from "./Logo";
 import { shortcutLabel } from "./shortcuts";
 import { SearchBox } from "./SearchBox";
@@ -110,7 +112,7 @@ function checkForUpdates() {
  * fallback (the username's first letter), which shows while the picture
  * loads or when it fails.
  */
-function AvatarFace({ path, size, fallback, className }: { path: string | null; size: number; fallback: ReactNode; className: string }) {
+export function AvatarFace({ path, size, fallback, className }: { path: string | null; size: number; fallback: ReactNode; className: string }) {
   const src = artUrl(path, size);
   const [loaded, setLoaded] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -318,6 +320,48 @@ export function OfflineIndicator() {
   );
 }
 
+/** The bell: opens What's New, with a dot for unseen releases. */
+export function WhatsNewButton() {
+  const on = useCurrentEntry().route.name === "whatsNew";
+  const announce = useSettings((s) => s.settings?.whatsNewAnnouncements !== false);
+  const unseen = useSocial((s) => s.unseen);
+  const dot = announce && unseen > 0;
+  return (
+    <Tooltip label="What's New" placement="bottom">
+      <button
+        type="button"
+        className={`topbar__social ${on ? "is-active" : ""}`}
+        aria-label={dot ? `What's New, ${unseen} new` : "What's New"}
+        aria-current={on ? "page" : undefined}
+        onClick={() => nav.go({ name: "whatsNew" })}
+      >
+        <Bell size={18} aria-hidden="true" fill={on ? "currentColor" : "none"} />
+        {dot && <span className="topbar__dot" data-testid="whats-new-dot" aria-hidden="true" />}
+      </button>
+    </Tooltip>
+  );
+}
+
+/** Two people: shows or hides friend activity in the right panel. */
+export function FriendActivityButton() {
+  const shown = useSettings((s) => s.settings?.showFriendActivity !== false);
+  const open = useUi((s) => s.activityOpen);
+  if (!shown) return null;
+  return (
+    <Tooltip label="Friend activity" placement="bottom">
+      <button
+        type="button"
+        className={`topbar__social ${open ? "is-active" : ""}`}
+        aria-label="Friend activity"
+        aria-pressed={open}
+        onClick={() => useUi.getState().toggleActivity()}
+      >
+        <UsersRound size={18} aria-hidden="true" />
+      </button>
+    </Tooltip>
+  );
+}
+
 /**
  * The top bar, which is also the window's drag area: back and forward on the
  * left, Home and the search pill centred on the window, the app menu on the
@@ -374,6 +418,8 @@ export function TopBar() {
       </div>
       <div className="topbar__end" data-tauri-drag-region>
         <OfflineIndicator />
+        <WhatsNewButton />
+        <FriendActivityButton />
         <AppMenu />
         {chrome === "windows" && <WindowControls />}
       </div>

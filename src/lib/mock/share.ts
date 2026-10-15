@@ -96,7 +96,8 @@ export class MockShare {
   /** Read a platter:// link like the core does (enough for the demo). */
   resolve(raw: string): DeepLinkOpen {
     const none = (status: DeepLinkOpen["status"]): DeepLinkOpen => ({ status, kind: null, id: null, albumId: null, atSeconds: null });
-    const m = /^platter:\/\/(song|track|album|artist|playlist)\/([A-Za-z0-9_-]{1,64})\/?(?:\?(.*))?$/i.exec(raw.trim());
+    if (/^platter:\/\/join\/[0-9a-f]{16}\?/i.test(raw.trim())) return { ...none("open"), join: raw.trim() };
+    const m =/^platter:\/\/(song|track|album|artist|playlist)\/([A-Za-z0-9_-]{1,64})\/?(?:\?(.*))?$/i.exec(raw.trim());
     if (!m) return none("invalid");
     const kind: ShareKind = m[1].toLowerCase() === "song" || m[1].toLowerCase() === "track" ? "track" : (m[1].toLowerCase() as ShareKind);
     const id = m[2];

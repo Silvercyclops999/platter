@@ -90,6 +90,7 @@ import { MockFileTags } from "./fileTags";
 import { MockTranscribe } from "./transcribe";
 import { MockDownloads } from "./downloads";
 import { MockMixes } from "./mixes";
+import { MockSocial } from "./social";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -202,6 +203,8 @@ export class MockBackend implements Backend {
   /** Smart shuffle and smooth transitions (player state). */
   private smartShuffle = false;
   private smoothFor: string | null = null;
+  /** Friend activity, follows, What's New, listening sessions (test hooks: access, guestJoins, hostGone, hostEnds, addRelease). */
+  readonly social: MockSocial;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -338,6 +341,14 @@ export class MockBackend implements Backend {
         this.downloads.usedOffset = 1024 ** 3;
       }
     }
+    this.social = new MockSocial(this.fx, {
+      settings: () => this.settings,
+      emitFollows: (all) => this.emit("follows://changed", all),
+      emitBadge: (unseen) => this.emit("whatsnew://changed", { unseen: this.settings.whatsNewAnnouncements ? unseen : 0 }),
+      emitListen: (v) => this.emit("listen://state", v),
+      later: (ms, fn) => this.later(ms, fn),
+      queueAdd: (ids) => void this.queueAdd(ids, "end"),
+    });
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
     this.remote = new MockRemote(
@@ -1928,6 +1939,39 @@ export class MockBackend implements Backend {
   sharePublicLink(kind: ShareKind, id: string) {
     return this.delay(() => this.share.publicLink(kind, id));
   }
+  // ---------------------------------------------------------------- social
+
+  friendActivity(_fresh?: boolean) {
+    return this.delay(() => this.social.activity());
+  }
+  followsList() {
+    return this.delay(() => this.social.list());
+  }
+  followSet(artist: { id: string; title: string; thumb?: string | null }, on: boolean) {
+    return this.delay(() => this.social.set(artist, on));
+  }
+  whatsNew() {
+    return this.delay(() => this.social.whatsNew());
+  }
+  whatsNewSeen() {
+    return this.delay(() => this.social.markSeen());
+  }
+  listenState() {
+    return this.delay(() => this.social.listenState());
+  }
+  listenStart() {
+    return this.delay(() => this.social.start());
+  }
+  listenStop() {
+    return this.delay(() => this.social.stop());
+  }
+  listenJoin(link: string) {
+    return this.delay(() => this.social.join(link));
+  }
+  listenAdd(trackIds: string[]) {
+    return this.delay(() => this.social.add(trackIds));
+  }
+
   deepLinkTake() {
     return this.delay(() => this.share.take());
   }

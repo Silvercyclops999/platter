@@ -9,6 +9,7 @@ import type { QueueItem, Track } from "../lib/types";
 import { dragLeft, dropOnQueue, isSongDrag, useDrag } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
 import { useUi } from "../stores/ui";
+import { SessionCard } from "./ListenStrip";
 
 type Tab = "queue" | "history";
 
@@ -239,6 +240,7 @@ export function QueuePanel() {
               )}
             </section>
 
+            {queue?.current && <SessionCard dismissable />}
             {queue && queue.userQueue.length === 0 && insertAt !== null && <div className="queue-drop-line" aria-hidden="true" />}
             {queue && queue.userQueue.length > 0 && (
               <section className="queue-section" aria-labelledby="q-user">

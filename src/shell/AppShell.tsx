@@ -36,6 +36,9 @@ import { NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
 import { OutputPanel } from "./OutputPanel";
 import { PlayerBar } from "./PlayerBar";
 import { RemoteStrip } from "./RemoteStrip";
+import { ListenStrip } from "./ListenStrip";
+import { FriendActivityPanel } from "./FriendActivityPanel";
+import { startSocial } from "../stores/social";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
@@ -62,11 +65,13 @@ export function AppShell() {
   useEffect(() => void loadOwnLyricsIds(), []);
   useEffect(() => void startTranscribe(), []);
   useEffect(() => void startDownloads(), []);
+  useEffect(() => void startSocial(), []);
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
-  // The queue, the now-playing panel and the output picker share the right slot, one at a time.
-  const rightView = outputOpen ? "output" : queueOpen ? "queue" : nowPlayingOpen ? "nowPlaying" : null;
+  const activityOpen = useUi((s) => s.activityOpen);
+  // The queue, the now-playing panel, the output picker and friend activity share the right slot, one at a time.
+  const rightView = outputOpen ? "output" : activityOpen ? "activity" : queueOpen ? "queue" : nowPlayingOpen ? "nowPlaying" : null;
   const rightOpen = rightView !== null;
   // One panel replacing the other rises in place of sliding in from the edge.
   const [slot, setSlot] = useState<{ view: typeof rightView; swap: boolean }>({ view: rightView, swap: false });
@@ -157,7 +162,7 @@ export function AppShell() {
           <>
             <ResizeHandle
               className="resize-handle--right"
-              label={outputOpen ? "Resize device picker" : queueOpen ? "Resize queue" : "Resize now playing view"}
+              label={outputOpen ? "Resize device picker" : activityOpen ? "Resize listening activity" : queueOpen ? "Resize queue" : "Resize now playing view"}
               value={layout.right}
               min={RIGHT_MIN}
               max={RIGHT_MAX}
@@ -170,7 +175,7 @@ export function AppShell() {
                 return true;
               }}
             />
-            {outputOpen ? <OutputPanel /> : queueOpen ? <QueuePanel /> : <NowPlayingPanel />}
+            {outputOpen ? <OutputPanel /> : activityOpen ? <FriendActivityPanel /> : queueOpen ? <QueuePanel /> : <NowPlayingPanel />}
           </>
         ) : (
           <div className="right-strip">
@@ -183,6 +188,7 @@ export function AppShell() {
         )}
       </div>
       <RemoteStrip />
+      <ListenStrip />
       <PlayerBar />
       <CommandPalette />
       <ShortcutsHelp />

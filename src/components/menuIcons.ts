@@ -22,6 +22,9 @@ import {
   Captions,
   Trash2,
   UserRound,
+  UserCheck,
+  UserPlus,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,6 +38,10 @@ const RULES: [RegExp, LucideIcon][] = [
   [/^Add (popular songs )?to queue$/, ListEnd],
   [/^Remove from queue$/, ListMinus],
   [/^Add to (other )?playlist$/, ListPlus],
+  [/^Add to the session's queue$/, ListEnd],
+  [/^Start a listening session$/, UsersRound],
+  [/^Follow$/, UserPlus],
+  [/^Unfollow$/, UserCheck],
   [/^Remove from this playlist$/, CircleMinus],
   [/^Add to Liked Songs$/, Heart],
   [/^Remove from Liked Songs$/, HeartOff],

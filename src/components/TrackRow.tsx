@@ -37,6 +37,7 @@ import { SaveButton } from "./SaveButton";
 import { DownloadedMark } from "./DownloadButton";
 import { useIsDownloaded } from "../stores/downloads";
 import { shareItem } from "./ShareMenu";
+import { sessionItems } from "../stores/social";
 import { Skeleton } from "./Skeleton";
 
 /** Whether the album page for `albumId` is the one showing. */
@@ -87,6 +88,7 @@ export function trackMenuItems(
     ...(extra.afterPlaylist ?? []),
     { label: "Add to queue", onSelect: () => void player.addToQueue([track]) },
     ...(extra.afterQueue ?? []),
+    ...sessionItems(() => [track.id], () => void player.playTracks([track.id], track.id)),
     ...goToArtistItems(track),
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
     { label: "Go to song radio", onSelect: () => nav.go({ name: "radio", seed: `track:${track.id}` }) },

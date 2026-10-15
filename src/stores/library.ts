@@ -9,16 +9,16 @@ import type { LibraryItem } from "../lib/types";
 
 export type LibKind = "playlist" | "album" | "artist";
 export type LibFilter = LibKind | "all";
-/** Playlist sub-chips: regular Plex playlists, or smart ones. */
-export type LibSub = "byYou" | "smart";
+/** Sub-chips: regular or smart playlists; followed artists. */
+export type LibSub = "byYou" | "smart" | "followed";
 export type LibSort = "recents" | "added" | "alpha" | "creator" | "custom";
 export type LibView = "list" | "compactList" | "compactGrid" | "grid";
 
 export const LIB_KINDS: LibKind[] = ["playlist", "album", "artist"];
 export const LIB_VIEWS: LibView[] = ["compactList", "list", "compactGrid", "grid"];
 export const KIND_LABEL: Record<LibKind, string> = { playlist: "Playlists", album: "Albums", artist: "Artists" };
-export const SUB_LABEL: Record<LibSub, string> = { byYou: "By you", smart: "Smart" };
-export const SUB_CHIPS: Record<LibKind, LibSub[]> = { playlist: ["byYou", "smart"], album: [], artist: [] };
+export const SUB_LABEL: Record<LibSub, string> = { byYou: "By you", smart: "Smart", followed: "Followed" };
+export const SUB_CHIPS: Record<LibKind, LibSub[]> = { playlist: ["byYou", "smart"], album: [], artist: ["followed"] };
 export const SORT_LABEL: Record<LibSort, string> = {
   recents: "Recents",
   added: "Recently added",
@@ -231,6 +231,8 @@ export interface LibEntry {
   liked?: boolean;
   /** Kept on this computer (downloads). */
   downloaded?: boolean;
+  /** An artist you follow. */
+  followed?: boolean;
 }
 
 /** Library items as rows. Playlists are the signed-in user's own, so they're the creator. */
@@ -327,10 +329,10 @@ export function recentAt(e: LibEntry, recents: Record<string, number>): number {
  * search text.
  */
 export function libraryEntries(items: LibEntry[], opts: EntryOpts): LibEntry[] {
-  const sub = opts.filter === "playlist" ? (opts.sub ?? null) : null;
+  const sub = opts.filter !== "all" && opts.sub && SUB_CHIPS[opts.filter].includes(opts.sub) ? opts.sub : null;
   const keep = (e: LibEntry) =>
     (opts.filter === "all" || e.kind === opts.filter) &&
-    (sub === null || (sub === "smart" ? e.smart : !e.smart)) &&
+    (sub === null || (sub === "followed" ? !!e.followed : sub === "smart" ? e.smart : !e.smart)) &&
     (!opts.downloadedOnly || !!e.downloaded) &&
     matchesQuery(e, opts.query);
   const pinned = items.filter((e) => e.pinned && keep(e));

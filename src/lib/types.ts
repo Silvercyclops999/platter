@@ -729,6 +729,18 @@ export interface Settings {
   queueEnd: QueueEnd;
   /** The shuffle button has a third state, smart shuffle. */
   smartShuffle: boolean;
+  /** The top bar's friend activity button and panel. */
+  showFriendActivity: boolean;
+  /** Tell Plex what's playing now, so friends on the server see it live. */
+  shareActivity: boolean;
+  /** The bell's dot for unseen releases on What's New. */
+  whatsNewAnnouncements: boolean;
+  /** A desktop notification when a followed artist gets new music. */
+  notifyNewReleases: boolean;
+  /** Guests in a listening session can add songs to the queue. */
+  listenGuestsAdd: boolean;
+  /** Discord shows a listening session you host. */
+  discordListenAlong: boolean;
   [key: string]: unknown;
 }
 
@@ -859,6 +871,12 @@ export const DEFAULT_SETTINGS: Settings = {
   daylistHours: 3,
   queueEnd: "keepPlaying",
   smartShuffle: false,
+  showFriendActivity: true,
+  shareActivity: true,
+  whatsNewAnnouncements: true,
+  notifyNewReleases: false,
+  listenGuestsAdd: true,
+  discordListenAlong: true,
 };
 
 // ---------------------------------------------------------------- downloads
@@ -1062,6 +1080,74 @@ export interface DeepLinkOpen {
   albumId: string | null;
   /** For a song: where to start when the user presses play. */
   atSeconds: number | null;
+  /** A listening session invite (platter://join/...) to join. */
+  join?: string | null;
+}
+
+// ---------------------------------------------------------------- social
+
+/** One person's latest listen on the Plex server. */
+export interface FriendActivity {
+  accountId: number;
+  name: string;
+  /** Art path for the round avatar. */
+  thumb: string | null;
+  trackId: string;
+  title: string;
+  artist: string;
+  albumId: string | null;
+  album: string;
+  cover: string | null;
+  /** Unix seconds. */
+  at: number;
+  /** Listening right now. */
+  now: boolean;
+}
+
+/** "ok", or why there's nothing: not the server owner, turned off, or offline. */
+export type ActivityState = "ok" | "notAdmin" | "off" | "offline";
+
+export interface ActivityPanel {
+  state: ActivityState;
+  friends: FriendActivity[];
+}
+
+export interface FollowedArtist {
+  /** A library artist id, or a credited artist's credit: id. */
+  id: string;
+  title: string;
+  thumb: string | null;
+  /** Unix seconds. */
+  followedAt: number;
+}
+
+export interface NewRelease {
+  album: Album;
+  /** Added since What's New was last seen. */
+  new: boolean;
+}
+
+export interface WhatsNew {
+  /** Some artist is followed (otherwise everything recently added). */
+  following: boolean;
+  items: NewRelease[];
+  unseen: number;
+}
+
+export type ListenRole = "none" | "host" | "guest";
+export type ListenStatus = "connecting" | "live" | "hostGone" | "ended";
+
+/** A listening session as this computer sees it. */
+export interface ListenView {
+  role: ListenRole;
+  sessionId: string | null;
+  hostName: string | null;
+  /** The link to send people (host only). */
+  invite: string | null;
+  /** Who's listening along (host first for guests). */
+  listeners: string[];
+  guestsCanAdd: boolean;
+  status: ListenStatus | null;
 }
 
 // ---------------------------------------------------------------- artist info
@@ -1279,6 +1365,12 @@ export interface EventMap {
   "downloads://changed": null;
   /** Mixes were made again (a new day, the next daylist, new settings). */
   "mixes://changed": null;
+  /** The follow list changed. */
+  "follows://changed": FollowedArtist[];
+  /** How many What's New items are unseen. */
+  "whatsnew://changed": { unseen: number };
+  /** A listening session started, changed or ended. */
+  "listen://state": ListenView;
 }
 
 export type EventName = keyof EventMap;

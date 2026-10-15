@@ -5,6 +5,7 @@ import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/
 import { shareItem } from "../components/ShareMenu";
 import { createPlaylist } from "../stores/playlists";
 import { downloadMenuItems, useDownloads } from "../stores/downloads";
+import { startSessionItem, useSocial } from "../stores/social";
 import { useLikes } from "../stores/likes";
 import type { Playlist } from "../lib/types";
 import { useApp } from "../stores/app";
@@ -120,6 +121,7 @@ export function useLibraryModel(query: string): LibraryModel {
   const owner = useApp((s) => s.auth?.username ?? null);
   const pins = usePins((s) => s.pins);
   const dlItems = useDownloads((s) => s.status?.items);
+  const followIds = useSocial((s) => s.followIds);
   const dlChoice = useLibraryView((s) => s.downloaded);
   const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
   // Going offline or back online hands the chip back to the connection.
@@ -130,10 +132,11 @@ export function useLibraryModel(query: string): LibraryModel {
     const keys = new Set((dlItems ?? []).map((i) => `${i.kind}:${i.kind === "liked" ? "" : i.id}`));
     const mark = (e: LibEntry): LibEntry => {
       const on = keys.has(e.liked ? "liked:" : `${e.kind}:${e.id}`);
-      return on ? { ...e, downloaded: true } : e;
+      const followed = e.kind === "artist" && followIds.has(e.id);
+      return on || followed ? { ...e, ...(on ? { downloaded: true } : {}), ...(followed ? { followed: true } : {}) } : e;
     };
     return [likedEntry(owner), ...mergePins(toEntries(items, owner), pins)].map(mark);
-  }, [items, owner, pins, dlItems]);
+  }, [items, owner, pins, dlItems, followIds]);
   const dlAvailable = all.some((e) => e.downloaded);
   const downloadedOnly = dlChoice ?? (cachedOnly && dlAvailable);
   const kinds = items === null ? LIB_KINDS : LIB_KINDS.filter((k) => all.some((e) => e.kind === k));
@@ -214,6 +217,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
     items.push({ label: "Create playlist", separator: true, onSelect: () => void createPlaylist() });
   }
   if (e.kind === "album" || e.kind === "playlist") items.push(...downloadMenuItems({ kind: e.kind, id: e.id, title: e.title }));
+  if (e.kind === "album" || e.kind === "playlist") items.push(startSessionItem(() => void playEntry(e)));
   items.push(shareItem(e.kind, e.id, e.thumb));
   items.push({ ...pin, separator: true });
   if (opts.move) {

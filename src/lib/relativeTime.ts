@@ -31,3 +31,12 @@ export function addedLabel(at: number | null | undefined, now = Date.now() / 100
 export function playedLabel(at: number | null | undefined, now = Date.now() / 1000): string {
   return at ? timeAgo(at, now) : "";
 }
+
+/** Friend activity's short time: "now", "11 min", "2 hr", "1 d". */
+export function shortAgo(at: number, now = Date.now() / 1000, live = false): string {
+  const d = Math.max(0, now - at);
+  if (live || d < MIN) return "now";
+  if (d < HOUR) return `${Math.floor(d / MIN)} min`;
+  if (d < DAY) return `${Math.floor(d / HOUR)} hr`;
+  return `${Math.floor(d / DAY)} d`;
+}

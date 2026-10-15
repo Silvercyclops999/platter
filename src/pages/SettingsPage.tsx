@@ -1157,6 +1157,50 @@ export function SettingsPage() {
         "Share menus can copy a song.link page that opens the song or album in any music service. Platter finds it with iTunes Search, sending only the artist, title and album. Unreleased music never gets one. Off leaves only Platter links.",
       control: (ids) => toggle(s, "sharePublicLinks", ids),
     },
+    // Friends, following and listening sessions
+    {
+      key: "showFriendActivity",
+      section: "Social",
+      group: "Friend activity",
+      title: "Show friend activity",
+      description:
+        "The people button in the top bar shows what others on your Plex server listened to in the last week. Only the server's owner can see it, because Plex shares sessions and history with the owner only.",
+      control: (ids) => toggle(s, "showFriendActivity", ids),
+    },
+    {
+      key: "shareActivity",
+      section: "Social",
+      group: "Friend activity",
+      title: "Share my activity with Platter friends",
+      description:
+        "Lets Plex show what you're playing right now. Off, and in a private session, Platter stops telling Plex about the song as it plays, so friends don't see you live. Songs you finish still go into Plex's history, which the server's owner and other Plex apps can see.",
+      control: (ids) => toggle(s, "shareActivity", ids),
+    },
+    {
+      key: "whatsNewAnnouncements",
+      section: "Social",
+      group: "Following artists",
+      title: "What's New announcements",
+      description: "A dot on the bell when artists you follow have new releases in your library.",
+      control: (ids) => toggle(s, "whatsNewAnnouncements", ids),
+    },
+    {
+      key: "notifyNewReleases",
+      section: "Social",
+      group: "Following artists",
+      title: "Notify me about new releases",
+      description: "A desktop notification when an artist you follow gets new music in your library. Not during a private session. Who you follow is kept on this computer.",
+      control: (ids) => toggle(s, "notifyNewReleases", ids),
+    },
+    {
+      key: "listenGuestsAdd",
+      section: "Social",
+      group: "Listening sessions",
+      title: "Let guests add to the queue",
+      description:
+        "People listening along with you can add songs to your queue. Sessions work between computers on the same local network, with Show this computer to my other devices on.",
+      control: (ids) => toggle(s, "listenGuestsAdd", ids),
+    },
     // Integrations: Discord
     {
       key: "discordStatus",
@@ -1241,6 +1285,15 @@ export function SettingsPage() {
             description: "What the member list shows after \"Listening to\": Platter, the artist, or the song.",
             control: (ids) =>
               select(s, (x) => x.discordStatusLine, DISCORD_STATUS_LINE, ids, (v) => updateSettings({ discordStatusLine: v })),
+          },
+          {
+            key: "discordListenAlong",
+            section: "Integrations",
+            group: "Discord",
+            title: "Show the Listen along button on Discord",
+            description:
+              "While you host a listening session, your Discord status shows it and how many are listening. Joining from Discord isn't there yet, so send the invite link.",
+            control: (ids) => toggle(s, "discordListenAlong", ids),
           },
         ] satisfies RowDef[])),
     // Lyrics and the full-window view

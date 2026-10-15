@@ -15,6 +15,7 @@ import { PlaylistPage } from "../pages/PlaylistPage";
 import { RecentsPage } from "../pages/RecentsPage";
 import { SearchPage } from "../pages/SearchPage";
 import { SettingsPage } from "../pages/SettingsPage";
+import { WhatsNewPage } from "../pages/WhatsNewPage";
 import { useApp } from "../stores/app";
 import { useCurrentEntry, type Route } from "../stores/router";
 import { useUi } from "../stores/ui";
@@ -92,6 +93,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   liked: "Liked Songs",
   settings: "Settings",
   recents: "Recents",
+  whatsNew: "What's New",
 };
 
 /**
@@ -146,6 +148,8 @@ function Page({ route }: { route: Route }) {
       return <SettingsPage />;
     case "recents":
       return <RecentsPage />;
+    case "whatsNew":
+      return <WhatsNewPage />;
     case "homeShelf":
       return <HomeShelfPage shelf={route.shelf} />;
     case "artistShelf":

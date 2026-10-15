@@ -12,6 +12,7 @@ import { formatDuration } from "../lib/format";
 import type { AppError, DeepLinkOpen, ShareKind } from "../lib/types";
 import { player, usePlayer } from "./player";
 import { nav } from "./router";
+import { joinSession } from "./social";
 import { toast, useToasts, type ToastArt } from "./toasts";
 
 export const LINK_COPIED = "Link copied";
@@ -145,6 +146,10 @@ async function songTitle(albumId: string, trackId: string, b: Backend): Promise<
 
 /** Show what a link points at. */
 export async function openDeepLink(o: DeepLinkOpen, b: Backend = backend): Promise<void> {
+  if (o.join) {
+    await joinSession(o.join, b);
+    return;
+  }
   if (o.status === "notInLibrary") {
     toast.info("This isn't in your library");
     return;

@@ -23,6 +23,8 @@ export type Route =
   | { name: "settings" }
   /** What was played here, by day and listening session. */
   | { name: "recents" }
+  /** New releases by followed artists (the top bar's bell). */
+  | { name: "whatsNew" }
   /** Lyrics for the playing song: never a page, it opens the expanded view in lyrics mode. */
   | { name: "lyrics" }
   /** A Home shelf's "Show all" grid. */
