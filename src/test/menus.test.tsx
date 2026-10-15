@@ -52,7 +52,7 @@ describe("track menu", () => {
 
   it("queue items put 'Remove from queue' right after 'Add to queue'", () => {
     const items = trackMenuItems(t1, { afterQueue: [{ label: "Remove from queue" }] });
-    expect(items.map((i) => i.label)).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Remove from queue", "Start a listening session", "Add to the session's queue", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title"]);
+    expect(items.map((i) => i.label)).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Remove from queue", "Start a listening session", "Add to the session's queue", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Wrong lyrics?", "Share", "Copy song title"]);
   });
 
   it("the options button opens the menu aligned to the button", async () => {

@@ -44,7 +44,7 @@ import { useLayout } from "../stores/theme";
 import { keepSuggestion, playingSuggestion, removeSuggestion } from "../stores/smartShuffle";
 import { useUi } from "../stores/ui";
 import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtras";
-import { useLyrics } from "./lyrics";
+import { actionableNotice, useLyrics } from "./lyrics";
 import { normalizeLoop } from "./playerRules";
 import { HifiMark } from "./HifiMark";
 
@@ -278,9 +278,9 @@ export function PlayControls() {
  */
 function LyricsButton() {
   const trackId = usePlayer((s) => s.state?.track?.id ?? null);
-  const { lyrics, loading } = useLyrics(trackId);
+  const { lyrics, loading, info } = useLyrics(trackId);
   const on = useFullWindow((s) => s.open && s.mode === "lyrics");
-  const none = !trackId || (!loading && !lyrics);
+  const none = !trackId || (!loading && !lyrics && !actionableNotice(info));
   const off = none && !on;
   // Off, the name says why, so a screen reader hears the reason too.
   const reason = trackId ? "No lyrics for this song" : "Lyrics, nothing playing";

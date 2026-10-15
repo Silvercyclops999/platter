@@ -76,6 +76,10 @@ import type {
   ShareKind,
   SyncStatus,
   OwnLyrics,
+  Lyrics,
+  LyricsCandidate,
+  LyricsCandidates,
+  LyricsVerdict,
   KeyKind,
   PinRecord,
   Track,
@@ -100,6 +104,16 @@ import type {
   ThemeFile,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
+
+/** More lyrics found for a mock song (an LRCLIB hit), for tests and screenshots. */
+export interface MockLyricsCandidate {
+  key: string;
+  origin: LyricsCandidate["origin"];
+  album?: string;
+  durationMs?: number;
+  otherVersion?: boolean;
+  lyrics: Lyrics;
+}
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
 import { mockArtUrl } from "./art";
 import { mockLyrics, mockNowPlayingDetails } from "./details";
@@ -1304,26 +1318,134 @@ export class MockBackend implements Backend {
   exported: { text: string; fileName: string }[] = [];
   exportCancels = false;
 
+  /** Lyrics choices per song (the core keeps them in SQLite and the sync file). */
+  lyricsChoices = new Map<string, { pick?: string; offsetMs: number }>();
+  /** More lyrics found for a song (LRCLIB hits), for tests and screenshots. */
+  lyricsExtra = new Map<string, MockLyricsCandidate[]>();
+  /** What the check against the song said, per song and candidate key. */
+  lyricsVerdicts = new Map<string, Record<string, LyricsVerdict>>();
+
   /** Plex's lyrics, then the user's own, unless they asked for theirs first. */
+  private autoLyrics(track: Track): Lyrics | null {
+    let own = this.own.get(track.id);
+    // Transcriptions hide when turned off, and never go ahead of Plex's.
+    if (own?.auto && !this.settings.showAutoLyrics) own = undefined;
+    const mine = own ? lyricsFromText(own.text) : null;
+    if (mine && own?.auto) mine.source = "auto";
+    if (mine && !own?.auto && (own!.prefer || this.settings.lyricsPreferOwn)) return { ...mine, pick: "user" };
+    const plex = this.lyricsDown ? null : mockLyrics(track);
+    const extra = this.lyricsDown ? [] : (this.lyricsExtra.get(track.id) ?? []);
+    const verdicts = this.lyricsVerdicts.get(track.id) ?? {};
+    const found = [...(plex ? [{ key: "server", lyrics: plex }] : []), ...extra];
+    // The first that matches the song, else the first not ruled out.
+    const pick = found.find((c) => verdicts[c.key] === "match" || verdicts[c.key] === "matchOffset") ?? found.find((c) => verdicts[c.key] !== "noMatch");
+    if (!pick) {
+      if (mine) return { ...mine, pick: own?.auto ? "auto" : "user" };
+      return found.length ? { synced: false, lines: [], notice: "noneMatched" } : null;
+    }
+    const v = verdicts[pick.key];
+    const checked = v === "match" || v === "matchOffset";
+    const others = found.filter((c) => c !== pick && verdicts[c.key] !== "noMatch");
+    const disagree = !checked && others.some((c) => (c.lyrics.lines.join(" ") !== pick.lyrics.lines.join(" ")));
+    const shown: Lyrics = { ...pick.lyrics, pick: pick.key, check: checked ? "checked" : "notChecked", ...(disagree ? { disagree } : {}) };
+    // A live take with lyrics found by artist and title: the timing is another version's.
+    const album = this.fx.albums.find((a) => a.id === track.albumId);
+    const live = !!album && (album.subformats.includes("live") || /\(live|- live|unplugged/i.test(track.title));
+    if (!shown.synced || !live || checked) return shown;
+    if (this.settings.lyricsLiveTiming) return { ...shown, borrowedTiming: true };
+    // A transcription of this recording beats borrowed timing.
+    if (own?.auto && mine?.synced) return { ...mine, pick: "auto" };
+    return { ...shown, synced: false, timed: undefined, borrowedTiming: true };
+  }
+
+  /** Every set of lyrics found for a song, with its key. */
+  private lyricsFound(track: Track): { key: string; lyrics: Lyrics; c: Omit<LyricsCandidate, "key" | "preview" | "synced" | "source"> }[] {
+    const out: { key: string; lyrics: Lyrics; c: Omit<LyricsCandidate, "key" | "preview" | "synced" | "source"> }[] = [];
+    const plex = this.lyricsDown ? null : mockLyrics(track);
+    if (plex) out.push({ key: "server", lyrics: plex, c: { origin: "server", album: track.albumTitle, durationMs: track.durationMs } });
+    const own = this.own.get(track.id);
+    const mine = own ? lyricsFromText(own.text) : null;
+    if (own && mine) out.push({ key: own.auto ? "auto" : "user", lyrics: { ...mine, source: own.auto ? "auto" : "user" }, c: { origin: own.auto ? "auto" : "user" } });
+    for (const e of this.lyricsExtra.get(track.id) ?? []) out.push({ key: e.key, lyrics: e.lyrics, c: { origin: e.origin, album: e.album, durationMs: e.durationMs, otherVersion: e.otherVersion } });
+    return out;
+  }
+
   lyrics(trackId: string) {
-    return this.delay(() => {
+    return this.delay((): Lyrics | null => {
       const track = this.trackById(trackId) ?? this.notFound("Track");
-      let own = this.own.get(trackId);
-      // Transcriptions hide when turned off, and never go ahead of Plex's.
-      if (own?.auto && !this.settings.showAutoLyrics) own = undefined;
-      const mine = own ? lyricsFromText(own.text) : null;
-      if (mine && own?.auto) mine.source = "auto";
-      if (mine && !own?.auto && (own!.prefer || this.settings.lyricsPreferOwn)) return mine;
-      const plex = this.lyricsDown ? null : mockLyrics(track);
-      if (!plex) return mine;
-      // A live take with lyrics found by artist and title: the timing is another version's.
-      const album = this.fx.albums.find((a) => a.id === track.albumId);
-      const live = !!album && (album.subformats.includes("live") || /\(live|- live|unplugged/i.test(track.title));
-      if (!plex.synced || !live) return plex;
-      if (this.settings.lyricsLiveTiming) return { ...plex, borrowedTiming: true };
-      // A transcription of this recording beats borrowed timing.
-      if (own?.auto && mine?.synced) return mine;
-      return { ...plex, synced: false, timed: undefined, borrowedTiming: true };
+      const choice = this.lyricsChoices.get(trackId);
+      if (choice?.pick === "none") return { synced: false, lines: [], notice: "chosenNone" };
+      let l: Lyrics | null = null;
+      const picked = choice?.pick ? this.lyricsFound(track).find((f) => f.key === choice.pick) : undefined;
+      if (picked) {
+        const v = this.lyricsVerdicts.get(trackId)?.[picked.key];
+        l = { ...picked.lyrics, pick: picked.key, chosen: true, ...(v === "match" || v === "matchOffset" ? { check: "checked" as const } : {}) };
+      } else {
+        l = this.autoLyrics(track);
+      }
+      const offset = choice?.offsetMs ?? 0;
+      if (l && offset && l.synced && l.timed) {
+        const move = (t: number) => Math.max(0, t + offset);
+        l = {
+          ...l,
+          offsetMs: offset,
+          timed: l.timed.map((t) => ({ ...t, startMs: move(t.startMs), words: t.words?.map((w) => ({ ...w, startMs: move(w.startMs) })) })),
+        };
+      }
+      return l;
+    });
+  }
+  lyricsCandidates(trackId: string) {
+    return this.delay((): LyricsCandidates => {
+      const track = this.trackById(trackId) ?? this.notFound("Track");
+      const shown = this.autoLyrics(track)?.pick;
+      const choice = this.lyricsChoices.get(trackId);
+      const verdicts = this.lyricsVerdicts.get(trackId) ?? {};
+      const status = this.transcribe.status();
+      const items = this.lyricsFound(track).map(({ key, lyrics, c }) => ({
+        key,
+        ...c,
+        source: lyrics.source ?? "plex",
+        synced: lyrics.synced,
+        ...(verdicts[key] ? { check: verdicts[key] } : {}),
+        preview: (lyrics.timed?.map((t) => t.text) ?? lyrics.lines).filter(Boolean).slice(0, 3),
+        ...(key === (choice?.pick ?? shown) ? { shown: true } : {}),
+      }));
+      return {
+        items,
+        ...(choice?.pick ? { pick: choice.pick } : {}),
+        offsetMs: choice?.offsetMs ?? 0,
+        canCheck: this.settings.lyricsCheckAudio && status.available && status.models.some((m) => m.installed),
+      };
+    });
+  }
+  lyricsChoose(trackId: string, pick: string | null) {
+    return this.delay(() => {
+      this.trackById(trackId) ?? this.notFound("Track");
+      const cur = this.lyricsChoices.get(trackId);
+      const offsetMs = cur && (cur.pick ?? null) === pick ? cur.offsetMs : 0;
+      if (!pick && !offsetMs) this.lyricsChoices.delete(trackId);
+      else this.lyricsChoices.set(trackId, { ...(pick ? { pick } : {}), offsetMs });
+    });
+  }
+  lyricsOffset(trackId: string, offsetMs: number) {
+    return this.delay(() => {
+      this.trackById(trackId) ?? this.notFound("Track");
+      if (Math.abs(offsetMs) > 60_000) throw { kind: "invalid", message: "That offset is too far." };
+      const cur = this.lyricsChoices.get(trackId);
+      const next = { ...(cur?.pick ? { pick: cur.pick } : {}), offsetMs: Math.round(offsetMs / 100) * 100 };
+      if (!next.pick && !next.offsetMs) this.lyricsChoices.delete(trackId);
+      else this.lyricsChoices.set(trackId, next);
+    });
+  }
+  lyricsChoicesCount() {
+    return this.delay(() => this.lyricsChoices.size);
+  }
+  lyricsChoicesClear() {
+    return this.delay(() => {
+      const n = this.lyricsChoices.size;
+      this.lyricsChoices.clear();
+      return n;
     });
   }
   ownLyrics(trackId: string) {

@@ -15,6 +15,7 @@ import { useSettings } from "../stores/settings";
 import { currentLineIndex, currentWordIndex, followTarget, interpolate, lineState, lyricsSourceLabel, timedLines, useLyrics } from "./lyrics";
 import { useCoverColors } from "./nowPlaying";
 import { TranscribeOffer } from "./TranscribeOffer";
+import { LyricsNotice, LyricsTools, tapLine } from "./LyricsTrust";
 import "./lyrics.css";
 import "./lyrics-editor.css";
 
@@ -83,7 +84,23 @@ function usePlayhead(lines: LyricLine[]): { line: number; word: number; jump: (m
   return { ...pos, jump };
 }
 
-function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]; credit?: string; className: string; footer?: ReactNode }) {
+function SyncedLyrics({
+  lines,
+  credit,
+  className,
+  footer,
+  tools,
+  onTap,
+}: {
+  lines: LyricLine[];
+  credit?: string;
+  className: string;
+  footer?: ReactNode;
+  /** Over the lyrics: the check note, timing nudge and Wrong lyrics?. */
+  tools?: ReactNode;
+  /** A line clicked while tapping to sync (true: used, don't seek). */
+  onTap?: (line: LyricLine) => boolean;
+}) {
   const { line: current, word, jump } = usePlayhead(lines);
   const picking = useLyricPick((s) => s.picking);
   const picked = useLyricPick((s) => s.picked);
@@ -149,6 +166,7 @@ function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]
                 disabled={picking && !l.text}
                 onClick={() => {
                   if (picking) return useLyricPick.getState().toggle(i);
+                  if (onTap?.(l)) return;
                   jump(l.startMs);
                   resume();
                   void player.seek(l.startMs);
@@ -176,6 +194,7 @@ function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]
         {credit && <p className="lyrics__credit">{credit}</p>}
         {footer}
       </div>
+      {tools}
       {!following && (
         <button type="button" className="lyrics__sync" aria-label="Sync to the current line" onClick={resume}>
           <AudioLines size={16} aria-hidden="true" />
@@ -192,12 +211,14 @@ function PlainLyrics({
   className,
   footer,
   note = UNSYNCED_NOTE,
+  tools,
 }: {
   lines: string[];
   credit?: string;
   className: string;
   footer?: ReactNode;
   note?: string;
+  tools?: ReactNode;
 }) {
   const picking = useLyricPick((s) => s.picking);
   const picked = useLyricPick((s) => s.picked);
@@ -229,6 +250,7 @@ function PlainLyrics({
         {credit && <p className="lyrics__credit">{credit}</p>}
         {footer}
       </div>
+      {tools}
     </div>
   );
 }
@@ -255,8 +277,17 @@ export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) 
       {borrowed && <TranscribeOffer trackId={track.id} />}
     </>
   );
+  const tools = <LyricsTools lyrics={lyrics} track={track} synced={!!timed} />;
   return timed ? (
-    <SyncedLyrics key={track.id} lines={timed} credit={lyrics.credit} className={cls} footer={footer} />
+    <SyncedLyrics
+      key={track.id}
+      lines={timed}
+      credit={lyrics.credit}
+      className={cls}
+      footer={footer}
+      tools={tools}
+      onTap={(l) => tapLine(track.id, l, lyrics)}
+    />
   ) : (
     <PlainLyrics
       key={track.id}
@@ -265,6 +296,7 @@ export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) 
       className={cls}
       footer={footer}
       note={borrowed ? BORROWED_NOTE : UNSYNCED_NOTE}
+      tools={tools}
     />
   );
 }
@@ -276,7 +308,7 @@ export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) 
  */
 export function LyricsPane() {
   const track = usePlayer((s) => s.state?.track);
-  const { lyrics, loading } = useLyrics(track?.id);
+  const { lyrics, loading, info } = useLyrics(track?.id);
   const showAdd = useSettings((s) => s.settings?.lyricsShowAdd ?? true);
 
   if (!track) return <p className="lyrics-page__empty">Nothing playing.</p>;
@@ -287,6 +319,13 @@ export function LyricsPane() {
           <Skeleton key={i} width={`${w}%`} height={32} />
         ))}
       </div>
+    );
+  if (!lyrics && info?.notice)
+    return (
+      <>
+        <LyricsNotice info={info} track={track} />
+        {info.notice === "noneMatched" && <TranscribeOffer trackId={track.id} />}
+      </>
     );
   if (!lyrics)
     return (

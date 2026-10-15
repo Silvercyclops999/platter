@@ -5,6 +5,7 @@
  * auto-follow pause, and auto-show.
  */
 import { useEffect, useState } from "react";
+import { create } from "zustand";
 import { backend } from "../lib/backend";
 import type { LyricLine, LyricWord, Lyrics } from "../lib/types";
 import { useLyricsEditor } from "../stores/lyricsEditor";
@@ -25,14 +26,32 @@ export function clearLyricsCache() {
   pending.clear();
 }
 
-/** The track's lyrics, from the cache or the core. A failed fetch is "none" (and not cached). */
+/** Lyrics were looked up for the song this session (shown, held back or checked): its menu offers "Wrong lyrics?". */
+export function lyricsSeen(trackId: string): boolean {
+  return !!cache.get(trackId);
+}
+
+/** Lyrics with words to show (not just a notice saying why there are none). */
+export function hasWords(l: Lyrics | null | undefined): boolean {
+  return !!l && !l.notice && !!(l.lines.length || l.timed?.length);
+}
+
+/** The track's lyrics, from the cache or the core: null when there are none to show. */
 export function loadLyrics(trackId: string): Promise<Lyrics | null> {
+  return loadLyricsInfo(trackId).then((l) => (hasWords(l) ? l : null));
+}
+
+/**
+ * The core's whole answer, notices included ("Lyrics from the released
+ * version", "Checking…"). A failed fetch is "none" (and not cached).
+ */
+export function loadLyricsInfo(trackId: string): Promise<Lyrics | null> {
   if (cache.has(trackId)) return Promise.resolve(cache.get(trackId) ?? null);
   let p = pending.get(trackId);
   if (!p) {
     p = backend.lyrics(trackId).then(
       (l) => {
-        const v = l && (l.lines.length || l.timed?.length) ? l : null;
+        const v = l && (hasWords(l) || l.notice) ? l : null;
         cache.set(trackId, v);
         if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
         pending.delete(trackId);
@@ -53,13 +72,19 @@ export function loadLyrics(trackId: string): Promise<Lyrics | null> {
  * preferring your own lyrics, borrowed timing on live versions, and saving
  * lyrics in the editor ask again.
  */
-export function useLyrics(trackId: string | null | undefined): { lyrics: Lyrics | null; loading: boolean } {
+export function useLyrics(trackId: string | null | undefined): {
+  lyrics: Lyrics | null;
+  loading: boolean;
+  /** The whole answer: with a notice when nothing is shown and why. */
+  info: Lyrics | null;
+} {
   const lrclib = useSettings((s) => s.settings?.lyricsLrclib ?? false);
   const preferOwn = useSettings((s) => s.settings?.lyricsPreferOwn ?? false);
   const showAuto = useSettings((s) => s.settings?.showAutoLyrics ?? true);
   const liveTiming = useSettings((s) => s.settings?.lyricsLiveTiming ?? false);
   const version = useLyricsEditor((s) => s.version);
-  const sources = `${lrclib}|${preferOwn}|${showAuto}|${liveTiming}|${version}`;
+  const trust = useLyricsTrust((s) => s.version);
+  const sources = `${lrclib}|${preferOwn}|${showAuto}|${liveTiming}|${version}|${trust}`;
   const [state, setState] = useState<{ key: string | null; lyrics: Lyrics | null; loading: boolean }>(() => ({
     key: null,
     lyrics: null,
@@ -73,13 +98,52 @@ export function useLyrics(trackId: string | null | undefined): { lyrics: Lyrics 
   useEffect(() => {
     if (!trackId) return;
     let alive = true;
-    loadLyrics(trackId).then((lyrics) => alive && setState({ key: `${trackId}|${sources}`, lyrics, loading: false }));
+    loadLyricsInfo(trackId).then((lyrics) => alive && setState({ key: `${trackId}|${sources}`, lyrics, loading: false }));
     return () => {
       alive = false;
     };
   }, [trackId, sources]);
-  return { lyrics: state.lyrics, loading: state.loading };
+  return { lyrics: hasWords(state.lyrics) ? state.lyrics : null, loading: state.loading, info: state.lyrics };
 }
+
+/** A notice the lyrics view can act on (not "you chose none"): the lyrics button stays on. */
+export function actionableNotice(l: Lyrics | null | undefined): boolean {
+  return !!l?.notice && l.notice !== "chosenNone";
+}
+
+/**
+ * Lyrics checked against the song, a pick or an offset changed: `version`
+ * moves so the views ask again.
+ */
+export const useLyricsTrust = create<{ version: number }>()(() => ({ version: 0 }));
+
+/** Forget a song's lyrics (or every song's) and ask again. */
+export function lyricsChanged(trackId?: string) {
+  if (trackId) {
+    cache.delete(trackId);
+    pending.delete(trackId);
+  } else {
+    clearLyricsCache();
+  }
+  useLyricsTrust.setState((s) => ({ version: s.version + 1 }));
+}
+
+let trustStarted = false;
+
+/** Follow the core's lyrics events (once, at startup). */
+export async function startLyricsTrust(): Promise<void> {
+  if (trustStarted) return;
+  trustStarted = true;
+  await backend.listen("lyrics://checked", ({ trackId }) => lyricsChanged(trackId));
+  await backend.listen("lyrics://choices", () => lyricsChanged());
+}
+
+// Checking against the song, fixing its timing and released lyrics for other
+// versions change what shows.
+useSettings.subscribe((s, p) => {
+  const k = (x: typeof s) => `${x.settings?.lyricsCheckAudio}|${x.settings?.lyricsFixTiming}|${x.settings?.lyricsReleasedForVersions}`;
+  if (s.settings && p.settings && k(s) !== k(p)) lyricsChanged();
+});
 
 // Turning LRCLIB on finds lyrics Plex didn't have; off drops them. Preferring
 // your own lyrics changes which source wins.

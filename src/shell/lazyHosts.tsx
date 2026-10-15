@@ -6,6 +6,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useCurate } from "../stores/curate";
 import { useLyricsEditor } from "../stores/lyricsEditor";
+import { useWrongLyrics } from "../stores/wrongLyrics";
 import { ensureLoaded, usePlexEdit } from "../stores/plexEdit";
 import { useShareCard } from "../stores/shareCard";
 import { useStatsDialog } from "../stores/stats";
@@ -13,6 +14,7 @@ import { useLooks } from "../stores/looks";
 
 const SmartEditor = lazy(() => import("../components/SmartPlaylistEditor").then((m) => ({ default: m.SmartEditorHost })));
 const LyricsEditor = lazy(() => import("./LyricsEditor").then((m) => ({ default: m.LyricsEditorHost })));
+const WrongLyrics = lazy(() => import("./LyricsTrust").then((m) => ({ default: m.WrongLyricsDialog })));
 const ShareCard = lazy(() => import("../components/ShareCardDialog").then((m) => ({ default: m.ShareCardHost })));
 const StatsDialog = lazy(() => import("../components/StatsDialog").then((m) => ({ default: m.StatsDialogHost })));
 const LookBuilder = lazy(() => import("../pages/looks/LookBuilder").then((m) => ({ default: m.LookBuilderHost })));
@@ -40,6 +42,15 @@ export function LazyLyricsEditorHost() {
   return show ? (
     <Suspense fallback={null}>
       <LyricsEditor />
+    </Suspense>
+  ) : null;
+}
+
+export function LazyWrongLyricsHost() {
+  const show = useOnceOpen(useWrongLyrics((s) => !!s.track));
+  return show ? (
+    <Suspense fallback={null}>
+      <WrongLyrics />
     </Suspense>
   ) : null;
 }

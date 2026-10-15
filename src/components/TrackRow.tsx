@@ -21,6 +21,8 @@ import { endSongDrag, startSongDrag, tracksDrag } from "../stores/drag";
 import { useSettings } from "../stores/settings";
 import { likeMenuLabel, toggleLiked } from "../stores/likes";
 import { lyricsEditLabel, openLyricsEditor } from "../stores/lyricsEditor";
+import { openWrongLyrics } from "../stores/wrongLyrics";
+import { lyricsSeen } from "../shell/lyrics";
 import { nav, useRouter } from "../stores/router";
 import { player } from "../stores/player";
 import { toast } from "../stores/toasts";
@@ -110,6 +112,8 @@ export function trackMenuItems(
       },
       onSelect: () => openLyricsEditor(track),
     },
+    // Once its lyrics have been looked up (you've seen them, or why there are none).
+    { label: "Wrong lyrics?", when: () => lyricsSeen(track.id), onSelect: () => openWrongLyrics(track) },
     shareItem("track", track.id, track.thumb, { title: track.title, subtitle: trackArtistLine(track), durationMs: track.durationMs }),
     {
       label: "Copy song title",

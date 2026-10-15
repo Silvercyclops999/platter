@@ -1104,6 +1104,11 @@ the call: when the artist or lyrics request fails, that part is just left out.
 | `lyrics_own_delete` | `{ trackId }` | `bool` (there were some) |
 | `lyrics_own_ids` | – | `string[]` |
 | `lyrics_export` | `{ text, fileName }` | `string \| null` |
+| `lyrics_candidates` | `{ trackId }` | `LyricsCandidates` |
+| `lyrics_choose` | `{ trackId, pick }` | – |
+| `lyrics_offset` | `{ trackId, offsetMs }` | – |
+| `lyrics_choices_count` | – | `number` |
+| `lyrics_choices_clear` | – | `number` |
 
 The expanded now-playing view's lyrics mode and the lyrics button use `lyrics_get`. Sources in order:
 the track's Plex lyrics stream (a sidecar `.lrc` or `.txt` file, or Plex's
@@ -1155,6 +1160,47 @@ lets menus say "Add lyrics" or "Edit lyrics".
 `lyrics_export` opens a save dialog (suggested name `fileName` made safe for
 file systems, ending in `.lrc`) and writes `text` where the user picks.
 Returns the saved file's name, or `null` when the dialog was cancelled.
+
+### Checking lyrics against the song
+
+Every set of lyrics found for a song is a candidate, in this order: the
+user's own when they prefer them, the server's, the user's own, LRCLIB's
+exact lookup, every LRCLIB search hit with the same artist and title
+(closest length first), then a transcription. When `lyricsCheckAudio` is on
+and a speech model is installed, Platter transcribes a 30 second window of
+the song on this computer (starting just before the first sung line, at the
+lowest priority, never ahead of playback's transfer) and compares the words
+heard with each candidate in turn until one matches. Lyrics the user wrote
+and transcriptions aren't checked. Results are kept per song, candidate and
+text, so a check runs once. The audio never leaves the computer.
+
+A candidate that matches is shown with `check: "checked"`. When its timing is
+off by a steady amount, or drifts (measured again near the end), and
+`lyricsFixTiming` is on, the lines come back moved (`autoOffsetMs`,
+`retimed`). A candidate that doesn't match is skipped. While a check runs,
+lyrics from the server or LRCLIB's exact lookup show with `check:
+"checking"`; ones found only by title wait (`notice: "checking"`). When
+nothing matched, `notice: "noneMatched"` (and a transcription is queued when
+transcription is on). `lyrics://checked` (`{ trackId }`) says to ask again.
+
+Without the check, lyrics show with `check: "notChecked"` and stricter rules:
+LRCLIB timing is kept only when its length is within 2 s of the song's, or
+within 5 s on the same album (edition notes ignored). A song that is
+unreleased, an alternate version, live, or has a version tag doesn't take
+lyrics found for another release unless `lyricsReleasedForVersions` is on,
+the user picks them, or the check matched them: `notice: "versionHeld"` with
+the held candidate in `pick`. `disagree` is set when other lyrics found say
+something quite different.
+
+`lyrics_candidates` lists every candidate (`key`, `origin`, `source`,
+`album`, `durationMs`, `synced`, `check`, `otherVersion`, a short
+`preview`, `shown`) with the user's `pick` and `offsetMs`, and `canCheck`.
+`lyrics_choose` sets the song's pick: a candidate key, `"none"` (`notice:
+"chosenNone"`), or `null` for automatic. A new pick starts with no offset.
+`lyrics_offset` moves synced lines by `offsetMs` (positive is later, rounded
+to 0.1 s, at most a minute either way). Picks and offsets win over anything
+automatic and travel in the sync file (`lyricsChoices`); `lyrics://choices`
+says some arrived from another device.
 
 ## Lyrics transcription
 | Command | Args | Returns |
@@ -2342,6 +2388,9 @@ The rest of the fields, with their defaults:
 | `transcribeLyrics` | bool, false | Transcribe songs without lyrics on this computer (Transcribe this song, the album menu, the unreleased batch). See Lyrics transcription. This device only. |
 | `transcribeModel` | `"small"` or `"medium"`, `"small"` | The speech model. Medium is more accurate and about three times slower. This device only. |
 | `showAutoLyrics` | bool, true | `lyrics_get` returns transcriptions the user hasn't edited. Off hides them; they stay saved. |
+| `lyricsCheckAudio` | bool, true | Check lyrics against the song with the speech model, once it's installed. Off shows lyrics as not checked. This device only. |
+| `lyricsFixTiming` | bool, true | Checked lyrics are moved or stretched to the timing measured in the song. This device only. |
+| `lyricsReleasedForVersions` | bool, false | Other versions (unreleased, alternate, live, version tag) take lyrics found for the released version without asking. |
 | `fullWindowHideControls` | bool, true | The expanded view fades its header after 3 s without mouse movement or a key. |
 | `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |

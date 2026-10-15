@@ -12,7 +12,7 @@ import { player, usePlayer } from "../stores/player";
 import { nav, useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
-import { useLyrics } from "./lyrics";
+import { actionableNotice, useLyrics } from "./lyrics";
 import { LyricsPane, useLyricsBackground } from "./LyricsView";
 import { contextRoute, useNowPlayingDetails } from "./nowPlaying";
 import { SEEK_KEY_STEP } from "./PlayerBar";
@@ -145,7 +145,7 @@ function useRootClasses(idle: boolean) {
 
 function FullWindowView() {
   const track = usePlayer((s) => s.state?.track);
-  const { lyrics, loading: lyricsLoading } = useLyrics(track?.id);
+  const { lyrics, loading: lyricsLoading, info: lyricsInfo } = useLyrics(track?.id);
   const { details } = useNowPlayingDetails(track?.id);
   const mode = useFullWindow((s) => s.mode);
   const osFull = useFullWindow((s) => s.osFullscreen);
@@ -175,7 +175,7 @@ function FullWindowView() {
   // A link (album, artist) takes you to its page: the view steps aside.
   useEffect(() => useRouter.subscribe((s, p) => s.index !== p.index && void fullWindow.close()), []);
 
-  const hasLyrics = !!lyrics;
+  const hasLyrics = !!lyrics || actionableNotice(lyricsInfo);
   const noLyrics = !!track && !lyricsLoading && !hasLyrics;
   const ownLyrics = useLyricsEditor((s) => !!track && s.ownIds.has(track.id));
   const artistPhoto = details?.artist ? details.artist.art || details.artist.thumb : null;

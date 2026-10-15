@@ -27,7 +27,7 @@ import {
   type SidebarDrag,
 } from "./layout";
 import { FullWindow } from "./FullWindow";
-import { useLyricsAutoShow } from "./lyrics";
+import { startLyricsTrust, useLyricsAutoShow } from "./lyrics";
 import { startTranscribe } from "../stores/transcribe";
 import { startDownloads } from "../stores/downloads";
 import { DownloadDialogs } from "../components/DownloadButton";
@@ -44,6 +44,7 @@ import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
 import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost } from "./lazyHosts";
+import { LazyWrongLyricsHost } from "./lazyHosts";
 import { LookDrop } from "./LookDrop";
 import { QueuePanel } from "./QueuePanel";
 import { ArchiveDialogs } from "../components/ArchiveDialogs";
@@ -90,6 +91,7 @@ export function AppShell() {
   useEffect(() => void loadOwnLyricsIds(), []);
   // Not needed for the first screen: wait until it has painted.
   useEffect(() => afterFirstPaint(() => void startTranscribe()), []);
+  useEffect(() => afterFirstPaint(() => void startLyricsTrust()), []);
   useEffect(() => void startDownloads(), []);
   useEffect(() => afterFirstPaint(() => void startSocial()), []);
   useEffect(() => void startCurate(), []);
@@ -239,6 +241,7 @@ export function AppShell() {
       <DownloadDialogs />
       <DragAnnouncer />
       <LazyLyricsEditorHost />
+      <LazyWrongLyricsHost />
       <FullWindow />
       <LazyShareCardHost />
       <DeckActions />

@@ -489,6 +489,66 @@ export interface Lyrics {
    * another version's. Unsynced unless lyricsLiveTiming is on.
    */
   borrowedTiming?: boolean;
+  /** What the check against the recording said about the lyrics shown. */
+  check?: LyricsCheck;
+  /** Nothing is shown, and why (lines and timed are empty). */
+  notice?: LyricsNotice;
+  /** The candidate shown (or held back with notice versionHeld). */
+  pick?: string;
+  /** The user picked these lyrics for the song. */
+  chosen?: boolean;
+  /** The user's timing nudge in ms, already applied (positive: later). */
+  offsetMs?: number;
+  /** The shift measured in the song, already applied. */
+  autoOffsetMs?: number;
+  /** The timing was stretched to follow the song. */
+  retimed?: boolean;
+  /** Other lyrics found for the song say something quite different. */
+  disagree?: boolean;
+}
+
+/** checked: matched against the song; notChecked: not compared with it; checking: being compared now. */
+export type LyricsCheck = "checked" | "notChecked" | "checking";
+
+/**
+ * versionHeld: lyrics found for the released version, waiting for "Use anyway";
+ * checking: being compared with the song and nothing safe to show yet;
+ * noneMatched: every set found disagreed with the song; chosenNone: the user chose no lyrics.
+ */
+export type LyricsNotice = "versionHeld" | "checking" | "noneMatched" | "chosenNone";
+
+/** What the check said about one set of lyrics. */
+export type LyricsVerdict = "match" | "matchOffset" | "noMatch" | "cantTell";
+
+/** Where a set of lyrics was found. */
+export type LyricsOrigin = "user" | "server" | "lrclibExact" | "lrclibSearch" | "auto";
+
+/** One set of lyrics found for a song ("Wrong lyrics?"). */
+export interface LyricsCandidate {
+  /** "user", "server", "auto" or "lrclib:<hash>": what lyricsChoose takes. */
+  key: string;
+  origin: LyricsOrigin;
+  source: LyricsSource;
+  album?: string;
+  durationMs?: number;
+  synced: boolean;
+  check?: LyricsVerdict;
+  /** Found for the released version while this song is another version. */
+  otherVersion?: boolean;
+  /** The first few lines. */
+  preview: string[];
+  /** Shown now. */
+  shown?: boolean;
+}
+
+/** `lyrics_candidates`. */
+export interface LyricsCandidates {
+  items: LyricsCandidate[];
+  /** The user's pick: a key, "none", or absent for automatic. */
+  pick?: string;
+  offsetMs: number;
+  /** The check against the song can run (setting on, speech model installed). */
+  canCheck: boolean;
 }
 
 /**
@@ -912,6 +972,12 @@ export interface Settings {
   transcribeModel: TranscribeModel;
   /** Show lyrics transcribed on this computer. */
   showAutoLyrics: boolean;
+  /** Check lyrics against the song with the speech model, once it's installed. This device only. */
+  lyricsCheckAudio: boolean;
+  /** Move or stretch checked lyrics to the timing measured in the song. This device only. */
+  lyricsFixTiming: boolean;
+  /** Unreleased songs, alternate versions and live takes take the released version's lyrics without asking. */
+  lyricsReleasedForVersions: boolean;
   /** Announce this computer to your other Platter devices and let them play here. This device only. */
   showToMyDevices: boolean;
   /** The name your other devices see; empty uses the computer's name. This device only. */
@@ -1255,6 +1321,9 @@ export const DEFAULT_SETTINGS: Settings = {
   transcribeLyrics: false,
   transcribeModel: "small",
   showAutoLyrics: true,
+  lyricsCheckAudio: true,
+  lyricsFixTiming: true,
+  lyricsReleasedForVersions: false,
   showToMyDevices: true,
   computerName: "",
   showAirplayLocked: false,
@@ -2713,6 +2782,10 @@ export interface EventMap {
   "transcribe://status": TranscribeStatus;
   /** A song was transcribed (`found`: words came out). */
   "transcribe://done": { trackId: string; found: boolean };
+  /** A song's lyrics were checked against the song: ask for them again. */
+  "lyrics://checked": { trackId: string };
+  /** Lyrics choices arrived from another device. */
+  "lyrics://choices": null;
   /** Download progress, the queue's state and storage. */
   "downloads://status": DownloadStatus;
   /** The set of downloaded songs changed; ask downloadedTracks again. */

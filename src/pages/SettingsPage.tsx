@@ -27,6 +27,7 @@ import type {
 import { useApp } from "../stores/app";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
+import { LyricsChoicesControl } from "../shell/LyricsTrust";
 import { PlexEditSettings, plexEditMatches } from "./PlexEditSettings";
 import { useHomeUsers } from "../shell/HomeUsers";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
@@ -2097,6 +2098,38 @@ export function SettingsPage() {
       description:
         "Lyrics found by artist and title are usually timed to the studio recording, so on a live version they show without timing. On keeps that timing and follows along anyway. Lyrics files next to the song and your own lyrics always keep theirs.",
       control: (ids) => toggle(s, "lyricsLiveTiming", ids),
+    },
+    {
+      key: "lyricsCheckAudio",
+      section: "Appearance",
+      title: "Check lyrics against the song",
+      description:
+        "Compares the lyrics found with a short part of the song, using the speech model on this computer, and skips lyrics that belong to another song. Until the model is downloaded, lyrics show as not checked. The song never leaves this computer. This device only.",
+      control: (ids) => toggle(s, "lyricsCheckAudio", ids),
+    },
+    {
+      key: "lyricsFixTiming",
+      section: "Appearance",
+      title: "Fix lyrics timing automatically",
+      description:
+        "Checked lyrics that run early or late, or drift over the song, are moved to match it. Off shows them with the timing they came with. This device only.",
+      control: (ids) => toggle(s, "lyricsFixTiming", ids),
+    },
+    {
+      key: "lyricsReleasedForVersions",
+      section: "Appearance",
+      title: "Use released lyrics for other versions",
+      description:
+        "Unreleased songs, alternate versions, live takes and songs with a version tag show lyrics found for the released version without asking. Off asks first with Use anyway, unless the check finds they match the song.",
+      control: (ids) => toggle(s, "lyricsReleasedForVersions", ids),
+    },
+    {
+      key: "lyricsChoices",
+      section: "Appearance",
+      title: "Lyrics choices and timing",
+      description:
+        "Lyrics you picked with Wrong lyrics?, songs you turned lyrics off for, and timing you moved. They win over everything automatic and travel in your sync file. Reset lets Platter pick again.",
+      control: (ids) => <LyricsChoicesControl labelledBy={ids.title} />,
     },
     {
       key: "fullWindowHideControls",

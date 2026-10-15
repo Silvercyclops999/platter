@@ -86,6 +86,7 @@ import type {
   MiniplayerState,
   LikedPage,
   Lyrics,
+  LyricsCandidates,
   OwnLyrics,
   NowPlayingDetails,
   OutputState,
@@ -338,6 +339,16 @@ export interface Backend {
   ownLyricsIds(): Promise<string[]>;
   /** Save lyrics as an .lrc file through a save dialog. The saved file's name, or null when cancelled. */
   lyricsExport(text: string, fileName: string): Promise<string | null>;
+  /** Every set of lyrics found for the song, with what the check said ("Wrong lyrics?"). */
+  lyricsCandidates(trackId: string): Promise<LyricsCandidates>;
+  /** Pick the song's lyrics: a candidate key, "none", or null for automatic. */
+  lyricsChoose(trackId: string, pick: string | null): Promise<void>;
+  /** The song's lyrics timing offset in ms (positive: later). */
+  lyricsOffset(trackId: string, offsetMs: number): Promise<void>;
+  /** How many songs have a lyrics choice or offset. */
+  lyricsChoicesCount(): Promise<number>;
+  /** Forget every lyrics choice and offset; answers how many there were. */
+  lyricsChoicesClear(): Promise<number>;
 
   // Search
   search(args: SearchArgs): Promise<SearchResults>;
@@ -902,6 +913,11 @@ export function createTauriBackend(): Backend {
     ownLyricsDelete: (trackId) => call("lyrics_own_delete", { trackId }),
     ownLyricsIds: () => call("lyrics_own_ids"),
     lyricsExport: (text, fileName) => call("lyrics_export", { text, fileName }),
+    lyricsCandidates: (trackId) => call("lyrics_candidates", { trackId }),
+    lyricsChoose: (trackId, pick) => call("lyrics_choose", { trackId, pick }),
+    lyricsOffset: (trackId, offsetMs) => call("lyrics_offset", { trackId, offsetMs }),
+    lyricsChoicesCount: () => call("lyrics_choices_count"),
+    lyricsChoicesClear: () => call("lyrics_choices_clear"),
 
     search: (args) => call("search", { ...args }),
     searchCompletions: (query, limit) => call("search_completions", { query, limit }),
