@@ -32,7 +32,8 @@ pub struct ImportOverview {
 #[tauri::command]
 pub async fn import_overview(db: State<'_, DbHandle>) -> AppResult<ImportOverview> {
     db.read_async(|c| {
-        let (review_count, missing_count) = store::queue_counts(c)?;
+        let (review_count, songs_missing) = store::queue_counts(c)?;
+        let missing_count = songs_missing + store::wanted_albums(c)?.len() as u64;
         Ok(ImportOverview { reports: store::reports(c)?, lists: store::lists(c)?, review_count, missing_count })
     })
     .await
@@ -110,6 +111,24 @@ pub async fn import_list_page(db: State<'_, DbHandle>, id: String) -> AppResult<
 #[tauri::command]
 pub async fn import_missing(db: State<'_, DbHandle>) -> AppResult<Vec<MissingSong>> {
     db.read_async(|c| store::missing(c, store::MISSING_MAX)).await
+}
+
+/// Albums added to the Missing list by hand, newest first.
+#[tauri::command]
+pub async fn import_missing_albums(db: State<'_, DbHandle>) -> AppResult<Vec<store::MissingAlbum>> {
+    db.read_async(store::missing_albums).await
+}
+
+/// Remember an album that isn't in the library on the Missing list.
+#[tauri::command]
+pub async fn import_missing_album_add(db: State<'_, DbHandle>, album: store::WantedAlbum) -> AppResult<Vec<store::WantedAlbum>> {
+    let now = now_ms() / 1000;
+    db.write_async(move |c| store::add_wanted(c, album, now)).await
+}
+
+#[tauri::command]
+pub async fn import_missing_album_remove(db: State<'_, DbHandle>, release_group_id: String) -> AppResult<Vec<store::WantedAlbum>> {
+    db.write_async(move |c| store::remove_wanted(c, &release_group_id)).await
 }
 
 /// Opens a store search page from the Missing list.

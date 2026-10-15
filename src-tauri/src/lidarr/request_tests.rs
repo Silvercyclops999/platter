@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use super::check::{PlexFile, PlexFiles};
 use super::mbpick::MbGet;
-use super::mbpick::tests::{ARTIST, FakeMb, RG_BOOT, RG_EP, RG_SECOND, RG_SKETCH};
+use super::mbpick::tests::{ARTIST, FakeMb, OTHER, RG_BOOT, RG_EP, RG_SECOND, RG_SKETCH};
 use super::request::{QUEUED_NOTE, RequestInput};
 use super::status::RequestState;
 use super::{ArtistMbid, Lidarr, LidarrDeps, PlexMusic};
@@ -254,6 +254,7 @@ fn input(rgid: &str, title: &str, typed: Option<&str>) -> RequestInput {
         title: title.into(),
         artist: "Northlight".into(),
         artist_id: Some("ar1".into()),
+        artist_mbid: None,
         typed: typed.map(str::to_string),
     }
 }
@@ -452,6 +453,38 @@ async fn preview_shows_where_files_land() {
     assert_eq!(p.destination.as_deref(), Some("/downloads/lidarr/Northlight"));
     assert_eq!(p.existing, None);
     assert!(r.web.writes().is_empty(), "a preview only reads");
+}
+
+#[tokio::test]
+async fn a_catalogue_request_uses_the_artist_id_it_names_and_every_guard() {
+    let r = rig();
+    // From a page for music that isn't in the library: no library id, the
+    // MusicBrainz id given, so no name search.
+    let named = |rgid: &str, title: &str| RequestInput {
+        release_group_id: rgid.into(),
+        title: title.into(),
+        artist: "Northlight".into(),
+        artist_id: None,
+        artist_mbid: Some(ARTIST.to_uppercase()),
+        typed: None,
+    };
+    let before = r.mb.count("/artist/?query=");
+    let p = r.lidarr.preview(&named(RG_SECOND, "Second Wind")).await.unwrap();
+    assert!(p.reachable && p.adds_artist);
+    assert_eq!(r.mb.count("/artist/?query="), before, "the named id is used");
+    // The guards still run: a bootleg and a title clash with an unreleased build are refused.
+    assert!(r.lidarr.preview(&named(RG_BOOT, "Basement Tapes")).await.is_err());
+    assert!(r.lidarr.preview(&named(RG_SKETCH, "Quiet Sketches")).await.is_err());
+    // Someone else's id: the release isn't theirs alone.
+    let mut other = named(RG_SECOND, "Second Wind");
+    other.artist_mbid = Some(OTHER.into());
+    assert!(r.lidarr.preview(&other).await.is_err());
+    assert!(r.web.writes().is_empty());
+    // The id goes with a request that waits, for the retry.
+    r.web.st.lock().down = true;
+    let rec = r.lidarr.request(RequestInput { typed: Some("Second Wind".into()), ..named(RG_SECOND, "Second Wind") }).await.unwrap();
+    assert_eq!(rec.state, RequestState::Queued);
+    assert_eq!(rec.artist_mbid.as_deref(), Some(ARTIST.to_uppercase().as_str()));
 }
 
 #[tokio::test]

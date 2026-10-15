@@ -5,6 +5,7 @@ pub mod backend;
 pub mod bookmarks;
 pub mod bridge;
 pub mod db;
+pub mod discover;
 pub mod doctor;
 pub mod downloads;
 pub mod error;
@@ -672,6 +673,7 @@ pub fn run() {
             });
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
             let radar_lidarr = lidarr_service.clone();
+            let discover_lidarr = lidarr_service.clone();
             app.manage(lidarr_service);
             let smart_service = smart::Smart::new(smart::SmartDeps {
                 db: db.clone(),
@@ -862,6 +864,30 @@ pub fn run() {
                 });
                 tauri::async_runtime::spawn(radar::watch(radar.clone()));
                 app.manage(radar);
+
+                // Discover: music that isn't in the library (search, catalogue
+                // pages, Fans also like, New to you).
+                let discover = discover::Discover::new(discover::DiscoverDeps {
+                    db: db.clone(),
+                    mb: mb(lidarr::mbpick::CACHE_TTL),
+                    similar: Arc::new(discover::lb::LbCached {
+                        http: artist_info.http(),
+                        limiter: Arc::new(artistinfo::limit::Limiter::per_second(1.0)),
+                        db: db.clone(),
+                        clock: Arc::new(db::queries::now_s),
+                    }),
+                    mbids: Arc::new(radar::commands::RadarMbids {
+                        info: Arc::new(lidarr::InfoMbid(artist_info.clone())),
+                        picker: lidarr::mbpick::Picker { mb: mb(lidarr::mbpick::CACHE_TTL) },
+                    }),
+                    top: Arc::new(radar::StatsTop(db.clone())),
+                    info: Arc::new(artist_info.clone()),
+                    requests: Arc::new(discover_lidarr),
+                    prefs: Arc::new(discover::SettingsPrefs(db.clone())),
+                    offline: plex.offline_switch(),
+                    clock: Arc::new(db::queries::now_s),
+                });
+                app.manage(discover);
             }
 
             // Lyrics: the song's server first, then LRCLIB when its setting is on.
@@ -1043,7 +1069,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove,
+            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove,
             plex::commands::auth_status,
             plex::commands::auth_start,
             plex::commands::auth_cancel,
@@ -1310,6 +1336,11 @@ pub fn run() {
             lidarr::commands::lidarr_request_cancel,
             lidarr::commands::lidarr_missing_releases,
             radar::commands::release_radar,
+            discover::commands::catalogue_search,
+            discover::commands::catalogue_artist,
+            discover::commands::catalogue_album,
+            discover::commands::catalogue_fans_also_like,
+            discover::commands::new_to_you,
             radar::commands::release_radar_check,
             radar::commands::radar_auto_artists,
             radar::commands::radar_auto_set,

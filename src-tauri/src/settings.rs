@@ -571,6 +571,15 @@ pub struct Settings {
     /// Keep the queue on servers that hold one, so another app can pick it
     /// up there.
     pub save_queue_on_server: bool,
+    /// Search also shows artists, albums and songs from MusicBrainz that
+    /// aren't in the library.
+    pub catalogue_search: bool,
+    /// "Fans also like" on artist pages includes artists not in the library.
+    pub fans_also_like_catalogue: bool,
+    /// The "New to you" shelf on Home: artists like the ones played most.
+    pub home_new_to_you: bool,
+    /// Artists the user said "Not interested" to (never suggested again).
+    pub dismissed_artists: Vec<crate::discover::Dismissed>,
 }
 
 /// Minutes between Subsonic change checks the setting offers.
@@ -776,6 +785,10 @@ impl Default for Settings {
             sound_id_scope: crate::soundid::Scope::Untagged,
             subsonic_check_minutes: crate::subsonic::manager::DEFAULT_POLL_MINUTES,
             save_queue_on_server: true,
+            catalogue_search: true,
+            fans_also_like_catalogue: true,
+            home_new_to_you: true,
+            dismissed_artists: Vec::new(),
         }
     }
 }
@@ -883,6 +896,10 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "releaseRadar",
     "radarNotify",
     "saveQueueOnServer",
+    "catalogueSearch",
+    "fansAlsoLikeCatalogue",
+    "homeNewToYou",
+    "dismissedArtists",
 ];
 
 /// Settings kept on this device only.
@@ -1137,6 +1154,10 @@ pub struct SettingsPatch {
     pub sound_id_scope: Option<crate::soundid::Scope>,
     pub subsonic_check_minutes: Option<u32>,
     pub save_queue_on_server: Option<bool>,
+    pub catalogue_search: Option<bool>,
+    pub fans_also_like_catalogue: Option<bool>,
+    pub home_new_to_you: Option<bool>,
+    pub dismissed_artists: Option<Vec<crate::discover::Dismissed>>,
 }
 
 impl SettingsPatch {
@@ -1384,6 +1405,12 @@ impl Settings {
             self.subsonic_check_minutes = m;
         }
         set(&mut self.save_queue_on_server, p.save_queue_on_server);
+        set(&mut self.catalogue_search, p.catalogue_search);
+        set(&mut self.fans_also_like_catalogue, p.fans_also_like_catalogue);
+        set(&mut self.home_new_to_you, p.home_new_to_you);
+        if let Some(list) = &p.dismissed_artists {
+            self.dismissed_artists = crate::discover::tidy_dismissed(list);
+        }
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -3129,5 +3156,25 @@ mod tests {
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(!old.identify_by_sound);
         assert_eq!(old.sound_id_scope, Scope::Untagged);
+    fn discover_settings_defaults_and_where_they_live() {
+        let s = Settings::default();
+        assert!(s.catalogue_search && s.fans_also_like_catalogue && s.home_new_to_you);
+        assert!(s.dismissed_artists.is_empty());
+        for k in ["catalogueSearch", "fansAlsoLikeCatalogue", "homeNewToYou", "dismissedArtists"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let mut s = s;
+        let a = "11111111-2222-3333-4444-555555555555";
+        s.apply(
+            &serde_json::from_value(serde_json::json!({
+                "catalogueSearch": false, "fansAlsoLikeCatalogue": false, "homeNewToYou": false,
+                "dismissedArtists": [{"mbid": a, "name": "Rue"}, {"mbid": a.to_uppercase(), "name": "Rue again"}, {"mbid": "nope", "name": "X"}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!s.catalogue_search && !s.fans_also_like_catalogue && !s.home_new_to_you);
+        assert_eq!(s.dismissed_artists.len(), 1, "one entry per artist, real ids only");
+        assert_eq!(s.dismissed_artists[0].mbid, a);
     }
 }

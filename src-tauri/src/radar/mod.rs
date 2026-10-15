@@ -588,6 +588,7 @@ impl Radar {
                 title: f.title.clone(),
                 artist: f.artist.clone(),
                 artist_id: f.artist_id.clone(),
+                artist_mbid: None,
                 typed: None,
             };
             let rec = self.inner.lidarr.request_auto(input).await?;

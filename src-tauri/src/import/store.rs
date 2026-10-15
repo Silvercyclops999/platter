@@ -618,3 +618,111 @@ pub fn forget(c: &mut Connection, source: &str) -> AppResult<()> {
     tx.commit()?;
     Ok(())
 }
+
+// ------------------------------------------------------------------ albums added by hand
+
+/// Where albums added to the Missing list by hand are kept (this device).
+const WANTED_KEY: &str = "import.wantedAlbums";
+/// Most albums kept there.
+pub const WANTED_MAX: usize = 500;
+
+/// An album the user added to the Missing list from a page for music that
+/// isn't in the library, so it's remembered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WantedAlbum {
+    /// MusicBrainz release group id.
+    pub release_group_id: String,
+    pub title: String,
+    pub artist: String,
+    #[serde(default)]
+    pub artist_mbid: Option<String>,
+    #[serde(default)]
+    pub added_at: i64,
+}
+
+/// A wanted album as the Missing list shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingAlbum {
+    #[serde(flatten)]
+    pub album: WantedAlbum,
+    /// Its front cover from the Cover Art Archive, as an art path.
+    pub thumb: Option<String>,
+    pub links: StoreLinks,
+    /// The library album with its name by that artist, once it's arrived.
+    pub library_album_id: Option<String>,
+}
+
+/// Store search pages for an album.
+pub fn album_store_links(artist: &str, title: &str) -> StoreLinks {
+    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+    let q = utf8_percent_encode(&format!("{artist} {title}"), NON_ALPHANUMERIC).to_string();
+    StoreLinks {
+        bandcamp: format!("https://bandcamp.com/search?q={q}&item_type=a"),
+        qobuz: format!("https://www.qobuz.com/search?q={q}"),
+        itunes: format!("https://music.apple.com/search?term={q}"),
+    }
+}
+
+pub fn wanted_albums(c: &Connection) -> AppResult<Vec<WantedAlbum>> {
+    Ok(crate::db::store::kv_get(c, WANTED_KEY)?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default())
+}
+
+fn save_wanted(c: &Connection, list: &[WantedAlbum]) -> AppResult<()> {
+    let json = serde_json::to_string(list).map_err(|e| AppError::Internal(e.to_string()))?;
+    crate::db::store::kv_set(c, WANTED_KEY, &json)
+}
+
+/// Adds an album (once; newest first). Returns the list.
+pub fn add_wanted(c: &Connection, mut w: WantedAlbum, now: i64) -> AppResult<Vec<WantedAlbum>> {
+    w.release_group_id = w.release_group_id.trim().to_ascii_lowercase();
+    if !crate::artistinfo::is_mbid(&w.release_group_id) || w.title.trim().is_empty() || w.artist.trim().is_empty() {
+        return Err(AppError::Invalid("That album can't be added to Missing.".into()));
+    }
+    w.artist_mbid = w.artist_mbid.map(|m| m.trim().to_ascii_lowercase()).filter(|m| crate::artistinfo::is_mbid(m));
+    w.added_at = now;
+    let mut list = wanted_albums(c)?;
+    if !list.iter().any(|x| x.release_group_id == w.release_group_id) {
+        list.insert(0, w);
+        list.truncate(WANTED_MAX);
+        save_wanted(c, &list)?;
+    }
+    Ok(list)
+}
+
+pub fn remove_wanted(c: &Connection, release_group_id: &str) -> AppResult<Vec<WantedAlbum>> {
+    let mut list = wanted_albums(c)?;
+    list.retain(|x| !x.release_group_id.eq_ignore_ascii_case(release_group_id.trim()));
+    save_wanted(c, &list)?;
+    Ok(list)
+}
+
+/// The wanted albums with their store links, and the library album each
+/// matches once it's there (same folded title and artist).
+pub fn missing_albums(c: &Connection) -> AppResult<Vec<MissingAlbum>> {
+    let list = wanted_albums(c)?;
+    if list.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut have: HashMap<(String, String), String> = HashMap::new();
+    let want: HashSet<String> = list.iter().map(|w| fold::fold_album(&w.title)).collect();
+    let mut st = c.prepare_cached("SELECT id, title, artist_title FROM albums")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+    for row in rows {
+        let (id, title, artist) = row?;
+        let t = fold::fold_album(&title);
+        if want.contains(&t) {
+            have.entry((fold::fold_artist(&artist), t)).or_insert(id);
+        }
+    }
+    Ok(list
+        .into_iter()
+        .map(|w| MissingAlbum {
+            thumb: crate::lidarr::request::cover_thumb(&w.release_group_id),
+            links: album_store_links(&w.artist, &w.title),
+            library_album_id: have.get(&(fold::fold_artist(&w.artist), fold::fold_album(&w.title))).cloned(),
+            album: w,
+        })
+        .collect())
+}

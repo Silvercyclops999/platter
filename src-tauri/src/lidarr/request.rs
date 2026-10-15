@@ -44,6 +44,10 @@ pub struct RequestRecord {
     pub artist: String,
     #[serde(default)]
     pub artist_id: Option<String>,
+    /// The artist's MusicBrainz id when the request named it (an artist
+    /// not in the library, from a catalogue page).
+    #[serde(default)]
+    pub artist_mbid: Option<String>,
     pub state: RequestState,
     /// Where the files will land, as Lidarr sees it.
     #[serde(default)]
@@ -78,6 +82,9 @@ pub struct RequestInput {
     pub artist: String,
     #[serde(default)]
     pub artist_id: Option<String>,
+    /// The artist's MusicBrainz id, when known (an artist not in the library).
+    #[serde(default)]
+    pub artist_mbid: Option<String>,
     /// The album's name typed by the user (the first request ever).
     #[serde(default)]
     pub typed: Option<String>,
@@ -196,7 +203,11 @@ impl Lidarr {
     }
 
     /// The artist a request is for, with its MusicBrainz id when known.
-    async fn want(&self, artist: &str, artist_id: Option<&str>) -> Want {
+    async fn want(&self, artist: &str, artist_id: Option<&str>, artist_mbid: Option<&str>) -> Want {
+        let named = artist_mbid.map(|m| m.trim().to_ascii_lowercase()).filter(|m| crate::artistinfo::is_mbid(m));
+        if named.is_some() {
+            return Want { name: artist.to_string(), mbid: named, artist_id: artist_id.map(str::to_string) };
+        }
         let mbid = match artist_id {
             Some(id) => self.inner.artist_mbid.artist_mbid(id, artist).await,
             None => None,
@@ -215,7 +226,7 @@ impl Lidarr {
 
     /// Which release group to request for an album or a song.
     pub async fn pick(&self, artist: &str, artist_id: Option<&str>, title: &str, song: bool, isrc: Option<&str>) -> AppResult<Picked> {
-        let want = self.want(artist, artist_id).await;
+        let want = self.want(artist, artist_id, None).await;
         let library = self.library(&want).await?;
         if song { self.picker().pick_song(&want, title, isrc, &library).await } else { self.picker().pick_album(&want, title, &library).await }
     }
@@ -270,7 +281,7 @@ impl Lidarr {
 
     /// What a request will do. Reads only.
     pub async fn preview(&self, input: &RequestInput) -> AppResult<Preview> {
-        let want = self.want(&input.artist, input.artist_id.as_deref()).await;
+        let want = self.want(&input.artist, input.artist_id.as_deref(), input.artist_mbid.as_deref()).await;
         let library = self.library(&want).await?;
         let group = self.picker().vet_group(&input.release_group_id, &want, &library).await?;
         let mut p = Preview {
@@ -343,6 +354,7 @@ impl Lidarr {
             title: input.title.trim().to_string(),
             artist: input.artist.trim().to_string(),
             artist_id: input.artist_id.clone(),
+            artist_mbid: input.artist_mbid.clone(),
             state: RequestState::Queued,
             destination: None,
             lidarr_album_id: None,
@@ -385,7 +397,7 @@ impl Lidarr {
     /// the writes. Network failures come back as errors so the caller keeps
     /// the request waiting.
     async fn send(&self, mut rec: RequestRecord) -> AppResult<RequestRecord> {
-        let want = self.want(&rec.artist, rec.artist_id.as_deref()).await;
+        let want = self.want(&rec.artist, rec.artist_id.as_deref(), rec.artist_mbid.as_deref()).await;
         let library = self.library(&want).await?;
         let group = self.picker().vet_group(&rec.release_group_id, &want, &library).await?;
         let c = self.check_full().await?;
@@ -591,7 +603,7 @@ impl Lidarr {
         if !(st.url_set || st.away_set) || !st.has_key || !self.last_check().is_some_and(|l| l.passed) {
             return Ok(hidden);
         }
-        let want = self.want(artist, Some(artist_id)).await;
+        let want = self.want(artist, Some(artist_id), None).await;
         let Some(mbid) = want.mbid.clone() else { return Ok(MissingReleases { shown: true, items: Vec::new() }) };
         let library = self.library(&want).await?;
         let groups = self.picker().artist_groups(&mbid).await?;

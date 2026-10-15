@@ -773,6 +773,65 @@ impl ArtistInfoService {
         Ok((popular_changed, changed))
     }
 
+    // ------------------------------------------------------------ artists outside the library
+
+    /// A bio (Wikipedia) and pictures (Fanart.tv, with a key) for an artist
+    /// that isn't in the library, by MusicBrainz id. Cached like library
+    /// artists' info, under `mb:<id>`. Sources that are off give nothing.
+    pub async fn catalogue_bio(&self, mbid: &str, name: &str) -> Option<crate::discover::CatalogueBio> {
+        use crate::discover::CatalogueBio;
+        if !is_mbid(mbid) {
+            return None;
+        }
+        let key = format!("mb:{}", mbid.to_ascii_lowercase());
+        let now = now_s();
+        let k = key.clone();
+        let row = self.inner.db.read_async(move |c| cache::get(c, &k, "catalogue")).await.ok().flatten();
+        if let Some(r) = &row
+            && !r.stale(now)
+        {
+            return r.parse::<CatalogueBio>();
+        }
+        let http = self.inner.http.as_ref();
+        let l = &self.inner.limits;
+        let mut out = CatalogueBio::default();
+        let mut failed = false;
+        if self.usable(InfoSource::Wikipedia) {
+            match (Wiki { http, limiter: &l.wiki, lang: self.inner.lang.as_str() }).lookup(Some(mbid), name).await {
+                Ok(Some(w)) => {
+                    out.bio = w.bio;
+                    out.article_url = w.article_url;
+                }
+                Ok(None) => {}
+                Err(_) => failed = true,
+            }
+        }
+        if self.usable(InfoSource::Fanart)
+            && let Some(k) = self.key(InfoSource::Fanart)
+        {
+            match (Fanart { http, limiter: &l.fanart, key: k.expose() }).lookup(Some(mbid)).await {
+                Ok(Some(f)) => {
+                    out.photo = f.thumb.as_deref().map(super::ext_art_path);
+                    out.banner = f.background.as_deref().map(super::ext_art_path);
+                }
+                Ok(None) => {}
+                Err(_) => failed = true,
+            }
+        }
+        if failed {
+            // Offline or busy: keep what was there, and ask again next time.
+            return row.and_then(|r| r.parse::<CatalogueBio>()).or(Some(out));
+        }
+        let found = out != CatalogueBio::default();
+        let stored = out.clone();
+        let _ = self
+            .inner
+            .db
+            .write_async(move |c| cache::put(c, &key, "catalogue", Some(&stored), now, cache::ttl_for(None, found)))
+            .await;
+        Some(out)
+    }
+
     // ------------------------------------------------------------ albums
 
     /// An album's MusicBrainz credits from the cache, at once. A missing or
