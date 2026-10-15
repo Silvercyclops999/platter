@@ -3,7 +3,8 @@
  * queue's state, storage), kept current from `downloads://status`, and the
  * set of downloaded songs (rows show a mark), reloaded on `downloads://changed`.
  * Removing a download always asks first. An item that finishes says
- * "Download complete".
+ * "Download complete". A downloaded item that gains songs (a playlist edit,
+ * a new like) catches up by itself and says "Downloading N songs".
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
@@ -54,14 +55,21 @@ export async function startDownloads(b: Backend = backend): Promise<void> {
   ]);
 }
 
-/** A new status; items that just finished say so. */
+/** "Downloading 3 songs". */
+export const catchingUpMessage = (n: number) => `Downloading ${n} ${n === 1 ? "song" : "songs"}`;
+
+/** A new status; items that just finished, or started catching up, say so. */
 function takeStatus(status: DownloadStatus) {
   const before = useDownloads.getState().status;
   useDownloads.setState({ status });
   if (!before) return;
   for (const it of status.items) {
     const was = findItem(before, it.kind, it.id);
-    if (it.state === "downloaded" && was && was.state !== "downloaded" && it.total > 0) toast.info("Download complete");
+    if (!was) continue;
+    if (it.state === "downloaded" && was.state !== "downloaded" && it.total > 0) toast.info("Download complete");
+    // New songs on a downloaded item, fetching now (not held by Go offline or the like).
+    const catchingUp = was.state === "downloaded" && it.total > was.total && it.state !== "downloaded" && it.state !== "error";
+    if (catchingUp && !status.paused) toast.info(catchingUpMessage(it.total - it.done));
   }
 }
 

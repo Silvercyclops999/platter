@@ -34,7 +34,7 @@ pub mod web;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::Manager;
+use tauri::{Listener, Manager};
 
 use crate::audio::player::{PlayerConfig, PlayerHandle};
 use crate::db::{ArtCache, DbHandle};
@@ -240,12 +240,21 @@ pub fn run() {
     // rustls can't pick one on its own. Use the same one as our HTTP client.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    {
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        let console = tracing_subscriber::fmt::layer().with_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,platter_lib=debug".into()),
-        )
-        .init();
+        );
+        // The log file (Help, Show Logs) keeps info and above.
+        let file = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(platform::logs::LogFile)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+        tracing_subscriber::registry().with(console).with(file).init();
+    }
 
     tauri::Builder::default()
         // First, so a second launch (a platter:// link on Windows) hands its
@@ -271,6 +280,7 @@ pub fn run() {
             let cache_dir = app.path().app_cache_dir()?;
             std::fs::create_dir_all(&root_dir)?;
             monitor::crash::install(&root_dir);
+            platform::logs::open(app.handle());
             // The Plex Home user this run belongs to: their own folder and
             // keychain entries (the user who signed in keeps the top folder).
             let (profile, data_dir) = plex::home::startup(&root_dir);
@@ -415,6 +425,11 @@ pub fn run() {
             );
             downloads.attach(player.transfer_gate(), Some(player.transfer_host()), audio::http::http_client());
             tauri::async_runtime::spawn(downloads.clone().run());
+            // Downloaded items follow library changes straight away.
+            for ev in downloads::FOLLOW_EVENTS {
+                let d = downloads.clone();
+                app.listen_any(ev, move |_| d.poke());
+            }
             if initial.download_liked {
                 // Keep Liked Songs downloaded (turned on before this item existed).
                 let d = downloads.clone();

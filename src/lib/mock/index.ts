@@ -318,13 +318,20 @@ export class MockBackend implements Backend {
     this.pl = new MockPlaylists(
       this.fx,
       (id) => this.trackById(id),
-      () => this.emit("library://changed", null),
+      () => {
+        this.emit("library://changed", null);
+        // Downloaded playlists follow their edits straight away, as in the core.
+        this.downloads.resync();
+      },
       (message) => this.emit("toast", { kind: "error", message }),
     );
     this.likes = new MockLikes(
       this.fx,
       () => this.settings.likedMeans,
-      (ids) => this.emit("likes://changed", { ids }),
+      (ids) => {
+        this.emit("likes://changed", { ids });
+        this.downloads.resync();
+      },
       (message) => this.emit("toast", { kind: "error", message }),
     );
     this.contextPlays = this.seedContextPlays();

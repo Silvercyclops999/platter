@@ -519,9 +519,11 @@ Event `menu://action` → `{ action }` when an item is picked. `action` is one
 of `checkUpdates`, `settings`, `newPlaylist`, `newFolder`, `search`,
 `filterLibrary`, `playPause`, `next`, `previous`, `volumeUp`, `volumeDown`,
 `shuffle`, `repeat`, `miniplayer`, `fullWindow`, `lyrics`, `queue`,
-`toggleLibrary` and `shortcuts`. The UI runs the same code as its own buttons
-and shortcuts (`src/shell/menuBar.ts`). Anything but a playback item or
-Miniplayer brings the main window forward first.
+`toggleLibrary`, `shortcuts`, `goOffline` and `signOut`. The UI runs the same
+code as its own buttons and shortcuts (`src/shell/menuBar.ts`): Go Offline
+flips the `goOffline` setting, and Sign Out asks first, like the app menu.
+Anything but a playback item, Miniplayer or Go Offline brings the main window
+forward first.
 
 Items with keys use the app's own shortcuts (Cmd+, for Settings, Cmd+Left
 and Cmd+Right for previous and next, and so on); New Playlist (Cmd+N) and New
@@ -531,10 +533,14 @@ handled a key press, the menu's copy of the same press within half a second
 is skipped, so a key never acts twice.
 
 Quit Platter and Platter on GitHub are done in the core: Quit saves the queue
-first, like the tray's Quit, and the project page opens in the browser. About,
+first, like the tray's Quit, and the project page opens in the browser. So
+are Help's Report an Issue, which opens the project's issues page, and Show
+Logs in Finder, which opens the folder holding `platter.log` (the core's info
+level log, started fresh past 5 MB with one older file kept). About,
 Services, Hide, the Edit items, Close Window and the Window menu are the
 system's own. Play/Pause, Shuffle and Repeat follow `player://state` (the
-label reads Pause while playing; Shuffle and Repeat show a checkmark when on).
+label reads Pause while playing; Shuffle and Repeat show a checkmark when on),
+and Go Offline's checkmark follows the setting.
 
 ## Now-playing feed
 | Command | Args | Returns |
@@ -860,9 +866,12 @@ of downloaded songs changes; the UI asks `downloaded_tracks` again.
 
 Whole albums, playlists, Liked Songs and mixes download, never single songs.
 Albums, playlists and Liked Songs take their songs from the library cache and
-follow it: every 30 seconds (and after each change made here) new songs queue
-and removed songs' files are deleted unless another downloaded item still
-holds them. A mix has no list in the cache, so `downloads_set` for a mix needs
+follow it: right after every `library://changed` or `likes://changed` (live
+library updates, playlist edits, likes), and every 30 seconds besides, new
+songs queue and removed songs' files are deleted unless another downloaded
+item still holds them. The item shows as downloading while it catches up and
+the UI says "Downloading N songs", then "Download complete". Go offline, the
+home network rule and the storage limit hold the new songs like any others. A mix has no list in the cache, so `downloads_set` for a mix needs
 `trackIds`; calling it again with a new list updates it. Liked Songs' id is
 ignored, and turning it on or off also sets `downloadLiked`.
 

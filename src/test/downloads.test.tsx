@@ -2,8 +2,9 @@
  * Downloads: the toggle on album, playlist and Liked Songs pages (outline,
  * progress ring with percent, filled), "Download complete", the remove
  * confirm, the downloaded mark on rows and library items, the Downloaded
- * chip (on by itself offline), Settings storage rows, Go offline, and the
- * app states: storage full, download failed, file missing on disk.
+ * chip (on by itself offline), Settings storage rows, Go offline, keeping
+ * downloaded items in sync with the library, and the app states: storage
+ * full, download failed, file missing on disk.
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -17,11 +18,11 @@ import { AlbumPage } from "../pages/AlbumPage";
 import { LikedPage } from "../pages/LikedPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { SettingsPage } from "../pages/SettingsPage";
-import { offlineMessage } from "../shell/bannerView";
+import { offlineCallout } from "../shell/bannerView";
 import { Sidebar } from "../shell/Sidebar";
 import { AppMenu } from "../shell/TopBar";
 import { useApp } from "../stores/app";
-import { resetDownloads, startDownloads, useDownloads } from "../stores/downloads";
+import { catchingUpMessage, resetDownloads, startDownloads, useDownloads } from "../stores/downloads";
 import { useLibraryView } from "../stores/library";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -124,6 +125,97 @@ describe("playlists and Liked Songs", () => {
   });
 });
 
+describe("keeping downloads in sync", () => {
+  const pl = () => mock.fx.playlists.find((p) => (mock.fx.playlistTracks.get(p.id) ?? []).length > 1 && !p.smart)!;
+  /** Songs on no downloaded item yet. */
+  const fresh = (n: number) => {
+    const have = new Set([...(mock.fx.playlistTracks.get(pl().id) ?? []), ...mock.likes.ids()]);
+    return mock.fx.tracks.filter((t) => !have.has(t.id)).slice(0, n).map((t) => t.id);
+  };
+  const seed = async (kind: "playlist" | "liked" | "album", id: string, title: string) => {
+    mock.downloads.seedDone(kind, id, title);
+    resetDownloads();
+    await startDownloads();
+  };
+
+  it("songs added to a downloaded playlist download by themselves", { timeout: 20_000 }, async () => {
+    const p = pl();
+    await seed("playlist", p.id, p.title);
+    mock.downloads.stepMs = 30;
+    mock.downloads.steps = 2;
+    render(<PlaylistPage id={p.id} />);
+    await screen.findByRole("button", { name: `Remove download of ${p.title}` });
+    const added = fresh(3);
+    await mock.playlistAdd(p.id, added);
+    // The button shows it's catching up, with a toast saying how many.
+    await waitFor(() => expect(button()).toHaveClass("dl-btn--downloading"));
+    expect(toasts()).toContain(catchingUpMessage(3));
+    expect(useDownloads.getState().ids.has(added[2])).toBe(false);
+    // Row badges fill in one by one, then it's downloaded again.
+    await waitFor(() => expect(useDownloads.getState().ids.has(added[0])).toBe(true));
+    await screen.findByRole("button", { name: `Remove download of ${p.title}` }, { timeout: 15_000 });
+    for (const id of added) expect(useDownloads.getState().ids.has(id)).toBe(true);
+    expect(toasts().filter((t) => t === "Download complete")).toHaveLength(1);
+  });
+
+  it("songs removed from a downloaded playlist lose their files quietly", async () => {
+    const p = pl();
+    await seed("playlist", p.id, p.title);
+    const ids = mock.fx.playlistTracks.get(p.id)!;
+    const gone = ids[ids.length - 1];
+    const page = await mock.playlistPage(p.id);
+    const item = page.itemIds[page.tracks.findIndex((t) => t.id === gone)];
+    await mock.playlistRemove(p.id, [item]);
+    await waitFor(() => expect(useDownloads.getState().ids.has(gone)).toBe(false));
+    expect(mock.downloads.downloadedIds()).not.toContain(gone);
+    const st = useDownloads.getState().status!.items.find((i) => i.kind === "playlist")!;
+    expect(st.state).toBe("downloaded");
+    expect(toasts()).toEqual([]);
+  });
+
+  it("a new like downloads when Liked Songs is downloaded", { timeout: 20_000 }, async () => {
+    await seed("liked", "", "Liked Songs");
+    const [song] = fresh(1);
+    await mock.likesSet([song], true);
+    await waitFor(() => expect(toasts()).toContain(catchingUpMessage(1)));
+    await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true), { timeout: 15_000 });
+    await waitFor(() => expect(toasts()).toContain("Download complete"));
+    // Unliking takes the file away again.
+    await mock.likesSet([song], false);
+    await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(false));
+  });
+
+  it("an album that gains a song (a live library update) fetches it", { timeout: 20_000 }, async () => {
+    await seed("album", album.id, album.title);
+    const [song] = fresh(1);
+    const list = mock.fx.tracksByAlbum.get(album.id)!;
+    list.push(mock.fx.tracks.find((t) => t.id === song)!);
+    try {
+      act(() => mock.downloads.resync());
+      await waitFor(() => expect(toasts()).toContain(catchingUpMessage(1)));
+      await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true), { timeout: 15_000 });
+    } finally {
+      list.pop();
+    }
+  });
+
+  it("Go offline holds the new songs, then they catch up", { timeout: 20_000 }, async () => {
+    const p = pl();
+    await seed("playlist", p.id, p.title);
+    await mock.settingsSet({ goOffline: true });
+    await waitFor(async () => expect((await mock.downloadsStatus()).paused).toBe("offline"));
+    const [song] = fresh(1);
+    await mock.playlistAdd(p.id, [song]);
+    await waitFor(() => expect(useDownloads.getState().status!.items[0].total).toBe(mock.fx.playlistTracks.get(p.id)!.length));
+    const it = useDownloads.getState().status!.items[0];
+    expect(it.state).toBe("queued");
+    expect(useDownloads.getState().ids.has(song)).toBe(false);
+    expect(toasts()).not.toContain(catchingUpMessage(1));
+    await mock.settingsSet({ goOffline: false });
+    await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true), { timeout: 15_000 });
+  });
+});
+
 describe("library sidebar", () => {
   it("marks downloaded items and offers a Downloaded chip, on by itself offline", async () => {
     mock.downloads.seedDone("album", mock.fx.albums[0].id, mock.fx.albums[0].title);
@@ -197,7 +289,7 @@ describe("Go offline", () => {
       return h;
     });
     expect(h.cachedOnly).toBe(true);
-    expect(offlineMessage(h)).toMatch(/Turn off Go offline in the app menu/);
+    expect(offlineCallout(h)?.title).toBe("You chose Go offline.");
     expect(useDownloads.getState().status?.paused ?? (await mock.downloadsStatus()).paused).toBe("offline");
     await userEvent.click(screen.getByRole("button", { name: /App menu/ }));
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Go offline" }));

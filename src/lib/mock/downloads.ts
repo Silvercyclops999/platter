@@ -194,7 +194,7 @@ export class MockDownloads {
     return this.items.has(keyOf(kind, id));
   }
 
-  /** Playlists and Liked Songs follow the library (the core checks every 30 s). */
+  /** Playlists and Liked Songs follow the library (on every library or like change, as the core does). */
   resync() {
     let changed = false;
     for (const it of this.items.values()) {

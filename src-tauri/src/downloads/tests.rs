@@ -506,3 +506,127 @@ fn quality_and_file_names() {
     assert_eq!(estimate_bytes(&tracks[0], DownloadQuality::Original), 22_500_000);
     assert_eq!(estimate_bytes(&tracks[0], DownloadQuality::Kbps128), 3_200_000);
 }
+
+/// Waits up to `secs` for `f` to hold.
+async fn within(secs: u64, mut f: impl FnMut() -> bool) -> bool {
+    let until = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < until {
+        if f() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    f()
+}
+
+fn add_to_playlist(db: &DbHandle, position: i64, track: &str) {
+    let track = track.to_string();
+    db.write(move |c| {
+        c.execute(
+            "INSERT INTO playlist_items (playlist_id, position, track_id) VALUES ('p', ?1, ?2)",
+            rusqlite::params![position, track],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn drop_from_playlist(db: &DbHandle, track: &str) {
+    let track = track.to_string();
+    db.write(move |c| {
+        c.execute("DELETE FROM playlist_items WHERE playlist_id = 'p' AND track_id = ?1", [track])?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_library_change_reaches_downloaded_items_straight_away() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Playlist, "p"), "Mix".into(), None).await.unwrap();
+    r.d.add(key(ItemKind::Album, "b"), "Second".into(), None).await.unwrap();
+    let run = tokio::spawn(r.d.clone().run());
+    assert!(within(5, || r.d.downloaded_ids() == ["a1", "b1", "b2"]).await);
+
+    // A song added to the playlist is fetched long before the 30 s re-read.
+    add_to_playlist(&r.db, 2, "a2");
+    r.d.poke();
+    assert!(within(5, || r.d.downloaded_ids() == ["a1", "a2", "b1", "b2"]).await, "{:?}", r.d.downloaded_ids());
+    let st = r.d.status().unwrap();
+    assert_eq!(item(&st, ItemKind::Playlist, "p").state, ItemState::Downloaded);
+    assert_eq!(item(&st, ItemKind::Playlist, "p").total, 3);
+    // On the way it showed as catching up, then as downloaded again.
+    let states: Vec<_> = r
+        .events
+        .statuses
+        .lock()
+        .iter()
+        .filter_map(|s| s.items.iter().find(|i| i.kind == ItemKind::Playlist).map(|i| (i.state, i.total)))
+        .collect();
+    let back = states.iter().position(|s| *s == (ItemState::Downloading, 3)).expect("in progress with the new song");
+    assert!(states[back..].contains(&(ItemState::Downloaded, 3)));
+
+    // A song removed from the playlist and on no other item: its file goes.
+    drop_from_playlist(&r.db, "a1");
+    r.d.poke();
+    assert!(within(5, || r.d.downloaded_ids() == ["a2", "b1", "b2"]).await);
+    assert!(!r.dir.join("a1.flac").exists());
+    // b1 is on the album too, so its file stays when the playlist drops it.
+    drop_from_playlist(&r.db, "b1");
+    r.d.poke();
+    assert!(within(5, || item(&r.d.status().unwrap(), ItemKind::Playlist, "p").total == 1).await);
+    assert!(r.dir.join("b1.flac").exists());
+    run.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_new_like_downloads_straight_away() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Liked, ""), "Liked Songs".into(), None).await.unwrap();
+    let run = tokio::spawn(r.d.clone().run());
+    r.db.write(|c| {
+        c.execute("UPDATE tracks SET user_rating = 10, rated_at = 7 WHERE id IN ('a1', 'b2')", [])?;
+        Ok(())
+    })
+    .unwrap();
+    r.d.poke();
+    assert!(within(5, || r.d.downloaded_ids() == ["a1", "b2"]).await);
+    // Unliking removes the file.
+    r.db.write(|c| {
+        c.execute("UPDATE tracks SET user_rating = NULL WHERE id = 'b2'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    r.d.poke();
+    assert!(within(5, || r.d.downloaded_ids() == ["a1"]).await);
+    assert!(!r.dir.join("b2.flac").exists());
+    run.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn go_offline_holds_new_songs_until_it_is_turned_off() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Playlist, "p"), "Mix".into(), None).await.unwrap();
+    let run = tokio::spawn(r.d.clone().run());
+    assert!(within(5, || r.d.downloaded_ids() == ["a1", "b1"]).await);
+    r.d.set_prefs(Prefs { offline: true, ..Prefs::default() });
+    add_to_playlist(&r.db, 2, "b2");
+    r.d.poke();
+    assert!(within(5, || r.d.status().unwrap().queued == 1).await);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let st = r.d.status().unwrap();
+    assert_eq!(st.paused, Some(PauseReason::Offline));
+    assert_eq!(item(&st, ItemKind::Playlist, "p").state, ItemState::Queued);
+    assert_eq!(r.d.downloaded_ids(), ["a1", "b1"]);
+    assert!(!r.hits.lock().iter().any(|(p, _)| p.contains("/b2/")));
+    // Turned off again: it catches up by itself.
+    r.d.set_prefs(Prefs::default());
+    assert!(within(5, || r.d.downloaded_ids() == ["a1", "b1", "b2"]).await);
+    run.abort();
+}
+
+#[test]
+fn the_app_pokes_downloads_on_library_and_like_changes() {
+    assert_eq!(FOLLOW_EVENTS, ["library://changed", "likes://changed"]);
+    assert_eq!(crate::likes::EVENT_LIKES_CHANGED, FOLLOW_EVENTS[1]);
+}

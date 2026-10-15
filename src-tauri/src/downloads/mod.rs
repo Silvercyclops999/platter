@@ -7,7 +7,9 @@
 //! MP3 from the server's transcoder when the quality setting says so. Files
 //! live in one folder, named by track id, shared by every item that holds the
 //! song. Playlists and Liked Songs follow the library: new songs queue, and a
-//! removed song's file goes once no downloaded item needs it.
+//! removed song's file goes once no downloaded item needs it. The app pokes
+//! the queue on every library change ([`FOLLOW_EVENTS`]), so this happens
+//! within a moment; a slow re-read every [`RESYNC_EVERY`] catches the rest.
 //!
 //! The queue waits while the server can't be reached or Go offline is on,
 //! away from the home network when "Download only on home network" is on,
@@ -45,6 +47,9 @@ use crate::plex::types::ConnectionKind;
 pub use store::{ItemKey, ItemKind};
 
 const GB: u64 = 1024 * 1024 * 1024;
+/// App events after which downloaded playlists, albums and Liked Songs are
+/// read again (live library updates, playlist edits, likes).
+pub const FOLLOW_EVENTS: [&str; 2] = ["library://changed", "likes://changed"];
 /// Re-read playlists and Liked Songs this often for new and removed songs.
 const RESYNC_EVERY: Duration = Duration::from_secs(30);
 /// How often a waiting queue looks again on its own.
