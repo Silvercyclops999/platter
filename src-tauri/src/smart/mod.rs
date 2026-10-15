@@ -97,7 +97,7 @@ impl SmartStore for SyncSmart {
         for p in &mut all {
             let key = format!("{KEY_SNAPSHOT}{}", p.id);
             if let Some(s) = self.db.read(|c| kv_get(c, &key))?.and_then(|raw| serde_json::from_str::<Snapshot>(&raw).ok()) {
-                p.snapshot = Some(s.ids);
+                p.snapshot = Some(crate::sid::resolve_all(&s.ids));
                 p.snapshot_at = Some(s.at);
             }
         }

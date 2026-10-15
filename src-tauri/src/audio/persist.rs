@@ -35,7 +35,16 @@ pub fn save(path: &Path, p: &Persisted) -> io::Result<()> {
 /// `None` if missing, unreadable, or from an incompatible version.
 pub fn load(path: &Path) -> Option<Persisted> {
     let bytes = fs::read(path).ok()?;
-    match serde_json::from_slice::<Persisted>(&bytes) {
+    // Ids saved before they carried their server get its tag (crate::sid).
+    let mut v: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("ignoring unreadable queue file: {e}");
+            return None;
+        }
+    };
+    crate::sid::resolve_json(&mut v);
+    match serde_json::from_value::<Persisted>(v) {
         Ok(p) if p.version == VERSION => Some(p),
         Ok(_) => None,
         Err(e) => {

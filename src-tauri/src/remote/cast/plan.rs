@@ -87,11 +87,12 @@ fn direct(server: &ServerCtx, token: &Token, client_id: &str, t: &Track) -> Opti
     let image = t
         .thumb
         .as_deref()
+        .map(crate::sid::key)
         .filter(|p| p.starts_with('/'))
         .and_then(|p| server.url(p).ok())
         .map(|u| with_token(u, token));
     Some(DirectItem {
-        rating_key: t.id.clone(),
+        rating_key: crate::sid::key(&t.id).to_string(),
         url,
         content_type: content_type.to_string(),
         title: t.title.clone(),
@@ -113,7 +114,7 @@ pub fn plan(
     repeat: Repeat,
 ) -> CastPlan {
     let plex = tracks.first().map(|first| PlexLoad {
-        rating_key: first.id.clone(),
+        rating_key: crate::sid::key(&first.id).to_string(),
         offset_ms,
         machine_id: server.machine_id.clone(),
         protocol: server.base.scheme().to_string(),

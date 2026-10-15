@@ -58,12 +58,7 @@ pub struct AppLink {
 
 /// Short tag for a server id: 8 hex digits of its FNV-1a hash.
 pub fn server_tag(machine_id: &str) -> String {
-    let mut h: u32 = 0x811c_9dc5;
-    for b in machine_id.as_bytes() {
-        h ^= *b as u32;
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    format!("{h:08x}")
+    crate::sid::tag(machine_id)
 }
 
 fn valid_id(id: &str) -> bool {
@@ -72,14 +67,29 @@ fn valid_id(id: &str) -> bool {
 
 /// Build a link. `t` is kept for songs only.
 pub fn build(kind: ShareKind, id: &str, t: Option<u32>, machine_id: Option<&str>) -> String {
+    let tag = machine_id.filter(|m| !m.is_empty()).map(server_tag);
+    build_tagged(kind, id, t, tag.as_deref())
+}
+
+/// Build a link for an item id as the app keeps it: an id that carries its
+/// server (`crate::sid`) goes out as the server's own id with that server's
+/// tag; any other id gets `fallback_tag` (the connected server's).
+pub fn for_item(kind: ShareKind, id: &str, t: Option<u32>, fallback_tag: Option<&str>) -> String {
+    match crate::sid::split(id) {
+        (Some(tag), key) => build_tagged(kind, key, t, Some(tag)),
+        (None, key) => build_tagged(kind, key, t, fallback_tag),
+    }
+}
+
+fn build_tagged(kind: ShareKind, id: &str, t: Option<u32>, tag: Option<&str>) -> String {
     let mut q = Vec::new();
     if kind == ShareKind::Track
         && let Some(t) = t
     {
         q.push(format!("t={}", t.min(MAX_T)));
     }
-    if let Some(m) = machine_id.filter(|m| !m.is_empty()) {
-        q.push(format!("s={}", server_tag(m)));
+    if let Some(tag) = tag.filter(|t| !t.is_empty()) {
+        q.push(format!("s={tag}"));
     }
     let id: String = url::form_urlencoded::byte_serialize(id.as_bytes()).collect();
     let mut s = format!("{SCHEME}://{}/{id}", kind.link_word());

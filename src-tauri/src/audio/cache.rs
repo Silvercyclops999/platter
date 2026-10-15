@@ -30,13 +30,32 @@ pub fn cache_key(track: &Track) -> String {
         h ^= *b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
-    let id: String = track
-        .id
+    // The server tag stays readable (`<tag>_<key>`, see crate::sid).
+    let id: String = crate::sid::file_part(&track.id)
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .take(32)
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(48)
         .collect();
     format!("{id}-{h:016x}")
+}
+
+/// Files cached before ids carried their server (`<key>-<hash>.audio`) get
+/// the tag of the server they came from, so they still count as this
+/// track's. Returns how many were renamed.
+pub fn qualify_files(dir: &Path, tag: &str) -> usize {
+    let mut n = 0;
+    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(stem) = name.strip_suffix(".audio") else { continue };
+        let Some((id, hash)) = stem.rsplit_once('-') else { continue };
+        if !crate::sid::is_plain_key(id) || hash.len() != 16 {
+            continue;
+        }
+        if fs::rename(e.path(), dir.join(format!("{tag}_{id}-{hash}.audio"))).is_ok() {
+            n += 1;
+        }
+    }
+    n
 }
 
 pub struct DiskCache {

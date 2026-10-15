@@ -409,3 +409,35 @@ async fn an_opened_link_waits_for_the_ui_once() {
     f.share.open("platter://album/999").await;
     assert_eq!(f.share.take().unwrap().status, DeepLinkStatus::NotInLibrary);
 }
+
+#[tokio::test]
+async fn links_name_the_server_that_has_the_item() {
+    let f = fx();
+    let here = link::server_tag("machine-a");
+    let other = link::server_tag("machine-b");
+    f.db.write(|c| {
+        c.execute_batch(&format!(
+            "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, format, subformats, track_count)
+               VALUES ('{here}:60', 'Here', 'Here', '7', 'Test Artist', 'album', '[]', 1),
+                      ('{other}:60', 'There', 'There', '7', 'Test Artist', 'album', '[]', 1);"
+        ))?;
+        Ok(())
+    })
+    .unwrap();
+    // The link carries the server's own id and the tag of the server with it.
+    let i = f.share.info(ShareKind::Album, &format!("{other}:60"), None).await.unwrap();
+    assert_eq!(i.app_link, format!("platter://album/60?s={other}"));
+    let i = f.share.info(ShareKind::Album, &format!("{here}:60"), None).await.unwrap();
+    assert_eq!(i.app_link, format!("platter://album/60?s={here}"));
+    // Opening it finds that server's album, not the same number elsewhere.
+    let o = f.share.resolve(&format!("platter://album/60?s={other}")).await;
+    assert_eq!((o.status, o.id.clone()), (DeepLinkStatus::Open, Some(format!("{other}:60"))));
+    let o = f.share.resolve(&format!("platter://album/60?s={here}")).await;
+    assert_eq!(o.id, Some(format!("{here}:60")));
+    // A link from before tags means the connected server.
+    let o = f.share.resolve("platter://album/60").await;
+    assert_eq!(o.id, Some(format!("{here}:60")));
+    // A server whose music isn't here.
+    let gone = link::server_tag("machine-c");
+    assert_eq!(f.share.resolve(&format!("platter://album/60?s={gone}")).await.status, DeepLinkStatus::NotInLibrary);
+}

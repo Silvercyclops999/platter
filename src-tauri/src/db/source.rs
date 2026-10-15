@@ -65,6 +65,13 @@ pub struct SimilarArtist {
 /// Plex allows; see docs/PLEX-API.md for the endpoints behind each.
 #[async_trait]
 pub trait LibrarySource: Send + Sync {
+    /// The server's tag (`crate::sid`), which its ids carry. A cache from
+    /// before tags is rewritten with it before the first sync. None: the
+    /// source's ids are plain (tests).
+    async fn server_tag(&self) -> Option<String> {
+        None
+    }
+
     /// Music sections on the selected server (empty = "no music library").
     async fn music_sections(&self) -> AppResult<Vec<MusicSection>>;
 

@@ -145,7 +145,8 @@ pub async fn apply(db: &DbHandle, source: &dyn LibrarySource, batch: Batch) -> A
     if batch.is_empty() {
         return Ok(LiveOutcome::Nothing);
     }
-    if batch.len() > MAX_BATCH {
+    // Too big, or the cache still owes its server tags (a sync adds them).
+    if batch.len() > MAX_BATCH || db.ids_pending() && source.server_tag().await.is_some() {
         return Ok(LiveOutcome::NeedsSync);
     }
     let Some(state) = db.read_async(store::sync_state).await? else {

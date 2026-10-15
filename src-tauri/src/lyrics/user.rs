@@ -43,9 +43,10 @@ impl OwnLyrics {
     }
 }
 
-/// Library track ids are Plex rating keys (numbers).
+/// Library track ids: a Plex rating key (a number), with its server tag.
 pub fn valid_track_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit())
+    let k = crate::sid::key(id);
+    !k.is_empty() && k.len() <= 20 && k.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// The text to store: line endings made plain, outer blank lines trimmed.

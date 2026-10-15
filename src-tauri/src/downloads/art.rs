@@ -18,9 +18,9 @@ pub const ART_DIR: &str = "art";
 const SIZE: u32 = 640;
 
 fn name(thumb: &str) -> String {
-    // FNV-1a of the Plex art path.
+    // FNV-1a of the Plex art path (as kept before paths carried their server).
     let mut h: u64 = 0xcbf29ce484222325;
-    for b in thumb.as_bytes() {
+    for b in crate::sid::storage_form(thumb).as_bytes() {
         h ^= *b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }

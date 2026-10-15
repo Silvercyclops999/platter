@@ -198,7 +198,7 @@ fn non_empty(s: Option<String>) -> Option<String> {
 /// picture through the outside-image route. Anything else is dropped.
 pub fn art_path(raw: Option<String>) -> Option<String> {
     let raw = non_empty(raw)?;
-    if raw.starts_with('/') {
+    if raw.starts_with('/') || crate::sid::tag_of(&raw).is_some() {
         return Some(raw);
     }
     raw.starts_with("https://").then(|| format!("{}{raw}", crate::artistinfo::art::EXT_PREFIX))

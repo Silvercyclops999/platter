@@ -102,11 +102,13 @@ impl SmartRemote for PlexSmart {
     }
 
     async fn content(&self, id: &str) -> AppResult<String> {
-        if !id.chars().all(|c| c.is_ascii_digit()) {
+        let client = self.plex.client().await?;
+        let id = client.raw(id)?;
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
             return Err(AppError::Invalid("not a Plex playlist".into()));
         }
         let path = format!("/playlists/{id}");
-        let bytes = self.plex.client().await?.get_bytes(&path, &[]).await?;
+        let bytes = client.get_bytes(&path, &[]).await?;
         let env: Env<Metas> = serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))?;
         env.mc
             .metadata

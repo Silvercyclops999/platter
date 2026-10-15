@@ -31,7 +31,7 @@ pub fn cached_ids(dir: &Path) -> Vec<String> {
         if let Some(name) = e.file_name().to_str()
             && let Some(id) = track_id_of(name)
         {
-            out.insert(id.to_string());
+            out.insert(crate::sid::resolve(&crate::sid::from_file_part(id)));
         }
     }
     out.into_iter().collect()

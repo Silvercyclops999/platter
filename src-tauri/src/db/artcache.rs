@@ -70,7 +70,8 @@ fn fnv(seed: u64, s: &str) -> u64 {
 }
 
 fn cache_key(path: &str, w: u32, h: u32) -> String {
-    format!("{w}x{h}:{path}")
+    // Art cached before paths carried their server keeps its name.
+    format!("{w}x{h}:{}", crate::sid::storage_form(path))
 }
 
 fn file_name(key: &str) -> String {

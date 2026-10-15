@@ -6,6 +6,7 @@
 import { create } from "zustand";
 import { backend } from "../lib/backend";
 import type { LibraryItem } from "../lib/types";
+import { idVariants, plainId } from "../lib/ids";
 
 export type LibKind = "playlist" | "album" | "artist";
 export type LibFilter = LibKind | "all";
@@ -350,7 +351,8 @@ const creatorKey = (e: LibEntry) => (e.kind === "artist" ? e.sortTitle : (e.crea
 
 /** When the item was last opened or played here, or played anywhere (ms). */
 export function recentAt(e: LibEntry, recents: Record<string, number>): number {
-  return Math.max(recents[`${e.kind}:${e.id}`] ?? 0, (e.playedAt ?? 0) * 1000);
+  const saved = idVariants(e.id).map((id) => recents[`${e.kind}:${id}`]).find((v) => v != null);
+  return Math.max(saved ?? 0, (e.playedAt ?? 0) * 1000);
 }
 
 /**
@@ -381,8 +383,8 @@ export function libraryEntries(items: LibEntry[], opts: EntryOpts): LibEntry[] {
           return collator.compare(creatorKey(a.e), creatorKey(b.e)) || byTitle(a.e, b.e);
         case "custom": {
           // Playlists not placed yet follow the placed ones, by title.
-          const oa = order.get(a.e.id) ?? Infinity;
-          const ob = order.get(b.e.id) ?? Infinity;
+          const oa = order.get(a.e.id) ?? order.get(plainId(a.e.id)) ?? Infinity;
+          const ob = order.get(b.e.id) ?? order.get(plainId(b.e.id)) ?? Infinity;
           return oa === ob ? byTitle(a.e, b.e) : oa - ob;
         }
         default:

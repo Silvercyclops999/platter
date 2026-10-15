@@ -301,14 +301,29 @@ impl SyncStore {
         }
     }
 
-    /// One value, or None when missing or deleted.
+    /// One value, or None when missing or deleted. A key with a server tag
+    /// also finds the entry an older build saved under the plain id
+    /// (`crate::sid`).
     pub fn get<T: DeserializeOwned>(&self, ns: &Ns<T>, key: &str) -> AppResult<Option<T>> {
-        let e = self.inner.db.read(|c| get_entry(c, ns.name(), key))?;
-        Ok(e.and_then(|e| e.value).and_then(|v| serde_json::from_value(v).ok()))
+        let e = self.inner.db.read(|c| {
+            Ok(match get_entry(c, ns.name(), key)? {
+                Some(e) => Some(e),
+                None => match crate::sid::legacy_variant(key) {
+                    Some(old) => get_entry(c, ns.name(), &old)?,
+                    None => None,
+                },
+            })
+        })?;
+        Ok(e.and_then(|e| e.value).and_then(|mut v| {
+            crate::sid::resolve_json(&mut v);
+            serde_json::from_value(v).ok()
+        }))
     }
 
     /// Every live value in a namespace, by key. Values this build can't read
-    /// (written by a newer one) are left out but kept.
+    /// (written by a newer one) are left out but kept. Keys and ids saved
+    /// before server tags come back with them (`crate::sid`); where both
+    /// forms of a key are stored, the tagged one wins.
     pub fn list<T: DeserializeOwned>(&self, ns: &Ns<T>) -> AppResult<Vec<(String, T)>> {
         let name = ns.name();
         let rows: Vec<(String, String)> = self.inner.db.read(|c| {
@@ -316,10 +331,25 @@ impl SyncStore {
             let rows = st.query_map([name], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
             Ok(rows)
         })?;
-        Ok(rows
-            .into_iter()
-            .filter_map(|(k, v)| serde_json::from_str::<T>(&v).ok().map(|t| (k, t)))
-            .collect())
+        let mut out: Vec<(String, T, bool)> = Vec::with_capacity(rows.len());
+        let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for (k, v) in rows {
+            let Ok(mut v) = serde_json::from_str::<Value>(&v) else { continue };
+            crate::sid::resolve_json(&mut v);
+            let Ok(t) = serde_json::from_value::<T>(v) else { continue };
+            let resolved = crate::sid::resolve_key(&k);
+            let tagged = resolved == k;
+            match at.get(&resolved) {
+                Some(&i) if out[i].2 => {}
+                Some(&i) => out[i] = (resolved, t, tagged),
+                None => {
+                    at.insert(resolved.clone(), out.len());
+                    out.push((resolved, t, tagged));
+                }
+            }
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out.into_iter().map(|(k, t, _)| (k, t)).collect())
     }
 
     /// Whether the namespace has ever had an entry (deleted ones count).
@@ -338,14 +368,17 @@ impl SyncStore {
         self.inner.db.read(|c| {
             let mut st = c.prepare_cached("SELECT key FROM sync_entries WHERE ns = ?1 AND value IS NULL ORDER BY key")?;
             let rows = st.query_map([name], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?;
-            Ok(rows)
+            Ok(rows.iter().map(|k| crate::sid::resolve_key(k)).collect())
         })
     }
 
-    /// Whether a key has an entry (deleted counts).
+    /// Whether a key has an entry (deleted counts), under either form.
     pub fn has_entry<T>(&self, ns: &Ns<T>, key: &str) -> AppResult<bool> {
         let name = ns.name();
-        Ok(self.inner.db.read(|c| get_entry(c, name, key))?.is_some())
+        let old = crate::sid::legacy_variant(key);
+        self.inner.db.read(|c| {
+            Ok(get_entry(c, name, key)?.is_some() || old.as_deref().map(|o| get_entry(c, name, o)).transpose()?.flatten().is_some())
+        })
     }
 
     pub fn put<T: Serialize>(&self, ns: &Ns<T>, key: &str, value: &T) -> AppResult<()> {
@@ -354,7 +387,12 @@ impl SyncStore {
 
     /// Delete (leaves a tombstone). Returns whether there was a value.
     pub fn remove<T>(&self, ns: &Ns<T>, key: &str) -> AppResult<bool> {
-        let had = self.inner.db.read(|c| get_entry(c, ns.name(), key))?.is_some_and(|e| !e.is_tombstone());
+        let old = crate::sid::legacy_variant(key);
+        let live = |c: &Connection, k: &str| -> AppResult<bool> { Ok(get_entry(c, ns.name(), k)?.is_some_and(|e| !e.is_tombstone())) };
+        let had = self
+            .inner
+            .db
+            .read(|c| Ok(live(c, key)? || old.as_deref().map(|o| live(c, o)).transpose()?.unwrap_or(false)))?;
         if had {
             self.write_many(vec![Op::remove(ns, key)])?;
         }
@@ -382,6 +420,17 @@ impl SyncStore {
                     Op::Put { ns, key, value } => (*ns, key, Some(value.clone())),
                     Op::Remove { ns, key } => (*ns, key, None),
                 };
+                // The same item saved by an older build under its plain id
+                // goes, so the two forms never both stay (crate::sid).
+                if let Some(old) = crate::sid::legacy_variant(key)
+                    && let Some(p) = get_entry(&tx, ns, &old)?
+                    && !p.is_tombstone()
+                {
+                    set_entry(&tx, ns, &old, &Entry { value: None, ts: now.max(p.ts + 1), device: device.clone() })?;
+                    if !touched.iter().any(|t| t == ns) {
+                        touched.push(ns.to_string());
+                    }
+                }
                 let prev = get_entry(&tx, ns, key)?;
                 if prev.as_ref().is_some_and(|p| p.value == value) {
                     continue;

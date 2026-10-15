@@ -274,8 +274,8 @@ impl ShareService {
     /// The app link and whether a public link can be had.
     pub async fn info(&self, kind: ShareKind, id: &str, at_seconds: Option<u32>) -> AppResult<ShareInfo> {
         let item = self.item(kind, id).await?.ok_or_else(|| AppError::NotFound(MSG_NOT_IN_LIBRARY.into()))?;
-        let machine = self.inner.server.machine_id().await;
-        Ok(ShareInfo { app_link: link::build(kind, id, at_seconds, machine.as_deref()), public: self.status(&item) })
+        let tag = self.inner.server.machine_id().await.map(|m| link::server_tag(&m));
+        Ok(ShareInfo { app_link: link::for_item(kind, id, at_seconds, tag.as_deref()), public: self.status(&item) })
     }
 
     /// Find the public link for a released song or album.
@@ -337,25 +337,46 @@ impl ShareService {
         let Some(l) = link::parse(raw) else {
             return DeepLinkOpen::failed(DeepLinkStatus::Invalid);
         };
-        if let Some(tag) = &l.server
-            && let Some(m) = self.inner.server.machine_id().await
-            && link::server_tag(&m) != *tag
-        {
-            return DeepLinkOpen::failed(DeepLinkStatus::NotInLibrary);
-        }
-        let item = match self.item(l.kind, &l.id).await {
-            Ok(Some(item)) => item,
-            Ok(None) => return DeepLinkOpen::failed(DeepLinkStatus::NotInLibrary),
-            Err(e) => {
-                tracing::warn!("deep link lookup failed: {e}");
-                return DeepLinkOpen::failed(DeepLinkStatus::NotInLibrary);
+        // The link names the server and the library keeps ids with it
+        // (crate::sid). A cache from before that keeps the connected
+        // server's ids plain, and a link without a tag means that server.
+        let current = self.inner.server.machine_id().await.map(|m| link::server_tag(&m));
+        let mut candidates = Vec::new();
+        match &l.server {
+            Some(tag) => {
+                candidates.push(crate::sid::qualify(tag, &l.id));
+                if current.as_ref() == Some(tag) || crate::sid::legacy().as_ref() == Some(tag) {
+                    candidates.push(l.id.clone());
+                }
             }
+            None => {
+                if let Some(tag) = &current {
+                    candidates.push(crate::sid::qualify(tag, &l.id));
+                }
+                candidates.push(crate::sid::resolve(&l.id));
+                candidates.push(l.id.clone());
+            }
+        }
+        candidates.dedup();
+        let mut found = None;
+        for id in candidates {
+            match self.item(l.kind, &id).await {
+                Ok(Some(item)) => {
+                    found = Some((id, item));
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => tracing::warn!("deep link lookup failed: {e}"),
+            }
+        }
+        let Some((id, item)) = found else {
+            return DeepLinkOpen::failed(DeepLinkStatus::NotInLibrary);
         };
         let album_id = match item {
             Item::Track { album_id, .. } => Some(album_id),
             _ => None,
         };
-        DeepLinkOpen { status: DeepLinkStatus::Open, kind: Some(l.kind), id: Some(l.id), album_id, at_seconds: l.t, join: None }
+        DeepLinkOpen { status: DeepLinkStatus::Open, kind: Some(l.kind), id: Some(id), album_id, at_seconds: l.t, join: None }
     }
 
     /// A link was opened: keep it for the UI and tell it.

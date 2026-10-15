@@ -54,7 +54,14 @@ pub struct KvFollows(pub DbHandle);
 impl FollowStore for KvFollows {
     fn list(&self) -> AppResult<Vec<FollowedArtist>> {
         let raw = self.0.read(|c| kv_get(c, KEY_FOLLOWS))?;
-        Ok(raw.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default())
+        // Artist ids saved before they carried their server (crate::sid).
+        Ok(raw
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|mut v| {
+                crate::sid::resolve_json(&mut v);
+                serde_json::from_value(v).ok()
+            })
+            .unwrap_or_default())
     }
 
     fn save(&self, all: &[FollowedArtist]) -> AppResult<()> {

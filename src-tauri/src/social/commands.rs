@@ -36,7 +36,8 @@ impl ActivitySource for PlexActivity {
     }
 
     async fn sessions(&self) -> AppResult<Vec<u8>> {
-        Ok(self.plex.client().await?.get_bytes("/status/sessions", &[]).await?.to_vec())
+        let c = self.plex.client().await?;
+        Ok(c.qualify_json(&c.get_bytes("/status/sessions", &[]).await?))
     }
 
     async fn history(&self, size: u64) -> AppResult<Vec<u8>> {
@@ -52,7 +53,8 @@ impl ActivitySource for PlexActivity {
             ("X-Plex-Container-Start", "0".to_string()),
             ("X-Plex-Container-Size", size.to_string()),
         ];
-        Ok(self.plex.client().await?.get_bytes("/status/sessions/history/all", &q).await?.to_vec())
+        let c = self.plex.client().await?;
+        Ok(c.qualify_json(&c.get_bytes("/status/sessions/history/all", &q).await?))
     }
 
     async fn accounts(&self) -> AppResult<Vec<u8>> {

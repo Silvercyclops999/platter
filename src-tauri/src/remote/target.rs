@@ -319,7 +319,7 @@ impl TargetHandler for PlayerTarget {
             state,
             time_ms: s.position_ms,
             duration_ms: s.duration_ms,
-            rating_key: s.track.as_ref().map(|t| t.id.clone()),
+            rating_key: s.track.as_ref().map(|t| crate::sid::key(&t.id).to_string()),
             volume: if s.muted { 0 } else { (s.volume.clamp(0.0, 1.0) * 100.0).round() as u8 },
             shuffle: s.shuffle,
             repeat: repeat_code(s.repeat),
@@ -345,10 +345,16 @@ impl TargetHandler for PlayerTarget {
                     .map(str::to_string)
                     .ok_or_else(|| AppError::Invalid("missing key".into()))?;
                 let offset = num(params, "offset").unwrap_or(0).max(0) as u64;
-                let mut ids = match params.get("containerKey").and_then(|c| playqueue::id_from_container_key(c)) {
+                // The cache's ids carry the server's tag (crate::sid).
+                let tag = crate::sid::tag(&server.machine_id);
+                let key = crate::sid::qualify(&tag, &key);
+                let mut ids: Vec<String> = match params.get("containerKey").and_then(|c| playqueue::id_from_container_key(c)) {
                     Some(pq) => playqueue::items(&self.http, &server, &pq).await.unwrap_or_default(),
                     None => Vec::new(),
-                };
+                }
+                .iter()
+                .map(|k| crate::sid::qualify(&tag, k))
+                .collect();
                 if !ids.contains(&key) {
                     ids = vec![key.clone()];
                 }
