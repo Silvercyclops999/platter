@@ -1,4 +1,5 @@
 import { BookmarksPage } from "../pages/BookmarksPage";
+import { ImportPage } from "../pages/ImportPage";
 import { SmartPlaylistPage } from "../pages/SmartPlaylistPage";
 import { Pause, Play } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
@@ -148,6 +149,8 @@ function Page({ route }: { route: Route }) {
       return route.id.startsWith("smart:") ? <SmartPlaylistPage id={route.id} /> : <PlaylistPage id={route.id} />;
     case "bookmarks":
       return <BookmarksPage />;
+    case "import":
+      return <ImportPage key={route.view ?? "home"} view={route.view} />;
     case "liked":
       return <LikedPage />;
     case "settings":

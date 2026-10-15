@@ -25,6 +25,7 @@
  *   ?downloads=demo the first album and Liked Songs start downloaded
  *   ?downloads=full as demo, with the storage limit already reached
  *   ?view=miniplayer show the miniplayer window's page
+ *   ?import=demo    two library import sources on and already imported
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
@@ -97,6 +98,8 @@ import {
 } from "./fixtures";
 import { mockBio } from "./bio";
 import { MOCK_CLOUD_FOLDERS, MockSync } from "./sync";
+import { MockImport, importLinkAllowed } from "./importData";
+import type { ImportDecision, ImportSourceId } from "../importTypes";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { mockAlbumCredits } from "./albumCredits";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
@@ -152,6 +155,8 @@ export interface MockOptions {
   theme?: Settings["theme"];
   /** What the faked Lidarr looks like (?lidarr=clear). */
   lidarr?: LidarrDemo;
+  /** Start with two import sources on and imported (?import=demo). */
+  importDemo?: boolean;
 }
 
 const isTestEnv = (() => {
@@ -192,6 +197,7 @@ export function optionsFromUrl(search: string): MockOptions {
     downloads: p.get("downloads") === "demo" || p.get("downloads") === "full" ? (p.get("downloads") as "demo" | "full") : undefined,
     lidarr: isLidarrDemo(p.get("lidarr")) ? (p.get("lidarr") as LidarrDemo) : undefined,
     theme: (["dark", "light", "system", "midnight", "forest", "sand"] as const).find((t) => t === p.get("theme")),
+    importDemo: p.get("import") === "demo",
   };
 }
 
@@ -242,6 +248,10 @@ export class MockBackend implements Backend {
   /** Friend activity, follows, What's New, listening sessions (test hooks: access, guestJoins, hostGone, hostEnds, addRelease). */
   readonly social: MockSocial;
   readonly syncFile: MockSync;
+  /** Library import (test hook: failNext). */
+  readonly importMock: MockImport;
+  /** Store links the Missing list opened. */
+  readonly importLinksOpened: string[] = [];
   /** Hidden songs and artists. */
   readonly hidden: MockHidden;
   readonly bookmarks: MockBookmarks;
@@ -404,6 +414,12 @@ export class MockBackend implements Backend {
       offline: () => !!this.healthState?.cachedOnly,
     });
     if (this.opts.theme) this.settings = { ...this.settings, theme: this.opts.theme };
+    this.importMock = new MockImport(this.fx, () => this.settings.importSources);
+    if (this.opts.importDemo) {
+      this.settings = { ...this.settings, importSources: ["streaming", "transfer"] };
+      this.importMock.run("streaming", "Downloads/my_data.zip");
+      this.importMock.run("transfer", "Downloads/library.csv");
+    }
     if (this.opts.downloads) {
       this.downloads.seedDone("album", this.fx.albums[0].id, this.fx.albums[0].title);
       this.downloads.seedDone("liked", "", "Liked Songs");
@@ -2081,6 +2097,8 @@ export class MockBackend implements Backend {
         if (u && !/^https?:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(u)) throw { kind: "invalid", message: "Lidarr's address is a web address like http://192.168.x.x:8686." };
         next[k] = u;
       }
+      // Known sources only, each once, in their listed order (as the core).
+      if (patch.importSources) next.importSources = ["streaming", "transfer", "lists"].filter((id) => patch.importSources!.includes(id));
       if (patch.nowPlayingFeedPort !== undefined) {
         const port = patch.nowPlayingFeedPort;
         if (!Number.isInteger(port) || port < 1024 || port > 65535) throw { kind: "invalid", message: "Pick a port from 1024 to 65535." };
@@ -2544,6 +2562,39 @@ export class MockBackend implements Backend {
   }
   lidarrConfirmRoot(path: string, confirmed: boolean) {
     return this.delay(() => this.lidarr.confirmRoot(this.settings, path, confirmed));
+  }
+
+  // ---------------------------------------------------------------- library import
+
+  importOverview() {
+    return this.delay(() => this.importMock.overview());
+  }
+  importChoose(folder: boolean) {
+    return this.delay(() => (folder ? "Downloads/my_data" : "Downloads/my_data.zip"));
+  }
+  importRun(source: ImportSourceId, path: string) {
+    return this.delay(() => this.importMock.run(source, path));
+  }
+  importReviewQueue() {
+    return this.delay(() => this.importMock.reviewQueue());
+  }
+  importReview(songId: number, decision: ImportDecision) {
+    return this.delay(() => this.importMock.review(songId, decision));
+  }
+  importListPage(id: string) {
+    return this.delay(() => this.importMock.listPage(id));
+  }
+  importMissing() {
+    return this.delay(() => this.importMock.missingSongs());
+  }
+  importOpenLink(url: string) {
+    return this.delay(() => {
+      if (!importLinkAllowed(url)) throw { kind: "invalid", message: "link not allowed" };
+      this.importLinksOpened.push(url);
+    });
+  }
+  importForget(source: ImportSourceId) {
+    return this.delay(() => this.importMock.forget(source));
   }
 
   // ---------------------------------------------------------------- discord

@@ -116,6 +116,15 @@ import type {
   ThemeFile,
   ThemeFolder,
 } from "./types";
+import type {
+  ImportDecision,
+  ImportOverview,
+  ImportReport,
+  ImportReviewItem,
+  ImportSourceId,
+  ImportedListPage,
+  MissingSong,
+} from "./importTypes";
 
 export type Unlisten = () => void;
 
@@ -492,6 +501,21 @@ export interface Backend {
   /** Say an empty Lidarr root folder is (or isn't) separate from the Plex music folder. */
   lidarrConfirmRoot(path: string, confirmed: boolean): Promise<void>;
 
+  // Library import (nothing here writes to Plex)
+  importOverview(): Promise<ImportOverview>;
+  /** File or folder picker for an import; null when cancelled. */
+  importChoose(folder: boolean): Promise<string | null>;
+  /** Import from a file, folder or zip for a source that's turned on. */
+  importRun(source: ImportSourceId, path: string): Promise<ImportReport>;
+  importReviewQueue(): Promise<ImportReviewItem[]>;
+  importReview(songId: number, decision: ImportDecision): Promise<void>;
+  importListPage(id: string): Promise<ImportedListPage>;
+  importMissing(): Promise<MissingSong[]>;
+  /** Open a store search page from the Missing list. */
+  importOpenLink(url: string): Promise<void>;
+  /** Forget everything imported from a source. */
+  importForget(source: ImportSourceId): Promise<void>;
+
   // Miniplayer window
   miniplayerState(): Promise<MiniplayerState>;
   /** Open or close the miniplayer; answers whether it's open now. */
@@ -740,6 +764,15 @@ export function createTauriBackend(): Backend {
     lidarrHeadersSet: (text) => call("lidarr_headers_set", { text }),
     lidarrCheck: () => call("lidarr_check"),
     lidarrConfirmRoot: (path, confirmed) => call("lidarr_confirm_root", { path, confirmed }),
+    importOverview: () => call("import_overview"),
+    importChoose: (folder) => call("import_choose", { folder }),
+    importRun: (source, path) => call("import_run", { source, path }),
+    importReviewQueue: () => call("import_review_queue"),
+    importReview: (songId, decision) => call("import_review", { songId, decision }),
+    importListPage: (id) => call("import_list_page", { id }),
+    importMissing: () => call("import_missing"),
+    importOpenLink: (url) => call("import_open_link", { url }),
+    importForget: (source) => call("import_forget", { source }),
     miniplayerState: () => call("miniplayer_state"),
     miniplayerSet: (open) => call("miniplayer_set", { open }),
     windowLabel: () => getCurrentWindow().label,

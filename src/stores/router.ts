@@ -36,7 +36,9 @@ export type Route =
   /** Song or artist radio: `track:<id>` or `artist:<id>`. */
   | { name: "radio"; seed: string }
   /** Bookmarked songs and pages. */
-  | { name: "bookmarks" };
+  | { name: "bookmarks" }
+  /** Library import: the reports and review queue, one imported list (`list:<id>`), or the Missing songs (`missing`). */
+  | { name: "import"; view?: string };
 
 export interface HistoryEntry {
   key: number;

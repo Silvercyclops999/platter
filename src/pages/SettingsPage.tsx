@@ -34,6 +34,7 @@ import { updateSettings, useSettings } from "../stores/settings";
 import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
+import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { MixExclusions } from "./MixExclusions";
 import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
@@ -1979,6 +1980,7 @@ export function SettingsPage() {
         </div>
       )}
       {nowPlayingMatches(query) && <NowPlayingSettings />}
+      {importMatches(query) && <LibraryImportSettings />}
       <p className="settings__hint">Shortcut: {modKey}+,</p>
       <ConfirmDialog
         open={dialog === "signOut"}

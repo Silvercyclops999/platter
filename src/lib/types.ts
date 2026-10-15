@@ -903,6 +903,8 @@ export interface Settings {
   nowPlayingFeed: boolean;
   /** The feed's port, 1024 to 65535 (this device only). */
   nowPlayingFeedPort: number;
+  /** Library import sources turned on ("streaming", "transfer", "lists"). All off until picked. */
+  importSources: string[];
   /** Dark, Light, Match system, or another built-in theme. */
   theme: ThemeSetting;
   /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
@@ -1114,6 +1116,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hintKey: "f",
   nowPlayingFeed: false,
   nowPlayingFeedPort: 32540,
+  importSources: [],
   theme: "dark",
   accent: "ivory",
   themeFile: null,
