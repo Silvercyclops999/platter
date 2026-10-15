@@ -9,7 +9,8 @@ import type { QueueItem, Track } from "../lib/types";
 import { dragLeft, dropOnQueue, isSongDrag, useDrag } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
 import { useUi } from "../stores/ui";
-import { SessionCard } from "./ListenStrip";
+import { PersonFace, SessionCard, addedBy } from "./ListenStrip";
+import { useSocial } from "../stores/social";
 
 type Tab = "queue" | "history";
 
@@ -52,6 +53,8 @@ function QueueRow({
   reorder?: Reorder;
 }) {
   const playing = usePlayer((s) => current && s.state?.status === "playing");
+  // Listening along: whose song this is, when a guest added it.
+  const by = useSocial((s) => addedBy(s.listen, item.track.id, current));
   const remove = removable ? () => player.queueRemove(item.itemId) : undefined;
   const edge = reorder?.insertAt === index ? "before" : reorder?.insertAt === index + 1 ? "after" : null;
   return (
@@ -66,7 +69,11 @@ function QueueRow({
       onPlay={() => (current ? player.toggle() : player.queueJump(item.itemId))}
       onRemove={remove}
       trailing={
-        current ? (
+        by ? (
+          <span className="added-by" title={`Added by ${by.name}`} aria-label={`Added by ${by.name}`} role="img">
+            <PersonFace person={by} size={20} />
+          </span>
+        ) : current ? (
           <span className="track-row__slot" aria-hidden="true" />
         ) : item.source === "smart" ? (
           <span className="queue-smart" title="Added by smart shuffle" aria-label="Added by smart shuffle" role="img">

@@ -6,6 +6,7 @@ import { Cloud, FolderOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
+import { QrCode } from "../components/QrCode";
 import { Switch } from "../components/Switch";
 import { backend } from "../lib/backend";
 import { timeAgo } from "../lib/relativeTime";
@@ -169,20 +170,6 @@ export function SyncNowControl({ status, onStatus }: { status: SyncFileStatus | 
 
 // ---------------------------------------------------------------- keys
 
-/** The QR code: dark modules as squares. */
-function QrCode({ qr }: { qr: NonNullable<KeyReceiveState["qr"]> }) {
-  const q = 2;
-  const n = qr.size + q * 2;
-  return (
-    <svg className="keys-qr" viewBox={`0 0 ${n} ${n}`} role="img" aria-label="QR code for the code" shapeRendering="crispEdges">
-      <rect width={n} height={n} fill="#fff" />
-      {qr.rows.flatMap((row, y) =>
-        [...row].map((c, x) => (c === "1" ? <rect key={`${x}-${y}`} x={x + q} y={y + q} width={1} height={1} fill="#000" /> : null)),
-      )}
-    </svg>
-  );
-}
-
 const spaced = (code: string) => `${code.slice(0, 3)} ${code.slice(3)}`;
 
 function useCountdown(until: number | null) {
@@ -246,7 +233,7 @@ export function ReceiveKeysDialog({ open, onClose }: { open: boolean; onClose: (
             there. Both computers need to be on the same network.
           </p>
           <div className="keys-code">
-            {st?.qr && <QrCode qr={st.qr} />}
+            {st?.qr && <QrCode qr={st.qr} label="QR code for the code" className="keys-qr" />}
             <div>
               <p className="keys-code__digits" aria-label={st?.code ? `Code ${[...st.code].join(" ")}` : "Getting a code"}>
                 {st?.code ? spaced(st.code) : "··· ···"}

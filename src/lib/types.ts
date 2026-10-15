@@ -745,8 +745,14 @@ export interface Settings {
   whatsNewAnnouncements: boolean;
   /** A desktop notification when a followed artist gets new music. */
   notifyNewReleases: boolean;
-  /** Guests in a listening session can add songs to the queue. */
-  listenGuestsAdd: boolean;
+  /** "Let others change what's playing": guests can play, pause, skip, seek and reorder. Off, they can only add songs. */
+  listenGuestsControl: boolean;
+  /** The listen along relay (an ntfy server); empty means ntfy.sh. */
+  listenRelay: string;
+  /** "Invites expire after", hours: 1, 24 or 168. */
+  listenInviteHours: number;
+  /** The name others in a listening session see; empty means the Plex display name. */
+  listenName: string;
   /** Discord shows a listening session you host. */
   discordListenAlong: boolean;
   /** Keep app-only state in a sync file in a folder. This device only. */
@@ -907,7 +913,10 @@ export const DEFAULT_SETTINGS: Settings = {
   shareActivity: true,
   whatsNewAnnouncements: true,
   notifyNewReleases: false,
-  listenGuestsAdd: true,
+  listenGuestsControl: true,
+  listenRelay: "",
+  listenInviteHours: 24,
+  listenName: "",
   discordListenAlong: true,
   syncEnabled: false,
   syncFolder: "",
@@ -1422,20 +1431,58 @@ export interface WhatsNew {
 }
 
 export type ListenRole = "none" | "host" | "guest";
-export type ListenStatus = "connecting" | "live" | "hostGone" | "ended";
+export type ListenStatus = "connecting" | "live" | "hostGone" | "ended" | "removed";
+export type RelayHealth = "connecting" | "ok" | "unreachable" | "limited";
+
+/** Someone in a listening session: a display name, never an address. */
+export interface ListenPerson {
+  id: string;
+  name: string;
+  /** No pictures are sent yet; the name's letter shows instead. */
+  avatar: string | null;
+  host: boolean;
+  me: boolean;
+}
+
+/** An invite: a single-use link that runs out. */
+export interface ListenInvite {
+  link: string;
+  /** The link as a QR code: rows of "0" and "1" (dark). */
+  qr: { size: number; rows: string[] } | null;
+  /** Unix ms. */
+  expiresAt: number;
+}
 
 /** A listening session as this computer sees it. */
 export interface ListenView {
   role: ListenRole;
   sessionId: string | null;
   hostName: string | null;
-  /** The link to send people (host only). */
-  invite: string | null;
-  /** Who's listening along (host first for guests). */
+  /** The invite to send (host only); null once used or run out. */
+  invite: ListenInvite | null;
+  /** Everyone in the session, host first. */
+  people: ListenPerson[];
+  /** Everyone else's names. */
   listeners: string[];
-  guestsCanAdd: boolean;
+  /** Guests may play, pause, skip, seek and reorder (else only add). */
+  guestsCanControl: boolean;
+  /** Who added the song playing (a person id). */
+  nowBy: string | null;
+  /** The shared up next, and who added each song. */
+  queue: { trackId: string; by: string | null }[];
   status: ListenStatus | null;
+  relay: RelayHealth;
 }
+
+/** What a guest asks the host to do (`listen_control`). */
+export type ListenOp =
+  | { op: "play" }
+  | { op: "pause" }
+  | { op: "next" }
+  | { op: "previous" }
+  | { op: "seek"; ms: number }
+  | { op: "add"; ids: string[] }
+  | { op: "move"; from: number; to: number };
 
 // ---------------------------------------------------------------- artist info
 
@@ -1660,6 +1707,8 @@ export interface EventMap {
   "whatsnew://changed": { unseen: number };
   /** A listening session started, changed or ended. */
   "listen://state": ListenView;
+  /** Something to tell the user about the session (a request the host turned down). */
+  "listen://notice": { message: string };
   /** The sync file's state changed. */
   "sync-file://status": SyncFileStatus;
   /** Pins, folders or other app-only state changed (here or from the sync file). */

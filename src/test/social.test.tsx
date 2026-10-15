@@ -2,7 +2,8 @@
  * Social: the friend activity panel (rows, short times, hover play, the
  * owner-only and offline states), the Follow pill and the Followed chip,
  * What's New with its New and Earlier groups and the bell's dot, the
- * listening session strip (host, guest, host gone, ended), joining from an
+ * listening session strip (host, guest, host gone, ended, removed, relay
+ * trouble), the one-time invite with its QR code, joining from an
  * invite link, the session card, and the Settings rows.
  */
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -18,7 +19,8 @@ import { ArtistPage } from "../pages/ArtistPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { WhatsNewPage } from "../pages/WhatsNewPage";
 import { FriendActivityPanel } from "../shell/FriendActivityPanel";
-import { ListenStrip, SessionCard, namesLine } from "../shell/ListenStrip";
+import { ListenStrip, SessionCard, addedBy, namesLine } from "../shell/ListenStrip";
+import { player } from "../stores/player";
 import { Sidebar } from "../shell/Sidebar";
 import { TopBar } from "../shell/TopBar";
 import { useApp } from "../stores/app";
@@ -212,8 +214,10 @@ describe("What's New", () => {
   });
 });
 
+const join = (link = MOCK_INVITE) => act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: link }));
+
 describe("listening sessions", () => {
-  it("the host starts from the queue card, copies the invite, sees who joins, and ends it", async () => {
+  it("the host starts from the queue card, gets a one-time invite with a QR code, sees who joins, removes them, and ends it", async () => {
     const copied: string[] = [];
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: (t: string) => (copied.push(t), Promise.resolve()) },
@@ -227,14 +231,39 @@ describe("listening sessions", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Start a listening session" }));
     expect(await screen.findByRole("region", { name: "Listening session" })).toHaveTextContent("waiting for people to join");
-    expect(useSocial.getState().listen.invite).toBe(MOCK_INVITE);
-    await waitFor(() => expect(toasts()).toContain("Listening session started. The invite link is copied."));
+    expect(toasts()).toContain("Listening session started");
+    // The invite: a link that's only a token, and its QR code.
+    const dialog = await screen.findByRole("dialog", { name: "Invite people to listen along" });
+    const link = within(dialog).getByRole("textbox", { name: "Invite link" }) as HTMLInputElement;
+    expect(link.value).toBe(MOCK_INVITE);
+    expect(link.value).toMatch(/^platter:\/\/join\/[A-Za-z0-9_-]+$/);
+    expect(within(dialog).getByRole("img", { name: "QR code for the invite link" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("It works for one person, once, and runs out in 24 hours");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Copy link" }));
     expect(copied).toEqual([MOCK_INVITE]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "New link" }));
+    await waitFor(() => expect((within(dialog).getByRole("textbox", { name: "Invite link" }) as HTMLInputElement).value).not.toBe(MOCK_INVITE));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     // The card goes while in a session.
     expect(screen.queryByRole("group", { name: "Listen along" })).toBeNull();
+
     act(() => mock.social.guestJoins("Casey"));
-    await waitFor(() => expect(screen.getByRole("region", { name: "Listening session" })).toHaveTextContent("Casey listening along"));
-    expect(screen.getByRole("button", { name: "Copy invite link" })).toBeInTheDocument();
+    const strip = screen.getByRole("region", { name: "Listening session" });
+    await waitFor(() => expect(strip).toHaveTextContent("Casey listening along"));
+    // Everyone, and a Remove button for the host.
+    await userEvent.click(within(strip).getByRole("button", { name: "People (2)" }));
+    const people = within(strip).getByRole("list", { name: "People in the session" });
+    expect(people).toHaveTextContent("listener (you) · host");
+    await userEvent.click(within(people).getByRole("button", { name: "Remove Casey" }));
+    await waitFor(() => expect(strip).toHaveTextContent("waiting for people to join"));
+    expect(toasts()).toContain("Casey was removed from the session");
+
+    // The used invite is replaced when Invite is pressed again.
+    await userEvent.click(within(strip).getByRole("button", { name: "Invite" }));
+    expect(await screen.findByRole("dialog", { name: "Invite people to listen along" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+
     await userEvent.click(screen.getByRole("button", { name: "End session" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Listening session" })).toBeNull());
     expect(toasts()).toContain("Listening session ended");
@@ -249,13 +278,20 @@ describe("listening sessions", () => {
     expect(screen.queryByRole("group", { name: "Listen along" })).toBeNull();
   });
 
-  it("an invite link joins, and a host that goes away or ends it is said so", async () => {
+  it("an invite link joins, and a host that goes away, ends it or removes you is said so", async () => {
     render(<ListenStrip />);
-    await act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE }));
+    await join();
     const strip = await screen.findByRole("region", { name: "Listening session" });
     expect(strip).toHaveTextContent(`Listening along with ${MOCK_FRIENDS[1]}, ${MOCK_FRIENDS[2]}`);
     expect(toasts()).toContain(`Listening along with ${MOCK_FRIENDS[1]}`);
     expect(within(strip).getByRole("button", { name: "Leave" })).toBeInTheDocument();
+    expect(within(strip).queryByRole("button", { name: "Invite" })).toBeNull();
+    await userEvent.click(within(strip).getByRole("button", { name: "People (3)" }));
+    expect(within(strip).queryByRole("button", { name: /^Remove/ })).toBeNull();
+
+    act(() => mock.social.relay("unreachable"));
+    await waitFor(() => expect(strip).toHaveTextContent("Can't reach the relay. Trying again…"));
+    act(() => mock.social.relay("ok"));
 
     act(() => mock.social.hostGone());
     await waitFor(() => expect(strip).toHaveTextContent(`${MOCK_FRIENDS[1]} stopped answering`));
@@ -264,26 +300,49 @@ describe("listening sessions", () => {
     await userEvent.click(within(strip).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Listening session" })).toBeNull());
 
-    await act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE }));
+    await join();
     act(() => mock.social.hostEnds());
     await waitFor(() => expect(screen.getByRole("region", { name: "Listening session" })).toHaveTextContent("ended the listening session"));
     expect(toasts()).toContain("The listening session ended.");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await join();
+    act(() => mock.social.removedByHost());
+    await waitFor(() => expect(screen.getByRole("region", { name: "Listening session" })).toHaveTextContent("removed you from the listening session"));
+    expect(toasts()).toContain(`${MOCK_FRIENDS[1]} removed you from the listening session.`);
   });
 
-  it("a join that can't reach the host says why", async () => {
-    mock.social.failNextJoin = "Couldn't reach the host. You need to be on the same network.";
-    await openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE });
-    expect(toasts()).toContain("Couldn't reach the host. You need to be on the same network.");
-    expect(useSocial.getState().listen.role).toBe("none");
+  it("a join that fails says why: a used or expired invite, or no access to the host's library", async () => {
+    for (const why of ["That invite was already used. Ask for a new one.", `You need access to ${MOCK_FRIENDS[1]}'s Plex library to listen along.`]) {
+      mock.social.failNextJoin = why;
+      await openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE });
+      expect(toasts()).toContain(why);
+      expect(useSocial.getState().listen.role).toBe("none");
+    }
   });
 
-  it("guests add to the session's queue when the host lets them", async () => {
-    await act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE }));
+  it("a guest's controls and additions go to the host, and add-only hosts say so", async () => {
+    await join();
     const t = mock.fx.tracks[3];
     const { addToSession } = await import("../stores/social");
     await addToSession([t.id]);
     expect(toasts()).toContain("Added to the session's queue");
     await waitFor(async () => expect((await mock.playerState()).queue.userQueue.some((i) => i.track.id === t.id)).toBe(true));
+    // Added by: the guest's own songs, and the other guest's.
+    const v = useSocial.getState().listen;
+    expect(addedBy(v, t.id)?.me).toBe(true);
+    expect(addedBy(v, mock.fx.tracks[12].id)?.name).toBe(MOCK_FRIENDS[2]);
+    expect(addedBy(v, mock.fx.tracks[11].id)).toBeNull();
+    expect(addedBy(v, "", true)?.name).toBe(MOCK_FRIENDS[2]);
+    // The play button goes to the host.
+    await player.next();
+    expect(toasts().some((m) => m.includes("only lets others add"))).toBe(false);
+    act(() => mock.social.setHostControl(false));
+    await player.toggle();
+    await waitFor(() => expect(toasts()).toContain(`${MOCK_FRIENDS[1]} only lets others add songs.`));
+    // Adding still works.
+    await player.addToQueue([{ id: mock.fx.tracks[4].id, thumb: null }]);
+    await waitFor(async () => expect((await mock.playerState()).queue.userQueue.some((i) => i.track.id === mock.fx.tracks[4].id)).toBe(true));
   });
 });
 
@@ -296,10 +355,26 @@ describe("settings", () => {
     expect(sw("Share my activity with Platter friends")).toBeChecked();
     expect(sw("What's New announcements")).toBeChecked();
     expect(sw("Notify me about new releases")).not.toBeChecked();
-    expect(sw("Let guests add to the queue")).toBeChecked();
+    expect(sw("Let others change what's playing")).toBeChecked();
     await userEvent.click(sw("Notify me about new releases"));
     await waitFor(async () => expect((await mock.settingsGet()).notifyNewReleases).toBe(true));
     expect(social).toHaveTextContent("Only the server's owner can see it");
     expect(social).toHaveTextContent("in a private session");
+    // Listening sessions: add-only, invite length, name and relay.
+    await userEvent.click(sw("Let others change what's playing"));
+    await waitFor(async () => expect((await mock.settingsGet()).listenGuestsControl).toBe(false));
+    expect(within(social).getByText("Invites expire after")).toBeInTheDocument();
+    expect(social).toHaveTextContent("24 hours");
+    const relay = within(social).getByRole("textbox", { name: "Listen along relay" });
+    expect(relay).toHaveAttribute("placeholder", "https://ntfy.sh");
+    await userEvent.type(relay, "not a relay{Enter}");
+    await waitFor(() => expect(toasts().some((m) => m.includes("The relay is a web address"))).toBe(true));
+    expect((await mock.settingsGet()).listenRelay).toBe("");
+    await userEvent.clear(relay);
+    await userEvent.type(relay, "https://ntfy.example.org/{Enter}");
+    await waitFor(async () => expect((await mock.settingsGet()).listenRelay).toBe("https://ntfy.example.org"));
+    const name = within(social).getByRole("textbox", { name: "Your name in listening sessions" });
+    await userEvent.type(name, "DJ Sam{Enter}");
+    await waitFor(async () => expect((await mock.settingsGet()).listenName).toBe("DJ Sam"));
   });
 });

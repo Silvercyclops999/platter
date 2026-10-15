@@ -3,10 +3,14 @@
  * Invented people and fixture music only.
  *
  * Test hooks: `access` ("ok", "notAdmin", "offline"), `failNextJoin`,
- * `guestJoins(name)`, `hostGone()`, `hostEnds()`, `addRelease(albumId)`.
+ * `guestJoins(name)`, `hostGone()`, `hostEnds()`, `removedByHost()`,
+ * `relay(health)`, `setHostControl(on)`, `addRelease(albumId)`.
+ *
+ * Invites look like the real ones: a random token and nothing else.
  */
-import type { ActivityPanel, Album, FollowedArtist, FriendActivity, ListenView, Track, WhatsNew } from "../types";
+import type { ActivityPanel, Album, FollowedArtist, FriendActivity, ListenInvite, ListenOp, ListenView, Track, WhatsNew } from "../types";
 import type { Fixtures } from "./fixtures";
+import { mockQr } from "./sync";
 
 /** Invented people on the mock server. Avatars are left to the letter fallback. */
 export const MOCK_FRIENDS = ["Robin", "Jules", "Morgan", "Casey"];
@@ -16,16 +20,30 @@ const HOUR = 3600;
 const DAY = 86400;
 
 export interface SocialHooks {
-  settings: () => { listenGuestsAdd: boolean; showFriendActivity: boolean };
+  settings: () => { listenGuestsControl: boolean; listenInviteHours: number; listenName: string; showFriendActivity: boolean };
   emitFollows: (all: FollowedArtist[]) => void;
   emitBadge: (unseen: number) => void;
   emitListen: (v: ListenView) => void;
   later: (ms: number, fn: () => void) => void;
   queueAdd: (ids: string[]) => void;
+  /** Play, pause, skip or seek on the mock player (a guest's request reaching the host). */
+  control: (op: ListenOp) => void;
 }
 
-const NONE: ListenView = { role: "none", sessionId: null, hostName: null, invite: null, listeners: [], guestsCanAdd: false, status: null };
-export const MOCK_INVITE = "platter://join/0123456789abcdef?k=00112233445566778899aabbccddeeff&s=0a1b2c3d&h=10.0.0.5%3A32520&n=listener";
+const NONE: ListenView = {
+  role: "none",
+  sessionId: null,
+  hostName: null,
+  invite: null,
+  people: [],
+  listeners: [],
+  guestsCanControl: false,
+  nowBy: null,
+  queue: [],
+  status: null,
+  relay: "ok",
+};
+export const MOCK_INVITE = "platter://join/AV8MKp57HUw4puL5CxfT5EXMOOHwS3stlqDkyLHT9XopaPBRgA";
 
 export class MockSocial {
   access: "ok" | "notAdmin" | "offline" = "ok";
@@ -35,6 +53,8 @@ export class MockSocial {
   private seen = new Set<string>();
   private extra: string[] = [];
   private listen: ListenView = { ...NONE };
+  private invites = 0;
+  private hostControl = true;
 
   constructor(
     private fx: Fixtures,
@@ -53,6 +73,8 @@ export class MockSocial {
     const all = this.releases();
     this.seen = new Set(all.slice(2).map((a) => a.id));
     this.listen = { ...NONE };
+    this.invites = 0;
+    this.hostControl = true;
   }
 
   // ---------------------------------------------------------------- activity
@@ -135,25 +157,35 @@ export class MockSocial {
   // ---------------------------------------------------------------- listen along
 
   listenState(): ListenView {
-    return { ...this.listen, listeners: [...this.listen.listeners] };
+    return { ...this.listen, people: this.listen.people.map((p) => ({ ...p })), listeners: [...this.listen.listeners], queue: [...this.listen.queue] };
   }
 
   private setListen(v: ListenView) {
+    v.listeners = v.people.filter((p) => !p.me).map((p) => p.name);
     this.listen = v;
     this.hooks.emitListen(this.listenState());
+  }
+
+  private newInvite(): ListenInvite {
+    this.invites += 1;
+    const link = this.invites === 1 ? MOCK_INVITE : `${MOCK_INVITE.slice(0, -2)}${String(this.invites).padStart(2, "0")}`;
+    return { link, qr: mockQr(link), expiresAt: Date.now() + this.hooks.settings().listenInviteHours * HOUR * 1000 };
   }
 
   start(): ListenView {
     if (this.listen.role === "guest") throw { kind: "invalid", message: "Leave the listening session you're in first." };
     if (this.listen.role === "none") {
+      const name = this.hooks.settings().listenName || "listener";
       this.setListen({
+        ...NONE,
         role: "host",
-        sessionId: "0123456789abcdef",
-        hostName: "listener",
-        invite: MOCK_INVITE,
-        listeners: [],
-        guestsCanAdd: this.hooks.settings().listenGuestsAdd,
+        sessionId: "5f0c2a9e7b1d4c38a6e2f90b1c7d3e45",
+        hostName: name,
+        invite: this.newInvite(),
+        people: [{ id: "host", name, avatar: null, host: true, me: true }],
+        guestsCanControl: this.hooks.settings().listenGuestsControl,
         status: "live",
+        relay: "ok",
       });
       // Someone opens the link a moment later.
       this.hooks.later(1500, () => this.guestJoins(MOCK_FRIENDS[0]));
@@ -161,14 +193,28 @@ export class MockSocial {
     return this.listenState();
   }
 
-  /** A guest joins the session this computer hosts (test hook). */
+  invite(fresh: boolean): ListenView {
+    if (this.listen.role !== "host") throw { kind: "invalid", message: "Start a listening session first." };
+    if (fresh || !this.listen.invite) this.setListen({ ...this.listen, invite: this.newInvite() });
+    return this.listenState();
+  }
+
+  /** A guest joins the session this computer hosts (test hook); the invite is used up. */
   guestJoins(name: string) {
-    if (this.listen.role !== "host" || this.listen.listeners.includes(name)) return;
-    this.setListen({ ...this.listen, listeners: [...this.listen.listeners, name] });
+    if (this.listen.role !== "host" || this.listen.people.some((p) => p.name === name)) return;
+    const id = `g${this.listen.people.length}0c4e1a7b9d2f3`;
+    this.setListen({ ...this.listen, invite: null, people: [...this.listen.people, { id, name, avatar: null, host: false, me: false }] });
+  }
+
+  remove(personId: string): ListenView {
+    if (this.listen.role !== "host") throw { kind: "invalid", message: "Only the host can remove people." };
+    if (!this.listen.people.some((p) => p.id === personId && !p.host)) throw { kind: "notFound", message: "They're not in the session anymore." };
+    this.setListen({ ...this.listen, people: this.listen.people.filter((p) => p.id !== personId) });
+    return this.listenState();
   }
 
   stop() {
-    if (this.listen.role !== "none") this.setListen({ ...NONE });
+    if (this.listen.role !== "none") this.setListen({ ...NONE, people: [] });
   }
 
   join(link: string): ListenView {
@@ -177,24 +223,58 @@ export class MockSocial {
     if (this.failNextJoin) {
       const message = this.failNextJoin;
       this.failNextJoin = null;
-      throw { kind: "network", message };
+      throw { kind: "invalid", message };
     }
+    const host = MOCK_FRIENDS[1];
+    const other = { id: "a91f3c0d5e7b2468", name: MOCK_FRIENDS[2], avatar: null, host: false, me: false };
+    const t = this.fx.tracks;
     this.setListen({
+      ...NONE,
       role: "guest",
-      sessionId: "fedcba9876543210",
-      hostName: MOCK_FRIENDS[1],
-      invite: null,
-      listeners: [MOCK_FRIENDS[1], MOCK_FRIENDS[2]],
-      guestsCanAdd: this.hooks.settings().listenGuestsAdd,
+      sessionId: "c3a8e1f04b7d2956a0e4c8b1d3f57a29",
+      hostName: host,
+      people: [
+        { id: "host", name: host, avatar: null, host: true, me: false },
+        other,
+        { id: "me", name: this.hooks.settings().listenName || "listener", avatar: null, host: false, me: true },
+      ],
+      guestsCanControl: this.hostControl,
+      nowBy: other.id,
+      queue: [
+        { trackId: t[11].id, by: null },
+        { trackId: t[12].id, by: other.id },
+      ],
       status: "live",
+      relay: "ok",
     });
     return this.listenState();
   }
 
+  control(op: ListenOp) {
+    const v = this.listen;
+    if (v.role === "none" || (v.role === "guest" && v.status !== "live")) throw { kind: "invalid", message: "You're not in a listening session." };
+    if (v.role === "guest" && !v.guestsCanControl && op.op !== "add") throw { kind: "invalid", message: `${v.hostName} only lets others add songs.` };
+    if (op.op === "add") {
+      this.hooks.queueAdd(op.ids);
+      if (v.role === "guest") this.setListen({ ...v, queue: [...v.queue, ...op.ids.map((trackId) => ({ trackId, by: "me" }))] });
+      return;
+    }
+    this.hooks.control(op);
+  }
+
   add(ids: string[]) {
-    if (this.listen.role === "none") throw { kind: "invalid", message: "You're not in a listening session." };
-    if (this.listen.role === "guest" && !this.listen.guestsCanAdd) throw { kind: "invalid", message: "The host doesn't let guests add songs." };
-    this.hooks.queueAdd(ids);
+    this.control({ op: "add", ids });
+  }
+
+  /** The host turns "Let others change what's playing" on or off (test hook). */
+  setHostControl(on: boolean) {
+    this.hostControl = on;
+    if (this.listen.role === "guest") this.setListen({ ...this.listen, guestsCanControl: on });
+  }
+
+  /** The host's own setting changed. */
+  settingsChanged() {
+    if (this.listen.role === "host") this.setListen({ ...this.listen, guestsCanControl: this.hooks.settings().listenGuestsControl });
   }
 
   /** The host stops answering (test hook). */
@@ -205,5 +285,15 @@ export class MockSocial {
   /** The host ends the session (test hook). */
   hostEnds() {
     if (this.listen.role === "guest") this.setListen({ ...this.listen, status: "ended" });
+  }
+
+  /** The host removes this guest (test hook). */
+  removedByHost() {
+    if (this.listen.role === "guest") this.setListen({ ...this.listen, status: "removed" });
+  }
+
+  /** The relay can't be reached, is busy, or is back (test hook). */
+  relay(health: ListenView["relay"]) {
+    if (this.listen.role !== "none") this.setListen({ ...this.listen, relay: health });
   }
 }

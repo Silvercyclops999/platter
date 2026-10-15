@@ -88,6 +88,7 @@ import type {
   FollowedArtist,
   WhatsNew,
   ListenView,
+  ListenOp,
   AiStatus,
   Bookmark,
   HiddenItem,
@@ -349,14 +350,20 @@ export interface Backend {
   /** What's New was seen: its items stop being new. */
   whatsNewSeen(): Promise<void>;
   listenState(): Promise<ListenView>;
-  /** Host a listening session; the view carries the invite link. */
+  /** Host a listening session; the view carries the first invite. */
   listenStart(): Promise<ListenView>;
+  /** The invite to send; `fresh` makes a new one (each link works once). */
+  listenInvite(fresh?: boolean): Promise<ListenView>;
   /** End the session you host, or leave the one you're in. */
   listenStop(): Promise<void>;
   /** Join from an invite link. */
   listenJoin(link: string): Promise<ListenView>;
   /** Add songs to the session's queue (a guest's go to the host). */
   listenAdd(trackIds: string[]): Promise<void>;
+  /** Play, pause, skip, seek or reorder for everyone (a guest's go to the host). */
+  listenControl(op: ListenOp): Promise<void>;
+  /** Remove someone from the session you host. */
+  listenRemove(personId: string): Promise<ListenView>;
 
   // Sync file, library folders and keys (docs/IPC.md "Sync, folders and keys")
   syncFileStatus(): Promise<SyncFileStatus>;
@@ -611,6 +618,9 @@ export function createTauriBackend(): Backend {
     listenStop: () => call("listen_stop"),
     listenJoin: (link) => call("listen_join", { link }),
     listenAdd: (trackIds) => call("listen_add", { trackIds }),
+    listenInvite: (fresh) => call("listen_invite", { fresh: fresh ?? false }),
+    listenControl: (op) => call("listen_control", { op }),
+    listenRemove: (personId) => call("listen_remove", { personId }),
     hiddenList: () => call("hidden_list"),
     hiddenSet: (item, on) => call("hidden_set", { item, on }),
     bookmarksList: () => call("bookmarks_list"),

@@ -23,6 +23,7 @@ import type {
 } from "../lib/types";
 import { OFFLINE_SKIPPED } from "../lib/offline";
 import { useApp } from "./app";
+import { addToSession, controlSession, guestLive } from "./social";
 import { toast } from "./toasts";
 
 interface PlayerStore {
@@ -193,15 +194,19 @@ export function queuedToast(n: number, thumb?: string | null) {
 /** Player commands with error toasts. */
 export const player = {
   toggle: () => {
+    // Listening along: the controls go to the host, for everyone.
+    if (guestLive()) return controlSession({ op: usePlayer.getState().state?.status === "playing" ? "pause" : "play" });
     if (isRemote()) {
       const playing = usePlayer.getState().state?.status === "playing";
       return remoteCmd({ kind: playing ? "pause" : "play" }).catch(report);
     }
     return backend.playToggle().catch(report);
   },
-  next: () => (isRemote() ? remoteCmd({ kind: "next" }) : backend.playNext()).catch(report),
-  previous: () => (isRemote() ? remoteCmd({ kind: "previous" }) : backend.playPrevious()).catch(report),
+  next: () => (guestLive() ? controlSession({ op: "next" }) : (isRemote() ? remoteCmd({ kind: "next" }) : backend.playNext()).catch(report)),
+  previous: () =>
+    guestLive() ? controlSession({ op: "previous" }) : (isRemote() ? remoteCmd({ kind: "previous" }) : backend.playPrevious()).catch(report),
   seek: (ms: number) => {
+    if (guestLive()) return controlSession({ op: "seek", ms });
     if (isRemote()) {
       usePlayer.setState({ positionMs: ms });
       return remoteCmd({ kind: "seek", positionMs: ms }).catch(report);
@@ -260,6 +265,8 @@ export const player = {
    */
   addToQueue: (tracks: { id: string; thumb: string | null }[], thumb?: string | null) => {
     if (!tracks.length) return Promise.resolve();
+    // Listening along: into the shared queue, through the host.
+    if (guestLive()) return addToSession(tracks.map((t) => t.id));
     return backend
       .queueAdd(
         tracks.map((t) => t.id),
@@ -371,7 +378,15 @@ export const player = {
   },
   cycleRepeatNow: () => player.cycleRepeat(usePlayer.getState().state?.repeat ?? "off"),
   queueRemove: (itemId: string) => backend.queueRemove(itemId).catch(report),
-  queueMove: (itemId: string, toIndex: number) => backend.queueMove(itemId, toIndex).catch(report),
+  queueMove: (itemId: string, toIndex: number) => {
+    // Listening along: the queue here mirrors the host's, so move it there.
+    if (guestLive()) {
+      const q = usePlayer.getState().state?.queue;
+      const from = q ? [...q.userQueue, ...q.nextUp].findIndex((i) => i.itemId === itemId) : -1;
+      return from < 0 ? Promise.resolve() : controlSession({ op: "move", from, to: toIndex });
+    }
+    return backend.queueMove(itemId, toIndex).catch(report);
+  },
   queueClear: () => backend.queueClear().catch(report),
   queueJump: (itemId: string) =>
     (isRemote()

@@ -6,11 +6,23 @@
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
-import type { ActivityPanel, AppError, FollowedArtist, ListenView } from "../lib/types";
+import type { ActivityPanel, AppError, FollowedArtist, ListenOp, ListenView } from "../lib/types";
 import { copyText, toast } from "./toasts";
 import type { MenuItem } from "./ui";
 
-const NO_SESSION: ListenView = { role: "none", sessionId: null, hostName: null, invite: null, listeners: [], guestsCanAdd: false, status: null };
+export const NO_SESSION: ListenView = {
+  role: "none",
+  sessionId: null,
+  hostName: null,
+  invite: null,
+  people: [],
+  listeners: [],
+  guestsCanControl: false,
+  nowBy: null,
+  queue: [],
+  status: null,
+  relay: "ok",
+};
 
 interface SocialState {
   follows: FollowedArtist[];
@@ -19,6 +31,8 @@ interface SocialState {
   unseen: number;
   activity: ActivityPanel | null;
   listen: ListenView;
+  /** The invite dialog is open. */
+  inviteOpen: boolean;
 }
 
 export const useSocial = create<SocialState>()(() => ({
@@ -27,6 +41,7 @@ export const useSocial = create<SocialState>()(() => ({
   unseen: 0,
   activity: null,
   listen: NO_SESSION,
+  inviteOpen: false,
 }));
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
@@ -39,9 +54,13 @@ function takeFollows(all: FollowedArtist[]) {
 function takeListen(v: ListenView) {
   const before = useSocial.getState().listen;
   useSocial.setState({ listen: v });
+  if (v.role === "none") useSocial.setState({ inviteOpen: false });
   if (v.role !== "guest" || before.status === v.status) return;
-  if (v.status === "hostGone") toast.error(`${v.hostName ?? "The host"} stopped answering. You're no longer listening along.`);
+  const host = v.hostName ?? "The host";
+  if (v.status === "hostGone") toast.error(`${host} stopped answering. You're no longer listening along.`);
+  if (v.status === "live" && before.status === "hostGone") toast.info(`${host} is back.`);
   if (v.status === "ended") toast.info("The listening session ended.");
+  if (v.status === "removed") toast.info(`${host} removed you from the listening session.`);
 }
 
 let started: Backend | null = null;
@@ -54,6 +73,7 @@ export async function startSocial(b: Backend = backend): Promise<void> {
   unsubs.push(await b.listen("follows://changed", takeFollows));
   unsubs.push(await b.listen("whatsnew://changed", (p) => useSocial.setState({ unseen: p.unseen })));
   unsubs.push(await b.listen("listen://state", takeListen));
+  unsubs.push(await b.listen("listen://notice", (n) => toast.info(n.message)));
   await Promise.all([
     b.followsList().then(takeFollows, () => {}),
     b.whatsNew().then((w) => useSocial.setState({ unseen: w.unseen }), () => {}),
@@ -66,7 +86,7 @@ export function resetSocial() {
   unsubs.forEach((u) => u());
   unsubs = [];
   started = null;
-  useSocial.setState({ follows: [], followIds: new Set(), unseen: 0, activity: null, listen: NO_SESSION });
+  useSocial.setState({ follows: [], followIds: new Set(), unseen: 0, activity: null, listen: NO_SESSION, inviteOpen: false });
 }
 
 export const isFollowing = (id: string) => useSocial.getState().followIds.has(id);
@@ -95,17 +115,54 @@ export async function loadActivity(fresh = false, b: Backend = backend): Promise
 
 // ---------------------------------------------------------------- listen along
 
-/** Host a session and copy its invite link. */
+/** Host a session and show its invite. */
 export async function startSession(b: Backend = backend): Promise<void> {
   try {
     const v = await b.listenStart();
-    useSocial.setState({ listen: v });
-    if (v.invite) {
-      const copied = await (navigator.clipboard?.writeText(v.invite).then(() => true, () => false) ?? Promise.resolve(false));
-      toast.info(copied ? "Listening session started. The invite link is copied." : "Listening session started. Copy the invite link from the bar below.");
-    }
+    useSocial.setState({ listen: v, inviteOpen: true });
+    toast.info("Listening session started");
   } catch (e) {
     toast.error(errText(e) || "Couldn't start a listening session");
+  }
+}
+
+/** Open the invite dialog (host): the open invite, or a new one when it was used. `fresh` always makes a new link. */
+export async function openInvite(fresh = false, b: Backend = backend): Promise<void> {
+  try {
+    const v = await b.listenInvite(fresh);
+    useSocial.setState({ listen: v, inviteOpen: true });
+  } catch (e) {
+    toast.error(errText(e) || "Couldn't make an invite");
+  }
+}
+
+export function closeInvite() {
+  useSocial.setState({ inviteOpen: false });
+}
+
+/** Remove someone from the session you host. */
+export async function removePerson(id: string, b: Backend = backend): Promise<void> {
+  const name = useSocial.getState().listen.people.find((p) => p.id === id)?.name ?? "They";
+  try {
+    useSocial.setState({ listen: await b.listenRemove(id) });
+    toast.info(`${name} was removed from the session`);
+  } catch (e) {
+    toast.error(errText(e) || "Couldn't remove them");
+  }
+}
+
+/** A guest in a live session whose controls go to the host. */
+export function guestLive(): boolean {
+  const v = useSocial.getState().listen;
+  return v.role === "guest" && v.status === "live";
+}
+
+/** Play, pause, skip, seek or reorder for everyone in the session. */
+export async function controlSession(op: ListenOp, b: Backend = backend): Promise<void> {
+  try {
+    await b.listenControl(op);
+  } catch (e) {
+    toast.error(errText(e) || "Couldn't reach the host");
   }
 }
 
@@ -141,22 +198,21 @@ export async function addToSession(ids: string[], b: Backend = backend): Promise
 }
 
 export function copyInvite() {
-  const link = useSocial.getState().listen.invite;
+  const link = useSocial.getState().listen.invite?.link;
   if (link) copyText(link);
 }
 
 /**
  * The listening session items for a song, album or playlist menu: "Start a
  * listening session" (plays it, then hosts) while there's no session, and
- * "Add to the session's queue" for a guest whose host allows it.
+ * "Add to the session's queue" for a guest (always allowed).
  */
 export function sessionItems(trackIds: () => string[], play: () => void): MenuItem[] {
-  const listen = () => useSocial.getState().listen;
   return [
     startSessionItem(play),
     {
       label: "Add to the session's queue",
-      when: () => listen().role === "guest" && listen().status === "live" && listen().guestsCanAdd,
+      when: guestLive,
       onSelect: () => void addToSession(trackIds()),
     },
   ];

@@ -27,6 +27,7 @@
 import type { Backend, Unlisten } from "../backend";
 import type {
   CachedLibrary,
+  ListenOp,
   DownloadKind,
   AbLoop,
   AddPlace,
@@ -376,6 +377,13 @@ export class MockBackend implements Backend {
       emitListen: (v) => this.emit("listen://state", v),
       later: (ms, fn) => this.later(ms, fn),
       queueAdd: (ids) => void this.queueAdd(ids, "end"),
+      control: (op) => {
+        if (op.op === "play") void this.act(() => this.resumeNow());
+        else if (op.op === "pause") void this.act(() => this.pauseNow());
+        else if (op.op === "next") void this.playNext();
+        else if (op.op === "previous") void this.playPrevious();
+        else if (op.op === "seek") void this.playSeek(op.ms);
+      },
     });
     this.hidden = new MockHidden((all) => this.emit("hidden://changed", all));
     this.bookmarks = new MockBookmarks(
@@ -1855,7 +1863,17 @@ export class MockBackend implements Backend {
       next.artCacheMb = Math.min(51_200, Math.max(128, Math.round(next.artCacheMb)));
       // Only outputSelect changes the output device.
       next.outputDevice = this.settings.outputDevice;
+      if (patch.listenInviteHours !== undefined && ![1, 24, 168].includes(patch.listenInviteHours)) {
+        throw { kind: "invalid", message: "Invites expire after 1 hour, 24 hours or 7 days." };
+      }
+      if (patch.listenRelay !== undefined) {
+        const r = patch.listenRelay.trim().replace(/\/+$/, "");
+        if (r && !/^https?:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(r)) throw { kind: "invalid", message: "The relay is a web address like https://ntfy.example.com." };
+        next.listenRelay = r;
+      }
+      if (patch.listenName !== undefined) next.listenName = patch.listenName.trim();
       this.settings = next;
+      if (patch.listenGuestsControl !== undefined) this.social.settingsChanged();
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
       if (patch.readFileTags !== undefined) this.tags.settingsChanged();
@@ -2052,6 +2070,15 @@ export class MockBackend implements Backend {
   }
   listenAdd(trackIds: string[]) {
     return this.delay(() => this.social.add(trackIds));
+  }
+  listenInvite(fresh?: boolean) {
+    return this.delay(() => this.social.invite(fresh ?? false));
+  }
+  listenControl(op: ListenOp) {
+    return this.delay(() => this.social.control(op));
+  }
+  listenRemove(personId: string) {
+    return this.delay(() => this.social.remove(personId));
   }
 
   deepLinkTake() {

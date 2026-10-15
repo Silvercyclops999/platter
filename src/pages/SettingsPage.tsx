@@ -31,6 +31,7 @@ import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { reloadLikes } from "../stores/likes";
 import { updateSettings, useSettings } from "../stores/settings";
 import { ComputerNameSetting } from "./DeviceSettings";
+import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { MixExclusions } from "./MixExclusions";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
@@ -1315,13 +1316,38 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "notifyNewReleases", ids),
     },
     {
-      key: "listenGuestsAdd",
+      key: "listenGuestsControl",
       section: "Social",
       group: "Listening sessions",
-      title: "Let guests add to the queue",
+      title: "Let others change what's playing",
       description:
-        "People listening along with you can add songs to your queue. Sessions work between computers on the same local network, with Show this computer to my other devices on.",
-      control: (ids) => toggle(s, "listenGuestsAdd", ids),
+        "People listening along with you can play, pause, skip and reorder the queue. Off, they can only add songs. Anyone who joins needs access to your Plex library and plays from it themselves.",
+      control: (ids) => toggle(s, "listenGuestsControl", ids),
+    },
+    {
+      key: "listenInviteHours",
+      section: "Social",
+      group: "Listening sessions",
+      title: "Invites expire after",
+      description: "Each invite link works for one person, once, and stops working after this long.",
+      control: (ids) => select(s, (x) => String(x.listenInviteHours), INVITE_HOURS, ids, (v) => updateSettings({ listenInviteHours: Number(v) })),
+    },
+    {
+      key: "listenName",
+      section: "Social",
+      group: "Listening sessions",
+      title: "Your name in listening sessions",
+      description: "What others in a session see, next to the songs you add. Leave it empty to use your Plex name. Nobody sees your email, location or computer.",
+      control: (ids) => <ListenTextSetting field="listenName" placeholder="Your Plex name" maxLength={40} ids={ids} />,
+    },
+    {
+      key: "listenRelay",
+      section: "Social",
+      group: "Listening sessions",
+      title: "Listen along relay",
+      description:
+        "Everyone in a session connects only to this relay, never to each other, so nobody learns anyone else's address. Messages are sealed end to end; the relay sees only scrambled text and each person's connection. Leave it empty for ntfy.sh (free, about 250 messages a day per connection), or enter your own ntfy server. Your own server's address goes in your invites.",
+      control: (ids) => <ListenTextSetting field="listenRelay" placeholder="https://ntfy.sh" maxLength={200} ids={ids} />,
     },
     // Integrations: scrobbling
     {
