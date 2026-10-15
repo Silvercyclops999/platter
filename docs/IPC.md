@@ -1267,8 +1267,8 @@ without the recognizer, or on an x86 processor without AVX2. `models` lists
 the size shows before downloading. `current = { trackId, stage, percent,
 background }`, stage one of `waitingForModel`, `reading`, `decoding`,
 `transcribing` (percent counts the last). `batch = { done, total }` counts
-songs since the queue was last empty. `paused` is `battery`,
-`slowConnection` or `offline` (background songs only). `error = { kind,
+songs since the queue was last empty. `paused` is `battery`
+or `offline` (background songs only). `error = { kind,
 message, trackId? }` with kind `download`, `checksum`, `disk` or
 `transcribe`; it clears when something new starts.
 
@@ -1286,9 +1286,11 @@ A song's file comes from the pre-cache when it's there; otherwise it's read
 like the tag scan reads, through the player's transfer gate at the lowest
 priority in 1 MB range requests, only while playback has nothing left to
 download, never over the relay. It's decoded with the player's decoder,
-mixed to mono and resampled to 16 kHz. Songs asked for now use about half
-the processor cores; the background batch a quarter, and it waits while the
-computer is on battery or music plays over remote access or the relay.
+mixed to mono and resampled to 16 kHz. The one song asked for now uses up
+to four processor threads; albums, the background batch and the lyrics check
+use two. The batch waits while the computer is on battery. A slow connection
+doesn't pause it: a song playback just fetched is read from disk, and before
+reading a song from the server it waits for playback's own download to end.
 
 Words found are saved as enhanced LRC (a time per line and per word) in the
 song's own lyrics (`lyrics_own_*`) with `auto` set to the model, so the

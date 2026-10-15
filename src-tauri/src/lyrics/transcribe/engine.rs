@@ -36,11 +36,12 @@ pub trait Recognizer: Send + Sync {
     fn unload(&self) {}
 }
 
-/// Threads for a run: about half the cores for a song asked for now, a
-/// quarter for the background batch, so playback and the UI keep theirs.
-pub fn threads(background: bool) -> usize {
+/// Threads for a run. The one song someone is waiting on gets up to four;
+/// anything that works through songs (an album, the batch, the lyrics check)
+/// gets two, so a long run doesn't keep the whole processor busy and hot.
+pub fn threads(gentle: bool) -> usize {
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    if background { (n / 4).clamp(1, 4) } else { (n / 2).clamp(1, 8) }
+    if gentle { (n / 4).clamp(1, 2) } else { (n / 4).clamp(1, 4) }
 }
 
 /// The CPU features the shipped whisper.cpp build assumes on x86.

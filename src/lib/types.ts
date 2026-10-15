@@ -1632,7 +1632,7 @@ export interface TranscribeStatus {
   current?: { trackId: string; stage: TranscribeStage; percent: number; background: boolean };
   queued: number;
   batch: { done: number; total: number };
-  paused?: "battery" | "slowConnection" | "offline";
+  paused?: "battery" | "offline";
   error?: { kind: "download" | "checksum" | "disk" | "transcribe"; message: string; trackId?: string };
 }
 

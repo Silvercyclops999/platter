@@ -953,7 +953,7 @@ pub fn run() {
                     recognizer: recognizer.clone(),
                     songs: songs.clone(),
                     other: Arc::new(trc::AppOther(lyrics_service.clone())),
-                    conditions: Arc::new(trc::AppConditions { player: player.clone(), plex: plex.clone() }),
+                    conditions: Arc::new(trc::AppConditions),
                     events: Arc::new(app.handle().clone()),
                 });
                 transcriber.set_options(initial.transcribe_lyrics, initial.transcribe_model);

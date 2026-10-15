@@ -9,7 +9,6 @@ const MODEL_LABEL: Record<TranscribeModel, string> = { small: "Small (faster)", 
 
 const PAUSED: Record<NonNullable<TranscribeStatus["paused"]>, string> = {
   battery: "Paused while on battery power.",
-  slowConnection: "Paused while music plays over a slow connection.",
   offline: "Paused: the server can't be reached. Trying again soon.",
 };
 

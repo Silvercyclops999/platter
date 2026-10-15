@@ -69,6 +69,17 @@ impl Reader {
         self.host.as_ref().is_none_or(|h| h.precache_allowed())
     }
 
+    /// Waits until playback has nothing left to download. False when cancelled.
+    pub async fn wait_idle(&self, cancel: &std::sync::atomic::AtomicBool) -> bool {
+        while !self.idle() {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return false;
+            }
+            tokio::time::sleep(IDLE_POLL).await;
+        }
+        !cancel.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// `len` bytes from `start` (fewer at the end of the file).
     pub async fn range(&self, src: &StreamSource, start: u64, len: usize) -> Result<Got, FetchError> {
         let prio = Priority::Background.cell();

@@ -138,7 +138,7 @@ describe("Settings", () => {
     expect(transcribeNote({ ...base, available: false, unavailableReason: undefined })).toMatch(/isn't available/);
     const on = { ...base, enabled: true };
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "battery" })).toBe("2 of 9 songs. Paused while on battery power.");
-    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "slowConnection" })).toMatch(/slow connection/);
+    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "offline" })).toMatch(/can't be reached/);
     expect(modelSize(539_225_533)).toBe("514 MB");
     expect(modelSize(1_600_000_000)).toBe("1.5 GB");
   });

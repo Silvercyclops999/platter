@@ -2449,7 +2449,7 @@ export function SettingsPage() {
       group: "Lyrics transcription",
       title: "Transcribe all unreleased songs without lyrics",
       description:
-        "Works through them in the background with fewer processor cores. It pauses on battery power and while music plays over a slow connection, and always gives way to playback.",
+        "Works through them in the background with fewer processor cores. It pauses on battery power and always gives way to playback. Away from home it reads songs while playback has nothing to download, and songs you just played come from this computer.",
       note: <BatchNote />,
       control: () => <BatchControl />,
     },

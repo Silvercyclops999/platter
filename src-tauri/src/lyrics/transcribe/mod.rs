@@ -55,8 +55,6 @@ const OFFLINE_RETRY: Duration = Duration::from_secs(60);
 pub enum PauseReason {
     /// The computer is on battery power.
     Battery,
-    /// Music is playing over a slow connection (remote access or the relay).
-    SlowConnection,
     /// The server can't be reached.
     Offline,
 }
@@ -187,6 +185,8 @@ struct Job {
     background: bool,
     /// Skip it when another source already has lyrics.
     check_other: bool,
+    /// The single song someone is waiting on ("Transcribe this song").
+    now: bool,
 }
 
 struct Download {
@@ -469,7 +469,7 @@ impl Transcriber {
                     st.queue.remove(pos);
                     st.batch.total = st.batch.total.saturating_sub(1);
                 }
-                let job = Job { track_id: id, background, check_other };
+                let job = Job { track_id: id, background, check_other, now: front };
                 if front {
                     fronts.push(job);
                 } else if background {
@@ -749,7 +749,7 @@ impl Transcriber {
             }
         };
         self.set_stage(Stage::Transcribing, 0);
-        let threads = engine::threads(job.background);
+        let threads = engine::threads(!job.now);
         let started = Instant::now();
         let seconds = pcm.len() / audio::RATE as usize;
         let res = {

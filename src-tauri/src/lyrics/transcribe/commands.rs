@@ -14,12 +14,9 @@ use super::{Conditions, OtherLyrics, PauseReason, SongAudio, SongReader, Transcr
 use crate::audio::PlayerHandle;
 use crate::audio::cache::cache_key;
 use crate::audio::decode::extension_hint;
-use crate::audio::events::PlayerStatus;
 use crate::db::DbHandle;
 use crate::error::{AppError, AppResult};
 use crate::lyrics::LyricsService;
-use crate::plex::PlexState;
-use crate::plex::types::ConnectionKind;
 use crate::tags::fetch::Reader;
 
 pub const EV_STATUS: &str = "transcribe://status";
@@ -66,6 +63,15 @@ impl SongReader for AppSongs {
         if let Ok(bytes) = tokio::fs::read(&cached).await {
             return Ok(SongAudio { bytes, hint });
         }
+        // Playback may be fetching this very song (it's playing or next).
+        // Once it's done, a fully streamed song is on disk: look again before
+        // reading it a second time over a slow connection.
+        if !self.reader.wait_idle(cancel).await {
+            return Err(AudioError::Cancelled);
+        }
+        if let Ok(bytes) = tokio::fs::read(&cached).await {
+            return Ok(SongAudio { bytes, hint });
+        }
         let src = self.parts.part(&track.id, &track.part_key).await.map_err(|e| AudioError::Unreachable(e.to_string()))?;
         let bytes = audio::read_whole(&self.reader, &src, cancel).await?;
         Ok(SongAudio { bytes, hint })
@@ -82,30 +88,16 @@ impl OtherLyrics for AppOther {
     }
 }
 
-/// Battery power, or music playing over remote access or the relay.
-pub struct AppConditions {
-    pub player: PlayerHandle,
-    pub plex: PlexState,
-}
+/// Battery power. A slow connection doesn't pause the batch: its reads
+/// already wait until playback has nothing left to download and give way the
+/// moment it wants the connection, and songs on disk need no network at all.
+pub struct AppConditions;
 
 #[async_trait]
 impl Conditions for AppConditions {
     async fn pause_reason(&self) -> Option<PauseReason> {
         let battery = tokio::task::spawn_blocking(crate::platform::power::on_battery).await.unwrap_or(false);
-        if battery {
-            return Some(PauseReason::Battery);
-        }
-        let playing = self.player.state().await.is_ok_and(|s| s.status == PlayerStatus::Playing);
-        if playing {
-            let slow = match self.plex.client().await {
-                Ok(c) => matches!(c.connection(), Some(ConnectionKind::Remote | ConnectionKind::Relay)),
-                Err(_) => false,
-            };
-            if slow {
-                return Some(PauseReason::SlowConnection);
-            }
-        }
-        None
+        battery.then_some(PauseReason::Battery)
     }
 }
 
