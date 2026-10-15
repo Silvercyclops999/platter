@@ -553,6 +553,39 @@ Dates come from `ARCHIVE_DATE`, else the album years.
 newest build first. `album_page` adds `archive?: { era?, date?, edition?, source? }`
 for unreleased albums with archive tags.
 
+### Lineage and Compare
+| Command | Args | Returns |
+| --- | --- | --- |
+| `track_lineage` | `{ id }` (any version of the song) | `Lineage` |
+| `compare_prepare` | `{ aId, bId }` | `CompareReady` |
+| `compare_switch` | `{ side: "a"|"b", play: bool|null }` | `CompareNow` |
+| `compare_loop` | `{ ab: AbLoop|null }` | the loop in the playing version's time |
+| `compare_end` | – | – |
+
+`Lineage = { title, artistId, artistTitle, nodes: LineageNode[] }`, where a
+node is a `VersionItem` plus `stage` (`demo`, `session`, `leak`, `alternate`,
+`unreleased`, `release`, `remaster` or `live`), `when` (yyyymmdd from
+`ARCHIVE_DATE`, else the album year, null when neither is known) and
+`shareable` (released versions only). Dated versions come oldest first and
+undated ones follow in stage order. The stage comes from `ARCHIVE_VERSION`,
+then words in the title, album or edition, then the song's status.
+
+`compare_prepare` puts both versions' whole files in the audio cache, one
+after the other through the same one-transfer-at-a-time gate playback uses,
+and keeps them there until `compare_end`. `compare://progress` reports
+`{ side, fraction }` as each file comes in. Downloaded songs count as already
+there. It returns `{ aId, bId, approximate, levelMatched, levelAvailable }`:
+`approximate` when the lengths differ by more than 5%, so a switch keeps the
+same share of the song instead of the same time. While Compare is open,
+leveling is track gain when the `compareLevelMatch` setting is on and the
+server has loudness data for both, else off. `compare_end` puts the user's
+own sound settings back and clears the loop.
+
+`compare_switch` plays one side as a one-song queue at the moment the other
+side is at (the start the first time), keeping play or pause unless `play`
+says otherwise, and returns `{ side, positionMs, abLoop }`. The loop region
+is kept in A's time and carried into B by the same mapping.
+
 ## Library doctor
 | Command | Args | Returns |
 | --- | --- | --- |

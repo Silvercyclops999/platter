@@ -35,6 +35,10 @@ import type {
   DoctorReport,
   ReleaseMark,
   VersionItem,
+  Lineage,
+  CompareReady,
+  CompareNow,
+  CompareSide,
   ArtistPage,
   ArtistsArgs,
   AuthStatus,
@@ -412,6 +416,20 @@ export interface Backend {
   releaseMarkSet(kind: "album" | "track", id: string, mark: ReleaseMark | null): Promise<void>;
   /** A song and its other versions, released ones first. */
   trackVersions(id: string): Promise<VersionItem[]>;
+  /** Every version of a song on one timeline, oldest first (undated last). */
+  trackLineage(id: string): Promise<Lineage>;
+  /**
+   * Put both versions' whole files on this computer, one after the other
+   * (`compare://progress`), then open Compare. Leveling follows the
+   * Compare level matching setting until `compareEnd`.
+   */
+  comparePrepare(aId: string, bId: string): Promise<CompareReady>;
+  /** Play one side at the moment the other is at (the start the first time). */
+  compareSwitch(side: CompareSide, play?: boolean): Promise<CompareNow>;
+  /** Set the loop region in the playing version's time (null clears it). */
+  compareLoop(ab: AbLoop | null): Promise<AbLoop | null>;
+  /** Close Compare: the user's own sound settings come back. */
+  compareEnd(): Promise<void>;
   /** An artist's era: its songs by album or build, newest first. */
   eraPage(artistId: string, name: string): Promise<EraPage>;
   /** Move an album to a section of the user's own (null: back to its own). */
@@ -846,6 +864,11 @@ export function createTauriBackend(): Backend {
     albumReleaseStatus: (id) => call("album_release_status", { id }),
     releaseMarkSet: (kind, id, mark) => call("release_mark_set", { kind, id, mark }),
     trackVersions: (id) => call("track_versions", { id }),
+    trackLineage: (id) => call("track_lineage", { id }),
+    comparePrepare: (aId, bId) => call("compare_prepare", { aId, bId }),
+    compareSwitch: (side, play) => call("compare_switch", { side, play: play ?? null }),
+    compareLoop: (ab) => call("compare_loop", { ab }),
+    compareEnd: () => call("compare_end"),
     eraPage: (artistId, name) => call("era_page", { artistId, name }),
     albumSectionSet: (albumId, artistId, name) => call("album_section_set", { albumId, artistId, name }),
     artistSections: (artistId) => call("artist_sections", { artistId }),

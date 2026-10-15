@@ -1,5 +1,6 @@
 /** "Your stats" from a song, artist or album menu: its stats strip in a dialog. */
 import { nav } from "../stores/router";
+import { openLineage } from "../stores/archive";
 import { useStatsDialog, type StatsSubject } from "../stores/stats";
 import { useSettings } from "../stores/settings";
 import { Button } from "./Button";
@@ -12,6 +13,7 @@ const KIND_WORD = { song: "song", artist: "artist", album: "album" } as const;
 function StatsBody({ subject, onClose }: { subject: StatsSubject; onClose: () => void }) {
   const stats = useItemStats(subject.kind, subject.id);
   const statsPage = useSettings((s) => s.settings?.statsPage !== false);
+  const lineage = useSettings((s) => s.settings?.showLineage !== false) && subject.kind === "song" && (subject.versions ?? 0) > 0;
   return (
     <div className="stats-dialog" data-testid="stats-dialog">
       <h2 className="stats-dialog__title">Your stats</h2>
@@ -30,6 +32,17 @@ function StatsBody({ subject, onClose }: { subject: StatsSubject; onClose: () =>
         <StatsStripView stats={stats} kind={subject.kind} sparkWidth={480} />
       )}
       <div className="stats-dialog__actions">
+        {lineage && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              onClose();
+              openLineage(subject.id);
+            }}
+          >
+            Lineage
+          </Button>
+        )}
         {statsPage && (
           <Button
             variant="ghost"

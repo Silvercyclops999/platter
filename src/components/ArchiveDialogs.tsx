@@ -9,7 +9,8 @@ import { backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
 import type { VersionItem } from "../lib/types";
 import { formatArchiveDate, SONG_STATUS_LABEL } from "../pages/era";
-import { useArchiveUi } from "../stores/archive";
+import { openLineage, useArchiveUi } from "../stores/archive";
+import { useSettings } from "../stores/settings";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { toast } from "../stores/toasts";
@@ -48,6 +49,7 @@ export function VersionsDialog({ trackId, title, onClose }: { trackId: string; t
   const nowId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
   const headingId = useId();
+  const showLineage = useSettings((s) => s.settings?.showLineage !== false);
   useEffect(() => {
     let alive = true;
     backend.trackVersions(trackId).then(
@@ -135,6 +137,17 @@ export function VersionsDialog({ trackId, title, onClose }: { trackId: string; t
         </ul>
       )}
       <div className="versions__actions">
+        {showLineage && items && items.length > 1 && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              onClose();
+              openLineage(trackId);
+            }}
+          >
+            See lineage
+          </Button>
+        )}
         <Button variant="secondary" onClick={onClose}>
           Close
         </Button>

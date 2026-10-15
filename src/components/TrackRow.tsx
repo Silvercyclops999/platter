@@ -42,7 +42,7 @@ import { bookmarkTrackItem, dontPlayArtistItem } from "../stores/curate";
 import { yourStatsItem } from "../stores/stats";
 import { Skeleton } from "./Skeleton";
 import { useOwnDoubleClick } from "../lib/doubleClick";
-import { openVersions, otherVersionsItem } from "../stores/archive";
+import { lineageItem, openVersions, otherVersionsItem } from "../stores/archive";
 import { showVersionLink, versionLinkText } from "../pages/era";
 import "./archive.css";
 
@@ -99,8 +99,9 @@ export function trackMenuItems(
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
     { label: "Go to song radio", onSelect: () => nav.go({ name: "radio", seed: `track:${track.id}` }) },
     ...otherVersionsItem(track),
+    ...lineageItem(track),
     bookmarkTrackItem(track),
-    yourStatsItem("song", track.id, track.title),
+    yourStatsItem("song", track.id, track.title, track.otherVersions ?? 0),
     dontPlayArtistItem({ id: track.artistId, title: track.artistTitle }),
     {
       // Read when the menu shows: lyrics may have been saved since the row built it.

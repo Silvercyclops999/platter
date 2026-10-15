@@ -493,6 +493,10 @@ pub struct Settings {
     pub monthly_stats_on_profile: bool,
     /// Compare stats with friends (a summary only, never the history).
     pub stats_compare: bool,
+    /// Song lineage: "Lineage" in song menus, the versions panel and Your stats.
+    pub show_lineage: bool,
+    /// Compare plays both versions at matched loudness when the server has it.
+    pub compare_level_match: bool,
     /// Scrobble to Last.fm (once signed in).
     pub scrobble_lastfm: bool,
     /// Scrobble to ListenBrainz (with the user token).
@@ -724,6 +728,8 @@ impl Default for Settings {
             stats_strip: true,
             monthly_stats_on_profile: true,
             stats_compare: false,
+            show_lineage: true,
+            compare_level_match: true,
             scrobble_lastfm: false,
             scrobble_listenbrainz: false,
             scrobble_unreleased: false,
@@ -840,6 +846,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "statsStrip",
     "monthlyStatsOnProfile",
     "statsCompare",
+    "showLineage",
+    "compareLevelMatch",
     "scrobbleUnreleased",
     "aiModel",
     "lidarrUrl",
@@ -1074,6 +1082,8 @@ pub struct SettingsPatch {
     pub stats_strip: Option<bool>,
     pub monthly_stats_on_profile: Option<bool>,
     pub stats_compare: Option<bool>,
+    pub show_lineage: Option<bool>,
+    pub compare_level_match: Option<bool>,
     pub scrobble_lastfm: Option<bool>,
     pub scrobble_listenbrainz: Option<bool>,
     pub scrobble_unreleased: Option<bool>,
@@ -1372,6 +1382,8 @@ impl Settings {
         set(&mut self.stats_strip, p.stats_strip);
         set(&mut self.monthly_stats_on_profile, p.monthly_stats_on_profile);
         set(&mut self.stats_compare, p.stats_compare);
+        set(&mut self.show_lineage, p.show_lineage);
+        set(&mut self.compare_level_match, p.compare_level_match);
         set(&mut self.scrobble_lastfm, p.scrobble_lastfm);
         set(&mut self.scrobble_listenbrainz, p.scrobble_listenbrainz);
         set(&mut self.scrobble_unreleased, p.scrobble_unreleased);
@@ -2422,6 +2434,18 @@ mod tests {
         s.apply(&SettingsPatch { lidarr_away_url: Some("https://lidarr.example.com/".into()), ..Default::default() }).unwrap();
         assert_eq!(s.lidarr_away_url, "https://lidarr.example.com");
         assert!(s.apply(&SettingsPatch { lidarr_away_url: Some("lidarr.example.com".into()), ..Default::default() }).is_err());
+    }
+
+    #[test]
+    fn lineage_settings_default_sync_and_apply() {
+        let mut s = Settings::default();
+        assert!(s.show_lineage && s.compare_level_match);
+        for k in ["showLineage", "compareLevelMatch"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let p: SettingsPatch = serde_json::from_str(r#"{"showLineage":false,"compareLevelMatch":false}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.show_lineage && !s.compare_level_match);
     }
 
     #[test]

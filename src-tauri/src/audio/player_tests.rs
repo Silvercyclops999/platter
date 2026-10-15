@@ -1417,3 +1417,63 @@ async fn smooth_transitions_last_for_the_context_they_were_turned_on_for() {
     r.player.play_context(ctx(&["c"]), None, Some(false)).await.unwrap();
     assert!(!r.player.state().await.unwrap().smooth_transitions, "another context: off again");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn compare_files_come_in_one_at_a_time_and_play_from_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache_dir = dir.path().join("cache");
+    let r = rig(&["a", "b"], 1.0, false, PlayerConfig { cache_dir: Some(cache_dir.clone()), ..Default::default() }).await;
+    // One transfer at a time, and slowish, so overlapping would show.
+    r.server.state.exclusive.store(true, std::sync::atomic::Ordering::SeqCst);
+    for route in r.server.state.routes.lock().values_mut() {
+        route.chunk_delay = Some(Duration::from_millis(5));
+    }
+    let tracks = r.player.lookup_tracks(&["a".into(), "b".into()]).await.unwrap();
+    assert!(!tracks.iter().any(|t| r.player.on_device(t)));
+    let seen = Mutex::new(Vec::<(usize, f32)>::new());
+    let progress = |i: usize, f: f32| seen.lock().push((i, f));
+    r.player.fetch_whole(&tracks, &progress, &|| true).await.unwrap();
+    assert!(tracks.iter().all(|t| r.player.on_device(t)), "both whole files are here");
+    assert_eq!(r.server.state.killed.load(std::sync::atomic::Ordering::SeqCst), 0, "never two transfers at once");
+    let seen = seen.lock().clone();
+    let last_a = seen.iter().rposition(|p| p.0 == 0).unwrap();
+    let first_b = seen.iter().position(|p| p.0 == 1).unwrap();
+    assert!(last_a < first_b, "a finished before b started: {seen:?}");
+    assert_eq!(seen.last(), Some(&(1, 1.0)));
+
+    // Switching is a local open: the server isn't asked again.
+    let asked = r.server.state.requests.load(std::sync::atomic::Ordering::SeqCst);
+    r.player.play_context_at(ctx(&["b"]), Some("b".into()), 500, false).await.unwrap();
+    r.player.play_context_at(ctx(&["a"]), Some("a".into()), 500, false).await.unwrap();
+    let st = r.player.state().await.unwrap();
+    assert_eq!(st.track.unwrap().id, "a");
+    assert_eq!(r.server.state.requests.load(std::sync::atomic::Ordering::SeqCst), asked);
+    r.player.release_whole();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn compare_fetch_fails_cleanly_when_a_file_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(&["a"], 1.0, false, PlayerConfig { cache_dir: Some(dir.path().join("cache")), ..Default::default() }).await;
+    let mut gone = track("gone", "A", "/p/gone");
+    gone.duration_ms = 1_000;
+    r.resolver.tracks.lock().insert("gone".into(), gone.clone());
+    let a = r.player.lookup_tracks(&["a".into()]).await.unwrap().remove(0);
+    let err = r.player.fetch_whole(&[a.clone(), gone.clone()], &|_, _| {}, &|| true).await.unwrap_err();
+    assert_eq!(err.kind(), "network");
+    assert!(r.player.on_device(&a) && !r.player.on_device(&gone));
+    // Stopped (Compare closed) before it starts: nothing is fetched.
+    let dir2 = tempfile::tempdir().unwrap();
+    let r2 = rig(&["b"], 1.0, false, PlayerConfig { cache_dir: Some(dir2.path().join("cache")), ..Default::default() }).await;
+    let b = r2.player.lookup_tracks(&["b".into()]).await.unwrap().remove(0);
+    assert!(r2.player.fetch_whole(std::slice::from_ref(&b), &|_, _| {}, &|| false).await.is_err());
+    assert!(!r2.player.on_device(&b));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn compare_needs_the_cache() {
+    let r = rig(&["a"], 1.0, false, PlayerConfig::default()).await;
+    let a = r.player.lookup_tracks(&["a".into()]).await.unwrap().remove(0);
+    let err = r.player.fetch_whole(&[a], &|_, _| {}, &|| true).await.unwrap_err();
+    assert_eq!(err.kind(), "invalid");
+}

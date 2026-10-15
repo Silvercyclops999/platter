@@ -353,6 +353,46 @@ export interface VersionItem {
   current: boolean;
 }
 
+/** Where a version sits in a song's life. */
+export type LineageStage = "demo" | "session" | "leak" | "alternate" | "unreleased" | "release" | "remaster" | "live";
+
+/** One version on a song's lineage timeline. */
+export interface LineageNode extends VersionItem {
+  stage: LineageStage;
+  /** Sort key from the date (yyyymmdd); null when the version has no date. */
+  when: number | null;
+  /** Released versions only: unreleased ones never leave this computer. */
+  shareable: boolean;
+}
+
+/** `track_lineage`: every version of a song, oldest first, undated last. */
+export interface Lineage {
+  title: string;
+  artistId: string;
+  artistTitle: string;
+  nodes: LineageNode[];
+}
+
+export type CompareSide = "a" | "b";
+
+/** `compare_prepare`: both files are on this computer. */
+export interface CompareReady {
+  aId: string;
+  bId: string;
+  /** Lengths differ by more than 5%: switches map by proportion. */
+  approximate: boolean;
+  levelMatched: boolean;
+  /** The server has loudness data for both. */
+  levelAvailable: boolean;
+}
+
+/** `compare_switch`: which version plays and where. */
+export interface CompareNow {
+  side: CompareSide;
+  positionMs: number;
+  abLoop: AbLoop | null;
+}
+
 export interface ArtistPage {
   artist: Artist;
   popular: Track[];
@@ -950,6 +990,10 @@ export interface Settings {
   monthlyStatsOnProfile: boolean;
   /** Compare stats with friends: a summary only, never the history. */
   statsCompare: boolean;
+  /** Song lineage: "Lineage" in song menus, the versions panel and Your stats. */
+  showLineage: boolean;
+  /** Compare plays both versions at matched loudness when the server has it. */
+  compareLevelMatch: boolean;
   /** Scrobble to Last.fm (once signed in). */
   scrobbleLastfm: boolean;
   /** Scrobble to ListenBrainz (with the user token). */
@@ -1228,6 +1272,8 @@ export const DEFAULT_SETTINGS: Settings = {
   statsStrip: true,
   monthlyStatsOnProfile: true,
   statsCompare: false,
+  showLineage: true,
+  compareLevelMatch: true,
   scrobbleLastfm: false,
   scrobbleListenbrainz: false,
   scrobbleUnreleased: false,
@@ -2432,6 +2478,8 @@ export interface EventMap {
   /** A Home user switch went through; the app restarts as them. */
   "home://changed": { restarting: boolean };
   "sync://progress": SyncStatus;
+  /** How far preparing Compare is: one version's file, 0 to 1. */
+  "compare://progress": { side: CompareSide; fraction: number };
   "library://changed": null;
   /** One artist's page data changed outside a sync (similar artists fetched). */
   "artist://changed": { id: string };

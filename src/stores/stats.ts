@@ -12,6 +12,8 @@ export interface StatsSubject {
   kind: StatsItemKind;
   id: string;
   title: string;
+  /** A song's other versions: the dialog links to its lineage. */
+  versions?: number;
 }
 
 interface StatsDialogStore {
@@ -30,6 +32,6 @@ export const useStatsDialog = create<StatsDialogStore>()((set) => ({
 export const statsStripOn = () => useSettings.getState().settings?.statsStrip !== false;
 
 /** "Your stats" for a song, artist or album menu, while the strip is on. */
-export function yourStatsItem(kind: StatsItemKind, id: string, title: string): MenuItem {
-  return { label: "Your stats", icon: BarChart3, when: statsStripOn, onSelect: () => useStatsDialog.getState().open({ kind, id, title }) };
+export function yourStatsItem(kind: StatsItemKind, id: string, title: string, versions?: number): MenuItem {
+  return { label: "Your stats", icon: BarChart3, when: statsStripOn, onSelect: () => useStatsDialog.getState().open({ kind, id, title, versions }) };
 }

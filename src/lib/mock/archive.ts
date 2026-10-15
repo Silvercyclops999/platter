@@ -17,6 +17,9 @@ import type {
   EraPage,
   Evidence,
   EvidenceKind,
+  Lineage,
+  LineageNode,
+  LineageStage,
   ReleaseMark,
   ReleaseSection,
   ReleaseStatus,
@@ -210,6 +213,26 @@ const ALBUMS: AlbumDef[] = [
       { title: "Harbor Lights (Live)", len: 240, plays: 11 },
     ],
   },
+  {
+    id: "9010",
+    title: "Loose Files",
+    format: null,
+    subformats: [],
+    year: null,
+    folder: "Leaks",
+    plays: 9,
+    songs: [{ title: "Glasshouse (Leak)", len: 205, version: "leak", date: "2018-12-01", quality: "lq", plays: 9 }],
+  },
+  {
+    id: "9011",
+    title: "Glass Season (2025 Remaster)",
+    format: "album",
+    subformats: [],
+    year: 2025,
+    edition: "2025 Remaster",
+    plays: 14,
+    songs: [{ title: "Glasshouse (2025 Remaster)", len: 215, quality: "lossless", plays: 14 }],
+  },
 ];
 
 const SECTION_OF = (d: AlbumDef): ReleaseSection => {
@@ -332,6 +355,47 @@ export function mockFoldTitle(title: string): string {
 }
 
 const GENERIC = new Set(["intro", "outro", "interlude", "skit", "untitled"]);
+
+const STAGES: LineageStage[] = ["demo", "session", "leak", "alternate", "unreleased", "release", "remaster", "live"];
+
+const TAG_STAGE: Record<string, LineageStage> = {
+  demo: "demo",
+  snippet: "demo",
+  rough: "demo",
+  early: "demo",
+  session: "session",
+  sessions: "session",
+  build: "session",
+  stems: "session",
+  rehearsal: "session",
+  leak: "leak",
+  leaked: "leak",
+  alternate: "alternate",
+  alt: "alternate",
+  remix: "alternate",
+  edit: "alternate",
+  instrumental: "alternate",
+  acoustic: "alternate",
+  remaster: "remaster",
+  remastered: "remaster",
+  live: "live",
+};
+
+/** The core's stage rule: the version tag, then words in the title, album or edition, then the status. */
+export function mockStage(v: VersionItem, albumLive: boolean): LineageStage {
+  const tagged = v.version ? TAG_STAGE[v.version] : undefined;
+  if (tagged) return tagged;
+  const words = `${v.track.title} ${v.track.albumTitle} ${v.edition ?? ""}`.toLowerCase().split(/[^\p{L}\p{N}]+/u);
+  const has = (...w: string[]) => words.some((x) => w.includes(x));
+  if (albumLive || has("live")) return "live";
+  if (has("remaster", "remastered")) return "remaster";
+  if (has("demo", "snippet", "rough")) return "demo";
+  if (has("session", "sessions")) return "session";
+  if (has("leak", "leaked")) return "leak";
+  if (v.status === "released") return "release";
+  if (v.status === "probablyAlternate") return "alternate";
+  return has("alt", "alternate", "mix", "version") ? "alternate" : "unreleased";
+}
 
 // ---------------------------------------------------------------- the mock
 
@@ -506,6 +570,27 @@ export class MockArchive {
     });
     const when = (v: VersionItem) => (v.date ? Number(v.date.replace(/-/g, "").padEnd(8, "0")) : v.year ? v.year * 10000 : -1);
     return items.sort((a, b) => Number(a.status !== "released") - Number(b.status !== "released") || when(b) - when(a));
+  }
+
+  /** `track_lineage`: the core's stage rule and order (dated oldest first, then undated by stage). */
+  lineage(trackId: string): Lineage | null {
+    const items = this.versions(trackId);
+    if (!items.length) return null;
+    const nodes: LineageNode[] = items.map((v) => {
+      const album = this.fx.albums.find((a) => a.id === v.track.albumId);
+      const stage = mockStage(v, !!album?.subformats.includes("live"));
+      const when = v.date ? Number(v.date.split("-").map((p, i) => (i === 0 ? p : p.padStart(2, "0"))).join("").padEnd(8, "0")) : v.year ? v.year * 10000 : null;
+      return { ...v, stage, when, shareable: v.status === "released" };
+    });
+    nodes.sort(
+      (a, b) =>
+        Number(a.when === null) - Number(b.when === null) ||
+        (a.when ?? 0) - (b.when ?? 0) ||
+        STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage) ||
+        a.track.id.localeCompare(b.track.id),
+    );
+    const face = nodes.find((n) => n.stage === "release") ?? nodes.find((n) => n.current) ?? nodes[0];
+    return { title: face.track.title, artistId: face.track.artistId, artistTitle: face.track.artistTitle, nodes };
   }
 
   /** Search: one row per song, shown as its released version. */

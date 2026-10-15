@@ -63,6 +63,9 @@ pub struct DiskCache {
     cap_bytes: u64,
     /// Keys that must not be evicted (current + upcoming).
     pinned: Mutex<HashSet<String>>,
+    /// Keys held apart from playback's own pins (the two versions being
+    /// compared), until released.
+    held: Mutex<HashSet<String>>,
 }
 
 impl DiskCache {
@@ -81,6 +84,7 @@ impl DiskCache {
             dir,
             cap_bytes,
             pinned: Mutex::new(HashSet::new()),
+            held: Mutex::new(HashSet::new()),
         })
     }
 
@@ -111,6 +115,16 @@ impl DiskCache {
 
     pub fn set_pinned(&self, keys: impl IntoIterator<Item = String>) {
         *self.pinned.lock() = keys.into_iter().collect();
+    }
+
+    /// Keeps these keys from eviction until [`DiskCache::release_held`],
+    /// whatever playback pins meanwhile.
+    pub fn hold(&self, keys: impl IntoIterator<Item = String>) {
+        *self.held.lock() = keys.into_iter().collect();
+    }
+
+    pub fn release_held(&self) {
+        self.held.lock().clear();
     }
 
     /// Stores a complete file and evicts old entries past the cap.
@@ -167,11 +181,12 @@ impl DiskCache {
         }
         entries.sort_by_key(|e| e.2);
         let pinned = self.pinned.lock().clone();
+        let held = self.held.lock().clone();
         for (p, len, _, key) in entries {
             if used <= self.cap_bytes {
                 break;
             }
-            if pinned.contains(&key) {
+            if pinned.contains(&key) || held.contains(&key) {
                 continue;
             }
             if fs::remove_file(&p).is_ok() {
@@ -311,24 +326,48 @@ enum Attempt {
 }
 
 async fn download(d: &Deps, track: &Track, pre: &Precacher) -> Result<(), String> {
+    let keep = || pre.still_wanted(&track.id) && !d.streaming(track);
+    let wait = || !d.allowed();
+    let job = Job { keep: &keep, wait: &wait, progress: &|_, _| {} };
+    fetch(&d.cache, d.resolver.as_ref(), &d.client, &d.gate, track, Priority::Precache, &job).await
+}
+
+/// What a whole-file fetch checks as it goes.
+pub struct Job<'a> {
+    /// False stops the fetch and drops its partial file.
+    pub keep: &'a (dyn Fn() -> bool + Send + Sync),
+    /// True holds the fetch back for now (playback's own transfers first).
+    pub wait: &'a (dyn Fn() -> bool + Send + Sync),
+    /// Bytes written so far and the file's size when known.
+    pub progress: &'a (dyn Fn(u64, Option<u64>) + Send + Sync),
+}
+
+/// Downloads a track whole into the cache through the transfer gate, at
+/// `prio`. A preempted fetch keeps its partial file and resumes by `Range`.
+pub async fn fetch(
+    cache: &DiskCache,
+    resolver: &dyn TrackResolver,
+    client: &reqwest::Client,
+    gate: &Arc<TransferGate>,
+    track: &Track,
+    prio: Priority,
+    job: &Job<'_>,
+) -> Result<(), String> {
     let key = cache_key(track);
-    let src = d.resolver.stream(track).await.map_err(|e| e.to_string())?;
-    let part = d.cache.part_path(&key);
-    let prio = Priority::Precache.cell();
+    let src = resolver.stream(track).await.map_err(|e| e.to_string())?;
+    let part = cache.part_path(&key);
+    let prio = prio.cell();
     let mut failures = 0u32;
     let result = loop {
-        if !pre.still_wanted(&track.id) {
+        if !(job.keep)() {
             break Err("no longer wanted".to_string());
         }
-        if d.streaming(track) {
-            break Err("being streamed".to_string());
-        }
-        if !d.allowed() {
+        if (job.wait)() {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         }
-        let permit = d.gate.acquire(&prio).await;
-        let a = attempt(d, &src, &part, pre, &track.id, &permit).await;
+        let permit = gate.acquire(&prio).await;
+        let a = attempt(client, &src, &part, job, &permit).await;
         drop(permit);
         match a {
             Attempt::Done => break Ok(()),
@@ -343,7 +382,7 @@ async fn download(d: &Deps, track: &Track, pre: &Precacher) -> Result<(), String
         }
     };
     match result {
-        Ok(()) => d.cache.commit(&key).map_err(|e| e.to_string()),
+        Ok(()) => cache.commit(&key).map_err(|e| e.to_string()),
         Err(e) => {
             let _ = tokio::fs::remove_file(&part).await;
             Err(e)
@@ -353,16 +392,9 @@ async fn download(d: &Deps, track: &Track, pre: &Precacher) -> Result<(), String
 
 /// One request, continuing the partial file from where it ends. Checks for
 /// preemption only between chunks, so a file write is never cut short.
-async fn attempt(
-    d: &Deps,
-    src: &StreamSource,
-    part: &Path,
-    pre: &Precacher,
-    id: &str,
-    permit: &Permit,
-) -> Attempt {
+async fn attempt(client: &reqwest::Client, src: &StreamSource, part: &Path, job: &Job<'_>, permit: &Permit) -> Attempt {
     let have = tokio::fs::metadata(part).await.map(|m| m.len()).unwrap_or(0);
-    let mut req = d.client.get(&src.url);
+    let mut req = client.get(&src.url);
     for (k, v) in &src.headers {
         req = req.header(k.as_str(), v.as_str());
     }
@@ -413,7 +445,8 @@ async fn attempt(
                     return Attempt::Failed(e.to_string());
                 }
                 written += chunk.len() as u64;
-                if !pre.still_wanted(id) {
+                (job.progress)(written, total);
+                if !(job.keep)() {
                     let _ = f.flush().await;
                     return Attempt::Failed("no longer wanted".into());
                 }
@@ -487,5 +520,24 @@ mod tests {
         assert!(!c.contains("b"));
         assert!(c.contains("c"));
         assert!(c.used_bytes() <= 250);
+    }
+
+    #[test]
+    fn held_keys_outlast_playback_pins() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = DiskCache::new(dir.path(), 250).unwrap();
+        let old = SystemTime::now() - std::time::Duration::from_secs(100);
+        for k in ["a", "b"] {
+            c.insert_bytes(k, &[0u8; 100]).unwrap();
+            fs::File::options().append(true).open(c.path(k)).unwrap().set_modified(old).unwrap();
+        }
+        c.hold(["a".to_string(), "b".to_string()]);
+        // Playback pins something else; the held pair still stays.
+        c.set_pinned(["c".to_string()]);
+        c.insert_bytes("c", &[0u8; 100]).unwrap();
+        assert!(c.contains("a") && c.contains("b") && c.contains("c"));
+        c.release_held();
+        c.insert_bytes("d", &[0u8; 10]).unwrap();
+        assert!(c.used_bytes() <= 250, "back to normal turnover once released");
     }
 }

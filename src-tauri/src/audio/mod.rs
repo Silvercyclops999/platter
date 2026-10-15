@@ -12,6 +12,7 @@
 pub mod autoeq;
 pub mod cache;
 pub mod commands;
+pub mod compare;
 pub mod convert;
 pub mod decode;
 pub mod dsp;

@@ -179,17 +179,18 @@ describe("Other versions", () => {
         <ArchiveDialogs />
       </>,
     );
-    const link = await screen.findByRole("button", { name: "+4 versions of Glasshouse" });
+    const link = await screen.findByRole("button", { name: "+6 versions of Glasshouse" });
     await user.click(link);
     const dialog = await screen.findByRole("dialog", { name: "Versions of Glasshouse" });
-    await within(dialog).findByText("4 other versions in your library");
+    await within(dialog).findByText("6 other versions in your library");
     const rows = within(dialog).getAllByRole("listitem");
-    expect(rows).toHaveLength(5);
-    // Released versions first, newest first: the live one (2022), then the album (2019).
-    expect(within(rows[0]).getByText("Glasshouse (Live)")).toBeInTheDocument();
-    expect(within(rows[1]).getByText("Glasshouse")).toBeInTheDocument();
-    expect(rows[1]).toHaveAttribute("aria-current", "true");
-    expect(within(rows[1]).getByText("This one")).toBeInTheDocument();
+    expect(rows).toHaveLength(7);
+    // Released versions first, newest first: the remaster (2025), the live one (2022), then the album (2019).
+    expect(within(rows[0]).getByText("Glasshouse (2025 Remaster)")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("Glasshouse (Live)")).toBeInTheDocument();
+    expect(within(rows[2]).getByText("Glasshouse")).toBeInTheDocument();
+    expect(rows[2]).toHaveAttribute("aria-current", "true");
+    expect(within(rows[2]).getByText("This one")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Play Glasshouse (Demo)" })).toBeInTheDocument();
     expect(within(dialog).getAllByText("Demo").length).toBeGreaterThan(0);
   });
@@ -232,7 +233,7 @@ describe("search groups versions", () => {
   it("shows the released version first, with its other versions under it", async () => {
     const res = await backend.search({ query: "glasshouse", filter: "songs", limit: 30 });
     expect(res.songs.filter((t) => t.artistId === ARCHIVE_ARTIST_ID).map((t) => t.title)).toEqual(["Glasshouse"]);
-    expect(res.versions?.[trackNamed("Glasshouse").id]).toHaveLength(4);
+    expect(res.versions?.[trackNamed("Glasshouse").id]).toHaveLength(6);
   });
 
   it("the released one leads even when a demo is the better hit", async () => {
@@ -267,7 +268,7 @@ describe("artist page sections and eras", () => {
     const page = await backend.artistPage(ARCHIVE_ARTIST_ID);
     const ids = (s: string) => page.sections.find((x) => x.section === s)!.albums.map((a) => a.title).sort();
     expect(ids("demos")).toEqual(["Basement Takes"]);
-    expect(ids("unreleased")).toEqual(["Glass Season (Build v1)", "Glass Season (Build v2)", "Night Ferry Sessions", "Paper Kingdom"]);
+    expect(ids("unreleased")).toEqual(["Glass Season (Build v1)", "Glass Season (Build v2)", "Loose Files", "Night Ferry Sessions", "Paper Kingdom"]);
   });
 
   it("an album moved to a section of your own gets its chip", async () => {

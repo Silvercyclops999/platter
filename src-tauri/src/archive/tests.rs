@@ -706,3 +706,59 @@ fn era_filter_covers_every_section() {
         .collect();
     assert_eq!(kept, [("albums".into(), vec!["glass".to_string()]), ("unreleased".into(), vec!["build1".into(), "build2".into()])]);
 }
+
+// ------------------------------------------------------------------ lineage
+
+#[test]
+fn lineage_runs_oldest_first_with_stages_and_undated_last() {
+    use super::lineage::{Stage, lineage_of};
+    let (_d, c) = db();
+    album(&c, "rel", "Artist", "Glass", true, Some("album"), &[], Some(2019));
+    song(&c, "r", "rel", "Glass", "Artist", "Glasshouse", 214_000, None, 1);
+    album(&c, "b1", "Artist", "Build v1", false, None, &[], None);
+    song(&c, "d", "b1", "Build v1", "Artist", "Glasshouse (Demo)", 198_000, None, 1);
+    tags(&c, "d", Some("demo"), Some("Glass"), Some("2018-09-14"), None);
+    album(&c, "b2", "Artist", "Build v2", false, None, &[], None);
+    song(&c, "s", "b2", "Build v2", "Artist", "Glasshouse (Session)", 220_000, None, 1);
+    tags(&c, "s", Some("session"), Some("Glass"), Some("2019-02-11"), None);
+    album(&c, "lv", "Artist", "Live at Home", true, Some("album"), &["live"], Some(2022));
+    song(&c, "l", "lv", "Live at Home", "Artist", "Glasshouse", 252_000, None, 1);
+    album(&c, "rm", "Artist", "Glass (Remastered)", true, Some("album"), &[], Some(2024));
+    song(&c, "m", "rm", "Glass (Remastered)", "Artist", "Glasshouse (Remastered 2024)", 214_000, None, 1);
+    album(&c, "tk", "Artist", "Takes", false, None, &[], None);
+    song(&c, "p", "tk", "Takes", "Artist", "Glasshouse (Piano Demo)", 167_000, None, 1);
+    tags(&c, "p", Some("demo"), None, None, None);
+    album(&c, "lk", "Artist", "Paper", false, None, &[], None);
+    song(&c, "k", "lk", "Paper", "Artist", "Glasshouse", 55_000, None, 1);
+    tags(&c, "k", Some("leak"), None, Some("2023-08-19"), None);
+    refresh(&c);
+
+    let l = lineage_of(&c, "s", false).unwrap();
+    assert_eq!(l.title, "Glasshouse");
+    let order: Vec<(&str, Stage)> = l.nodes.iter().map(|n| (n.item.track.id.as_str(), n.stage)).collect();
+    assert_eq!(
+        order,
+        [
+            ("d", Stage::Demo),
+            ("r", Stage::Release),
+            ("s", Stage::Session),
+            ("l", Stage::Live),
+            ("k", Stage::Leak),
+            ("m", Stage::Remaster),
+            ("p", Stage::Demo),
+        ]
+    );
+    assert!(l.nodes.iter().find(|n| n.item.track.id == "s").unwrap().item.current);
+    assert_eq!(l.nodes.last().unwrap().when, None, "undated goes last");
+    // Only released versions can be shared.
+    let share: Vec<&str> = l.nodes.iter().filter(|n| n.shareable).map(|n| n.item.track.id.as_str()).collect();
+    assert_eq!(share, ["r", "l", "m"]);
+    // Any version opens the same lineage.
+    assert_eq!(lineage_of(&c, "p", false).unwrap().nodes.len(), 7);
+}
+
+#[test]
+fn lineage_of_an_unknown_song_is_not_found() {
+    let (_d, c) = db();
+    assert!(super::lineage::lineage_of(&c, "nope", false).is_err());
+}

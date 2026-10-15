@@ -29,6 +29,7 @@ const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ d
 const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
 const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
 const ReleaseRadarPage = lazy(() => import("../pages/ReleaseRadar").then((m) => ({ default: m.ReleaseRadarPage })));
+const LineagePage = lazy(() => import("../pages/LineagePage").then((m) => ({ default: m.LineagePage })));
 const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
 const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
 
@@ -148,6 +149,8 @@ function Page({ route }: { route: Route }) {
       return <LibraryPage tab={route.tab} />;
     case "artist":
       return <ArtistPage id={route.id} era={route.era} />;
+    case "lineage":
+      return <LineagePage key={route.id} id={route.id} />;
     case "era":
       return <EraPage key={`${route.id}:${route.era}`} artistId={route.id} name={route.era} />;
     case "discography":

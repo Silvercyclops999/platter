@@ -9,6 +9,7 @@
 //!   song's own status, the versions panel and search grouping
 //! - [`sections`] artist page sections by release type and status, plus the
 //!   user's own
+//! - [`lineage`]  every version of a song on one timeline, by date
 //! - [`eras`]     ARCHIVE_ERA and ARCHIVE_DATE: era cards, the era page and
 //!   the album page's era banner
 //! - [`commands`] the Tauri commands
@@ -18,6 +19,7 @@
 
 pub mod commands;
 pub mod eras;
+pub mod lineage;
 pub mod marks;
 pub mod sections;
 pub mod status;

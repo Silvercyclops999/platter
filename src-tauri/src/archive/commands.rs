@@ -68,6 +68,13 @@ pub async fn track_versions(db: State<'_, DbHandle>, id: String) -> AppResult<Ve
     db.read_async(move |c| super::versions::versions_of(c, &id, show)).await
 }
 
+/// Every version of a song on one timeline, oldest first.
+#[tauri::command]
+pub async fn track_lineage(db: State<'_, DbHandle>, id: String) -> AppResult<super::lineage::Lineage> {
+    let show = db.tag_view().show_edits;
+    db.read_async(move |c| super::lineage::lineage_of(c, &id, show)).await
+}
+
 /// An artist's era: its songs by album or build, newest first.
 #[tauri::command]
 pub async fn era_page(db: State<'_, DbHandle>, artist_id: String, name: String) -> AppResult<EraPage> {

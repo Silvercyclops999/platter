@@ -4,6 +4,8 @@
  */
 import { create } from "zustand";
 import type { Album, Track } from "../lib/types";
+import { nav } from "./router";
+import { useSettings } from "./settings";
 import type { MenuItem } from "./ui";
 
 interface ArchiveUi {
@@ -27,6 +29,17 @@ export const openMoveToSection = (a: Album) => useArchiveUi.getState().set({ mov
 export function otherVersionsItem(t: Track): MenuItem[] {
   const n = t.otherVersions ?? 0;
   return n > 0 ? [{ label: `Other versions (${n})`, onSelect: () => openVersions(t) }] : [];
+}
+
+/** Song lineage is on in Settings. */
+export const lineageOn = () => useSettings.getState().settings?.showLineage !== false;
+
+/** Open a song's lineage (any of its versions). */
+export const openLineage = (trackId: string) => nav.go({ name: "lineage", id: trackId });
+
+/** "Lineage" for a song's menu, when it has other versions and lineage is on. */
+export function lineageItem(t: Track): MenuItem[] {
+  return (t.otherVersions ?? 0) > 0 ? [{ label: "Lineage", when: lineageOn, onSelect: () => openLineage(t.id) }] : [];
 }
 
 /** "Move to section…" for an album's menu (an artist's own albums only). */

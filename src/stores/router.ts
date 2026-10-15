@@ -17,6 +17,8 @@ export type Route =
   | { name: "artist"; id: string; era?: string }
   /** An artist's whole discography, optionally filtered to one release type (or `custom:<name>`). */
   | { name: "discography"; id: string; type?: ReleaseSection | `custom:${string}` }
+  /** Every version of a song on one timeline (`id`: any of its versions). */
+  | { name: "lineage"; id: string }
   /** One era of an artist (ARCHIVE_ERA). */
   | { name: "era"; id: string; era: string }
   | { name: "album"; id: string }

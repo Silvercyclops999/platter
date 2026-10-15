@@ -216,6 +216,17 @@ pub struct PlayerHandle {
     gate: Arc<TransferGate>,
     /// Whether playback's own transfers are done for now.
     host: Arc<dyn PrecacheHost>,
+    /// What putting whole files in the cache needs (Compare).
+    files: WholeFiles,
+}
+
+/// The cache, how to reach a file, and downloads already on disk.
+#[derive(Clone)]
+struct WholeFiles {
+    cache: Option<Arc<DiskCache>>,
+    resolver: Arc<dyn TrackResolver>,
+    client: reqwest::Client,
+    local: Option<super::source::LocalFiles>,
 }
 
 fn now_ms() -> i64 {
@@ -267,6 +278,12 @@ impl PlayerHandle {
                 Some(engine.precache_host()),
             )
         });
+        let files = WholeFiles {
+            cache: cache.clone(),
+            resolver: resolver.clone(),
+            client: client.clone(),
+            local: config.local_files.clone(),
+        };
         let (tx, rx) = mpsc::unbounded_channel();
         let (tracking, _) = broadcast::channel(256);
         let problems = Arc::new(Mutex::new(Vec::new()));
@@ -342,7 +359,68 @@ impl PlayerHandle {
             outputs,
             gate,
             host,
+            files,
         }
+    }
+
+    /// The track's whole file is on this computer: downloaded, or in the
+    /// audio cache.
+    pub fn on_device(&self, track: &Track) -> bool {
+        self.files.local.as_ref().is_some_and(|l| l.0.path(track).is_some())
+            || self.files.cache.as_ref().is_some_and(|c| c.contains(&cache_key(track)))
+    }
+
+    /// Puts each track's whole file in the audio cache, one after the
+    /// other through the transfer gate (one file transfer at a time), and
+    /// keeps them there until [`PlayerHandle::release_whole`]. `progress`
+    /// gets the track's index and how much of it is in (0 to 1). Stops
+    /// when `keep` turns false.
+    pub async fn fetch_whole(
+        &self,
+        tracks: &[Track],
+        progress: &(dyn Fn(usize, f32) + Send + Sync),
+        keep: &(dyn Fn() -> bool + Send + Sync),
+    ) -> AppResult<()> {
+        let f = &self.files;
+        let Some(cache) = f.cache.as_ref() else {
+            if tracks.iter().all(|t| self.on_device(t)) {
+                return Ok(());
+            }
+            return Err(AppError::Invalid("The audio cache is off, so the files can't be prepared.".into()));
+        };
+        cache.hold(tracks.iter().map(cache_key));
+        for (i, t) in tracks.iter().enumerate() {
+            if self.on_device(t) {
+                progress(i, 1.0);
+                continue;
+            }
+            progress(i, 0.0);
+            let each = |done: u64, total: Option<u64>| {
+                if let Some(total) = total.filter(|n| *n > 0) {
+                    progress(i, (done as f64 / total as f64).min(1.0) as f32);
+                }
+            };
+            let wait = || false;
+            let job = super::cache::Job { keep, wait: &wait, progress: &each };
+            super::cache::fetch(cache, f.resolver.as_ref(), &f.client, &self.gate, t, super::gate::Priority::Next, &job)
+                .await
+                .map_err(|e| AppError::Network(format!("Couldn't get {}: {e}", t.title)))?;
+            progress(i, 1.0);
+        }
+        Ok(())
+    }
+
+    /// Lets the files [`PlayerHandle::fetch_whole`] kept go back to the
+    /// cache's normal turnover.
+    pub fn release_whole(&self) {
+        if let Some(c) = &self.files.cache {
+            c.release_held();
+        }
+    }
+
+    /// The track's loudness data, when the server has it.
+    pub async fn loudness(&self, track: &Track) -> Option<super::dsp::TrackAudio> {
+        self.files.resolver.audio_info(track).await
     }
 
     /// The transfer gate, for background readers that must queue behind

@@ -981,6 +981,7 @@ pub fn run() {
             app.manage(art);
             app.manage(artist_info);
             app.manage(player);
+            app.manage(audio::compare::CompareState::default());
             app.manage(app_settings);
             app.manage(live.platform.clone());
             updates::start(app.handle().clone());
@@ -1130,6 +1131,11 @@ pub fn run() {
             artistinfo::commands::album_release_status,
             archive::commands::release_mark_set,
             archive::commands::track_versions,
+            archive::commands::track_lineage,
+            audio::compare::compare_prepare,
+            audio::compare::compare_switch,
+            audio::compare::compare_loop,
+            audio::compare::compare_end,
             archive::commands::era_page,
             archive::commands::album_section_set,
             archive::commands::artist_sections,

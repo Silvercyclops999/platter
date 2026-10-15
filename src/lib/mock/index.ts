@@ -30,7 +30,11 @@
  *   ?compare=1      Compare stats with friends starts on
  */
 import type { Backend, Unlisten } from "../backend";
+import { compareApproximate, compareMap, compareMapLoop } from "../compare";
 import type {
+  CompareNow,
+  CompareReady,
+  CompareSide,
   LidarrPickInput,
   LidarrRequestInput,
   CachedLibrary,
@@ -2466,6 +2470,95 @@ export class MockBackend implements Backend {
       return this.settings.showFanEdits ? items : items.filter((v) => v.current || !this.tags.index().tracks[v.track.id]?.edit);
     });
   }
+  trackLineage(id: string) {
+    return this.delay(() => {
+      if (!this.trackById(id)) this.notFound("Song");
+      const l = this.archive.lineage(id) ?? this.notFound("Song");
+      const hidden = (tid: string) => !this.settings.showFanEdits && !!this.tags.index().tracks[tid]?.edit;
+      return { ...l, nodes: l.nodes.filter((n) => n.current || !hidden(n.track.id)) };
+    });
+  }
+
+  // ---- Compare: like the core, both files come in one after the other,
+  // then switches map the moment (by proportion past 5% apart).
+
+  /** Test hook: make preparing fail (the server dropped the file). */
+  compareFails = false;
+  private compare: { a: Track; b: Track; side: CompareSide | null; ab: AbLoop | null; run: number } | null = null;
+  private compareRun = 0;
+
+  comparePrepare(aId: string, bId: string): Promise<CompareReady> {
+    const run = ++this.compareRun;
+    const a = this.trackById(aId);
+    const b = this.trackById(bId);
+    if (!a || !b) return Promise.reject({ kind: "notFound", message: "Song not found" });
+    if (aId === bId) return Promise.reject({ kind: "invalid", message: "Pick two different versions." });
+    const steps = [0, 0.35, 0.7, 1];
+    const step = Math.max(10, this.opts.latencyMs);
+    return new Promise((resolve, reject) => {
+      let i = 0;
+      const tick = () => {
+        if (run !== this.compareRun) return reject({ kind: "invalid", message: "Compare was closed." });
+        const side: CompareSide = i < steps.length ? "a" : "b";
+        if (this.compareFails && side === "b") return reject({ kind: "network", message: `Couldn't get ${b.title}: http 404` });
+        this.emit("compare://progress", { side, fraction: steps[i % steps.length] });
+        i += 1;
+        if (i < steps.length * 2) return this.later(step, tick);
+        const levelAvailable = !a.codec?.includes("mp3") && !b.codec?.includes("mp3");
+        this.compare = { a, b, side: null, ab: null, run };
+        resolve({
+          aId,
+          bId,
+          approximate: compareApproximate(a.durationMs, b.durationMs),
+          levelMatched: this.settings.compareLevelMatch && levelAvailable,
+          levelAvailable,
+        });
+      };
+      this.later(step, tick);
+    });
+  }
+  compareSwitch(side: CompareSide, play?: boolean): Promise<CompareNow> {
+    return this.delay(() => {
+      const c = this.compare;
+      if (!c) throw { kind: "invalid", message: "Compare isn't open." };
+      const to = side === "a" ? c.a : c.b;
+      const from = c.side ? (c.side === "a" ? c.a : c.b) : null;
+      const playingFrom = !!from && this.current?.track.id === from.id;
+      let pos = playingFrom ? compareMap(this.positionMs, from!.durationMs, to.durationMs) : 0;
+      const ab = c.ab && side === "b" ? compareMapLoop(c.ab, c.a.durationMs, c.b.durationMs) : c.ab;
+      if (ab && (pos < ab.aMs || pos >= ab.bMs)) pos = ab.aMs;
+      const wasPlaying = this.status === "playing";
+      this.loadContext({ context: { kind: "tracks", trackIds: [to.id] }, startTrackId: to.id }, play ?? (!playingFrom || wasPlaying));
+      this.positionMs = pos;
+      this.abLoop = ab;
+      c.side = side;
+      this.emitState();
+      return { side, positionMs: pos, abLoop: ab };
+    });
+  }
+  compareLoop(ab: AbLoop | null): Promise<AbLoop | null> {
+    return this.delay(() => {
+      const c = this.compare;
+      if (!c) throw { kind: "invalid", message: "Compare isn't open." };
+      if (ab && ab.bMs <= ab.aMs) throw { kind: "invalid", message: "The loop has to end after it starts." };
+      c.ab = ab && c.side === "b" ? compareMapLoop(ab, c.b.durationMs, c.a.durationMs) : ab;
+      const now = c.ab && c.side === "b" ? compareMapLoop(c.ab, c.a.durationMs, c.b.durationMs) : c.ab;
+      this.abLoop = now;
+      this.emitState();
+      return now;
+    });
+  }
+  compareEnd() {
+    return this.delay(() => {
+      this.compareRun += 1;
+      if (this.compare) {
+        this.abLoop = null;
+        this.emitState();
+      }
+      this.compare = null;
+    });
+  }
+
   eraPage(artistId: string, name: string) {
     return this.delay(() => this.archive.eraPage(artistId, name) ?? this.notFound("Era"));
   }

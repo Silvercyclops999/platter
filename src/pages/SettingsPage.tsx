@@ -2102,6 +2102,24 @@ export function SettingsPage() {
         "Artists whose songs are tagged with two or more eras get a row of era cards under Popular. Picking one shows only that era, released and unreleased.",
       control: (ids) => toggle(s, "showEraCards", ids),
     },
+    {
+      key: "showLineage",
+      section: "Library",
+      group: "Archive",
+      title: "Show lineage",
+      description:
+        "Songs with other versions get Lineage in their menu, in Other versions and in Your stats: every version on one timeline, from the first demo to the live takes, with Compare to switch between two at the same moment.",
+      control: (ids) => toggle(s, "showLineage", ids),
+    },
+    {
+      key: "compareLevelMatch",
+      section: "Library",
+      group: "Archive",
+      title: "Compare level matching",
+      description:
+        "Compare plays both versions at the same loudness when your server has loudness data for them, so the louder one doesn't sound better just for being louder. Your own sound settings come back when Compare closes.",
+      control: (ids) => toggle(s, "compareLevelMatch", ids),
+    },
     // Library: the library doctor
     {
       key: "libraryDoctor",
