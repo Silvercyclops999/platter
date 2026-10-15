@@ -4,14 +4,15 @@
  * of the songs the rules find. With an AI provider set, a prompted playlist
  * starts from a description that fills the rules and picks songs.
  */
-import { Plus, Sparkles, X } from "lucide-react";
+import { MessageSquareText, Plus, Sparkles, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
-import type { AppError, SmartField, SmartOp, SmartPreview, SmartRule, SmartRules, SmartSort, SmartUpdate } from "../lib/types";
+import type { AppError, Described, SmartField, SmartOp, SmartPreview, SmartRule, SmartRules, SmartSort, SmartUpdate } from "../lib/types";
 import { hasCap } from "../stores/caps";
 import { closeSmartEditor, isPlatterSmart, useCurate, type SmartEditorState } from "../stores/curate";
 import { nav } from "../stores/router";
+import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import { Art } from "./Art";
 import { Button, IconButton } from "./Button";
@@ -39,6 +40,12 @@ export const FIELDS: { value: SmartField; label: string; kind: Kind; hint?: stri
   { value: "releaseType", label: "Release type", kind: "choice" },
   { value: "explicit", label: "Explicit", kind: "bool" },
   { value: "version", label: "Version", kind: "text", hint: "Remaster" },
+  { value: "era", label: "Era", kind: "text" },
+  { value: "played", label: "Played", kind: "date" },
+  { value: "skips", label: "Skips", kind: "number", hint: "0" },
+  { value: "unreleased", label: "Unreleased", kind: "bool" },
+  { value: "lossless", label: "Lossless", kind: "bool" },
+  { value: "finished", label: "Album finished", kind: "bool" },
 ];
 
 const OPS: Record<Kind, { value: SmartOp; label: string }[]> = {
@@ -65,6 +72,7 @@ const OPS: Record<Kind, { value: SmartOp; label: string }[]> = {
   date: [
     { value: "inLast", label: "in the last" },
     { value: "notInLast", label: "not in the last" },
+    { value: "between", label: "between" },
   ],
   bool: [{ value: "is", label: "is" }],
   choice: [
@@ -125,6 +133,64 @@ const LIMITS: SelectOption<LimitChoice>[] = [
 
 export const fieldKind = (f: SmartField): Kind => FIELDS.find((x) => x.value === f)?.kind ?? "text";
 
+/** "45d" -> "45 days", "1m" -> "month". */
+function spanLabel(v: string): string {
+  const m = /^(\d+)(d|w|m|y)$/.exec(v.trim());
+  if (!m) return v;
+  const n = Number(m[1]);
+  const unit = { d: "day", w: "week", m: "month", y: "year" }[m[2] as "d"];
+  return n === 1 ? unit : `${n} ${unit}s`;
+}
+
+/** A local calendar day as "2026-06-01". */
+function isoDay(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** The last 30 days, as a between value. */
+function lastMonthRange(): string {
+  const to = new Date();
+  const from = new Date(to.getFullYear(), to.getMonth(), to.getDate() - 30);
+  return `${isoDay(from)}..${isoDay(to)}`;
+}
+
+/** "2026-06-01..2026-08-31" -> "1 Jun 2026 and 31 Aug 2026". */
+export function rangeWords(v: string): string {
+  const [a, b] = v.split("..");
+  const show = (s: string | undefined) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s ?? "");
+    if (!m) return s ?? "";
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  };
+  return `${show(a)} and ${show(b)}`;
+}
+
+const OP_WORDS: Record<SmartOp, string> = {
+  is: "is",
+  isNot: "is not",
+  contains: "contains",
+  notContains: "doesn't contain",
+  gt: "over",
+  lt: "under",
+  inLast: "in the last",
+  notInLast: "not in the last",
+  between: "between",
+};
+
+/** One rule in words: "Mood is Chill", "Length under 3", "Played between 1 Jun 2026 and 31 Aug 2026". */
+export function ruleWords(r: SmartRule): string {
+  const label = FIELDS.find((f) => f.value === r.field)?.label.replace(/ \((minutes|stars)\)$/, "") ?? r.field;
+  if (fieldKind(r.field) === "bool") return `${label}: ${r.value === "true" ? "yes" : "no"}`;
+  let value = r.value;
+  if (r.op === "between") value = rangeWords(r.value);
+  else if (r.op === "inLast" || r.op === "notInLast") value = SPANS.find((s) => s.value === r.value)?.label ?? r.value;
+  else if (r.field === "releaseType") value = RELEASE_TYPES.find((t) => t.value === r.value)?.label ?? r.value;
+  else if (r.field === "decade") value = `${r.value}s`;
+  else if (r.field === "duration") value = `${r.value} min`;
+  return `${label} ${OP_WORDS[r.op]} ${value}`;
+}
+
 /** A sensible first value when a rule's field changes. */
 function defaultValue(kind: Kind): string {
   return kind === "date" ? "30d" : kind === "bool" ? "true" : kind === "decade" ? "1990" : kind === "choice" ? "albums" : "";
@@ -157,7 +223,21 @@ function RuleRow({ rule, index, onChange, onRemove }: { rule: SmartRule; index: 
   const def = FIELDS.find((f) => f.value === rule.field);
   const n = index + 1;
   let value;
-  if (kind === "date") value = <Select label={`Rule ${n} time`} value={rule.value} options={SPANS} onChange={(v) => onChange({ ...rule, value: v })} />;
+  if (kind === "date" && rule.op === "between") {
+    const [from = "", to = ""] = rule.value.split("..");
+    value = (
+      <span className="smart-ed__range">
+        <input className="pl-edit__input smart-ed__date" type="date" aria-label={`Rule ${n} from`} value={from} onChange={(e) => onChange({ ...rule, value: `${e.target.value}..${to}` })} />
+        <span>and</span>
+        <input className="pl-edit__input smart-ed__date" type="date" aria-label={`Rule ${n} to`} value={to} onChange={(e) => onChange({ ...rule, value: `${from}..${e.target.value}` })} />
+      </span>
+    );
+  } else if (kind === "date")
+  {
+    // A span the list doesn't have ("45d" from a description) stays choosable.
+    const spans = SPANS.some((s) => s.value === rule.value) ? SPANS : [...SPANS, { value: rule.value, label: spanLabel(rule.value) }];
+    value = <Select label={`Rule ${n} time`} value={rule.value} options={spans} onChange={(v) => onChange({ ...rule, value: v })} />;
+  }
   else if (kind === "bool")
     value = (
       <Select
@@ -195,7 +275,17 @@ function RuleRow({ rule, index, onChange, onRemove }: { rule: SmartRule; index: 
           onChange({ field: f, op: OPS[k][0].value, value: k === kind ? rule.value : defaultValue(k) });
         }}
       />
-      <Select label={`Rule ${n} comparison`} value={rule.op} options={OPS[kind]} onChange={(op) => onChange({ ...rule, op })} />
+      <Select
+        label={`Rule ${n} comparison`}
+        value={rule.op}
+        options={OPS[kind]}
+        onChange={(op) => {
+          // A range and a span read their values differently.
+          const was = rule.op === "between";
+          const value = op === "between" && !was ? lastMonthRange() : op !== "between" && was ? "30d" : rule.value;
+          onChange({ ...rule, op, value });
+        }}
+      />
       {value}
       <IconButton label={`Remove rule ${n}`} size="sm" icon={<X size={16} />} onClick={onRemove} />
     </li>
@@ -217,7 +307,55 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
   const [saving, setSaving] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const describeRef = useRef<HTMLTextAreaElement>(null);
   const editingPlex = !!initial.id && !isPlatterSmart(initial.id);
+  const describeAllowed = useSettings((s) => s.settings?.showDescribePlaylist !== false);
+  const [describing, setDescribing] = useState(!!initial.describe);
+  const [describeText, setDescribeText] = useState("");
+  const [described, setDescribed] = useState<Described | null>(null);
+  // A name typed by hand stays; otherwise the description names it.
+  const named = useRef(!!initial.title);
+  // Described playlists stay on this computer unless asked otherwise.
+  const [onServer, setOnServer] = useState(false);
+
+  // The description is read as it's typed (on this computer, a moment after the last key).
+  useEffect(() => {
+    if (!describing) return;
+    const text = describeText.trim();
+    if (!text) {
+      setDescribed(null);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      backend.smartDescribe(text).then(
+        (d) => {
+          if (!alive) return;
+          setDescribed(d);
+          setRules((r) => ({ ...d.rules, update: r.update }));
+          setPicks([]);
+          if (!named.current) setTitle(d.title);
+        },
+        (e) => alive && setError(errText(e) || "Couldn't read that"),
+      );
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [describeText, describing]);
+
+  /** Use another reading for a rule the description made. */
+  const choose = (index: number, other: SmartRule) => {
+    if (!described) return;
+    const old = rules.rules[index];
+    if (!old) return;
+    setRules({ ...rules, rules: rules.rules.map((x, j) => (j === index ? other : x)) });
+    setDescribed({
+      ...described,
+      choices: described.choices.map((c) => (c.index === index ? { ...c, others: c.others.map((o) => (o === other ? old : o)) } : c)),
+    });
+  };
 
   const asked = useMemo(() => completeRules(rules), [rules]);
   const pickIds = useMemo(() => picks.map((t) => t.id), [picks]);
@@ -237,7 +375,12 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
   }, [asked, pickIds]);
 
   const update = (i: number, r: SmartRule) => setRules({ ...rules, rules: rules.rules.map((x, j) => (j === i ? r : x)) });
-  const remove = (i: number) => setRules({ ...rules, rules: rules.rules.filter((_, j) => j !== i) });
+  const remove = (i: number) => {
+    setRules({ ...rules, rules: rules.rules.filter((_, j) => j !== i) });
+    // Readings offered for later rules move up with them.
+    if (described)
+      setDescribed({ ...described, choices: described.choices.filter((c) => c.index !== i).map((c) => (c.index > i ? { ...c, index: c.index - 1 } : c)) });
+  };
   const add = () => setRules({ ...rules, rules: [...rules.rules, { field: "genre", op: "is", value: "" }] });
   const limitChoice: LimitChoice = rules.limit ? rules.limit.unit : "none";
 
@@ -274,9 +417,10 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
         title: name,
         rules: asked,
         picks: pickIds,
-        prompt: promptText.trim() || null,
+        prompt: (describing ? describeText : promptText).trim() || null,
         // A server that can't keep smart playlists: keep it on this computer.
-        ...(initial.id || hasCap("serverSmartPlaylists") ? {} : { platter: true }),
+        // A described one stays here unless the server version was asked for.
+        ...(initial.id || (hasCap("serverSmartPlaylists") && !(describing && !onServer)) ? {} : { platter: true }),
       });
       closeSmartEditor();
       if (saved.note) toast.info(saved.note);
@@ -288,8 +432,10 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
     setSaving(false);
   };
 
-  const heading = initial.id ? "Edit smart playlist" : initial.prompt ? "New prompted playlist" : "New smart playlist";
+  const heading = initial.id ? "Edit smart playlist" : initial.prompt ? "New prompted playlist" : describing ? "Describe a playlist" : "New smart playlist";
   const gaps = preview?.plexGaps ?? [];
+  // A described playlist can go to the server only when the server can hold its rules.
+  const serverOffer = describing && !initial.id && !picks.length && !gaps.length && hasCap("serverSmartPlaylists");
   const where = editingPlex
     ? "This playlist lives in Plex, so your other Plex apps see the change."
     : initial.id
@@ -298,17 +444,77 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
         ? "Picked songs stay first, so this is a Platter smart playlist, filled on this computer."
         : gaps.length
           ? `This will be a Platter smart playlist, filled on this computer: ${gaps.join("; ")}.`
-          : "Saved in Plex, so your other Plex apps see it too.";
+          : describing && !(serverOffer && onServer)
+            ? "A Platter smart playlist, filled on this computer."
+            : "Saved in Plex, so your other Plex apps see it too.";
 
   return (
-    <Dialog open onClose={closeSmartEditor} label={heading} className="pl-edit smart-ed" initialFocus={initial.prompt ? promptRef : nameRef}>
+    <Dialog open onClose={closeSmartEditor} label={heading} className="pl-edit smart-ed" initialFocus={initial.prompt ? promptRef : initial.describe ? describeRef : nameRef}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void save();
         }}
       >
-        <h2 className="pl-edit__title">{heading}</h2>
+        <div className="smart-ed__head">
+          <h2 className="pl-edit__title">{heading}</h2>
+          {describeAllowed && !describing && !initial.prompt && (
+            <Button variant="ghost" size="sm" icon={<MessageSquareText size={16} />} onClick={() => (setDescribing(true), setTimeout(() => describeRef.current?.focus(), 0))}>
+              Describe a playlist
+            </Button>
+          )}
+        </div>
+        {describing && describeAllowed && (
+          <div className="smart-ed__prompt smart-ed__describe">
+            <label className="pl-edit__field" htmlFor={`${id}-describe`}>
+              <span className="pl-edit__label">Describe a playlist</span>
+              <textarea
+                ref={describeRef}
+                id={`${id}-describe`}
+                className="pl-edit__input pl-edit__textarea smart-ed__prompt-box"
+                value={describeText}
+                maxLength={500}
+                placeholder="Chill late-night stuff from 2016 I haven't played lately"
+                onChange={(e) => setDescribeText(e.target.value)}
+              />
+            </label>
+            {described && described.rules.rules.length + described.unknown.length > 0 && (
+              <ul className="smart-ed__chips" aria-label="Understood">
+                {rules.rules.map((r, i) => (
+                  <li key={i} className="smart-ed__chip">
+                    <span>{ruleWords(r)}</span>
+                    <button type="button" className="smart-ed__chip-x" aria-label={`Remove ${ruleWords(r)}`} onClick={() => remove(i)}>
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {described?.choices
+              .filter((c) => rules.rules[c.index])
+              .map((c) => (
+                <p key={`${c.index}-${c.text}`} className="smart-ed__note smart-ed__choice">
+                  "{c.text}" could also be{" "}
+                  {c.others.map((o, k) => (
+                    <button key={k} type="button" className="smart-ed__chip smart-ed__chip--alt" onClick={() => choose(c.index, o)}>
+                      {ruleWords(o)}
+                    </button>
+                  ))}
+                </p>
+              ))}
+            {!!described?.unknown.length && (
+              <p className="smart-ed__note smart-ed__unknown" data-testid="describe-unknown">
+                Didn't understand: {described.unknown.join(", ")}
+              </p>
+            )}
+            {described?.notes.map((n) => (
+              <p key={n} className="smart-ed__note">
+                {n}
+              </p>
+            ))}
+            <p className="smart-ed__note">Read on this computer from your library's own names. Nothing is sent anywhere.</p>
+          </div>
+        )}
         {initial.prompt && (
           <div className="smart-ed__prompt">
             <label className="pl-edit__field" htmlFor={`${id}-prompt`}>
@@ -340,7 +546,10 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
             value={title}
             maxLength={100}
             placeholder="My smart playlist"
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              named.current = e.target.value.trim() !== "";
+              setTitle(e.target.value);
+            }}
           />
         </label>
         <div className="smart-ed__match">
@@ -417,6 +626,12 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
           {preview ? previewLine(preview) : "Counting songs"}
         </p>
         <p className="smart-ed__note">{where}</p>
+        {serverOffer && (
+          <label className="smart-ed__server">
+            <input type="checkbox" checked={onServer} onChange={(e) => setOnServer(e.target.checked)} />
+            Save it on the server instead, so your other apps see it too
+          </label>
+        )}
         {(error ?? ruleError) && (
           <p className="smart-ed__error" role="alert">
             {error ?? ruleError}

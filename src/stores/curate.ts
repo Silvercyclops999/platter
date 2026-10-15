@@ -20,6 +20,7 @@ import type {
 } from "../lib/types";
 import { nav, type Route } from "./router";
 import { usePlayer } from "./player";
+import { useSettings } from "./settings";
 import { toast, useToasts } from "./toasts";
 import type { MenuItem } from "./ui";
 
@@ -34,6 +35,8 @@ export interface SmartEditorState {
   /** The prompt box shows (an AI provider is set). */
   prompt: boolean;
   promptText: string;
+  /** The describe box shows: typed words become rules on this computer. */
+  describe?: boolean;
 }
 
 interface CurateState {
@@ -242,11 +245,23 @@ export async function removeBookmark(id: string, b: Backend = backend): Promise<
 
 export const isPlatterSmart = (id: string) => id.startsWith("smart:");
 
-/** Open the editor for a new smart playlist (or a prompted one). */
-export function newSmartPlaylist(opts: { prompt?: boolean } = {}): void {
+/** "Describe a playlist" shows (its setting, on by default). */
+export const describeOn = () => useSettings.getState().settings?.showDescribePlaylist !== false;
+
+/** Open the editor for a new smart playlist (or a prompted or described one). */
+export function newSmartPlaylist(opts: { prompt?: boolean; describe?: boolean } = {}): void {
   const ai = useCurate.getState().ai;
+  const describe = !!opts.describe && describeOn();
   useCurate.setState({
-    editor: { id: null, title: "", rules: { ...EMPTY_RULES, rules: [{ field: "genre", op: "is", value: "" }] }, picks: [], prompt: !!opts.prompt && !!ai?.ready, promptText: "" },
+    editor: {
+      id: null,
+      title: "",
+      rules: { ...EMPTY_RULES, rules: describe ? [] : [{ field: "genre", op: "is", value: "" }] },
+      picks: [],
+      prompt: !!opts.prompt && !!ai?.ready,
+      promptText: "",
+      describe,
+    },
   });
 }
 
@@ -283,6 +298,7 @@ export async function deleteSmartPlaylist(id: string, b: Backend = backend): Pro
 /** The create menu's smart playlist items (a prompted one when an AI provider is set). */
 export function smartCreateItems(): MenuItem[] {
   const items: MenuItem[] = [{ label: "Smart playlist", onSelect: () => newSmartPlaylist() }];
+  if (describeOn()) items.push({ label: "Describe a playlist", onSelect: () => newSmartPlaylist({ describe: true }) });
   if (useCurate.getState().ai?.ready) items.push({ label: "Prompted playlist", onSelect: () => newSmartPlaylist({ prompt: true }) });
   return items;
 }

@@ -2254,6 +2254,16 @@ export function SettingsPage() {
         "Compare plays both versions at the same loudness when your server has loudness data for them, so the louder one doesn't sound better just for being louder. Your own sound settings come back when Compare closes.",
       control: (ids) => toggle(s, "compareLevelMatch", ids),
     },
+    // Library: smart playlists
+    {
+      key: "showDescribePlaylist",
+      section: "Library",
+      group: "Smart playlists",
+      title: "Show \"Describe a playlist\"",
+      description:
+        "Type what you want, like \"chill late-night stuff from 2016 I haven't played lately\", and it becomes smart playlist rules you can change before saving. It's read on this computer from your library's own names; nothing is sent anywhere.",
+      control: (ids) => toggle(s, "showDescribePlaylist", ids),
+    },
     // Library: the library doctor
     {
       key: "libraryDoctor",

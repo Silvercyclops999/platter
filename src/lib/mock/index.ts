@@ -3036,6 +3036,9 @@ export class MockBackend implements Backend {
   smartPrompt(prompt: string) {
     return this.delay(() => this.smart.prompt(prompt));
   }
+  smartDescribe(text: string) {
+    return this.delay(() => this.smart.describe(text));
+  }
   aiStatus() {
     return this.delay(() => this.smart.aiStatus());
   }

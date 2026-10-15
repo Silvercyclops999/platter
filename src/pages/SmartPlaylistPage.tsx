@@ -2,7 +2,7 @@ import { Ellipsis, Pause, Play, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
-import { FIELDS } from "../components/SmartPlaylistEditor";
+import { FIELDS, rangeWords } from "../components/SmartPlaylistEditor";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton, trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
@@ -22,6 +22,7 @@ const OP_WORDS: Record<string, string> = {
   lt: "under",
   inLast: "in the last",
   notInLast: "not in the last",
+  between: "between",
 };
 
 /** "30d" -> "30 days", "1y" -> "year". */
@@ -38,7 +39,7 @@ export function rulesLine(r: SmartRules): string {
   if (!r.rules.length) return "Every song in your library";
   const parts = r.rules.map((x) => {
     const label = FIELDS.find((f) => f.value === x.field)?.label ?? x.field;
-    const value = x.value === "true" ? "yes" : x.value === "false" ? "no" : x.op === "inLast" || x.op === "notInLast" ? spanWords(x.value) : x.value;
+    const value = x.value === "true" ? "yes" : x.value === "false" ? "no" : x.op === "between" ? rangeWords(x.value) : x.op === "inLast" || x.op === "notInLast" ? spanWords(x.value) : x.value;
     return `${label} ${OP_WORDS[x.op] ?? x.op} ${value}`;
   });
   return parts.join(r.matchAll ? ", and " : ", or ");

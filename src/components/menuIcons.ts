@@ -20,6 +20,7 @@ import {
   ListEnd,
   ListMinus,
   ListPlus,
+  MessageSquareText,
   MicVocal,
   Pause,
   Pencil,
@@ -44,6 +45,7 @@ import {
 const RULES: [RegExp, LucideIcon][] = [
   [/^Smart playlist$/, ListFilter],
   [/^Prompted playlist$/, Sparkles],
+  [/^Describe a playlist$/, MessageSquareText],
   [/^Hide song$/, EyeOff],
   [/^Unhide song$/, Eye],
   [/^Don't play this artist$/, Ban],

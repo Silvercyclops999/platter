@@ -148,6 +148,7 @@ import type {
   HideRequest,
   NewBookmark,
   PromptResult,
+  Described,
   ScrobbleStatus,
   SmartPage,
   SmartPreview,
@@ -654,6 +655,8 @@ export interface Backend {
   smartPlexRules(id: string): Promise<SmartRules>;
   /** A description turned into rules and picked songs (the AI provider). */
   smartPrompt(prompt: string): Promise<PromptResult>;
+  /** A description read into rules on this computer (nothing is sent anywhere). */
+  smartDescribe(text: string): Promise<Described>;
   aiStatus(): Promise<AiStatus>;
   /** Save (or with null remove) the AI provider's key in the OS keychain. */
   aiKeySet(key: string | null): Promise<AiStatus>;
@@ -1055,13 +1058,14 @@ export function createTauriBackend(): Backend {
     bookmarkAdd: (bookmark) => call("bookmark_add", { bookmark }),
     bookmarkRemove: (id) => call("bookmark_remove", { id }),
     bookmarkOpen: (id) => call("bookmark_open", { id }),
-    smartPreview: (rules, picks) => call("smart_preview", { rules, picks: picks ?? null }),
+    smartPreview: (rules, picks) => call("smart_preview", { rules, picks: picks ?? null, tzOffsetMin: -new Date().getTimezoneOffset() }),
     smartSave: (request) => call("smart_save", { request }),
     smartList: () => call("smart_list"),
-    smartPage: (id) => call("smart_page", { id }),
+    smartPage: (id) => call("smart_page", { id, tzOffsetMin: -new Date().getTimezoneOffset() }),
     smartDelete: (id) => call("smart_delete", { id }),
     smartPlexRules: (id) => call("smart_plex_rules", { id }),
     smartPrompt: (prompt) => call("smart_prompt", { prompt }),
+    smartDescribe: (text) => call("smart_describe", { text, tzOffsetMin: -new Date().getTimezoneOffset() }),
     aiStatus: () => call("ai_status"),
     aiKeySet: (key) => call("ai_key_set", { key }),
     scrobbleStatus: () => call("scrobble_status"),

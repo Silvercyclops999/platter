@@ -992,6 +992,8 @@ export interface Settings {
   statsCompare: boolean;
   /** Song lineage: "Lineage" in song menus, the versions panel and Your stats. */
   showLineage: boolean;
+  /** "Describe a playlist" in the create menu and the smart playlist editor. */
+  showDescribePlaylist: boolean;
   /** Compare plays both versions at matched loudness when the server has it. */
   compareLevelMatch: boolean;
   /** Scrobble to Last.fm (once signed in). */
@@ -1293,6 +1295,7 @@ export const DEFAULT_SETTINGS: Settings = {
   monthlyStatsOnProfile: true,
   statsCompare: false,
   showLineage: true,
+  showDescribePlaylist: true,
   compareLevelMatch: true,
   scrobbleLastfm: false,
   scrobbleListenbrainz: false,
@@ -1739,8 +1742,15 @@ export type SmartField =
   | "duration"
   | "releaseType"
   | "explicit"
-  | "version";
-export type SmartOp = "is" | "isNot" | "contains" | "notContains" | "gt" | "lt" | "inLast" | "notInLast";
+  | "version"
+  | "era"
+  | "unreleased"
+  | "lossless"
+  | "skips"
+  | "finished"
+  | "played";
+/** `between` takes two local days: "2026-06-01..2026-08-31". */
+export type SmartOp = "is" | "isNot" | "contains" | "notContains" | "gt" | "lt" | "inLast" | "notInLast" | "between";
 
 export interface SmartRule {
   field: SmartField;
@@ -1814,6 +1824,17 @@ export interface PromptResult {
   title: string;
   rules: SmartRules;
   picks: Track[];
+}
+
+/** Describe a playlist: rules read from a description on this computer. */
+export interface Described {
+  title: string;
+  rules: SmartRules;
+  /** Words that matched nothing, as typed. */
+  unknown: string[];
+  /** Other readings for the rule at `index`. */
+  choices: { text: string; index: number; others: SmartRule[] }[];
+  notes: string[];
 }
 
 export type AiProvider = "none" | "anthropic";

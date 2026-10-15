@@ -9,6 +9,30 @@
 .smart-ed__prompt-row { display: flex; align-items: flex-start; gap: var(--space-4); justify-content: space-between; }
 .smart-ed__prompt-row .btn { flex: none; }
 
+.smart-ed__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.smart-ed__head .btn { flex: none; }
+.smart-ed__chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.smart-ed__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 12px;
+  border-radius: 999px;
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+.smart-ed__chip-x { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--color-text-secondary); }
+.smart-ed__chip-x:hover, .smart-ed__chip-x:focus-visible { background: var(--color-state-hover); color: var(--color-text-primary); }
+.smart-ed__chip--alt { height: 24px; padding: 0 10px; margin: 2px 4px 2px 0; background: transparent; border: 1px solid var(--color-divider, color-mix(in srgb, var(--color-ink) 16%, transparent)); font-size: var(--font-size-xs); cursor: pointer; }
+.smart-ed__chip--alt:hover, .smart-ed__chip--alt:focus-visible { background: var(--color-state-hover); }
+.smart-ed__unknown { color: var(--color-text-primary); }
+.smart-ed__range { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); min-width: 0; }
+.smart-ed__date { height: 36px; min-width: 0; font-size: var(--font-size-sm); }
+.smart-ed__server { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-primary); }
+
 .smart-ed__match { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 
 .smart-ed__rules { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }

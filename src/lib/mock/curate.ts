@@ -8,6 +8,7 @@
 import type {
   AiStatus,
   Album,
+  Described,
   Bookmark,
   HiddenItem,
   HideRequest,
@@ -142,6 +143,12 @@ const LABEL: Record<string, string> = {
   releaseType: "Release type",
   explicit: "Explicit",
   version: "Version",
+  era: "Era",
+  unreleased: "Unreleased",
+  lossless: "Lossless",
+  skips: "Skips",
+  finished: "Album finished",
+  played: "Played",
 };
 
 /** Why Plex can't hold these rules (same rules as the core). */
@@ -150,10 +157,20 @@ export function plexGaps(r: SmartRules): string[] {
   for (const rule of r.rules) {
     const l = LABEL[rule.field];
     if (l && !out.includes(`${l} isn't something Plex can filter on`)) out.push(`${l} isn't something Plex can filter on`);
+    else if (!l && rule.op === "between" && !out.includes("Plex can't filter between two dates")) out.push("Plex can't filter between two dates");
   }
   if (r.limit?.unit === "hours") out.push("Plex limits by number of songs, not hours");
   if (r.update !== "live") out.push("Plex smart playlists are always up to date");
   return out;
+}
+
+/** "2026-06-01..2026-08-31" as local unix seconds, end of the last day included. */
+function range(v: string): [number, number] | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})\.\.(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim());
+  if (!m) return null;
+  const a = new Date(+m[1], +m[2] - 1, +m[3]).getTime() / 1000;
+  const b = new Date(+m[4], +m[5] - 1, +m[6] + 1).getTime() / 1000;
+  return a < b ? [a, b] : null;
 }
 
 function span(v: string): number | null {
@@ -171,9 +188,11 @@ function checkRule(r: SmartRule): boolean {
     case "artist":
     case "album":
     case "version":
+    case "era":
       return v.length > 0;
     case "year":
     case "playCount":
+    case "skips":
     case "duration":
       return v !== "" && Number(v) >= 0;
     case "rating":
@@ -183,9 +202,13 @@ function checkRule(r: SmartRule): boolean {
     case "addedAt":
     case "lastPlayed":
     case "playedHere":
-      return span(v) !== null;
+    case "played":
+      return r.op === "between" ? range(v) !== null : span(v) !== null;
     case "liked":
     case "explicit":
+    case "unreleased":
+    case "lossless":
+    case "finished":
       return v === "true" || v === "false";
     case "releaseType":
       return v.length > 0;
@@ -252,7 +275,20 @@ export class MockSmart {
       case "album":
         return text(r.op, [t.albumTitle], v);
       case "version":
+      case "era":
         return text(r.op, [], v);
+      case "skips":
+        return num(r.op, 0, Number(v));
+      case "unreleased": {
+        const is = a?.section === "demos" || !!a?.format?.includes("demo");
+        return is === (v === "true");
+      }
+      case "lossless":
+        return /^(flac|alac|wav|aiff)$/i.test(t.codec ?? "") === (v === "true");
+      case "finished": {
+        const all = this.fx.tracks.filter((x) => x.albumId === t.albumId);
+        return all.every((x) => x.viewCount > 0) === (v === "true");
+      }
       case "year":
         return num(r.op, a?.year ?? 0, Number(v));
       case "decade": {
@@ -267,8 +303,13 @@ export class MockSmart {
         return num(r.op, t.durationMs / 60_000, Number(v));
       case "addedAt":
       case "lastPlayed":
-      case "playedHere": {
-        const at = r.field === "addedAt" ? (a?.addedAt ?? null) : r.field === "lastPlayed" ? t.lastViewedAt : null;
+      case "playedHere":
+      case "played": {
+        const at = r.field === "addedAt" ? (a?.addedAt ?? null) : r.field === "lastPlayed" || r.field === "played" ? t.lastViewedAt : null;
+        if (r.op === "between") {
+          const span = range(v);
+          return at !== null && !!span && at >= span[0] && at < span[1];
+        }
         const within = at !== null && at >= t0 - (span(v) ?? 0);
         return r.op === "inLast" ? within : !within;
       }
@@ -443,6 +484,16 @@ export class MockSmart {
     return this.aiStatus();
   }
 
+  /** Describe a playlist: a small reading of the words over the fixtures' names. */
+  describe(text: string): Described {
+    if (!text.trim()) invalid("Describe the playlist first.");
+    return mockDescribe(text, {
+      genre: [...new Set(this.fx.albums.flatMap((a) => a.genres))],
+      artist: this.fx.artists.map((a) => a.title),
+      album: this.fx.albums.map((a) => a.title),
+    });
+  }
+
   prompt(text: string): PromptResult {
     if (!this.aiStatus().ready) invalid("Choose an AI provider and add its key in Settings first.");
     if (!text.trim()) invalid("Describe the playlist first.");
@@ -453,6 +504,109 @@ export class MockSmart {
     const title = text.trim().replace(/^./, (c) => c.toUpperCase()).slice(0, 40);
     return { title, rules, picks };
   }
+}
+
+/** Folded words: lower case, no accents, hyphens split. */
+function foldWords(s: string): string[] {
+  return s
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f']/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9+]+/)
+    .filter(Boolean);
+}
+
+const MOCK_FILLER = new Set(["a", "an", "the", "some", "my", "me", "i", "from", "in", "of", "with", "and", "songs", "song", "stuff", "music", "tracks", "only", "just", "by", "style", "like", "that", "era"]);
+const MOCK_MOODS: Record<string, string> = { chill: "Ambient", mellow: "Ambient", upbeat: "Electronic", dreamy: "Dream Pop" };
+
+/** The mock's reading: library names, a few fixed phrases, unknown words listed. */
+export function mockDescribe(text: string, names: { genre: string[]; artist: string[]; album: string[] }): Described {
+  const w = foldWords(text);
+  const rules: SmartRule[] = [];
+  const unknown: string[] = [];
+  const add = (r: SmartRule) => {
+    if (!rules.some((x) => x.field === r.field && x.op === r.op && x.value === r.value)) rules.push(r);
+  };
+  const lists: [SmartRule["field"], string[]][] = [
+    ["genre", names.genre],
+    ["artist", names.artist],
+    ["album", names.album],
+  ];
+  let i = 0;
+  let negate = false;
+  let lastUnknown = -2;
+  outer: while (i < w.length) {
+    const at = (k: number) => w[i + k] ?? "";
+    const rest = w.slice(i).join(" ");
+    const phrase = (re: RegExp, make: (m: RegExpMatchArray) => SmartRule | null): boolean => {
+      const m = rest.match(re);
+      if (!m || m.index !== 0) return false;
+      const r = make(m);
+      if (r) add(r);
+      i += m[0].split(" ").length;
+      return true;
+    };
+    if (phrase(/^(havent|never|not) played (lately|recently)/, () => ({ field: "lastPlayed", op: "notInLast", value: "3m" }))) continue;
+    if (phrase(/^(never|not) played/, () => ({ field: "playCount", op: "is", value: "0" }))) continue;
+    if (phrase(/^(never|not) finished/, () => ({ field: "finished", op: "is", value: "false" }))) continue;
+    if (phrase(/^(under|less than|shorter than) (\d+) (minutes|minute|min|mins)/, (m) => ({ field: "duration", op: "lt", value: m[2] }))) continue;
+    if (phrase(/^(over|more than|longer than) (\d+) (minutes|minute|min|mins)/, (m) => ({ field: "duration", op: "gt", value: m[2] }))) continue;
+    if (phrase(/^(last summer)/, () => {
+      const now = new Date();
+      const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+      return { field: "played", op: "between", value: `${y}-06-01..${y}-08-31` };
+    }))
+      continue;
+    if (phrase(/^i (loved|liked|like|love)/, () => ({ field: "liked", op: "is", value: "true" }))) continue;
+    const word = at(0);
+    if (["no", "not", "without"].includes(word)) {
+      negate = true;
+      i++;
+      continue;
+    }
+    const year = /^(19|20)\d\d$/.test(word) ? word : null;
+    const decade = /^(\d0|\d{3}0)s$/.exec(word);
+    const kw: Record<string, SmartRule> = {
+      unreleased: { field: "unreleased", op: "is", value: "true" },
+      leaks: { field: "unreleased", op: "is", value: "true" },
+      lossless: { field: "lossless", op: "is", value: "true" },
+      flac: { field: "lossless", op: "is", value: "true" },
+      liked: { field: "liked", op: "is", value: "true" },
+      skipped: { field: "skips", op: "gt", value: "0" },
+      explicit: { field: "explicit", op: "is", value: "true" },
+      albums: { field: "releaseType", op: "is", value: "albums" },
+      live: { field: "releaseType", op: "is", value: "live" },
+    };
+    let r: SmartRule | null = kw[word] ?? null;
+    if (year) r = { field: "year", op: "is", value: year };
+    if (decade) {
+      const n = Number(decade[1]);
+      r = { field: "decade", op: "is", value: String(n >= 1000 ? n : n >= 30 ? 1900 + n : 2000 + n) };
+    }
+    if (!r)
+      for (const [field, list] of lists)
+        for (const name of list) {
+          const nw = foldWords(name);
+          if (nw.length && nw.every((x, k) => w[i + k] === x)) {
+            add({ field, op: negate ? "isNot" : "is", value: name });
+            negate = false;
+            i += nw.length;
+            continue outer;
+          }
+        }
+    if (!r && MOCK_MOODS[word] && names.genre.includes(MOCK_MOODS[word])) r = { field: "genre", op: "is", value: MOCK_MOODS[word] };
+    if (r) {
+      add(negate ? { ...r, op: r.op === "is" && r.value !== "true" ? "isNot" : r.op, value: r.value === "true" ? "false" : r.value } : r);
+      negate = false;
+    } else if (!MOCK_FILLER.has(word)) {
+      if (lastUnknown === i - 1 && unknown.length) unknown[unknown.length - 1] += ` ${word}`;
+      else unknown.push(word);
+      lastUnknown = i;
+    }
+    i++;
+  }
+  const title = text.trim().replace(/[.!?,]+$/, "").replace(/^./, (c) => c.toUpperCase()).slice(0, 100);
+  return { title, rules: { matchAll: true, rules, limit: null, sort: "none", update: "live" }, unknown, choices: [], notes: [] };
 }
 
 // ---------------------------------------------------------------- scrobbling
