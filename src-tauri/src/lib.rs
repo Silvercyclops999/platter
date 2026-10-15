@@ -1104,6 +1104,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             platform::miniplayer::on_window_event(window, event);
             platform::visibility::on_window_event(window, event);
+            // Back in front: look for an update if the last check is old.
+            if let tauri::WindowEvent::Focused(true) = event
+                && window.label() == "main"
+            {
+                updates::window_shown(window.app_handle());
+            }
             // Back from System Settings: pick up Local Network access at once.
             if let tauri::WindowEvent::Focused(true) = event
                 && window.label() == "main"

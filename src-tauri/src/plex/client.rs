@@ -2141,12 +2141,10 @@ mod tests {
             assert_eq!(k, want, "{p}");
             assert!(!msg.contains(TOKEN));
         }
-        // connection refused → network
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = l.local_addr().unwrap();
-        drop(l);
+        // connection refused → network. Port 1 on loopback is never served;
+        // a freed ephemeral port could be taken by a parallel test.
         let dead = PlexClient::new(
-            &format!("http://{addr}"),
+            "http://127.0.0.1:1",
             Token::new(TOKEN).unwrap(),
             Arc::new(ClientIdentity::with_id("c")),
             None,
