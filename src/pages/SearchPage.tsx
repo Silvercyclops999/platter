@@ -19,6 +19,7 @@ import { MAX_QUERY } from "../shell/SearchBox";
 import { hitInfo, hitOf, mixedHits, openHit, playHit, rememberHit, type HitInfo } from "../shell/searchModel";
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
 import { otherVersionsText } from "./era";
+import { SearchCatalogue } from "./SearchCatalogue";
 import "./search.css";
 
 export { MAX_QUERY };
@@ -260,6 +261,18 @@ export function SearchPage({ query }: { query: string }) {
       </div>
     );
 
+  const localCount = !res
+    ? 0
+    : filter === "all"
+      ? res.songs.length + res.albums.length + res.artists.length + res.playlists.length
+      : filter === "songs"
+        ? res.songs.length
+        : filter === "albums"
+          ? res.albums.length
+          : filter === "artists"
+            ? res.artists.length
+            : res.playlists.length;
+
   const empty =
     res &&
     !res.top &&
@@ -293,10 +306,13 @@ export function SearchPage({ query }: { query: string }) {
           <ResultsSkeleton filter={filter} />
         )
       ) : empty ? (
-        <div className="sr-empty">
-          <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
-          <p>Check the spelling, or try fewer or different keywords.</p>
-        </div>
+        <>
+          <div className="sr-empty">
+            <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}” in your library</h2>
+            <p>Check the spelling, or try fewer or different keywords.</p>
+          </div>
+          <SearchCatalogue query={q} filter={filter} localCount={0} />
+        </>
       ) : (
         <>
           {filter === "all" && (
@@ -422,6 +438,7 @@ export function SearchPage({ query }: { query: string }) {
           <p className="sr-meta">
             {res.source === "local" ? "From your library" : "From your server while your library finishes syncing"} · {Math.round(res.tookMs)} ms
           </p>
+          <SearchCatalogue query={q} filter={filter} localCount={localCount} />
         </>
       )}
     </div>

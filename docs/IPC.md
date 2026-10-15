@@ -1589,6 +1589,29 @@ Auto-request is per artist (and the `autoRequest` setting for all of them). It a
 
 Event: `radar://changed` (no payload) when a look starts or ends or auto-request changes.
 
+## Discover
+
+Music that isn't in the library, from MusicBrainz (the shared one-a-second limiter, answers kept a week) and ListenBrainz's similar artists (one a second, kept a week). Nothing is asked while Go offline is on or while the setting for it is off.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `catalogue_search` | `{ query }` | `CatalogueSearch`; `shown` is false while `catalogueSearch` is off or offline |
+| `catalogue_artist` | `{ mbid }` | `CatalogueArtistPage`; `notFound` for an unknown id, `network` offline |
+| `catalogue_album` | `{ releaseGroupId }` | `CatalogueAlbumPage` |
+| `catalogue_fans_also_like` | `{ artistId, name }` | `CatArtist[]` outside the library for a library artist (empty while `fansAlsoLikeCatalogue` is off) |
+| `new_to_you` | – | `{ shown, artists: { mbid, name, because: string[] }[] }`; worked out at most twice a day from the artists played most |
+| `import_missing_albums` | – | `MissingAlbum[]`: albums added to Missing by hand, with `links` and `libraryAlbumId` once one arrives |
+| `import_missing_album_add` | `{ album: { releaseGroupId, title, artist, artistMbid } }` | the list |
+| `import_missing_album_remove` | `{ releaseGroupId }` | the list |
+
+`CatalogueSearch = { shown, artists: CatArtist[], albums: CatAlbum[], songs: CatSong[] }`. Anything the library has is left out: artists by MusicBrainz id or folded name, albums by folded title under that artist, songs by folded artist and title. Albums need an official release and to be an album, EP or single not credited to Various Artists.
+`CatArtist = { mbid, name, disambiguation, kind, photo, libraryId }`; `libraryId` is set for an artist the library has (open their page instead).
+`CatAlbum = { releaseGroupId, title, artist, artistMbid, kind, secondary, year, thumb, libraryAlbumId, request, refusal, inMissing }`. `refusal` says why it can't be requested (the same rules a Lidarr request checks).
+`CatalogueArtistPage = { artist, area, lifeSpan, bio, bioCredit, bioUrl, banner, sections: { kind: "album"|"ep"|"single"|"other", albums }[], similar, dismissed }`.
+`CatalogueAlbumPage = { album, tracks: { disc, number, title, artist, durationMs }[], released, label, links: { bandcamp, qobuz, itunes }, artistLibraryId }`. The tracks are the earliest official release's.
+
+Requests from these pages use `lidarr_request_preview` and `lidarr_request` with `artistMbid` in the input, so the artist is known without a name search. Store links open through `import_open_link`. Artists marked "Not interested" are the synced `dismissedArtists` setting (`{ mbid, name }[]`).
+
 ## Sync, folders and keys
 
 | Command | Args | Returns |

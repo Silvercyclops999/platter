@@ -1,0 +1,77 @@
+/* Music that isn't in the library: catalogue cards, pages and search section. */
+
+.cat-card { gap: 0; }
+.cat-card .missing-release__action:empty { display: none; }
+.cat-blocked { color: var(--color-text-secondary); }
+
+/* "Not in your library" next to a page's type line. */
+.cat-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--color-state-pressed);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0;
+  text-transform: none;
+  vertical-align: middle;
+}
+
+/* A catalogue page's header photo and cover sit back like the cards. */
+.cat-page .detail-header__art { opacity: 0.6; }
+.cat-page .detail-header__meta { flex-wrap: wrap; }
+
+.cat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.cat-actions__note { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+
+.cat-stores { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-2) 0 var(--space-6); }
+.cat-stores__label { margin-right: var(--space-1); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+
+/* The tracklist: plain rows, dimmed, nothing to play. */
+.cat-tracks { display: flex; flex-direction: column; margin: 0 0 var(--space-4); padding: 0; list-style: none; }
+.cat-track {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 52px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-row);
+  color: var(--color-text-primary);
+}
+.cat-track > * { opacity: 0.55; }
+.cat-track:hover { background: var(--color-state-hover); }
+.cat-track:hover > * { opacity: 0.75; }
+.cat-track__n { text-align: right; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.cat-track__text { display: flex; flex-direction: column; min-width: 0; }
+.cat-track__title { font-size: var(--font-size-md); }
+.cat-track__artist { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.cat-track__time { color: var(--color-text-secondary); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+.cat-disc { padding: var(--space-4) var(--space-4) var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); }
+
+/* About, for an artist outside the library. */
+.cat-bio { max-width: 72ch; margin: 0; color: var(--color-text-secondary); line-height: 1.6; white-space: pre-line; }
+.cat-bio__credit { margin-top: var(--space-2); font-size: var(--font-size-sm); }
+.cat-bio__none { color: var(--color-text-secondary); }
+
+/* Search: the section under the library results. */
+.sr-catalogue { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-8); }
+.sr-catalogue__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.sr-catalogue__note { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.sr-catalogue__open { align-self: flex-start; }
+.sr-catalogue .sr-row > :not(.sr-row__more):not(.sr-row__action) { opacity: 0.55; }
+.sr-catalogue .sr-row:hover > :not(.sr-row__more):not(.sr-row__action),
+.sr-catalogue .sr-row:focus-within > :not(.sr-row__more):not(.sr-row__action) { opacity: 0.8; }
+.sr-row__action { display: flex; align-items: center; }
+
+/* "New to you" on its own page. */
+.ntu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--space-5) var(--space-4); }
+.ntu-empty { color: var(--color-text-secondary); }
+
+/* Settings: dismissed artists. */
+.dismissed-list { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: var(--space-2) 0 0; list-style: none; }
+.dismissed-list__item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-radius: var(--radius-card); background: var(--color-bg-raised); }
+.dismissed-list__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

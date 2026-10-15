@@ -12,6 +12,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { artPixelSize } from "./artSize";
 import { createMockBackend } from "./mock";
 import type {
+  CatArtist,
+  CatalogueAlbumPage,
+  CatalogueArtistPage,
+  CatalogueSearch,
+  MissingAlbum,
+  NewToYou,
+  WantedAlbum,
   CachedLibrary,
   AbLoop,
   AddPlace,
@@ -686,6 +693,22 @@ export interface Backend {
   /** Turn auto-request on or off for an artist (on also turns auto-request on in Settings). */
   radarAutoSet(id: string, name: string, on: boolean): Promise<AutoArtist[]>;
 
+  // Discover: music that isn't in the library (MusicBrainz and ListenBrainz, paced and cached in the core)
+  /** Artists, albums and songs from MusicBrainz the library lacks; `shown` false while off or offline. */
+  catalogueSearch(query: string): Promise<CatalogueSearch>;
+  /** A page for an artist outside the library. `artist.libraryId` set: open their library page instead. */
+  catalogueArtist(mbid: string): Promise<CatalogueArtistPage>;
+  /** A page for an album outside the library (MusicBrainz release group id). */
+  catalogueAlbum(releaseGroupId: string): Promise<CatalogueAlbumPage>;
+  /** Artists outside the library for a library artist's "Fans also like". */
+  catalogueFansAlsoLike(artistId: string, name: string): Promise<CatArtist[]>;
+  /** Artists like the ones played most that aren't in the library. */
+  newToYou(): Promise<NewToYou>;
+  /** Albums added to the Missing list by hand. */
+  importMissingAlbums(): Promise<MissingAlbum[]>;
+  importMissingAlbumAdd(album: WantedAlbum): Promise<WantedAlbum[]>;
+  importMissingAlbumRemove(releaseGroupId: string): Promise<WantedAlbum[]>;
+
   // Library import (nothing here writes to Plex)
   importOverview(): Promise<ImportOverview>;
   /** File or folder picker for an import; null when cancelled. */
@@ -1038,6 +1061,14 @@ export function createTauriBackend(): Backend {
     importReview: (songId, decision) => call("import_review", { songId, decision }),
     importListPage: (id) => call("import_list_page", { id }),
     importMissing: () => call("import_missing"),
+    importMissingAlbums: () => call("import_missing_albums"),
+    importMissingAlbumAdd: (album) => call("import_missing_album_add", { album }),
+    importMissingAlbumRemove: (releaseGroupId) => call("import_missing_album_remove", { releaseGroupId }),
+    catalogueSearch: (query) => call("catalogue_search", { query }),
+    catalogueArtist: (mbid) => call("catalogue_artist", { mbid }),
+    catalogueAlbum: (releaseGroupId) => call("catalogue_album", { releaseGroupId }),
+    catalogueFansAlsoLike: (artistId, name) => call("catalogue_fans_also_like", { artistId, name }),
+    newToYou: () => call("new_to_you"),
     importOpenLink: (url) => call("import_open_link", { url }),
     importForget: (source) => call("import_forget", { source }),
     importListRemove: (listId, songId) => call("import_list_remove", { listId, songId }),

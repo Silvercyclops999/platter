@@ -38,6 +38,7 @@ import { PlaylistNameSetting } from "./PlaylistSettings";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { StreamDeckSettings, streamDeckMatches } from "./StreamDeckSettings";
 import { MixExclusions } from "./MixExclusions";
+import { DismissedArtists } from "./DiscoverSettings";
 import { FolderKeywords } from "./ArchiveSettings";
 import { COVER_PX_OPTIONS, DoctorChecksList, DoctorNote } from "./DoctorSettings";
 import { AcoustIdKeyControl, SOUND_ID_DESCRIPTION, SOUND_ID_SCOPE_OPTIONS, soundIdNote, useSoundIdStatus } from "./SoundIdSettings";
@@ -1012,6 +1013,14 @@ export function SettingsPage() {
         </>
       ),
     },
+    {
+      key: "catalogueSearch",
+      section: "Search",
+      title: "Show music that isn't in your library",
+      description:
+        "Below your library's results, artists, albums and songs from MusicBrainz you don't have, to open, request or buy. Only asked once you stop typing, and only the search text is sent.",
+      control: (ids) => toggle(s, "catalogueSearch", ids),
+    },
     // Appearance
     {
       key: "look",
@@ -1660,6 +1669,32 @@ export function SettingsPage() {
       title: "Notify me about what the radar finds",
       description: "A desktop notification when the release radar finds something new. Not during a private session.",
       control: (ids) => (s?.releaseRadar === false ? null : toggle(s, "radarNotify", ids)),
+    },
+    {
+      key: "fansAlsoLikeCatalogue",
+      section: "Social",
+      group: "Discover",
+      title: "Show artists you don't have in Fans also like",
+      description: "Artist pages add similar artists that aren't in your library (from ListenBrainz), dimmed, opening their own page.",
+      control: (ids) => toggle(s, "fansAlsoLikeCatalogue", ids),
+    },
+    {
+      key: "homeNewToYou",
+      section: "Social",
+      group: "Discover",
+      title: "New to you on Home",
+      description:
+        "A shelf of artists like the ones you play most that aren't in your library, from ListenBrainz and MusicBrainz. Only artists' MusicBrainz ids are sent.",
+      control: (ids) => toggle(s, "homeNewToYou", ids),
+    },
+    {
+      key: "dismissedArtists",
+      section: "Social",
+      group: "Discover",
+      title: "Artists you're not interested in",
+      description: "They never show up in New to you, Fans also like or on artist pages' suggestions. Undo one to see them again.",
+      control: () => null,
+      block: () => <DismissedArtists />,
     },
     {
       key: "listenGuestsControl",

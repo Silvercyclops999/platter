@@ -49,7 +49,13 @@ export type Route =
   /** Library import: the reports and review queue, one imported list (`list:<id>`), or the Missing songs (`missing`). */
   | { name: "import"; view?: string }
   /** The library doctor: things worth fixing in the library. */
-  | { name: "doctor" };
+  | { name: "doctor" }
+  /** An artist that isn't in the library (MusicBrainz artist id). */
+  | { name: "catalogueArtist"; mbid: string }
+  /** An album that isn't in the library (MusicBrainz release group id). */
+  | { name: "catalogueAlbum"; id: string }
+  /** Artists like the ones played most that aren't in the library. */
+  | { name: "newToYou" };
 
 export interface HistoryEntry {
   key: number;

@@ -5,6 +5,7 @@ import type { HomeShelfId } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { AlbumCard, ArtistCard, HomeItemCard, homeItemInfo } from "./cards";
 import { shelfTitle } from "./home";
+import { CatalogueArtistCard, useCatalogueFans } from "./catalogue";
 import "./home.css";
 
 /**
@@ -76,6 +77,7 @@ export const ARTIST_SHELF_TITLES: Record<ArtistShelfId, string> = {
 /** An artist page shelf's "Show all": albums keep their artist line, artists their round art. */
 export function ArtistShelfPage({ id, shelf }: { id: string; shelf: ArtistShelfId }) {
   const { data, error } = useLoad(() => backend.artistPage(id), [id]);
+  const more = useCatalogueFans(shelf === "fansAlsoLike" ? id : null, data?.artist.title);
   const title = ARTIST_SHELF_TITLES[shelf];
   const cards =
     data &&
@@ -85,11 +87,18 @@ export function ArtistShelfPage({ id, shelf }: { id: string; shelf: ArtistShelfI
             <AlbumCard album={album} subtitle="artist" />
           </div>
         ))
-      : data.similar.map((artist) => (
-          <div role="listitem" key={artist.id}>
-            <ArtistCard artist={artist} />
-          </div>
-        )));
+      : [
+          ...data.similar.map((artist) => (
+            <div role="listitem" key={artist.id}>
+              <ArtistCard artist={artist} />
+            </div>
+          )),
+          ...more.map((a) => (
+            <div role="listitem" key={`mb-${a.mbid}`}>
+              <CatalogueArtistCard artist={a} />
+            </div>
+          )),
+        ]);
   return (
     <ShowAllGrid title={title} error={error} empty={cards?.length === 0} skeletonKind={shelf === "fansAlsoLike" ? "artist" : "album"}>
       {cards}

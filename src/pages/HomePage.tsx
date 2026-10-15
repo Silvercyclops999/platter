@@ -17,6 +17,7 @@ import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, offlineHom
 import { LikedTile, ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
 import { MixCard } from "./MixCard";
 import { RadarShelf } from "./ReleaseRadar";
+import { NewToYouShelf } from "./NewToYou";
 import { useLikes } from "../stores/likes";
 import "./home.css";
 
@@ -276,6 +277,7 @@ export function HomePage() {
                 );
               })}
           {data && radarOn && filter === "all" && <RadarShelf />}
+          {data && filter === "all" && <NewToYouShelf />}
         </>
       )}
     </div>

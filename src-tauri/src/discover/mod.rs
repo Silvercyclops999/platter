@@ -314,6 +314,9 @@ pub struct Discover {
     new_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
+/// A candidate on "New to you": name, score, and the seeds that led there with their points.
+type Scored = (String, f64, Vec<(f64, String)>);
+
 #[derive(Serialize, Deserialize)]
 struct StoredNew {
     at: i64,
@@ -355,7 +358,7 @@ impl Discover {
     async fn missing_ids(&self) -> HashSet<String> {
         self.inner
             .db
-            .read_async(|c| wanted_albums(c))
+            .read_async(wanted_albums)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -646,7 +649,7 @@ impl Discover {
             }
         }
         let seed_ids: HashSet<String> = seeds.iter().map(|(m, _)| m.clone()).collect();
-        let mut scores: HashMap<String, (String, f64, Vec<(f64, String)>)> = HashMap::new();
+        let mut scores: HashMap<String, Scored> = HashMap::new();
         let mut add = |mbid: &str, name: &str, points: f64, because: &str| {
             if seed_ids.contains(mbid) || mbid == VARIOUS_ARTISTS || !is_mbid(mbid) {
                 return;
@@ -674,7 +677,7 @@ impl Discover {
                 }
             }
         }
-        let mut list: Vec<(String, (String, f64, Vec<(f64, String)>))> = scores.into_iter().collect();
+        let mut list: Vec<(String, Scored)> = scores.into_iter().collect();
         list.sort_by(|a, b| b.1.1.total_cmp(&a.1.1).then_with(|| a.1.0.cmp(&b.1.0)));
         Ok(list
             .into_iter()

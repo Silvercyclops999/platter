@@ -32,6 +32,7 @@
 import type { Backend, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
 import type {
+  WantedAlbum,
   CompareNow,
   CompareReady,
   CompareSide,
@@ -145,6 +146,7 @@ import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
 import { MockRadar } from "./radar";
+import { MockCatalogue } from "./catalogue";
 import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
 import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "../statsTypes";
 import { MockArchive } from "./archive";
@@ -307,6 +309,8 @@ export class MockBackend implements Backend {
   readonly lidarr: MockLidarr;
   /** The release radar (test hooks: setEmpty, reset). */
   readonly radar: MockRadar;
+  /** Music that isn't in the library (faked MusicBrainz and ListenBrainz). */
+  readonly catalogue: MockCatalogue;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -560,6 +564,11 @@ export class MockBackend implements Backend {
       },
       this.opts.radarEmpty,
     );
+    this.catalogue = new MockCatalogue(this.fx, {
+      settings: () => this.settings,
+      offline: () => !!this.healthState?.cachedOnly,
+      requests: () => this.lidarr.list(),
+    });
     this.scrobble = new MockScrobble((queued) => this.emit("scrobble://status", { queued }));
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
@@ -3131,7 +3140,37 @@ export class MockBackend implements Backend {
   // ---------------------------------------------------------------- library import
 
   importOverview() {
-    return this.delay(() => this.importMock.overview());
+    return this.delay(() => {
+      const o = this.importMock.overview();
+      return { ...o, missingCount: o.missingCount + this.catalogue.missingCount };
+    });
+  }
+  importMissingAlbums() {
+    return this.delay(() => this.catalogue.missingAlbums());
+  }
+  importMissingAlbumAdd(album: WantedAlbum) {
+    return this.delay(() => this.catalogue.addMissing(album));
+  }
+  importMissingAlbumRemove(releaseGroupId: string) {
+    return this.delay(() => this.catalogue.removeMissing(releaseGroupId));
+  }
+
+  // ---------------------------------------------------------------- discover
+
+  catalogueSearch(query: string) {
+    return this.delay(() => this.catalogue.search(query));
+  }
+  catalogueArtist(mbid: string) {
+    return this.delay(() => this.catalogue.artistPage(mbid));
+  }
+  catalogueAlbum(releaseGroupId: string) {
+    return this.delay(() => this.catalogue.albumPage(releaseGroupId));
+  }
+  catalogueFansAlsoLike(artistId: string, _name: string) {
+    return this.delay(() => this.catalogue.fansAlsoLike(artistId));
+  }
+  newToYou() {
+    return this.delay(() => this.catalogue.newToYou());
   }
   importChoose(folder: boolean) {
     return this.delay(() => (folder ? "Downloads/my_data" : "Downloads/my_data.zip"));

@@ -1,5 +1,5 @@
 import { Disc3, Ellipsis, List, Pause, Play, Rows3, Shuffle } from "lucide-react";
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { Badge, QualityBadge } from "../components/Badge";
 import { IconButton } from "../components/Button";
@@ -17,7 +17,7 @@ import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
-import { formatLongDuration, plural, releaseTypeLabel } from "../lib/format";
+import { formatDuration, formatLongDuration, plural, releaseTypeLabel } from "../lib/format";
 import type { AlbumArchive, AlbumCredits } from "../lib/types";
 import { formatArchiveDate } from "./era";
 import { useAlbumCredits } from "../lib/useAlbumCredits";
@@ -44,8 +44,17 @@ import {
   type AlbumView,
 } from "./album";
 import "./album.css";
+import { CatalogueAction, MissingButton, NOT_IN_LIBRARY, RequestDialog, StoreLinks, catalogueKind, requestInput } from "./catalogue";
+import { useLidarrReady } from "./lidarrShared";
+import { useRouter } from "../stores/router";
+import type { CatTrack } from "../lib/types";
 
-export function AlbumPage({ id }: { id: string }) {
+/** An album page; `catalogue`: `id` is a MusicBrainz release group the library doesn't have. */
+export function AlbumPage({ id, catalogue }: { id: string; catalogue?: boolean }) {
+  return catalogue ? <CatalogueAlbumView key={`mb:${id}`} rgid={id} /> : <LibraryAlbumView id={id} />;
+}
+
+function LibraryAlbumView({ id }: { id: string }) {
   const { data, error } = useLoad(() => backend.albumPage(id), [id]);
   const album = data?.album;
   useArtTint(album?.tint, album?.thumb);
@@ -270,6 +279,146 @@ export function AlbumPage({ id }: { id: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- an album that isn't in the library
+
+/**
+ * The same page for an album the library doesn't have: its cover and the
+ * tracklist of its first official release, dimmed with nothing to play,
+ * then Request (Lidarr), Add to Missing and store links. No previews.
+ */
+function CatalogueAlbumView({ rgid }: { rgid: string }) {
+  const [version, setVersion] = useState(0);
+  const { data, error } = useLoad(() => backend.catalogueAlbum(rgid), [rgid, version]);
+  const lidarrReady = useLidarrReady();
+  const [asking, setAsking] = useState(false);
+  const album = data?.album;
+  useArtTint(null, album?.thumb ?? undefined);
+  const { header, column, step, compact } = useTitleStep(album?.title);
+  const owned = album?.libraryAlbumId;
+  useEffect(() => {
+    if (owned) useRouter.getState().replace({ name: "album", id: owned });
+  }, [owned]);
+
+  if (error && !data) return <p className="page-pad page-error">Couldn't load this album: {error.message}</p>;
+  const reload = () => setVersion((v) => v + 1);
+  const total = data?.tracks.reduce((n, t) => n + (t.durationMs ?? 0), 0) ?? 0;
+  const goArtist = () => {
+    if (!data) return;
+    if (data.artistLibraryId) nav.go({ name: "artist", id: data.artistLibraryId });
+    else if (data.album.artistMbid) nav.go({ name: "catalogueArtist", mbid: data.album.artistMbid });
+  };
+  const discs = new Set(data?.tracks.map((t) => t.disc ?? 1)).size > 1;
+  return (
+    <div className="detail cat-page">
+      <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
+        <div className="detail-header__art">{album ? <Art path={album.thumb} size={232} alt="" /> : <Skeleton width={232} height={232} />}</div>
+        <div ref={column} className="detail-header__text">
+          {album ? (
+            <>
+              <span className="detail-header__type">
+                {catalogueKind(album)} <span className="cat-tag">{NOT_IN_LIBRARY}</span>
+              </span>
+              <h1 className="detail-header__title" data-step={step}>
+                {album.title}
+              </h1>
+              <div className="detail-header__meta">
+                <button type="button" className="link detail-header__artist" onClick={goArtist}>
+                  {album.artist}
+                </button>
+                {album.year && <span>• {album.year}</span>}
+                {data!.tracks.length > 0 && <span>• {plural(data!.tracks.length, "song")},</span>}
+                {total > 0 && <span className="detail-header__muted">{formatLongDuration(total)}</span>}
+              </div>
+            </>
+          ) : (
+            <>
+              <Skeleton width={60} height={12} />
+              <Skeleton width="60%" height={48} style={{ margin: "12px 0" }} />
+              <Skeleton width="40%" height={14} />
+            </>
+          )}
+        </div>
+      </header>
+      <div className="detail-body">
+        <div className="action-row cat-actions">
+          {album && <CatalogueAction album={album} lidarrReady={lidarrReady} onRequest={() => setAsking(true)} />}
+          {album && <MissingButton album={album} onChanged={reload} />}
+          <IconButton
+            label={`More options for ${album?.title ?? "album"}`}
+            size="lg"
+            icon={<Ellipsis size={22} />}
+            disabled={!album}
+            onClick={(e) =>
+              album &&
+              openContextMenu(
+                `Options for ${album.title}`,
+                [
+                  { label: "Go to artist", onSelect: goArtist },
+                  { label: "Copy album title", onSelect: () => copyText(`${album.title} - ${album.artist}`) },
+                  {
+                    label: "Open on MusicBrainz",
+                    onSelect: () => void backend.openInfoLink(`https://musicbrainz.org/release-group/${album.releaseGroupId}`).catch(() => {}),
+                  },
+                ],
+                e.currentTarget,
+              )
+            }
+          />
+          {album && !lidarrReady && !album.refusal && <span className="cat-actions__note">Set up Lidarr in Settings to request it.</span>}
+        </div>
+        {album?.refusal && <p className="cat-actions__note">{album.refusal}</p>}
+        {data && <StoreLinks links={data.links} title={data.album.title} />}
+        {data ? (
+          data.tracks.length > 0 ? (
+            <ol className="cat-tracks" aria-label={`${data.album.title} tracks, ${NOT_IN_LIBRARY.toLowerCase()}`}>
+              {data.tracks.map((t, i) => (
+                <Fragment key={`${t.disc ?? 1}-${t.number}-${i}`}>
+                  {discs && (i === 0 || data.tracks[i - 1].disc !== t.disc) && (
+                    <li className="cat-disc" aria-hidden="true">
+                      Disc {t.disc ?? 1}
+                    </li>
+                  )}
+                  <CatalogueTrackRow t={t} />
+                </Fragment>
+              ))}
+            </ol>
+          ) : (
+            <p className="cat-bio__none">MusicBrainz has no tracklist for this album yet.</p>
+          )
+        ) : (
+          <TrackList label="Tracks" showAlbum={false}>
+            {Array.from({ length: 8 }, (_, i) => (
+              <TrackRowSkeleton key={i} showAlbum={false} />
+            ))}
+          </TrackList>
+        )}
+        {data && <AlbumFooter released={data.released} studio={data.label} year={data.album.year} />}
+      </div>
+      <RequestDialog
+        input={asking && album ? requestInput(album, data?.artistLibraryId) : null}
+        onClose={() => setAsking(false)}
+        onDone={() => {
+          setAsking(false);
+          reload();
+        }}
+      />
+    </div>
+  );
+}
+
+function CatalogueTrackRow({ t }: { t: CatTrack }) {
+  return (
+    <li className="cat-track" aria-label={`${t.number}. ${t.title}${t.artist ? `, ${t.artist}` : ""}`}>
+      <span className="cat-track__n">{t.number}</span>
+      <span className="cat-track__text">
+        <span className="cat-track__title truncate">{t.title}</span>
+        {t.artist && <span className="cat-track__artist truncate">{t.artist}</span>}
+      </span>
+      <span className="cat-track__time">{t.durationMs ? formatDuration(t.durationMs) : ""}</span>
+    </li>
   );
 }
 

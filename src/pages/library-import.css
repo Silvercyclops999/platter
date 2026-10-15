@@ -158,3 +158,8 @@
   .missing-row .import-row__album, .missing-row__wants { display: none; }
   .missing-row__links { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
 }
+
+/* Albums added to Missing by hand, above the songs. */
+.missing-albums { margin: var(--space-4) 0 0; }
+.missing-albums .import-rows { margin-bottom: var(--space-6); }
+.missing-albums__songs { margin-bottom: var(--space-2); }

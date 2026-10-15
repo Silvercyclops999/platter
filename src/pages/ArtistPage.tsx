@@ -31,6 +31,8 @@ import { AboutCard, useArtistInfo } from "./ArtistAbout";
 import { missingFor, useLidarrReady, useMissingReleases } from "./lidarrShared";
 import { useAutoOn, useAutoRequest } from "../stores/radar";
 import { AutoRequestDialog } from "./AutoRequestDialog";
+import { CatalogueAlbumCard, CatalogueArtistCard, NOT_IN_LIBRARY, SECTION_TITLE, dismissArtist, undismissArtist, useCatalogueFans } from "./catalogue";
+import type { CatArtist, CatalogueArtistPage } from "../lib/types";
 
 /** Cards for releases the library lacks (and their request dialog), loaded once an artist has some. */
 const MissingReleaseCard = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.MissingReleaseCard })));
@@ -50,9 +52,12 @@ import {
   type DiscographyFilter,
 } from "./artist";
 
-/** Page state (see more, chip, expanded rows) starts over for each artist. `era` filters it to one era. */
-export function ArtistPage({ id, era }: { id: string; era?: string }) {
-  return <ArtistView key={id} id={id} era={era} />;
+/**
+ * Page state (see more, chip, expanded rows) starts over for each artist. `era` filters it to one era.
+ * `catalogue`: `id` is a MusicBrainz artist id for an artist that isn't in the library.
+ */
+export function ArtistPage({ id, era, catalogue }: { id: string; era?: string; catalogue?: boolean }) {
+  return catalogue ? <CatalogueArtistView key={`mb:${id}`} mbid={id} /> : <ArtistView key={id} id={id} era={era} />;
 }
 
 function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
@@ -99,6 +104,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
   const credited = isCreditId(id);
   const artist = data?.artist;
   const info = useArtistInfo(id);
+  const fans = useCatalogueFans(credited ? null : id, artist?.title);
   const banner = artist ? bannerPath(artist, info) : null;
   const variant = artist ? headerVariant(artist, banner) : "photo";
   const about = data ? aboutText(data.about, info) : null;
@@ -121,6 +127,11 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
         eras: showEraCards(data.eras, eraCardsOn) ? data.eras : undefined,
       })
     : [];
+  // Artists outside the library alone still make a "Fans also like" shelf.
+  if (data && fans.length && !sections.includes("fansAlsoLike")) {
+    const at = sections.indexOf("appearsOn");
+    sections.splice(at < 0 ? sections.length : at, 0, "fansAlsoLike");
+  }
   const text = artist ? (
     <>
       <span className="detail-header__type">Artist</span>
@@ -191,7 +202,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
               case "about":
                 return <AboutCard key={s} artist={data.artist} about={about} plays={data.plays} info={info} />;
               case "fansAlsoLike":
-                return <FansAlsoLike key={s} id={id} artists={data.similar} />;
+                return <FansAlsoLike key={s} id={id} artists={data.similar} more={fans} />;
             }
           })}
       </div>
@@ -512,7 +523,8 @@ function AppearsOn({ id, albums }: { id: string; albums: Album[] }) {
   );
 }
 
-function FansAlsoLike({ id, artists }: { id: string; artists: Artist[] }) {
+/** Library artists first, then (dimmed) artists that aren't in the library. */
+function FansAlsoLike({ id, artists, more = [] }: { id: string; artists: Artist[]; more?: CatArtist[] }) {
   return (
     <Shelf title="Fans also like" skeletonKind="artist" onShowAll={() => nav.go({ name: "artistShelf", id, shelf: "fansAlsoLike" })}>
       {artists.map((a) => (
@@ -520,6 +532,159 @@ function FansAlsoLike({ id, artists }: { id: string; artists: Artist[] }) {
           <ArtistCard artist={a} />
         </ShelfItem>
       ))}
+      {more.map((a) => (
+        <ShelfItem key={`mb-${a.mbid}`}>
+          <CatalogueArtistCard artist={a} />
+        </ShelfItem>
+      ))}
     </Shelf>
+  );
+}
+
+// ---------------------------------------------------------------- an artist that isn't in the library
+
+/**
+ * The same page for an artist the library doesn't have: header photo and
+ * bio from the artist info sources, the discography of official releases
+ * by type (dimmed, with Request), and similar artists. An artist the
+ * library turns out to have opens their own page instead.
+ */
+function CatalogueArtistView({ mbid }: { mbid: string }) {
+  const [version, setVersion] = useState(0);
+  const { data, error } = useLoad(() => backend.catalogueArtist(mbid), [mbid, version]);
+  const lidarrReady = useLidarrReady();
+  const dismissed = useSettings((s) => s.settings?.dismissedArtists?.some((d) => d.mbid === mbid)) ?? false;
+  const { header, column, step, compact } = useTitleStep(data?.artist.name);
+  const libraryId = data?.artist.libraryId;
+  useEffect(() => {
+    if (libraryId) useRouter.getState().replace({ name: "artist", id: libraryId });
+  }, [libraryId]);
+  useArtTint(null, data?.artist.photo ?? undefined);
+
+  if (error && !data) return <p className="page-pad page-error">Couldn't load this artist: {error.message}</p>;
+  const artist = data?.artist;
+  const meta = data ? [data.artist.disambiguation, data.area, data.lifeSpan].filter(Boolean).join(" · ") : "";
+  const reload = () => setVersion((v) => v + 1);
+  const text = artist ? (
+    <>
+      <span className="detail-header__type">
+        Artist <span className="cat-tag">{NOT_IN_LIBRARY}</span>
+      </span>
+      <h1 className="detail-header__title" data-step={step}>
+        {artist.name}
+      </h1>
+      <div className="detail-header__meta">
+        {meta && <span>{meta}</span>}
+      </div>
+    </>
+  ) : (
+    <>
+      <Skeleton width={60} height={12} />
+      <Skeleton width="50%" height={48} style={{ margin: "12px 0" }} />
+      <Skeleton width="30%" height={14} />
+    </>
+  );
+  return (
+    <div className="detail artist-page cat-page">
+      {data?.banner && !compact ? (
+        <header ref={header} className="artist-banner" data-variant="banner">
+          <BannerImage path={data.banner} box={header} />
+          <div ref={column} className="detail-header__text artist-banner__text">
+            {text}
+          </div>
+        </header>
+      ) : (
+        <header ref={header} className={`detail-header detail-header--artist ${compact ? "detail-header--compact" : ""}`} data-variant="photo">
+          <div className="detail-header__art">
+            {artist ? <Art path={artist.photo} size={232} round kind="artist" /> : <Skeleton width={232} height={232} radius="circle" />}
+          </div>
+          <div ref={column} className="detail-header__text">
+            {text}
+          </div>
+        </header>
+      )}
+      <div className="detail-body">
+        <div className="action-row cat-actions">
+          <button
+            type="button"
+            className="follow-pill"
+            aria-pressed={dismissed}
+            disabled={!artist}
+            onClick={() => artist && (dismissed ? undismissArtist(artist.mbid) : dismissArtist({ mbid: artist.mbid, name: artist.name }))}
+          >
+            {dismissed ? "Hidden from suggestions" : "Not interested"}
+          </button>
+          <IconButton
+            label={`More options for ${artist?.name ?? "artist"}`}
+            size="lg"
+            icon={<Ellipsis size={22} />}
+            disabled={!artist}
+            onClick={(e) =>
+              artist &&
+              openContextMenu(
+                `Options for ${artist.name}`,
+                [
+                  dismissed
+                    ? { label: "Show in suggestions again", onSelect: () => undismissArtist(artist.mbid) }
+                    : { label: "Not interested", onSelect: () => dismissArtist({ mbid: artist.mbid, name: artist.name }) },
+                  {
+                    label: "Open on MusicBrainz",
+                    onSelect: () => void backend.openInfoLink(`https://musicbrainz.org/artist/${artist.mbid}`).catch(() => {}),
+                  },
+                ],
+                e.currentTarget,
+              )
+            }
+          />
+          {!lidarrReady && data && <span className="cat-actions__note">Set up Lidarr in Settings to request albums, or buy them from a store.</span>}
+        </div>
+        {!data && <Shelf title="Discography" loading />}
+        {data && data.sections.length === 0 && <p className="cat-bio__none">MusicBrainz has no official albums for this artist yet.</p>}
+        {data?.sections.map((s) => (
+          <Shelf key={s.kind} title={SECTION_TITLE[s.kind] ?? "Albums"}>
+            {s.albums.map((a) => (
+              <ShelfItem key={a.releaseGroupId}>
+                <CatalogueAlbumCard album={a} lidarrReady={lidarrReady} onChanged={reload} />
+              </ShelfItem>
+            ))}
+          </Shelf>
+        ))}
+        {data && <CatalogueAbout page={data} />}
+        {data && data.similar.length > 0 && (
+          <Shelf title="Fans also like" skeletonKind="artist">
+            {data.similar.map((a) => (
+              <ShelfItem key={a.mbid}>
+                <CatalogueArtistCard artist={a} />
+              </ShelfItem>
+            ))}
+          </Shelf>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CatalogueAbout({ page }: { page: CatalogueArtistPage }) {
+  const headingId = useId();
+  return (
+    <section className="detail-section" aria-labelledby={headingId}>
+      <h2 id={headingId} className="section-title">
+        About
+      </h2>
+      {page.bio ? (
+        <>
+          <p className="cat-bio">{page.bio}</p>
+          {page.bioUrl && (
+            <p className="cat-bio__credit">
+              <button type="button" className="link" onClick={() => void backend.openInfoLink(page.bioUrl!).catch(() => {})}>
+                From {page.bioCredit ?? "Wikipedia"}
+              </button>
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="cat-bio__none">There's no biography for {page.artist.name} yet.</p>
+      )}
+    </section>
   );
 }

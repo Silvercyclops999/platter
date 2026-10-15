@@ -1058,6 +1058,14 @@ export interface Settings {
   subsonicCheckMinutes: number;
   /** Keep the queue on servers that hold one, so another app can pick it up. */
   saveQueueOnServer: boolean;
+  /** Search also shows music from MusicBrainz that isn't in the library. */
+  catalogueSearch: boolean;
+  /** "Fans also like" includes artists that aren't in the library. */
+  fansAlsoLikeCatalogue: boolean;
+  /** The "New to you" shelf on Home. */
+  homeNewToYou: boolean;
+  /** Artists marked "Not interested" (never suggested again). */
+  dismissedArtists: DismissedArtist[];
   /** Dark, Light, Match system, or another built-in theme. */
   theme: ThemeSetting;
   /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
@@ -1323,6 +1331,10 @@ export const DEFAULT_SETTINGS: Settings = {
   soundIdScope: "untagged",
   subsonicCheckMinutes: 5,
   saveQueueOnServer: true,
+  catalogueSearch: true,
+  fansAlsoLikeCatalogue: true,
+  homeNewToYou: true,
+  dismissedArtists: [],
   theme: "dark",
   accent: "ivory",
   themeFile: null,
@@ -1856,6 +1868,8 @@ export interface LidarrRequestInput {
   title: string;
   artist: string;
   artistId?: string | null;
+  /** The artist's MusicBrainz id, for an artist that isn't in the library. */
+  artistMbid?: string | null;
   /** The album's name typed by the user (their first request ever). */
   typed?: string | null;
 }
@@ -2783,4 +2797,136 @@ export interface EditChange {
   at: number;
   undoable: boolean;
   undone: boolean;
+}
+
+// ---------------------------------------------------------------- discover (music that isn't in the library)
+
+/** An artist marked "Not interested" (synced). */
+export interface DismissedArtist {
+  mbid: string;
+  name: string;
+}
+
+/** An artist from MusicBrainz. */
+export interface CatArtist {
+  mbid: string;
+  name: string;
+  disambiguation: string | null;
+  /** "Person", "Group"... */
+  kind: string | null;
+  photo: string | null;
+  /** The library artist they are, if any. */
+  libraryId: string | null;
+}
+
+/** A release group from MusicBrainz. */
+export interface CatAlbum {
+  releaseGroupId: string;
+  title: string;
+  artist: string;
+  artistMbid: string | null;
+  /** "album", "ep" or "single". */
+  kind: string;
+  secondary: string[];
+  year: number | null;
+  thumb: string | null;
+  libraryAlbumId: string | null;
+  request: LidarrRequestState | null;
+  /** Why it can't be requested. */
+  refusal: string | null;
+  /** On the Missing list. */
+  inMissing: boolean;
+}
+
+export interface CatSong {
+  recordingId: string;
+  title: string;
+  artist: string;
+  artistMbid: string | null;
+  album: string | null;
+  releaseGroupId: string | null;
+  durationMs: number | null;
+  thumb: string | null;
+}
+
+/** `catalogue_search`. */
+export interface CatalogueSearch {
+  /** The setting is on and Platter is online. */
+  shown: boolean;
+  artists: CatArtist[];
+  albums: CatAlbum[];
+  songs: CatSong[];
+}
+
+export interface CatSection {
+  /** "album", "ep", "single" or "other". */
+  kind: string;
+  albums: CatAlbum[];
+}
+
+/** `catalogue_artist`. */
+export interface CatalogueArtistPage {
+  artist: CatArtist;
+  area: string | null;
+  lifeSpan: string | null;
+  bio: string | null;
+  bioCredit: string | null;
+  bioUrl: string | null;
+  banner: string | null;
+  sections: CatSection[];
+  similar: CatArtist[];
+  dismissed: boolean;
+}
+
+export interface CatTrack {
+  disc: number | null;
+  number: number;
+  title: string;
+  artist: string | null;
+  durationMs: number | null;
+}
+
+export interface StoreLinkSet {
+  bandcamp: string;
+  qobuz: string;
+  itunes: string;
+}
+
+/** `catalogue_album`. */
+export interface CatalogueAlbumPage {
+  album: CatAlbum;
+  tracks: CatTrack[];
+  released: string | null;
+  label: string | null;
+  links: StoreLinkSet;
+  artistLibraryId: string | null;
+}
+
+export interface NewArtist {
+  mbid: string;
+  name: string;
+  /** The artists played most that led here. */
+  because: string[];
+}
+
+/** `new_to_you`. */
+export interface NewToYou {
+  shown: boolean;
+  artists: NewArtist[];
+}
+
+/** An album added to the Missing list by hand. */
+export interface WantedAlbum {
+  releaseGroupId: string;
+  title: string;
+  artist: string;
+  artistMbid?: string | null;
+  addedAt?: number;
+}
+
+/** `import_missing_albums`. */
+export interface MissingAlbum extends WantedAlbum {
+  thumb: string | null;
+  links: StoreLinkSet;
+  libraryAlbumId: string | null;
 }

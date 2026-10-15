@@ -67,7 +67,7 @@ pub fn parse(body: &[u8], reference: &str) -> AppResult<Vec<SimilarArtist>> {
     let v: Value = serde_json::from_slice(body).map_err(|_| AppError::Network(LB_DOWN.into()))?;
     let mut out = Vec::new();
     collect(&v, &reference.to_ascii_lowercase(), &mut out);
-    out.sort_by(|a, b| b.score.cmp(&a.score));
+    out.sort_by_key(|a| std::cmp::Reverse(a.score));
     Ok(out)
 }
 

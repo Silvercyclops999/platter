@@ -214,7 +214,10 @@ export function ImportPage({ view }: { view?: string }) {
   const on = (s?.importSources ?? []).length > 0;
   return (
     <div className="page-pad import-page" data-testid="import-page">
-      {s && !on ? (
+      {view === "missing" ? (
+        // Albums added by hand live here too, so Missing opens with library import off (albums only).
+        <MissingView songs={!(s && !on)} />
+      ) : s && !on ? (
         <>
           <h1 className="page-title">Library import</h1>
           <div className="import-empty" role="status">
@@ -225,8 +228,6 @@ export function ImportPage({ view }: { view?: string }) {
             </Button>
           </div>
         </>
-      ) : view === "missing" ? (
-        <MissingView />
       ) : view?.startsWith("list:") ? (
         <ListView id={view.slice(5)} />
       ) : (

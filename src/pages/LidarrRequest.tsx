@@ -85,6 +85,7 @@ export function LidarrRequestDialog({
   const [typed, setTyped] = useState("");
   const [sending, setSending] = useState(false);
   const { releaseGroupId, title, artist, artistId } = input;
+  const artistMbid = input.artistMbid ?? null;
 
   useEffect(() => {
     if (!open) return;
@@ -92,14 +93,14 @@ export function LidarrRequestDialog({
     setPreview(null);
     setError(null);
     setTyped("");
-    backend.lidarrRequestPreview({ releaseGroupId, title, artist, artistId }).then(
+    backend.lidarrRequestPreview({ releaseGroupId, title, artist, artistId, ...(artistMbid ? { artistMbid } : {}) }).then(
       (p) => alive && setPreview(p),
       (e) => alive && setError(errText(e) || "Platter couldn't check this request. Try again."),
     );
     return () => {
       alive = false;
     };
-  }, [open, releaseGroupId, title, artist, artistId]);
+  }, [open, releaseGroupId, title, artist, artistId, artistMbid]);
 
   const fold = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
   const typedOk = !preview?.needsTyped || fold(typed) === fold(preview.title);
@@ -108,7 +109,14 @@ export function LidarrRequestDialog({
     if (!preview || !typedOk) return;
     setSending(true);
     try {
-      const r = await backend.lidarrRequest({ releaseGroupId, title: preview.title, artist, artistId, typed: preview.needsTyped ? typed : null });
+      const r = await backend.lidarrRequest({
+        releaseGroupId,
+        title: preview.title,
+        artist,
+        artistId,
+        ...(artistMbid ? { artistMbid } : {}),
+        typed: preview.needsTyped ? typed : null,
+      });
       toast.info(r.state === "queued" ? `Saved. ${preview.title} sends when Platter can reach Lidarr.` : `Requested ${preview.title} from Lidarr`);
       onDone(r);
     } catch (e) {

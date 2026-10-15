@@ -75,14 +75,14 @@ describe("missing official releases on the artist page", () => {
     const { unmount } = render(<ArtistPage id={artist().id} />);
     await screen.findByRole("heading", { level: 1, name: artist().title });
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByText(/Not in your library/)).toBeNull();
+    expect(document.querySelector(".discography .missing-release")).toBeNull();
     unmount();
 
     await setUp("ready", { lidarrUrl: "" });
     const second = render(<ArtistPage id={artist().id} />);
     await screen.findByRole("heading", { level: 1, name: artist().title });
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByText(/Not in your library/)).toBeNull();
+    expect(document.querySelector(".discography .missing-release")).toBeNull();
     second.unmount();
 
     // Set up, but the check hasn't passed (it has a red item).
@@ -90,7 +90,7 @@ describe("missing official releases on the artist page", () => {
     render(<ArtistPage id={artist().id} />);
     await screen.findByRole("heading", { level: 1, name: artist().title });
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByText(/Not in your library/)).toBeNull();
+    expect(document.querySelector(".discography .missing-release")).toBeNull();
   });
 
   it("filters by the discography chip", () => {
