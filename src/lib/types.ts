@@ -1048,6 +1048,7 @@ export interface Settings {
   syncLyrics: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
+  allowAutomation: boolean;
   translateTo: string;
   translationService: string;
   showPronunciation: boolean;
@@ -1170,10 +1171,23 @@ export type DeckStatus = (
   | { state: "on"; port: number }
   | { state: "portInUse"; port: number }
   | { state: "failed"; port: number; message: string }
-) & { code: string | null; paired: boolean };
+) & {
+  /** The Stream Deck pairing code (while Allow Stream Deck is on). */
+  code: string | null;
+  paired: boolean;
+  /** The automation pairing code (while Allow automation is on). */
+  automationCode: string | null;
+  automationPaired: boolean;
+};
 
 /** What a Stream Deck key asked the window to show. */
-export type DeckAction = { kind: "listenAlong" } | { kind: "requestAlbum"; input: LidarrRequestInput };
+export type DeckAction =
+  | { kind: "listenAlong" }
+  | { kind: "requestAlbum"; input: LidarrRequestInput }
+  /** A command link or script asked for a page. */
+  | { kind: "open"; route: import("../stores/router").Route }
+  /** A command link didn't run (automation off, no such playlist...). */
+  | { kind: "notice"; message: string };
 
 /** The feed's default port. */
 export const FEED_DEFAULT_PORT = 32540;
@@ -1363,6 +1377,7 @@ export const DEFAULT_SETTINGS: Settings = {
   syncFollows: true,
   syncLyrics: true,
   bookmarksInLibrary: true,
+  allowAutomation: false,
   translateTo: "en",
   translationService: "",
   showPronunciation: false,

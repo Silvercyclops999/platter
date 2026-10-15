@@ -1,11 +1,14 @@
 /**
- * What a Stream Deck key asks the window for (`deck://action`): Listen
- * along starts a session or shows the open invite, and Request album opens
- * the usual Lidarr request dialog. The dialog's code loads the first time.
+ * What a Stream Deck key or an automation command asks the window for
+ * (`deck://action`): Listen along starts a session or shows the open
+ * invite, Request album opens the usual Lidarr request dialog (its code
+ * loads the first time), a page opens, or a note says why a command link
+ * didn't run.
  */
 import { lazy, Suspense, useEffect, useState } from "react";
 import { backend } from "../lib/backend";
 import type { DeckAction, LidarrRequestInput } from "../lib/types";
+import { nav } from "../stores/router";
 import { openInvite, startSession, useSocial } from "../stores/social";
 import { toast } from "../stores/toasts";
 
@@ -30,6 +33,8 @@ export function DeckActions() {
     const un = backend.listen("deck://action", (a: DeckAction) => {
       if (!alive) return;
       if (a.kind === "listenAlong") void runDeckListen();
+      else if (a.kind === "open") nav.go(a.route);
+      else if (a.kind === "notice") toast.info(a.message);
       else {
         setInput(a.input);
         setOpen(true);

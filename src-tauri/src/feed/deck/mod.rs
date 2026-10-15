@@ -17,13 +17,21 @@
 //! - `POST /v1/command` `{"command": "playPause"}` and the others in
 //!   [`Command`]
 //!
-//! Off by default (Settings, this device only); turning it off closes the port.
+//! Automation (scripts, launchers, `platter://` command links and the
+//! `platter --next` command line) uses the same API with its own pairing
+//! (`"client": "automation"`), shown under Allow automation in Settings.
+//!
+//! Off by default (Settings, this device only); the port is open while
+//! Allow Stream Deck or Allow automation is on.
 //!
 //! Layout: [`pairing`] the code and the token, [`server`] the listener and
 //! the HTTP handling, [`app`] the real player, likes, Lidarr and Listen
-//! along behind [`DeckHost`], [`commands`] the Tauri commands.
+//! along behind [`DeckHost`], [`commands`] the Tauri commands,
+//! [`automation`] the `platter://` command links, [`cli`] the command line.
 
 pub mod app;
+pub mod automation;
+pub mod cli;
 pub mod commands;
 pub mod pairing;
 pub mod server;
@@ -52,8 +60,18 @@ pub const COVER_SIZE: u32 = 144;
 /// What the control API should be doing (from Settings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DeckConfig {
+    /// Allow Stream Deck.
     pub enabled: bool,
     pub private_session: bool,
+    /// Allow automation.
+    pub automation: bool,
+}
+
+impl DeckConfig {
+    /// Whether the port should be open.
+    pub fn listening(&self) -> bool {
+        self.enabled || self.automation
+    }
 }
 
 /// Settings push changes here; the server follows. Cheap to clone.
@@ -104,6 +122,10 @@ pub struct DeckStatus {
     pub code: Option<String>,
     /// A Stream Deck is paired.
     pub paired: bool,
+    /// The automation pairing code, while automation is on.
+    pub automation_code: Option<String>,
+    /// A script or the command line is paired.
+    pub automation_paired: bool,
 }
 
 /// What's playing, as the control API needs it.
@@ -158,6 +180,19 @@ pub enum Command {
     RequestAlbum,
     /// Host a Listen along session and show its invite.
     ListenAlong,
+    /// Play (resume), and pause.
+    Play,
+    Pause,
+    /// Play a playlist found by id or name.
+    PlayPlaylist {
+        playlist: String,
+        #[serde(default)]
+        shuffle: bool,
+    },
+    /// Open Search with this text in the window.
+    Search { query: String },
+    /// Open a page in the window (see [`automation::page_route`]).
+    Open { page: String },
 }
 
 /// The player, likes, art, Lidarr and Listen along (faked in tests).
@@ -175,6 +210,14 @@ pub trait DeckHost: Send + Sync {
     async fn set_volume(&self, volume: f32) -> AppResult<()>;
     async fn request_album(&self, track: &Track) -> AppResult<()>;
     async fn listen_along(&self) -> AppResult<()>;
+    async fn pause(&self) -> AppResult<()>;
+    async fn resume(&self) -> AppResult<()>;
+    /// Play the playlist with this id, or the best match for this name.
+    async fn play_playlist(&self, query: &str, shuffle: bool) -> AppResult<()>;
+    /// Bring the window up on a page (a UI route).
+    async fn show(&self, route: serde_json::Value) -> AppResult<()>;
+    /// Tell the window something didn't happen (a toast).
+    fn notice(&self, message: &str);
 }
 
 /// A token bucket: `rate` requests a second, up to `burst` at once.

@@ -80,6 +80,7 @@ fn reason(code: u16) -> &'static str {
 struct Inner {
     host: Arc<dyn DeckHost>,
     pairing: Arc<Pairing>,
+    automation: Arc<Pairing>,
     events: Arc<dyn EventSink>,
     listening: Mutex<Listening>,
     config: Mutex<DeckConfig>,
@@ -103,6 +104,7 @@ impl DeckServer {
         Self {
             inner: Arc::new(Inner {
                 host,
+                automation: Arc::new(pairing.sibling(super::pairing::AUTOMATION_ACCOUNT)),
                 pairing,
                 events,
                 listening: Mutex::new(Listening::Off),
@@ -116,7 +118,40 @@ impl DeckServer {
     pub fn status(&self) -> DeckStatus {
         let listening = self.inner.listening.lock().clone();
         let on = matches!(listening, Listening::On { .. });
-        DeckStatus { code: on.then(|| self.inner.pairing.code()), paired: self.inner.pairing.paired(), listening }
+        let c = *self.inner.config.lock();
+        DeckStatus {
+            code: (on && self.deck_on(&c)).then(|| self.inner.pairing.code()),
+            paired: self.inner.pairing.paired(),
+            automation_code: (on && c.automation).then(|| self.inner.automation.code()),
+            automation_paired: self.inner.automation.paired(),
+            listening,
+        }
+    }
+
+    /// The Stream Deck side is on (it's the only side when neither is set,
+    /// as in a server not yet following settings).
+    fn deck_on(&self, c: &DeckConfig) -> bool {
+        c.enabled || !c.automation
+    }
+
+    /// Forget the paired script or command line and show a new code.
+    pub fn revoke_automation(&self) -> crate::error::AppResult<DeckStatus> {
+        self.inner.automation.revoke()?;
+        self.emit_status();
+        Ok(self.status())
+    }
+
+    /// Run a `platter://` command link (only while automation is on).
+    pub async fn run_link(&self, cmd: Command) {
+        if !self.inner.config.lock().automation {
+            self.inner.host.notice("Turn on Allow automation in Settings to control Platter from links.");
+            return;
+        }
+        let r = self.command(cmd).await;
+        if r.status != 200 {
+            let m = r.body["error"].as_str().unwrap_or("That didn't work.").to_owned();
+            self.inner.host.notice(&m);
+        }
     }
 
     fn emit_status(&self) {
@@ -147,6 +182,11 @@ impl DeckServer {
         *self.inner.config.lock() = c;
     }
 
+    #[cfg(test)]
+    pub fn automation_code_for_tests(&self) -> String {
+        self.inner.automation.code()
+    }
+
     /// `/v1/state`; `have` names the cover the client already shows.
     pub async fn state(&self, have: Option<&str>) -> DeckState {
         let host = &self.inner.host;
@@ -168,6 +208,7 @@ impl DeckServer {
         if let Some(thumb) = t.thumb.as_deref() {
             let key = cover_key(thumb);
             if have != Some(key.as_str())
+                && have != Some("none")
                 && let Ok(a) = host.cover(thumb, COVER_SIZE).await
             {
                 out.cover = Some(format!("data:{};base64,{}", a.content_type, base64::engine::general_purpose::STANDARD.encode(&a.bytes)));
@@ -203,6 +244,17 @@ impl DeckServer {
                 None => Err(AppError::Invalid("Nothing is playing.".into())),
             },
             Command::ListenAlong => host.listen_along().await,
+            Command::Play => host.resume().await,
+            Command::Pause => host.pause().await,
+            Command::PlayPlaylist { playlist, shuffle } => match playlist.trim() {
+                "" => Err(AppError::Invalid("Name a playlist to play.".into())),
+                p => host.play_playlist(p, shuffle).await,
+            },
+            Command::Search { query } => host.show(serde_json::json!({ "name": "search", "query": query.trim() })).await,
+            Command::Open { page } => match super::automation::page_route(&page) {
+                Some(route) => host.show(route).await,
+                None => Err(AppError::Invalid(format!("Platter has no page called {}.", page.trim()))),
+            },
         };
         match r {
             Ok(()) => Reply::ok(serde_json::json!({ "ok": true })),
@@ -229,18 +281,26 @@ impl DeckServer {
             Some((p, q)) => (p, Some(q)),
             None => (req.target.as_str(), None),
         };
-        let authed = req.bearer().is_some_and(|t| self.inner.pairing.check(t));
+        let c = *self.inner.config.lock();
+        let authed = req
+            .bearer()
+            .is_some_and(|t| (self.deck_on(&c) && self.inner.pairing.check(t)) || (c.automation && self.inner.automation.check(t)));
         match (req.method.as_str(), path) {
             ("GET", "/v1/hello") => Reply::ok(serde_json::json!({ "app": "Platter", "api": API_VERSION, "paired": authed })),
             ("POST", "/v1/pair") => {
                 if !self.inner.pair_limit.lock().allow(now) {
                     return Reply::error(429, "Too many tries. Wait a moment.");
                 }
-                let code = serde_json::from_slice::<serde_json::Value>(&req.body)
-                    .ok()
-                    .and_then(|v| v.get("code").and_then(|c| c.as_str()).map(str::to_owned))
-                    .unwrap_or_default();
-                let r = self.inner.pairing.pair(&code);
+                let body = serde_json::from_slice::<serde_json::Value>(&req.body).unwrap_or_default();
+                let code = body.get("code").and_then(|c| c.as_str()).unwrap_or_default().to_owned();
+                let automation = body.get("client").and_then(|c| c.as_str()) == Some("automation");
+                let pairing = match automation {
+                    true if !c.automation => return Reply::error(403, "Turn on Allow automation in Platter's Settings first."),
+                    true => &self.inner.automation,
+                    false if !self.deck_on(&c) => return Reply::error(403, "Turn on Allow Stream Deck in Platter's Settings first."),
+                    false => &self.inner.pairing,
+                };
+                let r = pairing.pair(&code);
                 self.emit_status();
                 match r {
                     Ok(token) => Reply::ok(serde_json::json!({ "token": token })),
@@ -290,7 +350,7 @@ impl DeckServer {
         loop {
             let c = *cfg.borrow_and_update();
             *self.inner.config.lock() = c;
-            if !c.enabled {
+            if !c.listening() {
                 self.set_listening(Listening::Off);
                 if cfg.changed().await.is_err() {
                     return;
@@ -332,8 +392,10 @@ impl DeckServer {
                             return;
                         }
                         let next = *cfg.borrow();
-                        if next.enabled == c.enabled {
+                        if next.listening() == c.listening() {
                             *self.inner.config.lock() = next;
+                            // The codes shown follow which sides are on.
+                            self.emit_status();
                             continue;
                         }
                         break;

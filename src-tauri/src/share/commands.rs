@@ -40,17 +40,32 @@ impl<R: Runtime> ShareEvents for AppHandle<R> {
 }
 
 /// Wire the deep-link plugin to the share service: a link that started the
-/// app waits for the UI; later ones arrive as events.
+/// app waits for the UI; later ones arrive as events. Command links
+/// (`platter://next`) go to the control API's automation side instead; one
+/// that started the app is dropped (there's nothing to control yet).
 pub fn install<R: Runtime>(app: &AppHandle<R>, share: &ShareService) {
+    use crate::feed::deck::automation::parse_link;
     let at_start = app.deep_link().get_current().ok().flatten().unwrap_or_default();
     let s = share.clone();
+    let handle = app.clone();
     app.deep_link().on_open_url(move |event| {
         for url in event.urls() {
+            if let Some(cmd) = parse_link(url.as_str()) {
+                if let Some(deck) = handle.try_state::<crate::feed::deck::server::DeckServer>() {
+                    let deck = deck.inner().clone();
+                    tauri::async_runtime::spawn(async move { deck.run_link(cmd).await });
+                }
+                continue;
+            }
             let s = s.clone();
             tauri::async_runtime::spawn(async move { s.open(url.as_str()).await });
         }
     });
     for url in at_start {
+        if parse_link(url.as_str()).is_some() {
+            tracing::info!("command link at start ignored");
+            continue;
+        }
         let s = share.clone();
         tauri::async_runtime::spawn(async move { s.open(url.as_str()).await });
     }

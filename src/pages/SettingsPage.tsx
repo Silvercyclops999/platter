@@ -38,7 +38,7 @@ import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
-import { StreamDeckSettings, streamDeckMatches } from "./StreamDeckSettings";
+import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMatches } from "./StreamDeckSettings";
 import { MixExclusions } from "./MixExclusions";
 import { DismissedArtists } from "./DiscoverSettings";
 import { DISCOGS_TOKEN_DESCRIPTION, DiscogsImportControl, DiscogsTokenControl, discogsNote, useDiscogs } from "./DiscogsSettings";
@@ -2493,6 +2493,7 @@ export function SettingsPage() {
       {importMatches(query) && <LibraryImportSettings />}
       {caps.metadataEdit && plexEditMatches(query) && <PlexEditSettings />}
       {streamDeckMatches(query) && <StreamDeckSettings />}
+      {automationMatches(query) && <AutomationSettings />}
       <p className="settings__hint">Shortcut: {modKey}+,</p>
       <ConfirmDialog
         open={dialog === "signOut"}

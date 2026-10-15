@@ -15,6 +15,13 @@ pub async fn deck_status(deck: State<'_, DeckServer>) -> AppResult<DeckStatus> {
     tokio::task::spawn_blocking(move || d.status()).await.map_err(|e| crate::error::AppError::Internal(e.to_string()))
 }
 
+/// Forget the paired script or command line and show a new code.
+#[tauri::command]
+pub async fn automation_revoke(deck: State<'_, DeckServer>) -> AppResult<DeckStatus> {
+    let d = deck.inner().clone();
+    tokio::task::spawn_blocking(move || d.revoke_automation()).await.map_err(|e| crate::error::AppError::Internal(e.to_string()))?
+}
+
 /// Forget the paired Stream Deck and show a new code.
 #[tauri::command]
 pub async fn deck_revoke(deck: State<'_, DeckServer>) -> AppResult<DeckStatus> {

@@ -337,6 +337,10 @@ fn follow_sync_store(store: &sync::SyncStore, hidden: hidden::Hidden, bookmarks:
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // `platter --next` and the rest talk to the running app and exit.
+    if let Some(code) = feed::deck::cli::main(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     // Two TLS crypto backends get compiled in (the updater pulls in ring), so
     // rustls can't pick one on its own. Use the same one as our HTTP client.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -360,7 +364,12 @@ pub fn run() {
     tauri::Builder::default()
         // First, so a second launch (a platter:// link on Windows) hands its
         // link to the copy already running and quits before doing anything.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| share::commands::focus_main(app)))
+        // A command link (platter://next) leaves the window where it is.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|a| feed::deck::automation::is_command_link(a)) {
+                share::commands::focus_main(app)
+            }
+        }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1289,6 +1298,7 @@ pub fn run() {
             feed::commands::feed_status,
             feed::deck::commands::deck_status,
             feed::deck::commands::deck_revoke,
+            feed::deck::commands::automation_revoke,
             artistinfo::commands::artist_info_keys,
             artistinfo::commands::artist_info_key_set,
             artistinfo::commands::artist_info_cache_clear,

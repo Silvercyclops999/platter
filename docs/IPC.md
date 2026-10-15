@@ -900,19 +900,24 @@ otherwise). No CORS header is sent.
 | --- | --- | --- |
 | `deck_status` | – | `DeckStatus` |
 | `deck_revoke` | – | `DeckStatus` |
+| `automation_revoke` | – | `DeckStatus` |
 
 `DeckStatus` is the port's state as in `FeedStatus` (`off`, `on` with
 `port`, `portInUse`, `failed`) plus `code` (the six-digit pairing code, only
 while it's on) and `paired`. Event `deck://status` carries it whenever it
 changes, including after a pairing. `deck_revoke` forgets the paired Stream
 Deck and makes a new code. It's turned on with `settings_set`
-(`allowStreamDeck`).
+(`allowStreamDeck`). Automation has its own pairing on the same API:
+`automationCode` (only while `allowAutomation` is on) and
+`automationPaired`, and `automation_revoke` forgets it. The port is open
+while either setting is on. See [AUTOMATION.md](AUTOMATION.md).
 
 Request album and Listen along from a Stream Deck bring the window up and
 send `deck://action` to the UI, which shows the usual confirmation:
 `{ kind: "requestAlbum", input: LidarrRequestInput }` opens the Lidarr
 request dialog, and `{ kind: "listenAlong" }` starts a session (or shows the
-open invite).
+open invite). For automation, `{ kind: "open", route }` opens a page and
+`{ kind: "notice", message }` says why a `platter://` command link didn't run.
 
 The control API itself is plain HTTP with JSON on `127.0.0.1:32541`, for the
 Stream Deck plugin in `streamdeck/` and other local programs. It binds the
@@ -923,7 +928,9 @@ a second (429 past that). Bodies are at most 4 KB.
 
 - `GET /v1/hello` → `{ app: "Platter", api: 1, paired }`; `paired` says
   whether the bearer token sent is the paired one.
-- `POST /v1/pair` with `{ code }` → `{ token }`. One try every two seconds;
+- `POST /v1/pair` with `{ code }` → `{ token }`, or `{ code, client:
+  "automation" }` for the automation pairing (403 while its setting is off,
+  as is a Stream Deck pairing while Allow Stream Deck is off). One try every two seconds;
   a wrong code is 401 and five in a row make a new code. A success also
   makes a new code and replaces any earlier token. Only the token's SHA-256
   is kept, in the keychain.
@@ -931,12 +938,16 @@ a second (429 past that). Bodies are at most 4 KB.
 - `GET /v1/state?cover=<coverKey>` → `{ api, playing, private, title, artist,
   album, trackId, liked, volume, muted, coverKey, cover, canRequest }`.
   `volume` is 0 to 100. `cover` is a 144 px `data:image/...;base64,` image,
-  left out when `cover` in the query already names it. A private session
+  left out when `cover` in the query already names it (or is `none`). A private session
   leaves out the song and cover.
 - `POST /v1/command` with `{ command }`: `playPause`, `next`, `previous`,
   `like` (toggles), `volumeSet` and `volumeStep` (with `value` in percent),
-  `requestAlbum`, `listenAlong` → `{ ok: true }`, or 409 with `{ error }`
-  saying why (nothing playing, Lidarr not set up, no album to request).
+  `requestAlbum`, `listenAlong`, `play`, `pause`, `playPlaylist` (with
+  `playlist`, an id or a name, and optional `shuffle`), `search` (with
+  `query`) and `open` (with `page`) → `{ ok: true }`, or 409 with `{ error }`
+  saying why (nothing playing, Lidarr not set up, no album to request, no
+  such playlist or page). A Stream Deck token works while Allow Stream Deck
+  is on, an automation token while Allow automation is on.
 
 ## Discord
 | Command | Args | Returns |
@@ -2457,6 +2468,10 @@ The rest of the fields, with their defaults:
 | `syncFollows` | bool, true | What to sync: followed artists, hidden and snoozed items, bookmarks. This device only. |
 | `syncLyrics` | bool, true | What to sync: lyrics written in the editor. This device only. |
 | `bookmarksInLibrary` | bool, true | A Bookmarks row under Liked Songs in the library. |
+| `pinsInLibrary` | bool, true | Pins (up to 4 playlists, albums, artists or folders, `pins_toggle`) sit at the top of the library. |
+| `showPronunciation` | bool, false | A romanised line under lyrics in Japanese, Korean, Chinese, Hindi and Cyrillic (`lyrics_pronounce`). |
+| `translationService` | string, "" | A LibreTranslate-compatible address for `lyrics_translate`; empty means no translation. This device only. |
+| `translateTo` | string, "en" | The language code lyrics are translated into. |
 | `libraryDoctor` | bool, true | The library doctor checks the library in the background and shows a count in the app menu. |
 | `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched, soundsLike }`, all true | Which library doctor checks run. |
 | `doctorCoverPx` | 300, 500, 600 (default), 800, 1000 or 1400 | Covers smaller than this on their longest side count as small. |
@@ -2482,6 +2497,7 @@ The rest of the fields, with their defaults:
 | `nowPlayingFeed` | bool, false | Serve the playing song on 127.0.0.1 for widgets (see Now-playing feed). This device only. |
 | `nowPlayingFeedPort` | 1024 to 65535, 32540 | The feed's port. Lower ports are refused with `invalid`. This device only. |
 | `allowStreamDeck` | bool, false | Let a paired Stream Deck control playback on 127.0.0.1 (see Stream Deck). This device only. |
+| `allowAutomation` | bool, false | Let `platter://` command links, paired scripts and the `platter` command line control playback (see Stream Deck and AUTOMATION.md). This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

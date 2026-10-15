@@ -595,6 +595,8 @@ pub struct Settings {
     pub show_physical_collection: bool,
     /// "Missing from the shelf": albums played most that aren't owned.
     pub shelf_missing_list: bool,
+    /// platter:// command links, scripts and the command line can control playback (through the local control API).
+    pub allow_automation: bool,
     /// The language lyrics are translated into.
     pub translate_to: String,
     /// Where lyrics translations come from (a LibreTranslate-compatible address); empty: no translation.
@@ -818,6 +820,7 @@ impl Default for Settings {
             dismissed_artists: Vec::new(),
             show_physical_collection: true,
             shelf_missing_list: false,
+            allow_automation: false,
             translate_to: "en".into(),
             translation_service: String::new(),
             show_pronunciation: false,
@@ -945,6 +948,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
     "privateSession",
+    "allowAutomation",
     "translationService",
     "lookStepDone",
     "volume",
@@ -1207,6 +1211,7 @@ pub struct SettingsPatch {
     pub dismissed_artists: Option<Vec<crate::discover::Dismissed>>,
     pub show_physical_collection: Option<bool>,
     pub shelf_missing_list: Option<bool>,
+    pub allow_automation: Option<bool>,
     pub translate_to: Option<String>,
     pub translation_service: Option<String>,
     pub show_pronunciation: Option<bool>,
@@ -1464,6 +1469,7 @@ impl Settings {
         set(&mut self.catalogue_search, p.catalogue_search);
         set(&mut self.fans_also_like_catalogue, p.fans_also_like_catalogue);
         set(&mut self.home_new_to_you, p.home_new_to_you);
+        set(&mut self.allow_automation, p.allow_automation);
         if let Some(l) = &p.translate_to { self.translate_to = crate::lyrics::translate::language(l).ok_or_else(|| AppError::Invalid("Pick a language to translate into.".into()))?; }
         if let Some(u) = &p.translation_service { self.translation_service = if u.trim().is_empty() { String::new() } else { crate::lyrics::translate::service_url(u).ok_or_else(|| AppError::Invalid("The translation service is a web address like https://translate.example.com.".into()))? }; }
         set(&mut self.show_pronunciation, p.show_pronunciation);
@@ -1830,7 +1836,11 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         port: s.now_playing_feed_port,
         private_session: s.private_session,
     });
-    live.deck.set(crate::feed::deck::DeckConfig { enabled: s.allow_stream_deck, private_session: s.private_session });
+    live.deck.set(crate::feed::deck::DeckConfig {
+        enabled: s.allow_stream_deck,
+        private_session: s.private_session,
+        automation: s.allow_automation,
+    });
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
@@ -2288,7 +2298,7 @@ mod tests {
         assert!(!live.deck.get().enabled);
         s.apply(&SettingsPatch { allow_stream_deck: Some(true), private_session: Some(true), ..Default::default() }).unwrap();
         publish(&s, &live, &db);
-        assert_eq!(live.deck.get(), crate::feed::deck::DeckConfig { enabled: true, private_session: true });
+        assert_eq!(live.deck.get(), crate::feed::deck::DeckConfig { enabled: true, private_session: true, automation: false });
         s.apply(&SettingsPatch { allow_stream_deck: Some(false), ..Default::default() }).unwrap();
         publish(&s, &live, &db);
         assert!(!live.deck.get().enabled);
@@ -3330,5 +3340,18 @@ mod tests {
         assert_eq!((s.translation_service.as_str(), s.translate_to.as_str()), ("https://tr.example.com", "pt"));
         s.apply(&serde_json::from_str(r#"{"translationService":"  "}"#).unwrap()).unwrap();
         assert!(s.translation_service.is_empty(), "blank turns it off");
+    }
+
+    #[test]
+    fn allow_automation_is_off_on_this_device_and_opens_the_control_api() {
+        let mut s = Settings::default();
+        assert!(!s.allow_automation, "automation is opt-in");
+        assert!(DEVICE_SETTINGS.contains(&"allowAutomation") && !SYNCED_SETTINGS.contains(&"allowAutomation"));
+        s.apply(&serde_json::from_str(r#"{"allowAutomation":true}"#).unwrap()).unwrap();
+        let live = Live::default();
+        let (db, _d) = db();
+        publish(&s, &live, &db);
+        let c = live.deck.get();
+        assert!(c.automation && !c.enabled && c.listening(), "the port opens for automation alone");
     }
 }

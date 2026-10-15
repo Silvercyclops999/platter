@@ -125,4 +125,38 @@ impl DeckHost for AppDeck {
         self.action(serde_json::json!({ "kind": "listenAlong" }));
         Ok(())
     }
+
+    async fn pause(&self) -> AppResult<()> {
+        self.player.pause().await
+    }
+
+    async fn resume(&self) -> AppResult<()> {
+        self.player.resume().await
+    }
+
+    async fn play_playlist(&self, query: &str, shuffle: bool) -> AppResult<()> {
+        let db = self.app.try_state::<crate::db::DbHandle>().map(|d| d.inner().clone()).ok_or_else(|| AppError::Internal("library not ready".into()))?;
+        let server = db.server_view();
+        let lists = db
+            .read_async(move |c| {
+                let mut out = crate::db::queries::playlists(c)?;
+                crate::db::merge::ViewFilter::load(c, &server)?.playlists(&mut out);
+                Ok(out)
+            })
+            .await?;
+        let p = super::automation::pick_playlist(&lists, query).ok_or_else(|| AppError::NotFound(format!("No playlist called {query}.")))?;
+        let ctx = crate::audio::source::PlayContext { kind: crate::audio::source::ContextKind::Playlist, id: Some(p.id.clone()), track_ids: None };
+        self.player.play_context(ctx, None, Some(shuffle)).await
+    }
+
+    async fn show(&self, route: serde_json::Value) -> AppResult<()> {
+        self.action(serde_json::json!({ "kind": "open", "route": route }));
+        Ok(())
+    }
+
+    fn notice(&self, message: &str) {
+        if let Err(e) = self.app.emit("deck://action", serde_json::json!({ "kind": "notice", "message": message })) {
+            tracing::warn!("emit deck://action failed: {e}");
+        }
+    }
 }

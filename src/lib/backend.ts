@@ -551,6 +551,8 @@ export interface Backend {
   deckStatus(): Promise<DeckStatus>;
   /** Forget the paired Stream Deck and make a new code. */
   deckRevoke(): Promise<DeckStatus>;
+  /** Forget the paired script or command line and show a new automation code. */
+  automationRevoke(): Promise<DeckStatus>;
   /** Save the Imgur client ID in the keychain (null removes it); answers whether Imgur refused it. */
   discordImgurKeySet(key: string | null): Promise<InfoKeyState>;
 
@@ -1028,6 +1030,7 @@ export function createTauriBackend(): Backend {
     feedStatus: () => call("feed_status"),
     deckStatus: () => call("deck_status"),
     deckRevoke: () => call("deck_revoke"),
+    automationRevoke: () => call("automation_revoke"),
     discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
     tagsIndex: () => call("tags_index"),
     tagScanStatus: () => call("tag_scan_status"),

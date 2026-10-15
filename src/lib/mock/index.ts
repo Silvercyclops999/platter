@@ -2521,7 +2521,7 @@ export class MockBackend implements Backend {
         const st = this.feed();
         this.later(0, () => this.emit("feed://status", st));
       }
-      if (patch.allowStreamDeck !== undefined) {
+      if (patch.allowStreamDeck !== undefined || patch.allowAutomation !== undefined) {
         const st = this.deck();
         this.later(0, () => this.emit("deck://status", st));
       }
@@ -3400,9 +3400,23 @@ export class MockBackend implements Backend {
 
   private deckCode = "482913";
   private deckPaired = false;
+  private autoCode = "250617";
+  autoPaired = false;
   private deck(): DeckStatus {
-    if (!this.settings.allowStreamDeck) return { state: "off", code: null, paired: this.deckPaired };
-    return { state: "on", port: 32541, code: this.deckCode, paired: this.deckPaired };
+    const deck = this.settings.allowStreamDeck;
+    const auto = this.settings.allowAutomation;
+    const paired = { paired: this.deckPaired, automationPaired: this.autoPaired };
+    if (!deck && !auto) return { state: "off", code: null, automationCode: null, ...paired };
+    return { state: "on", port: 32541, code: deck ? this.deckCode : null, automationCode: auto ? this.autoCode : null, ...paired };
+  }
+  automationRevoke() {
+    return this.delay(() => {
+      this.autoPaired = false;
+      this.autoCode = String((Number(this.autoCode) + 7919) % 1000000).padStart(6, "0");
+      const st = this.deck();
+      this.later(0, () => this.emit("deck://status", st));
+      return st;
+    });
   }
   deckStatus() {
     return this.delay(() => this.deck());

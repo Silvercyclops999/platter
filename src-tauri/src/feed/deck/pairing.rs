@@ -13,6 +13,8 @@ use crate::plex::token::Token;
 
 /// Keychain account for the paired token's hash.
 pub const TOKEN_ACCOUNT: &str = "streamdeck-token-hash";
+/// The same for automation (scripts and the command line).
+pub const AUTOMATION_ACCOUNT: &str = "automation-token-hash";
 /// Wrong codes before the code changes.
 pub const MAX_WRONG: u32 = 5;
 
@@ -49,12 +51,23 @@ struct State {
 
 pub struct Pairing {
     store: Arc<dyn TokenStore>,
+    account: &'static str,
     state: Mutex<State>,
 }
 
 impl Pairing {
     pub fn new(store: Arc<dyn TokenStore>) -> Self {
-        Self { store, state: Mutex::new(State { code: new_code(), wrong: 0, hash: None }) }
+        Self::with_account(store, TOKEN_ACCOUNT)
+    }
+
+    /// A pairing kept under another keychain account.
+    pub fn with_account(store: Arc<dyn TokenStore>, account: &'static str) -> Self {
+        Self { store, account, state: Mutex::new(State { code: new_code(), wrong: 0, hash: None }) }
+    }
+
+    /// Another pairing in the same keychain.
+    pub fn sibling(&self, account: &'static str) -> Self {
+        Self::with_account(self.store.clone(), account)
     }
 
     /// The code to type into the Stream Deck.
@@ -71,7 +84,7 @@ impl Pairing {
 
     fn stored(&self, s: &mut State) -> Option<String> {
         if s.hash.is_none() {
-            let read = match self.store.get(TOKEN_ACCOUNT) {
+            let read = match self.store.get(self.account) {
                 Ok(t) => t.map(|t| t.expose().to_owned()),
                 Err(e) => {
                     // Not cached, so it's read again next time.
@@ -114,7 +127,7 @@ impl Pairing {
         let token = hex(&rand::random::<[u8; 32]>());
         let h = hash(&token);
         let stored = Token::new(h.clone()).map_err(|e| PairError::Keychain(e.to_string()))?;
-        self.store.set(TOKEN_ACCOUNT, &stored).map_err(|e| PairError::Keychain(e.to_string()))?;
+        self.store.set(self.account, &stored).map_err(|e| PairError::Keychain(e.to_string()))?;
         s.hash = Some(Some(h));
         s.code = new_code();
         s.wrong = 0;
@@ -124,7 +137,7 @@ impl Pairing {
     /// Forget the paired Stream Deck and show a new code.
     pub fn revoke(&self) -> AppResult<()> {
         let mut s = self.state.lock();
-        self.store.delete(TOKEN_ACCOUNT).map_err(|e| AppError::Internal(format!("couldn't forget the Stream Deck: {e}")))?;
+        self.store.delete(self.account).map_err(|e| AppError::Internal(format!("couldn't forget the Stream Deck: {e}")))?;
         s.hash = Some(None);
         s.code = new_code();
         s.wrong = 0;

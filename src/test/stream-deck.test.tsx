@@ -44,13 +44,13 @@ describe("Stream Deck settings", () => {
   it("revoke shows only once paired and calls the core", async () => {
     const user = userEvent.setup();
     const onRevoke = vi.fn();
-    const { rerender } = render(<DeckPairing status={{ state: "on", port: 32541, code: "123456", paired: true }} onRevoke={onRevoke} />);
+    const { rerender } = render(<DeckPairing status={{ state: "on", port: 32541, code: "123456", paired: true, automationCode: null, automationPaired: false }} onRevoke={onRevoke} />);
     expect(screen.getByText("A Stream Deck is paired.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Revoke" }));
     expect(onRevoke).toHaveBeenCalledOnce();
-    rerender(<DeckPairing status={{ state: "portInUse", port: 32541, code: null, paired: false }} onRevoke={onRevoke} />);
+    rerender(<DeckPairing status={{ state: "portInUse", port: 32541, code: null, paired: false, automationCode: null, automationPaired: false }} onRevoke={onRevoke} />);
     expect(screen.getByRole("alert")).toHaveTextContent("Port 32541 is in use by another program");
-    rerender(<DeckPairing status={{ state: "failed", port: 32541, message: "denied", code: null, paired: false }} onRevoke={onRevoke} />);
+    rerender(<DeckPairing status={{ state: "failed", port: 32541, message: "denied", code: null, paired: false, automationCode: null, automationPaired: false }} onRevoke={onRevoke} />);
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't open port 32541: denied");
   });
 

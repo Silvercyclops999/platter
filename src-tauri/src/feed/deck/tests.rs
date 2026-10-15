@@ -71,6 +71,28 @@ impl DeckHost for Fake {
         self.calls.lock().push("listen".into());
         Ok(())
     }
+    async fn pause(&self) -> AppResult<()> {
+        self.calls.lock().push("pause".into());
+        Ok(())
+    }
+    async fn resume(&self) -> AppResult<()> {
+        self.calls.lock().push("resume".into());
+        Ok(())
+    }
+    async fn play_playlist(&self, query: &str, shuffle: bool) -> AppResult<()> {
+        if query == "missing" {
+            return Err(AppError::NotFound("No playlist called missing.".into()));
+        }
+        self.calls.lock().push(format!("playlist {query} {shuffle}"));
+        Ok(())
+    }
+    async fn show(&self, route: serde_json::Value) -> AppResult<()> {
+        self.calls.lock().push(format!("show {route}"));
+        Ok(())
+    }
+    fn notice(&self, message: &str) {
+        self.calls.lock().push(format!("notice {message}"));
+    }
 }
 
 #[derive(Default)]
@@ -355,7 +377,7 @@ async fn state_has_the_song_cover_and_volume() {
 #[tokio::test]
 async fn a_private_session_hides_the_song() {
     let r = rig();
-    r.server.set_config(DeckConfig { enabled: true, private_session: true });
+    r.server.set_config(DeckConfig { enabled: true, private_session: true, automation: false });
     let t = r.paired().await;
     let b = r.send(&req("GET", "/v1/state", Some(&t), "")).await.body;
     assert_eq!(b["private"], true);
@@ -484,7 +506,7 @@ async fn the_port_opens_when_allowed_and_closes_when_not() {
     assert_eq!(st.code, None, "no code while it's off");
     assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err());
 
-    switch.set(DeckConfig { enabled: true, private_session: false });
+    switch.set(DeckConfig { enabled: true, private_session: false, automation: false });
     let st = wait_for(&r.server, |l| *l == Listening::On { port }).await;
     assert_eq!(st.code.as_deref(), Some(r.pairing.code().as_str()));
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -509,7 +531,7 @@ async fn the_port_opens_when_allowed_and_closes_when_not() {
     let (status, _) = http(addr, format!("POST /v1/command HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 999999\r\n\r\n")).await;
     assert_eq!(status, 413);
 
-    switch.set(DeckConfig { enabled: false, private_session: false });
+    switch.set(DeckConfig { enabled: false, private_session: false, automation: false });
     wait_for(&r.server, |l| *l == Listening::Off).await;
     let mut closed = false;
     for _ in 0..100 {
@@ -528,7 +550,7 @@ async fn a_busy_port_is_reported() {
     let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = held.local_addr().unwrap().port();
     let switch = DeckSwitch::default();
-    switch.set(DeckConfig { enabled: true, private_session: false });
+    switch.set(DeckConfig { enabled: true, private_session: false, automation: false });
     tokio::spawn(r.server.clone().follow(switch.subscribe(), port));
     let st = wait_for(&r.server, |l| !matches!(l, Listening::Off)).await;
     assert!(matches!(st.listening, Listening::PortInUse { .. } | Listening::Failed { .. }), "{st:?}");
@@ -537,6 +559,189 @@ async fn a_busy_port_is_reported() {
 
 #[test]
 fn status_serializes_flat() {
-    let st = DeckStatus { listening: Listening::On { port: 1 }, code: Some("123456".into()), paired: false };
-    assert_eq!(serde_json::to_value(&st).unwrap(), serde_json::json!({ "state": "on", "port": 1, "code": "123456", "paired": false }));
+    let st = DeckStatus { listening: Listening::On { port: 1 }, code: Some("123456".into()), paired: false, automation_code: None, automation_paired: false };
+    assert_eq!(serde_json::to_value(&st).unwrap(), serde_json::json!({ "state": "on", "port": 1, "code": "123456", "paired": false, "automationCode": null, "automationPaired": false }));
+}
+
+// ---------------------------------------------------------------- automation
+
+fn automation_on(r: &Rig, deck: bool) {
+    r.server.set_config(DeckConfig { enabled: deck, private_session: false, automation: true });
+}
+
+impl Rig {
+    async fn pair_automation(&self, code: &str) -> server::Reply {
+        self.send(&req("POST", "/v1/pair", None, &format!(r#"{{"code":"{code}","client":"automation"}}"#))).await
+    }
+}
+
+#[tokio::test]
+async fn automation_pairs_on_its_own_code_only_while_allowed() {
+    let r = rig();
+    r.server.set_config(DeckConfig { enabled: true, private_session: false, automation: false });
+    let code = r.server.automation_code_for_tests();
+    assert_eq!(r.pair_automation(&code).await.status, 403, "refused while automation is off");
+    let deck = r.paired().await;
+    automation_on(&r, true);
+    let wrong = r.pair_automation(&r.pairing.code()).await;
+    assert_eq!(wrong.status, 401, "the Stream Deck's code doesn't pair automation");
+    assert!(!r.server.status().automation_paired);
+    assert!(r.store.get(pairing::AUTOMATION_ACCOUNT).unwrap().is_none());
+    assert!(r.store.get(TOKEN_ACCOUNT).unwrap().is_some(), "the Stream Deck keeps its pairing");
+    assert_eq!(r.command(&deck, r#"{"command":"next"}"#).await.status, 200);
+}
+
+#[tokio::test]
+async fn automation_and_stream_deck_tokens_follow_their_settings() {
+    let r = rig();
+    automation_on(&r, true);
+    let deck = r.paired().await;
+    // Pair automation with the code the server holds.
+    let auto_code = r.server.automation_code_for_tests();
+    let a = r.pair_automation(&auto_code).await;
+    assert_eq!(a.status, 200, "{:?}", a.body);
+    let auto = a.body["token"].as_str().unwrap().to_owned();
+    assert_ne!(auto, deck);
+    assert!(r.server.status().automation_paired && r.server.status().paired);
+    assert_eq!(r.command(&auto, r#"{"command":"pause"}"#).await.status, 200);
+    // Stream Deck off, automation on: only the automation token works.
+    automation_on(&r, false);
+    assert_eq!(r.command(&deck, r#"{"command":"next"}"#).await.status, 401);
+    assert_eq!(r.command(&auto, r#"{"command":"next"}"#).await.status, 200);
+    assert_eq!(r.server.status().code, None, "no Stream Deck code while it's off");
+    // Automation off: its token stops working.
+    r.server.set_config(DeckConfig { enabled: true, private_session: false, automation: false });
+    assert_eq!(r.command(&auto, r#"{"command":"next"}"#).await.status, 401);
+    assert_eq!(r.command(&deck, r#"{"command":"next"}"#).await.status, 200);
+    // Revoke forgets the automation pairing only.
+    automation_on(&r, true);
+    r.server.revoke_automation().unwrap();
+    assert_eq!(r.command(&auto, r#"{"command":"next"}"#).await.status, 401);
+    assert_eq!(r.command(&deck, r#"{"command":"next"}"#).await.status, 200);
+}
+
+#[tokio::test]
+async fn automation_commands_play_pause_playlists_search_and_pages() {
+    let r = rig();
+    automation_on(&r, true);
+    let t = r.paired().await;
+    for body in [
+        r#"{"command":"play"}"#,
+        r#"{"command":"pause"}"#,
+        r#"{"command":"playPlaylist","playlist":" Road Trip ","shuffle":true}"#,
+        r#"{"command":"playPlaylist","playlist":"Gym"}"#,
+        r#"{"command":"search","query":"night drive"}"#,
+        r#"{"command":"open","page":"liked"}"#,
+    ] {
+        assert_eq!(r.command(&t, body).await.status, 200, "{body}");
+    }
+    assert_eq!(
+        *r.host.calls.lock(),
+        vec![
+            "resume",
+            "pause",
+            "playlist Road Trip true",
+            "playlist Gym false",
+            r#"show {"name":"search","query":"night drive"}"#,
+            r#"show {"name":"liked"}"#,
+        ]
+    );
+    let missing = r.command(&t, r#"{"command":"playPlaylist","playlist":"missing"}"#).await;
+    assert_eq!((missing.status, missing.body["error"].as_str()), (409, Some("No playlist called missing.")));
+    let page = r.command(&t, r#"{"command":"open","page":"nowhere"}"#).await;
+    assert_eq!(page.body["error"], "Platter has no page called nowhere.");
+    assert_eq!(r.command(&t, r#"{"command":"playPlaylist","playlist":""}"#).await.status, 409);
+    // The command line asks for the state without the cover.
+    let s = r.send(&req("GET", "/v1/state?cover=none", Some(&t), "")).await;
+    assert!(s.body.get("cover").is_none() && s.body["title"] == "Night Drive");
+}
+
+#[tokio::test]
+async fn command_links_run_only_while_automation_is_on() {
+    let r = rig();
+    r.server.run_link(automation::parse_link("platter://next").unwrap()).await;
+    assert_eq!(*r.host.calls.lock(), vec!["notice Turn on Allow automation in Settings to control Platter from links."]);
+    r.host.calls.lock().clear();
+    automation_on(&r, false);
+    r.server.run_link(automation::parse_link("platter://next").unwrap()).await;
+    r.server.run_link(automation::parse_link("platter://play?playlist=missing").unwrap()).await;
+    r.server.run_link(automation::parse_link("platter://open/settings").unwrap()).await;
+    assert_eq!(
+        *r.host.calls.lock(),
+        vec!["next", "notice No playlist called missing.", r#"show {"name":"settings"}"#]
+    );
+}
+
+// ---------------------------------------------------------------- command line
+
+fn args(a: &[&str]) -> Vec<String> {
+    std::iter::once("platter").chain(a.iter().copied()).map(String::from).collect()
+}
+
+#[test]
+fn command_line_flags() {
+    use cli::{Action, parse};
+    assert_eq!(parse(&args(&[])), None, "no flags: the app starts");
+    assert_eq!(parse(&args(&["--autostart"])), None);
+    assert_eq!(parse(&args(&["platter://next"])), None, "links go to the app");
+    assert_eq!(parse(&args(&["--next"])), Some(Ok(Action::Command(serde_json::json!({ "command": "next" })))));
+    assert_eq!(parse(&args(&["--toggle"])), Some(Ok(Action::Command(serde_json::json!({ "command": "playPause" })))));
+    assert_eq!(parse(&args(&["--now-playing", "--json"])), Some(Ok(Action::NowPlaying { json: true })));
+    assert_eq!(
+        parse(&args(&["--playlist", "Road Trip", "--shuffle"])),
+        Some(Ok(Action::Command(serde_json::json!({ "command": "playPlaylist", "playlist": "Road Trip", "shuffle": true }))))
+    );
+    assert_eq!(parse(&args(&["--pair", "123456"])), Some(Ok(Action::Pair("123456".into()))));
+    assert!(matches!(parse(&args(&["--pair", "12"])), Some(Err(_))));
+    assert!(matches!(parse(&args(&["--playlist"])), Some(Err(_))));
+    assert_eq!(parse(&args(&["--help"])), Some(Ok(Action::Help)));
+}
+
+#[test]
+fn now_playing_line() {
+    assert_eq!(cli::now_line(&serde_json::json!({ "playing": true, "title": "Night Drive", "artist": "Rue Ellis" })), "Night Drive - Rue Ellis");
+    assert_eq!(cli::now_line(&serde_json::json!({ "playing": false, "title": "Night Drive", "artist": "Rue Ellis" })), "(paused) Night Drive - Rue Ellis");
+    assert_eq!(cli::now_line(&serde_json::json!({ "private": true })), "Private session");
+    assert_eq!(cli::now_line(&serde_json::json!({})), "Nothing playing");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn command_line_pairs_and_controls_the_running_app() {
+    use cli::{Action, run_with};
+    let r = rig();
+    let port = free_port();
+    let keychain = MemoryStore::new();
+    let run = |a: Action| {
+        let k = &keychain;
+        tokio::task::block_in_place(|| run_with(a, port, k))
+    };
+    // Nothing listening.
+    let (code, msg) = run(Action::Command(serde_json::json!({ "command": "next" })));
+    assert_eq!(code, cli::FAILED, "{msg}");
+    assert!(msg.starts_with("Pair first"), "{msg}");
+    let (code, _) = run(Action::Pair("123456".into()));
+    assert_eq!(code, cli::NOT_RUNNING);
+
+    let switch = DeckSwitch::default();
+    switch.set(DeckConfig { enabled: false, private_session: false, automation: true });
+    tokio::spawn(r.server.clone().follow(switch.subscribe(), port));
+    wait_for(&r.server, |l| *l == Listening::On { port }).await;
+    let (code, msg) = run(Action::Pair("000000".into()));
+    assert_eq!((code, msg.as_str()), (cli::FAILED, "That code doesn't match the one in Platter's Settings."));
+    let good = r.server.status().automation_code.unwrap();
+    assert_eq!(run(Action::Pair(good)), (cli::OK, "Paired with Platter.".to_string()));
+    assert!(keychain.get(cli::CLI_TOKEN_ACCOUNT).unwrap().is_some(), "the token is kept in the keychain");
+
+    assert_eq!(run(Action::Command(serde_json::json!({ "command": "next" }))).0, cli::OK);
+    assert_eq!(*r.host.calls.lock(), vec!["next"]);
+    let (code, out) = run(Action::NowPlaying { json: true });
+    assert_eq!(code, cli::OK);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["title"], "Night Drive");
+    assert!(v.get("cover").is_none() && v.get("coverKey").is_none());
+    assert_eq!(run(Action::NowPlaying { json: false }), (cli::OK, "Night Drive - Rue Ellis".to_string()));
+    // Turning automation off closes the port: the command line says so.
+    switch.set(DeckConfig { enabled: false, private_session: false, automation: false });
+    wait_for(&r.server, |l| *l == Listening::Off).await;
+    assert_eq!(run(Action::Command(serde_json::json!({ "command": "next" }))).0, cli::NOT_RUNNING);
 }
