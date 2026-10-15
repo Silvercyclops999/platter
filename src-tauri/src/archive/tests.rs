@@ -28,6 +28,7 @@ fn db() -> (tempfile::TempDir, Connection) {
 }
 
 /// An album. `matched`: Plex matched it. `format` and `subs` as Plex has them.
+#[allow(clippy::too_many_arguments)]
 fn album(c: &Connection, id: &str, artist: &str, title: &str, matched: bool, format: Option<&str>, subs: &[&str], year: Option<i32>) {
     c.execute(
         "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, track_count, matched, format, subformats, year, thumb, added_at)
