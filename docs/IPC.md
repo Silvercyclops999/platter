@@ -1140,6 +1140,22 @@ Events: `hidden://changed` → `HiddenItem[]`, `bookmarks://changed` →
 or a sign-in changes. Changes another device made through the sync file send
 the same events.
 
+## Lidarr
+
+Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` settings. The API key and any extra proxy headers are in the OS keychain and never cross back to the UI. Everything here only reads from Lidarr: every request is a GET.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `lidarr_status` | – | `{ urlSet, awaySet, hasKey, headerNames: string[], unencrypted: string[] }` |
+| `lidarr_key_set` | `{ key: string \| null }` | the same, after saving or removing the key |
+| `lidarr_headers_set` | `{ text: string \| null }` (`Name: value` lines; blank removes) | the same; `invalid` for a bad line, a reserved header or more than 5 |
+| `lidarr_check` | – | `LidarrReport`, or `network` (unreachable), `auth` (key refused), `invalid` (too old, not Lidarr, not set up), `decode` |
+| `lidarr_confirm_root` | `{ path, confirmed }` | – (the user says an empty root folder is separate from the Plex music folder) |
+
+`LidarrReport = { version, findings: { id, level: "red"|"amber"|"ok", title, detail, fix: string|null, emptyRoot: { path, confirmed }|null }[], passed, checkedAt, route: "home"|"away"|null }`.
+Findings come red first, then amber, then OK. `passed` is false while any finding is red.
+The home address is tried first (for 4 seconds when an away address is set), then the away address.
+
 ## Sync, folders and keys
 
 | Command | Args | Returns |

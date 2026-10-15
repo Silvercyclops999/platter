@@ -169,6 +169,10 @@ is ignored unless `X-Plex-Container-Start` is also given.
 - `Media[0]`: `audioCodec`, `container`, `bitrate`, `duration`;
   `Part[0].key` = `/library/parts/{id}/{ts}/file.{ext}` (direct stream),
   `Part[0].file` = server path, `size`.
+  Platter doesn't keep `file` in its cache. The Lidarr setup check lists every
+  track live and compares these paths and sizes with what Lidarr sees.
+  Music sections in `/library/sections` carry `Location[].path`, the
+  section's folders in the server's own path form.
 - Codecs here: flac 1091, mp3 322, aac (mp4) 25, alac 1. One album can mix
   codecs (aac + mp3 + flac), so gapless has to work across codec changes.
 - `bitDepth`, `samplingRate` and loudness are only in track detail

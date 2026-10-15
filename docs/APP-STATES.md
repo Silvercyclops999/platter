@@ -159,6 +159,20 @@ are in `docs/screenshots/app-states/`.
 | Miniplayer window fails to open | `platform/miniplayer.rs`: the window builder fails | Toast "The miniplayer couldn't open. Try again, or restart Platter if it keeps happening." The player bar button stays off and playback carries on in the main window | `miniplayer::tests` place and size rules; UI `miniplayer` a window that fails to open | Done |
 | Crash | Panic hook in `monitor/crash.rs` | Nothing on relaunch: the queue and position come back from `queue.json`, which is written a moment after every change. A crash report is saved locally in `crash-reports/` and never sent | `player_tests::crash_without_flush_restores_queue_and_position`, `player_tests::queue_and_position_survive_a_restart`, `crash::writes_report_and_keeps_the_last_few` | Done |
 
+## Lidarr
+
+The setup check only reads from Lidarr. Nothing is ever sent to Lidarr while any red finding stands.
+
+| Situation | Detected in | User sees | Tests | Status |
+| --- | --- | --- | --- | --- |
+| Lidarr unreachable | `lidarr/api.rs`: neither the home nor the away address answers | Under Check Lidarr's setup: "Lidarr isn't reachable. Check the address, and that Lidarr is running." | `lidarr::tests::unreachable_lidarr`, `lidarr::tests::neither_address_answers`; UI `lidarr` shows unreachable in plain words | Done |
+| Away from home | `lidarr/mod.rs`: the home address doesn't answer within 4 seconds, so the away address is tried | The check runs as usual and says "answered on its away address". Proxy headers go only to the away address | `lidarr::tests::away_from_home_the_away_address_answers_with_its_headers`, `lidarr::tests::at_home_the_away_address_is_never_tried` | Done |
+| Wrong API key | `lidarr/api.rs`: 401 or 403 | "Lidarr didn't accept this API key. Copy it again from Lidarr's Settings > General." Nothing else is read | `lidarr::tests::a_refused_key`; UI `lidarr` shows badKey in plain words | Done |
+| Lidarr too old, or not Lidarr | `lidarr/mod.rs`: `system/status` reports a version below 2.0, another app, or a page that isn't the API | "This Lidarr is version 1.4.5. Platter needs Lidarr 2.0 or later. Update Lidarr, then check again." or "That address doesn't answer like Lidarr." | `lidarr::tests::too_old_or_not_lidarr`; UI `lidarr` shows old in plain words | Done |
+| Plain http address outside the home network | `lidarr/mod.rs`: an http address whose host isn't private or local | Amber "Your API key would travel unencrypted", never a block. A public https address is fine | `lidarr::tests::only_plain_http_to_a_public_host_is_a_warning` | Done |
+| A Lidarr root folder is the Plex music folder, holds it or is inside it | `lidarr/check.rs`: path strings, or the same folder names under both and Lidarr's own listing showing the same files and sizes (Plex and Lidarr in separate containers see one folder by different paths) | Red, with what to change in Lidarr | `lidarr::tests::same_path_is_red_even_when_empty`, `parent_and_child_paths_are_red`, `case_and_separators_dont_hide_the_same_path`, `docker_remap_with_different_strings_is_red_by_content`, `unc_versus_mapped_drive_is_red_by_content` | Done |
+| An empty Lidarr root folder | `lidarr/check.rs`: no folders to compare | Red until the user says it's a different folder; then OK, checked again every time, and its contents decide once it fills | `lidarr::tests::an_empty_root_needs_the_user_to_confirm_it`; UI `lidarr` empty root confirmation | Done |
+| Plex music can't be read | `lidarr/mod.rs`: the Plex server is offline, or its music library has no files | "Platter can't reach your Plex server, so it can't compare folders." or red "Platter couldn't see your Plex music files" | `lidarr::tests::without_plex_files_nothing_can_be_proven` | Done |
 ## Checking by hand against a real server
 
 Each of these is covered by a test that fakes it, and should also be tried
