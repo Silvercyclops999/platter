@@ -233,6 +233,7 @@ impl TagScanner {
         self.emit_progress();
         let mut last_emit = Instant::now();
         let mut wrote = false;
+        let mut read_ids: Vec<String> = Vec::new();
         let mut result = Pass::More;
         for item in batch {
             if !self.enabled() {
@@ -263,6 +264,7 @@ impl TagScanner {
                 break;
             }
             wrote = true;
+            read_ids.push(item.track_id.clone());
             {
                 let mut s = self.0.status.lock();
                 s.done = (s.done + 1).min(s.total);
@@ -277,6 +279,12 @@ impl TagScanner {
         }
         if wrote {
             self.refresh().await;
+            // ISRCs, recording ids and versions feed the song index: redo
+            // the rows of just these songs' artists (after album_tags, whose
+            // versions decide release status).
+            if let Err(e) = self.0.db.write_async(move |c| crate::identity::index::refresh_for_tracks(c, &read_ids)).await {
+                tracing::warn!("song index refresh failed: {e}");
+            }
         }
         if let Some(c) = self.counts().await {
             self.set_counts(c);

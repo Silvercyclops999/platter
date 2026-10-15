@@ -16,7 +16,7 @@ use crate::db::release::is_unreleased;
 use crate::error::AppResult;
 use crate::model::Track;
 
-use super::{FileTags, TagView, is_edit};
+use super::{CACHE_VERSION, FileTags, TagView, is_edit};
 
 /// How a read ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,8 +49,9 @@ pub struct Pending {
 pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i64) -> AppResult<()> {
     c.execute(
         "INSERT OR REPLACE INTO file_tags
-             (part_key, status, explicit, version, era, quality, date, edition, grp, source, flags, scanned_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             (part_key, status, explicit, version, era, quality, date, edition, grp, source, flags, scanned_at,
+              isrc, recording_mbid, ver)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             part_key,
             status.key(),
@@ -63,7 +64,10 @@ pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i
             t.group,
             t.source,
             t.flags,
-            now
+            now,
+            t.isrc,
+            t.recording_mbid,
+            CACHE_VERSION
         ],
     )?;
     Ok(())
@@ -72,7 +76,7 @@ pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i
 /// Read tags for one part key (tests and diagnostics).
 pub fn get(c: &Connection, part_key: &str) -> AppResult<Option<(String, FileTags)>> {
     Ok(c.query_row(
-        "SELECT status, explicit, version, era, quality, date, edition, grp, source, flags
+        "SELECT status, explicit, version, era, quality, date, edition, grp, source, flags, isrc, recording_mbid
          FROM file_tags WHERE part_key = ?1",
         [part_key],
         |r| {
@@ -88,6 +92,8 @@ pub fn get(c: &Connection, part_key: &str) -> AppResult<Option<(String, FileTags
                     group: r.get(7)?,
                     source: r.get(8)?,
                     flags: r.get(9)?,
+                    isrc: r.get(10)?,
+                    recording_mbid: r.get(11)?,
                 },
             ))
         },
@@ -95,15 +101,17 @@ pub fn get(c: &Connection, part_key: &str) -> AppResult<Option<(String, FileTags
     .optional()?)
 }
 
-/// Tracks still to read, album by album.
+/// Tracks still to read, album by album: files never read first, then files
+/// an older build read (see [`CACHE_VERSION`]). Their old row stays in use
+/// until the new read replaces it.
 pub fn pending(c: &Connection, limit: usize) -> AppResult<Vec<Pending>> {
     let mut st = c.prepare_cached(
         "SELECT t.id, t.part_key, t.container FROM tracks t
          LEFT JOIN file_tags f ON f.part_key = t.part_key
-         WHERE f.part_key IS NULL AND t.part_key <> ''
-         ORDER BY t.album_id, t.disc_number, t.track_number LIMIT ?1",
+         WHERE (f.part_key IS NULL OR f.ver < ?2) AND t.part_key <> ''
+         ORDER BY f.part_key IS NOT NULL, t.album_id, t.disc_number, t.track_number LIMIT ?1",
     )?;
-    let rows = st.query_map([limit as i64], |r| {
+    let rows = st.query_map(params![limit as i64, CACHE_VERSION], |r| {
         Ok(Pending { track_id: r.get(0)?, part_key: r.get(1)?, container: r.get(2)? })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -126,8 +134,8 @@ pub fn counts(c: &Connection) -> AppResult<Counts> {
     let total: i64 = c.query_row("SELECT count(*) FROM tracks", [], |r| r.get(0))?;
     let (done, failed): (i64, i64) = c.query_row(
         "SELECT count(*), COALESCE(sum(f.status <> 'ok'), 0)
-         FROM tracks t JOIN file_tags f ON f.part_key = t.part_key",
-        [],
+         FROM tracks t JOIN file_tags f ON f.part_key = t.part_key AND f.ver >= ?1",
+        [CACHE_VERSION],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     Ok(Counts { done: done as u64, total: total as u64, failed: failed as u64 })

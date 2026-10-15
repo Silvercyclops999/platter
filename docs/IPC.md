@@ -673,10 +673,18 @@ is `Range: bytes=0-65535`. When the tags lie further in (a big cover picture
 before them, or an MP4 whose `moov` atom follows the audio) the parser names
 the next bytes it needs and one more 64 KB read (or the block's own size, up
 to 1 MB) follows, at most six per file. Formats: FLAC Vorbis comments (with or
-without an ID3 tag in front), ID3v2.2 to 2.4 `TXXX`, MP4 `rtng` and `----`
-items, Ogg Vorbis, Opus and FLAC comments. Kept: `ARCHIVE_VERSION`, `_ERA`,
-`_QUALITY`, `_DATE`, `_EDITION`, `_GROUP`, `_SOURCE`, `_FLAGS` and explicit
-(`ITUNESADVISORY` 1 or 4, `EXPLICIT=1`, M4A `rtng` 1 or 4; 2 means clean).
+without an ID3 tag in front), ID3v2.2 to 2.4 `TXXX`, `TSRC` and `UFID`, MP4
+`rtng` and `----` items, Ogg Vorbis, Opus and FLAC comments. Kept:
+`ARCHIVE_VERSION`, `_ERA`, `_QUALITY`, `_DATE`, `_EDITION`, `_GROUP`,
+`_SOURCE`, `_FLAGS` and explicit (`ITUNESADVISORY` 1 or 4, `EXPLICIT=1`, M4A
+`rtng` 1 or 4; 2 means clean). Also kept, to tell when two files hold the same
+song: the ISRC (ID3 `TSRC`, Vorbis `ISRC`, MP4 `ISRC`) and the MusicBrainz
+recording id (Vorbis `MUSICBRAINZ_TRACKID`, ID3 `UFID` owned by
+`http://musicbrainz.org`, MP4 `MusicBrainz Track Id`). Songs are matched by
+ISRC, then the recording id from file tags, else Plex's track id, then
+artist and title. Each cached row carries the cache version it was read
+with; when a new version keeps more, older rows are read again after every
+unread file, and they keep working until then.
 
 Reads go one at a time through the player's transfer gate at the lowest
 priority, below pre-caching, and only while playback has nothing left to

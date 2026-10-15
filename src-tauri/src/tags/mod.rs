@@ -41,9 +41,19 @@ pub struct FileTags {
     pub source: Option<String>,
     /// Comma-separated, e.g. "fanedit" or "fanedit,aiedit".
     pub flags: Option<String>,
+    /// ISRC, upper case without dashes (ID3 TSRC, Vorbis ISRC, MP4 freeform ISRC).
+    pub isrc: Option<String>,
+    /// MusicBrainz recording id, lower case (Vorbis MUSICBRAINZ_TRACKID, ID3
+    /// UFID owned by musicbrainz.org, MP4 freeform "MusicBrainz Track Id").
+    pub recording_mbid: Option<String>,
 }
 
-const KEYS: [&str; 11] = [
+/// Raised whenever the parsers start keeping something new, so files read
+/// by an older build are read again (at the scan's background priority).
+/// 1: ISRC and the MusicBrainz recording id.
+pub const CACHE_VERSION: i64 = 1;
+
+const KEYS: [&str; 14] = [
     "ARCHIVE_VERSION",
     "ARCHIVE_ERA",
     "ARCHIVE_QUALITY",
@@ -55,6 +65,9 @@ const KEYS: [&str; 11] = [
     "ITUNESADVISORY",
     "EXPLICIT",
     "RTNG",
+    "ISRC",
+    "MUSICBRAINZ_TRACKID",
+    "MUSICBRAINZ TRACK ID",
 ];
 
 impl FileTags {
@@ -109,6 +122,16 @@ impl FileTags {
                 "2" => self.set_explicit(Some(false)),
                 _ => {}
             },
+            "ISRC" => {
+                if self.isrc.is_none() {
+                    self.isrc = v.split([';', '/', ',']).find_map(clean_isrc);
+                }
+            }
+            "MUSICBRAINZ_TRACKID" | "MUSICBRAINZ TRACK ID" => {
+                if self.recording_mbid.is_none() {
+                    self.recording_mbid = v.split([';', '/', ',']).find_map(clean_mbid);
+                }
+            }
             "EXPLICIT" => match v.to_ascii_lowercase().as_str() {
                 "1" | "true" | "yes" | "explicit" => self.set_explicit(Some(true)),
                 "0" | "false" | "no" | "clean" => self.set_explicit(Some(false)),
@@ -121,6 +144,27 @@ impl FileTags {
     pub fn has_flag(&self, flag: &str) -> bool {
         has_flag(self.flags.as_deref(), flag)
     }
+}
+
+/// An ISRC in its plain form ("USRC17607839"), or None when it isn't one.
+/// Dashes and spaces some taggers add are dropped.
+pub fn clean_isrc(v: &str) -> Option<String> {
+    let s = v.chars().filter(|c| !matches!(c, '-' | ' ' | '\0')).collect::<String>().to_ascii_uppercase();
+    let b = s.as_bytes();
+    let ok = b.len() == 12
+        && b[..2].iter().all(u8::is_ascii_alphabetic)
+        && b[2..5].iter().all(u8::is_ascii_alphanumeric)
+        && b[5..].iter().all(u8::is_ascii_digit);
+    ok.then_some(s)
+}
+
+/// A MusicBrainz id in lower case, or None when it isn't one (36 characters:
+/// hex digits and four dashes).
+pub fn clean_mbid(v: &str) -> Option<String> {
+    let s = v.trim().trim_matches('\0').trim().to_ascii_lowercase();
+    let ok = s.len() == 36
+        && s.char_indices().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() });
+    ok.then_some(s)
 }
 
 /// Whether a comma-separated flag list holds `flag` (fan or AI edit).

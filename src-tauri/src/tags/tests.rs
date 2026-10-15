@@ -199,7 +199,80 @@ fn expected_archive() -> FileTags {
         group: Some("test-group".into()),
         source: Some("made-up source".into()),
         flags: Some("fanedit".into()),
+        ..Default::default()
     }
+}
+
+// ------------------------------------------------------------------ recording ids
+
+const ISRC: &str = "USRC17607839";
+const REC: &str = "4f3c2b1a-0d9e-4c8b-a7f6-5e4d3c2b1a09";
+
+fn ufid_frame(owner: &str, id: &str) -> Vec<u8> {
+    [owner.as_bytes(), &[0], id.as_bytes()].concat()
+}
+
+#[test]
+fn flac_keeps_isrc_and_the_recording_id() {
+    let f = flac(&[
+        streaminfo(),
+        (4, vorbis(&["TITLE=Made Up", "isrc=US-RC1-76-07839", &format!("MUSICBRAINZ_TRACKID={}", REC.to_uppercase())])),
+    ]);
+    let (t, _) = run(&f, Some("flac"));
+    assert_eq!(t.isrc.as_deref(), Some(ISRC), "dashes dropped, upper case");
+    assert_eq!(t.recording_mbid.as_deref(), Some(REC), "lower case");
+}
+
+#[test]
+fn mp3_keeps_tsrc_and_the_musicbrainz_ufid() {
+    for ver in [3u8, 4] {
+        let f = [
+            id3(
+                ver,
+                &[
+                    (b"UFID", ufid_frame("http://example.com", "not-this")),
+                    (b"TSRC", [&[0u8][..], ISRC.as_bytes()].concat()),
+                    (b"UFID", ufid_frame("http://musicbrainz.org", REC)),
+                    // The release track id is not the recording id.
+                    (b"TXXX", txxx(0, "MusicBrainz Release Track Id", "11111111-2222-3333-4444-555555555555")),
+                ],
+            ),
+            vec![0xff; 400],
+        ]
+        .concat();
+        let (t, _) = run(&f, Some("mp3"));
+        assert_eq!(t.isrc.as_deref(), Some(ISRC), "v2.{ver}");
+        assert_eq!(t.recording_mbid.as_deref(), Some(REC), "v2.{ver}");
+    }
+    // ID3v2.2 names them TRC and UFI; UTF-16 text decodes too.
+    let mut trc = vec![1u8, 0xff, 0xfe];
+    for u in ISRC.encode_utf16() {
+        trc.extend(u.to_le_bytes());
+    }
+    let f = id3(2, &[(b"TRC", trc), (b"UFI", ufid_frame("http://musicbrainz.org", REC))]);
+    let t = run(&f, Some("mp3")).0;
+    assert_eq!(t.isrc.as_deref(), Some(ISRC));
+    assert_eq!(t.recording_mbid.as_deref(), Some(REC));
+}
+
+#[test]
+fn m4a_keeps_the_freeform_isrc_and_recording_id() {
+    let f = mp4(&[freeform("ISRC", ISRC), freeform("MusicBrainz Track Id", REC)], true, 200_000, true);
+    let (t, reads) = run(&f, Some("mp4"));
+    assert_eq!(t.isrc.as_deref(), Some(ISRC));
+    assert_eq!(t.recording_mbid.as_deref(), Some(REC));
+    assert_eq!(reads, 2);
+}
+
+#[test]
+fn ids_that_are_not_ids_are_left_out() {
+    let f = flac(&[streaminfo(), (4, vorbis(&["ISRC=not an isrc", "MUSICBRAINZ_TRACKID=12345", "ISRC=GBAYE0601498; USRC17607839"]))]);
+    let t = run(&f, Some("flac")).0;
+    assert_eq!(t.isrc.as_deref(), Some("GBAYE0601498"), "the first good value of the first good tag");
+    assert_eq!(t.recording_mbid, None);
+    assert_eq!(super::clean_isrc("usrc17607839").as_deref(), Some(ISRC));
+    assert_eq!(super::clean_isrc("USRC1760783"), None);
+    assert_eq!(super::clean_mbid(" 4F3C2B1A-0D9E-4C8B-A7F6-5E4D3C2B1A09\0").as_deref(), Some(REC));
 }
 
 // ------------------------------------------------------------------ parsers
@@ -630,6 +703,54 @@ async fn the_scan_reads_each_file_once_and_again_when_it_changes() {
     // The scan pruned the row for the key no track has any more.
     assert!(db.read(|c| store::get(c, &t1.part_key)).unwrap().is_none());
     assert_eq!(db.write(|c| store::prune(c)).unwrap(), 0);
+}
+
+#[tokio::test]
+async fn files_read_by_an_older_build_are_read_again_for_their_ids() {
+    let t1 = track("11", "1", 1, "flac");
+    let t2 = track("12", "1", 2, "flac");
+    let mut a = album("1", "ar", Some(2020), 10, &[]);
+    a.matched = Some(true);
+    let (db, _d) = db_with(&[a], &[t1.clone(), t2.clone()]);
+    // t1 was read before ids were kept: an old row (version 0) with a badge.
+    db.write(|c| {
+        c.execute(
+            "INSERT INTO file_tags (part_key, status, version, scanned_at) VALUES (?1, 'ok', 'leak', 1)",
+            [&t1.part_key],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let pending = db.read(|c| store::pending(c, 10)).unwrap();
+    let ids: Vec<&str> = pending.iter().map(|p| p.track_id.as_str()).collect();
+    assert_eq!(ids, ["12", "11"], "never-read files first, then old reads");
+    assert_eq!(db.read(store::counts).unwrap().done, 0, "an old read doesn't count as done");
+    // The old row keeps working until the new read replaces it.
+    assert_eq!(db.read(|c| store::track_version(c, "11")).unwrap().as_deref(), Some("leak"));
+
+    let files = [
+        (t1.part_key.clone(), flac(&[streaminfo(), (4, vorbis(&["ARCHIVE_VERSION=leak", &format!("ISRC={ISRC}")]))])),
+        (t2.part_key.clone(), flac(&[streaminfo(), (4, vorbis(&[&format!("MUSICBRAINZ_TRACKID={REC}")]))])),
+    ];
+    let refs: Vec<(&str, Vec<u8>)> = files.iter().map(|(p, b)| (p.as_str(), b.clone())).collect();
+    let server = serve(&refs, false, Duration::ZERO).await;
+    let scan = TagScanner::new(db.clone(), Arc::new(Parts(server.uri())), reader(TransferGate::new(), None), None);
+    scan.spawn();
+    until(|| scan.status().done == 2 && !scan.status().running).await;
+    let (_, t) = db.read(|c| store::get(c, &t1.part_key)).unwrap().unwrap();
+    assert_eq!((t.isrc.as_deref(), t.version.as_deref()), (Some(ISRC), Some("leak")));
+    assert!(db.read(|c| store::pending(c, 10)).unwrap().is_empty(), "read once at the new version");
+    // The ids reach the song index for those songs' artist.
+    until(|| {
+        db.read(|c| {
+            Ok(c.query_row("SELECT count(*) FROM song_index WHERE isrc = ?1 OR recording_mbid = ?2", [ISRC, REC], |r| {
+                r.get::<_, i64>(0)
+            })?)
+        })
+        .unwrap()
+            == 2
+    })
+    .await;
 }
 
 #[tokio::test]

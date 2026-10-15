@@ -54,6 +54,7 @@ impl Sparse {
 
 /// What a parse pass found.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)] // one per file read, never stored
 pub enum Step {
     Done(FileTags),
     /// Read at least `len` bytes at `offset`, then parse again.
@@ -235,7 +236,13 @@ fn frames(s: &Sparse, start: u64, end: u64, ver: u8, ext: bool, frame_unsync: bo
         if size == 0 || off + hdr + size > end {
             break;
         }
-        if id == b"TXXX" || id == b"TXX" {
+        let kind = match id {
+            b"TXXX" | b"TXX" => Some(Frame::UserText),
+            b"TSRC" | b"TRC" => Some(Frame::Isrc),
+            b"UFID" | b"UFI" => Some(Frame::Ufid),
+            _ => None,
+        };
+        if let Some(kind) = kind {
             let compressed_or_encrypted = match ver {
                 3 => fflags & 0x00c0 != 0,
                 4 => fflags & 0x000c != 0,
@@ -248,7 +255,11 @@ fn frames(s: &Sparse, start: u64, end: u64, ver: u8, ext: bool, frame_unsync: bo
                     data = std::borrow::Cow::Owned(unsync(&data));
                 }
                 let d: &[u8] = if ver == 4 && fflags & 0x0001 != 0 { data.get(4..).unwrap_or(&[]) } else { &data };
-                txxx(d, tags);
+                match kind {
+                    Frame::UserText => txxx(d, tags),
+                    Frame::Isrc => text_frame(d, "ISRC", tags),
+                    Frame::Ufid => ufid(d, tags),
+                }
             }
         }
         off += hdr + size;
@@ -296,6 +307,39 @@ fn split_terminated(enc: u8, b: &[u8]) -> Vec<&[u8]> {
         out.extend(b.split(|&x| x == 0));
     }
     out
+}
+
+/// ID3 frames the scan reads.
+#[derive(Clone, Copy)]
+enum Frame {
+    /// TXXX: a named value (the ARCHIVE_* tags and the like).
+    UserText,
+    /// TSRC: the ISRC.
+    Isrc,
+    /// UFID: an id owned by a database; MusicBrainz keeps its recording id here.
+    Ufid,
+}
+
+/// A standard text frame (encoding byte, then one or more values) stored as `key`.
+fn text_frame(d: &[u8], key: &str, tags: &mut FileTags) {
+    let Some((&enc, rest)) = d.split_first() else { return };
+    for v in split_terminated(enc, rest) {
+        let v = decode(enc, v);
+        if !v.trim().is_empty() {
+            tags.set(key, &v);
+        }
+    }
+}
+
+/// A unique file id: owner (Latin-1, zero-terminated), then up to 64 bytes.
+/// Only MusicBrainz's is kept, as the recording id.
+fn ufid(d: &[u8], tags: &mut FileTags) {
+    let Some(end) = d.iter().position(|&b| b == 0) else { return };
+    let owner = &d[..end];
+    if owner.eq_ignore_ascii_case(b"http://musicbrainz.org") || owner.eq_ignore_ascii_case(b"https://musicbrainz.org") {
+        let id = String::from_utf8_lossy(&d[end + 1..]);
+        tags.set("MUSICBRAINZ_TRACKID", &id);
+    }
 }
 
 /// A user text frame: description, then one or more values.
