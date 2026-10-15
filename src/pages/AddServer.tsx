@@ -134,7 +134,7 @@ export function AddServerFlow({ choose = false, plexSignedIn = false, onPlex, on
           </button>
           <button type="button" className="add-server__kind" onClick={() => setStep({ kind: "address" })}>
             <span className="add-server__kind-name">Jellyfin</span>
-            <span className="add-server__kind-note">Your server's address</span>
+            <span className="add-server__kind-note">Your server's address. In beta</span>
           </button>
         </div>
         {onCancel && (
