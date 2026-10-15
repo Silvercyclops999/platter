@@ -23,6 +23,7 @@ import { nav } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
+import { MissingReleaseCard, missingFor, useMissingReleases } from "./LidarrRequest";
 import {
   POPULAR_FIRST,
   POPULAR_MORE,
@@ -158,7 +159,7 @@ function ArtistView({ id }: { id: string }) {
               case "popular":
                 return popularWaiting ? <PopularSkeleton key={s} /> : <PopularSection key={s} id={id} data={data} />;
               case "discography":
-                return <Discography key={s} id={id} sections={data.sections} />;
+                return <Discography key={s} id={id} sections={data.sections} artist={credited ? undefined : data.artist.title} />;
               case "appearsOn":
                 return <AppearsOn key={s} id={id} albums={data.appearsOn} />;
               case "about":
@@ -360,8 +361,9 @@ function PopularSection({ id, data }: { id: string; data: ArtistPageData }) {
 }
 
 /** The discography shelf with its type chips; Show all opens the full discography page at the chosen type. */
-function Discography({ id, sections }: { id: string; sections: ArtistPageSection[] }) {
+function Discography({ id, sections, artist }: { id: string; sections: ArtistPageSection[]; artist?: string }) {
   const [filter, setFilter] = useState<DiscographyFilter>("popular");
+  const missing = useMissingReleases(id, artist);
   const chips = discographyChips(sections);
   const chipRow = (
     <FilterChips label="Release type" items={chips} value={filter} onChange={setFilter} className="discography__chips" scroll />
@@ -378,6 +380,12 @@ function Discography({ id, sections }: { id: string; sections: ArtistPageSection
             <AlbumCard album={album} subtitle="year" note={latest ? "Latest release" : undefined} />
           </ShelfItem>
         ))}
+        {artist &&
+          missingFor(missing.items, filter).map((item) => (
+            <ShelfItem key={`missing-${item.releaseGroupId}`}>
+              <MissingReleaseCard item={item} artist={artist} artistId={id} onChanged={missing.reload} />
+            </ShelfItem>
+          ))}
       </Shelf>
     </div>
   );

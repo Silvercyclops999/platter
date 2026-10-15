@@ -67,6 +67,7 @@ import {
   LidarrUrlField,
   useLidarr,
 } from "./LidarrSettings";
+import { LidarrRequestsList } from "./LidarrRequest";
 import { useTheme } from "../stores/theme";
 import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNote, useThemeFolder } from "./ThemeSettings";
 import type { AiProvider } from "../lib/types";
@@ -1640,6 +1641,25 @@ export function SettingsPage() {
               "Reads Lidarr's folders and settings and compares them with your Plex music, by contents as well as paths, to make sure Lidarr can never touch your existing library. Only reads; nothing in Lidarr changes.",
             control: () => <LidarrCheckButton lidarr={lidarr} />,
             block: () => <LidarrFindings lidarr={lidarr} />,
+          },
+          {
+            key: "showMissingReleases",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Show missing official releases",
+            description:
+              "Artist pages list official albums and EPs you don't have, dimmed at the end, with Request. Only while Lidarr's setup check passes. Anything sharing a title with an album in your library, unreleased ones included, is left out.",
+            control: (ids) => toggle(s, "showMissingReleases", ids),
+          },
+          {
+            key: "lidarrRequests",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Requests",
+            description:
+              "Albums requested from this computer and where each stands in Lidarr. Waiting ones send when Platter can reach Lidarr, after the setup check runs again.",
+            control: () => null,
+            block: () => <LidarrRequestsList />,
           },
         ] satisfies RowDef[])
       : []),

@@ -893,6 +893,8 @@ export interface Settings {
   lidarrUrl: string;
   /** Lidarr's away address, tried when the home one doesn't answer (empty: none). */
   lidarrAwayUrl: string;
+  /** Artist pages list official releases the library lacks, with Request (when Lidarr is set up and its check passed). */
+  showMissingReleases: boolean;
   /** The miniplayer window stays above other windows (this device only). */
   miniplayerOnTop: boolean;
   /** The miniplayer's card takes a colour from the cover (this device only). */
@@ -1117,6 +1119,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModel: "claude-opus-5-5",
   lidarrUrl: "",
   lidarrAwayUrl: "",
+  showMissingReleases: true,
   miniplayerOnTop: true,
   miniplayerTint: true,
   miniplayerQueue: false,
@@ -1643,6 +1646,76 @@ export interface LidarrReport {
   checkedAt: number;
   /** Which address answered. */
   route: "home" | "away" | null;
+}
+
+/** Where a Lidarr request stands. */
+export type LidarrRequestState = "queued" | "requested" | "searching" | "downloading" | "imported" | "failed";
+
+/** What a request needs: the release group and what it's called. */
+export interface LidarrRequestInput {
+  releaseGroupId: string;
+  title: string;
+  artist: string;
+  artistId?: string | null;
+  /** The album's name typed by the user (their first request ever). */
+  typed?: string | null;
+}
+
+/** `lidarr_request_preview`: what a request will do. Reads only. */
+export interface LidarrPreview {
+  releaseGroupId: string;
+  title: string;
+  artist: string;
+  /** Where the files will land, as Lidarr sees it. */
+  destination: string | null;
+  /** From the last check, since Lidarr can't be reached now. */
+  destinationIsGuess: boolean;
+  /** The first request ever: the album's name must be typed. */
+  needsTyped: boolean;
+  /** Lidarr has the album already; nothing will be sent. */
+  existing: LidarrRequestState | null;
+  /** False: the request will wait until Platter can reach Lidarr. */
+  reachable: boolean;
+  route: "home" | "away" | null;
+  /** The artist is new to Lidarr and will be added with only this album. */
+  addsArtist: boolean;
+}
+
+/** One request, kept on this device. */
+export interface LidarrRequest {
+  id: string;
+  releaseGroupId: string;
+  title: string;
+  artist: string;
+  artistId: string | null;
+  state: LidarrRequestState;
+  destination: string | null;
+  lidarrAlbumId: number | null;
+  addedArtist: boolean;
+  alreadyInLidarr: boolean;
+  createdAt: number;
+  updatedAt: number;
+  /** Why it's waiting or failed. */
+  message: string | null;
+  /** What Platter did along the way. */
+  notes: string[];
+}
+
+/** One official release the library lacks. */
+export interface LidarrMissingItem {
+  releaseGroupId: string;
+  title: string;
+  /** "album" or "ep". */
+  kind: string;
+  year: number | null;
+  request: LidarrRequestState | null;
+}
+
+/** `lidarr_missing_releases`: for the artist page. */
+export interface LidarrMissing {
+  /** Setting on, Lidarr set up, last check green. */
+  shown: boolean;
+  items: LidarrMissingItem[];
 }
 
 export interface ScrobbleStatus {

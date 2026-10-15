@@ -99,7 +99,11 @@ import type {
   ListenView,
   ListenOp,
   AiStatus,
+  LidarrMissing,
+  LidarrPreview,
   LidarrReport,
+  LidarrRequest,
+  LidarrRequestInput,
   LidarrStatus,
   Bookmark,
   HiddenItem,
@@ -531,6 +535,16 @@ export interface Backend {
   lidarrCheck(): Promise<LidarrReport>;
   /** Say an empty Lidarr root folder is (or isn't) separate from the Plex music folder. */
   lidarrConfirmRoot(path: string, confirmed: boolean): Promise<void>;
+  /** What a Lidarr request will do and where its files will land. Runs the full check; reads only. */
+  lidarrRequestPreview(input: LidarrRequestInput): Promise<LidarrPreview>;
+  /** Send a request to Lidarr (or keep it waiting when Lidarr can't be reached). */
+  lidarrRequest(input: LidarrRequestInput): Promise<LidarrRequest>;
+  /** Requests on this device, newest first; refresh reads their state from Lidarr. */
+  lidarrRequests(refresh: boolean): Promise<LidarrRequest[]>;
+  /** Cancel a waiting request, or clear a finished one. */
+  lidarrRequestCancel(id: string): Promise<LidarrRequest[]>;
+  /** An artist's official releases the library lacks, for the artist page. */
+  lidarrMissingReleases(artistId: string, artist: string): Promise<LidarrMissing>;
 
   // Library import (nothing here writes to Plex)
   importOverview(): Promise<ImportOverview>;
@@ -820,6 +834,11 @@ export function createTauriBackend(): Backend {
     importMissing: () => call("import_missing"),
     importOpenLink: (url) => call("import_open_link", { url }),
     importForget: (source) => call("import_forget", { source }),
+    lidarrRequestPreview: (input) => call("lidarr_request_preview", { input }),
+    lidarrRequest: (input) => call("lidarr_request", { input }),
+    lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),
+    lidarrRequestCancel: (id) => call("lidarr_request_cancel", { id }),
+    lidarrMissingReleases: (artistId, artist) => call("lidarr_missing_releases", { artistId, artist }),
     miniplayerState: () => call("miniplayer_state"),
     miniplayerSet: (open) => call("miniplayer_set", { open }),
     windowLabel: () => getCurrentWindow().label,

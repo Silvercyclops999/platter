@@ -29,6 +29,7 @@
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
+  LidarrRequestInput,
   CachedLibrary,
   ListenOp,
   DownloadKind,
@@ -432,6 +433,7 @@ export class MockBackend implements Backend {
       this.importMock.run("streaming", "Downloads/my_data.zip");
       this.importMock.run("transfer", "Downloads/library.csv");
     }
+    if (this.opts.lidarr === "ready" || this.opts.lidarr === "offline") this.settings = { ...this.settings, lidarrUrl: "http://192.168.x.x:8686" };
     if (this.opts.downloads) {
       this.downloads.seedDone("album", this.fx.albums[0].id, this.fx.albums[0].title);
       this.downloads.seedDone("liked", "", "Liked Songs");
@@ -2622,6 +2624,21 @@ export class MockBackend implements Backend {
   }
   lidarrConfirmRoot(path: string, confirmed: boolean) {
     return this.delay(() => this.lidarr.confirmRoot(this.settings, path, confirmed));
+  }
+  lidarrRequestPreview(input: LidarrRequestInput) {
+    return this.delay(() => this.lidarr.preview(this.settings, input));
+  }
+  lidarrRequest(input: LidarrRequestInput) {
+    return this.delay(() => this.lidarr.request(this.settings, input, Math.floor(Date.now() / 1000)));
+  }
+  lidarrRequests(_refresh: boolean) {
+    return this.delay(() => this.lidarr.list());
+  }
+  lidarrRequestCancel(id: string) {
+    return this.delay(() => this.lidarr.cancel(id));
+  }
+  lidarrMissingReleases(artistId: string, _artist: string) {
+    return this.delay(() => this.lidarr.missing(this.settings, artistId));
   }
 
   // ---------------------------------------------------------------- library import

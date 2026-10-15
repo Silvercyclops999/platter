@@ -1,13 +1,33 @@
-import type { AppError, LidarrFinding, LidarrReport, LidarrStatus, Settings } from "../types";
+import type {
+  AppError,
+  LidarrFinding,
+  LidarrMissing,
+  LidarrPreview,
+  LidarrReport,
+  LidarrRequest,
+  LidarrRequestInput,
+  LidarrRequestState,
+  LidarrStatus,
+  Settings,
+} from "../types";
 
 /**
  * Lidarr's setup check in the browser mock. `?lidarr=` picks what the faked
  * Lidarr looks like: `demo` (one red, two amber; the default), `clear`,
  * `empty` (an empty root folder to vouch for), `away` (only the away address
- * answers), `unreachable`, `badKey` or `old`.
+ * answers), `unreachable`, `badKey` or `old`. `ready` is set up with a
+ * green check (artist pages list missing releases, requests send);
+ * `offline` is the same with Lidarr out of reach (requests wait).
  */
-export type LidarrDemo = "demo" | "clear" | "empty" | "away" | "unreachable" | "badKey" | "old";
-export const LIDARR_DEMOS: LidarrDemo[] = ["demo", "clear", "empty", "away", "unreachable", "badKey", "old"];
+export type LidarrDemo = "demo" | "clear" | "empty" | "away" | "unreachable" | "badKey" | "old" | "ready" | "offline";
+export const LIDARR_DEMOS: LidarrDemo[] = ["demo", "clear", "empty", "away", "unreachable", "badKey", "old", "ready", "offline"];
+
+/** Mock MusicBrainz: official releases each artist lacks, by artist title. */
+const MISSING_BY_DEFAULT = [
+  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000001", title: "Paper Lanterns", kind: "album", year: 2014 },
+  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000002", title: "Low Tide EP", kind: "ep", year: 2017 },
+  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000003", title: "Northern Rooms", kind: "album", year: 2022 },
+];
 export const isLidarrDemo = (v: string | null): v is LidarrDemo => !!v && (LIDARR_DEMOS as string[]).includes(v);
 
 const invalid = (message: string): AppError => ({ kind: "invalid", message });
@@ -65,20 +85,120 @@ export class MockLidarr {
   private hasKey = false;
   private headers: [string, string][] = [];
   private confirmed = new Set<string>();
+  private lastPassed = false;
+  private typedOnce = false;
+  requests: LidarrRequest[] = [];
 
-  constructor(private demo: LidarrDemo = "demo") {}
+  constructor(private demo: LidarrDemo = "demo") {
+    if (demo === "ready" || demo === "offline") {
+      this.hasKey = true;
+      this.lastPassed = true;
+    }
+  }
+
+  /** Whether the faked Lidarr answers now. */
+  private reachable(s: Settings) {
+    return this.demo !== "offline" && this.demo !== "unreachable" && !(this.demo === "away" && !s.lidarrAwayUrl.trim());
+  }
 
   /** Test hook: switch what the faked Lidarr looks like. */
   setDemo(demo: LidarrDemo) {
     this.demo = demo;
   }
 
-  /** Test hook: no key, no headers, nothing confirmed. */
+  /** Test hook: no key, no headers, nothing confirmed, no requests. */
   reset(demo: LidarrDemo = "demo") {
     this.demo = demo;
-    this.hasKey = false;
+    this.hasKey = demo === "ready" || demo === "offline";
+    this.lastPassed = this.hasKey;
+    this.typedOnce = false;
     this.headers = [];
     this.confirmed.clear();
+    this.requests = [];
+  }
+
+  /** Test hook: the first request has been typed already. */
+  setTypedOnce(v: boolean) {
+    this.typedOnce = v;
+  }
+
+  private setUp(s: Settings) {
+    return (!!s.lidarrUrl.trim() || !!s.lidarrAwayUrl.trim()) && this.hasKey;
+  }
+
+  missing(s: Settings, _artistId: string): LidarrMissing {
+    if (!s.showMissingReleases || !this.setUp(s) || !this.lastPassed) return { shown: false, items: [] };
+    return {
+      shown: true,
+      items: MISSING_BY_DEFAULT.map((m) => ({ ...m, request: this.requests.find((r) => r.releaseGroupId === m.releaseGroupId)?.state ?? null })),
+    };
+  }
+
+  private destination(artist: string) {
+    return `/downloads/lidarr/${artist}`;
+  }
+
+  preview(s: Settings, input: LidarrRequestInput): LidarrPreview {
+    if (!this.setUp(s)) throw invalid("Set up Lidarr in Settings first.");
+    const reachable = this.reachable(s);
+    if (reachable && this.demo === "demo") {
+      throw invalid("Platter won't send Lidarr anything while its setup check has red items: Lidarr's folder /music is your Plex music folder. Fix them in Lidarr, then check again in Settings.");
+    }
+    return {
+      releaseGroupId: input.releaseGroupId,
+      title: input.title,
+      artist: input.artist,
+      destination: this.destination(input.artist),
+      destinationIsGuess: !reachable,
+      needsTyped: !this.typedOnce,
+      existing: null,
+      reachable,
+      route: reachable ? "home" : null,
+      addsArtist: !this.requests.some((r) => r.artist === input.artist && r.state !== "queued"),
+    };
+  }
+
+  request(s: Settings, input: LidarrRequestInput, now: number): LidarrRequest {
+    const p = this.preview(s, input);
+    const fold = (t: string) => t.trim().replace(/\s+/g, " ").toLowerCase();
+    if (p.needsTyped && (!input.typed || fold(input.typed) !== fold(input.title))) {
+      throw invalid(`Type the album's name, ${input.title}, to send your first request.`);
+    }
+    const had = this.requests.find((r) => r.releaseGroupId === input.releaseGroupId && r.state !== "failed");
+    if (had) return had;
+    const state: LidarrRequestState = p.reachable ? "searching" : "queued";
+    const r: LidarrRequest = {
+      id: `req-${this.requests.length + 1}`,
+      releaseGroupId: input.releaseGroupId,
+      title: input.title,
+      artist: input.artist,
+      artistId: input.artistId ?? null,
+      state,
+      destination: p.destination,
+      lidarrAlbumId: p.reachable ? 100 + this.requests.length : null,
+      addedArtist: p.reachable && p.addsArtist,
+      alreadyInLidarr: false,
+      createdAt: now,
+      updatedAt: now,
+      message: p.reachable ? null : "Sends when Platter can reach Lidarr.",
+      notes: p.reachable && p.addsArtist ? [`Added ${input.artist} to Lidarr with only this album to download.`] : [],
+    };
+    this.requests = [r, ...this.requests];
+    this.typedOnce = true;
+    return r;
+  }
+
+  list(): LidarrRequest[] {
+    return [...this.requests];
+  }
+
+  cancel(id: string): LidarrRequest[] {
+    const r = this.requests.find((x) => x.id === id);
+    if (r && !(r.state === "queued" || r.state === "imported" || r.state === "failed" || r.alreadyInLidarr)) {
+      throw invalid("Lidarr already has this request. Remove the album in Lidarr to stop it.");
+    }
+    this.requests = this.requests.filter((x) => x.id !== id);
+    return this.list();
   }
 
   status(s: Settings): LidarrStatus {
@@ -114,7 +234,7 @@ export class MockLidarr {
     if (!s.lidarrUrl.trim() && !s.lidarrAwayUrl.trim()) throw invalid("Set Lidarr's address first.");
     if (!this.hasKey) throw invalid("Add Lidarr's API key first.");
     const unreachable: AppError = { kind: "network", message: "Lidarr isn't reachable. Check the address, and that Lidarr is running." };
-    if (this.demo === "unreachable") throw unreachable;
+    if (this.demo === "unreachable" || this.demo === "offline") throw unreachable;
     if (this.demo === "away" && !s.lidarrAwayUrl.trim()) throw unreachable;
     if (this.demo === "badKey") throw { kind: "auth", message: "Lidarr didn't accept this API key. Copy it again from Lidarr's Settings > General." };
     if (this.demo === "old") {
@@ -194,6 +314,7 @@ export class MockLidarr {
       });
     }
     const route = this.demo === "away" || !s.lidarrUrl.trim() ? "away" : "home";
+    this.lastPassed = red.length === 0;
     return { version: "2.8.2.4493", findings: [...red, ...amber, ...good], passed: red.length === 0, checkedAt: now, route };
   }
 }

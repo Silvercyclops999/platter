@@ -1,0 +1,92 @@
+/* Lidarr requests: missing releases at the end of an artist's albums, the request dialog, the Settings list. */
+
+/* A release the library lacks: the same card, dimmed, with its action below. */
+.missing-release { gap: 0; }
+.missing-release__art,
+.missing-release__title,
+.missing-release__sub { opacity: 0.5; transition: opacity var(--motion-quick) var(--motion-easing); }
+.missing-release:hover .missing-release__art,
+.missing-release:hover .missing-release__title,
+.missing-release:hover .missing-release__sub,
+.missing-release:focus-within .missing-release__art,
+.missing-release:focus-within .missing-release__title,
+.missing-release:focus-within .missing-release__sub { opacity: 0.72; }
+.missing-release__art .art { box-shadow: none; }
+.missing-release__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.missing-release__action { position: relative; z-index: 2; display: flex; margin-top: var(--space-2); }
+
+/* Where a request stands. */
+.lidarr-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--color-state-pressed);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+.lidarr-state--searching,
+.lidarr-state--downloading { color: var(--color-text-primary); }
+.lidarr-state--imported { color: var(--color-success); }
+.lidarr-state--failed { color: var(--color-error-text); background: var(--color-error-surface); }
+
+/* The request dialog. */
+.lidarr-request { width: min(480px, calc(100vw - 48px)); }
+.lidarr-request__loading { display: flex; flex-direction: column; gap: var(--space-3); }
+.lidarr-request__path {
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-row);
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+.lidarr-request__note { font-size: var(--font-size-sm); }
+.lidarr-request__queued,
+.lidarr-request__error {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+.lidarr-request__queued { background: var(--color-bg-raised); color: var(--color-text-primary); }
+.lidarr-request__error { background: var(--color-error-surface); color: var(--color-error-text); }
+.lidarr-request__queued svg,
+.lidarr-request__error svg { flex: none; margin-top: 2px; }
+.lidarr-request__typed { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-4); }
+.lidarr-request__typed-label { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.lidarr-request .lidarr-request__typed-field { width: 100%; }
+.lidarr-request__typed-field:focus { outline: none; border-color: color-mix(in srgb, var(--color-ink) 28%, transparent); }
+.lidarr-request__typed-field:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+
+/* Settings: the requests list. */
+.lidarr-requests { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: var(--space-2) 0 0; list-style: none; }
+.lidarr-requests__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+}
+.lidarr-requests__text { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 0; }
+.lidarr-requests__title { margin: 0; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); overflow-wrap: anywhere; }
+.lidarr-requests__artist { font-weight: var(--font-weight-regular, 400); color: var(--color-text-secondary); }
+.lidarr-requests__meta { margin: 0; font-size: var(--font-size-sm); line-height: 1.5; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.lidarr-requests__empty { margin: 0; padding-top: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  .missing-release__art,
+  .missing-release__title,
+  .missing-release__sub { transition: none; }
+}
