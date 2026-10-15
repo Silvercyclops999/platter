@@ -34,21 +34,43 @@ export const useDownloads = create<DownloadsState>()(() => ({ status: null, ids:
 let started: Backend | null = null;
 let unsubs: Array<() => void> = [];
 
-const reloadIds = (b: Backend) =>
-  b.downloadedTracks().then(
-    (ids) => useDownloads.setState({ ids: new Set(ids) }),
+// A command's answer and the core's events travel separately, so an answer
+// can land after an event newer than it. The core sends every change as a
+// `downloads://status` event, so a status answer is only used when no event
+// came while it was being asked for; dropping it just waits for that event.
+let statusEvents = 0;
+/** Reloads of the downloaded songs asked for, and the newest one used. */
+let idsAsked = 0;
+let idsUsed = 0;
+
+const reloadIds = (b: Backend) => {
+  const n = ++idsAsked;
+  return b.downloadedTracks().then(
+    (ids) => {
+      // An older reload answering after a newer one changes nothing.
+      if (n < idsUsed) return;
+      idsUsed = n;
+      useDownloads.setState({ ids: new Set(ids) });
+    },
     () => {},
   );
+};
 
 /** Load the status and follow its events (once, at startup). */
 export async function startDownloads(b: Backend = backend): Promise<void> {
   if (started === b) return;
   started = b;
-  unsubs.push(await b.listen("downloads://status", (status) => takeStatus(status)));
+  unsubs.push(
+    await b.listen("downloads://status", (status) => {
+      statusEvents++;
+      takeStatus(status);
+    }),
+  );
   unsubs.push(await b.listen("downloads://changed", () => void reloadIds(b)));
+  const seen = statusEvents;
   await Promise.all([
     b.downloadsStatus().then(
-      (status) => useDownloads.setState({ status }),
+      (status) => statusEvents === seen && useDownloads.setState({ status }),
       () => {},
     ),
     reloadIds(b),
@@ -101,8 +123,10 @@ const message = (e: unknown) => (e && typeof e === "object" && "message" in e ? 
 /** Turn a download on or off. */
 export async function setDownload(t: DownloadTarget, on: boolean): Promise<boolean> {
   try {
+    const seen = statusEvents;
     const status = await backend.downloadsSet(t.kind, t.id, on, { title: t.title, trackIds: t.trackIds?.() });
-    takeStatus(status);
+    // An event that came meanwhile may be newer than this answer (see statusEvents).
+    if (statusEvents === seen) takeStatus(status);
     return true;
   } catch (e) {
     toast.error(`Couldn't ${on ? "download" : "remove"} ${t.title}: ${message(e)}`);

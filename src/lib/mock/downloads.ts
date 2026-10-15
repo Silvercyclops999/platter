@@ -59,11 +59,14 @@ export class MockDownloads {
   private current: { trackId: string; received: number; total: number } | null = null;
   private running = false;
   private paused: DownloadPause | null = null;
+  /** Bumped by reset, so a transfer still ticking from before stops. */
+  private generation = 0;
 
   constructor(private hooks: MockDownloadsHooks) {}
 
   /** Back to nothing downloaded (tests). */
   reset() {
+    this.generation++;
     this.items.clear();
     this.files.clear();
     this.order = [];
@@ -280,7 +283,10 @@ export class MockDownloads {
     this.current = { trackId: next, received: 0, total };
     this.emit();
     let step = 0;
+    const generation = this.generation;
     const tick = () => {
+      // Reset meanwhile (the next test): this transfer is gone.
+      if (generation !== this.generation) return;
       const cur = this.current;
       // Removed, or the queue has to stop (Go offline, away from home).
       if (!cur || cur.trackId !== next || this.blocked()) {

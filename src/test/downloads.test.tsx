@@ -8,12 +8,12 @@
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { DownloadDialogs, DownloadsBanner } from "../components/DownloadButton";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { DEFAULT_SETTINGS } from "../lib/types";
+import { DEFAULT_SETTINGS, type DownloadItem, type DownloadStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { LikedPage } from "../pages/LikedPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
@@ -22,7 +22,7 @@ import { offlineCallout } from "../shell/bannerView";
 import { Sidebar } from "../shell/Sidebar";
 import { AppMenu } from "../shell/TopBar";
 import { useApp } from "../stores/app";
-import { catchingUpMessage, resetDownloads, startDownloads, useDownloads } from "../stores/downloads";
+import { catchingUpMessage, findItem, resetDownloads, setDownload, startDownloads, useDownloads } from "../stores/downloads";
 import { useLibraryView } from "../stores/library";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -34,6 +34,16 @@ const albumTracks = mock.fx.tracksByAlbum.get(album.id)!;
 
 const button = () => screen.getByTestId("download-button");
 const toasts = () => useToasts.getState().toasts.map((t) => t.message);
+/**
+ * Waits for a download to finish: the button turns to the filled disc, then
+ * names "Remove download of …". A role query re-run on every progress tick of
+ * a long download takes seconds on its own, so the wait watches the button's
+ * class and the accessible name is checked once at the end.
+ */
+async function downloaded(title: string): Promise<HTMLElement> {
+  await waitFor(() => expect(button()).toHaveClass("dl-btn--downloaded"));
+  return screen.getByRole("button", { name: `Remove download of ${title}` });
+}
 
 beforeEach(async () => {
   mock.downloads.reset();
@@ -51,8 +61,12 @@ beforeEach(async () => {
   await startDownloads();
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("album download", () => {
-  it("goes from the outline to a ring with percent to the filled disc, then says it's complete", { timeout: 20_000 }, async () => {
+  it("goes from the outline to a ring with percent to the filled disc, then says it's complete", async () => {
     mock.downloads.stepMs = 25;
     mock.downloads.steps = 2;
     render(<AlbumPage id={album.id} />);
@@ -63,7 +77,7 @@ describe("album download", () => {
     await waitFor(() => expect(button()).toHaveClass("dl-btn--downloading"));
     expect(within(button()).getByText(/^\d+%$/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Downloading, \d+%\. Cancel the download/ })).toBeInTheDocument();
-    const done = await screen.findByRole("button", { name: `Remove download of ${album.title}` }, { timeout: 15_000 });
+    const done = await downloaded(album.title);
     expect(done).toHaveAttribute("aria-pressed", "true");
     expect(toasts()).toContain("Download complete");
     // Every row has the downloaded mark.
@@ -108,13 +122,13 @@ describe("album download", () => {
 });
 
 describe("playlists and Liked Songs", () => {
-  it("downloads a playlist from its page", { timeout: 20_000 }, async () => {
+  it("downloads a playlist from its page", async () => {
     mock.downloads.steps = 1;
     mock.downloads.stepMs = 1;
     const pl = mock.fx.playlists.find((p) => (mock.fx.playlistTracks.get(p.id) ?? []).length > 0 && !p.smart)!;
     render(<PlaylistPage id={pl.id} />);
     await userEvent.click(await screen.findByRole("button", { name: `Download ${pl.title}` }));
-    await screen.findByRole("button", { name: `Remove download of ${pl.title}` }, { timeout: 15_000 });
+    await downloaded(pl.title);
   });
 
   it("Liked Songs' toggle is the Download Liked Songs setting", async () => {
@@ -138,7 +152,7 @@ describe("keeping downloads in sync", () => {
     await startDownloads();
   };
 
-  it("songs added to a downloaded playlist download by themselves", { timeout: 20_000 }, async () => {
+  it("songs added to a downloaded playlist download by themselves", async () => {
     const p = pl();
     await seed("playlist", p.id, p.title);
     mock.downloads.stepMs = 30;
@@ -153,7 +167,7 @@ describe("keeping downloads in sync", () => {
     expect(useDownloads.getState().ids.has(added[2])).toBe(false);
     // Row badges fill in one by one, then it's downloaded again.
     await waitFor(() => expect(useDownloads.getState().ids.has(added[0])).toBe(true));
-    await screen.findByRole("button", { name: `Remove download of ${p.title}` }, { timeout: 15_000 });
+    await downloaded(p.title);
     for (const id of added) expect(useDownloads.getState().ids.has(id)).toBe(true);
     expect(toasts().filter((t) => t === "Download complete")).toHaveLength(1);
   });
@@ -173,19 +187,19 @@ describe("keeping downloads in sync", () => {
     expect(toasts()).toEqual([]);
   });
 
-  it("a new like downloads when Liked Songs is downloaded", { timeout: 20_000 }, async () => {
+  it("a new like downloads when Liked Songs is downloaded", async () => {
     await seed("liked", "", "Liked Songs");
     const [song] = fresh(1);
     await mock.likesSet([song], true);
     await waitFor(() => expect(toasts()).toContain(catchingUpMessage(1)));
-    await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true), { timeout: 15_000 });
+    await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true));
     await waitFor(() => expect(toasts()).toContain("Download complete"));
     // Unliking takes the file away again.
     await mock.likesSet([song], false);
     await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(false));
   });
 
-  it("an album that gains a song (a live library update) fetches it", { timeout: 20_000 }, async () => {
+  it("an album that gains a song (a live library update) fetches it", async () => {
     await seed("album", album.id, album.title);
     const [song] = fresh(1);
     const list = mock.fx.tracksByAlbum.get(album.id)!;
@@ -193,13 +207,13 @@ describe("keeping downloads in sync", () => {
     try {
       act(() => mock.downloads.resync());
       await waitFor(() => expect(toasts()).toContain(catchingUpMessage(1)));
-      await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true), { timeout: 15_000 });
+      await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true));
     } finally {
       list.pop();
     }
   });
 
-  it("Go offline holds the new songs, then they catch up", { timeout: 20_000 }, async () => {
+  it("Go offline holds the new songs, then they catch up", async () => {
     const p = pl();
     await seed("playlist", p.id, p.title);
     await mock.settingsSet({ goOffline: true });
@@ -212,7 +226,7 @@ describe("keeping downloads in sync", () => {
     expect(useDownloads.getState().ids.has(song)).toBe(false);
     expect(toasts()).not.toContain(catchingUpMessage(1));
     await mock.settingsSet({ goOffline: false });
-    await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true), { timeout: 15_000 });
+    await waitFor(() => expect(useDownloads.getState().ids.has(song)).toBe(true));
   });
 });
 
@@ -256,10 +270,10 @@ describe("app states", () => {
     render(<AlbumPage id={one.id} />);
     await mock.downloadsSet("mix", "m", true, { title: "Mix", trackIds: [mock.fx.tracksByAlbum.get(one.id)![0].id] });
     await userEvent.click(await screen.findByRole("button", { name: `Download ${one.title}` }));
-    await waitFor(() => expect(button()).toHaveClass("dl-btn--error"), { timeout: 5000 });
+    await waitFor(() => expect(button()).toHaveClass("dl-btn--error"));
     const retry = screen.getByRole("button", { name: new RegExp(`couldn't download\\. Download ${one.title} again`) });
     await userEvent.click(retry);
-    await screen.findByRole("button", { name: `Remove download of ${one.title}` }, { timeout: 5000 });
+    await downloaded(one.title);
   });
 
   it("file missing on disk: shown as an error and downloaded again", async () => {
@@ -271,7 +285,7 @@ describe("app states", () => {
     act(() => mock.downloads.loseFile(albumTracks[0].id));
     const again = await screen.findByRole("button", { name: /missing from this computer\. Download .* again/ });
     await userEvent.click(again);
-    await screen.findByRole("button", { name: `Remove download of ${album.title}` }, { timeout: 5000 });
+    await downloaded(album.title);
   });
 });
 
@@ -322,5 +336,66 @@ describe("Settings", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(mock.downloads.downloadedIds()).toEqual([]));
     await waitFor(() => expect(row("downloadsStorage").getByRole("button", { name: "Remove all downloads" })).toBeDisabled());
+  });
+});
+
+describe("answers that arrive late", () => {
+  // In the app a command's answer and the core's events travel separately, so
+  // an answer can land after an event that is newer than it. These force
+  // that order with answers the test hands over when it chooses.
+  function later<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+  const item = (state: DownloadItem["state"], done: number): DownloadItem => ({
+    kind: "album",
+    id: album.id,
+    title: album.title,
+    state,
+    total: 1,
+    done,
+    failed: 0,
+    missing: 0,
+    progress: done,
+    bytes: 0,
+    error: null,
+  });
+  const status = (it: DownloadItem): DownloadStatus => ({ items: [it], usedBytes: 0, limitBytes: 1024 ** 3, folder: "downloads", paused: null, queued: 0 });
+  const shown = () => findItem(useDownloads.getState().status, "album", album.id)?.state;
+
+  it("Download's answer doesn't undo a finish the core sent before it", async () => {
+    const answer = later<DownloadStatus>();
+    vi.spyOn(backend, "downloadsSet").mockReturnValue(answer.promise);
+    const asked = setDownload({ kind: "album", id: album.id, title: album.title }, true);
+    act(() => mock.emit("downloads://status", status(item("downloaded", 1))));
+    answer.resolve(status(item("downloading", 0)));
+    await act(() => asked);
+    expect(shown()).toBe("downloaded");
+  });
+
+  it("the status asked for at startup doesn't undo an event that came first", async () => {
+    resetDownloads();
+    const answer = later<DownloadStatus>();
+    const ask = vi.spyOn(backend, "downloadsStatus").mockReturnValue(answer.promise);
+    const starting = startDownloads();
+    await waitFor(() => expect(ask).toHaveBeenCalled());
+    act(() => mock.emit("downloads://status", status(item("downloaded", 1))));
+    answer.resolve(status(item("downloading", 0)));
+    await act(() => starting);
+    expect(shown()).toBe("downloaded");
+  });
+
+  it("the downloaded marks keep the newest list when two reloads cross", async () => {
+    const [a, b] = albumTracks.map((t) => t.id);
+    const first = later<string[]>();
+    const second = later<string[]>();
+    const ask = vi.spyOn(backend, "downloadedTracks").mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    act(() => mock.emit("downloads://changed", null));
+    act(() => mock.emit("downloads://changed", null));
+    expect(ask).toHaveBeenCalledTimes(2);
+    await act(async () => second.resolve([a, b]));
+    await act(async () => first.resolve([a]));
+    expect([...useDownloads.getState().ids].sort()).toEqual([a, b].sort());
   });
 });
