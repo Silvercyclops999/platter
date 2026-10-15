@@ -475,7 +475,7 @@ pub fn duplicates(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Vec<
             artist_id,
             a,
             title,
-            "Plex has more than one file of the same recording here, so it plays twice. Open the album to compare the copies, then remove the one you don't want from your music folder.".into(),
+            "Your library has more than one file of the same recording here, so it plays twice. Open the album to compare the copies, then remove the one you don't want from your music folder.".into(),
             Fix::OpenAlbum,
         );
         for g in &groups {
@@ -855,7 +855,7 @@ pub fn unmatched(artist_id: &str, d: &ArtistData) -> Vec<Finding> {
             artist_id,
             a,
             format!("Plex didn't match {}", a.title),
-            "MusicBrainz has this release, but Plex couldn't match it, so it's missing details like its cover choices and release date. Fix match lets you pick the right release.".into(),
+            "MusicBrainz has this release, but your server couldn't match it, so it's missing details like its cover choices and release date. Fix match lets you pick the right release.".into(),
             Fix::Match,
         );
         f.evidence = a.evidence.iter().map(|e| e.text.clone()).collect();

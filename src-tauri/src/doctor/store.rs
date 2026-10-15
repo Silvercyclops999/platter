@@ -118,7 +118,7 @@ pub fn cover_findings(c: &Connection, px: u32) -> AppResult<Vec<Finding>> {
             _ => (
                 "No cover".to_string(),
                 "This album has no cover. Change cover lets you pick one from Plex's choices or use your own image.".to_string(),
-                vec!["Plex has no cover for this album.".to_string()],
+                vec!["This album has no cover.".to_string()],
             ),
         };
         out.push(Finding {

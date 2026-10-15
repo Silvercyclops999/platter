@@ -350,7 +350,7 @@ function FindingRow({
               ))}
             </ul>
             {f.table.length > 0 && <TagTable f={f} />}
-            {!fixable && <p className="doctor-why__note">Editing in Plex is off in Settings, or this account can't edit this server, so the fix opens the album instead.</p>}
+            {!fixable && <p className="doctor-why__note">Editing is off in Settings, or this account can't edit this server, so the fix opens the album instead.</p>}
           </div>
         )}
       </div>

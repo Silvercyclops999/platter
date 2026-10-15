@@ -20,7 +20,7 @@ export const DOCTOR_CHECKS: { key: keyof DoctorChecks; label: string; hint: stri
   { key: "splitAlbums", label: "Albums split in two", hint: "One album Plex shows as two, with its songs divided between them." },
   { key: "albumArtist", label: "Missing album artist", hint: "Songs with no album artist on albums that credit several artists." },
   { key: "lowQuality", label: "Low-quality copies", hint: "A song you also have in better quality on another album." },
-  { key: "unmatched", label: "Albums Plex didn't match", hint: "Albums MusicBrainz knows but Plex couldn't match. Unreleased albums are never listed." },
+  { key: "unmatched", label: "Albums that weren't matched", hint: "Albums MusicBrainz knows but your server couldn't match. Unreleased albums are never listed." },
 ];
 
 export const COVER_PX_OPTIONS = [
