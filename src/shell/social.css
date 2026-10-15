@@ -86,9 +86,10 @@
 .friend-empty { padding: var(--space-2) var(--space-4); color: var(--color-text-secondary); font-size: var(--font-size-md); }
 
 /* ---------------------------------------------------------------- What's New */
-.whats-new__lede { margin: calc(-1 * var(--space-2)) 0 var(--space-6); color: var(--color-text-secondary); }
-.whats-new__empty { color: var(--color-text-secondary); }
-.release-group { margin-bottom: var(--space-6); }
+.whats-new__lede { margin: calc(-1 * var(--space-4)) var(--space-3) var(--space-6); color: var(--color-text-secondary); }
+.whats-new__empty { margin: 0 var(--space-3); color: var(--color-text-secondary); }
+.whats-new > .release-list { margin: 0 var(--space-3); }
+.release-group { margin: 0 var(--space-3) var(--space-6); }
 .release-list { list-style: none; margin: 0; padding: 0; }
 .release-row {
   display: flex;

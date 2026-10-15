@@ -210,6 +210,11 @@ describe("What's New", () => {
 
 describe("listening sessions", () => {
   it("the host starts from the queue card, copies the invite, sees who joins, and ends it", async () => {
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: (t: string) => (copied.push(t), Promise.resolve()) },
+      configurable: true,
+    });
     render(
       <>
         <SessionCard dismissable />
@@ -219,7 +224,8 @@ describe("listening sessions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Start a listening session" }));
     expect(await screen.findByRole("region", { name: "Listening session" })).toHaveTextContent("waiting for people to join");
     expect(useSocial.getState().listen.invite).toBe(MOCK_INVITE);
-    expect(toasts()).toContain("Listening session started. The invite link is copied.");
+    await waitFor(() => expect(toasts()).toContain("Listening session started. The invite link is copied."));
+    expect(copied).toEqual([MOCK_INVITE]);
     // The card goes while in a session.
     expect(screen.queryByRole("group", { name: "Listen along" })).toBeNull();
     act(() => mock.social.guestJoins("Casey"));

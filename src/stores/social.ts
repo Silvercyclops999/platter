@@ -101,8 +101,8 @@ export async function startSession(b: Backend = backend): Promise<void> {
     const v = await b.listenStart();
     useSocial.setState({ listen: v });
     if (v.invite) {
-      copyText(v.invite);
-      toast.info("Listening session started. The invite link is copied.");
+      const copied = await (navigator.clipboard?.writeText(v.invite).then(() => true, () => false) ?? Promise.resolve(false));
+      toast.info(copied ? "Listening session started. The invite link is copied." : "Listening session started. Copy the invite link from the bar below.");
     }
   } catch (e) {
     toast.error(errText(e) || "Couldn't start a listening session");
