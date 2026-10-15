@@ -1132,6 +1132,26 @@ impl PlexClient {
             .ok_or_else(|| AppError::NotFound(format!("item {rating_key}")))
     }
 
+    /// Several items at once: `/library/metadata/{k1},{k2},…`. Types can be
+    /// mixed; ids the server no longer has are left out of the answer.
+    pub async fn metadata_many(&self, rating_keys: &[String]) -> AppResult<Vec<PlexMetadata>> {
+        // Rating keys are numbers; anything else can't be in the path.
+        let keys: Vec<&str> = rating_keys
+            .iter()
+            .map(String::as_str)
+            .filter(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric()))
+            .collect();
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        match self.container(&format!("/library/metadata/{}", keys.join(",")), &[], None).await {
+            Ok(c) => Ok(c.metadata),
+            // None of them is there any more.
+            Err(AppError::NotFound(_)) => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Ask the server whether a track's file can be read right now
     /// (`GET /library/metadata/{id}?checkFiles=1`). This is a metadata call,
     /// not a file transfer, so it never interrupts a playing stream.

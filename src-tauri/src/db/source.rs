@@ -81,6 +81,14 @@ pub trait LibrarySource: Send + Sync {
     /// Items whose updatedAt or addedAt is ≥ `since` (unix seconds).
     async fn changed_since(&self, section_id: &str, since: i64) -> AppResult<Changes>;
 
+    /// These items as they are now (live updates from server events), sorted
+    /// by kind; ids the server no longer has are left out. Albums come back
+    /// with their release section mapped. None: not supported, so the caller
+    /// runs a sync instead.
+    async fn items(&self, _section_id: &str, _ids: &[String]) -> AppResult<Option<Changes>> {
+        Ok(None)
+    }
+
     /// Every current ratingKey of a kind (deletion detection).
     async fn all_ids(&self, section_id: &str, kind: ItemKind) -> AppResult<Vec<String>>;
 

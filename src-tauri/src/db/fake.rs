@@ -39,6 +39,10 @@ pub struct FakeSource {
     pub similar_calls: Mutex<Vec<String>>,
     /// Make `artist_similar` fail (server offline).
     pub fail_similar: Mutex<bool>,
+    /// Ids asked for by `items` (live updates), per call.
+    pub item_calls: Mutex<Vec<Vec<String>>>,
+    /// Make `items` fail (server offline).
+    pub fail_items: Mutex<bool>,
 }
 
 impl FakeSource {
@@ -92,6 +96,20 @@ impl LibrarySource for FakeSource {
             albums: l.albums.iter().filter(|a| changed(&a.id)).cloned().collect(),
             tracks: l.tracks.iter().filter(|t| changed(&t.id)).cloned().collect(),
         })
+    }
+
+    async fn items(&self, _s: &str, ids: &[String]) -> AppResult<Option<Changes>> {
+        self.item_calls.lock().push(ids.to_vec());
+        if *self.fail_items.lock() {
+            return Err(AppError::Network("offline".into()));
+        }
+        let l = self.lib.lock();
+        let has = |id: &str| ids.iter().any(|x| x == id);
+        Ok(Some(Changes {
+            artists: l.artists.iter().filter(|a| has(&a.id)).cloned().collect(),
+            albums: l.albums.iter().filter(|a| has(&a.id)).cloned().collect(),
+            tracks: l.tracks.iter().filter(|t| has(&t.id)).cloned().collect(),
+        }))
     }
 
     async fn all_ids(&self, _s: &str, kind: ItemKind) -> AppResult<Vec<String>> {

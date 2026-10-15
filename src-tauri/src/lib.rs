@@ -37,16 +37,29 @@ use crate::db::{ArtCache, DbHandle};
 use crate::plex::PlexState;
 use crate::plex::notifications::PlexEvent;
 
-/// Re-sync the cache when the server connects and when Plex reports library
-/// changes. Changes arrive in bursts during a scan, so they're coalesced:
-/// a sync starts once no new change has arrived for `QUIET`.
-fn watch_library(plex: PlexState, db: DbHandle) {
+/// Keep the cache current from the server's notification socket:
+///
+/// - Items Plex finished adding or changing, or deleted (`timeline`
+///   entries), go straight into the cache in batches gathered for
+///   [`db::live::BATCH_WINDOW`] (`db::live`). Pages hear `library://changed`,
+///   and new albums go to What's New. A batch too big to fetch item by item
+///   (a large scan) runs a sync instead.
+/// - The socket connecting (after being down), missed events, and a library
+///   scan ending run the usual incremental sync once things are quiet for
+///   `QUIET`.
+/// - While the socket is down, an incremental sync runs every
+///   `FALLBACK_EVERY` instead, since no events arrive.
+fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
     const QUIET: Duration = Duration::from_secs(5);
+    const FALLBACK_EVERY: Duration = Duration::from_secs(15 * 60);
     // When the last relevant change arrived; None = nothing pending.
     let pending: Arc<parking_lot::Mutex<Option<std::time::Instant>>> = Arc::default();
+    let socket_up = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (live_tx, live_rx) = tokio::sync::mpsc::unbounded_channel::<db::live::LiveChange>();
     let mut events = plex.subscribe();
     let mark = pending.clone();
     let db_events = db.clone();
+    let up = socket_up.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             let ev = match events.recv().await {
@@ -59,15 +72,29 @@ fn watch_library(plex: PlexState, db: DbHandle) {
                 .ok()
                 .flatten()
                 .map(|s| s.section_id);
+            match &ev {
+                Some(PlexEvent::Connected) => up.store(true, std::sync::atomic::Ordering::Release),
+                Some(PlexEvent::Disconnected) => up.store(false, std::sync::atomic::Ordering::Release),
+                Some(PlexEvent::LibraryUpdate { section_id, item_id, item_type, state }) => {
+                    if let Some(c) = db::live::change_from_timeline(
+                        section_id.as_deref(),
+                        item_id.as_deref(),
+                        *item_type,
+                        *state,
+                        music.as_deref(),
+                    ) {
+                        let _ = live_tx.send(c);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
             let relevant = match &ev {
                 Some(ev) => marks_library_dirty(ev, music.as_deref()),
                 None => true, // missed events; assume something changed
             };
             if relevant {
                 match &ev {
-                    Some(PlexEvent::LibraryUpdate { section_id, item_type, state, .. }) => {
-                        tracing::debug!(?section_id, ?item_type, ?state, "library change")
-                    }
                     Some(PlexEvent::Activity { kind, .. }) => tracing::debug!(kind, "library activity ended"),
                     Some(PlexEvent::Connected) => tracing::debug!("server connected; resync"),
                     _ => tracing::debug!("missed server events; resync"),
@@ -76,9 +103,17 @@ fn watch_library(plex: PlexState, db: DbHandle) {
             }
         }
     });
+    spawn_live_batches(app, db.clone(), live_rx, pending.clone());
     tauri::async_runtime::spawn(async move {
+        let mut last_fallback = std::time::Instant::now();
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
+            let down = !socket_up.load(std::sync::atomic::Ordering::Acquire);
+            if down && last_fallback.elapsed() >= FALLBACK_EVERY {
+                last_fallback = std::time::Instant::now();
+                tracing::debug!("notification socket down; periodic sync");
+                *pending.lock() = std::time::Instant::now().checked_sub(QUIET);
+            }
             let due = matches!(*pending.lock(), Some(at) if at.elapsed() >= QUIET);
             if due && plex.client().await.is_ok() {
                 match db.start_sync(false) {
@@ -91,17 +126,72 @@ fn watch_library(plex: PlexState, db: DbHandle) {
     });
 }
 
-/// Whether a Plex notification means the music cache may be stale. Changes
-/// in other libraries on the server (movies, TV) are ignored once the music
-/// section is known.
+/// Gather live changes for a moment, then write them into the cache. While
+/// a sync runs, the batch waits (the sync is rewriting the same rows).
+fn spawn_live_batches(
+    app: tauri::AppHandle,
+    db: DbHandle,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<db::live::LiveChange>,
+    pending_sync: Arc<parking_lot::Mutex<Option<std::time::Instant>>>,
+) {
+    tauri::async_runtime::spawn(async move {
+        while let Some(first) = rx.recv().await {
+            let mut batch = db::live::Batch::default();
+            batch.add(first);
+            let until = tokio::time::Instant::now() + db::live::BATCH_WINDOW;
+            loop {
+                tokio::select! {
+                    c = rx.recv() => match c {
+                        Some(c) => batch.add(c),
+                        None => break,
+                    },
+                    _ = tokio::time::sleep_until(until) => break,
+                }
+            }
+            while db.sync_running() {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                while let Ok(c) = rx.try_recv() {
+                    batch.add(c);
+                }
+            }
+            let Some(source) = db.source() else { continue };
+            match db::live::apply(&db, source.as_ref(), batch).await {
+                Ok(db::live::LiveOutcome::Applied { updated, removed, new_albums }) => {
+                    tracing::debug!(updated, removed, new = new_albums.len(), "live library update");
+                    if !new_albums.is_empty()
+                        && let Some(social) = app.try_state::<social::Social>()
+                    {
+                        let social = social.inner().clone();
+                        let _ = tokio::task::spawn_blocking(move || social.library_changed()).await;
+                    }
+                }
+                Ok(db::live::LiveOutcome::Nothing) => {}
+                Ok(db::live::LiveOutcome::NeedsSync) => {
+                    *pending_sync.lock() = Some(std::time::Instant::now());
+                }
+                Err(e) => {
+                    tracing::debug!("live library update failed, syncing instead: {e}");
+                    *pending_sync.lock() = Some(std::time::Instant::now());
+                }
+            }
+        }
+    });
+}
+
+/// Whether a Plex notification means the cache needs a sync. Item changes
+/// (`timeline`) are applied live instead; changes in other libraries on the
+/// server (movies, TV) are ignored once the music section is known.
 fn marks_library_dirty(ev: &PlexEvent, music_section: Option<&str>) -> bool {
     match ev {
         PlexEvent::Connected => true,
-        PlexEvent::LibraryUpdate { section_id, .. } => match (section_id.as_deref(), music_section) {
-            (Some(s), Some(m)) => s == m,
-            _ => true,
-        },
-        PlexEvent::Activity { event, kind, .. } => event == "ended" && kind.starts_with("library."),
+        PlexEvent::Activity { event, kind, section_id, .. } => {
+            event == "ended"
+                && kind.starts_with("library.")
+                && match (section_id.as_deref(), music_section) {
+                    (Some(s), Some(m)) => s == m,
+                    _ => true,
+                }
+        }
         _ => false,
     }
 }
@@ -612,7 +702,7 @@ pub fn run() {
             }
 
             plex.start(app.handle().clone());
-            watch_library(plex.clone(), db.clone());
+            watch_library(app.handle().clone(), plex.clone(), db.clone());
             monitor::files::spawn(plex.clone(), db.clone(), player.clone());
             monitor::net::spawn(plex.clone());
             monitor::disk::spawn(
@@ -861,21 +951,39 @@ mod watch_tests {
         PlexEvent::LibraryUpdate {
             section_id: section.map(str::to_owned),
             item_id: Some("1".into()),
-            item_type: Some(1),
+            item_type: Some(10),
             state: Some(5),
         }
     }
 
-    #[test]
-    fn other_libraries_dont_trigger_a_music_sync() {
-        assert!(!marks_library_dirty(&update(Some("2")), Some("7")));
-        assert!(marks_library_dirty(&update(Some("7")), Some("7")));
+    fn scan_ended(section: Option<&str>) -> PlexEvent {
+        PlexEvent::Activity {
+            event: "ended".into(),
+            uuid: "u".into(),
+            kind: "library.update.section".into(),
+            title: None,
+            subtitle: None,
+            progress: None,
+            section_id: section.map(str::to_owned),
+        }
     }
 
     #[test]
-    fn unknown_sections_still_count() {
-        assert!(marks_library_dirty(&update(None), Some("7")));
-        assert!(marks_library_dirty(&update(Some("2")), None));
+    fn item_changes_are_applied_live_not_by_a_sync() {
+        assert!(!marks_library_dirty(&update(Some("7")), Some("7")));
+    }
+
+    #[test]
+    fn scans_ending_in_other_libraries_dont_trigger_a_music_sync() {
+        assert!(!marks_library_dirty(&scan_ended(Some("2")), Some("7")));
+        assert!(marks_library_dirty(&scan_ended(Some("7")), Some("7")));
+    }
+
+    #[test]
+    fn unknown_sections_and_reconnects_still_count() {
+        assert!(marks_library_dirty(&scan_ended(None), Some("7")));
+        assert!(marks_library_dirty(&scan_ended(Some("2")), None));
         assert!(marks_library_dirty(&PlexEvent::Connected, Some("7")));
+        assert!(!marks_library_dirty(&PlexEvent::Disconnected, Some("7")));
     }
 }

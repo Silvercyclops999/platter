@@ -27,6 +27,8 @@ use crate::plex::types::ConnectionKind;
 const STARTUP_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 const PAGE: u64 = 500;
+/// Items asked for in one `/library/metadata/{k1},{k2},…` call (live updates).
+const LIVE_CHUNK: usize = 50;
 
 fn meta_type(kind: ItemKind) -> MetaType {
     match kind {
@@ -217,6 +219,34 @@ impl LibrarySource for PlexLibrary {
                 .collect(),
             tracks: tracks.iter().map(PlexMetadata::to_track).collect(),
         })
+    }
+
+    async fn items(&self, section_id: &str, ids: &[String]) -> AppResult<Option<Changes>> {
+        let client = self.plex.client().await?;
+        let mut found = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(LIVE_CHUNK) {
+            found.extend(client.metadata_many(chunk).await?);
+        }
+        // Album detail has its own Format and Style tags; the bulk lists
+        // (when loaded) add what detail leaves out.
+        let tags = self.tags.lock().get(section_id).cloned();
+        let mut out = Changes::default();
+        for m in found {
+            match m.kind.as_deref() {
+                Some("artist") => out.artists.push(m.to_artist()),
+                Some("album") => {
+                    let mut a = m.to_album();
+                    match &tags {
+                        Some(t) => t.apply(&mut a),
+                        None => a.section = crate::db::release_section(a.format.as_deref(), &a.subformats),
+                    }
+                    out.albums.push(a);
+                }
+                Some("track") => out.tracks.push(m.to_track()),
+                _ => {}
+            }
+        }
+        Ok(Some(out))
     }
 
     async fn all_ids(&self, section_id: &str, kind: ItemKind) -> AppResult<Vec<String>> {

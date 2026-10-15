@@ -150,6 +150,17 @@ play started from a playlist. Times are unix seconds.
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.
 
+Between syncs the cache follows the server's notification socket. Items Plex
+finishes adding or changing, and items it deletes (its `timeline` entries for
+artists, albums and tracks in the music library), are gathered for 2 seconds
+and written straight into the cache: changed items are read again in one
+`/library/metadata/{k1},{k2},…` call, gone ones are dropped, and
+`library://changed` fires once for the batch. New albums by followed artists
+reach What's New and its notification the same way. A batch of more than 200
+items (a big scan) runs an incremental sync instead, as do the socket
+connecting, missed events and a scan ending. While the socket is down an
+incremental sync runs every 15 minutes.
+
 ## Playlist editing
 | Command | Args | Returns |
 | --- | --- | --- |

@@ -237,6 +237,16 @@ pub fn refresh_artist_recency(tx: &Transaction<'_>) -> AppResult<()> {
     Ok(())
 }
 
+/// Delete these items of `kind`. Returns rows deleted.
+pub fn delete_ids(tx: &Transaction<'_>, kind: ItemKind, ids: &[String]) -> AppResult<u64> {
+    let mut del = tx.prepare_cached(&format!("DELETE FROM {} WHERE id = ?1", table_for(kind)))?;
+    let mut n = 0;
+    for id in ids {
+        n += del.execute([id])? as u64;
+    }
+    Ok(n)
+}
+
 /// Delete items of `kind` whose ids are not in `keep`. Returns rows deleted.
 pub fn delete_missing(tx: &Transaction<'_>, kind: ItemKind, keep: &HashSet<String>) -> AppResult<u64> {
     let table = table_for(kind);

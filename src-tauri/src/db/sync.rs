@@ -52,6 +52,10 @@ impl SyncController {
         self.status.lock().clone()
     }
 
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
+    }
+
     pub fn cancel(&self) {
         if let Some(c) = self.cancel.lock().as_ref() {
             c.store(true, Ordering::Release);

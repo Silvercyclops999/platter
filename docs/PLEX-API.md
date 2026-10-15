@@ -93,6 +93,13 @@ Status comes back as standard media status messages.
 ## Findings log
 Anything surprising goes here as it's tested (date, endpoint, what happened).
 
+### 2026-10-14: several items in one metadata call (read-only)
+- `GET /library/metadata/{k1},{k2},{k3}` with two album keys and a track key
+  answered one `Metadata` list in the asked order with mixed `type`s
+  (`album`, `track`), each with `librarySectionID`. Album entries carry
+  `Format` and `Style` like the single-item detail. Live library updates use
+  it to read the items a batch of `timeline` entries names, 50 at a time.
+
 ### 2026-10-13: first look at a real server (direct HTTP, read-only)
 
 #### Discovery

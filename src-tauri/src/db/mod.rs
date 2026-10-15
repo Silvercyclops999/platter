@@ -27,6 +27,7 @@ pub mod credits;
 pub mod history;
 pub mod likes;
 pub mod listens;
+pub mod live;
 pub mod playlists;
 pub mod popular;
 pub mod queries;
@@ -270,6 +271,11 @@ impl DbHandle {
             .source()
             .ok_or_else(|| AppError::Invalid("no library source configured".into()))?;
         Ok(sync::spawn(self.clone(), source, full))
+    }
+
+    /// Whether a sync is running now.
+    pub fn sync_running(&self) -> bool {
+        self.inner.sync.is_running()
     }
 
     /// Ask a running sync to stop after the current page.
