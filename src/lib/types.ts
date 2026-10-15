@@ -4,6 +4,7 @@
  * serializes as `null`, so model fields are `T | null`; IPC types documented
  * with `?` are optional and may also be null.
  */
+import { CLASSIC_LAYOUT, type Layout, type UserTheme } from "../design/themes/validate";
 
 // ---------------------------------------------------------------- model.rs
 
@@ -680,14 +681,9 @@ export type ReduceMotion = "system" | "on" | "off";
 /** The Theme setting: a built-in theme, or follow the computer's light or dark mode. */
 export type ThemeSetting = "dark" | "light" | "system" | "midnight" | "forest" | "sand";
 
-/** A theme file that passed the checks (also what the `themeFile` setting holds). */
-export interface ThemeFile {
-  /** The file's name in the themes folder. */
-  file: string;
-  name: string;
-  base: "dark" | "light";
-  tokens: Record<string, string>;
-}
+/** A theme or look file that passed the checks (also what the `themeFile` setting holds). */
+export type ThemeFile = UserTheme;
+export type { Layout };
 
 /** The themes folder: the theme files in it, and the ones that can't be used. */
 export interface ThemeFolder {
@@ -1007,6 +1003,12 @@ export interface Settings {
   accent: string;
   /** The theme file in use, carried whole so it travels in the sync file. */
   themeFile: ThemeFile | null;
+  /** Layout options (Classic by default). */
+  layout: Layout;
+  /** Appearance shows the "Make your own" look builder. */
+  showLookBuilder: boolean;
+  /** The "Pick a look" step was shown or skipped on this computer. */
+  lookStepDone: boolean;
   [key: string]: unknown;
 }
 
@@ -1252,6 +1254,9 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   accent: "ivory",
   themeFile: null,
+  layout: CLASSIC_LAYOUT,
+  showLookBuilder: true,
+  lookStepDone: false,
 };
 
 // ---------------------------------------------------------------- sync file, folders and keys

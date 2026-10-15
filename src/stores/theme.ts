@@ -3,7 +3,8 @@
  * settings and the computer's light or dark mode, and kept on <html>.
  */
 import { create } from "zustand";
-import { DEFAULT_CHOICE, applyTheme, resolveTheme, type ResolvedTheme, type ThemeBase, type ThemeChoice } from "../design/themes";
+import { DEFAULT_CHOICE, applyTheme, resolveTheme, safeLayout, type Layout, type ResolvedTheme, type ThemeBase, type ThemeChoice } from "../design/themes";
+import { DEFAULT_PARTS, applyLook, cacheLook, type LookParts } from "../design/looks/apply";
 import type { Settings } from "../lib/types";
 import { useSettings } from "./settings";
 
@@ -25,11 +26,22 @@ export function choiceFrom(s: Settings | null): ThemeChoice {
   return { theme: s.theme ?? "dark", accent: s.accent ?? "ivory", themeFile: s.themeFile ?? null };
 }
 
+/** The look's style, fonts and layout from the settings. */
+export function lookPartsFrom(s: Settings | null): LookParts {
+  if (!s) return DEFAULT_PARTS;
+  const f = s.themeFile;
+  return { style: f?.style ?? DEFAULT_PARTS.style, fonts: f?.fonts ?? DEFAULT_PARTS.fonts, layout: safeLayout(s.layout) };
+}
+
 function update(doc: Document) {
   const { systemDark } = useTheme.getState();
-  const resolved = resolveTheme(choiceFrom(useSettings.getState().settings), systemDark);
+  const settings = useSettings.getState().settings;
+  const resolved = resolveTheme(choiceFrom(settings), systemDark);
   useTheme.setState({ resolved });
   applyTheme(resolved, doc);
+  const parts = lookPartsFrom(settings);
+  applyLook(doc.documentElement, parts);
+  cacheLook(parts);
 }
 
 /**
@@ -41,11 +53,13 @@ export function installTheme(win: Window = window): () => void {
   const mq = typeof win.matchMedia === "function" ? win.matchMedia(QUERY) : null;
   useTheme.setState({ systemDark: mq ? mq.matches : true });
   let last: ThemeChoice | null = null;
+  let lastLayout: unknown = null;
   const onSettings = (s: Settings | null) => {
     if (!s) return;
     const c = choiceFrom(s);
-    if (last && last.theme === c.theme && last.accent === c.accent && last.themeFile === c.themeFile) return;
+    if (last && last.theme === c.theme && last.accent === c.accent && last.themeFile === c.themeFile && lastLayout === s.layout) return;
     last = c;
+    lastLayout = s.layout;
     update(doc);
   };
   onSettings(useSettings.getState().settings);
@@ -64,4 +78,20 @@ export function installTheme(win: Window = window): () => void {
 /** Whether the theme in use has light or dark surfaces. */
 export function useThemeBase(): ThemeBase {
   return useTheme((s) => s.resolved.base);
+}
+
+/** The layout in use (Classic until settings load). */
+export function useLayout(): Layout {
+  return useSettings((s) => s.settings?.layout ?? DEFAULT_PARTS.layout);
+}
+
+/**
+ * The Reduce motion setting, unless the layout's Motion option asks for
+ * less (reduced or off). Under Match system the computer's own
+ * reduced-motion setting is always respected.
+ */
+export function motionPreference(s: { settings: Settings | null }): Settings["reduceMotion"] {
+  const motion = s.settings?.layout?.motion;
+  if (motion === "reduced" || motion === "off") return "on";
+  return s.settings?.reduceMotion ?? "system";
 }

@@ -9,6 +9,7 @@ import { Toaster } from "../components/Toast";
 import { Tooltip } from "../components/Tooltip";
 import { chrome } from "../lib/platform";
 import { useCurrentEntry } from "../stores/router";
+import { useLayout } from "../stores/theme";
 import { useUi } from "../stores/ui";
 import { CommandPalette } from "./CommandPalette";
 import {
@@ -42,7 +43,8 @@ import { startSocial } from "../stores/social";
 import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
-import { LazyLyricsEditorHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost } from "./lazyHosts";
+import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost } from "./lazyHosts";
+import { LookDrop } from "./LookDrop";
 import { QueuePanel } from "./QueuePanel";
 import { ArchiveDialogs } from "../components/ArchiveDialogs";
 import { ResizeHandle } from "./ResizeHandle";
@@ -62,6 +64,20 @@ function useWindowWidth() {
     return () => window.removeEventListener("resize", on);
   }, []);
   return w;
+}
+
+/**
+ * The layout's "Sidebar collapsed" choice: applied when it changes (a look
+ * or layout was picked), so the sidebar's own state from last time stays
+ * otherwise.
+ */
+function useSidebarDefault(collapsed: boolean) {
+  const prev = useRef(collapsed);
+  useEffect(() => {
+    if (prev.current === collapsed) return;
+    prev.current = collapsed;
+    useUi.getState().setSidebar({ collapsed });
+  }, [collapsed]);
 }
 
 /** Top bar over sidebar | main | right panel, over the player bar. */
@@ -102,13 +118,20 @@ export function AppShell() {
   // snaps between the rail and full mode.
   const setVar = (name: string, px: number) => shell.current?.style.setProperty(name, `${px}px`);
 
+  // A sidebar on the right or a panel on the left drags the other way.
+  const look = useLayout();
+  const sidebarFlip = look.sidebarSide === "right" ? -1 : 1;
+  const rightFlip = look.nowPlaying === "left" ? -1 : 1;
+  const flipKey = (key: string, flip: number) => (flip > 0 ? key : key === "ArrowLeft" ? "ArrowRight" : key === "ArrowRight" ? "ArrowLeft" : key);
+  useSidebarDefault(look.sidebarCollapsed);
+
   const sidebarDrag = () => {
     const start: SidebarDrag = { width: layout.sidebar, rail };
     const room = sidebarRoom(width, layout.right);
     let cur = start;
     return {
       move: (dx: number) => {
-        const next = dragSidebar(start, dx, room);
+        const next = dragSidebar(start, dx * sidebarFlip, room);
         if (next.rail !== cur.rail) useUi.getState().setSidebar(next.rail ? { collapsed: true } : { collapsed: false, width: next.width });
         cur = next;
         setVar("--sidebar-w", next.width);
@@ -124,7 +147,7 @@ export function AppShell() {
     let cur = start;
     return {
       move: (dx: number) => {
-        cur = dragRight(start, dx, room);
+        cur = dragRight(start, dx * rightFlip, room);
         setVar("--right-w", cur);
         return cur;
       },
@@ -160,7 +183,7 @@ export function AppShell() {
             shell={shell}
             begin={sidebarDrag}
             onKey={(key) => {
-              const next = keySidebar({ width: layout.sidebar, rail }, key, sidebarRoom(width, layout.right));
+              const next = keySidebar({ width: layout.sidebar, rail }, flipKey(key, sidebarFlip), sidebarRoom(width, layout.right));
               if (!next) return false;
               useUi.getState().setSidebar(next.rail ? { collapsed: true } : { collapsed: false, width: next.width });
               return true;
@@ -179,7 +202,7 @@ export function AppShell() {
               shell={shell}
               begin={rightDrag}
               onKey={(key) => {
-                const next = keyRight(layout.right, key, rightRoom(width, layout.sidebar));
+                const next = keyRight(layout.right, flipKey(key, rightFlip), rightRoom(width, layout.sidebar));
                 if (next === null) return false;
                 useUi.getState().setRightWidth(next);
                 return true;
@@ -218,6 +241,9 @@ export function AppShell() {
       <LazyShareCardHost />
       <DeckActions />
       <LazyStatsDialogHost />
+      <LazyLookBuilderHost />
+      <LazyPickLookHost />
+      <LookDrop />
     </div>
   );
 }

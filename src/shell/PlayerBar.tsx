@@ -19,7 +19,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { TextLink } from "../components/ArtistLinks";
 import { ListenMark } from "./ListenStrip";
@@ -40,6 +40,7 @@ import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { miniplayer, useMiniplayer } from "../stores/miniplayer";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
+import { useLayout } from "../stores/theme";
 import { keepSuggestion, playingSuggestion, removeSuggestion } from "../stores/smartShuffle";
 import { useUi } from "../stores/ui";
 import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtras";
@@ -384,6 +385,7 @@ export function PlayerBar() {
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
   const toggleOutput = useUi((s) => s.toggleOutput);
+  const buttons = useLayout().playerButtons;
   const track = state?.track;
   const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
   // The playing song drags like a track row.
@@ -430,7 +432,7 @@ export function PlayerBar() {
               <ListenMark />
             </div>
             <SuggestionButtons />
-            <SaveButton track={track} place="bar" />
+            {buttons.includes("like") && <SaveButton track={track} place="bar" />}
           </>
         ) : state === null ? (
           // Still loading the restored session: reserve the same space (no layout shift).
@@ -453,13 +455,29 @@ export function PlayerBar() {
 
       <div className="player-bar__extras">
         <PrivateSession />
-        <LyricsButton />
-        <QueueButton />
-        <HifiMark />
-        <IconButton label="Connect to a device" pressed={outputOpen} icon={<MonitorSpeaker size={18} />} onClick={toggleOutput} />
-        <Volume />
-        <MiniplayerButton />
-        <ExpandButton disabled={!track} />
+        {/* The Layout option picks which buttons show, and their order. The
+            hi-fi mark stays beside the device button. */}
+        {!buttons.includes("devices") && <HifiMark />}
+        {buttons.map((id) => (
+          <Fragment key={id}>
+            {id === "lyrics" ? (
+              <LyricsButton />
+            ) : id === "queue" ? (
+              <QueueButton />
+            ) : id === "devices" ? (
+              <>
+                <HifiMark />
+                <IconButton label="Connect to a device" pressed={outputOpen} icon={<MonitorSpeaker size={18} />} onClick={toggleOutput} />
+              </>
+            ) : id === "volume" ? (
+              <Volume />
+            ) : id === "miniplayer" ? (
+              <MiniplayerButton />
+            ) : id === "fullWindow" ? (
+              <ExpandButton disabled={!track} />
+            ) : null}
+          </Fragment>
+        ))}
       </div>
     </aside>
   );

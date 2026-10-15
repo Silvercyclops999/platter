@@ -89,6 +89,7 @@ import type {
   ReleaseMark,
   DoctorFinding,
   DoctorKind,
+  ThemeFile,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
@@ -312,7 +313,8 @@ export class MockBackend implements Backend {
   private recent: { kind: SearchKind; id: string }[] = [];
   private recentSeeded = false;
   private settings: Settings = { ...DEFAULT_SETTINGS };
-  private themes = new MockThemes();
+  /** The themes folder (tests read what export wrote). */
+  readonly themes = new MockThemes();
   // output devices (invented)
   private outputs: OutputDevice[] = MOCK_OUTPUTS.map((d) => ({ ...d }));
   /** Headphone correction A/B: off while comparing. */
@@ -2638,6 +2640,16 @@ export class MockBackend implements Backend {
   }
   themesOpenFolder() {
     return this.delay(() => undefined);
+  }
+  themesImportText(text: string) {
+    return this.delay(() => this.themes.importText(text));
+  }
+  themesSave(look: ThemeFile, replace: boolean) {
+    return this.delay(() => this.themes.save(look, replace));
+  }
+  themesExport(look: ThemeFile) {
+    // Stands in for the save dialog.
+    return this.delay(() => this.themes.export(look));
   }
   syncFileReplace() {
     return this.delay(() => this.syncFile.replace());

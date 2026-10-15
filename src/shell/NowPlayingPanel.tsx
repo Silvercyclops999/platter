@@ -13,6 +13,7 @@ import { useApp } from "../stores/app";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
+import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import {
   buildCredits,
@@ -213,6 +214,8 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
   // Offline: sections that need the server (about the artist, its credits) step aside.
   const offline = useApp((s) => isOffline(s.health));
   const about = !offline && details?.artist?.summary ? details.artist : null;
+  // The spinning-record style turns the cover while music plays.
+  const spinning = usePlayer((s) => s.state?.status === "playing");
 
   if (view === "lyrics" && lyrics) {
     return (
@@ -238,7 +241,7 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
 
   return (
     <div className="np-content" key={track.id}>
-      <button type="button" className="np-art" aria-label={`Go to album ${track.albumTitle}`} onClick={() => nav.go({ name: "album", id: track.albumId })}>
+      <button type="button" className={`np-art ${spinning ? "is-spinning" : ""}`} aria-label={`Go to album ${track.albumTitle}`} onClick={() => nav.go({ name: "album", id: track.albumId })}>
         <Art path={track.thumb} fluid requestSize={PANEL_ART} />
       </button>
       <TrackTitle track={track} />
@@ -309,6 +312,8 @@ export function useOpenNowPlayingOnStart() {
         const id = s.state?.track?.id;
         if (!id || !prev.state || id === prev.state.track?.id || !isPlaying(s.state?.status)) return;
         const ui = useUi.getState();
+        // The layout's Now playing option "Off" keeps the panel closed until asked for.
+        if (useSettings.getState().settings?.layout?.nowPlaying === "off") return;
         if (ui.nowPlayingPrefs.openOnStart && !ui.queueOpen && !ui.nowPlayingOpen && !ui.outputOpen) ui.setNowPlayingOpen(true);
       }),
     [],

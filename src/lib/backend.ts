@@ -361,6 +361,12 @@ export interface Backend {
   themesImport(): Promise<ThemeFile | null>;
   /** Show the themes folder in Explorer / Finder. */
   themesOpenFolder(): Promise<void>;
+  /** Check the text of a look or theme file dropped on the window and add it to the themes folder. */
+  themesImportText(text: string): Promise<ThemeFile>;
+  /** Save a look into the themes folder; `replace` writes over its own look file. */
+  themesSave(look: ThemeFile, replace: boolean): Promise<ThemeFile>;
+  /** Export a look to a file the user picks. The file's name, or null when cancelled. */
+  themesExport(look: ThemeFile): Promise<string | null>;
   /** Saves the current EQ curve as a profile (replacing one with that name) and selects it. */
   eqProfileSave(name: string): Promise<Settings>;
   eqProfileRename(from: string, to: string): Promise<Settings>;
@@ -802,6 +808,9 @@ export function createTauriBackend(): Backend {
     themesList: () => call("themes_list"),
     themesImport: () => call("themes_import"),
     themesOpenFolder: () => call("themes_open_folder"),
+    themesImportText: (text) => call("themes_import_text", { text }),
+    themesSave: (look, replace) => call("themes_save", { look, replace }),
+    themesExport: (look) => call("themes_export", { look }),
     eqProfileSave: (name) => call("eq_profile_save", { name }),
     eqProfileRename: (from, to) => call("eq_profile_rename", { from, to }),
     eqProfileDelete: (name) => call("eq_profile_delete", { name }),

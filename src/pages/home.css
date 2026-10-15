@@ -69,7 +69,8 @@
 /* ---------------------------------------------------------------- Shortcut grid */
 .home-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Four a row, or three for a grid of six (the Quick access option). */
+  grid-template-columns: repeat(var(--quick-access-cols, 4), minmax(0, 1fr));
   gap: var(--space-2) var(--space-3);
   margin: 0 var(--space-3) var(--space-8);
 }

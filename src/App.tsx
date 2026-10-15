@@ -1,8 +1,8 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { installReducedMotion, setMotionPreference } from "./design/motion";
 import { installPageVisibility } from "./design/pageVisibility";
 import { installOverlayScrollbars } from "./design/scrollbars";
-import { installTheme } from "./stores/theme";
+import { installTheme, motionPreference } from "./stores/theme";
 import { SignInPage, ServerPickPage } from "./pages/SignInPage";
 import { AppShell } from "./shell/AppShell";
 import { connectApp, useApp } from "./stores/app";
@@ -14,6 +14,7 @@ import { connectShare } from "./stores/share";
 import { loadSettings, useSettings } from "./stores/settings";
 import { backend } from "./lib/backend";
 import { useUi } from "./stores/ui";
+import { offerLookStep } from "./stores/looks";
 
 // Only the miniplayer window needs it.
 const Miniplayer = lazy(() => import("./shell/Miniplayer").then((m) => ({ default: m.Miniplayer })));
@@ -26,7 +27,7 @@ export function MiniplayerApp() {
   useEffect(() => installReducedMotion(), []);
   useEffect(() => installPageVisibility(), []);
   useEffect(() => installTheme(), []);
-  const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
+  const reduceMotion = useSettings(motionPreference);
   useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
   useEffect(() => connectPlayer(), []);
   useEffect(() => connectLikes(), []);
@@ -57,7 +58,7 @@ function MainApp() {
   useEffect(() => installReducedMotion(), []);
   useEffect(() => installPageVisibility(), []);
   useEffect(() => installTheme(), []);
-  const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
+  const reduceMotion = useSettings(motionPreference);
   useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
   useEffect(() => installOverlayScrollbars(), []);
   useEffect(() => connectApp(), []);
@@ -68,8 +69,15 @@ function MainApp() {
   useEffect(() => connectMiniplayer(), []);
   const auth = useApp((s) => s.auth);
   const signInOpen = useUi((s) => s.signInOpen);
+  // First run: right after signing in for the first time, offer "Pick a look".
+  const sawSignIn = useRef(false);
+  if (auth && auth.state !== "signedIn" && !auth.reauthRequired) sawSignIn.current = true;
   useEffect(() => {
     if (auth?.state === "signedIn") useUi.getState().setSignInOpen(false);
+    if (auth?.state === "signedIn" && sawSignIn.current) {
+      sawSignIn.current = false;
+      offerLookStep();
+    }
   }, [auth?.state]);
 
   // Until auth status arrives, show the shell frame (no spinner, no flash of sign-in).

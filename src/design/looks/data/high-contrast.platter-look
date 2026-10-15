@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "name": "High contrast",
+  "base": "dark",
+  "tokens": {
+    "color-bg-base": "#000000",
+    "color-bg-raised": "#0A0A0A",
+    "color-bg-raised2": "#161616",
+    "color-bg-overlay": "#1F1F1F",
+    "color-border": "#9A9A9A",
+    "color-ink": "#FFFFFF",
+    "color-text-primary": "#FFFFFF",
+    "color-text-secondary": "#EDEDED",
+    "color-text-muted": "#D2D2D2",
+    "color-text-on-accent": "#000000",
+    "color-accent": "#FFD84D",
+    "color-accent-hover": "#FFE58A",
+    "color-accent-pressed": "#E8C232",
+    "color-accent-strong": "#7A6620",
+    "color-focus-ring": "#FFE58A",
+    "color-state-hover": "rgba(255, 255, 255, 0.12)",
+    "color-state-pressed": "rgba(255, 255, 255, 0.18)",
+    "color-state-selected": "rgba(255, 255, 255, 0.2)",
+    "color-playing": "#FFD84D"
+  },
+  "style": { "density": "comfortable", "shadow": "flat", "blur": "off", "border": 1 },
+  "fonts": { "text": "atkinson", "headings": "atkinson" }
+}

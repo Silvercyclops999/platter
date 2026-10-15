@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "OLED black",
+  "base": "dark",
+  "tokens": {
+    "color-bg-base": "#000000",
+    "color-bg-raised": "#000000",
+    "color-bg-raised2": "#0E0E0E",
+    "color-bg-overlay": "#171717",
+    "color-border": "#262626",
+    "color-state-hover": "rgba(255, 255, 255, 0.07)",
+    "color-state-pressed": "rgba(255, 255, 255, 0.11)",
+    "color-state-selected": "rgba(255, 255, 255, 0.13)"
+  },
+  "style": { "density": "comfortable", "shadow": "flat", "blur": "off", "border": 1 }
+}

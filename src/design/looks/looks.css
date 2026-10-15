@@ -1,0 +1,153 @@
+/* Looks: style and layout options from <html data-look-*> (apply.ts).
+   With nothing chosen the app is exactly the Classic layout, so every rule
+   here is keyed to a non-default value. */
+
+/* ---------------------------------------------------------------- Fonts */
+h1,
+h2,
+.detail-header__title,
+.shelf__title { font-family: var(--font-headings, var(--font-family)); }
+
+/* ---------------------------------------------------------------- Sides */
+/* Sidebar on the right: it and its handle move past the main view. */
+:root[data-look-sidebar-side="right"] .app__body > .sidebar { order: 5; }
+:root[data-look-sidebar-side="right"] .resize-handle--sidebar {
+  left: auto;
+  right: calc(var(--space-2) + var(--sidebar-w) + var(--space-2) / 2 - 6px);
+}
+/* Panels (now playing, queue, devices, activity) on the left. */
+:root[data-look-now-playing="left"] .app__body > :is(.np-panel, .queue-panel, .output-panel, .right-strip) { order: -1; }
+:root[data-look-now-playing="left"] .resize-handle--right {
+  right: auto;
+  left: calc(var(--space-2) + var(--right-w) + var(--space-2) / 2 - 6px);
+}
+/* Both on the left: the panel comes first, so the sidebar's handle moves over by its width. */
+:root[data-look-now-playing="left"]:not([data-look-sidebar-side="right"]) .resize-handle--sidebar {
+  left: calc(var(--space-2) * 2 + var(--right-w) + var(--sidebar-w) + var(--space-2) / 2 - 6px);
+}
+/* Both on the right: the sidebar is outermost, the panel's handle moves in by its width. */
+:root[data-look-sidebar-side="right"]:not([data-look-now-playing="left"]) .resize-handle--right {
+  right: calc(var(--space-2) * 2 + var(--sidebar-w) + var(--right-w) + var(--space-2) / 2 - 6px);
+}
+:root[data-look-sidebar-side="right"]:not([data-look-now-playing="left"]) .app__body > :is(.np-panel, .queue-panel, .output-panel, .right-strip) { order: 3; }
+:root[data-look-sidebar-side="right"]:not([data-look-now-playing="left"]) .app__body > .main { order: 2; }
+/* Off: the panel only opens when asked, and the closed strip goes. */
+:root[data-look-now-playing="off"] .right-strip { display: none; }
+
+/* ---------------------------------------------------------------- Player bar */
+:root[data-look-player-style="compact"] .player-bar { height: 64px; }
+:root[data-look-player-style="compact"] .player-bar__art .art { width: 40px !important; height: 40px !important; }
+:root[data-look-player-style="largeArt"] .player-bar { height: 112px; }
+:root[data-look-player-style="largeArt"] .player-bar__art .art { width: 88px !important; height: 88px !important; }
+:root[data-look-player-style="largeArt"] .player-bar__title { font-size: var(--font-size-lg); }
+
+/* ---------------------------------------------------------------- Headers */
+/* Banner: a wide colour band with the title, the art kept small. */
+:root[data-look-header-style="banner"] .detail-header { min-height: 260px; padding-top: 96px; align-items: flex-end; }
+:root[data-look-header-style="banner"] .detail-header__art .art { width: 120px !important; height: 120px !important; }
+/* Minimal: no colour band, a small cover and a quieter title. */
+:root[data-look-header-style="minimal"] .detail-header {
+  min-height: 0;
+  padding-top: 72px;
+  padding-bottom: var(--space-4);
+  align-items: center;
+  background: none;
+}
+:root[data-look-header-style="minimal"] .detail-header ~ .detail-body { background: none; }
+:root[data-look-header-style="minimal"] .detail-header__art .art { width: 96px !important; height: 96px !important; box-shadow: none; }
+:root[data-look-header-style="minimal"] .detail-header__title { font-size: var(--font-size-display-5) !important; line-height: 1.1; }
+
+/* ---------------------------------------------------------------- Cover shape */
+:root[data-look-cover-shape="rounded"] .art:not(.art--round) { border-radius: 12px; }
+:root[data-look-cover-shape="rounded"] :is(.np-art, .np-art .art) { border-radius: 16px; }
+:root[data-look-cover-shape="circle"] .art { border-radius: 50%; }
+:root[data-look-cover-shape="circle"] :is(.np-art, .np-art .art, .player-bar__art) { border-radius: 50%; }
+
+/* Spinning record: the now playing cover becomes a record that turns while
+   music plays (never under reduced motion). */
+:root[data-look-spin-record="on"] :is(.np-art, .np-art .art) { border-radius: 50%; }
+:root[data-look-spin-record="on"] .np-art { position: relative; }
+:root[data-look-spin-record="on"] .np-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, var(--color-bg-raised) 0 4%, rgba(0, 0, 0, 0.55) 4.5% 5.5%, transparent 6% 30%, rgba(0, 0, 0, 0.18) 30.5% 31%, transparent 31.5%),
+    repeating-radial-gradient(circle, transparent 0 2px, rgba(0, 0, 0, 0.06) 2px 3px);
+}
+@keyframes look-spin {
+  to { transform: rotate(360deg); }
+}
+:root[data-look-spin-record="on"]:not([data-reduced-motion="true"]) .np-art.is-spinning { animation: look-spin 6s linear infinite; }
+
+/* ---------------------------------------------------------------- Density */
+:root[data-look-density="compact"] .track-row { height: 44px; }
+:root[data-look-density="compact"] .card { padding: var(--space-2); }
+:root[data-look-density="compact"] .home-grid { gap: var(--space-1) var(--space-2); }
+:root[data-look-density="spacious"] .track-row { height: 64px; }
+:root[data-look-density="spacious"] .card { padding: var(--space-4); }
+:root[data-look-density="spacious"] .home-grid { gap: var(--space-3) var(--space-4); }
+
+/* ---------------------------------------------------------------- Surfaces */
+:root[data-look-shadow="subtle"] :is(.main, .sidebar__block, .np-panel, .queue-panel, .output-panel) { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22); }
+:root[data-look-shadow="soft"] :is(.main, .sidebar__block, .np-panel, .queue-panel, .output-panel) { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32); }
+:root:not([data-look-border="0"])[data-look-border] :is(.main, .sidebar__block, .np-panel, .queue-panel, .output-panel, .context-menu, .dialog) {
+  outline: var(--look-border) solid var(--color-border);
+  outline-offset: calc(-1 * var(--look-border));
+}
+:root[data-look-blur="low"] :is(.context-menu, .dialog, .tooltip) {
+  background: color-mix(in srgb, var(--color-bg-overlay) 86%, transparent);
+  backdrop-filter: blur(10px) saturate(1.2);
+}
+:root[data-look-blur="medium"] :is(.context-menu, .dialog, .tooltip) {
+  background: color-mix(in srgb, var(--color-bg-overlay) 72%, transparent);
+  backdrop-filter: blur(22px) saturate(1.3);
+}
+
+/* ---------------------------------------------------------------- Track columns */
+/* Custom columns: rows become flex rows so columns can hide and reorder. */
+:root[data-look-cols="custom"] :is(.track-row, .track-list__head) { display: flex; column-gap: var(--space-4); }
+:root[data-look-cols="custom"] :is(.track-row, .track-list__head) > .track-row__num { flex: 0 0 32px; order: 0; }
+:root[data-look-cols="custom"] :is(.track-row, .track-list__head) > :is(.track-row__main, [role="columnheader"]:nth-child(2)) { flex: 5 1 0; min-width: 0; order: 1; }
+:root[data-look-cols="custom"] :is(.track-row__album, .track-list__album) { flex: 3 1 0; min-width: 0; order: var(--col-album); }
+:root[data-look-cols="custom"] :is(.track-row__badges, .track-list__badges, .track-row__added, .track-list__added) { flex: 0 0 92px; order: var(--col-info); }
+:root[data-look-cols="custom"] :is(.track-row__plays, .track-list__plays) { flex: 0 0 128px; order: var(--col-info); }
+:root[data-look-cols="custom"] :is(.track-row__end, .track-list__dur) { flex: 0 0 auto; min-width: 108px; order: var(--col-duration); }
+:root[data-look-cols-hide~="album"] :is(.track-row__album, .track-list__album) { display: none; }
+:root[data-look-cols-hide~="info"] :is(.track-row__badges, .track-list__badges, .track-row__plays, .track-list__plays, .track-row__added, .track-list__added) { display: none; }
+:root[data-look-cols-hide~="duration"] :is(.track-row__duration, .track-list__dur > *) { display: none; }
+
+/* ---------------------------------------------------------------- Home */
+.home__greeting {
+  margin: 0 var(--space-3) var(--space-4);
+  font-size: var(--font-size-display-5);
+  font-weight: var(--font-weight-display);
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+}
+
+/* ---------------------------------------------------------------- Motion */
+/* Off: nothing moves or fades. */
+:root[data-look-motion="off"] *,
+:root[data-look-motion="off"] *::before,
+:root[data-look-motion="off"] *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* ---------------------------------------------------------------- Dropping a look file on the window */
+.look-drop {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-bg-base) 70%, transparent);
+  outline: 3px dashed var(--color-accent);
+  outline-offset: -16px;
+}
+.look-drop__text { padding: var(--space-4) var(--space-6); border-radius: var(--radius-card); background: var(--color-bg-overlay); color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }

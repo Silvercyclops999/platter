@@ -6,6 +6,7 @@ import { useLibraryView } from "../stores/library";
 import { folders } from "../stores/folders";
 import { nav } from "../stores/router";
 import { smartCreateItems } from "../stores/curate";
+import { useLayout } from "../stores/theme";
 import { useUi, type MenuItem } from "../stores/ui";
 import { createPlaylistIn, folderMenu } from "./FolderMenus";
 import { LibraryCollection } from "./LibraryCollection";
@@ -37,6 +38,7 @@ const openCreate = (folderId: string | null) => (e: MouseEvent<HTMLButtonElement
 export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?: boolean }) {
   const view = useLibraryView((s) => s.view);
   const showArt = useUi((s) => s.sidebarArt);
+  const sections = useLayout().sidebarSections;
   const [query, setQuery] = useState("");
   useLibraryLoader();
   useLibraryRecents();
@@ -97,12 +99,19 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
                 <IconButton size="sm" label="Expand Your Library" icon={<Maximize2 size={16} />} onClick={() => nav.go({ name: "library" })} />
               </span>
             </div>
-            {!drill && <ServerSwitcher />}
-            <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} />
-            <div className="lib-tools">
-              <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} />
-              <LibrarySortView filter={model.filter} sort={model.sort} view={view} setView={(v) => useLibraryView.getState().setView(v)} />
-            </div>
+            {/* The Layout option picks which of these show, and their order. */}
+            {sections.map((id) =>
+              id === "servers" ? (
+                !drill && <ServerSwitcher key={id} />
+              ) : id === "filters" ? (
+                <LibraryChips key={id} filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} />
+              ) : id === "tools" ? (
+                <div key={id} className="lib-tools">
+                  <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} />
+                  <LibrarySortView filter={model.filter} sort={model.sort} view={view} setView={(v) => useLibraryView.getState().setView(v)} />
+                </div>
+              ) : null,
+            )}
           </>
         )}
         {drill && model.shown.length === 0 && !model.loading ? (
@@ -112,9 +121,11 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
         ) : (
           <LibraryCollection model={model} view={view} mode={collapsed ? "rail" : "sidebar"} query={query} showArt={showArt} label={drill ? `${drill.name} items` : undefined} />
         )}
-        <div className="sidebar__status">
-          <StatusDot compact={collapsed} />
-        </div>
+        {sections.includes("status") && (
+          <div className="sidebar__status">
+            <StatusDot compact={collapsed} />
+          </div>
+        )}
       </section>
     </nav>
   );

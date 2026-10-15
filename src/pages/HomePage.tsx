@@ -10,6 +10,7 @@ import type { CachedLibrary, HomeItem, MixShelves, MixSummary } from "../lib/typ
 import { useLoad } from "../lib/useLoad";
 import { useApp } from "../stores/app";
 import { useSettings } from "../stores/settings";
+import { useLayout } from "../stores/theme";
 import { nav } from "../stores/router";
 import { HomeItemCard, homeItemInfo } from "./cards";
 import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, offlineHome, showsLikedTile, visibleShelves, type HomeFilter } from "./home";
@@ -151,7 +152,9 @@ export function HomePage() {
   // Offline, Liked Songs keeps its tile only while something liked can play.
   const likedCount = useLikes((s) => s.ids.size);
   const liked = !!data && !cachedOnly && showsLikedTile(filter, likedCount, showGrid);
-  const tiles = data ? gridItems(data, filter, showGrid, liked) : [];
+  const look = useLayout();
+  // Quick access grid size: Liked Songs takes one of the places.
+  const tiles = data ? gridItems(data, filter, showGrid, liked).slice(0, look.quickAccess - (liked ? 1 : 0)) : [];
   const shelves = data ? visibleShelves(data, filter) : [];
   const washItem = tiles.find((t) => homeItemInfo(t).key === hovered) ?? tiles[0];
   const wash = useWashColour(washItem, washOn);
@@ -176,7 +179,7 @@ export function HomePage() {
       data-testid="home"
     >
       <div className="home__wash" aria-hidden="true" />
-      <h1 className="sr-only">{greeting()}</h1>
+      <h1 className={look.homeGreeting ? "home__greeting" : "sr-only"}>{greeting()}</h1>
       <HomeChips value={filter} onChange={pick} />
       {error && !data ? (
         <p className="page-error">Couldn't load Home: {error.message}</p>
@@ -201,7 +204,7 @@ export function HomePage() {
         <>
           {!data && showGrid ? (
             <div className="home-grid" aria-hidden="true">
-              {Array.from({ length: 8 }, (_, i) => (
+              {Array.from({ length: look.quickAccess }, (_, i) => (
                 <ShortcutSkeleton key={i} />
               ))}
             </div>
@@ -230,33 +233,33 @@ export function HomePage() {
               No {kindLabel} to show yet.
             </p>
           )}
-          {showMixes && <MixShelf title="Made for you" mixes={mixes.madeForYou} />}
           {!data
-            ? HOME_SHELVES.slice(0, 3).map((s) => <Shelf key={s.id} title={s.title} loading />)
-            : shelves.flatMap((s, i) => [
-                ...(i === 1 && showMixes
-                  ? [<MixShelf key="mix-moods" title="Your mixes by mood" mixes={mixes.moods} />, <MixShelf key="mix-genres" title="Your genre mixes" mixes={mixes.genres} />]
-                  : []),
-                <Shelf
-                  key={s.id}
-                  title={s.title}
-                  skeletonKind={s.id === "topArtists" ? "artist" : "album"}
-                  // Recently played's Show all is the Recents page.
-                  onShowAll={() => nav.go(s.id === "recentlyPlayed" ? { name: "recents" } : { name: "homeShelf", shelf: s.id })}
-                >
-                  {s.items.map((item) => (
-                    <ShelfItem key={homeItemInfo(item).key}>
-                      <HomeItemCard item={item} />
-                    </ShelfItem>
-                  ))}
-                </Shelf>,
-              ])}
-          {showMixes && shelves.length < 2 && (
-            <>
-              <MixShelf title="Your mixes by mood" mixes={mixes.moods} />
-              <MixShelf title="Your genre mixes" mixes={mixes.genres} />
-            </>
-          )}
+            ? HOME_SHELVES.filter((s) => look.homeShelves.includes(s.id))
+                .slice(0, 3)
+                .map((s) => <Shelf key={s.id} title={s.title} loading />)
+            : // The Layout option picks which shelves show, and their order.
+              look.homeShelves.map((key) => {
+                if (key === "madeForYou") return showMixes && <MixShelf key={key} title="Made for you" mixes={mixes.madeForYou} />;
+                if (key === "mixMoods") return showMixes && <MixShelf key={key} title="Your mixes by mood" mixes={mixes.moods} />;
+                if (key === "mixGenres") return showMixes && <MixShelf key={key} title="Your genre mixes" mixes={mixes.genres} />;
+                const s = shelves.find((x) => x.id === key);
+                if (!s) return null;
+                return (
+                  <Shelf
+                    key={s.id}
+                    title={s.title}
+                    skeletonKind={s.id === "topArtists" ? "artist" : "album"}
+                    // Recently played's Show all is the Recents page.
+                    onShowAll={() => nav.go(s.id === "recentlyPlayed" ? { name: "recents" } : { name: "homeShelf", shelf: s.id })}
+                  >
+                    {s.items.map((item) => (
+                      <ShelfItem key={homeItemInfo(item).key}>
+                        <HomeItemCard item={item} />
+                      </ShelfItem>
+                    ))}
+                  </Shelf>
+                );
+              })}
         </>
       )}
     </div>
