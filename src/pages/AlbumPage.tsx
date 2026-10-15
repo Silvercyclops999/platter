@@ -7,6 +7,7 @@ import { openContextMenu } from "../components/ContextMenu";
 import { bookmarkPageItem } from "../stores/curate";
 import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem } from "../components/PlaylistPicker";
+import { plexEditItem } from "../components/PlexEditMenu";
 import { CoverPopup } from "../components/CoverPopup";
 import { DownloadButton } from "../components/DownloadButton";
 import { downloadMenuItems } from "../stores/downloads";
@@ -190,6 +191,7 @@ export function AlbumPage({ id }: { id: string }) {
                   ...(transcribeOn
                     ? [{ label: "Transcribe songs without lyrics", onSelect: () => void transcribe.album(album.id) }]
                     : []),
+                  plexEditItem({ id: album.id, kind: "album", title: album.title, thumb: album.thumb, artistTitle: album.artistTitle }),
                 ],
                 e.currentTarget,
               )

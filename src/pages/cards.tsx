@@ -4,6 +4,8 @@ import { Card } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { shareItem } from "../components/ShareMenu";
+import { plexEditItem } from "../components/PlexEditMenu";
+import { isCreditId } from "../lib/credits";
 import { ExplicitBadge } from "../components/FileTagBadges";
 import { releaseTypeLabel } from "../lib/format";
 import { albumDrag, playlistDrag } from "../stores/drag";
@@ -60,6 +62,7 @@ export function useAlbumActions(album: Album): ItemActions & { openMenu: (at: { 
           onSelect: () =>
             usePins.getState().toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
         },
+        plexEditItem({ id: album.id, kind: "album", title: album.title, thumb: album.thumb, artistTitle: album.artistTitle }),
       ],
       at,
     );
@@ -86,6 +89,7 @@ export function useArtistActions(artist: Artist): ItemActions {
             label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
             onSelect: () => usePins.getState().toggle({ kind: "artist", id: artist.id, title: artist.title, subtitle: "Artist", thumb: artist.thumb }),
           },
+          ...(isCreditId(artist.id) ? [] : [plexEditItem({ id: artist.id, kind: "artist", title: artist.title, thumb: artist.thumb })]),
         ],
         e,
       );

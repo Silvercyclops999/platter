@@ -795,6 +795,12 @@ export interface Settings {
   checkUnmatchedMusicbrainz: boolean;
   /** Albums sharing a group tag show as one card with an edition picker. */
   groupEditions: boolean;
+  /** Edit in Plex (covers, matches, details, merge) on servers this account owns. */
+  plexEditShow: boolean;
+  /** Fields edited in Plex are locked so a refresh doesn't undo them. */
+  plexEditLock: boolean;
+  /** Fix match shows on unreleased albums (always with a warning). */
+  plexEditMatchUnreleased: boolean;
   /** Drag songs, albums and playlists onto playlists, Liked Songs and the queue. */
   dragAndDrop: boolean;
   /** Transcribe songs without lyrics on this computer (this device only). */
@@ -1062,6 +1068,9 @@ export const DEFAULT_SETTINGS: Settings = {
   countUnmatchedUnreleased: true,
   checkUnmatchedMusicbrainz: true,
   groupEditions: true,
+  plexEditShow: true,
+  plexEditLock: true,
+  plexEditMatchUnreleased: true,
   dragAndDrop: true,
   transcribeLyrics: false,
   transcribeModel: "small",
@@ -2035,3 +2044,80 @@ export interface EventMap {
 }
 
 export type EventName = keyof EventMap;
+
+// ---------------------------------------------------------------- Edit in Plex (docs/IPC.md "Edit in Plex")
+
+export type EditKind = "album" | "artist";
+/** An album cover or artist photo ("poster"), or the background behind an artist ("art"). */
+export type ImageKind = "poster" | "art";
+
+/** What the UI may offer: the Settings switch and the servers this account can edit. */
+export interface EditAccess {
+  show: boolean;
+  /** Tags of servers that can be edited. */
+  servers: string[];
+  /** Ids without a tag (the connected server's) can be edited. */
+  connected: boolean;
+  lockFields: boolean;
+  matchUnreleased: boolean;
+}
+
+/** The fields Platter edits. `released` is YYYY or YYYY-MM-DD. */
+export interface EditFields {
+  title: string;
+  sortTitle: string;
+  released: string;
+  studio: string;
+  summary: string;
+  genres: string[];
+  styles: string[];
+  moods: string[];
+}
+
+export interface EditInfo {
+  id: string;
+  kind: EditKind | null;
+  fields: EditFields;
+  /** Plex field names that are locked. */
+  locked: string[];
+  guid: string | null;
+  thumb: string | null;
+  art: string | null;
+  artistTitle: string | null;
+  sectionId: string | null;
+  /** Matched to an online entry. */
+  matched: boolean;
+  /** Albums: counts as unreleased. */
+  unreleased: boolean;
+}
+
+export interface ImageChoice {
+  key: string;
+  /** Art path for the preview. */
+  preview: string | null;
+  provider: string | null;
+  selected: boolean;
+}
+
+export interface MatchCandidate {
+  guid: string;
+  name: string;
+  /** The album's artist, or where an artist is from. */
+  artist: string | null;
+  year: number | null;
+  score: number | null;
+}
+
+export type EditAction = "image" | "match" | "unmatch" | "details" | "merge" | "split" | "refresh";
+
+export interface EditChange {
+  id: string;
+  itemId: string;
+  kind: EditKind;
+  action: EditAction;
+  label: string;
+  /** Unix ms. */
+  at: number;
+  undoable: boolean;
+  undone: boolean;
+}

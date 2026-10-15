@@ -277,6 +277,56 @@ PNG or WebP under 10 MB. Smart playlists can't be edited (`invalid`).
 `playlist_duplicates` lets the UI ask before adding a song that's already
 there (setting `playlistAskDuplicates`).
 
+## Edit in Plex
+| Command | Args | Returns |
+| --- | --- | --- |
+| `plex_edit_access` | – | `{ show, servers: string[], connected, lockFields, matchUnreleased }` |
+| `plex_edit_item` | `{ id }` | `EditInfo` |
+| `plex_edit_images` | `{ id, which: "poster" \| "art" }` | `{ key, preview, provider, selected }[]` |
+| `plex_edit_select_image` | `{ id, kind, which, key }` | `EditChange` |
+| `plex_edit_upload_image` | `{ id, kind, which, bytes: number[], contentType }` | `EditChange` |
+| `plex_edit_image_link` | `{ id, kind, which, url }` | `EditChange` |
+| `plex_edit_matches` | `{ id, title?, year? }` | `{ guid, name, artist, year, score }[]` |
+| `plex_edit_match` | `{ id, kind, guid, name, year? }` | `EditChange` |
+| `plex_edit_unmatch` | `{ id, kind }` | `EditChange` |
+| `plex_edit_details` | `{ id, fields }` | `EditChange` |
+| `plex_edit_merge` | `{ target, others: string[], photoFrom? }` | `EditChange` |
+| `plex_edit_split` | `{ id }` | `EditChange` |
+| `plex_edit_refresh` | `{ id, kind }` | `EditChange` |
+| `plex_edit_undo` | `{ changeId }` | `EditChange` (now `undone`) |
+| `plex_edit_history` | `{ id }` | `EditChange[]`, newest first |
+
+These change Plex's own data for an album or artist (`kind` is `"album"` or
+`"artist"`), never the files. Only servers the account owns can be edited:
+`servers` lists their tags and `connected` covers ids without a tag. A
+server that answers 401 or 403 to an edit is an `auth` error ("Only the
+server's owner and admins can edit this.") and drops out of `servers` for
+the rest of the run. With `plexEditShow` off every write is `invalid`.
+
+`EditInfo` has `id`, `kind`, `fields`, `locked` (Plex field names),
+`guid`, `thumb`, `art`, `artistTitle`, `sectionId`, `matched` (not a
+`local://` guid) and `unreleased` (albums, by the same rule as sharing).
+`fields` is `{ title, sortTitle, released, studio, summary, genres, styles,
+moods }`; `released` is `YYYY` or `YYYY-MM-DD`. `plex_edit_details` sends
+only the fields that differ and locks them when `plexEditLock` is on. Artists
+have no `released` or `studio`.
+
+`which: "art"` is an artist's background. Uploads are JPEG, PNG or WebP under
+10 MB; links must be http or https. After an image change the item's cached
+artwork is dropped, so the new one shows at once. Every change is read back
+into the library cache (`library://changed`); merge and split also start a
+sync, since albums move between artists.
+
+`EditChange` is `{ id, itemId, kind, action, label, at, undoable, undone }`,
+`action` one of `image`, `match`, `unmatch`, `details`, `merge`, `split`,
+`refresh`. Undo puts back the previous image (by selecting it again, or
+uploading the copy kept when it was replaced), the previous match, the
+previous field values and locks, or splits a merge. Split and refresh can't
+be undone. The last 100 changes are kept on this computer.
+
+With `plexEditMatchUnreleased` off, `plex_edit_match` on an unreleased album
+is `invalid`. The UI hides Fix match there; Unmatch always works.
+
 ## Likes
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1798,6 +1848,9 @@ The rest of the fields, with their defaults:
 | `countUnmatchedUnreleased` | bool, true | Albums Plex couldn't match (guid `local://`, or no release type and no label before the next sync) count as unreleased for sharing, Discord, scrobbling, mixes, smart playlists and lyrics transcription until a release type or `ARCHIVE_VERSION` says otherwise. Off: only demo release types and archive version tags count. |
 | `checkUnmatchedMusicbrainz` | bool, true | Look albums Plex couldn't match up on MusicBrainz in the background (needs `infoMusicbrainz`). A sure match means Plex missed it and the album counts as released. Off, or with MusicBrainz off, stored answers stop counting. Synced. |
 | `groupEditions` | bool, true | Albums sharing `ARCHIVE_GROUP` list as one album (the face) in the library, artist pages and Home's album shelves. |
+| `plexEditShow` | bool, true | Edit in Plex on album and artist menus, for servers the account owns. Off refuses every edit. |
+| `plexEditLock` | bool, true | Fields changed with `plex_edit_details` are locked in Plex so a refresh keeps them. |
+| `plexEditMatchUnreleased` | bool, true | Fix match is offered on unreleased albums (always with a warning). Off refuses it there. |
 | `dragAndDrop` | bool, true | Songs, albums and playlists can be dragged onto playlists, Liked Songs and the queue. Off stops those drags; reordering inside a playlist or the queue still works. |
 | `showToMyDevices` | bool, true | Announce this computer to the user's other Platter computers, open the control port and publish its addresses to plex.tv. Off withdraws the announcement and closes the port. Independent of `actAsPlexPlayer`. This device only. |
 | `computerName` | string, `""` | The name other devices see, up to 60 characters, trimmed. Empty uses the OS computer name. This device only. |

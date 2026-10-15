@@ -77,6 +77,10 @@ import type {
   SmartRules,
   SmartSaveRequest,
   FeedStatus,
+  EditFields,
+  EditKind,
+  ImageKind,
+  MatchCandidate,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
@@ -121,6 +125,7 @@ import { MockDownloads } from "./downloads";
 import { MockMixes } from "./mixes";
 import { MockSocial } from "./social";
 import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
+import { MockPlexEdit } from "./plexEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
 
 /** Record labels for the mock album footers. */
@@ -241,6 +246,8 @@ export class MockBackend implements Backend {
   readonly transcribe: MockTranscribe;
   /** Downloads (test hooks: failNext, loseFile, connection, stepMs, steps). */
   readonly downloads: MockDownloads;
+  /** Edit in Plex (test hooks: shared, failNext). */
+  readonly plexEdit: MockPlexEdit;
   /** Mixes and radio, made from the fixtures. */
   readonly mixes: MockMixes;
   /** Smooth transitions (player state). */
@@ -359,6 +366,11 @@ export class MockBackend implements Backend {
       () => this.emit("deeplink://open", null),
     );
     this.discord = new MockDiscord(this.opts.discord, (s) => this.emit("discord://status", s));
+    this.plexEdit = new MockPlexEdit(
+      this.fx,
+      () => this.settings,
+      () => this.later(0, () => this.emit("library://changed", null)),
+    );
     this.tags = new MockFileTags(
       this.fx,
       () => this.settings,
@@ -1010,6 +1022,54 @@ export class MockBackend implements Backend {
   }
   playlistDelete(id: string) {
     return this.delay(() => this.pl.delete(id));
+  }
+
+  // ---------------------------------------------------------------- edit in Plex
+
+  plexEditAccess() {
+    return this.delay(() => this.plexEdit.access());
+  }
+  plexEditItem(id: string) {
+    return this.delay(() => this.plexEdit.item(id));
+  }
+  plexEditImages(id: string, which: ImageKind) {
+    return this.delay(() => this.plexEdit.images(id, which));
+  }
+  plexEditSelectImage(id: string, kind: EditKind, which: ImageKind, key: string) {
+    return this.delay(() => this.plexEdit.selectImage(id, kind, which, key));
+  }
+  plexEditUploadImage(id: string, kind: EditKind, which: ImageKind, bytes: Uint8Array, contentType: string) {
+    return this.delay(() => this.plexEdit.uploadImage(id, kind, which, bytes, contentType));
+  }
+  plexEditImageLink(id: string, kind: EditKind, which: ImageKind, url: string) {
+    return this.delay(() => this.plexEdit.imageLink(id, kind, which, url));
+  }
+  plexEditMatches(id: string, title?: string, year?: number | null) {
+    return this.delay(() => this.plexEdit.matches(id, title, year));
+  }
+  plexEditMatch(id: string, kind: EditKind, candidate: MatchCandidate) {
+    return this.delay(() => this.plexEdit.match(id, kind, candidate));
+  }
+  plexEditUnmatch(id: string, kind: EditKind) {
+    return this.delay(() => this.plexEdit.unmatch(id, kind));
+  }
+  plexEditDetails(id: string, fields: EditFields) {
+    return this.delay(() => this.plexEdit.details(id, fields));
+  }
+  plexEditMerge(target: string, others: string[], photoFrom?: string | null) {
+    return this.delay(() => this.plexEdit.merge(target, others, photoFrom));
+  }
+  plexEditSplit(id: string) {
+    return this.delay(() => this.plexEdit.split(id));
+  }
+  plexEditRefresh(id: string, kind: EditKind) {
+    return this.delay(() => this.plexEdit.refresh(id, kind));
+  }
+  plexEditUndo(changeId: string) {
+    return this.delay(() => this.plexEdit.undo(changeId));
+  }
+  plexEditHistory(id: string) {
+    return this.delay(() => this.plexEdit.history(id));
   }
 
   // ---------------------------------------------------------------- likes

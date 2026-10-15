@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { DragAnnouncer } from "../components/DragAnnouncer";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
+import { PlexEditDialogs } from "../components/PlexEditDialogs";
 import { FolderDialogs } from "./FolderMenus";
 import { SavedInHost } from "../components/SavedInMenu";
 import { Toaster } from "../components/Toast";
@@ -205,6 +206,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <PlexEditDialogs />
       <SmartEditorHost />
       <FolderDialogs />
       <DownloadDialogs />

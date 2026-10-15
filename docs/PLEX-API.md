@@ -713,3 +713,42 @@ interface, so a Plex path can be added if Plex ever offers one). What it
 does use from Plex: each guest's own access to the server, rating keys, and
 the server's machine id, hashed with the session id before it's sent.
 
+### 2026-10-15: editing metadata (reads checked, writes not sent)
+
+Only GETs were sent to the real server. The writes below follow the shapes
+other Plex clients use and are tested against a faked server.
+
+- `GET /library/metadata/{id}/posters` answers `MediaContainer` with `size`
+  and `Metadata[]`, each `{ key, ratingKey, thumb, selected, provider }`.
+  The one in use has `selected: true`, a `metadata://posters/...` (or
+  `upload://...`) `ratingKey`, and server paths for `key` and `thumb`. The
+  others are suggestions: `ratingKey` and `key` are the image's https link
+  and `thumb` is an `images.plex.tv` preview. Providers seen on albums:
+  `embedded`, `caa`, `lastfm`, `discogs`, `fanarttv`, `tivo`; one album had
+  a single suggestion and none selected. Artists listed up to 13, one
+  selected.
+- `GET /library/metadata/{id}/arts` on an artist has the same shape (3
+  backgrounds, `fanarttv`).
+- `GET /library/metadata/{id}/matches?manual=1` answers `SearchResult[]`
+  (not `Metadata`). Albums: `{ type, guid, name, parentName, parentGUID,
+  score, year, lifespanEnded, SearchResult[] }`, the inner list being the
+  candidate's tracks (`id, type, index, guid, name, matched`). Guids are
+  `mbid://...`, scores 0 to 100, no thumbnails. Adding `title` and `year`
+  changed the list (4 results instead of 3). Artists: `{ type, guid, name,
+  score, area?, beginArea?, lifespanBegin?, lifespanEnded }`.
+- Album detail has `studio`, `originallyAvailableAt`, `summary`,
+  `librarySectionID`, `Genre`, `Style`, `Mood`, and no `titleSort` when
+  none is set. No album in the music section had a `Field` list, so no
+  field was locked; when one is, the detail carries
+  `Field: [{ name, locked }]`. Guids were `plex://` (matched) or `local://`.
+
+Writes used: `PUT .../poster?url=<ratingKey>` (or `/art`) selects one,
+`POST .../posters` with the image as the body uploads one and selects it,
+`POST .../posters?url=<link>` has the server fetch it,
+`PUT .../match?guid=&name=&year=`, `PUT .../unmatch`,
+`PUT /library/sections/{s}/all?type=8|9&id=&<field>.value=&<field>.locked=1`
+(tags as `genre[0].tag.tag=` and removals as `genre[].tag.tag-=a,b`),
+`PUT /library/metadata/{target}/merge?ids=a,b` (the target keeps its name
+and photo), `PUT .../split` and `PUT .../refresh`. A 401 or 403 on any of
+them is read as "this account can't edit the server".
+

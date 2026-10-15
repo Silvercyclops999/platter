@@ -27,6 +27,7 @@ import type {
 import { useApp } from "../stores/app";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
+import { PlexEditSettings, plexEditMatches } from "./PlexEditSettings";
 import { useHomeUsers } from "../shell/HomeUsers";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { reloadLikes } from "../stores/likes";
@@ -1981,6 +1982,7 @@ export function SettingsPage() {
       )}
       {nowPlayingMatches(query) && <NowPlayingSettings />}
       {importMatches(query) && <LibraryImportSettings />}
+      {plexEditMatches(query) && <PlexEditSettings />}
       <p className="settings__hint">Shortcut: {modKey}+,</p>
       <ConfirmDialog
         open={dialog === "signOut"}

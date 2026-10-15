@@ -115,6 +115,14 @@ import type {
   SmartSummary,
   ThemeFile,
   ThemeFolder,
+  EditAccess,
+  EditChange,
+  EditFields,
+  EditInfo,
+  EditKind,
+  ImageChoice,
+  ImageKind,
+  MatchCandidate,
 } from "./types";
 import type {
   ImportDecision,
@@ -194,6 +202,29 @@ export interface Backend {
   playlistUpdate(id: string, details: { title?: string; summary?: string }): Promise<Playlist>;
   playlistSetCover(id: string, bytes: Uint8Array, contentType: string): Promise<void>;
   playlistDelete(id: string): Promise<void>;
+
+  // Edit in Plex (docs/IPC.md "Edit in Plex")
+  /** Whether editing is on, and which servers this account can edit. */
+  plexEditAccess(): Promise<EditAccess>;
+  /** An album or artist's editable fields, locks, match and release status. */
+  plexEditItem(id: string): Promise<EditInfo>;
+  /** The images Plex offers (posters, or an artist's backgrounds). */
+  plexEditImages(id: string, which: ImageKind): Promise<ImageChoice[]>;
+  plexEditSelectImage(id: string, kind: EditKind, which: ImageKind, key: string): Promise<EditChange>;
+  plexEditUploadImage(id: string, kind: EditKind, which: ImageKind, bytes: Uint8Array, contentType: string): Promise<EditChange>;
+  plexEditImageLink(id: string, kind: EditKind, which: ImageKind, url: string): Promise<EditChange>;
+  plexEditMatches(id: string, title?: string, year?: number | null): Promise<MatchCandidate[]>;
+  plexEditMatch(id: string, kind: EditKind, candidate: MatchCandidate): Promise<EditChange>;
+  plexEditUnmatch(id: string, kind: EditKind): Promise<EditChange>;
+  /** Save the fields; changed ones are locked when that setting is on. */
+  plexEditDetails(id: string, fields: EditFields): Promise<EditChange>;
+  /** Merge `others` into `target` (which keeps its name); the photo comes from `photoFrom` when given. */
+  plexEditMerge(target: string, others: string[], photoFrom?: string | null): Promise<EditChange>;
+  plexEditSplit(id: string): Promise<EditChange>;
+  plexEditRefresh(id: string, kind: EditKind): Promise<EditChange>;
+  plexEditUndo(changeId: string): Promise<EditChange>;
+  /** The item's recent changes, newest first. */
+  plexEditHistory(id: string): Promise<EditChange[]>;
 
   // Likes (docs/IPC.md "Likes")
   /** Like (five stars) or unlike (clear the rating); resolves to the ids that changed. */
@@ -597,6 +628,22 @@ export function createTauriBackend(): Backend {
     playlistUpdate: (id, details) => call("playlist_update", { id, title: details.title, summary: details.summary }),
     playlistSetCover: (id, bytes, contentType) => call("playlist_set_cover", { id, bytes: Array.from(bytes), contentType }),
     playlistDelete: (id) => call("playlist_delete", { id }),
+    plexEditAccess: () => call("plex_edit_access"),
+    plexEditItem: (id) => call("plex_edit_item", { id }),
+    plexEditImages: (id, which) => call("plex_edit_images", { id, which }),
+    plexEditSelectImage: (id, kind, which, key) => call("plex_edit_select_image", { id, kind, which, key }),
+    plexEditUploadImage: (id, kind, which, bytes, contentType) =>
+      call("plex_edit_upload_image", { id, kind, which, bytes: Array.from(bytes), contentType }),
+    plexEditImageLink: (id, kind, which, url) => call("plex_edit_image_link", { id, kind, which, url }),
+    plexEditMatches: (id, title, year) => call("plex_edit_matches", { id, title: title ?? null, year: year ?? null }),
+    plexEditMatch: (id, kind, c) => call("plex_edit_match", { id, kind, guid: c.guid, name: c.name, year: c.year ?? null }),
+    plexEditUnmatch: (id, kind) => call("plex_edit_unmatch", { id, kind }),
+    plexEditDetails: (id, fields) => call("plex_edit_details", { id, fields }),
+    plexEditMerge: (target, others, photoFrom) => call("plex_edit_merge", { target, others, photoFrom: photoFrom ?? null }),
+    plexEditSplit: (id) => call("plex_edit_split", { id }),
+    plexEditRefresh: (id, kind) => call("plex_edit_refresh", { id, kind }),
+    plexEditUndo: (changeId) => call("plex_edit_undo", { changeId }),
+    plexEditHistory: (id) => call("plex_edit_history", { id }),
     likesSet: (trackIds, liked) => call("likes_set", { trackIds, liked }),
     likedIds: () => call("liked_ids"),
     likedPage: () => call("liked_page"),

@@ -93,6 +93,28 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["eq_profile_rename", (b) => b.eqProfileRename("Desk", "Studio"), { from: "Desk", to: "Studio" }],
   ["eq_profile_delete", (b) => b.eqProfileDelete("Studio"), { name: "Studio" }],
   ["eq_use_for_output", (b) => b.eqUseForOutput(true), { on: true }],
+  ["plex_edit_access", (b) => b.plexEditAccess(), undefined],
+  ["plex_edit_item", (b) => b.plexEditItem("a:5"), { id: "a:5" }],
+  ["plex_edit_images", (b) => b.plexEditImages("5", "art"), { id: "5", which: "art" }],
+  ["plex_edit_select_image", (b) => b.plexEditSelectImage("5", "album", "poster", "k"), { id: "5", kind: "album", which: "poster", key: "k" }],
+  [
+    "plex_edit_upload_image",
+    (b) => b.plexEditUploadImage("5", "album", "poster", new Uint8Array([1, 2]), "image/png"),
+    { id: "5", kind: "album", which: "poster", bytes: [1, 2], contentType: "image/png" },
+  ],
+  ["plex_edit_image_link", (b) => b.plexEditImageLink("5", "artist", "art", "https://x"), { id: "5", kind: "artist", which: "art", url: "https://x" }],
+  ["plex_edit_matches", (b) => b.plexEditMatches("5", "T", 2020), { id: "5", title: "T", year: 2020 }],
+  [
+    "plex_edit_match",
+    (b) => b.plexEditMatch("5", "album", { guid: "g", name: "N", artist: null, year: null, score: 9 }),
+    { id: "5", kind: "album", guid: "g", name: "N", year: null },
+  ],
+  ["plex_edit_unmatch", (b) => b.plexEditUnmatch("5", "album"), { id: "5", kind: "album" }],
+  ["plex_edit_merge", (b) => b.plexEditMerge("7", ["8"], "8"), { target: "7", others: ["8"], photoFrom: "8" }],
+  ["plex_edit_split", (b) => b.plexEditSplit("7"), { id: "7" }],
+  ["plex_edit_refresh", (b) => b.plexEditRefresh("7", "artist"), { id: "7", kind: "artist" }],
+  ["plex_edit_undo", (b) => b.plexEditUndo("c1"), { changeId: "c1" }],
+  ["plex_edit_history", (b) => b.plexEditHistory("5"), { id: "5" }],
 ];
 
 const EVENTS = [
