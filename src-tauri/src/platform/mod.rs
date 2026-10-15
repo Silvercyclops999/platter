@@ -14,6 +14,7 @@ pub mod media;
 pub mod menubar;
 pub mod miniplayer;
 pub mod power;
+pub mod reveal;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub mod session;
 #[cfg(target_os = "windows")]
@@ -395,21 +396,6 @@ fn sync_autostart<R: Runtime>(app: &AppHandle<R>, on: bool) {
             }
         }
         Err(e) => tracing::warn!("launch at login state: {e}"),
-    }
-}
-
-/// Apply the launch-at-login start mode to the main window.
-pub fn apply_start_mode<R: Runtime>(app: &AppHandle<R>, mode: StartMode) {
-    let Some(w) = app.get_webview_window("main") else { return };
-    match mode {
-        StartMode::Normal => {}
-        StartMode::Hidden => {
-            let _ = w.hide();
-            visibility::set_page_visible(&w, false);
-        }
-        StartMode::Minimised => {
-            let _ = w.minimize();
-        }
     }
 }
 

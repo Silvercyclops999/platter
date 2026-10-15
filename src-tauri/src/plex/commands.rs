@@ -47,7 +47,9 @@ pub const COMMANDS: &[&str] = &[
 
 #[tauri::command]
 pub async fn auth_status(state: State<'_, PlexState>) -> AppResult<AuthStatus> {
-    Ok(state.auth_status().await)
+    // At launch, wait for the saved sign-in to be read so the sign-in page
+    // never shows for a moment before the library.
+    Ok(state.auth_status_when_read(std::time::Duration::from_secs(2)).await)
 }
 
 /// Creates a PIN, opens the Plex sign-in page in the default browser and
@@ -79,7 +81,7 @@ pub async fn auth_sign_out(app: AppHandle, state: State<'_, PlexState>, home: St
     }
     // Signing out as another Home user goes back to the user who signed in.
     if home.signed_out()? {
-        app.request_restart();
+        restart_as_other_user(&app).await;
     }
     Ok(())
 }
@@ -138,12 +140,23 @@ pub async fn home_switch(app: AppHandle, home: State<'_, super::home::Home>, uui
     let pin = pin.as_deref().map(str::trim).filter(|p| !p.is_empty());
     let switched = home.switch(&uuid, pin).await?;
     if switched.restart {
-        use tauri::Emitter;
-        let _ = app.emit(super::home::EVENT_HOME_CHANGED, serde_json::json!({ "restarting": true }));
-        // Exiting saves the queue and ends a listening session.
-        app.request_restart();
+        restart_as_other_user(&app).await;
     }
     Ok(())
+}
+
+/// How long the "Switching to…" screen gets to fade in before the restart.
+pub const SWITCH_SCREEN_MS: u64 = 250;
+
+/// Restart into another Home user's folder: the page covers itself with the
+/// switching screen first, and the new window opens where this one is.
+async fn restart_as_other_user(app: &AppHandle) {
+    use tauri::Emitter;
+    let _ = app.emit(super::home::EVENT_HOME_CHANGED, serde_json::json!({ "restarting": true }));
+    tokio::time::sleep(std::time::Duration::from_millis(SWITCH_SCREEN_MS)).await;
+    crate::platform::reveal::mark_switching(app);
+    // Exiting saves the queue and ends a listening session.
+    app.request_restart();
 }
 
 /// Settings: remember the last Home user on this device.

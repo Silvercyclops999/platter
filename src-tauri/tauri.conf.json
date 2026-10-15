@@ -19,7 +19,7 @@
         "minWidth": 800,
         "minHeight": 600,
         "center": true,
-        "visible": true,
+        "visible": false,
         "backgroundColor": "#0E0D0C",
         "dragDropEnabled": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --force-gpu-mem-discardable-limit-mb=64"

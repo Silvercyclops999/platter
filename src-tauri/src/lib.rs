@@ -557,9 +557,10 @@ pub fn run() {
             tauri::async_runtime::spawn(artist_info.clone().watch_prefetch());
             // Albums Plex couldn't match: ask MusicBrainz whether Plex just missed them.
             tauri::async_runtime::spawn(artistinfo::releasecheck::watch(artist_info.clone()));
-            // Launched at login: start hidden to the tray or minimised.
+            // The window opens hidden and is shown once the page has drawn
+            // (launched at login: kept in the tray or minimised).
             let args: Vec<String> = std::env::args().collect();
-            platform::apply_start_mode(app.handle(), platform::start_mode(&args, &initial.platform()));
+            platform::reveal::install(app.handle(), &root_dir, platform::start_mode(&args, &initial.platform()));
             let os = platform::Platform::new();
 
             let net_route = audio::netsink::NetRoute::default();
@@ -1408,10 +1409,12 @@ pub fn run() {
             radar::commands::radar_auto_set,
             platform::miniplayer::miniplayer_state,
             platform::miniplayer::miniplayer_set,
+            platform::reveal::window_ready,
         ])
         .on_window_event(|window, event| {
             platform::miniplayer::on_window_event(window, event);
             platform::visibility::on_window_event(window, event);
+            platform::reveal::on_window_event(window, event);
             // Back in front: look for an update if the last check is old.
             if let tauri::WindowEvent::Focused(true) = event
                 && window.label() == "main"
@@ -1441,6 +1444,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
+                platform::reveal::save(app);
                 let player = app.state::<PlayerHandle>().inner().clone();
                 tauri::async_runtime::block_on(player.flush());
                 // A hosted session ends for everyone; a guest says it left.

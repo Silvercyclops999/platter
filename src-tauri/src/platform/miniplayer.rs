@@ -170,7 +170,7 @@ pub async fn open<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
         // would otherwise fill the screen.
         .maximizable(false)
         .always_on_top(s.miniplayer_on_top)
-        .background_color(tauri::window::Color(0x0E, 0x0D, 0x0C, 0xFF))
+        .background_color(super::reveal::background(app))
         .visible(true)
         .focused(true);
     if let Some((x, y)) = at {

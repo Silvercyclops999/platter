@@ -88,7 +88,18 @@ on a Plex server changes. `remember` (Settings, this device) off starts as
 the user who signed in. Signing out as another Home user goes back to the
 user who signed in.
 
-Event `home://changed` → `{ restarting: bool }` just before the restart.
+Event `home://changed` → `{ restarting: bool }` just before the restart
+(also when signing out as another Home user restarts the app). The core then
+waits 250 ms so the UI can cover the window with its "Switching to..."
+screen, and the new window opens where the old one was, shown even if the
+app was launched at login (see Main window). The UI puts that screen up as
+soon as a user is picked. When `home_switch` fails (a wrong PIN, plex.tv out
+of reach) nothing has changed: the screen goes and a toast says why. If the
+restart hasn't happened 20 seconds after the pick, the screen goes too.
+
+`auth_status` waits up to 2 seconds at launch for the saved sign-in to be
+read from the keychain (never for the network), so the first answer is not
+a signed-out one.
 
 ### More than one library
 | Command | Args | Returns |
@@ -834,6 +845,25 @@ after it stops moving and when it closes). It is always on top while
 any `miniplayer*` setting is sent to both windows as `settings://changed`.
 When the window can't be made, `miniplayer_set` fails with `internal` ("The
 miniplayer couldn't open.").
+
+## Main window
+| Command | Args | Returns |
+| --- | --- | --- |
+| `window_ready` | `{ background: string \| null }` | – |
+
+The main window is made hidden and shown once its page has drawn. The UI
+calls `window_ready` after the shell is on the page with the look applied
+(two animation frames, or 150 ms if frames don't run), passing the look's
+background as `#rrggbb`. If it never comes the core shows the window after
+3 seconds anyway. Launched at login with close to tray on, the window stays
+in the tray; otherwise it opens minimised. Calls from other windows are
+ignored.
+
+The core keeps `window.json` in the app data folder (shared by all Home
+users on the computer): the window's place, size and maximised state, saved
+when it closes or the app quits, and the look's background, which colours
+the window before the page draws on the next launch. A place that is no
+longer on any screen is dropped and the window opens centred.
 
 ## Menu bar (macOS)
 On a Mac the core builds the menu bar: Platter, File, Edit, Playback, View,

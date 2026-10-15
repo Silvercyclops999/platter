@@ -105,6 +105,9 @@ struct Inner {
     events: broadcast::Sender<PlexEvent>,
     /// False while `start` is restoring the saved session; true otherwise.
     restored: watch::Sender<bool>,
+    /// False until `start` has read the saved sign-in from the keychain, so
+    /// the first auth answer at launch isn't a signed-out one.
+    account_read: watch::Sender<bool>,
     /// Go offline: no requests to the server or plex.tv.
     offline: Arc<std::sync::atomic::AtomicBool>,
     /// Clients for the account's other servers (more than one library), by
@@ -179,6 +182,7 @@ impl PlexState {
                 recheck: Notify::new(),
                 events,
                 restored: watch::channel(true).0,
+                account_read: watch::channel(true).0,
                 offline: Arc::default(),
                 others: Mutex::new(std::collections::HashMap::new()),
             }),
@@ -200,13 +204,24 @@ impl PlexState {
     /// `client_when_ready` callers wait for it.
     fn restore_in_background(&self) {
         self.inner.restored.send_replace(false);
+        self.inner.account_read.send_replace(false);
         let me = self.clone();
         spawn(async move {
             if let Err(e) = me.restore().await {
                 tracing::warn!(kind = e.kind(), "restoring Plex session failed");
             }
+            me.inner.account_read.send_replace(true);
             me.inner.restored.send_replace(true);
         });
+    }
+
+    /// [`Self::auth_status`], first waiting (up to `wait`) for the saved
+    /// sign-in to be read at launch. Only the keychain read is waited for,
+    /// never the network.
+    pub async fn auth_status_when_read(&self, wait: Duration) -> AuthStatus {
+        let mut rx = self.inner.account_read.subscribe();
+        let _ = tokio::time::timeout(wait, rx.wait_for(|done| *done)).await;
+        self.auth_status().await
     }
 
     pub fn identity(&self) -> &Arc<ClientIdentity> {
@@ -636,7 +651,9 @@ impl PlexState {
 
     /// Restore a session from the keychain (app start).
     pub async fn restore(&self) -> AppResult<AuthStatus> {
-        let Some(token) = self.inner.store.get(ACCOUNT_TOKEN)? else {
+        let saved = self.inner.store.get(ACCOUNT_TOKEN);
+        let Some(token) = saved? else {
+            self.inner.account_read.send_replace(true);
             self.emit_auth().await;
             self.emit_health();
             return Ok(self.auth_status().await);
@@ -645,6 +662,7 @@ impl PlexState {
             let mut s = self.inner.session.write().await;
             s.account = Some(token.clone());
         }
+        self.inner.account_read.send_replace(true);
         // Username is cosmetic; don't block on it.
         let me = self.clone();
         let t2 = token.clone();
@@ -1465,6 +1483,28 @@ mod tests {
         assert_eq!(h.status, HealthStatus::Local);
         assert!(h.banner.is_none());
         st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_first_auth_answer_at_launch_waits_for_the_saved_sign_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new());
+        store.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = format!("http://{}", l.local_addr().unwrap());
+        drop(l);
+        let (st, _rec) = state(dir.path(), &dead, store);
+        // As at launch: the keychain hasn't been read yet.
+        st.inner.account_read.send_replace(false);
+        assert_eq!(st.auth_status().await.state, AuthState::SignedOut, "asking too early");
+        let (_, a) = tokio::join!(st.restore(), st.auth_status_when_read(Duration::from_secs(2)));
+        assert_eq!(a.state, AuthState::SignedIn, "no signed-out answer in between");
+        // Nothing saved: the answer comes as soon as the keychain is read.
+        let empty = tempfile::tempdir().unwrap();
+        let (st2, _rec2) = state(empty.path(), &dead, Arc::new(MemoryStore::new()));
+        st2.inner.account_read.send_replace(false);
+        let (_, b) = tokio::join!(st2.restore(), st2.auth_status_when_read(Duration::from_secs(2)));
+        assert_eq!(b.state, AuthState::SignedOut);
     }
 
     #[tokio::test]
