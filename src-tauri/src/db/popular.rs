@@ -4,7 +4,7 @@
 //! `artistinfo` (ListenBrainz, or Last.fm top tracks when ListenBrainz has
 //! nothing) and cached in the `artist_info` table under [`GLOBAL_ROW`].
 //! Library tracks are matched to it by folded title ([`normalize_title`]).
-//! Version qualifiers such as "(Interlude)", "(Live)" or "(AOL Sessions)"
+//! Version qualifiers such as "(Interlude)", "(Live)" or "(Radio Sessions)"
 //! are part of the folded title, so a variant only matches an entry with
 //! the same qualifier; featured artists and remaster notes fold away.
 //!
@@ -273,7 +273,7 @@ fn fold(s: &str) -> String {
 
 /// A title folded for matching: lower case, featured artists and edition
 /// notes ("2011 Remaster", "[Bonus Track]", "Album Version") dropped,
-/// version qualifiers ("(Interlude)", "- Live", "(AOL Sessions)") kept,
+/// version qualifiers ("(Interlude)", "- Live", "(Radio Sessions)") kept,
 /// apostrophes removed and other punctuation turned into single spaces.
 pub fn normalize_title(s: &str) -> String {
     let (base, versions) = split_title(s);
