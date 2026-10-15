@@ -112,7 +112,7 @@ jobs:
           repo: ${{ vars.RELEASES_REPO || github.event.repository.name }}
           tagName: ${{ github.ref_name }}
           releaseName: 'Platter ${{ github.ref_name }}'
-          releaseBody: 'Early build, installers not code-signed yet. Windows: SmartScreen, More info, Run anyway. macOS: open it once, then System Settings, Privacy & Security, Open Anyway.'
+          releaseBody: 'The Windows installer is not code-signed yet: on SmartScreen click More info, then Run anyway. The Mac app is signed and notarized.'
           releaseDraft: true
           # Not a prerelease: the updater reads releases/latest, which skips prereleases.
           prerelease: false
