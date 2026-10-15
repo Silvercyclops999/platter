@@ -95,6 +95,34 @@ Lyrics transcription runs entirely on your computer: songs are read from your
 own server (or the app's cache), turned into text on this machine, and saved
 in the app's data folder. No audio or text from it is sent anywhere.
 
+## Friend activity and listening sessions
+
+Friend activity reads your own Plex server: who is playing music right now
+(`/status/sessions`), the music plays of the last week from the server's play
+history, and the names on the server's accounts. Plex only answers these for
+the server's owner, so for everyone else the panel stays empty. What it shows
+(names, profile pictures, songs) stays on your computer and is read again
+while the panel is open. It goes nowhere else.
+
+What others see of you is what Plex records. While a song plays, Platter tells
+your server about it, and that's what makes you show up live for the server's
+owner. Turn off "Share my activity with Platter friends", or start a private
+session, and Platter stops doing that. Songs you finish still go into Plex's
+play history unless you're in a private session or "Report plays to Plex" is
+off, and other Plex apps the owner uses can see that history.
+
+The artists you follow are kept in the app's data folder on this computer.
+
+A listening session connects Platter computers on your local network
+directly. The invite link holds the session's id, a random secret, the
+host's local addresses and the host's Plex name. Anyone with the link can
+join while the session runs, so send it only to people you mean to. Guests
+see the host's name, who else is listening and the songs playing, and they
+play those songs from the same Plex server with their own sign-in. Nothing
+goes through a server of ours, and your Plex token never leaves your
+computer. While you host a session and Discord status is on, Discord shows
+that you're in one and how many people are in it.
+
 Some optional features planned for later will talk to other services, but
 only once you turn them on. Examples are Last.fm or ListenBrainz
 scrobbling, Lidarr and Tautulli. Each one is off until you set it up, and

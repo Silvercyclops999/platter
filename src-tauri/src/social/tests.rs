@@ -566,6 +566,11 @@ async fn a_host_that_goes_away_is_reported_gone() {
     mem.down.store(true, Ordering::SeqCst);
     eventually("host gone", || g.listen.view().status == Some(SessionStatus::HostGone)).await;
     assert_eq!(g.events.last(listen::EVENT).unwrap()["status"], "hostGone");
+    // Joining a host that can't be reached says so and leaves nothing behind.
+    g.listen.stop().await.unwrap();
+    let e = g.listen.join(&invite, None).await.unwrap_err();
+    assert!(e.to_string().contains("Couldn't reach the host"), "{e}");
+    assert_eq!(g.listen.view().role, Role::None);
 }
 
 #[tokio::test]

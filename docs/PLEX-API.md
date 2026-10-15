@@ -528,3 +528,27 @@ an HTML body, with and without `X-Plex-Session-Identifier` and a client
 profile. So the app doesn't ask for a decision first; it relies on the
 `start.mp3` check from the first log entry. Not checked yet: a full MP3
 download's size against the bitrate estimate the storage limit uses.
+
+### 2026-10-14: sessions, history and accounts (friend activity)
+
+Read with the owner's token. `/status/sessions` had no session at the time
+(`size` 0), so its music entries are read the way other Plex clients document
+them: `type` "track", `ratingKey`, `title`, `grandparentTitle`, `parentTitle`,
+`parentRatingKey`, `parentThumb`, `User` (`id`, `title`, `thumb`) and `Player`
+(`state`). Not yet seen live: whether `User.id` is the server account id
+(`1` for the owner) as in history; the app reads it that way.
+
+`/status/sessions/history/all?librarySectionID=<music>&sort=viewedAt:desc`
+with a page of 300 returned 300 of 1273 rows, all `type` "track", with
+`historyKey`, `key`, `ratingKey`, `librarySectionID`, `parentKey`,
+`grandparentKey`, `title`, `parentTitle`, `grandparentTitle`, `thumb`,
+`parentThumb`, `grandparentThumb`, `grandparentArt`, `index`, `parentIndex`,
+`viewedAt`, `accountID` and `deviceID`. There's no `parentRatingKey`; the album
+id is the last part of `parentKey`. Those rows came from 2 accounts, and 73 of
+them were from the last 7 days.
+
+`/accounts` listed 46 accounts with `id`, `key`, `name`, `thumb` and some
+language fields; every `thumb` was empty, so avatars come from the live
+session's `User.thumb` when there is one and fall back to the name's letter.
+plex.tv's `/api/v2/home/users` has `thumb` for Home users (6 here) but isn't
+used yet, and `/api/v2/friends` answered 410.

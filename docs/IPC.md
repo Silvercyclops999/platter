@@ -276,7 +276,7 @@ sites. With `artistId` it also opens a link listed in that artist's `links`
 | `share_public_link` | `{ kind, id }` | the public link (string) |
 | `deep_link_take` | – | `DeepLinkOpen` or null |
 
-`DeepLinkOpen = { status: "open"|"notInLibrary"|"invalid", kind?, id?, albumId?, atSeconds? }`
+`DeepLinkOpen = { status: "open"|"notInLibrary"|"invalid", kind?, id?, albumId?, atSeconds?, join? }` (`join`: a listening session invite to pass to `listen_join`)
 
 `appLink` is a `platter://` link: `platter://<song|album|artist|playlist>/<id>`,
 plus `?t=<seconds>` for a song when `atSeconds` is given, and `s=<tag>`, eight
@@ -584,6 +584,73 @@ after 30 seconds, 2 minutes, 10 minutes and an hour; after five tries the item
 shows `error` until `downloads_retry`. A downloaded file deleted from disk is
 noticed when it would play and at startup, and counts as `missing` until
 retried. The queue survives restarts.
+
+## Friend activity, following and listening sessions
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `friend_activity` | `{ fresh: bool \| null }` | `ActivityPanel` (read again after 20 s, or now with `fresh`) |
+| `follows_list` | – | `FollowedArtist[]` |
+| `follow_set` | `{ id, title, thumb: string \| null, on: bool }` | `FollowedArtist[]`, the whole list |
+| `whats_new` | – | `WhatsNew` |
+| `whats_new_seen` | – | – |
+| `listen_state` | – | `ListenView` |
+| `listen_start` | – | `ListenView` with the invite link |
+| `listen_stop` | – | – (ends the session you host, or leaves the one you're in) |
+| `listen_join` | `{ link }` | `ListenView` |
+| `listen_add` | `{ trackIds: string[] }` | – |
+
+`ActivityPanel = { state: "ok"|"notAdmin"|"off"|"offline", friends: FriendActivity[] }`
+
+`FriendActivity = { accountId, name, thumb?, trackId, title, artist, albumId?, album, cover?, at (unix s), now: bool }`
+
+`FollowedArtist = { id, title, thumb?, followedAt (unix s) }`
+
+`WhatsNew = { following: bool, items: { album: Album, new: bool }[], unseen }`
+
+`ListenView = { role: "none"|"host"|"guest", sessionId?, hostName?, invite?, listeners: string[], guestsCanAdd, status?: "connecting"|"live"|"hostGone"|"ended" }`
+
+Events: `follows://changed` → `FollowedArtist[]`, `whatsnew://changed` →
+`{ unseen }` (0 while What's New announcements are off), and `listen://state`
+→ `ListenView` whenever a session starts, someone joins or leaves, or it ends.
+
+Friend activity reads the server's `/status/sessions` (live) and
+`/status/sessions/history/all` for the music section (the newest 500 plays,
+kept to the last 7 days), with names from `/accounts`. One row per person,
+newest first; the viewer's own account is left out. Only the server owner's
+token may read these, so anyone else gets `notAdmin`.
+
+Follows are artist ids (a library artist, or a credited artist's `credit:`
+id), kept in this computer's database for now. What's New lists albums added
+in the last 90 days by followed artists (credited artists bring the albums of
+songs that credit them), or everything recently added while nothing is
+followed, at most 60, newest first. `new` means added since `whats_new_seen`
+was last called; the first look counts as seen. After each library sync,
+albums added since the last check by artists followed before they were added
+raise one desktop notification when `notifyNewReleases` is on and no private
+session is.
+
+A listening session runs on the host's Platter control port (the one "Show
+this computer to my other devices" opens), so hosting needs that setting on
+and a local network. The invite is
+`platter://join/<session>?k=<secret>&s=<server tag>&h=<ip:port,...>&n=<host name>`;
+opening one (or `listen_join`) joins. Guests sign every request with a key
+made from the secret, ask for the host's state about once a second and
+follow it: the same song and spot (half the request's round trip added while
+playing), pauses and skips. With `listenGuestsAdd` on, guests' `listen_add`
+goes to the end of the host's queue. A host that doesn't answer for 10 s is
+`hostGone`; one that ended the session is `ended`.
+
+| Route on the control port | Body | Answer |
+| --- | --- | --- |
+| `POST /platter/v1/session/join` | `{ name }` | `HostState` |
+| `GET /platter/v1/session/state` | – | `HostState` |
+| `POST /platter/v1/session/add` | `{ trackIds }` | `{}`, or 403 when the host doesn't let guests add |
+| `POST /platter/v1/session/leave` | – | `{}` |
+
+`HostState = { sessionId, hostName, trackId?, positionMs, durationMs, playing, upNext: string[] (50 at most), guests: { id, name }[], guestsCanAdd }`.
+A session that has ended answers 410; a request not signed with the
+session's key answers 401.
 
 ## Search
 | Command | Args | Returns |
@@ -1046,6 +1113,12 @@ The rest of the fields, with their defaults:
 | `queueEnd` | `"keepPlaying"` or `"stop"`, `"keepPlaying"` | When the queue ends, keep playing similar music, or rewind and stop. |
 | `smartShuffle` | bool, false | The shuffle button has a third state, smart shuffle. Off ends smart shuffle that's on. |
 | `goOffline` | bool, false | No network use: no requests to the server or plex.tv, no artist info, LRCLIB, share link lookups, Discord status, Listen on discovery or update checks. Health shows `offline` with the `goneOffline` banner and `cachedOnly`, so only music on this computer plays. Off reconnects as at startup. This device only. |
+| `showFriendActivity` | bool, true | The top bar's friend activity button and panel. |
+| `shareActivity` | bool, true | Send Plex now-playing timelines, so friends on the server see you live. Off (and in a private session) none go out; finished plays still reach Plex's history. |
+| `whatsNewAnnouncements` | bool, true | The bell's dot for unseen What's New items. |
+| `notifyNewReleases` | bool, false | A desktop notification when a followed artist gets new music in the library. |
+| `listenGuestsAdd` | bool, true | Guests in a listening session you host can add songs to your queue. |
+| `discordListenAlong` | bool, true | Discord shows a listening session you host and how many are in it. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
