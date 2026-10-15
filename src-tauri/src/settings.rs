@@ -380,7 +380,22 @@ pub struct Settings {
     pub sync_follows: bool,
     /// What to sync: lyrics you wrote (this device only).
     pub sync_lyrics: bool,
+    /// Bookmarks has a row in the library.
+    pub bookmarks_in_library: bool,
+    /// Scrobble to Last.fm (once signed in).
+    pub scrobble_lastfm: bool,
+    /// Scrobble to ListenBrainz (with the user token).
+    pub scrobble_listenbrainz: bool,
+    /// Unreleased music scrobbles too.
+    pub scrobble_unreleased: bool,
+    /// The AI provider for prompted playlists (none by default).
+    pub ai_provider: crate::smart::prompt::AiProvider,
+    /// The provider's model.
+    pub ai_model: String,
 }
+
+/// Longest model name accepted.
+pub const AI_MODEL_MAX: usize = 100;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -492,6 +507,12 @@ impl Default for Settings {
             sync_library: true,
             sync_follows: true,
             sync_lyrics: true,
+            bookmarks_in_library: true,
+            scrobble_lastfm: false,
+            scrobble_listenbrainz: false,
+            scrobble_unreleased: false,
+            ai_provider: crate::smart::prompt::AiProvider::None,
+            ai_model: crate::smart::prompt::DEFAULT_MODEL.to_string(),
         }
     }
 }
@@ -556,6 +577,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "shareActivity",
     "whatsNewAnnouncements",
     "listenGuestsAdd",
+    "bookmarksInLibrary",
+    "scrobbleUnreleased",
+    "aiModel",
 ];
 
 /// Settings kept on this device only.
@@ -611,6 +635,10 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "syncLibrary",
     "syncFollows",
     "syncLyrics",
+    // Signed in, and keys kept, per device.
+    "scrobbleLastfm",
+    "scrobbleListenbrainz",
+    "aiProvider",
 ];
 
 /// A partial update; absent fields are left alone.
@@ -721,6 +749,12 @@ pub struct SettingsPatch {
     pub sync_library: Option<bool>,
     pub sync_follows: Option<bool>,
     pub sync_lyrics: Option<bool>,
+    pub bookmarks_in_library: Option<bool>,
+    pub scrobble_lastfm: Option<bool>,
+    pub scrobble_listenbrainz: Option<bool>,
+    pub scrobble_unreleased: Option<bool>,
+    pub ai_provider: Option<crate::smart::prompt::AiProvider>,
+    pub ai_model: Option<String>,
 }
 
 impl SettingsPatch {
@@ -873,6 +907,19 @@ impl Settings {
         set(&mut self.notify_new_releases, p.notify_new_releases);
         set(&mut self.listen_guests_add, p.listen_guests_add);
         set(&mut self.discord_listen_along, p.discord_listen_along);
+        set(&mut self.bookmarks_in_library, p.bookmarks_in_library);
+        set(&mut self.scrobble_lastfm, p.scrobble_lastfm);
+        set(&mut self.scrobble_listenbrainz, p.scrobble_listenbrainz);
+        set(&mut self.scrobble_unreleased, p.scrobble_unreleased);
+        set(&mut self.ai_provider, p.ai_provider);
+        if let Some(m) = &p.ai_model {
+            let m = m.trim();
+            let ok = m.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':' | '@' | '/'));
+            if m.chars().count() > AI_MODEL_MAX || !ok {
+                return Err(AppError::Invalid("Model names are letters, numbers, dots and dashes.".into()));
+            }
+            self.ai_model = if m.is_empty() { crate::smart::prompt::DEFAULT_MODEL.to_string() } else { m.to_string() };
+        }
         if let Some(name) = &p.computer_name {
             let name = name.trim();
             if name.chars().count() > COMPUTER_NAME_MAX {
@@ -937,6 +984,8 @@ impl Settings {
             daylist_hours: self.daylist_hours,
             tag_view: self.tag_view(),
             liked_min: self.liked_min_rating(),
+            // The mix service adds the hidden songs and artists itself.
+            hidden: Default::default(),
         }
     }
 
@@ -1058,6 +1107,8 @@ pub struct Live {
     pub social: crate::social::SocialSwitches,
     /// The sync file settings the sync engine follows.
     pub sync: crate::sync::engine::ConfigSwitch,
+    /// Scrobbling.
+    pub scrobble: crate::scrobble::ScrobbleSwitches,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -1080,6 +1131,13 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         so.notify_releases.store(s.notify_new_releases, Ordering::Relaxed);
         so.guests_can_add.store(s.listen_guests_add, Ordering::Relaxed);
         so.private_session.store(s.private_session, Ordering::Relaxed);
+    }
+    {
+        let sc = &live.scrobble;
+        sc.lastfm.store(s.scrobble_lastfm, Ordering::Relaxed);
+        sc.listenbrainz.store(s.scrobble_listenbrainz, Ordering::Relaxed);
+        sc.unreleased.store(s.scrobble_unreleased, Ordering::Relaxed);
+        sc.private_session.store(s.private_session, Ordering::Relaxed);
     }
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
@@ -1596,6 +1654,22 @@ mod tests {
         assert_eq!((s.popular_source, s.artwork_colours, s.reduce_motion), (PopularSource::Global, true, ReduceMotion::System));
     }
 
+    #[test]
+    fn new_feature_settings_default_and_check_the_model_name() {
+        let mut s = Settings::default();
+        assert!(s.bookmarks_in_library);
+        assert!(!s.scrobble_lastfm && !s.scrobble_listenbrainz && !s.scrobble_unreleased);
+        assert_eq!(s.ai_provider, crate::smart::prompt::AiProvider::None);
+        assert_eq!(s.ai_model, crate::smart::prompt::DEFAULT_MODEL);
+        let bad = SettingsPatch { ai_model: Some("rm -rf /".into()), ..Default::default() };
+        assert!(s.apply(&bad).is_err());
+        s.apply(&SettingsPatch { ai_model: Some("  ".into()), ..Default::default() }).unwrap();
+        assert_eq!(s.ai_model, crate::smart::prompt::DEFAULT_MODEL, "empty goes back to the default");
+        // Older stored settings without the new fields read as the defaults.
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.bookmarks_in_library && old.ai_provider == crate::smart::prompt::AiProvider::None);
+    }
+
     #[tokio::test]
     async fn set_persists_across_reopen_and_publishes() {
         let (db, dir) = db();
@@ -1697,10 +1771,19 @@ mod tests {
             notify_new_releases: Some(true),
             listen_guests_add: Some(false),
             discord_listen_along: Some(false),
+            bookmarks_in_library: Some(false),
+            scrobble_lastfm: Some(true),
+            scrobble_listenbrainz: Some(true),
+            scrobble_unreleased: Some(true),
+            ai_provider: Some(crate::smart::prompt::AiProvider::Anthropic),
+            ai_model: Some(" claude-sonnet-5-5 ".into()),
             ..Default::default()
         })
         .await
         .unwrap();
+        // Scrobbling sees its switches, and the private session.
+        assert!(live.scrobble.lastfm.load(Ordering::Relaxed) && live.scrobble.listenbrainz.load(Ordering::Relaxed));
+        assert!(live.scrobble.unreleased.load(Ordering::Relaxed) && live.scrobble.private_session.load(Ordering::Relaxed));
         // Friend activity, What's New and listening sessions see their switches.
         assert!(!live.social.show_activity.load(Ordering::Relaxed));
         assert!(!live.social.whats_new.load(Ordering::Relaxed));

@@ -78,14 +78,16 @@ pub const FOLDER_ITEMS: Ns<super::folders::Placement> = Ns::new("folderItems");
 pub const FOLLOWS: Ns<crate::social::follows::FollowedArtist> = Ns::new("follows");
 /// Hidden and snoozed items, keyed `kind:id`.
 pub const HIDDEN: Ns<Hidden> = Ns::new("hidden");
-/// Places to resume long tracks, keyed by track id.
+/// Bookmarks (songs at a time, and pages), keyed by bookmark id.
 pub const BOOKMARKS: Ns<Bookmark> = Ns::new("bookmarks");
+/// Platter smart playlists, keyed by playlist id.
+pub const SMART: Ns<crate::smart::SmartPlaylist> = Ns::new("smartPlaylists");
 /// Lyrics the user wrote, keyed by track id.
 pub const LYRICS: Ns<UserLyricsEntry> = Ns::new("lyrics");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 8] = [
+pub const NAMESPACES: [&str; 9] = [
     SETTINGS.name(),
     PINS.name(),
     FOLDERS.name(),
@@ -94,10 +96,11 @@ pub const NAMESPACES: [&str; 8] = [
     HIDDEN.name(),
     BOOKMARKS.name(),
     LYRICS.name(),
+    SMART.name(),
 ];
 
-/// A hidden item; with `until`, snoozed until then (ms).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A hidden item ("track" or "artist"); with `until`, snoozed until then (ms).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Hidden {
     pub kind: String,
@@ -105,15 +108,41 @@ pub struct Hidden {
     pub title: String,
     #[serde(default)]
     pub until: Option<u64>,
+    /// A song's artist.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<String>,
+    /// When it was hidden, unix seconds.
+    #[serde(default)]
+    pub hidden_at: i64,
 }
 
-/// Where to resume a track.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A bookmark (crate::bookmarks): a song at a time, or a page, keyed by
+/// the bookmark's id.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Bookmark {
+    #[serde(default)]
     pub position_ms: u64,
     #[serde(default)]
     pub title: String,
+    /// "track" or "page".
+    #[serde(default)]
+    pub kind: String,
+    /// The song's id, or the page's id.
+    #[serde(default)]
+    pub target: String,
+    /// The page's route name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<String>,
+    /// Unix seconds.
+    #[serde(default)]
+    pub created_at: i64,
 }
 
 /// Lyrics the user wrote for a track (LRC or plain lines).

@@ -137,6 +137,11 @@ pub trait TrackLookup: Send + Sync {
     async fn more(&self, _req: &MoreRequest) -> AppResult<Vec<Track>> {
         Ok(Vec::new())
     }
+    /// Hidden songs and artists: shuffle play skips them (a song picked
+    /// directly still plays).
+    fn hidden(&self) -> Option<std::sync::Arc<crate::hidden::HiddenSet>> {
+        None
+    }
 }
 
 /// What [`TrackLookup::more`] is asked for.

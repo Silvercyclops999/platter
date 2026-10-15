@@ -15,9 +15,9 @@
 //!
 //! ```ignore
 //! use crate::sync::{SyncStore, store::BOOKMARKS, store::Bookmark};
-//! store.put(&BOOKMARKS, &track_id, &Bookmark { position_ms, title })?;
+//! store.put(&BOOKMARKS, &id, &Bookmark { position_ms, title, ..Default::default() })?;
 //! let all: Vec<(String, Bookmark)> = store.list(&BOOKMARKS)?;
-//! store.remove(&BOOKMARKS, &track_id)?;
+//! store.remove(&BOOKMARKS, &id)?;
 //! let mut changes = store.subscribe(); // Changed { namespaces, remote }
 //! ```
 //!

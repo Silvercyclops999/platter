@@ -327,6 +327,49 @@ fn radio_refills_without_repeating_and_starts_with_its_song() {
 }
 
 #[test]
+fn hidden_songs_and_artists_stay_out_of_mixes_and_radio() {
+    let mut hidden = crate::hidden::HiddenSet::default();
+    hidden.artists.insert("r1".into());
+    hidden.tracks.insert("r0-al0-t3".into());
+    let o = MixOptions { hidden: std::sync::Arc::new(hidden), ..opts() };
+    let lib = lib_of(raw(), &o);
+    let banned = |id: &str| id.starts_with("r1-") || id == "r0-al0-t3";
+    for t in &lib.tracks {
+        assert_eq!(t.eligible, !banned(&t.id), "{}", t.id);
+    }
+    // Radio and "keep playing similar music" (a radio of the last songs).
+    let taste = Taste::new(&lib);
+    for seed in [Seed::Track("r0-al0-t0".into()), Seed::Artist("r0".into()), Seed::Tracks(vec!["r0-al0-t0".into()])] {
+        let b = radio::batch(&lib, &taste, &seed, &HashSet::new(), 40, 5, true, radio::LEAN_PLAIN);
+        assert!(!b.is_empty());
+        assert!(b.iter().all(|t| !banned(&lib.tracks[*t as usize].id)));
+    }
+    // Hiding doesn't change the fingerprint (no remaking every mix).
+    assert_eq!(o.fingerprint(), opts().fingerprint());
+}
+
+#[tokio::test]
+async fn a_song_hidden_after_a_mix_was_made_leaves_its_page() {
+    let (s, _db, _d) = service();
+    s.ensure_fresh_blocking(NOW).unwrap();
+    let ids = crate::hidden::HiddenIds::default();
+    s.set_hidden_ids(ids.clone());
+    let before = s.page("daily:1".into(), None).await.unwrap();
+    let gone = before.tracks[0].id.clone();
+    let mut h = crate::hidden::HiddenSet { version: 1, ..Default::default() };
+    h.tracks.insert(gone.clone());
+    ids.set(h);
+    let after = s.page("daily:1".into(), None).await.unwrap();
+    assert_eq!(after.tracks.len() + 1, before.tracks.len());
+    assert_eq!(after.familiar.len(), after.tracks.len());
+    assert!(after.tracks.iter().all(|t| t.id != gone));
+    assert_eq!(after.mix.track_count as usize, after.tracks.len());
+    // Mixes made from now on leave it out too.
+    let lib = s.lib().unwrap();
+    assert!(!lib.tracks[lib.index[&gone] as usize].eligible);
+}
+
+#[test]
 fn exclusions_and_filters_keep_songs_out() {
     let mut r = raw();
     r.tracks.iter_mut().find(|t| t.id == "r0-al0-t1").unwrap().explicit = true;

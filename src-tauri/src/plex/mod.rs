@@ -27,7 +27,7 @@ pub mod state;
 pub mod token;
 pub mod types;
 
-mod lenient;
+pub(crate) mod lenient;
 #[cfg(test)]
 mod live_tests;
 

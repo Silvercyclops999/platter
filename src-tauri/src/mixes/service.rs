@@ -49,6 +49,7 @@ struct SnapKey {
     likes: String,
     tracks: i64,
     options: String,
+    hidden: u64,
 }
 
 struct Inner {
@@ -60,6 +61,8 @@ struct Inner {
     events: Mutex<Option<Arc<dyn MixEvents>>>,
     /// Minutes east of UTC, from the UI (i32::MIN until known).
     tz: AtomicI32,
+    /// Hidden songs and artists (skipped by mixes, radio and autoplay).
+    hidden: Mutex<crate::hidden::HiddenIds>,
 }
 
 #[derive(Clone)]
@@ -76,6 +79,24 @@ pub fn now_ms() -> i64 {
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> AppResult<T> + Send + 'static) -> AppResult<T> {
     tokio::task::spawn_blocking(f).await.map_err(|e| AppError::Internal(format!("mix task: {e}")))?
+}
+
+/// A mix page without songs hidden since it was made.
+fn without_hidden(mut page: MixPage, hidden: &crate::hidden::HiddenSet) -> MixPage {
+    if hidden.is_empty() {
+        return page;
+    }
+    let keep: Vec<bool> = page.tracks.iter().map(|t| !hidden.hides(&t.id, &t.artist_id)).collect();
+    if keep.iter().all(|k| *k) {
+        return page;
+    }
+    let mut k = keep.iter();
+    page.tracks.retain(|_| *k.next().unwrap_or(&true));
+    let mut k = keep.iter();
+    page.familiar.retain(|_| *k.next().unwrap_or(&true));
+    page.mix.track_count = page.tracks.len() as u32;
+    page.mix.duration_ms = page.tracks.iter().map(|t| t.duration_ms).sum();
+    page
 }
 
 fn day_seed(day: &str) -> u64 {
@@ -112,6 +133,7 @@ impl MixService {
                 snap: Mutex::new(None),
                 events: Mutex::new(None),
                 tz: AtomicI32::new(tz),
+                hidden: Mutex::new(Default::default()),
             }),
         }
     }
@@ -126,7 +148,18 @@ impl MixService {
     }
 
     pub fn options(&self) -> MixOptions {
-        self.inner.opts.lock().clone()
+        let mut o = self.inner.opts.lock().clone();
+        o.hidden = self.hidden();
+        o
+    }
+
+    /// Share the hidden songs and artists (the Hide service owns them).
+    pub fn set_hidden_ids(&self, ids: crate::hidden::HiddenIds) {
+        *self.inner.hidden.lock() = ids;
+    }
+
+    pub fn hidden(&self) -> Arc<crate::hidden::HiddenSet> {
+        self.inner.hidden.lock().get()
     }
 
     /// The UI's time zone, minutes east of UTC (remembered for checks made
@@ -169,7 +202,7 @@ impl MixService {
                 |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)),
             )?)
         })?;
-        Ok(SnapKey { generation: db.generation(), listens, history, likes, tracks, options: opts.fingerprint() })
+        Ok(SnapKey { generation: db.generation(), listens, history, likes, tracks, options: opts.fingerprint(), hidden: opts.hidden.version })
     }
 
     /// The library snapshot (blocking).
@@ -290,7 +323,7 @@ impl MixService {
                 mix.next_update_at = Some(s.ctx(now_ms(), &s.options()).next_daylist_update());
             }
             let Some(steer) = steer else {
-                return Ok(MixPage { mix, tracks, familiar, steer: None });
+                return Ok(without_hidden(MixPage { mix, tracks, familiar, steer: None }, &s.hidden()));
             };
             let opts = s.options();
             let mut ctx = s.ctx(now_ms(), &opts);
@@ -300,7 +333,7 @@ impl MixService {
             };
             let (stored, tracks, familiar) = s.remake(&id, &ctx)?;
             let mix = db.read(|c| store::summary_of(c, &stored, &tracks))?;
-            Ok(MixPage { mix, tracks, familiar, steer: Some(steer) })
+            Ok(without_hidden(MixPage { mix, tracks, familiar, steer: Some(steer) }, &s.hidden()))
         })
         .await
     }

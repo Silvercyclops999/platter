@@ -529,6 +529,10 @@ pub fn offline_left_out_message(n: usize) -> String {
 
 #[async_trait]
 impl TrackLookup for CacheLookup {
+    fn hidden(&self) -> Option<Arc<crate::hidden::HiddenSet>> {
+        self.3.as_ref().map(|m| m.hidden())
+    }
+
     async fn tracks(&self, ids: &[String]) -> AppResult<Vec<Track>> {
         let ids = ids.to_vec();
         self.0.read_async(move |c| queries::tracks_by_ids(c, &ids)).await

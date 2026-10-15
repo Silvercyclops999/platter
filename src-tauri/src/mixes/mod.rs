@@ -107,6 +107,9 @@ pub struct MixOptions {
     /// Explicit filter and fan edits, as everywhere else.
     pub tag_view: crate::tags::TagView,
     pub liked_min: f64,
+    /// Hidden songs and artists (never in a mix; not part of the
+    /// fingerprint, so hiding one doesn't make every mix again).
+    pub hidden: std::sync::Arc<crate::hidden::HiddenSet>,
 }
 
 impl Default for MixOptions {
@@ -120,6 +123,7 @@ impl Default for MixOptions {
             daylist_hours: 3,
             tag_view: crate::tags::TagView::default(),
             liked_min: crate::db::likes::LIKED_RATING,
+            hidden: Default::default(),
         }
     }
 }

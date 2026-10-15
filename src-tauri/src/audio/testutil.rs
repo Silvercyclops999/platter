@@ -321,6 +321,8 @@ pub struct FakeResolver {
     pub more_batches: Mutex<Vec<Vec<String>>>,
     /// Every `more` request.
     pub more_calls: Mutex<Vec<super::source::MoreRequest>>,
+    /// Hidden songs and artists (shuffle play skips them).
+    pub hidden: Mutex<Option<Arc<crate::hidden::HiddenSet>>>,
 }
 
 impl FakeResolver {
@@ -333,6 +335,7 @@ impl FakeResolver {
             left_out: Mutex::new(Vec::new()),
             more_batches: Mutex::new(Vec::new()),
             more_calls: Mutex::new(Vec::new()),
+            hidden: Mutex::new(None),
         })
     }
 }
@@ -379,6 +382,9 @@ impl TrackLookup for FakeResolver {
     }
     fn left_out_offline(&self, n: usize) {
         self.left_out.lock().push(n);
+    }
+    fn hidden(&self) -> Option<Arc<crate::hidden::HiddenSet>> {
+        self.hidden.lock().clone()
     }
     async fn more(&self, req: &super::source::MoreRequest) -> AppResult<Vec<Track>> {
         self.more_calls.lock().push(req.clone());

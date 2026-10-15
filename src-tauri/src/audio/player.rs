@@ -366,6 +366,7 @@ impl PlayerHandle {
             return Err(AppError::Invalid("nothing to play".into()));
         }
         let (tracks, start_track_id) = self.keep_playable(resolved.tracks, start_track_id).await?;
+        let tracks = if shuffle == Some(true) { self.skip_hidden(tracks, start_track_id.as_deref()) } else { tracks };
         let info = ContextInfo {
             kind: context.kind,
             id: context.id.clone(),
@@ -460,6 +461,17 @@ impl PlayerHandle {
     /// While only music on this computer can play, leaves the rest out (and
     /// tells the lookup how many, for its notice). A start song that can't
     /// play gives way to the next one that can.
+    /// Shuffle play leaves out hidden songs and artists, except the song
+    /// that was picked. Everything hidden: the context plays as it is.
+    fn skip_hidden(&self, tracks: Vec<Track>, start: Option<&str>) -> Vec<Track> {
+        let Some(hidden) = self.lookup.hidden().filter(|h| !h.is_empty()) else { return tracks };
+        let keep = |t: &Track| Some(t.id.as_str()) == start || !hidden.hides(&t.id, &t.artist_id);
+        if !tracks.iter().any(keep) {
+            return tracks;
+        }
+        tracks.into_iter().filter(keep).collect()
+    }
+
     async fn keep_playable(
         &self,
         tracks: Vec<Track>,

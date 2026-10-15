@@ -49,7 +49,7 @@ impl Groups {
             out.push(store::SETTINGS.name());
         }
         if self.library {
-            out.extend([store::PINS.name(), store::FOLDERS.name(), store::FOLDER_ITEMS.name()]);
+            out.extend([store::PINS.name(), store::FOLDERS.name(), store::FOLDER_ITEMS.name(), store::SMART.name()]);
         }
         if self.follows {
             out.extend([store::FOLLOWS.name(), store::HIDDEN.name(), store::BOOKMARKS.name()]);

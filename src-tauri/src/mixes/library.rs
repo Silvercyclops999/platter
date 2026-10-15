@@ -59,7 +59,7 @@ pub struct TrackRow {
     /// Newest play, unix ms.
     pub last_played_ms: Option<i64>,
     /// May go in a mix (not hidden by the explicit filter, fan edit setting,
-    /// exclusions or the unreleased setting).
+    /// exclusions, the unreleased setting or Hide).
     pub eligible: bool,
 }
 
@@ -326,7 +326,8 @@ impl Lib {
                 && (opts.include_unreleased || !unreleased)
                 && !ex_artists.contains(t.artist_id.as_str())
                 && !ex_albums.contains(t.album_id.as_str())
-                && !excluded_genre;
+                && !excluded_genre
+                && !opts.hidden.hides(&t.id, &t.artist_id);
             lib.index.insert(t.id.clone(), lib.tracks.len() as u32);
             lib.tracks.push(TrackRow {
                 id: t.id,

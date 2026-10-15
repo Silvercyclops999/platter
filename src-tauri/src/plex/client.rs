@@ -1293,6 +1293,34 @@ impl PlexClient {
             .ok_or_else(|| AppError::Decode("/playlists: no playlist in the reply".into()))
     }
 
+    /// `POST /playlists?type=audio&title=…&smart=1&uri=…`: a smart playlist
+    /// from a library query `uri` (see smart::plexuri).
+    pub async fn create_smart_playlist(&self, title: &str, uri: &str) -> AppResult<Playlist> {
+        let rb = self.request(Method::POST, "/playlists")?.query(&[
+            ("type", "audio"),
+            ("title", title),
+            ("smart", "1"),
+            ("uri", uri),
+        ]);
+        let resp = self.send(rb).await?;
+        let bytes = resp.bytes().await.map_err(map_send_error)?;
+        let env: Envelope<Container> =
+            serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
+        env.media_container
+            .metadata
+            .first()
+            .map(PlexMetadata::to_playlist)
+            .filter(|p| !p.id.is_empty())
+            .ok_or_else(|| AppError::Decode("/playlists: no playlist in the reply".into()))
+    }
+
+    /// `PUT /playlists/{id}/items?uri=…` on a smart playlist: new rules.
+    pub async fn playlist_set_smart(&self, id: &str, uri: &str) -> AppResult<()> {
+        let id = plain_id(id)?;
+        let rb = self.request(Method::PUT, &format!("/playlists/{id}/items"))?.query(&[("uri", uri)]);
+        self.send(rb).await.map(|_| ())
+    }
+
     /// `PUT /playlists/{id}/items?uri=…`: append songs in order.
     pub async fn playlist_add(&self, machine_id: &str, id: &str, track_ids: &[String]) -> AppResult<()> {
         let id = plain_id(id)?;

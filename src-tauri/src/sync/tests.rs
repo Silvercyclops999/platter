@@ -178,7 +178,7 @@ fn concurrent_edits_merge_per_entry_and_the_later_one_wins() {
 fn deletions_travel_and_old_tombstones_go() {
     let cloud = tempfile::tempdir().unwrap();
     let (pc, mac) = (Dev::new("pc"), Dev::new("mac"));
-    pc.store.put(&HIDDEN, "album:9", &Hidden { kind: "album".into(), title: "t".into(), until: None }).unwrap();
+    pc.store.put(&HIDDEN, "album:9", &Hidden { kind: "album".into(), title: "t".into(), ..Default::default() }).unwrap();
     pc.pass(cloud.path()).unwrap();
     mac.pass(cloud.path()).unwrap();
     assert!(mac.store.get(&HIDDEN, "album:9").unwrap().is_some());

@@ -622,6 +622,28 @@ async fn shuffle_play_starts_with_a_shuffled_context() {
     assert_eq!(up, ids[idx + 1..].iter().map(|s| s.to_string()).collect::<Vec<_>>());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shuffle_play_skips_hidden_songs_and_artists_but_not_the_picked_one() {
+    let ids = ["a", "b", "c", "d", "e", "f"];
+    let mut r = rig(&ids, 3.0, true, PlayerConfig::default()).await;
+    let mut hidden = crate::hidden::HiddenSet::default();
+    hidden.tracks.insert("c".into());
+    hidden.tracks.insert("e".into());
+    *r.resolver.hidden.lock() = Some(Arc::new(hidden));
+    // Picked directly: "c" plays, the other hidden one is left out.
+    r.player.play_context(ctx(&ids), Some("c".into()), Some(true)).await.unwrap();
+    next_tracking(&mut r.tracking, |e| matches!(e, TrackingEvent::TrackStarted { .. })).await;
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "c");
+    let mut all: Vec<String> = s.queue.next_up.iter().map(|i| i.track.id.clone()).collect();
+    all.sort();
+    assert_eq!(all, ["a", "b", "d", "f"]);
+    // In order (no shuffle), everything plays as listed.
+    r.player.play_context(ctx(&ids), None, Some(false)).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(s.queue.next_up.len(), 5);
+}
+
 /// A crash never runs the exit flush: the queue file as it was a moment
 /// after the last change must be enough to restore the queue and position.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

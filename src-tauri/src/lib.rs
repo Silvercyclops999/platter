@@ -1,9 +1,11 @@
 pub mod artistinfo;
 pub mod audio;
+pub mod bookmarks;
 pub mod bridge;
 pub mod db;
 pub mod downloads;
 pub mod error;
+pub mod hidden;
 pub mod likes;
 pub mod lyrics;
 pub mod mixes;
@@ -14,13 +16,16 @@ pub mod platform;
 pub mod playlists;
 pub mod plex;
 pub mod remote;
+pub mod scrobble;
 pub mod settings;
 pub mod share;
+pub mod smart;
 pub mod social;
 pub mod sync;
 pub mod tags;
 pub mod tracking;
 pub mod updates;
+pub mod web;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -99,6 +104,40 @@ fn marks_library_dirty(ev: &PlexEvent, music_section: Option<&str>) -> bool {
         PlexEvent::Activity { event, kind, .. } => event == "ended" && kind.starts_with("library."),
         _ => false,
     }
+}
+
+/// Hidden items, bookmarks and Platter smart playlists another device
+/// changed (through the sync file): read them again and tell the UI.
+fn follow_sync_store(store: &sync::SyncStore, hidden: hidden::Hidden, bookmarks: bookmarks::Bookmarks, smart: smart::Smart) {
+    let mut rx = store.subscribe();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let c = match rx.recv().await {
+                Ok(c) if c.remote => c,
+                Ok(_) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => sync::Changed {
+                    namespaces: sync::store::NAMESPACES.iter().map(|s| s.to_string()).collect(),
+                    remote: true,
+                },
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            let has = |ns: &str| c.namespaces.iter().any(|n| n == ns);
+            let (h, b, s) = (hidden.clone(), bookmarks.clone(), smart.clone());
+            let (hh, hb, hs) = (has(sync::store::HIDDEN.name()), has(sync::store::BOOKMARKS.name()), has(sync::store::SMART.name()));
+            let _ = tokio::task::spawn_blocking(move || {
+                if hh {
+                    h.reload();
+                }
+                if hb {
+                    let _ = b.changed();
+                }
+                if hs {
+                    s.changed();
+                }
+            })
+            .await;
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -188,6 +227,16 @@ pub fn run() {
             // Mixes, radio and the daylist, made here from the cache.
             let mix_service = mixes::MixService::new(db.clone());
             mix_service.set_options(initial.mix_options());
+            // App-only state that can travel in the sync file (sync::).
+            let sync_store = sync::SyncStore::new(db.clone(), plex.identity().client_id.clone());
+            // Hidden songs and artists: mixes, radio, autoplay and shuffle skip them.
+            let hidden = hidden::Hidden::new(
+                Arc::new(hidden::SyncHidden(sync_store.clone())),
+                hidden::HiddenIds::default(),
+                Arc::new(plex::state::TauriSink(app.handle().clone())),
+                Arc::new(db::queries::now_s),
+            );
+            mix_service.set_hidden_ids(hidden.ids());
             mix_service.set_events(Arc::new(app.handle().clone()));
             *live.mixes.lock() = Some(mix_service.clone());
             let artist_info = artistinfo::ArtistInfoService::new(
@@ -275,6 +324,41 @@ pub fn run() {
                 tracking::Tracker::new(plex.clone(), db.clone(), live.tracking.clone()),
                 player.subscribe_tracking(),
             );
+            // Scrobbling to Last.fm and ListenBrainz, and the AI provider.
+            let web_out: Arc<dyn web::Web> = Arc::new(web::Switched { inner: Arc::new(web::ReqwestWeb::new()?), off: plex.offline_switch() });
+            let keychain: Arc<dyn plex::keychain::TokenStore> = Arc::new(plex::keychain::KeyringStore::new());
+            {
+                let lastfm = Arc::new(scrobble::lastfm::Lastfm::new(web_out.clone(), keychain.clone()));
+                let listenbrainz = Arc::new(scrobble::listenbrainz::ListenBrainz::new(web_out.clone(), keychain.clone()));
+                let scrobbler = scrobble::Scrobbler::new(scrobble::ScrobbleDeps {
+                    db: db.clone(),
+                    services: vec![lastfm.clone(), listenbrainz.clone()],
+                    switches: live.scrobble.clone(),
+                    unreleased: Arc::new(scrobble::CacheUnreleased(db.clone())),
+                    notice: Arc::new(scrobble::commands::ToastNotice(plex.clone())),
+                    events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                    clock: Arc::new(db::queries::now_s),
+                });
+                scrobble::spawn(scrobbler.clone(), player.subscribe_tracking());
+                app.manage(scrobble::commands::ScrobbleState::new(scrobbler, lastfm, listenbrainz, db.clone()));
+            }
+            let smart_service = smart::Smart::new(smart::SmartDeps {
+                db: db.clone(),
+                store: Arc::new(smart::SyncSmart { store: sync_store.clone(), db: db.clone() }),
+                remote: Arc::new(smart::commands::PlexSmart { plex: plex.clone(), db: db.clone() }),
+                ai: Arc::new(smart::prompt::Anthropic::new(web_out.clone(), keychain.clone())),
+                events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                clock: Arc::new(db::queries::now_s),
+            });
+            let bookmarks_service = bookmarks::Bookmarks::new(
+                Arc::new(bookmarks::SyncBookmarks(sync_store.clone())),
+                Arc::new(plex::state::TauriSink(app.handle().clone())),
+                Arc::new(db::queries::now_s),
+            );
+            follow_sync_store(&sync_store, hidden.clone(), bookmarks_service.clone(), smart_service.clone());
+            app.manage(hidden);
+            app.manage(smart_service);
+            app.manage(bookmarks_service);
             notify::spawn(
                 app.handle().clone(),
                 player.subscribe_tracking(),
@@ -391,8 +475,6 @@ pub fn run() {
             )?;
             app.manage(share);
 
-            // App-only state that can travel in the sync file (sync::).
-            let sync_store = sync::SyncStore::new(db.clone(), plex.identity().client_id.clone());
             // Friend activity, follows and What's New.
             let social = social::Social::new(social::SocialDeps {
                 db: db.clone(),
@@ -702,6 +784,27 @@ pub fn run() {
             sync::commands::keys_receive_state,
             sync::commands::keys_receive_cancel,
             sync::commands::keys_send,
+            hidden::hidden_list,
+            hidden::hidden_set,
+            bookmarks::bookmarks_list,
+            bookmarks::bookmark_add,
+            bookmarks::bookmark_remove,
+            bookmarks::bookmark_open,
+            smart::commands::smart_preview,
+            smart::commands::smart_save,
+            smart::commands::smart_list,
+            smart::commands::smart_page,
+            smart::commands::smart_delete,
+            smart::commands::smart_plex_rules,
+            smart::commands::smart_prompt,
+            smart::commands::ai_status,
+            smart::commands::ai_key_set,
+            scrobble::commands::scrobble_status,
+            scrobble::commands::lastfm_secret_set,
+            scrobble::commands::lastfm_sign_in_start,
+            scrobble::commands::lastfm_sign_in_finish,
+            scrobble::commands::lastfm_sign_out,
+            scrobble::commands::listenbrainz_check,
         ])
         .on_window_event(|window, event| {
             // Back from System Settings: pick up Local Network access at once.
