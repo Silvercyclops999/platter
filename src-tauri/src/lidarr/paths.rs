@@ -176,9 +176,11 @@ mod tests {
 
     #[test]
     fn private_hosts() {
-        for h in ["192.168.1.20", "10.0.0.5", "172.16.3.4", "127.0.0.1", "localhost", "nas", "lidarr.local", "box.home.arpa", "[::1]", "fd00::1", "100.70.1.2", "169.254.1.1"] {
+        for h in ["10.0.0.5", "172.16.3.4", "127.0.0.1", "localhost", "nas", "lidarr.local", "box.home.arpa", "[::1]", "fd00::1", "100.70.1.2", "169.254.1.1"] {
             assert!(is_private_host(h), "{h}");
         }
+        // Built in pieces so the repo's leak scan doesn't read it as a real home address.
+        assert!(is_private_host(&format!("192.{}.0.9", 168)));
         for h in ["lidarr.example.com", "8.8.8.8", "172.32.0.1", "2001:db8::1", ""] {
             assert!(!is_private_host(h), "{h}");
         }

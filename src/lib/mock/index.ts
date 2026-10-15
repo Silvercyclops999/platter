@@ -2078,7 +2078,7 @@ export class MockBackend implements Backend {
       for (const k of ["lidarrUrl", "lidarrAwayUrl"] as const) {
         if (patch[k] === undefined) continue;
         const u = patch[k].trim().replace(/\/+$/, "");
-        if (u && !/^https?:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(u)) throw { kind: "invalid", message: "Lidarr's address is a web address like http://192.168.1.20:8686." };
+        if (u && !/^https?:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(u)) throw { kind: "invalid", message: "Lidarr's address is a web address like http://192.168.x.x:8686." };
         next[k] = u;
       }
       if (patch.nowPlayingFeedPort !== undefined) {

@@ -1592,8 +1592,8 @@ export function SettingsPage() {
       group: "Lidarr",
       title: "Lidarr home address",
       description:
-        "Lidarr's address on your home network, with its port and any URL base, like http://192.168.1.20:8686. Platter tries it first. Empty keeps Lidarr off.",
-      control: (ids) => <LidarrUrlField field="lidarrUrl" placeholder="http://192.168.1.20:8686" ids={ids} />,
+        "Lidarr's address on your home network, with its port and any URL base, like http://192.168.x.x:8686. Platter tries it first. Empty keeps Lidarr off.",
+      control: (ids) => <LidarrUrlField field="lidarrUrl" placeholder="http://192.168.x.x:8686" ids={ids} />,
     },
     {
       key: "lidarrAwayUrl",

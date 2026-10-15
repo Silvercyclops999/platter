@@ -366,7 +366,7 @@ fn only_plain_http_to_a_public_host_is_a_warning() {
     assert!(unencrypted("http://203.0.113.9:8686"));
     assert!(unencrypted("http://lidarr.example.com"));
     assert!(!unencrypted("https://lidarr.example.com"), "a public https address is fine");
-    assert!(!unencrypted("http://192.168.1.20:8686"));
+    assert!(!unencrypted("http://10.20.30.40:8686"));
     assert!(!unencrypted("http://nas:8686"));
 }
 #[test]
@@ -501,7 +501,7 @@ fn rig_with(url: &str, away: &str) -> Rig {
 
 #[tokio::test]
 async fn a_whole_check_sends_nothing_but_gets_with_the_key_in_a_header() {
-    let r = rig("http://192.168.1.20:8686");
+    let r = rig("http://10.20.30.40:8686");
     r.lidarr.set_key(Some("abc123")).unwrap();
     let report = r.lidarr.check().await.unwrap();
     // Docker remap: same files under /music, so it's red, plus two ambers.
@@ -515,7 +515,7 @@ async fn a_whole_check_sends_nothing_but_gets_with_the_key_in_a_header() {
         assert_eq!(*method, Method::Get, "only GETs: {url}");
         assert!(*has_key, "key header on {url}");
         assert!(!url.contains("abc123"), "the key never goes in a URL");
-        assert!(url.starts_with("http://192.168.1.20:8686/api/v1/"), "{url}");
+        assert!(url.starts_with("http://10.20.30.40:8686/api/v1/"), "{url}");
     }
     assert!(log.iter().any(|(_, u, _)| u.contains("/filesystem?") && u.contains("includeFiles=true")));
 }
@@ -536,7 +536,7 @@ async fn the_key_lives_in_the_keychain_not_in_settings() {
 
 #[tokio::test]
 async fn unreachable_lidarr() {
-    let r = rig("http://192.168.1.20:8686");
+    let r = rig("http://10.20.30.40:8686");
     r.lidarr.set_key(Some("abc123")).unwrap();
     *r.web.status.lock() = Err(());
     let e = r.lidarr.check().await.unwrap_err();
@@ -546,7 +546,7 @@ async fn unreachable_lidarr() {
 
 #[tokio::test]
 async fn a_refused_key() {
-    let r = rig("http://192.168.1.20:8686");
+    let r = rig("http://10.20.30.40:8686");
     r.lidarr.set_key(Some("wrongkey")).unwrap();
     let e = r.lidarr.check().await.unwrap_err();
     assert_eq!(e.kind(), "auth");
@@ -556,7 +556,7 @@ async fn a_refused_key() {
 
 #[tokio::test]
 async fn too_old_or_not_lidarr() {
-    let r = rig("http://192.168.1.20:8686");
+    let r = rig("http://10.20.30.40:8686");
     r.lidarr.set_key(Some("abc123")).unwrap();
     *r.web.status.lock() = Ok((200, json!({"appName": "Lidarr", "version": "1.4.5.3639"})));
     let e = r.lidarr.check().await.unwrap_err();
@@ -579,28 +579,28 @@ async fn nothing_is_checked_until_address_and_key_are_set() {
 
 #[tokio::test]
 async fn confirming_an_empty_root_is_kept_per_address() {
-    let r = rig("http://192.168.1.20:8686");
+    let r = rig("http://10.20.30.40:8686");
     r.lidarr.confirm_root("/Lidarr/", true).unwrap();
-    assert_eq!(r.lidarr.confirmations().get("http://192.168.1.20:8686").unwrap(), &vec!["lidarr".to_string()]);
+    assert_eq!(r.lidarr.confirmations().get("http://10.20.30.40:8686").unwrap(), &vec!["lidarr".to_string()]);
     r.lidarr.confirm_root("/lidarr", false).unwrap();
-    assert!(r.lidarr.confirmations().get("http://192.168.1.20:8686").unwrap().is_empty());
+    assert!(r.lidarr.confirmations().get("http://10.20.30.40:8686").unwrap().is_empty());
     assert!(r.lidarr.confirm_root("/", true).is_err());
 }
 
 #[tokio::test]
 async fn away_from_home_the_away_address_answers_with_its_headers() {
-    let r = rig_with("http://192.168.1.20:8686", "https://lidarr.example.com");
+    let r = rig_with("http://10.20.30.40:8686", "https://lidarr.example.com");
     r.lidarr.set_key(Some("abc123")).unwrap();
     r.lidarr.set_headers(Some("CF-Access-Client-Id: id.access\nCF-Access-Client-Secret: s3cret")).unwrap();
-    r.web.down.lock().push("192.168.1.20".into());
+    r.web.down.lock().push("10.20.30.40".into());
     let report = r.lidarr.check().await.unwrap();
     assert_eq!(report.route, Some(api::Route::Away));
     assert_eq!(ids(&report, Level::Red), vec!["rootOverlap"], "the same check on every route");
     assert!(ids(&report, Level::Amber).iter().all(|i| i != "plainHttp"), "a public https address is fine");
     let log = r.web.log.lock().clone();
     assert!(log.iter().all(|(m, _, _)| *m == Method::Get));
-    assert_eq!(log.iter().filter(|(_, u, _)| u.contains("192.168.1.20")).count(), 1, "home tried once, first");
-    assert!(log[0].1.contains("192.168.1.20"));
+    assert_eq!(log.iter().filter(|(_, u, _)| u.contains("10.20.30.40")).count(), 1, "home tried once, first");
+    assert!(log[0].1.contains("10.20.30.40"));
     for (url, names) in r.web.extra.lock().iter() {
         if url.contains("lidarr.example.com") {
             assert_eq!(names, &vec!["CF-Access-Client-Id".to_string(), "CF-Access-Client-Secret".to_string()]);
@@ -617,11 +617,11 @@ async fn away_from_home_the_away_address_answers_with_its_headers() {
 
 #[tokio::test]
 async fn at_home_the_away_address_is_never_tried() {
-    let r = rig_with("http://192.168.1.20:8686", "http://203.0.113.9:8686");
+    let r = rig_with("http://10.20.30.40:8686", "http://203.0.113.9:8686");
     r.lidarr.set_key(Some("abc123")).unwrap();
     let report = r.lidarr.check().await.unwrap();
     assert_eq!(report.route, Some(api::Route::Home));
-    assert!(r.web.log.lock().iter().all(|(_, u, _)| u.contains("192.168.1.20")));
+    assert!(r.web.log.lock().iter().all(|(_, u, _)| u.contains("10.20.30.40")));
     // A plain http away address on a public host warns, whichever route answered.
     assert!(ids(&report, Level::Amber).contains(&"plainHttp".to_string()));
     assert_eq!(r.lidarr.status().unencrypted, vec!["http://203.0.113.9:8686"]);
@@ -629,13 +629,13 @@ async fn at_home_the_away_address_is_never_tried() {
 
 #[tokio::test]
 async fn neither_address_answers() {
-    let r = rig_with("http://192.168.1.20:8686", "https://lidarr.example.com");
+    let r = rig_with("http://10.20.30.40:8686", "https://lidarr.example.com");
     r.lidarr.set_key(Some("abc123")).unwrap();
-    r.web.down.lock().extend(["192.168.1.20".to_string(), "lidarr.example.com".to_string()]);
+    r.web.down.lock().extend(["10.20.30.40".to_string(), "lidarr.example.com".to_string()]);
     let e = r.lidarr.check().await.unwrap_err();
     assert!(e.to_string().contains("Lidarr isn't reachable"), "{e}");
     // Home refuses the key while away is down: the refusal is what's shown.
-    r.web.down.lock().retain(|h| h != "192.168.1.20");
+    r.web.down.lock().retain(|h| h != "10.20.30.40");
     r.lidarr.set_key(Some("wrongkey")).unwrap();
     assert_eq!(r.lidarr.check().await.unwrap_err().kind(), "auth");
 }

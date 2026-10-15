@@ -509,7 +509,7 @@ pub fn lidarr_url(u: &str) -> AppResult<String> {
     if u.is_empty() {
         return Ok(String::new());
     }
-    let bad = || AppError::Invalid("Lidarr's address is a web address like http://192.168.1.20:8686.".into());
+    let bad = || AppError::Invalid("Lidarr's address is a web address like http://192.168.x.x:8686.".into());
     let parsed = url::Url::parse(u).map_err(|_| bad())?;
     let ok = matches!(parsed.scheme(), "http" | "https")
         && parsed.host_str().is_some_and(|h| !h.is_empty())
@@ -2145,8 +2145,8 @@ mod tests {
     fn lidarr_address_is_checked_and_tidied() {
         let mut s = Settings::default();
         assert!(s.lidarr_url.is_empty(), "Lidarr is off until set up");
-        s.apply(&SettingsPatch { lidarr_url: Some(" http://192.168.1.20:8686/ ".into()), ..Default::default() }).unwrap();
-        assert_eq!(s.lidarr_url, "http://192.168.1.20:8686");
+        s.apply(&SettingsPatch { lidarr_url: Some(" http://10.20.30.40:8686/ ".into()), ..Default::default() }).unwrap();
+        assert_eq!(s.lidarr_url, "http://10.20.30.40:8686");
         s.apply(&SettingsPatch { lidarr_url: Some("https://nas.local/lidarr".into()), ..Default::default() }).unwrap();
         assert_eq!(s.lidarr_url, "https://nas.local/lidarr");
         for bad in ["nas:8686", "ftp://nas", "http://user:pw@nas:8686", "http://nas:8686/?apikey=x", "http://"] {

@@ -28,7 +28,7 @@ beforeEach(async () => {
 
 const row = (key: string) => document.querySelector<HTMLElement>(`[data-setting="${key}"]`);
 
-async function setUp(home = "http://192.168.1.20:8686", away = "") {
+async function setUp(home = "http://192.168.x.x:8686", away = "") {
   await mock.settingsSet({ lidarrUrl: home, lidarrAwayUrl: away });
   await loadSettings();
   await mock.lidarrKeySet("abc123");
@@ -45,8 +45,8 @@ describe("Lidarr settings", () => {
     expect(screen.queryByRole("button", { name: /request/i })).toBeNull();
 
     const url = screen.getByRole("textbox", { name: "Lidarr home address" });
-    await userEvent.type(url, "http://192.168.1.20:8686/{Enter}");
-    await waitFor(() => expect(useSettings.getState().settings?.lidarrUrl).toBe("http://192.168.1.20:8686"));
+    await userEvent.type(url, "http://192.168.x.x:8686/{Enter}");
+    await waitFor(() => expect(useSettings.getState().settings?.lidarrUrl).toBe("http://192.168.x.x:8686"));
     expect(row("lidarrCheck")).toBeNull();
 
     await userEvent.type(screen.getByLabelText("Lidarr API key"), "abc123");
@@ -113,7 +113,7 @@ describe("Lidarr settings", () => {
 
   it("away from home: the away address answers, takes proxy headers, and warns only for plain http", async () => {
     mock.lidarr.setDemo("away");
-    await setUp("http://192.168.1.20:8686", "https://lidarr.example.com");
+    await setUp("http://192.168.x.x:8686", "https://lidarr.example.com");
     render(<SettingsPage />);
     const field = await screen.findByLabelText("Extra headers for the away address");
     fireEvent.change(field, { target: { value: "CF-Access-Client-Id: id\nCF-Access-Client-Secret: s3cret" } });
