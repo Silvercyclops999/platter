@@ -563,6 +563,49 @@ async fn device_loss_pauses_and_resume_reopens() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paused_output_goes_idle_and_play_wakes_it() {
+    let cfg = PlayerConfig {
+        output_idle_after: Duration::from_millis(100),
+        ..PlayerConfig::default()
+    };
+    let mut r = rig(&["a"], 3.0, true, cfg).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    // Playing: the stream keeps pulling well past the idle delay.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert!(!r.cap.is_idle(), "idle while playing");
+    r.player.pause().await.unwrap();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !r.cap.is_idle() {
+        assert!(Instant::now() < deadline, "output still pulling while paused");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // Paused: no position events either.
+    let positions = r.sink.positions.lock().len();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(r.sink.positions.lock().len(), positions, "position ticks while paused");
+    let frames = r.cap.len_frames(2);
+    r.player.resume().await.unwrap();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    assert!(!r.cap.is_idle());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while r.cap.len_frames(2) <= frames {
+        assert!(Instant::now() < deadline, "no audio after resume");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[test]
+fn position_tick_runs_only_while_playing() {
+    use crate::audio::player::ticks_in;
+    assert!(ticks_in(PlayerStatus::Playing));
+    assert!(ticks_in(PlayerStatus::Buffering));
+    assert!(!ticks_in(PlayerStatus::Paused));
+    assert!(!ticks_in(PlayerStatus::Idle));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn position_events_flow_while_playing_and_volume_state_updates() {
     let mut r = rig(&["a"], 2.0, true, PlayerConfig::default()).await;
     r.player.play_context(ctx(&["a"]), None, None).await.unwrap();

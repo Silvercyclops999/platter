@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { installReducedMotion, setMotionPreference } from "./design/motion";
+import { installPageVisibility } from "./design/pageVisibility";
 import { installOverlayScrollbars } from "./design/scrollbars";
 import { installTheme } from "./stores/theme";
 import { SignInPage, ServerPickPage } from "./pages/SignInPage";
@@ -11,9 +12,11 @@ import { connectMiniplayer, isMiniplayerWindow } from "./stores/miniplayer";
 import { connectPlayer } from "./stores/player";
 import { connectShare } from "./stores/share";
 import { loadSettings, useSettings } from "./stores/settings";
-import { Miniplayer } from "./shell/Miniplayer";
 import { backend } from "./lib/backend";
 import { useUi } from "./stores/ui";
+
+// Only the miniplayer window needs it.
+const Miniplayer = lazy(() => import("./shell/Miniplayer").then((m) => ({ default: m.Miniplayer })));
 
 /**
  * The miniplayer window: only the player, likes and settings stores, fed by
@@ -21,6 +24,7 @@ import { useUi } from "./stores/ui";
  */
 export function MiniplayerApp() {
   useEffect(() => installReducedMotion(), []);
+  useEffect(() => installPageVisibility(), []);
   useEffect(() => installTheme(), []);
   const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
   useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
@@ -36,7 +40,11 @@ export function MiniplayerApp() {
       un?.();
     };
   }, []);
-  return <Miniplayer />;
+  return (
+    <Suspense fallback={null}>
+      <Miniplayer />
+    </Suspense>
+  );
 }
 
 /** Root: the miniplayer window gets its own page; the main window wires everything. */
@@ -47,6 +55,7 @@ export default function App() {
 /** The main window: wires stores to the core, then gates on auth. */
 function MainApp() {
   useEffect(() => installReducedMotion(), []);
+  useEffect(() => installPageVisibility(), []);
   useEffect(() => installTheme(), []);
   const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
   useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);

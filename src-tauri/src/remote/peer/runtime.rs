@@ -135,7 +135,8 @@ pub async fn run(remote: RemoteService, dir: Arc<dyn PeerDirectory>, addrs: Addr
         tokio::select! {
             r = on.changed() => if r.is_err() { break },
             r = name_rx.changed() => if r.is_err() { break },
-            _ = tokio::time::sleep(cfg.recheck) => {}
+            // Off: nothing to recheck, so wait for the switch alone.
+            _ = tokio::time::sleep(cfg.recheck), if want => {}
         }
     }
     stop(&mut running, dir.as_ref(), &port);

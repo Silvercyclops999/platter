@@ -14,6 +14,8 @@ use crate::error::{AppError, AppResult};
 
 const FIRST_CHECK: Duration = Duration::from_secs(10);
 const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// While offline by choice, how often to see whether that changed.
+const OFFLINE_RECHECK: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 pub struct Updates {
@@ -69,7 +71,8 @@ pub fn start(app: AppHandle) {
                 .try_state::<crate::plex::PlexState>()
                 .is_some_and(|p| p.offline_by_choice());
             if offline {
-                tokio::time::sleep(FIRST_CHECK).await;
+                // Look again once a minute, not every few seconds.
+                tokio::time::sleep(OFFLINE_RECHECK).await;
                 continue;
             }
             if let Err(e) = check_and_download(&app).await {

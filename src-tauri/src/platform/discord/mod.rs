@@ -433,7 +433,7 @@ impl Runner {
                 }
                 Some(m) = side.recv() => self.on_side(m),
                 _ = tokio::time::sleep_until(wake.unwrap_or_else(Instant::now)), if wake.is_some() => self.flush().await,
-                _ = tokio::time::sleep(self.cfg.gap), if self.cur.is_some() => {
+                _ = tokio::time::sleep(self.cfg.gap), if self.watches_party() => {
                     let p = self.cfg.party.lock().clone();
                     if p != self.party {
                         self.party = p;
@@ -560,8 +560,16 @@ impl Runner {
             c.cover_ok = false;
         }
         self.settings = s;
+        // The party isn't watched while the status is off: catch up now.
+        self.party = self.cfg.party.lock().clone();
         self.lookups();
         self.mark();
+    }
+
+    /// The listening-session check runs only while a song is shown and the
+    /// status is on; otherwise nothing wakes on a timer.
+    fn watches_party(&self) -> bool {
+        self.settings.enabled && self.cur.is_some()
     }
 
     fn on_side(&mut self, m: Side) {

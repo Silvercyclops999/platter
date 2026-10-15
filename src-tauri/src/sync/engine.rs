@@ -425,9 +425,10 @@ impl SyncEngine {
                         }
                         break;
                     }
-                    _ = tokio::time::sleep(t.poll) => {
+                    // Sync off (no file): nothing to poll, so no timer.
+                    _ = tokio::time::sleep(t.poll), if path.is_some() => {
                         let now = path.as_deref().and_then(stamp);
-                        if path.is_some() && now != last {
+                        if now != last {
                             last = now;
                             break;
                         }

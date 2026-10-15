@@ -7,6 +7,7 @@
  * enough for the header's light text.
  */
 import { color } from "../design/tokens";
+import { setBounded } from "./bounded";
 
 export type RGB = [number, number, number];
 
@@ -235,7 +236,7 @@ export function headerColorsFromImageUrl(url: string): Promise<HeaderColors | nu
       const picked = vividFromImage(img);
       if (picked === undefined) return resolve(null);
       const colors = headerColors(picked);
-      imageColorCache.set(url, colors);
+      setBounded(imageColorCache, url, colors, 300);
       resolve(colors);
     };
     img.onerror = () => resolve(null);

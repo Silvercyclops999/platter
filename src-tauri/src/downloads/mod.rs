@@ -700,6 +700,11 @@ impl Downloads {
         }
     }
 
+    /// Whether anything is downloaded or set to download. Public for tests.
+    pub async fn has_items(&self) -> bool {
+        self.inner.db.read_async(|c| Ok(!store::items(c)?.is_empty())).await.unwrap_or(true)
+    }
+
     async fn wait(&self, max: Duration) {
         let _ = tokio::time::timeout(max, self.inner.wake.notified()).await;
     }
@@ -717,6 +722,13 @@ impl Downloads {
                     tracing::warn!("downloads resync failed: {e}");
                 }
                 last_sync = Some(Instant::now());
+            }
+            // Nothing downloaded or wanted: no timer, wait for a download
+            // to be added (or the library to change).
+            if !self.has_items().await {
+                self.set_paused(None);
+                self.inner.wake.notified().await;
+                continue;
             }
             if let Some(why) = self.blocked().await {
                 self.set_paused(Some(why));

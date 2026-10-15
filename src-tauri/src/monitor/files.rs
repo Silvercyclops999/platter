@@ -114,21 +114,52 @@ async fn run_check(plex: &PlexState, db: &DbHandle) {
     }
 }
 
+/// Playback counts as recent for this long after its last event.
+const ACTIVE_FOR: Duration = Duration::from_secs(30);
+
+/// When the loop next wakes: every few seconds around playback (to catch a
+/// burst of failures), otherwise only for the once-a-minute file check.
+fn next_look(active: bool, last_look: tokio::time::Instant, last_check: tokio::time::Instant) -> tokio::time::Instant {
+    let check = last_check + CHECK_EVERY;
+    if active { check.min(last_look + PROBLEMS_EVERY) } else { check }
+}
+
 /// Background loop. Also re-runs the library sync every minute while the
 /// server has no music library, so one that's added later shows up.
 pub fn spawn(plex: PlexState, db: DbHandle, player: PlayerHandle) {
     let player = Arc::new(player);
+    let mut tracking = player.subscribe_tracking();
     tauri::async_runtime::spawn(async move {
+        use tokio::time::Instant;
         let mut watch = FailureWatch::default();
-        let mut since_check = CHECK_EVERY; // check soon after start
+        let start = Instant::now();
+        // Check soon after start.
+        let mut last_check = start.checked_sub(CHECK_EVERY - PROBLEMS_EVERY).unwrap_or(start);
+        let mut last_look = start;
+        // Playback failures only happen while something is being played, so
+        // the Problems list is looked at often only around playback.
+        let mut last_playback: Option<Instant> = None;
+        let mut events_open = true;
         loop {
-            tokio::time::sleep(PROBLEMS_EVERY).await;
-            since_check += PROBLEMS_EVERY;
+            let now = Instant::now();
+            let active = last_playback.is_some_and(|at| now.duration_since(at) < ACTIVE_FOR);
+            let at = next_look(active, last_look, last_check);
+            tokio::select! {
+                _ = tokio::time::sleep_until(at) => {}
+                ev = tracking.recv(), if events_open => {
+                    match ev {
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => events_open = false,
+                        _ => last_playback = Some(Instant::now()),
+                    }
+                    continue;
+                }
+            }
+            last_look = Instant::now();
             let problems: Vec<(i64, String)> =
                 player.problems().into_iter().map(|p| (p.at, p.kind)).collect();
             let burst = watch.new_file_failures(&problems) >= FAILURE_BURST;
-            if burst || since_check >= CHECK_EVERY {
-                since_check = Duration::ZERO;
+            if burst || last_check.elapsed() >= CHECK_EVERY {
+                last_check = Instant::now();
                 run_check(&plex, &db).await;
                 if plex.connected() && plex.no_music_library() {
                     let _ = db.start_sync(false);
@@ -175,6 +206,15 @@ mod tests {
         let f = Fake(HashMap::new());
         assert_eq!(check(&f, &ids(3)).await, None);
         assert_eq!(verdict(&[None, Some(false)]), Some(false));
+    }
+
+    #[test]
+    fn idle_player_wakes_only_for_the_minute_check() {
+        let t0 = tokio::time::Instant::now();
+        // Nothing playing: next wake is the file check, a minute out.
+        assert_eq!(next_look(false, t0, t0), t0 + CHECK_EVERY);
+        // Around playback: every few seconds.
+        assert_eq!(next_look(true, t0, t0), t0 + PROBLEMS_EVERY);
     }
 
     #[test]

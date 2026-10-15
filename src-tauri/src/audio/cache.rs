@@ -199,6 +199,12 @@ pub struct Precacher {
 }
 
 /// Collaborators of the pre-cache task.
+/// Whether any wanted track still has to be fetched. When none does, the
+/// precacher sleeps until the wish list changes instead of polling.
+fn has_uncached(want: &[Track], cache: &DiskCache) -> bool {
+    want.iter().any(|t| !cache.contains(&cache_key(t)))
+}
+
 struct Deps {
     cache: Arc<DiskCache>,
     resolver: Arc<dyn TrackResolver>,
@@ -260,10 +266,17 @@ impl Precacher {
                         }
                     }
                     None => {
+                        // Something wanted but held back: re-check
+                        // periodically, since the engine's buffering state
+                        // changes without telling us. Nothing left to fetch:
+                        // sleep until the wish list changes.
+                        let waiting = has_uncached(&me.want.lock(), &deps.cache);
                         drop(me);
-                        // Re-check periodically: the engine's buffering
-                        // state changes without telling us.
-                        let _ = tokio::time::timeout(Duration::from_millis(200), notified).await;
+                        if waiting {
+                            let _ = tokio::time::timeout(Duration::from_millis(200), notified).await;
+                        } else {
+                            notified.await;
+                        }
                     }
                 }
             }
@@ -427,6 +440,19 @@ mod tests {
 
     fn track(id: &str, part: &str) -> Track {
         crate::audio::testutil::track(id, "a", part)
+    }
+
+    #[test]
+    fn precacher_parks_when_nothing_to_fetch() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = DiskCache::new(dir.path(), 1_000).unwrap();
+        // Empty wish list: nothing to poll for.
+        assert!(!has_uncached(&[], &c));
+        let t = track("1", "/a");
+        assert!(has_uncached(std::slice::from_ref(&t), &c));
+        c.insert_bytes(&cache_key(&t), &[0u8; 10]).unwrap();
+        // Everything wanted is on disk: park.
+        assert!(!has_uncached(&[t], &c));
     }
 
     #[test]

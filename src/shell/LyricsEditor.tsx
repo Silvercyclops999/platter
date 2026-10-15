@@ -18,6 +18,7 @@ import { clockTenths, isSynced, linesFromText, parseLrc, stampable, textFromLine
 import type { Track } from "../lib/types";
 import { closeLyricsEditor, ownLyricsChanged, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
+import { usePageVisible } from "../design/pageVisibility";
 import { toast } from "../stores/toasts";
 import { interpolate } from "./lyrics";
 import {
@@ -56,17 +57,23 @@ function useSongClock(trackId: string) {
     return Math.round(interpolate(base.current, performance.now(), st.state?.status === "playing", st.durationMs));
   }, [trackId]);
   const [shown, setShown] = useState(0);
+  const visible = usePageVisible();
   useEffect(() => {
     const unsub = usePlayer.subscribe((s, p) => {
-      if (s.positionMs !== p.positionMs || s.state?.status !== p.state?.status) base.current = { positionMs: s.positionMs, at: performance.now() };
+      if (s.positionMs !== p.positionMs || s.state?.status !== p.state?.status) {
+        base.current = { positionMs: s.positionMs, at: performance.now() };
+        setShown(now());
+      }
     });
     setShown(now());
-    const t = setInterval(() => setShown(now()), 100);
-    return () => {
-      clearInterval(t);
-      unsub();
-    };
+    return unsub;
   }, [now]);
+  // Ticks only while the song plays and the window can be seen.
+  useEffect(() => {
+    if (!playing || !visible) return;
+    const t = setInterval(() => setShown(now()), 100);
+    return () => clearInterval(t);
+  }, [now, playing, visible]);
   return { isThis, playing, now, shown };
 }
 

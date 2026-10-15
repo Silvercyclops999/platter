@@ -1,8 +1,5 @@
-import { BookmarksPage } from "../pages/BookmarksPage";
-import { ImportPage } from "../pages/ImportPage";
-import { SmartPlaylistPage } from "../pages/SmartPlaylistPage";
 import { Pause, Play } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { IconButton } from "../components/Button";
 import { NEUTRAL_HEADER, THEMED_NEUTRAL_HEADER, themedHeader } from "../lib/color";
 import { useTheme } from "../stores/theme";
@@ -18,13 +15,18 @@ import { MixPage } from "../pages/MixPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { RecentsPage } from "../pages/RecentsPage";
 import { SearchPage } from "../pages/SearchPage";
-import { SettingsPage } from "../pages/SettingsPage";
-import { WhatsNewPage } from "../pages/WhatsNewPage";
 import { useApp } from "../stores/app";
 import { useCurrentEntry, type Route } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { HealthBanner } from "./HealthBanner";
 import { DownloadsBanner } from "../components/DownloadButton";
+
+// Rarely visited pages load on first visit, so their code isn't parsed at startup.
+const BookmarksPage = lazy(() => import("../pages/BookmarksPage").then((m) => ({ default: m.BookmarksPage })));
+const ImportPage = lazy(() => import("../pages/ImportPage").then((m) => ({ default: m.ImportPage })));
+const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((m) => ({ default: m.SmartPlaylistPage })));
+const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
@@ -284,7 +286,9 @@ export function MainView() {
           }}
         >
           <div className="page" key={entry.key} ref={page}>
-            <Page route={r} />
+            <Suspense fallback={null}>
+              <Page route={r} />
+            </Suspense>
           </div>
         </div>
       </div>

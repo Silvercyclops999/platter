@@ -81,6 +81,8 @@ pub struct PlayerConfig {
     pub precache_count: usize,
     pub persist_debounce: Duration,
     pub position_interval: Duration,
+    /// How long after playback stops the output stream is held still.
+    pub output_idle_after: Duration,
     pub engine: EngineConfig,
     /// Fixed shuffle seed (tests).
     pub seed: Option<u64>,
@@ -107,6 +109,7 @@ impl Default for PlayerConfig {
             precache_count: 5,
             persist_debounce: Duration::from_millis(500),
             position_interval: Duration::from_millis(250),
+            output_idle_after: Duration::from_secs(5),
             engine: EngineConfig::default(),
             seed: None,
             shuffle_style: ShuffleStyle::default(),
@@ -323,6 +326,7 @@ impl PlayerHandle {
             config,
             dirty: false,
             persist_at: None,
+            idle_at: None,
             ticks: 0,
             ab: None,
             outputs: outputs.clone(),
@@ -683,10 +687,17 @@ struct Actor {
     config: PlayerConfig,
     dirty: bool,
     persist_at: Option<Instant>,
+    /// When the output stream is held still, once playback has stopped.
+    idle_at: Option<Instant>,
     ticks: u64,
     /// The A-B loop and the queue entry it belongs to.
     ab: Option<(String, AbLoop)>,
     outputs: broadcast::Sender<OutputState>,
+}
+
+/// Whether the position tick runs in this state: only while something plays.
+pub(crate) fn ticks_in(status: PlayerStatus) -> bool {
+    matches!(status, PlayerStatus::Playing | PlayerStatus::Buffering)
 }
 
 impl Actor {
@@ -699,7 +710,9 @@ impl Actor {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         self.refresh_precache();
         loop {
+            self.plan_output_idle();
             let persist_at = self.persist_at;
+            let idle_at = self.idle_at;
             tokio::select! {
                 cmd = rx.recv() => match cmd {
                     Some(cmd) => self.handle(cmd),
@@ -709,14 +722,36 @@ impl Actor {
                     }
                 },
                 Some(ev) = engine_rx.recv() => self.on_engine(ev),
-                _ = tick.tick() => self.on_tick(),
+                // Paused or stopped, the tick isn't polled, so the actor sleeps.
+                _ = tick.tick(), if ticks_in(self.status) => self.on_tick(),
                 _ = async {
                     match persist_at {
                         Some(at) => tokio::time::sleep_until(at).await,
                         None => std::future::pending::<()>().await,
                     }
                 } => self.persist_now(),
+                _ = async {
+                    match idle_at {
+                        Some(at) => tokio::time::sleep_until(at).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    self.idle_at = None;
+                    if !ticks_in(self.status) {
+                        self.engine.idle_output();
+                    }
+                }
             }
+        }
+    }
+
+    /// A while after playback stops, the output stream is held still so the
+    /// device stops waking the app; playing starts it again.
+    fn plan_output_idle(&mut self) {
+        if ticks_in(self.status) || self.engine.output_is_idle() {
+            self.idle_at = None;
+        } else if self.idle_at.is_none() {
+            self.idle_at = Some(Instant::now() + self.config.output_idle_after);
         }
     }
 
@@ -1793,7 +1828,7 @@ impl Actor {
     }
 
     fn on_tick(&mut self) {
-        if !matches!(self.status, PlayerStatus::Playing | PlayerStatus::Buffering) {
+        if !ticks_in(self.status) {
             return;
         }
         self.emit_position();

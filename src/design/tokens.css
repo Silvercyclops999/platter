@@ -165,3 +165,11 @@
 :root[data-reduced-motion="true"] {
   --motion-move: 0;
 }
+
+/* While the window can't be seen (src/design/pageVisibility.ts), looping
+   animations hold still so a hidden app doesn't keep painting. */
+:root[data-page-hidden="true"] *,
+:root[data-page-hidden="true"] *::before,
+:root[data-page-hidden="true"] *::after {
+  animation-play-state: paused !important;
+}

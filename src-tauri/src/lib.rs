@@ -57,11 +57,15 @@ use crate::plex::notifications::PlexEvent;
 ///   `QUIET`.
 /// - While the socket is down, an incremental sync runs every
 ///   `FALLBACK_EVERY` instead, since no events arrive.
+const QUIET: Duration = Duration::from_secs(5);
+const FALLBACK_EVERY: Duration = Duration::from_secs(15 * 60);
+
 fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
-    const QUIET: Duration = Duration::from_secs(5);
-    const FALLBACK_EVERY: Duration = Duration::from_secs(15 * 60);
     // When the last relevant change arrived; None = nothing pending.
     let pending: Arc<parking_lot::Mutex<Option<std::time::Instant>>> = Arc::default();
+    // Wakes the sync timer when something changes, so it can sleep meanwhile.
+    let wake = Arc::new(tokio::sync::Notify::new());
+    let wake_events = wake.clone();
     let socket_up = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (live_tx, live_rx) = tokio::sync::mpsc::unbounded_channel::<db::live::LiveChange>();
     let mut events = plex.subscribe();
@@ -82,7 +86,10 @@ fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
                 .map(|s| s.section_id);
             match &ev {
                 Some(PlexEvent::Connected) => up.store(true, std::sync::atomic::Ordering::Release),
-                Some(PlexEvent::Disconnected) => up.store(false, std::sync::atomic::Ordering::Release),
+                Some(PlexEvent::Disconnected) => {
+                    up.store(false, std::sync::atomic::Ordering::Release);
+                    wake_events.notify_one();
+                }
                 Some(PlexEvent::LibraryUpdate { section_id, item_id, item_type, state }) => {
                     if let Some(c) = db::live::change_from_timeline(
                         section_id.as_deref(),
@@ -108,14 +115,14 @@ fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
                     _ => tracing::debug!("missed server events; resync"),
                 }
                 *mark.lock() = Some(std::time::Instant::now());
+                wake_events.notify_one();
             }
         }
     });
-    spawn_live_batches(app, db.clone(), live_rx, pending.clone());
+    spawn_live_batches(app, db.clone(), live_rx, pending.clone(), wake.clone());
     tauri::async_runtime::spawn(async move {
         let mut last_fallback = std::time::Instant::now();
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
             let down = !socket_up.load(std::sync::atomic::Ordering::Acquire);
             if down && last_fallback.elapsed() >= FALLBACK_EVERY {
                 last_fallback = std::time::Instant::now();
@@ -123,15 +130,47 @@ fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
                 *pending.lock() = std::time::Instant::now().checked_sub(QUIET);
             }
             let due = matches!(*pending.lock(), Some(at) if at.elapsed() >= QUIET);
-            if due && plex.client().await.is_ok() {
-                match db.start_sync(false) {
-                    Ok(true) => *pending.lock() = None,
-                    Ok(false) => {} // a sync is running; try again next tick
-                    Err(e) => tracing::warn!("sync start failed: {e}"),
+            let mut blocked = false;
+            if due {
+                blocked = true;
+                if plex.client().await.is_ok() {
+                    match db.start_sync(false) {
+                        Ok(true) => {
+                            *pending.lock() = None;
+                            blocked = false;
+                        }
+                        Ok(false) => {} // a sync is running; try again shortly
+                        Err(e) => tracing::warn!("sync start failed: {e}"),
+                    }
                 }
+            }
+            let age = pending.lock().map(|at| at.elapsed());
+            // Nothing pending and the socket up: sleep until an event arrives.
+            match library_wait(age, down, last_fallback.elapsed(), blocked) {
+                Some(wait) => {
+                    tokio::select! {
+                        _ = tokio::time::sleep(wait) => {}
+                        _ = wake.notified() => {}
+                    }
+                }
+                None => wake.notified().await,
             }
         }
     });
+}
+
+/// How long the library watcher sleeps: until a pending change has been
+/// quiet long enough, until the next fallback sync while the socket is down,
+/// a short retry when a due sync couldn't start, or (None) until woken.
+fn library_wait(pending_age: Option<Duration>, socket_down: bool, since_fallback: Duration, blocked: bool) -> Option<Duration> {
+    const RETRY: Duration = Duration::from_secs(5);
+    if blocked {
+        return Some(RETRY);
+    }
+    if let Some(age) = pending_age {
+        return Some(QUIET.saturating_sub(age).max(Duration::from_millis(100)));
+    }
+    socket_down.then(|| FALLBACK_EVERY.saturating_sub(since_fallback).max(Duration::from_secs(1)))
 }
 
 /// Gather live changes for a moment, then write them into the cache. While
@@ -141,6 +180,7 @@ fn spawn_live_batches(
     db: DbHandle,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<db::live::LiveChange>,
     pending_sync: Arc<parking_lot::Mutex<Option<std::time::Instant>>>,
+    wake: Arc<tokio::sync::Notify>,
 ) {
     tauri::async_runtime::spawn(async move {
         while let Some(first) = rx.recv().await {
@@ -176,10 +216,12 @@ fn spawn_live_batches(
                 Ok(db::live::LiveOutcome::Nothing) => {}
                 Ok(db::live::LiveOutcome::NeedsSync) => {
                     *pending_sync.lock() = Some(std::time::Instant::now());
+                    wake.notify_one();
                 }
                 Err(e) => {
                     tracing::debug!("live library update failed, syncing instead: {e}");
                     *pending_sync.lock() = Some(std::time::Instant::now());
+                    wake.notify_one();
                 }
             }
         }
@@ -1044,6 +1086,7 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             platform::miniplayer::on_window_event(window, event);
+            platform::visibility::on_window_event(window, event);
             // Back from System Settings: pick up Local Network access at once.
             if let tauri::WindowEvent::Focused(true) = event
                 && window.label() == "main"
@@ -1058,6 +1101,9 @@ pub fn run() {
             {
                 api.prevent_close();
                 let _ = window.hide();
+                if let Some(w) = window.app_handle().get_webview_window("main") {
+                    platform::visibility::set_page_visible(&w, false);
+                }
             }
         })
         .build(tauri::generate_context!())
@@ -1100,6 +1146,19 @@ mod watch_tests {
             progress: None,
             section_id: section.map(str::to_owned),
         }
+    }
+
+    #[test]
+    fn library_watcher_sleeps_until_woken_when_nothing_is_pending() {
+        let s = Duration::from_secs;
+        // Socket up, nothing pending: no timer at all.
+        assert_eq!(library_wait(None, false, s(0), false), None);
+        // A change waits out the quiet period.
+        assert_eq!(library_wait(Some(s(2)), false, s(0), false), Some(s(3)));
+        // Socket down: the next fallback sync, not a 1 s poll.
+        assert_eq!(library_wait(None, true, s(60), false), Some(FALLBACK_EVERY - s(60)));
+        // A due sync that couldn't start retries in seconds, not per tick.
+        assert_eq!(library_wait(Some(s(10)), false, s(0), true), Some(s(5)));
     }
 
     #[test]

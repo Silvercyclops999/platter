@@ -27,6 +27,16 @@ export default defineConfig(() => ({
     },
   },
 
+  build: {
+    rolldownOptions: {
+      output: {
+        // Everything the first screen needs goes in one chunk; rarely used
+        // pages (Settings, Library import, the editors) load on first use.
+        codeSplitting: { groups: [{ name: "app", tags: ["$initial"] }] },
+      },
+    },
+  },
+
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],

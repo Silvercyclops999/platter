@@ -3,11 +3,9 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { DragAnnouncer } from "../components/DragAnnouncer";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
-import { PlexEditDialogs } from "../components/PlexEditDialogs";
 import { FolderDialogs } from "./FolderMenus";
 import { SavedInHost } from "../components/SavedInMenu";
 import { Toaster } from "../components/Toast";
-import { ShareCardHost } from "../components/ShareCardDialog";
 import { Tooltip } from "../components/Tooltip";
 import { chrome } from "../lib/platform";
 import { useCurrentEntry } from "../stores/router";
@@ -29,7 +27,6 @@ import {
 } from "./layout";
 import { FullWindow } from "./FullWindow";
 import { useLyricsAutoShow } from "./lyrics";
-import { LyricsEditorHost } from "./LyricsEditor";
 import { startTranscribe } from "../stores/transcribe";
 import { startDownloads } from "../stores/downloads";
 import { DownloadDialogs } from "../components/DownloadButton";
@@ -42,8 +39,9 @@ import { RemoteStrip } from "./RemoteStrip";
 import { ListenStrip } from "./ListenStrip";
 import { FriendActivityPanel } from "./FriendActivityPanel";
 import { startSocial } from "../stores/social";
+import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
-import { SmartEditorHost } from "../components/SmartPlaylistEditor";
+import { LazyLyricsEditorHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost } from "./lazyHosts";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
@@ -71,9 +69,10 @@ export function AppShell() {
   useOpenNowPlayingOnStart();
   useLyricsAutoShow();
   useEffect(() => void loadOwnLyricsIds(), []);
-  useEffect(() => void startTranscribe(), []);
+  // Not needed for the first screen: wait until it has painted.
+  useEffect(() => afterFirstPaint(() => void startTranscribe()), []);
   useEffect(() => void startDownloads(), []);
-  useEffect(() => void startSocial(), []);
+  useEffect(() => afterFirstPaint(() => void startSocial()), []);
   useEffect(() => void startCurate(), []);
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
@@ -206,14 +205,14 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
-      <PlexEditDialogs />
-      <SmartEditorHost />
+      <LazyPlexEditDialogs />
+      <LazySmartEditorHost />
       <FolderDialogs />
       <DownloadDialogs />
       <DragAnnouncer />
-      <LyricsEditorHost />
+      <LazyLyricsEditorHost />
       <FullWindow />
-      <ShareCardHost />
+      <LazyShareCardHost />
     </div>
   );
 }

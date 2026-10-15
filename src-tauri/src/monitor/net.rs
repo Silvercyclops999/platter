@@ -15,7 +15,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::plex::PlexState;
 
-pub const TICK: Duration = Duration::from_secs(5);
+/// One look costs a socket bind, so a slower tick saves wakeups while idle;
+/// the health ping still runs every 30 s.
+pub const TICK: Duration = Duration::from_secs(15);
 /// Extra wall-clock time beyond the tick that counts as a sleep.
 const WAKE_SLACK: Duration = Duration::from_secs(20);
 

@@ -979,6 +979,8 @@ pub struct Engine {
     env: Arc<Env>,
     output: Mutex<Box<dyn AudioOutput>>,
     next_key: AtomicU64,
+    /// The output stream is held still while nothing plays.
+    output_idle: AtomicBool,
 }
 
 impl Engine {
@@ -1026,6 +1028,7 @@ impl Engine {
                 env,
                 output: Mutex::new(deps.output),
                 next_key: AtomicU64::new(1),
+                output_idle: AtomicBool::new(false),
             },
             rx,
         )
@@ -1048,8 +1051,12 @@ impl Engine {
     /// Opens the output if it isn't. Returns true if the format changed.
     fn ensure_output(&self) -> AppResult<bool> {
         if self.core().mix.lock().output_open {
+            if self.output_idle.swap(false, Ordering::SeqCst) {
+                self.output.lock().set_idle(false);
+            }
             return Ok(false);
         }
+        self.output_idle.store(false, Ordering::SeqCst);
         let weak = Arc::downgrade(&self.env.core);
         let cb: OutputCallback = Arc::new(move |ev| {
             let Some(core) = weak.upgrade() else { return };
@@ -1270,6 +1277,21 @@ impl Engine {
 
     pub fn pause(&self) {
         self.core().mix.lock().playing = false;
+    }
+
+    /// Holds the open output still while nothing plays, so the device
+    /// callback stops waking the app. Does nothing while playing; `play`
+    /// and `load` start it again.
+    pub fn idle_output(&self) {
+        if self.core().mix.lock().playing || self.output_idle.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.output.lock().set_idle(true);
+    }
+
+    /// Whether the output is held still (or there's nothing to hold).
+    pub fn output_is_idle(&self) -> bool {
+        self.output_idle.load(Ordering::SeqCst)
     }
 
     pub fn is_playing(&self) -> bool {
@@ -1535,6 +1557,29 @@ fn open_track(
     open_from(env, track, src, Origin::Stream, prio)
 }
 
+/// Longest a decode thread sleeps between checks while it has nothing to
+/// do (buffer full, or the file fully decoded). Seeks, cancels and the
+/// output taking samples all wake it at once; this only bounds a missed
+/// wake, so a paused player isn't woken 20 times a second per track.
+pub(crate) const DECODER_IDLE_WAIT: Duration = Duration::from_secs(1);
+
+/// A fully decoded segment waits here for a seek (returns its generation
+/// and position) or a cancel (returns None). The flags are read under the
+/// mix lock, which is where they are set, so a wake can't slip between
+/// the check and the wait.
+fn idle_until_seek(core: &Core, ctl: &LoaderCtl) -> Option<(u64, u64)> {
+    let mut m = core.mix.lock();
+    loop {
+        if ctl.cancel.load(Ordering::SeqCst) {
+            return None;
+        }
+        if let Some(seek) = ctl.seek.lock().take() {
+            return Some(seek);
+        }
+        core.cv.wait_for(&mut m, DECODER_IDLE_WAIT);
+    }
+}
+
 /// Push result for a decoded block.
 enum Push {
     Ok,
@@ -1561,7 +1606,7 @@ fn push_samples(core: &Core, key: u64, generation: u64, ctl: &LoaderCtl, data: &
             seg.samples.extend(data.iter().copied());
             return Push::Ok;
         }
-        core.cv.wait_for(&mut m, Duration::from_millis(50));
+        core.cv.wait_for(&mut m, DECODER_IDLE_WAIT);
     }
 }
 
@@ -1830,18 +1875,12 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     }
                 }
                 // Idle until a seek or cancel.
-                loop {
-                    if ctl.cancel.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    if let Some((g, ms)) = ctl.seek.lock().take() {
-                        generation = g;
-                        seek_to = Some(ms);
-                        continue 'decode;
-                    }
-                    let mut m = core.mix.lock();
-                    core.cv.wait_for(&mut m, Duration::from_millis(50));
+                if let Some((g, ms)) = idle_until_seek(&core, &ctl) {
+                    generation = g;
+                    seek_to = Some(ms);
+                    continue 'decode;
                 }
+                return;
             }
             Err(e) => {
                 if !pushed_any && !transcoded && !matches!(e, DecodeError::Io(_)) {
@@ -1876,18 +1915,12 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 // Mid-track failure: play what we have, then move on.
                 tracing::warn!("track {} ended early: {e}", track.id);
                 mark_done(&env, key, generation);
-                loop {
-                    if ctl.cancel.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    if let Some((g, ms)) = ctl.seek.lock().take() {
-                        generation = g;
-                        seek_to = Some(ms);
-                        continue 'decode;
-                    }
-                    let mut m = core.mix.lock();
-                    core.cv.wait_for(&mut m, Duration::from_millis(50));
+                if let Some((g, ms)) = idle_until_seek(&core, &ctl) {
+                    generation = g;
+                    seek_to = Some(ms);
+                    continue 'decode;
                 }
+                return;
             }
         }
     }

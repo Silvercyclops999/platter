@@ -167,6 +167,8 @@ pub struct Tracker {
     plex: Arc<dyn PlayReporter>,
     db: DbHandle,
     settings: TrackingSettings,
+    /// Wakes the retry loop when a scrobble is queued for later.
+    queued: tokio::sync::Notify,
 }
 
 impl Tracker {
@@ -175,7 +177,7 @@ impl Tracker {
     }
 
     pub fn with_reporter(plex: Arc<dyn PlayReporter>, db: DbHandle, settings: TrackingSettings) -> Self {
-        Self { plex, db, settings }
+        Self { plex, db, settings, queued: tokio::sync::Notify::new() }
     }
 
     fn reporting(&self) -> bool {
@@ -225,17 +227,29 @@ impl Tracker {
                 Ok(())
             })
             .await;
+        if !sent {
+            self.queued.notify_one();
+        }
     }
 
     /// Send queued scrobbles, oldest first. Stops at the first failure.
-    pub async fn replay_pending(&self) {
-        if !self.reporting() || !self.plex.online().await {
-            return;
+    /// Returns whether any are still waiting (so the retry loop keeps going).
+    pub async fn replay_pending(&self) -> bool {
+        const BATCH: u32 = 200;
+        if !self.reporting() {
+            return false;
         }
-        let pending = match self.db.read_async(|c| listens::pending_reports(c, 200)).await {
+        let pending = match self.db.read_async(|c| listens::pending_reports(c, BATCH)).await {
             Ok(p) => p,
-            Err(_) => return,
+            Err(_) => return true,
         };
+        if pending.is_empty() {
+            return false;
+        }
+        if !self.plex.online().await {
+            return true;
+        }
+        let total = pending.len();
         let mut sent = Vec::new();
         for r in pending {
             let ok = match r.kind {
@@ -247,12 +261,14 @@ impl Tracker {
             }
             sent.push(r.id);
         }
+        let all = sent.len() == total && total < BATCH as usize;
         if !sent.is_empty() {
             let _ = self
                 .db
                 .write_async(move |c| listens::mark_sent(c, &sent, now_s()))
                 .await;
         }
+        !all
     }
 
     pub async fn run(self: Arc<Self>, mut events: broadcast::Receiver<TrackingEvent>) {
@@ -332,9 +348,14 @@ pub fn spawn(tracker: Tracker, events: broadcast::Receiver<TrackingEvent>) {
     tauri::async_runtime::spawn(tracker.clone().run(events));
     tauri::async_runtime::spawn(async move {
         let mut backfilling = true;
+        let mut waiting = true;
         loop {
+            // Backfill done and nothing queued: sleep until a scrobble fails.
+            if !waiting && !backfilling {
+                tracker.queued.notified().await;
+            }
             tokio::time::sleep(Duration::from_secs(30)).await;
-            tracker.replay_pending().await;
+            waiting = tracker.replay_pending().await;
             if backfilling {
                 backfilling = tracker.backfill_step().await;
             }
@@ -550,6 +571,35 @@ mod tests {
             .unwrap();
         assert_eq!(snap, ("t".into(), "R".into(), "A".into(), "R".into()));
         assert!(!r.tracker.backfill_step().await, "nothing left to fill");
+    }
+
+    #[tokio::test]
+    async fn replay_says_when_the_retry_loop_can_stop() {
+        let r = rig(false, true);
+        // Nothing queued: the loop can park.
+        assert!(!r.tracker.replay_pending().await);
+        r.db
+            .write(|c| {
+                listens::enqueue_report(
+                    c,
+                    &NewReport {
+                        play_id: None,
+                        kind: ReportKind::Scrobble,
+                        rating_key: "7".into(),
+                        state: None,
+                        time_ms: None,
+                        duration_ms: None,
+                        at: 1,
+                    },
+                )
+            })
+            .unwrap();
+        // Sent: nothing left, so it stops again.
+        assert!(!r.tracker.replay_pending().await);
+        assert_eq!(r.rec.scrobbles.lock().clone(), vec!["7".to_string()]);
+        // Reporting off: nothing to retry.
+        let off = rig(false, false);
+        assert!(!off.tracker.replay_pending().await);
     }
 
     #[tokio::test]

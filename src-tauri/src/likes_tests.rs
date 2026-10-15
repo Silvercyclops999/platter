@@ -321,3 +321,22 @@ async fn saved_in_lists_the_playlists_holding_a_song() {
     assert_eq!(r.likes.playlists_with("1".into()).await.unwrap(), s(&["p2", "p1"]));
     assert!(r.likes.playlists_with("3".into()).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn the_retry_loop_sleeps_until_a_like_is_queued() {
+    let r = rig();
+    let retry = Duration::from_millis(50);
+    let parked = |l: Likes| async move { tokio::time::timeout(Duration::from_millis(300), l.wait_for_work(retry)).await.is_err() };
+    // Nothing queued: no timer, the loop waits for work.
+    assert!(!r.likes.pending().await);
+    assert!(parked(r.likes.clone()).await, "woke with nothing queued");
+    // A queued like wakes it, and it retries on the timer while the write waits.
+    r.likes.set(s(&["1"]), true).await.unwrap();
+    assert!(r.likes.pending().await);
+    assert!(!parked(r.likes.clone()).await, "didn't retry a queued write");
+    r.likes.replay().await;
+    assert!(!r.likes.pending().await);
+    // One pass for the wake that was already in hand, then it parks again.
+    let _ = parked(r.likes.clone()).await;
+    assert!(parked(r.likes.clone()).await, "kept polling after the queue emptied");
+}

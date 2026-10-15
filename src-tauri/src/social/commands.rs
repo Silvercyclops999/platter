@@ -181,7 +181,8 @@ pub fn spawn_watch(social: Social, db: DbHandle) {
         // The first look sets the marks and the badge.
         social.library_changed();
         loop {
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            // Once a minute is plenty: syncs run minutes apart at most.
+            tokio::time::sleep(Duration::from_secs(60)).await;
             let at = db.read_async(crate::db::store::sync_state).await.ok().flatten().and_then(|s| s.last_sync_at);
             if at.is_some() && at != last {
                 if last.is_some() {

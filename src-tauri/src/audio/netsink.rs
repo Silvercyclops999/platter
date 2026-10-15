@@ -240,6 +240,14 @@ impl AudioOutput for RoutedOutput {
             None => self.local.opened(),
         }
     }
+
+    // A network receiver keeps its own clock from the stream, so only the
+    // local device is held still.
+    fn set_idle(&mut self, idle: bool) {
+        if self.net.is_none() {
+            self.local.set_idle(idle);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -105,6 +105,8 @@ struct Inner {
     /// Start a replay after each change (off in tests, which replay by hand).
     auto_replay: bool,
     replaying: tokio::sync::Mutex<()>,
+    /// Wakes the retry loop when a write is queued.
+    queued: tokio::sync::Notify,
 }
 
 fn transient(e: &AppError) -> bool {
@@ -117,7 +119,9 @@ impl Likes {
     }
 
     pub fn build(db: DbHandle, remote: Arc<dyn RatingRemote>, events: Arc<dyn LikeEvents>, auto_replay: bool) -> Self {
-        Self { inner: Arc::new(Inner { db, remote, events, auto_replay, replaying: Default::default() }) }
+        Self {
+            inner: Arc::new(Inner { db, remote, events, auto_replay, replaying: Default::default(), queued: Default::default() }),
+        }
     }
 
     fn db(&self) -> &DbHandle {
@@ -164,6 +168,7 @@ impl Likes {
             .await?;
         if !changed.is_empty() {
             self.inner.events.changed(&changed);
+            self.inner.queued.notify_one();
             if self.inner.auto_replay
                 && let Ok(rt) = tokio::runtime::Handle::try_current()
             {
@@ -272,14 +277,32 @@ impl Likes {
     }
 }
 
-/// Replay queued writes now and then (they also replay right after each change).
+/// Replay queued writes now and then (they also replay right after each
+/// change). With nothing queued the loop sleeps until a write is queued.
 pub fn spawn(likes: Likes) {
     tauri::async_runtime::spawn(async move {
         loop {
             likes.replay().await;
-            tokio::time::sleep(REPLAY_EVERY).await;
+            likes.wait_for_work(REPLAY_EVERY).await;
         }
     });
+}
+
+impl Likes {
+    /// Whether writes are still waiting to reach Plex.
+    pub async fn pending(&self) -> bool {
+        self.db().read_async(|c| Ok(!local::queued(c)?.is_empty())).await.unwrap_or(true)
+    }
+
+    /// The retry loop's wait: `retry` while writes wait, otherwise until one
+    /// is queued.
+    pub async fn wait_for_work(&self, retry: Duration) {
+        if self.pending().await {
+            tokio::time::sleep(retry).await;
+        } else {
+            self.inner.queued.notified().await;
+        }
+    }
 }
 
 // ---------------------------------------------------------------- commands

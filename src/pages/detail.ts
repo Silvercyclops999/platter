@@ -2,6 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { displaySize, font } from "../design/tokens";
 import { useUi } from "../stores/ui";
+import { setBounded } from "../lib/bounded";
 
 /** Header title sizes in px, step 1 (largest) to step 5. */
 export const TITLE_STEPS: readonly number[] = displaySize;
@@ -61,7 +62,7 @@ export function measureTitle(text: string): number {
   } else {
     perPx = Array.from(text).length * 0.6;
   }
-  widthCache.set(text, perPx);
+  setBounded(widthCache, text, perPx, 500);
   return perPx;
 }
 

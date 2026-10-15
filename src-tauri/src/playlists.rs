@@ -148,6 +148,8 @@ struct Inner {
     /// Start a replay after each edit (off in tests, which replay by hand).
     auto_replay: bool,
     replaying: tokio::sync::Mutex<()>,
+    /// Wakes the retry loop when an edit is queued.
+    queued: tokio::sync::Notify,
 }
 
 fn transient(e: &AppError) -> bool {
@@ -191,7 +193,9 @@ impl Playlists {
         events: Arc<dyn PlaylistEvents>,
         auto_replay: bool,
     ) -> Self {
-        Self { inner: Arc::new(Inner { db, remote, events, auto_replay, replaying: Default::default() }) }
+        Self {
+            inner: Arc::new(Inner { db, remote, events, auto_replay, replaying: Default::default(), queued: Default::default() }),
+        }
     }
 
     fn db(&self) -> &DbHandle {
@@ -201,6 +205,7 @@ impl Playlists {
     /// Tell the UI and start sending the edit.
     fn edited(&self) {
         self.inner.events.changed();
+        self.inner.queued.notify_one();
         if self.inner.auto_replay
             && let Ok(rt) = tokio::runtime::Handle::try_current()
         {
@@ -642,14 +647,32 @@ impl Playlists {
     }
 }
 
-/// Replay queued edits now and then (they also replay right after each edit).
+/// Replay queued edits now and then (they also replay right after each
+/// edit). With nothing queued the loop sleeps until an edit is queued.
 pub fn spawn(playlists: Playlists) {
     tauri::async_runtime::spawn(async move {
         loop {
             playlists.replay().await;
-            tokio::time::sleep(REPLAY_EVERY).await;
+            playlists.wait_for_work(REPLAY_EVERY).await;
         }
     });
+}
+
+impl Playlists {
+    /// Whether edits are still waiting to reach Plex.
+    pub async fn pending(&self) -> bool {
+        self.db().read_async(|c| Ok(!local::queued(c)?.is_empty())).await.unwrap_or(true)
+    }
+
+    /// The retry loop's wait: `retry` while edits wait, otherwise until one
+    /// is queued.
+    pub async fn wait_for_work(&self, retry: Duration) {
+        if self.pending().await {
+            tokio::time::sleep(retry).await;
+        } else {
+            self.inner.queued.notified().await;
+        }
+    }
 }
 
 // ---------------------------------------------------------------- commands

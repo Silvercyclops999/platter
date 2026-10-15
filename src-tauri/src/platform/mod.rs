@@ -19,6 +19,7 @@ pub mod session;
 #[cfg(target_os = "windows")]
 pub mod thumbbar;
 pub mod tray;
+pub mod visibility;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -404,6 +405,7 @@ pub fn apply_start_mode<R: Runtime>(app: &AppHandle<R>, mode: StartMode) {
         StartMode::Normal => {}
         StartMode::Hidden => {
             let _ = w.hide();
+            visibility::set_page_visible(&w, false);
         }
         StartMode::Minimised => {
             let _ = w.minimize();

@@ -158,6 +158,10 @@ pub trait AudioOutput: Send {
     fn opened(&self) -> Option<OutputDevice> {
         None
     }
+    /// Hold the open stream still while nothing plays (true) or start it
+    /// pulling again (false). The device stays open, so resuming is quick,
+    /// but a paused player no longer wakes on every device period.
+    fn set_idle(&mut self, _idle: bool) {}
 }
 
 // ---------------------------------------------------------------- capture
@@ -173,6 +177,8 @@ struct CaptureShared {
     selected: Mutex<Option<String>>,
     opened: Mutex<Option<OutputDevice>>,
     opens: AtomicUsize,
+    /// Held still by `set_idle`: pulls nothing.
+    idle: AtomicBool,
 }
 
 /// Test output: pulls as fast as audio is available and records only real
@@ -255,6 +261,10 @@ impl CaptureHandle {
     pub fn opens(&self) -> usize {
         self.0.opens.load(Ordering::SeqCst)
     }
+    /// Whether the stream is held still (see `AudioOutput::set_idle`).
+    pub fn is_idle(&self) -> bool {
+        self.0.idle.load(Ordering::SeqCst)
+    }
 }
 
 impl CaptureOutput {
@@ -293,6 +303,7 @@ impl AudioOutput for CaptureOutput {
             *self.shared.opened.lock() = pick_device(&devices, sel.as_deref());
         }
         self.shared.opens.fetch_add(1, Ordering::SeqCst);
+        self.shared.idle.store(false, Ordering::SeqCst);
         let shared = self.shared.clone();
         let fmt = self.format;
         let pace = self.pace;
@@ -309,6 +320,10 @@ impl AudioOutput for CaptureOutput {
                     if ends {
                         return;
                     }
+                }
+                if shared.idle.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
                 }
                 let filled = renderer.render(&mut buf);
                 if filled > 0 {
@@ -357,6 +372,10 @@ impl AudioOutput for CaptureOutput {
             None
         }
     }
+
+    fn set_idle(&mut self, idle: bool) {
+        self.shared.idle.store(idle, Ordering::SeqCst);
+    }
 }
 
 impl Drop for CaptureOutput {
@@ -382,12 +401,18 @@ pub fn null_output() -> CaptureOutput {
 /// everywhere).
 #[derive(Default)]
 pub struct CpalOutput {
-    stop_tx: Option<mpsc::Sender<()>>,
+    stop_tx: Option<mpsc::Sender<StreamCtl>>,
     thread: Option<JoinHandle<()>>,
     /// Name and sample format of the last opened device (diagnostics).
     pub last_device: Arc<Mutex<Option<(String, String)>>>,
     selected: Arc<Mutex<Option<String>>>,
     opened: Arc<Mutex<Option<OutputDevice>>>,
+}
+
+/// What the stream thread is told: close, or hold still / pull again.
+enum StreamCtl {
+    Stop,
+    Idle(bool),
 }
 
 impl CpalOutput {
@@ -566,7 +591,7 @@ impl AudioOutput for CpalOutput {
     ) -> AppResult<OutputFormat> {
         self.close();
         let (ready_tx, ready_rx) = mpsc::channel::<AppResult<OutputFormat>>();
-        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let (stop_tx, stop_rx) = mpsc::channel::<StreamCtl>();
         let last = self.last_device.clone();
         let selected = self.selected.clone();
         let opened = self.opened.clone();
@@ -635,8 +660,14 @@ impl AudioOutput for CpalOutput {
                     return;
                 }
                 let _ = ready_tx.send(Ok(fmt));
-                // Keep the stream alive until asked to stop.
-                let _ = stop_rx.recv();
+                // Keep the stream alive until asked to stop. While idle it is
+                // paused, so the device callback stops firing.
+                while let Ok(StreamCtl::Idle(idle)) = stop_rx.recv() {
+                    let r = if idle { stream.pause() } else { stream.play() };
+                    if let Err(e) = r {
+                        tracing::debug!("audio stream {}: {e}", if idle { "pause" } else { "resume" });
+                    }
+                }
                 drop(stream);
             })
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -661,7 +692,7 @@ impl AudioOutput for CpalOutput {
 
     fn close(&mut self) {
         if let Some(tx) = self.stop_tx.take() {
-            let _ = tx.send(());
+            let _ = tx.send(StreamCtl::Stop);
         }
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -690,6 +721,12 @@ impl AudioOutput for CpalOutput {
             self.opened.lock().clone()
         } else {
             None
+        }
+    }
+
+    fn set_idle(&mut self, idle: bool) {
+        if let Some(tx) = &self.stop_tx {
+            let _ = tx.send(StreamCtl::Idle(idle));
         }
     }
 }
