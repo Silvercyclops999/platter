@@ -36,6 +36,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: "selectAll", section: "basic", label: "Select all songs in a list", keys: ["Mod", "A"] },
   { id: "menu", section: "basic", label: "Open the menu for the focused item", keys: ["Shift", "F10"] },
   { id: "playFocused", section: "basic", label: "Play the focused song", keys: ["Enter"] },
+  { id: "queueFromSearch", section: "basic", label: "Add the highlighted song in search to the queue", keys: ["Shift", "Enter"] },
   { id: "close", section: "basic", label: "Close a menu, dialog or view", keys: ["Esc"] },
   // Playback
   { id: "playPause", section: "playback", label: "Play or pause", keys: ["Space"] },

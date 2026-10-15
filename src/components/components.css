@@ -759,6 +759,9 @@
 .track-row:hover .eq,
 .track-row:focus-visible .eq { visibility: hidden; }
 .track-row.is-active .track-row__index { color: var(--color-playing); }
+/* Play on the cover art: the number stays put on hover. */
+.track-row--art-play:hover .track-row__index,
+.track-row--art-play:focus-visible .track-row__index { visibility: visible; }
 .track-row__main { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .track-row__art { position: relative; flex: none; }
 .track-row__art-play {

@@ -278,6 +278,8 @@ export interface TrackRowProps {
   /** Added to the row's accessible name, after a comma. */
   labelNote?: string;
   compact?: boolean;
+  /** With `showArt`: play sits on the cover art instead of the number (search's songs table). */
+  artPlay?: boolean;
   /** Highlighted by keyboard navigation that lives elsewhere (search box arrows). */
   selected?: boolean;
   /** Liked Songs page: the like tick shows on hover only. */
@@ -327,6 +329,7 @@ export function TrackRow({
   subBadge,
   labelNote,
   compact,
+  artPlay = false,
   selected,
   likedQuiet,
   added,
@@ -354,6 +357,7 @@ export function TrackRow({
   // The hover button on the current track pauses / resumes instead of restarting.
   const playButton = () => (active ? player.toggle() : onPlay());
   const PlayIcon = active && playing ? Pause : Play;
+  const playOnArt = !!compact || (artPlay && showArt);
   const playLabel = `${active && playing ? "Pause" : "Play"} ${track.title} by ${artists}`;
   const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
   const versionsOn = useSettings((s) => s.settings?.showVersionCounts);
@@ -467,7 +471,7 @@ export function TrackRow({
       ref={(el) => {
         if (el) tracksIn.set(el, track);
       }}
-      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${entering ? "is-entering" : ""} ${dimmed ? "is-dimmed" : ""} ${added !== undefined ? "track-row--added" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
+      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${entering ? "is-entering" : ""} ${dimmed ? "is-dimmed" : ""} ${added !== undefined ? "track-row--added" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${playOnArt && !compact ? "track-row--art-play" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
       onClick={onClick}
       onMouseDown={dbl.onMouseDown}
       onDoubleClick={(e) => {
@@ -492,7 +496,7 @@ export function TrackRow({
     >
       {!compact && (
         <div className="track-row__num" role="gridcell">
-          {playing ? (
+          {playing && !playOnArt ? (
             <span className="eq" aria-hidden="true">
               <i />
               <i />
@@ -501,25 +505,27 @@ export function TrackRow({
           ) : (
             <span className="track-row__index tabular">{index}</span>
           )}
-          <button
-            type="button"
-            tabIndex={-1}
-            className="track-row__play"
-            aria-label={playLabel}
-            onClick={(e) => {
-              e.stopPropagation();
-              playButton();
-            }}
-          >
-            <PlayIcon size={14} fill="currentColor" aria-hidden="true" />
-          </button>
+          {!playOnArt && (
+            <button
+              type="button"
+              tabIndex={-1}
+              className="track-row__play"
+              aria-label={playLabel}
+              onClick={(e) => {
+                e.stopPropagation();
+                playButton();
+              }}
+            >
+              <PlayIcon size={14} fill="currentColor" aria-hidden="true" />
+            </button>
+          )}
         </div>
       )}
       <div className="track-row__main" role="gridcell">
         {(showArt || compact) && (
           <span className="track-row__art">
             <Art path={track.thumb} size={compact ? 48 : 40} />
-            {compact && (
+            {playOnArt && (
               <button
                 type="button"
                 tabIndex={-1}

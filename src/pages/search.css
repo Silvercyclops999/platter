@@ -31,6 +31,13 @@
   transition: background-color var(--motion-very-quick) var(--motion-easing);
 }
 .sr-top:hover { background: var(--color-state-pressed); }
+.sr-top__art .sr-row__play { border-radius: var(--radius-row); }
+.sr-top:hover .sr-row__play { opacity: 1; }
+.sr-top__actions { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; }
+.sr-top:hover .save-btn--row,
+.sr-top:focus-within .save-btn--row { visibility: visible; }
+.sr-top:hover .sr-row__more,
+.sr-top .sr-row__more:focus-visible { opacity: 1; color: var(--color-text-primary); }
 .sr-top__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .sr-top__title {
   max-width: 100%;
@@ -104,7 +111,8 @@
 .sr-row.is-current .sr-row__title { color: var(--color-playing); }
 .sr-row__by { font-size: var(--font-size-md); color: var(--color-text-secondary); }
 .sr-row__type { flex: none; width: 72px; font-size: var(--font-size-sm); text-align: right; color: var(--color-text-muted); }
-.sr-row__more {
+.sr-row__more,
+.sr-row__queue {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -116,10 +124,15 @@
   opacity: 0;
   transition: opacity var(--motion-very-quick) var(--motion-easing);
 }
-.sr-row__more:hover { color: var(--color-text-primary); }
+.sr-row__more:hover,
+.sr-row__queue:hover { color: var(--color-text-primary); }
 .sr-row:hover .sr-row__more { color: var(--color-text-primary); }
 .sr-row:hover .sr-row__more,
-.sr-row__more:focus-visible { opacity: 1; }
+.sr-row:hover .sr-row__queue,
+.sr-row__more:focus-visible,
+.sr-row__queue:focus-visible { opacity: 1; }
+.sr-row:hover .save-btn--row,
+.sr-row:focus-within .save-btn--row { visibility: visible; }
 
 /* Card grids. */
 .sr-grid {

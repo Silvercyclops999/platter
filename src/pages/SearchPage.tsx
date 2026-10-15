@@ -3,20 +3,19 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type R
 import { Art } from "../components/Art";
 import { CardSkeleton } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
-import { shareItem } from "../components/ShareMenu";
+import { SaveButton } from "../components/SaveButton";
 import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
-import { TrackList, TrackRow, TrackRowSkeleton, trackMenuItems } from "../components/TrackRow";
+import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { isOffline, OFFLINE_SEARCH } from "../lib/offline";
 import { modKey } from "../lib/platform";
 import type { SearchFilter, SearchHit, SearchResults } from "../lib/types";
-import type { MenuItem } from "../stores/ui";
 import { useApp } from "../stores/app";
 import { player, usePlayer } from "../stores/player";
-import { nav } from "../stores/router";
 import { MAX_QUERY } from "../shell/SearchBox";
-import { hitInfo, hitOf, mixedHits, openHit, playHit, rememberHit, type HitInfo } from "../shell/searchModel";
+import { QueueButton } from "../shell/SearchActions";
+import { hitInfo, hitMenuItems, hitOf, mixedHits, openHit, playHit, rememberHit, type HitInfo } from "../shell/searchModel";
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
 import { otherVersionsText } from "./era";
 import { SearchCatalogue } from "./SearchCatalogue";
@@ -36,24 +35,6 @@ export const FILTERS: { id: SearchFilter; label: string }[] = [
 ];
 
 // ---------------------------------------------------------------- rows
-
-function menuFor(h: SearchHit, playing: boolean, toggle: () => void): MenuItem[] {
-  const i = hitInfo(h)!;
-  const play: MenuItem = { label: playing ? "Pause" : "Play", onSelect: toggle };
-  if (h.kind === "track" && h.track) return trackMenuItems(h.track, { before: [play] });
-  if (h.kind === "album" && h.album) {
-    const a = h.album;
-    return [
-      play,
-      { label: "Add to queue", onSelect: () => void player.queueAlbum(a.id) },
-      { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: a.artistId }) },
-      shareItem("album", a.id, a.thumb),
-    ];
-  }
-  if (h.kind === "playlist") return [play, { label: "Add to queue", onSelect: () => void player.queuePlaylist(i.id) }, shareItem("playlist", i.id, i.thumb)];
-  if (h.kind === "artist") return [play, shareItem("artist", i.id, i.thumb)];
-  return [play];
-}
 
 /** Whether a result is what's playing (a song) or the playing context (the rest). */
 function usePlayingState(i: HitInfo): { current: boolean; playing: boolean } {
@@ -77,7 +58,7 @@ function useHitActions(h: SearchHit, songIds?: string[]) {
   };
   const menu = (e: MouseEvent<HTMLElement>, at?: HTMLElement) => {
     e.preventDefault();
-    openContextMenu(`Options for ${i.title}`, menuFor(h, playing, toggle), at ?? e);
+    openContextMenu(`Options for ${i.title}`, hitMenuItems(h, playing, toggle), at ?? e);
   };
   return { i, current, playing, toggle, open, menu };
 }
@@ -85,9 +66,19 @@ function useHitActions(h: SearchHit, songIds?: string[]) {
 /** The highlighted first result: taller, larger art, a big play button. */
 function TopResult({ hit, songIds }: { hit: SearchHit; songIds: string[] }) {
   const { i, playing, toggle, open, menu } = useHitActions(hit, songIds);
+  const more = useRef<HTMLButtonElement>(null);
+  const PlayIcon = playing ? Pause : Play;
+  const playLabel = `${playing ? "Pause" : "Play"} ${i.title}`;
   return (
     <section className="sr-top" aria-label="Top result" onContextMenu={(e) => menu(e)}>
-      <Art path={i.thumb} size={92} round={i.round} kind={i.kind === "artist" ? "artist" : "album"} />
+      <span className="sr-row__art sr-top__art">
+        <Art path={i.thumb} size={92} round={i.round} kind={i.kind === "artist" ? "artist" : "album"} />
+        {hit.track && (
+          <button type="button" tabIndex={-1} className="sr-row__play" aria-label={playLabel} onClick={toggle}>
+            <PlayIcon size={22} fill="currentColor" aria-hidden="true" />
+          </button>
+        )}
+      </span>
       <div className="sr-top__text">
         <button type="button" className="sr-top__title" onClick={open}>
           <span className="truncate">{i.title}</span>
@@ -97,8 +88,16 @@ function TopResult({ hit, songIds }: { hit: SearchHit; songIds: string[] }) {
           {i.byline && <> · {i.byline}</>}
         </div>
       </div>
-      <button type="button" className="sr-top__play" aria-label={`${playing ? "Pause" : "Play"} ${i.title}`} onClick={toggle}>
-        {playing ? <Pause size={22} fill="currentColor" aria-hidden="true" /> : <Play size={22} fill="currentColor" aria-hidden="true" />}
+      {hit.track && (
+        <span className="sr-top__actions">
+          <SaveButton track={hit.track} place="row" />
+          <button ref={more} type="button" className="sr-row__more" aria-label={`More options for ${i.title}`} onClick={(e) => menu(e, more.current ?? undefined)}>
+            <MoreHorizontal size={18} aria-hidden="true" />
+          </button>
+        </span>
+      )}
+      <button type="button" className="sr-top__play" aria-label={playLabel} onClick={toggle}>
+        <PlayIcon size={22} fill="currentColor" aria-hidden="true" />
       </button>
     </section>
   );
@@ -130,6 +129,12 @@ export function ResultRow({ hit, songIds }: { hit: SearchHit; songIds?: string[]
         </button>
         <span className="sr-row__by truncate">{i.byline || i.typeLabel}</span>
       </span>
+      {hit.track && (
+        <>
+          <QueueButton hit={hit} className="sr-row__queue" />
+          <SaveButton track={hit.track} place="row" />
+        </>
+      )}
       <span className="sr-type sr-row__type">{i.typeLabel}</span>
       <button ref={more} type="button" className="sr-row__more" aria-label={`More options for ${i.title}`} onClick={(e) => menu(e, more.current ?? undefined)}>
         <MoreHorizontal size={18} aria-hidden="true" />
@@ -374,6 +379,7 @@ export function SearchPage({ query }: { query: string }) {
                       track={t}
                       index={i + 1}
                       showArt
+                      artPlay
                       active={t.id === nowTrackId}
                       playing={t.id === nowTrackId && status === "playing"}
                       onPlay={() => {
@@ -390,6 +396,7 @@ export function SearchPage({ query }: { query: string }) {
                           track={o}
                           index={j + 1}
                           showArt
+                          artPlay
                           compact={false}
                           labelNote={`another version of ${t.title}`}
                           active={o.id === nowTrackId}

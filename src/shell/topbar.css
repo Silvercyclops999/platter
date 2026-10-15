@@ -354,6 +354,42 @@
 .searchbox__row.is-selected .searchbox__remove { opacity: 1; }
 /* The remove button stays findable without hover in the recents list. */
 .searchbox__remove { opacity: 0.6; }
+/* Song results: play on the cover, then add to queue, like and more options. */
+.searchbox__art { position: relative; flex: none; display: inline-flex; }
+.searchbox__art-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-row);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--color-text-primary);
+  opacity: 0;
+  transition: opacity var(--motion-very-quick) var(--motion-easing);
+}
+.searchbox__art-play svg { margin-left: 1px; }
+.searchbox__actions { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; }
+.searchbox__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--color-text-secondary);
+  opacity: 0;
+  transition: opacity var(--motion-very-quick) var(--motion-easing);
+}
+.searchbox__action:hover { color: var(--color-text-primary); }
+.searchbox__actions .save-btn { margin: 0 var(--space-1); }
+.searchbox__row:hover .searchbox__art-play,
+.searchbox__row.is-selected .searchbox__art-play,
+.searchbox__row:hover .searchbox__action,
+.searchbox__row.is-selected .searchbox__action { opacity: 1; }
+.searchbox__row:hover .save-btn--row,
+.searchbox__row.is-selected .save-btn--row { visibility: visible; }
 
 /* Offline: a small quiet button instead of a banner; its callout says why. */
 .topbar__offline-wrap { position: relative; display: inline-flex; flex: none; }

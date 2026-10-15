@@ -328,14 +328,16 @@ export function openContextMenu(
   label: string,
   items: MenuItem[],
   at: { clientX: number; clientY: number } | HTMLElement,
+  /** Where focus goes when the menu closes, when not the button or the focused element. */
+  returnTo?: HTMLElement | null,
 ) {
   const shown = items.filter((i) => !i.when || i.when());
   if (at instanceof HTMLElement) {
     const r = at.getBoundingClientRect();
     const anchor = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-    useUi.getState().openMenu({ label, items: shown, x: r.left, y: r.bottom, anchor, returnFocus: at });
+    useUi.getState().openMenu({ label, items: shown, x: r.left, y: r.bottom, anchor, returnFocus: returnTo ?? at });
   } else {
-    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const returnFocus = returnTo ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     useUi.getState().openMenu({ label, items: shown, x: at.clientX, y: at.clientY, returnFocus });
   }
 }

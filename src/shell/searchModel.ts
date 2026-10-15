@@ -3,12 +3,15 @@
  * playing it, remembering it as a recent search, and the typed-part split
  * for completions. Used by the top bar's dropdown and the results page.
  */
+import { shareItem } from "../components/ShareMenu";
+import { trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { trackArtistLine } from "../lib/format";
 import type { SearchHit, SearchKind, SearchResults } from "../lib/types";
 import { player } from "../stores/player";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
+import type { MenuItem } from "../stores/ui";
 
 export interface HitInfo {
   key: string;
@@ -80,6 +83,48 @@ export function openHit(h: SearchHit) {
   if (!i) return;
   if (i.kind === "track") return playHit(h);
   nav.go({ name: i.kind, id: i.id });
+}
+
+/** Add a song result to the end of the queue (the usual "Added to queue" toast follows). */
+export function queueHit(h: SearchHit) {
+  if (h.kind === "track" && h.track) return player.addToQueue([h.track]);
+}
+
+/**
+ * A result's menu: the app's own song menu for songs (with Play first), and
+ * play, queue, go and share for the rest.
+ */
+export function hitMenuItems(h: SearchHit, playing: boolean, toggle: () => void): MenuItem[] {
+  const i = hitInfo(h)!;
+  const play: MenuItem = { label: playing ? "Pause" : "Play", onSelect: toggle };
+  if (h.kind === "track" && h.track) return trackMenuItems(h.track, { before: [play] });
+  if (h.kind === "album" && h.album) {
+    const a = h.album;
+    return [
+      play,
+      { label: "Add to queue", onSelect: () => void player.queueAlbum(a.id) },
+      { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: a.artistId }) },
+      shareItem("album", a.id, a.thumb),
+    ];
+  }
+  if (h.kind === "playlist") return [play, { label: "Add to queue", onSelect: () => void player.queuePlaylist(i.id) }, shareItem("playlist", i.id, i.thumb)];
+  if (h.kind === "artist") return [play, shareItem("artist", i.id, i.thumb)];
+  return [play];
+}
+
+/**
+ * Completions without repeats: ones that match when case and spacing are
+ * ignored count once (the first is kept). Real differences, such as a
+ * "(feat. ...)" suffix, stay.
+ */
+export function uniqueCompletions(list: string[]): string[] {
+  const seen = new Set<string>();
+  return list.filter((c) => {
+    const k = c.trim().replace(/\s+/g, " ").toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 export const hitOf = {

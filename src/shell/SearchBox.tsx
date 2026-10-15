@@ -1,15 +1,30 @@
-import { Play, Search as SearchIcon, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { MoreHorizontal, Pause, Play, Search as SearchIcon, X } from "lucide-react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Art } from "../components/Art";
+import { openContextMenu } from "../components/ContextMenu";
+import { SaveButton } from "../components/SaveButton";
 import { SearchField } from "../components/SearchField";
 import { Tooltip } from "../components/Tooltip";
 import { backend } from "../lib/backend";
 import { modKey } from "../lib/platform";
 import type { SearchHit } from "../lib/types";
+import { player, usePlayer } from "../stores/player";
 import { nav, useCurrentEntry, useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
-import { dropdownHits, hitInfo, openHit, playHit, rememberHit, subtitleWithType, typedPrefixLength } from "./searchModel";
+import { QueueButton } from "./SearchActions";
+import {
+  dropdownHits,
+  hitInfo,
+  hitMenuItems,
+  openHit,
+  playHit,
+  queueHit,
+  rememberHit,
+  subtitleWithType,
+  typedPrefixLength,
+  uniqueCompletions,
+} from "./searchModel";
 
 /** Longest query sent to the core; anything past it is ignored. */
 export const MAX_QUERY = 200;
@@ -27,6 +42,15 @@ export function openResults(query: string) {
   else nav.go({ name: "search", query: q });
 }
 
+/** Popups that open from the dropdown (a row's menu, the like control's "saved in") and keep it open. */
+const POPUPS = ".context-menu, .saved-in";
+const inPopup = (t: EventTarget | null) => t instanceof Element && !!t.closest(POPUPS);
+
+/** Whether a song is the one playing (its play button pauses instead). */
+function useSongPlaying(id: string | undefined) {
+  return usePlayer((s) => !!id && s.state?.track?.id === id && s.state?.status === "playing");
+}
+
 function Completion({ text, typed }: { text: string; typed: string }) {
   const n = typedPrefixLength(text, typed);
   return (
@@ -34,6 +58,110 @@ function Completion({ text, typed }: { text: string; typed: string }) {
       <strong>{text.slice(0, n)}</strong>
       {text.slice(n)}
     </span>
+  );
+}
+
+/**
+ * One direct result in the dropdown. Songs get play on the cover, add to
+ * queue, like and more options; the rest a play button. Right-click opens
+ * the same menu as elsewhere in the app.
+ */
+function HitRow({
+  id,
+  hit,
+  recent,
+  selected,
+  className,
+  onActivate,
+  onMenu,
+  onRemove,
+}: {
+  id: string;
+  hit: SearchHit;
+  recent: boolean;
+  selected: boolean;
+  className: string;
+  onActivate: () => void;
+  onMenu: (at: { clientX: number; clientY: number } | HTMLElement) => void;
+  onRemove: () => void;
+}) {
+  const info = hitInfo(hit)!;
+  const song = hit.kind === "track" ? hit.track : undefined;
+  const playing = useSongPlaying(song?.id);
+  const more = useRef<HTMLButtonElement>(null);
+  const play = (e: MouseEvent) => {
+    e.stopPropagation();
+    rememberHit(hit);
+    if (song && usePlayer.getState().state?.track?.id === song.id) void player.toggle();
+    else void playHit(hit);
+  };
+  const playLabel = `${playing ? "Pause" : "Play"} ${info.title}`;
+  const PlayIcon = playing ? Pause : Play;
+  return (
+    <li
+      id={id}
+      role="option"
+      aria-selected={selected}
+      aria-label={`${info.title}, ${subtitleWithType(info)}`}
+      className={`${className} ${song ? "searchbox__row--song" : ""}`}
+      onClick={onActivate}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(e);
+      }}
+    >
+      {song ? (
+        <span className="searchbox__art">
+          <Art path={info.thumb} size={40} kind="album" />
+          <button type="button" tabIndex={-1} className="searchbox__art-play" aria-label={playLabel} onClick={play}>
+            <PlayIcon size={16} fill="currentColor" aria-hidden="true" />
+          </button>
+        </span>
+      ) : (
+        <Art path={info.thumb} size={40} round={info.round} kind={info.kind === "artist" ? "artist" : "album"} />
+      )}
+      <span className="searchbox__text">
+        <span className="searchbox__title truncate">{info.title}</span>
+        <span className="searchbox__sub truncate">{subtitleWithType(info)}</span>
+      </span>
+      {song ? (
+        <span className="searchbox__actions">
+          <QueueButton hit={hit} className="searchbox__action" />
+          <SaveButton track={song} place="row" />
+          <button
+            ref={more}
+            type="button"
+            tabIndex={-1}
+            className="searchbox__action"
+            aria-label={`More options for ${info.title}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMenu(more.current!);
+            }}
+          >
+            <MoreHorizontal size={18} aria-hidden="true" />
+          </button>
+        </span>
+      ) : (
+        <button type="button" tabIndex={-1} className="searchbox__play" aria-label={playLabel} onClick={play}>
+          <Play size={16} fill="currentColor" aria-hidden="true" />
+        </button>
+      )}
+      {recent && (
+        <button
+          type="button"
+          tabIndex={-1}
+          className="searchbox__remove"
+          aria-label={`Remove ${info.title} from recent searches`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          <X size={16} aria-hidden="true" />
+        </button>
+      )}
+    </li>
   );
 }
 
@@ -58,6 +186,9 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
+  // Set while a click outside closes a row's menu, which hands focus back to
+  // the box: that focus shouldn't reopen the dropdown.
+  const quietFocus = useRef(false);
   const listId = useId();
 
   // The box shows the results page's query when you arrive on one.
@@ -96,7 +227,7 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
     Promise.all([backend.searchCompletions(q, 4), backend.search({ query: q, filter: "all", limit: 4 })]).then(
       ([c, res]) => {
         if (mine !== seq.current) return;
-        setCompletions(c);
+        setCompletions(uniqueCompletions(c));
         setHits(dropdownHits(res));
       },
       () => {
@@ -144,6 +275,20 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
     backend.searchRecentRemove(i.kind, i.id).catch(() => loadRecents());
   };
 
+  // A row's menu opens over the dropdown and hands focus back to the box.
+  const openRowMenu = (hit: SearchHit, at: { clientX: number; clientY: number } | HTMLElement) => {
+    const i = hitInfo(hit);
+    if (!i) return;
+    const s = usePlayer.getState().state;
+    const current = i.kind === "track" && s?.track?.id === i.id;
+    const toggle = () => {
+      rememberHit(hit);
+      if (current) void player.toggle();
+      else void playHit(hit);
+    };
+    openContextMenu(`Options for ${i.title}`, hitMenuItems(hit, current && s?.status === "playing", toggle), at, input.current);
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -156,6 +301,18 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
       if (!rows.length) return;
       const last = rows.length - 1;
       setSel((s) => (e.key === "ArrowDown" ? Math.min(s + 1, last) : Math.max(s - 1, -1)));
+    } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+      // The highlighted result's menu.
+      const row = shown && sel >= 0 ? rows[sel] : undefined;
+      const el = document.getElementById(`${listId}-${sel}`);
+      if (row?.kind !== "hit" || !el) return;
+      e.preventDefault();
+      openRowMenu(row.hit, el);
+    } else if (e.key === "Enter" && e.shiftKey) {
+      // Shift+Enter adds the highlighted song to the queue; the dropdown stays.
+      e.preventDefault();
+      const row = shown && sel >= 0 ? rows[sel] : undefined;
+      if (row?.kind === "hit") void queueHit(row.hit);
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (shown && sel >= 0 && rows[sel]) activate(rows[sel]);
@@ -176,11 +333,17 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
     }
   };
 
-  // A click anywhere outside the box and its dropdown closes the dropdown.
+  // A click anywhere outside the box and its dropdown closes the dropdown
+  // (but not one in a menu opened from it).
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) close();
+      if (root.current?.contains(e.target as Node) || inPopup(e.target)) return;
+      if (useUi.getState().menu) {
+        quietFocus.current = true;
+        setTimeout(() => (quietFocus.current = false));
+      }
+      close();
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
@@ -219,7 +382,8 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
       className={`searchbox ${collapsed ? "searchbox--expanded" : ""} ${shown ? "is-open" : ""}`}
       ref={root}
       onBlur={(e) => {
-        if (root.current?.contains(e.relatedTarget as Node)) return;
+        // A row's menu takes focus while it's open; the dropdown stays behind it.
+        if (root.current?.contains(e.relatedTarget as Node) || inPopup(e.relatedTarget) || useUi.getState().menu) return;
         close();
         if (collapsed && !text) setExpanded(false);
       }}
@@ -243,6 +407,7 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
           "aria-autocomplete": "list",
           "aria-activedescendant": activeId,
           onFocus: () => {
+            if (quietFocus.current) return;
             setOpen(true);
             if (!q) loadRecents();
           },
@@ -262,7 +427,8 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
           ) : (
             <div className="searchbox__hint" aria-hidden="true">
               <kbd>↑</kbd>
-              <kbd>↓</kbd> to move · <kbd>Enter</kbd> to search
+              <kbd>↓</kbd> to move · <kbd>Enter</kbd> to search · <kbd>Shift</kbd>
+              <kbd>Enter</kbd> to add a song to the queue
             </div>
           )}
           <ul className="searchbox__list" role="listbox" id={listId} aria-label={q ? "Suggestions" : "Recent searches"}>
@@ -278,51 +444,22 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
                     <Completion text={row.text} typed={q} />
                   </li>
                 );
-              const info = hitInfo(row.hit);
-              if (!info) return null;
+              if (!hitInfo(row.hit)) return null;
               return (
-                <li
-                  key={`h:${info.key}`}
+                <HitRow
+                  key={`h:${hitInfo(row.hit)!.key}`}
                   id={id}
-                  role="option"
-                  aria-selected={sel === i}
-                  aria-label={`${info.title}, ${subtitleWithType(info)}`}
+                  hit={row.hit}
+                  recent={row.recent}
+                  selected={sel === i}
                   className={cls}
-                  onClick={() => activate(row)}
-                >
-                  <Art path={info.thumb} size={40} round={info.round} kind={info.kind === "artist" ? "artist" : "album"} />
-                  <span className="searchbox__text">
-                    <span className="searchbox__title truncate">{info.title}</span>
-                    <span className="searchbox__sub truncate">{subtitleWithType(info)}</span>
-                  </span>
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    className="searchbox__play"
-                    aria-label={`Play ${info.title}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      rememberHit(row.hit);
-                      void playHit(row.hit);
-                    }}
-                  >
-                    <Play size={16} fill="currentColor" aria-hidden="true" />
-                  </button>
-                  {row.recent && (
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      className="searchbox__remove"
-                      aria-label={`Remove ${info.title} from recent searches`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeRecent(row.hit);
-                      }}
-                    >
-                      <X size={16} aria-hidden="true" />
-                    </button>
-                  )}
-                </li>
+                  onActivate={() => activate(row)}
+                  onMenu={(at) => {
+                    setSel(i);
+                    openRowMenu(row.hit, at);
+                  }}
+                  onRemove={() => removeRecent(row.hit)}
+                />
               );
             })}
           </ul>
