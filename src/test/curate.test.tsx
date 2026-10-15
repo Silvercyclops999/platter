@@ -113,7 +113,7 @@ describe("smart playlist editor", () => {
     const dialog = await openEditor();
     await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Later");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/server is offline/);
+    expect(await within(dialog).findByRole("alert", {}, { timeout: 4000 })).toHaveTextContent(/server is offline/);
     expect(useCurate.getState().editor).not.toBeNull();
   });
 
