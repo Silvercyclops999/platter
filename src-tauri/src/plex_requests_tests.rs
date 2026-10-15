@@ -40,16 +40,18 @@ struct Wiring {
 }
 
 fn wire(plex: &PlexState) -> Wiring {
+    use crate::backend::routed::*;
     let prefs = Arc::new(crate::bridge::StreamPrefs::new(None, None));
+    let b = crate::backend::Backends::with_plex(crate::backend::plex::PlexServer::new(plex.clone(), prefs.clone(), None));
     Wiring {
-        library: Arc::new(crate::bridge::PlexLibrary::new(plex.clone())),
-        search: Arc::new(crate::bridge::PlexSearch(plex.clone())),
-        art: Arc::new(crate::bridge::PlexArt(plex.clone())),
-        likes: Arc::new(crate::likes::PlexRatings(plex.clone())),
-        plays: Arc::new(plex.clone()),
-        playlists: Arc::new(crate::playlists::PlexPlaylists(plex.clone())),
-        streams: Arc::new(crate::bridge::PlexStreams(plex.clone(), prefs.clone(), None)),
-        downloads: Arc::new(crate::downloads::commands::PlexSource(plex.clone())),
+        library: b.primary().unwrap().library(),
+        search: Arc::new(RoutedSearch(b.clone())),
+        art: Arc::new(RoutedArt(b.clone())),
+        likes: Arc::new(RoutedLikes(b.clone())),
+        plays: Arc::new(RoutedPlays(b.clone())),
+        playlists: Arc::new(RoutedPlaylists(b.clone())),
+        streams: Arc::new(RoutedStreams(b.clone())),
+        downloads: Arc::new(RoutedDownloads(b)),
         prefs,
     }
 }

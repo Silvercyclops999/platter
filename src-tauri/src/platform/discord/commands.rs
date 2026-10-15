@@ -15,19 +15,17 @@ use crate::audio::events::TrackingEvent;
 use crate::db::release;
 use crate::db::{ArtCache, DbHandle};
 use crate::error::AppResult;
-use crate::plex::PlexState;
 use crate::plex::keychain::KeyringStore;
 use crate::share::{ShareKind, ShareService};
 
 pub const EV_STATUS: &str = "discord://status";
 
-/// The album's release id from Plex's album detail (`Guid` `mbid://…`).
-pub struct PlexAlbumMbid(pub PlexState);
-
+/// The album's release id from its server's album detail.
 #[async_trait::async_trait]
-impl AlbumMbid for PlexAlbumMbid {
+impl AlbumMbid for crate::backend::routed::RoutedMbids {
     async fn release_mbid(&self, album_id: &str) -> AppResult<Option<String>> {
-        Ok(self.0.client_for(album_id).await?.metadata(album_id).await?.mbid())
+        use crate::artistinfo::service::MbidLookup;
+        self.album_mbid(album_id).await
     }
 }
 
@@ -105,7 +103,7 @@ impl<R: Runtime> StatusSink for AppHandle<R> {
 #[allow(clippy::too_many_arguments)]
 pub fn start<R: Runtime>(
     app: &AppHandle<R>,
-    plex: PlexState,
+    album_mbid: Arc<dyn AlbumMbid>,
     db: DbHandle,
     http: Arc<dyn InfoHttp>,
     art: ArtCache,
@@ -119,7 +117,7 @@ pub fn start<R: Runtime>(
         db.clone(),
         http.clone(),
         Arc::new(ReqwestUpload::new()?),
-        Arc::new(PlexAlbumMbid(plex)),
+        album_mbid,
         Arc::new(CachedCovers(art)),
         Arc::new(KeyringStore::new()),
     )

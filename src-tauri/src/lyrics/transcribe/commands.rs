@@ -21,7 +21,6 @@ use crate::lyrics::LyricsService;
 use crate::plex::PlexState;
 use crate::plex::types::ConnectionKind;
 use crate::tags::fetch::Reader;
-use crate::tags::scan::PartSource;
 
 pub const EV_STATUS: &str = "transcribe://status";
 pub const EV_DONE: &str = "transcribe://done";
@@ -47,7 +46,7 @@ impl<R: Runtime> TranscribeEvents for AppHandle<R> {
 pub struct AppSongs {
     pub player: PlayerHandle,
     pub audio_dir: PathBuf,
-    pub parts: crate::tags::commands::PlexParts,
+    pub parts: std::sync::Arc<dyn crate::tags::scan::PartSource>,
     pub reader: Reader,
 }
 

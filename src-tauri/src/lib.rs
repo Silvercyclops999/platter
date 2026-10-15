@@ -410,12 +410,21 @@ pub fn run() {
                     Err(e) => tracing::warn!("cache ids not rewritten yet: {e}"),
                 }
             }
-            db.set_source(Arc::new(bridge::PlexLibrary::new(plex.clone())));
+            // The music servers: the Plex account. Calls about an item go
+            // to the server its id names.
+            let stream_prefs: Arc<bridge::StreamPrefs> = Arc::default();
+            let backends = backend::Backends::with_plex(backend::plex::PlexServer::new(
+                plex.clone(),
+                stream_prefs.clone(),
+                Some(db.clone()),
+            ));
+            backends.set_event_sink(Arc::new(plex::state::TauriSink(app.handle().clone())));
+            db.set_source(backends.primary()?.library());
             db.set_events(Arc::new(monitor::library::SyncHealth {
                 inner: Arc::new(app.handle().clone()),
                 plex: plex.clone(),
             }));
-            db.set_remote_search(Arc::new(bridge::PlexSearch(plex.clone())));
+            db.set_remote_search(Arc::new(backend::routed::RoutedSearch(backends.clone())));
             let initial = settings::load(&db);
             // Artist info sources share one HTTP client with the art cache,
             // which also serves their images.
@@ -431,9 +440,9 @@ pub fn run() {
             let downloads = downloads::Downloads::new(downloads::Deps {
                 db: db.clone(),
                 dir: initial.download_dir(&data_dir.join("downloads")),
-                source: Arc::new(downloads::commands::PlexSource(plex.clone())),
+                source: Arc::new(backend::routed::RoutedDownloads(backends.clone())),
                 free_space: downloads::os_free_space(),
-                art: Some(Arc::new(bridge::PlexArt(plex.clone()))),
+                art: Some(Arc::new(backend::routed::RoutedArt(backends.clone()))),
             });
             downloads.set_events(Arc::new(app.handle().clone()));
             downloads.set_prefs(initial.download_prefs());
@@ -443,7 +452,7 @@ pub fn run() {
                 initial.art_cache_bytes(),
                 Arc::new(downloads::art::WithDownloads {
                     inner: Arc::new(artistinfo::art::RoutedArt {
-                        plex: Arc::new(bridge::PlexArt(plex.clone())),
+                        plex: Arc::new(backend::routed::RoutedArt(backends.clone())),
                         http: info_http.clone(),
                     }),
                     downloads: downloads.clone(),
@@ -452,6 +461,7 @@ pub fn run() {
             let live = settings::Live {
                 art: Some(art.clone()),
                 plex: Some(plex.clone()),
+                streams: stream_prefs.clone(),
                 ..Default::default()
             };
             *live.downloads.lock() = Some(downloads.clone());
@@ -481,7 +491,7 @@ pub fn run() {
                 Arc::new(plex::keychain::KeyringStore::new()),
                 live.artist_info.clone(),
             );
-            artist_info.set_mbid_lookup(Arc::new(artistinfo::service::PlexMbid(plex.clone())));
+            artist_info.set_mbid_lookup(Arc::new(backend::routed::RoutedMbids(backends.clone())));
             artist_info.set_events(Arc::new(app.handle().clone()));
             // Popular lists for the artists you play, ready before their pages open.
             tauri::async_runtime::spawn(artist_info.clone().watch_prefetch());
@@ -495,7 +505,7 @@ pub fn run() {
             let net_route = audio::netsink::NetRoute::default();
             let player = PlayerHandle::spawn(
                 tauri::async_runtime::handle().inner().clone(),
-                Arc::new(bridge::PlexStreams(plex.clone(), live.streams.clone(), Some(db.clone()))),
+                Arc::new(backend::routed::RoutedStreams(backends.clone())),
                 Arc::new(bridge::CacheLookup(
                     db.clone(),
                     Some(plex.clone()),
@@ -546,7 +556,7 @@ pub fn run() {
             // File tags (explicit, versions, editions), read behind playback.
             let tag_scanner = tags::scan::TagScanner::new(
                 db.clone(),
-                Arc::new(tags::commands::PlexParts(plex.clone())),
+                Arc::new(backend::routed::RoutedParts(backends.clone())),
                 tags::fetch::Reader::new(
                     audio::http::http_client(),
                     player.transfer_gate(),
@@ -571,7 +581,11 @@ pub fn run() {
             ));
             os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone());
             tracking::spawn(
-                tracking::Tracker::new(plex.clone(), db.clone(), live.tracking.clone()),
+                tracking::Tracker::with_reporter(
+                    Arc::new(backend::routed::RoutedPlays(backends.clone())),
+                    db.clone(),
+                    live.tracking.clone(),
+                ),
                 player.subscribe_tracking(),
             );
             // Scrobbling to Last.fm and ListenBrainz, and the AI provider.
@@ -640,7 +654,7 @@ pub fn run() {
 
             let playlists = playlists::Playlists::new(
                 db.clone(),
-                Arc::new(playlists::PlexPlaylists(plex.clone())),
+                Arc::new(backend::routed::RoutedPlaylists(backends.clone())),
                 Arc::new(playlists::AppEvents { plex: plex.clone(), db: db.clone() }),
             );
             playlists::spawn(playlists.clone());
@@ -648,7 +662,7 @@ pub fn run() {
 
             let likes = likes::Likes::new(
                 db.clone(),
-                Arc::new(likes::PlexRatings(plex.clone())),
+                Arc::new(backend::routed::RoutedLikes(backends.clone())),
                 Arc::new(likes::AppLikeEvents { app: app.handle().clone(), plex: plex.clone() }),
             );
             likes::spawn(likes.clone());
@@ -687,7 +701,7 @@ pub fn run() {
                 player: Arc::new(player.clone()),
                 relays: Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
                 events: Arc::new(plex::state::TauriSink(app.handle().clone())),
-                server: Arc::new(social::commands::PlexServerId(plex.clone())),
+                server: Arc::new(backend::routed::RoutedServerId(backends.clone())),
                 library: Arc::new(social::commands::DbListenLibrary(db.clone())),
                 name: {
                     let plex_name = listen_name.0.clone();
@@ -727,7 +741,7 @@ pub fn run() {
             let share = share::ShareService::new(
                 db.clone(),
                 share_http,
-                Arc::new(share::commands::PlexServerId(plex.clone())),
+                Arc::new(backend::routed::RoutedServerId(backends.clone())),
                 live.share_public_links.clone(),
             );
             share.set_events(Arc::new(app.handle().clone()));
@@ -736,7 +750,7 @@ pub fn run() {
             // Discord status follows the player on its own task.
             platform::discord::commands::start(
                 app.handle(),
-                plex.clone(),
+                Arc::new(backend::routed::RoutedMbids(backends.clone())),
                 db.clone(),
                 discord_http,
                 art.clone(),
@@ -796,7 +810,7 @@ pub fn run() {
                     songs: Arc::new(trc::AppSongs {
                         player: player.clone(),
                         audio_dir: audio_dir.clone(),
-                        parts: tags::commands::PlexParts(plex.clone()),
+                        parts: Arc::new(backend::routed::RoutedParts(backends.clone())),
                         reader: tags::fetch::Reader::new(
                             audio::http::http_client(),
                             player.transfer_gate(),
@@ -900,6 +914,7 @@ pub fn run() {
                 Arc::new(plexedit::AppEditHooks { db: db.clone(), art: art.clone() }),
             ));
             app.manage(plex);
+            app.manage(backends);
             app.manage(db);
             // The now-playing feed for widgets, on 127.0.0.1 while its setting is on.
             app.manage(feed::spawn(
