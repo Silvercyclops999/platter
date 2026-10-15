@@ -119,7 +119,7 @@ export class MockDownloads {
       const fraction = has && this.current ? this.current.received / this.current.total : 0;
       const total = it.tracks.length;
       const state =
-        done >= total ? "downloaded" : done + failed + missing >= total ? "error" : has || done > 0 ? "downloading" : "queued";
+        done >= total ? "downloaded" : done + failed + missing >= total ? "error" : has || (done > 0 && !this.paused) ? "downloading" : "queued";
       const own = it.tracks
         .filter((t) => this.files.get(t)?.state === "done" && ![...this.items.values()].some((o) => o !== it && o.tracks.includes(t)))
         .reduce((n, t) => n + (this.files.get(t)?.bytes ?? 0), 0);

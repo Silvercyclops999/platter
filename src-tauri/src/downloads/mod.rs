@@ -592,6 +592,7 @@ impl Downloads {
     pub fn status(&self) -> AppResult<DownloadStatus> {
         let current = self.inner.current.lock().clone();
         let prefs = self.prefs();
+        let paused = *self.inner.paused.lock();
         let cur_id = current.as_ref().map(|c| c.track_id.clone());
         let fraction = current
             .as_ref()
@@ -616,7 +617,7 @@ impl Downloads {
                     ItemState::Downloaded
                 } else if settled >= n.total {
                     ItemState::Error
-                } else if has_current || n.done > 0 {
+                } else if has_current || (n.done > 0 && paused.is_none()) {
                     ItemState::Downloading
                 } else {
                     ItemState::Queued
@@ -649,7 +650,7 @@ impl Downloads {
             limit_bytes: prefs.limit_bytes,
             free_bytes: (self.inner.free_space)(&dir),
             folder: dir.to_string_lossy().into_owned(),
-            paused: *self.inner.paused.lock(),
+            paused,
             queued,
             current,
         })
