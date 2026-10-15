@@ -1534,6 +1534,8 @@ the same events.
 | --- | --- | --- |
 | `stats_overview` | `{ range: { from, to }, limit? }` | `StatsOverview` |
 | `stats_span` | – | `{ first, last, months: string[], today }` |
+| `stats_moments` | `{ range }` | `StatsMoments` |
+| `stats_days` | `{ from, to }` ("YYYY-MM-DD", at most 400 days) | `{ key, plays, ms }[]` for each day with plays |
 | `stats_item` | `{ kind: "song"\|"artist"\|"album", id }` | `ItemStats` |
 | `stats_month_recap` | `{ month }` ("YYYY-MM") | `MonthRecap` |
 | `stats_play_ids` | `{ range, kind: "songs"\|"artists"\|"albums"\|"genres", limit? }` | track ids, most played first |
@@ -1551,6 +1553,17 @@ The chart is by day for ranges under 92 days and by month for longer ones.
 Weekdays start on Sunday. Top lists rank by plays, then minutes. A top song
 is `{ key, trackId, title, artist, album, plays, ms, unreleased, track }`;
 `track` is the library song when it's still there.
+
+A top genre also has `thumb`, the cover of the range's most played album
+with songs in it. `MonthRecap` has `topAlbums`, up to four, for its covers.
+
+`StatsMoments = { firstSong, replayed, discovery, comeback, newArtists }`.
+`firstSong` is the range's first play. `replayed` is the day one song was
+played most, at least 3 times. `discovery` is the artist first played in the
+range that you played most there, and `newArtists` how many artists were new
+(null for all time, where both are left out). `comeback` is the song played
+again after the longest break, at least 30 days. The songs' plays and
+minutes are that day's.
 
 `ItemStats = { kind, plays, ms, first: { at, song, trackId, from: { kind, id, title } | null } | null, lastAt, rank, series }`.
 `rank` is the place in your all-time top for that kind, `series` the plays

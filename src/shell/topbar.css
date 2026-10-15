@@ -170,6 +170,7 @@
 .appmenu__item:focus-visible { background: var(--color-state-hover); outline: none; }
 .appmenu__hint { font-family: inherit; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .appmenu__check { color: var(--color-accent); }
+.appmenu__glyph { flex: none; color: var(--color-accent); }
 /* The count next to Library doctor in the app menu. */
 .doctor-badge {
   display: inline-grid;

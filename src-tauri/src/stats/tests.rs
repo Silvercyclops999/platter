@@ -441,6 +441,72 @@ fn friends_summaries_are_kept_by_name() {
     assert_eq!(compare::friend_remove(&c, "Sam").unwrap().len(), 1);
 }
 
+#[test]
+fn moments_first_song_replays_discovery_and_comeback() {
+    let mut c = db();
+    library(&c);
+    // Before the range: Band, and "One" last heard in May.
+    play(&c, "t1", local_ms(&c, "2026-05-01 10:00:00"), 3 * MIN);
+    // In September: the first song is Two at 08:00, One comes back after
+    // 123 days and plays four times that day, Other is new.
+    play(&c, "t2", local_ms(&c, "2026-09-01 08:00:00"), 3 * MIN);
+    play(&c, "t3", local_ms(&c, "2026-09-01 09:00:00"), 3 * MIN);
+    for i in 0..4 {
+        play(&c, "t1", local_ms(&c, &format!("2026-09-02 1{i}:00:00")), 3 * MIN);
+    }
+    play(&c, "t3", local_ms(&c, "2026-09-05 10:00:00"), 3 * MIN);
+    refresh(&mut c).unwrap();
+
+    let m = moments(&c, range("2026-09-01", "2026-09-30")).unwrap();
+    let first = m.first_song.unwrap();
+    assert_eq!((first.song.track_id.as_deref(), first.day.as_str()), (Some("t2"), "2026-09-01"));
+    assert_eq!(first.at, Some(local_ms(&c, "2026-09-01 08:00:00")));
+    let rep = m.replayed.unwrap();
+    assert_eq!((rep.song.track_id.as_deref(), rep.day.as_str(), rep.song.plays), (Some("t1"), "2026-09-02", 4));
+    let disc = m.discovery.unwrap();
+    assert_eq!((disc.artist.name.as_str(), disc.artist.plays, disc.day.as_str()), ("Other", 2, "2026-09-01"));
+    assert_eq!(m.new_artists, Some(1), "Band was heard before the range");
+    let back = m.comeback.unwrap();
+    assert_eq!((back.song.song.track_id.as_deref(), back.song.day.as_str()), (Some("t1"), "2026-09-02"));
+    assert_eq!(back.gap_days, day("2026-09-02") - day("2026-05-01"));
+
+    // A range with nothing in it has no moments; all time has no new artists.
+    let none = moments(&c, range("2026-01-01", "2026-01-31")).unwrap();
+    assert!(none.first_song.is_none() && none.replayed.is_none() && none.discovery.is_none() && none.comeback.is_none());
+    assert_eq!(none.new_artists, Some(0));
+    let all = moments(&c, resolve(&c, &StatsRange::default()).unwrap()).unwrap();
+    assert_eq!(all.new_artists, None);
+    assert!(all.discovery.is_none());
+    assert_eq!(all.first_song.unwrap().day, "2026-05-01");
+    // Two plays of a song in a day isn't a replay moment; a short break isn't a comeback.
+    let short = moments(&c, range("2026-09-05", "2026-09-05")).unwrap();
+    assert!(short.replayed.is_none());
+    assert!(short.comeback.is_none(), "four days since Other's last play");
+}
+
+#[test]
+fn calendar_days_genre_covers_and_recap_covers() {
+    let mut c = db();
+    library(&c);
+    play(&c, "t1", local_ms(&c, "2026-09-01 10:00:00"), 3 * MIN);
+    play(&c, "t1", local_ms(&c, "2026-09-01 11:00:00"), 2 * MIN);
+    play(&c, "t3", local_ms(&c, "2026-09-03 10:00:00"), 4 * MIN);
+    refresh(&mut c).unwrap();
+    let ds = days(&c, day("2026-08-30"), day("2026-09-10")).unwrap();
+    assert_eq!(ds.iter().map(|p| (p.key.as_str(), p.plays, p.ms)).collect::<Vec<_>>(), [
+        ("2026-09-01", 2, (5 * MIN) as i64),
+        ("2026-09-03", 1, (4 * MIN) as i64)
+    ]);
+    let o = overview(&c, range("2026-09-01", "2026-09-30"), 10).unwrap();
+    let rock = o.top_genres.iter().find(|g| g.name == "Rock").unwrap();
+    assert_eq!(rock.thumb.as_deref(), Some("/al/al1"));
+    let jazz = o.top_genres.iter().find(|g| g.name == "Jazz").unwrap();
+    assert_eq!(jazz.thumb.as_deref(), Some("/al/al2"));
+    let r = month_recap(&c, "2026-09").unwrap();
+    assert_eq!(r.top_albums.iter().map(|a| a.title.as_str()).collect::<Vec<_>>(), ["First", "Second"]);
+    assert_eq!(r.top_album.unwrap().title, "First");
+}
+
 /// 100k plays over three years: the first count and every range query stay fast.
 #[test]
 fn fast_at_100k_plays() {
@@ -515,7 +581,17 @@ fn fast_at_100k_plays() {
         let took = fastest(|| assert!(overview(&c, d, 50).unwrap().totals.plays > 0));
         eprintln!("overview {r:?}: {took:?}");
         assert!(took.as_millis() < budget_ms, "{r:?} took {took:?}");
+        let t = Instant::now();
+        let m = moments(&c, d).unwrap();
+        let took = t.elapsed();
+        eprintln!("moments {r:?}: {took:?}");
+        assert!(m.first_song.is_some());
+        assert!(took.as_millis() < budget_ms, "moments {r:?} took {took:?}");
     }
+    let t = Instant::now();
+    let cal = days(&c, day("2025-10-12"), day("2026-10-17")).unwrap();
+    assert!(!cal.is_empty());
+    assert!(t.elapsed().as_millis() < budget_ms);
     let today = day("2026-10-15");
     let took = fastest(|| {
         let a = item(&c, ItemKind::Artist, "a0", today).unwrap();

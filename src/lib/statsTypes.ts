@@ -67,6 +67,8 @@ export interface TopGenre {
   name: string;
   plays: number;
   ms: number;
+  /** The cover of the range's most played album in the genre. */
+  thumb: string | null;
 }
 
 export interface StatsOverview {
@@ -134,9 +136,34 @@ export interface MonthRecap {
   topSongs: TopSong[];
   topArtists: TopArtist[];
   topAlbum: TopAlbum | null;
+  /** The month's most played albums (up to 4), for its covers. */
+  topAlbums: TopAlbum[];
   topGenre: string | null;
   daily: StatsPoint[];
   biggestDay: StatsPoint | null;
+}
+
+/** A song at a moment of a range; its plays and minutes are that day's. */
+export interface MomentSong {
+  song: TopSong;
+  /** "YYYY-MM-DD". */
+  day: string;
+  /** Unix ms of the play, when it's one play. */
+  at: number | null;
+}
+
+/** Small stories from a range. */
+export interface StatsMoments {
+  /** The range's first song. */
+  firstSong: MomentSong | null;
+  /** The day one song was played most (3 or more times). */
+  replayed: MomentSong | null;
+  /** The artist first played in the range that you played most. */
+  discovery: { artist: TopArtist; day: string } | null;
+  /** A song played again after a break of 30 days or more (the longest). */
+  comeback: { song: MomentSong; gapDays: number } | null;
+  /** Artists first played in the range; null for all time. */
+  newArtists: number | null;
 }
 
 export interface WeightedArtist {

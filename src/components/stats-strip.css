@@ -12,9 +12,20 @@
 .stats-strip__body {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-6);
 }
+/* The rank badge: the place in your all-time top, in the accent colour. */
+.stats-strip__rank {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-bold);
+}
+.stats-strip__rank.is-top { background: var(--color-accent); color: var(--color-text-on-accent); }
+.stats-strip__spark { flex: none; margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.stats-strip__spark-label { font-size: 11px; color: var(--color-text-secondary); }
 .stats-strip__nums {
   display: flex;
   flex-wrap: wrap;
@@ -48,7 +59,9 @@
   stroke-linejoin: round;
   stroke-linecap: round;
 }
-.sparkline__fill { fill: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+.sparkline__fill { fill: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.sparkline__base { stroke: color-mix(in srgb, var(--color-ink) 10%, transparent); stroke-width: 1; }
+.sparkline__dot { fill: var(--color-accent); stroke: var(--color-bg-raised); stroke-width: 1.5; }
 
 /* The Your stats dialog. */
 .stats-dialog { width: min(560px, calc(100vw - 48px)); }
@@ -63,5 +76,6 @@
   font-size: var(--font-size-sm);
 }
 .stats-dialog .stats-strip__body { flex-direction: column; align-items: stretch; }
+.stats-dialog .stats-strip__spark { margin-left: 0; align-items: stretch; }
 .stats-dialog__empty { color: var(--color-text-secondary); margin: 0; }
 .stats-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-6); }

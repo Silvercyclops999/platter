@@ -22,6 +22,7 @@ import { shortcutLabel } from "./shortcuts";
 import { SearchBox } from "./SearchBox";
 import { HomePinDialog, HomeUserItems, switchHomeUser, useHomeUsers } from "./HomeUsers";
 import type { HomeUser } from "../lib/types";
+import { StatsGlyph } from "../components/StatsGlyph";
 import "./topbar.css";
 
 /** Below this window width the search pill becomes a round button beside Home. */
@@ -251,6 +252,7 @@ export function AppMenu() {
           {statsPage && (
             <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "stats" }))}>
               <span>Stats</span>
+              <StatsGlyph size={18} className="appmenu__glyph" />
             </button>
           )}
           {doctorOn && (

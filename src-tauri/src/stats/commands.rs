@@ -4,7 +4,7 @@
 use tauri::State;
 
 use super::compare::{self, CompareResult, CompareSummary};
-use super::{ItemKind, ItemStats, MonthRecap, StatsOverview, StatsRange, StatsSpan, TopKind};
+use super::{ItemKind, ItemStats, Moments, MonthRecap, Point, StatsOverview, StatsRange, StatsSpan, TopKind};
 use crate::db::DbHandle;
 use crate::error::{AppError, AppResult};
 
@@ -22,6 +22,32 @@ pub async fn stats_overview(db: State<'_, DbHandle>, range: StatsRange, limit: O
     db.read_async(move |c| {
         let d = super::resolve(c, &range)?;
         super::overview(c, d, limit.unwrap_or(50))
+    })
+    .await
+}
+
+/// Small stories from a range (first song, most replayed day, biggest
+/// discovery, a song you came back to).
+#[tauri::command]
+pub async fn stats_moments(db: State<'_, DbHandle>, range: StatsRange) -> AppResult<Moments> {
+    fresh(&db).await?;
+    db.read_async(move |c| {
+        let d = super::resolve(c, &range)?;
+        super::moments(c, d)
+    })
+    .await
+}
+
+/// Each day with plays from `from` to `to` (the calendar).
+#[tauri::command]
+pub async fn stats_days(db: State<'_, DbHandle>, from: String, to: String) -> AppResult<Vec<Point>> {
+    fresh(&db).await?;
+    db.read_async(move |c| {
+        let (lo, hi) = (super::parse_day(&from)?, super::parse_day(&to)?);
+        if hi < lo || hi - lo > super::DAYS_MAX {
+            return Err(AppError::Invalid("That calendar range is too long.".into()));
+        }
+        super::days(c, lo, hi)
     })
     .await
 }

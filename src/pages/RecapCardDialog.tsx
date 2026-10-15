@@ -6,8 +6,9 @@ import { Copy, Download } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
-import { CARD_FAILED } from "../components/ShareCardDialog";
+import { CARD_FAILED, loadImage } from "../components/ShareCardDialog";
 import { backend } from "../lib/backend";
+import { headerColorsFromImageUrl } from "../lib/color";
 import { drawRecapCard, layoutRecapCard, recapContent } from "../lib/recapCard";
 import { canvasMeasure, CARD_SIZES, type CardFormat } from "../lib/shareCard";
 import { monthName } from "../lib/stats";
@@ -19,8 +20,21 @@ export function RecapCardDialog({ recap, onClose }: { recap: MonthRecap; onClose
   const [format, setFormat] = useState<CardFormat>("story");
   const [busy, setBusy] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const content = useMemo(() => recapContent(recap), [recap]);
+  const base = useMemo(() => recapContent(recap), [recap]);
+  const [covers, setCovers] = useState<(HTMLImageElement | null)[]>([]);
+  const [tint, setTint] = useState<string | null>(null);
+  const content = useMemo(() => (tint ? { ...base, color: tint } : base), [base, tint]);
   const name = monthName(recap.month);
+
+  // The month's covers, and the card's colour from the first of them.
+  useEffect(() => {
+    let live = true;
+    void Promise.all(base.covers.map((c) => loadImage(backend.artUrl(c, 320, 320)))).then((imgs) => live && setCovers(imgs));
+    if (base.covers[0]) void headerColorsFromImageUrl(backend.artUrl(base.covers[0], 64, 64)).then((c) => live && c && setTint(c.vivid));
+    return () => {
+      live = false;
+    };
+  }, [base]);
 
   useEffect(() => {
     const el = canvas.current;
@@ -35,8 +49,8 @@ export function RecapCardDialog({ recap, onClose }: { recap: MonthRecap; onClose
       ctx = null;
     }
     if (!ctx) return;
-    drawRecapCard(ctx, layoutRecapCard(format, content, canvasMeasure(ctx)), content);
-  }, [content, format]);
+    drawRecapCard(ctx, layoutRecapCard(format, content, canvasMeasure(ctx)), content, covers);
+  }, [content, format, covers]);
 
   const copy = async () => {
     const el = canvas.current;

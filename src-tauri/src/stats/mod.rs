@@ -40,6 +40,8 @@ const DAY_MS: i64 = 86_400_000;
 pub const DAILY_SERIES_MAX_DAYS: i64 = 92;
 /// The longest top list a query returns.
 pub const TOP_MAX: u32 = 100;
+/// The longest calendar one call returns.
+pub const DAYS_MAX: i64 = 400;
 /// Months in an item's plays-over-time line.
 pub const ITEM_SERIES_MONTHS: u32 = 12;
 
@@ -409,6 +411,8 @@ pub struct TopGenre {
     pub name: String,
     pub plays: i64,
     pub ms: i64,
+    /// The cover of the range's most played album with songs in the genre.
+    pub thumb: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -601,8 +605,40 @@ pub fn top_genres(c: &Connection, d: Days, limit: u32) -> AppResult<Vec<TopGenre
         "SELECT genre, sum(plays) AS p, sum(ms) AS m FROM stats_genre_day WHERE day BETWEEN ?1 AND ?2
          GROUP BY genre ORDER BY p DESC, m DESC, genre LIMIT ?3",
     )?;
-    let rows = st.query_map(params![d.lo, d.hi, limit], |r| Ok(TopGenre { name: r.get(0)?, plays: r.get(1)?, ms: r.get(2)? }))?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    let rows = st.query_map(params![d.lo, d.hi, limit], |r| Ok(TopGenre { name: r.get(0)?, plays: r.get(1)?, ms: r.get(2)?, thumb: None }))?;
+    let mut out = rows.collect::<Result<Vec<_>, _>>()?;
+    if !out.is_empty() {
+        let covers = genre_covers(c, d)?;
+        for g in &mut out {
+            g.thumb = covers.get(&g.name.to_lowercase()).cloned();
+        }
+    }
+    Ok(out)
+}
+
+/// Albums looked through for genre covers.
+const GENRE_COVER_ALBUMS: u32 = 200;
+
+/// The cover for each genre: the range's most played album (of its top
+/// [`GENRE_COVER_ALBUMS`]) with a song in that genre. Keyed by lower-case genre.
+fn genre_covers(c: &Connection, d: Days) -> AppResult<HashMap<String, String>> {
+    let mut st = c.prepare_cached(
+        "WITH top AS (SELECT album_key, sum(plays) AS p FROM stats_album_day WHERE day BETWEEN ?1 AND ?2
+                      GROUP BY album_key ORDER BY p DESC LIMIT ?3)
+         SELECT DISTINCT lower(trim(g.value)), a.thumb, top.p
+         FROM top JOIN stats_album s ON s.album_key = top.album_key
+         JOIN albums a ON a.id = s.album_id
+         JOIN tracks t ON t.album_id = a.id,
+         json_each(CASE WHEN json_valid(t.genres) THEN t.genres ELSE '[]' END) g
+         WHERE a.thumb IS NOT NULL AND g.type = 'text'
+         ORDER BY top.p DESC",
+    )?;
+    let mut out = HashMap::new();
+    for row in st.query_map(params![d.lo, d.hi, GENRE_COVER_ALBUMS], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (g, thumb) = row?;
+        out.entry(g).or_insert(thumb);
+    }
+    Ok(out)
 }
 
 pub fn top_songs(c: &Connection, d: Days, limit: u32) -> AppResult<Vec<TopSong>> {
@@ -922,6 +958,8 @@ pub struct MonthRecap {
     pub top_songs: Vec<TopSong>,
     pub top_artists: Vec<TopArtist>,
     pub top_album: Option<TopAlbum>,
+    /// The month's most played albums (up to [`RECAP_COVERS`]), for its covers.
+    pub top_albums: Vec<TopAlbum>,
     pub top_genre: Option<String>,
     /// Listening time per day of the month.
     pub daily: Vec<Point>,
@@ -930,6 +968,8 @@ pub struct MonthRecap {
 }
 
 pub const RECAP_TOP: u32 = 5;
+/// Covers on a recap card.
+pub const RECAP_COVERS: u32 = 4;
 
 pub fn month_recap(c: &Connection, month: &str) -> AppResult<MonthRecap> {
     let (lo, hi) = parse_month(month)?;
@@ -952,15 +992,147 @@ pub fn month_recap(c: &Connection, month: &str) -> AppResult<MonthRecap> {
     totals.albums = distinct(c, "stats_album_day", "album_key", "stats_album", d)?;
     let (_, daily_pts) = series(&days, d);
     let biggest_day = daily_pts.iter().filter(|p| p.ms > 0).max_by_key(|p| p.ms).cloned();
+    let top_albums = top_albums(c, d, RECAP_COVERS)?;
     Ok(MonthRecap {
         month: format!("{y:04}-{m:02}"),
         totals,
         prev_ms,
         top_songs: top_songs(c, d, RECAP_TOP)?,
         top_artists: top_artists(c, d, RECAP_TOP)?,
-        top_album: top_albums(c, d, 1)?.pop(),
+        top_album: top_albums.first().cloned(),
+        top_albums,
         top_genre: top_genres(c, d, 1)?.pop().map(|g| g.name),
         daily: daily_pts,
         biggest_day,
     })
+}
+
+// ---------------------------------------------------------------- days
+
+/// Plays and listening time for each day with plays from `lo` to `hi`
+/// (the calendar), oldest first.
+pub fn days(c: &Connection, lo: i64, hi: i64) -> AppResult<Vec<Point>> {
+    Ok(daily(c, Days { lo, hi, all: false })?.into_iter().map(|(day, plays, ms)| Point { key: format_day(day), plays, ms }).collect())
+}
+
+// ---------------------------------------------------------------- moments
+
+/// A song at a moment of the range.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MomentSong {
+    /// Its plays and minutes are the moment's own (that day).
+    pub song: TopSong,
+    /// "YYYY-MM-DD".
+    pub day: String,
+    /// Unix ms of the play, when it's one play.
+    pub at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Discovery {
+    /// Its plays and minutes are the range's.
+    pub artist: TopArtist,
+    /// The day you first played them.
+    pub day: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Comeback {
+    pub song: MomentSong,
+    /// Days since you'd played it before.
+    pub gap_days: i64,
+}
+
+/// Small stories from a range: the first song, the day one song was played
+/// most, the artist found in it that you played most, and a song you came
+/// back to after a long break.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Moments {
+    pub first_song: Option<MomentSong>,
+    pub replayed: Option<MomentSong>,
+    pub discovery: Option<Discovery>,
+    pub comeback: Option<Comeback>,
+    /// Artists first played in the range. None for all time.
+    pub new_artists: Option<i64>,
+}
+
+/// A one-song day replays at least this often to be a moment.
+pub const REPLAY_MIN: i64 = 3;
+/// A break this many days or longer counts as coming back.
+pub const COMEBACK_MIN_DAYS: i64 = 30;
+
+fn one_song(c: &Connection, key: String, plays: i64, ms: i64) -> AppResult<Option<TopSong>> {
+    Ok(songs_for(c, &[(key, plays, ms)])?.pop())
+}
+
+pub fn moments(c: &Connection, d: Days) -> AppResult<Moments> {
+    let first: Option<(i64, String, i64, i64, i64)> = c
+        .prepare_cached(
+            "SELECT day, song_key, plays, ms, first_at FROM stats_song_day
+             WHERE day = (SELECT min(day) FROM stats_hour WHERE day BETWEEN ?1 AND ?2)
+             ORDER BY first_at, song_key LIMIT 1",
+        )?
+        .query_row([d.lo, d.hi], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .optional()?;
+    let first_song = match first {
+        Some((day, key, plays, ms, at)) => one_song(c, key, plays, ms)?.map(|song| MomentSong { song, day: format_day(day), at: Some(at) }),
+        None => None,
+    };
+
+    let replay: Option<(i64, String, i64, i64)> = c
+        .prepare_cached(
+            "SELECT day, song_key, plays, ms FROM stats_song_day WHERE day BETWEEN ?1 AND ?2 AND plays >= ?3
+             ORDER BY plays DESC, ms DESC, day DESC LIMIT 1",
+        )?
+        .query_row(params![d.lo, d.hi, REPLAY_MIN], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .optional()?;
+    let replayed = match replay {
+        Some((day, key, plays, ms)) => one_song(c, key, plays, ms)?.map(|song| MomentSong { song, day: format_day(day), at: None }),
+        None => None,
+    };
+
+    // New artists: played in the range and never before it. All time has none.
+    let (discovery, new_artists) = if d.all {
+        (None, None)
+    } else {
+        let mut st = c.prepare_cached(
+            "SELECT n.artist_key, sum(n.plays) AS p, sum(n.ms) AS m, min(n.day) AS f FROM stats_artist_day n
+             WHERE n.day BETWEEN ?1 AND ?2
+               AND NOT EXISTS (SELECT 1 FROM stats_artist_day o WHERE o.artist_key = n.artist_key AND o.day < ?1)
+             GROUP BY n.artist_key ORDER BY p DESC, m DESC, n.artist_key",
+        )?;
+        let rows = st
+            .query_map([d.lo, d.hi], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let found = match rows.first() {
+            Some((k, p, m, f)) => artists_for(c, &[(k.clone(), *p, *m)])?.pop().map(|artist| Discovery { artist, day: format_day(*f) }),
+            None => None,
+        };
+        (found, Some(rows.len() as i64))
+    };
+
+    // Coming back: the longest break before a day in the range, for songs
+    // played in the range.
+    let back: Option<(String, i64, i64, i64, i64)> = c
+        .prepare_cached(
+            "WITH played AS (SELECT DISTINCT song_key FROM stats_song_day WHERE day BETWEEN ?1 AND ?2),
+             gaps AS (SELECT x.song_key, x.day, x.plays, x.ms,
+                             x.day - lag(x.day) OVER (PARTITION BY x.song_key ORDER BY x.day) AS gap
+                      FROM stats_song_day x WHERE x.song_key IN (SELECT song_key FROM played) AND x.day <= ?2)
+             SELECT song_key, day, plays, ms, gap FROM gaps WHERE day >= ?1 AND gap >= ?3
+             ORDER BY gap DESC, day DESC, song_key LIMIT 1",
+        )?
+        .query_row(params![d.lo, d.hi, COMEBACK_MIN_DAYS], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .optional()?;
+    let comeback = match back {
+        Some((key, day, plays, ms, gap)) => {
+            one_song(c, key, plays, ms)?.map(|song| Comeback { song: MomentSong { song, day: format_day(day), at: None }, gap_days: gap })
+        }
+        None => None,
+    };
+    Ok(Moments { first_song, replayed, discovery, comeback, new_artists })
 }

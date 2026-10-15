@@ -48,7 +48,7 @@ function playingAtMs(s: CardSubject): number | null {
   return positionMs;
 }
 
-function loadImage(url: string | undefined): Promise<HTMLImageElement | null> {
+export function loadImage(url: string | undefined): Promise<HTMLImageElement | null> {
   if (!url || typeof Image === "undefined") return Promise.resolve(null);
   return new Promise((resolve) => {
     const img = new Image();

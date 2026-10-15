@@ -13,6 +13,7 @@ import type {
   ItemStats,
   MonthRecap,
   StatsItemKind,
+  StatsMoments,
   StatsOverview,
   StatsPoint,
   StatsRange,
@@ -250,7 +251,7 @@ export class MockStats {
       topSongs: t.songs.slice(0, limit).map(([id, x]) => this.song(id, x)),
       topArtists: t.artists.slice(0, limit).map(([id, x]) => this.artist(id, x)),
       topAlbums: t.albums.slice(0, limit).map(([id, x]) => this.album(id, x)),
-      topGenres: t.genres.slice(0, Math.min(limit, 20)).map(([name, x]): TopGenre => ({ name, plays: x.plays, ms: x.ms })),
+      topGenres: t.genres.slice(0, Math.min(limit, 20)).map(([name, x]): TopGenre => ({ name, plays: x.plays, ms: x.ms, thumb: this.genreCover(name, t.albums) })),
     };
   }
 
@@ -315,9 +316,94 @@ export class MockStats {
       topSongs: o.topSongs,
       topArtists: o.topArtists,
       topAlbum: o.topAlbums[0] ?? null,
+      topAlbums: o.topAlbums.slice(0, 4),
       topGenre: o.topGenres[0]?.name ?? null,
       daily: o.series,
       biggestDay: biggest,
+    };
+  }
+
+  /** The cover of the most played album with a song in the genre. */
+  private genreCover(genre: string, albums: [string, Tally][]): string | null {
+    for (const [id] of albums.slice(0, 200)) {
+      const a = this.fx.albums.find((x) => x.id === id);
+      if (a?.thumb && this.fx.tracks.some((t) => t.albumId === id && this.genres(t).includes(genre))) return a.thumb;
+    }
+    return null;
+  }
+
+  days(from: string, to: string): StatsPoint[] {
+    const lo = dayNumOf(from);
+    const hi = dayNumOf(to);
+    if (hi < lo || hi - lo > 400) throw { kind: "invalid", message: "That calendar range is too long." };
+    const by = new Map<number, Tally>();
+    for (const p of this.plays()) {
+      const d = dayNum(p.at);
+      if (d >= lo && d <= hi) bump(by, d, p.ms);
+    }
+    return [...by.entries()].sort((a, b) => a[0] - b[0]).map(([d, t]) => ({ key: dayStr(d), plays: t.plays, ms: t.ms }));
+  }
+
+  /** The core's moments rules over the demo history. */
+  moments(r: StatsRange): StatsMoments {
+    const all = r.from == null && r.to == null;
+    const { lo, hi, plays } = this.inRange(r);
+    const every = this.plays();
+    const first = plays[0];
+    // Per song and day.
+    const songDay = new Map<string, Tally & { day: number; id: string }>();
+    for (const p of plays) {
+      const d = dayNum(p.at);
+      const k = `${p.trackId}|${d}`;
+      const t = songDay.get(k) ?? { plays: 0, ms: 0, day: d, id: p.trackId };
+      t.plays++;
+      t.ms += p.ms;
+      songDay.set(k, t);
+    }
+    const rep = [...songDay.values()].filter((x) => x.plays >= 3).sort((a, b) => b.plays - a.plays || b.ms - a.ms || b.day - a.day)[0];
+    let discovery: StatsMoments["discovery"] = null;
+    let newArtists: number | null = null;
+    if (!all) {
+      const before = new Set(every.filter((p) => dayNum(p.at) < lo).map((p) => this.track(p.trackId)?.artistId));
+      const fresh = new Map<string, Tally & { day: number }>();
+      for (const p of plays) {
+        const a = this.track(p.trackId)?.artistId;
+        if (!a || before.has(a)) continue;
+        const t = fresh.get(a) ?? { plays: 0, ms: 0, day: dayNum(p.at) };
+        t.plays++;
+        t.ms += p.ms;
+        fresh.set(a, t);
+      }
+      newArtists = fresh.size;
+      const top = [...fresh.entries()].sort((a, b) => b[1].plays - a[1].plays || b[1].ms - a[1].ms)[0];
+      if (top) discovery = { artist: this.artist(top[0], top[1]), day: dayStr(top[1].day) };
+    }
+    // Comebacks: the longest break before a day in the range.
+    const daysBySong = new Map<string, number[]>();
+    for (const p of every) {
+      const d = dayNum(p.at);
+      if (d > hi) continue;
+      const list = daysBySong.get(p.trackId) ?? [];
+      if (list[list.length - 1] !== d) list.push(d);
+      daysBySong.set(p.trackId, list);
+    }
+    let back: { id: string; day: number; gap: number } | null = null;
+    for (const [id, ds] of daysBySong) {
+      for (let i = 1; i < ds.length; i++) {
+        const gap = ds[i] - ds[i - 1];
+        if (ds[i] >= lo && gap >= 30 && (!back || gap > back.gap || (gap === back.gap && ds[i] > back.day))) back = { id, day: ds[i], gap };
+      }
+    }
+    const songOn = (id: string, d: number) => {
+      const t = songDay.get(`${id}|${d}`) ?? { plays: 1, ms: 0 };
+      return this.song(id, t);
+    };
+    return {
+      firstSong: first ? { song: songOn(first.trackId, dayNum(first.at)), day: dayStr(dayNum(first.at)), at: first.at } : null,
+      replayed: rep ? { song: songOn(rep.id, rep.day), day: dayStr(rep.day), at: null } : null,
+      discovery,
+      comeback: back ? { song: { song: songOn(back.id, back.day), day: dayStr(back.day), at: null }, gapDays: back.gap } : null,
+      newArtists,
     };
   }
 

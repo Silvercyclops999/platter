@@ -3117,6 +3117,12 @@ export class MockBackend implements Backend {
   statsSpan() {
     return this.delay(() => this.stats.span());
   }
+  statsMoments(range: StatsRange) {
+    return this.delay(() => this.stats.moments(range));
+  }
+  statsDays(from: string, to: string) {
+    return this.delay(() => this.stats.days(from, to));
+  }
   statsItem(kind: StatsItemKind, id: string) {
     return this.delay(() => this.stats.item(kind, id));
   }

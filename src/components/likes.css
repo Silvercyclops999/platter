@@ -61,6 +61,15 @@
   filter: drop-shadow(0 2px 6px rgba(35, 32, 29, 0.25));
 }
 .liked-cover--fluid .liked-cover__heart { width: 40%; height: 40%; }
+/* Stats: the same tile in the accent colour, with the Stats symbol. */
+.liked-cover--stats {
+  color: var(--color-text-on-accent);
+  background:
+    radial-gradient(120% 90% at 18% 8%, color-mix(in srgb, var(--color-accent-hover) 85%, transparent) 0%, transparent 60%),
+    linear-gradient(140deg, var(--color-accent) 0%, color-mix(in srgb, var(--color-accent) 82%, var(--color-text-on-accent)) 100%);
+}
+.liked-cover--stats .liked-cover__glyph { width: calc(var(--liked-heart) * 1.5); height: calc(var(--liked-heart) * 1.5); }
+.liked-cover--fluid.liked-cover--stats .liked-cover__glyph { width: 60%; height: 60%; }
 
 /* ---------------------------------------------------------------- saved-in menu */
 .saved-in {

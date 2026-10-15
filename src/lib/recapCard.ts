@@ -1,9 +1,9 @@
 /**
  * A month's recap as a share card: the month, minutes listened and the
- * change on the month before, top artists and songs, and the month's daily
- * listening as bars. Laid out as plain data (tests check it), then drawn
- * with the share card's text and mark drawing. Unreleased songs and albums
- * never go on a card.
+ * change on the month before, a block of the month's covers, top artists
+ * and songs, and the month's daily listening as bars. Laid out as plain
+ * data (tests check it), then drawn with the share card's text and mark
+ * drawing. Unreleased songs and albums never go on a card.
  */
 import { CARD_SIZES, drawMark, drawText, fontFor, roundRect, wrapText, type CardFormat, type CardLayout, type CardText, type Measure } from "./shareCard";
 import { change, minutes, monthName } from "./stats";
@@ -18,8 +18,10 @@ export interface RecapCardContent {
   songs: { title: string; artist: string }[];
   /** Listening time per day. */
   daily: number[];
-  /** The card's colour, picked from the month. */
+  /** The card's colour, picked from the month (the dialog swaps in the first cover's). */
   color: string;
+  /** Up to four covers of the month's top albums; unreleased ones never. */
+  covers: string[];
 }
 
 export interface RecapLayout {
@@ -27,6 +29,8 @@ export interface RecapLayout {
   height: number;
   texts: CardText[];
   bars: { x: number; y: number; w: number; h: number }[];
+  /** Where each cover goes: a 2 by 2 block at the top right. */
+  covers: { x: number; y: number; size: number; radius: number }[];
   mark: CardLayout["mark"];
 }
 
@@ -47,6 +51,10 @@ export function recapContent(r: MonthRecap): RecapCardContent {
     songs: r.topSongs.filter((s) => !s.unreleased).map((s) => ({ title: s.title, artist: s.artist })),
     daily: r.daily.map((d) => d.ms),
     color: MONTH_COLORS[(m - 1 + 12) % 12],
+    covers: r.topAlbums
+      .filter((a) => !a.unreleased && a.thumb)
+      .map((a) => a.thumb as string)
+      .slice(0, 4),
   };
 }
 
@@ -137,11 +145,18 @@ export function layoutRecapCard(format: CardFormat, c: RecapCardContent, measure
     list("Top artists", PAD, y, artists);
     list("Top songs", PAD + colW + 48, y, songs);
   }
-  return { width, height, texts, bars, mark: { x: PAD, y: markY, size: markSize } };
+  // The month's covers, 2 by 2, top right beside the month and minutes.
+  const cell = story ? 150 : 104;
+  const gap = story ? 14 : 10;
+  const block = cell * 2 + gap;
+  const covers = c.covers
+    .slice(0, 4)
+    .map((_, i) => ({ x: width - PAD - block + (i % 2) * (cell + gap), y: (story ? 96 : 64) + Math.floor(i / 2) * (cell + gap), size: cell, radius: story ? 14 : 10 }));
+  return { width, height, texts, bars, covers, mark: { x: PAD, y: markY, size: markSize } };
 }
 
-/** Draw a laid-out recap card. */
-export function drawRecapCard(ctx: CanvasRenderingContext2D, l: RecapLayout, c: RecapCardContent) {
+/** Draw a laid-out recap card. `covers` are the loaded images, in the content's order (null when one didn't load). */
+export function drawRecapCard(ctx: CanvasRenderingContext2D, l: RecapLayout, c: RecapCardContent, covers: (CanvasImageSource | null)[] = []) {
   ctx.fillStyle = c.color;
   ctx.fillRect(0, 0, l.width, l.height);
   const shade = ctx.createLinearGradient(0, 0, l.width, l.height);
@@ -155,6 +170,18 @@ export function drawRecapCard(ctx: CanvasRenderingContext2D, l: RecapLayout, c: 
     roundRect(ctx, b.x, b.y, b.w, b.h, Math.min(4, b.w / 2));
     ctx.fill();
   }
+  l.covers.forEach((b, i) => {
+    const img = covers[i];
+    ctx.save();
+    roundRect(ctx, b.x, b.y, b.size, b.size, b.radius);
+    ctx.fillStyle = "rgba(14,13,12,0.35)";
+    ctx.fill();
+    if (img) {
+      ctx.clip();
+      ctx.drawImage(img, b.x, b.y, b.size, b.size);
+    }
+    ctx.restore();
+  });
   ctx.font = fontFor(10, 400);
   for (const tx of l.texts) drawText(ctx, tx);
   drawMark(ctx, l.mark);

@@ -184,6 +184,8 @@ import type {
   StatsItemKind,
   StatsOverview,
   StatsRange,
+  StatsMoments,
+  StatsPoint,
   StatsSpan,
   StatsTopKind,
 } from "./statsTypes";
@@ -755,6 +757,10 @@ export interface Backend {
   statsOverview(range: StatsRange, limit?: number): Promise<StatsOverview>;
   /** The first and last day with plays and the months with plays. */
   statsSpan(): Promise<StatsSpan>;
+  /** First song, most replayed day, biggest discovery and a comeback for a range. */
+  statsMoments(range: StatsRange): Promise<StatsMoments>;
+  /** Each day with plays from `from` to `to` ("YYYY-MM-DD", at most 400 days), oldest first. */
+  statsDays(from: string, to: string): Promise<StatsPoint[]>;
   /** One song's, artist's or album's numbers (the stats strip). */
   statsItem(kind: StatsItemKind, id: string): Promise<ItemStats>;
   /** A month's recap ("YYYY-MM"). */
@@ -1107,6 +1113,8 @@ export function createTauriBackend(): Backend {
     lidarrPick: ({ artist, artistId, title, song, isrc }) => call("lidarr_pick", { artist, artistId: artistId ?? null, title, song, isrc: isrc ?? null }),
     statsOverview: (range, limit) => call("stats_overview", { range, limit: limit ?? null }),
     statsSpan: () => call("stats_span"),
+    statsMoments: (range) => call("stats_moments", { range }),
+    statsDays: (from, to) => call("stats_days", { from, to }),
     statsItem: (kind, id) => call("stats_item", { kind, id }),
     statsMonthRecap: (month) => call("stats_month_recap", { month }),
     statsPlayIds: (range, kind, limit) => call("stats_play_ids", { range, kind, limit: limit ?? null }),
