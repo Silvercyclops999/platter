@@ -541,7 +541,8 @@ async fn reads_wait_while_playback_is_downloading() {
 #[tokio::test]
 async fn reads_queue_behind_other_transfers_and_yield_to_playback() {
     let gate = TransferGate::new();
-    let server = serve(&[("/a.flac", flac(&[streaminfo()]))], false, Duration::from_millis(600)).await;
+    // Each answer takes 2 s: the window in which playback cuts the read.
+    let server = serve(&[("/a.flac", flac(&[streaminfo()]))], false, Duration::from_secs(2)).await;
     // Pre-cache holds the gate: the tag read waits.
     let pre = gate.acquire(&Priority::Precache.cell()).await;
     let r = reader(gate.clone(), None);
@@ -552,7 +553,11 @@ async fn reads_queue_behind_other_transfers_and_yield_to_playback() {
     assert!(!pre.is_preempted(), "a background read never preempts");
     drop(pre);
     // Now it's sending (slow server); playback wants the gate and gets it.
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while ranges(&server).await.is_empty() {
+        assert!(std::time::Instant::now() < deadline, "the read never went out");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     assert_eq!(gate.holder_priority(), Some(Priority::Background as u8));
     let cur = tokio::time::timeout(Duration::from_secs(2), gate.acquire(&Priority::Current.cell())).await.unwrap();
     assert_eq!(gate.holder_priority(), Some(Priority::Current as u8));
