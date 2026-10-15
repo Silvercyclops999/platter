@@ -1,16 +1,30 @@
-/** Settings bits for lyrics transcription: the status line, the model picker with download and delete, and the batch button. */
+/** Settings bits for lyrics transcription: the status line, the model picker with download and delete, processor use, and the batch button. */
 import { Button } from "../components/Button";
 import { Select } from "../components/Select";
-import type { Settings, TranscribeModel, TranscribeStatus } from "../lib/types";
+import type { Settings, TranscribeModel, TranscribeProcessor, TranscribeStatus } from "../lib/types";
 import { updateSettings } from "../stores/settings";
 import { modelSize, transcribe, useTranscribe } from "../stores/transcribe";
 
-const MODEL_LABEL: Record<TranscribeModel, string> = { small: "Small (faster)", medium: "Medium (better)" };
+const MODEL_LABEL: Record<TranscribeModel, string> = { small: "Small (faster)", medium: "Medium (slower, much harder on the processor)" };
+
+export const PROCESSOR_OPTIONS: { value: TranscribeProcessor; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "balanced", label: "Balanced" },
+  { value: "fast", label: "Fast" },
+];
 
 const PAUSED: Record<NonNullable<TranscribeStatus["paused"]>, string> = {
   battery: "Paused while on battery power.",
   offline: "Paused: the server can't be reached. Trying again soon.",
+  busy: "Paused while your computer is busy.",
 };
+
+/** "about 3 minutes per song" for a long run, once a song is done. */
+export function paceNote(secs: number | undefined): string | undefined {
+  if (secs === undefined) return undefined;
+  const min = Math.max(1, Math.round(secs / 60));
+  return `about ${min} ${min === 1 ? "minute" : "minutes"} per song`;
+}
 
 /** The line under the switch: why it can't run, the last failure, or the model's state. */
 export function transcribeNote(s: TranscribeStatus | null): string | undefined {
@@ -80,7 +94,8 @@ export function batchNote(s: TranscribeStatus | null): string | undefined {
   if (s.batch.total === 0) return undefined;
   const of = `${s.batch.done} of ${s.batch.total} songs`;
   if (s.paused) return `${of}. ${PAUSED[s.paused]}`;
-  return `Transcribing: ${of}.`;
+  const pace = paceNote(s.secsPerSong);
+  return pace ? `Transcribing: ${of}, ${pace}.` : `Transcribing: ${of}.`;
 }
 
 export function BatchNote() {

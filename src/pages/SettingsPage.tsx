@@ -54,7 +54,7 @@ import { hifiRows } from "./HifiSettings";
 import { coversNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
-import { BatchControl, BatchNote, ModelControl, TranscribeNote } from "./TranscribeSettings";
+import { BatchControl, BatchNote, ModelControl, PROCESSOR_OPTIONS, TranscribeNote } from "./TranscribeSettings";
 import { ChangeSyncFolder, KeyCopyButton, SyncNowControl, SyncSwitch, syncNote, useSyncFile } from "./SyncSettings";
 import {
   AiKeyControl,
@@ -2440,8 +2440,37 @@ export function SettingsPage() {
       section: "Appearance",
       group: "Lyrics transcription",
       title: "Transcription model",
-      description: "Small is faster. Medium is more accurate and takes about three times as long. The size is the download. This device only.",
+      description:
+        "Small is faster and right for most songs. Medium is a little more accurate, but much slower and works the processor much harder. The size is the download. This device only.",
       control: (ids) => <ModelControl s={s} ids={ids} />,
+    },
+    {
+      key: "transcribeProcessor",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Processor use",
+      description:
+        "How hard transcription and the lyrics check may work the processor. Light keeps it cool and quiet, Fast finishes sooner. It always runs at low priority, so other programs come first. This device only.",
+      control: (ids) =>
+        select(s, (x) => x.transcribeProcessor ?? "light", PROCESSOR_OPTIONS, ids, (v) => void updateSettings({ transcribeProcessor: v })),
+    },
+    {
+      key: "transcribePauseBusy",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Pause while the computer is busy",
+      description:
+        "Albums, the background batch and the lyrics check wait while other programs keep the processor busy or a game is fullscreen. A song you ask for still runs. This device only.",
+      control: (ids) => toggle(s, "transcribePauseBusy", ids),
+    },
+    {
+      key: "transcribeFasterAway",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Work faster while I'm away",
+      description:
+        "After 5 minutes without the keyboard or mouse, and while plugged in, background work uses a little more of the processor. It goes back as soon as you're back. This device only.",
+      control: (ids) => toggle(s, "transcribeFasterAway", ids),
     },
     {
       key: "transcribeUnreleased",
@@ -2449,7 +2478,7 @@ export function SettingsPage() {
       group: "Lyrics transcription",
       title: "Transcribe all unreleased songs without lyrics",
       description:
-        "Works through them in the background with fewer processor cores. It pauses on battery power and always gives way to playback. Away from home it reads songs while playback has nothing to download, and songs you just played come from this computer.",
+        "Works through them in the background with fewer processor cores, resting a few seconds between songs. It pauses on battery power and always gives way to playback. Away from home it reads songs while playback has nothing to download, and songs you just played come from this computer.",
       note: <BatchNote />,
       control: () => <BatchControl />,
     },

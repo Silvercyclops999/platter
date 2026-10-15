@@ -970,6 +970,12 @@ export interface Settings {
   transcribeLyrics: boolean;
   /** The speech model transcription uses (this device only). */
   transcribeModel: TranscribeModel;
+  /** How hard speech-model work may use the processor (this device only). */
+  transcribeProcessor: TranscribeProcessor;
+  /** Background speech work waits while the computer is busy (this device only). */
+  transcribePauseBusy: boolean;
+  /** Background speech work uses more threads while nobody is at the computer and it's plugged in (this device only). */
+  transcribeFasterAway: boolean;
   /** Show lyrics transcribed on this computer. */
   showAutoLyrics: boolean;
   /** Check lyrics against the song with the speech model, once it's installed. This device only. */
@@ -1339,6 +1345,9 @@ export const DEFAULT_SETTINGS: Settings = {
   dragAndDrop: true,
   transcribeLyrics: false,
   transcribeModel: "small",
+  transcribeProcessor: "light",
+  transcribePauseBusy: true,
+  transcribeFasterAway: true,
   showAutoLyrics: true,
   lyricsCheckAudio: true,
   lyricsFixTiming: true,
@@ -1612,6 +1621,9 @@ export interface MixPage {
 /** Speech models for lyrics transcription (docs/IPC.md "Lyrics transcription"). */
 export type TranscribeModel = "small" | "medium";
 
+/** "Processor use": threads for transcription and the lyrics check. */
+export type TranscribeProcessor = "light" | "balanced" | "fast";
+
 export interface TranscribeModelInfo {
   kind: TranscribeModel;
   sizeBytes: number;
@@ -1632,7 +1644,9 @@ export interface TranscribeStatus {
   current?: { trackId: string; stage: TranscribeStage; percent: number; background: boolean };
   queued: number;
   batch: { done: number; total: number };
-  paused?: "battery" | "offline";
+  /** About how long each song of a long run takes, breather included. */
+  secsPerSong?: number;
+  paused?: "battery" | "offline" | "busy";
   error?: { kind: "download" | "checksum" | "disk" | "transcribe"; message: string; trackId?: string };
 }
 

@@ -41,6 +41,10 @@ export class MockTranscribe {
   silent = new Set<string>();
   /** Songs transcribed with no words found. */
   empty = new Set<string>();
+  /** The computer is busy: background songs wait. */
+  busy = false;
+  /** Seconds per song the status reports for a long run. */
+  secsPerSong: number | undefined = undefined;
 
   private installed = new Set<TranscribeModel>();
   private download: { kind: TranscribeModel; done: number; cancelled: boolean } | null = null;
@@ -68,6 +72,8 @@ export class MockTranscribe {
     this.failNextSong = false;
     this.silent.clear();
     this.empty.clear();
+    this.busy = false;
+    this.secsPerSong = undefined;
   }
 
   status(): TranscribeStatus {
@@ -86,6 +92,8 @@ export class MockTranscribe {
       current: this.current ? { ...this.current } : undefined,
       queued: this.queue.length,
       batch: { ...this.batch },
+      secsPerSong: this.batch.total > 1 ? this.secsPerSong : undefined,
+      paused: this.busy && this.batch.total > 0 ? "busy" : undefined,
       error: this.error,
     };
   }

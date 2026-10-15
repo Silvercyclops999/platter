@@ -133,12 +133,52 @@ describe("Settings", () => {
     expect(SOURCE_NOTICES.some((n) => n.name.startsWith("Hugging Face"))).toBe(true);
   });
 
+  it("has processor use, the busy pause and away mode, all this device only", async () => {
+    expect(DEFAULT_SETTINGS.transcribeProcessor).toBe("light");
+    expect(DEFAULT_SETTINGS.transcribePauseBusy).toBe(true);
+    expect(DEFAULT_SETTINGS.transcribeFasterAway).toBe(true);
+    await turnOn();
+    render(<SettingsPage />);
+    const use = await within(await waitFor(() => settingRow("transcribeProcessor"))).findByRole("combobox", { name: "Processor use" });
+    expect(use).toHaveValue("light");
+    expect(within(use).getAllByRole("option").map((o) => o.textContent)).toEqual(["Light", "Balanced", "Fast"]);
+    await userEvent.selectOptions(use, "fast");
+    await waitFor(async () => expect((await mock.settingsGet()).transcribeProcessor).toBe("fast"));
+    const pause = within(settingRow("transcribePauseBusy")).getByRole("switch", { name: "Pause while the computer is busy" });
+    expect(pause).toBeChecked();
+    await userEvent.click(pause);
+    await waitFor(async () => expect((await mock.settingsGet()).transcribePauseBusy).toBe(false));
+    const away = within(settingRow("transcribeFasterAway")).getByRole("switch", { name: "Work faster while I'm away" });
+    expect(away).toBeChecked();
+    for (const key of ["transcribeProcessor", "transcribePauseBusy", "transcribeFasterAway"]) {
+      expect(settingRow(key)).toHaveTextContent("This device only.");
+    }
+    // The model picker says Medium is slower and harder on the processor; Small stays the default.
+    expect(DEFAULT_SETTINGS.transcribeModel).toBe("small");
+    expect(settingRow("transcribeModel")).toHaveTextContent(/Medium is .*much slower and works the processor much harder/);
+    expect(within(settingRow("transcribeModel")).getByRole("option", { name: /Medium \(slower, much harder on the processor\)/ })).toBeInTheDocument();
+    await mock.settingsSet({ transcribeProcessor: "light", transcribePauseBusy: true });
+  });
+
+  it("shows a busy pause and the pace of a long run", async () => {
+    await turnOn();
+    mock.transcribe.stepMs = 30;
+    mock.transcribe.busy = true;
+    render(<SettingsPage />);
+    await userEvent.click(await within(settingRow("transcribeUnreleased")).findByRole("button", { name: "Transcribe now" }));
+    await within(settingRow("transcribeUnreleased")).findByText(/\d+ of \d+ songs\. Paused while your computer is busy\./);
+    await userEvent.click(within(settingRow("transcribeUnreleased")).getByRole("button", { name: "Cancel" }));
+  });
+
   it("explains pauses and an unavailable computer in plain words", () => {
     const base = useTranscribe.getState().status!;
     expect(transcribeNote({ ...base, available: false, unavailableReason: undefined })).toMatch(/isn't available/);
     const on = { ...base, enabled: true };
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "battery" })).toBe("2 of 9 songs. Paused while on battery power.");
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "offline" })).toMatch(/can't be reached/);
+    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "busy" })).toBe("2 of 9 songs. Paused while your computer is busy.");
+    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 170 })).toBe("Transcribing: 2 of 9 songs, about 3 minutes per song.");
+    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 40 })).toBe("Transcribing: 2 of 9 songs, about 1 minute per song.");
     expect(modelSize(539_225_533)).toBe("514 MB");
     expect(modelSize(1_600_000_000)).toBe("1.5 GB");
   });
