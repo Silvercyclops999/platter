@@ -11,7 +11,7 @@
   position: fixed;
   inset: 0;
   /* Over the panels (700), under the bars while open (760), menus, tooltips and dialogs (800 and up). */
-  z-index: 750;
+  z-index: var(--z-full-window);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   padding: var(--fw-top-bar) 0 var(--fw-player-bar);
@@ -28,8 +28,8 @@
 .fw.is-idle { cursor: none; }
 
 /* The bars stay over the view, clear, and fade with its header. */
-html.fw-open .topbar { z-index: 760; background: transparent; }
-html.fw-open .player-bar { position: relative; z-index: 760; }
+html.fw-open .topbar { z-index: var(--z-full-window-bars); background: transparent; }
+html.fw-open .player-bar { position: relative; z-index: var(--z-full-window-bars); }
 html.fw-open .topbar > *,
 html.fw-open .player-bar { transition: opacity var(--motion-medium) var(--motion-easing); }
 html.fw-idle .topbar > *,

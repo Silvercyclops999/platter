@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import componentsCss from "../components/components.css?raw";
 import globalCss from "../design/global.css?raw";
 import { duration, installReducedMotion, prefersReducedMotion } from "../design/motion";
-import { SCROLLBAR_IDLE_MS, covered, installOverlayScrollbars, thumbBox } from "../design/scrollbars";
+import { SCROLLBAR_IDLE_MS, covered, installOverlayScrollbars, thumbBox, thumbZ } from "../design/scrollbars";
 import tokensCss from "../design/tokens.css?raw";
+import { layer } from "../design/tokens";
 import pagesCss from "../pages/pages.css?raw";
+import fullWindowCss from "../shell/full-window.css?raw";
 import shellCss from "../shell/shell.css?raw";
+import topbarCss from "../shell/topbar.css?raw";
 
 function fakeMatchMedia(initial: boolean) {
   let listener: ((e: MediaQueryListEvent) => void) | null = null;
@@ -179,6 +182,88 @@ describe("scroll thumbs under menus", () => {
       document.elementsFromPoint = orig;
       scroller.remove();
       menu.remove();
+    }
+  });
+});
+
+describe("scroll thumbs stack under every floating layer", () => {
+  /** The z-index a rule sets, with `var(--z-*)` read from tokens.css. */
+  function zOf(css: string, selector: string): number {
+    const at = css.indexOf(`${selector} {`);
+    expect(at, `${selector} not found`).toBeGreaterThanOrEqual(0);
+    const rule = css.slice(at, css.indexOf("}", at));
+    const m = rule.match(/z-index:\s*([^;]+);/);
+    expect(m, `${selector} sets no z-index`).not.toBeNull();
+    const v = m![1].trim();
+    const ref = v.match(/^var\((--[a-z-]+)\)$/);
+    if (!ref) return Number(v);
+    const def = tokensCss.match(new RegExp(`${ref[1]}:\\s*(\\d+);`));
+    expect(def, `${ref[1]} missing from tokens.css`).not.toBeNull();
+    return Number(def![1]);
+  }
+
+  it("menus, dialogs, toasts and tooltips are above the scrollbar layer", () => {
+    const thumb = zOf(globalCss, ".sb-thumb");
+    expect(thumb).toBe(layer.scrollbar);
+    const above: [string, string][] = [
+      [topbarCss, ".topbar"], // the app (profile) menu and search panel hang from it over the sidebar
+      [shellCss, ".status-popover"],
+      [fullWindowCss, ".fw"],
+      [componentsCss, ".dialog-backdrop"],
+      [pagesCss, ".cover-popup"],
+      [componentsCss, ".context-menu"], // Sort by / View as and every right-click menu
+      [componentsCss, ".toaster"],
+      [componentsCss, ".tooltip"],
+    ];
+    for (const [css, sel] of above) expect(zOf(css, sel), sel).toBeGreaterThan(thumb);
+    const order = Object.values(layer);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("the thumb holder makes no stacking context of its own", () => {
+    const at = globalCss.indexOf(".sb-layer {");
+    const rule = globalCss.slice(at, globalCss.indexOf("}", at));
+    expect(rule).not.toMatch(/z-index/);
+    expect(rule).not.toMatch(/position:\s*(fixed|absolute|relative|sticky)/);
+  });
+
+  it("a page scroller's thumb sits at the scrollbar layer, a dialog's just over its dialog", () => {
+    const sidebar = document.createElement("nav");
+    sidebar.style.position = "relative";
+    sidebar.style.zIndex = "2";
+    const dialog = document.createElement("div");
+    dialog.style.position = "fixed";
+    dialog.style.zIndex = String(layer.dialog);
+    const body = document.createElement("div");
+    body.style.position = "relative";
+    body.style.zIndex = "1";
+    dialog.appendChild(body);
+    document.body.append(sidebar, dialog);
+    try {
+      expect(thumbZ(sidebar)).toBe(layer.scrollbar);
+      expect(thumbZ(body)).toBe(layer.dialog + 1);
+      expect(thumbZ(body)).toBeLessThan(layer.menu);
+    } finally {
+      sidebar.remove();
+      dialog.remove();
+    }
+  });
+
+  it("a shown thumb carries its z-index", () => {
+    vi.useFakeTimers();
+    const stop = installOverlayScrollbars(window);
+    const el = document.createElement("div");
+    Object.defineProperties(el, { clientHeight: { value: 400 }, clientWidth: { value: 300 }, scrollHeight: { value: 1600 } });
+    document.body.appendChild(el);
+    try {
+      el.dispatchEvent(new Event("scroll"));
+      const thumb = document.querySelector<HTMLElement>(".sb-thumb")!;
+      expect(Number(thumb.style.zIndex)).toBe(layer.scrollbar);
+      expect(Number(thumb.style.zIndex)).toBeLessThan(layer.menu);
+    } finally {
+      stop();
+      el.remove();
+      vi.useRealTimers();
     }
   });
 });

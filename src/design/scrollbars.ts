@@ -1,14 +1,20 @@
 /**
  * Overlay scrollbars. Native scrollbars are hidden (global.css), so no
  * scroller gives up width to a gutter. In their place a thin thumb is drawn
- * over the scroller's right edge, in one fixed layer: it fades in while the
- * scroller is scrolled or the pointer moves over it, and hides again after
- * just under a second without either. The thumb can be dragged; the wheel,
- * keyboard and touch scroll the element itself as before.
+ * over the scroller's right edge: it fades in while the scroller is scrolled
+ * or the pointer moves over it, and hides again after just under a second
+ * without either. The thumb can be dragged; the wheel, keyboard and touch
+ * scroll the element itself as before.
+ *
+ * Thumbs stack at `--z-scrollbar`, under the top bar and every menu, dialog,
+ * toast and tooltip (`layer` in tokens.ts). A scroller inside one of those
+ * floating layers gets its thumb one step above that layer instead.
  *
  * Two passive document listeners serve every scroller. A shown scroller also
  * gets `.sb-on` (and keeps `.sb` once seen) for styles that want to follow.
  */
+
+import { layer } from "./tokens";
 
 /** Idle time before the thumb hides. */
 export const SCROLLBAR_IDLE_MS = 900;
@@ -25,6 +31,9 @@ const timers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
 const thumbs = new WeakMap<Element, HTMLElement>();
 const owners = new WeakMap<Element, Element>();
 const drags = new WeakSet<Element>();
+
+/** Fallback for `--z-scrollbar` when no stylesheet is loaded. */
+const Z_SCROLLBAR = layer.scrollbar;
 
 function layerFor(doc: Document): HTMLElement {
   let layer = doc.querySelector<HTMLElement>(":scope > body > .sb-layer");
@@ -72,8 +81,8 @@ function place(el: Element, thumb: HTMLElement): void {
 }
 
 /** Whether something else (a menu, dialog or popover) is over the spot the
- * thumb would take. The thumb layer sits above everything, so without this
- * a thumb shows through menus that open over its scroller. */
+ * thumb would take. The stacking order already keeps thumbs under menus;
+ * this also hides a thumb under a popover drawn inside its own scroller. */
 export function covered(el: Element, box: { top: number; left: number; height: number }): boolean {
   const doc = el.ownerDocument;
   if (typeof doc.elementsFromPoint !== "function") return false;
@@ -85,12 +94,33 @@ export function covered(el: Element, box: { top: number; left: number; height: n
   return false;
 }
 
+/**
+ * The z-index for `el`'s thumb: `--z-scrollbar`, or one above the outermost
+ * floating layer `el` sits in (a dialog, a menu, the full window view), so
+ * the thumb shows on that layer and stays under anything opened over it.
+ */
+export function thumbZ(el: Element): number {
+  const doc = el.ownerDocument;
+  const win = doc.defaultView;
+  if (!win) return Z_SCROLLBAR;
+  const base = parseInt(win.getComputedStyle(doc.documentElement).getPropertyValue("--z-scrollbar"), 10);
+  const z = Number.isFinite(base) ? base : Z_SCROLLBAR;
+  let outer: number | null = null;
+  for (let n: Element | null = el; n && n !== doc.documentElement; n = n.parentElement) {
+    const cs = win.getComputedStyle(n);
+    const own = parseInt(cs.zIndex, 10);
+    if (Number.isFinite(own) && cs.position !== "static") outer = own;
+  }
+  return outer !== null && outer >= z ? outer + 1 : z;
+}
+
 function thumbFor(el: Element): HTMLElement {
   let thumb = thumbs.get(el);
   if (thumb?.isConnected) return thumb;
   const doc = el.ownerDocument;
   thumb = doc.createElement("div");
   thumb.className = "sb-thumb";
+  thumb.style.zIndex = String(thumbZ(el));
   thumbs.set(el, thumb);
   owners.set(thumb, el);
   thumb.addEventListener("pointerdown", (e) => startDrag(el, thumb!, e));

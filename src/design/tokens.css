@@ -113,6 +113,18 @@
   /* Multiplier on every movement distance and scale; 0 under reduced motion. */
   --motion-move: 1;
 
+  /* Stacking order for what floats. Scroll thumbs stay under the top bar and
+     every menu, dialog, toast and tooltip. */
+  --z-scrollbar: 590;
+  --z-topbar: 600;
+  --z-popover: 700;
+  --z-full-window: 750;
+  --z-full-window-bars: 760;
+  --z-dialog: 800;
+  --z-menu: 900;
+  --z-toast: 950;
+  --z-tooltip: 1000;
+
   /* Header tint (album/artist pages set this from artwork) */
   --tint: #3a3128;
 

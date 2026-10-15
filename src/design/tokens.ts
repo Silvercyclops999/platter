@@ -138,6 +138,24 @@ export const motion = {
   easingInOut: "cubic-bezier(0.45, 0, 0.25, 1)",
 } as const;
 
+/**
+ * Stacking order for everything that floats. Scroll thumbs sit under the top
+ * bar (whose app and search menus hang over the sidebar) and so under every
+ * menu, dialog, toast and tooltip. A scroller inside one of those layers gets
+ * its thumb one step above that layer (src/design/scrollbars.ts).
+ */
+export const layer = {
+  scrollbar: 590,
+  topbar: 600,
+  popover: 700,
+  fullWindow: 750,
+  fullWindowBars: 760,
+  dialog: 800,
+  menu: 900,
+  toast: 950,
+  tooltip: 1000,
+} as const;
+
 /** Map from token group/key to the CSS custom property that carries it. */
 export function cssVar(name: string): string {
   return `var(--${name})`;
@@ -154,6 +172,7 @@ export function cssVariableTable(): Record<string, string> {
   for (const [k, v] of Object.entries(space)) t[`space-${k}`] = `${v}px`;
   for (const [k, v] of Object.entries(radius)) t[`radius-${k}`] = `${v}px`;
   for (const [k, v] of Object.entries(motion)) t[`motion-${kebab(k)}`] = typeof v === "number" ? `${v}ms` : v;
+  for (const [k, v] of Object.entries(layer)) t[`z-${kebab(k)}`] = String(v);
   displaySize.forEach((v, i) => (t[`font-size-display-${i + 1}`] = `${v}px`));
   t["font-weight-display"] = String(displayWeight);
   return t;

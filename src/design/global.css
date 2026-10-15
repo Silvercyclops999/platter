@@ -85,14 +85,17 @@ img {
    the fade stays (fades are kept), and the thumb never slides. */
 * { scrollbar-width: none; }
 ::-webkit-scrollbar { width: 0; height: 0; }
+/* The layer is only a holder: it makes no stacking context, so each thumb
+   stacks on its own (z-index set per thumb, at --z-scrollbar or just over
+   the layer its scroller is in) and menus, dialogs, toasts and tooltips stay
+   above it. */
 .sb-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 990;
+  position: static;
   pointer-events: none;
 }
 .sb-thumb {
   position: fixed;
+  z-index: var(--z-scrollbar);
   width: 8px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-ink) 40%, transparent);

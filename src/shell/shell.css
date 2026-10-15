@@ -424,7 +424,7 @@
 .status-dot--pending { background: var(--color-text-muted); }
 .status-popover {
   position: fixed;
-  z-index: 700;
+  z-index: var(--z-popover);
   width: 280px;
   padding: var(--space-4);
   border-radius: var(--radius-card);

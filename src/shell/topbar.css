@@ -7,7 +7,7 @@
   --topbar-side: 150px;
   flex: none;
   position: relative;
-  z-index: 600;
+  z-index: var(--z-topbar);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
@@ -118,7 +118,7 @@
   position: absolute;
   top: calc(100% + var(--space-2));
   right: 0;
-  z-index: 700;
+  z-index: var(--z-popover);
   min-width: 240px;
   padding: var(--space-1);
   border-radius: var(--radius-row);
@@ -269,7 +269,7 @@
   top: calc(100% + var(--space-2));
   left: 0;
   right: 0;
-  z-index: 700;
+  z-index: var(--z-popover);
   max-height: min(560px, calc(100vh - 160px));
   overflow-y: auto;
   padding: var(--space-2) 0;
@@ -377,7 +377,7 @@
   position: absolute;
   top: calc(100% + 10px);
   right: -8px;
-  z-index: 700;
+  z-index: var(--z-popover);
   width: max-content;
   max-width: min(340px, calc(100vw - 32px));
   padding: var(--space-3) var(--space-4);
