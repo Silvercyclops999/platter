@@ -78,8 +78,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MAC_SIGNING: ${{ vars.MAC_SIGNING }}
         run: |
-          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]              && [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+          if [ "$MAC_SIGNING" = "off" ]; then
+            echo "Mac signing and notarization: off (MAC_SIGNING variable), building unsigned"
+          elif [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]              && [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
             {
               # Base64 may wrap over several lines; the delimiter form keeps it whole.
               echo "APPLE_CERTIFICATE<<APPLE_CERT_EOF"
@@ -93,6 +96,9 @@ jobs:
             } >> "$GITHUB_ENV"
             echo "Mac signing and notarization: on"
           else
+            true
+          fi
+          if [ "$MAC_SIGNING" != "off" ] && [ -z "$APPLE_CERTIFICATE" ]; then
             echo "Mac signing and notarization: off (Apple secrets not set), building unsigned"
           fi
       - uses: tauri-apps/tauri-action@v0
