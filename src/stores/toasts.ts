@@ -22,17 +22,32 @@ interface ToastState {
 }
 
 let seq = 1;
+/** Each toast's dismiss timer, so a repeat can restart it. */
+const timers = new Map<number, ReturnType<typeof setTimeout>>();
 
 export const useToasts = create<ToastState>()((set, get) => ({
   toasts: [],
   push: (t, ttlMs = 4000) => {
-    const id = seq++;
-    // Keep at most 3 on screen.
-    set({ toasts: [...get().toasts, { ...t, id }].slice(-3) });
-    if (ttlMs > 0) setTimeout(() => get().dismiss(id), ttlMs);
+    // The same text already showing is replaced in place, not stacked.
+    const same = get().toasts.find((x) => x.message === t.message);
+    const id = same ? same.id : seq++;
+    const old = timers.get(id);
+    if (old) clearTimeout(old);
+    timers.delete(id);
+    const next = same
+      ? get().toasts.map((x) => (x.id === id ? { ...t, id } : x))
+      : // Keep at most 3 on screen.
+        [...get().toasts, { ...t, id }].slice(-3);
+    set({ toasts: next });
+    if (ttlMs > 0) timers.set(id, setTimeout(() => get().dismiss(id), ttlMs));
     return id;
   },
-  dismiss: (id) => set({ toasts: get().toasts.filter((x) => x.id !== id) }),
+  dismiss: (id) => {
+    const timer = timers.get(id);
+    if (timer) clearTimeout(timer);
+    timers.delete(id);
+    set({ toasts: get().toasts.filter((x) => x.id !== id) });
+  },
 }));
 
 export const toast = {
