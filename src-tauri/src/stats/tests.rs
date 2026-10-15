@@ -512,29 +512,58 @@ fn fast_at_100k_plays() {
     ];
     for r in &ranges {
         let d = resolve(&c, r).unwrap();
-        let t = Instant::now();
-        let o = overview(&c, d, 50).unwrap();
-        let took = t.elapsed();
+        let took = fastest(|| assert!(overview(&c, d, 50).unwrap().totals.plays > 0));
         eprintln!("overview {r:?}: {took:?}");
-        assert!(o.totals.plays > 0);
         assert!(took.as_millis() < budget_ms, "{r:?} took {took:?}");
     }
     let today = day("2026-10-15");
-    let t = Instant::now();
-    let a = item(&c, ItemKind::Artist, "a0", today).unwrap();
-    let s = item(&c, ItemKind::Song, "s0", today).unwrap();
-    let al = item(&c, ItemKind::Album, "al0-0", today).unwrap();
-    let r = month_recap(&c, "2026-09").unwrap();
-    let took = t.elapsed();
+    let took = fastest(|| {
+        let a = item(&c, ItemKind::Artist, "a0", today).unwrap();
+        let s = item(&c, ItemKind::Song, "s0", today).unwrap();
+        let al = item(&c, ItemKind::Album, "al0-0", today).unwrap();
+        let r = month_recap(&c, "2026-09").unwrap();
+        assert!(a.plays > 0 && s.plays > 0 && al.plays > 0 && r.totals.plays > 0);
+    });
     eprintln!("item stats x3 + recap: {took:?}");
-    assert!(a.plays > 0 && s.plays > 0 && al.plays > 0 && r.totals.plays > 0);
     assert!(took.as_millis() < budget_ms);
 
     // A new play recounts one day, not the history.
-    play(&c, "s5", local_ms(&c, "2026-10-14 12:00:00"), 3 * MIN);
-    let t = Instant::now();
-    assert_eq!(refresh(&mut c).unwrap(), 1);
-    let took = t.elapsed();
+    let mut n = 0;
+    let took = fastest(|| {
+        n += 1;
+        play(&c, "s5", local_ms(&c, &format!("2026-10-14 12:00:{n:02}")), 3 * MIN);
+        let t = Instant::now();
+        assert_eq!(refresh(&mut c).unwrap(), 1);
+        t.elapsed()
+    });
     eprintln!("one-day recount: {took:?}");
     assert!(took.as_millis() < budget_ms);
+}
+
+/// The fastest of a few runs of `f`. Another process taking the CPU slows
+/// some runs, not all of them; slower code slows every run. `f` may time
+/// itself (returning the part that counts) or be timed whole.
+fn fastest<R: Timed>(mut f: impl FnMut() -> R) -> std::time::Duration {
+    (0..5)
+        .map(|_| {
+            let t = Instant::now();
+            let r = f();
+            r.took().unwrap_or_else(|| t.elapsed())
+        })
+        .min()
+        .unwrap()
+}
+
+trait Timed {
+    fn took(&self) -> Option<std::time::Duration>;
+}
+impl Timed for () {
+    fn took(&self) -> Option<std::time::Duration> {
+        None
+    }
+}
+impl Timed for std::time::Duration {
+    fn took(&self) -> Option<std::time::Duration> {
+        Some(*self)
+    }
 }

@@ -463,7 +463,8 @@ async fn http(addr: SocketAddr, raw: String) -> (u16, serde_json::Value) {
 }
 
 async fn wait_for(s: &DeckServer, want: impl Fn(&Listening) -> bool) -> DeckStatus {
-    for _ in 0..200 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
         let st = s.status();
         if want(&st.listening) {
             return st;

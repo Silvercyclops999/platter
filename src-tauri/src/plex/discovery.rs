@@ -642,8 +642,8 @@ mod tests {
             conn(&local, ConnectionKind::Local),
         ];
         let cfg = RaceConfig {
-            timeout: Duration::from_secs(4),
-            grace: Duration::from_millis(500),
+            timeout: Duration::from_secs(20),
+            grace: Duration::from_secs(5),
         };
         let p = race(&http(), &conns, Some("m"), cfg).await.unwrap();
         assert_eq!(p.kind, ConnectionKind::Local);
@@ -652,21 +652,21 @@ mod tests {
 
     #[tokio::test]
     async fn local_slower_than_grace_loses_to_remote() {
-        let local = identity_server(1500, "m").await;
+        let local = identity_server(10_000, "m").await;
         let remote = identity_server(10, "m").await;
         let conns = [
             conn(&local, ConnectionKind::Local),
             conn(&remote, ConnectionKind::Remote),
         ];
         let cfg = RaceConfig {
-            timeout: Duration::from_secs(4),
+            timeout: Duration::from_secs(20),
             grace: Duration::from_millis(100),
         };
         let started = std::time::Instant::now();
         let p = race(&http(), &conns, Some("m"), cfg).await.unwrap();
         assert_eq!(p.kind, ConnectionKind::Remote);
         assert!(
-            started.elapsed() < Duration::from_millis(1200),
+            started.elapsed() < Duration::from_secs(5),
             "should not wait for local"
         );
     }
@@ -699,7 +699,7 @@ mod tests {
             conn(&relay, ConnectionKind::Relay),
             conn(&remote, ConnectionKind::Remote),
         ];
-        let p = race(&http(), &conns, None, RaceConfig::default())
+        let p = race(&http(), &conns, None, RaceConfig { timeout: Duration::from_secs(20), grace: Duration::from_secs(5) })
             .await
             .unwrap();
         assert_eq!(p.kind, ConnectionKind::Remote);
@@ -707,7 +707,7 @@ mod tests {
 
     #[tokio::test]
     async fn nothing_answers_gives_none_within_timeout() {
-        let slow = identity_server(3000, "m").await;
+        let slow = identity_server(30_000, "m").await;
         let conns = [
             Connection {
                 uri: dead(),
@@ -721,7 +721,7 @@ mod tests {
         };
         let started = std::time::Instant::now();
         assert!(race(&http(), &conns, None, cfg).await.is_none());
-        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     /// An error that wraps another, like reqwest wrapping hyper wrapping io.

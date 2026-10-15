@@ -176,10 +176,14 @@ fn song(id: &str) -> Track {
 }
 
 /// The paused tokio clock as unix ms, so positions and time agree.
+/// The base is per thread: each test runs on its own current-thread
+/// runtime with its own paused clock, and one shared base would tie a test's
+/// clock to whichever test happened to read it first.
 fn now_ms() -> i64 {
-    use std::sync::OnceLock;
-    static BASE: OnceLock<tokio::time::Instant> = OnceLock::new();
-    let base = *BASE.get_or_init(tokio::time::Instant::now);
+    thread_local! {
+        static BASE: tokio::time::Instant = tokio::time::Instant::now();
+    }
+    let base = BASE.with(|b| *b);
     1_700_000_000_000 + tokio::time::Instant::now().saturating_duration_since(base).as_millis() as i64
 }
 

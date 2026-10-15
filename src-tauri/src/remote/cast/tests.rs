@@ -123,14 +123,27 @@ async fn stopped_elsewhere_and_gone_are_told_apart() {
     let link = start(&fake, &plan(false)).await.unwrap();
     assert!(link.poll().await.unwrap().is_some());
     fake.stop_elsewhere();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(link.poll().await.unwrap().is_none(), "another app or sender took over");
+    // Until the device's message has been taken in (the limit is a hang
+    // guard). A stop must read as "elsewhere", never as an error.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while link.poll().await.unwrap().is_some() {
+        assert!(std::time::Instant::now() < deadline, "another app or sender took over");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let fake = FakeCast::start().await;
     let link = start(&fake, &plan(false)).await.unwrap();
     fake.vanish();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(link.poll().await.is_err(), "the device went away");
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        match link.poll().await {
+            Err(_) => break,
+            // Still on, or not yet noticed: never a stop by someone else.
+            Ok(s) => assert!(s.is_some(), "a vanished device read as stopped elsewhere"),
+        }
+        assert!(std::time::Instant::now() < deadline, "the device went away");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 #[tokio::test]

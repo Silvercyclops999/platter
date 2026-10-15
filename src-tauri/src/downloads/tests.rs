@@ -613,6 +613,8 @@ async fn go_offline_holds_new_songs_until_it_is_turned_off() {
     add_to_playlist(&r.db, 2, "b2");
     r.d.poke();
     assert!(within(5, || r.d.status().unwrap().queued == 1).await);
+    assert!(within(5, || r.d.status().unwrap().paused == Some(PauseReason::Offline)).await);
+    // Room for a wrong download to start, which the checks below would see.
     tokio::time::sleep(Duration::from_millis(300)).await;
     let st = r.d.status().unwrap();
     assert_eq!(st.paused, Some(PauseReason::Offline));

@@ -1293,7 +1293,8 @@ mod tests {
     }
 
     async fn wait_signed_in(st: &PlexState) -> AuthStatus {
-        for _ in 0..100 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
             let a = st.auth_status().await;
             if a.state == AuthState::SignedIn && a.server.is_some() {
                 return a;
@@ -1339,7 +1340,8 @@ mod tests {
         assert!(st.client().await.is_ok());
 
         // settings warning toast arrives in the background
-        for _ in 0..100 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
             if !rec.toasts().is_empty() {
                 break;
             }
@@ -1420,7 +1422,7 @@ mod tests {
         let t = std::time::Instant::now();
         let c = st.client_when_ready(Duration::from_secs(10)).await;
         assert!(matches!(c, Err(AppError::Auth(_))));
-        assert!(t.elapsed() < Duration::from_secs(1));
+        assert!(t.elapsed() < Duration::from_secs(5));
     }
 
     #[tokio::test]

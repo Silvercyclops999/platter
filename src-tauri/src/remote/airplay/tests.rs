@@ -23,7 +23,9 @@ fn cfg(fake: &FakeRaop, password: Option<&str>) -> RaopConfig {
 }
 
 fn wait_for(f: impl Fn() -> bool) {
-    for _ in 0..100 {
+    // A hang guard: it returns as soon as `f` holds.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
         if f() {
             return;
         }

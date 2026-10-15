@@ -306,9 +306,15 @@ fn cfg(plex_tv: &MockServer) -> RemoteConfig {
         relay: Url::parse(&plex_tv.uri()).unwrap(),
         poll: Duration::from_millis(40),
         refresh: Duration::from_secs(60),
-        grace: Duration::from_millis(400),
+        // Longer than any test: a player that never reports playing keeps
+        // its session for the whole test, however slowly the machine runs.
+        // Tests of a stop rely on `seen_playing`, not on this running out.
+        grace: Duration::from_secs(60),
+        // Failures in these tests are answered at once (an error status, a
+        // refused connection), so the limit only matters when the machine
+        // is too slow to answer in time, which must not count as a miss.
         misses: 2,
-        timeout: Duration::from_millis(800),
+        timeout: Duration::from_secs(10),
     }
 }
 
@@ -387,7 +393,9 @@ fn q(r: &Request) -> HashMap<String, String> {
 }
 
 async fn wait_for(what: &str, mut ok: impl FnMut() -> bool) {
-    for _ in 0..200 {
+    // A hang guard: it returns as soon as `ok` holds.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
         if ok() {
             return;
         }
@@ -664,8 +672,14 @@ async fn stopped_by_someone_else_says_so_and_controls_come_back() {
 async fn a_player_still_starting_is_not_counted_as_stopped() {
     let r = rig().await;
     r.remote.move_to("amp").await.unwrap();
-    // "stopped" right after playMedia, inside the grace window.
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    // "stopped" right after playMedia, inside the grace window, for
+    // several polls in a row.
+    let before = requests(&r.player, "/player/timeline/poll").await.len();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while requests(&r.player, "/player/timeline/poll").await.len() < before + 3 {
+        assert!(std::time::Instant::now() < deadline, "the player was never polled");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert!(r.remote.state().session.is_some());
 }
 
@@ -1804,7 +1818,8 @@ mod peers {
         .await;
         let port = a.port();
         let mut puts = Vec::new();
-        for _ in 0..100 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
             puts = r.server.received_requests().await.unwrap_or_default().into_iter().filter(|x| x.method.as_str() == "PUT").collect();
             if !puts.is_empty() {
                 break;

@@ -224,7 +224,9 @@ async fn fresh_cache_is_reused_and_stale_entries_show_then_refresh() {
     r.http.route("en.wikipedia.org", 200, &json!({"query": {"pages": [{"extract": "New lead section, longer than nothing."}]}}).to_string());
     r.events.0.lock().clear();
     let _ = r.svc.info(ARTIST).await.unwrap();
-    for _ in 0..100 {
+    // A hang guard for the background refresh.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
         if !r.events.0.lock().is_empty() {
             break;
         }

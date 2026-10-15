@@ -77,7 +77,8 @@ async fn get(addr: SocketAddr, path: &str, host: &str) -> std::io::Result<(u16, 
 
 /// Start following a switch and wait until the status leaves Off/settles.
 async fn wait_status(s: &FeedServer, want: impl Fn(&FeedStatus) -> bool) -> FeedStatus {
-    for _ in 0..200 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
         let st = s.status();
         if want(&st) {
             return st;

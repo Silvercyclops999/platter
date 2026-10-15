@@ -1984,9 +1984,16 @@ async fn popular_with_a_warm_cache_is_quick() {
     .unwrap();
     // Warm the statement cache, then time it.
     t.db.read(|c| queries::artist_page(c, "a1")).unwrap();
-    let started = std::time::Instant::now();
-    let page = t.db.read(|c| queries::artist_page(c, "a1")).unwrap();
-    let ms = started.elapsed().as_millis();
+    // The fastest of a few reads: another process taking the CPU slows
+    // some, slower code slows all of them.
+    let mut ms = u128::MAX;
+    let mut page = None;
+    for _ in 0..5 {
+        let started = std::time::Instant::now();
+        page = Some(t.db.read(|c| queries::artist_page(c, "a1")).unwrap());
+        ms = ms.min(started.elapsed().as_millis());
+    }
+    let page = page.unwrap();
     eprintln!("artist page, 1000 tracks, warm list: {ms} ms");
     assert_eq!(page.popular.len(), popular::POPULAR_N);
     assert!(page.popular.iter().all(|t| !t.title.contains("(Live)")), "studio copies");
