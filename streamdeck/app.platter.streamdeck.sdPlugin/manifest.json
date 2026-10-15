@@ -1,0 +1,154 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "Platter",
+  "Version": "0.1.0.0",
+  "Author": "Platter",
+  "Description": "Control Platter, the music player for your Plex library: the cover on a key, play and pause, skip, like, volume, request the album and Listen along.",
+  "URL": "https://github.com/Silvercyclops999/platter",
+  "Icon": "imgs/plugin/icon",
+  "Category": "Platter",
+  "CategoryIcon": "imgs/plugin/category",
+  "CodePath": "bin/plugin.js",
+  "PropertyInspectorPath": "ui/pair.html",
+  "UUID": "app.platter.streamdeck",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.6"
+  },
+  "Nodejs": {
+    "Version": "20"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "13"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Actions": [
+    {
+      "UUID": "app.platter.streamdeck.playpause",
+      "Name": "Play / Pause",
+      "Tooltip": "Plays or pauses. Shows the cover of what's playing.",
+      "Icon": "imgs/actions/play",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/play",
+          "ShowTitle": false
+        },
+        {
+          "Image": "imgs/actions/pause",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.next",
+      "Name": "Next",
+      "Tooltip": "Skips to the next song.",
+      "Icon": "imgs/actions/next",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/next",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.previous",
+      "Name": "Previous",
+      "Tooltip": "Goes back to the start of the song, or the one before.",
+      "Icon": "imgs/actions/previous",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/previous",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.like",
+      "Name": "Like",
+      "Tooltip": "Likes the playing song, or unlikes it.",
+      "Icon": "imgs/actions/heart",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/heart",
+          "ShowTitle": false
+        },
+        {
+          "Image": "imgs/actions/heart-filled",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.volume",
+      "Name": "Volume",
+      "Tooltip": "Turn to change Platter's volume, press to play or pause.",
+      "Icon": "imgs/actions/volume",
+      "Controllers": [
+        "Encoder"
+      ],
+      "Encoder": {
+        "layout": "$B1",
+        "Icon": "imgs/actions/volume",
+        "TriggerDescription": {
+          "Rotate": "Volume",
+          "Push": "Play / Pause",
+          "Touch": "Play / Pause"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/actions/volume"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.request",
+      "Name": "Request album",
+      "Tooltip": "Opens Platter's Lidarr request for the playing song's album.",
+      "Icon": "imgs/actions/request",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/request",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.listen",
+      "Name": "Listen along",
+      "Tooltip": "Starts a Listen along session in Platter and shows its invite.",
+      "Icon": "imgs/actions/listen",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/listen",
+          "ShowTitle": false
+        }
+      ]
+    }
+  ]
+}

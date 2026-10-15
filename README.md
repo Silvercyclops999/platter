@@ -105,6 +105,7 @@ inside `src-tauri/`. There's a bit more in [CONTRIBUTING.md](CONTRIBUTING.md).
 docs/            Plex API notes, tagging rules, IPC contract
 src/             React + TypeScript interface
 src-tauri/       Rust core: audio, Plex client, cache + search, platform glue
+streamdeck/      Stream Deck plugin, built on its own (see its README)
 ```
 
 ## How it's made

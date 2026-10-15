@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Platter</title>
+    <style>
+      body { margin: 0; padding: 8px 12px; font: 12px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: #d8d8d8; background: #2d2d2d; }
+      p { margin: 0 0 8px; }
+      .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+      input { width: 96px; padding: 4px 6px; font: inherit; letter-spacing: 0.15em; color: #fff; background: #3d3d3d; border: 1px solid #555; border-radius: 3px; }
+      button { padding: 4px 10px; font: inherit; color: #fff; background: #3d3d3d; border: 1px solid #555; border-radius: 3px; cursor: pointer; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      #status { min-height: 18px; }
+      .error { color: #ff8a80; }
+      .ok { color: #9ccc65; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <p id="status">Checking Platter…</p>
+    <div id="pairing" hidden>
+      <p>In Platter, open Settings, turn on Allow Stream Deck, and type the pairing code here.</p>
+      <div class="row">
+        <input id="code" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="123456" aria-label="Pairing code" />
+        <button id="pair">Pair</button>
+      </div>
+    </div>
+    <div id="paired" hidden class="row">
+      <button id="unpair">Unpair</button>
+    </div>
+    <script>
+      let socket = null;
+      let context = null;
+      let actionId = null;
+      const $ = (id) => document.getElementById(id);
+
+      function send(payload) {
+        if (!socket || socket.readyState !== 1) return;
+        socket.send(JSON.stringify({ event: "sendToPlugin", action: actionId, context, payload }));
+      }
+
+      function show(msg) {
+        const s = $("status");
+        if (msg.paired) {
+          s.textContent = "Paired with Platter.";
+          s.className = "ok";
+        } else if (!msg.reachable) {
+          s.textContent = msg.error || "Platter isn't running, or Allow Stream Deck is off in its Settings.";
+          s.className = "error";
+        } else {
+          s.textContent = msg.error || "Not paired yet.";
+          s.className = msg.error ? "error" : "";
+        }
+        $("pairing").hidden = !!msg.paired;
+        $("paired").hidden = !msg.paired;
+        $("pair").disabled = false;
+      }
+
+      $("pair").addEventListener("click", () => {
+        $("pair").disabled = true;
+        $("status").textContent = "Pairing…";
+        $("status").className = "";
+        send({ pair: $("code").value });
+      });
+      $("code").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") $("pair").click();
+      });
+      $("unpair").addEventListener("click", () => send({ unpair: true, status: true }));
+
+      // Called by the Stream Deck app when the inspector opens.
+      window.connectElgatoStreamDeckSocket = (port, uuid, registerEvent, info, actionInfo) => {
+        context = uuid;
+        try {
+          actionId = JSON.parse(actionInfo).action;
+        } catch {
+          actionId = null;
+        }
+        socket = new WebSocket(`ws://127.0.0.1:${port}`);
+        socket.onopen = () => {
+          socket.send(JSON.stringify({ event: registerEvent, uuid }));
+          send({ status: true });
+        };
+        socket.onmessage = (e) => {
+          const m = JSON.parse(e.data);
+          if (m.event === "sendToPropertyInspector" && m.payload) show(m.payload);
+        };
+      };
+    </script>
+  </body>
+</html>

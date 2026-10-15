@@ -1,0 +1,4 @@
+node_modules/
+dist/
+app.platter.streamdeck.sdPlugin/bin/
+app.platter.streamdeck.sdPlugin/logs/
