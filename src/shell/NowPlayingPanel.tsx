@@ -14,7 +14,7 @@ import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
-import { useUi } from "../stores/ui";
+import { rightView, useUi } from "../stores/ui";
 import {
   buildCredits,
   withAlbumCredits,
@@ -314,7 +314,8 @@ export function useOpenNowPlayingOnStart() {
         const ui = useUi.getState();
         // The layout's Now playing option "Off" keeps the panel closed until asked for.
         if (useSettings.getState().settings?.layout?.nowPlaying === "off") return;
-        if (ui.nowPlayingPrefs.openOnStart && !ui.queueOpen && !ui.nowPlayingOpen && !ui.outputOpen) ui.setNowPlayingOpen(true);
+        // Never over the expanded view: opening the panel would close it.
+        if (ui.nowPlayingPrefs.openOnStart && !rightView(ui) && !useFullWindow.getState().open) ui.setNowPlayingOpen(true);
       }),
     [],
   );

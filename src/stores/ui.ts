@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { create } from "zustand";
 import type { HeaderColors } from "../lib/color";
+import { fullWindow, useFullWindow } from "./fullWindow";
 import { RIGHT_DEFAULT, RIGHT_MAX, RIGHT_MIN, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, clamp } from "../shell/layout";
 
 /** Panel widths the user chose. App-only and per device (localStorage), like the library view. */
@@ -125,6 +126,25 @@ export interface ContextMenuState {
   returnFocus: HTMLElement | null;
 }
 
+/** What the right slot can show. */
+export type RightView = "queue" | "nowPlaying" | "output" | "activity";
+
+/** What the right slot shows, if anything. */
+export function rightView(s: Pick<UiState, "queueOpen" | "nowPlayingOpen" | "outputOpen" | "activityOpen">): RightView | null {
+  return s.outputOpen ? "output" : s.activityOpen ? "activity" : s.queueOpen ? "queue" : s.nowPlayingOpen ? "nowPlaying" : null;
+}
+
+/**
+ * The panel open beside the expanded view, if any. Every view but the
+ * now-playing panel opens beside it; that one is the view's alternative.
+ */
+export function besideView(s: Pick<UiState, "queueOpen" | "nowPlayingOpen" | "outputOpen" | "activityOpen">, expanded: boolean): RightView | null {
+  const v = rightView(s);
+  return expanded && v !== "nowPlaying" ? v : null;
+}
+
+const showing = (v: RightView | null) => ({ queueOpen: v === "queue", nowPlayingOpen: v === "nowPlaying", outputOpen: v === "output", activityOpen: v === "activity" });
+
 interface UiState extends PanelWidths {
   /** The right slot shows the queue. At most one of queueOpen / nowPlayingOpen is true. */
   queueOpen: boolean;
@@ -183,6 +203,29 @@ interface UiState extends PanelWidths {
 
 const panels = (s: UiState): PanelWidths => ({ sidebarWidth: s.sidebarWidth, sidebarCollapsed: s.sidebarCollapsed, rightWidth: s.rightWidth });
 
+/**
+ * Every control that opens or closes a right-slot view comes through here.
+ * The slot shows one view at a time: opening one replaces the other. Over
+ * the expanded view, the now-playing panel is its alternative (opening it
+ * closes the view); any other view opens beside the view, which narrows to
+ * share the window. Closing the device picker gives the slot back to what
+ * it showed before, except beside the expanded view, which takes the room
+ * back instead.
+ */
+function setRight(view: RightView, open: boolean) {
+  const s = useUi.getState();
+  const cur = rightView(s);
+  if (open && view === "nowPlaying" && useFullWindow.getState().open) void fullWindow.close();
+  if (open === (cur === view)) return;
+  if (open) {
+    const outputReturn = view === "output" && (cur === "queue" || cur === "nowPlaying") ? cur : null;
+    useUi.setState({ ...showing(view), outputReturn });
+  } else {
+    const back = view === "output" && !useFullWindow.getState().open ? s.outputReturn : null;
+    useUi.setState({ ...showing(back), outputReturn: null });
+  }
+}
+
 export const useUi = create<UiState>()((set, get) => ({
   ...loadPanels(),
   queueOpen: false,
@@ -192,22 +235,12 @@ export const useUi = create<UiState>()((set, get) => ({
   outputReturn: null,
   activityOpen: false,
   toggleActivity: () => get().setActivityOpen(!get().activityOpen),
-  setActivityOpen: (v) =>
-    set(v ? { activityOpen: true, queueOpen: false, nowPlayingOpen: false, outputOpen: false, outputReturn: null } : { activityOpen: false }),
+  setActivityOpen: (v) => setRight("activity", v),
   toggleOutput: () => get().setOutputOpen(!get().outputOpen),
-  setOutputOpen: (v) => {
-    const s = get();
-    if (v === s.outputOpen) return;
-    if (v) {
-      const outputReturn = s.queueOpen ? "queue" : s.nowPlayingOpen ? "nowPlaying" : null;
-      set({ outputOpen: true, outputReturn, queueOpen: false, nowPlayingOpen: false, activityOpen: false });
-    } else {
-      set({ outputOpen: false, outputReturn: null, queueOpen: s.outputReturn === "queue", nowPlayingOpen: s.outputReturn === "nowPlaying" });
-    }
-  },
-  toggleNowPlaying: () => get().setNowPlayingOpen(!get().nowPlayingOpen),
-  setNowPlayingOpen: (v) =>
-    set(v ? { nowPlayingOpen: true, queueOpen: false, outputOpen: false, outputReturn: null, activityOpen: false } : { nowPlayingOpen: false }),
+  setOutputOpen: (v) => setRight("output", v),
+  // The cover button over the expanded view leaves it for the panel.
+  toggleNowPlaying: () => get().setNowPlayingOpen(useFullWindow.getState().open || !get().nowPlayingOpen),
+  setNowPlayingOpen: (v) => setRight("nowPlaying", v),
   setNowPlayingPrefs: (p) => {
     const nowPlayingPrefs = { ...get().nowPlayingPrefs, ...p };
     set({ nowPlayingPrefs });
@@ -232,9 +265,7 @@ export const useUi = create<UiState>()((set, get) => ({
     if (cur?.vivid !== tint?.vivid || cur?.shade !== tint?.shade) set({ tint });
   },
   toggleQueue: () => get().setQueueOpen(!get().queueOpen),
-  // The queue takes the right slot from the now-playing panel.
-  setQueueOpen: (v) =>
-    set(v ? { queueOpen: true, nowPlayingOpen: false, outputOpen: false, outputReturn: null, activityOpen: false } : { queueOpen: false }),
+  setQueueOpen: (v) => setRight("queue", v),
   setPaletteOpen: (v) => set({ paletteOpen: v }),
   focusSearch: () => set({ searchFocusTick: get().searchFocusTick + 1 }),
   openMenu: (m) =>

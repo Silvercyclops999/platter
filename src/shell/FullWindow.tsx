@@ -9,7 +9,7 @@ import type { Track } from "../lib/types";
 import { fullWindow, useFullWindow, type FullWindowMode } from "../stores/fullWindow";
 import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
-import { nav, useRouter } from "../stores/router";
+import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { actionableNotice, useLyrics } from "./lyrics";
@@ -72,6 +72,8 @@ const modified = (e: KeyboardEvent) => e.ctrlKey || e.metaKey || e.altKey || e.s
 function onFullWindowKey(e: KeyboardEvent) {
   if (e.defaultPrevented || useUi.getState().menu || document.querySelector("dialog[open], .dialog-backdrop")) return;
   const key = e.key;
+  // In a panel beside the view, keys are the panel's own (Esc still leaves the view).
+  if (key !== "Escape" && e.target instanceof Element && e.target.closest(".app__body")) return;
   let handled = true;
   if (key === "Escape") void fullWindow.escape();
   else if (key === " " && !e.repeat && !inButton(e.target)) player.toggle();
@@ -168,12 +170,10 @@ function FullWindowView() {
       window.removeEventListener("keydown", onFullWindowKey, true);
       window.removeEventListener("resize", onResize);
       document.removeEventListener("fullscreenchange", onResize);
-      returnTo?.focus?.();
+      // Focus in a panel beside the view stays there.
+      if (!document.activeElement || document.activeElement === document.body) returnTo?.focus?.();
     };
   }, []);
-
-  // A link (album, artist) takes you to its page: the view steps aside.
-  useEffect(() => useRouter.subscribe((s, p) => s.index !== p.index && void fullWindow.close()), []);
 
   const hasLyrics = !!lyrics || actionableNotice(lyricsInfo);
   const noLyrics = !!track && !lyricsLoading && !hasLyrics;
@@ -296,9 +296,11 @@ function FullWindowView() {
 
 /**
  * The expanded now-playing view: fills the window between the top bar and
- * the player bar (the sidebar and the right panel go under it) with the
- * artwork, the artist's image or the lyrics, picked in its header. Minimize
- * or Esc returns to the layout underneath, untouched.
+ * the player bar (the sidebar and the now-playing panel go under it) with
+ * the artwork, the artist's image or the lyrics, picked in its header. The
+ * queue, the device picker and friend activity open beside it, and it
+ * narrows to share the window. Minimize or Esc returns to the layout
+ * underneath, the panel beside it still open. Going to a page leaves it too.
  */
 export function FullWindow() {
   const open = useFullWindow((s) => s.open);

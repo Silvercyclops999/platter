@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 import type { HomeShelfId, ReleaseSection } from "../lib/types";
-import { fullWindow } from "./fullWindow";
+import { fullWindow, useFullWindow } from "./fullWindow";
 
 export type LibraryTab = "artists" | "albums" | "playlists";
 
@@ -84,11 +84,17 @@ export function sameRoute(a: Route, b: Route): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/** Going to a page (or back, or forward) leaves the expanded view. */
+function leaveExpanded() {
+  if (useFullWindow.getState().open) void fullWindow.close();
+}
+
 export const useRouter = create<RouterState>()((set, get) => ({
   entries: [entry({ name: "home" })],
   index: 0,
   navigate: (route) => {
     if (route.name === "lyrics") return fullWindow.open("lyrics");
+    leaveExpanded();
     const { entries, index } = get();
     if (sameRoute(entries[index].route, route)) return;
     const next = entries.slice(0, index + 1);
@@ -105,10 +111,12 @@ export const useRouter = create<RouterState>()((set, get) => ({
     set({ entries: next });
   },
   back: () => {
+    leaveExpanded();
     const { index } = get();
     if (index > 0) set({ index: index - 1 });
   },
   forward: () => {
+    leaveExpanded();
     const { index, entries } = get();
     if (index < entries.length - 1) set({ index: index + 1 });
   },
@@ -116,7 +124,7 @@ export const useRouter = create<RouterState>()((set, get) => ({
     if (route.name === "lyrics") {
       fullWindow.open("lyrics");
       route = { name: "home" };
-    }
+    } else leaveExpanded();
     set({ entries: [entry(route)], index: 0 });
   },
   drop: (route) => {

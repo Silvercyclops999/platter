@@ -10,7 +10,8 @@ import { Tooltip } from "../components/Tooltip";
 import { chrome } from "../lib/platform";
 import { useCurrentEntry } from "../stores/router";
 import { useLayout } from "../stores/theme";
-import { useUi } from "../stores/ui";
+import { besideView, rightView as slotView, useUi } from "../stores/ui";
+import { useFullWindow } from "../stores/fullWindow";
 import { CommandPalette } from "./CommandPalette";
 import {
   RAIL_WIDTH,
@@ -100,7 +101,9 @@ export function AppShell() {
   const outputOpen = useUi((s) => s.outputOpen);
   const activityOpen = useUi((s) => s.activityOpen);
   // The queue, the now-playing panel, the output picker and friend activity share the right slot, one at a time.
-  const rightView = outputOpen ? "output" : activityOpen ? "activity" : queueOpen ? "queue" : nowPlayingOpen ? "nowPlaying" : null;
+  const rightView = slotView({ queueOpen, nowPlayingOpen, outputOpen, activityOpen });
+  // Any of them but the now-playing panel sits beside the expanded view.
+  const beside = besideView({ queueOpen, nowPlayingOpen, outputOpen, activityOpen }, useFullWindow((s) => s.open)) !== null;
   const rightOpen = rightView !== null;
   // One panel replacing the other rises in place of sliding in from the edge.
   const [slot, setSlot] = useState<{ view: typeof rightView; swap: boolean }>({ view: rightView, swap: false });
@@ -161,7 +164,7 @@ export function AppShell() {
   const style = { "--sidebar-w": `${layout.sidebar}px`, "--right-w": `${layout.right}px` } as CSSProperties;
 
   return (
-    <div ref={shell} className={`app app--chrome-${chrome} ${queueOpen ? "has-queue" : ""} ${nowPlayingOpen ? "has-now-playing" : ""} ${slot.swap ? "right-swap" : ""} ${rail ? "sidebar-collapsed" : ""}`} style={style}>
+    <div ref={shell} className={`app app--chrome-${chrome} ${queueOpen ? "has-queue" : ""} ${nowPlayingOpen ? "has-now-playing" : ""} ${slot.swap ? "right-swap" : ""} ${beside ? "fw-beside" : ""} ${rail ? "sidebar-collapsed" : ""}`} style={style}>
       <a
         href="#main"
         className="skip-link"

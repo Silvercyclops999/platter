@@ -382,7 +382,9 @@ function SuggestionButtons() {
 /** Bottom player bar. */
 export function PlayerBar() {
   const state = usePlayer((s) => s.state);
-  const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
+  // Over the expanded view the panel is hidden, so the cover button isn't pressed.
+  const expanded = useFullWindow((s) => s.open);
+  const nowPlayingOpen = useUi((s) => s.nowPlayingOpen) && !expanded;
   const outputOpen = useUi((s) => s.outputOpen);
   const toggleOutput = useUi((s) => s.toggleOutput);
   const buttons = useLayout().playerButtons;

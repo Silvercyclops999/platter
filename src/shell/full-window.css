@@ -8,6 +8,9 @@
 .fw {
   --fw-top-bar: 64px;
   --fw-player-bar: 88px;
+  /* Room kept for a panel beside the view, and the width left for the view. */
+  --fw-side: 0px;
+  --fw-w: calc(100vw - var(--fw-side));
   position: fixed;
   inset: 0;
   /* Over the panels (700), under the bars while open (760), menus, tooltips and dialogs (800 and up). */
@@ -35,6 +38,17 @@ html.fw-open .player-bar { transition: opacity var(--motion-medium) var(--motion
 html.fw-idle .topbar > *,
 html.fw-idle .player-bar { opacity: 0; pointer-events: none; }
 html.fw-idle body { cursor: none; }
+
+/* A panel beside the view (queue, devices, activity): the view keeps its
+   background under the whole window, gives the panel its usual column at the
+   window's edge and lays its header and stage out in the rest. The panel and
+   its handle sit over the view and never fade with its controls. */
+.app.fw-beside .fw { --fw-side: calc(var(--right-w) + var(--space-2) * 2); padding-right: var(--fw-side); }
+:root[data-look-now-playing="left"] .app.fw-beside .fw { padding-right: 0; padding-left: var(--fw-side); }
+.app.fw-beside .app__body > :is(.queue-panel, .output-panel) { position: relative; z-index: calc(var(--z-full-window) + 1); }
+html:root:not([data-look-now-playing="left"]) .app.fw-beside .app__body > :is(.queue-panel, .output-panel) { order: 6; }
+html:root .app.fw-beside .resize-handle--right { z-index: calc(var(--z-full-window) + 2); right: calc(var(--space-2) + var(--right-w) + var(--space-2) / 2 - 6px); }
+html:root[data-look-now-playing="left"] .app.fw-beside .resize-handle--right { right: auto; left: calc(var(--space-2) + var(--right-w) + var(--space-2) / 2 - 6px); }
 
 .fw__bg {
   position: absolute;
@@ -92,7 +106,7 @@ html.fw-idle body { cursor: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 clamp(var(--space-6), 5vw, var(--space-16)) var(--space-8);
+  padding: 0 clamp(var(--space-6), calc(var(--fw-w) * 0.05), var(--space-16)) var(--space-8);
 }
 .fw__empty { font-size: var(--font-size-2xl); font-weight: 700; }
 
@@ -117,10 +131,10 @@ html.fw-idle body { cursor: none; }
 /* ---- Lyrics: a small cover beside the title (it fades with the header), then
    the lyrics in a left-aligned column starting about a quarter of the way
    across, with room on the right. */
-.fw--lyrics .fw__stage { justify-content: flex-start; padding-left: clamp(var(--space-6), 22vw, 640px); }
+.fw--lyrics .fw__stage { justify-content: flex-start; padding-left: clamp(var(--space-6), calc(var(--fw-w) * 0.22), 640px); }
 /* No lyrics: there's no column to line up with, so the column and its
    "No lyrics" message sit in the middle of the window. */
-.fw--lyrics .fw__stage:has(.lyrics-page__empty-wrap) { justify-content: center; padding-left: clamp(var(--space-6), 5vw, var(--space-16)); }
+.fw--lyrics .fw__stage:has(.lyrics-page__empty-wrap) { justify-content: center; padding-left: clamp(var(--space-6), calc(var(--fw-w) * 0.05), var(--space-16)); }
 .fw__lyrics .lyrics-page__empty-wrap { text-align: center; }
 .fw__lyrics-mode {
   width: min(1040px, 100%);

@@ -6,7 +6,8 @@ import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { createPlaylist } from "../stores/playlists";
 import { bookmarkNowPlaying } from "../stores/curate";
-import { useUi } from "../stores/ui";
+import { besideView, rightView, useUi } from "../stores/ui";
+import { useFullWindow } from "../stores/fullWindow";
 import { keyRight, keySidebar, rightRoom, sidebarRoom, solveLayout } from "./layout";
 import { hideHints, powerKey } from "./powerKeys";
 
@@ -75,11 +76,10 @@ export function resizeRight(narrower: boolean) {
 /** Close whatever is in the right slot, or open the now-playing view. */
 export function toggleRightPanel() {
   const ui = useUi.getState();
-  if (ui.queueOpen || ui.nowPlayingOpen || ui.outputOpen) {
-    useUi.setState({ queueOpen: false, nowPlayingOpen: false, outputOpen: false, outputReturn: null });
-    return;
-  }
-  ui.setNowPlayingOpen(true);
+  // Over the expanded view, a panel under it doesn't count as open.
+  const shown = useFullWindow.getState().open ? besideView(ui, true) : rightView(ui);
+  if (shown) useUi.setState({ queueOpen: false, nowPlayingOpen: false, outputOpen: false, activityOpen: false, outputReturn: null });
+  else ui.setNowPlayingOpen(true);
 }
 
 /** Open the library filter: in the sidebar, or on the wide library page when the sidebar is a rail. */
