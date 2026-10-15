@@ -13,16 +13,18 @@ feature), before and after this pass:
 
 | | Before | After |
 |---|---|---|
-| NSIS installer | 8.67 MB | AFTER_NSIS |
-| MSI installer | 12.21 MB | AFTER_MSI |
-| platter.exe | 26.6 MB | AFTER_EXE |
+| NSIS installer | 8.67 MB | 8.91 MB |
+| MSI installer | 12.21 MB | 12.57 MB |
+| platter.exe | 26.6 MB | 27.4 MB |
 | JS parsed at start | 886 KB (262 KB gzip) | 730 KB (220 KB gzip) |
 | JS loaded when first used | none | 200 KB in 12 chunks |
 | CSS at start | 200 KB | 171 KB |
 
-The JS numbers for "after" include the Plex edit and Lidarr screens that
-landed at the same time; on the same code as "before" the start bundle went
-from 886 KB to 716 KB.
+The "after" column includes the Plex edit and Lidarr request features that
+landed at the same time, which is why the installer and executable grew a
+little; this pass didn't change the native size, and the release profile
+was already tuned (below). On the same code as "before", the start bundle
+went from 886 KB to 716 KB. Both installers are well under the 15 MB budget.
 
 ## Idle wakeups
 
