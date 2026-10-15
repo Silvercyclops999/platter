@@ -14,7 +14,9 @@
 //! Unreleased albums skip steps 1 and 2: their cover is only ever uploaded,
 //! and only when unreleased covers may be shown.
 //!
-//! Answers are kept per album in the `discord_art` table.
+//! Answers are kept per album in the `discord_art` table. A cover uploaded
+//! during a lookup is fetched once right away, so the host serves it by the
+//! time Discord's image proxy asks.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -376,6 +378,7 @@ impl ArtResolver {
                 if let Err(e) = self.db.write_async(move |c| put(c, &id, Some(&u), host.source(), now, i64::MAX)).await {
                     tracing::debug!("discord art cache: {e}");
                 }
+                self.warm(&url).await;
                 ArtOutcome::Url(url)
             }
             Err(e) => {
@@ -383,6 +386,17 @@ impl ArtResolver {
                 self.failed.lock().insert(req.album_id.clone());
                 ArtOutcome::UploadFailed(e.to_string())
             }
+        }
+    }
+
+    /// Fetch a fresh upload once before Discord sees it, so the host has the
+    /// file ready when Discord's image proxy asks. Only the outcome is
+    /// logged; a failure here changes nothing.
+    async fn warm(&self, url: &str) {
+        match self.http.get(url, &[]).await {
+            Ok(r) if r.ok() => {}
+            Ok(r) => tracing::debug!("the fresh cover answered {}", r.status),
+            Err(e) => tracing::debug!("fetching the fresh cover: {e}"),
         }
     }
 

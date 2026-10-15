@@ -92,7 +92,9 @@ pub async fn read_frame<R: AsyncRead + Unpin + ?Sized>(r: &mut R) -> Result<(u32
 /// How Discord answered a command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
-    Ok,
+    /// Accepted, with the reply's `data`: the activity as Discord keeps it
+    /// (an external image comes back as `mp:external/...`). None for a clear.
+    Ok(Option<Value>),
     /// An ERROR event: the code and message Discord gave.
     Refused { code: i64, message: String },
 }
@@ -160,7 +162,7 @@ impl IpcClient {
                     message: d.get("message").and_then(Value::as_str).unwrap_or_default().to_owned(),
                 });
             }
-            return Ok(Reply::Ok);
+            return Ok(Reply::Ok(v.get("data").filter(|d| !d.is_null()).cloned()));
         }
     }
 }
@@ -282,7 +284,7 @@ pub mod fake {
                     json!({ "cmd": "SET_ACTIVITY", "evt": "ERROR", "nonce": nonce,
                             "data": { "code": 4000, "message": "child \"activity\" fails because [\"type\" must be one of [0]]" } })
                 } else {
-                    json!({ "cmd": "SET_ACTIVITY", "evt": null, "nonce": nonce, "data": v["args"]["activity"] })
+                    json!({ "cmd": "SET_ACTIVITY", "evt": null, "nonce": nonce, "data": proxied(&v["args"]["activity"]) })
                 };
                 if write_frame(&mut s, OP_FRAME, &reply).await.is_err() {
                     return;
@@ -297,6 +299,19 @@ pub mod fake {
                 }
             }
         }
+    }
+
+    /// The fake proxy signature in rewritten image paths.
+    pub const FAKE_SIGNATURE: &str = "SiGnEd123";
+
+    /// The activity as Discord echoes it: an external image becomes
+    /// `mp:external/<signature>/https/<host>/<path>`.
+    pub fn proxied(activity: &Value) -> Value {
+        let mut a = activity.clone();
+        if let Some(rest) = a["assets"]["large_image"].as_str().and_then(|u| u.strip_prefix("https://")) {
+            a["assets"]["large_image"] = format!("mp:external/{FAKE_SIGNATURE}/https/{rest}").into();
+        }
+        a
     }
 
     pub struct FakeConnector(pub Arc<FakeDiscord>);
@@ -342,8 +357,10 @@ mod tests {
     async fn handshake_then_set_and_clear() {
         let d = FakeDiscord::new();
         let mut c = IpcClient::open(&FakeConnector(d.clone()), "123").await.unwrap();
-        assert_eq!(c.set_activity(42, Some(&json!({ "type": 2, "details": "Song" }))).await.unwrap(), Reply::Ok);
-        assert_eq!(c.set_activity(42, None).await.unwrap(), Reply::Ok);
+        let a = json!({ "type": 2, "details": "Song", "assets": { "large_image": "https://files.catbox.moe/a.jpg" } });
+        let Reply::Ok(Some(data)) = c.set_activity(42, Some(&a)).await.unwrap() else { panic!("accepted with data") };
+        assert_eq!(data["assets"]["large_image"], format!("mp:external/{FAKE_SIGNATURE}/https/files.catbox.moe/a.jpg"));
+        assert_eq!(c.set_activity(42, None).await.unwrap(), Reply::Ok(None));
         let frames = d.frames.lock().clone();
         assert_eq!(frames[0], json!({ "v": 1, "client_id": "123" }));
         assert_eq!(frames[1]["cmd"], "SET_ACTIVITY");

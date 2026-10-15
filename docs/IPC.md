@@ -435,8 +435,20 @@ uploaded once to Imgur and its `i.imgur.com` link kept for good; else, with
 `discordUploadCatbox` on, the same upload to catbox.moe's anonymous API
 (`reqtype=fileupload`, `fileToUpload`) and its `files.catbox.moe` link kept for
 good. Only those hosts are ever sent; anything else falls back to the app
-icon. A failed upload isn't retried
-until the next start or a new client ID. The client ID lives in the keychain;
+icon. A fresh upload is fetched once from its link before the status is sent,
+so the host has it ready. A failed upload isn't retried
+until the next start or a new client ID.
+
+Discord answers SET_ACTIVITY with the external cover rewritten as
+`mp:external/<signed>/https/<host>/<path>`, and its client keeps a broken
+image if its proxy's first fetch failed. So after Discord takes a status with
+a cover, `https://media.discordapp.net/<the part after mp:>` is fetched once
+in the background (a 200 with an image type is good). If it fails it's tried
+again after 5 s, 15 s and 40 s; when a later try works the same status is sent
+once more (still at most one update per 15 s) so the client loads the cover
+again, and when none work the song shows the app icon for this play. Nothing
+is remembered, so the next play tries the cover again. Logs name only the
+image host, never the signed path. The client ID lives in the keychain;
 saving one checks it with one request that uploads nothing, and `rejected`
 is set when Imgur refuses it then or on an upload.
 

@@ -61,7 +61,10 @@ and your own Plex server.
   Anyone who can see your profile sees these. Nothing is sent during a
   private session, while paused (unless you choose to show paused songs), or
   when the status is off. Your Plex token and server address are never part
-  of it.
+  of it. After Discord takes a status with a cover, Platter loads Discord's
+  copy of that image once from media.discordapp.net (and up to three more
+  times over a minute if it isn't ready), to make sure the cover shows. That
+  request carries only the image link Discord made.
 - Cover Art Archive, for that cover image: it gets the album's MusicBrainz
   release id, or a MusicBrainz release group id, nothing else. Can be turned
   off in Settings. Discord then loads the image from Cover Art Archive itself.

@@ -10,6 +10,13 @@
 //! The service follows the player's tracking events on its own task, so a
 //! missing, slow or closing Discord never touches playback. Updates are
 //! coalesced: at most one per [`Config::gap`], always with the latest state.
+//!
+//! Discord fetches an external cover through its own image proxy, and the
+//! client keeps a broken image if that first fetch fails (common right after
+//! an upload). So once Discord accepts a status with a cover, the proxied
+//! image is checked in the background; if it only works on a later check
+//! the same status is sent once more so the client loads it again, and if it
+//! never works the song shows the app icon instead.
 
 pub mod activity;
 pub mod art;
@@ -29,11 +36,20 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::Instant;
 
+use crate::artistinfo::http::InfoHttp;
 use crate::artistinfo::service::KeyState;
 use crate::audio::events::TrackingEvent;
 use activity::{Kind, Song, StatusLine};
 use art::{ArtOutcome, ArtRequest, ArtResolver};
 use ipc::{Connector, IpcClient, Reply};
+
+/// Discord's image proxy: an image Discord reports as `mp:<path>` is served
+/// at `<MEDIA_PROXY><path>`.
+pub const MEDIA_PROXY: &str = "https://media.discordapp.net/";
+
+/// The waits between checks of a cover Discord's proxy couldn't serve yet,
+/// about a minute in all.
+pub const PROXY_RECHECKS: [Duration; 3] = [Duration::from_secs(5), Duration::from_secs(15), Duration::from_secs(40)];
 
 /// The Discord application id, set when the app is built
 /// (`PLATTER_DISCORD_APP_ID`). Without one the feature is hidden.
@@ -190,6 +206,8 @@ pub struct Deps {
     pub art: Arc<dyn CoverArt>,
     pub library: Arc<dyn Library>,
     pub status: Arc<dyn StatusSink>,
+    /// GETs for checking Discord's proxied cover.
+    pub http: Arc<dyn InfoHttp>,
 }
 
 /// Managed state for the commands.
@@ -246,6 +264,7 @@ pub fn spawn(
         last_send_at: None,
         reconnect_at: None,
         dirty: false,
+        force: false,
         not_before: Instant::now(),
         party: None,
     };
@@ -257,6 +276,18 @@ pub fn spawn(
 enum Side {
     Art { track_id: String, outcome: ArtOutcome },
     Link { track_id: String, url: Option<String> },
+    /// How Discord's proxy did with the cover `image` of this song.
+    Proxy { track_id: String, image: String, result: ProxyCheck },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProxyCheck {
+    /// Served on the first check.
+    Good,
+    /// Served only on a later check: the client may hold a broken image.
+    Recovered,
+    /// Never served.
+    Failed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,6 +309,8 @@ struct Current {
     started: Instant,
     art: Lookup,
     link: Lookup,
+    /// The cover whose proxied image was checked (once per song and cover).
+    proxy_checked: Option<String>,
 }
 
 /// A position this far from where it should be is a seek or a stall.
@@ -306,6 +339,8 @@ struct Runner {
     last_send_at: Option<Instant>,
     reconnect_at: Option<Instant>,
     dirty: bool,
+    /// Send the status even though Discord already has it.
+    force: bool,
     not_before: Instant,
     /// The hosted listening session as last shown.
     party: Option<activity::Party>,
@@ -397,6 +432,7 @@ impl Runner {
                     started: Instant::now(),
                     art: Lookup::NotAsked,
                     link: Lookup::NotAsked,
+                    proxy_checked: None,
                 });
                 self.lookups();
                 self.mark();
@@ -453,6 +489,7 @@ impl Runner {
         {
             c.art = Lookup::NotAsked;
             c.song.image = None;
+            c.proxy_checked = None;
         }
         self.settings = s;
         self.lookups();
@@ -478,6 +515,28 @@ impl Runner {
                 let Some(c) = self.cur.as_mut().filter(|c| c.track_id == track_id) else { return };
                 c.link = Lookup::Done;
                 c.song.link = url;
+            }
+            Side::Proxy { track_id, image, result } => {
+                let Some(c) = self
+                    .cur
+                    .as_mut()
+                    .filter(|c| c.track_id == track_id && c.song.image.as_deref() == Some(image.as_str()))
+                else {
+                    return;
+                };
+                match result {
+                    ProxyCheck::Good => return,
+                    // Same status again, so the client loads the cover anew.
+                    ProxyCheck::Recovered => self.force = true,
+                    ProxyCheck::Failed => {
+                        tracing::info!(
+                            "Discord couldn't show the cover from {}; using the app icon for this song",
+                            image_host(&image)
+                        );
+                        // Only for this play: the next one tries the cover again.
+                        c.song.image = None;
+                    }
+                }
             }
         }
         self.mark();
@@ -528,7 +587,27 @@ impl Runner {
         activity::build(song.as_ref(), &self.settings, self.kind, self.with_line)
     }
 
+    /// After Discord accepted `sent`: check its proxied cover once per song
+    /// and cover, in the background.
+    fn check_proxy(&mut self, sent: Option<&Value>, reply: Option<&Value>) {
+        let Some(c) = self.cur.as_mut() else { return };
+        let Some(image) = c.song.image.clone() else { return };
+        let large = |v: Option<&Value>| v.and_then(|a| a["assets"]["large_image"].as_str()).map(str::to_owned);
+        if large(sent).as_deref() != Some(image.as_str()) || c.proxy_checked.as_deref() == Some(image.as_str()) {
+            return;
+        }
+        let Some(path) = large(reply).and_then(|l| l.strip_prefix("mp:").map(str::to_owned)) else { return };
+        c.proxy_checked = Some(image.clone());
+        let url = format!("{MEDIA_PROXY}{path}");
+        let (http, tx, track_id) = (self.deps.http.clone(), self.side_tx.clone(), c.track_id.clone());
+        tokio::spawn(async move {
+            let result = proxy_check(http.as_ref(), &url, image_host(&image)).await;
+            let _ = tx.send(Side::Proxy { track_id, image, result });
+        });
+    }
+
     fn drop_conn(&mut self, now: Instant, retry_in: Duration) {
+        self.force = false;
         self.conn = None;
         self.last_sent = None;
         self.last_send_at = None;
@@ -590,7 +669,8 @@ impl Runner {
             }
         }
 
-        if want == self.last_sent {
+        if want == self.last_sent && !(self.force && want.is_some()) {
+            self.force = false;
             self.dirty = false;
             self.disconnect_if_off();
             return;
@@ -608,7 +688,9 @@ impl Runner {
         )
         .await;
         match sent {
-            Ok(Ok(Reply::Ok)) => {
+            Ok(Ok(Reply::Ok(reply))) => {
+                self.force = false;
+                self.check_proxy(want.as_ref(), reply.as_ref());
                 self.last_sent = want;
                 self.last_send_at = Some(now);
                 self.dirty = false;
@@ -655,4 +737,41 @@ impl Runner {
             self.set_live(|l| l.connected = false);
         }
     }
+}
+
+/// The host of a cover URL, for logs (never the full path).
+fn image_host(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    rest.split(['/', '?']).next().unwrap_or_default()
+}
+
+/// Whether Discord's proxy serves the image: a 200 with an image type.
+async fn proxy_serves(http: &dyn InfoHttp, url: &str) -> bool {
+    match http.get(url, &[]).await {
+        Ok(r) => {
+            r.status == 200
+                && r.content_type.as_deref().is_some_and(|t| t.trim().to_ascii_lowercase().starts_with("image/"))
+        }
+        Err(e) => {
+            tracing::debug!("checking Discord's copy of the cover: {e}");
+            false
+        }
+    }
+}
+
+/// Check the proxied cover, and again after each of [`PROXY_RECHECKS`]
+/// while it fails.
+async fn proxy_check(http: &dyn InfoHttp, url: &str, host: &str) -> ProxyCheck {
+    if proxy_serves(http, url).await {
+        return ProxyCheck::Good;
+    }
+    tracing::info!("Discord can't show the cover from {host} yet; checking again shortly");
+    for wait in PROXY_RECHECKS {
+        tokio::time::sleep(wait).await;
+        if proxy_serves(http, url).await {
+            tracing::info!("Discord can show the cover from {host} now; sending the status again");
+            return ProxyCheck::Recovered;
+        }
+    }
+    ProxyCheck::Failed
 }

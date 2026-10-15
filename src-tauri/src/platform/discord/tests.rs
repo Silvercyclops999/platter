@@ -13,7 +13,7 @@ use tokio::sync::broadcast;
 
 use super::activity::APP_ICON;
 use super::art::*;
-use super::ipc::fake::{FakeConnector, FakeDiscord};
+use super::ipc::fake::{FAKE_SIGNATURE, FakeConnector, FakeDiscord};
 use super::*;
 use crate::artistinfo::http::fake::FakeHttp;
 use crate::artistinfo::http::HttpResponse;
@@ -77,7 +77,40 @@ impl StatusSink for Statuses {
     }
 }
 
+/// Discord's image proxy: answers from a script, then a fixed answer
+/// (an image by default).
+struct FakeProxy {
+    script: Mutex<std::collections::VecDeque<(u16, &'static str)>>,
+    then: Mutex<(u16, &'static str)>,
+    log: Mutex<Vec<(String, tokio::time::Instant)>>,
+}
+
+impl Default for FakeProxy {
+    fn default() -> Self {
+        Self { script: Mutex::default(), then: Mutex::new((200, "image/jpeg")), log: Mutex::default() }
+    }
+}
+
+impl FakeProxy {
+    fn calls(&self) -> usize {
+        self.log.lock().len()
+    }
+}
+
+#[async_trait]
+impl crate::artistinfo::http::InfoHttp for FakeProxy {
+    async fn get(&self, url: &str, _: &[(&'static str, String)]) -> crate::error::AppResult<HttpResponse> {
+        self.log.lock().push((url.to_owned(), tokio::time::Instant::now()));
+        let (status, ct) = self.script.lock().pop_front().unwrap_or(*self.then.lock());
+        if status == 0 {
+            return Err(crate::error::AppError::Network("connection reset".into()));
+        }
+        Ok(HttpResponse { status, content_type: Some(ct.into()), body: "x".into(), ..Default::default() })
+    }
+}
+
 struct Rig {
+    proxy: Arc<FakeProxy>,
     discord: Arc<FakeDiscord>,
     events: broadcast::Sender<TrackingEvent>,
     switches: DiscordSwitches,
@@ -96,16 +129,18 @@ fn rig_with(art: FakeArt, lib: FakeLib, settings: DiscordSettings) -> Rig {
     let art = Arc::new(art);
     let lib = Arc::new(lib);
     let statuses = Arc::new(Statuses::default());
+    let proxy = Arc::new(FakeProxy::default());
     let deps = Deps {
         connector: Arc::new(FakeConnector(discord.clone())),
         art: art.clone(),
         library: lib.clone(),
         status: statuses.clone(),
+        http: proxy.clone(),
     };
     let mut cfg = Config::new("1234567890");
     cfg.clock = Arc::new(now_ms);
     let (handle, task) = spawn(cfg, deps, rx, switches.subscribe());
-    Rig { discord, events, switches, handle, art, lib, statuses, task }
+    Rig { proxy, discord, events, switches, handle, art, lib, statuses, task }
 }
 
 fn rig() -> Rig {
@@ -446,6 +481,102 @@ async fn a_failed_upload_shows_the_app_icon_and_tells_settings() {
     assert!(!r.handle.status().upload_failed, "a new key clears it");
 }
 
+// ---------------------------------------------------------------- proxied cover
+
+fn proxied_cover() -> String {
+    format!("{MEDIA_PROXY}external/{FAKE_SIGNATURE}/https/{}", COVER.trim_start_matches("https://"))
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cover_discord_can_show_is_checked_once_and_never_resent() {
+    let r = rig();
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(r.discord.activities().len(), 1);
+    assert_eq!(r.proxy.calls(), 1);
+    assert_eq!(r.proxy.log.lock()[0].0, proxied_cover(), "the path after mp: on Discord's proxy");
+    // A later update of the same song doesn't check the cover again.
+    r.events.send(TrackingEvent::Seeked { track_id: "1".into(), from_ms: 2_000, to_ms: 120_000 }).unwrap();
+    wait(16.0).await;
+    assert_eq!(r.discord.activities().len(), 2);
+    wait(70.0).await;
+    assert_eq!(r.discord.activities().len(), 2, "no resend");
+    assert_eq!(r.proxy.calls(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cover_discord_shows_only_later_is_resent_exactly_once() {
+    let r = rig();
+    r.proxy.script.lock().push_back((404, "text/html"));
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(r.discord.activities().len(), 1);
+    assert_eq!(r.proxy.calls(), 1);
+    wait(5.0).await; // 7 s in: the second check worked
+    assert_eq!(r.proxy.calls(), 2);
+    let log = r.proxy.log.lock().clone();
+    assert_eq!(log[1].1 - log[0].1, PROXY_RECHECKS[0]);
+    assert_eq!(r.discord.activities().len(), 1, "the resend waits for the gap");
+    wait(12.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 2, "{acts:?}");
+    assert_eq!(acts[1], acts[0], "the same status again");
+    assert_eq!(acts[1].as_ref().unwrap()["assets"]["large_image"], COVER);
+    wait(70.0).await;
+    assert_eq!(r.discord.activities().len(), 2, "exactly one resend");
+    assert_eq!(r.proxy.calls(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cover_discord_never_shows_falls_back_to_the_app_icon_for_that_play() {
+    let r = rig();
+    // Not an image, a dropped connection, a server error, then not found.
+    r.proxy.script.lock().extend([(200, "text/html"), (0, ""), (503, "text/plain")]);
+    *r.proxy.then.lock() = (404, "text/html");
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], COVER);
+    wait(50.0).await;
+    assert_eq!(r.proxy.calls(), 3);
+    assert_eq!(r.discord.activities().len(), 1);
+    wait(15.0).await; // past the last check, about a minute in
+    assert_eq!(r.proxy.calls(), 4);
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 2, "{acts:?}");
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], APP_ICON);
+    assert_eq!(last(&r.discord).unwrap()["details"], "Song 1");
+    wait(60.0).await;
+    assert_eq!(r.proxy.calls(), 4, "no more checks");
+    assert_eq!(r.discord.activities().len(), 2);
+    // Not remembered as bad: the next play tries the cover again.
+    *r.proxy.then.lock() = (200, "image/jpeg");
+    r.events.send(started(song("1"))).unwrap();
+    wait(16.0).await;
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], COVER);
+    assert_eq!(r.proxy.calls(), 5);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_app_icon_and_a_private_session_are_never_checked() {
+    let r = rig_with(FakeArt::new(ArtOutcome::None), FakeLib::default(), DiscordSettings::default());
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], APP_ICON);
+    assert_eq!(r.proxy.calls(), 0);
+
+    // A cover that recovers while a private session is on isn't resent.
+    let r = rig();
+    r.proxy.script.lock().push_back((404, "text/html"));
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    r.switches.set(DiscordSettings { private_session: true, ..Default::default() });
+    wait(30.0).await;
+    assert_eq!(r.discord.activities().last(), Some(&None));
+    let n = r.discord.activities().len();
+    wait(60.0).await;
+    assert_eq!(r.discord.activities().len(), n, "nothing sent in a private session");
+}
+
 // ---------------------------------------------------------------- covers
 
 struct Mbids(Option<String>, AtomicUsize);
@@ -615,7 +746,7 @@ async fn unreleased_albums_are_never_looked_up_only_uploaded() {
     *c.up.answer.lock() = Some(catbox_ok());
     let demo = ArtRequest { catbox: true, ..demo };
     assert_eq!(c.r.resolve(&demo).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
-    assert!(c.http.urls().is_empty());
+    assert_eq!(c.http.urls(), vec!["https://files.catbox.moe/ab12cd.jpg".to_string()], "only the fresh upload is fetched");
 }
 
 #[tokio::test]
@@ -781,6 +912,43 @@ async fn turning_the_archive_off_skips_its_cached_cover() {
     assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(COVER.into()));
     let off = ArtRequest { use_archive: false, ..req(false) };
     assert_eq!(c.r.resolve(&off).await, ArtOutcome::None);
+}
+
+#[tokio::test]
+async fn a_fresh_upload_is_fetched_once_before_use_and_a_cached_one_is_not() {
+    let c = resolver(None);
+    c.http.route("musicbrainz.org", 200, r#"{"release-groups":[]}"#);
+    *c.up.answer.lock() = Some(catbox_ok());
+    let r = ArtRequest { catbox: true, ..req(false) };
+    assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
+    assert_eq!(c.http.urls().last().unwrap(), "https://files.catbox.moe/ab12cd.jpg");
+    assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
+    assert_eq!(c.http.calls("files.catbox.moe"), 1, "the cached cover isn't fetched again");
+
+    // The same for Imgur, without the client id on the fetch.
+    let c = resolver(None);
+    c.http.route("musicbrainz.org", 200, r#"{"release-groups":[]}"#);
+    c.keys.set(IMGUR_ACCOUNT, &crate::plex::token::Token::new("client123").unwrap()).unwrap();
+    *c.up.answer.lock() = Some(imgur_ok());
+    c.r.resolve(&req(true)).await;
+    c.r.resolve(&req(true)).await;
+    assert_eq!(c.http.calls("i.imgur.com/AbC123.jpg"), 1);
+    let log = c.http.log.lock().clone();
+    let (_, headers) = log.iter().find(|(u, _)| u.contains("i.imgur.com")).unwrap();
+    assert!(headers.is_empty(), "nothing secret on the fetch");
+
+    // A failed fetch changes nothing.
+    let c = resolver(None);
+    c.http.fail("files.catbox.moe");
+    *c.up.answer.lock() = Some(catbox_ok());
+    let r = ArtRequest { catbox: true, use_archive: false, ..req(false) };
+    assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
+
+    // Cover Art Archive covers aren't uploads: never fetched by us.
+    let c = resolver(Some(MBID));
+    c.http.route("coverartarchive.org/release/", 200, r#"{"images":[{"front":true}]}"#);
+    assert_eq!(c.r.resolve(&req(false)).await, ArtOutcome::Url(COVER.into()));
+    assert!(!c.http.urls().iter().any(|u| u.ends_with("front-500")));
 }
 
 #[test]

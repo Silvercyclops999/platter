@@ -116,7 +116,7 @@ pub fn start<R: Runtime>(
 ) -> AppResult<()> {
     let resolver = Arc::new(ArtResolver::new(
         db.clone(),
-        http,
+        http.clone(),
         Arc::new(ReqwestUpload::new()?),
         Arc::new(PlexAlbumMbid(plex)),
         Arc::new(CachedCovers(art)),
@@ -131,6 +131,7 @@ pub fn start<R: Runtime>(
                 art: resolver.clone(),
                 library: Arc::new(AppLibrary { db, share }),
                 status: sink,
+                http,
             };
             // Enter Tauri's runtime so the service's task lands there.
             let _guard = tauri::async_runtime::handle().inner().enter();
