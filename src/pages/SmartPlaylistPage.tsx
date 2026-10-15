@@ -24,12 +24,21 @@ const OP_WORDS: Record<string, string> = {
   notInLast: "not in the last",
 };
 
+/** "30d" -> "30 days", "1y" -> "year". */
+export function spanWords(v: string): string {
+  const m = /^(\d+)(d|w|m|y)$/.exec(v.trim());
+  if (!m) return v;
+  const n = Number(m[1]);
+  const unit = { d: "day", w: "week", m: "month", y: "year" }[m[2] as "d"];
+  return n === 1 ? unit : `${n} ${unit}s`;
+}
+
 /** "Genre is Rock, and Plays over 3". */
 export function rulesLine(r: SmartRules): string {
   if (!r.rules.length) return "Every song in your library";
   const parts = r.rules.map((x) => {
     const label = FIELDS.find((f) => f.value === x.field)?.label ?? x.field;
-    const value = x.value === "true" ? "yes" : x.value === "false" ? "no" : x.value;
+    const value = x.value === "true" ? "yes" : x.value === "false" ? "no" : x.op === "inLast" || x.op === "notInLast" ? spanWords(x.value) : x.value;
     return `${label} ${OP_WORDS[x.op] ?? x.op} ${value}`;
   });
   return parts.join(r.matchAll ? ", and " : ", or ");

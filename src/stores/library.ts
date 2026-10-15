@@ -294,6 +294,7 @@ export function typeLabel(e: Pick<LibEntry, "kind" | "smart" | "format" | "folde
  * artists nothing.
  */
 export function subtitle(e: LibEntry, filtered: boolean): string {
+  if (e.bookmarks) return "Songs and pages";
   if (e.unavailable) return "Not available";
   if (e.folder) return e.folder.count === 1 ? "1 playlist" : `${e.folder.count} playlists`;
   if (filtered) return e.kind === "artist" ? "" : (e.creator ?? "");

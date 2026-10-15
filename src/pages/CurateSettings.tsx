@@ -63,14 +63,20 @@ async function run(f: () => Promise<ScrobbleStatus>, fail: string) {
   }
 }
 
+/** A line under a row's description; `error` lines show as errors. */
+export interface RowNote {
+  text: string;
+  error?: boolean;
+}
+
 /** What the Last.fm row says under its description. */
-export function lastfmNote(st: ScrobbleStatus | null): string | undefined {
+export function lastfmNote(st: ScrobbleStatus | null): RowNote | undefined {
   if (!st) return undefined;
   const l = st.lastfm;
-  if (l.rejected) return "Last.fm signed Platter out. Sign in again; scrobbles wait until you do.";
-  if (!l.hasKey) return "Add your Last.fm API key under Artist info first.";
-  if (l.signedIn) return `Signed in as ${l.user ?? "you"}.${st.queued ? ` ${st.queued} waiting to be sent.` : ""}`;
-  if (l.pending) return "Allow Platter on the Last.fm page that opened, then finish here.";
+  if (l.rejected) return { text: "Last.fm signed Platter out. Sign in again; scrobbles wait until you do.", error: true };
+  if (!l.hasKey) return { text: "Add your Last.fm API key under Artist info first." };
+  if (l.signedIn) return { text: `Signed in as ${l.user ?? "you"}.${st.queued ? ` ${st.queued} waiting to be sent.` : ""}` };
+  if (l.pending) return { text: "Allow Platter on the Last.fm page that opened, then finish here." };
   return undefined;
 }
 
@@ -140,12 +146,12 @@ export function LastfmControl({ ids }: { ids: Ids }) {
   );
 }
 
-export function listenbrainzNote(st: ScrobbleStatus | null): string | undefined {
+export function listenbrainzNote(st: ScrobbleStatus | null): RowNote | undefined {
   if (!st) return undefined;
   const b = st.listenbrainz;
-  if (!b.hasToken) return "Add your ListenBrainz user token under Artist info first.";
-  if (b.rejected) return "ListenBrainz didn't accept your token. Check it under Artist info; scrobbles wait until it works.";
-  if (b.user) return `Sending as ${b.user}.`;
+  if (!b.hasToken) return { text: "Add your ListenBrainz user token under Artist info first." };
+  if (b.rejected) return { text: "ListenBrainz didn't accept your token. Check it under Artist info; scrobbles wait until it works.", error: true };
+  if (b.user) return { text: `Sending as ${b.user}.` };
   return undefined;
 }
 

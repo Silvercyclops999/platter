@@ -195,6 +195,11 @@ export const SOURCE_NOTICES: { name: string; licence: string }[] = [
 // ------------------------------------------------------------------ rows
 
 /** A Settings row note in the error colour (a refused API key). */
+function rowNote(n: { text: string; error?: boolean } | undefined): ReactNode {
+  if (!n) return undefined;
+  return n.error ? errorNote(n.text) : n.text;
+}
+
 function errorNote(text: string | undefined): ReactNode {
   return text ? (
     <span className="info-key__error" role="alert">
@@ -1326,7 +1331,7 @@ export function SettingsPage() {
       title: "Scrobble to Last.fm",
       description:
         "Sends each song you play for more than half its length (or 4 minutes) to your Last.fm profile, and what's playing now. Uses your Last.fm API key and its shared secret, and you sign in on Last.fm's site. Not during a private session.",
-      note: errorNote(lastfmNote(scrobble)),
+      note: rowNote(lastfmNote(scrobble)),
       control: (ids) => <LastfmControl ids={ids} />,
     },
     {
@@ -1335,7 +1340,7 @@ export function SettingsPage() {
       group: "Scrobbling",
       title: "Scrobble to ListenBrainz",
       description: "Sends the same plays to ListenBrainz with your user token. Not during a private session. Plays made offline wait and go out later.",
-      note: errorNote(listenbrainzNote(scrobble)),
+      note: rowNote(listenbrainzNote(scrobble)),
       control: (ids) => <ListenBrainzControl ids={ids} />,
     },
     {
