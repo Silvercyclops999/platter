@@ -61,9 +61,10 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
         "SELECT t.id, t.artist_id, t.artist_title, t.track_artist, t.album_title, t.disc_number, t.track_number,
                 al.year, coalesce(al.added_at, 0), t.view_count, t.last_viewed_at, t.user_rating, t.duration_ms,
                 coalesce(al.section, 'albums'), coalesce(al.genres, '[]'), coalesce(al.styles, '[]'),
-                coalesce(al.moods, '[]'), t.genres, f.explicit, f.version, al.format, coalesce(al.subformats, '[]'), t.title, al.studio, al.matched
+                coalesce(al.moods, '[]'), t.genres, f.explicit, f.version, al.format, coalesce(al.subformats, '[]'), t.title, al.studio, al.matched, mc.found
          FROM tracks t
          LEFT JOIN albums al ON al.id = t.album_id
+         LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
          LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'",
     )?;
     let mut rows = st.query([])?;
@@ -81,7 +82,9 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
         let subformats = json_vec(&r.get::<_, String>(21)?);
         let studio: Option<String> = r.get(23)?;
         let matched: Option<bool> = r.get(24)?;
-        let unreleased = crate::db::release::is_unreleased(format.as_deref(), &subformats, matched, studio.as_deref(), version.as_deref());
+        let mb: Option<bool> = r.get(25)?;
+        let unreleased =
+            crate::db::release::is_unreleased(format.as_deref(), &subformats, matched, studio.as_deref(), version.as_deref(), mb);
         out.push(Row {
             played_here: here.get(&id).copied(),
             id,

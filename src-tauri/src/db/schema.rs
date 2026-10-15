@@ -611,6 +611,19 @@ CREATE TABLE IF NOT EXISTS dupes (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS dupes_canon ON dupes (canon);
 "#,
+    // v23: what MusicBrainz said about albums Plex couldn't match
+    // (artistinfo::releasecheck). found = 1 with the release group and
+    // release ids, 0 when nothing matched. Checked again after expires_at.
+    r#"
+CREATE TABLE IF NOT EXISTS album_mb_check (
+    album_id         TEXT PRIMARY KEY,
+    found            INTEGER NOT NULL,
+    release_group_id TEXT,
+    release_id       TEXT,
+    checked_at       INTEGER NOT NULL,
+    expires_at       INTEGER NOT NULL
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

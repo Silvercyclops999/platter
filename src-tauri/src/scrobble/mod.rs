@@ -194,8 +194,9 @@ impl Unreleased for CacheUnreleased {
         let part = track.part_key.clone();
         let row = self.0.read(move |c| {
             Ok(c.query_row(
-                "SELECT al.format, al.subformats, coalesce(f.version, at.version), al.studio, al.matched FROM albums al
+                "SELECT al.format, al.subformats, coalesce(f.version, at.version), al.studio, al.matched, mc.found FROM albums al
                  LEFT JOIN album_tags at ON at.album_id = al.id
+                 LEFT JOIN album_mb_check mc ON mc.album_id = al.id
                  LEFT JOIN file_tags f ON f.part_key = ?2 AND f.status = 'ok'
                  WHERE al.id = ?1",
                 rusqlite::params![album, part],
@@ -206,15 +207,16 @@ impl Unreleased for CacheUnreleased {
                         r.get::<_, Option<String>>(2)?,
                         r.get::<_, Option<String>>(3)?,
                         r.get::<_, Option<bool>>(4)?,
+                        r.get::<_, Option<bool>>(5)?,
                     ))
                 },
             )
             .optional()?)
         });
         match row {
-            Ok(Some((format, subs, version, studio, matched))) => {
+            Ok(Some((format, subs, version, studio, matched, mb))) => {
                 let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
-                crate::db::release::is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref())
+                crate::db::release::is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb)
             }
             _ => true,
         }

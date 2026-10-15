@@ -1,0 +1,29 @@
+{
+  "id": "cccccccc-1111-4111-8111-000000000001",
+  "title": "Northern Lights",
+  "first-release-date": "2024-03-08",
+  "primary-type": "Album",
+  "releases": [
+    {
+      "id": "eeeeeeee-1111-4111-8111-000000000009",
+      "title": "Northern Lights",
+      "status": "Promotion",
+      "date": "2024-02-01",
+      "media": [{ "position": 1, "format": "Digital Media", "track-count": 12 }]
+    },
+    {
+      "id": "eeeeeeee-1111-4111-8111-000000000001",
+      "title": "Northern Lights",
+      "status": "Official",
+      "date": "2024-03-08",
+      "media": [{ "position": 1, "format": "Digital Media", "track-count": 12 }]
+    },
+    {
+      "id": "eeeeeeee-1111-4111-8111-000000000002",
+      "title": "Northern Lights (Deluxe)",
+      "status": "Official",
+      "date": "2024-09-20",
+      "media": [{ "position": 1, "format": "Digital Media", "track-count": 16 }]
+    }
+  ]
+}

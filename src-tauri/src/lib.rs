@@ -374,6 +374,8 @@ pub fn run() {
             artist_info.set_events(Arc::new(app.handle().clone()));
             // Popular lists for the artists you play, ready before their pages open.
             tauri::async_runtime::spawn(artist_info.clone().watch_prefetch());
+            // Albums Plex couldn't match: ask MusicBrainz whether Plex just missed them.
+            tauri::async_runtime::spawn(artistinfo::releasecheck::watch(artist_info.clone()));
             // Launched at login: start hidden to the tray or minimised.
             let args: Vec<String> = std::env::args().collect();
             platform::apply_start_mode(app.handle(), platform::start_mode(&args, &initial.platform()));
@@ -882,6 +884,7 @@ pub fn run() {
             themes::themes_open_folder,
             artistinfo::commands::artist_info,
             artistinfo::commands::album_credits,
+            artistinfo::commands::album_release_status,
             feed::commands::feed_status,
             artistinfo::commands::artist_info_keys,
             artistinfo::commands::artist_info_key_set,

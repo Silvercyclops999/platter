@@ -14,6 +14,7 @@
 //! - [`listenbrainz`] top recordings and listener stats; [`musicbrainz`]
 //!   artist id by name, artist and release lookups
 //! - [`mbdetails`] parsing MusicBrainz members, relationships and credits
+//! - [`releasecheck`] MusicBrainz release status for albums Plex couldn't match
 //! - [`cache`]    SQLite rows per artist and source (`artist_info` table)
 //! - [`merge`]    what the page shows, from Plex plus the cached sources
 //! - [`service`]  lazy fetch, background refresh, keys, switches
@@ -35,6 +36,7 @@ pub mod listenbrainz;
 pub mod mbdetails;
 pub mod merge;
 pub mod musicbrainz;
+pub mod releasecheck;
 pub mod service;
 pub mod wiki;
 
@@ -42,6 +44,8 @@ pub mod wiki;
 mod tests;
 #[cfg(test)]
 mod mb_tests;
+#[cfg(test)]
+mod releasecheck_tests;
 
 use serde::{Deserialize, Serialize};
 

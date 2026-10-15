@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { mockLyricsKind } from "../lib/mock/details";
-import { mockMatched } from "../lib/mock/fixtures";
+import { mockMatched, mockPlexMissed } from "../lib/mock/fixtures";
 import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { LyricsPane } from "../shell/LyricsView";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -117,7 +117,8 @@ describe("Settings", () => {
     const tracksOf = (match: (a: (typeof mock.fx.albums)[number]) => boolean) =>
       mock.fx.albums.filter(match).reduce((n, a) => n + (mock.fx.tracksByAlbum.get(a.id)?.length ?? 0), 0);
     const demos = tracksOf((a) => a.subformats.includes("demo"));
-    const builds = tracksOf((a) => !mockMatched(a));
+    // Albums Plex couldn't match, less the one MusicBrainz says Plex missed.
+    const builds = tracksOf((a) => !mockMatched(a) && !mockPlexMissed(mock.fx.albums, a));
     expect(builds).toBeGreaterThan(0);
     expect(await mock.transcribeUnreleased()).toBe(demos + builds);
     mock.transcribe.reset();

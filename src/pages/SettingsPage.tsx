@@ -1784,6 +1784,27 @@ export function SettingsPage() {
         "Albums Plex found no match for, which usually have no release type and no label, are treated as unreleased until you tag them. That covers lyrics transcription, sharing, Discord, mixes and smart playlists.",
       control: (ids) => toggle(s, "countUnmatchedUnreleased", ids),
     },
+    {
+      key: "checkUnmatchedMusicbrainz",
+      section: "Library",
+      group: "File tags",
+      title: "Check MusicBrainz for albums Plex couldn't match",
+      description:
+        "Looks each one up on MusicBrainz by artist and title in the background. If MusicBrainz has it, Plex just missed the match and the album counts as released. Albums tagged as demos or unreleased versions are never looked up.",
+      note: s && !s.infoMusicbrainz ? "Turn on MusicBrainz under Artist info to use this." : undefined,
+      control: (ids) =>
+        s ? (
+          <Switch
+            checked={s.infoMusicbrainz && s.checkUnmatchedMusicbrainz}
+            disabled={!s.infoMusicbrainz}
+            onChange={(v) => updateSettings({ checkUnmatchedMusicbrainz: v })}
+            labelledBy={ids.title}
+            describedBy={ids.desc}
+          />
+        ) : (
+          <Skeleton width={40} height={24} radius="pill" />
+        ),
+    },
     // Library: drag and drop
     {
       key: "dragAndDrop",

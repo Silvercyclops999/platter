@@ -4,9 +4,10 @@
 //!
 //! 1. Cover Art Archive, by the album's MusicBrainz release id from Plex
 //!    (only the id is sent).
-//! 2. For a released album without one, a MusicBrainz search by album
-//!    artist and title; only a sure match is taken, and its release group's
-//!    cover on Cover Art Archive is used.
+//! 2. For a released album without one, the ids the release check found
+//!    for an album Plex couldn't match (`artistinfo::releasecheck`), else a
+//!    MusicBrainz search by album artist and title; only a sure match is
+//!    taken, and its release group's cover on Cover Art Archive is used.
 //! 3. Otherwise the 512 px cover is uploaded once and its link kept: to
 //!    Imgur with the user's own client id, else to catbox.moe when that's on.
 //! 4. Otherwise nothing (the activity uses the app icon).
@@ -297,7 +298,18 @@ impl ArtResolver {
     async fn archive(&self, req: &ArtRequest, now: i64) -> AppResult<Option<String>> {
         let mut complete = true;
         let mut url = None;
-        match self.mbids.release_mbid(&req.album_id).await {
+        // Ids the release check found for an album Plex couldn't match.
+        let id = req.album_id.clone();
+        let (stored_group, stored_release) =
+            match self.db.read_async(move |c| crate::artistinfo::releasecheck::found_ids(c, &id)).await {
+                Ok(Some((g, r))) => (Some(g), r),
+                _ => (None, None),
+            };
+        let plex_release = match stored_release {
+            Some(r) => Ok(Some(r)),
+            None => self.mbids.release_mbid(&req.album_id).await,
+        };
+        match plex_release {
             Ok(Some(mbid)) if is_mbid(&mbid) => match self.front(&format!("{CAA}/{mbid}")).await {
                 Ok(u) => url = u,
                 Err(e) => {
@@ -313,7 +325,11 @@ impl ArtResolver {
         }
         if url.is_none() {
             let mb = MusicBrainz { http: self.http.as_ref(), limiter: &self.musicbrainz };
-            match mb.release_group_id(&req.artist, &req.album).await {
+            let group = match stored_group {
+                Some(g) => Ok(Some(g)),
+                None => mb.release_group_id(&req.artist, &req.album).await,
+            };
+            match group {
                 Ok(Some(group)) => match self.front(&format!("{CAA_GROUP}/{group}")).await {
                     Ok(u) => url = u,
                     Err(e) => {

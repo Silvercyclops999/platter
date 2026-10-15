@@ -136,6 +136,49 @@ pub fn release_group_releases_url(rg: &str) -> String {
     format!("{RELEASE_GROUP_API}{rg}?inc=releases+media&fmt=json")
 }
 
+/// How far an official release's track count may be from the library
+/// album's and still be the same album (a bonus track or two).
+pub const TRACK_SLACK: usize = 2;
+
+/// An album MusicBrainz has: its release group and the release that fits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundRelease {
+    pub release_group_id: String,
+    pub release_id: String,
+}
+
+/// The official release in a release group (`inc=releases+media`) whose
+/// track count is closest to `track_count`, within [`TRACK_SLACK`]; the
+/// earliest one on a tie. None when no official release is that close.
+pub fn pick_official_near(v: &Value, track_count: usize) -> Option<String> {
+    let mut best: Option<(usize, String, String)> = None;
+    for r in v.get("releases").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
+        let Some(id) = r.get("id").and_then(Value::as_str).filter(|id| is_mbid(id)) else { continue };
+        let official = r.get("status").and_then(Value::as_str).is_some_and(|s| s.eq_ignore_ascii_case("official"));
+        if !official {
+            continue;
+        }
+        let n: u64 = r
+            .get("media")
+            .and_then(Value::as_array)
+            .map(|ms| ms.iter().filter_map(|m| m.get("track-count").and_then(Value::as_u64)).sum())
+            .unwrap_or(0);
+        let off = (n as usize).abs_diff(track_count);
+        if n == 0 || off > TRACK_SLACK {
+            continue;
+        }
+        let date = r.get("date").and_then(Value::as_str).filter(|d| !d.is_empty()).unwrap_or("9999").to_owned();
+        let better = match &best {
+            None => true,
+            Some((o, d, _)) => (off, &date) < (*o, d),
+        };
+        if better {
+            best = Some((off, date, id.to_owned()));
+        }
+    }
+    best.map(|(_, _, id)| id)
+}
+
 /// An artist with its artist relations (members, subgroups and so on).
 pub fn artist_url(mbid: &str) -> String {
     format!("{API}{mbid}?inc=artist-rels&fmt=json")
@@ -200,6 +243,16 @@ impl MusicBrainz<'_> {
         }
         let v: Value = resp.json().map_err(FetchError::from)?;
         Ok(pick_release_group(&v, artist, title))
+    }
+
+    /// Whether MusicBrainz has an album as an official release: a sure
+    /// release group match (see [`pick_release_group`]) with an official
+    /// release whose track count is within [`TRACK_SLACK`] of ours. Two
+    /// requests at most. `Ok(None)`: no such release.
+    pub async fn release_check(&self, artist: &str, title: &str, track_count: usize) -> Fetch<FoundRelease> {
+        let Some(rg) = self.release_group_id(artist, title).await? else { return Ok(None) };
+        let Some(v) = self.lookup(&release_group_releases_url(&rg)).await? else { return Ok(None) };
+        Ok(pick_official_near(&v, track_count).map(|release_id| FoundRelease { release_group_id: rg, release_id }))
     }
 
     /// `Ok(None)` when there is no exact match.

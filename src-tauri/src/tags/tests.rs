@@ -802,7 +802,7 @@ fn archive_versions_make_shares_and_discord_unreleased() {
     })
     .unwrap();
     let v = db.read(|c| store::track_version(c, "41")).unwrap();
-    assert!(crate::db::release::is_unreleased(Some("album"), &[] as &[&str], Some(true), None, v.as_deref()));
+    assert!(crate::db::release::is_unreleased(Some("album"), &[] as &[&str], Some(true), None, v.as_deref(), None));
     assert_eq!(db.read(|c| store::album_version(c, "1")).unwrap().as_deref(), Some("released"));
     assert_eq!(db.read(|c| store::track_version(c, "42")).unwrap(), None);
 }

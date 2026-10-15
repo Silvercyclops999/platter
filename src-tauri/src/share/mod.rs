@@ -134,8 +134,9 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
         ShareKind::Track => c
             .query_row(
                 "SELECT t.title, t.album_id, t.album_title, t.artist_title, t.track_artist, t.duration_ms,
-                        al.format, al.subformats, ft.version, al.studio, al.matched
+                        al.format, al.subformats, ft.version, al.studio, al.matched, mc.found
                  FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
+                 LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
                  LEFT JOIN file_tags ft ON ft.part_key = t.part_key WHERE t.id = ?1",
                 params![id],
                 |r| {
@@ -146,6 +147,7 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
                     let version: Option<String> = r.get(8)?;
                     let studio: Option<String> = r.get(9)?;
                     let matched: Option<bool> = r.get(10)?;
+                    let mb: Option<bool> = r.get(11)?;
                     Ok(Item::Track {
                         song: SongQuery {
                             artist: track_artist.filter(|a| !a.trim().is_empty()).unwrap_or_else(|| album_artist.clone()),
@@ -155,15 +157,16 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
                             duration_ms: r.get(5)?,
                         },
                         album_id: r.get(1)?,
-                        unreleased: is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref()),
+                        unreleased: is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb),
                     })
                 },
             )
             .optional()?,
         ShareKind::Album => c
             .query_row(
-                "SELECT al.title, al.artist_title, al.track_count, al.format, al.subformats, at.version, al.studio, al.matched
-                 FROM albums al LEFT JOIN album_tags at ON at.album_id = al.id WHERE al.id = ?1",
+                "SELECT al.title, al.artist_title, al.track_count, al.format, al.subformats, at.version, al.studio, al.matched, mc.found
+                 FROM albums al LEFT JOIN album_tags at ON at.album_id = al.id
+                 LEFT JOIN album_mb_check mc ON mc.album_id = al.id WHERE al.id = ?1",
                 params![id],
                 |r| {
                     let format: Option<String> = r.get(3)?;
@@ -171,9 +174,10 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
                     let version: Option<String> = r.get(5)?;
                     let studio: Option<String> = r.get(6)?;
                     let matched: Option<bool> = r.get(7)?;
+                    let mb: Option<bool> = r.get(8)?;
                     Ok(Item::Album {
                         album: AlbumQuery { title: r.get(0)?, artist: r.get(1)?, track_count: r.get(2)? },
-                        unreleased: is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref()),
+                        unreleased: is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb),
                     })
                 },
             )

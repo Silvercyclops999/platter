@@ -1,0 +1,33 @@
+{
+  "created": "2026-10-14T12:00:00.000Z",
+  "count": 2,
+  "offset": 0,
+  "release-groups": [
+    {
+      "id": "cccccccc-1111-4111-8111-000000000001",
+      "type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+      "score": 100,
+      "primary-type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+      "count": 2,
+      "title": "Northern Lights",
+      "first-release-date": "2024-03-08",
+      "primary-type": "Album",
+      "artist-credit": [
+        {
+          "name": "Rue Ellis",
+          "artist": { "id": "dddddddd-1111-4111-8111-000000000001", "name": "Rue Ellis", "sort-name": "Ellis, Rue" }
+        }
+      ],
+      "releases": [
+        { "id": "eeeeeeee-1111-4111-8111-000000000001", "status-id": "4e304316-386d-3409-af2e-78857eec5cfe", "title": "Northern Lights", "status": "Official" }
+      ]
+    },
+    {
+      "id": "cccccccc-1111-4111-8111-000000000002",
+      "score": 64,
+      "title": "Northern Lights (Live)",
+      "primary-type": "Album",
+      "artist-credit": [{ "name": "Rue Ellis", "artist": { "id": "dddddddd-1111-4111-8111-000000000001", "name": "Rue Ellis" } }]
+    }
+  ]
+}

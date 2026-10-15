@@ -35,3 +35,26 @@
 .album-credits__people { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin: 0; padding: 0; list-style: none; font-size: var(--font-size-sm); }
 .album-credits__people li:not(:last-child)::after { content: ","; color: var(--color-text-secondary); }
 .album-credits__source { margin-top: var(--space-4); font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+
+/* "Probably unreleased" / "Released, Plex missed it" label with its "Why?". */
+.release-status { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); }
+.release-status__why { font-size: var(--font-size-xs); color: var(--color-text-secondary); text-decoration: underline; }
+.release-status__why:hover { color: var(--color-text-primary); }
+.release-status__popover {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 50;
+  width: 300px;
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-overlay);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px color-mix(in srgb, var(--color-ink) 6%, transparent);
+  animation: rise-in var(--motion-fast) var(--motion-easing);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  user-select: text;
+}
+.release-status__title { display: block; margin-bottom: var(--space-2); font-size: var(--font-size-md); }
+.release-status__reasons { display: grid; gap: var(--space-1); margin: 0; padding-left: var(--space-4); color: var(--color-text-secondary); }
+.release-status__hint { margin-top: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-secondary); }

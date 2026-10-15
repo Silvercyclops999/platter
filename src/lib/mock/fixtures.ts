@@ -2,7 +2,7 @@
  * Invented fixture library for the mock backend. Every name here is made up.
  * Generation is deterministic (seeded PRNG) so screenshots and tests are stable.
  */
-import type { Album, Artist, Playlist, ReleaseSection, Track } from "../types";
+import type { Album, AlbumReleaseStatus, Artist, Playlist, ReleaseSection, ReleaseStatus, Settings, Track } from "../types";
 
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -171,10 +171,44 @@ export function mockMatched(a: Album): boolean {
   return a.format !== null || a.subformats.length > 0;
 }
 
-/** The app's one unreleased rule, as the mock sees it. */
-export function mockUnreleased(a: Album, countUnmatched: boolean): boolean {
+/**
+ * An album Plex couldn't match that MusicBrainz has anyway ("Plex missed
+ * it"). In the mock it's the last unmatched album.
+ */
+export function mockPlexMissed(albums: Album[], a: Album): boolean {
+  if (mockMatched(a)) return false;
+  for (let i = albums.length - 1; i >= 0; i--) if (!mockMatched(albums[i])) return albums[i].id === a.id;
+  return false;
+}
+
+/** Whether the MusicBrainz check's answers count (its setting with MusicBrainz on). */
+export function mockMbCheckOn(s: Partial<Settings>): boolean {
+  return s.checkUnmatchedMusicbrainz !== false && s.infoMusicbrainz !== false;
+}
+
+/**
+ * The app's one unreleased rule, as the mock sees it. `plexMissed`: the
+ * MusicBrainz check found the release (and its answers count).
+ */
+export function mockUnreleased(a: Album, countUnmatched: boolean, plexMissed = false): boolean {
   if (a.format?.includes("demo") || a.subformats.some((s) => s.includes("demo"))) return true;
+  if (plexMissed) return false;
   return countUnmatched && !mockMatched(a);
+}
+
+/** `album_release_status` in the mock. */
+export function mockReleaseStatus(albums: Album[], a: Album, s: Partial<Settings>): AlbumReleaseStatus {
+  const why = (status: ReleaseStatus, reasons: string[]) => ({ id: a.id, status, reasons });
+  if (a.format?.includes("demo") || a.subformats.some((x) => x.includes("demo"))) {
+    return why("taggedUnreleased", ["Its release type is tagged as a demo."]);
+  }
+  if (mockMatched(a)) return why("released", []);
+  const base = ["Plex couldn't match it to a known release.", "Nothing in its tags says what kind of release it is."];
+  if (mockMbCheckOn(s) && mockPlexMissed(albums, a)) {
+    return why("plexMissed", [...base, "MusicBrainz has an official release with the same artist, title and about as many songs."]);
+  }
+  if (s.countUnmatchedUnreleased === false) return why("released", []);
+  return why("probablyUnreleased", mockMbCheckOn(s) ? [...base, "MusicBrainz has no release by this artist with this title."] : base);
 }
 
 export const BROKEN_TRACK_TITLE_SUFFIX = " (corrupt rip)";

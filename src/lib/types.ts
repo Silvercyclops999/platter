@@ -786,6 +786,8 @@ export interface Settings {
   showFanEdits: boolean;
   /** Albums Plex couldn't match count as unreleased until they're tagged. */
   countUnmatchedUnreleased: boolean;
+  /** Look albums Plex couldn't match up on MusicBrainz (needs MusicBrainz on). */
+  checkUnmatchedMusicbrainz: boolean;
   /** Albums sharing a group tag show as one card with an edition picker. */
   groupEditions: boolean;
   /** Drag songs, albums and playlists onto playlists, Liked Songs and the queue. */
@@ -1044,6 +1046,7 @@ export const DEFAULT_SETTINGS: Settings = {
   explicitContent: "allowed",
   showFanEdits: false,
   countUnmatchedUnreleased: true,
+  checkUnmatchedMusicbrainz: true,
   groupEditions: true,
   dragAndDrop: true,
   transcribeLyrics: false,
@@ -1724,6 +1727,21 @@ export interface AlbumCreditRow {
   roles: string[];
 }
 
+/**
+ * Whether an album counts as released. taggedUnreleased: a demo release type
+ * or an unreleased version tag. probablyUnreleased: Plex couldn't match it and
+ * nothing is tagged. plexMissed: Plex couldn't match it but MusicBrainz has it.
+ */
+export type ReleaseStatus = "taggedUnreleased" | "probablyUnreleased" | "plexMissed" | "released";
+
+/** `album_release_status`; `releasestatus://changed` fires when it changes. */
+export interface AlbumReleaseStatus {
+  id: string;
+  status: ReleaseStatus;
+  /** Plain sentences for "Why?". */
+  reasons: string[];
+}
+
 /** An album's original release date, label and credits from MusicBrainz. */
 export interface AlbumCredits {
   albumId: string;
@@ -1879,6 +1897,7 @@ export interface EventMap {
   "artistinfo://popular": { id: string };
   /** An album's MusicBrainz credits were looked up (found or not). */
   "albumcredits://changed": { id: string };
+  "releasestatus://changed": { id: string };
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

@@ -968,3 +968,55 @@ fn an_empty_build_time_id_means_unavailable() {
         assert!(id.bytes().all(|b| b.is_ascii_digit()));
     }
 }
+
+#[tokio::test]
+async fn an_album_plex_missed_gets_the_cover_of_the_release_the_check_found() {
+    use crate::artistinfo::musicbrainz::FoundRelease;
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("d.db")).unwrap();
+    db.write(|c| {
+        c.execute(
+            "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, matched)
+             VALUES ('al1', 'Record (Deluxe Edition)', 'Record', 'a1', 'Band', 0)",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    // Unmatched and unchecked: probably unreleased, so only ever uploaded.
+    assert_eq!(db.read(|c| super::commands::album_unreleased(c, "al1")).unwrap(), Some(true));
+    db.write(|c| {
+        let found = FoundRelease { release_group_id: GROUP.into(), release_id: MBID.into() };
+        crate::artistinfo::releasecheck::put(c, "al1", Some(&found), crate::db::queries::now_s())
+    })
+    .unwrap();
+    // Found on MusicBrainz: the one rule says released.
+    assert_eq!(db.read(|c| super::commands::album_unreleased(c, "al1")).unwrap(), Some(false));
+
+    let http = Arc::new(FakeHttp::new());
+    let mbids = Arc::new(Mbids(None, AtomicUsize::new(0)));
+    let r = ArtResolver::new(
+        db.clone(),
+        http.clone(),
+        Arc::new(FakeUpload::default()),
+        mbids.clone(),
+        Arc::new(Covers),
+        Arc::new(MemoryStore::new()),
+    )
+    .with_musicbrainz_limiter(Arc::new(crate::artistinfo::limit::Limiter::per_second(1000.0)));
+    http.route("coverartarchive.org/release/", 200, r#"{"images":[{"front":true}]}"#);
+    assert_eq!(r.resolve(&req(false)).await, ArtOutcome::Url(COVER.into()), "the stored release's cover");
+    assert_eq!(http.calls("musicbrainz.org"), 0, "no new search");
+    assert_eq!(mbids.1.load(Ordering::SeqCst), 0, "Plex isn't asked for an id it doesn't have");
+
+    // No cover for that release: the stored release group's.
+    db.write(|c| {
+        c.execute("DELETE FROM discord_art", [])?;
+        Ok(())
+    })
+    .unwrap();
+    http.route("coverartarchive.org/release/", 404, "Not Found");
+    http.route("coverartarchive.org/release-group/", 200, r#"{"images":[{"front":true}]}"#);
+    assert_eq!(r.resolve(&req(false)).await, ArtOutcome::Url(GROUP_COVER.into()));
+    assert_eq!(http.calls("musicbrainz.org"), 0);
+}

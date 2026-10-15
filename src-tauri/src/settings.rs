@@ -367,6 +367,9 @@ pub struct Settings {
     /// Albums Plex couldn't match count as unreleased until they're tagged
     /// (off: only demo release types and archive version tags do).
     pub count_unmatched_unreleased: bool,
+    /// Look albums Plex couldn't match up on MusicBrainz: a match means Plex
+    /// missed it and the album is released (needs MusicBrainz on).
+    pub check_unmatched_musicbrainz: bool,
     /// Albums sharing ARCHIVE_GROUP show as one card with an edition picker.
     pub group_editions: bool,
     /// Drag songs, albums and playlists onto playlists, Liked Songs and the queue.
@@ -570,6 +573,7 @@ impl Default for Settings {
             explicit_content: ExplicitContent::Allowed,
             show_fan_edits: false,
             count_unmatched_unreleased: true,
+            check_unmatched_musicbrainz: true,
             group_editions: true,
             drag_and_drop: true,
             transcribe_lyrics: false,
@@ -679,6 +683,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "explicitContent",
     "showFanEdits",
     "countUnmatchedUnreleased",
+    "checkUnmatchedMusicbrainz",
     "groupEditions",
     "dragAndDrop",
     "showAutoLyrics",
@@ -860,6 +865,7 @@ pub struct SettingsPatch {
     pub explicit_content: Option<ExplicitContent>,
     pub show_fan_edits: Option<bool>,
     pub count_unmatched_unreleased: Option<bool>,
+    pub check_unmatched_musicbrainz: Option<bool>,
     pub group_editions: Option<bool>,
     pub drag_and_drop: Option<bool>,
     pub transcribe_lyrics: Option<bool>,
@@ -933,6 +939,7 @@ impl SettingsPatch {
             || self.explicit_content.is_some()
             || self.show_fan_edits.is_some()
             || self.count_unmatched_unreleased.is_some()
+            || self.check_unmatched_musicbrainz.is_some()
             || self.liked_means.is_some()
     }
 
@@ -1059,6 +1066,7 @@ impl Settings {
         set(&mut self.explicit_content, p.explicit_content);
         set(&mut self.show_fan_edits, p.show_fan_edits);
         set(&mut self.count_unmatched_unreleased, p.count_unmatched_unreleased);
+        set(&mut self.check_unmatched_musicbrainz, p.check_unmatched_musicbrainz);
         set(&mut self.group_editions, p.group_editions);
         set(&mut self.drag_and_drop, p.drag_and_drop);
         set(&mut self.transcribe_lyrics, p.transcribe_lyrics);
@@ -1421,6 +1429,8 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.discord.set(s.discord());
     db.set_tag_view(s.tag_view());
     crate::db::release::set_count_unmatched(s.count_unmatched_unreleased);
+    // Stored answers keep counting while offline; only new lookups stop.
+    crate::db::release::set_use_musicbrainz(s.check_unmatched_musicbrainz && s.info_musicbrainz);
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
         scan.set_enabled(s.read_file_tags);
     }
@@ -1948,11 +1958,45 @@ mod tests {
         s.apply(&patch).unwrap();
         publish(&s, &live, &db);
         assert!(!crate::db::release::count_unmatched());
-        assert!(!crate::db::release::is_unreleased(None, &[] as &[&str], Some(false), None, None));
+        assert!(!crate::db::release::is_unreleased(None, &[] as &[&str], Some(false), None, None, None));
         assert_eq!(serde_json::to_value(&s).unwrap()["countUnmatchedUnreleased"], false);
         s.apply(&SettingsPatch { count_unmatched_unreleased: Some(true), ..Default::default() }).unwrap();
         publish(&s, &live, &db);
         assert!(crate::db::release::count_unmatched());
+    }
+
+    #[test]
+    fn musicbrainz_check_setting_follows_musicbrainz() {
+        use crate::db::release::{ReleaseStatus, release_status, use_musicbrainz};
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = Settings::default();
+        assert!(s.check_unmatched_musicbrainz, "on by default");
+        assert!(SYNCED_SETTINGS.contains(&"checkUnmatchedMusicbrainz"));
+        publish(&s, &live, &db);
+        assert!(use_musicbrainz());
+        let found = || release_status(None, &[] as &[&str], Some(false), None, None, Some(true)).0;
+        assert_eq!(found(), ReleaseStatus::PlexMissed);
+        // Off: MusicBrainz answers stop counting.
+        let patch = SettingsPatch { check_unmatched_musicbrainz: Some(false), ..Default::default() };
+        assert!(patch.touches_mixes());
+        s.apply(&patch).unwrap();
+        publish(&s, &live, &db);
+        assert!(!use_musicbrainz());
+        assert_eq!(found(), ReleaseStatus::ProbablyUnreleased);
+        assert_eq!(serde_json::to_value(&s).unwrap()["checkUnmatchedMusicbrainz"], false);
+        // On again, but MusicBrainz itself off: still off.
+        s.apply(&SettingsPatch { check_unmatched_musicbrainz: Some(true), info_musicbrainz: Some(false), ..Default::default() })
+            .unwrap();
+        publish(&s, &live, &db);
+        assert!(!use_musicbrainz());
+        s.apply(&SettingsPatch { info_musicbrainz: Some(true), ..Default::default() }).unwrap();
+        publish(&s, &live, &db);
+        assert!(use_musicbrainz());
+        // Going offline keeps stored answers counting.
+        s.apply(&SettingsPatch { go_offline: Some(true), ..Default::default() }).unwrap();
+        publish(&s, &live, &db);
+        assert!(use_musicbrainz());
     }
 
     #[test]

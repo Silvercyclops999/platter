@@ -83,7 +83,18 @@ import { mockArtUrl } from "./art";
 import { mockLyrics, mockNowPlayingDetails } from "./details";
 import { lyricsFromText } from "../lrc";
 import { credits, globalTop, popularTracks, rankPopular } from "./popular";
-import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mockMatched, mockUnreleased, mulberry32, type Fixtures } from "./fixtures";
+import {
+  BROKEN_TRACK_TITLE_SUFFIX,
+  LEARNED_NAMES,
+  buildFixtures,
+  mockMatched,
+  mockMbCheckOn,
+  mockPlexMissed,
+  mockReleaseStatus,
+  mockUnreleased,
+  mulberry32,
+  type Fixtures,
+} from "./fixtures";
 import { mockBio } from "./bio";
 import { MOCK_CLOUD_FOLDERS, MockSync } from "./sync";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
@@ -351,7 +362,13 @@ export class MockBackend implements Backend {
       albumTracks: (albumId) => (this.fx.tracksByAlbum.get(albumId) ?? []).map((t) => t.id).filter((id) => !this.own.has(id)),
       unreleasedTracks: () =>
         this.fx.albums
-          .filter((a) => mockUnreleased(a, this.settings.countUnmatchedUnreleased !== false))
+          .filter((a) =>
+            mockUnreleased(
+              a,
+              this.settings.countUnmatchedUnreleased !== false,
+              mockMbCheckOn(this.settings) && mockPlexMissed(this.fx.albums, a),
+            ),
+          )
           .flatMap((a) => this.fx.tracksByAlbum.get(a.id) ?? [])
           .map((t) => t.id)
           .filter((id) => !this.own.has(id)),
@@ -2090,6 +2107,12 @@ export class MockBackend implements Backend {
         return { ...answer, state: "pending" as const, released: null, editionDate: null, label: null, credits: [], tracks: [], url: null };
       }
       return answer;
+    });
+  }
+  albumReleaseStatus(id: string) {
+    return this.delay(() => {
+      const album = this.fx.albums.find((a) => a.id === id) ?? this.notFound("Album");
+      return mockReleaseStatus(this.fx.albums, album, this.settings);
     });
   }
   artistInfoKeys() {

@@ -42,6 +42,33 @@ impl CoverBytes for CachedCovers {
     }
 }
 
+/// Whether a cached album counts as unreleased by the one rule (None: not
+/// in the cache).
+pub fn album_unreleased(c: &rusqlite::Connection, id: &str) -> AppResult<Option<bool>> {
+    let row = c
+        .query_row(
+            "SELECT al.format, al.subformats, at.version, al.studio, al.matched, mc.found FROM albums al
+             LEFT JOIN album_tags at ON at.album_id = al.id
+             LEFT JOIN album_mb_check mc ON mc.album_id = al.id WHERE al.id = ?1",
+            params![id],
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<bool>>(4)?,
+                    r.get::<_, Option<bool>>(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    Ok(row.map(|(format, subs, version, studio, matched, mb)| {
+        let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
+        is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb)
+    }))
+}
+
 /// Unreleased checks from the library cache; links from sharing.
 pub struct AppLibrary {
     pub db: DbHandle,
@@ -52,36 +79,8 @@ pub struct AppLibrary {
 impl Library for AppLibrary {
     async fn unreleased(&self, album_id: &str) -> bool {
         let id = album_id.to_owned();
-        let row = self
-            .db
-            .read_async(move |c| {
-                Ok(c.query_row(
-                    "SELECT al.format, al.subformats, at.version, al.studio, al.matched FROM albums al
-                     LEFT JOIN album_tags at ON at.album_id = al.id WHERE al.id = ?1",
-                    params![id],
-                    |r| {
-                        Ok((
-                            r.get::<_, Option<String>>(0)?,
-                            r.get::<_, Option<String>>(1)?,
-                            r.get::<_, Option<String>>(2)?,
-                            r.get::<_, Option<String>>(3)?,
-                            r.get::<_, Option<bool>>(4)?,
-                        ))
-                    },
-                )
-                .optional()?)
-            })
-            .await
-            .ok()
-            .flatten();
-        match row {
-            Some((format, subs, version, studio, matched)) => {
-                let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
-                is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref())
-            }
-            // Not in the cache: treat as unreleased, the cautious choice.
-            None => true,
-        }
+        // Not in the cache: treat as unreleased, the cautious choice.
+        self.db.read_async(move |c| album_unreleased(c, &id)).await.ok().flatten().unwrap_or(true)
     }
 
     async fn song_link(&self, track_id: &str) -> Option<String> {

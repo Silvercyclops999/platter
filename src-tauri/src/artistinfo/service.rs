@@ -110,6 +110,8 @@ pub trait InfoEvents: Send + Sync {
     fn popular_done(&self, _id: &str) {}
     /// An album's MusicBrainz credits were looked up (found or not).
     fn album_credits_changed(&self, _album_id: &str) {}
+    /// The MusicBrainz release check changed an album's release status.
+    fn release_status_changed(&self, _album_id: &str) {}
 }
 
 impl<R: tauri::Runtime> InfoEvents for tauri::AppHandle<R> {
@@ -131,6 +133,13 @@ impl<R: tauri::Runtime> InfoEvents for tauri::AppHandle<R> {
         use tauri::Emitter;
         if let Err(e) = self.emit("albumcredits://changed", serde_json::json!({ "id": album_id })) {
             tracing::warn!("emit albumcredits://changed: {e}");
+        }
+    }
+
+    fn release_status_changed(&self, album_id: &str) {
+        use tauri::Emitter;
+        if let Err(e) = self.emit("releasestatus://changed", serde_json::json!({ "id": album_id })) {
+            tracing::warn!("emit releasestatus://changed: {e}");
         }
     }
 }
@@ -351,6 +360,15 @@ impl ArtistInfoService {
     /// The MusicBrainz pacing, for other lookups that ask MusicBrainz.
     pub fn musicbrainz_limiter(&self) -> Arc<Limiter> {
         self.inner.limits.musicbrainz.clone()
+    }
+
+    /// The library cache (the release status check keeps its answers there).
+    pub fn db(&self) -> &DbHandle {
+        &self.inner.db
+    }
+
+    pub(crate) fn events(&self) -> Option<Arc<dyn InfoEvents>> {
+        self.inner.events.lock().clone()
     }
 
     // ------------------------------------------------------------ keys
@@ -1070,8 +1088,8 @@ pub struct AlbumSubject {
 pub fn album_subject(c: &Connection, id: &str) -> AppResult<Option<AlbumSubject>> {
     let row = c
         .query_row(
-            "SELECT al.title, al.artist_title, al.format, al.subformats, at.version, al.matched, al.studio FROM albums al
-             LEFT JOIN album_tags at ON at.album_id = al.id WHERE al.id = ?1",
+            "SELECT al.title, al.artist_title, al.format, al.subformats, at.version, al.matched, al.studio, mc.found FROM albums al
+             LEFT JOIN album_tags at ON at.album_id = al.id LEFT JOIN album_mb_check mc ON mc.album_id = al.id WHERE al.id = ?1",
             [id],
             |r| {
                 Ok((
@@ -1082,13 +1100,15 @@ pub fn album_subject(c: &Connection, id: &str) -> AppResult<Option<AlbumSubject>
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, Option<bool>>(5)?,
                     r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<bool>>(7)?,
                 ))
             },
         )
         .optional()?;
-    let Some((title, artist, format, subformats, version, matched, studio)) = row else { return Ok(None) };
+    let Some((title, artist, format, subformats, version, matched, studio, mb)) = row else { return Ok(None) };
     let subformats: Vec<String> = subformats.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    let unreleased = crate::db::release::is_unreleased(format.as_deref(), &subformats, matched, studio.as_deref(), version.as_deref());
+    let unreleased =
+        crate::db::release::is_unreleased(format.as_deref(), &subformats, matched, studio.as_deref(), version.as_deref(), mb);
     let mut stmt = c.prepare_cached(
         "SELECT id, title, disc_number, track_number FROM tracks WHERE album_id = ?1 ORDER BY disc_number, track_number",
     )?;

@@ -313,6 +313,7 @@ in that order (the page's sort or filter).
 | --- | --- | --- |
 | `artist_info` | `{ id }` | `ArtistInfo` |
 | `album_credits` | `{ id }` (album) | `AlbumCredits` |
+| `album_release_status` | `{ id }` (album) | `AlbumReleaseStatus` |
 | `artist_info_keys` | – | `{ lastfm, fanart, audiodb, listenbrainz: { saved, rejected } }` |
 | `artist_info_key_set` | `{ source: "lastfm"|"fanart"|"audiodb"|"listenbrainz", key: string|null }` | `{ saved, rejected }` |
 | `artist_info_cache_clear` | – | number of artists that had cached info |
@@ -349,6 +350,27 @@ their songs in `tracks` (matched to library tracks by disc and position, else
 by title). Unreleased albums are never looked up (`none`). MusicBrainz is
 asked at most once a second with a user agent that names the app; a failed
 lookup waits ten minutes before it's tried again.
+
+`AlbumReleaseStatus = { id, status: "taggedUnreleased"|"probablyUnreleased"|"plexMissed"|"released", reasons: string[] }`.
+`reasons` are plain sentences for the album page's "Why?". Tags decide
+first: a demo release type or an unreleased `ARCHIVE_VERSION` is
+`taggedUnreleased`, and any other release type or version tag is
+`released`. An album Plex couldn't match with no tags is
+`probablyUnreleased` (while `countUnmatchedUnreleased` is on), unless the
+MusicBrainz check found it, which makes it `plexMissed`, a released album.
+
+The MusicBrainz check (`checkUnmatchedMusicbrainz`, needs MusicBrainz on)
+runs in the background after each library sync. For each album Plex couldn't
+match that has no release type and no version tag on the album or its files,
+it searches release groups by artist and title (edition notes like
+"(Deluxe)" left out) and takes a sure match only: score 100, the same folded
+title and the same artists, and an official release in the group whose track
+count is within 2 of the album's. Found answers are kept 30 days, misses 7
+days, in `album_mb_check`. It shares the one-a-second MusicBrainz pacing and
+pauses after each album so page lookups go first. A found album's release ids
+give Discord its Cover Art Archive cover, and a cover uploaded while it
+counted as unreleased is forgotten. `releasestatus://changed` fires with
+`{ id }` when an album's answer changes.
 
 `bio` is Plex's summary when it is longer than 300 characters, else the
 first of Wikipedia, Last.fm and TheAudioDB with more text than Plex has, else
@@ -418,7 +440,8 @@ the id as the app keeps it, with its tag.
 
 `public` says whether `share_public_link` can work: `unreleased` for music
 whose album release type is a demo, whose `ARCHIVE_VERSION` says so, or whose
-album Plex couldn't match (see `countUnmatchedUnreleased`; the one rule lives
+album Plex couldn't match and MusicBrainz doesn't have (see `countUnmatchedUnreleased`
+and `album_release_status`; the one rule lives
 in `db::release::is_unreleased`), `off` when the
 `sharePublicLinks` setting is off, `none` for artists and playlists.
 
@@ -1639,6 +1662,7 @@ The rest of the fields, with their defaults:
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |
 | `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |
 | `countUnmatchedUnreleased` | bool, true | Albums Plex couldn't match (guid `local://`, or no release type and no label before the next sync) count as unreleased for sharing, Discord, scrobbling, mixes, smart playlists and lyrics transcription until a release type or `ARCHIVE_VERSION` says otherwise. Off: only demo release types and archive version tags count. |
+| `checkUnmatchedMusicbrainz` | bool, true | Look albums Plex couldn't match up on MusicBrainz in the background (needs `infoMusicbrainz`). A sure match means Plex missed it and the album counts as released. Off, or with MusicBrainz off, stored answers stop counting. Synced. |
 | `groupEditions` | bool, true | Albums sharing `ARCHIVE_GROUP` list as one album (the face) in the library, artist pages and Home's album shelves. |
 | `dragAndDrop` | bool, true | Songs, albums and playlists can be dragged onto playlists, Liked Songs and the queue. Off stops those drags; reordering inside a playlist or the queue still works. |
 | `showToMyDevices` | bool, true | Announce this computer to the user's other Platter computers, open the control port and publish its addresses to plex.tv. Off withdraws the announcement and closes the port. Independent of `actAsPlexPlayer`. This device only. |

@@ -62,8 +62,9 @@ pub fn album_tracks(c: &Connection, album_id: &str) -> AppResult<Vec<String>> {
 /// match) that still need doing.
 pub fn unreleased_todo(c: &Connection) -> AppResult<Vec<String>> {
     let mut st = c.prepare(
-        "SELECT t.id, al.format, al.subformats, ft.version, al.studio, al.matched FROM tracks t
+        "SELECT t.id, al.format, al.subformats, ft.version, al.studio, al.matched, mc.found FROM tracks t
          LEFT JOIN albums al ON al.id = t.album_id
+         LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
          LEFT JOIN file_tags ft ON ft.part_key = t.part_key
          WHERE NOT EXISTS (SELECT 1 FROM user_lyrics u WHERE u.track_id = t.id)
            AND NOT EXISTS (SELECT 1 FROM lyrics_auto_empty e WHERE e.track_id = t.id)
@@ -77,13 +78,14 @@ pub fn unreleased_todo(c: &Connection) -> AppResult<Vec<String>> {
             r.get::<_, Option<String>>(3)?,
             r.get::<_, Option<String>>(4)?,
             r.get::<_, Option<bool>>(5)?,
+            r.get::<_, Option<bool>>(6)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, format, subs, version, studio, matched) = row?;
+        let (id, format, subs, version, studio, matched, mb) = row?;
         let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
-        if crate::db::release::is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref()) {
+        if crate::db::release::is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb) {
             out.push(id);
         }
     }

@@ -27,6 +27,7 @@ import { transcribe, useTranscribe } from "../stores/transcribe";
 import { AlbumCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { EditionPicker } from "./EditionPicker";
+import { ReleaseStatusLabel, useReleaseStatus } from "./ReleaseStatusLabel";
 import {
   ALBUM_VIEW_LABEL,
   albumCreditGroups,
@@ -51,6 +52,7 @@ export function AlbumPage({ id }: { id: string }) {
   const pinned = usePins((s) => s.isPinned("album", id));
   const transcribeOn = useTranscribe((s) => !!s.status?.enabled && s.status.available);
   const mb = useAlbumCredits(album ? id : null);
+  const releaseStatus = useReleaseStatus(album ? id : null);
   const play = () => (isContext ? player.toggle() : player.playAlbum(id));
   usePageBar(album?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(album?.title);
@@ -118,6 +120,7 @@ export function AlbumPage({ id }: { id: string }) {
                     Untagged
                   </Badge>
                 )}
+                <ReleaseStatusLabel status={releaseStatus} />
                 {album.genres.slice(0, 2).map((g) => (
                   <Badge key={g}>{g}</Badge>
                 ))}
