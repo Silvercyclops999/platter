@@ -1070,7 +1070,7 @@ pub struct AlbumSubject {
 pub fn album_subject(c: &Connection, id: &str) -> AppResult<Option<AlbumSubject>> {
     let row = c
         .query_row(
-            "SELECT al.title, al.artist_title, al.format, al.subformats, at.version FROM albums al
+            "SELECT al.title, al.artist_title, al.format, al.subformats, at.version, al.matched, al.studio FROM albums al
              LEFT JOIN album_tags at ON at.album_id = al.id WHERE al.id = ?1",
             [id],
             |r| {
@@ -1080,13 +1080,15 @@ pub fn album_subject(c: &Connection, id: &str) -> AppResult<Option<AlbumSubject>
                     r.get::<_, Option<String>>(2)?,
                     r.get::<_, Option<String>>(3)?,
                     r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<bool>>(5)?,
+                    r.get::<_, Option<String>>(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some((title, artist, format, subformats, version)) = row else { return Ok(None) };
+    let Some((title, artist, format, subformats, version, matched, studio)) = row else { return Ok(None) };
     let subformats: Vec<String> = subformats.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    let unreleased = crate::db::release::is_unreleased(format.as_deref(), &subformats, version.as_deref());
+    let unreleased = crate::db::release::is_unreleased(format.as_deref(), &subformats, matched, studio.as_deref(), version.as_deref());
     let mut stmt = c.prepare_cached(
         "SELECT id, title, disc_number, track_number FROM tracks WHERE album_id = ?1 ORDER BY disc_number, track_number",
     )?;
