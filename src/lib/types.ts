@@ -551,6 +551,25 @@ export interface ToastEvent {
 export type StreamQuality = "original" | "320" | "256" | "192" | "128";
 export type PopularSource = "global" | "myPlays";
 export type ReduceMotion = "system" | "on" | "off";
+
+/** The Theme setting: a built-in theme, or follow the computer's light or dark mode. */
+export type ThemeSetting = "dark" | "light" | "system" | "midnight" | "forest" | "sand";
+
+/** A theme file that passed the checks (also what the `themeFile` setting holds). */
+export interface ThemeFile {
+  /** The file's name in the themes folder. */
+  file: string;
+  name: string;
+  base: "dark" | "light";
+  tokens: Record<string, string>;
+}
+
+/** The themes folder: the theme files in it, and the ones that can't be used. */
+export interface ThemeFolder {
+  folder: string;
+  themes: ThemeFile[];
+  invalid: { file: string; reason: string }[];
+}
 /** Which Plex star ratings count as liked ("five": rating 10; "fourUp": 8 and up). */
 export type LikedMeans = "five" | "fourUp";
 /** When track rows show the like control. */
@@ -803,6 +822,12 @@ export interface Settings {
   nowPlayingFeed: boolean;
   /** The feed's port, 1024 to 65535 (this device only). */
   nowPlayingFeedPort: number;
+  /** Dark, Light, Match system, or another built-in theme. */
+  theme: ThemeSetting;
+  /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
+  accent: string;
+  /** The theme file in use, carried whole so it travels in the sync file. */
+  themeFile: ThemeFile | null;
   [key: string]: unknown;
 }
 
@@ -999,6 +1024,9 @@ export const DEFAULT_SETTINGS: Settings = {
   hintKey: "f",
   nowPlayingFeed: false,
   nowPlayingFeedPort: 32540,
+  theme: "dark",
+  accent: "ivory",
+  themeFile: null,
 };
 
 // ---------------------------------------------------------------- sync file, folders and keys

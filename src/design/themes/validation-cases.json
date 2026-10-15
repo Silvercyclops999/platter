@@ -1,0 +1,30 @@
+[
+  {
+    "case": "good dark theme",
+    "text": "{\"name\":\"Harbour\",\"base\":\"dark\",\"tokens\":{\"color-bg-base\":\"#08121A\",\"color-accent\":\"rgb(143 211 232)\",\"color-state-hover\":\"rgba(255, 255, 255, 0.06)\",\"color-text-muted\":\"hsl(210 20% 60%)\",\"radius-card\":\"12px\"}}",
+    "ok": true
+  },
+  {
+    "case": "good light theme with an author and dashed names",
+    "text": "{\"name\":\"Morning paper\",\"base\":\"light\",\"author\":\"A listener\",\"tokens\":{\"--color-bg-raised\":\"#FBFAF7\",\"radius-row\":\"0\"}}",
+    "ok": true
+  },
+  { "case": "unknown token", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"font-family\":\"Comic Sans\"}}", "ok": false, "reason": "Unknown token" },
+  { "case": "unknown field", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{},\"css\":\"body{}\"}", "ok": false, "reason": "Unknown field" },
+  { "case": "url()", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-bg-base\":\"url(https://example.com/a.png)\"}}", "ok": false, "reason": "url()" },
+  { "case": "url() in upper case", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-bg-base\":\"URL( x )\"}}", "ok": false, "reason": "url()" },
+  { "case": "CSS injection", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-accent\":\"red; } body { display: none\"}}", "ok": false, "reason": "has CSS in it" },
+  { "case": "var()", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-accent\":\"var(--color-error)\"}}", "ok": false, "reason": "has CSS in it" },
+  { "case": "script", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-accent\":\"<script>alert(1)</script>\"}}", "ok": false, "reason": "has CSS in it" },
+  { "case": "colour name", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-accent\":\"red\"}}", "ok": false, "reason": "needs a colour" },
+  { "case": "length for a colour", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-accent\":\"12px\"}}", "ok": false, "reason": "needs a colour" },
+  { "case": "colour for a length", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"radius-card\":\"#FFFFFF\"}}", "ok": false, "reason": "needs a size" },
+  { "case": "em length", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"radius-card\":\"2em\"}}", "ok": false, "reason": "needs a size" },
+  { "case": "number value", "text": "{\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"radius-card\":8}}", "ok": false, "reason": "isn't text" },
+  { "case": "bad base", "text": "{\"name\":\"X\",\"base\":\"grey\",\"tokens\":{}}", "ok": false, "reason": "base must be" },
+  { "case": "no name", "text": "{\"base\":\"dark\",\"tokens\":{}}", "ok": false, "reason": "needs a name" },
+  { "case": "markup in the name", "text": "{\"name\":\"<b>X</b>\",\"base\":\"dark\",\"tokens\":{}}", "ok": false, "reason": "The name can be" },
+  { "case": "no tokens", "text": "{\"name\":\"X\",\"base\":\"dark\"}", "ok": false, "reason": "tokens object" },
+  { "case": "not an object", "text": "[1, 2]", "ok": false, "reason": "isn't a theme" },
+  { "case": "not JSON", "text": "{ this isn't json", "ok": false, "reason": "isn't valid JSON" }
+]

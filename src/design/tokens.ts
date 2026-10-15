@@ -30,6 +30,8 @@ export const color = {
   bgRaised2: "#201D1A",
   bgOverlay: "#2A2622",
   border: "#2F2A25",
+  /** Base for faint lines and fills drawn over surfaces (mixed with transparent). */
+  ink: "#FFF0DC",
 
   // Text
   textPrimary: "#F4EFE8",
@@ -55,8 +57,14 @@ export const color = {
   // Semantic
   success: "#4CC38A",
   warning: "#F2B13D",
+  warningText: "#FFEBC2",
   error: "#F2555A",
+  errorText: "#FBD9DA",
+  errorSurface: "#3A1A1B",
   info: "#5AA9F5",
+  infoText: "#CFE5FB",
+  /** Version badges (demo, live, remix). */
+  version: "#9CCBF8",
 
   // Connection status dot
   statusLocal: "#3FCF8E",

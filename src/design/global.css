@@ -95,14 +95,14 @@ img {
   position: fixed;
   width: 8px;
   border-radius: 999px;
-  background: rgba(255, 240, 220, 0.4);
+  background: color-mix(in srgb, var(--color-ink) 40%, transparent);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--motion-quick) ease, background-color var(--motion-very-quick) ease;
 }
 .sb-thumb.is-on { opacity: 1; pointer-events: auto; }
 .sb-thumb:hover,
-.sb-thumb.is-dragging { background: rgba(255, 240, 220, 0.6); }
+.sb-thumb.is-dragging { background: color-mix(in srgb, var(--color-ink) 60%, transparent); }
 
 .sr-only {
   position: absolute;

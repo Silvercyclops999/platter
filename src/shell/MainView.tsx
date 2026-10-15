@@ -3,7 +3,8 @@ import { SmartPlaylistPage } from "../pages/SmartPlaylistPage";
 import { Pause, Play } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { IconButton } from "../components/Button";
-import { NEUTRAL_HEADER } from "../lib/color";
+import { NEUTRAL_HEADER, THEMED_NEUTRAL_HEADER, themedHeader } from "../lib/color";
+import { useTheme } from "../stores/theme";
 import type { SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { ArtistPage } from "../pages/ArtistPage";
@@ -227,7 +228,14 @@ export function MainView() {
 
   const syncText = syncLabel(sync);
   const r = entry.route;
-  const colors = tint ?? NEUTRAL_HEADER;
+  // Light themes get pale header colours; pages without art use the theme's panels.
+  const theme = useTheme((s) => s.resolved);
+  const colors =
+    !tint || tint === NEUTRAL_HEADER
+      ? theme.id === "dark"
+        ? NEUTRAL_HEADER
+        : THEMED_NEUTRAL_HEADER[theme.base]
+      : themedHeader(tint, theme.base);
   const barShown = !!pageBar && pastHeader;
 
   return (

@@ -1,0 +1,40 @@
+/* Settings: accent swatches and the theme files that can't be used. */
+.accent-picker,
+.accent-picker__presets { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.accent-swatch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--swatch, var(--color-bg-overlay));
+  color: var(--color-bg-base);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 16%, transparent);
+  cursor: pointer;
+  transition: transform var(--motion-very-quick) var(--motion-easing);
+}
+.accent-swatch:hover { transform: scale(calc(1 + 0.08 * var(--motion-move))); }
+.accent-swatch.is-on { box-shadow: 0 0 0 2px var(--color-bg-raised), 0 0 0 4px var(--swatch, var(--color-text-primary)); }
+.accent-swatch:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 4px; border-radius: 50%; }
+.accent-swatch--custom { color: var(--color-text-secondary); }
+.accent-swatch--custom.is-on { color: var(--color-bg-base); }
+.accent-swatch--custom:has(.accent-swatch__input:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 4px; }
+.accent-swatch__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+}
+
+.theme-problems { margin-top: var(--space-3); padding: var(--space-3); border-radius: var(--radius-card); background: var(--color-bg-raised2); }
+.theme-problems__title { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-bottom: var(--space-2); }
+.theme-problems__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
+.theme-problems__item { display: flex; gap: var(--space-3); font-size: var(--font-size-sm); min-width: 0; }
+.theme-problems__file { flex: none; font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.theme-problems__reason { color: var(--color-error); min-width: 0; }

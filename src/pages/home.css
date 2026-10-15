@@ -82,13 +82,13 @@
   min-width: 0;
   overflow: hidden;
   border-radius: var(--radius-row);
-  background: rgba(255, 240, 220, 0.08);
+  background: color-mix(in srgb, var(--color-ink) 8%, transparent);
   isolation: isolate;
   transition: background-color var(--motion-quick) var(--motion-easing);
 }
 .shortcut:hover,
 .shortcut:focus-within {
-  background: rgba(255, 240, 220, 0.16);
+  background: color-mix(in srgb, var(--color-ink) 16%, transparent);
   transition-duration: var(--motion-very-quick);
 }
 .shortcut__art { flex: none; display: flex; }

@@ -1408,6 +1408,31 @@ while only music already on this computer can play; the UI then asks
 
 Event `health://changed` → `Health`. Event `toast` → `{ kind: "info"|"error", message }`.
 
+## Themes
+| Command | Args | Returns |
+| --- | --- | --- |
+| `themes_list` | – | `ThemeFolder` |
+| `themes_import` | – | `ThemeFile`, or null when the file picker was cancelled. The file is checked first and copied into the folder under its theme name |
+| `themes_open_folder` | – | – (shows the folder in Explorer or Finder) |
+
+`ThemeFolder = { folder: string, themes: ThemeFile[], invalid: { file, reason }[] }`.
+`ThemeFile = { file, name, base: "dark" | "light", tokens: Record<string, string> }`.
+
+Theme files are JSON in a `themes` folder in the app's data folder:
+
+```json
+{ "name": "Harbour", "base": "dark", "tokens": { "color-bg-base": "#08121A", "radius-card": "12px" } }
+```
+
+A file has `name`, `base` and `tokens`, and may have `author`. Tokens start
+from the base's built-in theme. Only the token names in
+`src/design/themes/contract.json` are taken (with or without a leading `--`).
+Colour tokens take `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`,
+`hsl()` or `hsla()`; the radius tokens take a pixel size like `8px`. Files
+over 64 KB, unknown fields or tokens, `url()`, CSS (`;`, braces, comments,
+`var()`) and markup are refused, and the file is listed under `invalid` with
+the reason. The UI applies the same checks again before using a theme.
+
 ## Settings and tracking
 | Command | Args |
 | --- | --- |
@@ -1437,6 +1462,9 @@ The rest of the fields, with their defaults:
 | `artCacheMb` | 128 to 51200, 2048 | Artwork cache size. Shrinking it removes the oldest images at once. |
 | `artworkColours` | bool, true | Headers tint from artwork. Off gives every header the same neutral colour. |
 | `reduceMotion` | `"system"`, `"on"`, `"off"` | Follow the OS setting, or force reduced motion on or off. |
+| `theme` | `"dark"` (default), `"light"`, `"system"`, `"midnight"`, `"forest"`, `"sand"` | The theme. System follows the computer's light or dark mode. A theme file in `themeFile` takes its place. See Themes. |
+| `accent` | string, `"ivory"` | Accent colour: `ivory`, `sage`, `sky`, `lilac`, `amber`, `rose`, `teal`, or a custom colour as `#RRGGBB` (stored in capitals). Anything else is refused. Ivory is each theme's own accent. |
+| `themeFile` | `ThemeFile` or null | The theme file in use, held whole so it travels in the sync file. Checked like a file in the folder; a bad one is refused. Null clears it. |
 | `outputDevice` | device id or null, null | Read only here. Set with `output_select`; null follows the system default. |
 | `homeShortcuts` | bool, true | Home shows the grid of recent and most played shortcuts. |
 | `homeColourWash` | bool, true | Home's top takes its colour from the shortcuts' artwork. Only applies while `artworkColours` is on. |

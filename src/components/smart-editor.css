@@ -4,7 +4,7 @@
 .smart-ed form { display: flex; flex-direction: column; gap: var(--space-3); }
 .smart-ed .pl-edit__title { margin-bottom: var(--space-1); }
 
-.smart-ed__prompt { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-divider, rgba(255, 240, 220, 0.08)); }
+.smart-ed__prompt { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-divider, color-mix(in srgb, var(--color-ink) 8%, transparent)); }
 .smart-ed__prompt-box { min-height: 88px; font-family: inherit; }
 .smart-ed__prompt-row { display: flex; align-items: flex-start; gap: var(--space-4); justify-content: space-between; }
 .smart-ed__prompt-row .btn { flex: none; }

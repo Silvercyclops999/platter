@@ -80,6 +80,29 @@ pub enum ReduceMotion {
     Off,
 }
 
+/// The Theme setting: a built-in theme, or follow the computer's light or
+/// dark mode (System). The UI holds the token values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ThemeMode {
+    #[default]
+    Dark,
+    Light,
+    System,
+    Midnight,
+    Forest,
+    Sand,
+}
+
+/// Deserialize a field that can be absent (leave alone) or null (clear).
+fn some_or_null<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
 /// Which Plex star ratings count as liked. Liking always writes five stars.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -191,6 +214,11 @@ pub struct Settings {
     /// Album and artist headers tint from artwork.
     pub artwork_colours: bool,
     pub reduce_motion: ReduceMotion,
+    pub theme: ThemeMode,
+    /// Accent colour: a preset id ("ivory" is the default) or #RRGGBB.
+    pub accent: String,
+    /// The theme file in use, held whole so it travels in the sync file.
+    pub theme_file: Option<crate::themes::ThemeFile>,
     /// Chosen output device id; None follows the system default. Changed
     /// with `output_select`, not `settings_set`.
     pub output_device: Option<String>,
@@ -460,6 +488,9 @@ impl Default for Settings {
             art_cache_mb: 2048,
             artwork_colours: true,
             reduce_motion: ReduceMotion::System,
+            theme: ThemeMode::Dark,
+            accent: "ivory".into(),
+            theme_file: None,
             output_device: None,
             home_shortcuts: true,
             home_colour_wash: true,
@@ -592,6 +623,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "popularSource",
     "artworkColours",
     "reduceMotion",
+    "theme",
+    "accent",
+    "themeFile",
     "homeShortcuts",
     "homeColourWash",
     "searchSuggestions",
@@ -735,6 +769,11 @@ pub struct SettingsPatch {
     pub art_cache_mb: Option<u32>,
     pub artwork_colours: Option<bool>,
     pub reduce_motion: Option<ReduceMotion>,
+    pub theme: Option<ThemeMode>,
+    pub accent: Option<String>,
+    /// Null clears it.
+    #[serde(default, deserialize_with = "some_or_null")]
+    pub theme_file: Option<Option<crate::themes::ThemeFile>>,
     pub home_shortcuts: Option<bool>,
     pub home_colour_wash: Option<bool>,
     pub search_suggestions: Option<bool>,
@@ -910,6 +949,17 @@ impl Settings {
         set(&mut self.art_cache_mb, p.art_cache_mb);
         set(&mut self.artwork_colours, p.artwork_colours);
         set(&mut self.reduce_motion, p.reduce_motion);
+        set(&mut self.theme, p.theme);
+        if let Some(a) = &p.accent {
+            self.accent = crate::themes::accent_value(a)
+                .ok_or_else(|| AppError::Invalid("Accent colours are a preset or a colour like #A1B2C3.".into()))?;
+        }
+        if let Some(f) = &p.theme_file {
+            if let Some(t) = f {
+                crate::themes::check(t).map_err(AppError::Invalid)?;
+            }
+            self.theme_file = f.clone();
+        }
         set(&mut self.home_shortcuts, p.home_shortcuts);
         set(&mut self.home_colour_wash, p.home_colour_wash);
         set(&mut self.search_suggestions, p.search_suggestions);
@@ -1082,6 +1132,11 @@ impl Settings {
         self.download_limit_gb = self.download_limit_gb.clamp(downloads::LIMIT_MIN_GB, downloads::LIMIT_MAX_GB);
         if !DAYLIST_HOURS.contains(&self.daylist_hours) {
             self.daylist_hours = 3;
+        }
+        // A hand-edited accent or theme falls back rather than reaching the UI.
+        self.accent = crate::themes::accent_value(&self.accent).unwrap_or_else(|| "ivory".into());
+        if self.theme_file.as_ref().is_some_and(|t| crate::themes::check(t).is_err()) {
+            self.theme_file = None;
         }
         eqprofile::clamp(self);
     }
@@ -2297,5 +2352,56 @@ mod tests {
         assert!(live.lyrics_prefer_own.load(Ordering::Relaxed));
         assert!(!s.lyrics_show_add);
         assert!(!s.full_window_hide_controls);
+    }
+
+    #[test]
+    fn theme_settings_default_validate_and_sync() {
+        let s = Settings::default();
+        assert_eq!((s.theme, s.accent.as_str(), s.theme_file.is_none()), (ThemeMode::Dark, "ivory", true));
+        for k in ["theme", "accent", "themeFile"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k}");
+        }
+
+        let mut s = Settings::default();
+        let p: SettingsPatch = serde_json::from_str(r##"{"theme":"system","accent":"#a1b2c3"}"##).unwrap();
+        s.apply(&p).unwrap();
+        assert_eq!((s.theme, s.accent.as_str()), (ThemeMode::System, "#A1B2C3"));
+        let p: SettingsPatch = serde_json::from_str(r#"{"accent":"purple"}"#).unwrap();
+        assert!(matches!(s.apply(&p), Err(AppError::Invalid(_))));
+        assert!(serde_json::from_str::<SettingsPatch>(r#"{"theme":"neon"}"#).is_err());
+
+        // A theme file is held whole; null clears it; a bad one is refused.
+        let p: SettingsPatch = serde_json::from_str(
+            r##"{"themeFile":{"file":"a.json","name":"A","base":"light","tokens":{"color-accent":"#112233"}}}"##,
+        )
+        .unwrap();
+        s.apply(&p).unwrap();
+        assert_eq!(s.theme_file.as_ref().map(|t| t.name.as_str()), Some("A"));
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["themeFile"]["tokens"]["color-accent"], "#112233");
+        let p: SettingsPatch = serde_json::from_str(r#"{"accent":"sky"}"#).unwrap();
+        assert_eq!(p.theme_file, None);
+        s.apply(&p).unwrap();
+        assert!(s.theme_file.is_some());
+        let p: SettingsPatch = serde_json::from_str(r#"{"themeFile":null}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(s.theme_file.is_none());
+        let p: SettingsPatch = serde_json::from_str(
+            r#"{"themeFile":{"file":"b.json","name":"B","base":"dark","tokens":{"color-bg-base":"url(x)"}}}"#,
+        )
+        .unwrap();
+        assert!(matches!(s.apply(&p), Err(AppError::Invalid(m)) if m.contains("url()")));
+        assert!(s.theme_file.is_none());
+    }
+
+    #[test]
+    fn hand_edited_theme_values_fall_back() {
+        let mut s: Settings = serde_json::from_str(
+            r#"{"accent":"neon","themeFile":{"file":"b.json","name":"B","base":"dark","tokens":{"font-family":"x"}}}"#,
+        )
+        .unwrap();
+        s.clamp();
+        assert_eq!(s.accent, "ivory");
+        assert!(s.theme_file.is_none());
     }
 }

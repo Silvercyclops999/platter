@@ -99,6 +99,7 @@ import { MockRemote } from "./remote";
 import { MockShare, mockQr } from "./share";
 import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 import { MockFileTags } from "./fileTags";
+import { MockThemes, checkThemePatch } from "./themes";
 import { MockTranscribe } from "./transcribe";
 import { MockDownloads } from "./downloads";
 import { MockMixes } from "./mixes";
@@ -247,6 +248,7 @@ export class MockBackend implements Backend {
   private recent: { kind: SearchKind; id: string }[] = [];
   private recentSeeded = false;
   private settings: Settings = { ...DEFAULT_SETTINGS };
+  private themes = new MockThemes();
   // output devices (invented)
   private outputs: OutputDevice[] = MOCK_OUTPUTS.map((d) => ({ ...d }));
   private outputSelected: string | null = null;
@@ -1884,6 +1886,8 @@ export class MockBackend implements Backend {
         const port = patch.nowPlayingFeedPort;
         if (!Number.isInteger(port) || port < 1024 || port > 65535) throw { kind: "invalid", message: "Pick a port from 1024 to 65535." };
       }
+      checkThemePatch(patch);
+      if (patch.accent !== undefined && patch.accent.startsWith("#")) next.accent = patch.accent.toUpperCase();
       this.settings = next;
       if (patch.nowPlayingFeed !== undefined || patch.nowPlayingFeedPort !== undefined) {
         const st = this.feed();
@@ -2193,6 +2197,16 @@ export class MockBackend implements Backend {
   syncFileChooseFolder() {
     // Stands in for the folder dialog: picks an invented folder.
     return this.delay(() => this.syncFile.useFolder("C:\\Users\\listener\\Documents\\Synced"));
+  }
+  themesList() {
+    return this.delay(() => this.themes.list());
+  }
+  themesImport() {
+    // Stands in for the file picker: adds an invented theme file.
+    return this.delay(() => this.themes.import());
+  }
+  themesOpenFolder() {
+    return this.delay(() => undefined);
   }
   syncFileReplace() {
     return this.delay(() => this.syncFile.replace());

@@ -107,6 +107,8 @@ import type {
   SmartSaveRequest,
   SmartSaved,
   SmartSummary,
+  ThemeFile,
+  ThemeFolder,
 } from "./types";
 
 export type Unlisten = () => void;
@@ -265,6 +267,12 @@ export interface Backend {
   // Settings
   settingsGet(): Promise<Settings>;
   settingsSet(patch: Partial<Settings>): Promise<void>;
+  /** The theme files in the themes folder, and the ones that can't be used with the reason. */
+  themesList(): Promise<ThemeFolder>;
+  /** Pick a theme file and copy it into the themes folder. Null when the picker was cancelled. */
+  themesImport(): Promise<ThemeFile | null>;
+  /** Show the themes folder in Explorer / Finder. */
+  themesOpenFolder(): Promise<void>;
   /** Saves the current EQ curve as a profile (replacing one with that name) and selects it. */
   eqProfileSave(name: string): Promise<Settings>;
   eqProfileRename(from: string, to: string): Promise<Settings>;
@@ -583,6 +591,9 @@ export function createTauriBackend(): Backend {
     openLocalNetworkSettings: () => call("open_local_network_settings"),
     settingsGet: () => call("settings_get"),
     settingsSet: (patch) => call("settings_set", { patch }),
+    themesList: () => call("themes_list"),
+    themesImport: () => call("themes_import"),
+    themesOpenFolder: () => call("themes_open_folder"),
     eqProfileSave: (name) => call("eq_profile_save", { name }),
     eqProfileRename: (from, to) => call("eq_profile_rename", { from, to }),
     eqProfileDelete: (name) => call("eq_profile_delete", { name }),

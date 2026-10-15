@@ -18,11 +18,34 @@ export interface HeaderColors {
 
 /** Header colours for pages without art: the page's own surfaces. */
 export const NEUTRAL_HEADER: HeaderColors = { vivid: "#2a2520", shade: color.bgRaised };
+/** The same on other themes: the theme's own panel colours. */
+export const THEMED_NEUTRAL_HEADER: Record<"dark" | "light", HeaderColors> = {
+  dark: { vivid: "var(--color-bg-overlay)", shade: "var(--color-bg-raised)" },
+  light: { vivid: "var(--color-bg-raised2)", shade: "var(--color-bg-raised)" },
+};
 
 export function hexToRgb(hex: string): RGB | null {
   const h = hex.replace(/^#/, "");
   if (!/^[0-9a-f]{6}$/i.test(h)) return null;
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+/** Parse #rgb, #rrggbb, #rrggbbaa or rgb()/rgba() into RGB (alpha ignored). */
+export function parseColour(v: string): RGB | null {
+  const s = v.trim();
+  let m = /^#([0-9a-f]{3,4})$/i.exec(s);
+  if (m) {
+    const h = m[1];
+    return [0, 1, 2].map((i) => parseInt(h[i] + h[i], 16)) as RGB;
+  }
+  m = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(s);
+  if (m) {
+    const h = m[1];
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as RGB;
+  }
+  m = /^rgba?\(\s*([\d.]+)\s*[,\s]\s*([\d.]+)\s*[,\s]\s*([\d.]+)/i.exec(s);
+  if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+  return null;
 }
 
 export function rgbToCss([r, g, b]: RGB): string {
@@ -137,6 +160,38 @@ export function headerColors(rgb: RGB | null): HeaderColors {
   }
   const shade = hslToRgb(h, Math.min(s, 0.7), SHADE_L);
   return { vivid: rgbToCss(vivid), shade: rgbToCss(shade) };
+}
+
+/** Header text on light themes (the Light theme's primary text). */
+export const LIGHT_HEADER_TEXT: RGB = [27, 24, 20];
+/** Lightness of the pale band on light themes. */
+const LIGHT_SHADE_L = 0.87;
+/** Dark header text over the vivid tone on light themes: full AA. */
+const LIGHT_VIVID_MIN_CONTRAST = 4.5;
+
+/**
+ * Header colours for a light theme, from the dark-theme pair: the same hue
+ * as a pale band with a lighter vivid tone above it, both light enough for
+ * the dark header text. Greyscale art stays a warm grey.
+ */
+export function lightHeader(c: HeaderColors): HeaderColors {
+  const v = parseColour(c.vivid) ?? [83, 83, 83];
+  const [h, s0] = rgbToHsl(v);
+  const grey = s0 < 0.08;
+  const s = grey ? 0.08 : Math.min(0.6, Math.max(0.35, s0));
+  let l = 0.66;
+  let vivid = hslToRgb(grey ? 36 : h, s, l);
+  while (contrastRatio(LIGHT_HEADER_TEXT, vivid) < LIGHT_VIVID_MIN_CONTRAST && l < 0.95) {
+    l += 0.01;
+    vivid = hslToRgb(grey ? 36 : h, s, l);
+  }
+  const shade = hslToRgb(grey ? 36 : h, grey ? 0.1 : Math.min(s, 0.45), LIGHT_SHADE_L);
+  return { vivid: rgbToCss(vivid), shade: rgbToCss(shade) };
+}
+
+/** Header colours for the theme in use: as picked on dark themes, pale on light ones. */
+export function themedHeader(c: HeaderColors, base: "dark" | "light"): HeaderColors {
+  return base === "light" ? lightHeader(c) : c;
 }
 
 /** Header colours from a server-computed colour (hex), used when the art can't be sampled. */

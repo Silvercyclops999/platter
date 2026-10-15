@@ -24,6 +24,7 @@ pub mod smart;
 pub mod social;
 pub mod sync;
 pub mod tags;
+pub mod themes;
 pub mod tracking;
 pub mod updates;
 pub mod web;
@@ -837,6 +838,9 @@ pub fn run() {
             settings::art_cache_clear,
             settings::app_info,
             settings::open_project_page,
+            themes::themes_list,
+            themes::themes_import,
+            themes::themes_open_folder,
             artistinfo::commands::artist_info,
             artistinfo::commands::album_credits,
             feed::commands::feed_status,

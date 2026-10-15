@@ -15,13 +15,13 @@
   border: 0;
   border-radius: var(--radius-pill);
   background: var(--color-bg-overlay);
-  box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.16);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 16%, transparent);
   color: var(--color-text-primary);
   font: inherit;
   font-size: var(--font-size-sm);
 }
 .info-key__field::placeholder { color: var(--color-text-muted); }
-.info-key__field:hover { box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.32); }
+.info-key__field:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 32%, transparent); }
 .info-key__field:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
 
 .info-key__error { color: var(--color-error); }

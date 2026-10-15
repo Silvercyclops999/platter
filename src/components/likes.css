@@ -73,7 +73,7 @@
   padding: var(--space-2) var(--space-1) 0;
   border-radius: var(--radius-card);
   background: var(--color-bg-overlay);
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 240, 220, 0.05);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px color-mix(in srgb, var(--color-ink) 5%, transparent);
   color: var(--color-text-primary);
   animation: saved-in-in var(--motion-quick) var(--motion-easing);
 }
@@ -140,7 +140,7 @@
   justify-content: flex-end;
   gap: var(--space-2);
   padding: var(--space-3);
-  border-top: 1px solid rgba(255, 240, 220, 0.08);
+  border-top: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
 }
 
 /* Now playing: the control sits after the title and artists. */

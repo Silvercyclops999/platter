@@ -124,7 +124,7 @@
 .mix-header--daylist .detail-header__title { text-transform: lowercase; }
 .mix-header__description {
   max-width: 70ch;
-  color: rgba(244, 239, 232, 0.82);
+  color: color-mix(in srgb, var(--color-text-primary) 82%, transparent);
   font-size: var(--font-size-md);
 }
 .mix-header__made { font-weight: var(--font-weight-bold); }

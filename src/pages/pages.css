@@ -60,7 +60,7 @@
   appearance: none;
   cursor: pointer;
 }
-.library__sort select:hover { background-color: rgba(255, 240, 220, 0.16); }
+.library__sort select:hover { background-color: color-mix(in srgb, var(--color-ink) 16%, transparent); }
 .library__sort select:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
 .library__sort option { background: var(--color-bg-overlay); }
 .library__count { margin: 0 var(--space-3) var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
@@ -111,17 +111,17 @@
   font-size: var(--font-size-md);
 }
 .detail-header__artist { font-weight: var(--font-weight-bold); }
-.detail-header__muted { color: rgba(244, 239, 232, 0.72); }
+.detail-header__muted { color: color-mix(in srgb, var(--color-text-primary) 72%, transparent); }
 .detail-header__badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
 /* The header colour can be light; give badges their own dark plate so they
    stay readable on any art. */
 .detail-header__badges .badge {
   background: rgba(10, 8, 6, 0.55);
-  border-color: rgba(255, 240, 220, 0.22);
+  border-color: color-mix(in srgb, var(--color-ink) 22%, transparent);
   color: var(--color-text-secondary);
 }
 .detail-header__badges .badge--hires { color: var(--color-accent-hover); }
-.detail-header__badges .badge--version { color: #9CCBF8; }
+.detail-header__badges .badge--version { color: var(--color-version); }
 /* Under the header, a short fade from the shade into the page background,
    behind the action row. It starts at the header's full shade so there's no
    line where the two meet, and eases out over several stops so the fade has
@@ -353,7 +353,7 @@
   align-items: center;
   gap: var(--space-6);
   padding: var(--space-4) 0;
-  border-bottom: 1px solid rgba(255, 240, 220, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
 }
 .setting-row:last-child { border-bottom: 0; }
 .setting-row__text { flex: 1; min-width: 0; }
@@ -381,7 +381,7 @@
 .confirm__actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-6); }
 .confirm .server-list { margin-top: var(--space-2); }
 .notices { margin: var(--space-4) 0 0; padding: 0; list-style: none; }
-.notices__item { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border-bottom: 1px solid rgba(255, 240, 220, 0.08); font-size: var(--font-size-sm); }
+.notices__item { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent); font-size: var(--font-size-sm); }
 .notices__item:last-child { border-bottom: 0; }
 .notices__name { color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }
 .notices__licence { color: var(--color-text-secondary); text-align: right; }
@@ -415,7 +415,7 @@
   padding: 0 var(--space-6);
   border-radius: var(--radius-card);
   background: var(--color-bg-raised2);
-  box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.08);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 8%, transparent);
   font-size: var(--font-size-4xl);
   font-weight: var(--font-weight-bold);
   letter-spacing: 0.24em;

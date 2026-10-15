@@ -4,7 +4,8 @@ import { Button } from "../components/Button";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { FilterChips } from "../components/Tabs";
 import { artUrl, backend } from "../lib/backend";
-import { headerColorsFromImageUrl, headerColorsFromServer } from "../lib/color";
+import { headerColorsFromImageUrl, headerColorsFromServer, lightHeader } from "../lib/color";
+import { useThemeBase } from "../stores/theme";
 import type { CachedLibrary, HomeItem, MixShelves, MixSummary } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { useApp } from "../stores/app";
@@ -41,7 +42,10 @@ function useWashColour(item: HomeItem | undefined, enabled: boolean): string | n
       alive = false;
     };
   }, [thumb, serverTint, on]);
-  return on ? colour : null;
+  // Light themes wash with a pale tone of the same colour.
+  const base = useThemeBase();
+  if (!on || !colour) return null;
+  return base === "light" ? lightHeader({ vivid: colour, shade: colour }).vivid : colour;
 }
 
 /** Chips row pinned under the main header; its backdrop fades in with the header's. */

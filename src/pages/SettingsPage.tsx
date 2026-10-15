@@ -55,6 +55,8 @@ import {
   useScrobble,
 } from "./CurateSettings";
 import { loadAi } from "../stores/curate";
+import { useTheme } from "../stores/theme";
+import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNote, useThemeFolder } from "./ThemeSettings";
 import type { AiProvider } from "../lib/types";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
@@ -474,6 +476,9 @@ export function SettingsPage() {
   const [update, setUpdate] = useState<UpdateState>({ kind: "idle" });
   const [dialog, setDialog] = useState<"signOut" | "server" | "notices" | null>(null);
 
+  const [accentIssue, setAccentIssue] = useState<string | null>(null);
+  const [themeFolder, reloadThemes] = useThemeFolder();
+  const theme = useTheme((t) => t.resolved);
   const { keys: infoKeys, setKey: setInfoKey } = useInfoKeys();
   const feed = useFeedStatus();
   const downloads = useDownloadStatus();
@@ -882,6 +887,39 @@ export function SettingsPage() {
       ),
     },
     // Appearance
+    {
+      key: "theme",
+      section: "Appearance",
+      title: "Theme",
+      description: "Dark, Light, or Match system to follow your computer's light or dark mode. Midnight, Forest and Sand are other built-in themes.",
+      note: themeNote(s),
+      control: (ids) => (s ? <ThemeSelect s={s} ids={ids} /> : loading),
+    },
+    {
+      key: "accent",
+      section: "Appearance",
+      title: "Accent colour",
+      description: "The colour of play buttons, switches and sliders. Ivory is each theme's own. A custom colour needs at least 3:1 contrast with the background.",
+      note: rowNote(
+        accentIssue
+          ? { text: accentIssue, error: true }
+          : theme.accentNote
+            ? { text: theme.accentNote }
+            : theme.fileAccent && s?.accent === "ivory"
+              ? { text: "Your theme file sets its own accent. Pick a colour here to replace it." }
+              : undefined,
+      ),
+      control: (ids) => (s ? <AccentPicker s={s} ids={ids} onProblem={setAccentIssue} /> : loading),
+    },
+    {
+      key: "themeFile",
+      section: "Appearance",
+      title: "Theme file",
+      description:
+        "Use a theme file from the themes folder. Theme files are JSON with a name, a base of dark or light, and token colours. The theme in use travels in the sync file.",
+      control: (ids) => (s ? <ThemeFileControl s={s} ids={ids} folder={themeFolder} reload={reloadThemes} /> : loading),
+      block: themeFolder?.invalid.length ? () => <ThemeFileProblems folder={themeFolder} /> : undefined,
+    },
     {
       key: "sidebarArt",
       section: "Appearance",

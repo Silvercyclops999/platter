@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { installReducedMotion, setMotionPreference } from "./design/motion";
 import { installOverlayScrollbars } from "./design/scrollbars";
+import { installTheme } from "./stores/theme";
 import { SignInPage, ServerPickPage } from "./pages/SignInPage";
 import { AppShell } from "./shell/AppShell";
 import { connectApp, useApp } from "./stores/app";
@@ -20,6 +21,7 @@ import { useUi } from "./stores/ui";
  */
 export function MiniplayerApp() {
   useEffect(() => installReducedMotion(), []);
+  useEffect(() => installTheme(), []);
   const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
   useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
   useEffect(() => connectPlayer(), []);
@@ -45,6 +47,7 @@ export default function App() {
 /** The main window: wires stores to the core, then gates on auth. */
 function MainApp() {
   useEffect(() => installReducedMotion(), []);
+  useEffect(() => installTheme(), []);
   const reduceMotion = useSettings((s) => s.settings?.reduceMotion ?? "system");
   useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
   useEffect(() => installOverlayScrollbars(), []);

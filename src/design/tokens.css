@@ -1,5 +1,7 @@
 /* Design tokens. Mirrors src/design/tokens.ts - keep in sync
-   (tokens.test.ts checks every value). Dark theme only for Phase 1. */
+   (tokens.test.ts checks every value). These are the Dark theme's values;
+   other themes (src/design/themes) set the colour tokens on <html> inline,
+   and data-theme-base says whether the theme is light or dark. */
 
 :root {
   --ivory-50: #FFFDF8;
@@ -19,6 +21,8 @@
   --color-bg-raised2: #201D1A;
   --color-bg-overlay: #2A2622;
   --color-border: #2F2A25;
+  /* Faint lines and fills over surfaces are this mixed with transparent. */
+  --color-ink: #FFF0DC;
 
   /* Text */
   --color-text-primary: #F4EFE8;
@@ -45,7 +49,11 @@
   --color-warning: #F2B13D;
   --color-warning-text: #FFEBC2;
   --color-error: #F2555A;
+  --color-error-text: #FBD9DA;
+  --color-error-surface: #3A1A1B;
   --color-info: #5AA9F5;
+  --color-info-text: #CFE5FB;
+  --color-version: #9CCBF8;
 
   /* Connection status */
   --color-status-local: #3FCF8E;
@@ -108,6 +116,10 @@
   --tint: #3a3128;
 
   color-scheme: dark;
+}
+
+:root[data-theme-base="light"] {
+  color-scheme: light;
 }
 
 /* Reduced motion (OS setting, mirrored onto data-reduced-motion by

@@ -62,5 +62,5 @@
   font: inherit;
   font-size: var(--font-size-md);
 }
-.folder-rename__input:focus { outline: none; border-color: rgba(255, 240, 220, 0.28); background: var(--color-bg-overlay); }
+.folder-rename__input:focus { outline: none; border-color: color-mix(in srgb, var(--color-ink) 28%, transparent); background: var(--color-bg-overlay); }
 .folder-rename__input:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
