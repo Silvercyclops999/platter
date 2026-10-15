@@ -255,6 +255,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().arg(platform::AUTOSTART_ARG).build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(updates::Updates::default())
         .manage(platform::miniplayer::Miniplayer::default())
         .register_asynchronous_uri_scheme_protocol("art", |ctx, req, responder| {
@@ -847,6 +848,9 @@ pub fn run() {
             share::commands::share_info,
             share::commands::share_public_link,
             share::commands::deep_link_take,
+            share::commands::share_card_qr,
+            share::commands::share_card_copy,
+            share::commands::share_card_save,
             platform::discord::commands::discord_status,
             platform::discord::commands::discord_imgur_key_set,
             tags::commands::tags_index,

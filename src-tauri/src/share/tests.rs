@@ -335,6 +335,21 @@ async fn store_trouble_is_an_error_not_a_cached_miss() {
 }
 
 #[tokio::test]
+async fn card_qr_codes_hold_only_the_platter_link() {
+    let f = fx();
+    let tag = link::server_tag("machine-a");
+    let q = f.share.card_qr(ShareKind::Track, "501", Some(61)).await.unwrap();
+    assert_eq!(q.text, format!("platter://song/501?t=61&s={tag}"));
+    // No server details: not its id, not an address, not a web link.
+    assert!(!q.text.contains("machine") && !q.text.contains("http") && !q.text.contains("plex"));
+    assert_eq!(q.rows.len(), q.size);
+    assert!(q.rows.iter().all(|r| r.len() == q.size && r.chars().all(|c| c == '0' || c == '1')));
+    // The same QR as the link would make on its own.
+    assert_eq!(crate::sync::keycopy::qr_text(&q.text).unwrap().rows, q.rows);
+    assert!(matches!(f.share.card_qr(ShareKind::Album, "nope", None).await, Err(AppError::NotFound(_))));
+}
+
+#[tokio::test]
 async fn info_gives_app_links_for_every_kind() {
     let f = fx();
     let tag = link::server_tag("machine-a");

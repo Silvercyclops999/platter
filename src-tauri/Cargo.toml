@@ -71,6 +71,7 @@ qrcode = { version = "0.14.1", default-features = false }
 # On-device lyrics transcription (the `transcribe` feature). Builds whisper.cpp
 # from source, so it needs CMake and a C++ compiler.
 whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend"] }
+tauri-plugin-clipboard-manager = "2.5.0"
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.8.3", default-features = false }

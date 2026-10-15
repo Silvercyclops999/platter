@@ -6,6 +6,7 @@ import { PlaylistDialogs } from "../components/PlaylistDialogs";
 import { FolderDialogs } from "./FolderMenus";
 import { SavedInHost } from "../components/SavedInMenu";
 import { Toaster } from "../components/Toast";
+import { ShareCardHost } from "../components/ShareCardDialog";
 import { Tooltip } from "../components/Tooltip";
 import { chrome } from "../lib/platform";
 import { useCurrentEntry } from "../stores/router";
@@ -206,6 +207,7 @@ export function AppShell() {
       <DragAnnouncer />
       <LyricsEditorHost />
       <FullWindow />
+      <ShareCardHost />
     </div>
   );
 }

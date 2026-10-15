@@ -653,6 +653,10 @@ export interface Settings {
   eqLastOutput?: string | null;
   /** Share menus find public links for released music (iTunes Search and song.link). */
   sharePublicLinks: boolean;
+  /** Share cards include a QR code with the Platter link. */
+  shareCardQr: boolean;
+  /** Share cards for released music include the song.link line. */
+  shareCardSongLink: boolean;
   /** List Cast devices and AirPlay receivers under Listen on (mDNS stays off when off). */
   showCastDevices: boolean;
   /** Show what's playing on Discord (this device only). */
@@ -798,6 +802,13 @@ export interface WindowBounds {
   height: number;
 }
 
+/** A share card's QR code: rows of modules ('1' dark) and the link it holds. */
+export interface CardQr {
+  size: number;
+  rows: string[];
+  text: string;
+}
+
 /** Whether the miniplayer window is open. */
 export interface MiniplayerState {
   open: boolean;
@@ -888,6 +899,8 @@ export const DEFAULT_SETTINGS: Settings = {
   eqFallback: null,
   eqLastOutput: null,
   sharePublicLinks: true,
+  shareCardQr: true,
+  shareCardSongLink: true,
   showCastDevices: true,
   discordStatus: true,
   discordShowUnreleased: true,

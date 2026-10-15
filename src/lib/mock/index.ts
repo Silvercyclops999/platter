@@ -93,7 +93,7 @@ import { MockLikes } from "./likes";
 import { buildRecents, seedListens, type MockListen } from "./recents";
 import { MockPlaylists } from "./playlists";
 import { MockRemote } from "./remote";
-import { MockShare } from "./share";
+import { MockShare, mockQr } from "./share";
 import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 import { MockFileTags } from "./fileTags";
 import { MockTranscribe } from "./transcribe";
@@ -2084,6 +2084,33 @@ export class MockBackend implements Backend {
 
   deepLinkTake() {
     return this.delay(() => this.share.take());
+  }
+
+  // ---------------------------------------------------------------- share cards
+
+  /** Cards put on the clipboard and saved (test hooks), and a save dialog that cancels. */
+  cardsCopied: { width: number; height: number; bytes: number }[] = [];
+  cardsSaved: { name: string; bytes: number }[] = [];
+  cardSaveCancels = false;
+  shareCardQr(kind: ShareKind, id: string, atSeconds?: number) {
+    return this.delay(() => {
+      const text = this.share.info(kind, id, atSeconds).appLink;
+      return { ...mockQr(text), text };
+    });
+  }
+  shareCardCopy(rgba: Uint8Array, width: number, height: number) {
+    return this.delay(() => {
+      if (rgba.length !== width * height * 4) throw { kind: "invalid", message: "That card image is incomplete." };
+      this.cardsCopied.push({ width, height, bytes: rgba.length });
+    });
+  }
+  shareCardSave(png: Uint8Array, name: string) {
+    return this.delay(() => {
+      if (this.cardSaveCancels) return null;
+      const file = `${name.replace(/[<>:"/\\|?*]/g, " ").replace(/\s+/g, " ").trim() || "Platter card"}.png`;
+      this.cardsSaved.push({ name: file, bytes: png.length });
+      return file;
+    });
   }
 
   // ---------------------------------------------------------------- miniplayer

@@ -264,6 +264,10 @@ pub struct Settings {
     /// Share menus find public links for released music (iTunes Search and
     /// song.link). Off leaves only Platter links.
     pub share_public_links: bool,
+    /// Share cards include a QR code with the Platter link.
+    pub share_card_qr: bool,
+    /// Share cards for released music include the song.link line.
+    pub share_card_song_link: bool,
     /// List Cast devices and AirPlay receivers in the device picker
     /// (Listen on). Off keeps mDNS off.
     pub show_cast_devices: bool,
@@ -470,6 +474,8 @@ impl Default for Settings {
             eq_fallback: None,
             eq_last_output: None,
             share_public_links: true,
+            share_card_qr: true,
+            share_card_song_link: true,
             show_cast_devices: true,
             discord_status: true,
             discord_show_unreleased: true,
@@ -577,6 +583,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "crossfadeSkipAlbums",
     "leveling",
     "sharePublicLinks",
+    "shareCardQr",
+    "shareCardSongLink",
     "showCastDevices",
     "lyricsMode",
     "lyricsLrclib",
@@ -726,6 +734,8 @@ pub struct SettingsPatch {
     /// Selects a preset or profile (and its curve).
     pub eq_preset: Option<String>,
     pub share_public_links: Option<bool>,
+    pub share_card_qr: Option<bool>,
+    pub share_card_song_link: Option<bool>,
     pub show_cast_devices: Option<bool>,
     pub discord_status: Option<bool>,
     pub discord_show_unreleased: Option<bool>,
@@ -881,6 +891,8 @@ impl Settings {
         set(&mut self.act_as_plex_player, p.act_as_plex_player);
         set(&mut self.move_stops_old_device, p.move_stops_old_device);
         set(&mut self.share_public_links, p.share_public_links);
+        set(&mut self.share_card_qr, p.share_card_qr);
+        set(&mut self.share_card_song_link, p.share_card_song_link);
         set(&mut self.miniplayer_on_top, p.miniplayer_on_top);
         set(&mut self.miniplayer_tint, p.miniplayer_tint);
         set(&mut self.miniplayer_queue, p.miniplayer_queue);

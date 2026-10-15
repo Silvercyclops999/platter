@@ -1,0 +1,186 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`card layout > a lyric card puts the picked lines where the cover was 1`] = `
+{
+  "art": {
+    "radius": 12,
+    "size": 140,
+    "x": 80,
+    "y": 300,
+  },
+  "height": 1920,
+  "mark": {
+    "size": 56,
+    "x": 80,
+    "y": 1784,
+  },
+  "progress": null,
+  "qr": {
+    "size": 200,
+    "x": 800,
+    "y": 1640,
+  },
+  "texts": {
+    "link": null,
+    "lyrics": {
+      "align": "left",
+      "color": "primary",
+      "lineHeight": 1.25,
+      "lines": [
+        "One",
+        "Two",
+        "Three",
+        "Four",
+      ],
+      "size": 72,
+      "weight": 800,
+      "x": 80,
+      "y": 612,
+    },
+    "subtitle": {
+      "align": "left",
+      "color": "secondary",
+      "lineHeight": 1.2,
+      "lines": [
+        "Copperline Choir",
+      ],
+      "size": 34,
+      "weight": 400,
+      "x": 252,
+      "y": 410,
+    },
+    "title": {
+      "align": "left",
+      "color": "primary",
+      "lineHeight": 1.2,
+      "lines": [
+        "Signal Fire",
+      ],
+      "size": 44,
+      "weight": 700,
+      "x": 252,
+      "y": 364,
+    },
+  },
+  "width": 1080,
+}
+`;
+
+exports[`card layout > a square card, with no extras 1`] = `
+{
+  "art": {
+    "radius": 16,
+    "size": 560,
+    "x": 260,
+    "y": 96,
+  },
+  "height": 1080,
+  "mark": {
+    "size": 48,
+    "x": 80,
+    "y": 952,
+  },
+  "progress": null,
+  "qr": null,
+  "texts": {
+    "link": null,
+    "lyrics": null,
+    "subtitle": {
+      "align": "center",
+      "color": "secondary",
+      "lineHeight": 1.2,
+      "lines": [
+        "Copperline Choir",
+      ],
+      "size": 32,
+      "weight": 400,
+      "x": 540,
+      "y": 784,
+    },
+    "title": {
+      "align": "center",
+      "color": "primary",
+      "lineHeight": 1.15,
+      "lines": [
+        "Signal Fire",
+      ],
+      "size": 52,
+      "weight": 800,
+      "x": 540,
+      "y": 736,
+    },
+  },
+  "width": 1080,
+}
+`;
+
+exports[`card layout > a story card: the cover, title, artist, progress, link, QR and mark 1`] = `
+{
+  "art": {
+    "radius": 20,
+    "size": 800,
+    "x": 140,
+    "y": 260,
+  },
+  "height": 1920,
+  "mark": {
+    "size": 56,
+    "x": 80,
+    "y": 1784,
+  },
+  "progress": {
+    "frac": 0.3333333333333333,
+    "left": "1:01",
+    "right": "3:03",
+    "timeSize": 28,
+    "width": 800,
+    "x": 140,
+    "y": 1290,
+  },
+  "qr": {
+    "size": 200,
+    "x": 800,
+    "y": 1640,
+  },
+  "texts": {
+    "link": {
+      "align": "center",
+      "color": "muted",
+      "lineHeight": 1.2,
+      "lines": [
+        "https://song.link/i/1",
+      ],
+      "size": 30,
+      "weight": 400,
+      "x": 540,
+      "y": 1410,
+    },
+    "lyrics": null,
+    "subtitle": {
+      "align": "center",
+      "color": "secondary",
+      "lineHeight": 1.2,
+      "lines": [
+        "Copperline Choir",
+      ],
+      "size": 40,
+      "weight": 400,
+      "x": 540,
+      "y": 1234,
+    },
+    "title": {
+      "align": "center",
+      "color": "primary",
+      "lineHeight": 1.15,
+      "lines": [
+        "Signal Fire",
+      ],
+      "size": 68,
+      "weight": 800,
+      "x": 540,
+      "y": 1170,
+    },
+  },
+  "width": 1080,
+}
+`;

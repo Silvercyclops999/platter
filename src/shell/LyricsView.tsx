@@ -1,4 +1,4 @@
-import { AudioLines, PenLine } from "lucide-react";
+import { AudioLines, Image as ImageIcon, PenLine } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
@@ -7,6 +7,9 @@ import { NEUTRAL_HEADER } from "../lib/color";
 import type { LyricLine, Lyrics, Track } from "../lib/types";
 import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
+import { openShareCard, useLyricPick } from "../stores/shareCard";
+import { LYRIC_LINES_MAX } from "../lib/shareCard";
+import { trackArtistLine } from "../lib/format";
 import { useSettings } from "../stores/settings";
 import { currentLineIndex, currentWordIndex, followTarget, interpolate, lineState, lyricsSourceLabel, timedLines, useLyrics } from "./lyrics";
 import { useCoverColors } from "./nowPlaying";
@@ -73,6 +76,8 @@ function usePlayhead(lines: LyricLine[]): { line: number; word: number; jump: (m
 
 function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]; credit?: string; className: string; footer?: ReactNode }) {
   const { line: current, word, jump } = usePlayhead(lines);
+  const picking = useLyricPick((s) => s.picking);
+  const picked = useLyricPick((s) => s.picked);
   const scroller = useRef<HTMLDivElement>(null);
   const lineEls = useRef<(HTMLElement | null)[]>([]);
   const [following, setFollowing] = useState(true);
@@ -128,10 +133,13 @@ function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]
                 ref={(el) => {
                   lineEls.current[i] = el;
                 }}
-                className={`lyrics__line is-${state} ${l.text ? "" : "lyrics__line--gap"}`}
+                className={`lyrics__line is-${state} ${l.text ? "" : "lyrics__line--gap"} ${picking && picked.includes(i) ? "is-picked" : ""}`}
                 aria-current={state === "current" ? "true" : undefined}
                 aria-label={l.text || "Instrumental"}
+                aria-pressed={picking && l.text ? picked.includes(i) : undefined}
+                disabled={picking && !l.text}
                 onClick={() => {
+                  if (picking) return useLyricPick.getState().toggle(i);
                   jump(l.startMs);
                   resume();
                   void player.seek(l.startMs);
@@ -170,13 +178,25 @@ function SyncedLyrics({ lines, credit, className, footer }: { lines: LyricLine[]
 }
 
 function PlainLyrics({ lines, credit, className, footer }: { lines: string[]; credit?: string; className: string; footer?: ReactNode }) {
+  const picking = useLyricPick((s) => s.picking);
+  const picked = useLyricPick((s) => s.picked);
   return (
     <div className={`lyrics lyrics--plain ${className}`}>
       <div className="lyrics__scroll" tabIndex={0} aria-label="Lyrics">
         <div className="lyrics__lines">
           <p className="lyrics__unsynced">{UNSYNCED_NOTE}</p>
           {lines.map((l, i) =>
-            l ? (
+            l && picking ? (
+              <button
+                key={i}
+                type="button"
+                className={`lyrics__line lyrics__line--pick ${picked.includes(i) ? "is-picked" : ""}`}
+                aria-pressed={picked.includes(i)}
+                onClick={() => useLyricPick.getState().toggle(i)}
+              >
+                {l}
+              </button>
+            ) : l ? (
               <p key={i} className="lyrics__line">
                 {l}
               </p>
@@ -202,7 +222,13 @@ function PlainLyrics({ lines, credit, className, footer }: { lines: string[]; cr
 export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
   const timed = timedLines(lyrics);
   const cls = "lyrics--full";
-  const footer = <LyricsSourceLine lyrics={lyrics} track={track} />;
+  const texts = timed ? timed.map((l) => l.text) : lyrics.lines;
+  const footer = (
+    <>
+      <LyricPickBar track={track} texts={texts} />
+      <LyricsSourceLine lyrics={lyrics} track={track} />
+    </>
+  );
   return timed ? (
     <SyncedLyrics key={track.id} lines={timed} credit={lyrics.credit} className={cls} footer={footer} />
   ) : (
@@ -242,6 +268,60 @@ export function LyricsPane() {
       </div>
     );
   return <LyricsView lyrics={lyrics} track={track} />;
+}
+
+/**
+ * Share lyrics: a button that starts picking lines (clicks pick instead of
+ * seeking), then a bar with how many are picked, Share lyrics and Cancel.
+ */
+export function LyricPickBar({ track, texts }: { track: Track; texts: string[] }) {
+  const pick = useLyricPick();
+  const mine = pick.picking && pick.trackId === track.id;
+  // A new song ends picking.
+  useEffect(() => {
+    const p = useLyricPick.getState();
+    if (p.picking && p.trackId !== track.id) p.cancel();
+  }, [track.id]);
+  useEffect(() => () => useLyricPick.getState().cancel(), []);
+  if (!mine)
+    return (
+      <p className="lyrics__share">
+        <button type="button" className="lyrics__source-edit" onClick={() => pick.start(track.id)}>
+          <ImageIcon size={14} aria-hidden="true" /> Share lyrics
+        </button>
+      </p>
+    );
+  const n = pick.picked.length;
+  return (
+    <div className="lyrics__pickbar" role="group" aria-label="Pick lyrics to share">
+      <span className="lyrics__pickcount" aria-live="polite">
+        {n === 0 ? `Pick up to ${LYRIC_LINES_MAX} lines` : `${n} of ${LYRIC_LINES_MAX} lines`}
+      </span>
+      <Button variant="ghost" size="sm" onClick={pick.cancel}>
+        Cancel
+      </Button>
+      <Button
+        variant="primary"
+        size="sm"
+        disabled={n === 0}
+        onClick={() => {
+          const lines = pick.picked.map((i) => texts[i]).filter(Boolean);
+          pick.cancel();
+          openShareCard({
+            kind: "track",
+            id: track.id,
+            title: track.title,
+            subtitle: trackArtistLine(track),
+            thumb: track.thumb,
+            durationMs: track.durationMs,
+            lyrics: lines,
+          });
+        }}
+      >
+        Share lyrics
+      </Button>
+    </div>
+  );
 }
 
 function LyricsSourceLine({ lyrics, track }: { lyrics: Lyrics; track: Track }) {

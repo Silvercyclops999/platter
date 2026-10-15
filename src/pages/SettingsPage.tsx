@@ -170,6 +170,8 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "tokio-rustls", licence: "MIT or Apache-2.0" },
   { name: "RustCrypto MD5", licence: "MIT or Apache-2.0" },
   { name: "RustCrypto SHA-2", licence: "MIT or Apache-2.0" },
+  { name: "qrcode (QR codes)", licence: "MIT or Apache-2.0" },
+  { name: "Tauri clipboard plugin and arboard (copying images)", licence: "MIT or Apache-2.0" },
   { name: "whisper.cpp and ggml (transcription)", licence: "MIT" },
   { name: "whisper-rs", licence: "Unlicense" },
   { name: "Whisper speech models (downloaded when asked)", licence: "MIT" },
@@ -1279,6 +1281,22 @@ export function SettingsPage() {
       description:
         "Share menus can copy a song.link page that opens the song or album in any music service. Platter finds it with iTunes Search, sending only the artist, title and album. Unreleased music never gets one. Off leaves only Platter links.",
       control: (ids) => toggle(s, "sharePublicLinks", ids),
+    },
+    {
+      key: "shareCardQr",
+      section: "Sharing",
+      title: "Share cards include a QR code",
+      description:
+        "Share card images get a QR code that opens the song, album or playlist in Platter for people on your Plex server. It holds only the Platter link, never your server's address. You can turn it off on each card too.",
+      control: (ids) => toggle(s, "shareCardQr", ids),
+    },
+    {
+      key: "shareCardSongLink",
+      section: "Sharing",
+      title: "Include the song.link line",
+      description: "Share cards for released music show their song.link page. Unreleased music never does. Needs Public links for released music.",
+      note: s && !s.sharePublicLinks ? "Turn on Public links for released music to use this." : undefined,
+      control: (ids) => toggle(s, "shareCardSongLink", ids),
     },
     // Friends, following and listening sessions
     {

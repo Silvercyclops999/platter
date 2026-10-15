@@ -80,7 +80,7 @@ body:has(.mini) {
 }
 .mini__art .art { border-radius: var(--radius-row); }
 
-/* Controls: hidden at rest, at once on hover (an instant fade, per the reference). */
+/* Controls: hidden at rest, at once on hover (a very quick fade). */
 .mini__scrim {
   position: absolute;
   inset: 0;

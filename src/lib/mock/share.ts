@@ -21,6 +21,41 @@ function hash(s: string): number {
   return h;
 }
 
+/**
+ * A stand-in QR code for the demo: the three finder squares and a pattern
+ * from the text's hash (not scannable; the core makes the real one).
+ */
+export function mockQr(text: string): { size: number; rows: string[] } {
+  const size = 29;
+  let h = hash(text);
+  const finder = (x: number, y: number) => {
+    for (const [fx, fy] of [[0, 0], [size - 7, 0], [0, size - 7]]) {
+      const dx = x - fx;
+      const dy = y - fy;
+      if (dx >= 0 && dx < 7 && dy >= 0 && dy < 7) {
+        const ring = Math.min(dx, dy, 6 - dx, 6 - dy);
+        return ring !== 1;
+      }
+      if (dx >= -1 && dx <= 7 && dy >= -1 && dy <= 7) return false;
+    }
+    return null;
+  };
+  const rows: string[] = [];
+  for (let y = 0; y < size; y++) {
+    let r = "";
+    for (let x = 0; x < size; x++) {
+      const f = finder(x, y);
+      if (f !== null) r += f ? "1" : "0";
+      else {
+        h = Math.imul(h ^ (x * 31 + y), 0x01000193) >>> 0;
+        r += h % 7 < 3 ? "1" : "0";
+      }
+    }
+    rows.push(r);
+  }
+  return { size, rows };
+}
+
 /** Ids with no confident match in the (pretend) store. */
 export function mockHasNoMatch(id: string): boolean {
   return hash(id) % 5 === 0;

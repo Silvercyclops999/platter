@@ -15,6 +15,7 @@
 //! link instead.
 
 pub mod cache;
+pub mod card;
 pub mod commands;
 pub mod itunes;
 pub mod link;

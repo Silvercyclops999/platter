@@ -206,7 +206,8 @@ describe("plain and missing lyrics", () => {
     const view = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
     const note = within(view).getByText(UNSYNCED_NOTE);
     expect(note).toBe(view.querySelector(".lyrics__lines")!.firstElementChild);
-    expect(within(view).queryAllByRole("button")).toHaveLength(0);
+    // The only button is Share lyrics (lines don't seek).
+    expect(within(view).queryAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Share lyrics"]);
     const ls = view.querySelectorAll("p.lyrics__line");
     expect(ls.length).toBeGreaterThan(5);
     expect([...ls].every((l) => !/is-(past|current|future)/.test(l.className))).toBe(true);

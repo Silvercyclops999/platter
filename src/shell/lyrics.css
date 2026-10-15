@@ -147,3 +147,29 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
+
+/* Share lyrics: picking lines for a card. */
+.lyrics__share { margin: 0 0 var(--space-3); font-size: var(--font-size-sm); }
+.lyrics__share .lyrics__source-edit { display: inline-flex; align-items: center; gap: var(--space-1); }
+.lyrics__line--pick { cursor: pointer; border-radius: var(--radius-row); }
+.lyrics__line.is-picked {
+  color: var(--lyrics-now) !important;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: -12px 0 0 rgba(255, 255, 255, 0.14), 12px 0 0 rgba(255, 255, 255, 0.14);
+}
+.lyrics__line:disabled { cursor: default; }
+.lyrics__pickbar {
+  position: sticky;
+  bottom: var(--space-4);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: fit-content;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: rgba(14, 13, 12, 0.85);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.lyrics__pickcount { font-size: var(--font-size-sm); color: var(--color-text-secondary); }

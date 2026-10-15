@@ -337,6 +337,34 @@ resolved in the core, kept until the UI takes it with `deep_link_take`, and
 announced with event `deeplink://open` (no payload). A song opens its album;
 with `atSeconds`, the player seeks there once when that song starts playing.
 
+## Share cards
+| Command | Args | Returns |
+| --- | --- | --- |
+| `share_card_qr` | `{ kind, id, atSeconds? }` | `{ size, rows, text }` |
+| `share_card_copy` | raw body: RGBA pixels; headers `x-card-width`, `x-card-height` | – |
+| `share_card_save` | raw body: a PNG; header `x-card-name` (percent-encoded) | the saved file's name, or null when cancelled |
+
+Share › Share card… (songs, albums, playlists) and Share lyrics in the lyrics
+view open a dialog with a 9:16 story card (1080 x 1920) and a square card
+(1080 x 1080). The UI lays the card out and draws it on a canvas
+(`src/lib/shareCard.ts`): the cover on a background tinted from it, title,
+artist and the Platter mark; for the song playing now a progress bar at the
+current time; for released music the song.link line (`share_public_link`,
+never for unreleased music, and only with `sharePublicLinks` and
+`shareCardSongLink` on); and a QR code when `shareCardQr` is on. A lyric card
+puts up to 4 picked lines where the big cover would be.
+
+`share_card_qr` makes the QR code in the core from the item's `appLink`
+(`share_info`), so it only ever holds the `platter://` link with the 8-hex
+server tag, never an address, the server's id or a token. `text` is what it
+holds. `rows` are strings of `0` and `1`, one per row.
+
+`share_card_copy` puts the image on the clipboard; the body must be exactly
+width x height x 4 bytes, at most 4096 on a side. `share_card_save` checks the
+body is a PNG and writes it where the save dialog says. Nothing is uploaded.
+Errors: `invalid` for a wrong size or a body that isn't a PNG, `internal`
+("Couldn't copy the image.") when the clipboard refuses.
+
 ## Miniplayer
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1386,6 +1414,8 @@ The rest of the fields, with their defaults:
 | `eqOutputs` | `{ deviceId, deviceName, preset }[]`, empty | Read only here. The preset or profile each output device uses. Set with `eq_use_for_output`. |
 | `eqFallback` | `{ preset, bands }` or null | Read only. The choice for devices without their own, kept from the last such device. |
 | `eqLastOutput` | device id or null | Read only. The device the EQ last followed. |
+| `shareCardQr` | bool, true | Share cards include a QR code that opens the item in Platter (the `platter://` link only). |
+| `shareCardSongLink` | bool, true | Share cards for released songs and albums include the song.link line. Also needs `sharePublicLinks`. |
 | `sharePublicLinks` | bool, true | Share menus find public links for released songs and albums (iTunes Search and song.link). Off leaves only Platter links and sends nothing. |
 | `discordStatus` | bool, true | Show what's playing on Discord. This device only. See Discord above. |
 | `discordClearOnPause` | bool, true | Pausing clears the status. Off shows the song as paused, without a progress bar. |

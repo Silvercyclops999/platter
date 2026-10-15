@@ -45,6 +45,7 @@ import type {
   InfoKeysStatus,
   KeyedInfoSource,
   LibraryItem,
+  CardQr,
   MiniplayerState,
   LikedPage,
   Lyrics,
@@ -300,6 +301,12 @@ export interface Backend {
   sharePublicLink(kind: ShareKind, id: string): Promise<string>;
   /** The platter:// link opened last, once (null when none is waiting). */
   deepLinkTake(): Promise<DeepLinkOpen | null>;
+  /** The QR code for an item's Platter link (with the start time for a song). */
+  shareCardQr(kind: ShareKind, id: string, atSeconds?: number): Promise<CardQr>;
+  /** Put a card on the clipboard (its RGBA pixels). */
+  shareCardCopy(rgba: Uint8Array, width: number, height: number): Promise<void>;
+  /** Save a card (PNG bytes) through a save dialog; the file's name, or null when cancelled. */
+  shareCardSave(png: Uint8Array, name: string): Promise<string | null>;
 
   // Discord status (docs/IPC.md "Discord")
   discordStatus(): Promise<DiscordStatus>;
@@ -460,6 +467,15 @@ function toAppError(e: unknown): AppError {
   return { kind: "internal", message: typeof e === "string" ? e : String(e) };
 }
 
+/** A command whose body is raw bytes (images), with string headers. */
+async function invokeRaw<T>(cmd: string, body: Uint8Array, headers: Record<string, string>): Promise<T> {
+  try {
+    return await invoke<T>(cmd, body, { headers });
+  } catch (e) {
+    throw toAppError(e);
+  }
+}
+
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>(cmd, args);
@@ -579,6 +595,10 @@ export function createTauriBackend(): Backend {
     shareInfo: (kind, id, atSeconds) => call("share_info", { kind, id, atSeconds }),
     sharePublicLink: (kind, id) => call("share_public_link", { kind, id }),
     deepLinkTake: () => call("deep_link_take"),
+    shareCardQr: (kind, id, atSeconds) => call("share_card_qr", { kind, id, atSeconds: atSeconds ?? null }),
+    shareCardCopy: (rgba, width, height) =>
+      invokeRaw("share_card_copy", rgba, { "x-card-width": String(width), "x-card-height": String(height) }),
+    shareCardSave: (png, name) => invokeRaw("share_card_save", png, { "x-card-name": encodeURIComponent(name) }),
     discordStatus: () => call("discord_status"),
     discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
     tagsIndex: () => call("tags_index"),

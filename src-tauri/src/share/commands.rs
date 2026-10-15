@@ -75,3 +75,76 @@ pub async fn share_public_link(share: State<'_, ShareService>, kind: ShareKind, 
 pub async fn deep_link_take(share: State<'_, ShareService>) -> AppResult<Option<DeepLinkOpen>> {
     Ok(share.take())
 }
+
+// ---------------------------------------------------------------- share cards
+
+fn header_text(request: &tauri::ipc::Request<'_>, name: &str) -> Option<String> {
+    request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned)
+}
+
+fn raw_body(request: &tauri::ipc::Request<'_>) -> AppResult<Vec<u8>> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(b) => Ok(b.clone()),
+        _ => Err(crate::error::AppError::Invalid("The card image didn't arrive.".into())),
+    }
+}
+
+/// The QR code for an item's Platter link (`share_card_qr`).
+#[tauri::command]
+pub async fn share_card_qr(
+    share: State<'_, ShareService>,
+    kind: ShareKind,
+    id: String,
+    at_seconds: Option<u32>,
+) -> AppResult<super::card::CardQr> {
+    share.card_qr(kind, &id, at_seconds).await
+}
+
+/// Put a card on the clipboard. The body is the card's RGBA pixels; the
+/// `x-card-width` and `x-card-height` headers give its size.
+#[tauri::command]
+pub async fn share_card_copy(app: AppHandle, request: tauri::ipc::Request<'_>) -> AppResult<()> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let num = |n: &str| header_text(&request, n).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    let (w, h) = (num("x-card-width"), num("x-card-height"));
+    let rgba = raw_body(&request)?;
+    super::card::check_rgba(rgba.len(), w, h)?;
+    let image = tauri::image::Image::new_owned(rgba, w, h);
+    app.clipboard().write_image(&image).map_err(|e| {
+        tracing::warn!("card to clipboard: {e}");
+        crate::error::AppError::Internal("Couldn't copy the image.".into())
+    })
+}
+
+/// Save a card as a PNG through the save dialog. The body is the PNG; the
+/// `x-card-name` header (percent-encoded) suggests a name. Answers the saved
+/// file's name, or None when the dialog was cancelled.
+#[tauri::command]
+pub async fn share_card_save(app: AppHandle, request: tauri::ipc::Request<'_>) -> AppResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let png = raw_body(&request)?;
+    super::card::check_png(&png)?;
+    let title = header_text(&request, "x-card-name")
+        .map(|n| percent_encoding::percent_decode_str(&n).decode_utf8_lossy().into_owned())
+        .unwrap_or_default();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Save share card")
+        .set_file_name(super::card::file_name(&title))
+        .add_filter("PNG image", &["png"])
+        .save_file(move |p| {
+            let _ = tx.send(p);
+        });
+    let Some(picked) = rx.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|e| crate::error::AppError::Io(format!("save path: {e}")))?;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    tokio::task::spawn_blocking(move || std::fs::write(&path, png))
+        .await
+        .map_err(|e| crate::error::AppError::Internal(format!("save: {e}")))??;
+    Ok(Some(name))
+}

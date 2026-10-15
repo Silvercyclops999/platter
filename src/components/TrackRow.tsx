@@ -102,7 +102,7 @@ export function trackMenuItems(
       },
       onSelect: () => openLyricsEditor(track),
     },
-    shareItem("track", track.id, track.thumb),
+    shareItem("track", track.id, track.thumb, { title: track.title, subtitle: trackArtistLine(track), durationMs: track.durationMs }),
     {
       label: "Copy song title",
       onSelect: () => {

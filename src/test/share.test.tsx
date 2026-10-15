@@ -79,7 +79,7 @@ describe("Share submenu", () => {
 
   it("copies the public link for a released song", async () => {
     const { user, sub } = await openShare("track", released.id);
-    await waitFor(() => expect(items(sub)).toEqual(["Copy song link", "Copy Platter link"]));
+    await waitFor(() => expect(items(sub)).toEqual(["Copy song link", "Copy Platter link", "Share card…"]));
     await user.click(within(sub).getByRole("menuitem", { name: "Copy song link" }));
     await waitFor(() => expect(clip).toHaveLength(1));
     expect(clip[0]).toMatch(/^https:\/\/song\.link\/i\/\d+$/);
@@ -107,7 +107,7 @@ describe("Share submenu", () => {
 
   it("copies the Platter link, and playlists and artists only get that", async () => {
     const { user, sub } = await openShare("playlist", playlist.id);
-    await waitFor(() => expect(items(sub)).toEqual(["Copy Platter link"]));
+    await waitFor(() => expect(items(sub)).toEqual(["Copy Platter link", "Share card…"]));
     await user.click(within(sub).getByRole("menuitem", { name: "Copy Platter link" }));
     await waitFor(() => expect(clip).toEqual([expect.stringMatching(new RegExp(`^platter://playlist/${playlist.id}\\?s=[0-9a-f]{8}$`))]));
     expect(toasts()[0].message).toBe("Link copied");
@@ -116,7 +116,7 @@ describe("Share submenu", () => {
   it("leaves the public link out when it's turned off in Settings", async () => {
     await backend.settingsSet({ sharePublicLinks: false });
     const { sub } = await openShare("track", released.id);
-    await waitFor(() => expect(items(sub)).toEqual(["Copy Platter link"]));
+    await waitFor(() => expect(items(sub)).toEqual(["Copy Platter link", "Share card…"]));
   });
 
   it("offers the Platter link when no sure match is found", async () => {
@@ -143,7 +143,7 @@ describe("Share submenu", () => {
   it("the song playing now gets links at the current time", async () => {
     usePlayer.setState({ state: { status: "playing", track: released } as PlayerState, positionMs: 83_400 });
     const { user, sub } = await openShare("track", released.id);
-    await waitFor(() => expect(items(sub)).toEqual(["Copy song link", "Copy Platter link", "Copy link at 1:23"]));
+    await waitFor(() => expect(items(sub)).toEqual(["Copy song link", "Copy Platter link", "Copy link at 1:23", "Share card…"]));
     await user.click(within(sub).getByRole("menuitem", { name: "Copy link at 1:23" }));
     await waitFor(() => expect(clip).toHaveLength(1));
     const [pub, app] = clip[0].split("\n");
@@ -155,7 +155,7 @@ describe("Share submenu", () => {
   it("a song that isn't playing has no timed link", async () => {
     usePlayer.setState({ state: { status: "playing", track: noMatch } as PlayerState, positionMs: 5000 });
     const { sub } = await openShare("track", released.id);
-    await waitFor(() => expect(items(sub)).toEqual(["Copy song link", "Copy Platter link"]));
+    await waitFor(() => expect(items(sub)).toEqual(["Copy song link", "Copy Platter link", "Share card…"]));
   });
 });
 
