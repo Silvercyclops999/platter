@@ -11,6 +11,8 @@
 //! - [`model`]  the model files: catalogue, download, checksum, delete
 //! - [`audio`]  reading the whole file behind playback, decoding to 16 kHz mono
 //! - [`engine`] the recognizer (whisper.cpp in builds with `transcribe`)
+//! - [`helper`] the helper process the recognizer runs in
+//! - [`pace`]   threads, the busy pause and the breather between songs
 //! - [`lines`]  timed words to lyric lines and LRC
 //! - [`store`]  the `lyrics_auto` table
 //! - [`commands`] Tauri commands, events and the app's side of the traits
@@ -18,8 +20,10 @@
 pub mod audio;
 pub mod commands;
 pub mod engine;
+pub mod helper;
 pub mod lines;
 pub mod model;
+pub mod pace;
 pub mod store;
 
 #[cfg(test)]
@@ -44,10 +48,10 @@ use model::{DownloadError, ModelFetch, ModelKind, ModelStore};
 
 /// Progress events at most this often (state changes go out at once).
 const EMIT_GAP: Duration = Duration::from_millis(250);
-/// How often a paused batch looks again.
-const PAUSE_POLL: Duration = Duration::from_secs(5);
 /// A batch that can't reach the server waits this long before trying again.
 const OFFLINE_RETRY: Duration = Duration::from_secs(60);
+/// After repeated helper crashes.
+const STOPPED: &str = "Transcribing in the background is off until Platter restarts, because the speech model kept stopping.";
 
 /// Why the background batch is waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -57,6 +61,9 @@ pub enum PauseReason {
     Battery,
     /// The server can't be reached.
     Offline,
+    /// Other programs are keeping the processor busy, a fullscreen game
+    /// or presentation is in front, or the computer is running warm.
+    Busy,
 }
 
 /// What went wrong last (shown in Settings and the lyrics view).
@@ -141,6 +148,9 @@ pub struct TranscribeStatus {
     /// Songs waiting (not counting the current one).
     pub queued: usize,
     pub batch: BatchProgress,
+    /// About how long each song of a long run takes, breather included.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secs_per_song: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paused: Option<PauseReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -206,6 +216,10 @@ struct State {
     error: Option<Failure>,
     download: Option<Download>,
     last_emit: Option<Instant>,
+    /// No background song starts before this (the breather).
+    rest_until: Option<Instant>,
+    /// Time taken by the background songs transcribed in this run, and how many.
+    pace: (Duration, u32),
 }
 
 /// The parts the service works with.
@@ -218,6 +232,8 @@ pub struct Deps {
     pub other: Arc<dyn OtherLyrics>,
     pub conditions: Arc<dyn Conditions>,
     pub events: Arc<dyn TranscribeEvents>,
+    /// Threads, the busy check and the breather (shared with the lyrics check).
+    pub pacer: Arc<pace::Pacer>,
 }
 
 struct Inner {
@@ -276,6 +292,13 @@ impl Transcriber {
         self.emit(true);
     }
 
+    /// Settings: "Processor use", "Pause while the computer is busy" and
+    /// "Work faster while I'm away".
+    pub fn set_pace(&self, usage: pace::ProcessorUse, pause_when_busy: bool, faster_away: bool) {
+        self.inner.deps.pacer.set_options(usage, pause_when_busy, faster_away);
+        self.inner.wake.notify_one();
+    }
+
     fn stop_all(st: &mut State) {
         st.queue.clear();
         if let Some((_, c)) = &st.current {
@@ -311,6 +334,7 @@ impl Transcriber {
             current: st.current.as_ref().map(|c| c.0.clone()),
             queued: st.queue.len(),
             batch: st.batch,
+            secs_per_song: (st.batch.total > 1 && st.pace.1 > 0).then(|| (st.pace.0.as_secs() / st.pace.1 as u64) as u32),
             paused: st.paused,
             error: st.error.clone(),
         }
@@ -334,6 +358,15 @@ impl Transcriber {
         }
         if !self.inner.st.lock().enabled {
             return Err(AppError::Invalid("Turn on transcription in Settings first.".into()));
+        }
+        Ok(())
+    }
+
+    /// Albums and the batch also stop for the session after repeated crashes.
+    fn check_background(&self) -> AppResult<()> {
+        self.check_usable()?;
+        if self.inner.deps.recognizer.crashed_too_often() {
+            return Err(AppError::Invalid(STOPPED.into()));
         }
         Ok(())
     }
@@ -444,7 +477,7 @@ impl Transcriber {
     /// Queue songs. Songs asked for now go before the background batch; a
     /// single song goes first. Returns how many were added.
     fn enqueue(&self, ids: Vec<String>, background: bool, check_other: bool, front: bool) -> AppResult<usize> {
-        self.check_usable()?;
+        if front { self.check_usable()? } else { self.check_background()? }
         let start_download = {
             let st = self.inner.st.lock();
             self.inner.deps.models.installed(st.model).is_none() && st.download.is_none()
@@ -505,14 +538,15 @@ impl Transcriber {
             let st = self.inner.st.lock();
             st.enabled && self.inner.deps.models.installed(st.model).is_some()
         };
-        if ready && self.inner.deps.recognizer.unavailable().is_none() {
+        let rec = &self.inner.deps.recognizer;
+        if ready && rec.unavailable().is_none() && !rec.crashed_too_often() {
             let _ = self.enqueue(vec![track_id.to_owned()], true, false, false);
         }
     }
 
     /// An album's songs without lyrics.
     pub async fn transcribe_album(&self, album_id: &str) -> AppResult<usize> {
-        self.check_usable()?;
+        self.check_background()?;
         let id = album_id.to_owned();
         let ids = self
             .inner
@@ -534,7 +568,7 @@ impl Transcriber {
 
     /// Every unreleased song without lyrics, in the background.
     pub async fn transcribe_unreleased(&self) -> AppResult<usize> {
-        self.check_usable()?;
+        self.check_background()?;
         let ids = self.inner.deps.db.read_async(store::unreleased_todo).await?;
         self.enqueue(ids, true, true, false)
     }
@@ -571,20 +605,55 @@ impl Transcriber {
     // ------------------------------------------------------------ worker
 
     async fn run(self) {
+        // Held while background songs wait or run (the busy check reads the
+        // processor only then).
+        let mut pace: Option<pace::PaceGuard> = None;
         loop {
             let notified = self.inner.wake.notified();
+            // A breather between background songs so the processor cools down.
+            let rest = {
+                let st = self.inner.st.lock();
+                match (st.enabled, st.queue.front(), st.rest_until) {
+                    (true, Some(j), Some(until)) if !j.now => until.checked_duration_since(Instant::now()),
+                    _ => None,
+                }
+            };
+            if let Some(d) = rest.filter(|d| !d.is_zero()) {
+                if pace.is_none() {
+                    pace = Some(self.inner.deps.pacer.want());
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(d) => {}
+                    _ = notified => {}
+                }
+                continue;
+            }
             let job = {
                 let mut st = self.inner.st.lock();
-                if st.enabled { st.queue.pop_front() } else { None }
+                let job = if st.enabled { st.queue.pop_front() } else { None };
+                job.map(|j| {
+                    let background_left = !j.now || st.queue.iter().any(|q| !q.now);
+                    (j, background_left)
+                })
             };
             match job {
-                Some(job) => self.process(job).await,
+                Some((job, background_left)) => {
+                    if !background_left {
+                        drop(pace.take());
+                    } else if pace.is_none() {
+                        pace = Some(self.inner.deps.pacer.want());
+                    }
+                    self.process(job).await
+                }
                 None => {
+                    drop(pace.take());
                     {
                         let mut st = self.inner.st.lock();
                         if st.queue.is_empty() && st.current.is_none() {
                             st.batch = BatchProgress::default();
                             st.paused = None;
+                            st.rest_until = None;
+                            st.pace = (Duration::ZERO, 0);
                         }
                     }
                     self.inner.deps.recognizer.unload();
@@ -616,30 +685,64 @@ impl Transcriber {
             st.current = Some((current, cancel.clone()));
         }
         self.emit(true);
+        let started = Instant::now();
         let outcome = self.work(&job, &cancel).await;
         {
             let mut st = self.inner.st.lock();
             st.current = None;
+            if matches!(outcome, Outcome::Done) && !job.now {
+                let rest = self.inner.deps.pacer.timing().rest;
+                st.rest_until = Some(Instant::now() + rest);
+                st.pace.0 += started.elapsed() + rest;
+                st.pace.1 += 1;
+            }
             match outcome {
                 Outcome::Retry => {
                     st.queue.push_back(job.clone());
+                }
+                Outcome::Again => {
+                    // After the songs someone is waiting on.
+                    let at = st.queue.iter().position(|j| !j.now).unwrap_or(st.queue.len());
+                    st.queue.insert(at, job.clone());
                 }
                 Outcome::Cancelled => {}
                 Outcome::Done | Outcome::Skipped | Outcome::Failed => {
                     st.batch.done = (st.batch.done + 1).min(st.batch.total);
                 }
             }
+            if matches!(outcome, Outcome::Failed) && self.inner.deps.recognizer.crashed_too_often() {
+                // Background work stops for the session; songs asked for still run.
+                let before = st.queue.len();
+                st.queue.retain(|j| j.now);
+                let dropped = before - st.queue.len();
+                st.batch.total = st.batch.total.saturating_sub(dropped);
+                st.error = Some(Failure { kind: FailureKind::Transcribe, message: STOPPED.into(), track_id: None });
+            }
         }
         self.emit(true);
     }
 
-    /// Waits out the batch's pause conditions. False when cancelled.
-    async fn wait_conditions(&self, cancel: &AtomicBool) -> bool {
+    /// Waits out the pause conditions for work nobody is waiting on: the
+    /// computer being busy, and battery power for the background batch.
+    /// Gives way to a song someone asks for meanwhile.
+    async fn wait_conditions(&self, cancel: &AtomicBool, battery: bool) -> Waited {
+        let pacer = &self.inner.deps.pacer;
         loop {
             if cancel.load(Ordering::Relaxed) {
-                return false;
+                return Waited::Cancelled;
             }
-            let reason = self.inner.deps.conditions.pause_reason().await;
+            let asked_for = self.inner.st.lock().queue.front().is_some_and(|j| j.now);
+            if asked_for {
+                self.inner.st.lock().paused = None;
+                return Waited::GiveWay;
+            }
+            let mut reason = if battery { self.inner.deps.conditions.pause_reason().await } else { None };
+            let load = pacer.load();
+            if reason.is_none() && load == pace::Load::Busy {
+                reason = Some(PauseReason::Busy);
+            }
+            // Not enough readings yet: wait a moment without saying paused.
+            let settling = reason.is_none() && load == pace::Load::Unknown;
             let changed = {
                 let mut st = self.inner.st.lock();
                 let changed = st.paused != reason;
@@ -649,11 +752,12 @@ impl Transcriber {
             if changed {
                 self.emit(true);
             }
-            if reason.is_none() {
-                return true;
+            if reason.is_none() && !settling {
+                return Waited::Go;
             }
+            let poll = if settling { pacer.timing().sample } else { pacer.timing().poll };
             tokio::select! {
-                _ = tokio::time::sleep(PAUSE_POLL) => {}
+                _ = tokio::time::sleep(poll) => {}
                 _ = self.inner.wake.notified() => {}
             }
         }
@@ -697,8 +801,12 @@ impl Transcriber {
             }
         };
         let (model_path, kind) = path;
-        if job.background && !self.wait_conditions(cancel).await {
-            return Outcome::Cancelled;
+        if !job.now {
+            match self.wait_conditions(cancel, job.background).await {
+                Waited::Go => {}
+                Waited::Cancelled => return Outcome::Cancelled,
+                Waited::GiveWay => return Outcome::Again,
+            }
         }
         if job.check_other && d.other.has_lyrics(&id).await {
             return Outcome::Skipped;
@@ -749,19 +857,48 @@ impl Transcriber {
             }
         };
         self.set_stage(Stage::Transcribing, 0);
-        let threads = engine::threads(!job.now);
+        // More threads because nobody's at the computer: back to fewer the
+        // moment someone is (the song starts again).
+        let (threads, boosted) = d.pacer.threads_boosted(job.now);
         let started = Instant::now();
         let seconds = pcm.len() / audio::RATE as usize;
+        let run_cancel = Arc::new(AtomicBool::new(false));
+        let downshift = Arc::new(AtomicBool::new(false));
+        let watch = {
+            let (job_cancel, run_cancel, downshift, pacer) = (cancel.clone(), run_cancel.clone(), downshift.clone(), d.pacer.clone());
+            tokio::spawn(async move {
+                loop {
+                    if job_cancel.load(Ordering::Relaxed) {
+                        run_cancel.store(true, Ordering::Relaxed);
+                    }
+                    if boosted && !pacer.away() {
+                        downshift.store(true, Ordering::Relaxed);
+                        run_cancel.store(true, Ordering::Relaxed);
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+        };
         let res = {
             let rec = d.recognizer.clone();
-            let cancel = cancel.clone();
+            let run_cancel = run_cancel.clone();
             let me = self.clone();
             let progress: engine::Progress = Arc::new(move |p| me.set_stage(Stage::Transcribing, p));
-            tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, cancel, progress)).await
+            tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, engine::LANGUAGE, run_cancel, progress))
+                .await
         };
+        watch.abort();
         let segments = match res {
             Ok(Ok(s)) => s,
+            Ok(Err(RecognizeError::Cancelled)) if downshift.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) => {
+                tracing::info!("someone is back at the computer: starting the song again with fewer threads");
+                return Outcome::Again;
+            }
             Ok(Err(RecognizeError::Cancelled)) => return Outcome::Cancelled,
+            Ok(Err(RecognizeError::Crashed)) => {
+                self.fail(&id, "The speech model stopped unexpectedly on this song.");
+                return Outcome::Failed;
+            }
             Ok(Err(RecognizeError::Failed(m))) => {
                 tracing::warn!("transcription failed: {m}");
                 self.fail(&id, "Transcription failed for this song.");
@@ -811,6 +948,16 @@ enum Outcome {
     Cancelled,
     /// Put back at the end of the queue (the server was unreachable).
     Retry,
+    /// Put back after the songs someone is waiting on (it gave way to one,
+    /// or starts again with fewer threads).
+    Again,
+}
+
+enum Waited {
+    Go,
+    Cancelled,
+    /// A song someone is waiting on came first.
+    GiveWay,
 }
 
 async fn wait_flag(flag: &AtomicBool) {

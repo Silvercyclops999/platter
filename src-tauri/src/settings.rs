@@ -405,6 +405,14 @@ pub struct Settings {
     pub transcribe_lyrics: bool,
     /// The speech model transcription uses (this device only).
     pub transcribe_model: crate::lyrics::transcribe::model::ModelKind,
+    /// How hard speech-model work may use the processor (this device only).
+    pub transcribe_processor: crate::lyrics::transcribe::pace::ProcessorUse,
+    /// Background speech work waits while other programs keep the processor
+    /// busy or a fullscreen game is in front (this device only).
+    pub transcribe_pause_busy: bool,
+    /// Background speech work may use more threads while nobody is at the
+    /// computer and it's on mains power (this device only).
+    pub transcribe_faster_away: bool,
     /// Show lyrics transcribed on this computer.
     pub show_auto_lyrics: bool,
     /// Check lyrics against the song with the speech model, when it's
@@ -738,6 +746,9 @@ impl Default for Settings {
             drag_and_drop: true,
             transcribe_lyrics: false,
             transcribe_model: Default::default(),
+            transcribe_processor: Default::default(),
+            transcribe_pause_busy: true,
+            transcribe_faster_away: true,
             show_auto_lyrics: true,
             lyrics_check_audio: true,
             lyrics_fix_timing: true,
@@ -993,6 +1004,9 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "readFileTags",
     "transcribeLyrics",
     "transcribeModel",
+    "transcribeProcessor",
+    "transcribePauseBusy",
+    "transcribeFasterAway",
     "lyricsCheckAudio",
     "lyricsFixTiming",
     "showToMyDevices",
@@ -1131,6 +1145,9 @@ pub struct SettingsPatch {
     pub drag_and_drop: Option<bool>,
     pub transcribe_lyrics: Option<bool>,
     pub transcribe_model: Option<crate::lyrics::transcribe::model::ModelKind>,
+    pub transcribe_processor: Option<crate::lyrics::transcribe::pace::ProcessorUse>,
+    pub transcribe_pause_busy: Option<bool>,
+    pub transcribe_faster_away: Option<bool>,
     pub show_auto_lyrics: Option<bool>,
     pub lyrics_check_audio: Option<bool>,
     pub lyrics_fix_timing: Option<bool>,
@@ -1387,6 +1404,9 @@ impl Settings {
         set(&mut self.drag_and_drop, p.drag_and_drop);
         set(&mut self.transcribe_lyrics, p.transcribe_lyrics);
         set(&mut self.transcribe_model, p.transcribe_model);
+        set(&mut self.transcribe_processor, p.transcribe_processor);
+        set(&mut self.transcribe_pause_busy, p.transcribe_pause_busy);
+        set(&mut self.transcribe_faster_away, p.transcribe_faster_away);
         set(&mut self.show_auto_lyrics, p.show_auto_lyrics);
         set(&mut self.lyrics_check_audio, p.lyrics_check_audio);
         set(&mut self.lyrics_fix_timing, p.lyrics_fix_timing);
@@ -1859,6 +1879,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.lyrics_released_ok.store(s.lyrics_released_for_versions, Ordering::Relaxed);
     if let Some(t) = live.transcriber.lock().as_ref() {
         t.set_options(s.transcribe_lyrics, s.transcribe_model);
+        t.set_pace(s.transcribe_processor, s.transcribe_pause_busy, s.transcribe_faster_away);
     }
     if let Some(m) = live.mixes.lock().as_ref() {
         m.set_options(s.mix_options());
@@ -2262,6 +2283,8 @@ mod tests {
         // Transcription is opt-in (it downloads a model); its results show.
         assert!(!s.transcribe_lyrics && s.show_auto_lyrics);
         assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Small);
+        assert_eq!(s.transcribe_processor, crate::lyrics::transcribe::pace::ProcessorUse::Light);
+        assert!(s.transcribe_pause_busy && s.transcribe_faster_away);
         assert_eq!(s.explicit_content, ExplicitContent::Allowed);
         assert!(s.home_mixes && s.mix_unreleased);
         assert_eq!(s.mix_variety, crate::mixes::Variety::Balanced);
@@ -2740,6 +2763,9 @@ mod tests {
             drag_and_drop: Some(false),
             transcribe_lyrics: Some(true),
             transcribe_model: Some(crate::lyrics::transcribe::model::ModelKind::Medium),
+            transcribe_processor: Some(crate::lyrics::transcribe::pace::ProcessorUse::Balanced),
+            transcribe_pause_busy: Some(false),
+            transcribe_faster_away: Some(false),
             show_auto_lyrics: Some(false),
             show_to_my_devices: Some(false),
             computer_name: Some("Den".into()),
@@ -2839,6 +2865,8 @@ mod tests {
         assert!(s.report_plays);
         assert!(s.transcribe_lyrics && !s.show_auto_lyrics);
         assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Medium);
+        assert_eq!(s.transcribe_processor, crate::lyrics::transcribe::pace::ProcessorUse::Balanced);
+        assert!(!s.transcribe_pause_busy && !s.transcribe_faster_away);
         assert!(!fresh.lyrics_show_auto.load(Ordering::Relaxed));
         assert!(!s.info_wikipedia && s.info_lastfm && s.info_fanart && s.info_audiodb);
         assert!(!s.info_listenbrainz && !s.link_featured);

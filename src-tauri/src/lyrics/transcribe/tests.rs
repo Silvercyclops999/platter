@@ -18,6 +18,7 @@ use super::audio::{AudioError, RATE};
 use super::engine::{Progress, RecognizeError, Recognizer};
 use super::lines::{Segment, Word};
 use super::model::{DownloadError, ModelFetch, ModelKind, ModelSpec, ModelStore, sha256_hex};
+use super::pace::fake::FakeLoad;
 use super::*;
 use crate::lyrics::user;
 
@@ -69,6 +70,8 @@ enum Behaviour {
     Fail,
     /// Runs until cancelled.
     Block,
+    /// The helper process stopped.
+    Crash,
 }
 
 struct FakeRecognizer {
@@ -77,11 +80,21 @@ struct FakeRecognizer {
     /// Samples given on the last run.
     last_len: AtomicUsize,
     last_threads: AtomicUsize,
+    crashed_too_often: AtomicBool,
+    /// Runs after this many block until cancelled.
+    hold_after: AtomicUsize,
 }
 
 impl FakeRecognizer {
     fn new(b: Behaviour) -> Arc<Self> {
-        Arc::new(Self { behaviour: Mutex::new(b), runs: AtomicUsize::new(0), last_len: AtomicUsize::new(0), last_threads: AtomicUsize::new(0) })
+        Arc::new(Self {
+            behaviour: Mutex::new(b),
+            runs: AtomicUsize::new(0),
+            last_len: AtomicUsize::new(0),
+            last_threads: AtomicUsize::new(0),
+            crashed_too_often: AtomicBool::new(false),
+            hold_after: AtomicUsize::new(usize::MAX),
+        })
     }
 }
 
@@ -95,15 +108,21 @@ impl Recognizer for FakeRecognizer {
         _kind: ModelKind,
         pcm: &[f32],
         threads: usize,
+        language: &str,
         cancel: Arc<AtomicBool>,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
         assert!(model.is_file(), "the model is on disk");
-        self.runs.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(language, "en");
+        let run = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
+        if run > self.hold_after.load(Ordering::SeqCst) {
+            *self.behaviour.lock() = Behaviour::Block;
+        }
         self.last_len.store(pcm.len(), Ordering::SeqCst);
         self.last_threads.store(threads, Ordering::SeqCst);
         progress(50);
-        match self.behaviour.lock().clone() {
+        let behaviour = self.behaviour.lock().clone();
+        match behaviour {
             Behaviour::Words(s) => Ok(s),
             Behaviour::Fail => Err(RecognizeError::Failed("boom".into())),
             Behaviour::Block => {
@@ -112,7 +131,11 @@ impl Recognizer for FakeRecognizer {
                 }
                 Err(RecognizeError::Cancelled)
             }
+            Behaviour::Crash => Err(RecognizeError::Crashed),
         }
+    }
+    fn crashed_too_often(&self) -> bool {
+        self.crashed_too_often.load(Ordering::SeqCst)
     }
 }
 
@@ -217,6 +240,7 @@ struct Fx {
     other: Arc<FakeOther>,
     cond: Arc<FakeConditions>,
     events: Arc<FakeEvents>,
+    load: Arc<FakeLoad>,
     free: Arc<Mutex<Option<u64>>>,
     dir: tempfile::TempDir,
 }
@@ -262,6 +286,7 @@ fn fx_with(fetch: Arc<FakeFetch>) -> Fx {
     let other = Arc::new(FakeOther::default());
     let cond = Arc::new(FakeConditions::default());
     let events = Arc::new(FakeEvents::default());
+    let load = FakeLoad::new(5.0);
     let t = Transcriber::new(Deps {
         db: db.clone(),
         models: models.clone(),
@@ -271,10 +296,12 @@ fn fx_with(fetch: Arc<FakeFetch>) -> Fx {
         other: other.clone(),
         conditions: cond.clone(),
         events: events.clone(),
+        // A 16-thread computer: Light is 2 threads in the background, 4 for a song asked for.
+        pacer: pace::Pacer::with_cores(load.clone(), pace::fake::timing(), 16),
     });
     t.set_options(true, ModelKind::Small);
     t.spawn();
-    Fx { t, db, models, fetch, rec, songs, other, cond, events, free, dir }
+    Fx { t, db, models, fetch, rec, songs, other, cond, events, load, free, dir }
 }
 
 fn fx() -> Fx {
@@ -559,7 +586,7 @@ async fn the_background_batch_takes_unreleased_songs_and_waits_on_battery() {
     *f.cond.0.lock() = None;
     let s = until(&f.t, "done", |s| idle(s) && f.events.done.lock().len() == 3).await;
     assert_eq!(s.paused, None);
-    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), engine::threads(true));
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 2);
     assert!(f.db.read(store::unreleased_todo).unwrap().is_empty());
 }
 
@@ -569,15 +596,129 @@ async fn songs_asked_for_go_before_the_batch() {
     install(&f).await;
     *f.cond.0.lock() = Some(PauseReason::Battery);
     f.t.transcribe_unreleased().await.unwrap();
-    until(&f.t, "paused", |s| s.paused.is_some()).await;
+    let s = until(&f.t, "paused", |s| s.paused.is_some()).await;
+    let waiting = s.current.unwrap().track_id;
+    // The asked-for song runs at once, even on battery, with more threads.
     f.t.transcribe_track("501").unwrap();
-    let s = f.t.status();
-    assert_eq!(s.queued, 3, "two batch songs and the one asked for");
-    // Cancel the paused batch song; the asked-for song runs next even on battery.
-    let current = s.current.unwrap().track_id;
-    f.t.cancel(Some(&current));
     until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
-    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), engine::threads(false));
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 4);
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 1, "only the song asked for ran");
+    // Then the batch song it gave way to waits again.
+    let s = until(&f.t, "paused again", |s| s.paused == Some(PauseReason::Battery)).await;
+    assert_eq!(s.current.unwrap().track_id, waiting);
+    assert_eq!((s.batch.total, s.queued), (4, 2));
+    f.t.cancel(None);
+}
+
+#[tokio::test]
+async fn background_work_waits_while_the_computer_is_busy() {
+    let f = fx();
+    install(&f).await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(f.load.reads(), 0, "nothing reads the processor while the queue is empty");
+    f.load.set(90.0);
+    f.t.transcribe_album("80").await.unwrap();
+    let s = until(&f.t, "paused", |s| s.paused == Some(PauseReason::Busy)).await;
+    assert_eq!(s.current.unwrap().track_id, "801");
+    assert_eq!(f.songs.reads.load(Ordering::SeqCst), 0, "nothing is read while paused");
+    // The song someone asks for still runs.
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 1);
+    until(&f.t, "paused again", |s| s.paused == Some(PauseReason::Busy)).await;
+    // Calm again (for the resume time): the album goes on.
+    f.load.set(5.0);
+    until(&f.t, "album done", |s| idle(s) && f.events.done.lock().len() == 4).await;
+    assert_eq!(f.t.status().paused, None);
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 2);
+    // Done: the readings stop.
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let n = f.load.reads();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(f.load.reads(), n);
+}
+
+#[tokio::test]
+async fn a_fullscreen_game_pauses_background_work() {
+    let f = fx();
+    install(&f).await;
+    f.load.in_front.store(true, Ordering::SeqCst);
+    f.t.transcribe_album("80").await.unwrap();
+    until(&f.t, "paused", |s| s.paused == Some(PauseReason::Busy)).await;
+    f.load.in_front.store(false, Ordering::SeqCst);
+    until(&f.t, "album done", |s| idle(s) && f.events.done.lock().len() == 3).await;
+}
+
+#[tokio::test]
+async fn the_busy_pause_can_be_turned_off() {
+    let f = fx();
+    install(&f).await;
+    f.t.set_pace(pace::ProcessorUse::Balanced, false, false);
+    f.load.set(95.0);
+    f.t.transcribe_album("80").await.unwrap();
+    until(&f.t, "album done", |s| idle(s) && f.events.done.lock().len() == 3).await;
+    assert_eq!(f.load.reads(), 0);
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 4, "Balanced");
+}
+
+#[tokio::test]
+async fn away_mode_uses_more_threads_and_drops_back_when_someone_returns() {
+    let f = fx();
+    install(&f).await;
+    *f.rec.behaviour.lock() = Behaviour::Block;
+    f.load.idle_for(Some(Duration::from_secs(10)));
+    f.t.transcribe_album("80").await.unwrap();
+    until(&f.t, "a run with 4 threads", |_| f.rec.last_threads.load(Ordering::SeqCst) == 4).await;
+    // Someone's back: the song starts again with the usual two.
+    *f.rec.behaviour.lock() = Behaviour::Words(vec![words("hello there", 1000)]);
+    f.load.idle_for(Some(Duration::from_millis(1)));
+    until(&f.t, "album done", |s| idle(s) && f.events.done.lock().len() == 3).await;
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 2);
+    assert_eq!(f.events.done.lock()[0].0, "801", "the song that started again isn't skipped");
+    assert!(f.t.status().error.is_none());
+}
+
+#[tokio::test]
+async fn a_crash_fails_the_song_and_the_queue_goes_on() {
+    let f = fx();
+    install(&f).await;
+    *f.rec.behaviour.lock() = Behaviour::Crash;
+    f.t.transcribe_album("80").await.unwrap();
+    let s = until(&f.t, "failure", |s| s.error.is_some()).await;
+    assert_eq!(s.error.unwrap().message, "The speech model stopped unexpectedly on this song.");
+    *f.rec.behaviour.lock() = Behaviour::Words(vec![words("hello there", 1000)]);
+    until(&f.t, "the rest", |s| idle(s) && f.events.done.lock().len() == 2).await;
+}
+
+#[tokio::test]
+async fn repeated_crashes_stop_background_work_for_the_session() {
+    let f = fx();
+    install(&f).await;
+    *f.rec.behaviour.lock() = Behaviour::Crash;
+    f.rec.crashed_too_often.store(true, Ordering::SeqCst);
+    f.t.transcribe_album("80").await.unwrap_err();
+    f.rec.crashed_too_often.store(false, Ordering::SeqCst);
+    f.t.transcribe_album("80").await.unwrap();
+    f.rec.crashed_too_often.store(true, Ordering::SeqCst);
+    let s = until(&f.t, "stopped", |s| idle(s) && s.error.as_ref().is_some_and(|e| e.track_id.is_none())).await;
+    assert!(s.error.unwrap().message.contains("until Platter restarts"));
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 1, "the rest of the album was dropped");
+    assert_eq!(f.t.transcribe_unreleased().await.unwrap_err().kind(), "invalid");
+    // A song someone asks for still runs.
+    *f.rec.behaviour.lock() = Behaviour::Words(vec![words("hello there", 1000)]);
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
+}
+
+#[tokio::test]
+async fn long_runs_show_their_pace() {
+    let f = fx();
+    install(&f).await;
+    f.rec.hold_after.store(1, Ordering::SeqCst);
+    f.t.transcribe_album("80").await.unwrap();
+    assert_eq!(f.t.status().secs_per_song, None, "not known before a song is done");
+    let s = until(&f.t, "the second song", |s| s.current.as_ref().is_some_and(|c| c.track_id == "802")).await;
+    assert!(s.secs_per_song.is_some(), "{s:?}");
     f.t.cancel(None);
 }
 
@@ -693,14 +834,14 @@ fn real_model_speed() {
     let model = std::env::var("PLATTER_WHISPER_MODEL").expect("PLATTER_WHISPER_MODEL");
     let clip = std::env::var("PLATTER_TEST_AUDIO").expect("PLATTER_TEST_AUDIO");
     let kind = if model.contains("medium") { ModelKind::Medium } else { ModelKind::Small };
-    let threads: usize = std::env::var("PLATTER_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(engine::threads(false));
+    let threads: usize = std::env::var("PLATTER_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(4);
     let never = AtomicBool::new(false);
     let pcm = audio::to_16k_mono(std::fs::read(&clip).unwrap(), None, &never).unwrap();
-    let rec = engine::default_recognizer();
+    let rec = engine::in_process();
     assert_eq!(rec.unavailable(), None);
     let started = std::time::Instant::now();
     let segs = rec
-        .transcribe(Path::new(&model), kind, &pcm, threads, Arc::new(AtomicBool::new(false)), Arc::new(|_| {}))
+        .transcribe(Path::new(&model), kind, &pcm, threads, engine::LANGUAGE, Arc::new(AtomicBool::new(false)), Arc::new(|_| {}))
         .unwrap();
     let took = started.elapsed();
     let lines = lines::to_lines(&segs);

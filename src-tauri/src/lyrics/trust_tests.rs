@@ -22,6 +22,7 @@ use crate::lyrics::transcribe::audio::{AudioError, RATE};
 use crate::lyrics::transcribe::engine::{Progress, RecognizeError, Recognizer};
 use crate::lyrics::transcribe::lines::{Segment, Word};
 use crate::lyrics::transcribe::model::{ModelKind, ModelSpec, ModelStore};
+use crate::lyrics::transcribe::pace::{Pacer, fake::{self, FakeLoad}};
 
 // ---------------------------------------------------------------- fixtures
 
@@ -330,14 +331,16 @@ struct FakeRecognizer {
     /// Track id → what its recording sounds like (the fake audio carries the track).
     heard: Mutex<Vec<(u32, String)>>,
     calls: AtomicUsize,
+    threads: AtomicUsize,
 }
 
 impl Recognizer for FakeRecognizer {
     fn unavailable(&self) -> Option<String> {
         None
     }
-    fn transcribe(&self, _: &Path, _: ModelKind, pcm: &[f32], _: usize, _: Arc<AtomicBool>, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
+    fn transcribe(&self, _: &Path, _: ModelKind, pcm: &[f32], threads: usize, _: &str, _: Arc<AtomicBool>, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.threads.store(threads, Ordering::SeqCst);
         let start = window_start(pcm);
         let end = start + (pcm.len() * 1000 / RATE as usize) as u32;
         let words: Vec<Word> = self
@@ -391,6 +394,7 @@ struct Fx {
     fix_timing: Arc<AtomicBool>,
     released_ok: Arc<AtomicBool>,
     none_matched: Arc<Mutex<Vec<String>>>,
+    load: Arc<FakeLoad>,
     db: DbHandle,
     models: std::path::PathBuf,
     _dir: tempfile::TempDir,
@@ -438,7 +442,8 @@ fn fx() -> Fx {
         size: MODEL_SIZE,
         sha256: String::new(),
     }];
-    let rec = Arc::new(FakeRecognizer { heard: Mutex::new(Vec::new()), calls: AtomicUsize::new(0) });
+    let rec = Arc::new(FakeRecognizer { heard: Mutex::new(Vec::new()), calls: AtomicUsize::new(0), threads: AtomicUsize::new(0) });
+    let load = FakeLoad::new(5.0);
     let pcm = Arc::new(FakePcm(Mutex::new(Ok(song_pcm(205_000)))));
     let events = Arc::new(Events::default());
     let none_matched = Arc::new(Mutex::new(Vec::new()));
@@ -453,6 +458,7 @@ fn fx() -> Fx {
             let n = none_matched.clone();
             Arc::new(move |id: &str| n.lock().push(id.into()))
         }),
+        pacer: Pacer::with_cores(load.clone(), fake::timing(), 16),
     });
     svc.set_checker(Arc::new(checker.clone()));
     let f = Fx {
@@ -467,6 +473,7 @@ fn fx() -> Fx {
         fix_timing,
         released_ok,
         none_matched,
+        load,
         db,
         models,
         _dir: dir,
@@ -542,6 +549,29 @@ async fn same_title_collision_never_shows_the_wrong_song() {
     );
     assert!(list.items[1].shown && !list.items[0].shown);
     assert!(list.can_check);
+}
+
+#[tokio::test]
+async fn the_check_waits_while_the_computer_is_busy_and_uses_two_threads() {
+    let f = fx();
+    f.lrclib_search(serde_json::json!([hit("Crown Season", 205.0, &lrc(KING_A))]));
+    f.hears(timeline(KING_A, |t| t));
+    f.load.set(90.0);
+    f.checker.spawn();
+    assert_eq!(f.svc.shown("701").await.unwrap().unwrap().notice, Some(Notice::Checking));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(f.load.reads() > 0, "the processor is read while a song waits");
+    assert_eq!(f.rec.calls.load(Ordering::SeqCst), 0, "nothing runs while the computer is busy");
+    assert!(f.events.0.lock().is_empty());
+    f.load.set(5.0);
+    for _ in 0..300 {
+        if !f.events.0.lock().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(*f.events.0.lock(), vec!["701"]);
+    assert_eq!(f.rec.threads.load(Ordering::SeqCst), 2, "background work gets two threads");
 }
 
 #[tokio::test]

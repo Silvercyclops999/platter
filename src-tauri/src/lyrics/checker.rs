@@ -1,5 +1,5 @@
-//! The audio check's worker: one song at a time, newest first, at the
-//! lowest priority. It reads the song the way transcription does (the
+//! The audio check's worker: one song at a time, newest first, with the
+//! background thread budget, waiting while the computer is busy. It reads the song the way transcription does (the
 //! pre-cache first, else the server behind playback's transfer, giving way
 //! to it), decodes it, transcribes a 30 s window with the speech model on
 //! this computer, and judges the candidates in order until one matches.
@@ -20,6 +20,7 @@ use super::candidates::Stored;
 use super::transcribe::audio::{self, AudioError};
 use super::transcribe::engine::{self, Recognizer};
 use super::transcribe::model::{ModelKind, ModelStore};
+use super::transcribe::pace::{PaceGuard, Pacer};
 use super::transcribe::{SongAudio, SongReader};
 use crate::db::DbHandle;
 use crate::db::queries::now_s;
@@ -97,6 +98,8 @@ pub struct CheckerDeps {
     /// "Check lyrics against the song".
     pub enabled: Arc<AtomicBool>,
     pub none_matched: Option<NoneMatched>,
+    /// Threads and the busy check (shared with transcription).
+    pub pacer: Arc<Pacer>,
 }
 
 struct Inner {
@@ -239,8 +242,21 @@ impl Checker {
     }
 
     async fn run(self) {
+        // Held while songs wait (the busy check reads the processor only then).
+        let mut pace: Option<PaceGuard> = None;
         loop {
             let notified = self.inner.wake.notified();
+            if !self.inner.queue.lock().is_empty() {
+                if pace.is_none() {
+                    pace = Some(self.inner.deps.pacer.want());
+                }
+                // Wait while other programs keep the processor busy.
+                self.inner.deps.pacer.wait_calm().await;
+            }
+            if self.inner.deps.recognizer.crashed_too_often() {
+                // Off for the session after repeated crashes.
+                self.inner.queue.lock().clear();
+            }
             let job = self.inner.queue.lock().pop_front();
             match job {
                 Some(job) => {
@@ -251,7 +267,10 @@ impl Checker {
                         self.inner.deps.recognizer.unload();
                     }
                 }
-                None => notified.await,
+                None => {
+                    drop(pace.take());
+                    notified.await
+                }
             }
         }
     }
@@ -362,9 +381,9 @@ impl Checker {
         } else {
             let rec = d.recognizer.clone();
             let model = model.to_path_buf();
-            let threads = engine::threads(true);
+            let threads = d.pacer.threads(false);
             let res = tokio::task::spawn_blocking(move || {
-                rec.transcribe(&model, kind, &slice, threads, Arc::new(AtomicBool::new(false)), Arc::new(|_| {}))
+                rec.transcribe(&model, kind, &slice, threads, engine::LANGUAGE, Arc::new(AtomicBool::new(false)), Arc::new(|_| {}))
             })
             .await;
             match res {
@@ -404,6 +423,7 @@ impl AudioCheck for Checker {
     fn available(&self) -> bool {
         self.inner.deps.enabled.load(Ordering::Relaxed)
             && self.inner.deps.recognizer.unavailable().is_none()
+            && !self.inner.deps.recognizer.crashed_too_often()
             && self.model().is_some()
     }
 

@@ -7,6 +7,7 @@
 
 pub mod art;
 pub mod commands;
+pub mod cpu;
 pub mod discord;
 pub mod keys;
 pub mod logs;
