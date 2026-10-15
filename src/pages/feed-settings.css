@@ -1,0 +1,14 @@
+/* Settings: the now-playing feed's addresses and port. */
+.feed-note {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+.feed-note code {
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  user-select: text;
+}
+.number-field--wide { width: 96px; }

@@ -15,6 +15,7 @@
  *                   real JPEGs at the requested size (scripts/measure-memory.mjs)
  *   ?update=1       "Check for updates" finds a new version (ready to install)
  *   ?tagScan=1      the file tag scan starts from nothing read (progress in Settings)
+ *   ?feedPortInUse=32540  another program has that port (the now-playing feed says so)
  *   ?link=<url>     open a platter:// link a moment after start, as if the
  *                   OS had handed it over (url-encoded)
  *   ?health=offline start in a given app state (see HEALTH_DEMOS in ./health:
@@ -74,6 +75,7 @@ import type {
   NewBookmark,
   SmartRules,
   SmartSaveRequest,
+  FeedStatus,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
@@ -122,6 +124,8 @@ export interface MockOptions {
   link?: string;
   /** Discord status demo: no app id, Discord closed, or a failed upload. */
   discord?: DiscordDemo;
+  /** Another program has this port, so the now-playing feed can't open it. */
+  feedPortInUse?: number;
   /** Start the file tag scan from nothing read (shows its progress in Settings). */
   tagScan?: boolean;
   /** The other Platter computer is seen through Plex but doesn't answer. */
@@ -163,6 +167,7 @@ export function optionsFromUrl(search: string): MockOptions {
     link: p.get("link") ?? undefined,
     discord: isDiscordDemo(p.get("discord")) ? (p.get("discord") as DiscordDemo) : undefined,
     tagScan: p.get("tagScan") === "1",
+    feedPortInUse: Number(p.get("feedPortInUse")) || undefined,
     platterUnreachable: p.get("platter") === "unreachable",
     downloads: p.get("downloads") === "demo" || p.get("downloads") === "full" ? (p.get("downloads") as "demo" | "full") : undefined,
   };
@@ -1873,7 +1878,15 @@ export class MockBackend implements Backend {
         next.listenRelay = r;
       }
       if (patch.listenName !== undefined) next.listenName = patch.listenName.trim();
+      if (patch.nowPlayingFeedPort !== undefined) {
+        const port = patch.nowPlayingFeedPort;
+        if (!Number.isInteger(port) || port < 1024 || port > 65535) throw { kind: "invalid", message: "Pick a port from 1024 to 65535." };
+      }
       this.settings = next;
+      if (patch.nowPlayingFeed !== undefined || patch.nowPlayingFeedPort !== undefined) {
+        const st = this.feed();
+        this.later(0, () => this.emit("feed://status", st));
+      }
       if (patch.listenGuestsControl !== undefined) this.social.settingsChanged();
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
@@ -2278,6 +2291,20 @@ export class MockBackend implements Backend {
 
   discordStatus() {
     return this.delay(() => this.discord.status());
+  }
+
+  // ---------------------------------------------------------------- now-playing feed
+
+  /** The feed as the core would report it for the current settings. */
+  private feed(): FeedStatus {
+    const s = this.settings;
+    if (!s.nowPlayingFeed) return { state: "off" };
+    const port = s.nowPlayingFeedPort;
+    if (port === this.opts.feedPortInUse) return { state: "portInUse", port };
+    return { state: "on", port, url: `http://127.0.0.1:${port}/now-playing.json` };
+  }
+  feedStatus() {
+    return this.delay(() => this.feed());
   }
   discordImgurKeySet(key: string | null) {
     return this.delay(() => this.discord.setKey(key));

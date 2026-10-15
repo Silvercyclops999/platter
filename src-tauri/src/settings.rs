@@ -431,6 +431,10 @@ pub struct Settings {
     pub power_keys: bool,
     /// The key that shows the jump hints.
     pub hint_key: HintKey,
+    /// Serve what's playing on 127.0.0.1 for widgets (this device only).
+    pub now_playing_feed: bool,
+    /// The feed's port (this device only).
+    pub now_playing_feed_port: u16,
 }
 
 /// Longest model name accepted.
@@ -563,6 +567,8 @@ impl Default for Settings {
             miniplayer_bounds: None,
             power_keys: false,
             hint_key: HintKey::F,
+            now_playing_feed: false,
+            now_playing_feed_port: crate::feed::DEFAULT_PORT,
         }
     }
 }
@@ -700,6 +706,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "miniplayerTint",
     "miniplayerQueue",
     "miniplayerBounds",
+    "nowPlayingFeed",
+    "nowPlayingFeedPort",
 ];
 
 /// A partial update; absent fields are left alone.
@@ -827,6 +835,8 @@ pub struct SettingsPatch {
     pub miniplayer_queue: Option<bool>,
     pub power_keys: Option<bool>,
     pub hint_key: Option<HintKey>,
+    pub now_playing_feed: Option<bool>,
+    pub now_playing_feed_port: Option<u16>,
 }
 
 impl SettingsPatch {
@@ -922,6 +932,13 @@ impl Settings {
         set(&mut self.miniplayer_queue, p.miniplayer_queue);
         set(&mut self.power_keys, p.power_keys);
         set(&mut self.hint_key, p.hint_key);
+        set(&mut self.now_playing_feed, p.now_playing_feed);
+        if let Some(port) = p.now_playing_feed_port {
+            if port < crate::feed::PORT_MIN {
+                return Err(AppError::Invalid("Pick a port from 1024 to 65535.".into()));
+            }
+            self.now_playing_feed_port = port;
+        }
         set(&mut self.show_cast_devices, p.show_cast_devices);
         set(&mut self.discord_status, p.discord_status);
         set(&mut self.discord_show_unreleased, p.discord_show_unreleased);
@@ -1216,6 +1233,8 @@ pub struct Live {
     pub sync: crate::sync::engine::ConfigSwitch,
     /// Scrobbling.
     pub scrobble: crate::scrobble::ScrobbleSwitches,
+    /// The now-playing feed for widgets.
+    pub feed: crate::feed::FeedSwitch,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -1249,6 +1268,11 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         sc.unreleased.store(s.scrobble_unreleased, Ordering::Relaxed);
         sc.private_session.store(s.private_session, Ordering::Relaxed);
     }
+    live.feed.set(crate::feed::FeedConfig {
+        enabled: s.now_playing_feed,
+        port: s.now_playing_feed_port,
+        private_session: s.private_session,
+    });
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
@@ -1628,7 +1652,27 @@ mod tests {
         assert!(!s.sync_enabled && s.sync_folder.is_empty(), "the sync file is opt-in");
         assert!(s.sync_settings && s.sync_library && s.sync_follows && s.sync_lyrics);
         assert!(!s.power_keys, "keyboard power mode is opt-in");
+        assert!(!s.now_playing_feed, "the widget feed is opt-in");
+        assert_eq!(s.now_playing_feed_port, 32540);
         assert_eq!(s.hint_key, HintKey::F);
+    }
+
+    #[test]
+    fn the_feed_follows_its_settings_and_the_private_session() {
+        let live = Live::default();
+        let (db, _d) = db();
+        let mut s = Settings::default();
+        publish(&s, &live, &db);
+        assert!(!live.feed.get().enabled);
+        s.apply(&SettingsPatch { now_playing_feed: Some(true), now_playing_feed_port: Some(40000), private_session: Some(true), ..Default::default() })
+            .unwrap();
+        publish(&s, &live, &db);
+        assert_eq!(live.feed.get(), crate::feed::FeedConfig { enabled: true, port: 40000, private_session: true });
+        // Low ports are refused and leave the port alone.
+        assert!(s.apply(&SettingsPatch { now_playing_feed_port: Some(80), ..Default::default() }).is_err());
+        assert_eq!(s.now_playing_feed_port, 40000);
+        // The feed stays on this computer.
+        assert!(DEVICE_SETTINGS.contains(&"nowPlayingFeed") && DEVICE_SETTINGS.contains(&"nowPlayingFeedPort"));
     }
 
     #[test]

@@ -5,6 +5,7 @@ pub mod bridge;
 pub mod db;
 pub mod downloads;
 pub mod error;
+pub mod feed;
 pub mod hidden;
 pub mod likes;
 pub mod lyrics;
@@ -719,6 +720,12 @@ pub fn run() {
 
             app.manage(plex);
             app.manage(db);
+            // The now-playing feed for widgets, on 127.0.0.1 while its setting is on.
+            app.manage(feed::spawn(
+                live.feed.clone(),
+                Arc::new(feed::AppSource { player: player.clone(), art: art.clone() }),
+                Arc::new(plex::state::TauriSink(app.handle().clone())),
+            ));
             app.manage(art);
             app.manage(artist_info);
             app.manage(player);
@@ -831,6 +838,7 @@ pub fn run() {
             settings::app_info,
             settings::open_project_page,
             artistinfo::commands::artist_info,
+            feed::commands::feed_status,
             artistinfo::commands::artist_info_keys,
             artistinfo::commands::artist_info_key_set,
             artistinfo::commands::artist_info_cache_clear,

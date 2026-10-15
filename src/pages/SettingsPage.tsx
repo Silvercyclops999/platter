@@ -35,6 +35,7 @@ import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { MixExclusions } from "./MixExclusions";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
+import { FeedNote, FeedPortField, useFeedStatus } from "./FeedSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
 import { catboxNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
@@ -474,6 +475,7 @@ export function SettingsPage() {
   const [dialog, setDialog] = useState<"signOut" | "server" | "notices" | null>(null);
 
   const { keys: infoKeys, setKey: setInfoKey } = useInfoKeys();
+  const feed = useFeedStatus();
   const downloads = useDownloadStatus();
   const [syncFile, setSyncFile] = useSyncFile();
   const syncOn = !!s?.syncEnabled && !!s?.syncFolder;
@@ -1194,6 +1196,25 @@ export function SettingsPage() {
           Clear artist info
         </Button>
       ),
+    },
+    // Integrations: the now-playing feed for widgets
+    {
+      key: "nowPlayingFeed",
+      section: "Integrations",
+      group: "Widgets",
+      title: "Now-playing feed for widgets",
+      description:
+        "Serves what's playing to OBS, Rainmeter and other widgets on this computer, as data and as an overlay page. Only this computer can reach it, never your network. A private session blanks it. This device only.",
+      note: s?.nowPlayingFeed ? <FeedNote status={feed} /> : undefined,
+      control: (ids) => toggle(s, "nowPlayingFeed", ids),
+    },
+    {
+      key: "nowPlayingFeedPort",
+      section: "Integrations",
+      group: "Widgets",
+      title: "Feed port",
+      description: "The port on 127.0.0.1 the feed uses, from 1024 to 65535. Change it if another program has it. This device only.",
+      control: (ids) => (s ? <FeedPortField value={s.nowPlayingFeedPort} ids={ids} /> : loading),
     },
     // Playback: listen on
     {

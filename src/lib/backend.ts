@@ -67,6 +67,7 @@ import type {
   Settings,
   DeepLinkOpen,
   DiscordStatus,
+  FeedStatus,
   DownloadKind,
   DownloadStatus,
   ShareInfo,
@@ -310,6 +311,8 @@ export interface Backend {
 
   // Discord status (docs/IPC.md "Discord")
   discordStatus(): Promise<DiscordStatus>;
+  /** The now-playing feed for widgets: serving, off, or why its port couldn't open. */
+  feedStatus(): Promise<FeedStatus>;
   /** Save the Imgur client ID in the keychain (null removes it); answers whether Imgur refused it. */
   discordImgurKeySet(key: string | null): Promise<InfoKeyState>;
 
@@ -600,6 +603,7 @@ export function createTauriBackend(): Backend {
       invokeRaw("share_card_copy", rgba, { "x-card-width": String(width), "x-card-height": String(height) }),
     shareCardSave: (png, name) => invokeRaw("share_card_save", png, { "x-card-name": encodeURIComponent(name) }),
     discordStatus: () => call("discord_status"),
+    feedStatus: () => call("feed_status"),
     discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
     tagsIndex: () => call("tags_index"),
     tagScanStatus: () => call("tag_scan_status"),

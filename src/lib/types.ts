@@ -795,8 +795,22 @@ export interface Settings {
   powerKeys: boolean;
   /** The key that shows the jump hints. */
   hintKey: HintKey;
+  /** Serve what's playing on 127.0.0.1 for widgets (this device only). */
+  nowPlayingFeed: boolean;
+  /** The feed's port, 1024 to 65535 (this device only). */
+  nowPlayingFeedPort: number;
   [key: string]: unknown;
 }
+
+/** `feed_status` and the `feed://status` event: the now-playing feed for widgets. */
+export type FeedStatus =
+  | { state: "off" }
+  | { state: "on"; port: number; url: string }
+  | { state: "portInUse"; port: number }
+  | { state: "failed"; port: number; message: string };
+
+/** The feed's default port. */
+export const FEED_DEFAULT_PORT = 32540;
 
 /** Keys that can show the jump hints in keyboard power mode. */
 export type HintKey = "f" | "h" | ";" | "'";
@@ -977,6 +991,8 @@ export const DEFAULT_SETTINGS: Settings = {
   miniplayerBounds: null,
   powerKeys: false,
   hintKey: "f",
+  nowPlayingFeed: false,
+  nowPlayingFeedPort: 32540,
 };
 
 // ---------------------------------------------------------------- sync file, folders and keys
@@ -1734,6 +1750,8 @@ export interface EventMap {
   "deeplink://open": null;
   /** Discord connected or went away, or a cover upload failed. */
   "discord://status": DiscordStatus;
+  /** The now-playing feed started, stopped or couldn't open its port. */
+  "feed://status": FeedStatus;
   /** The file tag scan moved on, started, paused or finished. */
   "tags://progress": TagScanStatus;
   /** File tags changed: badges, editions and filters should be read again. */

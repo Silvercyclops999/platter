@@ -230,6 +230,15 @@ client ID are kept the same way.
 The library cache, artwork cache, search history and listen log live in the
 app's data folder, as do the cover links found for Discord and lyrics found on LRCLIB.
 
+The now-playing feed for widgets is off until you turn it on in Settings. It
+opens a port on 127.0.0.1 only (32540 unless you pick another), which only
+programs on this computer can reach, never other devices on your network. It
+serves the playing song's title, artists, album, cover, position and length,
+and nothing else: no token, no server address, no library. It answers only
+requests addressed to 127.0.0.1 or localhost and gives web pages no way to
+read it from another site. A private session blanks it, and turning it off
+closes the port.
+
 Downloads are copies of songs from your own Plex server, kept in the app's
 data folder (or a folder you pick) with their album covers. They never go
 anywhere else, and Remove all downloads in Settings deletes them.

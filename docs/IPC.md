@@ -386,6 +386,34 @@ any `miniplayer*` setting is sent to both windows as `settings://changed`.
 When the window can't be made, `miniplayer_set` fails with `internal` ("The
 miniplayer couldn't open.").
 
+## Now-playing feed
+| Command | Args | Returns |
+| --- | --- | --- |
+| `feed_status` | – | `FeedStatus` |
+
+`FeedStatus` is `{ state: "off" }`, `{ state: "on", port, url }`,
+`{ state: "portInUse", port }` or `{ state: "failed", port, message }`.
+Event `feed://status` carries it whenever it changes. The feed is turned on
+and its port chosen with `settings_set` (`nowPlayingFeed`,
+`nowPlayingFeedPort`); the core opens, moves or closes the port to match.
+
+The feed itself is plain HTTP on `127.0.0.1:<port>` for widgets, not part of
+the IPC. It only binds the loopback address, answers GET and HEAD, and only
+when the `Host` header is `127.0.0.1:<port>` or `localhost:<port>` (403
+otherwise). No CORS header is sent.
+
+- `GET /now-playing.json` → `{ playing, private, title, artist, artists,
+  album, art, positionMs, durationMs, trackId }`. `art` is
+  `http://127.0.0.1:<port>/art?t=<trackId>`, or with `?art=data` a
+  `data:image/...;base64,` URL. Nothing playing gives nulls and empty lists;
+  a private session gives `private: true` and nothing else.
+- `GET /now-playing.html` → the overlay page. Query options: `size` (small,
+  medium, large), `theme` (dark, light, clear), `art` and `progress` (1 or
+  0). It reads the JSON once a second.
+- `GET /art?t=<trackId>&s=<px>` → the playing song's cover from the art
+  cache (300 px unless `s` asks for 64 to 1200). Any other track id, or a
+  private session, is 404.
+
 ## Discord
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1497,6 +1525,8 @@ The rest of the fields, with their defaults:
 | `miniplayerBounds` | `{ x, y, width, height }` or null, read only | Where the miniplayer was last, in logical pixels. Kept by the core. This device only. |
 | `powerKeys` | bool, false | Keyboard power mode in the main window: jump hints, j / k, g g, G, Enter and /. Handled in the UI (`src/shell/powerKeys.ts`); the core only stores it. |
 | `hintKey` | `"f"` (default), `"h"`, `";"`, `"'"` | The key that shows the jump hints. |
+| `nowPlayingFeed` | bool, false | Serve the playing song on 127.0.0.1 for widgets (see Now-playing feed). This device only. |
+| `nowPlayingFeedPort` | 1024 to 65535, 32540 | The feed's port. Lower ports are refused with `invalid`. This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
