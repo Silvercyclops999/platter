@@ -1103,7 +1103,7 @@ fn each_host_only_takes_a_direct_image_link_on_itself() {
     assert!(super::hosts::X0.link(&ok("File too large")).is_err());
     assert!(super::hosts::Litterbox.link(&HttpResponse { status: 412, ..Default::default() }).is_err());
     let uguu = |b: &str| super::hosts::Uguu.link(&ok(b));
-    assert_eq!(uguu(&String::from_utf8(uguu_ok().unwrap().body.to_vec()).unwrap()).unwrap(), UGUU_LINK);
+    assert_eq!(uguu(std::str::from_utf8(&uguu_ok().unwrap().body).unwrap()).unwrap(), UGUU_LINK);
     assert!(uguu(r#"{"success":false,"files":[{"url":"https://n.uguu.se/a.jpg"}]}"#).is_err());
     assert!(uguu(r#"{"success":true,"files":[{"url":"https://evil.example/a.jpg"}]}"#).is_err());
     assert!(uguu("<html>busy</html>").is_err());
