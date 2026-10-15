@@ -661,6 +661,37 @@ CREATE TABLE IF NOT EXISTS imported_plays (
 CREATE INDEX IF NOT EXISTS imported_plays_at ON imported_plays (played_at);
 CREATE INDEX IF NOT EXISTS imported_plays_key ON imported_plays (rating_key);
 "#,
+    // v26: song identity (identity::). file_tags keeps the ISRC and the
+    // MusicBrainz recording id, and `ver` is the tag cache version a row was
+    // read with (0 before this): rows older than tags::CACHE_VERSION are read
+    // again. song_index holds every synced song under its folded artist and
+    // title, one row per artist name it goes by (album artist, and the
+    // song's own artist when it differs), for finding the same song on any
+    // server.
+    r#"
+ALTER TABLE file_tags ADD COLUMN isrc TEXT;
+ALTER TABLE file_tags ADD COLUMN recording_mbid TEXT;
+ALTER TABLE file_tags ADD COLUMN ver INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS song_index (
+    track_id       TEXT NOT NULL,
+    artist_fold    TEXT NOT NULL,
+    title_fold     TEXT NOT NULL,
+    version_fold   TEXT NOT NULL DEFAULT '',
+    album_fold     TEXT NOT NULL DEFAULT '',
+    artist_id      TEXT NOT NULL,
+    duration_ms    INTEGER NOT NULL DEFAULT 0,
+    isrc           TEXT,
+    recording_mbid TEXT,
+    plex_mbid      TEXT,
+    unreleased     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (track_id, artist_fold)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS song_index_key ON song_index (artist_fold, title_fold);
+CREATE INDEX IF NOT EXISTS song_index_artist ON song_index (artist_id);
+CREATE INDEX IF NOT EXISTS song_index_isrc ON song_index (isrc) WHERE isrc IS NOT NULL;
+CREATE INDEX IF NOT EXISTS song_index_rec ON song_index (recording_mbid) WHERE recording_mbid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS song_index_mbid ON song_index (plex_mbid) WHERE plex_mbid IS NOT NULL;
+"#,
 ];
 
 #[cfg(test)]

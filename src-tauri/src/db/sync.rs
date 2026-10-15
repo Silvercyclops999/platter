@@ -246,6 +246,7 @@ async fn sync_extra_libraries(db: &DbHandle, main_tag: Option<&str>, full: bool,
                 store::drop_playlists_except(&tx, tags)?;
             }
             super::merge::rebuild(&tx)?;
+            crate::identity::index::rebuild(&tx)?;
             tx.commit()?;
             Ok(dropped)
         })

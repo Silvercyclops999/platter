@@ -29,7 +29,10 @@ use crate::error::AppResult;
 use crate::model::Track;
 
 /// Songs whose lengths differ by more than this aren't the same recording.
-pub const DURATION_SLACK_MS: u64 = 2_000;
+/// The song identity rules own the number (`identity::ALBUM_SLACK_MS`): the
+/// songs compared here belong to albums that already match, or carry the
+/// same MusicBrainz track id.
+pub const DURATION_SLACK_MS: u64 = crate::identity::ALBUM_SLACK_MS;
 
 /// What the library shows.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -631,6 +634,29 @@ mod tests {
         assert!(!f.shows("bbbbbbbb:20") && f.shows("aaaaaaaa:10") && f.shows("local:p"));
         let f = ViewFilter::load(&c, &ServerView::Server(B.into())).unwrap();
         assert!(f.shows("bbbbbbbb:20") && !f.shows("aaaaaaaa:10") && f.shows("local:p"));
+    }
+
+    #[test]
+    fn album_songs_use_the_shared_album_slack() {
+        assert_eq!(DURATION_SLACK_MS, crate::identity::ALBUM_SLACK_MS);
+        assert_eq!(DURATION_SLACK_MS, 2_000, "merging stays as it was");
+        let (_d, mut c) = db();
+        let b = store::src_of(B, "1");
+        let edge = DURATION_SLACK_MS as i64;
+        // Right at the slack: the same album.
+        album(&c, A, "", "10", "Artist", "Near", 1, None);
+        track(&c, A, "", "11", "10", 1, 200_000, "mp3", None);
+        album(&c, B, &b, "20", "Artist", "Near", 1, None);
+        track(&c, B, &b, "21", "20", 1, 200_000 + edge, "mp3", None);
+        // Just past it, though within the single-song slack: not the same.
+        album(&c, A, "", "30", "Artist", "Far", 1, None);
+        track(&c, A, "", "31", "30", 1, 200_000, "mp3", None);
+        album(&c, B, &b, "40", "Artist", "Far", 1, None);
+        track(&c, B, &b, "41", "40", 1, 200_000 + edge + 1, "mp3", None);
+        rebuild_now(&mut c);
+        let d = dupes(&c);
+        assert!(d.iter().any(|x| x.0 == "bbbbbbbb:20"), "{d:?}");
+        assert!(!d.iter().any(|x| x.0 == "bbbbbbbb:40"), "{d:?}");
     }
 
     #[test]

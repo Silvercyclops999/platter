@@ -7,6 +7,7 @@ pub mod downloads;
 pub mod error;
 pub mod feed;
 pub mod hidden;
+pub mod identity;
 pub mod libraries;
 pub mod likes;
 pub mod lyrics;
