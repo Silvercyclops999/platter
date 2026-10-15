@@ -801,6 +801,8 @@ export interface Backend {
   windowLabel(): string;
   /** Start resizing this window from its bottom-right corner (the grip). */
   windowResizeFromCorner(): Promise<void>;
+  /** The main window's page has drawn its first frame; `background` is the look's colour (#rrggbb). */
+  windowReady(background: string | null): Promise<void>;
 
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
@@ -1160,6 +1162,7 @@ export function createTauriBackend(): Backend {
     miniplayerSet: (open) => call("miniplayer_set", { open }),
     windowLabel: () => getCurrentWindow().label,
     windowResizeFromCorner: () => getCurrentWindow().startResizeDragging("SouthEast"),
+    windowReady: (background) => call("window_ready", { background }),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

@@ -878,3 +878,75 @@
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
+
+/* Switching Plex Home users: covers the window, in the current look, while
+   the app restarts as the other user. */
+.switching {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-tooltip) + 1);
+  display: grid;
+  place-items: center;
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  animation: fade-in var(--motion-quick) var(--motion-easing) both;
+}
+
+.switching__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+  animation: rise-in var(--motion-medium) var(--motion-easing) both;
+}
+
+/* A soft ring that breathes around the picture while the app reloads. */
+.switching__ring {
+  position: relative;
+  display: inline-flex;
+  margin-bottom: var(--space-3);
+  border-radius: 50%;
+}
+.switching__ring::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid var(--color-accent);
+  opacity: 0.35;
+  animation: switching-breathe 1600ms var(--motion-easing-in-out) infinite;
+}
+:root[data-reduced-motion="true"] .switching__ring::after { animation: none; }
+
+.switching__face {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: 36px;
+  font-weight: var(--font-weight-bold);
+}
+
+.switching__text {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+
+.switching__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+@keyframes switching-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.2; }
+  50% { transform: scale(calc(1 + 0.06 * var(--motion-move))); opacity: 0.55; }
+}

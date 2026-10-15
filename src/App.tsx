@@ -15,6 +15,9 @@ import { loadSettings, useSettings } from "./stores/settings";
 import { backend } from "./lib/backend";
 import { useUi } from "./stores/ui";
 import { offerLookStep } from "./stores/looks";
+import { connectSwitching } from "./stores/switching";
+import { SwitchingScreen } from "./shell/SwitchingScreen";
+import { READY_WAIT_FOR_AUTH_MS, signalReady } from "./lib/firstPaint";
 
 // Only the miniplayer window needs it.
 const Miniplayer = lazy(() => import("./shell/Miniplayer").then((m) => ({ default: m.Miniplayer })));
@@ -67,7 +70,16 @@ function MainApp() {
   useEffect(() => connectShare(), []);
   useEffect(() => connectFileTags(), []);
   useEffect(() => connectMiniplayer(), []);
+  useEffect(() => connectSwitching(), []);
   const auth = useApp((s) => s.auth);
+  // The window is shown once the page has drawn in the cached look, with
+  // the right page (library or sign-in) when the sign-in is known in time.
+  const authKnown = auth !== null;
+  useEffect(() => {
+    if (authKnown) return void signalReady();
+    const t = setTimeout(() => void signalReady(), READY_WAIT_FOR_AUTH_MS);
+    return () => clearTimeout(t);
+  }, [authKnown]);
   const servers = useApp((s) => s.servers);
   const signInOpen = useUi((s) => s.signInOpen);
   // A Jellyfin server is enough to use the app without a Plex account.
@@ -87,8 +99,15 @@ function MainApp() {
   // When Plex rejected the saved sign-in, the app stays open (cached music
   // still plays) and the sign-in screen opens from the banner.
   // Without Plex, the saved servers decide (until they're known, the frame shows).
+  let page;
   if (auth && auth.state !== "signedIn" && servers !== null && ((!auth.reauthRequired && !otherServer) || signInOpen))
-    return <SignInPage onBack={auth.reauthRequired || otherServer ? () => useUi.getState().setSignInOpen(false) : undefined} />;
-  if (auth?.needsServerPick) return <ServerPickPage />;
-  return <AppShell />;
+    page = <SignInPage onBack={auth.reauthRequired || otherServer ? () => useUi.getState().setSignInOpen(false) : undefined} />;
+  else if (auth?.needsServerPick) page = <ServerPickPage />;
+  else page = <AppShell />;
+  return (
+    <>
+      {page}
+      <SwitchingScreen />
+    </>
+  );
 }

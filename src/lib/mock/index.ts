@@ -817,11 +817,17 @@ export class MockBackend implements Backend {
       const was = this.homeUsersMock.current().uuid;
       const to = this.homeUsersMock.switchTo(uuid, pin);
       if (to.uuid === was) return;
-      // The app restarts as them; here the signed-in name and picture change.
+      // The app restarts as them; here the switching screen stays up for
+      // about as long as a restart takes, then the name and picture change.
       this.emit("home://changed", { restarting: true });
-      this.auth = { ...this.auth, username: to.name, avatar: to.avatar };
-      this.emit("auth://changed", this.auth);
-      this.emit("toast", { kind: "info", message: `Switched to ${to.name}` });
+      const done = () => {
+        this.auth = { ...this.auth, username: to.name, avatar: to.avatar };
+        this.emit("auth://changed", this.auth);
+        this.emit("home://changed", { restarting: false });
+        this.emit("toast", { kind: "info", message: `Switched to ${to.name}` });
+      };
+      if (this.opts.latencyMs <= 0) done();
+      else this.later(1500, done);
     });
   }
   homeRememberSet(on: boolean) {
@@ -3044,6 +3050,12 @@ export class MockBackend implements Backend {
     return view === "miniplayer" ? "miniplayer" : "main";
   }
   windowResizeFromCorner() {
+    return Promise.resolve();
+  }
+  /** Background colours the page reported with `windowReady`, in order. */
+  readySignals: Array<string | null> = [];
+  windowReady(background: string | null) {
+    this.readySignals.push(background);
     return Promise.resolve();
   }
 

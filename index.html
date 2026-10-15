@@ -10,6 +10,20 @@
       /* Paint the window color before CSS/JS load (matches tauri.conf backgroundColor). */
       html, body { background: #0E0D0C; }
     </style>
+    <script>
+      // The last look's background, before anything else loads, so a light
+      // look never paints dark first.
+      try {
+        var c = JSON.parse(localStorage.getItem("platter.theme") || "null");
+        var bg = c && c.tokens && c.tokens["color-bg-base"];
+        if (typeof bg === "string" && /^#[0-9a-fA-F]{3,8}$/.test(bg)) {
+          var s = document.createElement("style");
+          s.id = "first-paint-bg";
+          s.textContent = "html, body { background: " + bg + "; }";
+          document.head.appendChild(s);
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -20,6 +20,8 @@ export class MockHomeUsers {
   notAHome = false;
   /** Every switch asked for, PIN included only as "had a PIN". */
   readonly switches: { uuid: string; withPin: boolean }[] = [];
+  /** Test hook: the next switch fails like this (plex.tv unreachable, say). */
+  failNext: AppError | null = null;
 
   list(): HomeUsers {
     return { users: this.notAHome ? [] : this.users.map((u) => ({ ...u })), remember: this.remember };
@@ -33,6 +35,11 @@ export class MockHomeUsers {
   switchTo(uuid: string, pin?: string): HomeUser {
     const to = this.users.find((u) => u.uuid === uuid);
     if (!to) throw { kind: "notFound", message: "That Home user isn't in your Plex Home anymore." } satisfies AppError;
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      throw e;
+    }
     if (pin != null && !/^\d{4}$/.test(pin)) throw { kind: "invalid", message: "A PIN is 4 digits." } satisfies AppError;
     this.switches.push({ uuid, withPin: pin != null });
     if (to.protected && pin !== MOCK_HOME_PIN) {

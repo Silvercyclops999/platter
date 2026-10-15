@@ -5,7 +5,7 @@ import { Dialog } from "../components/Dialog";
 import { backend } from "../lib/backend";
 import type { AppError, HomeUser, HomeUsers } from "../lib/types";
 import { useCap } from "../stores/caps";
-import { toast } from "../stores/toasts";
+import { beginSwitch, switchDone, switchFailed } from "../stores/switching";
 import { AvatarFace } from "./TopBar";
 
 const NO_HOME: HomeUsers = { users: [], remember: true };
@@ -33,8 +33,9 @@ export function useHomeUsers(open: boolean): HomeUsers {
 export function switchHomeUser(user: HomeUser, askPin: (u: HomeUser) => void) {
   if (user.current) return;
   if (user.protected) return askPin(user);
-  toast.info(`Switching to ${user.name}…`);
-  backend.homeSwitch(user.uuid).catch((e: AppError) => toast.error(e.message || "Couldn't switch users"));
+  // The switching screen covers the window until the app restarts as them.
+  beginSwitch(user);
+  backend.homeSwitch(user.uuid).then(switchDone, (e: AppError) => switchFailed(e.message));
 }
 
 /**
@@ -84,12 +85,15 @@ export function HomePinDialog({ user, onClose }: { user: HomeUser | null; onClos
     if (!/^\d{4}$/.test(pin)) return setError("A PIN is 4 digits.");
     setBusy(true);
     setError(null);
+    beginSwitch(user);
     backend.homeSwitch(user.uuid, pin).then(
       () => {
         onClose();
-        toast.info(`Switching to ${user.name}…`);
+        switchDone();
       },
       (e: AppError) => {
+        // Back to the dialog as it was, to try again.
+        switchFailed(e.message);
         setBusy(false);
         setPin("");
         setError(e.message || "Couldn't switch users");

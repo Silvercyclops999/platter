@@ -77,6 +77,8 @@ export function applyTheme(t: Pick<ResolvedTheme, "id" | "base" | "tokens">, doc
   const root = doc.documentElement;
   root.dataset.theme = t.id;
   root.dataset.themeBase = t.base;
+  // index.html's first-paint colour has done its job once a theme is on.
+  doc.getElementById("first-paint-bg")?.remove();
   const overrides: Record<string, string> = {};
   for (const name of THEME_TOKEN_NAMES) {
     const v = t.tokens[name];
