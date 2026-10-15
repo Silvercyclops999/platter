@@ -68,7 +68,10 @@ function MainApp() {
   useEffect(() => connectFileTags(), []);
   useEffect(() => connectMiniplayer(), []);
   const auth = useApp((s) => s.auth);
+  const servers = useApp((s) => s.servers);
   const signInOpen = useUi((s) => s.signInOpen);
+  // A Jellyfin server is enough to use the app without a Plex account.
+  const otherServer = !!servers?.some((s) => s.kind !== "plex");
   // First run: right after signing in for the first time, offer "Pick a look".
   const sawSignIn = useRef(false);
   if (auth && auth.state !== "signedIn" && !auth.reauthRequired) sawSignIn.current = true;
@@ -83,8 +86,9 @@ function MainApp() {
   // Until auth status arrives, show the shell frame (no spinner, no flash of sign-in).
   // When Plex rejected the saved sign-in, the app stays open (cached music
   // still plays) and the sign-in screen opens from the banner.
-  if (auth && auth.state !== "signedIn" && (!auth.reauthRequired || signInOpen))
-    return <SignInPage onBack={auth.reauthRequired ? () => useUi.getState().setSignInOpen(false) : undefined} />;
+  // Without Plex, the saved servers decide (until they're known, the frame shows).
+  if (auth && auth.state !== "signedIn" && servers !== null && ((!auth.reauthRequired && !otherServer) || signInOpen))
+    return <SignInPage onBack={auth.reauthRequired || otherServer ? () => useUi.getState().setSignInOpen(false) : undefined} />;
   if (auth?.needsServerPick) return <ServerPickPage />;
   return <AppShell />;
 }

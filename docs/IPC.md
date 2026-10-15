@@ -130,6 +130,36 @@ be added to it.
 | Command | Args | Returns |
 | --- | --- | --- |
 | `backend_caps` | – | `BackendCaps { caps: Caps, servers: ServerCaps[] }` |
+| `servers_saved` | – | `SavedServer[]` |
+| `server_set_primary` | `{ tag }` | – |
+| `server_remove` | `{ tag }` | – (Jellyfin only; Plex signs out in Account) |
+| `server_libraries` | `{ tag }` | `{ id, title, included }[]` |
+| `server_libraries_set` | `{ tag, ids: string[] \| null }` | – (null includes every library) |
+| `jellyfin_check` | `{ url }` | `ServerCheck { url, name, version, quickConnect }` |
+| `jellyfin_quick_start` | `{ url }` | `{ code, serverName }` |
+| `jellyfin_quick_poll` | – | `{ state: "waiting" } \| { state: "done", server: SavedServer }` |
+| `jellyfin_quick_cancel` | – | – |
+| `jellyfin_sign_in_password` | `{ url, user, password }` | `SavedServer` |
+
+`SavedServer = { tag, kind, name, url?, user?, primary, state?, canTranscode, canDownload }`,
+where `state` is `"unknown" | "online" | "offline" | "signInAgain"` for a server
+added by address and null for Plex.
+
+A Jellyfin server (10.9 or later) is added by its address. `jellyfin_check`
+fails with `invalid` and a message to show when nothing answers there, when
+it isn't Jellyfin, or when it's older than 10.9. With Quick Connect on,
+`jellyfin_quick_start` gives a code to approve in another Jellyfin app and
+`jellyfin_quick_poll` is asked every couple of seconds until it's approved
+(an expired code fails with `invalid`). With Quick Connect off, or when the
+user prefers it, `jellyfin_sign_in_password` signs in; the password is used
+for that one request and never stored or logged. Either way the token goes to
+the keychain as `jf.<tag>` and the server's record (no secrets) to
+`servers.json`. Without a Plex account, a Jellyfin server is enough to use
+the app; its first included library becomes the main one. While Plex is set
+up, its library stays the main one and Jellyfin libraries sync next to it.
+Jellyfin sees what's playing through its session reports, which are sent so
+they don't count a play on their own; each finished play is marked played
+once, with the time it happened.
 
 `ServerCaps = { tag?, kind: "plex" | "jellyfin" | "subsonic", name?, primary, caps: Caps }`.
 `Caps` is an object with every capability name set to true or false:
@@ -143,7 +173,11 @@ The top level `caps` is what any server in use can do. The UI hides a
 feature when the item's server lacks what it needs (an id's tag names its
 server; ids without one belong to the primary server), and assumes
 everything is there until the first answer. Plex has every capability except
-`resumeQueue`, `backdatedScrobble` and `serverRadio`. `home_users` comes back
+`resumeQueue`, `backdatedScrobble` and `serverRadio`. A Jellyfin server has
+`liveUpdates`, `incrementalSync`, `playlistMove`, `lyrics`, `syncedLyrics`,
+`serverRadio`, `loudness` and `backdatedScrobble`, plus `transcode` when the
+account may convert songs and `friendActivity` and `realFilePaths` for an
+administrator. `home_users` comes back
 empty and `now_playing_details` fails with `notFound` for servers without
 `homeUsers` and `trackDetails`.
 

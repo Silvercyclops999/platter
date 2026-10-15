@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
 import { buildArtistLookup, type ArtistLookup } from "../lib/credits";
-import type { ArtistName, AuthStatus, Health, Playlist, SyncStatus } from "../lib/types";
+import type { ArtistName, AuthStatus, Health, Playlist, SavedServer, SyncStatus } from "../lib/types";
 import { outputLostMessage, useOutput } from "./output";
 import { loadSettings, useSettings } from "./settings";
 import { useToasts } from "./toasts";
@@ -14,6 +14,9 @@ import { loadFolders, onStoreChanged } from "./folders";
 
 interface AppStore {
   auth: AuthStatus | null;
+  /** Saved servers (Plex and those added by address); null until known. */
+  servers: SavedServer[] | null;
+  setServers: (s: SavedServer[]) => void;
   health: Health | null;
   sync: SyncStatus | null;
   playlists: Playlist[] | null;
@@ -33,6 +36,8 @@ interface AppStore {
 
 export const useApp = create<AppStore>()((set, get) => ({
   auth: null,
+  servers: null,
+  setServers: (servers) => set({ servers }),
   health: null,
   sync: null,
   playlists: null,
@@ -63,6 +68,14 @@ export function connectApp(b: Backend = backend): () => void {
   const s = useApp.getState();
 
   b.authStatus().then((a) => alive && s.setAuth(a)).catch(() => {});
+  const loadServers = () =>
+    b.serversSaved().then(
+      (list) => alive && useApp.getState().setServers(list),
+      () => alive && useApp.getState().servers === null && useApp.getState().setServers([]),
+    );
+  loadServers();
+  keep(b.listen("backends://changed", loadServers));
+  keep(b.listen("auth://changed", loadServers));
   // Cached-track list: fetched when entering a cached-only state, refreshed
   // while it lasts.
   let cachedTimer: ReturnType<typeof setInterval> | null = null;

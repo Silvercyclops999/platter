@@ -43,6 +43,11 @@ import type {
   ArtistsArgs,
   AuthStatus,
   BackendCaps,
+  QuickCode,
+  QuickPoll,
+  SavedServer,
+  ServerCheck,
+  ServerLibrary,
   EventMap,
   EventName,
   Health,
@@ -189,6 +194,24 @@ export interface Backend {
   libraryServers(): Promise<LibraryServers>;
   /** What the servers in use can do, and their names. */
   backendCaps(): Promise<BackendCaps>;
+  /** Settings, Music servers: every saved server, the primary marked. */
+  serversSaved(): Promise<SavedServer[]>;
+  serverSetPrimary(tag: string): Promise<void>;
+  /** Removes a server added by address (its sign-in and, after a sync, its music). */
+  serverRemove(tag: string): Promise<void>;
+  /** A server's music libraries and which are included. */
+  serverLibraries(tag: string): Promise<ServerLibrary[]>;
+  /** Include these libraries; null includes all of them. */
+  serverLibrariesSet(tag: string, ids: string[] | null): Promise<void>;
+  /** Is there a Jellyfin server at this address, and can it use Quick Connect? */
+  jellyfinCheck(url: string): Promise<ServerCheck>;
+  /** A Quick Connect code to approve in another Jellyfin app. */
+  jellyfinQuickStart(url: string): Promise<QuickCode>;
+  /** Asks whether the code was approved; once it is, the server is added. */
+  jellyfinQuickPoll(): Promise<QuickPoll>;
+  jellyfinQuickCancel(): Promise<void>;
+  /** Signs in with a password, used once and never kept. */
+  jellyfinSignInPassword(url: string, user: string, password: string): Promise<SavedServer>;
 
   // Library
   syncStatus(): Promise<SyncStatus>;
@@ -735,6 +758,16 @@ export function createTauriBackend(): Backend {
     librarySources: () => call("library_sources"),
     libraryServers: () => call("library_servers"),
     backendCaps: () => call("backend_caps"),
+    serversSaved: () => call("servers_saved"),
+    serverSetPrimary: (tag) => call("server_set_primary", { tag }),
+    serverRemove: (tag) => call("server_remove", { tag }),
+    serverLibraries: (tag) => call("server_libraries", { tag }),
+    serverLibrariesSet: (tag, ids) => call("server_libraries_set", { tag, ids }),
+    jellyfinCheck: (url) => call("jellyfin_check", { url }),
+    jellyfinQuickStart: (url) => call("jellyfin_quick_start", { url }),
+    jellyfinQuickPoll: () => call("jellyfin_quick_poll"),
+    jellyfinQuickCancel: () => call("jellyfin_quick_cancel"),
+    jellyfinSignInPassword: (url, user, password) => call("jellyfin_sign_in_password", { url, user, password }),
 
     syncStatus: () => call("sync_status"),
     syncNow: (full) => call("sync_now", { full }),

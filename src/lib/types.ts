@@ -2468,6 +2468,47 @@ export interface BackendCaps {
   servers: ServerCaps[];
 }
 
+/** How a server added by address is doing. */
+export type ServerState = "unknown" | "online" | "offline" | "signInAgain";
+
+/** A server in Settings (`servers_saved`). */
+export interface SavedServer {
+  tag: string;
+  kind: BackendKind;
+  name: string;
+  url: string | null;
+  user: string | null;
+  primary: boolean;
+  /** Null for Plex, whose state the Account section shows. */
+  state: ServerState | null;
+  canTranscode: boolean;
+  canDownload: boolean;
+}
+
+/** What an address turned out to be (`jellyfin_check`). */
+export interface ServerCheck {
+  /** The address, tidied. */
+  url: string;
+  name: string;
+  version: string;
+  quickConnect: boolean;
+}
+
+/** A Quick Connect code to show (`jellyfin_quick_start`). */
+export interface QuickCode {
+  code: string;
+  serverName: string;
+}
+
+export type QuickPoll = { state: "waiting" } | { state: "done"; server: SavedServer };
+
+/** A music library on a server and whether it's included. */
+export interface ServerLibrary {
+  id: string;
+  title: string;
+  included: boolean;
+}
+
 // ---------------------------------------------------------------- events
 
 /** Every event in docs/IPC.md → its payload. */

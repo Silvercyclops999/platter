@@ -41,6 +41,7 @@ import { MixExclusions } from "./MixExclusions";
 import { FolderKeywords } from "./ArchiveSettings";
 import { COVER_PX_OPTIONS, DoctorChecksList, DoctorNote } from "./DoctorSettings";
 import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
+import { ServerCount, ServerList } from "./ServerSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { FeedNote, FeedPortField, useFeedStatus } from "./FeedSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
@@ -750,6 +751,15 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "abLoopHandles", ids),
     },
     // Library
+    {
+      key: "servers",
+      section: "Library",
+      title: "Music servers",
+      description:
+        "Add a Plex or Jellyfin server, choose the primary server, and pick which music libraries come from each. Music on more than one server shows once. Passwords are never kept; each server's sign-in stays in this computer's keychain.",
+      control: () => <ServerCount />,
+      block: () => <ServerList />,
+    },
     {
       key: "libraries",
       section: "Library",

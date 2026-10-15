@@ -7,10 +7,13 @@ import type { AppError, PinInfo, ServerInfo } from "../lib/types";
 import { useApp } from "../stores/app";
 import { Logo } from "../shell/Logo";
 import { WindowBar } from "../shell/TopBar";
+import { useUi } from "../stores/ui";
+import { AddServerFlow } from "./AddServer";
 
-/** Welcome screen: Sign in with Plex → PIN code → waiting / cancel. */
+/** Welcome screen: Sign in with Plex → PIN code → waiting / cancel, or add a Jellyfin server. */
 export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
   const auth = useApp((s) => s.auth);
+  const [jellyfin, setJellyfin] = useState(false);
   const [pin, setPin] = useState<PinInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,23 +44,41 @@ export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
       <WindowBar />
       <div className="welcome__panel" role="main">
         <Logo size={64} />
-        <h1 className="welcome__title">{onBack ? "Sign in again" : "Welcome to Platter"}</h1>
-        {!pending ? (
+        <h1 className="welcome__title">{auth?.reauthRequired ? "Sign in again" : onBack ? "Sign in with Plex" : "Welcome to Platter"}</h1>
+        {jellyfin ? (
+          <>
+            <p className="welcome__lead">Add your Jellyfin server. You'll approve Platter with a code, or sign in with your password.</p>
+            <AddServerFlow
+              onDone={() => {
+                useUi.getState().setSignInOpen(false);
+                void backend.serversSaved().then((l) => useApp.getState().setServers(l), () => {});
+              }}
+              onCancel={() => setJellyfin(false)}
+            />
+          </>
+        ) : !pending ? (
           <>
             <p className="welcome__lead">
-              {onBack
+              {auth?.reauthRequired
                 ? "Plex asked you to sign in again. Music saved on this computer keeps playing in the meantime."
-                : "Your Plex music library, beautifully played. Sign in with your Plex account to start listening."}
+                : onBack
+                  ? "Add your Plex music next to the servers you already have."
+                  : "Your music library, beautifully played. Sign in with Plex or add your Jellyfin server to start listening."}
             </p>
             <Button variant="primary" size="lg" onClick={start} disabled={busy} autoFocus>
               Sign in with Plex
             </Button>
+            {!onBack && (
+              <Button variant="secondary" size="lg" onClick={() => setJellyfin(true)}>
+                Use a Jellyfin server
+              </Button>
+            )}
             {onBack && (
               <Button variant="ghost" onClick={onBack}>
                 Not now
               </Button>
             )}
-            <p className="welcome__fine">Platter never sees your password. You'll approve this device on plex.tv.</p>
+            <p className="welcome__fine">With Plex, Platter never sees your password: you approve this device on plex.tv.</p>
           </>
         ) : (
           <>

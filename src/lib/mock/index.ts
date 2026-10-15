@@ -146,6 +146,7 @@ import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
 import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "../statsTypes";
 import { MockArchive } from "./archive";
 import { MockDoctor } from "./doctor";
+import { MockJellyfin, plexRecord } from "./jellyfin";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -312,6 +313,10 @@ export class MockBackend implements Backend {
   readonly homeUsersMock = new MockHomeUsers();
   /** The account's servers and libraries (test hook: oneServer). */
   readonly librariesMock = new MockLibraries();
+  /** Servers added by address (test hooks: failure, approveAfter, revoke, canTranscode, canDownload). */
+  readonly jellyfin = new MockJellyfin();
+  /** The primary server's tag when one was chosen. */
+  private primaryTag: string | null = null;
   // health / sync
   private healthState: Health;
   /** The offline "skipped songs" toast was shown (once per offline spell). */
@@ -790,7 +795,84 @@ export class MockBackend implements Backend {
     });
   }
   backendCaps() {
-    return this.delay(() => mockBackendCaps(this.auth.server?.name ?? null));
+    return this.delay(() => {
+      const plexIn = this.auth.state === "signedIn";
+      const base = mockBackendCaps(this.auth.server?.name ?? null);
+      const primary = this.savedServers().find((s) => s.primary)?.tag ?? null;
+      const servers = [...(plexIn ? base.servers : []), ...this.jellyfin.caps()].map((s) => ({ ...s, primary: s.tag === primary }));
+      const caps = { ...base.caps };
+      if (!plexIn) for (const k of Object.keys(caps) as (keyof typeof caps)[]) caps[k] = servers.some((s) => s.caps[k]);
+      return { caps, servers };
+    });
+  }
+  /** Plex (when signed in) and the servers added by address, the primary marked. */
+  private savedServers() {
+    const plexIn = this.auth.state === "signedIn";
+    const list = [...(plexIn ? [plexRecord(this.auth.server?.name ?? "Plex server", false)] : []), ...this.jellyfin.servers];
+    const primary = list.find((s) => s.tag === this.primaryTag)?.tag ?? list[0]?.tag ?? null;
+    return list.map((s) => ({ ...s, primary: s.tag === primary }));
+  }
+  private serversChanged() {
+    this.emit("backends://changed", {});
+  }
+  serversSaved() {
+    return this.delay(() => this.savedServers());
+  }
+  serverSetPrimary(tag: string) {
+    return this.delay(() => {
+      if (!this.savedServers().some((s) => s.tag === tag)) throw { kind: "notFound", message: "That server isn't in Platter any more." };
+      this.primaryTag = tag;
+      this.serversChanged();
+    });
+  }
+  serverRemove(tag: string) {
+    return this.delay(() => {
+      if (tag === "0a1b2c3d") throw { kind: "invalid", message: "Sign out of Plex in Settings, Account." };
+      this.jellyfin.remove(tag);
+      if (this.primaryTag === tag) this.primaryTag = null;
+      this.serversChanged();
+    });
+  }
+  serverLibraries(tag: string) {
+    return this.delay(() => {
+      const libs = this.jellyfin.libraries[tag];
+      if (!libs) throw { kind: "notFound", message: "That server isn't in Platter any more." };
+      return libs;
+    });
+  }
+  serverLibrariesSet(tag: string, ids: string[] | null) {
+    return this.delay(() => {
+      this.jellyfin.setLibraries(tag, ids);
+      this.serversChanged();
+    });
+  }
+  jellyfinCheck(url: string) {
+    return this.delay(() => this.jellyfin.check(url));
+  }
+  jellyfinQuickStart(url: string) {
+    return this.delay(() => this.jellyfin.quickStart(url));
+  }
+  jellyfinQuickPoll() {
+    return this.delay(() => {
+      const r = this.jellyfin.quickPoll();
+      if (r.state === "done") this.serversChanged();
+      return r;
+    });
+  }
+  jellyfinQuickCancel() {
+    return this.delay(() => this.jellyfin.quickCancel());
+  }
+  jellyfinSignInPassword(url: string, user: string, password: string) {
+    return this.delay(() => {
+      const s = this.jellyfin.password(url, user, password);
+      this.serversChanged();
+      return s;
+    });
+  }
+  /** Test hook: the primary choice and servers added by address forgotten. */
+  resetServers() {
+    this.jellyfin.reset();
+    this.primaryTag = null;
   }
   librarySources() {
     return this.delay(() => this.librariesMock.sources(this.settings.libraries));

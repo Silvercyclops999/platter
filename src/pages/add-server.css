@@ -1,0 +1,50 @@
+/* Adding a server: kind, address, Quick Connect code or password. */
+.add-server { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; text-align: left; }
+.add-server__kinds { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+.add-server__kind {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-height: 72px;
+  padding: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 8%, transparent);
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-easing);
+}
+.add-server__kind:hover:not(:disabled) { background: var(--color-bg-overlay); }
+.add-server__kind:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--color-focus-ring); }
+.add-server__kind:disabled { cursor: default; opacity: 0.6; }
+.add-server__kind-name { font-weight: var(--font-weight-bold); }
+.add-server__kind-note { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.add-server__label { display: block; margin: 0 0 var(--space-1); font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.add-server__input {
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-md);
+}
+.add-server__input:focus { outline: none; border-color: color-mix(in srgb, var(--color-ink) 28%, transparent); background: var(--color-bg-overlay); }
+.add-server__input:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+.add-server__input[aria-invalid="true"] { border-color: var(--color-error); }
+.add-server__hint { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.add-server__code { align-self: center; }
+.add-server__error { margin: 0; color: var(--color-error); font-size: var(--font-size-sm); }
+.add-server__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+
+/* Settings, Library: music servers. */
+.server-rows { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+.server-row__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-left: calc(20px + var(--space-2)); }
+.server-row__note { margin: 0; padding-left: calc(20px + var(--space-2)); font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.server-row__state.is-warning { color: var(--color-error); }
