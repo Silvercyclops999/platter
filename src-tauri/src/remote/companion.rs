@@ -80,6 +80,8 @@ pub struct Timeline {
     pub rating_key: Option<String>,
     pub play_queue_id: Option<String>,
     pub play_queue_item_id: Option<String>,
+    /// Bumped by the server whenever the play queue changes.
+    pub play_queue_version: Option<String>,
     /// 0..100.
     pub volume: Option<i64>,
     pub shuffle: bool,
@@ -115,6 +117,7 @@ pub fn parse_timeline(body: &str) -> Option<Timeline> {
             rating_key: str_("ratingKey").or_else(|| rating_key_from(str_("key").as_deref())),
             play_queue_id: str_("playQueueID"),
             play_queue_item_id: str_("playQueueItemID"),
+            play_queue_version: str_("playQueueVersion"),
             volume: int("volume"),
             shuffle: int("shuffle").unwrap_or(0) != 0,
             repeat: int("repeat").unwrap_or(0),
@@ -133,6 +136,7 @@ pub fn parse_timeline(body: &str) -> Option<Timeline> {
             .or_else(|| rating_key_from(m.get("key"))),
         play_queue_id: m.get("playQueueID").filter(|s| !s.is_empty()).map(str::to_string),
         play_queue_item_id: m.get("playQueueItemID").filter(|s| !s.is_empty()).map(str::to_string),
+        play_queue_version: m.get("playQueueVersion").filter(|s| !s.is_empty()).map(str::to_string),
         volume: m.int("volume"),
         shuffle: m.int("shuffle").unwrap_or(0) != 0,
         repeat: m.int("repeat").unwrap_or(0),

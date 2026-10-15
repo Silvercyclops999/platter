@@ -146,11 +146,38 @@ impl LocalPlayer for Local {
         self.push(format!("repeat {r:?}"));
         Ok(())
     }
+    /// Like the queue: a queued entry drops the ones ahead of it, a
+    /// context entry skips the context entries before it.
     async fn jump_at(&self, item_id: String, ms: u64, play: bool) -> AppResult<()> {
+        {
+            let mut st = self.state.lock();
+            let q = &mut st.queue;
+            let to = if let Some(i) = q.user_queue.iter().position(|x| x.item_id == item_id) {
+                q.user_queue.drain(..=i).next_back()
+            } else if let Some(j) = q.next_up.iter().position(|x| x.item_id == item_id) {
+                q.next_up.drain(..=j).next_back()
+            } else {
+                None
+            };
+            if let Some(it) = to {
+                if let Some(old) = q.current.replace(it.clone()) {
+                    q.history.insert(0, old);
+                }
+                st.track = Some(it.track);
+                st.position_ms = ms;
+                st.status = if play { PlayerStatus::Playing } else { PlayerStatus::Paused };
+            }
+        }
         self.push(format!("jump {item_id} {ms} {play}"));
         Ok(())
     }
     async fn play_tracks(&self, ids: Vec<String>, start: Option<String>, ms: u64, play: bool) -> AppResult<()> {
+        let first = start.clone().unwrap_or_else(|| ids[0].clone());
+        let from = ids.iter().position(|i| *i == first).unwrap_or(0);
+        let rest: Vec<&str> = ids[from + 1..].iter().map(String::as_str).collect();
+        let mut st = Local::playing(&first, &rest, ms).state.lock().clone();
+        st.status = if play { PlayerStatus::Playing } else { PlayerStatus::Paused };
+        *self.state.lock() = st;
         self.push(format!("play {} from {} at {ms} {play}", ids.join(","), start.unwrap_or_default()));
         Ok(())
     }
@@ -184,6 +211,7 @@ impl LocalPlayer for Local {
         let rest: Vec<&str> = ids[1..].iter().map(String::as_str).collect();
         let fresh = Local::playing(&ids[0], &rest, ms);
         let mut st = fresh.state.lock().clone();
+        st.queue.user_queue = user.iter().map(|u| QueueItem { source: ItemSource::User, ..item(u) }).collect();
         st.status = if play { PlayerStatus::Playing } else { PlayerStatus::Paused };
         st.shuffle = shuffle;
         st.repeat = repeat;
@@ -309,8 +337,8 @@ async fn rig() -> Rig {
     Mock::given(method("GET"))
         .and(path("/playQueues/55"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer": {"Metadata": [
-            {"ratingKey": "a", "playQueueItemID": 1}, {"ratingKey": "b", "playQueueItemID": 2}, {"ratingKey": "z", "playQueueItemID": 3}
-        ]}})))
+            {"ratingKey": "a", "playQueueItemID": 1}, {"ratingKey": "b", "playQueueItemID": 2}, {"ratingKey": "c", "playQueueItemID": 3}
+        ], "playQueueSelectedItemID": 1}})))
         .mount(&server)
         .await;
     let tl = Timeline::new();
@@ -506,21 +534,32 @@ async fn return_resumes_here_at_the_players_song_and_position() {
     wait_for("song c", || r.remote.state().session.and_then(|s| s.track).is_some_and(|t| t.id == "c")).await;
     let st = r.remote.return_here().await.unwrap();
     assert!(st.session.is_none());
-    assert!(r.local.log().iter().any(|l| l.starts_with("jump qc 42") && l.ends_with("true")), "{:?}", r.local.log());
+    // The queue here already followed the player to c (paused); it plays on from its spot.
+    assert!(r.local.log().iter().any(|l| l.starts_with("jump qc ") && l.ends_with("false")), "{:?}", r.local.log());
+    let st = r.local.state.lock().clone();
+    assert_eq!((st.track.unwrap().id.as_str(), st.position_ms, st.status), ("c", 42_000, PlayerStatus::Playing));
     assert_eq!(requests(&r.player, "/player/playback/stop").await.len(), 1);
 }
 
 #[tokio::test]
 async fn return_after_the_player_moved_past_the_queue_takes_its_play_queue() {
     let r = rig().await;
+    Mock::given(method("GET"))
+        .and(path("/playQueues/55"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer": {"Metadata": [
+            {"ratingKey": "a", "playQueueItemID": 1}, {"ratingKey": "b", "playQueueItemID": 2}, {"ratingKey": "z", "playQueueItemID": 3}
+        ]}})))
+        .with_priority(1)
+        .mount(&r.server)
+        .await;
     r.remote.move_to("amp").await.unwrap();
     r.tl.set(200, timeline("paused", Some("z"), 5_000));
     r.remote.return_here().await.unwrap();
-    assert!(
-        r.local.log().iter().any(|l| l == "play a,b,z from z at 5000 false"),
-        "{:?}",
-        r.local.log()
-    );
+    // Either the queue here followed it already, or it's taken on the way back.
+    let log = r.local.log();
+    assert!(log.iter().any(|l| l == "play a,b,z from z at 5000 false" || l.starts_with("adopt z | ")), "{log:?}");
+    let st = r.local.state.lock().clone();
+    assert_eq!((st.track.unwrap().id.as_str(), st.position_ms, st.status), ("z", 5_000, PlayerStatus::Paused));
 }
 
 #[tokio::test]
@@ -620,11 +659,11 @@ async fn platter_as_a_player_answers_play_media_and_timeline_poll() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.headers()["access-control-allow-origin"], "*");
-    assert_eq!(local.log(), ["play a,b,z from b at 5000 true"]);
+    assert_eq!(local.log(), ["play a,b,c from b at 5000 true"]);
 
     let body = http.get(format!("{base}/player/timeline/poll?wait=0&commandID=2")).send().await.unwrap().text().await.unwrap();
     let t = crate::remote::companion::parse_timeline(&body).unwrap();
-    assert_eq!((t.state.as_str(), t.time_ms, t.rating_key.as_deref()), ("playing", 1_000, Some("a")));
+    assert_eq!((t.state.as_str(), t.time_ms, t.rating_key.as_deref()), ("playing", 5_000, Some("b")));
     assert_eq!(t.volume, Some(50));
 
     for (p, want) in [
@@ -680,6 +719,273 @@ async fn a_queue_jump_while_remote_moves_the_queue_here_paused_and_resends() {
     assert!(r.local.log().contains(&"jump qc 0 false".to_string()));
     assert_eq!(requests(&r.player, "/player/playback/playMedia").await.len(), 2);
     assert!(r.remote.state().session.is_some());
+}
+
+// ---- the queue while a Plex player plays ------------------------------------------
+
+/// A server play queue (id 55) that takes edits the way Plex does: adds go
+/// to the end, every change bumps the version.
+#[derive(Clone)]
+struct FakeQueue(Arc<Mutex<FakeQueueState>>);
+
+struct FakeQueueState {
+    version: u32,
+    selected: u32,
+    entries: Vec<(u32, String)>,
+    next_id: u32,
+    fail: bool,
+}
+
+impl FakeQueue {
+    fn new(keys: &[&str]) -> Self {
+        let entries: Vec<(u32, String)> = keys.iter().enumerate().map(|(i, k)| (i as u32 + 1, k.to_string())).collect();
+        let next_id = entries.len() as u32 + 1;
+        Self(Arc::new(Mutex::new(FakeQueueState { version: 1, selected: 1, entries, next_id, fail: false })))
+    }
+    async fn mount(&self, server: &MockServer) {
+        Mock::given(wiremock::matchers::path_regex("^/playQueues/55"))
+            .respond_with(self.clone())
+            .with_priority(1)
+            .mount(server)
+            .await;
+    }
+    fn keys(&self) -> Vec<String> {
+        self.0.lock().entries.iter().map(|(_, k)| k.clone()).collect()
+    }
+    fn version(&self) -> u32 {
+        self.0.lock().version
+    }
+    /// Changed on the server by someone else (another app, a shuffle there).
+    fn replace(&self, keys: &[&str]) {
+        let mut st = self.0.lock();
+        let mut old = std::mem::take(&mut st.entries);
+        for k in keys {
+            let id = match old.iter().position(|(_, x)| x == k) {
+                Some(p) => old.remove(p).0,
+                None => {
+                    st.next_id += 1;
+                    st.next_id - 1
+                }
+            };
+            st.entries.push((id, k.to_string()));
+        }
+        st.version += 1;
+    }
+    fn body(st: &FakeQueueState) -> serde_json::Value {
+        json!({"MediaContainer": {
+            "playQueueID": 55,
+            "playQueueVersion": st.version,
+            "playQueueSelectedItemID": st.selected,
+            "playQueueTotalCount": st.entries.len(),
+            "Metadata": st.entries.iter().map(|(id, k)| json!({"playQueueItemID": id, "ratingKey": k})).collect::<Vec<_>>(),
+        }})
+    }
+}
+
+impl Respond for FakeQueue {
+    fn respond(&self, r: &Request) -> ResponseTemplate {
+        let mut st = self.0.lock();
+        if st.fail {
+            return ResponseTemplate::new(500);
+        }
+        let parts: Vec<String> = r.url.path().trim_start_matches('/').split('/').map(str::to_string).collect();
+        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        let qs = q(r);
+        match (r.method.as_str(), parts.as_slice()) {
+            ("GET", ["playQueues", "55"]) => {}
+            ("PUT", ["playQueues", "55"]) => {
+                let keys = qs["uri"].rsplit('/').next().unwrap().to_string();
+                for k in keys.split(',') {
+                    let id = st.next_id;
+                    st.next_id += 1;
+                    st.entries.push((id, k.to_string()));
+                }
+                st.version += 1;
+            }
+            ("PUT", ["playQueues", "55", "items", item, "move"]) => {
+                let item: u32 = item.parse().unwrap();
+                let after: u32 = qs["after"].parse().unwrap();
+                let from = st.entries.iter().position(|e| e.0 == item).unwrap();
+                let e = st.entries.remove(from);
+                let to = st.entries.iter().position(|e| e.0 == after).unwrap() + 1;
+                st.entries.insert(to, e);
+                st.version += 1;
+            }
+            ("DELETE", ["playQueues", "55", "items", item]) => {
+                let item: u32 = item.parse().unwrap();
+                st.entries.retain(|e| e.0 != item);
+                st.version += 1;
+            }
+            _ => return ResponseTemplate::new(404),
+        }
+        ResponseTemplate::new(200).set_body_json(Self::body(&st))
+    }
+}
+
+/// A timeline that names the play queue entry and version, like Plexamp's.
+fn timeline_at(state: &str, key: &str, item: u32, version: u32, time: u64) -> String {
+    format!(
+        "<MediaContainer><Timeline type=\"music\" state=\"{state}\" time=\"{time}\" duration=\"180000\" volume=\"60\" shuffle=\"0\" repeat=\"0\" playQueueID=\"55\" playQueueItemID=\"{item}\" playQueueVersion=\"{version}\" ratingKey=\"{key}\" key=\"/library/metadata/{key}\"/></MediaContainer>"
+    )
+}
+
+impl Local {
+    fn now(&self) -> (String, Vec<String>, Vec<String>) {
+        let st = self.state.lock();
+        let ids = |v: &[QueueItem]| v.iter().map(|i| i.track.id.clone()).collect::<Vec<_>>();
+        (st.track.as_ref().map(|t| t.id.clone()).unwrap_or_default(), ids(&st.queue.user_queue), ids(&st.queue.next_up))
+    }
+    /// What `queue_add` does to the queue here.
+    fn queue(&self, ids: &[&str], next: bool) {
+        let mut st = self.state.lock();
+        let items: Vec<QueueItem> = ids.iter().map(|i| QueueItem { source: ItemSource::User, ..item(i) }).collect();
+        if next {
+            st.queue.user_queue.splice(0..0, items);
+        } else {
+            st.queue.user_queue.extend(items);
+        }
+    }
+}
+
+fn strs(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+/// On the fake player ("amp") with the play queue a, b, c, playing a.
+async fn on_player() -> (Rig, FakeQueue) {
+    let r = rig().await;
+    let fq = FakeQueue::new(&["a", "b", "c"]);
+    fq.mount(&r.server).await;
+    r.remote.move_to("amp").await.unwrap();
+    r.tl.set(200, timeline_at("playing", "a", 1, 1, 62_000));
+    wait_for("playing", || r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+    (r, fq)
+}
+
+#[tokio::test]
+async fn the_queue_here_follows_the_player_along_its_play_queue() {
+    let (r, fq) = on_player().await;
+    assert_eq!(r.local.now(), ("a".into(), vec![], strs(&["b", "c"])));
+    // The player goes on to b by itself: the queue panel shows c next.
+    fq.0.lock().selected = 2;
+    r.tl.set(200, timeline_at("playing", "b", 2, 1, 1_000));
+    wait_for("on b", || r.local.now().0 == "b").await;
+    assert_eq!(r.local.now(), ("b".into(), vec![], strs(&["c"])));
+    assert!(r.local.log().iter().any(|l| l.starts_with("jump qb ") && l.ends_with("false")), "{:?}", r.local.log());
+    assert_eq!(r.local.state.lock().status, PlayerStatus::Paused, "nothing sounds here");
+    // Someone adds to the play queue on the player itself: a new version.
+    fq.replace(&["a", "b", "x", "c"]);
+    r.tl.set(200, timeline_at("playing", "b", 2, fq.version(), 2_000));
+    wait_for("x shows", || r.local.now().2 == strs(&["x", "c"])).await;
+    assert_eq!(r.local.now().0, "b");
+    assert_eq!(r.local.state.lock().status, PlayerStatus::Paused);
+}
+
+#[tokio::test]
+async fn add_to_queue_on_a_plex_player_goes_into_its_play_queue() {
+    let (r, fq) = on_player().await;
+    // Add to queue: the song lands after the playing one, before the rest.
+    r.local.queue(&["x"], false);
+    r.remote.queue_edited().await.unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "x", "b", "c"]));
+    let adds: Vec<_> = r.server.received_requests().await.unwrap().into_iter().filter(|x| x.method.as_str() == "PUT" && x.url.path() == "/playQueues/55").collect();
+    assert_eq!(adds.len(), 1);
+    assert_eq!(q(&adds[0])["uri"], "server://srv/com.plexapp.plugins.library/library/metadata/x");
+    // The player is told to pick up the new version, without starting over.
+    let refresh = requests(&r.player, "/player/playback/refreshPlayQueue").await;
+    assert_eq!(refresh.len(), 1);
+    assert_eq!((q(&refresh[0])["playQueueID"].as_str(), q(&refresh[0])["type"].as_str()), ("55", "music"));
+    assert_eq!(requests(&r.player, "/player/playback/playMedia").await.len(), 1, "no new playMedia");
+    // Play next goes ahead of it; adding several keeps their order.
+    r.local.queue(&["y"], true);
+    r.remote.queue_edited().await.unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "y", "x", "b", "c"]));
+    r.local.queue(&["p", "q"], false);
+    r.remote.queue_edited().await.unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "y", "x", "p", "q", "b", "c"]));
+    // The player reports the new version: the panel keeps showing them as queued.
+    r.tl.set(200, timeline_at("playing", "a", 1, fq.version(), 63_000));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(r.local.now(), ("a".into(), strs(&["y", "x", "p", "q"]), strs(&["b", "c"])));
+    assert!(!r.local.log().iter().any(|l| l.starts_with("adopt")), "{:?}", r.local.log());
+    // When the player goes on to the queued song, the queue here follows.
+    fq.0.lock().selected = 5;
+    let y = fq.0.lock().entries[1].0;
+    r.tl.set(200, timeline_at("playing", "y", y, fq.version(), 0));
+    wait_for("on y", || r.local.now().0 == "y").await;
+    assert_eq!(r.local.now(), ("y".into(), strs(&["x", "p", "q"]), strs(&["b", "c"])));
+}
+
+#[tokio::test]
+async fn remove_reorder_and_clear_reach_the_play_queue() {
+    let (r, fq) = on_player().await;
+    r.local.queue(&["x", "y"], false);
+    r.remote.queue_edited().await.unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "x", "y", "b", "c"]));
+    // Remove an upcoming context song.
+    r.local.state.lock().queue.next_up.retain(|i| i.track.id != "c");
+    r.remote.queue_edited().await.unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "x", "y", "b"]));
+    let dels: Vec<_> = r.server.received_requests().await.unwrap().into_iter().filter(|x| x.method.as_str() == "DELETE").collect();
+    assert_eq!(dels.len(), 1);
+    assert_eq!(dels[0].url.path(), "/playQueues/55/items/3");
+    // Drag y above x: one move.
+    r.local.state.lock().queue.user_queue.reverse();
+    r.remote.queue_edited().await.unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "y", "x", "b"]));
+    let moves = r.server.received_requests().await.unwrap().into_iter().filter(|x| x.url.path().ends_with("/move")).count();
+    // Two to put the first adds after a, one for this drag.
+    assert_eq!(moves, 3);
+    // Clear queue: only the queued songs go.
+    r.local.state.lock().queue.user_queue.clear();
+    r.remote.queue_edited().await.unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "b"]));
+    assert_eq!(requests(&r.player, "/player/playback/refreshPlayQueue").await.len(), 4);
+}
+
+#[tokio::test]
+async fn an_edit_while_the_player_is_a_song_ahead_goes_after_its_song() {
+    let r = rig().await;
+    // Keep playing here: the queue here stays where it was.
+    r.switches.set(true, false, false);
+    let fq = FakeQueue::new(&["a", "b", "c"]);
+    fq.mount(&r.server).await;
+    r.remote.move_to("amp").await.unwrap();
+    fq.0.lock().selected = 2;
+    r.tl.set(200, timeline_at("playing", "b", 2, 1, 1_000));
+    wait_for("on b", || r.remote.state().session.and_then(|s| s.track).is_some_and(|t| t.id == "b")).await;
+    r.local.queue(&["x"], false);
+    r.remote.queue_edited().await.unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "b", "x", "c"]));
+}
+
+#[tokio::test]
+async fn a_shuffle_on_the_player_shows_in_the_queue_here() {
+    let (r, fq) = on_player().await;
+    r.remote.command(RemoteCommand::Shuffle { on: true }).await.unwrap();
+    // The server reorders the play queue; this player doesn't report versions.
+    fq.0.lock().entries.swap(1, 2);
+    r.tl.set(200, timeline("playing", Some("a"), 63_000));
+    wait_for("reshuffled", || r.local.now().2 == strs(&["c", "b"])).await;
+}
+
+#[tokio::test]
+async fn a_play_queue_that_doesnt_answer_says_the_queue_wasnt_updated() {
+    let (r, fq) = on_player().await;
+    fq.0.lock().fail = true;
+    r.local.queue(&["x"], false);
+    let e = r.remote.queue_edited().await.unwrap_err();
+    assert!(matches!(&e, AppError::Network(m) if m == "Couldn't update the queue on Desk"), "{e:?}");
+    assert!(requests(&r.player, "/player/playback/refreshPlayQueue").await.is_empty());
+    // Still playing there.
+    assert!(r.remote.state().session.is_some());
+}
+
+#[tokio::test]
+async fn edits_when_nothing_plays_elsewhere_do_nothing() {
+    let r = rig().await;
+    r.remote.queue_edited().await.unwrap();
+    assert!(r.server.received_requests().await.unwrap().is_empty());
 }
 
 // ---- Cast and AirPlay ---------------------------------------------------------
@@ -1105,6 +1411,27 @@ mod peers {
         assert!(log.contains(&"seek 90000".to_string()), "{log:?}");
         assert_eq!(log.last().map(String::as_str), Some("pause"));
         assert!(a.events.toasts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_queue_follows_the_other_platter_and_edits_reach_it() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        a.remote.players().await;
+        a.remote.move_to("mac").await.unwrap();
+        // The Mac goes on to b by itself: the queue panel here shows c next.
+        b.local.jump_at("qb".into(), 0, true).await.unwrap();
+        wait_for("on b here", || a.local.now().0 == "b").await;
+        assert_eq!(a.local.now(), ("b".into(), vec![], strs(&["c"])));
+        assert_eq!(a.local.state.lock().status, PlayerStatus::Paused);
+        // Add to queue here: the Mac gets the queue with it, on the same song.
+        a.local.queue(&["x"], false);
+        a.remote.queue_edited().await.unwrap();
+        let last = b.local.log().last().cloned().unwrap_or_default();
+        assert!(last.starts_with("adopt b,c | x | "), "{last}");
+        assert_eq!(b.local.now(), ("b".into(), strs(&["x"]), strs(&["c"])));
+        assert!(a.remote.state().session.is_some());
     }
 
     #[tokio::test]

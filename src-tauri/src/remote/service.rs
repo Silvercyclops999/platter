@@ -200,6 +200,27 @@ struct Inner {
     peer_http: reqwest::Client,
     /// More routes the control API answers (key copy).
     extra: peer::server::ExtraSlot,
+    /// What the queue here last mirrored of a player's play queue.
+    mirror: Mutex<Mirror>,
+}
+
+/// The queue here follows a Plex player's play queue: what was last read.
+#[derive(Default)]
+struct Mirror {
+    generation: u64,
+    /// Play queue, entry, version and song of the last read.
+    seen: Option<String>,
+    checked: Option<Instant>,
+    /// The entry the player is on (its last timeline).
+    item_id: Option<String>,
+}
+
+/// A play queue is read again this often even when nothing seems to change
+/// (players that don't report its version).
+const MIRROR_RECHECK: Duration = Duration::from_secs(10);
+
+fn track_ids(items: &[crate::audio::queue::QueueItem]) -> Vec<String> {
+    items.iter().map(|i| i.track.id.clone()).collect()
 }
 
 /// Cheap to clone; managed by Tauri.
@@ -263,6 +284,7 @@ impl RemoteService {
                 lan: Mutex::new(None),
                 peers: Mutex::new(None),
                 extra: Default::default(),
+                mirror: Mutex::default(),
                 peer_http: reqwest::Client::builder()
                     .no_proxy()
                     .connect_timeout(PEER_PROBE)
@@ -1112,6 +1134,10 @@ impl RemoteService {
             tracing::info!(kind = e.kind(), path, "player refused a command");
             return Err(AppError::Network(couldnt_reach(&name)));
         }
+        if matches!(cmd, RemoteCommand::Shuffle { .. }) {
+            // The server reorders the play queue: read it again.
+            self.inner.mirror.lock().seen = None;
+        }
         self.after_command(&id, cmd);
         Ok(self.state())
     }
@@ -1157,6 +1183,195 @@ impl RemoteService {
                 }
             }
             None => self.resume_local(a, false).await,
+        }
+    }
+
+    // ---- the queue ------------------------------------------------------
+
+    /// The queue here was edited (added to, removed from, reordered or
+    /// cleared) while another device plays: the device gets the change.
+    /// A Plex player's play queue is edited in place and the player told
+    /// to read it again, so the song playing there carries on.
+    pub async fn queue_edited(&self) -> AppResult<()> {
+        let _op = self.inner.op.lock().await;
+        let Some(a) = self.inner.active.lock().clone() else {
+            return Ok(());
+        };
+        let name = a.session.player_name.clone();
+        if let Some(link) = &a.lan {
+            if link.plays_here() {
+                // AirPlay plays this computer's queue as it is.
+                return Ok(());
+            }
+            // Cast and other Platter devices take the queue again from the
+            // song and spot they're at.
+            self.inner.local.seek(a.session.position_ms).await?;
+            return self.resend(a.found).await.map(|_| ());
+        }
+        let Some(pq) = a.play_queue_id.clone() else {
+            return Ok(());
+        };
+        let failed = |e: AppError| {
+            tracing::info!(kind = e.kind(), "the play queue didn't take the change");
+            AppError::Network(format!("Couldn't update the queue on {name}"))
+        };
+        let st = self.inner.local.state().await?;
+        let server = self.inner.env.server().await?;
+        let snap = playqueue::read(&self.inner.http, &server, &pq).await.map_err(failed)?;
+        let item_id = self.inner.mirror.lock().item_id.clone();
+        let key = a.session.track.as_ref().map(|t| t.id.clone());
+        let at = snap
+            .position(item_id.as_deref(), key.as_deref())
+            .ok_or_else(|| failed(AppError::NotFound("the player's song".into())))?;
+        let mut user = track_ids(&st.queue.user_queue);
+        let mut next = track_ids(&st.queue.next_up);
+        // The player may be a song or two ahead of what this computer has seen.
+        let playing = &snap.entries[at].key;
+        if st.track.as_ref().is_none_or(|t| &t.id != playing) {
+            if let Some(j) = next.iter().position(|k| k == playing) {
+                next.drain(..=j);
+            } else if let Some(i) = user.iter().position(|k| k == playing) {
+                user.drain(..=i);
+            }
+        }
+        let mut want = user;
+        want.extend(next);
+        want.truncate(playqueue::MAX_ITEMS.saturating_sub(1));
+        playqueue::set_upcoming(&self.inner.http, &server, &pq, &snap, at, &want)
+            .await
+            .map_err(failed)?;
+        self.inner
+            .companion
+            .send(
+                &a.found.player.id,
+                &a.routes,
+                "/player/playback/refreshPlayQueue",
+                &[("playQueueID", pq.clone()), ("type", "music".into())],
+            )
+            .await
+            .map_err(failed)?;
+        // Read it back on the next timeline, to be sure it shows as the player has it.
+        self.inner.mirror.lock().seen = None;
+        Ok(())
+    }
+
+    /// Keep the queue here on what the device has coming up, so the queue
+    /// panel shows it: a Plex player's play queue is read whenever its
+    /// entry, version or song changes; other devices move the queue here
+    /// along as their song changes.
+    async fn follow_queue(&self, generation: u64, a: &Active, t: &Timeline) {
+        // Still playing here too: this computer's queue is its own.
+        if !self.inner.switches.stop_old() {
+            return;
+        }
+        if let Some(link) = &a.lan {
+            if !link.plays_here()
+                && let Some(key) = &t.rating_key
+                && let Err(e) = self.follow_song(key, t.time_ms).await
+            {
+                tracing::debug!(kind = e.kind(), "the queue here didn't follow the device");
+            }
+            return;
+        }
+        let Some(pq) = a.play_queue_id.clone() else { return };
+        let seen = format!(
+            "{pq}|{}|{}|{}",
+            t.play_queue_item_id.as_deref().unwrap_or_default(),
+            t.play_queue_version.as_deref().unwrap_or_default(),
+            t.rating_key.as_deref().unwrap_or_default()
+        );
+        {
+            let mut m = self.inner.mirror.lock();
+            if m.generation != generation {
+                *m = Mirror { generation, ..Mirror::default() };
+            }
+            m.item_id = t.play_queue_item_id.clone();
+            if m.seen.as_deref() == Some(seen.as_str()) && m.checked.is_some_and(|c| c.elapsed() < MIRROR_RECHECK) {
+                return;
+            }
+        }
+        let r = self.mirror_play_queue(&pq, t).await;
+        let mut m = self.inner.mirror.lock();
+        if m.generation == generation {
+            m.checked = Some(Instant::now());
+            m.seen = match r {
+                Ok(()) => Some(seen),
+                Err(e) => {
+                    tracing::debug!(kind = e.kind(), "couldn't read the player's play queue");
+                    None
+                }
+            };
+        }
+    }
+
+    /// Put the queue here on the play queue a Plex player is playing.
+    async fn mirror_play_queue(&self, pq: &str, t: &Timeline) -> AppResult<()> {
+        let server = self.inner.env.server().await?;
+        let snap = playqueue::read(&self.inner.http, &server, pq).await?;
+        let Some(at) = snap.position(t.play_queue_item_id.as_deref(), t.rating_key.as_deref()) else {
+            return Ok(());
+        };
+        let key = snap.entries[at].key.clone();
+        let tail: Vec<String> = snap.entries[at + 1..].iter().map(|e| e.key.clone()).collect();
+        // Only part of a long queue came back (or was sent): what's there must match.
+        let partial = snap.windowed || snap.entries.len() >= playqueue::MAX_ITEMS;
+        let same = |up: &[String]| up == tail.as_slice() || (partial && up.len() > tail.len() && up.starts_with(&tail));
+
+        let local = &self.inner.local;
+        let st = local.state().await?;
+        let q = &st.queue;
+        let user = track_ids(&q.user_queue);
+        let next = track_ids(&q.next_up);
+        let upcoming: Vec<String> = user.iter().chain(&next).cloned().collect();
+        if st.track.as_ref().is_some_and(|tr| tr.id == key) && same(&upcoming) {
+            return Ok(());
+        }
+        // The player moved along the queue: move along here (paused).
+        for (i, it) in q.user_queue.iter().enumerate() {
+            if it.track.id == key && same(&[&user[i + 1..], next.as_slice()].concat()) {
+                return local.jump_at(it.item_id.clone(), t.time_ms, false).await;
+            }
+        }
+        for (j, it) in q.next_up.iter().enumerate() {
+            if it.track.id == key && same(&[user.as_slice(), &next[j + 1..]].concat()) {
+                return local.jump_at(it.item_id.clone(), t.time_ms, false).await;
+            }
+        }
+        // Anything else (edited, shuffled or gone back there): take the play
+        // queue as it is. Songs queued here keep showing as queued.
+        let mut pool = user;
+        if let Some(p) = pool.iter().position(|u| *u == key) {
+            pool.remove(p);
+        }
+        let mut queued = Vec::new();
+        for k in &tail {
+            let Some(p) = pool.iter().position(|u| u == k) else { break };
+            pool.remove(p);
+            queued.push(k.clone());
+        }
+        let mut ids = vec![key];
+        ids.extend(tail[queued.len()..].iter().cloned());
+        local
+            .adopt(q.context.clone(), ids, queued, t.shuffle, repeat_from_code(t.repeat), t.time_ms, false)
+            .await
+    }
+
+    /// Move the queue here (paused) to the song a device went on to, when
+    /// it's coming up here.
+    async fn follow_song(&self, key: &str, ms: u64) -> AppResult<()> {
+        let st = self.inner.local.state().await?;
+        if st.track.as_ref().is_none_or(|t| t.id == key) {
+            return Ok(());
+        }
+        let q = &st.queue;
+        // What plays next is the head of the user queue, else the context.
+        let next = q.user_queue.first().or(q.next_up.first());
+        let item = next
+            .filter(|i| i.track.id == key)
+            .or_else(|| q.user_queue.iter().chain(&q.next_up).find(|i| i.track.id == key));
+        match item {
+            Some(i) => self.inner.local.jump_at(i.item_id.clone(), ms, false).await,
+            None => Ok(()),
         }
     }
 
@@ -1244,6 +1459,7 @@ impl RemoteService {
                         }
                     } else if let Some(t) = tl {
                         self.apply_timeline(&mut a, &t).await;
+                        self.follow_queue(generation, &a, &t).await;
                     }
                     *self.inner.active.lock() = Some(a);
                     self.emit_state();

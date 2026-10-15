@@ -1284,8 +1284,24 @@ first.
 While a session is open the player bar shows the session over the local
 state and its controls use `remote_command`; playing an album or a queue
 entry uses `remote_play_context` or `remote_queue_jump`, which load it here
-paused and send the new queue to the same player. Local queue edits (add,
-remove, move) stay local until the next send.
+paused and send the new queue to the same player.
+
+The queue here stays on what the device has coming up, so `player_state`'s
+queue (and the queue panel) shows the device's real next songs. For a Plex
+player its server play queue is read again whenever the timeline's
+`playQueueItemID`, `playQueueVersion` or song changes, and every 10 seconds
+in case the player doesn't report a version; the queue here then moves along
+to that song (paused) or takes the play queue as it is. For another Platter
+or a Cast device the queue here moves along as its song changes. With
+`moveStopsOldDevice` off the queue here is left alone.
+
+`queue_add`, `queue_remove`, `queue_move` and `queue_clear` also reach the
+device while a session is open. A Plex player's play queue is edited in place
+(added, moved and removed entries) and the player is told to read it again,
+so the song there keeps playing. Another Platter or a Cast device gets the
+whole queue again from its song and spot. If the play queue doesn't take it,
+the command fails with a `network` error "Couldn't update the queue on
+<device>". AirPlay plays this computer's queue, so edits apply as they are.
 
 `remote_return` reads the player's position, stops it (unless
 `moveStopsOldDevice` is off) and carries on here: the same song seeks, a song

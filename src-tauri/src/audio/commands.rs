@@ -13,6 +13,7 @@ use super::player::PlayerHandle;
 use super::queue::{AddAt, Repeat};
 use super::source::PlayContext;
 use crate::error::{AppError, AppResult};
+use crate::remote::RemoteService;
 
 #[tauri::command]
 pub async fn play_context(
@@ -106,29 +107,44 @@ pub async fn set_ab_loop(player: State<'_, PlayerHandle>, ab_loop: Option<AbLoop
 #[tauri::command]
 pub async fn queue_add(
     player: State<'_, PlayerHandle>,
+    remote: State<'_, RemoteService>,
     track_ids: Vec<String>,
     at: AddAt,
 ) -> AppResult<()> {
-    player.queue_add(track_ids, at).await
+    player.queue_add(track_ids, at).await?;
+    edited(&remote).await
 }
 
 #[tauri::command]
-pub async fn queue_remove(player: State<'_, PlayerHandle>, item_id: String) -> AppResult<()> {
-    player.queue_remove(item_id).await
+pub async fn queue_remove(
+    player: State<'_, PlayerHandle>,
+    remote: State<'_, RemoteService>,
+    item_id: String,
+) -> AppResult<()> {
+    player.queue_remove(item_id).await?;
+    edited(&remote).await
 }
 
 #[tauri::command]
 pub async fn queue_move(
     player: State<'_, PlayerHandle>,
+    remote: State<'_, RemoteService>,
     item_id: String,
     to_index: usize,
 ) -> AppResult<()> {
-    player.queue_move(item_id, to_index).await
+    player.queue_move(item_id, to_index).await?;
+    edited(&remote).await
 }
 
 #[tauri::command]
-pub async fn queue_clear(player: State<'_, PlayerHandle>) -> AppResult<()> {
-    player.queue_clear().await
+pub async fn queue_clear(player: State<'_, PlayerHandle>, remote: State<'_, RemoteService>) -> AppResult<()> {
+    player.queue_clear().await?;
+    edited(&remote).await
+}
+
+/// While another device plays, it gets the edit too.
+async fn edited(remote: &RemoteService) -> AppResult<()> {
+    if remote.is_remote() { remote.queue_edited().await } else { Ok(()) }
 }
 
 #[tauri::command]

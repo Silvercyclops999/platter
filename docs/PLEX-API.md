@@ -75,10 +75,14 @@ relay `https://sonos.plex.tv` with the account token.
 | Sonos linked to Plex | `GET https://sonos.plex.tv/resources` (XML `Player` elements) |
 | What's playing where | `GET /status/sessions` (`Metadata[].Player.machineIdentifier`, `.state`) |
 | Make a play queue | `POST /playQueues?type=audio&uri=server://{machineId}/com.plexapp.plugins.library/library/metadata/{keys}&key=/library/metadata/{start}&shuffle=0&repeat=0|1&continuous=0&own=1` |
-| Read a play queue | `GET /playQueues/{id}` |
+| Read a play queue | `GET /playQueues/{id}?window=600&own=1` (`playQueueVersion`, `playQueueSelectedItemID`, `playQueueTotalCount`, `Metadata[]` with `playQueueItemID` and `ratingKey`) |
+| Add to it | `PUT /playQueues/{id}?uri=server://{machineId}/com.plexapp.plugins.library/library/metadata/{keys}&next=0` (answers the queue after the change) |
+| Move an entry | `PUT /playQueues/{id}/items/{playQueueItemID}/move?after={playQueueItemID}` |
+| Remove an entry | `DELETE /playQueues/{id}/items/{playQueueItemID}` |
+| Tell the player it changed | `/player/playback/refreshPlayQueue?playQueueID={id}&type=music` |
 | Play it on a player | `/player/playback/playMedia?providerIdentifier=com.plexapp.plugins.library&machineIdentifier=&protocol=&address=&port=&token=&key=/library/metadata/{start}&offset={ms}&containerKey=/playQueues/{id}?window=100&own=1&type=music` |
 | Controls | `/player/playback/{play,pause,stop,skipNext,skipPrevious}?type=music`, `seekTo?offset={ms}`, `setParameters?volume=0..100`, `shuffle=0|1`, `repeat=0|1|2` (off, one, all) |
-| Follow it | `/player/timeline/poll?wait=0` (XML `Timeline` per type; the `type="music"` one has `state`, `time`, `duration`, `ratingKey`, `key`, `playQueueID`, `playQueueItemID`, `volume`, `shuffle`, `repeat`) |
+| Follow it | `/player/timeline/poll?wait=0` (XML `Timeline` per type; the `type="music"` one has `state`, `time`, `duration`, `ratingKey`, `key`, `playQueueID`, `playQueueItemID`, `playQueueVersion`, `volume`, `shuffle`, `repeat`) |
 | Token for another device | `GET /security/token?type=delegation&scope=all` (`MediaContainer.token`, a transient token) |
 
 Casting to a Chromecast uses Plex's Cast receiver (app id `9AC194DC`). After
@@ -394,6 +398,12 @@ anything that plays on a real device needs an OK first). Check once:
 - `playMedia` to Plexamp directly at its 32500 address with the player's own
   token, then through the server with `X-Plex-Target-Client-Identifier`:
   which one Plexamp accepts, and whether `offset` starts it at that spot.
+- Editing a play queue a player is using: where `PUT /playQueues/{id}?uri=`
+  puts the new entries (Platter moves them after the right entry when they
+  land elsewhere), whether move and delete answer the queue, whether
+  `playQueueVersion` goes up on each change and shows in the player's
+  timeline, and that `refreshPlayQueue` makes Plexamp pick up the change
+  without restarting the song.
 - `/player/timeline/poll?wait=0` on Plexamp: XML or JSON, and whether `time`
   moves while playing. Then `pause`, `seekTo`, `setParameters?volume=` and
   `stop`.

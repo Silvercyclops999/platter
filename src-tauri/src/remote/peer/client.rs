@@ -157,6 +157,7 @@ pub fn as_timeline(t: &PeerTimeline) -> Timeline {
         rating_key: t.track_id.clone(),
         play_queue_id: None,
         play_queue_item_id: None,
+        play_queue_version: None,
         volume: Some((t.volume.clamp(0.0, 1.0) * 100.0).round() as i64),
         shuffle: t.shuffle,
         repeat: i64::from(repeat_code(t.repeat)),

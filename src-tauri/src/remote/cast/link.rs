@@ -332,6 +332,7 @@ impl CastLink {
             rating_key: st.rating_key.clone(),
             play_queue_id: None,
             play_queue_item_id: None,
+            play_queue_version: None,
             volume,
             shuffle: false,
             repeat: repeat_code(repeat) as i64,
