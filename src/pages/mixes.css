@@ -166,7 +166,8 @@
 /* ---------------------------------------------------------------- smart shuffle */
 .smart-shuffle-icon { position: relative; display: inline-flex; }
 .smart-shuffle-icon__spark { position: absolute; top: -5px; right: -6px; color: var(--color-accent); }
-.queue-smart { display: inline-flex; align-items: center; color: var(--color-accent); margin-right: var(--space-1); }
+.queue-smart { display: inline-flex; align-items: center; flex: none; color: var(--color-accent); }
+.player-bar__suggestion { display: inline-flex; align-items: center; flex: none; gap: 2px; }
 
 /* ---------------------------------------------------------------- settings: left out of mixes */
 .mix-exclusions { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; max-width: 360px; }

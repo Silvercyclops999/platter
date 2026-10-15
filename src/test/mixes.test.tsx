@@ -172,19 +172,17 @@ describe("radio", () => {
 });
 
 describe("smart shuffle", () => {
-  it("is a third shuffle state only while its setting is on", async () => {
+  it("isn't offered on an album: shuffle is just on or off", async () => {
     const user = userEvent.setup();
     const disconnect = connectPlayer(mock);
     await mock.playContext({ context: { kind: "album", id: mock.fx.albums[1].id } });
+    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, smartShuffle: true } });
     render(<PlayControls />);
     await user.click(await screen.findByRole("button", { name: "Enable shuffle" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Disable shuffle" })).toBeInTheDocument());
-    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, smartShuffle: true } });
-    await user.click(await screen.findByRole("button", { name: "Enable smart shuffle" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Disable smart shuffle" })).toBeInTheDocument());
-    expect(usePlayer.getState().state?.smartShuffle).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Disable smart shuffle" }));
+    await user.click(screen.getByRole("button", { name: "Disable shuffle" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Enable shuffle" })).toBeInTheDocument());
+    expect(usePlayer.getState().state?.smartShuffle).toBe(false);
     disconnect();
   });
 });

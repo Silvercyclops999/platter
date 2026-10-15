@@ -232,8 +232,14 @@ export interface Backend {
   setShuffle(shuffle: boolean): Promise<void>;
   /** Shuffle preference for a context by id (applies now if it's playing). */
   setContextShuffle(contextId: string, shuffle: boolean): Promise<void>;
-  /** Smart shuffle: shuffle on with similar library songs mixed in. */
+  /** Smart shuffle for the playing playlist or Liked Songs. Off turns shuffle off, keeping the order. */
   setSmartShuffle(on: boolean): Promise<void>;
+  /** Smart shuffle for a playlist or Liked Songs by id (applies now if it's playing). */
+  setContextSmartShuffle(contextId: string, on: boolean): Promise<void>;
+  /** Skip the playing smart shuffle suggestion and pick new ones. */
+  smartSuggestionRemove(): Promise<void>;
+  /** The playing suggestion was added to its playlist (or liked): drop its badge. */
+  smartSuggestionKeep(itemId: string): Promise<void>;
   /** Crossfade for the playing context only (a mix's smooth transitions). */
   setSmoothTransitions(on: boolean): Promise<void>;
   setRepeat(repeat: RepeatMode): Promise<void>;
@@ -586,6 +592,9 @@ export function createTauriBackend(): Backend {
     setShuffle: (shuffle) => call("set_shuffle", { shuffle }),
     setContextShuffle: (contextId, shuffle) => call("set_context_shuffle", { contextId, shuffle }),
     setSmartShuffle: (on) => call("set_smart_shuffle", { on }),
+    setContextSmartShuffle: (contextId, on) => call("set_context_smart_shuffle", { contextId, on }),
+    smartSuggestionRemove: () => call("smart_suggestion_remove"),
+    smartSuggestionKeep: (itemId) => call("smart_suggestion_keep", { itemId }),
     setSmoothTransitions: (on) => call("set_smooth_transitions", { on }),
     setRepeat: (repeat) => call("set_repeat", { repeat }),
     setAbLoop: (abLoop) => call("set_ab_loop", { abLoop }),

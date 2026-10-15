@@ -317,6 +317,11 @@ impl Taste {
         Taste { artist_score, artist_tags, profile, similar }
     }
 
+    /// Plex's similar artists of `a` that are in the library.
+    pub fn similar_to(&self, a: u32) -> &[u32] {
+        self.similar.get(a as usize).map(Vec::as_slice).unwrap_or(&[])
+    }
+
     /// How alike two artists are: shared tags, listened together, and Plex
     /// listing one as similar to the other.
     pub fn similarity(&self, lib: &Lib, a: u32, b: u32) -> f32 {

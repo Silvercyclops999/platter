@@ -62,8 +62,10 @@ pub const MIN_LOOP_MS: u64 = 1_000;
 pub const REFILL_BATCH: usize = 20;
 /// A radio refills when fewer songs than this are left.
 pub const RADIO_LOW: usize = 5;
-/// Smart shuffle puts a similar song after every this many.
-pub const SMART_EVERY: usize = 3;
+/// Smart shuffle puts a suggestion after every this many playlist songs.
+pub const SMART_EVERY: usize = 2;
+/// Playlist songs a smart shuffle build takes the playlist's style from.
+const SMART_SEEDS: usize = 30;
 /// Songs at the end of a context that "similar music" is like.
 const SIMILAR_SEEDS: usize = 10;
 const PROBLEMS_CAP: usize = 200;
@@ -92,6 +94,8 @@ pub struct PlayerConfig {
     pub local_files: Option<super::source::LocalFiles>,
     /// When the queue ends, keep playing similar music (from settings).
     pub autoplay: bool,
+    /// Smart shuffle is in the shuffle cycle (from settings).
+    pub smart_shuffle: bool,
 }
 
 impl Default for PlayerConfig {
@@ -110,6 +114,7 @@ impl Default for PlayerConfig {
             dsp: DspSettings::default(),
             local_files: None,
             autoplay: true,
+            smart_shuffle: true,
         }
     }
 }
@@ -162,8 +167,17 @@ enum Cmd {
     JumpAt(String, u64, bool, Reply<()>),
     /// Keep playing similar music when the queue ends.
     SetAutoplay(bool, Reply<()>),
-    /// Smart shuffle on (shuffle on too) or off.
-    SetSmartShuffle(bool, Reply<()>),
+    /// Smart shuffle for a context by id (None: the playing one). On turns
+    /// shuffle on too; off turns shuffle off, keeping the shuffled order.
+    SetSmartShuffle(Option<String>, bool, Reply<()>),
+    /// The smart shuffle setting (in the shuffle cycle or not).
+    SetSmartAllowed(bool, Reply<()>),
+    /// Skip the playing suggestion and build new ones.
+    SmartRemove(Reply<()>),
+    /// The playing suggestion was added to the context: drop its badge.
+    SmartKeep(String, Reply<()>),
+    /// Suggestions found for build number `build`.
+    SmartFound { build: u64, tracks: Vec<Track> },
     /// Crossfade on for the playing context only.
     SetSmoothTransitions(bool, Reply<()>),
     /// Songs from a refill (`TrackLookup::more`) for the context `key` names.
@@ -285,7 +299,8 @@ impl PlayerHandle {
             self_tx: tx.downgrade(),
             refilling: None,
             refill_dead: None,
-            smart: false,
+            smart_built: true,
+            smart_gen: 0,
             dsp: config.dsp,
             transitions_for: None,
             engine,
@@ -427,9 +442,32 @@ impl PlayerHandle {
         self.call(|r| Cmd::SetAutoplay(on, r)).await
     }
 
-    /// Smart shuffle: shuffle with similar songs from the library mixed in.
+    /// Smart shuffle for the playing context: suggestions from the library
+    /// mixed in among its songs. Off also turns shuffle off.
     pub async fn set_smart_shuffle(&self, on: bool) -> AppResult<()> {
-        self.call(|r| Cmd::SetSmartShuffle(on, r)).await
+        self.call(|r| Cmd::SetSmartShuffle(None, on, r)).await
+    }
+
+    /// Smart shuffle for a context by id: applies now if it's playing,
+    /// otherwise the next time it plays.
+    pub async fn set_context_smart_shuffle(&self, context_id: String, on: bool) -> AppResult<()> {
+        self.call(|r| Cmd::SetSmartShuffle(Some(context_id), on, r)).await
+    }
+
+    /// Whether smart shuffle is in the shuffle cycle (the setting).
+    pub async fn set_smart_allowed(&self, on: bool) -> AppResult<()> {
+        self.call(|r| Cmd::SetSmartAllowed(on, r)).await
+    }
+
+    /// Skips the playing smart shuffle suggestion and builds new ones.
+    pub async fn smart_remove(&self) -> AppResult<()> {
+        self.call(Cmd::SmartRemove).await
+    }
+
+    /// The playing suggestion was added to its playlist (or liked): it
+    /// becomes one of the context's songs.
+    pub async fn smart_keep(&self, item_id: String) -> AppResult<()> {
+        self.call(|r| Cmd::SmartKeep(item_id, r)).await
     }
 
     /// Crossfade for the playing context only (off again when it changes).
@@ -613,8 +651,11 @@ struct Actor {
     refilling: Option<String>,
     /// A context state a refill found nothing for (not asked again).
     refill_dead: Option<String>,
-    /// Smart shuffle is on (acts while the context is shuffled).
-    smart: bool,
+    /// Smart shuffle suggestions were asked for in this run of the context
+    /// (they're a fixed list, built once and not refilled).
+    smart_built: bool,
+    /// Counts smart shuffle builds, so a late answer is dropped.
+    smart_gen: u64,
     /// The sound settings from Settings (smooth transitions lay over them).
     dsp: DspSettings,
     /// The context smooth transitions are on for.
@@ -736,7 +777,8 @@ impl Actor {
             repeat: self.queue.repeat(),
             queue: self.queue.view(),
             ab_loop: self.current_loop(),
-            smart_shuffle: self.smart && self.queue.shuffle(),
+            smart_shuffle: self.smart_on(),
+            smart_contexts: self.queue.smart_contexts(),
             smooth_transitions: self.transitions_for.is_some(),
         }
     }
@@ -877,25 +919,6 @@ impl Actor {
         }
         let remaining = self.queue.remaining();
         let radio = ctx.kind == ContextKind::Radio;
-        let smart_kinds = matches!(ctx.kind, ContextKind::Album | ContextKind::Playlist | ContextKind::Liked | ContextKind::Artist);
-        if self.smart && self.queue.shuffle() && smart_kinds && self.queue.smart_upcoming() == 0 && remaining >= SMART_EVERY {
-            let Some(tx) = self.self_tx.upgrade() else { return };
-            self.refilling = Some(key.clone());
-            let req = MoreRequest {
-                kind: ctx.kind,
-                id: ctx.id.clone(),
-                seed_ids: self.queue.context_sample(SIMILAR_SEEDS),
-                avoid: self.queue.known_ids(),
-                n: (remaining / SMART_EVERY).clamp(1, REFILL_BATCH),
-                smart: true,
-            };
-            let lookup = self.lookup.clone();
-            tokio::spawn(async move {
-                let tracks = lookup.more(&req).await.unwrap_or_default();
-                let _ = tx.send(Cmd::Extend { key, tracks, source: ItemSource::Smart });
-            });
-            return;
-        }
         let due = if radio {
             remaining < RADIO_LOW
         } else {
@@ -913,6 +936,7 @@ impl Actor {
             avoid: self.queue.known_ids(),
             n: REFILL_BATCH,
             smart: false,
+            avoid_artists: Vec::new(),
         };
         let source = if radio { ItemSource::Context } else { ItemSource::Autoplay };
         let lookup = self.lookup.clone();
@@ -928,7 +952,95 @@ impl Actor {
         });
     }
 
+    /// Smart shuffle is on for the playing context: a playlist or Liked
+    /// Songs, shuffled, with its smart preference on and the setting allowing it.
+    fn smart_on(&self) -> bool {
+        self.config.smart_shuffle
+            && self.queue.shuffle()
+            && self.queue.context().is_some_and(|c| {
+                matches!(c.kind, ContextKind::Playlist | ContextKind::Liked)
+                    && c.id.as_deref().is_some_and(|id| self.queue.smart_pref(id))
+            })
+    }
+
+    /// Builds the suggestions once per run (start, turning it on, a removed
+    /// suggestion): asks for one per free slot in the background. True when
+    /// a build went out.
+    fn request_smart(&mut self) -> bool {
+        if self.smart_built || !self.smart_on() {
+            return false;
+        }
+        let Some(ctx) = self.queue.context().cloned() else { return false };
+        self.smart_built = true;
+        self.smart_gen += 1;
+        self.queue.drop_smart_upcoming();
+        let n = self.queue.smart_slots(SMART_EVERY);
+        if n == 0 {
+            return false;
+        }
+        let Some(tx) = self.self_tx.upgrade() else { return false };
+        let req = MoreRequest {
+            kind: ctx.kind,
+            id: ctx.id.clone(),
+            seed_ids: self.queue.context_sample(SMART_SEEDS),
+            avoid: self.queue.known_ids(),
+            n,
+            smart: true,
+            avoid_artists: self.queue.context_artist_ids(),
+        };
+        let build = self.smart_gen;
+        let lookup = self.lookup.clone();
+        tokio::spawn(async move {
+            let tracks = match lookup.more(&req).await {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::debug!("no smart shuffle suggestions: {e}");
+                    Vec::new()
+                }
+            };
+            let _ = tx.send(Cmd::SmartFound { build, tracks });
+        });
+        true
+    }
+
+    /// Smart shuffle on or off for a context (None: the playing one).
+    fn set_smart(&mut self, id: Option<String>, on: bool) -> AppResult<()> {
+        let playing_id = self
+            .queue
+            .context()
+            .filter(|c| matches!(c.kind, ContextKind::Playlist | ContextKind::Liked))
+            .and_then(|c| c.id.clone());
+        let id = match id {
+            Some(id) => id,
+            None => playing_id
+                .clone()
+                .ok_or_else(|| AppError::Invalid("Smart shuffle is for playlists and Liked Songs".into()))?,
+        };
+        if playing_id.as_deref() != Some(id.as_str()) {
+            // Not playing: how it plays next time.
+            if on {
+                self.queue.store_smart_pref(&id, true);
+            } else {
+                self.queue.set_context_shuffle(&id, false);
+            }
+            return Ok(());
+        }
+        if on {
+            self.queue.set_shuffle(true);
+            self.queue.store_smart_pref(&id, true);
+            self.smart_built = false;
+        } else {
+            // The playing song carries on, upcoming suggestions go, and the
+            // rest keeps its shuffled order.
+            self.queue.drop_smart_upcoming();
+            self.queue.shuffle_off_keep_order();
+        }
+        self.update_next();
+        Ok(())
+    }
+
     fn update_next(&mut self) {
+        self.request_smart();
         self.maybe_refill();
         self.sync_album_context();
         if let Some(cur) = self.cur_key {
@@ -1076,6 +1188,8 @@ impl Actor {
                     .queue
                     .set_context_at(info, tracks, start, shuffle)
                     .map_or(0, |(_, ms)| ms);
+                // A new start builds new suggestions.
+                self.smart_built = false;
                 let r = self.start_current(true, at);
                 let _ = reply.send(r);
             }
@@ -1137,18 +1251,56 @@ impl Actor {
                 self.mark_dirty();
                 let _ = reply.send(Ok(()));
             }
-            Cmd::SetSmartShuffle(on, reply) => {
-                self.smart = on;
-                if on && !self.queue.shuffle() {
-                    self.queue.set_shuffle(true);
-                }
-                if !on {
+            Cmd::SetSmartShuffle(id, on, reply) => {
+                let r = self.set_smart(id, on);
+                self.mark_dirty();
+                let _ = reply.send(r);
+            }
+            Cmd::SetSmartAllowed(on, reply) => {
+                self.config.smart_shuffle = on;
+                if on {
+                    self.smart_built = false;
+                } else {
                     self.queue.drop_smart_upcoming();
                 }
-                self.refill_dead = None;
                 self.update_next();
                 self.mark_dirty();
                 let _ = reply.send(Ok(()));
+            }
+            Cmd::SmartRemove(reply) => {
+                if self.queue.current().is_none_or(|c| c.source != ItemSource::Smart) {
+                    let _ = reply.send(Err(AppError::Invalid("No suggestion is playing".into())));
+                    return;
+                }
+                self.end_current_as_skip();
+                self.failures_in_row = 0;
+                self.queue.drop_smart_upcoming();
+                self.smart_built = false;
+                let r = match self.queue.next_manual() {
+                    Some(_) => self.start_current(true, 0),
+                    None => {
+                        self.end_of_queue();
+                        Ok(())
+                    }
+                };
+                let _ = reply.send(r);
+            }
+            Cmd::SmartKeep(id, reply) => {
+                let r = if self.queue.keep_smart(&id) {
+                    self.mark_dirty();
+                    Ok(())
+                } else {
+                    Err(AppError::NotFound(format!("suggestion {id}")))
+                };
+                let _ = reply.send(r);
+            }
+            Cmd::SmartFound { build, tracks } => {
+                if build != self.smart_gen || !self.smart_on() || tracks.is_empty() {
+                    return;
+                }
+                self.queue.insert_smart(tracks, SMART_EVERY);
+                self.update_next();
+                self.mark_dirty();
             }
             Cmd::SetSmoothTransitions(on, reply) => {
                 self.transitions_for = if on { self.context_key() } else { None };
@@ -1157,7 +1309,6 @@ impl Actor {
             }
             Cmd::SetShuffle(s, reply) => {
                 if !s {
-                    self.smart = false;
                     self.queue.drop_smart_upcoming();
                 }
                 self.queue.set_shuffle(s);
@@ -1166,8 +1317,7 @@ impl Actor {
                 let _ = reply.send(Ok(()));
             }
             Cmd::SetContextShuffle(id, s, reply) => {
-                if !s {
-                    self.smart = false;
+                if !s && self.queue.context().and_then(|c| c.id.as_deref()) == Some(id.as_str()) {
                     self.queue.drop_smart_upcoming();
                 }
                 self.queue.set_context_shuffle(&id, s);
@@ -1201,13 +1351,7 @@ impl Actor {
                     self.refill_dead = Some(key);
                     return;
                 }
-                if source == ItemSource::Smart {
-                    if self.smart && self.queue.shuffle() {
-                        self.queue.insert_smart(tracks, SMART_EVERY);
-                    }
-                } else {
-                    self.queue.extend_context(tracks, source);
-                }
+                self.queue.extend_context(tracks, source);
                 self.update_next();
                 self.mark_dirty();
             }
@@ -1290,6 +1434,7 @@ impl Actor {
                 self.skip_ids.clear();
                 self.failures_in_row = 0;
                 let _ = self.queue.set_context_at(info, tracks, start, None);
+                self.smart_built = false;
                 let r = self.start_current(play, start_ms);
                 let _ = reply.send(r);
             }

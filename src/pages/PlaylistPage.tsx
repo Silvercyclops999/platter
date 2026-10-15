@@ -1,7 +1,8 @@
-import { ArrowDownUp, Ellipsis, ListMusic, Pause, Pencil, Play, Shuffle } from "lucide-react";
+import { ArrowDownUp, Ellipsis, ListMusic, Pause, Pencil, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
+import { ContextShuffleButton } from "../components/ShuffleButton";
 import { openContextMenu } from "../components/ContextMenu";
 import { bookmarkPageItem, editSmartPlaylist } from "../stores/curate";
 import { shareItem } from "../components/ShareMenu";
@@ -107,7 +108,6 @@ export function PlaylistPage({ id }: { id: string }) {
   useArtTint(null, pl?.thumb);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
-  const shuffle = usePlayer((s) => s.state?.shuffledContexts?.includes(id) ?? false);
   const { isContext: isThis, playing: isThisPlaying } = useContextState("playlist", id);
   const pinned = usePins((s) => s.isPinned("playlist", id));
   const play = () => (isThis ? player.toggle() : player.playPlaylist(id));
@@ -345,13 +345,7 @@ export function PlaylistPage({ id }: { id: string }) {
                 icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
                 onClick={play}
               />
-              <IconButton
-                label={shuffle ? "Disable shuffle" : "Enable shuffle"}
-                size="lg"
-                pressed={shuffle}
-                icon={<Shuffle size={22} />}
-                onClick={() => player.setContextShuffle(id, !shuffle)}
-              />
+              <ContextShuffleButton id={id} kind="playlist" name={pl?.title} />
               <DownloadButton kind="playlist" id={id} title={pl?.title ?? "this playlist"} disabled={!pl} />
             </>
           )}

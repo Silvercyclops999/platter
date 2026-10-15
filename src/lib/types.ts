@@ -521,8 +521,10 @@ export interface PlayerState {
   queue: QueueView;
   /** The A-B loop on the playing track, if one is set. */
   abLoop?: AbLoop | null;
-  /** Shuffle with similar songs from the library mixed in. */
+  /** Smart shuffle is on for the playing playlist or Liked Songs: suggestions mixed in. */
   smartShuffle?: boolean;
+  /** Context ids (playlists, Liked Songs) whose smart shuffle preference is on. */
+  smartContexts?: string[];
   /** Crossfade on for this playback only (a mix's smooth transitions). */
   smoothTransitions?: boolean;
 }
@@ -1069,7 +1071,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mixUnreleased: true,
   daylistHours: 3,
   queueEnd: "keepPlaying",
-  smartShuffle: false,
+  smartShuffle: true,
   showFriendActivity: true,
   shareActivity: true,
   whatsNewAnnouncements: true,

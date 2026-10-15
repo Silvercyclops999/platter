@@ -70,10 +70,31 @@ pub async fn set_shuffle(player: State<'_, PlayerHandle>, shuffle: bool) -> AppR
     player.set_shuffle(shuffle).await
 }
 
-/// Smart shuffle: shuffle on, with similar songs from the library mixed in.
+/// Smart shuffle for the playing playlist or Liked Songs: suggestions from
+/// the library mixed in. Off turns shuffle off too, keeping the order.
 #[tauri::command]
 pub async fn set_smart_shuffle(player: State<'_, PlayerHandle>, on: bool) -> AppResult<()> {
     player.set_smart_shuffle(on).await
+}
+
+/// Smart shuffle for a playlist or Liked Songs by id. Applies now if it's
+/// playing, otherwise the next time it plays.
+#[tauri::command]
+pub async fn set_context_smart_shuffle(player: State<'_, PlayerHandle>, context_id: String, on: bool) -> AppResult<()> {
+    player.set_context_smart_shuffle(context_id, on).await
+}
+
+/// Skips the playing smart shuffle suggestion and picks new ones.
+#[tauri::command]
+pub async fn smart_suggestion_remove(player: State<'_, PlayerHandle>) -> AppResult<()> {
+    player.smart_remove().await
+}
+
+/// The playing suggestion was added to its playlist or liked: it stays as
+/// one of the playlist's songs.
+#[tauri::command]
+pub async fn smart_suggestion_keep(player: State<'_, PlayerHandle>, item_id: String) -> AppResult<()> {
+    player.smart_keep(item_id).await
 }
 
 /// Crossfade for the playing context only (a mix's smooth transitions).

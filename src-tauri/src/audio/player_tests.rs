@@ -1182,24 +1182,187 @@ async fn stop_at_the_end_asks_for_nothing() {
     assert!(r.resolver.more_calls.lock().is_empty());
 }
 
+fn playlist(id: &str, ids: &[&str]) -> PlayContext {
+    PlayContext {
+        kind: ContextKind::Playlist,
+        id: Some(id.into()),
+        track_ids: Some(ids.iter().map(|s| s.to_string()).collect()),
+    }
+}
+
+fn is_smart(i: &super::queue::QueueItem) -> bool {
+    i.source == super::queue::ItemSource::Smart
+}
+
+/// Upcoming kinds with the playing song first: C a playlist song, S a suggestion.
+fn rhythm(s: &PlayerState) -> String {
+    let cur = s.queue.current.as_ref().map_or("", |c| if is_smart(c) { "S" } else { "C" });
+    let rest: String = s.queue.next_up.iter().map(|i| if is_smart(i) { 'S' } else { 'C' }).collect();
+    format!("{cur}{rest}")
+}
+
+const SONGS: [&str; 7] = ["a", "b", "c", "d", "e", "f", "g"];
+const ALL: [&str; 11] = ["a", "b", "c", "d", "e", "f", "g", "x", "y", "z", "w"];
+
 #[tokio::test]
-async fn smart_shuffle_mixes_similar_songs_in_and_takes_them_out_again() {
-    let r = rig(&["a", "b", "c", "d", "e", "f", "g", "x", "y"], 30.0, true, PlayerConfig::default()).await;
-    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into()]];
-    r.player.play_context(album("al", &["a", "b", "c", "d", "e", "f", "g"]), Some("a".into()), Some(false)).await.unwrap();
-    r.player.set_smart_shuffle(true).await.unwrap();
-    let s = wait_state(&r.player, |s| s.queue.next_up.iter().any(|i| i.source == super::queue::ItemSource::Smart)).await;
-    assert!(s.shuffle && s.smart_shuffle);
-    let smart: Vec<String> = s.queue.next_up.iter().filter(|i| i.source == super::queue::ItemSource::Smart).map(|i| i.track.id.clone()).collect();
-    assert_eq!(smart, vec!["x", "y"]);
-    let req = r.resolver.more_calls.lock()[0].clone();
-    assert!(req.smart && req.kind == ContextKind::Album);
-    assert_eq!(req.n, 2, "one for every three songs left");
-    // Plain shuffle off ends smart shuffle and its songs.
-    r.player.set_shuffle(false).await.unwrap();
+async fn smart_shuffle_is_for_playlists_and_liked_songs_only() {
+    let r = rig(&ALL, 30.0, true, PlayerConfig::default()).await;
+    r.player.play_context(album("al", &SONGS), Some("a".into()), Some(true)).await.unwrap();
+    assert!(r.player.set_smart_shuffle(true).await.is_err(), "not on an album");
     let s = r.player.state().await.unwrap();
-    assert!(!s.smart_shuffle);
-    assert!(s.queue.next_up.iter().all(|i| i.source != super::queue::ItemSource::Smart));
+    assert!(s.shuffle && !s.smart_shuffle);
+    // A smart preference stored for an album id does nothing either.
+    r.player.set_context_smart_shuffle("al".into(), true).await.unwrap_or(());
+    r.player.play_context(album("al", &SONGS), Some("a".into()), Some(true)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(r.resolver.more_calls.lock().iter().all(|m| !m.smart));
+    // Liked Songs has it.
+    let liked = PlayContext { kind: ContextKind::Liked, id: Some("liked".into()), track_ids: Some(SONGS.iter().map(|s| s.to_string()).collect()) };
+    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into(), "z".into()]];
+    r.player.play_context(liked, Some("a".into()), Some(true)).await.unwrap();
+    r.player.set_smart_shuffle(true).await.unwrap();
+    let s = wait_state(&r.player, |s| s.queue.next_up.iter().any(is_smart)).await;
+    assert!(s.smart_shuffle && s.smart_contexts.contains(&"liked".to_string()));
+}
+
+#[tokio::test]
+async fn smart_shuffle_builds_one_fixed_list_two_songs_to_one_suggestion() {
+    let r = rig(&ALL, 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into(), "z".into()], vec!["w".into()]];
+    r.player.set_context_smart_shuffle("pl".into(), true).await.unwrap();
+    assert!(r.player.state().await.unwrap().shuffled_contexts.contains(&"pl".to_string()));
+    r.player.play_context(playlist("pl", &SONGS), None, None).await.unwrap();
+    let s = wait_state(&r.player, |s| s.queue.next_up.iter().any(is_smart)).await;
+    assert!(s.shuffle && s.smart_shuffle);
+    assert_eq!(rhythm(&s), "CCSCCSCCSC");
+    let req = r.resolver.more_calls.lock()[0].clone();
+    assert!(req.smart && req.kind == ContextKind::Playlist);
+    assert_eq!(req.n, 3);
+    assert!(SONGS.iter().all(|t| req.avoid.contains(&t.to_string())), "not already in the playlist");
+    assert_eq!(req.avoid_artists.len(), 2, "the playlist's artists are left out");
+    // Songs get used up: nothing new is asked for.
+    r.player.next().await.unwrap();
+    r.player.next().await.unwrap();
+    r.player.next().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.resolver.more_calls.lock().iter().filter(|m| m.smart).count(), 1);
+    assert_eq!(r.player.state().await.unwrap().queue.next_up.iter().filter(|i| is_smart(i)).count(), 2);
+}
+
+#[tokio::test]
+async fn removing_a_suggestion_skips_it_and_builds_new_ones() {
+    let r = rig(&ALL, 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into(), "z".into()], vec!["w".into(), "y".into()]];
+    r.player.set_context_smart_shuffle("pl".into(), true).await.unwrap();
+    r.player.play_context(playlist("pl", &SONGS), None, None).await.unwrap();
+    wait_state(&r.player, |s| s.queue.next_up.iter().any(is_smart)).await;
+    assert!(r.player.smart_remove().await.is_err(), "a playlist song is playing");
+    r.player.next().await.unwrap();
+    r.player.next().await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "x");
+    r.player.smart_remove().await.unwrap();
+    let s = wait_state(&r.player, |s| s.queue.next_up.iter().any(|i| i.track.id == "w")).await;
+    assert!(!is_smart(s.queue.current.as_ref().unwrap()), "on to the next playlist song");
+    assert_eq!(r.resolver.more_calls.lock().iter().filter(|m| m.smart).count(), 2);
+    assert!(s.queue.next_up.iter().all(|i| i.track.id != "z"), "the old suggestions went");
+    assert_eq!(rhythm(&s), "CCSCCSC");
+}
+
+#[tokio::test]
+async fn a_kept_suggestion_loses_its_badge_and_keeps_playing() {
+    let r = rig(&ALL, 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into(), "z".into()]];
+    r.player.set_context_smart_shuffle("pl".into(), true).await.unwrap();
+    r.player.play_context(playlist("pl", &SONGS), None, None).await.unwrap();
+    wait_state(&r.player, |s| s.queue.next_up.iter().any(is_smart)).await;
+    r.player.next().await.unwrap();
+    r.player.next().await.unwrap();
+    let cur = r.player.state().await.unwrap().queue.current.unwrap();
+    assert!(is_smart(&cur));
+    r.player.smart_keep(cur.item_id.clone()).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    let now = s.queue.current.unwrap();
+    assert_eq!((now.item_id.clone(), is_smart(&now)), (cur.item_id.clone(), false));
+    assert!(s.status != PlayerStatus::Idle);
+    assert!(r.player.smart_keep(cur.item_id).await.is_err());
+}
+
+#[tokio::test]
+async fn turning_smart_shuffle_off_mid_play_keeps_the_song_and_the_order() {
+    let r = rig(&ALL, 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into(), "z".into()]];
+    r.player.set_context_smart_shuffle("pl".into(), true).await.unwrap();
+    r.player.play_context(playlist("pl", &SONGS), None, None).await.unwrap();
+    wait_state(&r.player, |s| s.queue.next_up.iter().any(is_smart)).await;
+    r.player.next().await.unwrap();
+    r.player.next().await.unwrap();
+    let before = r.player.state().await.unwrap();
+    let playing = before.queue.current.clone().unwrap();
+    assert!(is_smart(&playing));
+    let order: Vec<String> = before.queue.next_up.iter().filter(|i| !is_smart(i)).map(|i| i.track.id.clone()).collect();
+    r.player.set_smart_shuffle(false).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert!(!s.shuffle && !s.smart_shuffle && s.smart_contexts.is_empty());
+    assert_eq!(s.queue.current.unwrap().item_id, playing.item_id, "the suggestion carries on, badge and all");
+    let after: Vec<String> = s.queue.next_up.iter().map(|i| i.track.id.clone()).collect();
+    assert_eq!(after, order, "no suggestions left, shuffled order kept");
+}
+
+#[tokio::test]
+async fn the_setting_takes_smart_shuffle_out_everywhere() {
+    let r = rig(&ALL, 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into(), "z".into()], vec!["w".into()]];
+    r.player.set_context_smart_shuffle("pl".into(), true).await.unwrap();
+    r.player.play_context(playlist("pl", &SONGS), None, None).await.unwrap();
+    wait_state(&r.player, |s| s.queue.next_up.iter().any(is_smart)).await;
+    r.player.set_smart_allowed(false).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert!(s.shuffle && !s.smart_shuffle, "plain shuffle stays");
+    assert!(!s.queue.next_up.iter().any(is_smart));
+    r.player.set_smart_allowed(true).await.unwrap();
+    wait_state(&r.player, |s| s.smart_shuffle && s.queue.next_up.iter().any(is_smart)).await;
+}
+
+#[tokio::test]
+async fn autoplay_takes_over_after_the_last_song_without_badges() {
+    let r = rig(&ALL, 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["x".into()], vec!["w".into()]];
+    r.player.set_context_smart_shuffle("pl".into(), true).await.unwrap();
+    r.player.play_context(playlist("pl", &["a", "b", "c"]), Some("a".into()), None).await.unwrap();
+    let s = wait_state(&r.player, |s| s.queue.next_up.iter().any(is_smart)).await;
+    assert_eq!(rhythm(&s), "CCSC");
+    r.player.next().await.unwrap();
+    r.player.next().await.unwrap();
+    r.player.next().await.unwrap();
+    let s = wait_state(&r.player, |s| s.queue.next_up.iter().any(|i| i.track.id == "w")).await;
+    let w = s.queue.next_up.iter().find(|i| i.track.id == "w").unwrap();
+    assert_eq!(w.source, super::queue::ItemSource::Autoplay);
+    let calls = r.resolver.more_calls.lock().clone();
+    assert_eq!((calls.len(), calls[1].smart), (2, false));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn smart_shuffle_is_remembered_per_playlist_across_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("queue.json");
+    let cfg = || PlayerConfig { persist_path: Some(path.clone()), ..Default::default() };
+    {
+        let r = rig(&ALL, 5.0, true, cfg()).await;
+        r.player.set_context_smart_shuffle("one".into(), true).await.unwrap();
+        r.player.set_context_shuffle("two".into(), true).await.unwrap();
+        r.player.set_context_smart_shuffle("liked".into(), true).await.unwrap();
+        r.player.set_context_smart_shuffle("liked".into(), false).await.unwrap();
+        r.player.flush().await;
+    }
+    let r = rig(&ALL, 5.0, true, cfg()).await;
+    let s = r.player.state().await.unwrap();
+    assert_eq!(s.smart_contexts, vec!["one".to_string()]);
+    assert!(s.shuffled_contexts.contains(&"one".to_string()) && s.shuffled_contexts.contains(&"two".to_string()));
+    assert!(!s.shuffled_contexts.contains(&"liked".to_string()), "smart shuffle off is off");
+    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into(), "z".into()]];
+    r.player.play_context(playlist("one", &SONGS), None, None).await.unwrap();
+    wait_state(&r.player, |s| s.smart_shuffle && s.queue.next_up.iter().any(is_smart)).await;
 }
 
 #[tokio::test]

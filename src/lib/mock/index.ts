@@ -233,8 +233,7 @@ export class MockBackend implements Backend {
   readonly downloads: MockDownloads;
   /** Mixes and radio, made from the fixtures. */
   readonly mixes: MockMixes;
-  /** Smart shuffle and smooth transitions (player state). */
-  private smartShuffle = false;
+  /** Smooth transitions (player state). */
   private smoothFor: string | null = null;
   /** Friend activity, follows, What's New, listening sessions (test hooks: access, guestJoins, hostGone, hostEnds, addRelease). */
   readonly social: MockSocial;
@@ -303,6 +302,10 @@ export class MockBackend implements Backend {
   private ctxInfo: QueueContextInfo | null = null;
   /** Context ids with shuffle on, least recently used first. */
   private shuffledIds: string[] = [];
+  /** Playlist and Liked Songs ids with smart shuffle on (each in shuffledIds too). */
+  private smartIds: string[] = [];
+  /** Smart shuffle suggestions were picked for this run of the context. */
+  private smartBuilt = true;
   /** Resume point per context id; Map order is least recently used first. */
   private resumePoints = new Map<string, ResumePoint>();
   private itemSeq = 1;
@@ -1252,6 +1255,84 @@ export class MockBackend implements Backend {
   private storeShufflePref(id: string, on: boolean) {
     this.shuffledIds = this.shuffledIds.filter((s) => s !== id);
     if (on) this.shuffledIds = [...this.shuffledIds, id].slice(-CONTEXT_MEMORY_CAP);
+    else this.smartIds = this.smartIds.filter((s) => s !== id);
+  }
+
+  private storeSmartPref(id: string, on: boolean) {
+    this.smartIds = this.smartIds.filter((s) => s !== id);
+    if (on) {
+      if (!this.shufflePref(id)) this.storeShufflePref(id, true);
+      this.smartIds = [...this.smartIds, id].slice(-CONTEXT_MEMORY_CAP);
+    }
+  }
+
+  /** Like the core: on for a shuffled playlist or Liked Songs with its preference set. */
+  private smartOn(): boolean {
+    const c = this.ctxInfo;
+    return (
+      this.settings.smartShuffle &&
+      this.shuffle &&
+      !!c?.id &&
+      (c.kind === "playlist" || c.kind === "liked") &&
+      this.smartIds.includes(c.id)
+    );
+  }
+
+  /**
+   * Like the core: one suggestion after every two playlist songs (counting
+   * the playing one), never after the last; built once per run.
+   */
+  private buildSmart(cur: QueueItem | null = this.current) {
+    if (this.smartBuilt || !this.smartOn()) return;
+    this.smartBuilt = true;
+    this.dropSmart();
+    const rest = this.ctxOrder.slice(this.ctxPos + 1);
+    let left = rest.filter((i) => i.source === "context").length;
+    let count = cur?.source === "context" ? 1 : 0;
+    const slots = new Set<number>();
+    rest.forEach((it, k) => {
+      if (it.source !== "context") return;
+      count++;
+      left--;
+      if (count >= 2 && left > 0) {
+        slots.add(k);
+        count = 0;
+      }
+    });
+    if (!slots.size) return;
+    const own = this.ctxOriginal.filter((i) => i.source === "context");
+    const artists = new Set(own.map((i) => i.track.artistId));
+    const avoid = new Set([...this.ctxOriginal, ...this.history, ...this.userQueue].map((i) => i.track.id));
+    const seeds = own.filter((_, k) => k % Math.max(1, Math.floor(own.length / 30)) === 0).map((i) => i.track.id);
+    const found = this.mixes
+      .similar(seeds, avoid, 400, `smart${this.itemSeq}`)
+      .filter((t) => !artists.has(t.artistId) && !this.hidden.hides(t));
+    // Songs that aren't liked first; a few per artist while there are others.
+    const liked = new Set(this.likes.ids());
+    const ordered = [...found.filter((t) => !liked.has(t.id)), ...found.filter((t) => liked.has(t.id))];
+    const per = new Map<string, number>();
+    const picks: Track[] = [];
+    for (const t of ordered) {
+      if (picks.length >= slots.size) break;
+      const n = per.get(t.artistId) ?? 0;
+      if (n >= 3) continue;
+      per.set(t.artistId, n + 1);
+      picks.push(t);
+    }
+    for (const t of ordered) {
+      if (picks.length >= slots.size) break;
+      if (!picks.includes(t)) picks.push(t);
+    }
+    const out: QueueItem[] = [];
+    rest.forEach((it, k) => {
+      out.push(it);
+      if (slots.has(k) && picks.length) {
+        const added = this.item(picks.shift()!, "smart");
+        this.ctxOriginal.push(added);
+        out.push(added);
+      }
+    });
+    this.ctxOrder = [...this.ctxOrder.slice(0, this.ctxPos + 1), ...out];
   }
 
   /** Remember where the current context is (track change, pause, ticks). */
@@ -1386,6 +1467,9 @@ export class MockBackend implements Backend {
       this.ctxOrder = [...this.ctxOriginal];
       this.ctxPos = this.ctxOrder.indexOf(first);
     }
+    // A new start picks new suggestions.
+    this.smartBuilt = false;
+    this.buildSmart(this.ctxOrder[this.ctxPos]);
     this.setCurrent(this.ctxOrder[this.ctxPos], play, offset);
   }
 
@@ -1503,7 +1587,8 @@ export class MockBackend implements Backend {
       shuffledContexts: this.shuffledIds,
       repeat: this.repeat,
       abLoop: this.abLoop,
-      smartShuffle: this.smartShuffle && this.shuffle,
+      smartShuffle: this.smartOn(),
+      smartContexts: this.smartIds,
       smoothTransitions: !!this.smoothFor && this.smoothFor === this.ctxKey(),
       queue: {
         current: this.current,
@@ -1741,22 +1826,50 @@ export class MockBackend implements Backend {
   }
   setSmartShuffle(on: boolean) {
     return this.act(() => {
-      this.smartShuffle = on;
-      if (on) {
-        if (!this.shuffle) this.applyShuffle(true);
-        // A similar song after every three still to come.
-        const rest = this.ctxOrder.slice(this.ctxPos + 1);
-        const avoid = new Set(this.ctxOriginal.map((i) => i.track.id));
-        const more = this.mixes.similar(this.ctxOriginal.slice(0, 10).map((i) => i.track.id), avoid, Math.max(1, Math.floor(rest.length / 3)), "smart");
-        const out: QueueItem[] = [];
-        rest.forEach((it, i) => {
-          out.push(it);
-          if ((i + 1) % 3 === 0 && more.length) out.push(this.item(more.shift()!, "smart"));
-        });
-        this.ctxOrder = [...this.ctxOrder.slice(0, this.ctxPos + 1), ...out];
-      } else {
-        this.dropSmart();
-      }
+      const c = this.ctxInfo;
+      if (!c?.id || (c.kind !== "playlist" && c.kind !== "liked")) throw { kind: "invalid", message: "Smart shuffle is for playlists and Liked Songs" };
+      this.applySmart(c.id, on);
+    });
+  }
+  setContextSmartShuffle(contextId: string, on: boolean) {
+    return this.act(() => this.applySmart(contextId, on));
+  }
+  /** Like the core: on also shuffles; off keeps the playing song and the shuffled order. */
+  private applySmart(id: string, on: boolean) {
+    const c = this.ctxInfo;
+    const playing = c?.id === id && (c.kind === "playlist" || c.kind === "liked");
+    if (!playing) {
+      if (on) this.storeSmartPref(id, true);
+      else this.storeShufflePref(id, false);
+    } else if (on) {
+      if (!this.shuffle) this.applyShuffle(true);
+      this.storeSmartPref(id, true);
+      this.smartBuilt = false;
+      this.buildSmart();
+    } else {
+      this.dropSmart();
+      this.storeShufflePref(id, false);
+      this.shuffle = false;
+    }
+    this.emitState();
+  }
+  smartSuggestionRemove() {
+    return this.act(() => {
+      if (this.current?.source !== "smart") throw { kind: "invalid", message: "No suggestion is playing" };
+      this.dropSmart();
+      this.smartBuilt = false;
+      this.advance(false, true);
+      this.buildSmart();
+      this.emitState();
+    });
+  }
+  smartSuggestionKeep(itemId: string) {
+    return this.act(() => {
+      const it = [this.current, ...this.ctxOriginal].find((i) => i?.itemId === itemId && i.source === "smart");
+      if (!it) throw { kind: "notFound", message: `suggestion ${itemId}` };
+      it.source = "context";
+      // The core sends a fresh copy, so the bar sees the change.
+      if (this.current?.itemId === itemId) this.current = { ...this.current, source: "context" };
       this.emitState();
     });
   }
@@ -1795,10 +1908,7 @@ export class MockBackend implements Backend {
   /** Shuffle for the playing context; remembered for its id. */
   private applyShuffle(shuffle: boolean) {
     if (this.ctxInfo?.id) this.storeShufflePref(this.ctxInfo.id, shuffle);
-    if (!shuffle && this.smartShuffle) {
-      this.smartShuffle = false;
-      this.dropSmart();
-    }
+    if (!shuffle) this.dropSmart();
     if (shuffle !== this.shuffle) {
       this.shuffle = shuffle;
       const at = this.ctxPos >= 0 ? this.ctxOrder[this.ctxPos] : undefined;
@@ -1968,10 +2078,14 @@ export class MockBackend implements Backend {
         this.mixes.invalidate();
         this.later(0, () => this.emit("mixes://changed", null));
       }
-      if (patch.smartShuffle === false && this.smartShuffle) {
-        this.smartShuffle = false;
-        this.dropSmart();
-        this.emitState();
+      if (patch.smartShuffle !== undefined) {
+        // Off takes smart shuffle out everywhere; on builds suggestions again.
+        if (patch.smartShuffle) this.smartBuilt = false;
+        else this.dropSmart();
+        this.later(0, () => {
+          this.buildSmart();
+          this.emitState();
+        });
       }
       if (patch.transcribeLyrics !== undefined || patch.transcribeModel !== undefined) this.transcribe.settingsChanged();
       if (patch.downloadLiked !== undefined && patch.downloadLiked !== this.downloads.isOn("liked", ""))

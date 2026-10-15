@@ -163,6 +163,10 @@ pub struct Queue {
     /// Context ids with shuffle on, least recently used first.
     #[serde(default)]
     shuffled: VecDeque<String>,
+    /// Context ids (playlists, Liked Songs) with smart shuffle on, least
+    /// recently used first. Always a subset of `shuffled`.
+    #[serde(default)]
+    smart: VecDeque<String>,
     /// Comes from settings, so it isn't saved with the queue.
     #[serde(skip)]
     shuffle_style: ShuffleStyle,
@@ -273,7 +277,43 @@ impl Queue {
             while self.shuffled.len() > CONTEXT_MEMORY_CAP {
                 self.shuffled.pop_front();
             }
+        } else {
+            self.smart.retain(|s| s != id);
         }
+    }
+
+    /// The stored smart shuffle preference for a context (off unless set).
+    pub fn smart_pref(&self, id: &str) -> bool {
+        self.smart.iter().any(|s| s == id)
+    }
+
+    /// Context ids with smart shuffle on, least recently used first.
+    pub fn smart_contexts(&self) -> Vec<String> {
+        self.smart.iter().cloned().collect()
+    }
+
+    /// Remembers smart shuffle for a context. On also turns its shuffle
+    /// preference on; off leaves shuffle as it is.
+    pub fn store_smart_pref(&mut self, id: &str, on: bool) {
+        self.smart.retain(|s| s != id);
+        if on {
+            if !self.shuffle_pref(id) {
+                self.store_shuffle_pref(id, true);
+            }
+            self.smart.push_back(id.to_owned());
+            while self.smart.len() > CONTEXT_MEMORY_CAP {
+                self.smart.pop_front();
+            }
+        }
+    }
+
+    /// Shuffle off for the playing context without going back to context
+    /// order: what's left plays in the order it was shuffled into.
+    pub fn shuffle_off_keep_order(&mut self) {
+        if let Some(id) = self.context_id().map(str::to_owned) {
+            self.store_shuffle_pref(&id, false);
+        }
+        self.shuffle = false;
     }
 
     /// Sets shuffle for a context. For the playing context it applies now;
@@ -861,24 +901,60 @@ impl Queue {
         }
     }
 
+    /// Where smart shuffle suggestions go in the upcoming play order: one
+    /// after every `every` context songs, counting the playing song when it's
+    /// a context song, and never after the last one (the list ends on a
+    /// context song). Returns the play-order positions (into what's upcoming)
+    /// a suggestion follows.
+    fn smart_slots_at(&self, every: usize) -> Vec<usize> {
+        let every = every.max(1);
+        let from = ((self.pos + 1).max(0) as usize).min(self.order.len());
+        let rest = &self.order[from..];
+        let ctx: Vec<bool> = rest.iter().map(|&i| self.items[i].source == ItemSource::Context).collect();
+        let mut left = ctx.iter().filter(|c| **c).count();
+        let mut count = usize::from(self.current.as_ref().is_some_and(|c| c.source == ItemSource::Context));
+        let mut out = Vec::new();
+        for (k, is_ctx) in ctx.into_iter().enumerate() {
+            if !is_ctx {
+                continue;
+            }
+            count += 1;
+            left -= 1;
+            if count >= every && left > 0 {
+                out.push(k);
+                count = 0;
+            }
+        }
+        out
+    }
+
+    /// How many suggestions the upcoming list has room for.
+    pub fn smart_slots(&self, every: usize) -> usize {
+        self.smart_slots_at(every).len()
+    }
+
     /// Puts smart shuffle songs in among the upcoming context songs, one
-    /// after every `every` songs.
+    /// after every `every` (see [`Queue::smart_slots`]). With fewer songs
+    /// than slots, the first slots get them.
     pub fn insert_smart(&mut self, tracks: Vec<Track>, every: usize) {
+        let slots = self.smart_slots_at(every);
         let split = ((self.pos + 1).max(0) as usize).min(self.order.len());
         let rest: Vec<usize> = self.order.split_off(split);
         let mut added = Vec::with_capacity(tracks.len());
-        for t in tracks {
+        for t in tracks.into_iter().take(slots.len()) {
             let item_id = self.new_id();
             self.items.push(QueueItem { item_id, track: t, source: ItemSource::Smart });
             added.push(self.items.len() - 1);
         }
         let mut added = added.into_iter();
-        for (i, idx) in rest.into_iter().enumerate() {
+        let mut slots = slots.into_iter().peekable();
+        for (k, idx) in rest.into_iter().enumerate() {
             self.order.push(idx);
-            if (i + 1) % every.max(1) == 0
-                && let Some(a) = added.next()
-            {
-                self.order.push(a);
+            if slots.peek() == Some(&k) {
+                slots.next();
+                if let Some(a) = added.next() {
+                    self.order.push(a);
+                }
             }
         }
     }
@@ -898,9 +974,38 @@ impl Queue {
         self.order.append(&mut keep);
     }
 
-    /// The context's own songs (not added ones), first `n`.
+    /// A smart shuffle song was added to the context for good: it becomes a
+    /// context song (no badge). False when no such entry is in the queue.
+    pub fn keep_smart(&mut self, item_id: &str) -> bool {
+        let mut found = false;
+        for it in self.items.iter_mut().chain(self.current.iter_mut()) {
+            if it.item_id == item_id && it.source == ItemSource::Smart {
+                it.source = ItemSource::Context;
+                found = true;
+            }
+        }
+        found
+    }
+
+    /// Up to `n` of the context's own songs (not added ones), spread evenly
+    /// over the whole context.
     pub fn context_sample(&self, n: usize) -> Vec<String> {
-        self.items.iter().filter(|i| i.source == ItemSource::Context).take(n).map(|i| i.track.id.clone()).collect()
+        let own: Vec<&QueueItem> = self.items.iter().filter(|i| i.source == ItemSource::Context).collect();
+        if own.len() <= n {
+            return own.iter().map(|i| i.track.id.clone()).collect();
+        }
+        (0..n).map(|k| own[k * own.len() / n].track.id.clone()).collect()
+    }
+
+    /// Artist ids of the context's own songs (not added ones).
+    pub fn context_artist_ids(&self) -> Vec<String> {
+        let mut seen = HashSet::new();
+        self.items
+            .iter()
+            .filter(|i| i.source == ItemSource::Context)
+            .map(|i| i.track.artist_id.clone())
+            .filter(|a| seen.insert(a.clone()))
+            .collect()
     }
 
     /// Context entries still to play after the current one.
@@ -961,19 +1066,120 @@ mod tests {
     use super::*;
     use crate::audio::testutil::track;
 
+    fn next_ids(q: &Queue) -> Vec<String> {
+        q.view().next_up.iter().map(|i| i.track.id.clone()).collect()
+    }
+
+    fn suggestions(n: usize) -> Vec<Track> {
+        (0..n).map(|i| track(&format!("s{i}"), "B", "/p")).collect()
+    }
+
     #[test]
-    fn smart_shuffle_songs_go_in_among_the_upcoming_ones_and_come_out_again() {
+    fn smart_shuffle_puts_one_suggestion_after_every_two_playlist_songs() {
         let mut q = Queue::with_seed(1);
         let ts: Vec<Track> = (0..7).map(|i| track(&i.to_string(), "A", "/p")).collect();
         q.set_context(ctx(), ts, Some(0), Some(false));
-        q.insert_smart(vec![track("s1", "B", "/p"), track("s2", "B", "/p")], 3);
-        let ids: Vec<String> = q.view().next_up.iter().map(|i| i.track.id.clone()).collect();
-        assert_eq!(ids, vec!["1", "2", "3", "s1", "4", "5", "6", "s2"]);
-        assert_eq!(q.smart_upcoming(), 2);
-        assert_eq!(q.context_sample(2), vec!["0".to_string(), "1".to_string()]);
+        // The playing song counts: 0 1 s0 2 3 s1 4 5 s2 6 (ends on a playlist song).
+        assert_eq!(q.smart_slots(2), 3);
+        q.insert_smart(suggestions(5), 2);
+        assert_eq!(next_ids(&q), vec!["1", "s0", "2", "3", "s1", "4", "5", "s2", "6"]);
+        assert_eq!(q.smart_upcoming(), 3);
         q.drop_smart_upcoming();
         assert_eq!(q.smart_upcoming(), 0);
-        assert_eq!(q.view().next_up.len(), 6);
+        assert_eq!(next_ids(&q), vec!["1", "2", "3", "4", "5", "6"]);
+    }
+
+    #[test]
+    fn the_two_to_one_rhythm_holds_on_short_and_long_playlists() {
+        for (n, want) in [(1, 0), (2, 0), (3, 1), (5, 2), (23, 11), (500, 249)] {
+            let mut q = Queue::with_seed(3);
+            let ts: Vec<Track> = (0..n).map(|i| track(&i.to_string(), "A", "/p")).collect();
+            q.set_context(ctx(), ts, None, Some(true));
+            assert_eq!(q.smart_slots(2), want, "{n} songs");
+            q.insert_smart(suggestions(want + 5), 2);
+            let up = q.view().next_up;
+            assert_eq!(up.len(), n - 1 + want);
+            // Two playlist songs (the playing one first), then one suggestion.
+            let mut kinds: Vec<ItemSource> = vec![ItemSource::Context];
+            kinds.extend(up.iter().map(|i| i.source));
+            for (k, s) in kinds.iter().enumerate() {
+                let expect = if k % 3 == 2 { ItemSource::Smart } else { ItemSource::Context };
+                assert_eq!(*s, expect, "{n} songs, entry {k}");
+            }
+            assert_ne!(up.last().map(|i| i.source), Some(ItemSource::Smart), "ends on a playlist song");
+        }
+    }
+
+    #[test]
+    fn fewer_suggestions_than_slots_fill_the_first_ones() {
+        let mut q = Queue::with_seed(1);
+        let ts: Vec<Track> = (0..7).map(|i| track(&i.to_string(), "A", "/p")).collect();
+        q.set_context(ctx(), ts, Some(0), Some(false));
+        q.insert_smart(suggestions(1), 2);
+        assert_eq!(next_ids(&q), vec!["1", "s0", "2", "3", "4", "5", "6"]);
+    }
+
+    #[test]
+    fn a_suggestion_playing_starts_the_count_afresh() {
+        let mut q = Queue::with_seed(1);
+        let ts: Vec<Track> = (0..5).map(|i| track(&i.to_string(), "A", "/p")).collect();
+        q.set_context(ctx(), ts, Some(0), Some(false));
+        q.insert_smart(suggestions(2), 2);
+        q.advance_auto();
+        q.advance_auto();
+        assert_eq!(q.current().unwrap().source, ItemSource::Smart);
+        q.drop_smart_upcoming();
+        q.insert_smart(suggestions(3), 2);
+        assert_eq!(next_ids(&q), vec!["2", "3", "s0", "4"]);
+    }
+
+    #[test]
+    fn a_kept_suggestion_loses_its_badge() {
+        let mut q = Queue::with_seed(1);
+        let ts: Vec<Track> = (0..4).map(|i| track(&i.to_string(), "A", "/p")).collect();
+        q.set_context(ctx(), ts, Some(0), Some(false));
+        q.insert_smart(suggestions(1), 2);
+        q.advance_auto();
+        let cur = q.advance_auto().unwrap();
+        assert_eq!(cur.source, ItemSource::Smart);
+        assert!(q.keep_smart(&cur.item_id));
+        assert_eq!(q.current().unwrap().source, ItemSource::Context);
+        assert!(!q.keep_smart(&cur.item_id), "only suggestions");
+        assert!(q.context_sample(10).contains(&"s0".to_string()));
+    }
+
+    #[test]
+    fn smart_preference_is_kept_per_context_inside_shuffle() {
+        let mut q = Queue::with_seed(1);
+        q.store_smart_pref("pl", true);
+        assert!(q.smart_pref("pl") && q.shuffle_pref("pl"));
+        assert_eq!(q.smart_contexts(), vec!["pl".to_string()]);
+        // Shuffle off for it ends smart shuffle too.
+        q.set_context_shuffle("pl", false);
+        assert!(!q.smart_pref("pl") && !q.shuffle_pref("pl"));
+        q.store_smart_pref("pl", true);
+        q.store_smart_pref("pl", false);
+        assert!(!q.smart_pref("pl") && q.shuffle_pref("pl"), "smart off leaves shuffle");
+    }
+
+    #[test]
+    fn shuffle_off_can_keep_the_shuffled_order() {
+        let mut q = Queue::with_seed(9);
+        let ts: Vec<Track> = (0..8).map(|i| track(&i.to_string(), "A", "/p")).collect();
+        q.set_context(ctx(), ts, None, Some(true));
+        let before = next_ids(&q);
+        q.shuffle_off_keep_order();
+        assert!(!q.shuffle() && !q.shuffle_pref("al"));
+        assert_eq!(next_ids(&q), before);
+    }
+
+    #[test]
+    fn the_context_sample_spreads_over_the_whole_context() {
+        let mut q = Queue::with_seed(1);
+        let ts: Vec<Track> = (0..10).map(|i| track(&i.to_string(), &format!("A{}", i % 3), "/p")).collect();
+        q.set_context(ctx(), ts, Some(0), Some(false));
+        assert_eq!(q.context_sample(2), vec!["0".to_string(), "5".to_string()]);
+        assert_eq!(q.context_artist_ids().len(), 3);
     }
 
     #[test]

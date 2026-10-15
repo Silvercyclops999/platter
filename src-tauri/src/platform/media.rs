@@ -344,6 +344,7 @@ pub(crate) mod tests {
             queue: QueueView::default(),
             ab_loop: None,
             smart_shuffle: false,
+            smart_contexts: vec![],
             smooth_transitions: false,
         }
     }

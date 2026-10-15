@@ -408,6 +408,7 @@ pub fn run() {
                     dsp: initial.dsp(),
                     local_files: Some(local_files.clone()),
                     autoplay: initial.queue_end == settings::QueueEnd::KeepPlaying,
+                    smart_shuffle: initial.smart_shuffle,
                     ..Default::default()
                 },
             );
@@ -857,6 +858,9 @@ pub fn run() {
             audio::commands::set_shuffle,
             audio::commands::set_context_shuffle,
             audio::commands::set_smart_shuffle,
+            audio::commands::set_context_smart_shuffle,
+            audio::commands::smart_suggestion_remove,
+            audio::commands::smart_suggestion_keep,
             audio::commands::set_smooth_transitions,
             audio::commands::set_repeat,
             audio::commands::set_ab_loop,

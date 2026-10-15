@@ -669,7 +669,7 @@ export function SettingsPage() {
       key: "smartShuffle",
       section: "Playback",
       title: "Smart shuffle",
-      description: "Gives the shuffle button a third setting that mixes similar songs from your library into an album or playlist. They show a sparkle in the queue.",
+      description: "On playlists and Liked Songs, gives the shuffle button a third setting that adds a suggestion from your library after every two songs. Suggestions show a sparkle in the queue.",
       control: (ids) => toggle(s, "smartShuffle", ids),
     },
     {

@@ -10,9 +10,11 @@
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
+import { contextShuffleMode, nextShuffleMode, playingShuffleMode, smartOffered } from "../lib/shuffleMode";
 import type {
   AbLoop,
   PlayContextArgs,
+  PlayContextKind,
   PlayerState,
   PlayerStatus,
   RemoteCommand,
@@ -369,12 +371,26 @@ export const player = {
       report(e);
     }
   },
-  /** Off, shuffle, then smart shuffle when its setting is on. */
+  /**
+   * The player bar's shuffle button: off, shuffle, then smart shuffle on a
+   * playlist or Liked Songs while its setting is on. Smart shuffle off turns
+   * shuffle off too (the order stays as shuffled).
+   */
   toggleShuffle: (smartAllowed = false) => {
     const s = usePlayer.getState().state;
-    if (s?.smartShuffle) return player.setShuffle(false);
-    if (s?.shuffle) return smartAllowed && !isRemote() ? player.setSmartShuffle(true) : player.setShuffle(false);
-    return player.setShuffle(true);
+    const mode = playingShuffleMode(s);
+    const ctx = s?.queue.context;
+    const smart = smartAllowed && !isRemote() && smartOffered(ctx?.kind) && !!ctx?.id;
+    if (mode === "smart") return isRemote() ? player.setShuffle(false) : player.setSmartShuffle(false);
+    const next = nextShuffleMode(mode, smart);
+    return next === "smart" ? player.setSmartShuffle(true) : player.setShuffle(next === "shuffle");
+  },
+  /** A page's shuffle toggle: the same cycle for a context by id, playing or not. */
+  cycleContextShuffle: (id: string, kind: PlayContextKind, smartAllowed = false) => {
+    const mode = contextShuffleMode(usePlayer.getState().state, id);
+    if (mode === "smart") return backend.setContextSmartShuffle(id, false).catch(report);
+    const next = nextShuffleMode(mode, smartAllowed && smartOffered(kind));
+    return next === "smart" ? backend.setContextSmartShuffle(id, true).catch(report) : player.setContextShuffle(id, next === "shuffle");
   },
   cycleRepeatNow: () => player.cycleRepeat(usePlayer.getState().state?.repeat ?? "off"),
   queueRemove: (itemId: string) => backend.queueRemove(itemId).catch(report),

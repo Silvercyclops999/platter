@@ -91,7 +91,7 @@ describe("settings page", () => {
       expect(screen.getByRole("switch", { name })).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
     expect(screen.getByRole("combobox", { name: "When the queue ends" })).toHaveValue("keepPlaying");
-    expect(screen.getByRole("switch", { name: "Smart shuffle" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Smart shuffle" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Show made-for-you mixes on Home" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("combobox", { name: "Variety" })).toHaveValue("balanced");
     expect(screen.getByRole("switch", { name: "Include unreleased music" })).toHaveAttribute("aria-checked", "true");
@@ -119,7 +119,7 @@ describe("settings page", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "When the queue ends" }), "stop");
     expect(set).toHaveBeenCalledWith({ queueEnd: "stop" });
     await user.click(screen.getByRole("switch", { name: "Smart shuffle" }));
-    expect(set).toHaveBeenCalledWith({ smartShuffle: true });
+    expect(set).toHaveBeenCalledWith({ smartShuffle: false });
     await user.type(screen.getByRole("combobox", { name: "Leave out of mixes" }), "Polka");
     await user.click(screen.getByRole("button", { name: "Leave out" }));
     expect(set).toHaveBeenCalledWith({ mixExcludeGenres: ["Polka"] });

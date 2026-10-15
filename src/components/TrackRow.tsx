@@ -261,6 +261,10 @@ export interface TrackRowProps {
   onRemove?: () => void;
   /** Extra trailing content. */
   trailing?: ReactNode;
+  /** A small mark before the artist line (the queue's smart shuffle sparkle). */
+  subBadge?: ReactNode;
+  /** Added to the row's accessible name, after a comma. */
+  labelNote?: string;
   compact?: boolean;
   /** Highlighted by keyboard navigation that lives elsewhere (search box arrows). */
   selected?: boolean;
@@ -308,6 +312,8 @@ export function TrackRow({
   menuItems,
   onRemove,
   trailing,
+  subBadge,
+  labelNote,
   compact,
   selected,
   likedQuiet,
@@ -332,7 +338,7 @@ export function TrackRow({
   const badges = useTrackBadges(track.id);
   const downloaded = useIsDownloaded(track.id);
   const artists = trackArtistLine(track);
-  const label = `${track.title}${badges.explicit ? ", explicit" : ""} by ${artists}${downloaded ? ", downloaded" : ""}${unavailable ? ", not available right now" : ""}`;
+  const label = `${track.title}${badges.explicit ? ", explicit" : ""} by ${artists}${downloaded ? ", downloaded" : ""}${unavailable ? ", not available right now" : ""}${labelNote ? `, ${labelNote}` : ""}`;
   // The hover button on the current track pauses / resumes instead of restarting.
   const playButton = () => (active ? player.toggle() : onPlay());
   const PlayIcon = active && playing ? Pause : Play;
@@ -518,8 +524,9 @@ export function TrackRow({
             <div className="track-row__title truncate">{track.title}</div>
           )}
           {showArtist &&
-            (badges.explicit || downloaded ? (
+            (badges.explicit || downloaded || subBadge ? (
               <div className="track-row__sub">
+                {subBadge}
                 {downloaded && <DownloadedMark trackId={track.id} />}
                 {badges.explicit && <ExplicitBadge />}
                 <ArtistLinks track={track} className="track-row__artist truncate" linkTabIndex={-1} />

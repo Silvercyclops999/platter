@@ -327,6 +327,50 @@ fn radio_refills_without_repeating_and_starts_with_its_song() {
 }
 
 #[test]
+fn smart_shuffle_suggests_other_artists_in_the_playlists_style() {
+    let mut r = raw();
+    // r2's songs are liked: they come after songs that aren't.
+    for t in r.tracks.iter_mut().filter(|t| t.artist_id == "r2") {
+        t.rating = Some(10.0);
+    }
+    // r3 is listed as similar to r0 by Plex.
+    r.artists.iter_mut().find(|a| a.id == "r0").unwrap().similar = vec!["Artist r3".into()];
+    let lib = lib_of(r, &opts());
+    let taste = Taste::new(&lib);
+    let playlist: Vec<String> = (0..6).map(|t| format!("r0-al0-t{t}")).collect();
+    let avoid: HashSet<String> = playlist.iter().cloned().collect();
+    let artists: HashSet<String> = ["r0".to_string()].into();
+    let picks = radio::suggestions(&lib, &taste, &playlist, &avoid, &artists, 6, 1);
+    assert_eq!(picks.len(), 6);
+    let ids: Vec<&str> = picks.iter().map(|t| lib.tracks[*t as usize].id.as_str()).collect();
+    assert!(ids.iter().all(|id| !id.starts_with("r0-")), "no songs by the playlist's own artist: {ids:?}");
+    assert!(ids.iter().all(|id| !avoid.contains(*id)));
+    let rock = ids.iter().filter(|id| id.starts_with('r')).count();
+    assert!(rock * 2 > ids.len(), "mostly in the playlist's style: {ids:?}");
+    assert!(ids.iter().all(|id| !id.starts_with("r2-")), "not-liked songs first: {ids:?}");
+    let mut per: HashMap<&str, usize> = HashMap::new();
+    for t in &picks {
+        *per.entry(artist_of(&lib, *t)).or_default() += 1;
+    }
+    assert!(per.values().all(|n| *n <= 3), "a few per artist: {per:?}");
+    // Each rebuild picks a fresh set.
+    let again = radio::suggestions(&lib, &taste, &playlist, &avoid, &artists, 6, 99);
+    assert_ne!(again, picks);
+    // Hidden artists and the unreleased setting keep songs out.
+    let mut hidden = crate::hidden::HiddenSet::default();
+    hidden.artists.insert("r1".into());
+    let mut r = raw();
+    r.albums.iter_mut().find(|a| a.id == "r3-al0").unwrap().unreleased = true;
+    let o = MixOptions { hidden: std::sync::Arc::new(hidden), include_unreleased: false, ..opts() };
+    let lib = lib_of(r, &o);
+    let taste = Taste::new(&lib);
+    for t in radio::suggestions(&lib, &taste, &playlist, &avoid, &artists, 40, 2) {
+        let id = &lib.tracks[t as usize].id;
+        assert!(!id.starts_with("r1-") && !id.starts_with("r3-al0") && !id.starts_with("r0-"), "{id}");
+    }
+}
+
+#[test]
 fn hidden_songs_and_artists_stay_out_of_mixes_and_radio() {
     let mut hidden = crate::hidden::HiddenSet::default();
     hidden.artists.insert("r1".into());
@@ -583,6 +627,7 @@ async fn mix_and_radio_contexts_resolve_through_the_cache() {
             avoid: r.tracks.iter().map(|t| t.id.clone()).collect(),
             n: 10,
             smart: false,
+            avoid_artists: vec![],
         })
         .await
         .unwrap();

@@ -156,6 +156,8 @@ pub struct MoreRequest {
     pub n: usize,
     /// For smart shuffle (songs to mix in), not for after the context.
     pub smart: bool,
+    /// Smart shuffle: artist ids already in the context (left out).
+    pub avoid_artists: Vec<String>,
 }
 
 #[cfg(test)]

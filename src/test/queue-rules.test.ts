@@ -162,18 +162,133 @@ describe("keep playing similar music", () => {
     expect(s.queue.current?.source).toBe("autoplay");
   });
 
-  it("smart shuffle mixes in songs marked smart, and plain shuffle off takes them out", async () => {
+});
+
+/** A playlist of one artist's songs, `n` long. */
+async function playlistOf(m: MockBackend, n: number) {
+  const { tracks } = albumWith(m, 4);
+  const pool = m.fx.tracks.filter((t) => t.artistId === tracks[0].artistId).slice(0, n);
+  const pl = await m.playlistCreate("Smart test", pool.map((t) => t.id));
+  return { pl, tracks: pool };
+}
+
+/** C a playlist song, S a suggestion; the playing song first. */
+const rhythm = (s: PlayerState) =>
+  [s.queue.current, ...s.queue.nextUp].map((i) => (i?.source === "smart" ? "S" : "C")).join("");
+
+describe("smart shuffle", () => {
+  it("is for playlists and Liked Songs, not albums", async () => {
     const m = fresh();
-    const { album } = albumWith(m, 12);
-    await m.playContext({ context: { kind: "album", id: album.id } });
+    const { album } = albumWith(m, 6);
+    await m.playContext({ context: { kind: "album", id: album.id }, shuffle: true });
+    await expect(m.setSmartShuffle(true)).rejects.toBeTruthy();
+    expect((await m.playerState()).smartShuffle).toBe(false);
+    await m.playContext({ context: { kind: "liked", id: "liked" }, shuffle: true });
     await m.setSmartShuffle(true);
+    const s = await m.playerState();
+    expect(s.smartShuffle).toBe(true);
+    expect(s.smartContexts).toContain("liked");
+  });
+
+  it("puts one suggestion after every two playlist songs, once, and doesn't refill", async () => {
+    const m = fresh();
+    const { pl, tracks } = await playlistOf(m, 7);
+    expect(tracks).toHaveLength(7);
+    await m.setContextSmartShuffle(pl.id, true);
+    await m.playContext({ context: { kind: "playlist", id: pl.id } });
     let s = await m.playerState();
     expect(s.shuffle && s.smartShuffle).toBe(true);
-    expect(s.queue.nextUp.some((i) => i.source === "smart")).toBe(true);
-    await m.setShuffle(false);
+    expect(s.smartContexts).toContain(pl.id);
+    expect(rhythm(s)).toBe("CCSCCSCCSC");
+    const smart = s.queue.nextUp.filter((i) => i.source === "smart");
+    expect(smart.every((i) => i.track.artistId !== tracks[0].artistId)).toBe(true);
+    expect(smart.every((i) => !tracks.some((t) => t.id === i.track.id))).toBe(true);
+    await m.playNext();
+    await m.playNext();
+    await m.playNext();
+    s = await m.playerState();
+    expect(s.queue.nextUp.filter((i) => i.source === "smart")).toHaveLength(2);
+  });
+
+  it("removing the playing suggestion skips it and picks new ones", async () => {
+    const m = fresh();
+    const { pl } = await playlistOf(m, 7);
+    await m.setContextSmartShuffle(pl.id, true);
+    await m.playContext({ context: { kind: "playlist", id: pl.id } });
+    await expect(m.smartSuggestionRemove()).rejects.toBeTruthy();
+    await m.playNext();
+    await m.playNext();
+    let s = await m.playerState();
+    expect(s.queue.current?.source).toBe("smart");
+    await m.smartSuggestionRemove();
+    s = await m.playerState();
+    expect(s.queue.current?.source).toBe("context");
+    expect(rhythm(s)).toBe("CCSCCSC");
+  });
+
+  it("adding the playing suggestion keeps it playing without its badge", async () => {
+    const m = fresh();
+    const { pl } = await playlistOf(m, 7);
+    await m.setContextSmartShuffle(pl.id, true);
+    await m.playContext({ context: { kind: "playlist", id: pl.id } });
+    await m.playNext();
+    await m.playNext();
+    const cur = (await m.playerState()).queue.current!;
+    await m.smartSuggestionKeep(cur.itemId);
+    const s = await m.playerState();
+    expect(s.queue.current?.itemId).toBe(cur.itemId);
+    expect(s.queue.current?.source).toBe("context");
+    expect(s.status).toBe("playing");
+  });
+
+  it("off mid-play keeps the song and the shuffled order, without suggestions", async () => {
+    const m = fresh();
+    const { pl } = await playlistOf(m, 7);
+    await m.setContextSmartShuffle(pl.id, true);
+    await m.playContext({ context: { kind: "playlist", id: pl.id } });
+    await m.playNext();
+    await m.playNext();
+    const before = await m.playerState();
+    const order = ids(before.queue.nextUp.filter((i) => i.source !== "smart"));
+    await m.setSmartShuffle(false);
+    const s = await m.playerState();
+    expect(s.shuffle || s.smartShuffle).toBe(false);
+    expect(s.queue.current?.itemId).toBe(before.queue.current?.itemId);
+    expect(s.queue.current?.source).toBe("smart");
+    expect(ids(s.queue.nextUp)).toEqual(order);
+  });
+
+  it("is remembered per playlist, and the setting takes it out everywhere", async () => {
+    const m = fresh();
+    const { pl } = await playlistOf(m, 5);
+    await m.setContextSmartShuffle(pl.id, true);
+    await m.setContextSmartShuffle("liked", true);
+    await m.setContextSmartShuffle("liked", false);
+    let s = await m.playerState();
+    expect(s.smartContexts).toEqual([pl.id]);
+    expect(s.shuffledContexts).not.toContain("liked");
+    await m.playContext({ context: { kind: "playlist", id: pl.id } });
+    await m.settingsSet({ smartShuffle: false });
+    await new Promise((r) => setTimeout(r, 5));
     s = await m.playerState();
     expect(s.smartShuffle).toBe(false);
+    expect(s.shuffle).toBe(true);
     expect(s.queue.nextUp.some((i) => i.source === "smart")).toBe(false);
+  });
+
+  it("hands over to keep playing at the end, without badges", async () => {
+    const m = fresh();
+    const { pl } = await playlistOf(m, 3);
+    await m.setContextSmartShuffle(pl.id, true);
+    await m.playContext({ context: { kind: "playlist", id: pl.id } });
+    expect(rhythm(await m.playerState())).toBe("CCSC");
+    await m.playNext();
+    await m.playNext();
+    await m.playNext();
+    await m.playNext();
+    const s = await m.playerState();
+    expect(s.queue.current?.source).toBe("autoplay");
+    expect(s.queue.nextUp.every((i) => i.source !== "smart")).toBe(true);
   });
 });
 

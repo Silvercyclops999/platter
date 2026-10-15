@@ -596,7 +596,7 @@ impl Default for Settings {
             mix_unreleased: true,
             daylist_hours: 3,
             queue_end: QueueEnd::KeepPlaying,
-            smart_shuffle: false,
+            smart_shuffle: true,
             show_friend_activity: true,
             share_activity: true,
             whats_new_announcements: true,
@@ -1589,10 +1589,9 @@ async fn apply_to_player(player: &PlayerHandle, s: &Settings, patch: &SettingsPa
     if patch.queue_end.is_some() {
         player.set_autoplay(s.queue_end == QueueEnd::KeepPlaying).await?;
     }
-    // Turning the setting off ends smart shuffle (plain shuffle stays).
-    if patch.smart_shuffle == Some(false) && player.state().await.is_ok_and(|p| p.smart_shuffle) {
-        player.set_smart_shuffle(false).await?;
-        player.set_shuffle(true).await?;
+    // Off takes smart shuffle out of the cycle everywhere (plain shuffle stays).
+    if let Some(on) = patch.smart_shuffle {
+        player.set_smart_allowed(on).await?;
     }
     Ok(())
 }
@@ -1795,7 +1794,7 @@ mod tests {
         assert!(s.mix_exclude_artists.is_empty() && s.mix_exclude_genres.is_empty() && s.mix_exclude_albums.is_empty());
         assert_eq!(s.daylist_hours, 3);
         assert_eq!(s.queue_end, QueueEnd::KeepPlaying);
-        assert!(!s.smart_shuffle, "smart shuffle is opt-in");
+        assert!(s.smart_shuffle, "smart shuffle is in the shuffle cycle");
         assert!(!s.sync_enabled && s.sync_folder.is_empty(), "the sync file is opt-in");
         assert!(s.sync_settings && s.sync_library && s.sync_follows && s.sync_lyrics);
         assert!(!s.power_keys, "keyboard power mode is opt-in");

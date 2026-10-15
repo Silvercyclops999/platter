@@ -75,12 +75,17 @@ function QueueRow({
           </span>
         ) : current ? (
           <span className="track-row__slot" aria-hidden="true" />
-        ) : item.source === "smart" ? (
-          <span className="queue-smart" title="Added by smart shuffle" aria-label="Added by smart shuffle" role="img">
-            <Sparkles size={14} aria-hidden="true" />
+        ) : undefined
+      }
+      // Smart shuffle suggestions: a small sparkle before the artist.
+      subBadge={
+        item.source === "smart" ? (
+          <span className="queue-smart" title="Smart shuffle suggestion" aria-hidden="true">
+            <Sparkles size={12} />
           </span>
         ) : undefined
       }
+      labelNote={item.source === "smart" ? "smart shuffle suggestion" : undefined}
       menuItems={trackMenuItems(item.track, {
         afterQueue: remove ? [{ label: "Remove from queue", onSelect: remove }] : [],
       })}

@@ -387,6 +387,23 @@ impl MixService {
             .map(|t| lib.tracks[t as usize].id.clone())
             .collect())
     }
+
+    /// Smart shuffle suggestions (see [`radio::suggestions`]), as track ids.
+    pub fn suggestion_ids(
+        &self,
+        seed_ids: &[String],
+        avoid: &HashSet<String>,
+        avoid_artists: &HashSet<String>,
+        n: usize,
+    ) -> AppResult<Vec<String>> {
+        let lib = self.lib()?;
+        let taste = engine::Taste::new(&lib);
+        let salt = now_ms() as u64;
+        Ok(radio::suggestions(&lib, &taste, seed_ids, avoid, avoid_artists, n, salt)
+            .into_iter()
+            .map(|t| lib.tracks[t as usize].id.clone())
+            .collect())
+    }
 }
 
 impl MixService {

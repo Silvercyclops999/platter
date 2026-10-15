@@ -1209,7 +1209,10 @@ dropdown parts off; the UI checks them.
 | `set_muted` | `{ muted }` |
 | `set_shuffle` | `{ shuffle }` (for the playing context) |
 | `set_context_shuffle` | `{ contextId, shuffle }` (applies now if that context is playing, otherwise the next time it plays) |
-| `set_smart_shuffle` | `{ on }` (on also turns shuffle on; plain shuffle off ends it) |
+| `set_smart_shuffle` | `{ on }` for the playing playlist or Liked Songs (on also turns shuffle on; off turns shuffle off and keeps the order) |
+| `set_context_smart_shuffle` | `{ contextId, on }` (applies now if it is playing, otherwise the next time it plays) |
+| `smart_suggestion_remove` | skips the playing suggestion and picks new ones |
+| `smart_suggestion_keep` | `{ itemId }` the playing suggestion was added to its playlist or liked; it becomes a playlist song |
 | `set_smooth_transitions` | `{ on }` (crossfade for the playing context only; ends when another context starts) |
 | `set_repeat` | `{ repeat: "off"|"all"|"one" }` |
 | `set_ab_loop` | `{ abLoop: { aMs, bMs } | null }` (null clears it) |
@@ -1220,7 +1223,7 @@ dropdown parts off; the UI checks them.
 | `queue_jump` | `{ itemId }` (play that item now) |
 | `player_state` | – → `PlayerState` |
 
-`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView, abLoop: { aMs, bMs } | null, smartShuffle, smoothTransitions }`
+`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView, abLoop: { aMs, bMs } | null, smartShuffle, smartContexts: string[], smoothTransitions }`
 `QueueView = { current?: QueueItem, userQueue: QueueItem[], nextUp: QueueItem[], history: QueueItem[], context?: { kind, id?, title? } }`
 `QueueItem = { itemId, track: Track, source: "user"|"context"|"autoplay"|"smart" }` (`autoplay`: similar music after the context ran out; `smart`: put in by smart shuffle)
 
@@ -1249,10 +1252,18 @@ Queue rules the core applies:
   0:00, with the rest of the context as upcoming.
 - A radio context asks for 20 more songs whenever fewer than 5 are left,
   never repeating one already in the queue or played lately.
-- Smart shuffle (shuffle on, with the `smartShuffle` setting) puts one similar
-  song after every three upcoming songs of an album, playlist, artist or
-  Liked Songs (`source: "smart"`), and more when those run out. Turning plain
-  shuffle off takes the ones still to come out again.
+- Smart shuffle works on playlists and Liked Songs only, while the
+  `smartShuffle` setting is on. When the context starts (or smart shuffle is
+  turned on) the core builds a fixed list: the shuffled songs with one
+  suggestion (`source: "smart"`) after every two of them, counting the playing
+  song, and never after the last one. It isn't refilled as songs are used up.
+  Suggestions are library songs in the playlist's style by artists who aren't
+  in it, songs that aren't liked first. Removing the playing suggestion skips
+  it and builds new ones. Turning smart shuffle off keeps the playing song,
+  drops the suggestions still to come and plays the rest in the order it was
+  shuffled into. The choice is remembered per context id (`smartContexts`) with
+  the queue, so it survives restarts. When the list runs out, keep playing adds
+  similar music as usual (`source: "autoplay"`).
 
 A-B loop: `set_ab_loop` takes the two points in either order and swaps them so
 A comes first. They're clamped to the track and must be at least 1 s apart,
@@ -1681,7 +1692,7 @@ The rest of the fields, with their defaults:
 | `mixUnreleased` | bool, true | Demos and archive versions marked unreleased can be in mixes and radio. |
 | `daylistHours` | 1, 3 or 6, 3 | Hours between daylist refreshes. |
 | `queueEnd` | `"keepPlaying"` or `"stop"`, `"keepPlaying"` | When the queue ends, keep playing similar music, or rewind and stop. |
-| `smartShuffle` | bool, false | The shuffle button has a third state, smart shuffle. Off ends smart shuffle that's on. |
+| `smartShuffle` | bool, true | On playlists and Liked Songs the shuffle button has a third state, smart shuffle. Off ends smart shuffle that's on. |
 | `goOffline` | bool, false | No network use: no requests to the server or plex.tv, no artist info, LRCLIB, share link lookups, Discord status, Listen on discovery or update checks. Health shows `offline` with the `goneOffline` banner and `cachedOnly`, so only music on this computer plays. Off reconnects as at startup. This device only. |
 | `showFriendActivity` | bool, true | The top bar's friend activity button and panel. |
 | `shareActivity` | bool, true | Send Plex now-playing timelines, so friends on the server see you live. Off (and in a private session) none go out; finished plays still reach Plex's history. |

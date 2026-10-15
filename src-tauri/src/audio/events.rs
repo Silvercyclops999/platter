@@ -56,9 +56,14 @@ pub struct PlayerState {
     /// The A-B loop on the playing track, if one is set.
     #[serde(default)]
     pub ab_loop: Option<AbLoop>,
-    /// Shuffle mixes similar songs from the library into the context.
+    /// Smart shuffle is on for the playing context: suggestions from the
+    /// library mixed in among its songs.
     #[serde(default)]
     pub smart_shuffle: bool,
+    /// Context ids (playlists, Liked Songs) whose smart shuffle preference
+    /// is on (playing or not). Each is in `shuffled_contexts` too.
+    #[serde(default)]
+    pub smart_contexts: Vec<String>,
     /// Crossfade is on for this playback only (a mix's smooth transitions).
     #[serde(default)]
     pub smooth_transitions: bool,
@@ -246,6 +251,7 @@ mod tests {
             queue: QueueView::default(),
             ab_loop: Some(AbLoop { a_ms: 1_000, b_ms: 4_000 }),
             smart_shuffle: false,
+            smart_contexts: vec![],
             smooth_transitions: false,
         };
         let v = serde_json::to_value(&s).unwrap();

@@ -65,52 +65,7 @@ pub fn batch(lib: &Lib, taste: &Taste, seed: &Seed, avoid: &HashSet<String>, n: 
         return Vec::new();
     }
     let seed_artists: HashSet<u32> = seeds.iter().map(|t| lib.tracks[*t as usize].artist).collect();
-    let mut tags: HashMap<u16, f32> = HashMap::new();
-    for t in &seeds {
-        for g in &lib.tracks[*t as usize].tags {
-            *tags.entry(*g).or_default() += 1.0;
-        }
-    }
-    let norm = tags.values().map(|x| x * x).sum::<f32>().sqrt().max(1e-6);
-    let mut co: HashMap<u32, f32> = HashMap::new();
-    for t in &seeds {
-        for (o, w) in lib.co_tracks.get(t).map(Vec::as_slice).unwrap_or(&[]) {
-            *co.entry(*o).or_default() += w;
-        }
-    }
-    // Artist closeness to the seed, once per artist.
-    let mut artist_close: HashMap<u32, f32> = HashMap::new();
-    let mut closeness = |a: u32| -> f32 {
-        *artist_close
-            .entry(a)
-            .or_insert_with(|| seed_artists.iter().map(|s| taste.similarity(lib, a, *s)).fold(0.0f32, f32::max))
-    };
-    // Candidates: songs sharing a tag with the seed, by its artists, or played with it.
-    let mut cand: HashSet<u32> = HashSet::new();
-    for g in tags.keys() {
-        cand.extend(lib.by_tag[*g as usize].iter().copied());
-    }
-    for a in &seed_artists {
-        cand.extend(lib.by_artist[*a as usize].iter().copied());
-    }
-    cand.extend(co.keys().copied());
-    let seed_set: HashSet<u32> = seeds.iter().copied().collect();
-    let mut scored: Vec<(u32, f32)> = cand
-        .into_iter()
-        .filter(|t| {
-            let tr = &lib.tracks[*t as usize];
-            tr.eligible && !avoid.contains(&tr.id) && !(seed_set.contains(t) && !first) && lib.affinity(*t) > -1.0
-        })
-        .map(|t| {
-            let tr = &lib.tracks[t as usize];
-            let shared: f32 = tr.tags.iter().map(|g| tags.get(g).copied().unwrap_or(0.0)).sum::<f32>()
-                / (norm * (tr.tags.len() as f32).sqrt().max(1.0));
-            let close = closeness(tr.artist);
-            let together = (co.get(&t).copied().unwrap_or(0.0) / 2.0).min(1.0);
-            let known = if lib.familiar(t) { lean } else { 0.0 };
-            (t, 0.45 * shared + 0.35 * close + 0.25 * together + known + 0.3 * jitter(salt, t))
-        })
-        .collect();
+    let mut scored = score(lib, taste, &seeds, &[], avoid, salt, first, lean);
     scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
     scored.truncate(RADIO_POOL);
     let mut out: Vec<u32> = Vec::with_capacity(n);
@@ -148,5 +103,130 @@ pub fn batch(lib: &Lib, taste: &Taste, seed: &Seed, avoid: &HashSet<String>, n: 
     // The seed song stays first.
     let start = usize::from(first && matches!(seed, Seed::Track(_)));
     space_artists(lib, &mut spaced[start..], 2);
+    spaced.into_iter().map(|(t, _)| t).collect()
+}
+
+/// Every candidate near the seed songs with its score (unsorted), plus the
+/// songs of `extra_artists`. Songs in `avoid`, songs that may not go in mixes
+/// and the seeds themselves (unless `first`) are left out.
+#[allow(clippy::too_many_arguments)]
+fn score(
+    lib: &Lib,
+    taste: &Taste,
+    seeds: &[u32],
+    extra_artists: &[u32],
+    avoid: &HashSet<String>,
+    salt: u64,
+    first: bool,
+    lean: f32,
+) -> Vec<(u32, f32)> {
+    let seed_artists: HashSet<u32> = seeds.iter().map(|t| lib.tracks[*t as usize].artist).collect();
+    let mut tags: HashMap<u16, f32> = HashMap::new();
+    for t in seeds {
+        for g in &lib.tracks[*t as usize].tags {
+            *tags.entry(*g).or_default() += 1.0;
+        }
+    }
+    let norm = tags.values().map(|x| x * x).sum::<f32>().sqrt().max(1e-6);
+    let mut co: HashMap<u32, f32> = HashMap::new();
+    for t in seeds {
+        for (o, w) in lib.co_tracks.get(t).map(Vec::as_slice).unwrap_or(&[]) {
+            *co.entry(*o).or_default() += w;
+        }
+    }
+    // Artist closeness to the seed, once per artist.
+    let mut artist_close: HashMap<u32, f32> = HashMap::new();
+    let mut closeness = |a: u32| -> f32 {
+        *artist_close
+            .entry(a)
+            .or_insert_with(|| seed_artists.iter().map(|s| taste.similarity(lib, a, *s)).fold(0.0f32, f32::max))
+    };
+    // Candidates: songs sharing a tag with the seed, by its artists, or played with it.
+    let mut cand: HashSet<u32> = HashSet::new();
+    for g in tags.keys() {
+        cand.extend(lib.by_tag[*g as usize].iter().copied());
+    }
+    for a in seed_artists.iter().chain(extra_artists) {
+        cand.extend(lib.by_artist[*a as usize].iter().copied());
+    }
+    cand.extend(co.keys().copied());
+    let seed_set: HashSet<u32> = seeds.iter().copied().collect();
+    cand
+        .into_iter()
+        .filter(|t| {
+            let tr = &lib.tracks[*t as usize];
+            tr.eligible && !avoid.contains(&tr.id) && !(seed_set.contains(t) && !first) && lib.affinity(*t) > -1.0
+        })
+        .map(|t| {
+            let tr = &lib.tracks[t as usize];
+            let shared: f32 = tr.tags.iter().map(|g| tags.get(g).copied().unwrap_or(0.0)).sum::<f32>()
+                / (norm * (tr.tags.len() as f32).sqrt().max(1.0));
+            let close = closeness(tr.artist);
+            let together = (co.get(&t).copied().unwrap_or(0.0) / 2.0).min(1.0);
+            let known = if lib.familiar(t) { lean } else { 0.0 };
+            (t, 0.45 * shared + 0.35 * close + 0.25 * together + known + 0.3 * jitter(salt, t))
+        })
+        .collect()
+}
+
+/// Smart shuffle suggestions for a playlist: songs in its style by artists
+/// that aren't in it (`avoid_artists`, by artist id), not in `avoid`, and
+/// songs that aren't liked before liked ones. An artist comes up at most a
+/// few times while there are others to pick.
+pub fn suggestions(
+    lib: &Lib,
+    taste: &Taste,
+    seed_ids: &[String],
+    avoid: &HashSet<String>,
+    avoid_artists: &HashSet<String>,
+    n: usize,
+    salt: u64,
+) -> Vec<u32> {
+    let seeds: Vec<u32> = seed_ids.iter().filter_map(|i| lib.index.get(i).copied()).collect();
+    if seeds.is_empty() || n == 0 {
+        return Vec::new();
+    }
+    let own: HashSet<u32> = seeds.iter().map(|t| lib.tracks[*t as usize].artist).collect();
+    // Plex's similar artists bring their songs in even without shared tags.
+    let mut near: Vec<u32> = own.iter().flat_map(|a| taste.similar_to(*a).iter().copied()).collect();
+    near.sort_unstable();
+    near.dedup();
+    let mut scored: Vec<(u32, f32)> = score(lib, taste, &seeds, &near, avoid, salt, false, LEAN_NEW)
+        .into_iter()
+        .filter(|(t, _)| {
+            let a = lib.tracks[*t as usize].artist;
+            !own.contains(&a) && !avoid_artists.contains(&lib.artists[a as usize].id)
+        })
+        .collect();
+    // Not liked first, best first within each.
+    scored.sort_by(|a, b| {
+        let la = lib.tracks[a.0 as usize].liked;
+        let lb = lib.tracks[b.0 as usize].liked;
+        la.cmp(&lb).then(b.1.total_cmp(&a.1)).then(a.0.cmp(&b.0))
+    });
+    scored.truncate(RADIO_POOL.max(n * 2));
+    let mut out: Vec<u32> = Vec::with_capacity(n);
+    let mut per: HashMap<u32, usize> = HashMap::new();
+    for &(t, _) in &scored {
+        if out.len() >= n {
+            break;
+        }
+        let c = per.entry(lib.tracks[t as usize].artist).or_default();
+        if *c < PER_ARTIST {
+            *c += 1;
+            out.push(t);
+        }
+    }
+    // A small library: past the per-artist limit rather than stop short.
+    for &(t, _) in &scored {
+        if out.len() >= n {
+            break;
+        }
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    let mut spaced: Vec<(u32, bool)> = out.into_iter().map(|t| (t, true)).collect();
+    space_artists(lib, &mut spaced, 2);
     spaced.into_iter().map(|(t, _)| t).collect()
 }

@@ -98,7 +98,7 @@ export async function addToPlaylist(playlist: Playlist, trackIds: string[]): Pro
 }
 
 /** Add without asking. */
-export async function addNow(playlist: Playlist, trackIds: string[]): Promise<boolean> {
+export async function addNow(playlist: Pick<Playlist, "id" | "title" | "thumb">, trackIds: string[]): Promise<boolean> {
   if (!trackIds.length) return false;
   try {
     const p = await backend.playlistAdd(playlist.id, trackIds);

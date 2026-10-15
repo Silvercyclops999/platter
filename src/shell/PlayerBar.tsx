@@ -1,4 +1,6 @@
 import {
+  CircleMinus,
+  CirclePlus,
   EyeOff,
   ListMusic,
   Maximize2,
@@ -29,6 +31,7 @@ import { Skeleton } from "../components/Skeleton";
 import { Slider } from "../components/Slider";
 import { Tooltip } from "../components/Tooltip";
 import { formatDuration, trackArtistLine } from "../lib/format";
+import { playingShuffleMode, shuffleLabel as labelFor, smartOffered } from "../lib/shuffleMode";
 import { modKey } from "../lib/platform";
 import { dropOnQueue, endSongDrag, startSongDrag, tracksDrag, useSongDrop } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
@@ -36,6 +39,7 @@ import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { miniplayer, useMiniplayer } from "../stores/miniplayer";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
+import { keepSuggestion, playingSuggestion, removeSuggestion } from "../stores/smartShuffle";
 import { useUi } from "../stores/ui";
 import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtras";
 import { useLyrics } from "./lyrics";
@@ -218,7 +222,12 @@ export function PlayControls() {
   const shuffle = state?.shuffle ?? false;
   const smart = !!state?.smartShuffle;
   const smartAllowed = useSettings((s) => !!s.settings?.smartShuffle);
-  const shuffleLabel = smart ? "Disable smart shuffle" : shuffle ? (smartAllowed ? "Enable smart shuffle" : "Disable shuffle") : "Enable shuffle";
+  const remote = usePlayer((s) => !!s.remote);
+  // Playlists and Liked Songs cycle through smart shuffle too, and the name
+  // says what the next click does for that playlist.
+  const ctx = state?.queue.context;
+  const offered = smartAllowed && !remote && smartOffered(ctx?.kind) && !!ctx?.id;
+  const shuffleLabel = labelFor(playingShuffleMode(state), offered || smart, ctx?.kind === "liked" ? "Liked Songs" : ctx?.title);
   return (
     <div className="player-bar__controls">
       <IconButton
@@ -345,6 +354,28 @@ function NowPlayingAnnouncer({ text }: { text: string | null }) {
   );
 }
 
+/**
+ * While a smart shuffle suggestion plays: take it out (skips it and picks new
+ * suggestions) or add it to the playlist for good.
+ */
+function SuggestionButtons() {
+  const state = usePlayer((s) => s.state);
+  const remote = usePlayer((s) => !!s.remote);
+  const s = remote ? null : playingSuggestion(state);
+  if (!s) return null;
+  return (
+    <span className="player-bar__suggestion">
+      <IconButton label="Remove suggestion" tooltip="Remove suggestion" icon={<CircleMinus size={16} />} onClick={() => void removeSuggestion()} />
+      <IconButton
+        label={`Add to ${s.title}`}
+        tooltip={`Add to ${s.title}`}
+        icon={<CirclePlus size={16} />}
+        onClick={() => void keepSuggestion(state)}
+      />
+    </span>
+  );
+}
+
 /** Bottom player bar. */
 export function PlayerBar() {
   const state = usePlayer((s) => s.state);
@@ -395,6 +426,7 @@ export function PlayerBar() {
               </div>
               <PlayerSubline track={track} />
             </div>
+            <SuggestionButtons />
             <SaveButton track={track} place="bar" />
           </>
         ) : state === null ? (

@@ -624,7 +624,8 @@ impl TrackLookup for CacheLookup {
         }
     }
 
-    /// The next radio batch, or similar music after a context.
+    /// The next radio batch, similar music after a context, or smart
+    /// shuffle suggestions.
     async fn more(&self, req: &MoreRequest) -> AppResult<Vec<Track>> {
         use crate::mixes::radio::Seed;
         let Some(mixes) = self.3.clone() else { return Ok(Vec::new()) };
@@ -637,7 +638,11 @@ impl TrackLookup for CacheLookup {
         };
         let avoid: std::collections::HashSet<String> = req.avoid.iter().cloned().collect();
         let n = req.n;
-        let ids = tokio::task::spawn_blocking(move || mixes.radio_ids(&seed, &avoid, n, false))
+        let smart = req.smart.then(|| (req.seed_ids.clone(), req.avoid_artists.iter().cloned().collect::<std::collections::HashSet<_>>()));
+        let ids = tokio::task::spawn_blocking(move || match smart {
+            Some((seeds, artists)) => mixes.suggestion_ids(&seeds, &avoid, &artists, n),
+            None => mixes.radio_ids(&seed, &avoid, n, false),
+        })
             .await
             .map_err(|e| crate::error::AppError::Internal(format!("radio task: {e}")))??;
         let view = self.0.tag_view();

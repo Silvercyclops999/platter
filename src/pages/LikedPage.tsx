@@ -1,7 +1,8 @@
 import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
-import { ArrowDownUp, Heart, List, Pause, Play, Rows3, Search, Shuffle, X } from "lucide-react";
+import { ArrowDownUp, Heart, List, Pause, Play, Rows3, Search, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
+import { ContextShuffleButton } from "../components/ShuffleButton";
 import { openContextMenu } from "../components/ContextMenu";
 import { LikedCover } from "../components/LikedCover";
 import { DownloadButton } from "../components/DownloadButton";
@@ -67,7 +68,6 @@ export function LikedPage() {
   const liked = useLikes((s) => s.ids);
   const owner = useApp((s) => s.auth?.username ?? null);
   const colours = useSettings((s) => s.settings?.artworkColours !== false);
-  const shuffle = usePlayer((s) => s.state?.shuffledContexts?.includes(LIKED_ID) ?? false);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
   const { isContext, playing: isThisPlaying } = useContextState("liked", LIKED_ID);
@@ -199,13 +199,7 @@ export function LikedPage() {
                 icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
                 onClick={play}
               />
-              <IconButton
-                label={shuffle ? "Disable shuffle" : "Enable shuffle"}
-                size="lg"
-                pressed={shuffle}
-                icon={<Shuffle size={22} />}
-                onClick={() => player.setContextShuffle(LIKED_ID, !shuffle)}
-              />
+              <ContextShuffleButton id={LIKED_ID} kind="liked" name={TITLE} />
               <DownloadButton kind="liked" id="" title={TITLE} disabled={!data} />
               <div className="liked__tools">
                 <div className={`liked-find ${findOpen ? "is-open" : ""}`}>
