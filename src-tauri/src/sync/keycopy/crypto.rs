@@ -103,7 +103,7 @@ pub fn hex(b: &[u8]) -> String {
 }
 
 pub fn unhex(s: &str) -> AppResult<Vec<u8>> {
-    if !s.is_ascii() || s.len() % 2 != 0 || s.len() > 64 * 1024 {
+    if !s.is_ascii() || !s.len().is_multiple_of(2) || s.len() > 64 * 1024 {
         return Err(AppError::Invalid("Bad hex.".into()));
     }
     (0..s.len())
