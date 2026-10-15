@@ -3156,6 +3156,9 @@ mod tests {
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(!old.identify_by_sound);
         assert_eq!(old.sound_id_scope, Scope::Untagged);
+    }
+
+    #[test]
     fn discover_settings_defaults_and_where_they_live() {
         let s = Settings::default();
         assert!(s.catalogue_search && s.fans_also_like_catalogue && s.home_new_to_you);
