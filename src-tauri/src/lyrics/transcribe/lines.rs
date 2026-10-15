@@ -8,7 +8,7 @@
 
 /// One recognized word. `text` keeps its leading space when the recognizer
 /// gave one; punctuation is already attached.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Word {
     pub start_ms: u32,
     pub end_ms: u32,
@@ -16,7 +16,7 @@ pub struct Word {
 }
 
 /// Words the recognizer grouped together (roughly a phrase or sentence).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Segment {
     pub words: Vec<Word>,
 }

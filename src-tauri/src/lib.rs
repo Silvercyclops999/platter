@@ -335,6 +335,14 @@ fn follow_sync_store(store: &sync::SyncStore, hidden: hidden::Hidden, bookmarks:
     });
 }
 
+/// `platter --speech-worker`: the helper process speech-model work runs in
+/// (lyrics transcription and the lyrics check). Checked first thing in
+/// `main`, before anything of the app starts. Returns the exit code.
+pub fn speech_worker(args: &[String]) -> Option<i32> {
+    (args.get(1).map(String::as_str) == Some(lyrics::transcribe::helper::WORKER_FLAG))
+        .then(lyrics::transcribe::helper::worker::main)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // `platter --next` and the rest talk to the running app and exit.
@@ -935,8 +943,17 @@ pub fn run() {
             {
                 use lyrics::transcribe::{self as tr, commands as trc};
                 let models = tr::model::ModelStore::new(data_dir.join("models"), tr::model::catalogue(), tr::model::os_free_space());
-                // One recognizer (one loaded model) for both.
-                let recognizer = tr::engine::default_recognizer();
+                // Threads, the busy check and the breather, shared by both.
+                let pacer = tr::pace::Pacer::new(Arc::new(tr::pace::SystemSignals::default()), tr::pace::Timing::default());
+                // One recognizer (one helper process, one loaded model) for both.
+                let recognizer: Arc<dyn tr::engine::Recognizer> = {
+                    let p = pacer.clone();
+                    Arc::new(tr::helper::Helper::new(
+                        Arc::new(tr::helper::ProcessLaunch::current()),
+                        Arc::new(move || p.light()),
+                        tr::helper::IDLE_EXIT,
+                    ))
+                };
                 let songs: Arc<dyn tr::SongReader> = Arc::new(trc::AppSongs {
                     player: player.clone(),
                     audio_dir: audio_dir.clone(),
@@ -956,8 +973,10 @@ pub fn run() {
                     other: Arc::new(trc::AppOther(lyrics_service.clone())),
                     conditions: Arc::new(trc::AppConditions),
                     events: Arc::new(app.handle().clone()),
+                    pacer: pacer.clone(),
                 });
                 transcriber.set_options(initial.transcribe_lyrics, initial.transcribe_model);
+                transcriber.set_pace(initial.transcribe_processor, initial.transcribe_pause_busy, initial.transcribe_faster_away);
                 *live.transcriber.lock() = Some(transcriber.clone());
                 tauri::async_runtime::spawn({
                     let t = transcriber.clone();
@@ -975,6 +994,7 @@ pub fn run() {
                         let t = transcriber.clone();
                         Arc::new(move |id: &str| t.transcribe_quietly(id))
                     }),
+                    pacer,
                 });
                 tauri::async_runtime::spawn({
                     let c = checker.clone();

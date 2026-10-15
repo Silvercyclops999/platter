@@ -4031,6 +4031,7 @@ dependencies = [
  "mdns-sd",
  "objc2-core-audio",
  "objc2-core-foundation",
+ "objc2-foundation",
  "parking_lot",
  "percent-encoding",
  "pinyin",

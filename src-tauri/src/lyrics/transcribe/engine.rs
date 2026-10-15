@@ -1,6 +1,8 @@
 //! The speech recognizer behind a trait, so the queue and its tests don't
-//! need a model. The real one is whisper.cpp (the `transcribe` build
-//! feature); builds without it say transcription isn't available.
+//! need a model. The app's one is the helper process ([`super::helper`]),
+//! which runs whisper.cpp (the `transcribe` build feature) in its own
+//! low-priority process; builds without it say transcription isn't
+//! available.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -9,6 +11,9 @@ use std::sync::atomic::AtomicBool;
 use super::lines::Segment;
 use super::model::ModelKind;
 
+/// The language songs are transcribed in.
+pub const LANGUAGE: &str = "en";
+
 /// Called with the percent done (0 to 100).
 pub type Progress = Arc<dyn Fn(u8) + Send + Sync>;
 
@@ -16,6 +21,8 @@ pub type Progress = Arc<dyn Fn(u8) + Send + Sync>;
 pub enum RecognizeError {
     Cancelled,
     Failed(String),
+    /// The helper process stopped in the middle of the run.
+    Crashed,
 }
 
 /// One run: 16 kHz mono samples in, timed words grouped into segments out.
@@ -23,25 +30,24 @@ pub trait Recognizer: Send + Sync {
     /// Why transcription can't run on this computer, if it can't.
     fn unavailable(&self) -> Option<String>;
     /// Blocking; call from a blocking thread. `cancel` stops it early.
+    #[allow(clippy::too_many_arguments)]
     fn transcribe(
         &self,
         model: &Path,
         kind: ModelKind,
         pcm: &[f32],
         threads: usize,
+        language: &str,
         cancel: Arc<AtomicBool>,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError>;
     /// Free the loaded model (the queue is empty).
     fn unload(&self) {}
-}
-
-/// Threads for a run. The one song someone is waiting on gets up to four;
-/// anything that works through songs (an album, the batch, the lyrics check)
-/// gets two, so a long run doesn't keep the whole processor busy and hot.
-pub fn threads(gentle: bool) -> usize {
-    let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    if gentle { (n / 4).clamp(1, 2) } else { (n / 4).clamp(1, 4) }
+    /// The recognizer crashed often enough this session that background
+    /// work should stop.
+    fn crashed_too_often(&self) -> bool {
+        false
+    }
 }
 
 /// The CPU features the shipped whisper.cpp build assumes on x86.
@@ -58,8 +64,20 @@ pub fn cpu_supported() -> bool {
     true
 }
 
-/// The recognizer this build has.
-pub fn default_recognizer() -> Arc<dyn Recognizer> {
+/// Why this build or computer can't transcribe, if it can't.
+pub fn unavailable_here() -> Option<String> {
+    #[cfg(feature = "transcribe")]
+    {
+        (!cpu_supported()).then(|| "Transcription needs a processor with AVX2 (most from 2013 on).".to_string())
+    }
+    #[cfg(not(feature = "transcribe"))]
+    {
+        Some("This build of Platter doesn't include transcription.".into())
+    }
+}
+
+/// The recognizer this build has, in this process (the helper process runs it).
+pub fn in_process() -> Arc<dyn Recognizer> {
     #[cfg(feature = "transcribe")]
     {
         Arc::new(whisper::Whisper::default())
@@ -77,9 +95,9 @@ struct Missing;
 #[cfg(not(feature = "transcribe"))]
 impl Recognizer for Missing {
     fn unavailable(&self) -> Option<String> {
-        Some("This build of Platter doesn't include transcription.".into())
+        unavailable_here()
     }
-    fn transcribe(&self, _: &Path, _: ModelKind, _: &[f32], _: usize, _: Arc<AtomicBool>, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
+    fn transcribe(&self, _: &Path, _: ModelKind, _: &[f32], _: usize, _: &str, _: Arc<AtomicBool>, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
         Err(RecognizeError::Failed("not in this build".into()))
     }
 }
@@ -97,7 +115,7 @@ pub mod whisper {
 
     use super::super::lines::{Segment, Word};
     use super::super::model::ModelKind;
-    use super::{Progress, RecognizeError, Recognizer, cpu_supported};
+    use super::{Progress, RecognizeError, Recognizer, unavailable_here};
 
     /// whisper.cpp, keeping the last model loaded between songs.
     #[derive(Default)]
@@ -114,8 +132,8 @@ pub mod whisper {
 
     fn load(path: &Path, kind: ModelKind) -> Result<WhisperContext, RecognizeError> {
         let p = WhisperContextParameters {
-            // CPU on every platform for now; the GPU builds need more toolchain.
-            use_gpu: false,
+            // Metal on macOS (much cooler than the processor); the processor elsewhere.
+            use_gpu: cfg!(target_os = "macos"),
             // Word times from the attention heads, steadier than token guesses.
             dtw_parameters: DtwParameters { mode: DtwMode::ModelPreset { model_preset: preset(kind) }, ..Default::default() },
             ..Default::default()
@@ -134,7 +152,7 @@ pub mod whisper {
 
     impl Recognizer for Whisper {
         fn unavailable(&self) -> Option<String> {
-            (!cpu_supported()).then(|| "Transcription needs a processor with AVX2 (most from 2013 on).".to_string())
+            unavailable_here()
         }
 
         fn transcribe(
@@ -143,6 +161,7 @@ pub mod whisper {
             kind: ModelKind,
             pcm: &[f32],
             threads: usize,
+            language: &str,
             cancel: Arc<AtomicBool>,
             progress: Progress,
         ) -> Result<Vec<Segment>, RecognizeError> {
@@ -156,7 +175,7 @@ pub mod whisper {
 
             let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
             p.set_n_threads(threads as i32);
-            p.set_language(Some("en"));
+            p.set_language(Some(language));
             p.set_token_timestamps(true);
             // Each window on its own: carrying text over makes the model loop
             // on a chorus.
