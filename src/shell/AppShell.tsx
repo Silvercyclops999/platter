@@ -47,6 +47,7 @@ import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEd
 import { LookDrop } from "./LookDrop";
 import { QueuePanel } from "./QueuePanel";
 import { ArchiveDialogs } from "../components/ArchiveDialogs";
+import { PhysicalDialogHost } from "../components/PhysicalDialog";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -231,6 +232,7 @@ export function AppShell() {
       <Toaster />
       <PlaylistDialogs />
       <ArchiveDialogs />
+      <PhysicalDialogHost />
       <LazyPlexEditDialogs />
       <LazySmartEditorHost />
       <FolderDialogs />

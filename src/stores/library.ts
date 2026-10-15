@@ -10,16 +10,16 @@ import { idVariants, plainId } from "../lib/ids";
 
 export type LibKind = "playlist" | "album" | "artist";
 export type LibFilter = LibKind | "all";
-/** Sub-chips: regular or smart playlists; followed artists. */
-export type LibSub = "byYou" | "smart" | "followed";
+/** Sub-chips: regular or smart playlists; followed artists; albums on the shelf. */
+export type LibSub = "byYou" | "smart" | "followed" | "shelf";
 export type LibSort = "recents" | "added" | "alpha" | "creator" | "custom";
 export type LibView = "list" | "compactList" | "compactGrid" | "grid";
 
 export const LIB_KINDS: LibKind[] = ["playlist", "album", "artist"];
 export const LIB_VIEWS: LibView[] = ["compactList", "list", "compactGrid", "grid"];
 export const KIND_LABEL: Record<LibKind, string> = { playlist: "Playlists", album: "Albums", artist: "Artists" };
-export const SUB_LABEL: Record<LibSub, string> = { byYou: "By you", smart: "Smart", followed: "Followed" };
-export const SUB_CHIPS: Record<LibKind, LibSub[]> = { playlist: ["byYou", "smart"], album: [], artist: ["followed"] };
+export const SUB_LABEL: Record<LibSub, string> = { byYou: "By you", smart: "Smart", followed: "Followed", shelf: "On the shelf" };
+export const SUB_CHIPS: Record<LibKind, LibSub[]> = { playlist: ["byYou", "smart"], album: ["shelf"], artist: ["followed"] };
 export const SORT_LABEL: Record<LibSort, string> = {
   recents: "Recents",
   added: "Recently added",
@@ -171,10 +171,11 @@ export function chipRowWithDownloads(
   sub: LibSub | null,
   kinds: LibKind[],
   downloaded: { available: boolean; on: boolean },
+  shelf = false,
 ): Chip[] {
-  if (!downloaded.available && !downloaded.on) return chipRow(filter, sub, kinds);
+  if (!downloaded.available && !downloaded.on) return chipRow(filter, sub, kinds, shelf);
   const dl: Chip = { kind: "downloaded", selected: downloaded.on };
-  if (!downloaded.on) return [...chipRow(filter, sub, kinds), dl];
+  if (!downloaded.on) return [...chipRow(filter, sub, kinds, shelf), dl];
   if (filter === "all") return [{ kind: "clear" }, dl, ...kinds.map((type): Chip => ({ kind: "type", type, selected: false }))];
   return [{ kind: "clear" }, { kind: "type", type: filter, selected: true }, dl];
 }
@@ -184,9 +185,10 @@ export function chipRowWithDownloads(
  * chosen: a clear chip, the selected type, then its sub-chips; with a
  * sub-chip chosen, only that one (pick it again to see its siblings).
  */
-export function chipRow(filter: LibFilter, sub: LibSub | null, kinds: LibKind[] = LIB_KINDS): Chip[] {
+export function chipRow(filter: LibFilter, sub: LibSub | null, kinds: LibKind[] = LIB_KINDS, shelf = false): Chip[] {
   if (filter === "all") return kinds.map((type) => ({ kind: "type", type, selected: false }));
-  const subs = sub ? [sub] : SUB_CHIPS[filter];
+  // "On the shelf" only while the physical collection shows and something's owned.
+  const subs = sub ? [sub] : SUB_CHIPS[filter].filter((s) => s !== "shelf" || shelf);
   return [
     { kind: "clear" },
     { kind: "type", type: filter, selected: true },
@@ -245,6 +247,8 @@ export interface LibEntry {
   downloaded?: boolean;
   /** An artist you follow. */
   followed?: boolean;
+  /** An album you own on vinyl, CD, cassette or another format. */
+  owned?: boolean;
   /** A library folder (Platter's own; Plex has none). */
   folder?: FolderInfo;
   /** How far in it sits under open folders (drilled-in lists). */
@@ -367,7 +371,7 @@ export function libraryEntries(items: LibEntry[], opts: EntryOpts): LibEntry[] {
   const sub = opts.filter !== "all" && opts.sub && SUB_CHIPS[opts.filter].includes(opts.sub) ? opts.sub : null;
   const keep = (e: LibEntry) =>
     (opts.filter === "all" || e.kind === opts.filter) &&
-    (sub === null || (sub === "followed" ? !!e.followed : sub === "smart" ? e.smart : !e.smart)) &&
+    (sub === null || (sub === "followed" ? !!e.followed : sub === "shelf" ? !!e.owned : sub === "smart" ? e.smart : !e.smart)) &&
     (!opts.downloadedOnly || !!e.downloaded) &&
     matchesQuery(e, opts.query);
   const pinned = items.filter((e) => e.pinned && keep(e));

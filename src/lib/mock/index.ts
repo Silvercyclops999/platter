@@ -32,6 +32,7 @@
 import type { Backend, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
 import type {
+  SetOwned,
   WantedAlbum,
   CompareNow,
   CompareReady,
@@ -151,6 +152,7 @@ import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
 import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "../statsTypes";
 import { MockArchive } from "./archive";
 import { MockDoctor } from "./doctor";
+import { MockPhysical } from "./physical";
 import { MockJellyfin, plexRecord } from "./jellyfin";
 import { MockSubsonic } from "./subsonic";
 
@@ -311,6 +313,8 @@ export class MockBackend implements Backend {
   readonly radar: MockRadar;
   /** Music that isn't in the library (faked MusicBrainz and ListenBrainz). */
   readonly catalogue: MockCatalogue;
+  /** The physical collection and the faked Discogs (test hooks: refuse, fail, reset). */
+  readonly physical: MockPhysical;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -430,6 +434,7 @@ export class MockBackend implements Backend {
       () => this.later(0, () => this.emit("library://changed", null)),
     );
     this.doctor = new MockDoctor(this.fx, () => this.settings);
+    this.physical = new MockPhysical(this.fx, () => this.settings, () => this.later(0, () => this.emit("physical://changed", {})));
     this.tags = new MockFileTags(
       this.fx,
       () => this.settings,
@@ -3171,6 +3176,30 @@ export class MockBackend implements Backend {
   }
   newToYou() {
     return this.delay(() => this.catalogue.newToYou());
+  }
+
+  // ---------------------------------------------------------------- physical collection
+
+  physicalList() {
+    return this.delay(() => this.physical.list());
+  }
+  physicalSet(albumId: string, owned: SetOwned) {
+    return this.delay(() => this.physical.set(albumId, owned));
+  }
+  physicalStats() {
+    return this.delay(() => this.physical.stats());
+  }
+  physicalFindRelease(artist: string, title: string) {
+    return this.delay(() => this.catalogue.findAlbum(artist, title));
+  }
+  discogsStatus() {
+    return this.delay(() => this.physical.status());
+  }
+  discogsTokenSet(token: string | null) {
+    return this.delay(() => this.physical.setToken(token));
+  }
+  discogsImport() {
+    return this.delay(() => this.physical.import());
   }
   importChoose(folder: boolean) {
     return this.delay(() => (folder ? "Downloads/my_data" : "Downloads/my_data.zip"));

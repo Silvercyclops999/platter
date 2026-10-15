@@ -16,6 +16,7 @@ import { PlaylistPage } from "../pages/PlaylistPage";
 import { RecentsPage } from "../pages/RecentsPage";
 import { SearchPage } from "../pages/SearchPage";
 import { NewToYouPage } from "../pages/NewToYou";
+import { ShelfPage } from "../pages/ShelfPage";
 import { useApp } from "../stores/app";
 import { useCurrentEntry, type Route } from "../stores/router";
 import { useUi } from "../stores/ui";
@@ -108,6 +109,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   whatsNew: "What's New",
   releaseRadar: "Release radar",
   newToYou: "New to you",
+  shelf: "Your shelf",
   stats: "Stats",
 };
 
@@ -165,6 +167,8 @@ function Page({ route }: { route: Route }) {
       return <AlbumPage id={route.id} catalogue />;
     case "newToYou":
       return <NewToYouPage />;
+    case "shelf":
+      return <ShelfPage />;
     case "playlist":
       // A Platter smart playlist has its own page.
       return route.id.startsWith("smart:") ? <SmartPlaylistPage id={route.id} /> : <PlaylistPage id={route.id} />;

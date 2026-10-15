@@ -12,6 +12,12 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { artPixelSize } from "./artSize";
 import { createMockBackend } from "./mock";
 import type {
+  DiscogsReport,
+  DiscogsStatus,
+  OwnedAlbum,
+  SetOwned,
+  ShelfStats,
+  CatAlbum,
   CatArtist,
   CatalogueAlbumPage,
   CatalogueArtistPage,
@@ -706,6 +712,21 @@ export interface Backend {
   newToYou(): Promise<NewToYou>;
   /** Albums added to the Missing list by hand. */
   importMissingAlbums(): Promise<MissingAlbum[]>;
+
+  // Physical collection (marks in the sync store; Discogs token in the keychain)
+  /** Every album marked as owned, by artist then title. `physical://changed` fires when they change. */
+  physicalList(): Promise<OwnedAlbum[]>;
+  /** Mark an album as owned with these copies; no copies takes the mark off. */
+  physicalSet(albumId: string, owned: SetOwned): Promise<OwnedAlbum | null>;
+  /** The shelf for the Stats page. */
+  physicalStats(): Promise<ShelfStats>;
+  /** The MusicBrainz album a record on the shelf is (to request it); null when MusicBrainz doesn't know it. */
+  physicalFindRelease(artist: string, title: string): Promise<CatAlbum | null>;
+  discogsStatus(): Promise<DiscogsStatus>;
+  /** Save the personal token (Discogs checks it first), or null to remove it. */
+  discogsTokenSet(token: string | null): Promise<DiscogsStatus>;
+  /** Read the Discogs collection and mark the albums the library has. */
+  discogsImport(): Promise<DiscogsReport>;
   importMissingAlbumAdd(album: WantedAlbum): Promise<WantedAlbum[]>;
   importMissingAlbumRemove(releaseGroupId: string): Promise<WantedAlbum[]>;
 
@@ -1069,6 +1090,13 @@ export function createTauriBackend(): Backend {
     catalogueAlbum: (releaseGroupId) => call("catalogue_album", { releaseGroupId }),
     catalogueFansAlsoLike: (artistId, name) => call("catalogue_fans_also_like", { artistId, name }),
     newToYou: () => call("new_to_you"),
+    physicalList: () => call("physical_list"),
+    physicalSet: (albumId, owned) => call("physical_set", { albumId, owned }),
+    physicalStats: () => call("physical_stats"),
+    physicalFindRelease: (artist, title) => call("physical_find_release", { artist, title }),
+    discogsStatus: () => call("discogs_status"),
+    discogsTokenSet: (token) => call("discogs_token_set", { token }),
+    discogsImport: () => call("discogs_import"),
     importOpenLink: (url) => call("import_open_link", { url }),
     importForget: (source) => call("import_forget", { source }),
     importListRemove: (listId, songId) => call("import_list_remove", { listId, songId }),

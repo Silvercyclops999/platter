@@ -104,7 +104,7 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
               id === "servers" ? (
                 !drill && <ServerSwitcher key={id} />
               ) : id === "filters" ? (
-                <LibraryChips key={id} filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} />
+                <LibraryChips key={id} filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} shelf={model.shelf} />
               ) : id === "tools" ? (
                 <div key={id} className="lib-tools">
                   <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} />

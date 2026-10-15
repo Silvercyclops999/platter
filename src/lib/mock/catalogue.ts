@@ -189,6 +189,17 @@ export class MockCatalogue {
     return { shown: true, artists: artists.slice(0, 6), albums: albums.slice(0, 6), songs: songs.slice(0, 6) };
   }
 
+  /** The catalogue album with this artist and title (a record on the shelf), whatever the search setting. */
+  findAlbum(artist: string, title: string): CatAlbum | null {
+    if (this.hooks.offline()) throw { kind: "network", message: "You're offline." };
+    for (const w of WORLD) {
+      if (fold(w.name) !== fold(artist)) continue;
+      const r = w.releases.find((x) => fold(x.title) === fold(title));
+      if (r) return this.album(w, r);
+    }
+    return null;
+  }
+
   artistPage(id: string): CatalogueArtistPage {
     if (this.hooks.offline()) throw { kind: "network", message: "You're offline." };
     const w = WORLD.find((x) => mbid(x.n) === id);

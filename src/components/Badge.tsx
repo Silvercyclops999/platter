@@ -4,7 +4,7 @@ import { useSettings } from "../stores/settings";
 import type { Track } from "../lib/types";
 
 export interface BadgeProps {
-  tone?: "neutral" | "quality" | "hires" | "version" | "accent";
+  tone?: "neutral" | "quality" | "hires" | "version" | "accent" | "shelf";
   children: ReactNode;
   title?: string;
 }

@@ -54,7 +54,7 @@ export function LibraryPage({ tab }: { tab?: LibraryTab }) {
         )}
         <IconButton label="Minimize Your Library" icon={<Minimize2 size={18} />} onClick={minimizeLibrary} />
       </div>
-      <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} />
+      <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} shelf={model.shelf} />
       <div className="lib-tools lib-tools--wide">
         <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} alwaysOpen />
         <LibrarySortView filter={model.filter} sort={model.sort} view={view} setView={(v) => useLibraryView.getState().setWideView(v)} />

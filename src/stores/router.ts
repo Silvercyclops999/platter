@@ -55,7 +55,9 @@ export type Route =
   /** An album that isn't in the library (MusicBrainz release group id). */
   | { name: "catalogueAlbum"; id: string }
   /** Artists like the ones played most that aren't in the library. */
-  | { name: "newToYou" };
+  | { name: "newToYou" }
+  /** Albums owned on vinyl, CD or cassette, and what a Discogs import found. */
+  | { name: "shelf" };
 
 export interface HistoryEntry {
   key: number;

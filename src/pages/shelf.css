@@ -1,0 +1,67 @@
+/* Your shelf: owned albums, the Discogs import and what's missing. */
+.shelf-page { max-width: 1040px; }
+.shelf-section { margin-top: var(--space-8); }
+.shelf-lede { margin: calc(-1 * var(--space-2)) 0 var(--space-3); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.shelf-empty { margin: var(--space-2) 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.shelf-credit { margin: var(--space-3) 0 0; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.shelf-subtitle { margin: var(--space-6) 0 var(--space-2); font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+
+.shelf-discogs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-state-hover);
+}
+.shelf-discogs__text { flex: 1; min-width: 240px; margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+.shelf-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.shelf-rows--grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-1) var(--space-4); }
+.shelf-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; border-radius: var(--radius-row); }
+.shelf-row:hover { background: var(--color-state-hover); }
+.shelf-row__open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-row);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.shelf-row__open:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
+.shelf-row > .btn { margin-right: var(--space-2); }
+.shelf-row__text, .shelf-only__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.shelf-row__title, .shelf-only__title { font-size: var(--font-size-md); color: var(--color-text-primary); }
+.shelf-row__sub, .shelf-only__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+.shelf-only-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.shelf-only {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-row);
+}
+.shelf-only:hover { background: var(--color-state-hover); }
+.shelf-only > :first-child { opacity: 0.85; }
+.shelf-only__actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.shelf-only__actions .cat-stores { margin: 0; }
+.shelf-only__actions .cat-stores__label { display: none; }
+
+.shelf-tiles { margin-top: var(--space-2); }
+
+@media (max-width: 720px) {
+  .shelf-only { grid-template-columns: 56px minmax(0, 1fr); }
+  .shelf-only__actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+.shelf-buttons { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); }

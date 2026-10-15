@@ -1066,6 +1066,10 @@ export interface Settings {
   homeNewToYou: boolean;
   /** Artists marked "Not interested" (never suggested again). */
   dismissedArtists: DismissedArtist[];
+  /** Badges, the On the shelf filter and the Stats shelf for albums owned on vinyl, CD, cassette or another format. */
+  showPhysicalCollection: boolean;
+  /** "Missing from the shelf": albums played most that aren't owned. */
+  shelfMissingList: boolean;
   /** Dark, Light, Match system, or another built-in theme. */
   theme: ThemeSetting;
   /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
@@ -1335,6 +1339,8 @@ export const DEFAULT_SETTINGS: Settings = {
   fansAlsoLikeCatalogue: true,
   homeNewToYou: true,
   dismissedArtists: [],
+  showPhysicalCollection: true,
+  shelfMissingList: false,
   theme: "dark",
   accent: "ivory",
   themeFile: null,
@@ -2646,6 +2652,8 @@ export interface EventMap {
   "archive://changed": Record<string, never>;
   /** Library doctor findings or what's ignored changed: the badge count and whether a check is going. */
   "doctor://changed": { count: number; running: boolean };
+  /** Owned albums or the Discogs import changed. */
+  "physical://changed": Record<string, never>;
   /** Identify by sound found something or moved on (read sound_id_status). */
   "soundid://changed": null;
   "player://state": PlayerState;
@@ -2929,4 +2937,94 @@ export interface MissingAlbum extends WantedAlbum {
   thumb: string | null;
   links: StoreLinkSet;
   libraryAlbumId: string | null;
+}
+
+// ---------------------------------------------------------------- physical collection
+
+/** A format an album can be owned on. */
+export type PhysicalFormat = "vinyl" | "cd" | "cassette" | "other";
+
+/** Which Discogs collection item a copy came from. */
+export interface DiscogsRef {
+  releaseId: number;
+  instanceId: number;
+}
+
+/** One copy the user owns. */
+export interface OwnedCopy {
+  format: PhysicalFormat;
+  pressing: string;
+  colour: string;
+  condition: string;
+  notes: string;
+  discogs?: DiscogsRef;
+}
+
+/** `physical_list` item: an album the user owns, with its copies. */
+export interface OwnedAlbum {
+  albumId: string;
+  title: string;
+  artist: string;
+  thumb: string | null;
+  copies: OwnedCopy[];
+  /** Each format once: vinyl, cd, cassette, other. */
+  formats: PhysicalFormat[];
+  /** When it was first marked (unix seconds). */
+  at: number;
+}
+
+/** `physical_set` payload. No copies takes the mark off. */
+export interface SetOwned {
+  copies: OwnedCopy[];
+  title: string;
+  artist: string;
+  thumb: string | null;
+}
+
+export interface ShelfAlbum {
+  albumId: string;
+  title: string;
+  artist: string;
+  thumb: string | null;
+  plays: number;
+  formats: PhysicalFormat[];
+}
+
+/** `physical_stats`: the shelf on the Stats page. */
+export interface ShelfStats {
+  albums: number;
+  copies: number;
+  byFormat: { format: PhysicalFormat; albums: number; copies: number }[];
+  mostPlayed: ShelfAlbum[];
+  /** Albums played most that aren't owned; null while its setting is off. */
+  missing: ShelfAlbum[] | null;
+}
+
+/** A record in the Discogs collection the library doesn't have. */
+export interface ShelfOnly {
+  releaseId: number;
+  artist: string;
+  title: string;
+  year: number | null;
+  format: PhysicalFormat;
+  thumb: string | null;
+  links: StoreLinkSet;
+}
+
+/** What the last Discogs import found. */
+export interface DiscogsReport {
+  username: string;
+  importedAt: number;
+  total: number;
+  matched: number;
+  added: number;
+  unmatched: ShelfOnly[];
+}
+
+/** `discogs_status`. The token itself never comes back. */
+export interface DiscogsStatus {
+  saved: boolean;
+  username: string | null;
+  importing: boolean;
+  report: DiscogsReport | null;
 }

@@ -5,11 +5,13 @@ import { openContextMenu } from "../components/ContextMenu";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { shareItem } from "../components/ShareMenu";
 import { plexEditItem } from "../components/PlexEditMenu";
+import { ShelfMark, physicalItem } from "../components/PhysicalDialog";
 import { isCreditId } from "../lib/credits";
 import { ExplicitBadge } from "../components/FileTagBadges";
 import { releaseTypeLabel } from "../lib/format";
 import { albumDrag, playlistDrag } from "../stores/drag";
 import { useAlbumBadges, useEditions } from "../stores/fileTags";
+import { useOwned } from "../stores/physical";
 import { useSettings } from "../stores/settings";
 import type { Album, Artist, HomeItem, PlayContextKind, Playlist } from "../lib/types";
 import { usePins } from "../stores/pins";
@@ -59,6 +61,7 @@ export function useAlbumActions(album: Album): ItemActions & { openMenu: (at: { 
         { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${album.artistId}` }) },
         moveToSectionItem(album),
         shareItem("album", album.id, album.thumb),
+        physicalItem({ albumId: album.id, title: album.title, artist: album.artistTitle, thumb: album.thumb }),
         {
           label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
           onSelect: () =>
@@ -141,6 +144,7 @@ export function playlistSubtitle(playlist: Playlist): string {
 export function AlbumCard({ album, subtitle = "artist", note }: { album: Album; subtitle?: "artist" | "year" | "type"; note?: string }) {
   const a = useAlbumActions(album);
   const tags = useAlbumBadges(album.id);
+  const owned = useOwned(album.id);
   const editions = useEditions(album.id).length;
   const groupEditions = useSettings((s) => s.settings?.groupEditions !== false);
   const text = note
@@ -152,9 +156,10 @@ export function AlbumCard({ album, subtitle = "artist", note }: { album: Album; 
         : `${album.year ? album.year + " · " : ""}${album.artistTitle}`;
   // A collapsed group says how many editions sit behind it.
   const withEditions = groupEditions && editions > 1 ? `${text} · ${editions} editions` : text;
-  const sub = tags?.explicit ? (
+  const sub = tags?.explicit || owned ? (
     <>
-      <ExplicitBadge />
+      {owned && <ShelfMark formats={owned.formats} />}
+      {tags?.explicit && <ExplicitBadge />}
       {withEditions}
     </>
   ) : (

@@ -27,13 +27,16 @@ export function LibraryChips({
   sub,
   kinds,
   downloaded = { available: false, on: false },
+  shelf = false,
 }: {
   filter: LibFilter;
   sub: LibSub | null;
   kinds: LibKind[];
   downloaded?: { available: boolean; on: boolean };
+  /** Offer the albums' "On the shelf" chip. */
+  shelf?: boolean;
 }) {
-  const chips = chipRowWithDownloads(filter, sub, kinds, downloaded);
+  const chips = chipRowWithDownloads(filter, sub, kinds, downloaded, shelf);
   const roving = useRovingRow();
   if (chips.length === 0) return null;
   return (

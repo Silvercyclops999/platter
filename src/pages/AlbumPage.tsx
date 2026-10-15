@@ -11,6 +11,7 @@ import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem } from "../components/PlaylistPicker";
 import { plexEditItem } from "../components/PlexEditMenu";
 import { CoverPopup } from "../components/CoverPopup";
+import { ShelfBadge, physicalItem } from "../components/PhysicalDialog";
 import { DownloadButton } from "../components/DownloadButton";
 import { downloadMenuItems } from "../stores/downloads";
 import { Shelf, ShelfItem } from "../components/Shelf";
@@ -134,6 +135,7 @@ function LibraryAlbumView({ id }: { id: string }) {
                   </Badge>
                 )}
                 <ReleaseStatusLabel status={releaseStatus} />
+                <ShelfBadge albumId={album.id} />
                 {album.genres.slice(0, 2).map((g) => (
                   <Badge key={g}>{g}</Badge>
                 ))}
@@ -191,6 +193,7 @@ function LibraryAlbumView({ id }: { id: string }) {
                   shareItem("album", album.id, album.thumb),
                   bookmarkPageItem("album", album.id, album.title, { subtitle: album.artistTitle, thumb: album.thumb }),
                   yourStatsItem("album", album.id, album.title),
+                  physicalItem({ albumId: album.id, title: album.title, artist: album.artistTitle, thumb: album.thumb }),
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
                     onSelect: () =>

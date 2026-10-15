@@ -32,6 +32,7 @@ import { useHomeUsers } from "../shell/HomeUsers";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { reloadLikes } from "../stores/likes";
 import { updateSettings, useSettings } from "../stores/settings";
+import { nav } from "../stores/router";
 import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
@@ -39,6 +40,7 @@ import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { StreamDeckSettings, streamDeckMatches } from "./StreamDeckSettings";
 import { MixExclusions } from "./MixExclusions";
 import { DismissedArtists } from "./DiscoverSettings";
+import { DISCOGS_TOKEN_DESCRIPTION, DiscogsImportControl, DiscogsTokenControl, discogsNote, useDiscogs } from "./DiscogsSettings";
 import { FolderKeywords } from "./ArchiveSettings";
 import { COVER_PX_OPTIONS, DoctorChecksList, DoctorNote } from "./DoctorSettings";
 import { AcoustIdKeyControl, SOUND_ID_DESCRIPTION, SOUND_ID_SCOPE_OPTIONS, soundIdNote, useSoundIdStatus } from "./SoundIdSettings";
@@ -551,6 +553,7 @@ export function SettingsPage() {
     .map((gb) => ({ value: String(gb), label: `${gb} GB` }));
   const { status: discord, setKey: setImgurKey } = useDiscordStatus();
   const { status: soundId, setKey: setAcoustIdKey } = useSoundIdStatus();
+  const discogs = useDiscogs();
   const discordOff = !!discord && !discord.available;
   const artMb = s?.artCacheMb;
   useEffect(() => {
@@ -1383,6 +1386,37 @@ export function SettingsPage() {
       description: "See your taste overlap with a Platter friend who shares theirs. Only a summary is shared, your top artists and songs, never your history. Unreleased songs stay out unless you both agree.",
       control: (ids) => toggle(s, "statsCompare", ids),
     },
+    // Library: the physical collection
+    {
+      key: "showPhysicalCollection",
+      section: "Library",
+      group: "Physical collection",
+      title: "Show physical collection",
+      description:
+        "Mark albums you own on vinyl, CD, cassette or another format from an album's menu, with notes on each copy. Shows an On vinyl badge on the album, an On the shelf filter in Your Library and your shelf on the Stats page.",
+      control: (ids) => toggle(s, "showPhysicalCollection", ids),
+    },
+    {
+      key: "shelfMissingList",
+      section: "Library",
+      group: "Physical collection",
+      title: "Missing from the shelf",
+      description: "Lists the albums you play most that you don't own on any format, on your shelf and the Stats page.",
+      control: (ids) => (s?.showPhysicalCollection === false ? null : toggle(s, "shelfMissingList", ids)),
+    },
+    {
+      key: "shelfOpen",
+      section: "Library",
+      group: "Physical collection",
+      title: "Your shelf",
+      description: "Every album you own, what a Discogs import found that isn't in your library, and what's missing.",
+      control: () =>
+        s?.showPhysicalCollection === false ? null : (
+          <Button size="sm" onClick={() => nav.go({ name: "shelf" })}>
+            Open your shelf
+          </Button>
+        ),
+    },
     {
       key: "likeControlRows",
       section: "Library",
@@ -1470,6 +1504,25 @@ export function SettingsPage() {
           Clear artist info
         </Button>
       ),
+    },
+    // Integrations: Discogs
+    {
+      key: "discogsToken",
+      section: "Integrations",
+      group: "Discogs",
+      title: "Discogs token",
+      description: DISCOGS_TOKEN_DESCRIPTION,
+      note: discogsNote(discogs),
+      control: (ids) => <DiscogsTokenControl ids={ids} st={discogs} />,
+    },
+    {
+      key: "discogsImport",
+      section: "Integrations",
+      group: "Discogs",
+      title: "Import your collection",
+      description:
+        "Marks the albums in your library that are in your Discogs collection, and lists the records that aren't with ways to request or buy them. Read it again any time; copies you edited keep your notes. Data provided by Discogs.",
+      control: () => <DiscogsImportControl st={discogs} />,
     },
     // Integrations: the now-playing feed for widgets
     {

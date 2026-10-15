@@ -27,6 +27,7 @@ import {
   type LibSort,
   type LibSub,
 } from "../stores/library";
+import { useOwnedIds } from "../stores/physical";
 import { usePins } from "../stores/pins";
 import { folders, useFolders, withFolders } from "../stores/folders";
 import { folderMenu, moveToFolderItem } from "./FolderMenus";
@@ -68,6 +69,8 @@ export interface LibraryModel {
   downloaded: { available: boolean; on: boolean };
   /** The folder the list is drilled into. */
   drill: import("../lib/types").LibraryFolder | null;
+  /** The albums' "On the shelf" chip shows (something's owned and the setting is on). */
+  shelf: boolean;
 }
 
 /** Pins (kept fresh from the library) followed by everything else. */
@@ -166,6 +169,7 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
   const pins = usePins((s) => s.pins);
   const dlItems = useDownloads((s) => s.status?.items);
   const followIds = useSocial((s) => s.followIds);
+  const ownedIds = useOwnedIds();
   const showBookmarks = useSettings((s) => s.settings?.bookmarksInLibrary !== false);
   const showStats = useSettings((s) => s.settings?.statsPage !== false);
   const dlChoice = useLibraryView((s) => s.downloaded);
@@ -179,17 +183,22 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
     const mark = (e: LibEntry): LibEntry => {
       const on = keys.has(e.liked ? "liked:" : `${e.kind}:${e.id}`);
       const followed = e.kind === "artist" && followIds.has(e.id);
-      return on || followed ? { ...e, ...(on ? { downloaded: true } : {}), ...(followed ? { followed: true } : {}) } : e;
+      const owned = e.kind === "album" && !!ownedIds?.has(e.id);
+      return on || followed || owned
+        ? { ...e, ...(on ? { downloaded: true } : {}), ...(followed ? { followed: true } : {}), ...(owned ? { owned: true } : {}) }
+        : e;
     };
     const top = [likedEntry(owner), ...(showBookmarks ? [bookmarksEntry()] : []), ...(showStats ? [statsEntry()] : [])];
     return [...top, ...mergePins(toEntries(items, owner), pins)].map(mark);
-  }, [items, owner, pins, dlItems, followIds, showBookmarks, showStats]);
+  }, [items, owner, pins, dlItems, followIds, ownedIds, showBookmarks, showStats]);
+  const shelf = !!ownedIds && all.some((e) => e.owned);
   const dlAvailable = all.some((e) => e.downloaded);
   const downloadedOnly = dlChoice ?? (cachedOnly && dlAvailable);
   const kinds = items === null ? LIB_KINDS : LIB_KINDS.filter((k) => all.some((e) => e.kind === k));
   // A saved filter for a type that's no longer there shows everything.
   const activeFilter: LibFilter = filter !== "all" && !kinds.includes(filter) ? "all" : filter;
-  const activeSub = activeFilter === "all" ? null : sub;
+  // The shelf chip saved from before, with nothing on the shelf now, shows every album.
+  const activeSub = activeFilter === "all" || (sub === "shelf" && !shelf) ? null : sub;
   const tree = useFolders((s) => s.tree);
   const drill = useFolders((s) => s.drill);
   const expanded = useFolders((s) => s.expanded);
@@ -215,6 +224,7 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
     loading: items === null,
     downloaded: { available: dlAvailable, on: downloadedOnly },
     drill: grouping && drillable ? (tree.folders.find((f) => f.id === drill) ?? null) : null,
+    shelf,
   };
 }
 

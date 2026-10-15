@@ -7,6 +7,7 @@
  * friend when that's on. Everything is counted on this computer.
  */
 import { BarChart3, ListPlus, Play, Share2 } from "lucide-react";
+import { ShelfStatsSection } from "./ShelfPage";
 import { lazy, Suspense, useId, useMemo, useState } from "react";
 import { Art } from "../components/Art";
 import { TextLink } from "../components/ArtistLinks";
@@ -505,6 +506,7 @@ export function StatsPage() {
           ) : (
             <Overview o={o} range={range} title={title} />
           )}
+          <ShelfStatsSection />
           {monthly && span && <MonthlySection span={span} />}
           {compare && <CompareSection />}
         </>
