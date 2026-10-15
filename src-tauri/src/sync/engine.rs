@@ -159,6 +159,10 @@ pub struct PassOutcome {
     pub merged_copies: u32,
     pub devices: Vec<SeenDevice>,
     pub path: PathBuf,
+    /// The file's size and time as this pass left it: after its own write,
+    /// or as it was before reading when it didn't write. A later change by
+    /// another device always differs from this.
+    pub stamp: Option<Stamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +201,7 @@ pub fn pass(store: &SyncStore, folder: &Path, tag: &str, groups: Groups, device_
     let dir = file::dir(folder);
     std::fs::create_dir_all(&dir).map_err(|e| PassError::Io(e.to_string()))?;
     let path = dir.join(file::file_name(tag));
+    let before = stamp(&path);
     let main = match file::read(&path) {
         Ok(m) => m,
         Err(ReadError::Unreadable) => return Err(PassError::Unreadable),
@@ -250,11 +255,15 @@ pub fn pass(store: &SyncStore, folder: &Path, tag: &str, groups: Groups, device_
         .map(|(id, d)| SeenDevice { name: d.name, last_seen: d.last_seen, this_device: id == me })
         .collect();
     seen.sort_by(|a, b| b.this_device.cmp(&a.this_device).then(b.last_seen.cmp(&a.last_seen)));
-    Ok(PassOutcome { changed, wrote, merged_copies: copies.len() as u32, devices: seen, path })
+    let stamp = if wrote { stamp(&path) } else { before };
+    Ok(PassOutcome { changed, wrote, merged_copies: copies.len() as u32, devices: seen, path, stamp })
 }
 
+/// A file's modified time and size.
+pub type Stamp = (SystemTime, u64);
+
 /// The file's size and time, to notice another device writing it.
-fn stamp(path: &Path) -> Option<(SystemTime, u64)> {
+fn stamp(path: &Path) -> Option<Stamp> {
     let m = std::fs::metadata(path).ok()?;
     Some((m.modified().ok()?, m.len()))
 }
@@ -268,6 +277,9 @@ struct Inner {
     status: Mutex<SyncFileStatus>,
     events: Mutex<Option<Arc<dyn SyncEvents>>>,
     kick: Notify,
+    /// Runs between a pass and the wait that follows it (tests only).
+    #[cfg(test)]
+    after_pass: Mutex<Option<Box<dyn FnMut() + Send>>>,
 }
 
 /// The background sync. Cheap to clone.
@@ -294,6 +306,8 @@ impl SyncEngine {
                 status: Mutex::new(SyncFileStatus::default()),
                 events: Mutex::new(None),
                 kick: Notify::new(),
+                #[cfg(test)]
+                after_pass: Mutex::new(None),
             }),
         }
     }
@@ -327,9 +341,22 @@ impl SyncEngine {
         }
     }
 
+    /// Runs `f` after every pass of [`SyncEngine::run`], before it starts
+    /// waiting, so a test can change the file in exactly that gap.
+    #[cfg(test)]
+    pub(crate) fn set_after_pass(&self, f: impl FnMut() + Send + 'static) {
+        *self.inner.after_pass.lock() = Some(Box::new(f));
+    }
+
     /// One pass with the current settings; returns the file's path when it
     /// ran against a file.
     pub async fn sync_now(&self) -> Option<PathBuf> {
+        self.pass_now().await.map(|(path, _)| path)
+    }
+
+    /// Like [`SyncEngine::sync_now`], plus the file's stamp as the pass
+    /// left it, which is what the next change is compared with.
+    async fn pass_now(&self) -> Option<(PathBuf, Option<Stamp>)> {
         let cfg = self.inner.config.borrow().clone();
         let folder_text = cfg.folder.as_ref().map(|f| f.to_string_lossy().to_string());
         let Some(folder) = cfg.folder.clone().filter(|_| cfg.enabled) else {
@@ -350,14 +377,20 @@ impl SyncEngine {
         let groups = cfg.groups;
         let f2 = folder.clone();
         let t2 = tag.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let path = file::dir(&folder).join(file::file_name(&tag));
+        let p2 = path.clone();
+        let (pre, result) = tokio::task::spawn_blocking(move || {
+            let pre = stamp(&p2);
             let now = store.now();
-            pass(&store, &f2, &t2, groups, &name, now).map(|o| (o, now))
+            (pre, pass(&store, &f2, &t2, groups, &name, now).map(|o| (o, now)))
         })
         .await
-        .unwrap_or_else(|e| Err(PassError::Io(e.to_string())));
-        let path = file::dir(&folder).join(file::file_name(&tag));
+        .unwrap_or_else(|e| (None, Err(PassError::Io(e.to_string()))));
         let prev = self.status();
+        let seen = match &result {
+            Ok((o, _)) => o.stamp,
+            Err(_) => pre,
+        };
         match result {
             Ok((o, now)) => {
                 if !o.changed.is_empty() {
@@ -389,7 +422,7 @@ impl SyncEngine {
                 });
             }
         }
-        Some(path)
+        Some((path, seen))
     }
 
     /// Start a new file: the unreadable one is moved aside (kept), then a pass.
@@ -413,9 +446,17 @@ impl SyncEngine {
         let t = self.inner.timing;
         let mut config = self.inner.config.clone();
         loop {
-            let path = self.sync_now().await;
-            let mut last = path.as_deref().and_then(stamp);
-            let started = tokio::time::Instant::now();
+            // The stamp is the one the pass saw or wrote, not one taken
+            // now: a write by another device right after the pass must
+            // count as a change, or it would wait for the next full reread.
+            let (path, last) = match self.pass_now().await {
+                Some((p, s)) => (Some(p), s),
+                None => (None, None),
+            };
+            #[cfg(test)]
+            if let Some(f) = self.inner.after_pass.lock().as_mut() {
+                f();
+            }            let started = tokio::time::Instant::now();
             // Wait for the next reason to sync.
             loop {
                 tokio::select! {
@@ -436,9 +477,7 @@ impl SyncEngine {
                     }
                     // Sync off (no file): nothing to poll, so no timer.
                     _ = tokio::time::sleep(t.poll), if path.is_some() => {
-                        let now = path.as_deref().and_then(stamp);
-                        if now != last {
-                            last = now;
+                        if path.as_deref().and_then(stamp) != last {
                             break;
                         }
                         if started.elapsed() >= t.reread {

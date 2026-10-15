@@ -560,14 +560,39 @@ fn fast() -> Timing {
     Timing { debounce: Duration::from_millis(50), poll: Duration::from_millis(30), reread: Duration::from_secs(60) }
 }
 
+/// Waits for `f`. The limit is a hang guard, kept well under the 60 s
+/// `reread` of [`fast`] so a change the engine only finds on its full
+/// reread still fails the test.
 async fn eventually(mut f: impl FnMut() -> bool) -> bool {
-    for _ in 0..200 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
         if f() {
             return true;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    false
+    f()
+}
+
+#[tokio::test]
+async fn a_write_by_another_device_right_after_a_pass_is_noticed() {
+    let cloud = tempfile::tempdir().unwrap();
+    let (pc, mac) = (Dev::new("pc"), Dev::new("mac"));
+    mac.store.put(&FOLLOWS, "z", &follow("from the mac")).unwrap();
+    let (_tx, rx) = tokio::sync::watch::channel(SyncConfig { enabled: true, folder: Some(cloud.path().to_path_buf()), groups: Groups::default() });
+    let engine = SyncEngine::new(pc.store.clone(), Arc::new(Tag(Some(TAG))), rx, Arc::new(|| "PC".into()), fast());
+    // The mac writes the file in the gap between the PC's first pass and
+    // its first look at the file, the worst moment.
+    let (mac_store, folder) = (mac.store.clone(), cloud.path().to_path_buf());
+    let mut once = true;
+    engine.set_after_pass(move || {
+        if std::mem::take(&mut once) {
+            engine::pass(&mac_store, &folder, TAG, Groups::default(), "Mac", mac_store.now()).unwrap();
+        }
+    });
+    let task = tokio::spawn(engine.clone().run());
+    assert!(eventually(|| pc.store.get(&FOLLOWS, "z").unwrap().is_some()).await, "the mac's write was missed");
+    task.abort();
 }
 
 #[tokio::test]
