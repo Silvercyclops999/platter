@@ -235,6 +235,10 @@ pub struct Settings {
     /// Popular songs from ListenBrainz (Last.fm top tracks when it has none
     /// and Last.fm is on).
     pub info_listenbrainz: bool,
+    /// MusicBrainz: members and relationships, album dates and credits.
+    pub info_musicbrainz: bool,
+    /// ListenBrainz listener numbers when Last.fm has none.
+    pub info_listenbrainz_stats: bool,
     /// Every name in a track's artist line links to a page, featured
     /// artists without a library entry included.
     pub link_featured: bool,
@@ -476,6 +480,8 @@ impl Default for Settings {
             info_fanart: false,
             info_audiodb: false,
             info_listenbrainz: true,
+            info_musicbrainz: true,
+            info_listenbrainz_stats: true,
             link_featured: true,
             liked_means: LikedMeans::Five,
             like_control_rows: LikeControlRows::Hover,
@@ -599,6 +605,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "infoFanart",
     "infoAudiodb",
     "infoListenbrainz",
+    "infoMusicbrainz",
+    "infoListenbrainzStats",
     "linkFeatured",
     "likedMeans",
     "likeControlRows",
@@ -746,6 +754,8 @@ pub struct SettingsPatch {
     pub info_fanart: Option<bool>,
     pub info_audiodb: Option<bool>,
     pub info_listenbrainz: Option<bool>,
+    pub info_musicbrainz: Option<bool>,
+    pub info_listenbrainz_stats: Option<bool>,
     pub link_featured: Option<bool>,
     pub liked_means: Option<LikedMeans>,
     pub like_control_rows: Option<LikeControlRows>,
@@ -918,6 +928,8 @@ impl Settings {
         set(&mut self.info_fanart, p.info_fanart);
         set(&mut self.info_audiodb, p.info_audiodb);
         set(&mut self.info_listenbrainz, p.info_listenbrainz);
+        set(&mut self.info_musicbrainz, p.info_musicbrainz);
+        set(&mut self.info_listenbrainz_stats, p.info_listenbrainz_stats);
         set(&mut self.link_featured, p.link_featured);
         set(&mut self.liked_means, p.liked_means);
         set(&mut self.like_control_rows, p.like_control_rows);
@@ -1296,6 +1308,8 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         ai.set(Src::Fanart, s.info_fanart && on);
         ai.set(Src::Audiodb, s.info_audiodb && on);
         ai.set(Src::Listenbrainz, s.info_listenbrainz && on);
+        ai.set(Src::Musicbrainz, s.info_musicbrainz && on);
+        ai.set(Src::ListenbrainzStats, s.info_listenbrainz_stats && on);
     }
     live.platform.set(s.platform());
     live.sync.set(s.sync_config());
@@ -1627,6 +1641,7 @@ mod tests {
         assert!(!s.notify_track_change);
         assert!(s.info_wikipedia && !s.info_lastfm && !s.info_fanart && !s.info_audiodb);
         assert!(s.info_listenbrainz && s.link_featured);
+        assert!(s.info_musicbrainz && s.info_listenbrainz_stats);
         assert!(s.playlist_ask_duplicates);
         assert_eq!(s.playlist_new_name, "My playlist #N");
         assert_eq!((s.liked_means, s.like_control_rows), (LikedMeans::Five, LikeControlRows::Hover));

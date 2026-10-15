@@ -237,12 +237,13 @@ in that order (the page's sort or filter).
 | Command | Args | Returns |
 | --- | --- | --- |
 | `artist_info` | `{ id }` | `ArtistInfo` |
+| `album_credits` | `{ id }` (album) | `AlbumCredits` |
 | `artist_info_keys` | – | `{ lastfm, fanart, audiodb, listenbrainz: { saved, rejected } }` |
 | `artist_info_key_set` | `{ source: "lastfm"|"fanart"|"audiodb"|"listenbrainz", key: string|null }` | `{ saved, rejected }` |
 | `artist_info_cache_clear` | – | number of artists that had cached info |
 | `open_info_link` | `{ url, artistId? }` | – (opens a source, licence or profile page in the default browser) |
 
-`ArtistInfo = { id, bio?, bioSource?: "plex"|"wikipedia"|"lastfm"|"audiodb", origin?, yearsActive?, members: { name, artistId? }[], tags: string[], listeners?, scrobbles?, photo?, banner?, logo?, credits: { source, text, url?, licence?, licenceUrl? }[], gallery: string[], links: { kind, label, url }[], bioLinks: { text, artistId }[] }`
+`ArtistInfo = { id, bio?, bioSource?: "plex"|"wikipedia"|"lastfm"|"audiodb", origin?, yearsActive?, members: { name, artistId?, years? }[], related: { name, artistId?, relation }[], tags: string[], listeners?, scrobbles?, listenersFrom?: "lastfm"|"listenbrainz", photo?, banner?, logo?, credits: { source, text, url?, licence?, licenceUrl? }[], gallery: string[], links: { kind, label, url }[], bioLinks: { text, artistId }[] }`
 
 Optional outside sources fill gaps that Plex leaves: Wikipedia and Wikidata
 (no key, on by default), Last.fm, Fanart.tv and TheAudioDB (each needs the
@@ -251,6 +252,28 @@ local cache at once and fetches missing or month-old entries in the
 background, then emits `artistinfo://changed` with `{ id }`. Only the
 artist's name or MusicBrainz id is sent. Sources that are off, failing or
 whose key was refused are left out, along with their credits.
+
+MusicBrainz (no key, on by default) gives members with their years, related
+artists ("Member of", "Subgroup", "Collaboration", "Formerly" and so on) and
+the years active when Wikidata has none. ListenBrainz listener numbers (on by
+default) fill `listeners` and `scrobbles` when Last.fm has none, with
+`listenersFrom` saying which one they came from.
+
+`AlbumCredits = { albumId, state: "off"|"pending"|"none"|"found", released?, editionDate?, label?, credits: CreditRow[], tracks: { trackId, credits: CreditRow[] }[], url? }`
+with `CreditRow = { name, artistId?, roles: ("producer"|"writer"|"composer"|"lyricist"|"featured"|"mixer"|"engineer"|"mastering")[] }`.
+
+`album_credits` answers from the same cache at once. A missing or month-old
+entry is `pending` and is looked up in the background, then
+`albumcredits://changed` fires with `{ id }`, found or not. The lookup uses
+the MusicBrainz release id Plex has for the album (one request), else a sure
+release group match by artist and title and its official release with the
+same number of songs. `released` is the release group's first date,
+`editionDate` this release's own date when it differs. Album `credits` lists
+everyone on the release and its songs except featured artists, who stay with
+their songs in `tracks` (matched to library tracks by disc and position, else
+by title). Unreleased albums are never looked up (`none`). MusicBrainz is
+asked at most once a second with a user agent that names the app; a failed
+lookup waits ten minutes before it's tried again.
 
 `bio` is Plex's summary when it is longer than 300 characters, else the
 first of Wikipedia, Last.fm and TheAudioDB with more text than Plex has, else
@@ -1434,6 +1457,8 @@ The rest of the fields, with their defaults:
 | `infoFanart` | bool, false | Artist images from Fanart.tv. Same key rule. |
 | `infoAudiodb` | bool, false | Artist photo and bio from TheAudioDB. Same key rule. |
 | `infoListenbrainz` | bool, true | Popular's global list from ListenBrainz (Last.fm top tracks fill in when it has none and Last.fm is on). With this and `infoLastfm` both off, Popular ranks by your plays. The optional token is kept in the keychain. |
+| `infoMusicbrainz` | bool, true | MusicBrainz: album release dates and credits, artist members with their years, related artists. Synced. |
+| `infoListenbrainzStats` | bool, true | ListenBrainz listener numbers when Last.fm has none. Synced. |
 | `linkFeatured` | bool, true | Every name in a track's artist line links to a page, featured artists without a library entry included, and search lists them. Off leaves those names as plain text. |
 | `likedMeans` | `"five"` or `"fourUp"`, `"five"` | Which Plex ratings count as liked: five stars (10), or four stars and up (8 or more). Liking always writes five stars. |
 | `likeControlRows` | `"hover"`, `"always"` or `"off"`, `"hover"` | When song rows show the like control. Liked songs always show their tick unless it's `"off"`; the player bar and now playing always show it. |

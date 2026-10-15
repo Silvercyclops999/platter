@@ -838,6 +838,7 @@ pub fn run() {
             settings::app_info,
             settings::open_project_page,
             artistinfo::commands::artist_info,
+            artistinfo::commands::album_credits,
             feed::commands::feed_status,
             artistinfo::commands::artist_info_keys,
             artistinfo::commands::artist_info_key_set,

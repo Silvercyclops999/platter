@@ -1,0 +1,37 @@
+{
+  "id": "bbbbbbbb-1111-4111-8111-000000000001",
+  "title": "Lantern Songs",
+  "first-release-date": "1997-05-21",
+  "releases": [
+    {
+      "id": "aaaaaaaa-1111-4111-8111-000000000009",
+      "title": "Lantern Songs",
+      "status": "Bootleg",
+      "date": "1996-12-01",
+      "media": [{ "position": 1, "track-count": 3 }]
+    },
+    {
+      "id": "aaaaaaaa-1111-4111-8111-000000000008",
+      "title": "Lantern Songs",
+      "status": "Official",
+      "date": "1997-05-21",
+      "media": [{ "position": 1, "track-count": 12 }]
+    },
+    {
+      "id": "aaaaaaaa-1111-4111-8111-000000000001",
+      "title": "Lantern Songs",
+      "status": "Official",
+      "date": "2004-03-01",
+      "media": [
+        { "position": 1, "track-count": 1 },
+        { "position": 2, "track-count": 1 }
+      ]
+    },
+    {
+      "id": "aaaaaaaa-1111-4111-8111-000000000007",
+      "title": "Lantern Songs",
+      "status": "Official",
+      "media": [{ "position": 1, "track-count": 3 }]
+    }
+  ]
+}

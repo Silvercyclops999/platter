@@ -60,9 +60,13 @@ pub fn put_raw(c: &Connection, artist_id: &str, source: &str, json: Option<Strin
     Ok(before != Some(json))
 }
 
-/// Delete every row. Returns how many artists had info.
+/// Delete every row (album credits too). Returns how many artists had info.
 pub fn clear(c: &Connection) -> AppResult<u64> {
-    let n: i64 = c.query_row("SELECT count(DISTINCT artist_id) FROM artist_info", [], |r| r.get(0))?;
+    let n: i64 = c.query_row(
+        "SELECT count(DISTINCT artist_id) FROM artist_info WHERE artist_id NOT LIKE 'album:%'",
+        [],
+        |r| r.get(0),
+    )?;
     c.execute("DELETE FROM artist_info", [])?;
     Ok(n as u64)
 }

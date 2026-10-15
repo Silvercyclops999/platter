@@ -3,9 +3,11 @@
 
 use std::collections::HashMap;
 
+use super::listenbrainz::LbStats;
+use super::mbdetails::MbArtist;
 use super::{
-    ArtistInfo, AudioDbData, BioLink, BioSource, Credit, FanartData, InfoLink, LastfmData, Member, WikiData, ext_art_path,
-    fold_name,
+    ArtistInfo, AudioDbData, BioLink, BioSource, Credit, FanartData, InfoLink, LastfmData, Member, Related, WikiData,
+    ext_art_path, fold_name,
 };
 
 /// A Plex summary at least this long is kept even when another source has more.
@@ -33,6 +35,20 @@ pub struct Sources {
     pub lastfm: Option<LastfmData>,
     pub fanart: Option<FanartData>,
     pub audiodb: Option<AudioDbData>,
+    pub musicbrainz: Option<MbArtist>,
+    pub lb_stats: Option<LbStats>,
+}
+
+impl Sources {
+    /// Names the page may link to library artists: members and relations.
+    pub fn people(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.wiki.as_ref().map(|w| w.members.clone()).unwrap_or_default();
+        if let Some(mb) = &self.musicbrainz {
+            out.extend(mb.members.iter().map(|m| m.name.clone()));
+            out.extend(mb.related.iter().map(|r| r.name.clone()));
+        }
+        out
+    }
 }
 
 fn chars(s: &str) -> usize {
@@ -227,23 +243,38 @@ pub fn merge(plex: &PlexArtist, s: &Sources, library: &HashMap<String, String>) 
         None => (None, None),
     };
     let wiki = s.wiki.as_ref();
-    let members: Vec<Member> = wiki
-        .map(|w| {
-            w.members
+    let mb = s.musicbrainz.as_ref();
+    let link = |name: &str| library.get(&fold_name(name)).filter(|id| **id != plex.id).cloned();
+    // MusicBrainz members carry their years, so they go first.
+    let mb_members = mb.is_some_and(|m| !m.members.is_empty());
+    let members: Vec<Member> = match (mb, wiki) {
+        (Some(m), _) if mb_members => {
+            m.members.iter().map(|x| Member { name: x.name.clone(), artist_id: link(&x.name), years: x.years.clone() }).collect()
+        }
+        (_, Some(w)) => w.members.iter().map(|name| Member { name: name.clone(), artist_id: link(name), years: None }).collect(),
+        _ => Vec::new(),
+    };
+    let related: Vec<Related> = mb
+        .map(|m| {
+            m.related
                 .iter()
-                .map(|name| Member {
-                    name: name.clone(),
-                    artist_id: library.get(&fold_name(name)).filter(|id| **id != plex.id).cloned(),
-                })
+                .map(|r| Related { name: r.name.clone(), artist_id: link(&r.name), relation: r.relation.clone() })
                 .collect()
         })
         .unwrap_or_default();
     let origin = wiki.and_then(|w| w.origin.clone());
-    let years_active = wiki.and_then(|w| w.years_active.clone());
+    let wiki_years = wiki.and_then(|w| w.years_active.clone());
+    let mb_years = if wiki_years.is_none() { mb.and_then(|m| m.life_span.clone()) } else { None };
+    let years_active = wiki_years.or(mb_years.clone());
     let lastfm = s.lastfm.as_ref();
     let tags = lastfm.map(|l| l.tags.clone()).unwrap_or_default();
-    let listeners = lastfm.and_then(|l| l.listeners);
-    let scrobbles = lastfm.and_then(|l| l.playcount);
+    // Last.fm's numbers, else ListenBrainz's.
+    let lb = s.lb_stats.as_ref().filter(|_| lastfm.is_none_or(|l| l.listeners.is_none()));
+    let (listeners, scrobbles, listeners_from) = match (lastfm.and_then(|l| l.listeners), lb) {
+        (Some(n), _) => (Some(n), lastfm.and_then(|l| l.playcount), Some("lastfm")),
+        (None, Some(st)) if st.listeners.is_some() => (st.listeners, st.listens, Some("listenbrainz")),
+        _ => (None, lastfm.and_then(|l| l.playcount), lastfm.and_then(|l| l.playcount).map(|_| "lastfm")),
+    };
 
     // Plex art always wins.
     let has_thumb = plex.thumb.as_deref().is_some_and(|t| !t.is_empty());
@@ -270,7 +301,7 @@ pub fn merge(plex: &PlexArtist, s: &Sources, library: &HashMap<String, String>) 
         });
     }
     if let Some(w) = wiki
-        && (origin.is_some() || years_active.is_some() || !members.is_empty())
+        && (origin.is_some() || wiki.is_some_and(|w| w.years_active.is_some()) || (!members.is_empty() && !mb_members))
     {
         credits.push(Credit {
             source: "wikidata".into(),
@@ -290,6 +321,28 @@ pub fn merge(plex: &PlexArtist, s: &Sources, library: &HashMap<String, String>) 
             url: l.url.clone().or_else(|| Some("https://www.last.fm".into())),
             licence: bio.then(|| LASTFM_LICENCE.into()),
             licence_url: bio.then(|| LASTFM_LICENCE_URL.into()),
+        });
+    }
+    if let Some(m) = mb
+        && (mb_members || !related.is_empty() || mb_years.is_some())
+    {
+        credits.push(Credit {
+            source: "musicbrainz".into(),
+            text: "Members and relationships from MusicBrainz".into(),
+            url: Some(format!("https://musicbrainz.org/artist/{}", m.mbid)),
+            licence: Some("CC0".into()),
+            licence_url: Some("https://creativecommons.org/publicdomain/zero/1.0/".into()),
+        });
+    }
+    if listeners_from == Some("listenbrainz")
+        && let Some(st) = lb
+    {
+        credits.push(Credit {
+            source: "listenbrainz".into(),
+            text: "Listener numbers from ListenBrainz".into(),
+            url: Some(format!("https://listenbrainz.org/artist/{}/", st.mbid)),
+            licence: Some("CC0".into()),
+            licence_url: Some("https://creativecommons.org/publicdomain/zero/1.0/".into()),
         });
     }
     if let Some(f) = fanart
@@ -325,6 +378,8 @@ pub fn merge(plex: &PlexArtist, s: &Sources, library: &HashMap<String, String>) 
         tags,
         listeners,
         scrobbles,
+        listeners_from: listeners_from.map(str::to_owned),
+        related,
         photo: fanart_photo.or(audiodb_photo).map(|u| ext_art_path(&u)),
         banner: banner.map(|u| ext_art_path(&u)),
         logo: logo.map(|u| ext_art_path(&u)),
@@ -390,6 +445,7 @@ mod tests {
             lastfm: Some(lastfm(&"l".repeat(900))),
             audiodb: Some(audiodb(&"a".repeat(900))),
             fanart: None,
+            ..Default::default()
         };
         assert_eq!(pick_bio(Some(&long_plex), &all).unwrap().1, BioSource::Plex);
         assert_eq!(pick_bio(Some("short"), &all).unwrap().1, BioSource::Wikipedia);
@@ -531,7 +587,7 @@ mod tests {
         let s = Sources { wiki: Some(wiki("w")), ..Default::default() };
         let lib = HashMap::from([("singer".to_string(), "77".to_string())]);
         let info = merge(&plex(None), &s, &lib);
-        assert_eq!(info.members[0], Member { name: "Singer".into(), artist_id: Some("77".into()) });
+        assert_eq!(info.members[0], Member { name: "Singer".into(), artist_id: Some("77".into()), years: None });
         assert_eq!(info.members[1].artist_id, None);
         assert_eq!(info.origin.as_deref(), Some("Abingdon"));
     }

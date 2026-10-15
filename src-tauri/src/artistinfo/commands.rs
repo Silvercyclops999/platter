@@ -15,6 +15,14 @@ pub async fn artist_info(info: State<'_, ArtistInfoService>, id: String) -> AppR
     info.info(&id).await
 }
 
+/// An album's original release date, label and credits from MusicBrainz.
+/// Answers from the cache at once (`state: "pending"` while a lookup runs);
+/// `albumcredits://changed` fires when the lookup is done.
+#[tauri::command]
+pub async fn album_credits(info: State<'_, ArtistInfoService>, id: String) -> AppResult<super::mbdetails::AlbumCredits> {
+    info.album_credits(&id).await
+}
+
 /// Whether each keyed source has a key saved on this device, and whether the
 /// service refused it this session.
 #[tauri::command]
@@ -59,6 +67,8 @@ const LINK_HOSTS: &[&str] = &[
     "fanart.tv",
     "www.theaudiodb.com",
     "theaudiodb.com",
+    "musicbrainz.org",
+    "listenbrainz.org",
     "creativecommons.org",
 ];
 

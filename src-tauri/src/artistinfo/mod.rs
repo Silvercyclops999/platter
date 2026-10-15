@@ -2,21 +2,26 @@
 //! Fanart.tv and TheAudioDB. Plex stays the main source; these fill gaps on
 //! the artist page (a longer bio, origin, years active, members, tags,
 //! listener counts, a photo or banner when Plex has none). ListenBrainz (or
-//! Last.fm top tracks) gives the global Popular list, and MusicBrainz the id
-//! of a credited artist that has no Plex entry.
+//! Last.fm top tracks) gives the global Popular list and listener numbers
+//! when Last.fm has none. MusicBrainz gives the id of a credited artist that
+//! has no Plex entry, members with their years and other relationships, and
+//! an album's original release date and credits.
 //!
 //! Layout:
 //! - [`http`]     the `InfoHttp` trait (faked in tests) and the real client
 //! - [`limit`]    per-source pacing and 429/5xx backoff
 //! - [`wiki`], [`lastfm`], [`fanart`], [`audiodb`]  one lookup per source
-//! - [`listenbrainz`] top recordings; [`musicbrainz`] artist id by name
+//! - [`listenbrainz`] top recordings and listener stats; [`musicbrainz`]
+//!   artist id by name, artist and release lookups
+//! - [`mbdetails`] parsing MusicBrainz members, relationships and credits
 //! - [`cache`]    SQLite rows per artist and source (`artist_info` table)
 //! - [`merge`]    what the page shows, from Plex plus the cached sources
 //! - [`service`]  lazy fetch, background refresh, keys, switches
 //! - [`art`]      serves source images through the `art` cache
 //! - [`commands`] Tauri commands (docs/IPC.md "Artist info")
 //!
-//! Only the artist's name or MusicBrainz id ever leaves the computer.
+//! Only the artist's name or MusicBrainz id ever leaves the computer (for an
+//! album: its MusicBrainz release id, or its artist and title).
 
 pub mod art;
 pub mod audiodb;
@@ -27,6 +32,7 @@ pub mod http;
 pub mod lastfm;
 pub mod limit;
 pub mod listenbrainz;
+pub mod mbdetails;
 pub mod merge;
 pub mod musicbrainz;
 pub mod service;
@@ -34,6 +40,8 @@ pub mod wiki;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod mb_tests;
 
 use serde::{Deserialize, Serialize};
 
@@ -49,11 +57,16 @@ pub enum InfoSource {
     Audiodb,
     /// Popular songs (not part of the merged info).
     Listenbrainz,
+    /// Members with their years, relationships, album dates and credits.
+    Musicbrainz,
+    /// Listener numbers from ListenBrainz (when Last.fm has none).
+    ListenbrainzStats,
 }
 
 impl InfoSource {
     /// The sources merged into [`ArtistInfo`].
-    pub const ALL: [InfoSource; 4] = [Self::Wikipedia, Self::Lastfm, Self::Fanart, Self::Audiodb];
+    pub const ALL: [InfoSource; 6] =
+        [Self::Wikipedia, Self::Lastfm, Self::Fanart, Self::Audiodb, Self::Musicbrainz, Self::ListenbrainzStats];
 
     /// Row name in the cache table.
     pub fn as_str(self) -> &'static str {
@@ -63,17 +76,19 @@ impl InfoSource {
             Self::Fanart => "fanart",
             Self::Audiodb => "audiodb",
             Self::Listenbrainz => crate::db::popular::GLOBAL_ROW,
+            Self::Musicbrainz => "musicbrainz",
+            Self::ListenbrainzStats => "listenbrainz-stats",
         }
     }
 
     /// Whether the source can't work without the user's API key.
     pub fn needs_key(self) -> bool {
-        !matches!(self, Self::Wikipedia | Self::Listenbrainz)
+        matches!(self, Self::Lastfm | Self::Fanart | Self::Audiodb)
     }
 
     /// Whether the source can use a key (ListenBrainz: an optional token).
     pub fn takes_key(self) -> bool {
-        !matches!(self, Self::Wikipedia)
+        matches!(self, Self::Lastfm | Self::Fanart | Self::Audiodb | Self::Listenbrainz)
     }
 
     /// Keychain account for the source's key.
@@ -84,6 +99,8 @@ impl InfoSource {
             Self::Fanart => "fanart-api-key",
             Self::Audiodb => "audiodb-api-key",
             Self::Listenbrainz => "listenbrainz-token",
+            Self::Musicbrainz => "musicbrainz-unused",
+            Self::ListenbrainzStats => "listenbrainz-token",
         }
     }
 
@@ -93,7 +110,8 @@ impl InfoSource {
             Self::Lastfm => "Last.fm",
             Self::Fanart => "Fanart.tv",
             Self::Audiodb => "TheAudioDB",
-            Self::Listenbrainz => "ListenBrainz",
+            Self::Listenbrainz | Self::ListenbrainzStats => "ListenBrainz",
+            Self::Musicbrainz => "MusicBrainz",
         }
     }
 }
@@ -207,6 +225,19 @@ pub struct Member {
     pub name: String,
     /// Set when the member is an artist in this library.
     pub artist_id: Option<String>,
+    /// "1991–present", "1991–2004" (MusicBrainz), when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub years: Option<String>,
+}
+
+/// Another artist this one is related to (MusicBrainz).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Related {
+    pub name: String,
+    pub artist_id: Option<String>,
+    /// "Member of", "Subgroup", "Collaboration", "Formerly", …
+    pub relation: String,
 }
 
 /// One "where this came from" line in the About dialog.
@@ -232,9 +263,13 @@ pub struct ArtistInfo {
     pub years_active: Option<String>,
     pub members: Vec<Member>,
     pub tags: Vec<String>,
-    /// Last.fm listeners and plays.
+    /// Last.fm listeners and plays, else ListenBrainz's.
     pub listeners: Option<u64>,
     pub scrobbles: Option<u64>,
+    /// Where the listener numbers come from: "lastfm" or "listenbrainz".
+    pub listeners_from: Option<String>,
+    /// Other artists this one is related to (MusicBrainz).
+    pub related: Vec<Related>,
     /// Art path for a photo, only when Plex has none.
     pub photo: Option<String>,
     /// Art path for the header banner, only when Plex has no background art.

@@ -1,0 +1,78 @@
+{
+  "id": "11111111-2222-3333-4444-555555555555",
+  "name": "The Band",
+  "type": "Group",
+  "life-span": { "begin": "1985", "end": null, "ended": false },
+  "relations": [
+    {
+      "type": "member of band",
+      "target-type": "artist",
+      "direction": "backward",
+      "begin": "1985",
+      "end": "1990",
+      "ended": true,
+      "attributes": ["lead vocals"],
+      "artist": { "id": "eeeeeeee-1111-4111-8111-000000000001", "name": "Singer" }
+    },
+    {
+      "type": "member of band",
+      "target-type": "artist",
+      "direction": "backward",
+      "begin": "1988",
+      "end": null,
+      "ended": false,
+      "attributes": ["guitar"],
+      "artist": { "id": "eeeeeeee-1111-4111-8111-000000000001", "name": "Singer" }
+    },
+    {
+      "type": "member of band",
+      "target-type": "artist",
+      "direction": "backward",
+      "begin": "1985-04",
+      "end": "1999-11-02",
+      "ended": true,
+      "attributes": ["drums"],
+      "artist": { "id": "eeeeeeee-1111-4111-8111-000000000003", "name": "Drummer" }
+    },
+    {
+      "type": "member of band",
+      "target-type": "artist",
+      "direction": "backward",
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "attributes": [],
+      "artist": { "id": "eeeeeeee-1111-4111-8111-000000000004", "name": "Keys Player" }
+    },
+    {
+      "type": "subgroup",
+      "target-type": "artist",
+      "direction": "forward",
+      "artist": { "id": "eeeeeeee-1111-4111-8111-000000000005", "name": "The Band Trio" }
+    },
+    {
+      "type": "collaboration",
+      "target-type": "artist",
+      "direction": "backward",
+      "artist": { "id": "eeeeeeee-1111-4111-8111-000000000006", "name": "Band and Friends" }
+    },
+    {
+      "type": "artist rename",
+      "target-type": "artist",
+      "direction": "backward",
+      "artist": { "id": "eeeeeeee-1111-4111-8111-000000000007", "name": "The Early Band" }
+    },
+    {
+      "type": "tribute",
+      "target-type": "artist",
+      "direction": "backward",
+      "artist": { "id": "eeeeeeee-1111-4111-8111-000000000008", "name": "Cover Act" }
+    },
+    {
+      "type": "official homepage",
+      "target-type": "url",
+      "direction": "forward",
+      "url": { "resource": "https://band.example/" }
+    }
+  ]
+}

@@ -11,6 +11,11 @@
 //! (`credit:` ids) have no Plex entry: their name comes from the tracks that
 //! credit them and their MusicBrainz id from a MusicBrainz search; Plex is
 //! never asked about them.
+//!
+//! Albums get the same treatment for their MusicBrainz release (original
+//! date, label, credits): `album_credits` answers from the cache at once and
+//! `albumcredits://changed` follows a lookup. Unreleased albums are never
+//! looked up.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -28,7 +33,8 @@ use super::fanart::Fanart;
 use super::http::InfoHttp;
 use super::lastfm::Lastfm;
 use super::limit::Limiter;
-use super::listenbrainz::ListenBrainz;
+use super::listenbrainz::{LbStats, ListenBrainz};
+use super::mbdetails::{self, AlbumCredits, CreditsState, LibTrack, MbArtist, MbRelease};
 use super::merge::{self, PlexArtist, Sources};
 use super::musicbrainz::MusicBrainz;
 use super::wiki::Wiki;
@@ -47,17 +53,19 @@ pub const POPULAR_TTL_S: i64 = 7 * 24 * 3600;
 
 /// On/off per source (from Settings). Cheap to clone.
 #[derive(Clone)]
-pub struct Switches(Arc<[AtomicBool; 5]>);
+pub struct Switches(Arc<[AtomicBool; 7]>);
 
 impl Default for Switches {
-    /// Wikipedia and ListenBrainz on, the keyed sources off (the Settings
-    /// defaults).
+    /// Wikipedia, ListenBrainz and MusicBrainz on, the keyed sources off
+    /// (the Settings defaults).
     fn default() -> Self {
         Self(Arc::new([
             AtomicBool::new(true),
             AtomicBool::new(false),
             AtomicBool::new(false),
             AtomicBool::new(false),
+            AtomicBool::new(true),
+            AtomicBool::new(true),
             AtomicBool::new(true),
         ]))
     }
@@ -70,6 +78,8 @@ fn slot(s: InfoSource) -> usize {
         InfoSource::Fanart => 2,
         InfoSource::Audiodb => 3,
         InfoSource::Listenbrainz => 4,
+        InfoSource::Musicbrainz => 5,
+        InfoSource::ListenbrainzStats => 6,
     }
 }
 
@@ -87,6 +97,10 @@ impl Switches {
 #[async_trait]
 pub trait MbidLookup: Send + Sync {
     async fn artist_mbid(&self, artist_id: &str) -> AppResult<Option<String>>;
+    /// An album's MusicBrainz release id (album detail `Guid`).
+    async fn album_mbid(&self, _album_id: &str) -> AppResult<Option<String>> {
+        Ok(None)
+    }
 }
 
 pub trait InfoEvents: Send + Sync {
@@ -94,6 +108,8 @@ pub trait InfoEvents: Send + Sync {
     /// A fetch of the global Popular list finished, found or not. The page
     /// stops waiting for it.
     fn popular_done(&self, _id: &str) {}
+    /// An album's MusicBrainz credits were looked up (found or not).
+    fn album_credits_changed(&self, _album_id: &str) {}
 }
 
 impl<R: tauri::Runtime> InfoEvents for tauri::AppHandle<R> {
@@ -108,6 +124,13 @@ impl<R: tauri::Runtime> InfoEvents for tauri::AppHandle<R> {
         use tauri::Emitter;
         if let Err(e) = self.emit("artistinfo://popular", serde_json::json!({ "id": id })) {
             tracing::warn!("emit artistinfo://popular: {e}");
+        }
+    }
+
+    fn album_credits_changed(&self, album_id: &str) {
+        use tauri::Emitter;
+        if let Err(e) = self.emit("albumcredits://changed", serde_json::json!({ "id": album_id })) {
+            tracing::warn!("emit albumcredits://changed: {e}");
         }
     }
 }
@@ -168,6 +191,8 @@ struct Inner {
     key_cache: Mutex<HashMap<InfoSource, Option<Token>>>,
     limits: Limiters,
     in_flight: Mutex<HashSet<String>>,
+    /// Albums whose lookup failed (offline, busy), when: not asked again for a while.
+    album_failed: Mutex<HashMap<String, i64>>,
     lang: String,
     prefetch: Mutex<Prefetch>,
 }
@@ -295,6 +320,7 @@ impl ArtistInfoService {
                 key_cache: Mutex::new(HashMap::new()),
                 limits: Limiters::default(),
                 in_flight: Mutex::new(HashSet::new()),
+                album_failed: Mutex::new(HashMap::new()),
                 lang: "en".into(),
                 prefetch: Mutex::new(Prefetch {
                     queue: VecDeque::new(),
@@ -429,6 +455,7 @@ impl ArtistInfoService {
             InfoSource::Fanart => Fanart { http, limiter: &l.fanart, key }.lookup(Some(PROBE_MBID)).await.map(|_| ()),
             InfoSource::Audiodb => AudioDb { http, limiter: &l.audiodb, key }.lookup(Some(PROBE_MBID), "").await.map(|_| ()),
             InfoSource::Listenbrainz => ListenBrainz { http, limiter: &l.listenbrainz, token: Some(key) }.validate().await,
+            InfoSource::Musicbrainz | InfoSource::ListenbrainzStats => Ok(()),
         }
     }
 
@@ -456,10 +483,12 @@ impl ArtistInfoService {
                 InfoSource::Lastfm => sources.lastfm = row.parse::<LastfmData>(),
                 InfoSource::Fanart => sources.fanart = row.parse::<FanartData>(),
                 InfoSource::Audiodb => sources.audiodb = row.parse::<AudioDbData>(),
+                InfoSource::Musicbrainz => sources.musicbrainz = row.parse::<MbArtist>(),
+                InfoSource::ListenbrainzStats => sources.lb_stats = row.parse::<LbStats>(),
                 InfoSource::Listenbrainz => {}
             }
         }
-        let names = sources.wiki.as_ref().map(|w| w.members.clone()).unwrap_or_default();
+        let names = sources.people();
         let mut library = library_ids(c, &names)?;
         if let Some((bio, _)) = merge::pick_bio(plex.summary.as_deref(), &sources) {
             library.extend(library_names_in(c, &merge::bio_candidates(&bio))?);
@@ -692,10 +721,152 @@ impl ArtistInfoService {
         if let Some(r) = audiodb {
             changed |= self.record(id, InfoSource::Audiodb, r, None, now).await;
         }
+        // These two need the MusicBrainz id; without one there's nothing to ask.
+        if want(InfoSource::Musicbrainz) {
+            let r = match mbid.as_deref() {
+                Some(m) => MusicBrainz { http, limiter: &l.musicbrainz }.artist(m).await,
+                None => Ok(None),
+            };
+            changed |= self.record(id, InfoSource::Musicbrainz, r, None, now).await;
+        }
+        if want(InfoSource::ListenbrainzStats) {
+            let token = self.key(InfoSource::Listenbrainz);
+            let r = match mbid.as_deref() {
+                Some(m) => {
+                    let lb = ListenBrainz { http, limiter: &l.listenbrainz, token: token.as_ref().map(|t| t.expose()) };
+                    lb.artist_stats(m).await
+                }
+                None => Ok(None),
+            };
+            if r == Err(FetchError::KeyRejected) {
+                self.reject(InfoSource::Listenbrainz);
+            } else {
+                changed |= self.record(id, InfoSource::ListenbrainzStats, r, None, now).await;
+            }
+        }
         if snap.popular_stale && !popular_early {
             popular_changed = self.popular_step(id, mbid.as_deref(), &name, now).await;
         }
         Ok((popular_changed, changed))
+    }
+
+    // ------------------------------------------------------------ albums
+
+    /// An album's MusicBrainz credits from the cache, at once. A missing or
+    /// stale answer is looked up in the background (`albumcredits://changed`
+    /// follows).
+    pub async fn album_credits(&self, album_id: &str) -> AppResult<AlbumCredits> {
+        let (out, stale) = self.album_cached(album_id, now_s()).await?;
+        if stale {
+            let me = self.clone();
+            let id = album_id.to_owned();
+            tokio::spawn(async move {
+                if let Err(e) = me.refresh_album(&id).await {
+                    tracing::debug!("album credits for {id}: {e}");
+                }
+            });
+        }
+        Ok(out)
+    }
+
+    /// The answer from the cache, and whether a lookup is due.
+    pub async fn album_cached(&self, album_id: &str, now: i64) -> AppResult<(AlbumCredits, bool)> {
+        if !self.usable(InfoSource::Musicbrainz) {
+            return Ok((AlbumCredits::empty(album_id, CreditsState::Off), false));
+        }
+        let key = album_key(album_id);
+        let id = album_id.to_owned();
+        let (subject, row, library) = self
+            .inner
+            .db
+            .read_async(move |c| {
+                let subject = album_subject(c, &id)?;
+                let row = cache::get(c, &key, InfoSource::Musicbrainz.as_str())?;
+                let names = row.as_ref().and_then(|r| r.parse::<MbRelease>()).map(|r| mbdetails::credit_names(&r)).unwrap_or_default();
+                Ok((subject, row, library_ids(c, &names)?))
+            })
+            .await?;
+        let Some(subject) = subject else { return Err(AppError::NotFound(format!("album {album_id}"))) };
+        if subject.unreleased {
+            return Ok((AlbumCredits::empty(album_id, CreditsState::None), false));
+        }
+        let Some(row) = row else {
+            let failed = self.inner.album_failed.lock().get(album_id).is_some_and(|t| now - t < ALBUM_RETRY_S);
+            return Ok(if failed {
+                (AlbumCredits::empty(album_id, CreditsState::None), false)
+            } else {
+                (AlbumCredits::empty(album_id, CreditsState::Pending), true)
+            });
+        };
+        let stale = row.stale(now) && !self.inner.album_failed.lock().get(album_id).is_some_and(|t| now - t < ALBUM_RETRY_S);
+        let out = match row.parse::<MbRelease>() {
+            Some(r) => mbdetails::album_credits(album_id, &r, &subject.tracks, &library),
+            None => AlbumCredits::empty(album_id, CreditsState::None),
+        };
+        Ok((out, stale))
+    }
+
+    /// The album's release id from Plex, cached like an artist's.
+    async fn album_mbid(&self, album_id: &str, now: i64) -> Option<String> {
+        let key = album_key(album_id);
+        let k2 = key.clone();
+        let row = self.inner.db.read_async(move |c| cache::get(c, &k2, MBID_ROW)).await.ok().flatten();
+        if let Some(r) = &row
+            && !r.stale(now)
+        {
+            return r.parse::<String>();
+        }
+        let lookup = self.inner.mbid.lock().clone();
+        match lookup {
+            Some(l) => match l.album_mbid(album_id).await {
+                Ok(m) => {
+                    let m = m.filter(|m| is_mbid(m));
+                    let json = m.clone();
+                    let _ = self.inner.db.write_async(move |c| cache::put(c, &key, MBID_ROW, json.as_ref(), now, cache::TTL_S)).await;
+                    m
+                }
+                Err(_) => row.and_then(|r| r.parse::<String>()),
+            },
+            None => None,
+        }
+    }
+
+    /// Look up an album on MusicBrainz and store the answer. One lookup per
+    /// album at a time. Returns whether the stored answer changed.
+    pub async fn refresh_album(&self, album_id: &str) -> AppResult<bool> {
+        let key = album_key(album_id);
+        if !self.inner.in_flight.lock().insert(key.clone()) {
+            return Ok(false);
+        }
+        let out = self.refresh_album_inner(album_id, now_s()).await;
+        self.inner.in_flight.lock().remove(&key);
+        if out.is_ok()
+            && let Some(ev) = self.inner.events.lock().clone()
+        {
+            ev.album_credits_changed(album_id);
+        }
+        out
+    }
+
+    async fn refresh_album_inner(&self, album_id: &str, now: i64) -> AppResult<bool> {
+        if !self.usable(InfoSource::Musicbrainz) {
+            return Ok(false);
+        }
+        let id = album_id.to_owned();
+        let Some(subject) = self.inner.db.read_async(move |c| album_subject(c, &id)).await? else { return Ok(false) };
+        if subject.unreleased {
+            return Ok(false);
+        }
+        let known = self.album_mbid(album_id, now).await;
+        let mb = MusicBrainz { http: self.inner.http.as_ref(), limiter: &self.inner.limits.musicbrainz };
+        let r = mb.album_release(&subject.artist, &subject.title, subject.tracks.len(), known.as_deref()).await;
+        if let Err(e) = &r {
+            tracing::debug!("MusicBrainz album lookup: {e:?}");
+            self.inner.album_failed.lock().insert(album_id.to_owned(), now);
+            return Ok(false);
+        }
+        self.inner.album_failed.lock().remove(album_id);
+        Ok(self.record(&album_key(album_id), InfoSource::Musicbrainz, r, None, now).await)
     }
 
     /// Queue artists for a background Popular fetch. One worker takes them
@@ -864,8 +1035,8 @@ impl ArtistInfoService {
     }
 }
 
-/// [`MbidLookup`] backed by the Plex client (artist detail carries
-/// `Guid: [{id: "mbid://…"}]`).
+/// [`MbidLookup`] backed by the Plex client (artist and album detail carry
+/// `Guid: [{id: "mbid://…"}]`; an album's is a release id).
 pub struct PlexMbid(pub crate::plex::PlexState);
 
 #[async_trait]
@@ -873,4 +1044,54 @@ impl MbidLookup for PlexMbid {
     async fn artist_mbid(&self, artist_id: &str) -> AppResult<Option<String>> {
         Ok(self.0.client().await?.metadata(artist_id).await?.mbid())
     }
+
+    async fn album_mbid(&self, album_id: &str) -> AppResult<Option<String>> {
+        Ok(self.0.client().await?.metadata(album_id).await?.mbid())
+    }
+}
+
+/// Cache rows for an album are keyed like this (the table is per "artist").
+pub const ALBUM_PREFIX: &str = "album:";
+/// How long a failed album lookup waits before the page may ask again.
+pub const ALBUM_RETRY_S: i64 = 10 * 60;
+
+pub fn album_key(album_id: &str) -> String {
+    format!("{ALBUM_PREFIX}{album_id}")
+}
+
+/// What an album lookup needs from the library cache.
+pub struct AlbumSubject {
+    pub title: String,
+    pub artist: String,
+    pub unreleased: bool,
+    pub tracks: Vec<LibTrack>,
+}
+
+pub fn album_subject(c: &Connection, id: &str) -> AppResult<Option<AlbumSubject>> {
+    let row = c
+        .query_row(
+            "SELECT al.title, al.artist_title, al.format, al.subformats, at.version FROM albums al
+             LEFT JOIN album_tags at ON at.album_id = al.id WHERE al.id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((title, artist, format, subformats, version)) = row else { return Ok(None) };
+    let subformats: Vec<String> = subformats.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let unreleased = crate::db::release::is_unreleased(format.as_deref(), &subformats, version.as_deref());
+    let mut stmt = c.prepare_cached(
+        "SELECT id, title, disc_number, track_number FROM tracks WHERE album_id = ?1 ORDER BY disc_number, track_number",
+    )?;
+    let tracks = stmt
+        .query_map([id], |r| Ok(LibTrack { id: r.get(0)?, title: r.get(1)?, disc: r.get(2)?, number: r.get(3)? }))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(AlbumSubject { title, artist, unreleased, tracks }))
 }

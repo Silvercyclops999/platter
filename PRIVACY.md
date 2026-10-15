@@ -23,9 +23,16 @@ and your own Plex server.
   list; on by default, can be turned off in Settings). The request carries
   the artist's MusicBrainz id, and your ListenBrainz user token if you choose
   to enter one.
+- ListenBrainz listener numbers for an artist, when Last.fm has none (on by
+  default, can be turned off in Settings). The request carries the artist's
+  MusicBrainz id.
 - MusicBrainz, to find the MusicBrainz id of a featured artist who has no
   albums in your library, when you open their page. The request carries the
-  artist's name, nothing else.
+  artist's name, nothing else. With MusicBrainz on in Settings (the default),
+  it also gives an artist's members and related artists (the request carries
+  their MusicBrainz id) and an album's release date and credits (the album's
+  MusicBrainz release id, or its artist and title when Plex has no id).
+  Unreleased albums are never looked up.
 - ntfy.sh (or your own ntfy server), only during a listening session. It
   carries the session's sealed messages; see Listening sessions below.
 - Apple's iTunes Search, only when you copy a public link for a song or album

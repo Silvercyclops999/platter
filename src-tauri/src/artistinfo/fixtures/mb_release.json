@@ -1,0 +1,164 @@
+{
+  "id": "aaaaaaaa-1111-4111-8111-000000000001",
+  "title": "Lantern Songs",
+  "status": "Official",
+  "date": "2004-03-01",
+  "release-group": {
+    "id": "bbbbbbbb-1111-4111-8111-000000000001",
+    "title": "Lantern Songs",
+    "primary-type": "Album",
+    "first-release-date": "1997-05-21"
+  },
+  "label-info": [
+    { "catalog-number": "LT-12", "label": { "id": "cccccccc-1111-4111-8111-000000000001", "name": "Low Tide Music" } }
+  ],
+  "artist-credit": [
+    { "name": "The Band", "joinphrase": "", "artist": { "id": "11111111-2222-3333-4444-555555555555", "name": "The Band" } }
+  ],
+  "relations": [
+    {
+      "type": "producer",
+      "target-type": "artist",
+      "direction": "backward",
+      "attributes": [],
+      "artist": { "id": "dddddddd-1111-4111-8111-000000000001", "name": "Ada Moss" }
+    },
+    {
+      "type": "mastering",
+      "target-type": "artist",
+      "direction": "backward",
+      "attributes": [],
+      "artist": { "id": "dddddddd-1111-4111-8111-000000000002", "name": "Bo Kettle" }
+    },
+    {
+      "type": "engineer",
+      "target-type": "artist",
+      "direction": "backward",
+      "attributes": ["assistant"],
+      "artist": { "id": "dddddddd-1111-4111-8111-000000000003", "name": "Tea Runner" }
+    },
+    {
+      "type": "design/illustration",
+      "target-type": "artist",
+      "direction": "backward",
+      "attributes": [],
+      "artist": { "id": "dddddddd-1111-4111-8111-000000000004", "name": "Sketch Person" }
+    },
+    {
+      "type": "amazon asin",
+      "target-type": "url",
+      "url": { "resource": "https://www.example.com/x" }
+    }
+  ],
+  "media": [
+    {
+      "position": 1,
+      "format": "CD",
+      "track-count": 1,
+      "tracks": [
+        {
+          "position": 1,
+          "number": "1",
+          "title": "Opening",
+          "artist-credit": [
+            { "name": "The Band", "joinphrase": " feat. ", "artist": { "id": "11111111-2222-3333-4444-555555555555", "name": "The Band" } },
+            { "name": "Singer", "joinphrase": "", "artist": { "id": "eeeeeeee-1111-4111-8111-000000000001", "name": "Singer" } }
+          ],
+          "recording": {
+            "id": "ffffffff-1111-4111-8111-000000000001",
+            "title": "Opening",
+            "relations": [
+              {
+                "type": "producer",
+                "target-type": "artist",
+                "direction": "backward",
+                "attributes": [],
+                "artist": { "id": "dddddddd-1111-4111-8111-000000000001", "name": "Ada Moss" }
+              },
+              {
+                "type": "mix",
+                "target-type": "artist",
+                "direction": "backward",
+                "attributes": [],
+                "artist": { "id": "dddddddd-1111-4111-8111-000000000005", "name": "Cy Fader" }
+              },
+              {
+                "type": "performance",
+                "target-type": "work",
+                "direction": "forward",
+                "work": {
+                  "id": "99999999-1111-4111-8111-000000000001",
+                  "title": "Opening",
+                  "relations": [
+                    {
+                      "type": "composer",
+                      "target-type": "artist",
+                      "direction": "backward",
+                      "attributes": [],
+                      "artist": { "id": "dddddddd-1111-4111-8111-000000000006", "name": "Cal Rowe" }
+                    },
+                    {
+                      "type": "lyricist",
+                      "target-type": "artist",
+                      "direction": "backward",
+                      "attributes": [],
+                      "artist": { "id": "dddddddd-1111-4111-8111-000000000007", "name": "Dee Lin" }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "position": 2,
+      "format": "CD",
+      "track-count": 1,
+      "tracks": [
+        {
+          "position": 1,
+          "number": "1",
+          "title": "Second Light",
+          "recording": {
+            "id": "ffffffff-1111-4111-8111-000000000002",
+            "title": "Second Light",
+            "artist-credit": [
+              { "name": "The Band", "joinphrase": " ft. ", "artist": { "id": "11111111-2222-3333-4444-555555555555", "name": "The Band" } },
+              { "name": "Guest Horn", "joinphrase": " & ", "artist": { "id": "eeeeeeee-1111-4111-8111-000000000002", "name": "Guest Horn" } },
+              { "name": "Guest Keys", "joinphrase": "" }
+            ],
+            "relations": [
+              {
+                "type": "performance",
+                "target-type": "work",
+                "direction": "forward",
+                "work": {
+                  "id": "99999999-1111-4111-8111-000000000002",
+                  "title": "Second Light",
+                  "relations": [
+                    {
+                      "type": "writer",
+                      "target-type": "artist",
+                      "direction": "backward",
+                      "attributes": [],
+                      "artist": { "id": "dddddddd-1111-4111-8111-000000000006", "name": "Cal Rowe" }
+                    },
+                    {
+                      "type": "composer",
+                      "target-type": "artist",
+                      "direction": "backward",
+                      "attributes": [],
+                      "artist": { "id": "dddddddd-1111-4111-8111-000000000006", "name": "Cal Rowe" }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

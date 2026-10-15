@@ -78,7 +78,59 @@ pub fn parse(body: &[u8]) -> Result<Option<TopRecordings>, FetchError> {
     Ok(Some(TopRecordings { top: GlobalTop::from_entries("listenbrainz", entries), credit_names }))
 }
 
+/// An artist's listener numbers on ListenBrainz (all time). Only the totals
+/// are kept; the reply's list of top listeners is never read.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LbStats {
+    pub mbid: String,
+    /// People who listened.
+    pub listeners: Option<u64>,
+    /// Listens in all.
+    pub listens: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct StatsReply {
+    payload: StatsPayload,
+}
+
+#[derive(Deserialize)]
+struct StatsPayload {
+    #[serde(default)]
+    total_user_count: Option<u64>,
+    #[serde(default)]
+    total_listen_count: Option<u64>,
+}
+
+/// Parse a listeners reply (`stats/artist/<mbid>/listeners`).
+pub fn parse_stats(body: &[u8], mbid: &str) -> Result<Option<LbStats>, FetchError> {
+    let r: StatsReply = serde_json::from_slice(body)
+        .map_err(|e| FetchError::Unavailable(format!("ListenBrainz stats answer is unexpected: {e}")))?;
+    let (listeners, listens) = (r.payload.total_user_count, r.payload.total_listen_count);
+    if listeners.is_none() && listens.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(LbStats { mbid: mbid.to_owned(), listeners, listens }))
+}
+
 impl ListenBrainz<'_> {
+    /// The artist's listener and listen totals. `Ok(None)` when ListenBrainz
+    /// has no stats for them yet.
+    pub async fn artist_stats(&self, mbid: &str) -> Fetch<LbStats> {
+        if !is_mbid(mbid) {
+            return Ok(None);
+        }
+        let url = format!("{API}stats/artist/{mbid}/listeners");
+        let resp = self.limiter.get(self.http, &url, &self.headers()).await?;
+        match resp.status {
+            200 => parse_stats(&resp.body, mbid),
+            401 | 403 if self.token.is_some() => Err(FetchError::KeyRejected),
+            204 | 400 | 401 | 403 | 404 => Ok(None),
+            s => Err(FetchError::Unavailable(format!("ListenBrainz answered {s}"))),
+        }
+    }
+
     fn headers(&self) -> Vec<(&'static str, String)> {
         self.token.map(|t| vec![("Authorization", format!("Token {t}"))]).unwrap_or_default()
     }

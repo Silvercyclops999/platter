@@ -120,7 +120,75 @@ pub fn pick_release_group(v: &Value, artist: &str, title: &str) -> Option<String
     found
 }
 
+pub const RELEASE_API: &str = "https://musicbrainz.org/ws/2/release/";
+/// What a release lookup includes: the release group (original date), credit
+/// lines, label, tracks, and artist relations on the release, its
+/// recordings and their works (producer, writer and so on).
+pub const RELEASE_INC: &str =
+    "release-groups+artist-credits+labels+recordings+artist-rels+recording-level-rels+work-rels+work-level-rels";
+
+pub fn release_url(release_id: &str) -> String {
+    format!("{RELEASE_API}{release_id}?inc={RELEASE_INC}&fmt=json")
+}
+
+/// A release group with its releases and their track counts.
+pub fn release_group_releases_url(rg: &str) -> String {
+    format!("{RELEASE_GROUP_API}{rg}?inc=releases+media&fmt=json")
+}
+
+/// An artist with its artist relations (members, subgroups and so on).
+pub fn artist_url(mbid: &str) -> String {
+    format!("{API}{mbid}?inc=artist-rels&fmt=json")
+}
+
 impl MusicBrainz<'_> {
+    /// One lookup by id: `Ok(None)` when MusicBrainz doesn't know it.
+    async fn lookup(&self, url: &str) -> Fetch<Value> {
+        let resp = self.limiter.get(self.http, url, &[]).await?;
+        match resp.status {
+            200 => Ok(Some(resp.json().map_err(FetchError::from)?)),
+            400 | 404 => Ok(None),
+            s => Err(FetchError::Unavailable(format!("MusicBrainz answered {s}"))),
+        }
+    }
+
+    /// An artist's members and relationships.
+    pub async fn artist(&self, mbid: &str) -> Fetch<super::mbdetails::MbArtist> {
+        if !is_mbid(mbid) {
+            return Ok(None);
+        }
+        Ok(self.lookup(&artist_url(mbid)).await?.as_ref().and_then(super::mbdetails::parse_artist))
+    }
+
+    /// A release with its dates and credits.
+    pub async fn release(&self, release_id: &str) -> Fetch<super::mbdetails::MbRelease> {
+        if !is_mbid(release_id) {
+            return Ok(None);
+        }
+        Ok(self.lookup(&release_url(release_id)).await?.as_ref().and_then(super::mbdetails::parse_release))
+    }
+
+    /// An album's release: the one Plex knows (one request), else a sure
+    /// release group match by artist and title, then its best release
+    /// (three requests).
+    pub async fn album_release(
+        &self,
+        artist: &str,
+        title: &str,
+        track_count: usize,
+        known: Option<&str>,
+    ) -> Fetch<super::mbdetails::MbRelease> {
+        if let Some(id) = known.filter(|k| is_mbid(k))
+            && let Some(r) = self.release(id).await?
+        {
+            return Ok(Some(r));
+        }
+        let Some(rg) = self.release_group_id(artist, title).await? else { return Ok(None) };
+        let Some(v) = self.lookup(&release_group_releases_url(&rg)).await? else { return Ok(None) };
+        let Some(id) = super::mbdetails::pick_release(&v, track_count) else { return Ok(None) };
+        self.release(&id).await
+    }
+
     /// The release group id of an album, only for a sure match.
     pub async fn release_group_id(&self, artist: &str, title: &str) -> Fetch<String> {
         if artist.trim().is_empty() || title.trim().is_empty() {

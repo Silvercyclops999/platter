@@ -71,7 +71,12 @@ fn rig(summary: Option<&str>, mbid: Option<&'static str>) -> Rig {
     .unwrap();
     let http = Arc::new(FakeHttp::new());
     let keys = Arc::new(MemoryStore::new());
-    let svc = ArtistInfoService::new(db.clone(), http.clone(), keys.clone(), Switches::default());
+    // The MusicBrainz details and ListenBrainz stats have their own tests
+    // (`rig_mb`); here they stay off so the request counts are the older ones.
+    let switches = Switches::default();
+    switches.set(InfoSource::Musicbrainz, false);
+    switches.set(InfoSource::ListenbrainzStats, false);
+    let svc = ArtistInfoService::new(db.clone(), http.clone(), keys.clone(), switches);
     svc.set_mbid_lookup(Arc::new(Mbid(mbid)));
     let events = Arc::new(Events::default());
     svc.set_events(events.clone());
@@ -125,7 +130,7 @@ async fn mbid_path_fills_bio_facts_members_and_credits() {
     assert_eq!(info.bio_source, Some(BioSource::Wikipedia));
     assert_eq!(info.origin.as_deref(), Some("Abingdon"));
     assert_eq!(info.years_active.as_deref(), Some("1985–present"));
-    assert_eq!(info.members[0], Member { name: "Singer".into(), artist_id: Some("77".into()) });
+    assert_eq!(info.members[0], Member { name: "Singer".into(), artist_id: Some("77".into()), years: None });
     assert_eq!(info.members[1].artist_id, None);
     let wp = &info.credits[0];
     assert_eq!((wp.text.as_str(), wp.licence.as_deref()), ("From Wikipedia", Some("CC BY-SA 4.0")));
