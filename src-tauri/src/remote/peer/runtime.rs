@@ -67,7 +67,7 @@ pub async fn run(remote: RemoteService, dir: Arc<dyn PeerDirectory>, addrs: Addr
         version: cfg.version.clone(),
         name: Arc::new(move || name_switches.computer_name()),
     });
-    let server = Arc::new(PeerServer::new(own_id.clone(), handler, Arc::new(EnvKey(remote.env()))));
+    let server = Arc::new(PeerServer::new(own_id.clone(), handler, Arc::new(EnvKey(remote.env()))).with_extra(remote.extra_routes()));
     let mut running: Option<Running> = None;
     loop {
         let want = *on.borrow_and_update();

@@ -55,12 +55,24 @@ impl KeySource for EnvKey {
     }
 }
 
+/// More routes on the same port, with their own checks (a listening
+/// session's guests sign with the session's key, not the account's).
+#[async_trait]
+pub trait ExtraRoutes: Send + Sync {
+    fn handles(&self, path: &str) -> bool;
+    async fn respond(&self, method: &str, target: &str, auth: Option<&str>, body: &[u8]) -> (u16, String);
+}
+
+/// Where the extra routes are plugged in (set once the app has them).
+pub type ExtraSlot = Arc<parking_lot::RwLock<Option<Arc<dyn ExtraRoutes>>>>;
+
 /// The control API: checks signatures, then hands requests to the handler.
 pub struct PeerServer {
     pub own_id: String,
     pub handler: Arc<dyn PeerHandler>,
     pub keys: Arc<dyn KeySource>,
     verifier: Verifier,
+    extra: ExtraSlot,
 }
 
 fn json_err(code: &str, message: &str) -> String {
@@ -91,12 +103,22 @@ fn app_err(e: AppError) -> (u16, String) {
 
 impl PeerServer {
     pub fn new(own_id: String, handler: Arc<dyn PeerHandler>, keys: Arc<dyn KeySource>) -> Self {
-        Self { own_id, handler, keys, verifier: Verifier::new() }
+        Self { own_id, handler, keys, verifier: Verifier::new(), extra: ExtraSlot::default() }
+    }
+
+    /// Answer the extra routes in `slot` too.
+    pub fn with_extra(mut self, slot: ExtraSlot) -> Self {
+        self.extra = slot;
+        self
     }
 
     /// Answer one request: (status, JSON body).
     pub async fn respond(&self, method: &str, target: &str, auth: Option<&str>, body: &[u8]) -> (u16, String) {
         let path = target.split('?').next().unwrap_or(target);
+        let extra = self.extra.read().clone();
+        if let Some(x) = extra.filter(|x| x.handles(path)) {
+            return x.respond(method, target, auth, body).await;
+        }
         let known = matches!(
             (method, path),
             ("GET", PATH_HELLO) | ("GET", PATH_STATE) | ("POST", PATH_PLAY) | ("POST", PATH_COMMAND) | ("POST", PATH_STOP)
@@ -194,8 +216,10 @@ async fn serve_conn(mut stream: TcpStream, server: Arc<PeerServer>) {
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
         409 => "Conflict",
+        410 => "Gone",
         _ => "Internal Server Error",
     };
     let resp = format!(

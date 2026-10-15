@@ -105,11 +105,13 @@ pub struct DeepLinkOpen {
     pub album_id: Option<String>,
     /// For a song: where to start when the user presses play.
     pub at_seconds: Option<u32>,
+    /// A listening session invite (`platter://join/...`), to join.
+    pub join: Option<String>,
 }
 
 impl DeepLinkOpen {
     fn failed(status: DeepLinkStatus) -> Self {
-        Self { status, kind: None, id: None, album_id: None, at_seconds: None }
+        Self { status, kind: None, id: None, album_id: None, at_seconds: None, join: None }
     }
 }
 
@@ -324,6 +326,9 @@ impl ShareService {
 
     /// Work out what a `platter://` link opens.
     pub async fn resolve(&self, raw: &str) -> DeepLinkOpen {
+        if crate::social::listen::parse_invite(raw).is_some() {
+            return DeepLinkOpen { join: Some(raw.trim().to_string()), ..DeepLinkOpen::failed(DeepLinkStatus::Open) };
+        }
         let Some(l) = link::parse(raw) else {
             return DeepLinkOpen::failed(DeepLinkStatus::Invalid);
         };
@@ -345,7 +350,7 @@ impl ShareService {
             Item::Track { album_id, .. } => Some(album_id),
             _ => None,
         };
-        DeepLinkOpen { status: DeepLinkStatus::Open, kind: Some(l.kind), id: Some(l.id), album_id, at_seconds: l.t }
+        DeepLinkOpen { status: DeepLinkStatus::Open, kind: Some(l.kind), id: Some(l.id), album_id, at_seconds: l.t, join: None }
     }
 
     /// A link was opened: keep it for the UI and tell it.

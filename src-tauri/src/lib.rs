@@ -16,6 +16,7 @@ pub mod plex;
 pub mod remote;
 pub mod settings;
 pub mod share;
+pub mod social;
 pub mod tags;
 pub mod tracking;
 pub mod updates;
@@ -323,10 +324,39 @@ pub fn run() {
                     },
                 );
             }
-            {
+            let peer_port = {
                 let id = plex.identity();
-                remote::commands::spawn_peers(&remote, id.platform.clone(), id.version.clone());
+                remote::commands::spawn_peers(&remote, id.platform.clone(), id.version.clone())
+            };
+            // Listening sessions answer on the same control port.
+            let listen_name = social::commands::ListenName::default();
+            let listen = social::listen::ListenAlong::new(social::listen::ListenDeps {
+                player: Arc::new(player.clone()),
+                transport: Arc::new(social::listen::HttpTransport::new()?),
+                events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                own_id: plex.identity().client_id.clone(),
+                name: {
+                    let n = listen_name.0.clone();
+                    Arc::new(move || n.lock().clone())
+                },
+                guests_can_add: live.social.guests_can_add.clone(),
+                cfg: Default::default(),
+            });
+            *remote.extra_routes().write() = Some(Arc::new(listen.clone()));
+            let discord_party: Arc<parking_lot::Mutex<Option<platform::discord::activity::Party>>> = Arc::default();
+            {
+                let mut rx = listen.subscribe_party();
+                let slot = discord_party.clone();
+                tauri::async_runtime::spawn(async move {
+                    while rx.changed().await.is_ok() {
+                        let p = rx.borrow().clone();
+                        *slot.lock() = p.map(|p| platform::discord::activity::Party { id: p.id, size: p.size, max: p.max, join: None });
+                    }
+                });
             }
+            app.manage(listen);
+            app.manage(social::commands::ListenAddrs { port: peer_port });
+            app.manage(listen_name);
             remote.set_lan(remote::LanEnv {
                 mdns: Arc::new(remote::lan::MdnsSd::new()),
                 route: net_route.clone(),
@@ -356,8 +386,22 @@ pub fn run() {
                 &live.discord,
                 artist_info.musicbrainz_limiter(),
                 player.subscribe_tracking(),
+                discord_party,
             )?;
             app.manage(share);
+
+            // Friend activity, follows and What's New.
+            let social = social::Social::new(social::SocialDeps {
+                db: db.clone(),
+                follows: Arc::new(social::follows::KvFollows(db.clone())),
+                activity: Arc::new(social::commands::PlexActivity { plex: plex.clone(), db: db.clone() }),
+                events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                notifier: Arc::new(social::commands::OsNotifier(app.handle().clone())),
+                switches: live.social.clone(),
+                clock: Arc::new(db::queries::now_s),
+            });
+            social::commands::spawn_watch(social.clone(), db.clone());
+            app.manage(social);
 
             // Lyrics: Plex first, then LRCLIB when its setting is on.
             let lyrics_service = lyrics::LyricsService::new(
@@ -556,6 +600,16 @@ pub fn run() {
             platform::discord::commands::discord_imgur_key_set,
             tags::commands::tags_index,
             tags::commands::tag_scan_status,
+            social::commands::friend_activity,
+            social::commands::follows_list,
+            social::commands::follow_set,
+            social::commands::whats_new,
+            social::commands::whats_new_seen,
+            social::commands::listen_state,
+            social::commands::listen_start,
+            social::commands::listen_stop,
+            social::commands::listen_join,
+            social::commands::listen_add,
         ])
         .on_window_event(|window, event| {
             // Back from System Settings: pick up Local Network access at once.

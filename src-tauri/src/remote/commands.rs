@@ -204,11 +204,12 @@ impl LocalPlayer for PlayerHandle {
 }
 
 /// Show this computer to the user's other Platter devices while the
-/// setting is on, and find theirs.
-pub fn spawn_peers(remote: &RemoteService, platform: String, version: String) {
+/// setting is on, and find theirs. The answer is the control API's port
+/// while it listens.
+pub fn spawn_peers(remote: &RemoteService, platform: String, version: String) -> watch::Receiver<Option<u16>> {
     let dir: Arc<dyn PeerDirectory> = Arc::new(MdnsPeers::new());
     remote.set_peers(dir.clone());
-    let (port, _) = watch::channel(None);
+    let (port, rx) = watch::channel(None);
     tauri::async_runtime::spawn(runtime::run(
         remote.clone(),
         dir,
@@ -216,6 +217,7 @@ pub fn spawn_peers(remote: &RemoteService, platform: String, version: String) {
         RuntimeConfig::app(platform, version),
         port,
     ));
+    rx
 }
 
 /// Start or stop Platter-as-a-player as the setting changes.

@@ -97,6 +97,21 @@ pub struct Song {
     pub image: Option<String>,
     /// The song.link page, for released songs.
     pub link: Option<String>,
+    /// A listening session this computer hosts.
+    pub party: Option<Party>,
+}
+
+/// A listening session on Discord: its id and how many are in it. A join
+/// secret makes Discord offer a join button; Discord hands it to the
+/// joining Platter through the socket (ACTIVITY_JOIN), which needs a
+/// listener on the socket that Platter doesn't run yet, so none is sent and
+/// the invite goes by link.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Party {
+    pub id: String,
+    pub size: u32,
+    pub max: u32,
+    pub join: Option<String>,
 }
 
 fn host_ok(url: &str, hosts: &[&str], max: usize) -> bool {
@@ -190,8 +205,17 @@ pub fn build(song: Option<&Song>, s: &DiscordSettings, kind: Kind, with_line: bo
             "end": song.started_at_ms + song.duration_ms as i64,
         });
     }
+    let party = song.party.as_ref().filter(|p| s.listen_along && !p.id.is_empty() && p.size > 0 && p.max >= p.size);
+    if let Some(p) = party {
+        a["party"] = json!({ "id": p.id, "size": [p.size, p.max] });
+        if let Some(fit) = p.join.as_deref().filter(|j| !j.is_empty() && j.len() <= TEXT_MAX) {
+            a["secrets"] = json!({ "join": fit });
+        }
+    }
+    // Discord takes buttons or a join secret, not both.
     if s.find_song
         && !song.unreleased
+        && a.get("secrets").is_none()
         && let Some(url) = song.link.as_deref().filter(|u| button_allowed(u))
     {
         a["buttons"] = json!([{ "label": "Find this song", "url": url }]);
@@ -219,6 +243,26 @@ mod tests {
             link: Some("https://song.link/i/123".into()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_hosted_listening_session_shows_as_a_party_when_on() {
+        let mut s = song();
+        s.party = Some(Party { id: "0123456789abcdef".into(), size: 3, max: 11, join: None });
+        let a = build(Some(&s), &on(), Kind::Listening, true).unwrap();
+        assert_eq!(a["party"]["id"], "0123456789abcdef");
+        assert_eq!(a["party"]["size"], json!([3, 11]));
+        assert!(a.get("secrets").is_none());
+        assert_eq!(a["buttons"][0]["label"], "Find this song", "no join secret: the button stays");
+        // A join secret replaces the buttons (Discord takes one or the other).
+        s.party.as_mut().unwrap().join = Some("secret".into());
+        let a = build(Some(&s), &on(), Kind::Listening, true).unwrap();
+        assert_eq!(a["secrets"]["join"], "secret");
+        assert!(a.get("buttons").is_none());
+        // The setting turns it off.
+        let off = DiscordSettings { listen_along: false, ..on() };
+        let a = build(Some(&s), &off, Kind::Listening, true).unwrap();
+        assert!(a.get("party").is_none() && a.get("secrets").is_none());
     }
 
     #[test]

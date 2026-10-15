@@ -355,6 +355,18 @@ pub struct Settings {
     pub queue_end: QueueEnd,
     /// The shuffle button has a third state, smart shuffle.
     pub smart_shuffle: bool,
+    /// The top bar's friend activity button and panel.
+    pub show_friend_activity: bool,
+    /// Tell Plex what's playing now, so friends on the server see it live.
+    pub share_activity: bool,
+    /// The bell's dot for unseen releases on What's New.
+    pub whats_new_announcements: bool,
+    /// A desktop notification when a followed artist gets new music.
+    pub notify_new_releases: bool,
+    /// Guests in a listening session can add songs to the queue.
+    pub listen_guests_add: bool,
+    /// Discord shows a listening session you host.
+    pub discord_listen_along: bool,
 }
 
 impl Default for Settings {
@@ -455,6 +467,12 @@ impl Default for Settings {
             daylist_hours: 3,
             queue_end: QueueEnd::KeepPlaying,
             smart_shuffle: false,
+            show_friend_activity: true,
+            share_activity: true,
+            whats_new_announcements: true,
+            notify_new_releases: false,
+            listen_guests_add: true,
+            discord_listen_along: true,
         }
     }
 }
@@ -556,6 +574,12 @@ pub struct SettingsPatch {
     pub daylist_hours: Option<u32>,
     pub queue_end: Option<QueueEnd>,
     pub smart_shuffle: Option<bool>,
+    pub show_friend_activity: Option<bool>,
+    pub share_activity: Option<bool>,
+    pub whats_new_announcements: Option<bool>,
+    pub notify_new_releases: Option<bool>,
+    pub listen_guests_add: Option<bool>,
+    pub discord_listen_along: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -697,6 +721,12 @@ impl Settings {
         if let Some(v) = &p.mix_exclude_albums {
             self.mix_exclude_albums = tidy(v);
         }
+        set(&mut self.show_friend_activity, p.show_friend_activity);
+        set(&mut self.share_activity, p.share_activity);
+        set(&mut self.whats_new_announcements, p.whats_new_announcements);
+        set(&mut self.notify_new_releases, p.notify_new_releases);
+        set(&mut self.listen_guests_add, p.listen_guests_add);
+        set(&mut self.discord_listen_along, p.discord_listen_along);
         if let Some(name) = &p.computer_name {
             let name = name.trim();
             if name.chars().count() > COMPUTER_NAME_MAX {
@@ -805,6 +835,7 @@ impl Settings {
             upload_catbox: self.discord_upload_catbox,
             status_line: self.discord_status_line,
             private_session: self.private_session,
+            listen_along: self.discord_listen_along,
         }
     }
 }
@@ -862,6 +893,8 @@ pub struct Live {
     pub plex: Option<crate::plex::PlexState>,
     /// The mix engine, once it exists.
     pub mixes: Arc<parking_lot::Mutex<Option<crate::mixes::MixService>>>,
+    /// Friend activity, What's New and listening sessions.
+    pub social: crate::social::SocialSwitches,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -876,6 +909,15 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     }
     live.tracking.private_session.store(s.private_session, Ordering::Relaxed);
     live.tracking.report_to_plex.store(s.report_to_plex, Ordering::Relaxed);
+    live.tracking.share_activity.store(s.share_activity, Ordering::Relaxed);
+    {
+        let so = &live.social;
+        so.show_activity.store(s.show_friend_activity && on, Ordering::Relaxed);
+        so.whats_new.store(s.whats_new_announcements, Ordering::Relaxed);
+        so.notify_releases.store(s.notify_new_releases, Ordering::Relaxed);
+        so.guests_can_add.store(s.listen_guests_add, Ordering::Relaxed);
+        so.private_session.store(s.private_session, Ordering::Relaxed);
+    }
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
@@ -1221,6 +1263,11 @@ mod tests {
         assert!(s.apply(&SettingsPatch { daylist_hours: Some(2), ..Default::default() }).is_err());
         assert!(SettingsPatch { mix_unreleased: Some(true), ..Default::default() }.touches_mixes());
         assert!(!SettingsPatch { home_mixes: Some(false), ..Default::default() }.touches_mixes());
+        // Friend activity, sharing, What's New, guests adding and the Discord
+        // session are on; new release notifications are off.
+        assert!(s.show_friend_activity && s.share_activity && s.whats_new_announcements);
+        assert!(!s.notify_new_releases);
+        assert!(s.listen_guests_add && s.discord_listen_along);
     }
 
     #[test]
@@ -1384,9 +1431,23 @@ mod tests {
             daylist_hours: Some(1),
             queue_end: Some(QueueEnd::Stop),
             smart_shuffle: Some(true),
+            show_friend_activity: Some(false),
+            share_activity: Some(false),
+            whats_new_announcements: Some(false),
+            notify_new_releases: Some(true),
+            listen_guests_add: Some(false),
+            discord_listen_along: Some(false),
         })
         .await
         .unwrap();
+        // Friend activity, What's New and listening sessions see their switches.
+        assert!(!live.social.show_activity.load(Ordering::Relaxed));
+        assert!(!live.social.whats_new.load(Ordering::Relaxed));
+        assert!(live.social.notify_releases.load(Ordering::Relaxed));
+        assert!(!live.social.guests_can_add.load(Ordering::Relaxed));
+        assert!(live.social.private_session.load(Ordering::Relaxed));
+        assert!(!live.tracking.share_activity.load(Ordering::Relaxed));
+        assert!(!live.discord.get().listen_along);
         assert!(!live.lyrics_show_auto.load(Ordering::Relaxed));
         assert!(!live.share_public_links.load(Ordering::Relaxed));
         assert!(!live.remote.show_cast());

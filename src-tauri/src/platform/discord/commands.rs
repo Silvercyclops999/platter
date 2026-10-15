@@ -112,6 +112,7 @@ pub fn start<R: Runtime>(
     switches: &DiscordSwitches,
     musicbrainz: Arc<crate::artistinfo::limit::Limiter>,
     events: broadcast::Receiver<TrackingEvent>,
+    party: Arc<parking_lot::Mutex<Option<super::activity::Party>>>,
 ) -> AppResult<()> {
     let resolver = Arc::new(ArtResolver::new(
         db.clone(),
@@ -133,7 +134,7 @@ pub fn start<R: Runtime>(
             };
             // Enter Tauri's runtime so the service's task lands there.
             let _guard = tauri::async_runtime::handle().inner().enter();
-            super::spawn(Config::new(id), deps, events, switches.subscribe()).0
+            super::spawn(Config { party, ..Config::new(id) }, deps, events, switches.subscribe()).0
         }
         None => super::unavailable(resolver.clone(), sink),
     };

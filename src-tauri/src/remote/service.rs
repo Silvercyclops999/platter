@@ -198,6 +198,8 @@ struct Inner {
     /// The user's other Platter devices (None until the app sets it up).
     peers: Mutex<Option<Arc<dyn PeerDirectory>>>,
     peer_http: reqwest::Client,
+    /// More routes the control API answers (listening sessions).
+    extra: peer::server::ExtraSlot,
 }
 
 /// Cheap to clone; managed by Tauri.
@@ -260,6 +262,7 @@ impl RemoteService {
                 op: tokio::sync::Mutex::new(()),
                 lan: Mutex::new(None),
                 peers: Mutex::new(None),
+                extra: Default::default(),
                 peer_http: reqwest::Client::builder()
                     .no_proxy()
                     .connect_timeout(PEER_PROBE)
@@ -280,6 +283,11 @@ impl RemoteService {
     }
     pub fn switches(&self) -> &RemoteSwitches {
         &self.inner.switches
+    }
+
+    /// Where more control API routes plug in.
+    pub fn extra_routes(&self) -> peer::server::ExtraSlot {
+        self.inner.extra.clone()
     }
 
     /// Turns on the user's other Platter devices.

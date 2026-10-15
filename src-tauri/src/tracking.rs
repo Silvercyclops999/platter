@@ -26,13 +26,15 @@ use crate::plex::client::{PlaybackState, TimelineReport};
 
 const TIMELINE_EVERY_MS: u64 = 10_000;
 
-/// Shared switch for the private session stub: when on, nothing is written to
-/// the local listen log. Plex reporting continues unless `report_to_plex` is
-/// off too.
+/// Shared switches. A private session writes nothing to the local listen
+/// log (so nothing is scrobbled) and sends no now-playing timelines, so the
+/// server shows no live session for friends to see. "Share my activity" off
+/// stops the timelines too; finished plays still reach Plex's history.
 #[derive(Clone)]
 pub struct TrackingSettings {
     pub private_session: Arc<AtomicBool>,
     pub report_to_plex: Arc<AtomicBool>,
+    pub share_activity: Arc<AtomicBool>,
 }
 
 impl Default for TrackingSettings {
@@ -40,6 +42,7 @@ impl Default for TrackingSettings {
         Self {
             private_session: Arc::new(AtomicBool::new(false)),
             report_to_plex: Arc::new(AtomicBool::new(true)),
+            share_activity: Arc::new(AtomicBool::new(true)),
         }
     }
 }
@@ -179,8 +182,13 @@ impl Tracker {
         self.settings.report_to_plex.load(Ordering::Relaxed)
     }
 
+    /// Now-playing timelines go out (they make the live session friends see).
+    fn sharing_now(&self) -> bool {
+        self.settings.share_activity.load(Ordering::Relaxed) && !self.settings.private_session.load(Ordering::Relaxed)
+    }
+
     async fn send_timeline(&self, r: TimelineReport) {
-        if !self.reporting() {
+        if !self.reporting() || !self.sharing_now() {
             return;
         }
         if let Err(e) = self.plex.timeline(&r).await {
@@ -487,11 +495,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn private_session_writes_no_listen_log_but_still_reports() {
+    async fn private_session_writes_no_listen_log_and_shows_no_live_session() {
         let r = rig(true, true);
         full_play(&r.tracker).await;
         assert_eq!(listen_rows(&r.db), 0);
-        assert!(!r.rec.timelines.lock().is_empty());
+        // No timelines: friends on the server don't see it playing.
+        assert!(r.rec.timelines.lock().is_empty());
+        assert!(r.rec.scrobbles.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn sharing_off_hides_the_live_session_but_keeps_history() {
+        let r = rig(false, true);
+        r.tracker.settings.share_activity.store(false, Ordering::Relaxed);
+        full_play(&r.tracker).await;
+        assert!(r.rec.timelines.lock().is_empty());
+        assert_eq!(*r.rec.scrobbles.lock(), vec!["7".to_string()]);
+        assert_eq!(listen_rows(&r.db), 1);
     }
 
     #[tokio::test]

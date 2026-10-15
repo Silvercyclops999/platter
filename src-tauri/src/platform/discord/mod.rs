@@ -59,11 +59,14 @@ pub struct DiscordSettings {
     pub status_line: StatusLine,
     /// A private session hides everything.
     pub private_session: bool,
+    /// Show a listening session this computer hosts.
+    pub listen_along: bool,
 }
 
 impl Default for DiscordSettings {
     fn default() -> Self {
         Self {
+            listen_along: true,
             enabled: true,
             show_unreleased: true,
             unreleased_art: true,
@@ -162,6 +165,9 @@ pub struct Config {
     pub art_wait: Duration,
     /// Discord must answer within this.
     pub reply_timeout: Duration,
+    /// The listening session this computer hosts, if any (looked at every
+    /// [`Config::gap`]).
+    pub party: Arc<Mutex<Option<activity::Party>>>,
 }
 
 impl Config {
@@ -174,6 +180,7 @@ impl Config {
             retry: Duration::from_secs(15),
             art_wait: Duration::from_millis(1500),
             reply_timeout: Duration::from_secs(5),
+            party: Arc::default(),
         }
     }
 }
@@ -240,6 +247,7 @@ pub fn spawn(
         reconnect_at: None,
         dirty: false,
         not_before: Instant::now(),
+        party: None,
     };
     let task = tokio::spawn(runner.run(events, settings, side_rx));
     (handle, task)
@@ -299,6 +307,8 @@ struct Runner {
     reconnect_at: Option<Instant>,
     dirty: bool,
     not_before: Instant,
+    /// The hosted listening session as last shown.
+    party: Option<activity::Party>,
 }
 
 impl Runner {
@@ -325,6 +335,13 @@ impl Runner {
                 }
                 Some(m) = side.recv() => self.on_side(m),
                 _ = tokio::time::sleep_until(wake.unwrap_or_else(Instant::now)), if wake.is_some() => self.flush().await,
+                _ = tokio::time::sleep(self.cfg.gap), if self.cur.is_some() => {
+                    let p = self.cfg.party.lock().clone();
+                    if p != self.party {
+                        self.party = p;
+                        self.mark();
+                    }
+                }
             }
         }
     }
@@ -374,6 +391,7 @@ impl Runner {
                         started_at_ms: if at > 0 { at } else { now },
                         image: None,
                         link: None,
+                        party: None,
                     },
                     paused_at_ms: 0,
                     started: Instant::now(),
@@ -506,8 +524,8 @@ impl Runner {
     }
 
     fn desired(&self) -> Option<Value> {
-        let song = self.cur.as_ref().map(|c| &c.song);
-        activity::build(song, &self.settings, self.kind, self.with_line)
+        let song = self.cur.as_ref().map(|c| Song { party: self.party.clone(), ..c.song.clone() });
+        activity::build(song.as_ref(), &self.settings, self.kind, self.with_line)
     }
 
     fn drop_conn(&mut self, now: Instant, retry_in: Duration) {
