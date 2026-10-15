@@ -1,6 +1,6 @@
 /* Adding a server: kind, address, Quick Connect code or password. */
 .add-server { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; text-align: left; }
-.add-server__kinds { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+.add-server__kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-2); }
 .add-server__kind {
   display: flex;
   flex-direction: column;

@@ -9,8 +9,9 @@ a different name and icon so people can tell them apart.
 ## Non-affiliation
 
 Platter is an unofficial client. It isn't affiliated with, endorsed by or
-sponsored by Plex, Inc. / Plex GmbH, the Jellyfin project, Spotify AB or
-Discord Inc. "Plex", "Plexamp", "Jellyfin", "Spotify" and "Discord" are
+sponsored by Plex, Inc. / Plex GmbH, the Jellyfin project, the Navidrome
+project, the makers of Subsonic, Spotify AB or Discord Inc. "Plex",
+"Plexamp", "Jellyfin", "Navidrome", "Subsonic", "Spotify" and "Discord" are
 trademarks of their respective owners.
 Where those names appear in the app or the docs, they're only there to say
 whose service is meant.

@@ -1054,6 +1054,10 @@ export interface Settings {
   identifyBySound: boolean;
   /** Which songs: untagged only, or all (this device). */
   soundIdScope: SoundIdScope;
+  /** Minutes between checks of a Subsonic server for library changes: 1, 5, 15, 30 or 60 (this device). */
+  subsonicCheckMinutes: number;
+  /** Keep the queue on servers that hold one, so another app can pick it up. */
+  saveQueueOnServer: boolean;
   /** Dark, Light, Match system, or another built-in theme. */
   theme: ThemeSetting;
   /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
@@ -1317,6 +1321,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoRequestCap: 3,
   identifyBySound: false,
   soundIdScope: "untagged",
+  subsonicCheckMinutes: 5,
+  saveQueueOnServer: true,
   theme: "dark",
   accent: "ivory",
   themeFile: null,
@@ -2558,6 +2564,31 @@ export interface ServerCheck {
   name: string;
   version: string;
   quickConnect: boolean;
+}
+
+/** What an address turned out to be (`subsonic_check`). */
+export interface SubsonicCheck {
+  /** The address, tidied. */
+  url: string;
+  name: string;
+  version: string | null;
+  /** More than the original Subsonic API. */
+  openSubsonic: boolean;
+  /** It takes API keys. */
+  apiKeys: boolean;
+}
+
+/** A queue another app saved on a server (`resume_queues`). */
+export interface ResumeOffer {
+  tag: string;
+  serverName: string;
+  trackCount: number;
+  currentId: string;
+  positionMs: number;
+  /** The app that saved it. */
+  changedBy: string | null;
+  /** Unix seconds. */
+  changedAt: number | null;
 }
 
 /** A Quick Connect code to show (`jellyfin_quick_start`). */

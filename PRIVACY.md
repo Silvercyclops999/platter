@@ -259,7 +259,12 @@ never logged.
 Your Plex token is kept in the OS keychain (Windows Credential Manager or
 macOS Keychain). It's never written to a plain file or to the logs. API keys
 and the ListenBrainz token you enter for artist info sources, AirPlay speaker passwords and the Imgur
-client ID are kept the same way. On macOS they all share one keychain item
+client ID are kept the same way, as are a Jellyfin server's token and a
+Navidrome or other Subsonic server's API key or password. Subsonic servers
+check the sign-in on every request, so a password has to be kept; Platter
+only ever sends the server a check made from it with a new random salt, never
+the password itself. An API key is the safer choice where the server offers
+one. On macOS they all share one keychain item
 (named "vault" under app.platter.player) so the system asks for permission
 at most once. The app data folder holds a small file, keychain-owner.json,
 that lists which keychain items this build has saved again. It holds no

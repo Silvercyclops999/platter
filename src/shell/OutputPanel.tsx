@@ -9,6 +9,7 @@ import { usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { ListenOn, RemoteCurrent } from "./ListenOn";
+import { ResumeFrom } from "./ResumeFrom";
 import { SessionCard } from "./ListenStrip";
 import { HifiLine } from "./HifiMark";
 import { streamQuality } from "./streamQuality";
@@ -127,6 +128,7 @@ export function OutputPanel() {
               <p className="output-empty">No audio output found on this computer.</p>
             )}
             <ListenOn />
+            <ResumeFrom />
             <section className="output-section" aria-labelledby="output-others">
               <h3 id="output-others" className="output-section__title">
                 This computer

@@ -132,7 +132,7 @@ be added to it.
 | `backend_caps` | – | `BackendCaps { caps: Caps, servers: ServerCaps[] }` |
 | `servers_saved` | – | `SavedServer[]` |
 | `server_set_primary` | `{ tag }` | – |
-| `server_remove` | `{ tag }` | – (Jellyfin only; Plex signs out in Account) |
+| `server_remove` | `{ tag }` | – (servers added by address; Plex signs out in Account) |
 | `server_libraries` | `{ tag }` | `{ id, title, included }[]` |
 | `server_libraries_set` | `{ tag, ids: string[] \| null }` | – (null includes every library) |
 | `jellyfin_check` | `{ url }` | `ServerCheck { url, name, version, quickConnect }` |
@@ -140,6 +140,11 @@ be added to it.
 | `jellyfin_quick_poll` | – | `{ state: "waiting" } \| { state: "done", server: SavedServer }` |
 | `jellyfin_quick_cancel` | – | – |
 | `jellyfin_sign_in_password` | `{ url, user, password }` | `SavedServer` |
+| `subsonic_check` | `{ url }` | `SubsonicCheck { url, name, version?, openSubsonic, apiKeys }` |
+| `subsonic_sign_in` | `{ url, user?, apiKey?, password? }` | `SavedServer` |
+| `resume_queues` | – | `ResumeOffer[]` |
+| `resume_queue_play` | `{ tag }` | – |
+| `resume_queue_save` | – | `boolean` (false when the playing song's server keeps no queue) |
 
 `SavedServer = { tag, kind, name, url?, user?, primary, state?, canTranscode, canDownload }`,
 where `state` is `"unknown" | "online" | "offline" | "signInAgain"` for a server
@@ -161,6 +166,30 @@ Jellyfin sees what's playing through its session reports, which are sent so
 they don't count a play on their own; each finished play is marked played
 once, with the time it happened.
 
+A Navidrome or other Subsonic server is added by its address too.
+`subsonic_check` fails with `invalid` when nothing answers there or it doesn't
+answer like a Subsonic server, and says whether it takes API keys.
+`subsonic_sign_in` takes an API key (preferred; it fails with `invalid` on a
+server without API keys and `auth` when the key is refused) or a user name and
+password (`auth` when they're wrong). Subsonic checks the sign-in on every
+request, so the key or password is kept in the keychain as `os.<tag>`. A
+password never goes to the server: each request carries a token made from it
+and a new salt instead. Requests are posted as a form where the server allows
+it, so the sign-in stays out of addresses; addresses that do carry it (streams,
+covers) are never logged, and the log hides `apiKey`, `t`, `s` and `p` values.
+What the server can do comes from its OpenSubsonic extension list. The server
+can't say what changed since a time, so it's asked every few minutes
+(Settings) whether its index or last scan changed, and a sync runs when they
+did; edits to music already in the cache arrive with the weekly full sync.
+Plays are shown with `playbackReport` where the server has it (told not to
+count), and each finished play is scrobbled once with the time it happened.
+
+`ResumeOffer = { tag, serverName, trackCount, currentId, positionMs, changedBy?, changedAt? }`:
+a queue another app saved on a server with `resumeQueue`. While "Keep my
+queue on the server" is on, the queue is saved on the playing song's server
+at each new song and each pause. `resume_queue_play` plays a saved queue
+from its song and place. It's not a handoff: the other app keeps playing.
+
 `ServerCaps = { tag?, kind: "plex" | "jellyfin" | "subsonic", name?, primary, caps: Caps }`.
 `Caps` is an object with every capability name set to true or false:
 `liveUpdates`, `incrementalSync`, `likeDates`, `starRatings`, `playlistMove`,
@@ -177,7 +206,12 @@ everything is there until the first answer. Plex has every capability except
 `liveUpdates`, `incrementalSync`, `playlistMove`, `lyrics`, `syncedLyrics`,
 `serverRadio`, `loudness` and `backdatedScrobble`, plus `transcode` when the
 account may convert songs and `friendActivity` and `realFilePaths` for an
-administrator. `home_users` comes back
+administrator. A Subsonic server has `likeDates`, `starRatings`,
+`playlistMove` (the playlist is written again in the new order),
+`playlistSummary`, `transcode`, `serverRadio`, `friendActivity`,
+`resumeQueue` and `backdatedScrobble`; `loudness` and `releaseTypes` when it's
+an OpenSubsonic server; `lyrics` and `syncedLyrics` with the `songLyrics`
+extension; and `sonic` with `sonicSimilarity`. `home_users` comes back
 empty and `now_playing_details` fails with `notFound` for servers without
 `homeUsers` and `trackDetails`.
 
@@ -2289,6 +2323,8 @@ The rest of the fields, with their defaults:
 | `autoRequestCap` | 1, 2, 3 (default), 5 or 10 | Most automatic requests a day. This device only. |
 | `identifyBySound` | bool, false | Fingerprint songs on this computer and look them up on AcoustID (only the fingerprint and length are sent). This device only. |
 | `soundIdScope` | `"untagged"` (default) or `"all"` | Which songs: files with no recording id or ISRC, or every song. This device only. |
+| `subsonicCheckMinutes` | 1, 5 (default), 15, 30 or 60 | Minutes between asking each Subsonic server whether its music changed. This device only. |
+| `saveQueueOnServer` | bool, true | Keep the queue on servers that hold one, so another app can pick it up. Synced. |
 | `scrobbleLastfm` | bool, false | Scrobble to Last.fm once signed in. This device only. |
 | `scrobbleListenbrainz` | bool, false | Scrobble to ListenBrainz with the user token. This device only. |
 | `scrobbleUnreleased` | bool, false | Unreleased music scrobbles too. |

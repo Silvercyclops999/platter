@@ -47,8 +47,10 @@ import type {
   BackendCaps,
   QuickCode,
   QuickPoll,
+  ResumeOffer,
   SavedServer,
   ServerCheck,
+  SubsonicCheck,
   ServerLibrary,
   EventMap,
   EventName,
@@ -214,6 +216,16 @@ export interface Backend {
   jellyfinQuickCancel(): Promise<void>;
   /** Signs in with a password, used once and never kept. */
   jellyfinSignInPassword(url: string, user: string, password: string): Promise<SavedServer>;
+  /** Is there a Navidrome or other Subsonic server at this address, and does it take API keys? */
+  subsonicCheck(url: string): Promise<SubsonicCheck>;
+  /** Signs in with an API key, or a user name and password (kept in the keychain). */
+  subsonicSignIn(url: string, creds: { apiKey?: string; user?: string; password?: string }): Promise<SavedServer>;
+  /** Queues other apps saved on servers that keep one. */
+  resumeQueues(): Promise<ResumeOffer[]>;
+  /** Plays the queue saved on this server, from where it was. */
+  resumeQueuePlay(tag: string): Promise<void>;
+  /** Saves the queue on the playing song's server now; false when it keeps none. */
+  resumeQueueSave(): Promise<boolean>;
 
   // Library
   syncStatus(): Promise<SyncStatus>;
@@ -776,6 +788,12 @@ export function createTauriBackend(): Backend {
     jellyfinQuickPoll: () => call("jellyfin_quick_poll"),
     jellyfinQuickCancel: () => call("jellyfin_quick_cancel"),
     jellyfinSignInPassword: (url, user, password) => call("jellyfin_sign_in_password", { url, user, password }),
+    subsonicCheck: (url) => call("subsonic_check", { url }),
+    subsonicSignIn: (url, creds) =>
+      call("subsonic_sign_in", { url, user: creds.user ?? null, apiKey: creds.apiKey ?? null, password: creds.password ?? null }),
+    resumeQueues: () => call("resume_queues"),
+    resumeQueuePlay: (tag) => call("resume_queue_play", { tag }),
+    resumeQueueSave: () => call("resume_queue_save"),
 
     syncStatus: () => call("sync_status"),
     syncNow: (full) => call("sync_now", { full }),

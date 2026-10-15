@@ -150,6 +150,7 @@ import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "..
 import { MockArchive } from "./archive";
 import { MockDoctor } from "./doctor";
 import { MockJellyfin, plexRecord } from "./jellyfin";
+import { MockSubsonic } from "./subsonic";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -318,6 +319,8 @@ export class MockBackend implements Backend {
   readonly librariesMock = new MockLibraries();
   /** Servers added by address (test hooks: failure, approveAfter, revoke, canTranscode, canDownload). */
   readonly jellyfin = new MockJellyfin();
+  /** Navidrome and other Subsonic servers (test hooks: failure, canDownload, revoke, queues). */
+  readonly subsonic = new MockSubsonic();
   /** The primary server's tag when one was chosen. */
   private primaryTag: string | null = null;
   // health / sync
@@ -802,16 +805,17 @@ export class MockBackend implements Backend {
       const plexIn = this.auth.state === "signedIn";
       const base = mockBackendCaps(this.auth.server?.name ?? null);
       const primary = this.savedServers().find((s) => s.primary)?.tag ?? null;
-      const servers = [...(plexIn ? base.servers : []), ...this.jellyfin.caps()].map((s) => ({ ...s, primary: s.tag === primary }));
+      const servers = [...(plexIn ? base.servers : []), ...this.jellyfin.caps(), ...this.subsonic.caps()].map((s) => ({ ...s, primary: s.tag === primary }));
       const caps = { ...base.caps };
-      if (!plexIn) for (const k of Object.keys(caps) as (keyof typeof caps)[]) caps[k] = servers.some((s) => s.caps[k]);
+      // What any server in use can do, as the core reports it.
+      for (const k of Object.keys(caps) as (keyof typeof caps)[]) caps[k] = (plexIn && caps[k]) || servers.some((s) => s.caps[k]);
       return { caps, servers };
     });
   }
   /** Plex (when signed in) and the servers added by address, the primary marked. */
   private savedServers() {
     const plexIn = this.auth.state === "signedIn";
-    const list = [...(plexIn ? [plexRecord(this.auth.server?.name ?? "Plex server", false)] : []), ...this.jellyfin.servers];
+    const list = [...(plexIn ? [plexRecord(this.auth.server?.name ?? "Plex server", false)] : []), ...this.jellyfin.servers, ...this.subsonic.servers];
     const primary = list.find((s) => s.tag === this.primaryTag)?.tag ?? list[0]?.tag ?? null;
     return list.map((s) => ({ ...s, primary: s.tag === primary }));
   }
@@ -831,21 +835,23 @@ export class MockBackend implements Backend {
   serverRemove(tag: string) {
     return this.delay(() => {
       if (tag === "0a1b2c3d") throw { kind: "invalid", message: "Sign out of Plex in Settings, Account." };
-      this.jellyfin.remove(tag);
+      if (this.subsonic.owns(tag)) this.subsonic.remove(tag);
+      else this.jellyfin.remove(tag);
       if (this.primaryTag === tag) this.primaryTag = null;
       this.serversChanged();
     });
   }
   serverLibraries(tag: string) {
     return this.delay(() => {
-      const libs = this.jellyfin.libraries[tag];
+      const libs = this.jellyfin.libraries[tag] ?? this.subsonic.libraries[tag];
       if (!libs) throw { kind: "notFound", message: "That server isn't in Platter any more." };
       return libs;
     });
   }
   serverLibrariesSet(tag: string, ids: string[] | null) {
     return this.delay(() => {
-      this.jellyfin.setLibraries(tag, ids);
+      if (this.subsonic.owns(tag)) this.subsonic.setLibraries(tag, ids);
+      else this.jellyfin.setLibraries(tag, ids);
       this.serversChanged();
     });
   }
@@ -872,9 +878,29 @@ export class MockBackend implements Backend {
       return s;
     });
   }
+  subsonicCheck(url: string) {
+    return this.delay(() => this.subsonic.check(url));
+  }
+  subsonicSignIn(url: string, creds: { apiKey?: string; user?: string; password?: string }) {
+    return this.delay(() => {
+      const s = this.subsonic.signIn(url, creds);
+      this.serversChanged();
+      return s;
+    });
+  }
+  resumeQueues() {
+    return this.delay(() => this.subsonic.offers());
+  }
+  resumeQueuePlay(tag: string) {
+    return this.delay(() => this.subsonic.play(tag));
+  }
+  resumeQueueSave() {
+    return this.delay(() => this.subsonic.servers.length > 0);
+  }
   /** Test hook: the primary choice and servers added by address forgotten. */
   resetServers() {
     this.jellyfin.reset();
+    this.subsonic.reset();
     this.primaryTag = null;
   }
   librarySources() {
@@ -2316,6 +2342,9 @@ export class MockBackend implements Backend {
       }
       if (patch.autoRequestCap !== undefined && ![1, 2, 3, 5, 10].includes(patch.autoRequestCap)) {
         throw { kind: "invalid", message: "Pick one of the daily limits offered." };
+      }
+      if (patch.subsonicCheckMinutes !== undefined && ![1, 5, 15, 30, 60].includes(patch.subsonicCheckMinutes)) {
+        throw { kind: "invalid", message: "Pick one of the times offered." };
       }
       if (patch.doctorChecks !== undefined) next.doctorChecks = { ...DEFAULT_SETTINGS.doctorChecks, ...patch.doctorChecks };
       if (patch.listenRelay !== undefined) {

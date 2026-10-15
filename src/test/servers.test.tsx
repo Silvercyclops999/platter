@@ -111,7 +111,8 @@ describe("adding a Jellyfin server", () => {
     const plexButton = screen.getByRole("button", { name: /Plex/ });
     expect(plexButton).toBeDisabled();
     expect(plexButton).toHaveTextContent("Signed in");
-    expect(screen.queryByText(/Subsonic|Navidrome|coming soon/i)).toBeNull();
+    expect(screen.queryByText(/coming soon/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /Navidrome or another Subsonic server/ })).toHaveTextContent("In beta");
     await user.click(screen.getByRole("button", { name: /Jellyfin/ }));
     expect(screen.getByLabelText("Jellyfin server address")).toBeInTheDocument();
     expect(plex).toBe(0);

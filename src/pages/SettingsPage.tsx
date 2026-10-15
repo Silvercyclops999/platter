@@ -75,6 +75,15 @@ import {
 } from "./LidarrSettings";
 import { LidarrRequestsList } from "./LidarrRequest";
 import { AUTO_CAP_OPTIONS, AutoArtistsList } from "./AutoRequestDialog";
+
+/** Minutes between Subsonic change checks the setting offers. */
+const SUBSONIC_CHECK_OPTIONS = [
+  { value: "1", label: "1 minute" },
+  { value: "5", label: "5 minutes" },
+  { value: "15", label: "15 minutes" },
+  { value: "30", label: "30 minutes" },
+  { value: "60", label: "1 hour" },
+];
 import { useTheme } from "../stores/theme";
 import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNote, useThemeFolder } from "./ThemeSettings";
 import { LookCards } from "./looks/LookCards";
@@ -511,6 +520,7 @@ export function SettingsPage() {
   const lidarr = useLidarr();
   ensureCaps();
   const caps = useCaps((x) => x.all.caps);
+  const hasSubsonic = useApp((x) => !!x.servers?.some((v) => v.kind === "subsonic"));
   const serverName = useServerName();
   const s = useSettings((x) => x.settings);
   const [sidebarArt, setSidebarArt] = useSidebarArt();
@@ -760,9 +770,31 @@ export function SettingsPage() {
       section: "Library",
       title: "Music servers",
       description:
-        "Add a Plex or Jellyfin server, choose the primary server, and pick which music libraries come from each. Music on more than one server shows once. Passwords are never kept; each server's sign-in stays in this computer's keychain.",
+        "Add a Plex, Jellyfin, Navidrome or other Subsonic server, choose the primary server, and pick which music libraries come from each. Music on more than one server shows once. Each server's sign-in stays in this computer's keychain. Jellyfin and Plex passwords are never kept; a Subsonic server needs its API key or password on every request, so that one is kept there too. Use an API key where the server offers one.",
       control: () => <ServerCount />,
       block: () => <ServerList />,
+    },
+    ...(hasSubsonic
+      ? ([
+          {
+            key: "subsonicCheckMinutes",
+            section: "Library",
+            title: "Check Subsonic servers for changes every",
+            description:
+              "Navidrome and other Subsonic servers can't tell Platter when their music changes, so Platter asks. New music shows up after the next check. Edits to music already in your library arrive with the weekly full sync. This device only.",
+            control: (ids) =>
+              select(s, (x) => String(x.subsonicCheckMinutes ?? 5), SUBSONIC_CHECK_OPTIONS, ids, (v) => updateSettings({ subsonicCheckMinutes: Number(v) })),
+          },
+        ] satisfies RowDef[])
+      : []),
+    {
+      key: "saveQueueOnServer",
+      section: "Library",
+      cap: "resumeQueue",
+      title: "Keep my queue on the server",
+      description:
+        "On servers that hold a queue, Platter saves what's playing and what's next as it goes, so another app signed in to the same account can pick it up. A queue another app left there shows under Pick up where you left off, in the player's devices panel.",
+      control: (ids) => toggle(s, "saveQueueOnServer", ids),
     },
     {
       key: "libraries",

@@ -9,7 +9,7 @@ import type { AppError, SavedServer, ServerLibrary, ServerState } from "../lib/t
 import { useApp } from "../stores/app";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
-import { AddServerFlow } from "./AddServer";
+import { AddServerFlow, type AddressKind } from "./AddServer";
 import "./add-server.css";
 import "./library-sources.css";
 
@@ -109,14 +109,14 @@ function ServerRow({ s, onSignInAgain, onRemove }: { s: SavedServer; onSignInAga
 }
 
 /**
- * Settings, Library: the music servers. Add one (Plex or Jellyfin), choose
+ * Settings, Library: the music servers. Add one (Plex, Jellyfin or Subsonic), choose
  * the primary server, include each server's music libraries, sign in again
  * or remove one.
  */
 export function ServerList() {
   const servers = useApp((s) => s.servers);
   const plexSignedIn = useApp((s) => s.auth?.state === "signedIn");
-  const [adding, setAdding] = useState<{ url?: string } | null>(null);
+  const [adding, setAdding] = useState<{ url?: string; kind?: AddressKind } | null>(null);
   const [removing, setRemoving] = useState<SavedServer | null>(null);
   const reload = useCallback(() => {
     backend.serversSaved().then((l) => useApp.getState().setServers(l), () => {});
@@ -137,7 +137,7 @@ export function ServerList() {
       ) : (
         <ul className="server-rows" aria-label="Music servers">
           {servers.map((s) => (
-            <ServerRow key={s.tag} s={s} onSignInAgain={() => setAdding({ url: s.url ?? undefined })} onRemove={() => setRemoving(s)} />
+            <ServerRow key={s.tag} s={s} onSignInAgain={() => setAdding({ url: s.url ?? undefined, kind: s.kind === "subsonic" ? "subsonic" : "jellyfin" })} onRemove={() => setRemoving(s)} />
           ))}
         </ul>
       )}
@@ -152,6 +152,7 @@ export function ServerList() {
           <AddServerFlow
             choose={!adding.url}
             url={adding.url}
+            kind={adding.kind}
             plexSignedIn={plexSignedIn}
             onPlex={() => {
               setAdding(null);
