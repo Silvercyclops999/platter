@@ -323,7 +323,8 @@ impl Tracker {
                 let start = PlayStart {
                     rating_key: track.id.clone(),
                     part_key: Some(track.part_key.clone()),
-                    started_at: at / 1000,
+                    // Unix ms, like every reader of the listen log expects.
+                    started_at: *at,
                     duration_ms: track.duration_ms,
                     context_kind: kind,
                     context_id: id,
@@ -351,7 +352,7 @@ impl Tracker {
                     let pos = skipped_at_ms.unwrap_or(ms);
                     let upd = self
                         .db
-                        .write_async(move |c| listens::end_play(c, id, now_s(), ms, pos, done))
+                        .write_async(move |c| listens::end_play(c, id, now_s() * 1000, ms, pos, done))
                         .await?;
                     if upd.scrobble_now {
                         self.scrobble(Some(id), track.id.clone()).await;

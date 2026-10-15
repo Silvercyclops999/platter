@@ -996,11 +996,55 @@ CREATE TABLE IF NOT EXISTS lyrics_choice (
     updated_at INTEGER NOT NULL
 ) WITHOUT ROWID;
 "#,
+    // v33: play times in the listen log are unix ms everywhere. Older builds
+    // wrote seconds; any value too small to be a ms time since 2001 is one of
+    // those and is moved to ms. Stats are then counted again from scratch.
+    r#"
+UPDATE listen_log SET started_at = started_at * 1000 WHERE started_at < 1000000000000;
+UPDATE listen_log SET ended_at = ended_at * 1000 WHERE ended_at IS NOT NULL AND ended_at < 1000000000000;
+DELETE FROM stats_hour;
+DELETE FROM stats_song_day;
+DELETE FROM stats_artist_day;
+DELETE FROM stats_album_day;
+DELETE FROM stats_genre_day;
+DELETE FROM stats_song;
+DELETE FROM stats_artist;
+DELETE FROM stats_album;
+DELETE FROM stats_dirty;
+INSERT OR IGNORE INTO stats_dirty
+    SELECT DISTINCT CAST(julianday(date(started_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER) FROM listen_log;
+INSERT OR IGNORE INTO stats_dirty
+    SELECT DISTINCT CAST(julianday(date(played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER) FROM imported_plays;
+"#,
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn play_times_written_in_seconds_move_to_ms() {
+        let mut c = Connection::open_in_memory().unwrap();
+        migrate_to(&mut c, MIGRATIONS.len() - 1).unwrap();
+        // One play from an older build (seconds) and one already in ms.
+        c.execute_batch(
+            "INSERT INTO listen_log (rating_key, started_at, ended_at, duration_ms) VALUES ('a', 1760000000, 1760000200, 200000);
+             INSERT INTO listen_log (rating_key, started_at, ended_at, duration_ms) VALUES ('b', 1760000000000, 1760000200000, 200000);",
+        )
+        .unwrap();
+        migrate(&mut c).unwrap();
+        let rows: Vec<(i64, i64)> = c
+            .prepare("SELECT started_at, ended_at FROM listen_log ORDER BY rating_key")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![(1_760_000_000_000, 1_760_000_200_000), (1_760_000_000_000, 1_760_000_200_000)]);
+        // Stats count the plays again on their real day, not in 1970.
+        let dirty: i64 = c.query_row("SELECT min(day) FROM stats_dirty", [], |r| r.get(0)).unwrap();
+        assert!(dirty > 20_000, "a 2025 day, not 1970: {dirty}");
+    }
 
     #[test]
     fn migrates_fresh_db_and_is_idempotent() {
