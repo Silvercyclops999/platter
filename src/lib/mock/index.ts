@@ -155,6 +155,7 @@ import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 import { MockFileTags } from "./fileTags";
 import { MockThemes, checkThemePatch } from "./themes";
 import { MockTranscribe } from "./transcribe";
+import { MockLyricsShare } from "./lyricsShare";
 import { MockDownloads } from "./downloads";
 import { MockMixes } from "./mixes";
 import { MockSocial } from "./social";
@@ -296,6 +297,7 @@ export class MockBackend implements Backend {
   readonly tags: MockFileTags;
   /** Lyrics transcription (test hooks: failNextDownload, failNextSong, silent, stepMs). */
   readonly transcribe: MockTranscribe;
+  readonly lyricsShare: MockLyricsShare;
   /** Downloads (test hooks: failNext, loseFile, connection, stepMs, steps). */
   readonly downloads: MockDownloads;
   /** Edit in Plex (test hooks: shared, failNext). */
@@ -492,6 +494,18 @@ export class MockBackend implements Backend {
           .flatMap((a) => this.fx.tracksByAlbum.get(a.id) ?? [])
           .map((t) => t.id)
           .filter((id) => !this.own.has(id)),
+    });
+    this.lyricsShare = new MockLyricsShare({
+      settings: () => this.settings,
+      track: (id) => this.trackById(id),
+      own: (id) => this.own.get(id),
+      unreleased: (t) => {
+        const a = this.fx.albums.find((x) => x.id === t.albumId);
+        return (
+          !!a && mockUnreleased(a, this.settings.countUnmatchedUnreleased !== false, mockMbCheckOn(this.settings) && mockPlexMissed(this.fx.albums, a))
+        );
+      },
+      later: (ms, fn) => this.later(ms, fn),
     });
     this.downloads = new MockDownloads({
       settings: () => this.settings,
@@ -3547,6 +3561,19 @@ export class MockBackend implements Backend {
   }
   transcribeFoundNothing(trackId: string) {
     return this.delay(() => this.transcribe.foundNothing(trackId));
+  }
+
+  lyricsShareInfo(trackId: string) {
+    return this.delay(() => this.lyricsShare.info(trackId));
+  }
+  lyricsShareReviewed(trackId: string) {
+    return this.delay(() => this.lyricsShare.markReviewed(trackId));
+  }
+  lyricsSharePublish(trackId: string) {
+    return this.delay(() => null).then(() => this.lyricsShare.publish(trackId));
+  }
+  lyricsShareCancel(trackId: string) {
+    return this.delay(() => this.lyricsShare.cancel(trackId));
   }
 
   // ---------------------------------------------------------------- downloads

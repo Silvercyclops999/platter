@@ -1395,6 +1395,58 @@ the editor clears `auto`. `lyrics_get` returns transcriptions with `source:
 no words found are remembered (`transcribe_found_nothing`) so the batch
 skips them.
 
+### Transcriptions on the user's other devices
+
+With `syncTranscriptions` on (the default; synced), results travel through
+the sync store's `transcripts` namespace, keyed `<track id>|<model>`, value
+`{ text, model, part, at }`: the enhanced LRC (empty for "no words found"),
+the model name, the song's part key (its file version) and when it was made
+(unix seconds). Another device saves them as the song's own lyrics with
+`auto` set to the model, so they show as transcribed under the same label and
+trust rules without running the model there, and "no words found" is
+remembered there too. A result for another part key is ignored, so a replaced
+file is transcribed again. Which result a song shows: lyrics the user wrote
+or edited always win; then the bigger model (`medium` over `small`); then the
+newest. Before transcribing a song, the batch (and a single song) takes a
+result made elsewhere for the same file instead of running the model, and
+sends `transcribe://done` for it. Results applied from the sync file send
+`transcribe://done` too. Forgetting a transcription forgets it on the other
+devices. Results made before this was on are added when the app starts.
+These travel with the "Lyrics you wrote" sync group (`syncLyrics`).
+
+## Sharing lyrics
+| Command | Args | Returns |
+| --- | --- | --- |
+| `lyrics_share_info` | `{ trackId }` | `LyricsShareInfo` |
+| `lyrics_share_reviewed` | `{ trackId }` | – |
+| `lyrics_share_publish` | `{ trackId }` | – (resolves once published) |
+| `lyrics_share_cancel` | `{ trackId }` | – |
+
+`LyricsShareInfo = { offer, whyNot?, unreleased, payload? }`. `whyNot` is
+`off` (`shareTranscriptions` is off), `shared` (already shared, on any
+device), `notTranscribed` (the song isn't showing a transcription),
+`unreleased` (an unreleased song, by the rule the batch uses, while
+`shareTranscriptionsUnreleased` is off), `missingInfo` (no title, artist,
+album or length) or `notReviewed`. `payload` comes only with an offer and is
+exactly what LRCLIB gets: `{ trackName, artistName, albumName, duration
+(seconds), plainLyrics, syncedLyrics }`, the synced lyrics being the
+transcription's lines without word times. `unreleased` true means the
+dialog adds a warning that sharing publishes the title.
+
+The lyrics view calls `lyrics_share_reviewed` when the user opens the
+lyrics editor for the song, or plays 90% of it with the lyrics showing.
+Nothing is ever shared automatically or in bulk: `lyrics_share_publish` runs
+only from the dialog's Share button. It checks the offer again, asks LRCLIB
+for a challenge (`POST /api/request-challenge` → `{ prefix, target }`),
+finds a nonce whose SHA-256 of `prefix + nonce` is at or below the target on
+its own thread at low priority (stopped by `lyrics_share_cancel`), then
+`POST /api/publish` with `X-Publish-Token: prefix:nonce` and the payload. The
+User-Agent names Platter and its version. On success the song remembers it
+(`lyrics_share` table, and `lyricsShared` in the sync store) and isn't
+offered again. Errors change nothing: `network` when LRCLIB can't be reached
+or Go offline is on, `invalid` with LRCLIB's reason when it refuses, when it's
+busy, when cancelled, or when the offer no longer holds.
+
 ## Downloads
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1882,7 +1934,9 @@ namespace, a key, a JSON value (none for a deletion), when it changed and on
 which device. The namespaces are `settings` (one entry per synced setting),
 `pins`, `folders`, `folderItems` (playlist id to folder id), `follows`,
 `hidden` (keyed `track:<id>` or `artist:<id>`), `bookmarks` (by bookmark id),
-`lyrics` (lyrics written in the editor, by track id) and `smartPlaylists`
+`lyrics` (lyrics written in the editor, by track id), `transcripts`
+(transcriptions, keyed `<track id>|<model>`), `lyricsShared` (songs whose
+lyrics were shared to LRCLIB) and `smartPlaylists`
 (Platter smart playlists, synced with the library folders). Without a sync file this is simply where the state is kept.
 
 Features use the typed store in `src-tauri/src/sync/store.rs`:

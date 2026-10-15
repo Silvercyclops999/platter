@@ -4027,6 +4027,7 @@ dependencies = [
  "image",
  "kakasi",
  "keyring",
+ "libc",
  "md-5",
  "mdns-sd",
  "objc2-core-audio",

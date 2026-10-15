@@ -86,6 +86,11 @@ pub const SMART: Ns<crate::smart::SmartPlaylist> = Ns::new("smartPlaylists");
 pub const LYRICS: Ns<UserLyricsEntry> = Ns::new("lyrics");
 /// The user's lyrics pick and timing offset per song, keyed by track id.
 pub const LYRICS_CHOICES: Ns<crate::lyrics::choice::Choice> = Ns::new("lyricsChoices");
+/// Lyrics transcribed on one of the user's devices, keyed
+/// `<track id>|<model>` (sync::transcripts).
+pub const TRANSCRIPTS: Ns<super::transcripts::Transcript> = Ns::new("transcripts");
+/// Songs whose lyrics the user shared to LRCLIB, keyed by track id.
+pub const LYRICS_SHARED: Ns<super::transcripts::Shared> = Ns::new("lyricsShared");
 /// Release status marks ("Confirm unreleased", "Not unreleased"), keyed
 /// `album:<id>` or `track:<id>`.
 pub const RELEASE_MARKS: Ns<crate::db::release::Mark> = Ns::new("releaseMarks");
@@ -99,7 +104,9 @@ pub const PHYSICAL: Ns<crate::physical::Owned> = Ns::new("physical");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 14] = [
+pub const NAMESPACES: [&str; 16] = [
+    TRANSCRIPTS.name(),
+    LYRICS_SHARED.name(),
     PHYSICAL.name(),
     DOCTOR_IGNORED.name(),
     RELEASE_MARKS.name(),

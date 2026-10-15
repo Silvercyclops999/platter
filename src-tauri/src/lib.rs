@@ -1008,6 +1008,7 @@ pub fn run() {
                 app.manage(transcriber);
             }
             app.manage(lyrics_service);
+            app.manage(lyrics::share::LyricsShare::new(lyrics::publish::Publisher::new()));
 
             // App-only state: the store, the sync file, and copying keys.
             {
@@ -1053,16 +1054,38 @@ pub fn run() {
                         downloads: downloads.clone(),
                         mixes: mix_service.clone(),
                         db: db.clone(),
+                        transcripts: live.sync_transcriptions.clone(),
                     },
                 );
+                if let Some(t) = live.transcriber.lock().as_ref() {
+                    t.set_shared(Arc::new(sync::transcripts::AppShared {
+                        store: store.clone(),
+                        db: db.clone(),
+                        on: live.sync_transcriptions.clone(),
+                    }));
+                }
                 {
                     let (store, settings, db, engine) = (store.clone(), app_settings.clone(), db.clone(), engine.clone());
+                    let transcripts = live.sync_transcriptions.clone();
                     tauri::async_runtime::spawn(async move {
                         if let Err(e) = settings.attach_sync(store.clone()).await {
                             tracing::warn!("synced settings not set up: {e}");
                         }
-                        if let Err(e) = store.run(move |s| sync::lyrics::seed(s, &db)).await {
+                        let db2 = db.clone();
+                        if let Err(e) = store.run(move |s| sync::lyrics::seed(s, &db2)).await {
                             tracing::warn!("lyrics not added to the sync store: {e}");
+                        }
+                        // Transcriptions: this computer's go in, other devices' come out.
+                        if transcripts.load(std::sync::atomic::Ordering::Relaxed) {
+                            let r = store
+                                .run(move |s| {
+                                    sync::transcripts::seed(s, &db)?;
+                                    sync::transcripts::apply(s, &db)
+                                })
+                                .await;
+                            if let Err(e) = r {
+                                tracing::warn!("transcriptions not synced: {e}");
+                            }
                         }
                         engine.run().await;
                     });
@@ -1185,6 +1208,10 @@ pub fn run() {
             lyrics::commands::lyrics_choices_clear,
             lyrics::commands::lyrics_pronounce,
             lyrics::commands::lyrics_translate,
+            lyrics::share::lyrics_share_info,
+            lyrics::share::lyrics_share_reviewed,
+            lyrics::share::lyrics_share_publish,
+            lyrics::share::lyrics_share_cancel,
             lyrics::transcribe::commands::transcribe_status,
             lyrics::transcribe::commands::transcribe_model_download,
             lyrics::transcribe::commands::transcribe_model_cancel,

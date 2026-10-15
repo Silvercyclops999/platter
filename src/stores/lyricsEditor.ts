@@ -6,6 +6,7 @@
 import { create } from "zustand";
 import { backend } from "../lib/backend";
 import type { Track } from "../lib/types";
+import { markReviewed } from "./lyricsShare";
 
 interface LyricsEditorState {
   /** The song being edited, or null when the editor is closed. */
@@ -23,6 +24,8 @@ export const useLyricsEditor = create<LyricsEditorState>()(() => ({
 
 export function openLyricsEditor(track: Track) {
   useLyricsEditor.setState({ track });
+  // Opening the editor counts as checking the lyrics (sharing a transcription).
+  void markReviewed(track.id);
 }
 
 export function closeLyricsEditor() {

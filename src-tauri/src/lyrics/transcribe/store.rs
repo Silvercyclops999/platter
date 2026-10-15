@@ -92,3 +92,56 @@ pub fn unreleased_todo(c: &Connection) -> AppResult<Vec<String>> {
     }
     Ok(out)
 }
+
+/// Songs transcribed with no words found: (track, model, unix seconds).
+pub fn empties(c: &Connection) -> AppResult<Vec<(String, String, i64)>> {
+    let mut st = c.prepare("SELECT track_id, model, created_at FROM lyrics_auto_empty ORDER BY track_id")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The model a "no words found" result came from.
+pub fn empty_model(c: &Connection, track_id: &str) -> AppResult<Option<(String, i64)>> {
+    Ok(c
+        .query_row("SELECT model, created_at FROM lyrics_auto_empty WHERE track_id = ?1", params![track_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .optional()?)
+}
+
+/// The song's file version (its part key), when the song is in the library.
+pub fn part_key(c: &Connection, track_id: &str) -> AppResult<Option<String>> {
+    Ok(c
+        .query_row("SELECT part_key FROM tracks WHERE id = ?1", params![track_id], |r| r.get::<_, Option<String>>(0))
+        .optional()?
+        .flatten()
+        .filter(|p| !p.is_empty()))
+}
+
+/// Whether the song counts as unreleased (the rule [`unreleased_todo`] uses).
+pub fn is_unreleased(c: &Connection, track_id: &str) -> AppResult<bool> {
+    let row = c
+        .query_row(
+            "SELECT al.format, al.subformats, ft.version, al.studio, al.matched, mc.found, t.album_id FROM tracks t
+             LEFT JOIN albums al ON al.id = t.album_id
+             LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
+             LEFT JOIN file_tags ft ON ft.part_key = t.part_key
+             WHERE t.id = ?1",
+            params![track_id],
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<bool>>(4)?,
+                    r.get::<_, Option<bool>>(5)?,
+                    r.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((format, subs, version, studio, matched, mb, album)) = row else { return Ok(false) };
+    let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
+    Ok(crate::db::release::track_unreleased(track_id, &album, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb))
+}

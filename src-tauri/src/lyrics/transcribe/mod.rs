@@ -183,6 +183,19 @@ pub trait Conditions: Send + Sync {
     async fn pause_reason(&self) -> Option<PauseReason>;
 }
 
+/// Results made on the user's other devices (the sync store). A song
+/// transcribed elsewhere for the same file isn't transcribed again here.
+#[async_trait]
+pub trait SharedResults: Send + Sync {
+    /// Save here a result another device made for this song's file. Some
+    /// (words found) when there was one.
+    async fn take(&self, track_id: &str) -> Option<bool>;
+    /// A result was saved here (an empty body: no words found).
+    async fn saved(&self, track_id: &str, body: &str, model: &str);
+    /// A song's transcription was forgotten here.
+    async fn forgot(&self, track_id: &str);
+}
+
 pub trait TranscribeEvents: Send + Sync {
     fn status(&self, s: &TranscribeStatus);
     /// A song was transcribed (`found`: words came out).
@@ -243,6 +256,7 @@ struct Inner {
     deps: Deps,
     st: Mutex<State>,
     wake: Notify,
+    shared: parking_lot::RwLock<Option<Arc<dyn SharedResults>>>,
 }
 
 /// The transcription queue and model manager. Cheap to clone.
@@ -264,7 +278,18 @@ fn mb(bytes: u64) -> u64 {
 
 impl Transcriber {
     pub fn new(deps: Deps) -> Self {
-        Self { inner: Arc::new(Inner { deps, st: Mutex::new(State::default()), wake: Notify::new() }) }
+        Self {
+            inner: Arc::new(Inner { deps, st: Mutex::new(State::default()), wake: Notify::new(), shared: Default::default() }),
+        }
+    }
+
+    /// Connect results from the user's other devices.
+    pub fn set_shared(&self, s: Arc<dyn SharedResults>) {
+        *self.inner.shared.write() = Some(s);
+    }
+
+    fn shared(&self) -> Option<Arc<dyn SharedResults>> {
+        self.inner.shared.read().clone()
     }
 
     /// Start the worker on the current runtime.
@@ -602,7 +627,11 @@ impl Transcriber {
     /// Forget a song's transcription.
     pub async fn forget(&self, track_id: &str) -> AppResult<bool> {
         let id = track_id.to_owned();
-        self.inner.deps.db.write_async(move |c| store::forget(c, &id)).await
+        let had = self.inner.deps.db.write_async(move |c| store::forget(c, &id)).await?;
+        if let Some(s) = self.shared() {
+            s.forgot(track_id).await;
+        }
+        Ok(had)
     }
 
     // ------------------------------------------------------------ worker
@@ -814,6 +843,13 @@ impl Transcriber {
         if done_before {
             return Outcome::Skipped;
         }
+        // Transcribed on another of the user's devices for this file.
+        if let Some(s) = self.shared()
+            && let Some(found) = s.take(&id).await
+        {
+            d.events.done(&id, found);
+            return Outcome::Skipped;
+        }
         // The model: wait for a download in progress.
         let path = loop {
             if cancel.load(Ordering::Relaxed) {
@@ -983,11 +1019,16 @@ impl Transcriber {
             "song transcribed"
         );
         let saved = {
-            let (id, model, now) = (id.clone(), model_name(kind), now_s());
+            let (id, body, model, now) = (id.clone(), body.clone(), model_name(kind), now_s());
             d.db.write_async(move |c| store::save(c, &id, &body, model, now)).await
         };
         match saved {
-            Ok(true) => d.events.done(&id, !found_lines.is_empty()),
+            Ok(true) => {
+                if let Some(s) = self.shared() {
+                    s.saved(&id, &body, model_name(kind)).await;
+                }
+                d.events.done(&id, !found_lines.is_empty())
+            }
             // The user saved lyrics of their own meanwhile: theirs stay.
             Ok(false) => {}
             Err(e) => {

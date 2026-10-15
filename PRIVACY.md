@@ -125,6 +125,13 @@ and your own Plex server.
   song without lyrics, unreleased ones included. Answers are kept on your
   computer for 30 days (7 days when there were none).
 
+- LRCLIB again, only when you share a transcription: you press "Share these
+  lyrics publicly" for one song and confirm in a dialog that shows exactly
+  what goes. LRCLIB then gets that song's title, artist, album, length and
+  the transcribed lyrics, and anyone can get them from it. Nothing is ever
+  shared on its own or in bulk. Unreleased songs aren't offered unless you
+  turn that on in Settings.
+
 - A translation service you enter yourself, only if you set "Translation
   service" in Settings and press Translate under some lyrics. The lyrics
   lines and the language you picked go to that address. There's no default
@@ -144,7 +151,10 @@ and your own Plex server.
 
 Lyrics transcription runs entirely on your computer: songs are read from your
 own server (or the app's cache), turned into text on this machine, and saved
-in the app's data folder. No audio or text from it is sent anywhere.
+in the app's data folder. No audio is sent anywhere. The text goes only to
+your other devices through the sync file (when "Sync transcriptions to my
+devices" and the sync file are on), and to LRCLIB for a song you choose to
+share (see above).
 
 ## Friend activity and listening sessions
 
@@ -248,7 +258,9 @@ not the id.
 
 The file holds the settings that aren't marked This device only, your pins,
 library folders and which playlists are in them, followed artists, hidden and
-snoozed items, bookmarks, lyrics you wrote in the editor, and for each of your
+snoozed items, bookmarks, lyrics you wrote in the editor, transcribed lyrics
+(unless you turn off "Sync transcriptions to my devices") and which songs'
+lyrics you shared, and for each of your
 devices its name and when it last wrote the file. You choose which of these go
 in under What to sync. It never holds your Plex token, API keys, the
 ListenBrainz token, the Imgur client ID, AirPlay passwords or any other

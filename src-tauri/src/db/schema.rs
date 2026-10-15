@@ -1016,6 +1016,15 @@ INSERT OR IGNORE INTO stats_dirty
 INSERT OR IGNORE INTO stats_dirty
     SELECT DISTINCT CAST(julianday(date(played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER) FROM imported_plays;
 "#,
+    // v34: sharing transcriptions to LRCLIB (lyrics::share). Per song, when
+    // the user reviewed the lyrics and when they shared them.
+    r#"
+CREATE TABLE IF NOT EXISTS lyrics_share (
+    track_id    TEXT PRIMARY KEY,
+    reviewed_at INTEGER,
+    shared_at   INTEGER
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]
@@ -1025,7 +1034,8 @@ mod tests {
     #[test]
     fn play_times_written_in_seconds_move_to_ms() {
         let mut c = Connection::open_in_memory().unwrap();
-        migrate_to(&mut c, MIGRATIONS.len() - 1).unwrap();
+        // Up to v32, before play times moved to ms.
+        migrate_to(&mut c, 32).unwrap();
         // One play from an older build (seconds) and one already in ms.
         c.execute_batch(
             "INSERT INTO listen_log (rating_key, started_at, ended_at, duration_ms) VALUES ('a', 1760000000, 1760000200, 200000);

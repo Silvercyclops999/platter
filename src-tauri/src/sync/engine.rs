@@ -32,7 +32,8 @@ pub struct Groups {
     pub library: bool,
     /// Followed artists, hidden and snoozed items, bookmarks.
     pub follows: bool,
-    /// Lyrics you wrote.
+    /// Lyrics you wrote, transcriptions (when that setting is on) and
+    /// which songs' lyrics you shared.
     pub lyrics: bool,
 }
 
@@ -65,7 +66,12 @@ impl Groups {
             out.extend([store::FOLLOWS.name(), store::HIDDEN.name(), store::BOOKMARKS.name()]);
         }
         if self.lyrics {
-            out.extend([store::LYRICS.name(), store::LYRICS_CHOICES.name()]);
+            out.extend([
+                store::LYRICS.name(),
+                store::LYRICS_CHOICES.name(),
+                store::TRANSCRIPTS.name(),
+                store::LYRICS_SHARED.name(),
+            ]);
         }
         out
     }

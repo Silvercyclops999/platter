@@ -986,7 +986,7 @@ export function SettingsPage() {
       section: "Sync",
       group: "What to sync",
       title: "Lyrics you wrote",
-      description: "Lyrics from the lyrics editor. Lyrics transcribed on this computer stay here until you edit them.",
+      description: "Lyrics from the lyrics editor, and transcriptions when Sync transcriptions to my devices is on.",
       control: (ids) => toggle(s, "syncLyrics", ids),
     },
     {
@@ -2489,6 +2489,32 @@ export function SettingsPage() {
       title: "Show auto-transcribed lyrics",
       description: "Off hides transcribed lyrics you haven't edited. They stay saved.",
       control: (ids) => toggle(s, "showAutoLyrics", ids),
+    },
+    {
+      key: "syncTranscriptions",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Sync transcriptions to my devices",
+      description:
+        "Transcribed lyrics go to your other devices through the sync file, so each song is transcribed once. Lyrics you wrote always come first. Needs Lyrics you wrote on under Sync.",
+      control: (ids) => toggle(s, "syncTranscriptions", ids),
+    },
+    {
+      key: "shareTranscriptions",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Offer to share transcriptions publicly",
+      description:
+        "After you check a transcription, the lyrics view offers to share it to LRCLIB, a free public lyrics library. It shows what is sent and asks every time.",
+      control: (ids) => toggle(s, "shareTranscriptions", ids),
+    },
+    {
+      key: "shareTranscriptionsUnreleased",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Including unreleased songs",
+      description: "Sharing publishes the song's title, so an unreleased song becomes public knowledge.",
+      control: (ids) => toggle(s, "shareTranscriptionsUnreleased", ids),
     },
   ];
 

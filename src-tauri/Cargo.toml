@@ -83,6 +83,10 @@ pinyin = { version = "0.11.0", default-features = false, features = ["with_tone"
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.8.3", default-features = false }
 
+# Lower thread priority for the LRCLIB challenge.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 # The audio features are for bit-perfect (exclusive) output; cpal already
 # builds them.

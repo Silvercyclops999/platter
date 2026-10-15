@@ -986,6 +986,12 @@ export interface Settings {
   transcribeFasterAway: boolean;
   /** Show lyrics transcribed on this computer. */
   showAutoLyrics: boolean;
+  /** Transcriptions travel to your other devices through the sync file. */
+  syncTranscriptions: boolean;
+  /** Offer to share a checked transcription to LRCLIB (asks every time). */
+  shareTranscriptions: boolean;
+  /** ...including unreleased songs (with an extra warning). */
+  shareTranscriptionsUnreleased: boolean;
   /** Check lyrics against the song with the speech model, once it's installed. This device only. */
   lyricsCheckAudio: boolean;
   /** Move or stretch checked lyrics to the timing measured in the song. This device only. */
@@ -1357,6 +1363,9 @@ export const DEFAULT_SETTINGS: Settings = {
   transcribePauseBusy: true,
   transcribeFasterAway: true,
   showAutoLyrics: true,
+  syncTranscriptions: true,
+  shareTranscriptions: true,
+  shareTranscriptionsUnreleased: false,
   lyricsCheckAudio: true,
   lyricsFixTiming: true,
   lyricsReleasedForVersions: false,
@@ -1656,6 +1665,30 @@ export interface TranscribeStatus {
   secsPerSong?: number;
   paused?: "battery" | "offline" | "busy";
   error?: { kind: "download" | "checksum" | "disk" | "transcribe"; message: string; trackId?: string };
+}
+
+// ---------------------------------------------------------------- sharing lyrics
+
+/** What LRCLIB gets when a transcription is shared (docs/IPC.md "Sharing lyrics"). */
+export interface LyricsSharePayload {
+  trackName: string;
+  artistName: string;
+  albumName: string;
+  /** Seconds. */
+  duration: number;
+  plainLyrics: string;
+  syncedLyrics: string;
+}
+
+export type LyricsShareWhyNot = "off" | "notTranscribed" | "notReviewed" | "missingInfo" | "unreleased" | "shared";
+
+/** `lyrics_share_info`: whether to offer sharing, and exactly what would go. */
+export interface LyricsShareInfo {
+  offer: boolean;
+  whyNot?: LyricsShareWhyNot;
+  /** The song counts as unreleased (sharing publishes its title). */
+  unreleased: boolean;
+  payload?: LyricsSharePayload;
 }
 
 // ---------------------------------------------------------------- file tags

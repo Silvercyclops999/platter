@@ -1,7 +1,7 @@
 //! Lyrics the user wrote travel through the store (the `lyrics` namespace).
 //! The `user_lyrics` table stays what the lyrics views read; this keeps the
-//! two in step. Lyrics transcribed on this computer stay on it until the
-//! user edits and saves them. The user's lyrics choices per song (a pick
+//! two in step. Transcriptions travel separately (sync::transcripts) and
+//! never replace lyrics the user wrote. The user's lyrics choices per song (a pick
 //! and a timing offset) travel the same way in `lyricsChoices`.
 
 use super::store::{LYRICS, LYRICS_CHOICES, SyncStore, UserLyricsEntry};

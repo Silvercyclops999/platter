@@ -127,6 +127,7 @@ import type {
   TagScanStatus,
   TranscribeModel,
   TranscribeStatus,
+  LyricsShareInfo,
   QueueAt,
   Track,
   ActivityPanel,
@@ -581,6 +582,15 @@ export interface Backend {
   transcribeCancel(trackId?: string): Promise<void>;
   /** The song was transcribed and no words were found. */
   transcribeFoundNothing(trackId: string): Promise<boolean>;
+
+  // Sharing lyrics (docs/IPC.md "Sharing lyrics")
+  /** Whether to offer sharing the song's transcription to LRCLIB, and what would be sent. */
+  lyricsShareInfo(trackId: string): Promise<LyricsShareInfo>;
+  /** The user checked the song's lyrics (opened the editor, or played it through with them showing). */
+  lyricsShareReviewed(trackId: string): Promise<void>;
+  /** Publish to LRCLIB after the user confirmed. Resolves once published. */
+  lyricsSharePublish(trackId: string): Promise<void>;
+  lyricsShareCancel(trackId: string): Promise<void>;
 
   // Downloads (docs/IPC.md "Downloads")
   downloadsStatus(): Promise<DownloadStatus>;
@@ -1049,6 +1059,10 @@ export function createTauriBackend(): Backend {
     transcribeUnreleased: () => call("transcribe_unreleased"),
     transcribeCancel: (trackId) => call("transcribe_cancel", { trackId: trackId ?? null }),
     transcribeFoundNothing: (trackId) => call("transcribe_found_nothing", { trackId }),
+    lyricsShareInfo: (trackId) => call("lyrics_share_info", { trackId }),
+    lyricsShareReviewed: (trackId) => call("lyrics_share_reviewed", { trackId }),
+    lyricsSharePublish: (trackId) => call("lyrics_share_publish", { trackId }),
+    lyricsShareCancel: (trackId) => call("lyrics_share_cancel", { trackId }),
     downloadsStatus: () => call("downloads_status"),
     downloadedTracks: () => call("downloaded_tracks"),
     downloadsSet: (kind, id, on, opts) =>

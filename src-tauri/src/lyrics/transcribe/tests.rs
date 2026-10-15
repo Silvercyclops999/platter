@@ -602,6 +602,43 @@ async fn the_background_batch_takes_unreleased_songs_and_waits_on_battery() {
     assert!(f.db.read(store::unreleased_todo).unwrap().is_empty());
 }
 
+/// Results from the user's other devices: "802" was transcribed elsewhere.
+#[derive(Default)]
+struct FakeShared {
+    saved: Mutex<Vec<(String, String)>>,
+    forgot: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl SharedResults for FakeShared {
+    async fn take(&self, track_id: &str) -> Option<bool> {
+        (track_id == "802").then_some(true)
+    }
+    async fn saved(&self, track_id: &str, _body: &str, model: &str) {
+        self.saved.lock().push((track_id.to_owned(), model.to_owned()));
+    }
+    async fn forgot(&self, track_id: &str) {
+        self.forgot.lock().push(track_id.to_owned());
+    }
+}
+
+#[tokio::test]
+async fn the_batch_skips_songs_transcribed_on_another_device() {
+    let f = fx();
+    let shared = Arc::new(FakeShared::default());
+    f.t.set_shared(shared.clone());
+    install(&f).await;
+    assert_eq!(f.t.transcribe_unreleased().await.unwrap(), 3);
+    until(&f.t, "done", |s| idle(s) && f.events.done.lock().len() == 3).await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 2, "802 came from another device");
+    let mut saved = shared.saved.lock().clone();
+    saved.sort();
+    assert_eq!(saved, vec![("801".to_string(), "small".to_string()), ("803".to_string(), "small".to_string())]);
+    assert!(f.events.done.lock().contains(&("802".to_string(), true)));
+    f.t.forget("801").await.unwrap();
+    assert_eq!(*shared.forgot.lock(), vec!["801".to_string()]);
+}
+
 #[tokio::test]
 async fn songs_asked_for_go_before_the_batch() {
     let f = fx();

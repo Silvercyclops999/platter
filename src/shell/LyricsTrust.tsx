@@ -27,6 +27,7 @@ import {
   useWrongLyrics,
 } from "../stores/wrongLyrics";
 import { loadCheckStatus, lyricsChanged, retryCheck, useLyricsTrust } from "./lyrics";
+import { ShareTranscription } from "./ShareTranscription";
 import "./lyrics-trust.css";
 
 /** The small note on what the check said. */
@@ -266,6 +267,7 @@ export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: 
           {lyrics.disagree && <AlertTriangle size={14} aria-hidden="true" />}
           Wrong lyrics?
         </button>
+        <ShareTranscription lyrics={lyrics} track={track} />
       </div>
       {lyrics.disagree && <p className="lyrics-trust__hint">Other lyrics found for this song say something different.</p>}
       {tapping && (

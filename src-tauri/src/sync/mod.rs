@@ -3,7 +3,8 @@
 //!
 //! Plex holds likes, playlists, history and play queues. What only Platter
 //! knows (settings marked Synced, pins, library folders, followed artists,
-//! hidden and snoozed items, bookmarks, lyrics the user wrote) lives in the
+//! hidden and snoozed items, bookmarks, lyrics the user wrote or
+//! transcribed) lives in the
 //! [`SyncStore`]. Without a sync file it stays on this device. With one,
 //! the [`engine`] keeps the store and the file in step.
 //!
@@ -31,7 +32,7 @@
 //! - [`file`]: the sync file on disk (atomic writes, conflicted copies).
 //! - [`engine`]: the passes between the store and the file.
 //! - [`settings`]: settings marked Synced through the store.
-//! - [`pins`], [`folders`], [`lyrics`], [`follows`]: features on top of the store
+//! - [`pins`], [`folders`], [`lyrics`], [`transcripts`], [`follows`]: features on top of the store
 //!   (followed artists through the social module's `FollowStore`).
 //! - [`detect`]: finding cloud folders to suggest.
 //! - [`keycopy`]: copying keys between devices (never through the file).
@@ -48,8 +49,11 @@ pub mod lyrics;
 pub mod pins;
 pub mod settings;
 pub mod store;
+pub mod transcripts;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transcripts_tests;
 
 pub use store::{Changed, Ns, SyncStore};

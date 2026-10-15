@@ -53,6 +53,7 @@ const COLUMNS: &[(&str, &[&str], &[&str])] = &[
     ("album_tags", &["album_id", "face_id"], &[]),
     ("user_lyrics", &["track_id"], &[]),
     ("lyrics_auto_empty", &["track_id"], &[]),
+    ("lyrics_share", &["track_id"], &[]),
     ("download_items", &["id"], &[]),
     ("download_item_tracks", &["id", "track_id"], &[]),
     ("download_files", &["track_id"], &[]),

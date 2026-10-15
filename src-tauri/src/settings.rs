@@ -415,6 +415,13 @@ pub struct Settings {
     pub transcribe_faster_away: bool,
     /// Show lyrics transcribed on this computer.
     pub show_auto_lyrics: bool,
+    /// Transcriptions travel to the user's other devices through the sync
+    /// store, so each song is transcribed once.
+    pub sync_transcriptions: bool,
+    /// Offer to share a checked transcription to LRCLIB (asks every time).
+    pub share_transcriptions: bool,
+    /// ...including unreleased songs (with an extra warning).
+    pub share_transcriptions_unreleased: bool,
     /// Check lyrics against the song with the speech model, when it's
     /// installed (this device only).
     pub lyrics_check_audio: bool,
@@ -750,6 +757,9 @@ impl Default for Settings {
             transcribe_pause_busy: true,
             transcribe_faster_away: true,
             show_auto_lyrics: true,
+            sync_transcriptions: true,
+            share_transcriptions: true,
+            share_transcriptions_unreleased: false,
             lyrics_check_audio: true,
             lyrics_fix_timing: true,
             lyrics_released_for_versions: false,
@@ -906,6 +916,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "plexEditMatchUnreleased",
     "dragAndDrop",
     "showAutoLyrics",
+    "syncTranscriptions",
+    "shareTranscriptions",
+    "shareTranscriptionsUnreleased",
     "homeMixes",
     "mixVariety",
     "mixExcludeArtists",
@@ -1149,6 +1162,9 @@ pub struct SettingsPatch {
     pub transcribe_pause_busy: Option<bool>,
     pub transcribe_faster_away: Option<bool>,
     pub show_auto_lyrics: Option<bool>,
+    pub sync_transcriptions: Option<bool>,
+    pub share_transcriptions: Option<bool>,
+    pub share_transcriptions_unreleased: Option<bool>,
     pub lyrics_check_audio: Option<bool>,
     pub lyrics_fix_timing: Option<bool>,
     pub lyrics_released_for_versions: Option<bool>,
@@ -1408,6 +1424,9 @@ impl Settings {
         set(&mut self.transcribe_pause_busy, p.transcribe_pause_busy);
         set(&mut self.transcribe_faster_away, p.transcribe_faster_away);
         set(&mut self.show_auto_lyrics, p.show_auto_lyrics);
+        set(&mut self.sync_transcriptions, p.sync_transcriptions);
+        set(&mut self.share_transcriptions, p.share_transcriptions);
+        set(&mut self.share_transcriptions_unreleased, p.share_transcriptions_unreleased);
         set(&mut self.lyrics_check_audio, p.lyrics_check_audio);
         set(&mut self.lyrics_fix_timing, p.lyrics_fix_timing);
         set(&mut self.lyrics_released_for_versions, p.lyrics_released_for_versions);
@@ -1787,6 +1806,8 @@ pub struct Live {
     pub lyrics_prefer_own: Arc<AtomicBool>,
     /// Show lyrics transcribed on this computer.
     pub lyrics_show_auto: Arc<AtomicBool>,
+    /// Transcriptions travel to the user's other devices.
+    pub sync_transcriptions: Arc<AtomicBool>,
     /// Live versions keep borrowed lyric timing.
     pub lyrics_live_timing: Arc<AtomicBool>,
     /// Check lyrics against the song.
@@ -1873,6 +1894,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.lyrics_lrclib.store(s.lyrics_lrclib && on, Ordering::Relaxed);
     live.lyrics_prefer_own.store(s.lyrics_prefer_own, Ordering::Relaxed);
     live.lyrics_show_auto.store(s.show_auto_lyrics, Ordering::Relaxed);
+    live.sync_transcriptions.store(s.sync_transcriptions, Ordering::Relaxed);
     live.lyrics_live_timing.store(s.lyrics_live_timing, Ordering::Relaxed);
     live.lyrics_check_audio.store(s.lyrics_check_audio, Ordering::Relaxed);
     live.lyrics_fix_timing.store(s.lyrics_fix_timing, Ordering::Relaxed);
@@ -2282,6 +2304,8 @@ mod tests {
         assert!(s.drag_and_drop);
         // Transcription is opt-in (it downloads a model); its results show.
         assert!(!s.transcribe_lyrics && s.show_auto_lyrics);
+        // Transcriptions sync and the share offer is on (asking every time); unreleased songs aren't offered.
+        assert!(s.sync_transcriptions && s.share_transcriptions && !s.share_transcriptions_unreleased);
         assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Small);
         assert_eq!(s.transcribe_processor, crate::lyrics::transcribe::pace::ProcessorUse::Light);
         assert!(s.transcribe_pause_busy && s.transcribe_faster_away);
@@ -2767,6 +2791,9 @@ mod tests {
             transcribe_pause_busy: Some(false),
             transcribe_faster_away: Some(false),
             show_auto_lyrics: Some(false),
+            sync_transcriptions: Some(false),
+            share_transcriptions: Some(false),
+            share_transcriptions_unreleased: Some(true),
             show_to_my_devices: Some(false),
             computer_name: Some("Den".into()),
             show_airplay_locked: Some(true),
@@ -2833,6 +2860,7 @@ mod tests {
         assert!(!live.sync.get().enabled);
         assert!(!live.sync.get().groups.settings && live.sync.get().groups.library && !live.sync.get().groups.follows);
         assert!(!live.lyrics_show_auto.load(Ordering::Relaxed));
+        assert!(!live.sync_transcriptions.load(Ordering::Relaxed));
         assert!(!live.share_public_links.load(Ordering::Relaxed));
         assert!(!live.remote.show_cast());
         assert!(!live.discord.get().enabled && live.discord.get().upload_art && live.discord.get().private_session);
@@ -2867,6 +2895,8 @@ mod tests {
         assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Medium);
         assert_eq!(s.transcribe_processor, crate::lyrics::transcribe::pace::ProcessorUse::Balanced);
         assert!(!s.transcribe_pause_busy && !s.transcribe_faster_away);
+        assert!(!s.sync_transcriptions && !s.share_transcriptions && s.share_transcriptions_unreleased);
+        assert!(!fresh.sync_transcriptions.load(Ordering::Relaxed));
         assert!(!fresh.lyrics_show_auto.load(Ordering::Relaxed));
         assert!(!s.info_wikipedia && s.info_lastfm && s.info_fanart && s.info_audiodb);
         assert!(!s.info_listenbrainz && !s.link_featured);

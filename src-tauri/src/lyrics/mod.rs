@@ -21,6 +21,8 @@
 //! - [`checker`]    the check's worker and its tables
 //! - [`choice`]     the user's pick and timing offset per song
 //! - [`pronounce`] romanised lines under lyrics (local)
+//! - [`publish`]   sharing to LRCLIB (challenge, proof of work, publish)
+//! - [`share`]     when sharing a transcription is offered, and its commands
 //! - [`translate`] translation through the service the user set
 //! - [`commands`]   the Tauri commands and the Plex side
 //!
@@ -35,10 +37,14 @@ pub mod commands;
 pub mod live;
 pub mod lrclib;
 pub mod pronounce;
+pub mod publish;
+pub mod share;
 pub mod transcribe;
 pub mod translate;
 pub mod user;
 
+#[cfg(test)]
+mod share_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

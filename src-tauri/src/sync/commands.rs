@@ -165,6 +165,8 @@ pub struct Appliers {
     pub downloads: crate::downloads::Downloads,
     pub mixes: crate::mixes::MixService,
     pub db: crate::db::DbHandle,
+    /// "Sync transcriptions to my devices".
+    pub transcripts: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Tell the window about store changes, and apply what the sync file
@@ -212,6 +214,17 @@ pub fn spawn_listener(store: SyncStore, a: Appliers) {
                 let db = a.db.clone();
                 if let Err(e) = store.run(move |st| super::lyrics::apply(st, &db)).await {
                     tracing::warn!("synced lyrics not applied: {e}");
+                }
+            }
+            if has(super::store::TRANSCRIPTS.name()) && a.transcripts.load(std::sync::atomic::Ordering::Relaxed) {
+                let db = a.db.clone();
+                match store.run(move |st| super::transcripts::apply(st, &db)).await {
+                    Ok(changed) => {
+                        for (id, found) in changed {
+                            crate::lyrics::transcribe::TranscribeEvents::done(&a.app, &id, found);
+                        }
+                    }
+                    Err(e) => tracing::warn!("synced transcriptions not applied: {e}"),
                 }
             }
             if has(super::store::LYRICS_CHOICES.name()) {
