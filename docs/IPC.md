@@ -1495,6 +1495,8 @@ The rest of the fields, with their defaults:
 | `miniplayerTint` | bool, true | The miniplayer's card takes a colour from the cover. This device only. |
 | `miniplayerQueue` | bool, false | The miniplayer lists the next songs when it's at least 480 tall. This device only. |
 | `miniplayerBounds` | `{ x, y, width, height }` or null, read only | Where the miniplayer was last, in logical pixels. Kept by the core. This device only. |
+| `powerKeys` | bool, false | Keyboard power mode in the main window: jump hints, j / k, g g, G, Enter and /. Handled in the UI (`src/shell/powerKeys.ts`); the core only stores it. |
+| `hintKey` | `"f"` (default), `"h"`, `";"`, `"'"` | The key that shows the jump hints. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

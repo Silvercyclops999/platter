@@ -31,11 +31,11 @@ beforeEach(() => {
 afterEach(() => resetTypeAhead());
 
 describe("keyboard shortcuts window", () => {
-  it("lists four sections with key caps", () => {
+  it("lists five sections with key caps", () => {
     act(() => useUi.setState({ shortcutsOpen: true }));
     render(<ShortcutsHelp />);
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
-    expect(within(dialog).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Basic", "Playback", "Navigation", "Layout"]);
+    expect(within(dialog).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Basic", "Playback", "Navigation", "Layout", "Keyboard power mode"]);
     expect(dialog).toHaveTextContent("Press Ctrl+/ to open or close this list");
     const play = dialog.querySelector('[data-shortcut="playPause"]')!;
     expect(play).toHaveTextContent("Play or pause");

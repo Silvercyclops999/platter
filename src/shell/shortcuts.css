@@ -30,6 +30,7 @@
   color: var(--color-text-primary);
 }
 .shortcuts__list { margin: 0; }
+.shortcuts__note { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .shortcuts__row {
   display: flex;
   align-items: center;

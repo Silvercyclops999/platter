@@ -84,6 +84,12 @@ const SHUFFLE = [
   { value: "spread", label: "Spread" },
   { value: "standard", label: "Standard" },
 ] as const satisfies SelectOption<Settings["shuffleStyle"]>[];
+const HINT_KEYS = [
+  { value: "f", label: "F" },
+  { value: "h", label: "H" },
+  { value: ";", label: ";" },
+  { value: "'", label: "'" },
+] as const satisfies SelectOption<Settings["hintKey"]>[];
 const QUEUE_END = [
   { value: "keepPlaying", label: "Keep playing similar music" },
   { value: "stop", label: "Stop" },
@@ -1046,6 +1052,21 @@ export function SettingsPage() {
           Show shortcuts
         </Button>
       ),
+    },
+    {
+      key: "powerKeys",
+      section: "App",
+      title: "Keyboard power mode",
+      description:
+        "Press the hint key to label everything you can click with two letters, then type the letters to use it. J and K move through songs in a list, G G jumps to the top and Shift+G to the bottom, Enter plays and / goes to search. Main window only.",
+      control: (ids) => toggle(s, "powerKeys", ids),
+    },
+    {
+      key: "hintKey",
+      section: "App",
+      title: "Keyboard power mode hint key",
+      description: "The key that shows the jump hints while keyboard power mode is on.",
+      control: (ids) => select(s, (x) => x.hintKey, HINT_KEYS, ids, (v) => updateSettings({ hintKey: v })),
     },
     {
       key: "notifyTrackChange",

@@ -8,6 +8,7 @@ import { createPlaylist } from "../stores/playlists";
 import { bookmarkNowPlaying } from "../stores/curate";
 import { useUi } from "../stores/ui";
 import { keyRight, keySidebar, rightRoom, sidebarRoom, solveLayout } from "./layout";
+import { hideHints, powerKey } from "./powerKeys";
 
 function isTyping(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -241,11 +242,30 @@ export function useShortcuts() {
         nav.forward();
       }
     };
+    // Power mode goes first (capture), so j / k / g aren't taken as
+    // type-ahead by a focused track row.
+    const onPowerKey = (e: KeyboardEvent) => {
+      const s = useSettings.getState().settings;
+      if (!s?.powerKeys) return;
+      const ui = useUi.getState();
+      const used = powerKey(e, {
+        hintKey: s.hintKey ?? "f",
+        busy: ui.paletteOpen || !!ui.menu || ui.shortcutsOpen,
+        focusSearch: () => ui.focusSearch(),
+      });
+      if (used) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", onPowerKey, true);
     window.addEventListener("keydown", onKey);
     window.addEventListener("mouseup", onMouse);
     return () => {
+      window.removeEventListener("keydown", onPowerKey, true);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mouseup", onMouse);
+      hideHints();
     };
   }, []);
 }

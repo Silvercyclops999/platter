@@ -49,6 +49,7 @@ import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { useShortcuts } from "./useShortcuts";
 import { ShortcutsHelp } from "./ShortcutsHelp";
+import { PowerHints } from "./PowerHints";
 import { skipToMain, useShellTabOrder } from "./focusOrder";
 
 function useWindowWidth() {
@@ -197,6 +198,7 @@ export function AppShell() {
       <PlayerBar />
       <CommandPalette />
       <ShortcutsHelp />
+      <PowerHints />
       <ContextMenuHost />
       <SavedInHost />
       <Toaster />

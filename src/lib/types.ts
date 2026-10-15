@@ -791,8 +791,15 @@ export interface Settings {
   miniplayerQueue: boolean;
   /** Where the miniplayer was last (logical pixels). Kept by the core; read only. */
   miniplayerBounds?: WindowBounds | null;
+  /** Keyboard power mode: jump hints, j / k, g g, G and / in the main window. */
+  powerKeys: boolean;
+  /** The key that shows the jump hints. */
+  hintKey: HintKey;
   [key: string]: unknown;
 }
+
+/** Keys that can show the jump hints in keyboard power mode. */
+export type HintKey = "f" | "h" | ";" | "'";
 
 /** A window's place and size in logical pixels. */
 export interface WindowBounds {
@@ -968,6 +975,8 @@ export const DEFAULT_SETTINGS: Settings = {
   miniplayerTint: true,
   miniplayerQueue: false,
   miniplayerBounds: null,
+  powerKeys: false,
+  hintKey: "f",
 };
 
 // ---------------------------------------------------------------- sync file, folders and keys

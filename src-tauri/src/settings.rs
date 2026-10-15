@@ -144,6 +144,20 @@ pub enum QueueEnd {
     Stop,
 }
 
+/// The key that shows jump hints in keyboard power mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum HintKey {
+    #[default]
+    #[serde(rename = "f")]
+    F,
+    #[serde(rename = "h")]
+    H,
+    #[serde(rename = ";")]
+    Semicolon,
+    #[serde(rename = "'")]
+    Quote,
+}
+
 /// Hours between daylist refreshes the setting offers.
 pub const DAYLIST_HOURS: [u32; 3] = [1, 3, 6];
 
@@ -413,6 +427,10 @@ pub struct Settings {
     /// Where the miniplayer was last, in logical pixels. Kept by the core,
     /// read only here.
     pub miniplayer_bounds: Option<crate::platform::miniplayer::WindowBounds>,
+    /// Keyboard power mode: jump hints, j / k, g g, G and / (main window).
+    pub power_keys: bool,
+    /// The key that shows the jump hints.
+    pub hint_key: HintKey,
 }
 
 /// Longest model name accepted.
@@ -543,6 +561,8 @@ impl Default for Settings {
             miniplayer_tint: true,
             miniplayer_queue: false,
             miniplayer_bounds: None,
+            power_keys: false,
+            hint_key: HintKey::F,
         }
     }
 }
@@ -615,6 +635,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "bookmarksInLibrary",
     "scrobbleUnreleased",
     "aiModel",
+    "powerKeys",
+    "hintKey",
 ];
 
 /// Settings kept on this device only.
@@ -803,6 +825,8 @@ pub struct SettingsPatch {
     pub miniplayer_on_top: Option<bool>,
     pub miniplayer_tint: Option<bool>,
     pub miniplayer_queue: Option<bool>,
+    pub power_keys: Option<bool>,
+    pub hint_key: Option<HintKey>,
 }
 
 impl SettingsPatch {
@@ -896,6 +920,8 @@ impl Settings {
         set(&mut self.miniplayer_on_top, p.miniplayer_on_top);
         set(&mut self.miniplayer_tint, p.miniplayer_tint);
         set(&mut self.miniplayer_queue, p.miniplayer_queue);
+        set(&mut self.power_keys, p.power_keys);
+        set(&mut self.hint_key, p.hint_key);
         set(&mut self.show_cast_devices, p.show_cast_devices);
         set(&mut self.discord_status, p.discord_status);
         set(&mut self.discord_show_unreleased, p.discord_show_unreleased);
@@ -1601,6 +1627,21 @@ mod tests {
         assert!(!s.smart_shuffle, "smart shuffle is opt-in");
         assert!(!s.sync_enabled && s.sync_folder.is_empty(), "the sync file is opt-in");
         assert!(s.sync_settings && s.sync_library && s.sync_follows && s.sync_lyrics);
+        assert!(!s.power_keys, "keyboard power mode is opt-in");
+        assert_eq!(s.hint_key, HintKey::F);
+    }
+
+    #[test]
+    fn hint_keys_are_the_characters_on_the_wire() {
+        for (k, wire) in [(HintKey::F, "f"), (HintKey::H, "h"), (HintKey::Semicolon, ";"), (HintKey::Quote, "'")] {
+            assert_eq!(serde_json::to_value(k).unwrap(), serde_json::json!(wire));
+        }
+        let p: SettingsPatch = serde_json::from_value(serde_json::json!({ "powerKeys": true, "hintKey": ";" })).unwrap();
+        let mut s = Settings::default();
+        s.apply(&p).unwrap();
+        assert!(s.power_keys);
+        assert_eq!(s.hint_key, HintKey::Semicolon);
+        assert!(serde_json::from_value::<SettingsPatch>(serde_json::json!({ "hintKey": "x" })).is_err());
     }
 
     #[test]

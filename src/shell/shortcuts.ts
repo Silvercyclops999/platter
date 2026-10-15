@@ -7,13 +7,14 @@
  */
 import { platform as currentPlatform, type Platform } from "../lib/platform";
 
-export type ShortcutSection = "basic" | "playback" | "navigation" | "layout";
+export type ShortcutSection = "basic" | "playback" | "navigation" | "layout" | "power";
 
 export const SECTION_TITLES: Record<ShortcutSection, string> = {
   basic: "Basic",
   playback: "Playback",
   navigation: "Navigation",
   layout: "Layout",
+  power: "Keyboard power mode",
 };
 
 export interface ShortcutDef {
@@ -69,6 +70,13 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: "toggleRight", section: "layout", label: "Show or hide the right panel", keys: ["Alt", "Shift", "R"] },
   { id: "rightNarrower", section: "layout", label: "Make the right panel narrower", keys: ["Alt", "Shift", "]"] },
   { id: "rightWider", section: "layout", label: "Make the right panel wider", keys: ["Alt", "Shift", "["] },
+  // Keyboard power mode (Settings, off by default). The hint key is the one chosen there.
+  { id: "powerHints", section: "power", label: "Show jump hints, then type a hint's letters", keys: ["F"] },
+  { id: "powerDown", section: "power", label: "Select the next song in the list", keys: ["J"] },
+  { id: "powerUp", section: "power", label: "Select the previous song in the list", keys: ["K"] },
+  { id: "powerTop", section: "power", label: "Jump to the top of the list", keys: ["G", "G"] },
+  { id: "powerBottom", section: "power", label: "Jump to the bottom of the list", keys: ["Shift", "G"] },
+  { id: "powerSearch", section: "power", label: "Search", keys: ["/"] },
 ];
 
 export type ShortcutId = (typeof SHORTCUTS)[number]["id"];
@@ -90,6 +98,11 @@ export function shortcutLabel(id: string, p: Platform = currentPlatform): string
   const def = SHORTCUTS.find((s) => s.id === id);
   if (!def) return "";
   return shortcutKeys(def, p).join(p === "mac" ? "" : "+");
+}
+
+/** The hint key as a key cap ("F", ";"). */
+export function hintKeyCap(key: string | undefined): string {
+  return (key || "f").toUpperCase();
 }
 
 export function shortcutsIn(section: ShortcutSection): ShortcutDef[] {
