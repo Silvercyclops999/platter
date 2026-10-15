@@ -1835,3 +1835,144 @@ async fn a_playlist_the_server_cannot_list_is_dropped_not_fatal() {
     assert_eq!(lists.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["ok"]);
     assert_eq!(count(&t.db, "tracks"), 12, "the rest of the sync still lands");
 }
+
+// ------------------------------------------------- popular: which copy
+
+/// An artist with the same songs on a studio album, a live album, an
+/// unreleased tape and a session compilation, plus an interlude.
+fn copies_library() -> FakeLibrary {
+    let mut lib = FakeLibrary { sections: vec![fake::section("1", "u")], ..Default::default() };
+    let ar = fake::artist("a1", "Odessa Wren");
+    let albums = [
+        fake::album("debut", "First Light", &ar, 2004, Some("Album"), &[]),
+        fake::album("fifth", "Fifth Room", &ar, 2010, Some("Album"), &[]),
+        fake::album("strings", "Live with Strings", &ar, 2006, Some("Album"), &["Live"]),
+        fake::album("tape", "Room Tapes", &ar, 2009, Some("Album"), &[]),
+        fake::album("sessions", "Radio Sessions", &ar, 2007, Some("Album"), &["Compilation"]),
+    ];
+    // id, title, album, plays, seconds
+    let tracks: &[(&str, &str, &str, u32, u64)] = &[
+        ("walk-live", "Walking Song", "strings", 30, 260),
+        ("walk", "Walking Song", "debut", 0, 250),
+        ("power-tape", "Power Song", "tape", 25, 290),
+        ("power", "Power Song", "fifth", 1, 292),
+        ("gold-session", "Gold Song (Radio Sessions)", "sessions", 40, 230),
+        ("gold", "Gold Song", "debut", 2, 210),
+        ("lights-interlude", "Bright Lights (Interlude)", "fifth", 50, 60),
+        ("lights", "Bright Lights (feat. Guest Singer)", "fifth", 3, 300),
+        ("old", "Old Song - 2011 Remaster", "debut", 0, 200),
+    ];
+    for (n, &(id, title, album, plays, secs)) in tracks.iter().enumerate() {
+        let al = albums.iter().find(|a| a.id == album).unwrap();
+        let mut t = fake::track(id, title, al, 1, n as u32 + 1);
+        t.view_count = plays;
+        t.duration_ms = secs * 1000;
+        lib.tracks.push(t);
+    }
+    lib.albums = albums.into();
+    lib.artists = vec![ar];
+    lib
+}
+
+fn put_global_with_releases(db: &DbHandle, id: &str, songs: &[(&str, u64, &str)]) {
+    let top = popular::GlobalTop::from_entries(
+        "listenbrainz",
+        songs.iter().map(|(t, n, r)| (t.to_string(), *n, Some(r.to_string()))),
+    );
+    let id = id.to_owned();
+    db.write(move |c| {
+        crate::artistinfo::cache::put(c, &id, popular::GLOBAL_ROW, Some(&top), now_s(), 3600)?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[tokio::test]
+async fn popular_picks_the_studio_copy_of_each_listed_song() {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(copies_library())), false).await;
+    // The tape is marked unreleased by its files' ARCHIVE_VERSION.
+    t.db.write(|c| {
+        c.execute(
+            "INSERT INTO file_tags (part_key, status, version, scanned_at)
+             SELECT part_key, 'ok', 'Leak', 0 FROM tracks WHERE album_id = 'tape'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    // No list yet: the page waits for one rather than showing plays order.
+    let page = t.db.read(|c| queries::artist_page(c, "a1")).unwrap();
+    assert!(page.popular_pending);
+    put_global_with_releases(
+        &t.db,
+        "a1",
+        &[
+            ("Bright Lights", 900, "Fifth Room"),
+            ("Power Song", 800, "Fifth Room"),
+            ("Gold Song", 700, "First Light"),
+            ("Walking Song", 600, "First Light"),
+            ("Old Song", 500, "First Light"),
+        ],
+    );
+    let page = t.db.read(|c| queries::artist_page(c, "a1")).unwrap();
+    assert!(!page.popular_pending);
+    let got: Vec<&str> = page.popular.iter().map(|p| p.id.as_str()).collect();
+    // Listed songs in list order, one copy each; then the unmatched by
+    // plays, variants of listed songs (the interlude, the session take) last.
+    assert_eq!(got, ["lights", "power", "gold", "walk", "old", "lights-interlude", "gold-session"]);
+
+    // Without release names the rules alone still pick the same copies.
+    let plain: Vec<(&str, u64)> =
+        vec![("Bright Lights", 900), ("Power Song", 800), ("Gold Song", 700), ("Walking Song", 600), ("Old Song", 500)];
+    put_global(&t.db, "a1", &plain);
+    let page = t.db.read(|c| queries::artist_page(c, "a1")).unwrap();
+    let got: Vec<&str> = page.popular.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(got, ["lights", "power", "gold", "walk", "old", "lights-interlude", "gold-session"]);
+
+    // My plays: no waiting for a list.
+    let page = t.db.read(|c| queries::artist_page_by(c, "a1", PopularSource::MyPlays)).unwrap();
+    assert!(!page.popular_pending);
+}
+
+#[tokio::test]
+async fn popular_with_a_warm_cache_is_quick() {
+    // A big artist: 40 albums of 25 tracks, songs on several albums.
+    let mut lib = FakeLibrary { sections: vec![fake::section("1", "u")], ..Default::default() };
+    let ar = fake::artist("a1", "Odessa Wren");
+    for a in 0..40i32 {
+        let live = a % 3 == 0;
+        let subs: &[&str] = if live { &["Live"] } else { &[] };
+        let mut al = fake::album(&format!("al{a}"), &format!("Record {a}"), &ar, 1990 + a, Some("Album"), subs);
+        al.track_count = 25;
+        for n in 0..25u32 {
+            let song = (a as u32 * 7 + n) % 300;
+            let title = if live { format!("Song {song} (Live)") } else { format!("Song {song}") };
+            let mut t = fake::track(&format!("t{a}-{n}"), &title, &al, 1, n + 1);
+            t.view_count = n;
+            lib.tracks.push(t);
+        }
+        lib.albums.push(al);
+    }
+    lib.artists = vec![ar];
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(lib)), false).await;
+    let songs: Vec<(String, u64)> = (0..150).map(|i| (format!("Song {i}"), 10_000 - i as u64)).collect();
+    let top = popular::GlobalTop::from_pairs("listenbrainz", songs);
+    t.db.write(move |c| {
+        crate::artistinfo::cache::put(c, "a1", popular::GLOBAL_ROW, Some(&top), now_s(), 3600)?;
+        Ok(())
+    })
+    .unwrap();
+    // Warm the statement cache, then time it.
+    t.db.read(|c| queries::artist_page(c, "a1")).unwrap();
+    let started = std::time::Instant::now();
+    let page = t.db.read(|c| queries::artist_page(c, "a1")).unwrap();
+    let ms = started.elapsed().as_millis();
+    eprintln!("artist page, 1000 tracks, warm list: {ms} ms");
+    assert_eq!(page.popular.len(), popular::POPULAR_N);
+    assert!(page.popular.iter().all(|t| !t.title.contains("(Live)")), "studio copies");
+    // Under 50 ms in a release build; a debug build gets room.
+    let budget = if cfg!(debug_assertions) { 250 } else { 50 };
+    assert!(ms < budget, "{ms} ms");
+}

@@ -196,6 +196,11 @@ pub struct ArtistPage {
     /// Albums by others with tracks that credit this artist, newest first.
     #[serde(default)]
     pub appears_on: Vec<Album>,
+    /// Popular ranks by the global list, none has been fetched yet and a
+    /// fetch is on its way: the page shows placeholder rows a moment
+    /// rather than plays order that reshuffles when the list lands.
+    #[serde(default)]
+    pub popular_pending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

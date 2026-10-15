@@ -247,6 +247,8 @@ pub fn run() {
             );
             artist_info.set_mbid_lookup(Arc::new(artistinfo::service::PlexMbid(plex.clone())));
             artist_info.set_events(Arc::new(app.handle().clone()));
+            // Popular lists for the artists you play, ready before their pages open.
+            tauri::async_runtime::spawn(artist_info.clone().watch_prefetch());
             // Launched at login: start hidden to the tray or minimised.
             let args: Vec<String> = std::env::args().collect();
             platform::apply_start_mode(app.handle(), platform::start_mode(&args, &initial.platform()));

@@ -3,6 +3,9 @@
 //! the rest it asks for a user token (free, from the user's ListenBrainz
 //! settings), sent as `Authorization: Token <token>` when one is saved.
 
+use std::borrow::Cow;
+
+use serde::Deserialize;
 use serde_json::Value;
 
 use super::http::InfoHttp;
@@ -26,22 +29,42 @@ pub struct TopRecordings {
     pub credit_names: Vec<String>,
 }
 
-/// Parse a top-recordings reply: a JSON array of recordings. Anything else
-/// is a bad answer.
-pub fn parse(v: &Value) -> Result<Option<TopRecordings>, FetchError> {
-    let Some(items) = v.as_array() else {
-        return Err(FetchError::Unavailable("ListenBrainz answer is not a list".into()));
-    };
-    let mut pairs = Vec::with_capacity(items.len());
+/// One recording in a top-recordings reply. Only these fields are read; the
+/// rest of the answer (often several MB) is skipped while parsing.
+#[derive(Deserialize)]
+struct Rec<'a> {
+    #[serde(borrow, default)]
+    recording_name: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    release_name: Option<Cow<'a, str>>,
+    #[serde(default)]
+    total_listen_count: Option<u64>,
+    #[serde(borrow, default)]
+    artists: Option<Vec<Credit<'a>>>,
+}
+
+#[derive(Deserialize)]
+struct Credit<'a> {
+    #[serde(borrow, default)]
+    artist_credit_name: Option<Cow<'a, str>>,
+}
+
+/// Parse a top-recordings reply: a JSON array of recordings, kept as the
+/// top songs with the releases they came out on. Anything else is a bad
+/// answer.
+pub fn parse(body: &[u8]) -> Result<Option<TopRecordings>, FetchError> {
+    let items: Vec<Rec> = serde_json::from_slice(body)
+        .map_err(|e| FetchError::Unavailable(format!("ListenBrainz answer is not a list of recordings: {e}")))?;
+    let mut entries = Vec::with_capacity(items.len());
     let mut credit_names: Vec<String> = Vec::new();
     for it in items {
-        let Some(title) = it.get("recording_name").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) else {
+        let Some(title) = it.recording_name.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
             continue;
         };
-        let listens = it.get("total_listen_count").and_then(Value::as_u64).unwrap_or(0);
-        pairs.push((title.to_owned(), listens));
-        for a in it.get("artists").and_then(Value::as_array).into_iter().flatten() {
-            if let Some(n) = a.get("artist_credit_name").and_then(Value::as_str).map(str::trim)
+        let release = it.release_name.as_deref().map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned);
+        entries.push((title.to_owned(), it.total_listen_count.unwrap_or(0), release));
+        for a in it.artists.iter().flatten() {
+            if let Some(n) = a.artist_credit_name.as_deref().map(str::trim)
                 && !n.is_empty()
                 && !credit_names.iter().any(|c| c == n)
             {
@@ -49,10 +72,10 @@ pub fn parse(v: &Value) -> Result<Option<TopRecordings>, FetchError> {
             }
         }
     }
-    if pairs.is_empty() {
+    if entries.is_empty() {
         return Ok(None);
     }
-    Ok(Some(TopRecordings { top: GlobalTop::from_pairs("listenbrainz", pairs), credit_names }))
+    Ok(Some(TopRecordings { top: GlobalTop::from_entries("listenbrainz", entries), credit_names }))
 }
 
 impl ListenBrainz<'_> {
@@ -69,7 +92,7 @@ impl ListenBrainz<'_> {
         let url = format!("{API}popularity/top-recordings-for-artist/{mbid}");
         let resp = self.limiter.get(self.http, &url, &self.headers()).await?;
         match resp.status {
-            200 => parse(&resp.json::<Value>().map_err(FetchError::from)?),
+            200 => parse(&resp.body),
             401 | 403 if self.token.is_some() => Err(FetchError::KeyRejected),
             // No token: ListenBrainz only answers what it has cached.
             401 | 403 => Ok(None),
@@ -127,6 +150,8 @@ mod tests {
         assert_eq!(got.top.from, "listenbrainz");
         let titles: Vec<_> = got.top.songs.iter().map(|s| (s.title.as_str(), s.listens)).collect();
         assert_eq!(titles, [("Big Song", 1100), ("Other", 500)]);
+        // The release each recording came out on is kept (once) to pick the library copy.
+        assert_eq!(got.top.songs[0].releases, ["LP"]);
         assert_eq!(got.credit_names, ["Rue, The Moth"]);
         assert!(http.urls()[0].ends_with(&format!("top-recordings-for-artist/{MBID}")));
     }

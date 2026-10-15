@@ -12,9 +12,10 @@
 //! credit them and their MusicBrainz id from a MusicBrainz search; Plex is
 //! never asked about them.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -90,6 +91,9 @@ pub trait MbidLookup: Send + Sync {
 
 pub trait InfoEvents: Send + Sync {
     fn info_changed(&self, id: &str);
+    /// A fetch of the global Popular list finished, found or not. The page
+    /// stops waiting for it.
+    fn popular_done(&self, _id: &str) {}
 }
 
 impl<R: tauri::Runtime> InfoEvents for tauri::AppHandle<R> {
@@ -97,6 +101,13 @@ impl<R: tauri::Runtime> InfoEvents for tauri::AppHandle<R> {
         use tauri::Emitter;
         if let Err(e) = self.emit("artistinfo://changed", serde_json::json!({ "id": id })) {
             tracing::warn!("emit artistinfo://changed: {e}");
+        }
+    }
+
+    fn popular_done(&self, id: &str) {
+        use tauri::Emitter;
+        if let Err(e) = self.emit("artistinfo://popular", serde_json::json!({ "id": id })) {
+            tracing::warn!("emit artistinfo://popular: {e}");
         }
     }
 }
@@ -158,7 +169,23 @@ struct Inner {
     limits: Limiters,
     in_flight: Mutex<HashSet<String>>,
     lang: String,
+    prefetch: Mutex<Prefetch>,
 }
+
+/// The background Popular prefetch queue (see
+/// [`ArtistInfoService::queue_popular`]).
+struct Prefetch {
+    queue: VecDeque<String>,
+    queued: HashSet<String>,
+    running: bool,
+    /// Pause after each artist that needed a fetch.
+    gap: Duration,
+}
+
+/// Pause between prefetched artists: three a minute.
+pub const PREFETCH_GAP: Duration = Duration::from_secs(20);
+/// Artists picked for one prefetch round.
+pub const PREFETCH_MAX: usize = 60;
 
 #[derive(Clone)]
 pub struct ArtistInfoService {
@@ -229,6 +256,31 @@ fn library_names_in(c: &Connection, candidates: &[String]) -> AppResult<HashMap<
     Ok(out)
 }
 
+/// Artists worth a Popular list before their page opens: Home's shortcuts
+/// and recently played (album artists of albums too), then the most played,
+/// at most [`PREFETCH_MAX`], in that order.
+pub fn prefetch_targets(c: &Connection, now: i64) -> AppResult<Vec<String>> {
+    use crate::db::types::HomeItem;
+    let home = crate::db::queries::home(c, now)?;
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    let home_ids = home.shortcuts.iter().chain(&home.recently_played).filter_map(|i| match i {
+        HomeItem::Artist { artist } => Some(artist.id.clone()),
+        HomeItem::Album { album } => Some(album.artist_id.clone()),
+        HomeItem::Playlist { .. } => None,
+    });
+    let top = crate::db::queries::top_artists(c, PREFETCH_MAX)?.into_iter().map(|a| a.id);
+    for id in home_ids.chain(top) {
+        if out.len() >= PREFETCH_MAX {
+            break;
+        }
+        if !id.is_empty() && seen.insert(id.clone()) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
 impl ArtistInfoService {
     pub fn new(db: DbHandle, http: Arc<dyn InfoHttp>, keys: Arc<dyn TokenStore>, switches: Switches) -> Self {
         Self {
@@ -244,6 +296,12 @@ impl ArtistInfoService {
                 limits: Limiters::default(),
                 in_flight: Mutex::new(HashSet::new()),
                 lang: "en".into(),
+                prefetch: Mutex::new(Prefetch {
+                    queue: VecDeque::new(),
+                    queued: HashSet::new(),
+                    running: false,
+                    gap: PREFETCH_GAP,
+                }),
             }),
         }
     }
@@ -414,7 +472,7 @@ impl ArtistInfoService {
     }
 
     /// Popular ranks by global popularity and a source for it is usable.
-    fn popular_wanted(&self) -> bool {
+    pub fn popular_wanted(&self) -> bool {
         self.inner.db.popular_source() == PopularSource::Global
             && (self.usable(InfoSource::Listenbrainz) || self.usable(InfoSource::Lastfm))
     }
@@ -517,31 +575,58 @@ impl ArtistInfoService {
     /// One refresh per artist at a time. Returns whether anything changed
     /// (and tells the page when it did).
     pub async fn refresh(&self, id: &str) -> AppResult<bool> {
+        self.refresh_with(id, false).await
+    }
+
+    /// [`Self::refresh`]; `popular_only` leaves the other sources alone (the
+    /// background prefetch). A new Popular list is announced as soon as it
+    /// is stored; the rest once everything is in.
+    async fn refresh_with(&self, id: &str, popular_only: bool) -> AppResult<bool> {
         if !self.inner.in_flight.lock().insert(id.to_owned()) {
             return Ok(false);
         }
-        let out = self.refresh_inner(id, now_s()).await;
+        let out = self.refresh_inner(id, now_s(), popular_only).await;
         self.inner.in_flight.lock().remove(id);
-        let changed = out?;
-        if changed && let Some(ev) = self.inner.events.lock().clone() {
+        let (popular_changed, other_changed) = out?;
+        if other_changed && let Some(ev) = self.inner.events.lock().clone() {
             ev.info_changed(id);
         }
-        Ok(changed)
+        Ok(popular_changed || other_changed)
     }
 
-    async fn refresh_inner(&self, id: &str, now: i64) -> AppResult<bool> {
-        let usable = self.usable_sources();
+    /// Fetch the Popular list, tell the page, and say whether it changed.
+    async fn popular_step(&self, id: &str, mbid: Option<&str>, name: &str, now: i64) -> bool {
+        let changed = self.refresh_popular(id, mbid, name, now).await;
+        if let Some(ev) = self.inner.events.lock().clone() {
+            if changed {
+                ev.info_changed(id);
+            }
+            ev.popular_done(id);
+        }
+        changed
+    }
+
+    /// Returns (Popular changed, anything else changed).
+    async fn refresh_inner(&self, id: &str, now: i64, popular_only: bool) -> AppResult<(bool, bool)> {
+        let usable = if popular_only { Vec::new() } else { self.usable_sources() };
         let wanted = self.popular_wanted();
         let me = self.clone();
         let key = id.to_owned();
         let Some(snap) = self.inner.db.read_async(move |c| me.snapshot(c, &key, now, &usable, wanted)).await? else {
-            return Ok(false);
+            return Ok((false, false));
         };
         if snap.stale.is_empty() && !snap.popular_stale {
-            return Ok(false);
+            return Ok((false, false));
         }
         let name = snap.plex.title.clone();
         let mut mbid = self.mbid(id, &name, now).await;
+        // With an id in hand the Popular list goes first: the page is
+        // waiting on it, and the other sources only add to About.
+        let mut popular_changed = false;
+        let popular_early = snap.popular_stale && mbid.is_some();
+        if popular_early {
+            popular_changed = self.popular_step(id, mbid.as_deref(), &name, now).await;
+        }
         let http = self.inner.http.as_ref();
         let l = &self.inner.limits;
         let lang = self.inner.lang.as_str();
@@ -607,10 +692,114 @@ impl ArtistInfoService {
         if let Some(r) = audiodb {
             changed |= self.record(id, InfoSource::Audiodb, r, None, now).await;
         }
-        if snap.popular_stale {
-            changed |= self.refresh_popular(id, mbid.as_deref(), &name, now).await;
+        if snap.popular_stale && !popular_early {
+            popular_changed = self.popular_step(id, mbid.as_deref(), &name, now).await;
         }
-        Ok(changed)
+        Ok((popular_changed, changed))
+    }
+
+    /// Queue artists for a background Popular fetch. One worker takes them
+    /// in order, skips those with a fresh list, and pauses [`PREFETCH_GAP`]
+    /// after each one it asked about, so the sources see a few requests a
+    /// minute at most. Artists already queued keep their place.
+    pub fn queue_popular(&self, ids: impl IntoIterator<Item = String>) {
+        let start = {
+            let mut p = self.inner.prefetch.lock();
+            for id in ids {
+                if p.queued.insert(id.clone()) {
+                    p.queue.push_back(id);
+                }
+            }
+            let start = !p.running && !p.queue.is_empty();
+            p.running |= start;
+            start
+        };
+        if start {
+            let me = self.clone();
+            tokio::spawn(async move { me.run_prefetch().await });
+        }
+    }
+
+    /// The pause after each prefetched artist (tests shorten it).
+    pub fn set_prefetch_gap(&self, gap: Duration) {
+        self.inner.prefetch.lock().gap = gap;
+    }
+
+    /// Whether the prefetch worker has nothing left to do.
+    pub fn prefetch_idle(&self) -> bool {
+        let p = self.inner.prefetch.lock();
+        !p.running && p.queue.is_empty()
+    }
+
+    async fn run_prefetch(&self) {
+        loop {
+            let (id, gap) = {
+                let mut p = self.inner.prefetch.lock();
+                match p.queue.pop_front() {
+                    Some(id) => {
+                        p.queued.remove(&id);
+                        (id, p.gap)
+                    }
+                    None => {
+                        p.running = false;
+                        return;
+                    }
+                }
+            };
+            match self.prefetch_one(&id).await {
+                Ok(true) => tokio::time::sleep(gap).await,
+                Ok(false) => {}
+                Err(e) => tracing::debug!("popular prefetch for {id}: {e}"),
+            }
+        }
+    }
+
+    /// Fetch one artist's Popular list when it's missing or stale, leaving
+    /// the other sources for the page. Returns whether it asked.
+    pub async fn prefetch_one(&self, id: &str) -> AppResult<bool> {
+        if !self.popular_wanted() {
+            return Ok(false);
+        }
+        let now = now_s();
+        let key = id.to_owned();
+        let stale = self
+            .inner
+            .db
+            .read_async(move |c| Ok(cache::get(c, &key, popular::GLOBAL_ROW)?.is_none_or(|r| r.stale(now))))
+            .await?;
+        if !stale {
+            return Ok(false);
+        }
+        self.refresh_with(id, true).await?;
+        Ok(true)
+    }
+
+    /// Prefetch Popular lists at startup and after each library sync: the
+    /// artists you play most and those on Home's shortcuts and recent
+    /// shelves. Runs for the life of the app.
+    pub async fn watch_prefetch(self) {
+        // Let startup work (the first sync, Home) go first.
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        let mut seen: Option<Option<i64>> = None;
+        loop {
+            let synced = self
+                .inner
+                .db
+                .read_async(|c| Ok(crate::db::store::sync_state(c)?.and_then(|s| s.last_sync_at)))
+                .await
+                .unwrap_or(None);
+            if seen != Some(synced) {
+                seen = Some(synced);
+                match self.inner.db.read_async(|c| prefetch_targets(c, now_s())).await {
+                    Ok(ids) => {
+                        tracing::debug!(n = ids.len(), "popular prefetch queued");
+                        self.queue_popular(ids);
+                    }
+                    Err(e) => tracing::debug!("popular prefetch targets: {e}"),
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
     }
 
     /// Fetch and store the global Popular list: ListenBrainz first, Last.fm

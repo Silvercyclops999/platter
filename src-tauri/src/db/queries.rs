@@ -445,7 +445,8 @@ pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppRes
     let credited = popular::credited_tracks(c, &artist.title, Some(id))?;
     let appears_on = appears_on(c, &credited)?;
     let global = global_for(c, id, source)?;
-    let popular = popular::rank(own.into_iter().chain(credited).collect(), global.as_ref(), POPULAR_N);
+    let popular =
+        popular::rank_with(own.into_iter().chain(credited).collect(), global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
     let all = {
         let mut st = c.prepare_cached(&format!(
             "SELECT {ALBUM_COLS} FROM albums al WHERE al.artist_id = ?1
@@ -466,7 +467,23 @@ pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppRes
         c.query_row("SELECT summary, similar FROM artists WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
     let about = about.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let similar = similar_artists(c, id, &similar_names)?;
-    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar, appears_on })
+    let popular_pending = popular_pending(c, id, source)?;
+    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar, appears_on, popular_pending })
+}
+
+/// Popular ranks by the global list and none was ever stored for `id` (a
+/// "none found" counts as stored). The command also checks a source for the
+/// list is on.
+fn popular_pending(c: &Connection, id: &str, source: PopularSource) -> AppResult<bool> {
+    if source != PopularSource::Global {
+        return Ok(false);
+    }
+    let stored: bool = c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM artist_info WHERE artist_id = ?1 AND source = ?2)",
+        params![id, popular::GLOBAL_ROW],
+        |r| r.get(0),
+    )?;
+    Ok(!stored)
 }
 
 /// The global top songs when Popular ranks by them.
@@ -498,7 +515,7 @@ pub fn credited_page(c: &Connection, id: &str, key: &str, source: PopularSource)
     let plays: u64 = tracks.iter().map(|t| t.view_count as u64).sum();
     let appears_on = appears_on(c, &tracks)?;
     let global = global_for(c, id, source)?;
-    let popular = popular::rank(tracks, global.as_ref(), POPULAR_N);
+    let popular = popular::rank_with(tracks, global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
     let artist = Artist {
         id: id.to_string(),
         sort_title: title.clone(),
@@ -508,7 +525,8 @@ pub fn credited_page(c: &Connection, id: &str, key: &str, source: PopularSource)
         view_count: plays.min(u32::MAX as u64) as u32,
         summary: None,
     };
-    Ok(ArtistPage { artist, popular, sections: Vec::new(), plays, about: None, similar: Vec::new(), appears_on })
+    let popular_pending = popular_pending(c, id, source)?;
+    Ok(ArtistPage { artist, popular, sections: Vec::new(), plays, about: None, similar: Vec::new(), appears_on, popular_pending })
 }
 
 /// The tracks a credited artist's play context adds after its Popular list.

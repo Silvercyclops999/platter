@@ -36,10 +36,14 @@ impl MbidLookup for PlexDown {
 }
 
 #[derive(Default)]
-struct Events(Mutex<Vec<String>>);
+struct Events(Mutex<Vec<String>>, Mutex<Vec<String>>);
 impl InfoEvents for Events {
     fn info_changed(&self, id: &str) {
         self.0.lock().push(id.to_owned());
+    }
+
+    fn popular_done(&self, id: &str) {
+        self.1.lock().push(id.to_owned());
     }
 }
 
@@ -631,4 +635,98 @@ async fn bio_names_in_the_library_link_and_wikidata_links_come_through() {
     assert_eq!(info.links.iter().map(|l| l.kind.as_str()).collect::<Vec<_>>(), ["website", "wikipedia"]);
     assert_eq!(info.gallery.len(), 3, "Plex's photo, then Fanart.tv's two");
     assert!(commands::listed_for(&info, "https://band.example/"));
+}
+
+// ---------------------------------------------------------------- prefetch
+
+async fn until_idle(svc: &ArtistInfoService) {
+    for _ in 0..500 {
+        if svc.prefetch_idle() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("prefetch never finished");
+}
+
+#[tokio::test]
+async fn a_finished_popular_fetch_tells_the_page_found_or_not() {
+    let r = rig(None, Some(MBID));
+    r.svc.switches().set(InfoSource::Wikipedia, false);
+    r.http.fail("listenbrainz");
+    assert!(!r.svc.refresh(ARTIST).await.unwrap());
+    assert_eq!(*r.events.1.lock(), [ARTIST], "the page stops waiting on a failed fetch");
+    assert!(r.events.0.lock().is_empty());
+
+    let r = rig(None, Some(MBID));
+    r.http.route("top-recordings-for-artist", 200, &lb_reply(&[("Hit", 9)]));
+    wiki_routes(&r.http);
+    assert!(r.svc.refresh(ARTIST).await.unwrap());
+    // The list first, then the rest: the page reloads twice at most.
+    assert_eq!(*r.events.1.lock(), [ARTIST]);
+    assert_eq!(*r.events.0.lock(), [ARTIST, ARTIST]);
+    let urls = r.http.urls();
+    let lb = urls.iter().position(|u| u.contains("listenbrainz")).unwrap();
+    let wiki = urls.iter().position(|u| u.contains("wiki")).unwrap();
+    assert!(lb < wiki, "Popular is asked for before the bio");
+}
+
+#[tokio::test]
+async fn prefetch_fills_missing_lists_politely_and_only_lists() {
+    let r = rig(None, Some(MBID));
+    wiki_routes(&r.http);
+    r.http.route("top-recordings-for-artist", 200, &lb_reply(&[("Hit", 9)]));
+    // '77' already has a fresh list; a third artist is new.
+    let fresh = crate::db::popular::GlobalTop::from_pairs("listenbrainz", [("Old".to_string(), 1)]);
+    r.db.write(move |c| {
+        c.execute("INSERT INTO artists (id, title, sort_title) VALUES ('78', 'Drummer', 'Drummer')", [])?;
+        cache::put(c, "77", crate::db::popular::GLOBAL_ROW, Some(&fresh), now_s(), 3600)?;
+        Ok(())
+    })
+    .unwrap();
+    let gap = std::time::Duration::from_millis(150);
+    r.svc.set_prefetch_gap(gap);
+    let started = std::time::Instant::now();
+    r.svc.queue_popular([ARTIST.to_string(), "77".to_string(), "78".to_string(), ARTIST.to_string()]);
+    // Queued again while running: no second worker, no repeat.
+    r.svc.queue_popular([ARTIST.to_string()]);
+    until_idle(&r.svc).await;
+    assert_eq!(r.http.calls("listenbrainz"), 2, "the fresh one is skipped, the repeat merged");
+    assert!(started.elapsed() >= gap * 2, "a pause after each fetch");
+    assert!(popular_row(&r.db, ARTIST).unwrap().data.is_some());
+    assert!(popular_row(&r.db, "78").unwrap().data.is_some());
+    // Only the Popular list: the bio waits for the page.
+    assert!(!r.http.urls().iter().any(|u| u.contains("wiki")));
+    let (_, stale) = r.svc.cached(ARTIST, now_s()).await.unwrap();
+    assert!(stale, "the other sources still refresh on page open");
+    assert_eq!(*r.events.1.lock(), [ARTIST, "78"]);
+
+    // Again: everything fresh, nothing asked.
+    r.svc.queue_popular([ARTIST.to_string(), "78".to_string()]);
+    until_idle(&r.svc).await;
+    assert_eq!(r.http.calls("listenbrainz"), 2);
+
+    // Popular by my plays: the prefetch asks nothing.
+    r.db.write(|c| {
+        c.execute("DELETE FROM artist_info", [])?;
+        Ok(())
+    })
+    .unwrap();
+    r.db.set_popular_source(crate::db::PopularSource::MyPlays);
+    r.svc.queue_popular([ARTIST.to_string()]);
+    until_idle(&r.svc).await;
+    assert_eq!(r.http.calls("listenbrainz"), 2);
+}
+
+#[tokio::test]
+async fn prefetch_targets_home_and_most_played_artists() {
+    let r = rig(None, Some(MBID));
+    r.db.write(|c| {
+        c.execute("UPDATE artists SET view_count = 5 WHERE id = '77'", [])?;
+        c.execute("INSERT INTO artists (id, title, sort_title) VALUES ('79', 'Never Played', 'Never Played')", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let ids = r.db.read(|c| super::service::prefetch_targets(c, now_s())).unwrap();
+    assert_eq!(ids, ["77"]);
 }

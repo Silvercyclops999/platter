@@ -109,17 +109,25 @@ pub async fn library_items(db: State<'_, DbHandle>) -> AppResult<Vec<LibraryItem
 }
 
 #[tauri::command]
-pub async fn artist_page(db: State<'_, DbHandle>, id: String) -> AppResult<ArtistPage> {
+pub async fn artist_page(
+    db: State<'_, DbHandle>,
+    info: State<'_, crate::artistinfo::ArtistInfoService>,
+    id: String,
+) -> AppResult<ArtistPage> {
     let source = db.popular_source();
     let key = id.clone();
     let view = db.tag_view();
-    let page = db
+    let started = std::time::Instant::now();
+    let mut page = db
         .read_async(move |c| {
             let mut page = queries::artist_page_by(c, &key, source)?;
             crate::tags::view::artist_page(c, &mut page, view)?;
             Ok(page)
         })
         .await?;
+    tracing::debug!(ms = started.elapsed().as_millis() as u64, popular = page.popular.len(), "artist page");
+    // Nothing will fetch a list with every source for it off.
+    page.popular_pending &= info.popular_wanted();
     // Cached similar artists show at once; stale or missing ones refresh in
     // the background and `artist://changed` tells the page. Credited
     // artists have no Plex entry to ask.

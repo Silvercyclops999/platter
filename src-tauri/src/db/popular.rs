@@ -3,21 +3,27 @@
 //! Global popularity is a list of song titles in order, fetched by
 //! `artistinfo` (ListenBrainz, or Last.fm top tracks when ListenBrainz has
 //! nothing) and cached in the `artist_info` table under [`GLOBAL_ROW`].
-//! Library tracks are matched to it by normalized title. Matched tracks come
-//! first, in list order; the rest follow by your own plays, then most recent
-//! play. Plex's `ratingCount` only breaks ties among unmatched tracks: it
-//! exists for few tracks and isn't on one scale, so it can't rank.
+//! Library tracks are matched to it by folded title ([`normalize_title`]).
+//! Version qualifiers such as "(Interlude)", "(Live)" or "(AOL Sessions)"
+//! are part of the folded title, so a variant only matches an entry with
+//! the same qualifier; featured artists and remaster notes fold away.
+//!
+//! Matched tracks come first, in list order, one copy per entry (see
+//! [`rank_with`] for which copy). The rest follow by your own plays, then
+//! most recent play; variants of a listed song go after other songs. Plex's
+//! `ratingCount` only breaks ties among unmatched tracks: it exists for few
+//! tracks and isn't on one scale, so it can't rank.
 //!
 //! Credited artists: names in a track's artist line that have no library
 //! artist get a generated page with the id `credit:<name, lower case>`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
-use crate::model::Track;
+use crate::model::{ReleaseSection, Track};
 
 use super::credits;
 use super::store::{TRACK_COLS, row_track};
@@ -32,6 +38,8 @@ pub const GLOBAL_KEEP: usize = 100;
 pub const POPULAR_N: usize = 10;
 /// Two copies of one song: same title and length within this.
 const SAME_SONG_MS: u64 = 2_000;
+/// Release names kept per song on a global list.
+const RELEASES_KEEP: usize = 4;
 
 /// One song on a global list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,6 +48,10 @@ pub struct GlobalSong {
     pub title: String,
     /// Listens (ListenBrainz) or plays (Last.fm), summed over duplicates.
     pub listens: u64,
+    /// Releases the counted recordings came out on (ListenBrainz), most
+    /// listened first. Picks the library copy when there are several.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub releases: Vec<String>,
 }
 
 /// An artist's global top songs, most popular first.
@@ -52,23 +64,39 @@ pub struct GlobalTop {
 }
 
 impl GlobalTop {
-    /// Build from raw (title, listens) pairs: copies of a song (same
-    /// normalized title) merge with their listens summed, then the list is
-    /// sorted and cut to [`GLOBAL_KEEP`].
+    /// Build from raw (title, listens) pairs. See [`GlobalTop::from_entries`].
     pub fn from_pairs(from: &str, pairs: impl IntoIterator<Item = (String, u64)>) -> Self {
+        Self::from_entries(from, pairs.into_iter().map(|(t, n)| (t, n, None)))
+    }
+
+    /// Build from raw (title, listens, release) entries: copies of a song
+    /// (same folded title) merge with their listens summed and their
+    /// releases collected, then the list is sorted and cut to
+    /// [`GLOBAL_KEEP`].
+    pub fn from_entries(from: &str, entries: impl IntoIterator<Item = (String, u64, Option<String>)>) -> Self {
         let mut by_key: HashMap<String, usize> = HashMap::new();
         let mut songs: Vec<GlobalSong> = Vec::new();
-        for (title, listens) in pairs {
+        for (title, listens, release) in entries {
             let key = normalize_title(&title);
             if key.is_empty() {
                 continue;
             }
-            match by_key.get(&key) {
-                Some(&i) => songs[i].listens = songs[i].listens.saturating_add(listens),
+            let i = match by_key.get(&key) {
+                Some(&i) => {
+                    songs[i].listens = songs[i].listens.saturating_add(listens);
+                    i
+                }
                 None => {
                     by_key.insert(key, songs.len());
-                    songs.push(GlobalSong { title, listens });
+                    songs.push(GlobalSong { title, listens, releases: Vec::new() });
+                    songs.len() - 1
                 }
+            };
+            if let Some(r) = release.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty())
+                && songs[i].releases.len() < RELEASES_KEEP
+                && !songs[i].releases.contains(&r)
+            {
+                songs[i].releases.push(r);
             }
         }
         // Stable: equal counts keep the source's order.
@@ -86,41 +114,149 @@ impl GlobalTop {
     }
 }
 
-/// Words after " - " that mark a version of the same song.
-const VERSION_WORDS: &[&str] = &["remaster", "version", "mono", "stereo", "edit", "mix", "live", "demo", "single", "mixed"];
+/// The cached global list for a page id (stale or not), when there is one.
+/// It is stored already cut to [`GLOBAL_KEEP`] songs, so a page open only
+/// reads a few KB of JSON.
+pub fn global_top(c: &Connection, id: &str) -> AppResult<Option<GlobalTop>> {
+    let data: Option<Option<String>> = c
+        .query_row(
+            "SELECT data FROM artist_info WHERE artist_id = ?1 AND source = ?2",
+            params![id, GLOBAL_ROW],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(data.flatten().and_then(|d| serde_json::from_str::<GlobalTop>(&d).ok()).filter(|g| !g.songs.is_empty()))
+}
 
-/// A title folded for matching: lower case, bracketed parts and featured
-/// artists dropped, version suffixes after " - " cut ("2011 Remaster"),
-/// apostrophes removed and other punctuation turned into single spaces.
-pub fn normalize_title(s: &str) -> String {
-    use unicode_normalization::UnicodeNormalization;
-    let lower: String = s.nfkc().collect::<String>().to_lowercase();
-    // Bracketed parts: "(feat. X)", "[Bonus Track]", "(2011 Remaster)".
-    let mut out = String::with_capacity(lower.len());
-    let mut depth = 0usize;
-    for ch in lower.chars() {
-        match ch {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth = depth.saturating_sub(1),
-            _ if depth == 0 => out.push(ch),
-            _ => {}
+// ------------------------------------------------------------ title folding
+
+/// Words that make a bracketed or " - " part a different version of the
+/// song: kept in the folded title.
+const QUALIFIERS: &[&str] = &[
+    "interlude", "intro", "outro", "live", "session", "sessions", "demo", "remix", "remixed", "mix", "mixed",
+    "instrumental", "acapella", "acappella", "cappella", "capella", "edit", "version", "skit", "reprise", "acoustic",
+];
+/// Parts that name the main recording: they fold away though they contain a
+/// qualifier word.
+const PLAIN_PARTS: &[&str] = &["album version", "original version", "original mix", "lp version"];
+/// Words after " - " that mark a plain edition note, not a subtitle.
+const NOTE_WORDS: &[&str] = &["mono", "stereo", "single", "bonus", "track", "explicit", "clean"];
+/// Words that start a featured-artist credit.
+const FEAT_WORDS: &[&str] = &["feat", "ft", "featuring"];
+
+fn words(s: &str) -> impl Iterator<Item = &str> {
+    s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty())
+}
+
+/// What a bracketed or " - " part of a title is.
+enum Part {
+    /// A version qualifier: kept.
+    Version(String),
+    /// A credit or edition note: dropped.
+    Note,
+    /// Anything else (a subtitle after " - ").
+    Other,
+}
+
+/// Classify one part (lower case, without its brackets or dash).
+fn classify(part: &str) -> Part {
+    let part = part.trim();
+    // "feat. X", "Remix feat. X", "with X": the credit goes.
+    let mut cut = part.len();
+    for (i, _) in part.char_indices() {
+        let at_word = i == 0 || !part[..i].chars().next_back().is_some_and(char::is_alphanumeric);
+        if !at_word {
+            continue;
+        }
+        let w = words(&part[i..]).next().unwrap_or("");
+        if FEAT_WORDS.contains(&w) || (i == 0 && w == "with") {
+            cut = i;
+            break;
         }
     }
-    // " - 2011 Remaster", " - Single Version", " - Live".
-    if let Some(i) = out.find(" - ") {
-        let tail = &out[i + 3..];
-        if VERSION_WORDS.iter().any(|w| tail.split(|c: char| !c.is_alphanumeric()).any(|t| t == *w || t.starts_with("remaster"))) {
-            out.truncate(i);
+    let part = part[..cut].trim();
+    if part.is_empty() {
+        return Part::Note;
+    }
+    let flat = words(part).collect::<Vec<_>>().join(" ");
+    let remaster = words(part).any(|w| w.starts_with("remaster"));
+    if PLAIN_PARTS.contains(&flat.as_str()) {
+        return Part::Note;
+    }
+    // "2011 Remastered Version" is a remaster note, not a version.
+    let qualified = words(part).any(|w| QUALIFIERS.contains(&w) && !(remaster && w == "version"));
+    if qualified {
+        return Part::Version(part.to_owned());
+    }
+    if remaster || words(part).all(|w| NOTE_WORDS.contains(&w) || w.chars().all(|c| c.is_ascii_digit())) {
+        return Part::Note;
+    }
+    Part::Other
+}
+
+/// A title split for matching: the base title and its version qualifiers.
+fn split_title(s: &str) -> (String, Vec<String>) {
+    use unicode_normalization::UnicodeNormalization;
+    let lower: String = s.nfkc().collect::<String>().to_lowercase();
+    let mut base = String::with_capacity(lower.len());
+    let mut versions = Vec::new();
+    let mut depth = 0usize;
+    let mut inner = String::new();
+    for ch in lower.chars() {
+        match ch {
+            '(' | '[' | '{' => {
+                if depth > 0 {
+                    inner.push(' ');
+                }
+                depth += 1;
+            }
+            ')' | ']' | '}' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    if let Part::Version(v) = classify(&inner) {
+                        versions.push(v);
+                    }
+                    inner.clear();
+                } else {
+                    inner.push(' ');
+                }
+            }
+            ')' | ']' | '}' => {}
+            _ if depth == 0 => base.push(ch),
+            _ => inner.push(ch),
+        }
+    }
+    // An unclosed bracket: judge what was in it all the same.
+    if depth > 0
+        && let Part::Version(v) = classify(&inner)
+    {
+        versions.push(v);
+    }
+    // " - 2011 Remaster" goes, " - Live" is a version, " - The Return" stays.
+    if let Some(i) = base.find(" - ") {
+        match classify(&base[i + 3..]) {
+            Part::Version(v) => {
+                versions.push(v);
+                base.truncate(i);
+            }
+            Part::Note => base.truncate(i),
+            Part::Other => {}
         }
     }
     // "Song feat. Someone".
-    for sep in [" feat. ", " ft. ", " featuring "] {
-        if let Some(i) = out.find(sep) {
-            out.truncate(i);
+    for sep in [" feat. ", " feat ", " ft. ", " featuring "] {
+        if let Some(i) = base.find(sep) {
+            base.truncate(i);
         }
     }
-    let mut folded = String::with_capacity(out.len());
-    for ch in out.chars() {
+    (base, versions)
+}
+
+/// Lower case, apostrophes removed, "&" spelled out, other punctuation
+/// turned into single spaces.
+fn fold(s: &str) -> String {
+    let mut folded = String::with_capacity(s.len());
+    for ch in s.chars() {
         if ch == '\'' || ch == '\u{2019}' || ch == '`' {
             continue;
         }
@@ -135,21 +271,101 @@ pub fn normalize_title(s: &str) -> String {
     folded.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The cached global list for a page id (stale or not), when there is one.
-pub fn global_top(c: &Connection, id: &str) -> AppResult<Option<GlobalTop>> {
-    let data: Option<Option<String>> = c
-        .query_row(
-            "SELECT data FROM artist_info WHERE artist_id = ?1 AND source = ?2",
-            params![id, GLOBAL_ROW],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(data.flatten().and_then(|d| serde_json::from_str::<GlobalTop>(&d).ok()).filter(|g| !g.songs.is_empty()))
+/// A title folded for matching: lower case, featured artists and edition
+/// notes ("2011 Remaster", "[Bonus Track]", "Album Version") dropped,
+/// version qualifiers ("(Interlude)", "- Live", "(AOL Sessions)") kept,
+/// apostrophes removed and other punctuation turned into single spaces.
+pub fn normalize_title(s: &str) -> String {
+    let (base, versions) = split_title(s);
+    let mut all = base;
+    for v in versions {
+        all.push(' ');
+        all.push_str(&v);
+    }
+    fold(&all)
 }
 
-/// Rank candidates for Popular (see the module docs). `global` None ranks by
-/// your plays only. Copies of a song show once, keeping the better ranked.
-pub fn rank(mut cands: Vec<Track>, global: Option<&GlobalTop>, n: usize) -> Vec<Track> {
+/// A title with every bracketed or " - " version part dropped too: the song
+/// whatever the version. Also folds album and release names.
+pub fn loose_title(s: &str) -> String {
+    fold(&split_title(s).0)
+}
+
+// ------------------------------------------------------------ ranking
+
+/// What picks between library copies of one listed song.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CopyInfo {
+    pub year: Option<i32>,
+    /// None counts as an album.
+    pub section: Option<ReleaseSection>,
+    /// [`super::release::is_unreleased`].
+    pub unreleased: bool,
+}
+
+/// A track's album info for picking a copy. The file's ARCHIVE_VERSION wins
+/// over the album's. Asked only for tracks that match a list entry.
+pub fn copy_info(c: &Connection, t: &Track) -> AppResult<CopyInfo> {
+    let row = c
+        .prepare_cached(
+            "SELECT al.year, al.format, al.subformats, al.section,
+                    coalesce((SELECT ft.version FROM file_tags ft WHERE ft.part_key = ?2),
+                             (SELECT at.version FROM album_tags at WHERE at.album_id = ?1))
+             FROM albums al WHERE al.id = ?1",
+        )?
+        .query_row(params![t.album_id, t.part_key], |r| {
+            let format: Option<String> = r.get(1)?;
+            let subs: Option<String> = r.get(2)?;
+            let section: Option<String> = r.get(3)?;
+            let version: Option<String> = r.get(4)?;
+            let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
+            Ok(CopyInfo {
+                year: r.get(0)?,
+                section: section.as_deref().map(super::release::section_from_key),
+                unreleased: super::release::is_unreleased(format.as_deref(), &subs, version.as_deref()),
+            })
+        })
+        .optional()?;
+    Ok(row.unwrap_or_default())
+}
+
+/// Studio albums first, demos last.
+fn section_pref(s: Option<ReleaseSection>) -> u8 {
+    match s.unwrap_or(ReleaseSection::Albums) {
+        ReleaseSection::Albums => 0,
+        ReleaseSection::SinglesEps => 1,
+        ReleaseSection::Compilations => 2,
+        ReleaseSection::Soundtracks => 3,
+        ReleaseSection::Remixes => 4,
+        ReleaseSection::Live => 5,
+        ReleaseSection::Mixtapes => 6,
+        ReleaseSection::Demos => 7,
+    }
+}
+
+fn lossless(t: &Track) -> bool {
+    let c = t.codec.as_deref().unwrap_or("").to_ascii_lowercase();
+    matches!(c.as_str(), "flac" | "alac" | "wav" | "pcm" | "aiff" | "ape" | "wavpack" | "wv" | "tta")
+}
+
+/// Rank candidates for Popular without album info (plain tests and callers
+/// that have none). See [`rank_with`].
+pub fn rank(cands: Vec<Track>, global: Option<&GlobalTop>, n: usize) -> Vec<Track> {
+    rank_with(cands, global, n, |_| Ok(CopyInfo::default())).unwrap_or_default()
+}
+
+/// Rank candidates for Popular (see the module docs). `global` None ranks
+/// by your plays only. `info` is asked only for tracks that match a list
+/// entry. When several copies match one entry, one shows, picked by:
+/// album named as the entry's release, released over unreleased, studio
+/// album over other release types, earliest year, lossless then bitrate,
+/// most played.
+pub fn rank_with(
+    mut cands: Vec<Track>,
+    global: Option<&GlobalTop>,
+    n: usize,
+    mut info: impl FnMut(&Track) -> AppResult<CopyInfo>,
+) -> AppResult<Vec<Track>> {
     let ranks = global.map(GlobalTop::ranks).unwrap_or_default();
     let keyed: Vec<(Option<usize>, String)> = cands
         .iter()
@@ -158,18 +374,46 @@ pub fn rank(mut cands: Vec<Track>, global: Option<&GlobalTop>, n: usize) -> Vec<
             (ranks.get(&k).copied(), k)
         })
         .collect();
+    // Songs on the list that the library has: their other versions wait.
+    let listed: HashSet<String> = keyed
+        .iter()
+        .zip(&cands)
+        .filter(|((r, _), _)| r.is_some())
+        .map(|(_, t)| loose_title(&t.title))
+        .collect();
+    let variant: Vec<bool> =
+        keyed.iter().zip(&cands).map(|((r, _), t)| r.is_none() && listed.contains(&loose_title(&t.title))).collect();
+    // Copy preference for matched tracks (lower is better).
+    type Pref = (bool, bool, u8, i32, bool, std::cmp::Reverse<u32>, std::cmp::Reverse<u32>);
+    let mut prefs: Vec<Option<Pref>> = vec![None; cands.len()];
+    for (i, t) in cands.iter().enumerate() {
+        let Some(r) = keyed[i].0 else { continue };
+        let ci = info(t)?;
+        let releases = &global.expect("ranked by a list").songs[r].releases;
+        let album = loose_title(&t.album_title);
+        let named = !album.is_empty() && releases.iter().any(|rel| loose_title(rel) == album);
+        prefs[i] = Some((
+            !named,
+            ci.unreleased,
+            section_pref(ci.section),
+            ci.year.filter(|y| *y > 0).unwrap_or(i32::MAX),
+            !lossless(t),
+            std::cmp::Reverse(t.bitrate.unwrap_or(0)),
+            std::cmp::Reverse(t.view_count),
+        ));
+    }
     let mut order: Vec<usize> = (0..cands.len()).collect();
     // Stable sort keeps library order for full ties.
     order.sort_by(|&a, &b| {
         let (ta, tb) = (&cands[a], &cands[b]);
         let (ra, rb) = (keyed[a].0, keyed[b].0);
         match (ra, rb) {
-            (Some(x), Some(y)) => x.cmp(&y).then(tb.view_count.cmp(&ta.view_count)),
+            (Some(x), Some(y)) => x.cmp(&y).then(prefs[a].cmp(&prefs[b])),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => tb
-                .view_count
-                .cmp(&ta.view_count)
+            (None, None) => variant[a]
+                .cmp(&variant[b])
+                .then(tb.view_count.cmp(&ta.view_count))
                 .then(tb.last_viewed_at.cmp(&ta.last_viewed_at))
                 .then(tb.rating_count.cmp(&ta.rating_count)),
         }
@@ -191,7 +435,7 @@ pub fn rank(mut cands: Vec<Track>, global: Option<&GlobalTop>, n: usize) -> Vec<
         }
     }
     let mut slots: Vec<Option<Track>> = cands.drain(..).map(Some).collect();
-    picked.into_iter().filter_map(|(i, _)| slots[i].take()).collect()
+    Ok(picked.into_iter().filter_map(|(i, _)| slots[i].take()).collect())
 }
 
 /// Lower-cased names that split credits must keep whole: library artists and
@@ -311,38 +555,108 @@ mod tests {
         v.iter().map(|t| t.id.as_str()).collect()
     }
 
+    /// A track on its own album, for copy picking.
+    fn on(id: &str, title: &str, album: &str) -> Track {
+        let mut t = tr(id, title, 0, None, None);
+        t.album_id = format!("al-{album}");
+        t.album_title = album.to_owned();
+        t
+    }
+
+    fn info(year: i32, section: ReleaseSection, unreleased: bool) -> CopyInfo {
+        CopyInfo { year: Some(year), section: Some(section), unreleased }
+    }
+
+    /// Rank with album info looked up by album title.
+    fn rank_by(cands: Vec<Track>, g: &GlobalTop, albums: &[(&str, CopyInfo)]) -> Vec<String> {
+        let infos: HashMap<String, CopyInfo> = albums.iter().map(|(a, i)| (a.to_string(), i.clone())).collect();
+        rank_with(cands, Some(g), POPULAR_N, |t| Ok(infos.get(&t.album_title).cloned().unwrap_or_default()))
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect()
+    }
+
     #[test]
     fn normalizes_titles() {
         for (a, b) in [
             ("Song Title", "song title"),
             ("Song Title (feat. Someone)", "song title"),
+            ("Song Title [feat. Someone & Other]", "song title"),
+            ("Song Title (with Someone)", "song title"),
             ("Song Title [Bonus Track]", "song title"),
             ("Song Title - 2011 Remaster", "song title"),
+            ("Song Title (2011 Remaster)", "song title"),
             ("Song Title - Remastered 2009", "song title"),
-            ("Song Title - Single Version", "song title"),
+            ("Song Title - 2009 Remastered Version", "song title"),
+            ("Song Title - Album Version", "song title"),
+            ("Song Title - Mono", "song title"),
             ("Song Title feat. Someone", "song title"),
             ("Don't Stop", "dont stop"),
             ("Don\u{2019}t  Stop!", "dont stop"),
             ("Rock & Roll", "rock and roll"),
             ("Ｗｉｄｅ", "wide"),
+            // The same qualifier, written either way, matches.
+            ("Song Title (Live)", "Song Title - Live"),
+            ("Song Title (Remix) [feat. Someone]", "Song Title - Remix"),
+            ("Song Title (Remix feat. Someone)", "Song Title (Remix)"),
         ] {
             assert_eq!(normalize_title(a), normalize_title(b), "{a} vs {b}");
+        }
+        // Version qualifiers stay: a variant is a different song.
+        for v in [
+            "Song Title (Interlude)",
+            "Song Title (Intro)",
+            "Song Title - Outro",
+            "Song Title (Live)",
+            "Song Title (Live at the Hall)",
+            "Song Title (Radio Sessions)",
+            "Song Title [Demo]",
+            "Song Title (Club Remix)",
+            "Song Title (Extended Mix)",
+            "Song Title (Instrumental)",
+            "Song Title (A Cappella)",
+            "Song Title (Acapella)",
+            "Song Title (Radio Edit)",
+            "Song Title (Single Version)",
+            "Song Title (Skit)",
+            "Song Title (Reprise)",
+            "Song Title - Acoustic",
+        ] {
+            assert_ne!(normalize_title(v), normalize_title("Song Title"), "{v}");
+            assert_eq!(loose_title(v), "song title", "{v}");
         }
         // A real subtitle after " - " stays.
         assert_ne!(normalize_title("Part One - The Return"), normalize_title("Part One"));
         assert_eq!(normalize_title("Ünïcode"), "ünïcode");
+        // Words inside a title are not qualifiers.
+        assert_eq!(normalize_title("Live Forever"), "live forever");
+        assert_eq!(normalize_title("Intro"), "intro");
     }
 
     #[test]
-    fn duplicate_recordings_merge_with_listens_summed() {
-        let g = GlobalTop::from_pairs(
+    fn duplicate_recordings_merge_with_listens_and_releases() {
+        let g = GlobalTop::from_entries(
             "listenbrainz",
-            [("Hit".into(), 100), ("Other".into(), 150), ("Hit - 2011 Remaster".into(), 80), ("hit (Live)".into(), 1)],
+            [
+                ("Hit".into(), 100, Some("First LP".into())),
+                ("Other".into(), 150, None),
+                ("Hit - 2011 Remaster".into(), 80, Some("First LP (Remastered)".into())),
+                ("hit (Live)".into(), 1, Some("Live Album".into())),
+            ],
         );
+        let got: Vec<_> = g.songs.iter().map(|s| (s.title.as_str(), s.listens, s.releases.clone())).collect();
         assert_eq!(
-            g.songs,
-            vec![GlobalSong { title: "Hit".into(), listens: 181 }, GlobalSong { title: "Other".into(), listens: 150 }]
+            got,
+            [
+                ("Hit", 180, vec!["First LP".to_string(), "First LP (Remastered)".to_string()]),
+                ("Other", 150, vec![]),
+                ("hit (Live)", 1, vec!["Live Album".to_string()]),
+            ]
         );
+        // Lists cached before releases were kept still read.
+        let old: GlobalTop = serde_json::from_str(r#"{"from":"listenbrainz","songs":[{"title":"Hit","listens":3}]}"#).unwrap();
+        assert!(old.songs[0].releases.is_empty());
     }
 
     #[test]
@@ -369,10 +683,134 @@ mod tests {
     }
 
     #[test]
+    fn a_short_interlude_does_not_take_the_songs_place() {
+        // The library has the song and a short interlude of the same name;
+        // the interlude is played more.
+        let mut song = on("song", "Bright Lights", "Big Record");
+        song.duration_ms = 300_000;
+        let mut inter = on("inter", "Bright Lights (Interlude)", "Big Record");
+        inter.duration_ms = 60_000;
+        inter.view_count = 40;
+        let other = on("other", "Second Hit", "Big Record");
+        let mut mine = on("mine", "Played Often", "Big Record");
+        mine.view_count = 10;
+        let g = GlobalTop::from_pairs("listenbrainz", [("Bright Lights".into(), 900), ("Second Hit".into(), 500)]);
+        // Matches first; the interlude, a variant of a listed song, after
+        // other unmatched songs even though it has more plays.
+        assert_eq!(rank_by(vec![inter, mine, other, song], &g, &[]), ["song", "other", "mine", "inter"]);
+
+        // Only the interlude in the library: it doesn't stand in for the song.
+        let mut inter = on("inter", "Bright Lights (Interlude)", "Big Record");
+        inter.view_count = 40;
+        let other = on("other", "Second Hit", "Big Record");
+        assert_eq!(rank_by(vec![inter, other], &g, &[]), ["other", "inter"]);
+
+        // A listed interlude does match.
+        let g = GlobalTop::from_pairs("listenbrainz", [("Bright Lights (Interlude)".into(), 9)]);
+        let inter = on("inter", "Bright Lights (Interlude)", "Big Record");
+        let song = on("song", "Bright Lights", "Big Record");
+        assert_eq!(rank_by(vec![song, inter], &g, &[]), ["inter", "song"]);
+    }
+
+    #[test]
+    fn released_album_copy_beats_an_unreleased_one() {
+        let boot = on("boot", "Power Song", "Leaked Tapes");
+        let studio = on("studio", "Power Song", "Fifth Album");
+        let g = GlobalTop::from_pairs("listenbrainz", [("Power Song".into(), 900)]);
+        let albums = [
+            ("Leaked Tapes", info(2009, ReleaseSection::Albums, true)),
+            ("Fifth Album", info(2010, ReleaseSection::Albums, false)),
+        ];
+        assert_eq!(rank_by(vec![boot.clone(), studio.clone()], &g, &albums), ["studio"]);
+        // Also when the other copy is on a mixtape with more plays.
+        let mut boot = boot;
+        boot.view_count = 99;
+        let albums = [
+            ("Leaked Tapes", info(2009, ReleaseSection::Mixtapes, false)),
+            ("Fifth Album", info(2010, ReleaseSection::Albums, false)),
+        ];
+        assert_eq!(rank_by(vec![boot, studio], &g, &albums), ["studio"]);
+    }
+
+    #[test]
+    fn a_session_take_on_a_compilation_does_not_match_the_song() {
+        let take = on("take", "Gold Song (Radio Sessions)", "Session Collection");
+        let song = on("song", "Gold Song", "Second Album");
+        let g = GlobalTop::from_pairs("listenbrainz", [("Gold Song".into(), 900)]);
+        let albums = [
+            ("Session Collection", info(2006, ReleaseSection::Compilations, false)),
+            ("Second Album", info(2005, ReleaseSection::Albums, false)),
+        ];
+        assert_eq!(rank_by(vec![take, song], &g, &albums), ["song", "take"]);
+        // The same title on a compilation and the album: the album copy.
+        let comp = on("comp", "Gold Song", "Session Collection");
+        let song = on("song", "Gold Song", "Second Album");
+        assert_eq!(rank_by(vec![comp, song], &g, &albums), ["song"]);
+    }
+
+    #[test]
+    fn the_studio_album_copy_beats_a_live_album() {
+        let live = on("live", "Walking Song", "Live with Strings");
+        let debut = on("debut", "Walking Song", "First Album");
+        let g = GlobalTop::from_pairs("listenbrainz", [("Walking Song".into(), 900)]);
+        let albums = [
+            ("Live with Strings", info(2006, ReleaseSection::Live, false)),
+            ("First Album", info(2004, ReleaseSection::Albums, false)),
+        ];
+        assert_eq!(rank_by(vec![live.clone(), debut.clone()], &g, &albums), ["debut"]);
+        // An untagged live album: the earliest year still picks the debut.
+        let albums = [
+            ("Live with Strings", info(2006, ReleaseSection::Albums, false)),
+            ("First Album", info(2004, ReleaseSection::Albums, false)),
+        ];
+        assert_eq!(rank_by(vec![live, debut], &g, &albums), ["debut"]);
+    }
+
+    #[test]
+    fn the_release_named_by_the_list_wins_then_quality_then_plays() {
+        let g = GlobalTop::from_entries("listenbrainz", [("Song".to_string(), 9, Some("Greatest Hits".to_string()))]);
+        let hits = on("hits", "Song", "Greatest Hits (Deluxe)");
+        let lp = on("lp", "Song", "The Album");
+        let albums = [
+            ("Greatest Hits (Deluxe)", info(2015, ReleaseSection::Compilations, false)),
+            ("The Album", info(2001, ReleaseSection::Albums, false)),
+        ];
+        assert_eq!(rank_by(vec![lp, hits], &g, &albums), ["hits"]);
+
+        // Same album twice: lossless, then bitrate, then plays.
+        let g = GlobalTop::from_pairs("listenbrainz", [("Song".into(), 9)]);
+        let mut mp3 = on("mp3", "Song", "The Album");
+        mp3.codec = Some("mp3".into());
+        mp3.bitrate = Some(320);
+        mp3.view_count = 50;
+        let mut flac = on("flac", "Song", "The Album");
+        flac.bitrate = Some(900);
+        let mut flac_hi = on("flac_hi", "Song", "The Album");
+        flac_hi.bitrate = Some(2_000);
+        let albums = [("The Album", info(2001, ReleaseSection::Albums, false))];
+        assert_eq!(rank_by(vec![mp3.clone(), flac.clone(), flac_hi], &g, &albums), ["flac_hi"]);
+        assert_eq!(rank_by(vec![mp3, flac.clone()], &g, &albums), ["flac"]);
+        let mut flac2 = flac.clone();
+        flac2.id = "flac2".into();
+        flac2.view_count = 3;
+        assert_eq!(rank_by(vec![flac, flac2], &g, &albums), ["flac2"]);
+    }
+
+    #[test]
+    fn feat_and_remaster_copies_still_match() {
+        let g = GlobalTop::from_pairs("listenbrainz", [("Duet Song".into(), 9), ("Old Song".into(), 5)]);
+        let duet = on("duet", "Duet Song (feat. Guest Singer)", "The Album");
+        let old = on("old", "Old Song - 2011 Remaster", "The Album");
+        let mut mine = on("mine", "Mine", "The Album");
+        mine.view_count = 80;
+        assert_eq!(rank_by(vec![mine, old, duet], &g, &[]), ["duet", "old", "mine"]);
+    }
+
+    #[test]
     fn copies_of_a_matched_song_show_once() {
         let mut a = tr("a", "Hit", 0, None, None);
         a.duration_ms = 200_000;
-        let mut b = tr("b", "Hit (Single Edit)", 3, None, None);
+        let mut b = tr("b", "Hit (Remastered)", 3, None, None);
         b.duration_ms = 180_000;
         let c = tr("c", "Other", 0, None, None);
         let g = GlobalTop::from_pairs("lastfm", [("Hit".into(), 9), ("Other".into(), 1)]);
