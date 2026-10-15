@@ -5,6 +5,7 @@ import { openContextMenu } from "../components/ContextMenu";
 import { useLibraryView } from "../stores/library";
 import { folders } from "../stores/folders";
 import { nav } from "../stores/router";
+import { smartCreateItems } from "../stores/curate";
 import { useUi, type MenuItem } from "../stores/ui";
 import { createPlaylistIn, folderMenu } from "./FolderMenus";
 import { LibraryCollection } from "./LibraryCollection";
@@ -17,6 +18,7 @@ import { useLibraryLoader, useLibraryModel, useLibraryRecents } from "./useLibra
 export function createMenu(folderId: string | null): MenuItem[] {
   return [
     { label: "Playlist", icon: ListMusic, onSelect: () => void createPlaylistIn(folderId) },
+    ...smartCreateItems(),
     { label: "Folder", icon: Folder, onSelect: () => void folders.create(folderId) },
   ];
 }

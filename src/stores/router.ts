@@ -34,7 +34,9 @@ export type Route =
   /** A made-for-you mix (Daily Mix, daylist, a genre mix...). */
   | { name: "mix"; id: string }
   /** Song or artist radio: `track:<id>` or `artist:<id>`. */
-  | { name: "radio"; seed: string };
+  | { name: "radio"; seed: string }
+  /** Bookmarked songs and pages. */
+  | { name: "bookmarks" };
 
 export interface HistoryEntry {
   key: number;

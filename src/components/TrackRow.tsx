@@ -38,6 +38,7 @@ import { DownloadedMark } from "./DownloadButton";
 import { useIsDownloaded } from "../stores/downloads";
 import { shareItem } from "./ShareMenu";
 import { sessionItems } from "../stores/social";
+import { bookmarkTrackItem, dontPlayArtistItem } from "../stores/curate";
 import { Skeleton } from "./Skeleton";
 
 /** Whether the album page for `albumId` is the one showing. */
@@ -92,6 +93,8 @@ export function trackMenuItems(
     ...goToArtistItems(track),
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
     { label: "Go to song radio", onSelect: () => nav.go({ name: "radio", seed: `track:${track.id}` }) },
+    bookmarkTrackItem(track),
+    dontPlayArtistItem({ id: track.artistId, title: track.artistTitle }),
     {
       // Read when the menu shows: lyrics may have been saved since the row built it.
       get label() {

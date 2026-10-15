@@ -4,6 +4,7 @@ import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { shareItem } from "../components/ShareMenu";
+import { bookmarkPageItem, dontPlayArtistItem } from "../stores/curate";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
@@ -284,6 +285,8 @@ function ActionRow({
               { label: following ? "Unfollow" : "Follow", onSelect: toggleFollow },
               { label: "Add popular songs to queue", onSelect: () => void player.addToQueue(data!.popular, artist.thumb) },
               { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${artist.id}` }) },
+              dontPlayArtistItem({ id: artist.id, title: artist.title, thumb: artist.thumb }),
+              bookmarkPageItem("artist", artist.id, artist.title, { thumb: artist.thumb }),
               ...(credited ? [] : [shareItem("artist", artist.id, artist.thumb)]),
               { label: pinned ? "Unpin from sidebar" : "Pin to sidebar", onSelect: togglePin },
             ],

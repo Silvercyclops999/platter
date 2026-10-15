@@ -125,7 +125,12 @@ export const useLibraryView = create<LibraryViewState>()((set, get) => {
     loadItems: async () => {
       const seq = ++loadSeq;
       try {
-        const items = await backend.libraryItems();
+        const [plex, smart] = await Promise.all([backend.libraryItems(), backend.smartList().catch(() => [])]);
+        // Platter smart playlists sit with the Plex playlists.
+        const items: LibraryItem[] = [
+          ...plex,
+          ...smart.map((s) => ({ kind: "playlist" as const, id: s.id, title: s.title, sortTitle: s.title, smart: true, platter: true, addedAt: s.updatedAt, playedAt: null })),
+        ];
         if (seq === loadSeq) set({ items });
       } catch {
         if (seq === loadSeq && get().items === null) set({ items: [] });
@@ -229,6 +234,10 @@ export interface LibEntry {
   unavailable?: boolean;
   /** Liked Songs (always pinned first; opens its own page). */
   liked?: boolean;
+  /** Bookmarks (pinned after Liked Songs while its setting is on). */
+  bookmarks?: boolean;
+  /** A Platter smart playlist (kept and filled on this computer). */
+  platter?: boolean;
   /** Kept on this computer (downloads). */
   downloaded?: boolean;
   /** An artist you follow. */
@@ -258,7 +267,8 @@ export function toEntries(items: LibraryItem[], owner: string | null): LibEntry[
     id: i.id,
     title: i.title,
     sortTitle: i.sortTitle || i.title,
-    creator: i.kind === "playlist" ? owner : (i.creator ?? null),
+    // A Platter smart playlist shows the "Platter" mark where the owner goes.
+    creator: i.platter ? "Platter" : i.kind === "playlist" ? owner : (i.creator ?? null),
     creatorId: i.creatorId ?? null,
     thumb: i.thumb ?? null,
     smart: i.smart,
@@ -266,6 +276,7 @@ export function toEntries(items: LibraryItem[], owner: string | null): LibEntry[
     addedAt: i.addedAt ?? null,
     playedAt: i.playedAt ?? null,
     pinned: false,
+    ...(i.platter ? { platter: true } : {}),
   }));
 }
 

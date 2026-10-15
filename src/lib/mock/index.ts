@@ -68,6 +68,10 @@ import type {
   TranscribeModel,
   QueueAt,
   MixSteer,
+  HideRequest,
+  NewBookmark,
+  SmartRules,
+  SmartSaveRequest,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
@@ -94,6 +98,7 @@ import { MockTranscribe } from "./transcribe";
 import { MockDownloads } from "./downloads";
 import { MockMixes } from "./mixes";
 import { MockSocial } from "./social";
+import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -209,6 +214,13 @@ export class MockBackend implements Backend {
   /** Friend activity, follows, What's New, listening sessions (test hooks: access, guestJoins, hostGone, hostEnds, addRelease). */
   readonly social: MockSocial;
   readonly syncFile: MockSync;
+  /** Hidden songs and artists. */
+  readonly hidden: MockHidden;
+  readonly bookmarks: MockBookmarks;
+  /** Smart playlists and the AI provider (test hooks: refusePlex, offline). */
+  readonly smart: MockSmart;
+  /** Scrobbling (test hook: reject). */
+  readonly scrobble: MockScrobble;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -363,6 +375,26 @@ export class MockBackend implements Backend {
       later: (ms, fn) => this.later(ms, fn),
       queueAdd: (ids) => void this.queueAdd(ids, "end"),
     });
+    this.hidden = new MockHidden((all) => this.emit("hidden://changed", all));
+    this.bookmarks = new MockBookmarks(
+      {
+        emit: (all) => this.emit("bookmarks://changed", all),
+        playAt: (id, ms) => {
+          this.loadContext({ context: { kind: "tracks", trackIds: [id] }, startTrackId: id }, true);
+          this.positionMs = ms;
+          this.emitState();
+        },
+      },
+      this.fx,
+    );
+    this.smart = new MockSmart(this.fx, {
+      settings: () => this.settings,
+      emit: (all) => this.emit("smart://changed", all),
+      libraryChanged: () => this.later(0, () => this.emit("library://changed", null)),
+      track: (id) => this.trackById(id),
+      album: (id) => this.fx.albums.find((a) => a.id === id),
+    });
+    this.scrobble = new MockScrobble((queued) => this.emit("scrobble://status", { queued }));
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
     this.remote = new MockRemote(
@@ -1231,6 +1263,11 @@ export class MockBackend implements Backend {
       args = { ...args, startTrackId: offline.start ?? undefined };
     }
     if (message && play) this.emit("toast", { kind: "info", message });
+    // Like the core: shuffle play leaves out hidden songs and artists, but not the picked one.
+    if (args.shuffle === true) {
+      const kept = tracks.filter((t) => t.id === args.startTrackId || !this.hidden.hides(t));
+      if (kept.length) tracks = kept;
+    }
     this.notePosition(); // where the outgoing context was left
     const id = info.id ?? null;
     const kind = args.context.kind;
@@ -1268,7 +1305,7 @@ export class MockBackend implements Backend {
     const avoid = new Set([...this.ctxOrder, ...this.history, ...this.userQueue].map((i) => i.track.id));
     const radio = this.ctxInfo?.kind === "radio";
     const seeds = this.ctxOrder.slice(Math.max(0, this.ctxPos - 9), this.ctxPos + 1).map((i) => i.track.id);
-    const more = this.mixes.similar(seeds, avoid, 20, `${this.itemSeq}`);
+    const more = this.mixes.similar(seeds, avoid, 20, `${this.itemSeq}`).filter((t) => !this.hidden.hides(t));
     if (!more.length) return false;
     const items = more.map((t) => this.item(t, radio ? "context" : "autoplay"));
     this.ctxOriginal.push(...items);
@@ -1647,7 +1684,14 @@ export class MockBackend implements Backend {
     return this.delay(() => this.mixes.shelves());
   }
   mixPage(id: string, steer?: MixSteer | null) {
-    return this.delay(() => this.mixes.page(id, steer ?? null) ?? this.notFound("Mix"));
+    return this.delay(() => this.withoutHidden(this.mixes.page(id, steer ?? null) ?? this.notFound("Mix")));
+  }
+  /** Like the core: hidden songs and artists leave mixes and radio. */
+  private withoutHidden<P extends { tracks: Track[]; familiar: boolean[]; mix: { trackCount: number; durationMs: number } }>(page: P): P {
+    const keep = page.tracks.map((t) => !this.hidden.hides(t));
+    if (keep.every(Boolean)) return page;
+    const tracks = page.tracks.filter((_, i) => keep[i]);
+    return { ...page, tracks, familiar: page.familiar.filter((_, i) => keep[i]), mix: { ...page.mix, trackCount: tracks.length, durationMs: tracks.reduce((s, t) => s + t.durationMs, 0) } };
   }
   mixRefresh(id: string) {
     return this.delay(() => {
@@ -1657,7 +1701,7 @@ export class MockBackend implements Backend {
     });
   }
   radioPage(seed: string, steer?: MixSteer | null, salt?: number) {
-    return this.delay(() => this.mixes.radio(seed, steer ?? null, salt ?? 0) ?? this.notFound("Radio"));
+    return this.delay(() => this.withoutHidden(this.mixes.radio(seed, steer ?? null, salt ?? 0) ?? this.notFound("Radio")));
   }
   /** Shuffle for the playing context; remembered for its id. */
   private applyShuffle(shuffle: boolean) {
@@ -1934,7 +1978,11 @@ export class MockBackend implements Backend {
     return this.delay(() => mockKeysStatus(this.infoKeys));
   }
   artistInfoKeySet(source: KeyedInfoSource, key: string | null) {
-    return this.delay(() => mockSetKey(this.infoKeys, source, key));
+    return this.delay(() => {
+      // The ListenBrainz token is the one scrobbling uses too.
+      if (source === "listenbrainz") this.scrobble.setListenBrainzToken(!!key?.trim());
+      return mockSetKey(this.infoKeys, source, key);
+    });
   }
   artistInfoCacheClear() {
     return this.delay(() => {
@@ -2056,6 +2104,72 @@ export class MockBackend implements Backend {
   }
   keysSend(code: string, kinds: KeyKind[]) {
     return this.delay(() => this.syncFile.send(code, kinds));
+  }
+
+  // ---------------------------------------------------------------- hide, bookmarks, smart playlists, scrobbling
+
+  hiddenList() {
+    return this.delay(() => this.hidden.list());
+  }
+  hiddenSet(item: HideRequest, on: boolean) {
+    return this.delay(() => this.hidden.set(item, on));
+  }
+  bookmarksList() {
+    return this.delay(() => this.bookmarks.list());
+  }
+  bookmarkAdd(bookmark: NewBookmark) {
+    return this.delay(() => this.bookmarks.add(bookmark));
+  }
+  bookmarkRemove(id: string) {
+    return this.delay(() => this.bookmarks.remove(id));
+  }
+  bookmarkOpen(id: string) {
+    return this.delay(() => this.bookmarks.open(id));
+  }
+  smartPreview(rules: SmartRules, picks?: string[]) {
+    return this.delay(() => this.smart.preview(rules, picks ?? []));
+  }
+  smartSave(request: SmartSaveRequest) {
+    return this.delay(() => this.smart.save(request));
+  }
+  smartList() {
+    return this.delay(() => this.smart.list());
+  }
+  smartPage(id: string) {
+    return this.delay(() => this.smart.page(id));
+  }
+  smartDelete(id: string) {
+    return this.delay(() => this.smart.delete(id));
+  }
+  smartPlexRules(id: string) {
+    return this.delay(() => this.smart.plexRulesOf(id));
+  }
+  smartPrompt(prompt: string) {
+    return this.delay(() => this.smart.prompt(prompt));
+  }
+  aiStatus() {
+    return this.delay(() => this.smart.aiStatus());
+  }
+  aiKeySet(key: string | null) {
+    return this.delay(() => this.smart.aiKeySet(key));
+  }
+  scrobbleStatus() {
+    return this.delay(() => this.scrobble.status());
+  }
+  lastfmSecretSet(secret: string | null) {
+    return this.delay(() => this.scrobble.setSecret(secret));
+  }
+  lastfmSignInStart() {
+    return this.delay(() => this.scrobble.start());
+  }
+  lastfmSignInFinish() {
+    return this.delay(() => this.scrobble.finish());
+  }
+  lastfmSignOut() {
+    return this.delay(() => this.scrobble.signOut());
+  }
+  listenbrainzCheck() {
+    return this.delay(() => this.scrobble.check());
   }
 
   // ---------------------------------------------------------------- discord

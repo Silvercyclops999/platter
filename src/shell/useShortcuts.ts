@@ -5,6 +5,7 @@ import { useSettings } from "../stores/settings";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { createPlaylist } from "../stores/playlists";
+import { bookmarkNowPlaying } from "../stores/curate";
 import { useUi } from "../stores/ui";
 import { keyRight, keySidebar, rightRoom, sidebarRoom, solveLayout } from "./layout";
 
@@ -106,6 +107,7 @@ const ALT_SHIFT: Record<string, () => void> = {
   KeyN: () => useUi.getState().toggleNowPlaying(),
   KeyD: () => useUi.getState().toggleOutput(),
   KeyP: () => void createPlaylist(),
+  KeyM: bookmarkNowPlaying,
   KeyL: toggleSidebar,
   KeyR: toggleRightPanel,
   ArrowLeft: () => resizeSidebar("ArrowLeft"),

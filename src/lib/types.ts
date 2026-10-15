@@ -119,6 +119,8 @@ export interface LibraryItem {
   format?: string | null;
   addedAt?: number | null;
   playedAt?: number | null;
+  /** A Platter smart playlist (kept on this computer, filled here). */
+  platter?: boolean;
 }
 
 // ---------------------------------------------------------------- errors
@@ -753,6 +755,18 @@ export interface Settings {
   syncFollows: boolean;
   /** What to sync: lyrics you wrote. This device only. */
   syncLyrics: boolean;
+  /** Bookmarks has a row in the library. */
+  bookmarksInLibrary: boolean;
+  /** Scrobble to Last.fm (once signed in). */
+  scrobbleLastfm: boolean;
+  /** Scrobble to ListenBrainz (with the user token). */
+  scrobbleListenbrainz: boolean;
+  /** Unreleased music scrobbles too. */
+  scrobbleUnreleased: boolean;
+  /** The AI provider for prompted playlists. */
+  aiProvider: AiProvider;
+  /** The provider's model. */
+  aiModel: string;
   [key: string]: unknown;
 }
 
@@ -895,6 +909,12 @@ export const DEFAULT_SETTINGS: Settings = {
   syncLibrary: true,
   syncFollows: true,
   syncLyrics: true,
+  bookmarksInLibrary: true,
+  scrobbleLastfm: false,
+  scrobbleListenbrainz: false,
+  scrobbleUnreleased: false,
+  aiProvider: "none",
+  aiModel: "claude-opus-5-5",
 };
 
 // ---------------------------------------------------------------- sync file, folders and keys
@@ -1225,6 +1245,169 @@ export interface NewRelease {
   new: boolean;
 }
 
+// ---------------------------------------------------------------- hide, bookmarks, smart playlists, scrobbling
+
+export type HiddenKind = "track" | "artist";
+
+/** A song or artist left out of mixes, radio, autoplay and shuffle. */
+export interface HiddenItem {
+  kind: HiddenKind;
+  id: string;
+  title: string;
+  /** A song's artist. */
+  subtitle?: string | null;
+  thumb?: string | null;
+  /** Unix seconds. */
+  hiddenAt: number;
+}
+
+export interface HideRequest {
+  kind: HiddenKind;
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  thumb?: string | null;
+}
+
+export type BookmarkKind = "track" | "page";
+/** Pages a bookmark can open (route names). */
+export type BookmarkPage = "album" | "artist" | "playlist" | "mix" | "radio" | "liked" | "smart" | "discography";
+
+export interface Bookmark {
+  id: string;
+  kind: BookmarkKind;
+  /** The song's id, or the page's id. */
+  target: string;
+  page?: BookmarkPage | null;
+  title: string;
+  subtitle?: string | null;
+  thumb?: string | null;
+  /** Where in the song (songs only). */
+  positionMs?: number | null;
+  /** Unix seconds. */
+  createdAt: number;
+}
+
+export type NewBookmark = Omit<Bookmark, "id" | "createdAt">;
+
+export type SmartField =
+  | "genre"
+  | "style"
+  | "mood"
+  | "artist"
+  | "album"
+  | "year"
+  | "decade"
+  | "addedAt"
+  | "playCount"
+  | "lastPlayed"
+  | "playedHere"
+  | "rating"
+  | "liked"
+  | "duration"
+  | "releaseType"
+  | "explicit"
+  | "version";
+export type SmartOp = "is" | "isNot" | "contains" | "notContains" | "gt" | "lt" | "inLast" | "notInLast";
+
+export interface SmartRule {
+  field: SmartField;
+  op: SmartOp;
+  value: string;
+  /** The Plex field it was read from (kept when saved back). */
+  plexField?: string | null;
+}
+
+export type SmartSort = "none" | "random" | "mostPlayed" | "leastPlayed" | "recentlyAdded" | "recentlyPlayed" | "rating";
+export type SmartUpdate = "live" | "daily" | "weekly";
+
+export interface SmartRules {
+  matchAll: boolean;
+  rules: SmartRule[];
+  limit?: { unit: "songs" | "hours"; value: number } | null;
+  sort: SmartSort;
+  update: SmartUpdate;
+  /** Plex options the editor doesn't show, kept as they are. */
+  extra?: [string, string][];
+}
+
+export interface SmartSummary {
+  id: string;
+  title: string;
+  summary: string | null;
+  trackCount: number;
+  durationMs: number;
+  update: SmartUpdate;
+  /** Unix seconds. */
+  nextUpdateAt: number | null;
+  updatedAt: number;
+  prompted: boolean;
+}
+
+export interface SmartPage {
+  playlist: SmartSummary;
+  rules: SmartRules;
+  picks: string[];
+  prompt: string | null;
+  tracks: Track[];
+}
+
+export interface SmartPreview {
+  count: number;
+  durationMs: number;
+  tracks: Track[];
+  /** Why these rules make a Platter smart playlist (empty: Plex can hold them). */
+  plexGaps: string[];
+}
+
+export interface SmartSaveRequest {
+  /** Editing: a Platter (`smart:`) or Plex playlist id. */
+  id?: string | null;
+  title: string;
+  summary?: string | null;
+  rules: SmartRules;
+  picks?: string[];
+  prompt?: string | null;
+  /** Keep it on this computer even if Plex could hold it. */
+  platter?: boolean;
+}
+
+export interface SmartSaved {
+  id: string;
+  platter: boolean;
+  note: string | null;
+}
+
+export interface PromptResult {
+  title: string;
+  rules: SmartRules;
+  picks: Track[];
+}
+
+export type AiProvider = "none" | "anthropic";
+export const DEFAULT_AI_MODEL = "claude-opus-5-5";
+
+export interface AiStatus {
+  provider: AiProvider;
+  model: string;
+  hasKey: boolean;
+  /** Prompted playlists show. */
+  ready: boolean;
+}
+
+export interface ScrobbleStatus {
+  lastfm: {
+    hasKey: boolean;
+    hasSecret: boolean;
+    signedIn: boolean;
+    user: string | null;
+    rejected: boolean;
+    pending: boolean;
+  };
+  listenbrainz: { hasToken: boolean; user: string | null; rejected: boolean };
+  queued: number;
+}
+
 export interface WhatsNew {
   /** Some artist is followed (otherwise everything recently added). */
   following: boolean;
@@ -1475,6 +1658,14 @@ export interface EventMap {
   "syncstore://changed": SyncStoreChanged;
   /** The Copy keys dialog's state (a code, keys arriving, expiry). */
   "keys://receive": KeyReceiveState;
+  /** The hidden songs and artists changed. */
+  "hidden://changed": HiddenItem[];
+  /** Bookmarks changed (newest first). */
+  "bookmarks://changed": Bookmark[];
+  /** Platter smart playlists changed. */
+  "smart://changed": SmartSummary[];
+  /** Scrobbles waiting to be sent, or a service's sign-in changed. */
+  "scrobble://status": { queued: number };
 }
 
 export type EventName = keyof EventMap;

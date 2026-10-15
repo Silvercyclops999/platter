@@ -88,6 +88,19 @@ import type {
   FollowedArtist,
   WhatsNew,
   ListenView,
+  AiStatus,
+  Bookmark,
+  HiddenItem,
+  HideRequest,
+  NewBookmark,
+  PromptResult,
+  ScrobbleStatus,
+  SmartPage,
+  SmartPreview,
+  SmartRules,
+  SmartSaveRequest,
+  SmartSaved,
+  SmartSummary,
 } from "./types";
 
 export type Unlisten = () => void;
@@ -379,6 +392,41 @@ export interface Backend {
   keysReceiveCancel(): Promise<void>;
   /** Send the ticked keys to the device showing `code`. */
   keysSend(code: string, kinds: KeyKind[]): Promise<KeySendOutcome>;
+  // Hide, bookmarks, smart playlists, scrobbling (docs/IPC.md)
+  /** Hidden songs and artists, newest first. */
+  hiddenList(): Promise<HiddenItem[]>;
+  /** Hide or unhide; resolves to the whole list. */
+  hiddenSet(item: HideRequest, on: boolean): Promise<HiddenItem[]>;
+  bookmarksList(): Promise<Bookmark[]>;
+  /** A song at a time, or a page. The same one again resolves to the one already there. */
+  bookmarkAdd(bookmark: NewBookmark): Promise<Bookmark>;
+  bookmarkRemove(id: string): Promise<Bookmark[]>;
+  /** A song bookmark plays from its time; resolves to the bookmark (a page one opens in the UI). */
+  bookmarkOpen(id: string): Promise<Bookmark>;
+  /** How many songs the rules give now (and picks first), with the first of them. */
+  smartPreview(rules: SmartRules, picks?: string[]): Promise<SmartPreview>;
+  /** Save to Plex when it can hold the rules, otherwise as a Platter smart playlist. */
+  smartSave(request: SmartSaveRequest): Promise<SmartSaved>;
+  /** Platter smart playlists. */
+  smartList(): Promise<SmartSummary[]>;
+  smartPage(id: string): Promise<SmartPage>;
+  smartDelete(id: string): Promise<void>;
+  /** A Plex smart playlist's rules for the editor (fails when they don't map). */
+  smartPlexRules(id: string): Promise<SmartRules>;
+  /** A description turned into rules and picked songs (the AI provider). */
+  smartPrompt(prompt: string): Promise<PromptResult>;
+  aiStatus(): Promise<AiStatus>;
+  /** Save (or with null remove) the AI provider's key in the OS keychain. */
+  aiKeySet(key: string | null): Promise<AiStatus>;
+  scrobbleStatus(): Promise<ScrobbleStatus>;
+  lastfmSecretSet(secret: string | null): Promise<ScrobbleStatus>;
+  /** Opens Last.fm's approval page in the browser. */
+  lastfmSignInStart(): Promise<ScrobbleStatus>;
+  /** After approving on last.fm. */
+  lastfmSignInFinish(): Promise<ScrobbleStatus>;
+  lastfmSignOut(): Promise<ScrobbleStatus>;
+  /** Check the ListenBrainz token (after saving it). */
+  listenbrainzCheck(): Promise<ScrobbleStatus>;
 
   /** Subscribe to a core event. Resolves to an unsubscribe function. */
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten>;
@@ -563,6 +611,27 @@ export function createTauriBackend(): Backend {
     listenStop: () => call("listen_stop"),
     listenJoin: (link) => call("listen_join", { link }),
     listenAdd: (trackIds) => call("listen_add", { trackIds }),
+    hiddenList: () => call("hidden_list"),
+    hiddenSet: (item, on) => call("hidden_set", { item, on }),
+    bookmarksList: () => call("bookmarks_list"),
+    bookmarkAdd: (bookmark) => call("bookmark_add", { bookmark }),
+    bookmarkRemove: (id) => call("bookmark_remove", { id }),
+    bookmarkOpen: (id) => call("bookmark_open", { id }),
+    smartPreview: (rules, picks) => call("smart_preview", { rules, picks: picks ?? null }),
+    smartSave: (request) => call("smart_save", { request }),
+    smartList: () => call("smart_list"),
+    smartPage: (id) => call("smart_page", { id }),
+    smartDelete: (id) => call("smart_delete", { id }),
+    smartPlexRules: (id) => call("smart_plex_rules", { id }),
+    smartPrompt: (prompt) => call("smart_prompt", { prompt }),
+    aiStatus: () => call("ai_status"),
+    aiKeySet: (key) => call("ai_key_set", { key }),
+    scrobbleStatus: () => call("scrobble_status"),
+    lastfmSecretSet: (secret) => call("lastfm_secret_set", { secret }),
+    lastfmSignInStart: () => call("lastfm_sign_in_start"),
+    lastfmSignInFinish: () => call("lastfm_sign_in_finish"),
+    lastfmSignOut: () => call("lastfm_sign_out"),
+    listenbrainzCheck: () => call("listenbrainz_check"),
 
     listen: async (event, cb) => {
       const un = await tauriListen<EventMap[typeof event]>(event, (e) => cb(e.payload));

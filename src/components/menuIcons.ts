@@ -1,4 +1,12 @@
 import {
+  Ban,
+  Bookmark,
+  CircleCheck,
+  Eye,
+  EyeOff,
+  ListFilter,
+  SlidersHorizontal,
+  Sparkles,
   ArrowDown,
   ArrowUp,
   CircleMinus,
@@ -33,6 +41,14 @@ import {
  * action shows the same icon in every menu. First match wins.
  */
 const RULES: [RegExp, LucideIcon][] = [
+  [/^Smart playlist$/, ListFilter],
+  [/^Prompted playlist$/, Sparkles],
+  [/^Hide song$/, EyeOff],
+  [/^Unhide song$/, Eye],
+  [/^Don't play this artist$/, Ban],
+  [/^Allow this artist$/, CircleCheck],
+  [/^Bookmark/, Bookmark],
+  [/^Edit rules$/, SlidersHorizontal],
   [/^Play$/, Play],
   [/^Pause$/, Pause],
   [/^Add (popular songs )?to queue$/, ListEnd],

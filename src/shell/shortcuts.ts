@@ -39,6 +39,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   // Playback
   { id: "playPause", section: "playback", label: "Play or pause", keys: ["Space"] },
   { id: "like", section: "playback", label: "Like or unlike the current song", keys: ["Alt", "Shift", "B"] },
+  { id: "bookmark", section: "playback", label: "Bookmark the current song at this moment", keys: ["Alt", "Shift", "M"] },
   { id: "shuffle", section: "playback", label: "Shuffle", keys: ["Mod", "S"] },
   { id: "repeat", section: "playback", label: "Repeat", keys: ["Mod", "R"] },
   { id: "previous", section: "playback", label: "Previous", keys: ["Mod", "←"] },

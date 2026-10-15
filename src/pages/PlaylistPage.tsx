@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEven
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
+import { bookmarkPageItem, editSmartPlaylist } from "../stores/curate";
 import { shareItem } from "../components/ShareMenu";
 import { DownloadButton } from "../components/DownloadButton";
 import { downloadMenuItems } from "../stores/downloads";
@@ -246,7 +247,9 @@ export function PlaylistPage({ id }: { id: string }) {
       `Options for ${pl.title}`,
       [
         { label: "Add to queue", disabled: empty, onSelect: () => void player.addToQueue(shown!.tracks, pl.thumb) },
+        ...(pl.smart ? [{ label: "Edit rules", onSelect: () => void editSmartPlaylist(pl.id, pl.title) }] : []),
         ...playlistEditItems(pl),
+        bookmarkPageItem("playlist", pl.id, pl.title, { thumb: pl.thumb }),
         ...(empty ? [] : downloadMenuItems({ kind: "playlist", id: pl.id, title: pl.title })),
         shareItem("playlist", pl.id, pl.thumb),
         {

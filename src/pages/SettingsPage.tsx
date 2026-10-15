@@ -40,6 +40,20 @@ import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
 import { BatchControl, BatchNote, ModelControl, TranscribeNote } from "./TranscribeSettings";
 import { ChangeSyncFolder, KeyCopyButton, SyncNowControl, SyncSwitch, syncNote, useSyncFile } from "./SyncSettings";
+import {
+  AiKeyControl,
+  AiModelField,
+  HiddenCount,
+  HiddenList,
+  LastfmControl,
+  ListenBrainzControl,
+  lastfmNote,
+  listenbrainzNote,
+  useAi,
+  useScrobble,
+} from "./CurateSettings";
+import { loadAi } from "../stores/curate";
+import type { AiProvider } from "../lib/types";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
 
@@ -188,6 +202,11 @@ function errorNote(text: string | undefined): ReactNode {
     </span>
   ) : undefined;
 }
+
+const AI_PROVIDERS: SelectOption<AiProvider>[] = [
+  { value: "none", label: "None" },
+  { value: "anthropic", label: "Anthropic Claude" },
+];
 
 interface RowDef {
   key: string;
@@ -426,6 +445,8 @@ function matches(row: RowDef, q: string): boolean {
 
 /** Settings (opened from the header or with Ctrl/Cmd+,). */
 export function SettingsPage() {
+  const scrobble = useScrobble();
+  const ai = useAi();
   const s = useSettings((x) => x.settings);
   const [sidebarArt, setSidebarArt] = useSidebarArt();
   const rememberMode = useFullWindow((x) => x.prefs.remember);
@@ -948,6 +969,15 @@ export function SettingsPage() {
       description: "How often the daylist changes to fit the time of day.",
       control: (ids) => select(s, (x) => String(x.daylistHours), DAYLIST_HOURS, ids, (v) => updateSettings({ daylistHours: Number(v) })),
     },
+    {
+      key: "hiddenItems",
+      section: "Mixes",
+      title: "Hidden songs and artists",
+      description:
+        "Mixes, radio, Keep playing similar music and shuffle play skip these. They still play when you pick them yourself. Kept in the sync file when Followed artists and hidden items is synced.",
+      control: () => <HiddenCount />,
+      block: () => <HiddenList />,
+    },
     // App
     {
       key: "updates",
@@ -1056,6 +1086,13 @@ export function SettingsPage() {
       title: "Liked means",
       description: "Likes are Plex star ratings, so other Plex apps see them. Liking a song always gives it five stars; this picks which ratings count as liked.",
       control: (ids) => select(s, (x) => x.likedMeans, LIKED_MEANS, ids, (v) => void updateSettings({ likedMeans: v }).then(reloadLikes)),
+    },
+    {
+      key: "bookmarksInLibrary",
+      section: "Library",
+      title: "Show Bookmarks in Your Library",
+      description: "A Bookmarks row under Liked Songs lists the songs and pages you bookmarked. Bookmark the playing song with Alt+Shift+M.",
+      control: (ids) => toggle(s, "bookmarksInLibrary", ids),
     },
     {
       key: "likeControlRows",
@@ -1281,6 +1318,65 @@ export function SettingsPage() {
         "People listening along with you can add songs to your queue. Sessions work between computers on the same local network, with Show this computer to my other devices on.",
       control: (ids) => toggle(s, "listenGuestsAdd", ids),
     },
+    // Integrations: scrobbling
+    {
+      key: "scrobbleLastfm",
+      section: "Integrations",
+      group: "Scrobbling",
+      title: "Scrobble to Last.fm",
+      description:
+        "Sends each song you play for more than half its length (or 4 minutes) to your Last.fm profile, and what's playing now. Uses your Last.fm API key and its shared secret, and you sign in on Last.fm's site. Not during a private session.",
+      note: errorNote(lastfmNote(scrobble)),
+      control: (ids) => <LastfmControl ids={ids} />,
+    },
+    {
+      key: "scrobbleListenbrainz",
+      section: "Integrations",
+      group: "Scrobbling",
+      title: "Scrobble to ListenBrainz",
+      description: "Sends the same plays to ListenBrainz with your user token. Not during a private session. Plays made offline wait and go out later.",
+      note: errorNote(listenbrainzNote(scrobble)),
+      control: (ids) => <ListenBrainzControl ids={ids} />,
+    },
+    {
+      key: "scrobbleUnreleased",
+      section: "Integrations",
+      group: "Scrobbling",
+      title: "Scrobble unreleased music",
+      description: "Demos and other unreleased versions go to your scrobbling profiles too. Off keeps them on this computer.",
+      control: (ids) => toggle(s, "scrobbleUnreleased", ids),
+    },
+    // Integrations: AI provider
+    {
+      key: "aiProvider",
+      section: "Integrations",
+      group: "AI provider",
+      title: "AI provider",
+      description:
+        "Turns a description into a prompted playlist's rules and picks songs for it. None keeps prompted playlists hidden. The provider gets your description, your library's genre, style and mood names, and the titles of songs that match. Unreleased music is never sent.",
+      control: (ids) => select(s, (x) => x.aiProvider, AI_PROVIDERS, ids, (v) => updateSettings({ aiProvider: v }).then(() => void loadAi())),
+    },
+    ...(s?.aiProvider === "anthropic"
+      ? ([
+          {
+            key: "aiKey",
+            section: "Integrations",
+            group: "AI provider",
+            title: "Anthropic API key",
+            description: "Your own key from the Anthropic Console, kept in this computer's keychain.",
+            note: ai?.hasKey ? "Saved." : undefined,
+            control: (ids) => <AiKeyControl ids={ids} />,
+          },
+          {
+            key: "aiModel",
+            section: "Integrations",
+            group: "AI provider",
+            title: "Model",
+            description: "The Claude model prompted playlists use.",
+            control: (ids) => <AiModelField ids={ids} />,
+          },
+        ] satisfies RowDef[])
+      : []),
     // Integrations: Discord
     {
       key: "discordStatus",

@@ -5,6 +5,9 @@ import { useUi, type MenuItem } from "../stores/ui";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { shareItem } from "../components/ShareMenu";
 import { createPlaylist } from "../stores/playlists";
+import { bookmarkPageItem, deleteSmartPlaylist, editSmartPlaylist } from "../stores/curate";
+import { useSettings } from "../stores/settings";
+import { backend } from "../lib/backend";
 import { downloadMenuItems, useDownloads } from "../stores/downloads";
 import { startSessionItem, useSocial } from "../stores/social";
 import { useLikes } from "../stores/likes";
@@ -116,6 +119,25 @@ export function likedEntry(owner: string | null): LibEntry {
   };
 }
 
+/** The Bookmarks row: pinned after Liked Songs while its setting is on. */
+export function bookmarksEntry(): LibEntry {
+  return {
+    kind: "playlist",
+    id: "bookmarks",
+    title: "Bookmarks",
+    sortTitle: "Bookmarks",
+    creator: null,
+    creatorId: null,
+    thumb: null,
+    smart: false,
+    format: null,
+    addedAt: null,
+    playedAt: null,
+    pinned: true,
+    bookmarks: true,
+  };
+}
+
 /** `drillable`: the list follows the folder the sidebar is drilled into (not the rail). */
 export function useLibraryModel(query: string, drillable = true): LibraryModel {
   const items = useLibraryView((s) => s.items);
@@ -128,6 +150,7 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
   const pins = usePins((s) => s.pins);
   const dlItems = useDownloads((s) => s.status?.items);
   const followIds = useSocial((s) => s.followIds);
+  const showBookmarks = useSettings((s) => s.settings?.bookmarksInLibrary !== false);
   const dlChoice = useLibraryView((s) => s.downloaded);
   const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
   // Going offline or back online hands the chip back to the connection.
@@ -141,8 +164,9 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
       const followed = e.kind === "artist" && followIds.has(e.id);
       return on || followed ? { ...e, ...(on ? { downloaded: true } : {}), ...(followed ? { followed: true } : {}) } : e;
     };
-    return [likedEntry(owner), ...mergePins(toEntries(items, owner), pins)].map(mark);
-  }, [items, owner, pins, dlItems, followIds]);
+    const top = showBookmarks ? [likedEntry(owner), bookmarksEntry()] : [likedEntry(owner)];
+    return [...top, ...mergePins(toEntries(items, owner), pins)].map(mark);
+  }, [items, owner, pins, dlItems, followIds, showBookmarks]);
   const dlAvailable = all.some((e) => e.downloaded);
   const downloadedOnly = dlChoice ?? (cachedOnly && dlAvailable);
   const kinds = items === null ? LIB_KINDS : LIB_KINDS.filter((k) => all.some((e) => e.kind === k));
@@ -179,6 +203,8 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
 
 export function playEntry(e: LibEntry) {
   if (e.folder) return;
+  if (e.bookmarks) return nav.go({ name: "bookmarks" });
+  if (e.platter) return backend.smartPage(e.id).then((pg) => player.playTracks(pg.tracks.map((t) => t.id)), () => {});
   const ctx = usePlayer.getState().state?.queue.context;
   if (e.liked) return ctx?.kind === "liked" ? player.toggle() : player.playLiked();
   if (ctx?.kind === e.kind && ctx.id === e.id) return player.toggle();
@@ -194,6 +220,7 @@ export function openEntry(e: LibEntry) {
     return folders.open(e.folder.id);
   }
   if (e.liked) return nav.go({ name: "liked" });
+  if (e.bookmarks) return nav.go({ name: "bookmarks" });
   nav.go({ name: e.kind, id: e.id });
 }
 
@@ -219,6 +246,14 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
   };
   if (e.unavailable) return [pin];
   const play: MenuItem = { label: opts.playing ? "Pause" : "Play", onSelect: () => void playEntry(e) };
+  if (e.bookmarks) return [{ label: "Open", onSelect: () => nav.go({ name: "bookmarks" }) }];
+  if (e.platter)
+    return [
+      play,
+      { label: "Edit rules", onSelect: () => void editSmartPlaylist(e.id, e.title) },
+      bookmarkPageItem("smart", e.id, e.title),
+      { label: "Delete", separator: true, onSelect: () => void deleteSmartPlaylist(e.id) },
+    ];
   if (e.liked)
     return [
       play,

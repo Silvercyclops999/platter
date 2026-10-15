@@ -40,6 +40,8 @@ import { RemoteStrip } from "./RemoteStrip";
 import { ListenStrip } from "./ListenStrip";
 import { FriendActivityPanel } from "./FriendActivityPanel";
 import { startSocial } from "../stores/social";
+import { startCurate } from "../stores/curate";
+import { SmartEditorHost } from "../components/SmartPlaylistEditor";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
@@ -67,6 +69,7 @@ export function AppShell() {
   useEffect(() => void startTranscribe(), []);
   useEffect(() => void startDownloads(), []);
   useEffect(() => void startSocial(), []);
+  useEffect(() => void startCurate(), []);
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
@@ -197,6 +200,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <SmartEditorHost />
       <FolderDialogs />
       <DownloadDialogs />
       <DragAnnouncer />

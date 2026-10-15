@@ -1,3 +1,5 @@
+import { BookmarksPage } from "../pages/BookmarksPage";
+import { SmartPlaylistPage } from "../pages/SmartPlaylistPage";
 import { Pause, Play } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { IconButton } from "../components/Button";
@@ -141,7 +143,10 @@ function Page({ route }: { route: Route }) {
     case "album":
       return <AlbumPage id={route.id} />;
     case "playlist":
-      return <PlaylistPage id={route.id} />;
+      // A Platter smart playlist has its own page.
+      return route.id.startsWith("smart:") ? <SmartPlaylistPage id={route.id} /> : <PlaylistPage id={route.id} />;
+    case "bookmarks":
+      return <BookmarksPage />;
     case "liked":
       return <LikedPage />;
     case "settings":

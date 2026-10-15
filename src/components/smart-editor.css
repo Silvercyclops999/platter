@@ -1,0 +1,86 @@
+/* The smart playlist editor (and the Bookmarks and smart playlist pages' bits). */
+
+.dialog.smart-ed { width: min(720px, calc(100vw - 48px)); max-height: calc(100vh - 64px); overflow-y: auto; }
+.smart-ed form { display: flex; flex-direction: column; gap: var(--space-3); }
+.smart-ed .pl-edit__title { margin-bottom: var(--space-1); }
+
+.smart-ed__prompt { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-divider, rgba(255, 240, 220, 0.08)); }
+.smart-ed__prompt-box { min-height: 88px; font-family: inherit; }
+.smart-ed__prompt-row { display: flex; align-items: flex-start; gap: var(--space-4); justify-content: space-between; }
+.smart-ed__prompt-row .btn { flex: none; }
+
+.smart-ed__match { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+.smart-ed__rules { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.smart-ed__rule { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(130px, 0.9fr) minmax(120px, 1fr) auto; gap: var(--space-2); align-items: center; }
+.smart-ed__rule .select, .smart-ed__rule .select__input { width: 100%; }
+.smart-ed__value { height: 36px; font-size: var(--font-size-sm); }
+.smart-ed__add { align-self: flex-start; }
+
+.smart-ed__options { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-5); align-items: center; padding-top: var(--space-2); }
+.smart-ed__option { display: inline-flex; align-items: center; gap: var(--space-2); }
+.smart-ed__option-label { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.smart-ed__num { width: 80px; height: 36px; font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+
+.smart-ed__picks { padding: var(--space-3); border-radius: 6px; background: var(--color-state-hover); }
+.smart-ed__picks-title { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.smart-ed__picks ol { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.smart-ed__pick { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--font-size-sm); color: var(--color-text-primary); }
+.smart-ed__pick .art { flex: none; border-radius: 2px; }
+.smart-ed__pick-artist { color: var(--color-text-secondary); }
+
+.smart-ed__count { margin: var(--space-2) 0 0; font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
+.smart-ed__note { margin: 0; font-size: var(--font-size-xs); line-height: 1.45; color: var(--color-text-secondary); }
+.smart-ed__error { margin: 0; font-size: var(--font-size-sm); color: var(--color-error); }
+.smart-ed .confirm__actions { margin-top: var(--space-3); }
+
+@media (max-width: 640px) {
+  .smart-ed__rule { grid-template-columns: 1fr 1fr; }
+  .smart-ed__prompt-row { flex-direction: column; }
+}
+
+/* ---------------------------------------------------------------- pages */
+.platter-mark {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--color-state-pressed);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+.smart-head { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-4); }
+.smart-head .page-title { margin: var(--space-1) 0; }
+.smart-rules-line { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+.bookmarks { display: flex; flex-direction: column; gap: var(--space-4); }
+.bookmark-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.bookmark-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: 6px;
+}
+.bookmark-row:hover, .bookmark-row:focus-within { background: var(--color-state-hover); }
+.bookmark-row__open { display: contents; text-align: left; color: inherit; }
+.bookmark-row__text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.bookmark-row__title { font-size: var(--font-size-md); color: var(--color-text-primary); }
+.bookmark-row__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.bookmark-row__at { font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.bookmarks__empty { color: var(--color-text-secondary); }
+
+.hidden-list { display: flex; flex-direction: column; gap: var(--space-1); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+.hidden-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-1) 0; }
+.hidden-row__text { display: flex; flex-direction: column; min-width: 0; }
+.hidden-row__title { font-size: var(--font-size-sm); color: var(--color-text-primary); }
+.hidden-row__sub { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.integration-fields { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.integration-fields .pl-edit__input { width: 260px; height: 36px; font-size: var(--font-size-sm); }
+.integration-state { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.integration-state.is-error { color: var(--color-error); }

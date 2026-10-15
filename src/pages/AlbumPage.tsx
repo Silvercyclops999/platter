@@ -4,6 +4,7 @@ import { Art } from "../components/Art";
 import { Badge, QualityBadge } from "../components/Badge";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
+import { bookmarkPageItem } from "../stores/curate";
 import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem } from "../components/PlaylistPicker";
 import { CoverPopup } from "../components/CoverPopup";
@@ -158,6 +159,7 @@ export function AlbumPage({ id }: { id: string }) {
                   { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
                   { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${album.artistId}` }) },
                   shareItem("album", album.id, album.thumb),
+                  bookmarkPageItem("album", album.id, album.title, { subtitle: album.artistTitle, thumb: album.thumb }),
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
                     onSelect: () =>

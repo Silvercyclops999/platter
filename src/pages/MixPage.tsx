@@ -1,5 +1,5 @@
 import { Ellipsis, Pause, Play, Shuffle } from "lucide-react";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { DownloadButton } from "../components/DownloadButton";
@@ -11,6 +11,7 @@ import { artUrl, backend } from "../lib/backend";
 import { formatLongDuration, plural } from "../lib/format";
 import type { MixPage as MixData, MixSteer, MixSummary, Track } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
+import { bookmarkPageItem, hideSongItem, useCurate } from "../stores/curate";
 import { useApp } from "../stores/app";
 import { downloadMenuItems } from "../stores/downloads";
 import { player, usePlayer } from "../stores/player";
@@ -133,7 +134,15 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
       un?.();
     };
   }, [radio]);
-  const page = shown;
+  // Songs hidden while the page is open leave it at once.
+  const hiddenTracks = useCurate((st) => st.hiddenTracks);
+  const hiddenArtists = useCurate((st) => st.hiddenArtists);
+  const page = useMemo(() => {
+    if (!shown || (!hiddenTracks.size && !hiddenArtists.size)) return shown;
+    const keep = shown.tracks.map((t) => !hiddenTracks.has(t.id) && !hiddenArtists.has(t.artistId));
+    if (keep.every(Boolean)) return shown;
+    return { ...shown, tracks: shown.tracks.filter((_, i) => keep[i]), familiar: shown.familiar.filter((_, i) => keep[i]) };
+  }, [shown, hiddenTracks, hiddenArtists]);
   const mix = page?.mix;
   const user = useApp((s) => s.auth?.username ?? null);
   const kind = radio ? "radio" : "mix";
@@ -187,6 +196,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
         // A radio is made when its page opens, so only mixes download.
         ...(radio || !page ? [] : downloadMenuItems({ kind: "mix", id: key, title: mix.title, trackIds: () => page.tracks.map((t) => t.id) })),
         { label: radio ? "Make a new radio" : "Refresh", onSelect: () => void refresh() },
+        bookmarkPageItem(radio ? "radio" : "mix", key, mix.title, { thumb: mix.art ?? mix.covers[0] ?? null }),
         {
           label: smooth ? "Turn off smooth transitions" : "Turn on smooth transitions",
           disabled: !isContext,
@@ -196,7 +206,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
       el,
     );
 
-  const rowMenu = (t: Track) => trackMenuItems(t);
+  const rowMenu = (t: Track) => trackMenuItems(t, { afterQueue: [hideSongItem(t)] });
 
   return (
     <div className="detail mix-page" data-testid="mix-page">
