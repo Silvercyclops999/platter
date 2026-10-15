@@ -633,6 +633,34 @@ ALTER TABLE discord_art ADD COLUMN host TEXT;
 ALTER TABLE discord_art ADD COLUMN link_expires_at INTEGER;
 UPDATE discord_art SET host = source WHERE source IN ('imgur', 'catbox');
 "#,
+    // v25: what a play was at the time it was played, so history and stats
+    // still read after a song leaves the library (db::listens). Older rows
+    // are filled from the track cache in the background where the rating
+    // key still resolves. `duration_ms` already holds the play-time length.
+    // imported_plays holds plays brought in from elsewhere (Plex history,
+    // Tautulli, a file), one row per source play.
+    r#"
+ALTER TABLE listen_log ADD COLUMN snap_title TEXT;
+ALTER TABLE listen_log ADD COLUMN snap_artist TEXT;
+ALTER TABLE listen_log ADD COLUMN snap_album TEXT;
+ALTER TABLE listen_log ADD COLUMN snap_album_artist TEXT;
+CREATE INDEX IF NOT EXISTS listen_log_unsnapped ON listen_log (id) WHERE snap_title IS NULL;
+CREATE TABLE IF NOT EXISTS imported_plays (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source      TEXT NOT NULL,
+    source_id   TEXT NOT NULL,
+    played_at   INTEGER NOT NULL,
+    ms_played   INTEGER,
+    title       TEXT NOT NULL,
+    artist      TEXT,
+    album       TEXT,
+    rating_key  TEXT,
+    matched_at  INTEGER,
+    UNIQUE (source, source_id)
+);
+CREATE INDEX IF NOT EXISTS imported_plays_at ON imported_plays (played_at);
+CREATE INDEX IF NOT EXISTS imported_plays_key ON imported_plays (rating_key);
+"#,
 ];
 
 #[cfg(test)]

@@ -18,7 +18,7 @@ use crate::audio::events::TrackingEvent;
 use crate::audio::queue::ContextInfo;
 use crate::audio::source::ContextKind as PlayContextKind;
 use crate::db::DbHandle;
-use crate::db::listens::{self, ContextKind, NewReport, PlayStart, ReportKind};
+use crate::db::listens::{self, ContextKind, NewReport, PlaySnapshot, PlayStart, ReportKind};
 use crate::db::queries::now_s;
 use crate::plex::PlexState;
 use crate::error::AppResult;
@@ -292,7 +292,9 @@ impl Tracker {
                     device: None,
                     offline: !self.plex.online().await,
                 };
-                cur.play_id = Some(self.db.write_async(move |c| listens::start_play(c, &start)).await?);
+                let snap = PlaySnapshot::of_track(track);
+                cur.play_id =
+                    Some(self.db.write_async(move |c| listens::start_play_with(c, &start, Some(&snap))).await?);
             }
             TrackingEvent::Progress { track_id, position_ms, .. } if *track_id == cur.rating_key => {
                 if let Some(id) = cur.play_id {
@@ -329,11 +331,29 @@ pub fn spawn(tracker: Tracker, events: broadcast::Receiver<TrackingEvent>) {
     let tracker = Arc::new(tracker);
     tauri::async_runtime::spawn(tracker.clone().run(events));
     tauri::async_runtime::spawn(async move {
+        let mut backfilling = true;
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
             tracker.replay_pending().await;
+            if backfilling {
+                backfilling = tracker.backfill_step().await;
+            }
         }
     });
+}
+
+impl Tracker {
+    /// One bounded pass filling the snapshot on plays logged before plays
+    /// kept one. Returns false once there is nothing left to fill.
+    async fn backfill_step(&self) -> bool {
+        match self.db.write_async(|c| listens::backfill_snapshots(c, listens::BACKFILL_BATCH)).await {
+            Ok(n) => n > 0,
+            Err(e) => {
+                tracing::warn!("listen log backfill: {e}");
+                false
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -512,6 +532,24 @@ mod tests {
         assert!(r.rec.timelines.lock().is_empty());
         assert_eq!(*r.rec.scrobbles.lock(), vec!["7".to_string()]);
         assert_eq!(listen_rows(&r.db), 1);
+    }
+
+    #[tokio::test]
+    async fn a_play_keeps_what_the_song_was_even_when_it_is_not_in_the_cache() {
+        let r = rig(false, true);
+        full_play(&r.tracker).await;
+        let snap = r
+            .db
+            .read(|c| {
+                Ok(c.query_row(
+                    "SELECT snap_title, snap_artist, snap_album, snap_album_artist FROM listen_log",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(snap, ("t".into(), "R".into(), "A".into(), "R".into()));
+        assert!(!r.tracker.backfill_step().await, "nothing left to fill");
     }
 
     #[tokio::test]
