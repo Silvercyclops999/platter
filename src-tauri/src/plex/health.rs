@@ -91,6 +91,8 @@ pub struct HealthMachine {
     /// macOS Local Network privacy is keeping Platter off the home network:
     /// the last race had every local address refused by the system.
     local_network_blocked: bool,
+    /// Go offline is on: no network use, only music on this computer plays.
+    offline_by_choice: bool,
 }
 
 /// What the macOS Local Network banner says.
@@ -121,7 +123,23 @@ impl HealthMachine {
             no_music_library: false,
             low_disk: false,
             local_network_blocked: false,
+            offline_by_choice: false,
         }
+    }
+
+    /// Go offline turned on or off. On, the status is offline until it's
+    /// turned off and the server answers again.
+    pub fn set_offline_by_choice(&mut self, on: bool) {
+        self.offline_by_choice = on;
+        if on {
+            self.status = HealthStatus::Offline;
+            self.connection = None;
+            self.latency_ms = None;
+        }
+    }
+
+    pub fn offline_by_choice(&self) -> bool {
+        self.offline_by_choice
     }
 
     /// Whether the last connection race found the home network blocked by
@@ -149,12 +167,14 @@ impl HealthMachine {
     /// probe the status is Offline with no banner.
     pub fn on_server_selected(&mut self, name: &str, version: Option<String>) {
         let low_disk = self.low_disk;
+        let offline_by_choice = self.offline_by_choice;
         *self = HealthMachine {
             signed_in: true,
             status: HealthStatus::Offline,
             server_name: Some(name.to_string()),
             version,
             low_disk,
+            offline_by_choice,
             ..HealthMachine::new()
         };
     }
@@ -174,7 +194,7 @@ impl HealthMachine {
     }
 
     pub fn on_probe(&mut self, outcome: ProbeOutcome, now_ms: i64) -> HealthAction {
-        if !self.signed_in {
+        if !self.signed_in || self.offline_by_choice {
             return HealthAction::None;
         }
         match outcome {
@@ -323,7 +343,8 @@ impl HealthMachine {
 
     /// Connected to the server (any route).
     pub fn connected(&self) -> bool {
-        matches!(
+        !self.offline_by_choice
+            && matches!(
             self.status,
             HealthStatus::Local | HealthStatus::Remote | HealthStatus::Relay
         )
@@ -346,6 +367,12 @@ impl HealthMachine {
         }
         if self.access_removed {
             return b("accessRemoved", "You no longer have access to this server.");
+        }
+        if self.offline_by_choice {
+            return b(
+                "goneOffline",
+                "You're offline. Only music on this computer plays. Turn off Go offline in the app menu to use your server again.",
+            );
         }
         match self.status {
             HealthStatus::NoAuth => return b("signIn", "Please sign in again."),
@@ -842,6 +869,26 @@ mod tests {
         assert!(!m.cached_only());
         m.on_rediscover_failed(T0 + 1, true);
         assert!(m.snapshot(T0 + 1).cached_only);
+    }
+
+    #[test]
+    fn going_offline_by_choice_is_cached_only_until_turned_off() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        m.set_offline_by_choice(true);
+        let h = m.snapshot(T0 + 1);
+        assert!(h.cached_only && !m.connected());
+        assert_eq!(h.status, HealthStatus::Offline);
+        assert_eq!(h.banner.unwrap().kind, "goneOffline");
+        // Pings are ignored while it lasts, and switching servers keeps it.
+        assert_eq!(m.on_probe(ok(ConnectionKind::Local), T0 + 2), HealthAction::None);
+        assert!(!m.connected());
+        m.on_server_selected("Other", None);
+        assert!(m.offline_by_choice());
+        m.set_offline_by_choice(false);
+        m.on_probe(ok(ConnectionKind::Local), T0 + 3);
+        assert!(m.connected() && !m.snapshot(T0 + 3).cached_only);
+        assert_eq!(m.snapshot(T0 + 3).banner, None);
     }
 
     #[test]

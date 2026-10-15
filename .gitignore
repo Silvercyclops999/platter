@@ -21,6 +21,7 @@ src-tauri/gen/
 *.sqlite-shm
 cache/
 downloads/
+!src-tauri/src/downloads/
 
 # OS / editor
 .DS_Store

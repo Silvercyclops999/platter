@@ -2,6 +2,7 @@ pub mod artistinfo;
 pub mod audio;
 pub mod bridge;
 pub mod db;
+pub mod downloads;
 pub mod error;
 pub mod likes;
 pub mod lyrics;
@@ -145,22 +146,42 @@ pub fn run() {
             let initial = settings::load(&db);
             // Artist info sources share one HTTP client with the art cache,
             // which also serves their images.
-            let info_http: Arc<dyn artistinfo::http::InfoHttp> = Arc::new(artistinfo::http::ReqwestHttp::new()?);
+            // Go offline stops these as well.
+            let info_http: Arc<dyn artistinfo::http::InfoHttp> = Arc::new(artistinfo::http::Switched {
+                inner: Arc::new(artistinfo::http::ReqwestHttp::new()?),
+                off: plex.offline_switch(),
+            });
             let share_http = info_http.clone();
             let lyrics_http = info_http.clone();
             let discord_http = info_http.clone();
+            // Downloads: the queue starts once the player's transfer gate exists.
+            let downloads = downloads::Downloads::new(downloads::Deps {
+                db: db.clone(),
+                dir: initial.download_dir(&data_dir.join("downloads")),
+                source: Arc::new(downloads::commands::PlexSource(plex.clone())),
+                free_space: downloads::os_free_space(),
+                art: Some(Arc::new(bridge::PlexArt(plex.clone()))),
+            });
+            downloads.set_events(Arc::new(app.handle().clone()));
+            downloads.set_prefs(initial.download_prefs());
+            let local_files = audio::source::LocalFiles(Arc::new(downloads.clone()));
             let art = ArtCache::open(
                 cache_dir.join("art"),
                 initial.art_cache_bytes(),
-                Arc::new(artistinfo::art::RoutedArt {
-                    plex: Arc::new(bridge::PlexArt(plex.clone())),
-                    http: info_http.clone(),
+                Arc::new(downloads::art::WithDownloads {
+                    inner: Arc::new(artistinfo::art::RoutedArt {
+                        plex: Arc::new(bridge::PlexArt(plex.clone())),
+                        http: info_http.clone(),
+                    }),
+                    downloads: downloads.clone(),
                 }),
             )?;
             let live = settings::Live {
                 art: Some(art.clone()),
+                plex: Some(plex.clone()),
                 ..Default::default()
             };
+            *live.downloads.lock() = Some(downloads.clone());
             let artist_info = artistinfo::ArtistInfoService::new(
                 db.clone(),
                 info_http,
@@ -181,7 +202,7 @@ pub fn run() {
                 Arc::new(bridge::CacheLookup(
                     db.clone(),
                     Some(plex.clone()),
-                    bridge::OfflinePlay::new(audio_dir.clone()),
+                    bridge::OfflinePlay::new(audio_dir.clone()).with_downloads(local_files.clone()),
                 )),
                 {
                     use audio::output::AudioOutput;
@@ -198,9 +219,24 @@ pub fn run() {
                     resume_contexts: initial.resume_contexts,
                     precache_count: initial.precache_count as usize,
                     dsp: initial.dsp(),
+                    local_files: Some(local_files.clone()),
                     ..Default::default()
                 },
             );
+            downloads.attach(player.transfer_gate(), Some(player.transfer_host()), audio::http::http_client());
+            tauri::async_runtime::spawn(downloads.clone().run());
+            if initial.download_liked {
+                // Keep Liked Songs downloaded (turned on before this item existed).
+                let d = downloads.clone();
+                tauri::async_runtime::spawn(async move {
+                    let key = downloads::ItemKey::new(downloads::ItemKind::Liked, "");
+                    if !d.is_on(key.clone()).await.unwrap_or(true)
+                        && let Err(e) = d.add(key, "Liked Songs".into(), None).await
+                    {
+                        tracing::warn!("Liked Songs download: {e}");
+                    }
+                });
+            }
             // File tags (explicit, versions, editions), read behind playback.
             let tag_scanner = tags::scan::TagScanner::new(
                 db.clone(),
@@ -373,6 +409,7 @@ pub fn run() {
                 live.art_cap.clone(),
             );
             app.manage(monitor::cached::AudioCacheDir(audio_dir));
+            app.manage(downloads);
 
             app.manage(plex);
             app.manage(db);
@@ -488,6 +525,12 @@ pub fn run() {
             artistinfo::commands::open_info_link,
             monitor::cached::cached_tracks,
             monitor::cached::cached_library,
+            downloads::commands::downloads_status,
+            downloads::commands::downloaded_tracks,
+            downloads::commands::downloads_set,
+            downloads::commands::downloads_retry,
+            downloads::commands::downloads_remove_all,
+            downloads::commands::downloads_choose_folder,
             updates::update_check,
             updates::update_install_on_restart,
             share::commands::share_info,

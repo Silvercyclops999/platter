@@ -68,6 +68,7 @@ async fn rig(paced: bool) -> Rig {
     let (engine, events) = Engine::new(EngineDeps {
         resolver: res.clone(),
         cache: None,
+        local: None,
         client: http_client(),
         rt: tokio::runtime::Handle::current(),
         output: Box::new(out),

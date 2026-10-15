@@ -57,6 +57,25 @@ pub trait TrackResolver: Send + Sync {
     fn save_silence(&self, _track_id: &str, _head_ms: u64, _tail_ms: u64) {}
 }
 
+/// Songs downloaded to this computer. The engine plays a downloaded file
+/// before it looks at the pre-cache or the server.
+pub trait LocalAudio: Send + Sync {
+    /// The downloaded file for the track, when it's on disk.
+    fn path(&self, track: &Track) -> Option<std::path::PathBuf>;
+    /// Every downloaded track id.
+    fn ids(&self) -> Vec<String>;
+}
+
+/// A shared [`LocalAudio`] that can sit in the player's config.
+#[derive(Clone)]
+pub struct LocalFiles(pub std::sync::Arc<dyn LocalAudio>);
+
+impl fmt::Debug for LocalFiles {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("LocalFiles")
+    }
+}
+
 /// The kinds of context playback can start from (docs/IPC.md `play_context`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

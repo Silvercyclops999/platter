@@ -48,6 +48,16 @@ async fn rig_full(
     cache: Option<Arc<super::cache::DiskCache>>,
     paced: bool,
 ) -> Rig {
+    rig_local(rate, config, cache, None, paced).await
+}
+
+async fn rig_local(
+    rate: u32,
+    config: EngineConfig,
+    cache: Option<Arc<super::cache::DiskCache>>,
+    local: Option<super::source::LocalFiles>,
+    paced: bool,
+) -> Rig {
     let server = TestServer::start().await;
     let resolver = FakeResolver::new(&server);
     let (out, cap) = CaptureOutput::new(OutputFormat {
@@ -59,6 +69,7 @@ async fn rig_full(
     let (engine, events) = Engine::new(EngineDeps {
         resolver: resolver.clone(),
         cache,
+        local,
         client: http_client(),
         rt: tokio::runtime::Handle::current(),
         output: Box::new(out),
@@ -528,6 +539,39 @@ async fn plays_from_disk_cache_when_server_is_gone() {
     cache.insert_bytes(&super::cache::cache_key(&tr), &a).unwrap();
     let mut r = rig_with(RATE, cfg(), Some(cache)).await;
     // No route on the server at all: only the cache can serve it.
+    r.engine.load(tr, "ia".into(), 0, true).unwrap();
+    collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
+    let (want, _, _) = decode_all(&a, "wav");
+    assert_same(&settled_samples(&r.cap, want.len()).await, &want);
+    assert_eq!(r.server.state.requests.load(Ordering::SeqCst), 0);
+}
+
+/// Downloaded files, by track id.
+struct Downloaded(std::collections::HashMap<String, std::path::PathBuf>);
+
+impl super::source::LocalAudio for Downloaded {
+    fn path(&self, track: &Track) -> Option<std::path::PathBuf> {
+        self.0.get(&track.id).cloned()
+    }
+    fn ids(&self) -> Vec<String> {
+        self.0.keys().cloned().collect()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plays_a_downloaded_file_before_the_cache_or_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = wav_tone(RATE, 2, 20_000, 440.0, 0.5);
+    // A different tone sits in the pre-cache and on the server.
+    let b = wav_tone(RATE, 2, 20_000, 220.0, 0.5);
+    let tr = t("a");
+    let file = dir.path().join("a.wav");
+    std::fs::write(&file, &a).unwrap();
+    let cache = Arc::new(super::cache::DiskCache::new(dir.path().join("cache"), 50 << 20).unwrap());
+    cache.insert_bytes(&super::cache::cache_key(&tr), &b).unwrap();
+    let local = super::source::LocalFiles(Arc::new(Downloaded([("a".to_string(), file)].into_iter().collect())));
+    let mut r = rig_local(RATE, cfg(), Some(cache), Some(local), false).await;
+    r.server.add("/t/a", Route { body: b.clone(), ..Default::default() });
     r.engine.load(tr, "ia".into(), 0, true).unwrap();
     collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
     let (want, _, _) = decode_all(&a, "wav");

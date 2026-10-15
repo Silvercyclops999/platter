@@ -485,6 +485,42 @@ ALTER TABLE albums ADD COLUMN released TEXT;
 ALTER TABLE albums ADD COLUMN studio TEXT;
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
+    // v17: downloads (downloads::store). download_items are what the user
+    // turned on (album, playlist, liked, mix), with their songs in
+    // download_item_tracks; download_files has one row per song file, shared
+    // by every item that holds the song. state: queued, done, failed or
+    // missing (gone from disk). seq is the queue order.
+    r#"
+CREATE TABLE IF NOT EXISTS download_items (
+    kind     TEXT NOT NULL,
+    id       TEXT NOT NULL,
+    title    TEXT NOT NULL DEFAULT '',
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (kind, id)
+);
+CREATE TABLE IF NOT EXISTS download_item_tracks (
+    kind     TEXT NOT NULL,
+    id       TEXT NOT NULL,
+    track_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (kind, id, track_id)
+);
+CREATE INDEX IF NOT EXISTS download_item_tracks_track ON download_item_tracks (track_id);
+CREATE TABLE IF NOT EXISTS download_files (
+    track_id    TEXT PRIMARY KEY,
+    seq         INTEGER NOT NULL,
+    state       TEXT NOT NULL,
+    part_key    TEXT NOT NULL DEFAULT '',
+    quality     TEXT NOT NULL DEFAULT 'original',
+    file        TEXT,
+    size        INTEGER NOT NULL DEFAULT 0,
+    error       TEXT,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    next_try_at INTEGER NOT NULL DEFAULT 0,
+    done_at     INTEGER
+);
+CREATE INDEX IF NOT EXISTS download_files_queue ON download_files (state, seq);
+"#,
 ];
 
 #[cfg(test)]

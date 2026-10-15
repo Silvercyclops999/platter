@@ -64,6 +64,14 @@ pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK).await;
         loop {
+            // Go offline: no update checks.
+            let offline = app
+                .try_state::<crate::plex::PlexState>()
+                .is_some_and(|p| p.offline_by_choice());
+            if offline {
+                tokio::time::sleep(FIRST_CHECK).await;
+                continue;
+            }
             if let Err(e) = check_and_download(&app).await {
                 tracing::info!("update check failed: {e}");
             }

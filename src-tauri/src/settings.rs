@@ -20,6 +20,7 @@ use crate::audio::queue::ShuffleStyle;
 use crate::bridge::StreamPrefs;
 use crate::db::store::{kv_get, kv_set};
 use crate::db::{ArtCache, DbHandle, PopularSource};
+use crate::downloads::{self, DownloadQuality};
 use crate::error::{AppError, AppResult};
 use crate::platform::discord::activity::StatusLine;
 use crate::platform::discord::{DiscordSettings, DiscordSwitches};
@@ -308,6 +309,20 @@ pub struct Settings {
     pub computer_name: String,
     /// List AirPlay receivers that need a password or pairing.
     pub show_airplay_locked: bool,
+    /// Downloads: the file as it is, or an MP3 (this device only).
+    pub download_quality: DownloadQuality,
+    /// Downloads stop at this size, in GB (this device only).
+    pub download_limit_gb: u32,
+    /// Where downloads go. Empty means the app's own folder (this device
+    /// only). Changed with `downloads_choose_folder`, not `settings_set`.
+    pub download_folder: String,
+    /// Download only over the local connection to the server (this device only).
+    pub download_home_only: bool,
+    /// Keep Liked Songs downloaded; new likes download too (this device only).
+    pub download_liked: bool,
+    /// Go offline: no network use at all, only music on this computer plays
+    /// (this device only).
+    pub go_offline: bool,
 }
 
 impl Default for Settings {
@@ -393,6 +408,12 @@ impl Default for Settings {
             show_to_my_devices: true,
             computer_name: String::new(),
             show_airplay_locked: false,
+            download_quality: DownloadQuality::Original,
+            download_limit_gb: 20,
+            download_folder: String::new(),
+            download_home_only: true,
+            download_liked: false,
+            go_offline: false,
         }
     }
 }
@@ -479,6 +500,11 @@ pub struct SettingsPatch {
     /// Trimmed; empty goes back to the OS computer name.
     pub computer_name: Option<String>,
     pub show_airplay_locked: Option<bool>,
+    pub download_quality: Option<DownloadQuality>,
+    pub download_limit_gb: Option<u32>,
+    pub download_home_only: Option<bool>,
+    pub download_liked: Option<bool>,
+    pub go_offline: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -573,6 +599,11 @@ impl Settings {
         set(&mut self.show_auto_lyrics, p.show_auto_lyrics);
         set(&mut self.show_to_my_devices, p.show_to_my_devices);
         set(&mut self.show_airplay_locked, p.show_airplay_locked);
+        set(&mut self.download_quality, p.download_quality);
+        set(&mut self.download_limit_gb, p.download_limit_gb);
+        set(&mut self.download_home_only, p.download_home_only);
+        set(&mut self.download_liked, p.download_liked);
+        set(&mut self.go_offline, p.go_offline);
         if let Some(name) = &p.computer_name {
             let name = name.trim();
             if name.chars().count() > COMPUTER_NAME_MAX {
@@ -596,6 +627,7 @@ impl Settings {
     fn clamp(&mut self) {
         self.precache_count = self.precache_count.clamp(PRECACHE_MIN, PRECACHE_MAX);
         self.art_cache_mb = self.art_cache_mb.clamp(ART_CACHE_MIN_MB, ART_CACHE_MAX_MB);
+        self.download_limit_gb = self.download_limit_gb.clamp(downloads::LIMIT_MIN_GB, downloads::LIMIT_MAX_GB);
         eqprofile::clamp(self);
     }
 
@@ -631,9 +663,29 @@ impl Settings {
         }
     }
 
+    /// What the download queue follows.
+    pub fn download_prefs(&self) -> downloads::Prefs {
+        downloads::Prefs {
+            quality: self.download_quality,
+            limit_bytes: self.download_limit_gb as u64 * 1024 * MB,
+            home_only: self.download_home_only,
+            offline: self.go_offline,
+        }
+    }
+
+    /// The downloads folder: the chosen one, or `default`.
+    pub fn download_dir(&self, default: &std::path::Path) -> std::path::PathBuf {
+        if self.download_folder.trim().is_empty() {
+            default.to_path_buf()
+        } else {
+            std::path::PathBuf::from(&self.download_folder)
+        }
+    }
+
     pub fn discord(&self) -> DiscordSettings {
         DiscordSettings {
-            enabled: self.discord_status,
+            // Go offline hides the status too.
+            enabled: self.discord_status && !self.go_offline,
             show_unreleased: self.discord_show_unreleased,
             unreleased_art: self.discord_unreleased_art,
             clear_on_pause: self.discord_clear_on_pause,
@@ -694,16 +746,28 @@ pub struct Live {
     pub tag_scanner: Arc<parking_lot::Mutex<Option<crate::tags::scan::TagScanner>>>,
     /// Lyrics transcription, once it exists.
     pub transcriber: Arc<parking_lot::Mutex<Option<crate::lyrics::transcribe::Transcriber>>>,
+    /// The download queue, once it exists.
+    pub downloads: Arc<parking_lot::Mutex<Option<downloads::Downloads>>>,
+    /// The Plex connection (Go offline stops it).
+    pub plex: Option<crate::plex::PlexState>,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
 pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
+    // Go offline turns off everything that reaches out to the network.
+    let on = !s.go_offline;
+    if let Some(plex) = &live.plex {
+        plex.set_offline_by_choice(s.go_offline);
+    }
+    if let Some(d) = live.downloads.lock().as_ref() {
+        d.set_prefs(s.download_prefs());
+    }
     live.tracking.private_session.store(s.private_session, Ordering::Relaxed);
     live.tracking.report_to_plex.store(s.report_to_plex, Ordering::Relaxed);
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
-    live.share_public_links.store(s.share_public_links, Ordering::Relaxed);
-    live.lyrics_lrclib.store(s.lyrics_lrclib, Ordering::Relaxed);
+    live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
+    live.lyrics_lrclib.store(s.lyrics_lrclib && on, Ordering::Relaxed);
     live.lyrics_prefer_own.store(s.lyrics_prefer_own, Ordering::Relaxed);
     live.lyrics_show_auto.store(s.show_auto_lyrics, Ordering::Relaxed);
     if let Some(t) = live.transcriber.lock().as_ref() {
@@ -715,11 +779,11 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     {
         use crate::artistinfo::InfoSource as Src;
         let ai = &live.artist_info;
-        ai.set(Src::Wikipedia, s.info_wikipedia);
-        ai.set(Src::Lastfm, s.info_lastfm);
-        ai.set(Src::Fanart, s.info_fanart);
-        ai.set(Src::Audiodb, s.info_audiodb);
-        ai.set(Src::Listenbrainz, s.info_listenbrainz);
+        ai.set(Src::Wikipedia, s.info_wikipedia && on);
+        ai.set(Src::Lastfm, s.info_lastfm && on);
+        ai.set(Src::Fanart, s.info_fanart && on);
+        ai.set(Src::Audiodb, s.info_audiodb && on);
+        ai.set(Src::Listenbrainz, s.info_listenbrainz && on);
     }
     live.platform.set(s.platform());
     live.discord.set(s.discord());
@@ -727,9 +791,9 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
         scan.set_enabled(s.read_file_tags);
     }
-    live.remote.set(s.show_plex_players, s.move_stops_old_device, s.act_as_plex_player);
-    live.remote.set_show_cast(s.show_cast_devices);
-    live.remote.set_peer(s.show_to_my_devices, &s.computer_name, s.show_airplay_locked);
+    live.remote.set(s.show_plex_players && on, s.move_stops_old_device, s.act_as_plex_player && on);
+    live.remote.set_show_cast(s.show_cast_devices && on);
+    live.remote.set_peer(s.show_to_my_devices && on, &s.computer_name, s.show_airplay_locked);
     let cap = s.art_cache_bytes();
     let old = live.art_cap.swap(cap, Ordering::Relaxed);
     if let Some(art) = &live.art
@@ -852,9 +916,19 @@ pub async fn settings_get(
 pub async fn settings_set(
     settings: State<'_, SettingsState>,
     player: State<'_, PlayerHandle>,
+    downloads: State<'_, downloads::Downloads>,
     patch: SettingsPatch,
 ) -> AppResult<()> {
     let s = settings.set(patch.clone()).await?;
+    // Download Liked Songs is the Liked Songs download itself.
+    if let Some(on) = patch.download_liked {
+        let key = downloads::ItemKey::new(downloads::ItemKind::Liked, "");
+        if on {
+            downloads.add(key, "Liked Songs".into(), None).await?;
+        } else {
+            downloads.remove(key).await?;
+        }
+    }
     apply_to_player(&player, &s, &patch).await
 }
 
@@ -1124,6 +1198,11 @@ mod tests {
             show_to_my_devices: Some(false),
             computer_name: Some("Den".into()),
             show_airplay_locked: Some(true),
+            download_quality: Some(DownloadQuality::Kbps192),
+            download_limit_gb: Some(50),
+            download_home_only: Some(false),
+            download_liked: Some(true),
+            go_offline: Some(false),
         })
         .await
         .unwrap();
@@ -1170,6 +1249,8 @@ mod tests {
         assert_eq!(s.volume, 0.25);
         assert!(!s.read_file_tags && s.show_fan_edits && !s.group_editions);
         assert!(!s.drag_and_drop);
+        assert_eq!((s.download_quality, s.download_limit_gb), (DownloadQuality::Kbps192, 50));
+        assert!(!s.download_home_only && s.download_liked && !s.go_offline);
         assert_eq!(s.explicit_content, ExplicitContent::Filtered);
         assert!(db2.tag_view().filter_explicit, "the library view follows at start");
         assert_eq!(s.shuffle_style, ShuffleStyle::Standard);

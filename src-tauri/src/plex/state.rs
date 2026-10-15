@@ -105,6 +105,8 @@ struct Inner {
     events: broadcast::Sender<PlexEvent>,
     /// False while `start` is restoring the saved session; true otherwise.
     restored: watch::Sender<bool>,
+    /// Go offline: no requests to the server or plex.tv.
+    offline: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Cheap to clone; all clones share state.
@@ -171,6 +173,7 @@ impl PlexState {
                 recheck: Notify::new(),
                 events,
                 restored: watch::channel(true).0,
+                offline: Arc::default(),
             }),
         })
     }
@@ -305,8 +308,55 @@ impl PlexState {
         self.inner.health.lock().snapshot(now_ms())
     }
 
+    /// Go offline is on.
+    pub fn offline_by_choice(&self) -> bool {
+        self.inner.offline.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The Go offline switch, for other network users to check.
+    pub fn offline_switch(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.inner.offline.clone()
+    }
+
+    /// Go offline on: drop the connection and stop every request to the
+    /// server and plex.tv. Off: reconnect as at startup.
+    pub fn set_offline_by_choice(&self, on: bool) {
+        if self.inner.offline.swap(on, std::sync::atomic::Ordering::SeqCst) == on {
+            return;
+        }
+        self.inner.health.lock().set_offline_by_choice(on);
+        self.emit_health();
+        let me = self.clone();
+        spawn(async move {
+            if on {
+                if let Some(tx) = me.inner.notif_stop.lock().take() {
+                    let _ = tx.send(true);
+                }
+                if let Some(cur) = me.inner.session.write().await.current.as_mut() {
+                    cur.client = None;
+                }
+                me.emit_auth().await;
+                return;
+            }
+            let (has_server, signed_in) = {
+                let s = me.inner.session.read().await;
+                (s.current.is_some(), s.account.is_some())
+            };
+            if has_server {
+                // The health loop re-races the server's addresses.
+                me.recheck();
+            } else if signed_in {
+                // Started offline: pick up the server as at startup.
+                me.restore_in_background();
+            }
+        });
+    }
+
     /// A client for the selected server over the current best connection.
     pub async fn client(&self) -> AppResult<PlexClient> {
+        if self.offline_by_choice() {
+            return Err(AppError::Network("You're offline.".into()));
+        }
         let s = self.inner.session.read().await;
         match &s.current {
             Some(Current {
@@ -509,7 +559,11 @@ impl PlexState {
         // Username is cosmetic; don't block on it.
         let me = self.clone();
         let t2 = token.clone();
+        let offline = self.offline_by_choice();
         spawn(async move {
+            if offline {
+                return;
+            }
             if let Ok(u) = me.inner.tv.user(&t2).await {
                 {
                     let mut s = me.inner.session.write().await;
@@ -525,7 +579,16 @@ impl PlexState {
 
     async fn refresh_and_pick(&self, token: &Token) -> AppResult<()> {
         let cache = self.inner.session.read().await.cache.clone();
-        let list = match load_servers(&self.inner.tv, token, &cache).await {
+        // Go offline: the saved server list, without asking plex.tv.
+        let loaded = if self.offline_by_choice() {
+            Ok(ServerList {
+                servers: cache.servers.iter().map(super::discovery::CachedServer::to_discovered).collect(),
+                from_cache: true,
+            })
+        } else {
+            load_servers(&self.inner.tv, token, &cache).await
+        };
+        let list = match loaded {
             Ok(l) => l,
             Err(AppError::Auth(_)) => {
                 self.expire_session().await;
@@ -690,7 +753,7 @@ impl PlexState {
             .health
             .lock()
             .on_server_selected(&server.name, server.version.clone());
-        let probe = self.race_server(&server).await;
+        let probe = if self.offline_by_choice() { None } else { self.race_server(&server).await };
         let client = match &probe {
             Some(p) => Some(PlexClient::new(
                 &p.uri,
@@ -877,6 +940,9 @@ impl PlexState {
 
     /// One health check: ping, then act on the machine's decision.
     pub async fn health_tick(&self) {
+        if self.offline_by_choice() {
+            return;
+        }
         let current = self.inner.session.read().await.current.clone();
         let Some(current) = current else { return };
         let outcome = match &current.client {
@@ -1445,6 +1511,28 @@ mod tests {
         st.health_tick().await;
         assert_eq!(st.health().status, HealthStatus::Local);
         assert!(rec.toasts().iter().any(|t| t == "Your server is back."));
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn going_offline_stops_server_calls_and_coming_back_reconnects() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        st.set_offline_by_choice(true);
+        assert!(st.offline_by_choice());
+        assert!(st.client().await.is_err(), "no server calls while offline");
+        assert!(st.health().cached_only);
+        assert_eq!(st.health().banner.unwrap().kind, "goneOffline");
+        // Requests made so far; a health tick sends none.
+        let before = server.received_requests().await.unwrap_or_default().len();
+        st.health_tick().await;
+        assert_eq!(server.received_requests().await.unwrap_or_default().len(), before);
+        st.set_offline_by_choice(false);
+        assert!(!st.offline_by_choice());
+        st.health_tick().await;
+        st.health_tick().await;
+        assert_eq!(st.health().status, HealthStatus::Local);
+        assert!(st.client().await.is_ok());
         st.sign_out().await.unwrap();
     }
 

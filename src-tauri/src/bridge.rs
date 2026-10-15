@@ -436,6 +436,8 @@ pub struct CacheLookup(pub DbHandle, pub Option<PlexState>, pub OfflinePlay);
 #[derive(Debug, Default)]
 pub struct OfflinePlay {
     audio_dir: Option<std::path::PathBuf>,
+    /// Downloaded songs play too.
+    downloads: Option<crate::audio::source::LocalFiles>,
     told: std::sync::atomic::AtomicBool,
 }
 
@@ -443,8 +445,15 @@ impl OfflinePlay {
     pub fn new(audio_dir: std::path::PathBuf) -> Self {
         OfflinePlay {
             audio_dir: Some(audio_dir),
+            downloads: None,
             told: Default::default(),
         }
+    }
+
+    /// Downloaded songs count as on this computer.
+    pub fn with_downloads(mut self, d: crate::audio::source::LocalFiles) -> Self {
+        self.downloads = Some(d);
+        self
     }
 
     /// Ids that can play now, or `None` when the server can be reached.
@@ -457,7 +466,11 @@ impl OfflinePlay {
         let ids = tokio::task::spawn_blocking(move || crate::monitor::cached::cached_ids(&dir))
             .await
             .unwrap_or_default();
-        Some(ids.into_iter().collect())
+        let mut ok: std::collections::HashSet<String> = ids.into_iter().collect();
+        if let Some(d) = &self.downloads {
+            ok.extend(d.0.ids());
+        }
+        Some(ok)
     }
 
     /// The notice for `n` songs left out, the first time only.
@@ -601,6 +614,27 @@ mod tests {
             Some("Skipped 1 song that isn't on this computer. They play again when Platter can reach your server.")
         );
         assert_eq!(OfflinePlay::default().notice(0), None);
+    }
+
+    struct Downloaded;
+    impl crate::audio::source::LocalAudio for Downloaded {
+        fn path(&self, _: &Track) -> Option<std::path::PathBuf> {
+            None
+        }
+        fn ids(&self) -> Vec<String> {
+            vec!["202".into()]
+        }
+    }
+
+    #[tokio::test]
+    async fn offline_plays_include_downloaded_songs() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("101-0123456789abcdef.audio"), b"x").unwrap();
+        let off = OfflinePlay::new(d.path().to_path_buf())
+            .with_downloads(crate::audio::source::LocalFiles(Arc::new(Downloaded)));
+        let mut ids: Vec<String> = off.playable(true).await.unwrap().into_iter().collect();
+        ids.sort();
+        assert_eq!(ids, vec!["101".to_string(), "202".to_string()]);
     }
 
     fn album(id: &str) -> Album {

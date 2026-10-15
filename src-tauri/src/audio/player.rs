@@ -80,6 +80,8 @@ pub struct PlayerConfig {
     pub resume_contexts: bool,
     /// Crossfade, leveling, EQ and limiter (from settings).
     pub dsp: DspSettings,
+    /// Downloaded songs: played first, and never pre-cached.
+    pub local_files: Option<super::source::LocalFiles>,
 }
 
 impl Default for PlayerConfig {
@@ -96,6 +98,7 @@ impl Default for PlayerConfig {
             shuffle_style: ShuffleStyle::default(),
             resume_contexts: true,
             dsp: DspSettings::default(),
+            local_files: None,
         }
     }
 }
@@ -204,6 +207,7 @@ impl PlayerHandle {
         let (engine, engine_rx) = Engine::new(EngineDeps {
             resolver: resolver.clone(),
             cache: cache.clone(),
+            local: config.local_files.clone(),
             client: client.clone(),
             rt: rt.clone(),
             output,
@@ -785,6 +789,10 @@ impl Actor {
             c.set_pinned(want.iter().map(cache_key));
         }
         if let Some(p) = &self.precacher {
+            // Downloaded songs are on this computer already.
+            if let Some(local) = &self.config.local_files {
+                want.retain(|t| local.0.path(t).is_none());
+            }
             p.set_wanted(want);
         }
     }

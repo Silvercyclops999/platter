@@ -1,6 +1,6 @@
 //! Which tracks are on this computer, so the UI can dim the rest while only
 //! cached music can play (server offline, files unavailable, signed out by
-//! the server). Read from the audio pre-cache directory.
+//! the server). Read from the audio pre-cache directory and the downloads.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -38,12 +38,24 @@ pub fn cached_ids(dir: &Path) -> Vec<String> {
 }
 
 /// `cached_tracks` → ids of tracks that can play without the server.
-#[tauri::command]
-pub async fn cached_tracks(dir: State<'_, AudioCacheDir>) -> AppResult<Vec<String>> {
+/// Pre-cached and downloaded ids together, sorted.
+async fn on_this_computer(dir: &AudioCacheDir, downloads: &crate::downloads::Downloads) -> Vec<String> {
     let d = dir.0.clone();
-    Ok(tokio::task::spawn_blocking(move || cached_ids(&d))
+    let mut ids: BTreeSet<String> = tokio::task::spawn_blocking(move || cached_ids(&d))
         .await
-        .unwrap_or_default())
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    ids.extend(downloads.downloaded_ids());
+    ids.into_iter().collect()
+}
+
+#[tauri::command]
+pub async fn cached_tracks(
+    dir: State<'_, AudioCacheDir>,
+    downloads: State<'_, crate::downloads::Downloads>,
+) -> AppResult<Vec<String>> {
+    Ok(on_this_computer(&dir, &downloads).await)
 }
 
 /// What Home can still offer while only cached music plays: the albums,
@@ -98,11 +110,12 @@ pub fn cached_library_of(c: &Connection, track_ids: &[String]) -> AppResult<Cach
 /// `cached_library` → the albums, artists and playlists that can still play
 /// without the server.
 #[tauri::command]
-pub async fn cached_library(dir: State<'_, AudioCacheDir>, db: State<'_, DbHandle>) -> AppResult<CachedLibrary> {
-    let d = dir.0.clone();
-    let ids = tokio::task::spawn_blocking(move || cached_ids(&d))
-        .await
-        .unwrap_or_default();
+pub async fn cached_library(
+    dir: State<'_, AudioCacheDir>,
+    downloads: State<'_, crate::downloads::Downloads>,
+    db: State<'_, DbHandle>,
+) -> AppResult<CachedLibrary> {
+    let ids = on_this_computer(&dir, &downloads).await;
     db.read_async(move |c| cached_library_of(c, &ids)).await
 }
 

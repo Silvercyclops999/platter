@@ -32,7 +32,7 @@ use super::dsp::{self, Chain, Crossfade, DspSettings, SilenceMeter, TrackAudio, 
 use super::gate::{Priority, PriorityCell, TransferGate};
 use super::http::{HttpConfig, HttpSource, HttpStats};
 use super::output::{AudioOutput, OutputCallback, OutputEvent, OutputFormat, OutputState, Renderer};
-use super::source::{StreamSource, TrackResolver};
+use super::source::{LocalFiles, StreamSource, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
 
@@ -924,6 +924,7 @@ struct Env {
     core: Arc<Core>,
     resolver: Arc<dyn TrackResolver>,
     cache: Option<Arc<DiskCache>>,
+    local: Option<LocalFiles>,
     client: reqwest::Client,
     rt: Handle,
     gate: Arc<TransferGate>,
@@ -932,6 +933,8 @@ struct Env {
 pub struct EngineDeps {
     pub resolver: Arc<dyn TrackResolver>,
     pub cache: Option<Arc<DiskCache>>,
+    /// Downloaded songs, played before the cache and the server.
+    pub local: Option<LocalFiles>,
     pub client: reqwest::Client,
     pub rt: Handle,
     pub output: Box<dyn AudioOutput>,
@@ -1013,6 +1016,7 @@ impl Engine {
             core,
             resolver: deps.resolver,
             cache: deps.cache,
+            local: deps.local,
             client: deps.client,
             rt: deps.rt,
             gate: deps.gate,
@@ -1480,6 +1484,29 @@ fn open_track(
             .block_on(env.resolver.transcode(track))
             .map_err(OpenFail::Fatal)?;
         return open_from(env, track, src, Origin::Transcode, prio);
+    }
+    // A downloaded copy first; its format can differ from the server's file
+    // (an MP3 download), so the file name gives the hint.
+    if let Some(local) = &env.local
+        && let Some(path) = local.0.path(track)
+        && let Ok(file) = std::fs::File::open(&path)
+    {
+        let hint = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .and_then(|e| extension_hint(None, Some(e)))
+            .or_else(|| extension_hint(track.codec.as_deref(), track.container.as_deref()));
+        match TrackDecoder::open(Box::new(file), hint.as_deref()) {
+            Ok(dec) => {
+                return Ok(Opened {
+                    dec,
+                    stats: None,
+                    origin: Origin::Cache,
+                    cache_from: None,
+                });
+            }
+            Err(e) => tracing::debug!("downloaded copy of {} unusable: {e}", track.id),
+        }
     }
     if let Some(cache) = &env.cache
         && let Some(path) = cache.get(&cache_key(track))

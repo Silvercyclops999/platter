@@ -78,6 +78,7 @@ async fn engine_plays_two_generated_tracks_gaplessly_on_the_default_device() {
     let (engine, mut rx) = Engine::new(EngineDeps {
         resolver,
         cache: None,
+        local: None,
         client: super::http::http_client(),
         rt: tokio::runtime::Handle::current(),
         output: Box::new(CpalOutput::new()),

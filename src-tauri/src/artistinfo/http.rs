@@ -102,6 +102,23 @@ impl InfoHttp for ReqwestHttp {
     }
 }
 
+/// Refuses every request while Go offline is on (the switch is shared with
+/// the Plex connection).
+pub struct Switched {
+    pub inner: std::sync::Arc<dyn InfoHttp>,
+    pub off: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait]
+impl InfoHttp for Switched {
+    async fn get(&self, url: &str, headers: &[(&'static str, String)]) -> AppResult<HttpResponse> {
+        if self.off.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(AppError::Network("You're offline.".into()));
+        }
+        self.inner.get(url, headers).await
+    }
+}
+
 #[cfg(test)]
 pub mod fake {
     //! Canned responses by URL substring, and a log of every request.
@@ -176,6 +193,18 @@ mod tests {
         let ua = user_agent();
         assert!(ua.starts_with("Platter/"));
         assert!(ua.contains("github.com/Silvercyclops999/platter"));
+    }
+
+    #[tokio::test]
+    async fn going_offline_stops_every_request() {
+        let fake = std::sync::Arc::new(fake::FakeHttp::new());
+        fake.route("example", 200, "{}");
+        let off = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let http = Switched { inner: fake.clone(), off: off.clone() };
+        assert!(http.get("https://example.org/a", &[]).await.is_err());
+        assert_eq!(fake.calls("example"), 0);
+        off.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(http.get("https://example.org/a", &[]).await.unwrap().ok());
     }
 
     #[test]
