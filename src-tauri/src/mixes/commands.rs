@@ -33,8 +33,13 @@ pub async fn mix_page(
 
 /// A song or artist radio page (`track:<id>` or `artist:<id>`).
 #[tauri::command]
-pub async fn radio_page(mixes: State<'_, MixService>, seed: String, steer: Option<MixSteer>) -> AppResult<MixPage> {
-    mixes.radio_page(seed, steer).await
+pub async fn radio_page(
+    mixes: State<'_, MixService>,
+    seed: String,
+    steer: Option<MixSteer>,
+    salt: Option<u64>,
+) -> AppResult<MixPage> {
+    mixes.radio_page(seed, steer, salt).await
 }
 
 /// Make one mix again with new songs.

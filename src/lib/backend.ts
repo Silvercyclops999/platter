@@ -37,6 +37,9 @@ import type {
   HomeItem,
   RecentsEntry,
   HomeShelfId,
+  MixPage,
+  MixShelves,
+  MixSteer,
   InfoKeyState,
   InfoKeysStatus,
   KeyedInfoSource,
@@ -109,6 +112,16 @@ export interface Backend {
   /** Listening sessions and likes for the Recents page, newest first. */
   recents(limit?: number): Promise<RecentsEntry[]>;
 
+  // Mixes and radio (docs/IPC.md "Mixes and radio")
+  /** Home's mix shelves (made when due). */
+  mixesHome(): Promise<MixShelves>;
+  /** A mix and its songs; `steer` leans the same mix one way. */
+  mixPage(id: string, steer?: MixSteer | null): Promise<MixPage>;
+  /** Make one mix again with new songs. */
+  mixRefresh(id: string): Promise<MixPage>;
+  /** A radio page: `track:<id>` or `artist:<id>`, about 50 songs starting with the seed (the same `salt`, the same songs). */
+  radioPage(seed: string, steer?: MixSteer | null, salt?: number): Promise<MixPage>;
+
   // Playlist editing (docs/IPC.md "Playlist editing")
   /** A new playlist, named from Settings unless `title` is given, holding `trackIds`. */
   playlistCreate(title?: string, trackIds?: string[]): Promise<Playlist>;
@@ -172,6 +185,10 @@ export interface Backend {
   setShuffle(shuffle: boolean): Promise<void>;
   /** Shuffle preference for a context by id (applies now if it's playing). */
   setContextShuffle(contextId: string, shuffle: boolean): Promise<void>;
+  /** Smart shuffle: shuffle on with similar library songs mixed in. */
+  setSmartShuffle(on: boolean): Promise<void>;
+  /** Crossfade for the playing context only (a mix's smooth transitions). */
+  setSmoothTransitions(on: boolean): Promise<void>;
   setRepeat(repeat: RepeatMode): Promise<void>;
   /** Sets the A-B loop on the playing track (points in either order, 1 s apart or more); null clears it. */
   setAbLoop(abLoop: AbLoop | null): Promise<void>;
@@ -343,6 +360,10 @@ export function createTauriBackend(): Backend {
     playlistPage: (id) => call("playlist_page", { id }),
     recentTracks: (limit) => call("recent_tracks", { limit }),
     recents: (limit) => call("recents", { limit }),
+    mixesHome: () => call("mixes_home", { tzOffsetMin: -new Date().getTimezoneOffset() }),
+    mixPage: (id, steer) => call("mix_page", { id, steer: steer ?? null, tzOffsetMin: -new Date().getTimezoneOffset() }),
+    mixRefresh: (id) => call("mix_refresh", { id }),
+    radioPage: (seed, steer, salt) => call("radio_page", { seed, steer: steer ?? null, salt: salt ?? null }),
     playlistCreate: (title, trackIds) => call("playlist_create", { title, trackIds }),
     playlistAdd: (id, trackIds, place) => call("playlist_add", { id, trackIds, after: place?.after, top: place?.top }),
     playlistDuplicates: (id, trackIds) => call("playlist_duplicates", { id, trackIds }),
@@ -381,6 +402,8 @@ export function createTauriBackend(): Backend {
     setMuted: (muted) => call("set_muted", { muted }),
     setShuffle: (shuffle) => call("set_shuffle", { shuffle }),
     setContextShuffle: (contextId, shuffle) => call("set_context_shuffle", { contextId, shuffle }),
+    setSmartShuffle: (on) => call("set_smart_shuffle", { on }),
+    setSmoothTransitions: (on) => call("set_smooth_transitions", { on }),
     setRepeat: (repeat) => call("set_repeat", { repeat }),
     setAbLoop: (abLoop) => call("set_ab_loop", { abLoop }),
     queueAdd: (trackIds, at) => call("queue_add", { trackIds, at }),

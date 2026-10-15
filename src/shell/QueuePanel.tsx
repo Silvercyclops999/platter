@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -64,7 +64,15 @@ function QueueRow({
       showAlbum={false}
       onPlay={() => (current ? player.toggle() : player.queueJump(item.itemId))}
       onRemove={remove}
-      trailing={current ? <span className="track-row__slot" aria-hidden="true" /> : undefined}
+      trailing={
+        current ? (
+          <span className="track-row__slot" aria-hidden="true" />
+        ) : item.source === "smart" ? (
+          <span className="queue-smart" title="Added by smart shuffle" aria-label="Added by smart shuffle" role="img">
+            <Sparkles size={14} aria-hidden="true" />
+          </span>
+        ) : undefined
+      }
       menuItems={trackMenuItems(item.track, {
         afterQueue: remove ? [{ label: "Remove from queue", onSelect: remove }] : [],
       })}

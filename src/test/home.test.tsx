@@ -183,7 +183,8 @@ describe("home page", () => {
     await user.click(screen.getByRole("button", { name: "Albums" }));
     expect(shelfTitles()).toEqual(["Recently played", "Jump back in", "Recently added"]);
     await user.click(screen.getByRole("button", { name: "All" }));
-    expect(shelfTitles()).toHaveLength(5);
+    // Five shelves and the three mix shelves (those show on All only).
+    expect(shelfTitles()).toHaveLength(8);
   });
 
   it("a chip with nothing to show says so", async () => {
@@ -205,7 +206,9 @@ describe("home page", () => {
 
   it("hides empty shelves, and shows the empty state when there's nothing at all", async () => {
     const { unmount } = renderHome(data({ jumpBackIn: [], topArtists: [] }));
-    await waitFor(() => expect(shelfTitles()).toEqual(["Recently played", "Your playlists", "Recently added"]));
+    await waitFor(() =>
+      expect(shelfTitles()).toEqual(["Made for you", "Recently played", "Your mixes by mood", "Your genre mixes", "Your playlists", "Recently added"]),
+    );
     unmount();
     renderHome({ shortcuts: [], recentlyPlayed: [], jumpBackIn: [], playlists: [], recentlyAdded: [], topArtists: [] });
     expect(await screen.findByText("Nothing here yet")).toBeInTheDocument();

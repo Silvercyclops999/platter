@@ -156,6 +156,7 @@ export function AlbumPage({ id }: { id: string }) {
                   addToPlaylistItem(() => data?.tracks.map((t) => t.id) ?? []),
                   ...downloadMenuItems({ kind: "album", id: album.id, title: album.title }),
                   { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
+                  { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${album.artistId}` }) },
                   shareItem("album", album.id, album.thumb),
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",

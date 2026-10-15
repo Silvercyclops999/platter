@@ -53,6 +53,7 @@ export function useAlbumActions(album: Album): ItemActions & { openMenu: (at: { 
         { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
         addToPlaylistItem(albumSongs(album.id)),
         { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
+        { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${album.artistId}` }) },
         shareItem("album", album.id, album.thumb),
         {
           label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
@@ -79,6 +80,7 @@ export function useArtistActions(artist: Artist): ItemActions {
         `Options for ${artist.title}`,
         [
           { label: playing ? "Pause" : "Play", onSelect: play },
+          { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${artist.id}` }) },
           shareItem("artist", artist.id, artist.thumb),
           {
             label: pinned ? "Unpin from sidebar" : "Pin to sidebar",

@@ -136,8 +136,9 @@ describe("resume points", () => {
 });
 
 describe("context end", () => {
-  it("rewinds to track 1, paused at 0:00, with the rest upcoming", async () => {
+  it("with Stop, rewinds to track 1, paused at 0:00, with the rest upcoming", async () => {
     const m = fresh();
+    await m.settingsSet({ queueEnd: "stop" });
     const { album, tracks } = albumWith(m, 3);
     await m.playContext({ context: { kind: "album", id: album.id }, startTrackId: tracks[tracks.length - 1].id });
     await m.playNext();
@@ -146,6 +147,33 @@ describe("context end", () => {
     expect(s.positionMs).toBe(0);
     expect(cur(s)).toBe(tracks[0].id);
     expect(ids(s.queue.nextUp)).toEqual(tracks.slice(1).map((t) => t.id));
+  });
+});
+
+describe("keep playing similar music", () => {
+  it("adds similar songs when the last one ends, marked as autoplay", async () => {
+    const m = fresh();
+    const { album, tracks } = albumWith(m, 3);
+    await m.playContext({ context: { kind: "album", id: album.id }, startTrackId: tracks[tracks.length - 1].id });
+    await m.playNext();
+    const s = await m.playerState();
+    expect(s.status).toBe("playing");
+    expect(tracks.map((t) => t.id)).not.toContain(cur(s));
+    expect(s.queue.current?.source).toBe("autoplay");
+  });
+
+  it("smart shuffle mixes in songs marked smart, and plain shuffle off takes them out", async () => {
+    const m = fresh();
+    const { album } = albumWith(m, 12);
+    await m.playContext({ context: { kind: "album", id: album.id } });
+    await m.setSmartShuffle(true);
+    let s = await m.playerState();
+    expect(s.shuffle && s.smartShuffle).toBe(true);
+    expect(s.queue.nextUp.some((i) => i.source === "smart")).toBe(true);
+    await m.setShuffle(false);
+    s = await m.playerState();
+    expect(s.smartShuffle).toBe(false);
+    expect(s.queue.nextUp.some((i) => i.source === "smart")).toBe(false);
   });
 });
 

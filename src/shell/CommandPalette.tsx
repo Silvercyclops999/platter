@@ -6,6 +6,7 @@ import { backend } from "../lib/backend";
 import { trackArtistLine } from "../lib/format";
 import { modKey } from "../lib/platform";
 import type { SearchResults } from "../lib/types";
+import { useSettings } from "../stores/settings";
 import { player } from "../stores/player";
 import { nav } from "../stores/router";
 import { useUi } from "../stores/ui";
@@ -35,7 +36,7 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "play-pause", label: "Play / pause", hint: "Space", icon: <Music size={16} />, group: "Playback", run: () => player.toggle() },
   { id: "next", label: "Next track", hint: `${modKey}+→`, icon: <Music size={16} />, group: "Playback", run: () => player.next() },
   { id: "previous", label: "Previous track", hint: `${modKey}+←`, icon: <Music size={16} />, group: "Playback", run: () => player.previous() },
-  { id: "shuffle", label: "Shuffle on / off", hint: `${modKey}+S`, icon: <Shuffle size={16} />, group: "Playback", run: () => player.toggleShuffle() },
+  { id: "shuffle", label: "Shuffle on / off", hint: `${modKey}+S`, icon: <Shuffle size={16} />, group: "Playback", run: () => player.toggleShuffle(!!useSettings.getState().settings?.smartShuffle) },
   { id: "repeat", label: "Repeat: off, all, one", hint: `${modKey}+R`, icon: <Repeat size={16} />, group: "Playback", run: () => player.cycleRepeatNow() },
   { id: "volume-up", label: "Volume up", hint: `${modKey}+↑`, icon: <Volume2 size={16} />, group: "Playback", run: () => player.nudgeVolume(VOLUME_KEY_STEP) },
   { id: "volume-down", label: "Volume down", hint: `${modKey}+↓`, icon: <Volume1 size={16} />, group: "Playback", run: () => player.nudgeVolume(-VOLUME_KEY_STEP) },

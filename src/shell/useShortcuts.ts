@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { isMod, platform } from "../lib/platform";
 import { toggleLiked } from "../stores/likes";
+import { useSettings } from "../stores/settings";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { createPlaylist } from "../stores/playlists";
@@ -181,7 +182,7 @@ export function useShortcuts() {
       if (isTyping(e.target)) return;
       if (isMod(e) && !e.shiftKey && !e.altKey && key === "s") {
         e.preventDefault();
-        player.toggleShuffle();
+        player.toggleShuffle(!!useSettings.getState().settings?.smartShuffle);
         return;
       }
       if (isMod(e) && !e.shiftKey && !e.altKey && key === "r") {

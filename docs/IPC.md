@@ -618,13 +618,15 @@ dropdown parts off; the UI checks them.
 ## Playback and queue
 | Command | Args |
 | --- | --- |
-| `play_context` | `{ context: { kind: "album"|"playlist"|"artist"|"tracks"|"search"|"liked", id?, trackIds? }, startTrackId?, shuffle? }` |
+| `play_context` | `{ context: { kind: "album"|"playlist"|"artist"|"tracks"|"search"|"liked"|"mix"|"radio", id?, trackIds? }, startTrackId?, shuffle? }` |
 | `play_toggle`, `play_pause`, `play_resume`, `play_next`, `play_previous` | – |
 | `play_seek` | `{ positionMs }` |
 | `set_volume` | `{ volume: 0..1 }` (linear slider value; core applies the perceptual curve) |
 | `set_muted` | `{ muted }` |
 | `set_shuffle` | `{ shuffle }` (for the playing context) |
 | `set_context_shuffle` | `{ contextId, shuffle }` (applies now if that context is playing, otherwise the next time it plays) |
+| `set_smart_shuffle` | `{ on }` (on also turns shuffle on; plain shuffle off ends it) |
+| `set_smooth_transitions` | `{ on }` (crossfade for the playing context only; ends when another context starts) |
 | `set_repeat` | `{ repeat: "off"|"all"|"one" }` |
 | `set_ab_loop` | `{ abLoop: { aMs, bMs } | null }` (null clears it) |
 | `queue_add` | `{ trackIds, at: "next"|"end"|{ index } }` (`index` puts them at that spot in the user queue; past the end appends) |
@@ -634,9 +636,9 @@ dropdown parts off; the UI checks them.
 | `queue_jump` | `{ itemId }` (play that item now) |
 | `player_state` | – → `PlayerState` |
 
-`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView, abLoop: { aMs, bMs } | null }`
+`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView, abLoop: { aMs, bMs } | null, smartShuffle, smoothTransitions }`
 `QueueView = { current?: QueueItem, userQueue: QueueItem[], nextUp: QueueItem[], history: QueueItem[], context?: { kind, id?, title? } }`
-`QueueItem = { itemId, track: Track, source: "user"|"context" }`
+`QueueItem = { itemId, track: Track, source: "user"|"context"|"autoplay"|"smart" }` (`autoplay`: similar music after the context ran out; `smart`: put in by smart shuffle)
 
 Shuffle is remembered per album, playlist or artist id; repeat is one global
 setting. `shuffle` is the playing context's state and `shuffledContexts` lists
@@ -656,8 +658,17 @@ Queue rules the core applies:
   restarts the track.
 - In repeat-one, `play_next` or an early `play_previous` switches repeat to
   all. A late `play_previous` restarts and keeps repeat-one.
-- When the context runs out with repeat off, the player goes back to its first
-  track, paused at 0:00, with the rest of the context as upcoming.
+- When the last song of a context starts with repeat off and `queueEnd` is
+  `keepPlaying`, 20 similar songs are added after it (`source: "autoplay"`),
+  so playback carries on. With `stop`, or when nothing similar is found, the
+  player goes back to the first track when the context runs out, paused at
+  0:00, with the rest of the context as upcoming.
+- A radio context asks for 20 more songs whenever fewer than 5 are left,
+  never repeating one already in the queue or played lately.
+- Smart shuffle (shuffle on, with the `smartShuffle` setting) puts one similar
+  song after every three upcoming songs of an album, playlist, artist or
+  Liked Songs (`source: "smart"`), and more when those run out. Turning plain
+  shuffle off takes the ones still to come out again.
 
 A-B loop: `set_ab_loop` takes the two points in either order and swaps them so
 A comes first. They're clamped to the track and must be at least 1 s apart,
@@ -674,6 +685,52 @@ Events:
 - `player://state` → `PlayerState` (on any state/track/queue change)
 - `player://position` → `{ positionMs, durationMs, bufferedMs }` (4×/s while playing)
 - `player://error` → `{ trackId?, kind, message }` (e.g. "Skipped: file unavailable")
+
+## Mixes and radio
+Made on this computer from the cache and the listen log; nothing is stored
+on the server except playlists saved from a mix (`playlist_create`).
+
+| Command | Args |
+| --- | --- |
+| `mixes_home` | `{ tzOffsetMin? }` → `MixShelves` (makes whatever is due first) |
+| `mix_page` | `{ id, steer?: "familiar"|"new", tzOffsetMin? }` → `MixPage` (a steered mix is made again, not stored) |
+| `mix_refresh` | `{ id }` → `MixPage` (that mix made again with new songs, and stored) |
+| `radio_page` | `{ seed: "track:<id>"|"artist:<id>", steer?, salt? }` → `MixPage` (about 50 songs, a song radio starting with its song; the same `salt` gives the same songs) |
+
+`tzOffsetMin` is the UI's time zone in minutes east of UTC; the core keeps the
+last one for its own checks.
+
+`MixShelves = { madeForYou: MixSummary[], moods: MixSummary[], genres: MixSummary[] }`
+`MixSummary = { id, kind: "daily"|"discover"|"newInLibrary"|"onRepeat"|"rediscover"|"genre"|"mood"|"daylist"|"topSongs"|"radio", title, description, color, art: string | null, covers: string[], artistIds: string[], tag: string | null, trackCount, durationMs, nextUpdateAt: number | null }`
+`MixPage = { mix: MixSummary, tracks: Track[], familiar: boolean[], steer: "familiar"|"new" | null }`
+
+What each mix is:
+- `daily:1` to `daily:6`: your most played artists grouped by shared Plex
+  genres, styles and moods, songs played in the same session, and Plex
+  similar artists. About 70% favourites from the group and 30% less played
+  songs from it and its close neighbours (the `mixVariety` setting moves the
+  split), 50 songs. A song is in one Daily Mix a day at most.
+- `discover`: 30 songs never played, closest to what you play most, two per
+  artist at most.
+- `new`: songs from albums added in the last 30 days.
+- `onRepeat`: the 30 songs played most in the last 30 days (two plays or more).
+- `rediscover`: songs played three times or more, none in the last six months.
+- `topSongs`: All-Time Top Songs, the 100 most played by play count.
+- `genre:<name>` and `mood:<name>`: one per tag with at least 25 songs, 12 of
+  each at most, the tags you play most first.
+- `daylist`: songs you play around this hour on this kind of day (weekday or
+  weekend), named "<genres and moods> <weekday> <part of day>", made again
+  every `daylistHours`. `nextUpdateAt` says when.
+
+Skips under 30 s count against a song and plays for it. No artist plays more
+than twice in a row. The explicit filter, hidden fan edits, `mixUnreleased`
+and the exclusion lists apply to every mix and to radio. Mixes are made again
+at the first check after 4 am local time each day, when a mix setting
+changes, and on demand; the daylist when its block of hours changes. All of it
+runs off the UI thread.
+
+Events:
+- `mixes://changed` → `null` (mixes were made again)
 
 ## Output devices
 | Command | Args |
@@ -979,6 +1036,15 @@ The rest of the fields, with their defaults:
 | `downloadFolder` | string, `""` | Where downloads go; empty is the app data folder. Changed with `downloads_choose_folder`, not `settings_set`. This device only. |
 | `downloadHomeOnly` | bool, true | Downloads wait while the server is reached over remote access or the relay. This device only. |
 | `downloadLiked` | bool, false | Keep Liked Songs downloaded; new likes download too. The same as the Liked Songs download toggle. This device only. |
+| `homeMixes` | bool, true | Home shows Made for you, Your mixes by mood and Your genre mixes. |
+| `mixVariety` | `"balanced"`, `"familiar"` or `"adventurous"`, `"balanced"` | The share of favourites in a mix: 70%, 85% or 50%. |
+| `mixExcludeArtists` | string[], `[]` | Artist ids never in mixes or radio. |
+| `mixExcludeGenres` | string[], `[]` | Genre, style or mood names (any case) never in mixes or radio. |
+| `mixExcludeAlbums` | string[], `[]` | Album ids never in mixes or radio. |
+| `mixUnreleased` | bool, true | Demos and archive versions marked unreleased can be in mixes and radio. |
+| `daylistHours` | 1, 3 or 6, 3 | Hours between daylist refreshes. |
+| `queueEnd` | `"keepPlaying"` or `"stop"`, `"keepPlaying"` | When the queue ends, keep playing similar music, or rewind and stop. |
+| `smartShuffle` | bool, false | The shuffle button has a third state, smart shuffle. Off ends smart shuffle that's on. |
 | `goOffline` | bool, false | No network use: no requests to the server or plex.tv, no artist info, LRCLIB, share link lookups, Discord status, Listen on discovery or update checks. Health shows `offline` with the `goneOffline` banner and `cachedOnly`, so only music on this computer plays. Off reconnects as at startup. This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build

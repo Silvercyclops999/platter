@@ -89,6 +89,7 @@ export function trackMenuItems(
     ...(extra.afterQueue ?? []),
     ...goToArtistItems(track),
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
+    { label: "Go to song radio", onSelect: () => nav.go({ name: "radio", seed: `track:${track.id}` }) },
     {
       // Read when the menu shows: lyrics may have been saved since the row built it.
       get label() {

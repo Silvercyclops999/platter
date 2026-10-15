@@ -398,7 +398,7 @@ export interface SearchResults {
 // ---------------------------------------------------------------- playback & queue
 
 /** "liked" is Liked Songs (id "liked"). */
-export type PlayContextKind = "album" | "playlist" | "artist" | "tracks" | "search" | "liked";
+export type PlayContextKind = "album" | "playlist" | "artist" | "tracks" | "search" | "liked" | "mix" | "radio";
 
 export interface PlayContext {
   kind: PlayContextKind;
@@ -420,7 +420,8 @@ export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "bufferin
 export interface QueueItem {
   itemId: string;
   track: Track;
-  source: "user" | "context";
+  /** "autoplay": similar music after the context ran out; "smart": put in by smart shuffle. */
+  source: "user" | "context" | "autoplay" | "smart";
 }
 
 export interface QueueContextInfo {
@@ -452,6 +453,10 @@ export interface PlayerState {
   queue: QueueView;
   /** The A-B loop on the playing track, if one is set. */
   abLoop?: AbLoop | null;
+  /** Shuffle with similar songs from the library mixed in. */
+  smartShuffle?: boolean;
+  /** Crossfade on for this playback only (a mix's smooth transitions). */
+  smoothTransitions?: boolean;
 }
 
 /** An A-B loop: playback that reaches B goes back to A (ms, A before B). */
@@ -706,10 +711,31 @@ export interface Settings {
   downloadLiked: boolean;
   /** No network use at all; only music on this computer plays. This device only. */
   goOffline: boolean;
+  /** Home shows the made-for-you and mood and genre mix shelves. */
+  homeMixes: boolean;
+  /** How much of a mix is favourites. */
+  mixVariety: MixVariety;
+  /** Artist ids left out of mixes and radio. */
+  mixExcludeArtists: string[];
+  /** Genre, style or mood names left out of mixes and radio. */
+  mixExcludeGenres: string[];
+  /** Album ids left out of mixes and radio. */
+  mixExcludeAlbums: string[];
+  /** Unreleased music can be in mixes. */
+  mixUnreleased: boolean;
+  /** Hours between daylist refreshes: 1, 3 or 6. */
+  daylistHours: number;
+  /** When the queue ends: keep playing similar music, or stop. */
+  queueEnd: QueueEnd;
+  /** The shuffle button has a third state, smart shuffle. */
+  smartShuffle: boolean;
   [key: string]: unknown;
 }
 
 export type DownloadQuality = "original" | "320" | "192" | "128";
+
+export type MixVariety = "balanced" | "familiar" | "adventurous";
+export type QueueEnd = "keepPlaying" | "stop";
 
 export type ExplicitContent = "allowed" | "filtered";
 
@@ -824,6 +850,15 @@ export const DEFAULT_SETTINGS: Settings = {
   downloadHomeOnly: true,
   downloadLiked: false,
   goOffline: false,
+  homeMixes: true,
+  mixVariety: "balanced",
+  mixExcludeArtists: [],
+  mixExcludeGenres: [],
+  mixExcludeAlbums: [],
+  mixUnreleased: true,
+  daylistHours: 3,
+  queueEnd: "keepPlaying",
+  smartShuffle: false,
 };
 
 // ---------------------------------------------------------------- downloads
@@ -863,6 +898,48 @@ export interface DownloadStatus {
   /** Songs waiting to be fetched. */
   queued: number;
   current?: { trackId: string; received: number; total?: number | null } | null;
+}
+
+// ---------------------------------------------------------------- mixes
+
+export type MixKind = "daily" | "discover" | "newInLibrary" | "onRepeat" | "rediscover" | "genre" | "mood" | "daylist" | "topSongs" | "radio";
+
+/** A made-for-you mix or a radio, as cards and page headers show it. */
+export interface MixSummary {
+  id: string;
+  kind: MixKind;
+  title: string;
+  /** "A, B, C and more", "with A, B and more", or what the mix is. */
+  description: string;
+  /** The card's name strip, #rrggbb. */
+  color: string;
+  /** The leading artist's photo (radio: the seed's picture). */
+  art: string | null;
+  /** Covers for a collage; on a radio the seed's picture then two artists' photos. */
+  covers: string[];
+  artistIds: string[];
+  tag: string | null;
+  trackCount: number;
+  durationMs: number;
+  /** When it's made again (the daylist), unix ms. */
+  nextUpdateAt: number | null;
+}
+
+export interface MixShelves {
+  madeForYou: MixSummary[];
+  moods: MixSummary[];
+  genres: MixSummary[];
+}
+
+/** A steering chip: lean towards favourites or towards songs played less. */
+export type MixSteer = "familiar" | "new";
+
+export interface MixPage {
+  mix: MixSummary;
+  tracks: Track[];
+  /** Per song: a favourite (true) or something less played. */
+  familiar: boolean[];
+  steer: MixSteer | null;
 }
 
 // ---------------------------------------------------------------- transcription
@@ -1200,6 +1277,8 @@ export interface EventMap {
   "downloads://status": DownloadStatus;
   /** The set of downloaded songs changed; ask downloadedTracks again. */
   "downloads://changed": null;
+  /** Mixes were made again (a new day, the next daylist, new settings). */
+  "mixes://changed": null;
 }
 
 export type EventName = keyof EventMap;

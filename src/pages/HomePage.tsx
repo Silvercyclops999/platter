@@ -5,7 +5,7 @@ import { Shelf, ShelfItem } from "../components/Shelf";
 import { FilterChips } from "../components/Tabs";
 import { artUrl, backend } from "../lib/backend";
 import { headerColorsFromImageUrl, headerColorsFromServer } from "../lib/color";
-import type { CachedLibrary, HomeItem } from "../lib/types";
+import type { CachedLibrary, HomeItem, MixShelves, MixSummary } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { useApp } from "../stores/app";
 import { useSettings } from "../stores/settings";
@@ -13,6 +13,7 @@ import { nav } from "../stores/router";
 import { HomeItemCard, homeItemInfo } from "./cards";
 import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, offlineHome, showsLikedTile, visibleShelves, type HomeFilter } from "./home";
 import { LikedTile, ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
+import { MixCard } from "./MixCard";
 import { useLikes } from "../stores/likes";
 import "./home.css";
 
@@ -97,6 +98,36 @@ function useCachedLibrary(): CachedLibrary | null {
   return cachedOnly ? lib : null;
 }
 
+/** Home's mix shelves, read again when the mixes are made again. Null while off or loading. */
+function useMixShelves(on: boolean): MixShelves | null {
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    let un: (() => void) | undefined;
+    let alive = true;
+    backend.listen("mixes://changed", () => setVersion((v) => v + 1)).then((u) => (alive ? (un = u) : u()));
+    return () => {
+      alive = false;
+      un?.();
+    };
+  }, [on]);
+  const { data } = useLoad(() => (on ? backend.mixesHome() : Promise.resolve(null)), [on, version]);
+  return on ? (data ?? null) : null;
+}
+
+function MixShelf({ title, mixes }: { title: string; mixes: MixSummary[] }) {
+  if (!mixes.length) return null;
+  return (
+    <Shelf title={title} skeletonKind="album">
+      {mixes.map((m) => (
+        <ShelfItem key={m.id}>
+          <MixCard mix={m} />
+        </ShelfItem>
+      ))}
+    </Shelf>
+  );
+}
+
 export function HomePage() {
   const { data: full, error } = useLoad(() => backend.home(), []);
   const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
@@ -109,6 +140,9 @@ export function HomePage() {
   const root = useRef<HTMLDivElement>(null);
   const showGrid = useSettings((s) => s.settings?.homeShortcuts !== false);
   const washOn = useSettings((s) => s.settings?.artworkColours !== false && s.settings?.homeColourWash !== false);
+  const mixesOn = useSettings((s) => s.settings?.homeMixes !== false);
+  const mixes = useMixShelves(mixesOn && !cachedOnly);
+  const showMixes = !!mixes && filter === "all";
 
   // Offline, Liked Songs keeps its tile only while something liked can play.
   const likedCount = useLikes((s) => s.ids.size);
@@ -192,9 +226,13 @@ export function HomePage() {
               No {kindLabel} to show yet.
             </p>
           )}
+          {showMixes && <MixShelf title="Made for you" mixes={mixes.madeForYou} />}
           {!data
             ? HOME_SHELVES.slice(0, 3).map((s) => <Shelf key={s.id} title={s.title} loading />)
-            : shelves.map((s) => (
+            : shelves.flatMap((s, i) => [
+                ...(i === 1 && showMixes
+                  ? [<MixShelf key="mix-moods" title="Your mixes by mood" mixes={mixes.moods} />, <MixShelf key="mix-genres" title="Your genre mixes" mixes={mixes.genres} />]
+                  : []),
                 <Shelf
                   key={s.id}
                   title={s.title}
@@ -207,8 +245,14 @@ export function HomePage() {
                       <HomeItemCard item={item} />
                     </ShelfItem>
                   ))}
-                </Shelf>
-              ))}
+                </Shelf>,
+              ])}
+          {showMixes && shelves.length < 2 && (
+            <>
+              <MixShelf title="Your mixes by mood" mixes={mixes.moods} />
+              <MixShelf title="Your genre mixes" mixes={mixes.genres} />
+            </>
+          )}
         </>
       )}
     </div>

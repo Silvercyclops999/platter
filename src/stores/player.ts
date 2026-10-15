@@ -243,6 +243,14 @@ export const player = {
     play({ context: { kind: "liked", id: "liked", trackIds }, startTrackId, shuffle }).catch(report),
   playArtist: (id: string, startTrackId?: string, shuffle?: boolean) =>
     play({ context: { kind: "artist", id }, startTrackId, shuffle }).catch(report),
+  /** A made-for-you mix; `trackIds` plays a steered mix as shown. */
+  playMix: (id: string, trackIds?: string[], startTrackId?: string) =>
+    play({ context: { kind: "mix", id, trackIds }, startTrackId }).catch(report),
+  /** A radio (`track:<id>` or `artist:<id>`): the page's songs, then more like them. */
+  playRadio: (seed: string, trackIds?: string[], startTrackId?: string) =>
+    play({ context: { kind: "radio", id: seed, trackIds }, startTrackId }).catch(report),
+  setSmartShuffle: (on: boolean) => backend.setSmartShuffle(on).catch(report),
+  setSmoothTransitions: (on: boolean) => backend.setSmoothTransitions(on).catch(report),
   playTracks: (trackIds: string[], startTrackId?: string, kind: "tracks" | "search" = "tracks") =>
     play({ context: { kind, trackIds }, startTrackId }).catch(report),
   queueAdd: (trackIds: string[], at: QueueAt) => backend.queueAdd(trackIds, at).catch(report),
@@ -354,7 +362,13 @@ export const player = {
       report(e);
     }
   },
-  toggleShuffle: () => player.setShuffle(!(usePlayer.getState().state?.shuffle ?? false)),
+  /** Off, shuffle, then smart shuffle when its setting is on. */
+  toggleShuffle: (smartAllowed = false) => {
+    const s = usePlayer.getState().state;
+    if (s?.smartShuffle) return player.setShuffle(false);
+    if (s?.shuffle) return smartAllowed && !isRemote() ? player.setSmartShuffle(true) : player.setShuffle(false);
+    return player.setShuffle(true);
+  },
   cycleRepeatNow: () => player.cycleRepeat(usePlayer.getState().state?.repeat ?? "off"),
   queueRemove: (itemId: string) => backend.queueRemove(itemId).catch(report),
   queueMove: (itemId: string, toIndex: number) => backend.queueMove(itemId, toIndex).catch(report),

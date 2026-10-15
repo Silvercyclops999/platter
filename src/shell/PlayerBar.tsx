@@ -9,6 +9,7 @@ import {
   Repeat,
   Repeat1,
   Shuffle,
+  Sparkles,
   SkipBack,
   SkipForward,
   Volume1,
@@ -213,14 +214,26 @@ export function PlayControls() {
   const playing = state?.status === "playing" || state?.status === "buffering" || state?.status === "loading";
   const repeat = state?.repeat ?? "off";
   const shuffle = state?.shuffle ?? false;
+  const smart = !!state?.smartShuffle;
+  const smartAllowed = useSettings((s) => !!s.settings?.smartShuffle);
+  const shuffleLabel = smart ? "Disable smart shuffle" : shuffle ? (smartAllowed ? "Enable smart shuffle" : "Disable shuffle") : "Enable shuffle";
   return (
     <div className="player-bar__controls">
       <IconButton
-        label={shuffle ? "Disable shuffle" : "Enable shuffle"}
-        tooltip={`${shuffle ? "Disable shuffle" : "Enable shuffle"} (${modKey}+S)`}
+        label={shuffleLabel}
+        tooltip={`${shuffleLabel} (${modKey}+S)`}
         pressed={shuffle}
-        icon={<Shuffle size={18} />}
-        onClick={() => player.setShuffle(!shuffle)}
+        icon={
+          smart ? (
+            <span className="smart-shuffle-icon">
+              <Shuffle size={18} />
+              <Sparkles size={10} className="smart-shuffle-icon__spark" />
+            </span>
+          ) : (
+            <Shuffle size={18} />
+          )
+        }
+        onClick={() => player.toggleShuffle(smartAllowed)}
       />
       <IconButton label="Previous" tooltip={`Previous (${modKey}+←)`} icon={<SkipBack size={20} fill="currentColor" />} onClick={() => player.previous()} />
       <IconButton

@@ -496,6 +496,22 @@ Here every one of 86 albums had a date and 44 had a studio. The app stores both
 for the album page footer and takes the first ten characters of the date, in
 case a time follows it.
 
+### 2026-10-14: genre, style and mood tags (mixes)
+
+Album and track list items carry `Genre` only: 85 of 86 albums and 1433 of
+1439 tracks had one (at most two per track, 9 distinct). `Style` and `Mood`
+are on none of the list items, but album detail has them (one album: 1 genre,
+4 styles, 10 moods). The tag directories (`/library/sections/{id}/style?type=9`
+and `/mood?type=9`) list 24 styles and 151 moods for albums; tracks list 161
+moods and no styles. The app reads album styles and moods the way it reads
+format: one filtered album list per tag value (`?style=<key>`,
+`?mood=<key>`), four at a time, at the start of a full sync. Track moods are
+left to album moods (161 more lists for little gain).
+
+The sonically similar endpoint (`/library/metadata/{id}/nearest`) answered
+with no items here: sonic analysis is off on this server, so mixes and radio
+don't use it.
+
 ### 2026-10-14: downloads
 
 Downloads use the same two requests as playback, one file at a time through

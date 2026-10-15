@@ -268,6 +268,7 @@ function ActionRow({
             `Options for ${artist.title}`,
             [
               { label: "Add popular songs to queue", onSelect: () => void player.addToQueue(data!.popular, artist.thumb) },
+              { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${artist.id}` }) },
               ...(credited ? [] : [shareItem("artist", artist.id, artist.thumb)]),
               { label: pinned ? "Unpin from sidebar" : "Pin to sidebar", onSelect: togglePin },
             ],

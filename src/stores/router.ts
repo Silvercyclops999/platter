@@ -28,7 +28,11 @@ export type Route =
   /** A Home shelf's "Show all" grid. */
   | { name: "homeShelf"; shelf: HomeShelfId }
   /** An artist page shelf's "Show all" grid. */
-  | { name: "artistShelf"; id: string; shelf: "appearsOn" | "fansAlsoLike" };
+  | { name: "artistShelf"; id: string; shelf: "appearsOn" | "fansAlsoLike" }
+  /** A made-for-you mix (Daily Mix, daylist, a genre mix...). */
+  | { name: "mix"; id: string }
+  /** Song or artist radio: `track:<id>` or `artist:<id>`. */
+  | { name: "radio"; seed: string };
 
 export interface HistoryEntry {
   key: number;

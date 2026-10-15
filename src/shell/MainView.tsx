@@ -10,6 +10,7 @@ import { HomePage } from "../pages/HomePage";
 import { ArtistShelfPage, HomeShelfPage } from "../pages/HomeShelfPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { LikedPage } from "../pages/LikedPage";
+import { MixPage } from "../pages/MixPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { RecentsPage } from "../pages/RecentsPage";
 import { SearchPage } from "../pages/SearchPage";
@@ -149,6 +150,10 @@ function Page({ route }: { route: Route }) {
       return <HomeShelfPage shelf={route.shelf} />;
     case "artistShelf":
       return <ArtistShelfPage id={route.id} shelf={route.shelf} />;
+    case "mix":
+      return <MixPage key={`mix-${route.id}`} id={route.id} />;
+    case "radio":
+      return <MixPage key={`radio-${route.seed}`} seed={route.seed} />;
     case "lyrics":
       // Never pushed: the router opens the expanded view in lyrics mode instead.
       return null;

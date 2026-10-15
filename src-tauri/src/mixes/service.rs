@@ -358,8 +358,9 @@ impl MixService {
 
 impl MixService {
     /// A radio page: about 50 songs like the seed, starting with it (made
-    /// fresh each time it opens; a steering chip leans it one way).
-    pub async fn radio_page(&self, seed_id: String, steer: Option<MixSteer>) -> AppResult<MixPage> {
+    /// fresh each time it opens; the same `salt` gives the same page; a
+    /// steering chip leans it one way).
+    pub async fn radio_page(&self, seed_id: String, steer: Option<MixSteer>, salt: Option<u64>) -> AppResult<MixPage> {
         let s = self.clone();
         blocking(move || {
             let seed = Seed::parse(&seed_id).ok_or_else(|| AppError::Invalid(format!("not a radio: {seed_id}")))?;
@@ -370,7 +371,7 @@ impl MixService {
                 Some(MixSteer::New) => radio::LEAN_NEW,
                 None => radio::LEAN_PLAIN,
             };
-            let salt = now_ms() as u64;
+            let salt = salt.unwrap_or_else(|| now_ms() as u64);
             let picked = radio::batch(&lib, &taste, &seed, &HashSet::new(), radio::RADIO_PAGE_LEN, salt, true, lean);
             let ids: Vec<String> = picked.iter().map(|t| lib.tracks[*t as usize].id.clone()).collect();
             let familiar: std::collections::HashMap<&str, bool> =

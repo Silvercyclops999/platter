@@ -65,6 +65,7 @@ import type {
   Track,
   TranscribeModel,
   QueueAt,
+  MixSteer,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
@@ -88,6 +89,7 @@ import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 import { MockFileTags } from "./fileTags";
 import { MockTranscribe } from "./transcribe";
 import { MockDownloads } from "./downloads";
+import { MockMixes } from "./mixes";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -195,6 +197,11 @@ export class MockBackend implements Backend {
   readonly transcribe: MockTranscribe;
   /** Downloads (test hooks: failNext, loseFile, connection, stepMs, steps). */
   readonly downloads: MockDownloads;
+  /** Mixes and radio, made from the fixtures. */
+  readonly mixes: MockMixes;
+  /** Smart shuffle and smooth transitions (player state). */
+  private smartShuffle = false;
+  private smoothFor: string | null = null;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -284,6 +291,7 @@ export class MockBackend implements Backend {
       },
       !this.opts.tagScan,
     );
+    this.mixes = new MockMixes(this.fx, (list) => this.tags.forPlay(list).tracks);
     this.transcribe = new MockTranscribe({
       settings: () => this.settings,
       emitStatus: (s) => this.emit("transcribe://status", s),
@@ -1155,6 +1163,19 @@ export class MockBackend implements Backend {
         const tracks = this.fx.tracks.filter((t) => t.artistId === ar.id).sort((a, b) => b.viewCount - a.viewCount);
         return { tracks, info: { kind: "artist", id: ar.id, title: ar.title } };
       }
+      case "mix": {
+        const page = this.mixes.page(c.id ?? "") ?? this.notFound("Mix");
+        const tracks = c.trackIds ? c.trackIds.map((i) => this.trackById(i)!).filter(Boolean) : page.tracks;
+        return { tracks, info: { kind: "mix", id: page.mix.id, title: page.mix.title } };
+      }
+      case "radio": {
+        const page = c.trackIds ? null : this.mixes.radio(c.id ?? "");
+        if (!c.trackIds && !page) this.notFound("Radio");
+        const [k, rid] = (c.id ?? "").split(":");
+        const name = k === "track" ? this.trackById(rid)?.title : this.fx.artists.find((a) => a.id === rid)?.title;
+        const tracks = c.trackIds ? c.trackIds.map((i) => this.trackById(i)!).filter(Boolean) : page!.tracks;
+        return { tracks, info: { kind: "radio", id: c.id ?? null, title: `${name ?? "Song"} Radio` } };
+      }
       default: {
         const tracks = (c.trackIds ?? []).map((i) => this.trackById(i)!).filter(Boolean);
         return { tracks, info: { kind: c.kind, id: c.id ?? null, title: c.kind === "search" ? "Search results" : "Tracks" } };
@@ -1217,6 +1238,23 @@ export class MockBackend implements Backend {
     this.setCurrent(this.ctxOrder[this.ctxPos], play, offset);
   }
 
+  /** Like the core's refill: more songs at the end of the context. */
+  private refill(): boolean {
+    const avoid = new Set([...this.ctxOrder, ...this.history, ...this.userQueue].map((i) => i.track.id));
+    const radio = this.ctxInfo?.kind === "radio";
+    const seeds = this.ctxOrder.slice(Math.max(0, this.ctxPos - 9), this.ctxPos + 1).map((i) => i.track.id);
+    const more = this.mixes.similar(seeds, avoid, 20, `${this.itemSeq}`);
+    if (!more.length) return false;
+    const items = more.map((t) => this.item(t, radio ? "context" : "autoplay"));
+    this.ctxOriginal.push(...items);
+    this.ctxOrder.push(...items);
+    return true;
+  }
+
+  private ctxKey(): string | null {
+    return this.ctxInfo ? `${this.ctxInfo.kind}|${this.ctxInfo.id ?? ""}` : null;
+  }
+
   private pushHistory(item: QueueItem) {
     this.history.push(item);
     if (this.history.length > 50) this.history.shift();
@@ -1262,6 +1300,9 @@ export class MockBackend implements Backend {
       if (this.current) this.pushHistory(this.current);
       this.ctxPos = 0;
       this.setCurrent(this.ctxOrder[0], true);
+    } else if (this.ctxOrder.length && (this.ctxInfo?.kind === "radio" || this.settings.queueEnd === "keepPlaying") && this.refill()) {
+      // A radio goes on; other contexts end in similar music (keep playing).
+      this.advance(natural, manual);
     } else {
       // The context ended (repeat off): back to its first track, paused at 0.
       if (this.ctxOrder.length) {
@@ -1311,6 +1352,8 @@ export class MockBackend implements Backend {
       shuffledContexts: this.shuffledIds,
       repeat: this.repeat,
       abLoop: this.abLoop,
+      smartShuffle: this.smartShuffle && this.shuffle,
+      smoothTransitions: !!this.smoothFor && this.smoothFor === this.ctxKey(),
       queue: {
         current: this.current,
         userQueue: this.userQueue,
@@ -1545,9 +1588,59 @@ export class MockBackend implements Backend {
   setShuffle(shuffle: boolean) {
     return this.act(() => this.applyShuffle(shuffle));
   }
+  setSmartShuffle(on: boolean) {
+    return this.act(() => {
+      this.smartShuffle = on;
+      if (on) {
+        if (!this.shuffle) this.applyShuffle(true);
+        // A similar song after every three still to come.
+        const rest = this.ctxOrder.slice(this.ctxPos + 1);
+        const avoid = new Set(this.ctxOriginal.map((i) => i.track.id));
+        const more = this.mixes.similar(this.ctxOriginal.slice(0, 10).map((i) => i.track.id), avoid, Math.max(1, Math.floor(rest.length / 3)), "smart");
+        const out: QueueItem[] = [];
+        rest.forEach((it, i) => {
+          out.push(it);
+          if ((i + 1) % 3 === 0 && more.length) out.push(this.item(more.shift()!, "smart"));
+        });
+        this.ctxOrder = [...this.ctxOrder.slice(0, this.ctxPos + 1), ...out];
+      } else {
+        this.dropSmart();
+      }
+      this.emitState();
+    });
+  }
+  private dropSmart() {
+    this.ctxOrder = this.ctxOrder.filter((i, k) => k <= this.ctxPos || i.source !== "smart");
+  }
+  setSmoothTransitions(on: boolean) {
+    return this.act(() => {
+      this.smoothFor = on ? this.ctxKey() : null;
+      this.emitState();
+    });
+  }
+  mixesHome() {
+    return this.delay(() => this.mixes.shelves());
+  }
+  mixPage(id: string, steer?: MixSteer | null) {
+    return this.delay(() => this.mixes.page(id, steer ?? null) ?? this.notFound("Mix"));
+  }
+  mixRefresh(id: string) {
+    return this.delay(() => {
+      const page = this.mixes.refresh(id) ?? this.notFound("Mix");
+      this.emit("mixes://changed", null);
+      return page;
+    });
+  }
+  radioPage(seed: string, steer?: MixSteer | null, salt?: number) {
+    return this.delay(() => this.mixes.radio(seed, steer ?? null, salt ?? 0) ?? this.notFound("Radio"));
+  }
   /** Shuffle for the playing context; remembered for its id. */
   private applyShuffle(shuffle: boolean) {
     if (this.ctxInfo?.id) this.storeShufflePref(this.ctxInfo.id, shuffle);
+    if (!shuffle && this.smartShuffle) {
+      this.smartShuffle = false;
+      this.dropSmart();
+    }
     if (shuffle !== this.shuffle) {
       this.shuffle = shuffle;
       const at = this.ctxPos >= 0 ? this.ctxOrder[this.ctxPos] : undefined;
@@ -1688,6 +1781,16 @@ export class MockBackend implements Backend {
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
       if (patch.readFileTags !== undefined) this.tags.settingsChanged();
+      const mixKeys = ["mixVariety", "mixExcludeArtists", "mixExcludeGenres", "mixExcludeAlbums", "mixUnreleased", "daylistHours", "explicitContent", "showFanEdits"];
+      if (mixKeys.some((k) => k in patch)) {
+        this.mixes.invalidate();
+        this.later(0, () => this.emit("mixes://changed", null));
+      }
+      if (patch.smartShuffle === false && this.smartShuffle) {
+        this.smartShuffle = false;
+        this.dropSmart();
+        this.emitState();
+      }
       if (patch.transcribeLyrics !== undefined || patch.transcribeModel !== undefined) this.transcribe.settingsChanged();
       if (patch.downloadLiked !== undefined && patch.downloadLiked !== this.downloads.isOn("liked", ""))
         this.downloads.set("liked", "", patch.downloadLiked, "Liked Songs");

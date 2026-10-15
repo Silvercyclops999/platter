@@ -32,6 +32,7 @@ import { reloadLikes } from "../stores/likes";
 import { updateSettings, useSettings } from "../stores/settings";
 import { ComputerNameSetting } from "./DeviceSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
+import { MixExclusions } from "./MixExclusions";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
 import { catboxNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
@@ -67,6 +68,20 @@ const SHUFFLE = [
   { value: "spread", label: "Spread" },
   { value: "standard", label: "Standard" },
 ] as const satisfies SelectOption<Settings["shuffleStyle"]>[];
+const QUEUE_END = [
+  { value: "keepPlaying", label: "Keep playing similar music" },
+  { value: "stop", label: "Stop" },
+] as const satisfies SelectOption<Settings["queueEnd"]>[];
+const VARIETY = [
+  { value: "balanced", label: "Balanced" },
+  { value: "familiar", label: "Familiar" },
+  { value: "adventurous", label: "Adventurous" },
+] as const satisfies SelectOption<Settings["mixVariety"]>[];
+const DAYLIST_HOURS = [
+  { value: "1", label: "Every hour" },
+  { value: "3", label: "Every 3 hours" },
+  { value: "6", label: "Every 6 hours" },
+] as const satisfies SelectOption<string>[];
 const POPULAR = [
   { value: "global", label: "Global popularity" },
   { value: "myPlays", label: "My plays" },
@@ -570,6 +585,20 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "resumeContexts", ids),
     },
     {
+      key: "queueEnd",
+      section: "Playback",
+      title: "When the queue ends",
+      description: "Keep playing similar music from your library once the last song finishes, or stop there.",
+      control: (ids) => select(s, (x) => x.queueEnd, QUEUE_END, ids, (v) => updateSettings({ queueEnd: v })),
+    },
+    {
+      key: "smartShuffle",
+      section: "Playback",
+      title: "Smart shuffle",
+      description: "Gives the shuffle button a third setting that mixes similar songs from your library into an album or playlist. They show a sparkle in the queue.",
+      control: (ids) => toggle(s, "smartShuffle", ids),
+    },
+    {
       key: "precacheCount",
       section: "Playback",
       title: "Pre-cache ahead",
@@ -802,6 +831,42 @@ export function SettingsPage() {
         ) : (
           <Skeleton width={40} height={24} radius="pill" />
         ),
+    },
+    // Mixes
+    {
+      key: "homeMixes",
+      section: "Mixes",
+      title: "Show made-for-you mixes on Home",
+      description: "Daily Mixes, the daylist, Discover and your mood and genre mixes, made on this computer from what you play.",
+      control: (ids) => toggle(s, "homeMixes", ids),
+    },
+    {
+      key: "mixVariety",
+      section: "Mixes",
+      title: "Variety",
+      description: "Familiar sticks mostly to songs you play a lot. Adventurous brings in more you haven't heard much.",
+      control: (ids) => select(s, (x) => x.mixVariety, VARIETY, ids, (v) => updateSettings({ mixVariety: v })),
+    },
+    {
+      key: "mixExclude",
+      section: "Mixes",
+      title: "Leave out of mixes",
+      description: "Artists, albums and genres that never go in mixes or radio.",
+      control: (ids) => (s ? <MixExclusions settings={s} ids={ids} /> : loading),
+    },
+    {
+      key: "mixUnreleased",
+      section: "Mixes",
+      title: "Include unreleased music",
+      description: "Demos and other unreleased versions can be in mixes and radio.",
+      control: (ids) => toggle(s, "mixUnreleased", ids),
+    },
+    {
+      key: "daylistHours",
+      section: "Mixes",
+      title: "Refresh the daylist",
+      description: "How often the daylist changes to fit the time of day.",
+      control: (ids) => select(s, (x) => String(x.daylistHours), DAYLIST_HOURS, ids, (v) => updateSettings({ daylistHours: Number(v) })),
     },
     // App
     {

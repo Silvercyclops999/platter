@@ -58,7 +58,7 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Storage", "Downloads and offline", "Search", "Appearance", "Home", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "About", "Now playing"]);
+    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Storage", "Downloads and offline", "Search", "Appearance", "Home", "Mixes", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "About", "Now playing"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
@@ -85,6 +85,13 @@ describe("settings page", () => {
     expect(screen.getByRole("switch", { name: "Download Liked Songs" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("switch", { name: "Go offline" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("button", { name: "Change location" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "When the queue ends" })).toHaveValue("keepPlaying");
+    expect(screen.getByRole("switch", { name: "Smart shuffle" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Show made-for-you mixes on Home" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("combobox", { name: "Variety" })).toHaveValue("balanced");
+    expect(screen.getByRole("switch", { name: "Include unreleased music" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("combobox", { name: "Refresh the daylist" })).toHaveValue("3");
+    expect(screen.getByRole("combobox", { name: "Leave out of mixes" })).toHaveValue("");
 
     // Account, version and art cache usage arrive from the core.
     expect(screen.getByText("Signed in as listener")).toBeInTheDocument();
@@ -94,6 +101,25 @@ describe("settings page", () => {
     expect(screen.getByText(/GPL-3.0-or-later/)).toBeInTheDocument();
     expect(screen.getByText(/A music player for Plex\./)).toBeInTheDocument();
     expect(screen.getByText("Not affiliated with or endorsed by Plex, Inc.")).toBeInTheDocument();
+  });
+
+  it("mix settings save, and what's left out of mixes can be added and removed", async () => {
+    const user = userEvent.setup();
+    const set = vi.spyOn(backend, "settingsSet");
+    render(<SettingsPage />);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Variety" }), "adventurous");
+    expect(set).toHaveBeenCalledWith({ mixVariety: "adventurous" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Refresh the daylist" }), "6");
+    expect(set).toHaveBeenCalledWith({ daylistHours: 6 });
+    await user.selectOptions(screen.getByRole("combobox", { name: "When the queue ends" }), "stop");
+    expect(set).toHaveBeenCalledWith({ queueEnd: "stop" });
+    await user.click(screen.getByRole("switch", { name: "Smart shuffle" }));
+    expect(set).toHaveBeenCalledWith({ smartShuffle: true });
+    await user.type(screen.getByRole("combobox", { name: "Leave out of mixes" }), "Polka");
+    await user.click(screen.getByRole("button", { name: "Leave out" }));
+    expect(set).toHaveBeenCalledWith({ mixExcludeGenres: ["Polka"] });
+    await user.click(await screen.findByRole("button", { name: "Include Polka again" }));
+    expect(set).toHaveBeenCalledWith({ mixExcludeGenres: [] });
   });
 
   it("app rows for the system media controls, tray and launch at login", async () => {
