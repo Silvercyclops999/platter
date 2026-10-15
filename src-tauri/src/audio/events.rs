@@ -69,6 +69,48 @@ pub struct PlayerState {
     pub smooth_transitions: bool,
 }
 
+/// How many songs after the current one the window is sent. Playing a
+/// whole library would otherwise send (and the queue list draw) every song
+/// on each state change.
+pub const UI_NEXT_UP_MAX: usize = 500;
+
+impl PlayerState {
+    /// The state as the window gets it: Next up cut to [`UI_NEXT_UP_MAX`].
+    pub fn for_ui(&self) -> std::borrow::Cow<'_, PlayerState> {
+        if self.queue.next_up.len() <= UI_NEXT_UP_MAX {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut s = self.clone_without_queue();
+        s.queue = QueueView {
+            current: self.queue.current.clone(),
+            user_queue: self.queue.user_queue.clone(),
+            next_up: self.queue.next_up[..UI_NEXT_UP_MAX].to_vec(),
+            history: self.queue.history.clone(),
+            context: self.queue.context.clone(),
+        };
+        std::borrow::Cow::Owned(s)
+    }
+
+    fn clone_without_queue(&self) -> PlayerState {
+        PlayerState {
+            status: self.status,
+            track: self.track.clone(),
+            position_ms: self.position_ms,
+            duration_ms: self.duration_ms,
+            volume: self.volume,
+            muted: self.muted,
+            shuffle: self.shuffle,
+            shuffled_contexts: self.shuffled_contexts.clone(),
+            repeat: self.repeat,
+            queue: QueueView::default(),
+            ab_loop: self.ab_loop,
+            smart_shuffle: self.smart_shuffle,
+            smart_contexts: self.smart_contexts.clone(),
+            smooth_transitions: self.smooth_transitions,
+        }
+    }
+}
+
 /// An A-B loop: playback that reaches B goes back to A (ms, A before B).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,7 +167,7 @@ pub struct TauriSink<R: tauri::Runtime>(pub tauri::AppHandle<R>);
 impl<R: tauri::Runtime> EventSink for TauriSink<R> {
     fn state(&self, state: &PlayerState) {
         use tauri::Emitter;
-        let _ = self.0.emit(EV_STATE, state);
+        let _ = self.0.emit(EV_STATE, state.for_ui());
     }
     fn position(&self, pos: &PositionPayload) {
         use tauri::Emitter;
@@ -263,5 +305,38 @@ mod tests {
         assert_eq!(v["shuffledContexts"][0], "al");
         assert!(v["queue"]["userQueue"].is_array());
         assert!(v["queue"]["nextUp"].is_array());
+    }
+
+    #[test]
+    fn the_window_gets_a_bounded_next_up() {
+        use super::super::queue::{ItemSource, QueueItem};
+        let item = |i: usize| QueueItem {
+            item_id: format!("q{i}"),
+            track: crate::audio::testutil::track(&i.to_string(), "a", "/p"),
+            source: ItemSource::Context,
+        };
+        let mut s = PlayerState {
+            status: PlayerStatus::Playing,
+            track: None,
+            position_ms: 0,
+            duration_ms: 0,
+            volume: 1.0,
+            muted: false,
+            shuffle: false,
+            shuffled_contexts: vec![],
+            repeat: Repeat::Off,
+            queue: QueueView { next_up: (0..10).map(item).collect(), ..QueueView::default() },
+            ab_loop: None,
+            smart_shuffle: false,
+            smart_contexts: vec![],
+            smooth_transitions: false,
+        };
+        assert!(matches!(s.for_ui(), std::borrow::Cow::Borrowed(_)));
+        // A whole library playing: the window gets the first stretch only.
+        s.queue.next_up = (0..UI_NEXT_UP_MAX + 100).map(item).collect();
+        let ui = s.for_ui();
+        assert_eq!(ui.queue.next_up.len(), UI_NEXT_UP_MAX);
+        assert_eq!(ui.queue.next_up[0].item_id, "q0");
+        assert_eq!(ui.status, PlayerStatus::Playing);
     }
 }

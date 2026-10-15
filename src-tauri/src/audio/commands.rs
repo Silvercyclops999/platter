@@ -175,7 +175,7 @@ pub async fn queue_jump(player: State<'_, PlayerHandle>, item_id: String) -> App
 
 #[tauri::command]
 pub async fn player_state(player: State<'_, PlayerHandle>) -> AppResult<PlayerState> {
-    player.state().await
+    player.state().await.map(|s| s.for_ui().into_owned())
 }
 
 /// Audio output devices, the chosen one and the one in use.

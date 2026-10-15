@@ -21,7 +21,11 @@ import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import { countParts, errText, importChanged, skippedLine, songsLine, useImportOverview } from "./importShared";
+import { VirtualRows } from "../components/VirtualRows";
 import "./library-import.css";
+
+/** About how tall an import row is (56 px minimum plus the reason line). */
+const IMPORT_ROW_H = 60;
 
 const n = (v: number) => v.toLocaleString();
 
@@ -308,9 +312,14 @@ function ListView({ id }: { id: string }) {
           <span>Album</span>
           <span className="import-row__dur">Length</span>
         </li>
-        {rows.map((r, i) => (
-          <Row key={`${r.songId}-${i}`} row={r} index={i} onPlay={r.track ? () => playFrom(r.track!) : undefined} />
-        ))}
+        <VirtualRows
+          count={rows.length}
+          rowHeight={IMPORT_ROW_H}
+          renderRow={(i) => {
+            const r = rows[i];
+            return <Row key={`${r.songId}-${i}`} row={r} index={i} onPlay={r.track ? () => playFrom(r.track!) : undefined} />;
+          }}
+        />
       </ul>
       {ask &&
         (list.liked ? (
@@ -366,29 +375,33 @@ function MissingView() {
             <span>Album</span>
             <span>Find it</span>
           </li>
-          {songs.map((s, i) => (
-            <li key={`${s.artist}-${s.title}`} className="import-row missing-row" aria-label={`${s.title} by ${s.artist}`}>
-              <span className="import-row__n">{i + 1}</span>
-              <span className="import-row__main">
-                <span className="import-row__title truncate">{s.title}</span>
-                <span className="import-row__artist truncate">{s.artist}</span>
-                <span className="missing-row__wants" title={s.wantedBy.join(", ")}>
-                  Wanted by {s.wants === 1 ? s.wantedBy[0] ?? "1 list" : `${n(s.wants)} lists`}
-                </span>
-              </span>
-              <span className="import-row__album truncate">{s.album ?? ""}</span>
-              <span className="missing-row__links">
-                {STORE_LINKS.map((st) => (
-                  <Button key={st.key} size="sm" variant="ghost" onClick={() => void open(s.links[st.key])} aria-label={`Search ${st.name} for ${s.title}`}>
-                    {st.name}
-                  </Button>
-                ))}
-              </span>
-            </li>
-          ))}
+          <VirtualRows count={songs.length} rowHeight={IMPORT_ROW_H} renderRow={(i) => <MissingRow key={`${songs[i].artist}-${songs[i].title}`} s={songs[i]} i={i} open={open} />} />
         </ul>
       )}
     </>
+  );
+}
+
+function MissingRow({ s, i, open }: { s: MissingSong; i: number; open: (url: string) => unknown }) {
+  return (
+    <li className="import-row missing-row" aria-label={`${s.title} by ${s.artist}`}>
+      <span className="import-row__n">{i + 1}</span>
+      <span className="import-row__main">
+        <span className="import-row__title truncate">{s.title}</span>
+        <span className="import-row__artist truncate">{s.artist}</span>
+        <span className="missing-row__wants" title={s.wantedBy.join(", ")}>
+          Wanted by {s.wants === 1 ? s.wantedBy[0] ?? "1 list" : `${n(s.wants)} lists`}
+        </span>
+      </span>
+      <span className="import-row__album truncate">{s.album ?? ""}</span>
+      <span className="missing-row__links">
+        {STORE_LINKS.map((st) => (
+          <Button key={st.key} size="sm" variant="ghost" onClick={() => void open(s.links[st.key])} aria-label={`Search ${st.name} for ${s.title}`}>
+            {st.name}
+          </Button>
+        ))}
+      </span>
+    </li>
   );
 }
 

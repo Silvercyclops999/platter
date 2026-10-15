@@ -1388,6 +1388,7 @@ dropdown parts off; the UI checks them.
 
 `PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView, abLoop: { aMs, bMs } | null, smartShuffle, smartContexts: string[], smoothTransitions }`
 `QueueView = { current?: QueueItem, userQueue: QueueItem[], nextUp: QueueItem[], history: QueueItem[], context?: { kind, id?, title? } }`
+(the window gets at most the next 500 songs in `nextUp`, so playing a whole library doesn't send every song on each change)
 `QueueItem = { itemId, track: Track, source: "user"|"context"|"autoplay"|"smart" }` (`autoplay`: similar music after the context ran out; `smart`: put in by smart shuffle)
 
 Shuffle is remembered per album, playlist or artist id; repeat is one global
