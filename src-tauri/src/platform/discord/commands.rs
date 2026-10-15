@@ -27,7 +27,7 @@ pub struct PlexAlbumMbid(pub PlexState);
 #[async_trait::async_trait]
 impl AlbumMbid for PlexAlbumMbid {
     async fn release_mbid(&self, album_id: &str) -> AppResult<Option<String>> {
-        Ok(self.0.client().await?.metadata(album_id).await?.mbid())
+        Ok(self.0.client_for(album_id).await?.metadata(album_id).await?.mbid())
     }
 }
 

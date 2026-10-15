@@ -43,6 +43,8 @@ pub struct FakeSource {
     pub item_calls: Mutex<Vec<Vec<String>>>,
     /// Make `items` fail (server offline).
     pub fail_items: Mutex<bool>,
+    /// The server tag its ids carry (`crate::sid`); None: plain ids.
+    pub tag: Mutex<Option<String>>,
 }
 
 impl FakeSource {
@@ -57,6 +59,10 @@ fn page<T: Clone>(v: &[T], start: u64, size: u64) -> Vec<T> {
 
 #[async_trait]
 impl LibrarySource for FakeSource {
+    async fn server_tag(&self) -> Option<String> {
+        self.tag.lock().clone()
+    }
+
     async fn music_sections(&self) -> AppResult<Vec<MusicSection>> {
         Ok(self.lib.lock().sections.clone())
     }
@@ -175,7 +181,7 @@ pub fn artist(id: &str, title: &str) -> Artist {
 
 pub fn album(id: &str, title: &str, artist: &Artist, year: i32, format: Option<&str>, subs: &[&str]) -> Album {
     let subformats: Vec<String> = subs.iter().map(|s| s.to_lowercase()).collect();
-    Album {
+    Album { mbid: None,
         id: id.into(),
         title: title.into(),
         sort_title: title.into(),
@@ -201,7 +207,7 @@ pub fn album(id: &str, title: &str, artist: &Artist, year: i32, format: Option<&
 }
 
 pub fn track(id: &str, title: &str, album: &Album, disc: u32, n: u32) -> Track {
-    Track {
+    Track { mbid: None,
         id: id.into(),
         title: title.into(),
         album_id: album.id.clone(),
@@ -239,6 +245,34 @@ pub fn playlist(id: &str, title: &str, n: u32) -> Playlist {
         summary: None,
         updated_at: None,
     }
+}
+
+/// The library as a server with `tag` sends it: every id and image path
+/// carries the tag (`crate::sid`).
+pub fn tagged(mut lib: FakeLibrary, tag: &str) -> FakeLibrary {
+    use crate::sid::{qualify, qualify_opt};
+    for a in &mut lib.artists {
+        a.id = qualify(tag, &a.id);
+        a.thumb = qualify_opt(tag, &a.thumb);
+    }
+    for a in &mut lib.albums {
+        a.id = qualify(tag, &a.id);
+        a.artist_id = qualify(tag, &a.artist_id);
+        a.thumb = qualify_opt(tag, &a.thumb);
+    }
+    for t in &mut lib.tracks {
+        t.id = qualify(tag, &t.id);
+        t.album_id = qualify(tag, &t.album_id);
+        t.artist_id = qualify(tag, &t.artist_id);
+        t.thumb = qualify_opt(tag, &t.thumb);
+    }
+    for (p, items) in &mut lib.playlists {
+        p.id = qualify(tag, &p.id);
+        for i in items.iter_mut() {
+            *i = qualify(tag, i);
+        }
+    }
+    lib
 }
 
 /// A generated library: `n_artists` × `albums_per` × `tracks_per`.

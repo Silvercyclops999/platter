@@ -13,6 +13,21 @@ Errors: commands return `Result<T, AppError>`; `AppError` serializes as
 `{ kind: string, message: string }` where `kind` is one of `network`,
 `auth`, `notFound`, `server`, `io`, `decode`, `invalid`, `internal`.
 
+## Ids
+Item ids are opaque strings. A Plex item's id carries its server:
+`<tag>:<rating key>`, where the tag is eight hex digits of a hash of the
+server's machine id (the same tag share links use, never the id itself), so
+the same number on two servers is two items. Plex image paths carry it the
+same way (`<tag>:/library/metadata/1/thumb/2`) and the `art` protocol takes
+them as they are. Part keys don't; they always go with their track.
+
+Ids from before this (a plain rating key) still work. Upgrading rewrites the
+cache in place, in one transaction, once the connected server is known, and
+remembers that server as the one plain ids belong to. Plain ids in a saved
+queue, links, the sync file, follows, mix exclusions and the UI's own saved
+state map to it. Downloaded files and cached art and songs keep their names.
+`src/lib/ids.ts` has the UI's helpers.
+
 ## Artwork
 A custom URI scheme, served by Rust from the disk cache (LRU, 2 GB default):
 `art://localhost/<urlencoded plex image path>?w=<px>&h=<px>`
@@ -74,6 +89,42 @@ the user who signed in. Signing out as another Home user goes back to the
 user who signed in.
 
 Event `home://changed` → `{ restarting: bool }` just before the restart.
+
+### More than one library
+| Command | Args | Returns |
+| --- | --- | --- |
+| `library_sources` | – | `LibrarySources { servers: SourceServer[] }` |
+| `library_servers` | – | `LibraryServers { servers: { tag, name }[], view }` |
+
+`SourceServer = { machineId, tag, name, owned, current, online, connection?, libraries: { id, title, included, main }[] }`.
+`library_sources` lists every server on the account, owned or shared, with
+its music libraries, asking each server at once (a server that doesn't
+answer is listed offline, with the libraries included from it). The
+connected server comes first and its main library (`main`) is always in.
+Which others are in is the `libraries` setting (`<machineId>/<sectionId>`
+entries); changing it starts a sync, which reads the libraries added and
+drops the rows of those left out.
+
+Each included library syncs into the same cache with its own rows. An album
+on two servers is found by its MusicBrainz release id (Plex `Guid`), or else
+by artist, title, track count and every song's length within 2 seconds;
+songs pair up within it, and songs elsewhere match on their MusicBrainz track
+id. The main library's copy stands for the group, else the best file.
+
+`library_servers` is for the sidebar switcher: the connected server and every
+server with an included library, without asking them. `view` is the
+`serverView` setting ("all", or a server's tag), back to "all" when that
+server isn't included any more. With "all", lists show each album, song and
+artist once and an artist page has its albums from every server; a server's
+tag shows only its music. Changing it fires `library://changed`.
+
+When a song with copies on several servers is queued, the copy played is the
+one on the server reached the best way (local network, then remote access,
+then the relay), then the better file (lossless, bit depth, sample rate,
+bitrate). Plays, likes, play queues and Plex players get that copy's id, so
+they go to the server that has the file. A playlist lives on one server: new
+ones go to the server with their songs, and songs from another server can't
+be added to it.
 
 ## Library
 | Command | Args | Returns |
@@ -358,10 +409,12 @@ sites. With `artistId` it also opens a link listed in that artist's `links`
 
 `appLink` is a `platter://` link: `platter://<song|album|artist|playlist>/<id>`,
 plus `?t=<seconds>` for a song when `atSeconds` is given, and `s=<tag>`, eight
-hex digits of a hash of the server's id (not the id itself), so a link from
-another server isn't mistaken for whatever has the same number here. Links
-are read leniently: `track` for `song`, `t` as seconds or `m:ss`, a missing
-`s`.
+hex digits of a hash of the server's id (not the id itself). The id in the
+link is the server's own, and the tag is the one of the server that has the
+item (see Ids), so a link from another server isn't mistaken for whatever has
+the same number here. Links are read leniently: `track` for `song`, `t` as
+seconds or `m:ss`, a missing `s` (the connected server). `DeepLinkOpen.id` is
+the id as the app keeps it, with its tag.
 
 `public` says whether `share_public_link` can work: `unreleased` for music
 whose album release type is a demo, whose `ARCHIVE_VERSION` says so, or whose
@@ -1561,6 +1614,8 @@ The rest of the fields, with their defaults:
 | `discordUploadCatbox` | bool, false | Upload covers Cover Art Archive lacks to catbox.moe (no key) when Imgur isn't used. Uploads are public and can't be deleted. |
 | `discordStatusLine` | `"app"\|"artist"\|"song"`, `"app"` | What the member list shows after "Listening to" (`status_display_type`). |
 | `showPlexAvatar` | bool, true | The app menu button shows the Plex profile picture (`AuthStatus.avatar`). Off shows the first letter of the username. This device only. |
+| `libraries` | string[], [] | Libraries included besides the connected server's main one, as `<machineId>/<sectionId>` (see More than one library). Changing it starts a sync. This device only. |
+| `serverView` | string, "all" | What the library shows with more than one server: "all" or a server's tag. This device only. |
 | `lyricsMode` | `"autoShow"\|"off"`, `"autoShow"` | Auto-show opens the expanded view in lyrics mode when a song with synced lyrics starts while now playing is open. Off shows lyrics only from the lyrics button. |
 | `lyricsLrclib` | bool, false | `lyrics_get` asks LRCLIB when Plex has no lyrics (sends artist, title, album and length; the search sends artist and title). Off sends nothing. |
 | `lyricsPreferOwn` | bool, false | Lyrics written in the app show ahead of Plex's for every song that has them. Off shows them only when Plex has none, or for songs saved with `prefer`. |

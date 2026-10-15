@@ -350,6 +350,18 @@ fn clamp_page(offset: u32, limit: u32) -> (i64, i64) {
 }
 
 pub fn artists(c: &Connection, sort: ArtistSort, offset: u32, limit: u32) -> AppResult<Page<Artist>> {
+    artists_on(c, sort, offset, limit, &super::merge::ServerView::All)
+}
+
+/// [`artists`] as one server, or all servers merged, show them.
+pub fn artists_on(
+    c: &Connection,
+    sort: ArtistSort,
+    offset: u32,
+    limit: u32,
+    server: &super::merge::ServerView,
+) -> AppResult<Page<Artist>> {
+    let shown = server.clause("ar", "artist");
     let order = match sort {
         ArtistSort::Name => "ar.sort_title COLLATE NOCASE, ar.pk",
         ArtistSort::Recent => "ar.latest_added_at DESC, ar.pk",
@@ -357,10 +369,10 @@ pub fn artists(c: &Connection, sort: ArtistSort, offset: u32, limit: u32) -> App
     };
     let (off, lim) = clamp_page(offset, limit);
     let mut st = c.prepare_cached(&format!(
-        "SELECT {ARTIST_COLS} FROM artists ar ORDER BY {order} LIMIT ?1 OFFSET ?2"
+        "SELECT {ARTIST_COLS} FROM artists ar WHERE {shown} ORDER BY {order} LIMIT ?1 OFFSET ?2"
     ))?;
     let items = st.query_map([lim, off], row_artist)?.collect::<Result<Vec<_>, _>>()?;
-    let total: i64 = c.query_row("SELECT count(*) FROM artists", [], |r| r.get(0))?;
+    let total: i64 = c.query_row(&format!("SELECT count(*) FROM artists ar WHERE {shown}"), [], |r| r.get(0))?;
     Ok(Page { items, total: total as u64 })
 }
 
@@ -384,6 +396,19 @@ pub fn albums_view(
     section: Option<ReleaseSection>,
     view: crate::tags::TagView,
 ) -> AppResult<Page<Album>> {
+    albums_view_on(c, sort, offset, limit, section, view, &super::merge::ServerView::All)
+}
+
+/// [`albums_view`] as one server, or all servers merged, show them.
+pub fn albums_view_on(
+    c: &Connection,
+    sort: AlbumSort,
+    offset: u32,
+    limit: u32,
+    section: Option<ReleaseSection>,
+    view: crate::tags::TagView,
+    server: &super::merge::ServerView,
+) -> AppResult<Page<Album>> {
     let order = match sort {
         AlbumSort::Name => "al.sort_title COLLATE NOCASE, al.pk",
         AlbumSort::Artist => "al.artist_title COLLATE NOCASE, al.year, al.sort_title COLLATE NOCASE",
@@ -393,7 +418,7 @@ pub fn albums_view(
     };
     let (off, lim) = clamp_page(offset, limit);
     let section = section.map(section_key);
-    let visible = crate::tags::store::visible_clause(view);
+    let visible = format!("{} AND {}", crate::tags::store::visible_clause(view), server.clause("al", "album"));
     let filter = format!("(?3 IS NULL OR al.section = ?3) AND {visible}");
     let mut st = c.prepare_cached(&format!(
         "SELECT {ALBUM_COLS} FROM albums al WHERE {filter} ORDER BY {order} LIMIT ?1 OFFSET ?2"

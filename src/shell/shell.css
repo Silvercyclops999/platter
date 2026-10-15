@@ -148,6 +148,9 @@
 .lib-chips .chip { flex: none; }
 .chip--sm { height: 32px; }
 
+/* More than one server: All servers or one (Settings, Library). */
+.lib-servers { padding: 0 0 var(--space-2); }
+.lib-servers .select, .lib-servers .select__input { width: 100%; }
 .lib-tools {
   display: flex;
   align-items: center;

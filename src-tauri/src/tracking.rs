@@ -155,11 +155,11 @@ impl PlayReporter for PlexState {
     }
 
     async fn timeline(&self, r: &TimelineReport) -> AppResult<()> {
-        self.client().await?.timeline(r).await
+        self.client_for(&r.rating_key).await?.timeline(r).await
     }
 
     async fn scrobble(&self, rating_key: &str) -> AppResult<()> {
-        self.client().await?.scrobble(rating_key).await
+        self.client_for(rating_key).await?.scrobble(rating_key).await
     }
 }
 
@@ -342,7 +342,7 @@ mod tests {
     use crate::model::Track;
 
     fn track(id: &str) -> Track {
-        Track {
+        Track { mbid: None,
             id: id.into(),
             title: "t".into(),
             album_id: "a".into(),

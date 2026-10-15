@@ -53,7 +53,7 @@ impl DownloadSource for PlexSource {
     }
 
     async fn fetch(&self, track: &Track, kbps: Option<u32>) -> AppResult<Fetch> {
-        let client = self.0.client().await?;
+        let client = self.0.client_for(&track.id).await?;
         match kbps {
             None => Ok(Fetch {
                 src: source_of(client.stream_request(&track.part_key)?, track.codec.clone()),

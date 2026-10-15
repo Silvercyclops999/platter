@@ -41,7 +41,16 @@ pub fn items_uri(machine_id: &str, ids: &[String]) -> String {
 /// Create a play queue holding `ids` (in order, at most [`MAX_ITEMS`]) with
 /// `start` selected. Shuffle is off: the order already is the shuffled one.
 pub async fn create(http: &reqwest::Client, server: &ServerCtx, ids: &[String], start: &str, repeat: Repeat) -> AppResult<PlayQueue> {
-    let ids: Vec<String> = ids.iter().take(MAX_ITEMS).cloned().collect();
+    // The server's own ids (the cache's carry a server tag, crate::sid);
+    // songs on another server can't be in its play queue.
+    let tag = crate::sid::tag(&server.machine_id);
+    let ids: Vec<String> = ids
+        .iter()
+        .filter(|i| crate::sid::tag_of(i).is_none_or(|t| t == tag))
+        .take(MAX_ITEMS)
+        .map(|i| crate::sid::key(i).to_string())
+        .collect();
+    let start = crate::sid::key(start);
     if ids.is_empty() {
         return Err(AppError::Invalid("Nothing to play.".into()));
     }

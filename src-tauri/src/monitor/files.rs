@@ -82,7 +82,7 @@ struct PlexProbe(PlexState);
 #[async_trait]
 impl FileProbe for PlexProbe {
     async fn readable(&self, track_id: &str) -> Option<bool> {
-        let client = self.0.client().await.ok()?;
+        let client = self.0.client_for(track_id).await.ok()?;
         client.file_readable(track_id).await.ok().flatten()
     }
 }

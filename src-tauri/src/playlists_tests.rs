@@ -476,3 +476,27 @@ async fn sync_leaves_playlists_with_local_changes_alone() {
     assert_eq!(r.local_tracks("50"), ["1", "2", "3"]);
     assert!(r.db.read(|c| local::playlist(c, &local_only.id)).unwrap().is_some());
 }
+
+#[test]
+fn a_playlist_belongs_to_the_server_with_its_songs() {
+    let a = crate::sid::tag("machine-a");
+    let b = crate::sid::tag("machine-b");
+    assert_eq!(owner_of(&[format!("{b}:1"), format!("{b}:2")]).unwrap(), Some(b.clone()));
+    assert_eq!(owner_of(&["1".into(), "2".into()]).unwrap(), None, "plain ids: the connected server");
+    assert!(owner_of(&[format!("{a}:1"), format!("{b}:2")]).is_err(), "a Plex playlist holds one server's songs");
+    // A server's playlists are replaced by its own list only.
+    let dir = tempfile::tempdir().unwrap();
+    let db = crate::db::DbHandle::open(dir.path().join("p.db")).unwrap();
+    db.write(|c| {
+        c.execute_batch(&format!("INSERT INTO playlists (id, title) VALUES ('{a}:1', 'Mine'), ('{b}:1', 'Theirs');"))?;
+        let tx = c.transaction()?;
+        store::replace_playlists_in(&tx, &[], false, Some(&b))?;
+        tx.commit()?;
+        Ok(())
+    })
+    .unwrap();
+    let left: Vec<String> = db
+        .read(|c| Ok(c.prepare("SELECT id FROM playlists")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?))
+        .unwrap();
+    assert_eq!(left, [format!("{a}:1")]);
+}

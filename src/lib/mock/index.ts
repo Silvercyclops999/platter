@@ -93,6 +93,7 @@ import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
 import * as eq from "./eq";
 import { MockHome, type ContextPlay } from "./home";
 import { MockHomeUsers } from "./homeUsers";
+import { MockLibraries } from "./libraries";
 import { MockLikes } from "./likes";
 import { buildRecents, seedListens, type MockListen } from "./recents";
 import { MockPlaylists } from "./playlists";
@@ -242,6 +243,8 @@ export class MockBackend implements Backend {
   private auth: AuthStatus;
   /** Plex Home users (test hooks: notAHome, switches). */
   readonly homeUsersMock = new MockHomeUsers();
+  /** The account's servers and libraries (test hook: oneServer). */
+  readonly librariesMock = new MockLibraries();
   // health / sync
   private healthState: Health;
   /** The offline "skipped songs" toast was shown (once per offline spell). */
@@ -660,6 +663,12 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       this.homeUsersMock.remember = on;
     });
+  }
+  librarySources() {
+    return this.delay(() => this.librariesMock.sources(this.settings.libraries));
+  }
+  libraryServers() {
+    return this.delay(() => this.librariesMock.servers(this.settings.libraries, this.settings.serverView));
   }
   serversList() {
     return this.delay(() => [SERVER, { ...SERVER, machineId: "mock-machine-02", name: "Cabin NAS", owned: false, online: false, connection: null }]);
@@ -1887,7 +1896,9 @@ export class MockBackend implements Backend {
   }
   settingsSet(patch: Partial<Settings>) {
     return this.delay(() => {
+      this.librariesMock.check(patch.libraries, patch.serverView);
       const next = { ...this.settings, ...patch };
+      if (patch.libraries) next.libraries = [...new Set(patch.libraries.map((e) => e.trim()))];
       // Profiles and bindings change only through their own calls.
       next.eqProfiles = this.settings.eqProfiles;
       next.eqOutputs = this.settings.eqOutputs;
@@ -1922,6 +1933,8 @@ export class MockBackend implements Backend {
         this.later(0, () => this.emit("feed://status", st));
       }
       if (patch.listenGuestsControl !== undefined) this.social.settingsChanged();
+      // Another server's music, or more libraries: every list reloads.
+      if (patch.serverView !== undefined || patch.libraries !== undefined) this.later(0, () => this.emit("library://changed", null));
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
       if (patch.readFileTags !== undefined) this.tags.settingsChanged();

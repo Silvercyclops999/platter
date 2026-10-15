@@ -647,6 +647,7 @@ impl PlexMetadata {
             matched: self.matched(),
             styles: self.style.iter().map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
             moods: self.mood.iter().map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
+            mbid: self.mbid(),
         }
     }
 
@@ -721,6 +722,7 @@ impl PlexMetadata {
             rating_count: self.rating_count.and_then(|n| u32::try_from(n).ok()),
             rated_at: self.user_rating.and(self.last_rated_at),
             genres: self.genre.iter().chain(&self.mood).map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
+            mbid: self.mbid(),
         }
     }
 
@@ -813,6 +815,10 @@ pub struct PlexClient {
     token: Token,
     identity: Arc<ClientIdentity>,
     connection: Option<ConnectionKind>,
+    /// The server's tag (`crate::sid`): put on every id and image path read
+    /// from it, and taken off every id sent to it. None in tests that use
+    /// plain Plex ids.
+    tag: Option<Arc<str>>,
 }
 
 impl PlexClient {
@@ -838,7 +844,111 @@ impl PlexClient {
             token,
             identity,
             connection,
+            tag: None,
         })
+    }
+
+    /// Name the server: ids read from it get its tag (`crate::sid`).
+    pub fn with_server(mut self, machine_id: &str) -> Self {
+        self.tag = Some(crate::sid::tag(machine_id).into());
+        self
+    }
+
+    /// The server's tag, when named.
+    pub fn tag(&self) -> Option<&str> {
+        self.tag.as_deref()
+    }
+
+    /// An id or image path from this server, with its tag.
+    pub fn qualify(&self, key: &str) -> String {
+        match &self.tag {
+            Some(t) => crate::sid::qualify(t, key),
+            None => key.to_string(),
+        }
+    }
+
+    /// The id as this server knows it. An id from another server is refused
+    /// rather than sent here, where the same number is something else.
+    pub fn raw<'a>(&self, id: &'a str) -> AppResult<&'a str> {
+        match (crate::sid::split(id), &self.tag) {
+            ((Some(t), _), Some(mine)) if t != &**mine => {
+                Err(AppError::Invalid("That item is on another server.".into()))
+            }
+            ((_, k), _) => Ok(k),
+        }
+    }
+
+    fn raw_all(&self, ids: &[String]) -> AppResult<Vec<String>> {
+        ids.iter().map(|i| self.raw(i).map(str::to_string)).collect()
+    }
+
+    /// Tag the ids and image paths of items read from this server.
+    pub fn qualify_meta(&self, m: &mut PlexMetadata) {
+        let Some(t) = self.tag.as_deref() else { return };
+        let q = |v: &mut String| *v = crate::sid::qualify(t, v);
+        let qo = |v: &mut Option<String>| {
+            if let Some(s) = v {
+                *s = crate::sid::qualify(t, s);
+            }
+        };
+        q(&mut m.rating_key);
+        qo(&mut m.parent_rating_key);
+        qo(&mut m.grandparent_rating_key);
+        qo(&mut m.thumb);
+        qo(&mut m.art);
+        qo(&mut m.parent_thumb);
+        qo(&mut m.grandparent_thumb);
+        qo(&mut m.composite);
+    }
+
+    /// Tag the ids and image paths in a raw JSON answer parsed elsewhere
+    /// (sessions, history): the same fields [`Self::qualify_meta`] tags.
+    pub fn qualify_json(&self, body: &[u8]) -> Vec<u8> {
+        let Some(t) = self.tag.as_deref() else { return body.to_vec() };
+        let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(body) else { return body.to_vec() };
+        fn walk(t: &str, v: &mut serde_json::Value) {
+            const FIELDS: &[&str] = &[
+                "ratingKey",
+                "parentRatingKey",
+                "grandparentRatingKey",
+                "thumb",
+                "art",
+                "parentThumb",
+                "grandparentThumb",
+                "composite",
+            ];
+            match v {
+                serde_json::Value::Object(o) => {
+                    for (k, val) in o.iter_mut() {
+                        match val {
+                            serde_json::Value::String(s) if FIELDS.contains(&k.as_str()) => *s = crate::sid::qualify(t, s),
+                            serde_json::Value::Number(n) if FIELDS.contains(&k.as_str()) => {
+                                *val = serde_json::Value::String(crate::sid::qualify(t, &n.to_string()))
+                            }
+                            _ => walk(t, val),
+                        }
+                    }
+                }
+                serde_json::Value::Array(a) => a.iter_mut().for_each(|x| walk(t, x)),
+                _ => {}
+            }
+        }
+        walk(t, &mut v);
+        serde_json::to_vec(&v).unwrap_or_else(|_| body.to_vec())
+    }
+
+    fn qualify_container(&self, c: &mut Container) {
+        if self.tag.is_none() {
+            return;
+        }
+        for m in &mut c.metadata {
+            self.qualify_meta(m);
+        }
+        for h in &mut c.hub {
+            for m in &mut h.metadata {
+                self.qualify_meta(m);
+            }
+        }
     }
 
     pub fn base_url(&self) -> &Url {
@@ -915,7 +1025,8 @@ impl PlexClient {
         query: &[(&str, String)],
         paging: Option<(u64, u64)>,
     ) -> AppResult<Container> {
-        let env: Envelope<Container> = self.get_json(path, query, paging).await?;
+        let mut env: Envelope<Container> = self.get_json(path, query, paging).await?;
+        self.qualify_container(&mut env.media_container);
         Ok(env.media_container)
     }
 
@@ -1019,6 +1130,11 @@ impl PlexClient {
         filters: &[(&str, String)],
     ) -> AppResult<Page<PlexMetadata>> {
         let mut q: Vec<(&str, String)> = vec![("type", ty.code().to_string())];
+        // Album and track list items carry their MusicBrainz ids only when
+        // asked (finding the same music on another server).
+        if matches!(ty, MetaType::Album | MetaType::Track) {
+            q.push(("includeGuids", "1".to_string()));
+        }
         q.extend(filters.iter().cloned());
         let c = self
             .container(
@@ -1136,6 +1252,7 @@ impl PlexClient {
     // ---- metadata ---------------------------------------------------------
 
     pub async fn metadata(&self, rating_key: &str) -> AppResult<PlexMetadata> {
+        let rating_key = self.raw(rating_key)?;
         let c = self
             .container(&format!("/library/metadata/{rating_key}"), &[], None)
             .await?;
@@ -1151,7 +1268,7 @@ impl PlexClient {
         // Rating keys are numbers; anything else can't be in the path.
         let keys: Vec<&str> = rating_keys
             .iter()
-            .map(String::as_str)
+            .filter_map(|k| self.raw(k).ok())
             .filter(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric()))
             .collect();
         if keys.is_empty() {
@@ -1170,6 +1287,7 @@ impl PlexClient {
     /// not a file transfer, so it never interrupts a playing stream.
     /// `Ok(None)` when the server doesn't say.
     pub async fn file_readable(&self, rating_key: &str) -> AppResult<Option<bool>> {
+        let rating_key = self.raw(rating_key)?;
         let c = self
             .container(
                 &format!("/library/metadata/{rating_key}"),
@@ -1189,6 +1307,7 @@ impl PlexClient {
     }
 
     pub async fn children(&self, rating_key: &str) -> AppResult<Vec<PlexMetadata>> {
+        let rating_key = self.raw(rating_key)?;
         let c = self
             .container(
                 &format!("/library/metadata/{rating_key}/children"),
@@ -1260,6 +1379,7 @@ impl PlexClient {
     }
 
     pub async fn playlist_items(&self, id: &str, start: u64, size: u64) -> AppResult<Page<Track>> {
+        let id = self.raw(id)?;
         let c = self
             .container(&format!("/playlists/{id}/items"), &[], Some((start, size)))
             .await?;
@@ -1272,7 +1392,7 @@ impl PlexClient {
 
     /// `GET /playlists/{id}`: one playlist, with its description.
     pub async fn playlist(&self, id: &str) -> AppResult<Playlist> {
-        let id = plain_id(id)?;
+        let id = plain_id(self.raw(id)?)?;
         let c = self.container(&format!("/playlists/{id}"), &[], None).await?;
         c.metadata
             .first()
@@ -1282,7 +1402,7 @@ impl PlexClient {
 
     /// Every row of a playlist in order: (track ratingKey, playlistItemID).
     pub async fn playlist_rows(&self, id: &str) -> AppResult<Vec<(String, Option<String>)>> {
-        let id = plain_id(id)?;
+        let id = plain_id(self.raw(id)?)?;
         let mut out = Vec::new();
         let mut start = 0;
         loop {
@@ -1307,7 +1427,7 @@ impl PlexClient {
     /// `POST /playlists?type=audio&title=…&smart=0&uri=…`: a new playlist
     /// holding `track_ids` in order. Plex needs at least one item.
     pub async fn create_playlist(&self, machine_id: &str, title: &str, track_ids: &[String]) -> AppResult<Playlist> {
-        let uri = library_uri(machine_id, track_ids)?;
+        let uri = library_uri(machine_id, &self.raw_all(track_ids)?)?;
         let rb = self.request(Method::POST, "/playlists")?.query(&[
             ("type", "audio"),
             ("title", title),
@@ -1316,8 +1436,9 @@ impl PlexClient {
         ]);
         let resp = self.send(rb).await?;
         let bytes = resp.bytes().await.map_err(map_send_error)?;
-        let env: Envelope<Container> =
+        let mut env: Envelope<Container> =
             serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
+        self.qualify_container(&mut env.media_container);
         env.media_container
             .metadata
             .first()
@@ -1337,8 +1458,9 @@ impl PlexClient {
         ]);
         let resp = self.send(rb).await?;
         let bytes = resp.bytes().await.map_err(map_send_error)?;
-        let env: Envelope<Container> =
+        let mut env: Envelope<Container> =
             serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
+        self.qualify_container(&mut env.media_container);
         env.media_container
             .metadata
             .first()
@@ -1349,15 +1471,15 @@ impl PlexClient {
 
     /// `PUT /playlists/{id}/items?uri=…` on a smart playlist: new rules.
     pub async fn playlist_set_smart(&self, id: &str, uri: &str) -> AppResult<()> {
-        let id = plain_id(id)?;
+        let id = plain_id(self.raw(id)?)?;
         let rb = self.request(Method::PUT, &format!("/playlists/{id}/items"))?.query(&[("uri", uri)]);
         self.send(rb).await.map(|_| ())
     }
 
     /// `PUT /playlists/{id}/items?uri=…`: append songs in order.
     pub async fn playlist_add(&self, machine_id: &str, id: &str, track_ids: &[String]) -> AppResult<()> {
-        let id = plain_id(id)?;
-        let uri = library_uri(machine_id, track_ids)?;
+        let id = plain_id(self.raw(id)?)?;
+        let uri = library_uri(machine_id, &self.raw_all(track_ids)?)?;
         let rb = self
             .request(Method::PUT, &format!("/playlists/{id}/items"))?
             .query(&[("uri", uri.as_str())]);
@@ -1366,7 +1488,7 @@ impl PlexClient {
 
     /// `DELETE /playlists/{id}/items/{playlistItemID}`.
     pub async fn playlist_remove(&self, id: &str, item_id: &str) -> AppResult<()> {
-        let (id, item) = (plain_id(id)?, plain_id(item_id)?);
+        let (id, item) = (plain_id(self.raw(id)?)?, plain_id(item_id)?);
         let rb = self.request(Method::DELETE, &format!("/playlists/{id}/items/{item}"))?;
         self.send(rb).await.map(|_| ())
     }
@@ -1374,7 +1496,7 @@ impl PlexClient {
     /// `PUT /playlists/{id}/items/{playlistItemID}/move?after={playlistItemID}`;
     /// without `after` the row goes to the top.
     pub async fn playlist_move(&self, id: &str, item_id: &str, after: Option<&str>) -> AppResult<()> {
-        let (id, item) = (plain_id(id)?, plain_id(item_id)?);
+        let (id, item) = (plain_id(self.raw(id)?)?, plain_id(item_id)?);
         let mut rb = self.request(Method::PUT, &format!("/playlists/{id}/items/{item}/move"))?;
         if let Some(a) = after {
             rb = rb.query(&[("after", plain_id(a)?)]);
@@ -1384,7 +1506,7 @@ impl PlexClient {
 
     /// `PUT /playlists/{id}?title=…&summary=…` (only the fields given).
     pub async fn playlist_edit(&self, id: &str, title: Option<&str>, summary: Option<&str>) -> AppResult<()> {
-        let id = plain_id(id)?;
+        let id = plain_id(self.raw(id)?)?;
         let mut q: Vec<(&str, &str)> = Vec::new();
         if let Some(t) = title {
             q.push(("title", t));
@@ -1401,7 +1523,7 @@ impl PlexClient {
 
     /// `POST /library/metadata/{id}/posters` with the image as the body.
     pub async fn playlist_poster(&self, id: &str, bytes: Vec<u8>, content_type: &str) -> AppResult<()> {
-        let id = plain_id(id)?;
+        let id = plain_id(self.raw(id)?)?;
         let rb = self
             .request(Method::POST, &format!("/library/metadata/{id}/posters"))?
             .header("content-type", content_type)
@@ -1411,7 +1533,7 @@ impl PlexClient {
 
     /// `DELETE /playlists/{id}`.
     pub async fn playlist_delete(&self, id: &str) -> AppResult<()> {
-        let id = plain_id(id)?;
+        let id = plain_id(self.raw(id)?)?;
         let rb = self.request(Method::DELETE, &format!("/playlists/{id}"))?;
         self.send(rb).await.map(|_| ())
     }
@@ -1447,7 +1569,7 @@ impl PlexClient {
     /// Resized artwork bytes from `/photo/:/transcode`.
     pub async fn photo(&self, image_path: &str, width: u32, height: u32) -> AppResult<Bytes> {
         let rb = self.request(Method::GET, "/photo/:/transcode")?.query(&[
-            ("url", image_path.to_string()),
+            ("url", self.raw(image_path)?.to_string()),
             ("width", width.to_string()),
             ("height", height.to_string()),
             ("minSize", "1".to_string()),
@@ -1460,6 +1582,7 @@ impl PlexClient {
     /// Direct-play request for a part key (`/library/parts/…`). Supports
     /// range requests.
     pub fn stream_request(&self, part_key: &str) -> AppResult<StreamRequest> {
+        let part_key = self.raw(part_key)?;
         if !part_key.starts_with('/') {
             return Err(AppError::Invalid("part key must start with '/'".into()));
         }
@@ -1478,6 +1601,7 @@ impl PlexClient {
         max_kbps: u32,
         session: &str,
     ) -> AppResult<StreamRequest> {
+        let rating_key = self.raw(rating_key)?;
         let mut url = self.url("/music/:/transcode/universal/start.mp3")?;
         url.query_pairs_mut()
             .append_pair("path", &format!("/library/metadata/{rating_key}"))
@@ -1510,8 +1634,8 @@ impl PlexClient {
     /// `GET /:/timeline` progress report.
     pub async fn timeline(&self, r: &TimelineReport) -> AppResult<()> {
         let mut q = vec![
-            ("ratingKey", r.rating_key.clone()),
-            ("key", format!("/library/metadata/{}", r.rating_key)),
+            ("ratingKey", self.raw(&r.rating_key)?.to_string()),
+            ("key", format!("/library/metadata/{}", self.raw(&r.rating_key)?)),
             ("identifier", LIBRARY_IDENTIFIER.to_string()),
             ("state", r.state.as_str().to_string()),
             ("time", r.time_ms.to_string()),
@@ -1528,7 +1652,7 @@ impl PlexClient {
     /// (0 to 10; 10 is five stars, which Platter calls liked). None clears it
     /// (Plex takes `rating=-1` for that).
     pub async fn rate(&self, rating_key: &str, rating: Option<f64>) -> AppResult<()> {
-        let key = plain_id(rating_key)?;
+        let key = plain_id(self.raw(rating_key)?)?;
         let value = match rating {
             Some(r) if r.is_finite() => {
                 let r = r.clamp(0.0, 10.0);
@@ -1561,7 +1685,7 @@ impl PlexClient {
     pub async fn scrobble(&self, rating_key: &str) -> AppResult<()> {
         let rb = self
             .request(Method::GET, "/:/scrobble")?
-            .query(&[("key", rating_key), ("identifier", LIBRARY_IDENTIFIER)]);
+            .query(&[("key", self.raw(rating_key)?), ("identifier", LIBRARY_IDENTIFIER)]);
         self.send(rb).await.map(|_| ())
     }
 }
@@ -1612,6 +1736,46 @@ mod tests {
 
     fn mc(v: serde_json::Value) -> ResponseTemplate {
         ResponseTemplate::new(200).set_body_json(serde_json::json!({ "MediaContainer": v }))
+    }
+
+    #[tokio::test]
+    async fn a_named_server_tags_what_it_reads_and_only_takes_its_own_ids() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/library/sections/1/all"))
+            .and(query_param("type", "10"))
+            .and(query_param("includeGuids", "1"))
+            .respond_with(mc(serde_json::json!({"totalSize": 1, "Metadata": [{
+                "ratingKey": "9", "type": "track", "title": "Song", "parentRatingKey": "8", "grandparentRatingKey": "7",
+                "parentThumb": "/library/metadata/8/thumb/1", "Guid": [{"id": "mbid://t-1"}],
+                "Media": [{"Part": [{"key": "/library/parts/1/2/f.flac"}]}]
+            }]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/:/rate"))
+            .and(query_param("key", "9"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let c = client(&server).with_server("machine-a");
+        let t = crate::sid::tag("machine-a");
+        assert_eq!(c.tag(), Some(t.as_str()));
+        let page = c.tracks("1", 0, 10).await.unwrap();
+        let tr = &page.items[0];
+        assert_eq!(tr.id, format!("{t}:9"));
+        assert_eq!(tr.album_id, format!("{t}:8"));
+        assert_eq!(tr.artist_id, format!("{t}:7"));
+        assert_eq!(tr.thumb.as_deref(), Some(format!("{t}:/library/metadata/8/thumb/1").as_str()));
+        assert_eq!(tr.part_key, "/library/parts/1/2/f.flac", "part keys go with their song");
+        assert_eq!(tr.mbid.as_deref(), Some("t-1"));
+        // Its own ids go back without the tag; plain ones (saved before tags) as they are.
+        c.rate(&tr.id, Some(10.0)).await.unwrap();
+        c.rate("9", Some(10.0)).await.unwrap();
+        // Another server's id is refused, not sent: the number is something else here.
+        let other = format!("{}:9", crate::sid::tag("machine-b"));
+        assert!(matches!(c.rate(&other, Some(10.0)).await, Err(AppError::Invalid(_))));
+        assert!(c.stream_request(&format!("{}:/library/parts/1/2/f.flac", crate::sid::tag("machine-b"))).is_err());
     }
 
     #[test]

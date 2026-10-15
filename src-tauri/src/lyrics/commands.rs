@@ -16,7 +16,7 @@ pub struct PlexSource(pub PlexState);
 #[async_trait::async_trait]
 impl PlexLyrics for PlexSource {
     async fn lyrics(&self, track_id: &str) -> AppResult<Option<Lyrics>> {
-        let client = self.0.client().await?;
+        let client = self.0.client_for(track_id).await?;
         fetch_lyrics(&client, track_id).await
     }
 }

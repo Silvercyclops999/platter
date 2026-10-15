@@ -338,6 +338,12 @@ pub struct Settings {
     pub discord_status_line: StatusLine,
     /// The top bar shows the Plex profile picture (this device only).
     pub show_plex_avatar: bool,
+    /// Libraries included besides the connected server's main one, as
+    /// `<machine id>/<section id>` (this device only; crate::libraries).
+    pub libraries: Vec<String>,
+    /// What the library shows when more than one server is included: "all"
+    /// or one server's tag (this device only).
+    pub server_view: String,
     /// Whether the lyrics view opens by itself.
     pub lyrics_mode: LyricsMode,
     /// Look lyrics up on LRCLIB when Plex has none (sends artist, title,
@@ -549,6 +555,8 @@ impl Default for Settings {
             discord_upload_catbox: false,
             discord_status_line: StatusLine::App,
             show_plex_avatar: true,
+            libraries: Vec::new(),
+            server_view: "all".into(),
             lyrics_mode: LyricsMode::AutoShow,
             lyrics_lrclib: false,
             lyrics_prefer_own: false,
@@ -725,6 +733,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "discordUploadCatbox",
     "discordStatusLine",
     "showPlexAvatar",
+    "libraries",
+    "serverView",
     "readFileTags",
     "transcribeLyrics",
     "transcribeModel",
@@ -831,6 +841,10 @@ pub struct SettingsPatch {
     pub discord_upload_catbox: Option<bool>,
     pub discord_status_line: Option<StatusLine>,
     pub show_plex_avatar: Option<bool>,
+    /// Every included library besides the main one (replaces the list).
+    pub libraries: Option<Vec<String>>,
+    /// "all" or a server tag.
+    pub server_view: Option<String>,
     pub lyrics_mode: Option<LyricsMode>,
     pub lyrics_lrclib: Option<bool>,
     pub lyrics_prefer_own: Option<bool>,
@@ -1019,6 +1033,16 @@ impl Settings {
         set(&mut self.discord_upload_catbox, p.discord_upload_catbox);
         set(&mut self.discord_status_line, p.discord_status_line);
         set(&mut self.show_plex_avatar, p.show_plex_avatar);
+        if let Some(v) = &p.libraries {
+            self.libraries = crate::libraries::tidy(v)?;
+        }
+        if let Some(v) = &p.server_view {
+            let v = v.trim();
+            if v != "all" && !crate::sid::is_tag(v) {
+                return Err(AppError::Invalid("Choose All servers or one of your servers.".into()));
+            }
+            self.server_view = v.to_string();
+        }
         set(&mut self.lyrics_mode, p.lyrics_mode);
         set(&mut self.lyrics_lrclib, p.lyrics_lrclib);
         set(&mut self.lyrics_prefer_own, p.lyrics_prefer_own);
@@ -1258,6 +1282,10 @@ pub fn load(db: &DbHandle) -> Settings {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     s.clamp();
+    // Ids saved before they carried their server (crate::sid).
+    for ids in [&mut s.mix_exclude_artists, &mut s.mix_exclude_albums] {
+        *ids = crate::sid::resolve_all(ids);
+    }
     s
 }
 
@@ -1363,6 +1391,10 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     // Global with no source for it on quietly ranks by plays.
     db.set_popular_source(if s.info_listenbrainz || s.info_lastfm { s.popular_source } else { PopularSource::MyPlays });
     db.set_link_featured(s.link_featured);
+    db.set_server_view(crate::db::merge::ServerView::parse(&s.server_view));
+    if let Some(plex) = &live.plex {
+        db.set_extra_libraries(crate::libraries::extra_libraries(plex, &s.libraries));
+    }
     {
         use crate::artistinfo::InfoSource as Src;
         let ai = &live.artist_info;
@@ -1410,6 +1442,10 @@ impl SettingsState {
     pub fn new(db: DbHandle, live: Live) -> Self {
         publish(&load(&db), &live, &db);
         Self { db, live, lock: Default::default(), sync: Default::default() }
+    }
+
+    pub fn db(&self) -> &DbHandle {
+        &self.db
     }
 
     /// Send synced settings through the sync store from now on. Existing
@@ -1590,6 +1626,18 @@ pub async fn apply_patch(
             downloads.add(key, "Liked Songs".into(), None).await?;
         } else {
             downloads.remove(key).await?;
+        }
+    }
+    if patch.server_view.is_some()
+        && let Some(ev) = settings.db().events()
+    {
+        // Every list shows another server's music now.
+        ev.library_changed();
+    }
+    if patch.libraries.is_some() {
+        // Read the libraries now included; drop the ones left out.
+        if let Err(e) = settings.db().start_sync(false) {
+            tracing::warn!("library sync not started: {e}");
         }
     }
     if patch.touches_mixes() {
@@ -2433,5 +2481,28 @@ mod tests {
         s.clamp();
         assert_eq!(s.accent, "ivory");
         assert!(s.theme_file.is_none());
+    }
+
+    #[test]
+    fn library_settings_default_check_their_values_and_reach_the_library() {
+        let s = Settings::default();
+        assert!(s.libraries.is_empty(), "only the main library until more are chosen");
+        assert_eq!(s.server_view, "all");
+        assert!(DEVICE_SETTINGS.contains(&"libraries") && DEVICE_SETTINGS.contains(&"serverView"));
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = load(&db);
+        s.apply(&serde_json::from_str(r#"{"libraries":["machine-b/5"," machine-b/5 ","home/2"],"serverView":"0a1b2c3d"}"#).unwrap())
+            .unwrap();
+        assert_eq!(s.libraries, ["machine-b/5", "home/2"]);
+        publish(&s, &live, &db);
+        assert_eq!(db.server_view(), crate::db::merge::ServerView::Server("0a1b2c3d".into()));
+        for bad in [r#"{"libraries":["not a library"]}"#, r#"{"serverView":"x"}"#] {
+            assert!(s.apply(&serde_json::from_str(bad).unwrap()).is_err(), "{bad}");
+        }
+        assert_eq!(s.libraries.len(), 2, "a refused change keeps what was there");
+        s.apply(&serde_json::from_str(r#"{"serverView":"all"}"#).unwrap()).unwrap();
+        publish(&s, &live, &db);
+        assert_eq!(db.server_view(), crate::db::merge::ServerView::All);
     }
 }

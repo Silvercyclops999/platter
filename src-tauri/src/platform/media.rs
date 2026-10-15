@@ -303,7 +303,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn track(id: &str) -> Track {
-        Track {
+        Track { mbid: None,
             id: id.into(),
             title: format!("Song {id}"),
             album_id: "al".into(),

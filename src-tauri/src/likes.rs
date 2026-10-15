@@ -55,7 +55,7 @@ impl RatingRemote for PlexRatings {
         self.0.client().await.is_ok()
     }
     async fn rate(&self, track_id: &str, rating: Option<f64>) -> AppResult<()> {
-        self.0.client().await?.rate(track_id, rating).await
+        self.0.client_for(track_id).await?.rate(track_id, rating).await
     }
 }
 
@@ -182,7 +182,16 @@ impl Likes {
 
     pub async fn page(&self) -> AppResult<LikedPage> {
         let min = self.min_rating();
-        let tracks = self.db().read_async(move |c| local::liked_tracks(c, min)).await?;
+        let server = self.db().server_view();
+        let tracks = self
+            .db()
+            .read_async(move |c| {
+                let mut t = local::liked_tracks(c, min)?;
+                // A song liked on two servers shows once (db::merge).
+                crate::db::merge::ViewFilter::load(c, &server)?.tracks(&mut t);
+                Ok(t)
+            })
+            .await?;
         let total_duration_ms = tracks.iter().map(|t| t.duration_ms).sum();
         Ok(LikedPage { tracks, total_duration_ms })
     }

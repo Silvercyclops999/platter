@@ -107,7 +107,13 @@ struct Inner {
     restored: watch::Sender<bool>,
     /// Go offline: no requests to the server or plex.tv.
     offline: Arc<std::sync::atomic::AtomicBool>,
+    /// Clients for the account's other servers (more than one library), by
+    /// server tag, with when their connection was picked.
+    others: Mutex<std::collections::HashMap<String, (PlexClient, std::time::Instant)>>,
 }
+
+/// A connection picked for another server is raced again after this.
+const OTHER_SERVER_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Cheap to clone; all clones share state.
 #[derive(Clone)]
@@ -174,6 +180,7 @@ impl PlexState {
                 events,
                 restored: watch::channel(true).0,
                 offline: Arc::default(),
+                others: Mutex::new(std::collections::HashMap::new()),
             }),
         })
     }
@@ -368,6 +375,81 @@ impl PlexState {
         }
     }
 
+    /// The connected server's tag (`crate::sid`), which its ids carry.
+    pub async fn tag(&self) -> Option<String> {
+        self.machine_id().await.map(|m| crate::sid::tag(&m))
+    }
+
+    /// A client for the server an item id or image path belongs to
+    /// (`crate::sid`): the connected server for its own ids and for ids
+    /// without a tag, else another of the account's servers.
+    pub async fn client_for(&self, id: &str) -> AppResult<PlexClient> {
+        match crate::sid::tag_of(id) {
+            None => self.client().await,
+            Some(t) => self.client_for_tag(t).await,
+        }
+    }
+
+    /// A client for the account's server with this tag. Another server's
+    /// connection is raced the first time (local address first, as for the
+    /// connected server) and kept for a while; it never changes the
+    /// connected server or its health.
+    pub async fn client_for_tag(&self, tag: &str) -> AppResult<PlexClient> {
+        let (server, account) = {
+            let s = self.inner.session.read().await;
+            if s.current.as_ref().is_some_and(|c| crate::sid::tag(&c.server.machine_id) == tag) {
+                drop(s);
+                return self.client().await;
+            }
+            let account = s.account.clone().ok_or_else(|| AppError::Auth("Not signed in.".into()))?;
+            let server = s
+                .servers
+                .iter()
+                .find(|x| crate::sid::tag(&x.machine_id) == tag)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound("That server isn't on your account any more.".into()))?;
+            (server, account)
+        };
+        if self.offline_by_choice() {
+            return Err(AppError::Network("You're offline.".into()));
+        }
+        if let Some((c, at)) = self.inner.others.lock().get(tag)
+            && at.elapsed() < OTHER_SERVER_TTL
+        {
+            return Ok(c.clone());
+        }
+        let out = discovery::race_detailed(&self.inner.probe_http, &server.connections, Some(&server.machine_id), self.inner.race_cfg).await;
+        let Some(p) = out.best else {
+            self.inner.others.lock().remove(tag);
+            return Err(AppError::Network(format!("{} is offline.", server.name)));
+        };
+        // A shared server takes its own token from resources; an owned one
+        // takes the account's.
+        let token = server.access_token.clone().unwrap_or(account);
+        let c = PlexClient::new(&p.uri, token, self.inner.identity.clone(), Some(p.kind))?.with_server(&server.machine_id);
+        self.inner.others.lock().insert(tag.to_string(), (c.clone(), std::time::Instant::now()));
+        Ok(c)
+    }
+
+    /// The machine id of the server an item id belongs to (`crate::sid`):
+    /// the connected server's for ids without a tag.
+    pub async fn machine_id_for(&self, id: &str) -> Option<String> {
+        let Some(tag) = crate::sid::tag_of(id) else { return self.machine_id().await };
+        let s = self.inner.session.read().await;
+        s.current
+            .iter()
+            .map(|c| &c.server)
+            .chain(s.servers.iter())
+            .find(|x| crate::sid::tag(&x.machine_id) == tag)
+            .map(|x| x.machine_id.clone())
+    }
+
+    /// Every server on the account (owned and shared), as plex.tv listed
+    /// them, with each one's tag.
+    pub async fn account_servers(&self) -> Vec<DiscoveredServer> {
+        self.inner.session.read().await.servers.clone()
+    }
+
     /// The selected server's machine id (names library items in playlist
     /// writes).
     pub async fn machine_id(&self) -> Option<String> {
@@ -393,6 +475,13 @@ impl PlexState {
         let mut rx = self.inner.restored.subscribe();
         let _ = tokio::time::timeout(wait, rx.wait_for(|done| *done)).await;
         self.client().await
+    }
+
+    /// [`Self::client_for`], first waiting like [`Self::client_when_ready`].
+    pub async fn client_for_when_ready(&self, id: &str, wait: std::time::Duration) -> AppResult<PlexClient> {
+        let mut rx = self.inner.restored.subscribe();
+        let _ = tokio::time::timeout(wait, rx.wait_for(|done| *done)).await;
+        self.client_for(id).await
     }
 
     /// Ask the health loop to ping now (wake from sleep, network change).
@@ -760,7 +849,7 @@ impl PlexState {
                 token.clone(),
                 self.inner.identity.clone(),
                 Some(p.kind),
-            )?),
+            )?.with_server(&server.machine_id)),
             None => None,
         };
         {
@@ -846,6 +935,7 @@ impl PlexState {
     // ---- background: health loop + notifications ---------------------------
 
     fn stop_background(&self) {
+        self.inner.others.lock().clear();
         if let Some(tx) = self.inner.background_stop.lock().take() {
             let _ = tx.send(true);
         }
@@ -861,10 +951,17 @@ impl PlexState {
         let (stop_tx, stop_rx) = watch::channel(false);
         *self.inner.notif_stop.lock() = Some(stop_tx);
         let (tx, mut rx) = mpsc::channel(64);
+        let named = client.clone();
         spawn(notifications::run(client, tx, stop_rx));
         let me = self.clone();
         spawn(async move {
-            while let Some(ev) = rx.recv().await {
+            while let Some(mut ev) = rx.recv().await {
+                // Item ids carry the server's tag like everything else.
+                match &mut ev {
+                    PlexEvent::LibraryUpdate { item_id: Some(id), .. }
+                    | PlexEvent::Playing { rating_key: Some(id), .. } => *id = named.qualify(id),
+                    _ => {}
+                }
                 me.on_plex_event(&ev);
                 let _ = me.inner.events.send(ev);
             }
@@ -1019,7 +1116,7 @@ impl PlexState {
                     self.inner.identity.clone(),
                     Some(p.kind),
                 ) {
-                    Ok(c) => c,
+                    Ok(c) => c.with_server(&server.machine_id),
                     Err(_) => return,
                 };
                 let changed = current

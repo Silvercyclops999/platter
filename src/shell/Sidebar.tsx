@@ -10,6 +10,7 @@ import { useUi, type MenuItem } from "../stores/ui";
 import { createPlaylistIn, folderMenu } from "./FolderMenus";
 import { LibraryCollection } from "./LibraryCollection";
 import { LibraryChips, LibrarySearch, LibrarySortView } from "./LibraryControls";
+import { ServerSwitcher } from "./ServerSwitcher";
 import { StatusDot } from "./StatusDot";
 import "./library-create.css";
 import { useLibraryLoader, useLibraryModel, useLibraryRecents } from "./useLibrary";
@@ -96,6 +97,7 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
                 <IconButton size="sm" label="Expand Your Library" icon={<Maximize2 size={16} />} onClick={() => nav.go({ name: "library" })} />
               </span>
             </div>
+            {!drill && <ServerSwitcher />}
             <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} />
             <div className="lib-tools">
               <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} />

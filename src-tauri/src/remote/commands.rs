@@ -117,6 +117,28 @@ impl RemoteEnv for PlexRemoteEnv {
             machine_id,
         })
     }
+    async fn server_for(&self, id: &str) -> AppResult<ServerCtx> {
+        let Some(tag) = crate::sid::tag_of(id) else { return self.server().await };
+        if self.0.tag().await.as_deref() == Some(tag) {
+            return self.server().await;
+        }
+        let client = self.0.client_for_tag(tag).await?;
+        let machine_id = self
+            .0
+            .account_servers()
+            .await
+            .into_iter()
+            .find(|s| crate::sid::tag(&s.machine_id) == tag)
+            .map(|s| s.machine_id)
+            .ok_or_else(|| AppError::NotFound("That server isn't on your account any more.".into()))?;
+        let headers = client.auth_headers()?;
+        let token = headers
+            .get("x-plex-token")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|t| Token::new(t).ok())
+            .ok_or_else(|| AppError::Auth("Not signed in.".into()))?;
+        Ok(ServerCtx { base: client.base_url().clone(), token, machine_id })
+    }
     async fn account_token(&self) -> Option<Token> {
         self.0.account_token().await
     }

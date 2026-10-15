@@ -178,12 +178,18 @@ pub struct Rated {
 /// Tracks with a write still queued here keep theirs. Returns the ids that
 /// changed.
 pub fn apply_rated(tx: &Transaction<'_>, rated: &[Rated]) -> AppResult<Vec<String>> {
+    apply_rated_in(tx, rated, super::store::MAIN_SRC)
+}
+
+/// [`apply_rated`] for the songs of library `src` (each server rates its
+/// own songs).
+pub fn apply_rated_in(tx: &Transaction<'_>, rated: &[Rated], src: &str) -> AppResult<Vec<String>> {
     let mut st = tx.prepare_cached(
         "SELECT id, user_rating, rated_at FROM tracks
-         WHERE user_rating IS NOT NULL AND id NOT IN (SELECT track_id FROM rating_ops)",
+         WHERE src = ?1 AND user_rating IS NOT NULL AND id NOT IN (SELECT track_id FROM rating_ops)",
     )?;
     let mut have: HashMap<String, (Option<f64>, Option<i64>)> = st
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?))))?
+        .query_map([src], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?))))?
         .collect::<Result<_, _>>()?;
     drop(st);
     let mut changed = Vec::new();

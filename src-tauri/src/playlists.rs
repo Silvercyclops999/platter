@@ -59,9 +59,21 @@ pub trait PlaylistEvents: Send + Sync {
 pub struct PlexPlaylists(pub PlexState);
 
 impl PlexPlaylists {
-    async fn machine(&self) -> AppResult<String> {
-        self.0.machine_id().await.ok_or_else(|| AppError::Network("Your server is offline.".into()))
+    /// The machine id of the server that has `id`.
+    async fn machine(&self, id: &str) -> AppResult<String> {
+        self.0.machine_id_for(id).await.ok_or_else(|| AppError::Network("Your server is offline.".into()))
     }
+}
+
+/// The one server all these songs are on (`crate::sid`; None for the
+/// connected server). A Plex playlist holds songs of its own server only.
+pub fn owner_of(track_ids: &[String]) -> AppResult<Option<String>> {
+    let mut tags = track_ids.iter().map(|i| crate::sid::tag_of(i).map(str::to_string));
+    let first = tags.next().flatten();
+    if tags.any(|t| t.is_some() && t != first) {
+        return Err(AppError::Invalid("A playlist can hold songs from one server only.".into()));
+    }
+    Ok(first)
 }
 
 #[async_trait]
@@ -69,31 +81,35 @@ impl PlaylistRemote for PlexPlaylists {
     async fn online(&self) -> bool {
         self.0.client().await.is_ok()
     }
+    // A playlist lives on the server that has its songs (crate::sid); its
+    // edits go there.
     async fn create(&self, title: &str, track_ids: &[String]) -> AppResult<String> {
-        let m = self.machine().await?;
-        Ok(self.0.client().await?.create_playlist(&m, title, track_ids).await?.id)
+        let first = track_ids.first().map(String::as_str).unwrap_or_default();
+        owner_of(track_ids)?;
+        let m = self.machine(first).await?;
+        Ok(self.0.client_for(first).await?.create_playlist(&m, title, track_ids).await?.id)
     }
     async fn add(&self, id: &str, track_ids: &[String]) -> AppResult<()> {
-        let m = self.machine().await?;
-        self.0.client().await?.playlist_add(&m, id, track_ids).await
+        let m = self.machine(id).await?;
+        self.0.client_for(id).await?.playlist_add(&m, id, track_ids).await
     }
     async fn remove(&self, id: &str, item_id: &str) -> AppResult<()> {
-        self.0.client().await?.playlist_remove(id, item_id).await
+        self.0.client_for(id).await?.playlist_remove(id, item_id).await
     }
     async fn move_item(&self, id: &str, item_id: &str, after: Option<&str>) -> AppResult<()> {
-        self.0.client().await?.playlist_move(id, item_id, after).await
+        self.0.client_for(id).await?.playlist_move(id, item_id, after).await
     }
     async fn update(&self, id: &str, title: Option<&str>, summary: Option<&str>) -> AppResult<()> {
-        self.0.client().await?.playlist_edit(id, title, summary).await
+        self.0.client_for(id).await?.playlist_edit(id, title, summary).await
     }
     async fn poster(&self, id: &str, bytes: Vec<u8>, content_type: &str) -> AppResult<()> {
-        self.0.client().await?.playlist_poster(id, bytes, content_type).await
+        self.0.client_for(id).await?.playlist_poster(id, bytes, content_type).await
     }
     async fn delete(&self, id: &str) -> AppResult<()> {
-        self.0.client().await?.playlist_delete(id).await
+        self.0.client_for(id).await?.playlist_delete(id).await
     }
     async fn fetch(&self, id: &str) -> AppResult<(Playlist, Vec<PlaylistEntry>)> {
-        let c = self.0.client().await?;
+        let c = self.0.client_for(id).await?;
         let p = c.playlist(id).await?;
         let rows = c.playlist_rows(id).await?;
         Ok((p, rows.into_iter().map(|(track_id, item_id)| PlaylistEntry { track_id, item_id }).collect()))

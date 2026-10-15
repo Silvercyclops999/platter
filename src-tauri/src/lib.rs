@@ -7,6 +7,7 @@ pub mod downloads;
 pub mod error;
 pub mod feed;
 pub mod hidden;
+pub mod libraries;
 pub mod likes;
 pub mod lyrics;
 pub mod mixes;
@@ -20,6 +21,7 @@ pub mod remote;
 pub mod scrobble;
 pub mod settings;
 pub mod share;
+pub mod sid;
 pub mod smart;
 pub mod social;
 pub mod sync;
@@ -284,6 +286,24 @@ pub fn run() {
                 Arc::new(plex::home::KeyringProfiles),
             ));
             let db = DbHandle::open(data_dir.join("library.sqlite"))?;
+            // A cache from before server-qualified ids: rewrite it now for
+            // the server it came from (saved with the server choice), before
+            // the queue, downloads or a sync read it. Otherwise the first
+            // sync does it.
+            if db.ids_pending()
+                && let Some(m) = plex::discovery::DiscoveryCache::load(&data_dir).selected
+            {
+                let tag = sid::tag(&m);
+                match db.qualify_legacy(&tag) {
+                    Ok(_) => {
+                        let n = audio::cache::qualify_files(&audio_dir, &tag);
+                        if n > 0 {
+                            tracing::info!(n, "cached songs now carry their server");
+                        }
+                    }
+                    Err(e) => tracing::warn!("cache ids not rewritten yet: {e}"),
+                }
+            }
             db.set_source(Arc::new(bridge::PlexLibrary::new(plex.clone())));
             db.set_events(Arc::new(monitor::library::SyncHealth {
                 inner: Arc::new(app.handle().clone()),
@@ -416,6 +436,8 @@ pub fn run() {
             );
             *live.tag_scanner.lock() = Some(tag_scanner.clone());
             let app_settings = settings::SettingsState::new(db.clone(), live.clone());
+            // How each included server is reached (choosing between copies).
+            libraries::spawn_ranks(plex.clone(), db.clone());
             tauri::async_runtime::spawn({
                 let s = tag_scanner.clone();
                 async move { s.spawn() }
@@ -758,6 +780,8 @@ pub fn run() {
             plex::commands::home_users,
             plex::commands::home_switch,
             plex::commands::home_remember_set,
+            libraries::library_sources,
+            libraries::library_servers,
             plex::details::now_playing_details,
             lyrics::commands::lyrics_get,
             lyrics::commands::lyrics_own_get,

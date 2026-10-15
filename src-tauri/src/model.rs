@@ -78,6 +78,11 @@ pub struct Album {
     /// Plex mood tags. Stored for mixes; not sent to the UI.
     #[serde(skip)]
     pub moods: Vec<String>,
+    /// MusicBrainz release id (Plex `Guid` `mbid://`), when Plex matched
+    /// the album. Stored to find the same album on another server; not sent
+    /// to the UI.
+    #[serde(skip)]
+    pub mbid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,6 +123,11 @@ pub struct Track {
     /// filter chips).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub genres: Vec<String>,
+    /// MusicBrainz track id (Plex `Guid` `mbid://`), when Plex matched the
+    /// track. Stored to find the same song on another server; not sent to
+    /// the UI.
+    #[serde(skip)]
+    pub mbid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

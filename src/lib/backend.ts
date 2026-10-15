@@ -36,6 +36,8 @@ import type {
   EventName,
   Health,
   HomeUsers,
+  LibraryServers,
+  LibrarySources,
   HomeData,
   HomeItem,
   RecentsEntry,
@@ -130,6 +132,10 @@ export interface Backend {
   homeSwitch(uuid: string, pin?: string): Promise<void>;
   /** Settings: remember the last Home user on this device. */
   homeRememberSet(on: boolean): Promise<void>;
+  /** Settings, Library: every server and music library the account can reach. Asks each server. */
+  librarySources(): Promise<LibrarySources>;
+  /** The servers the library has music from (the sidebar switcher). Doesn't ask the servers. */
+  libraryServers(): Promise<LibraryServers>;
 
   // Library
   syncStatus(): Promise<SyncStatus>;
@@ -517,6 +523,8 @@ export function createTauriBackend(): Backend {
     homeUsers: () => call("home_users"),
     homeSwitch: (uuid, pin) => call("home_switch", { uuid, pin: pin ?? null }),
     homeRememberSet: (on) => call("home_remember_set", { on }),
+    librarySources: () => call("library_sources"),
+    libraryServers: () => call("library_servers"),
 
     syncStatus: () => call("sync_status"),
     syncNow: (full) => call("sync_now", { full }),

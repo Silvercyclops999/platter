@@ -557,11 +557,12 @@ fn valid_id(id: &str) -> bool {
 /// Fetch and assemble the details for a track. Only the track's own
 /// metadata is required; the artist and lyrics requests may fail quietly.
 pub async fn fetch(client: &PlexClient, track_id: &str) -> AppResult<NowPlayingDetails> {
-    if !valid_id(track_id) {
+    let key = client.raw(track_id)?;
+    if !valid_id(key) {
         return Err(AppError::Invalid("track id".into()));
     }
     let body = client
-        .get_bytes(&format!("/library/metadata/{track_id}"), &[])
+        .get_bytes(&format!("/library/metadata/{key}"), &[])
         .await?;
     let extras = track_extras(first_meta(&body)?);
 
@@ -572,7 +573,13 @@ pub async fn fetch(client: &PlexClient, track_id: &str) -> AppResult<NowPlayingD
             .await
             .map_err(|e| tracing::debug!(kind = e.kind(), "artist details unavailable"))
             .ok()?;
-        first_meta(&body).ok().map(artist_about)
+        first_meta(&body).ok().map(artist_about).map(|mut a| {
+            // Ids and pictures carry the server's tag like the rest.
+            a.id = client.qualify(&a.id);
+            a.thumb = a.thumb.map(|t| client.qualify(&t));
+            a.art = a.art.map(|t| client.qualify(&t));
+            a
+        })
     };
     let lyrics = async {
         let path = extras.lyrics_path.as_deref()?;
@@ -596,11 +603,12 @@ pub async fn fetch(client: &PlexClient, track_id: &str) -> AppResult<NowPlayingD
 /// stream or the stream can't be read or has no words. Errors only when the
 /// track itself can't be read.
 pub async fn fetch_lyrics(client: &PlexClient, track_id: &str) -> AppResult<Option<Lyrics>> {
-    if !valid_id(track_id) {
+    let key = client.raw(track_id)?;
+    if !valid_id(key) {
         return Err(AppError::Invalid("track id".into()));
     }
     let body = client
-        .get_bytes(&format!("/library/metadata/{track_id}"), &[])
+        .get_bytes(&format!("/library/metadata/{key}"), &[])
         .await?;
     let extras = track_extras(first_meta(&body)?);
     let Some(path) = extras.lyrics_path else {
@@ -629,7 +637,7 @@ pub async fn now_playing_details(
     state: State<'_, PlexState>,
     track_id: String,
 ) -> AppResult<NowPlayingDetails> {
-    let client = state.client().await?;
+    let client = state.client_for(&track_id).await?;
     fetch(&client, &track_id).await
 }
 

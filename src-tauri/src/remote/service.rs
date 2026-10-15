@@ -69,6 +69,11 @@ impl ServerCtx {
 #[async_trait]
 pub trait RemoteEnv: Send + Sync {
     async fn server(&self) -> AppResult<ServerCtx>;
+    /// The server that has the item `id` (`crate::sid`): play queues for a
+    /// song go to the server with its file. Defaults to [`Self::server`].
+    async fn server_for(&self, _id: &str) -> AppResult<ServerCtx> {
+        self.server().await
+    }
     async fn account_token(&self) -> Option<Token>;
     /// The signed-in Plex account's id (its uuid), for the account tag
     /// other Platter devices match on.
@@ -745,7 +750,7 @@ impl RemoteService {
         };
         let (link, play_queue_id): (Arc<dyn LanLink>, Option<String>) = match found.lan.clone() {
             Some(LanDevice::Cast(dev)) => {
-                let server = self.inner.env.server().await?;
+                let server = self.inner.env.server_for(&track.id).await?;
                 let mut tracks = vec![track.clone()];
                 tracks.extend(st.queue.user_queue.iter().map(|i| i.track.clone()));
                 tracks.extend(st.queue.next_up.iter().map(|i| i.track.clone()));
@@ -944,7 +949,7 @@ impl RemoteService {
         let Some(track) = st.track.clone() else {
             return Err(AppError::Invalid("Play something first, then move it.".into()));
         };
-        let server = self.inner.env.server().await?;
+        let server = self.inner.env.server_for(&track.id).await?;
         let mut ids = vec![track.id.clone()];
         ids.extend(st.queue.user_queue.iter().map(|i| i.track.id.clone()));
         ids.extend(st.queue.next_up.iter().map(|i| i.track.id.clone()));
@@ -1391,7 +1396,15 @@ impl RemoteService {
         if let Some(pq) = &t.play_queue_id {
             a.play_queue_id = Some(pq.clone());
         }
-        if let Some(key) = &t.rating_key
+        // Players report the server's own id; the cache's carries its tag.
+        let key = match &t.rating_key {
+            Some(k) => Some(match self.inner.env.server().await {
+                Ok(s) => crate::sid::qualify(&crate::sid::tag(&s.machine_id), k),
+                Err(_) => crate::sid::resolve(k),
+            }),
+            None => None,
+        };
+        if let Some(key) = &key
             && a.session.track.as_ref().is_none_or(|tr| &tr.id != key)
         {
             a.session.track = self

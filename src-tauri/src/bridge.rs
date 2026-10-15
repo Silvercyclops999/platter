@@ -91,6 +91,9 @@ impl AlbumTags {
 pub struct PlexLibrary {
     plex: PlexState,
     tags: Mutex<HashMap<String, Arc<AlbumTags>>>,
+    /// Another included library: its server's tag and its section. None
+    /// reads the connected server (its main library).
+    other: Option<(String, String)>,
 }
 
 impl PlexLibrary {
@@ -98,11 +101,28 @@ impl PlexLibrary {
         Self {
             plex,
             tags: Mutex::new(HashMap::new()),
+            other: None,
+        }
+    }
+
+    /// Reads one library (`section`) of the account's server with `tag`.
+    pub fn other(plex: PlexState, tag: &str, section: &str) -> Self {
+        Self {
+            plex,
+            tags: Mutex::new(HashMap::new()),
+            other: Some((tag.to_string(), section.to_string())),
+        }
+    }
+
+    async fn client(&self) -> AppResult<crate::plex::client::PlexClient> {
+        match &self.other {
+            Some((tag, _)) => self.plex.client_for_tag(tag).await,
+            None => self.plex.client().await,
         }
     }
 
     async fn load_tags(&self, section: &str) -> AppResult<Arc<AlbumTags>> {
-        let client = self.plex.client().await?;
+        let client = self.client().await?;
         let mut lists = Vec::new();
         for field in TAG_FIELDS {
             for value in client.tag_values(section, field, MetaType::Album).await? {
@@ -144,7 +164,7 @@ impl PlexLibrary {
     }
 
     async fn changed(&self, section: &str, ty: MetaType, since: i64) -> AppResult<Vec<PlexMetadata>> {
-        let client = self.plex.client().await?;
+        let client = self.client().await?;
         let mut out = Vec::new();
         let mut start = 0;
         loop {
@@ -163,12 +183,21 @@ impl PlexLibrary {
 
 #[async_trait]
 impl LibrarySource for PlexLibrary {
+    async fn server_tag(&self) -> Option<String> {
+        if let Some((tag, _)) = &self.other {
+            return Some(tag.clone());
+        }
+        self.client().await.ok().and_then(|c| c.tag().map(str::to_string))
+    }
+
     async fn music_sections(&self) -> AppResult<Vec<MusicSection>> {
-        let client = self.plex.client().await?;
+        let client = self.client().await?;
         Ok(client
             .music_sections()
             .await?
             .into_iter()
+            // Another library lists only itself.
+            .filter(|s| self.other.as_ref().is_none_or(|(_, section)| *section == s.id))
             .map(|s| MusicSection {
                 uuid: s.uuid.clone().unwrap_or_else(|| s.id.clone()),
                 id: s.id,
@@ -178,16 +207,16 @@ impl LibrarySource for PlexLibrary {
     }
 
     async fn count(&self, section_id: &str, kind: ItemKind) -> AppResult<u64> {
-        self.plex.client().await?.count(section_id, meta_type(kind)).await
+        self.client().await?.count(section_id, meta_type(kind)).await
     }
 
     async fn artists(&self, section_id: &str, start: u64, size: u64) -> AppResult<Vec<Artist>> {
-        Ok(self.plex.client().await?.artists(section_id, start, size).await?.items)
+        Ok(self.client().await?.artists(section_id, start, size).await?.items)
     }
 
     async fn albums(&self, section_id: &str, start: u64, size: u64) -> AppResult<Vec<Album>> {
         let tags = self.tags(section_id, start == 0).await?;
-        let mut items = self.plex.client().await?.albums(section_id, start, size).await?.items;
+        let mut items = self.client().await?.albums(section_id, start, size).await?.items;
         for a in &mut items {
             tags.apply(a);
         }
@@ -195,7 +224,7 @@ impl LibrarySource for PlexLibrary {
     }
 
     async fn tracks(&self, section_id: &str, start: u64, size: u64) -> AppResult<Vec<Track>> {
-        Ok(self.plex.client().await?.tracks(section_id, start, size).await?.items)
+        Ok(self.client().await?.tracks(section_id, start, size).await?.items)
     }
 
     async fn changed_since(&self, section_id: &str, since: i64) -> AppResult<Changes> {
@@ -222,7 +251,7 @@ impl LibrarySource for PlexLibrary {
     }
 
     async fn items(&self, section_id: &str, ids: &[String]) -> AppResult<Option<Changes>> {
-        let client = self.plex.client().await?;
+        let client = self.client().await?;
         let mut found = Vec::with_capacity(ids.len());
         for chunk in ids.chunks(LIVE_CHUNK) {
             found.extend(client.metadata_many(chunk).await?);
@@ -260,7 +289,7 @@ impl LibrarySource for PlexLibrary {
     }
 
     async fn history(&self, section_id: &str, start: u64, size: u64) -> AppResult<Vec<HistoryEntry>> {
-        let page = self.plex.client().await?.history(section_id, start, size).await?;
+        let page = self.client().await?.history(section_id, start, size).await?;
         Ok(page
             .items
             .into_iter()
@@ -272,11 +301,11 @@ impl LibrarySource for PlexLibrary {
     }
 
     async fn playlists(&self) -> AppResult<Vec<Playlist>> {
-        self.plex.client().await?.playlists().await
+        self.client().await?.playlists().await
     }
 
     async fn rated_tracks(&self, section_id: &str) -> AppResult<Option<Vec<crate::db::likes::Rated>>> {
-        let rated = self.plex.client().await?.rated_tracks(section_id).await?;
+        let rated = self.client().await?.rated_tracks(section_id).await?;
         Ok(Some(
             rated
                 .into_iter()
@@ -286,17 +315,17 @@ impl LibrarySource for PlexLibrary {
     }
 
     async fn artist_similar(&self, artist_id: &str) -> AppResult<Vec<SimilarArtist>> {
-        let m = self.plex.client().await?.metadata(artist_id).await?;
+        let m = self.plex.client_for(artist_id).await?.metadata(artist_id).await?;
         Ok(m.similar_artists().into_iter().map(|(id, name)| SimilarArtist { id, name }).collect())
     }
 
     async fn playlist_entries(&self, playlist_id: &str) -> AppResult<Vec<PlaylistEntry>> {
-        let rows = self.plex.client().await?.playlist_rows(playlist_id).await?;
+        let rows = self.client().await?.playlist_rows(playlist_id).await?;
         Ok(rows.into_iter().map(|(track_id, item_id)| PlaylistEntry { track_id, item_id }).collect())
     }
 
     async fn playlist_items(&self, playlist_id: &str) -> AppResult<Vec<String>> {
-        let client = self.plex.client().await?;
+        let client = self.client().await?;
         let mut out = Vec::new();
         let mut start = 0;
         loop {
@@ -351,7 +380,7 @@ pub struct PlexArt(pub PlexState);
 #[async_trait]
 impl ArtFetcher for PlexArt {
     async fn fetch(&self, path: &str, width: u32, height: u32) -> AppResult<ArtBytes> {
-        let bytes = self.0.client_when_ready(STARTUP_WAIT).await?.photo(path, width, height).await?;
+        let bytes = self.0.client_for_when_ready(path, STARTUP_WAIT).await?.photo(path, width, height).await?;
         let content_type = sniff_content_type(&bytes).to_string();
         Ok(ArtBytes { bytes, content_type })
     }
@@ -431,7 +460,7 @@ fn source_of(req: crate::plex::client::StreamRequest, codec: Option<String>) -> 
 #[async_trait]
 impl TrackResolver for PlexStreams {
     async fn stream(&self, track: &Track) -> AppResult<StreamSource> {
-        let client = self.0.client_when_ready(STARTUP_WAIT).await?;
+        let client = self.0.client_for_when_ready(&track.id, STARTUP_WAIT).await?;
         let prefs = &self.1;
         if let Some(kbps) = stream_cap_kbps(client.connection(), track.bitrate, prefs.home(), prefs.away()) {
             let session = uuid::Uuid::new_v4().to_string();
@@ -444,7 +473,7 @@ impl TrackResolver for PlexStreams {
 
     async fn transcode(&self, track: &Track) -> AppResult<StreamSource> {
         let session = uuid::Uuid::new_v4().to_string();
-        let req = self.0.client().await?.transcode_request(&track.id, 320, &session)?;
+        let req = self.0.client_for(&track.id).await?.transcode_request(&track.id, 320, &session)?;
         Ok(source_of(req, Some("mp3".into())))
     }
 
@@ -458,7 +487,7 @@ impl TrackResolver for PlexStreams {
             return Some(a);
         }
         let mut a = cached.map(|c| c.0).unwrap_or_default();
-        let Ok(client) = self.0.client().await else { return Some(a) };
+        let Ok(client) = self.0.client_for(&track.id).await else { return Some(a) };
         match client.track(&track.id).await {
             Ok((_, stream)) => {
                 let s = stream.unwrap_or_default();
@@ -564,7 +593,8 @@ impl TrackLookup for CacheLookup {
     }
 
     async fn tracks(&self, ids: &[String]) -> AppResult<Vec<Track>> {
-        let ids = ids.to_vec();
+        // Ids saved before server tags (links, other players) still match.
+        let ids = crate::sid::resolve_all(ids);
         self.0.read_async(move |c| queries::tracks_by_ids(c, &ids)).await
     }
 
@@ -633,7 +663,9 @@ impl CacheLookup {
         ctx: &PlayContext,
         view: crate::tags::TagView,
     ) -> AppResult<(ResolvedContext, crate::tags::store::Skipped)> {
-        let ctx = ctx.clone();
+        let mut ctx = ctx.clone();
+        ctx.id = ctx.id.as_deref().map(crate::sid::resolve);
+        ctx.track_ids = ctx.track_ids.as_deref().map(crate::sid::resolve_all);
         let popular = self.0.popular_source();
         let liked_min = crate::settings::load(&self.0).liked_min_rating();
         // Popular leaves hidden songs and artists out.
@@ -656,6 +688,8 @@ impl CacheLookup {
             }
             _ => None,
         };
+        // Songs on more than one server play from the best copy (db::merge).
+        let ranks = matches!(self.0.server_view(), crate::db::merge::ServerView::All).then(|| self.0.source_ranks());
         self.0
             .read_async(move |c| {
                 let hidden = crate::tags::store::hidden_albums(c, view)?;
@@ -735,6 +769,9 @@ impl CacheLookup {
                     },
                 };
                 let skipped = crate::tags::store::drop_hidden(c, &mut resolved.tracks, view)?;
+                if let Some(ranks) = &ranks {
+                    crate::db::merge::best_copies(c, &mut resolved.tracks, ranks)?;
+                }
                 Ok((resolved, skipped))
             })
             .await
@@ -791,7 +828,7 @@ mod tests {
     }
 
     fn album(id: &str) -> Album {
-        Album {
+        Album { mbid: None,
             id: id.into(),
             title: "t".into(),
             sort_title: "t".into(),

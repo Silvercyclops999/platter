@@ -1,6 +1,6 @@
 //! Rewrite a cache from before server-qualified ids (`crate::sid`) in place.
 //!
-//! Migration v20 marks the cache (`kv` `ids.pending`). The rewrite itself
+//! Migration v21 marks the cache (`kv` `ids.pending`). The rewrite itself
 //! needs the tag of the server the library came from, which only the Plex
 //! side knows, so it runs here once that's known: at startup from the saved
 //! server choice, or when the first server is picked. One transaction puts

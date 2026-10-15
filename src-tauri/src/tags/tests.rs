@@ -491,7 +491,7 @@ async fn reads_queue_behind_other_transfers_and_yield_to_playback() {
 // ------------------------------------------------------------------ cache and scan
 
 fn album(id: &str, artist: &str, year: Option<i32>, added: i64, subformats: &[&str]) -> Album {
-    Album {
+    Album { mbid: None,
         id: id.into(),
         title: format!("Album {id}"),
         sort_title: format!("Album {id}"),

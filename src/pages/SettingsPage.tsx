@@ -35,6 +35,7 @@ import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { MixExclusions } from "./MixExclusions";
+import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { FeedNote, FeedPortField, useFeedStatus } from "./FeedSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
@@ -707,6 +708,15 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "abLoopHandles", ids),
     },
     // Library
+    {
+      key: "libraries",
+      section: "Library",
+      title: "Servers and libraries",
+      description:
+        "Add music from your other Plex servers and from servers shared with you. With more than one server, the sidebar lets you look at one or all of them, and an album on two servers shows once and plays from the best copy. This device only.",
+      control: () => <LibraryCount settings={s} />,
+      block: () => <LibrarySourceList settings={s} />,
+    },
     {
       key: "popularSource",
       section: "Library",

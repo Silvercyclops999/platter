@@ -301,6 +301,20 @@ sampled tracks the MusicBrainz recording lookup answered 404 and a search by
 track id found each one. None of the 63 matched a ListenBrainz recording id,
 so the app doesn't store them.
 
+### 2026-10-14: list items with MusicBrainz ids, and other servers
+
+Album and track list calls send `includeGuids=1` so each item comes with its
+`Guid` array; the `mbid://` entry is kept to find the same album or song on
+another server. Nothing else changes in the answer.
+
+Other servers on the account are reached the same way as the connected one:
+their connections from the resources list, local address first, then remote
+access, then the relay. A shared server takes its own `accessToken` from the
+resources list. Each server's item ids are its own; the app puts the
+server's tag on every id it reads and takes it off before a request, and
+refuses to send another server's id to a server. Not yet checked against a
+real second server.
+
 ### 2026-10-14: artist list vs artist detail
 
 Artist list items carry summary and art; Similar, Genre/Style/Mood and

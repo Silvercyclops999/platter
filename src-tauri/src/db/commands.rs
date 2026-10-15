@@ -46,9 +46,11 @@ pub async fn sync_now(db: State<'_, DbHandle>, full: Option<bool>) -> AppResult<
 #[tauri::command]
 pub async fn home(db: State<'_, DbHandle>) -> AppResult<HomeData> {
     let view = db.tag_view();
+    let server = db.server_view();
     db.read_async(move |c| {
         let mut data = queries::home(c, now_s())?;
         crate::tags::view::home(c, &mut data, view)?;
+        super::merge::ViewFilter::load(c, &server)?.home(&mut data);
         Ok(data)
     })
     .await
@@ -59,10 +61,12 @@ pub async fn home(db: State<'_, DbHandle>) -> AppResult<HomeData> {
 pub async fn home_shelf(db: State<'_, DbHandle>, shelf: HomeShelf, limit: Option<u32>) -> AppResult<Vec<HomeItem>> {
     let limit = limit.unwrap_or(queries::SHELF_ALL_MAX as u32);
     let view = db.tag_view();
+    let server = db.server_view();
     db.read_async(move |c| {
         let mut items = queries::home_shelf(c, now_s(), shelf, limit)?;
         let albums_shelf = matches!(shelf, HomeShelf::RecentlyAdded | HomeShelf::JumpBackIn);
         crate::tags::view::home_items(c, &mut items, view, albums_shelf)?;
+        super::merge::ViewFilter::load(c, &server)?.home_items(&mut items);
         Ok(items)
     })
     .await
@@ -76,7 +80,8 @@ pub async fn artists(
     limit: Option<u32>,
 ) -> AppResult<Page<crate::model::Artist>> {
     let (sort, offset, limit) = (sort.unwrap_or_default(), offset.unwrap_or(0), limit.unwrap_or(100));
-    db.read_async(move |c| queries::artists(c, sort, offset, limit)).await
+    let server = db.server_view();
+    db.read_async(move |c| queries::artists_on(c, sort, offset, limit, &server)).await
 }
 
 #[tauri::command]
@@ -89,7 +94,8 @@ pub async fn albums(
 ) -> AppResult<Page<crate::model::Album>> {
     let (sort, offset, limit) = (sort.unwrap_or_default(), offset.unwrap_or(0), limit.unwrap_or(100));
     let view = db.tag_view();
-    db.read_async(move |c| queries::albums_view(c, sort, offset, limit, section, view)).await
+    let server = db.server_view();
+    db.read_async(move |c| queries::albums_view_on(c, sort, offset, limit, section, view, &server)).await
 }
 
 #[tauri::command]
@@ -99,13 +105,25 @@ pub async fn artist_names(db: State<'_, DbHandle>) -> AppResult<Vec<ArtistName>>
 
 #[tauri::command]
 pub async fn playlists(db: State<'_, DbHandle>) -> AppResult<Vec<Playlist>> {
-    db.read_async(queries::playlists).await
+    let server = db.server_view();
+    db.read_async(move |c| {
+        let mut out = queries::playlists(c)?;
+        super::merge::ViewFilter::load(c, &server)?.playlists(&mut out);
+        Ok(out)
+    })
+    .await
 }
 
 /// Every playlist, album and artist for the library sidebar.
 #[tauri::command]
 pub async fn library_items(db: State<'_, DbHandle>) -> AppResult<Vec<LibraryItem>> {
-    db.read_async(queries::library_items).await
+    let server = db.server_view();
+    db.read_async(move |c| {
+        let mut out = queries::library_items(c)?;
+        super::merge::ViewFilter::load(c, &server)?.library_items(&mut out);
+        Ok(out)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -118,11 +136,13 @@ pub async fn artist_page(
     let source = db.popular_source();
     let key = id.clone();
     let view = db.tag_view();
+    let server = db.server_view();
     let hidden = hidden.ids().get();
     let started = std::time::Instant::now();
     let mut page = db
         .read_async(move |c| {
             let mut page = queries::artist_page_with(c, &key, source, Some(&hidden))?;
+            super::merge::ViewFilter::load(c, &server)?.artist_page(c, &mut page)?;
             crate::tags::view::artist_page(c, &mut page, view)?;
             Ok(page)
         })
@@ -162,7 +182,11 @@ pub async fn search(
     filter: Option<SearchFilter>,
     limit: Option<u32>,
 ) -> AppResult<SearchResults> {
-    search::search_with_fallback(db.inner(), &query, filter.unwrap_or_default(), limit).await
+    let mut out = search::search_with_fallback(db.inner(), &query, filter.unwrap_or_default(), limit).await?;
+    let server = db.server_view();
+    let f = db.read_async(move |c| super::merge::ViewFilter::load(c, &server)).await?;
+    f.search(&mut out);
+    Ok(out)
 }
 
 #[tauri::command]

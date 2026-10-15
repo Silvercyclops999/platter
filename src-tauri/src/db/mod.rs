@@ -28,8 +28,10 @@ pub mod history;
 pub mod likes;
 pub mod listens;
 pub mod live;
+pub mod merge;
 pub mod playlists;
 pub mod popular;
+pub mod qualify;
 pub mod queries;
 pub mod release;
 pub mod schema;
@@ -45,6 +47,8 @@ pub mod types;
 pub(crate) mod fake;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod libraries_tests;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -94,6 +98,14 @@ struct Inner {
     tag_view: AtomicU8,
     /// Artist ids with a similar-artists fetch in flight (db::similar).
     similar_in_flight: Mutex<HashSet<String>>,
+    /// Included libraries besides the main one (Settings, Library).
+    extra: Mutex<Vec<sync::ExtraLibrary>>,
+    /// Which server the library shows (`merge::ServerView`, the sidebar
+    /// switcher).
+    server_view: Mutex<merge::ServerView>,
+    /// How good a source each server is right now (`merge::Rank`), for
+    /// choosing between copies of the same song.
+    ranks: Mutex<std::collections::HashMap<String, merge::Rank>>,
 }
 
 impl DbHandle {
@@ -105,6 +117,9 @@ impl DbHandle {
         }
         let mut writer = schema::open_writer(&path)?;
         schema::migrate(&mut writer)?;
+        if let Some(t) = qualify::legacy_tag(&writer)? {
+            crate::sid::set_legacy(Some(t));
+        }
         Ok(Self {
             inner: Arc::new(Inner {
                 path,
@@ -120,12 +135,75 @@ impl DbHandle {
                 link_featured: AtomicBool::new(true),
                 tag_view: AtomicU8::new(crate::tags::TagView::default().bits()),
                 similar_in_flight: Mutex::new(HashSet::new()),
+                extra: Mutex::new(Vec::new()),
+                server_view: Mutex::new(merge::ServerView::All),
+                ranks: Mutex::new(std::collections::HashMap::new()),
             }),
         })
     }
 
+    /// The included libraries besides the main one. Takes effect on the
+    /// next sync, which also drops the rows of libraries left out.
+    pub fn set_extra_libraries(&self, libs: Vec<sync::ExtraLibrary>) {
+        *self.inner.extra.lock() = libs;
+    }
+
+    pub fn extra_libraries(&self) -> Vec<sync::ExtraLibrary> {
+        self.inner.extra.lock().clone()
+    }
+
+    /// Show one server's music, or every included server's merged.
+    pub fn set_server_view(&self, view: merge::ServerView) {
+        *self.inner.server_view.lock() = view;
+    }
+
+    pub fn server_view(&self) -> merge::ServerView {
+        self.inner.server_view.lock().clone()
+    }
+
+    /// How good a source a server is now (its connection; None forgets it).
+    pub fn set_source_rank(&self, tag: &str, rank: Option<merge::Rank>) {
+        let mut r = self.inner.ranks.lock();
+        match rank {
+            Some(k) => {
+                r.insert(tag.to_string(), k);
+            }
+            None => {
+                r.remove(tag);
+            }
+        }
+    }
+
+    pub fn source_ranks(&self) -> std::collections::HashMap<String, merge::Rank> {
+        self.inner.ranks.lock().clone()
+    }
+
     pub fn path(&self) -> &Path {
         &self.inner.path
+    }
+
+    /// Put the server tag on the ids of a cache from before tags (once; see
+    /// [`qualify`]). The tag becomes the one older plain ids resolve to.
+    pub fn qualify_legacy(&self, tag: &str) -> AppResult<usize> {
+        let started = std::time::Instant::now();
+        let n = {
+            let mut w = self.inner.writer.lock();
+            let n = qualify::qualify_legacy(&mut w, tag)?;
+            if let Some(t) = qualify::legacy_tag(&w)? {
+                crate::sid::set_legacy(Some(t));
+            }
+            n
+        };
+        if n > 0 {
+            tracing::info!(rows = n, ms = started.elapsed().as_millis() as u64, "cache ids now carry their server");
+            self.bump_generation();
+        }
+        Ok(n)
+    }
+
+    /// The rewrite in [`Self::qualify_legacy`] is still owed.
+    pub fn ids_pending(&self) -> bool {
+        self.read(qualify::pending).unwrap_or(false)
     }
 
     /// Plug in the Plex-backed library source (integrator).

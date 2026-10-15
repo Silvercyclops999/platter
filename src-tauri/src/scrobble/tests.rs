@@ -40,7 +40,7 @@ impl Unreleased for Unrel {
 }
 
 fn track(id: &str, ms: u64) -> Track {
-    Track {
+    Track { mbid: None,
         id: id.into(),
         title: format!("Song {id}"),
         album_id: "a".into(),

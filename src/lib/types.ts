@@ -153,6 +153,40 @@ export interface ServerInfo {
   connection?: ConnectionKind | null;
 }
 
+/** A music library on one of the account's servers (Settings, Library). */
+export interface SourceLibrary {
+  id: string;
+  title: string;
+  included: boolean;
+  /** The connected server's main library: always included. */
+  main: boolean;
+}
+
+/** A server on the account, owned or shared, and its music libraries. */
+export interface SourceServer {
+  machineId: string;
+  /** The server's tag, which its item ids carry (see lib/ids.ts). */
+  tag: string;
+  name: string;
+  owned: boolean;
+  /** The server Platter is connected to. */
+  current: boolean;
+  online: boolean;
+  connection?: ConnectionKind | null;
+  libraries: SourceLibrary[];
+}
+
+export interface LibrarySources {
+  servers: SourceServer[];
+}
+
+/** The servers the library has music from, for the sidebar switcher. */
+export interface LibraryServers {
+  servers: { tag: string; name: string }[];
+  /** "all" or a server tag. */
+  view: string;
+}
+
 export interface AuthStatus {
   state: "signedOut" | "pending" | "signedIn";
   username?: string | null;
@@ -723,6 +757,10 @@ export interface Settings {
   discordStatusLine: DiscordStatusLine;
   /** The top bar shows the Plex profile picture. This device only. */
   showPlexAvatar: boolean;
+  /** Libraries included besides the main one, as `<machine id>/<section id>`. This device only. */
+  libraries: string[];
+  /** What the library shows with more than one server: "all" or a server tag. This device only. */
+  serverView: string;
   /** The lyrics view opens by itself for songs with synced lyrics. */
   lyricsMode: LyricsMode;
   /** Look lyrics up on LRCLIB when Plex has none. */
@@ -987,6 +1025,8 @@ export const DEFAULT_SETTINGS: Settings = {
   discordUploadCatbox: false,
   discordStatusLine: "app",
   showPlexAvatar: true,
+  libraries: [],
+  serverView: "all",
   lyricsMode: "autoShow",
   lyricsLrclib: false,
   lyricsPreferOwn: false,

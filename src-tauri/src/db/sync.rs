@@ -104,6 +104,24 @@ struct Ctx {
     cancel: Arc<AtomicBool>,
     last_changed_emit: Mutex<Option<Instant>>,
     last_sync_at: Option<i64>,
+    /// Which library's rows this run reads and removes (`store::MAIN_SRC`
+    /// for the connected server's main library).
+    src: String,
+    /// The server whose playlists this run mirrors: None for none (another
+    /// library on a server already done), Some(None) for every playlist (no
+    /// server tags, tests), Some(Some(tag)) for that server's.
+    playlists: Option<Option<String>>,
+}
+
+/// A library besides the connected server's main one (Settings, Library).
+#[derive(Clone)]
+pub struct ExtraLibrary {
+    /// `store::src_of(tag, section)`.
+    pub src: String,
+    /// The server's tag (`crate::sid`).
+    pub tag: String,
+    /// Reads that one library from its server.
+    pub source: Arc<dyn LibrarySource>,
 }
 
 impl Ctx {
@@ -139,15 +157,31 @@ async fn run_inner(
     full: bool,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<SyncOutcome> {
+    // A cache from before server tags gets them first, so rows read now
+    // update the same rows instead of adding copies.
+    if db.ids_pending()
+        && let Some(tag) = source.server_tag().await
+    {
+        let db2 = db.clone();
+        tokio::task::spawn_blocking(move || db2.qualify_legacy(&tag))
+            .await
+            .map_err(|e| AppError::Internal(format!("id rewrite: {e}")))??;
+    }
     let prev = db.read_async(store::sync_state).await?;
+    let main_tag = source.server_tag().await;
     let ctx = Ctx {
         db: db.clone(),
         source,
-        cancel,
+        cancel: cancel.clone(),
         last_changed_emit: Mutex::new(None),
         last_sync_at: prev.as_ref().and_then(|p| p.last_sync_at),
+        src: store::MAIN_SRC.to_string(),
+        playlists: Some(main_tag.clone()),
     };
     let res = run_ctx(&ctx, prev, full).await;
+    if res.as_ref().is_ok_and(|o| !matches!(o, SyncOutcome::Cancelled)) {
+        sync_extra_libraries(&db, main_tag.as_deref(), full, &cancel).await;
+    }
     // Always settle back to idle, even on error.
     let last = db.read_async(store::sync_state).await.ok().flatten().and_then(|s| s.last_sync_at);
     let idle = SyncStatus { phase: SyncPhase::Idle, done: 0, total: 0, last_sync_at: last };
@@ -164,10 +198,73 @@ async fn run_inner(
     res
 }
 
+/// Sync every other included library after the main one, then drop the
+/// rows of libraries no longer included and find what's the same on more
+/// than one server (db::merge). A library that fails is logged and skipped.
+async fn sync_extra_libraries(db: &DbHandle, main_tag: Option<&str>, full: bool, cancel: &Arc<AtomicBool>) {
+    // The main library is synced already, whatever the list says.
+    let main_src = match (main_tag, db.read_async(store::sync_state).await.ok().flatten()) {
+        (Some(t), Some(st)) => Some(store::src_of(t, &st.section_id)),
+        _ => None,
+    };
+    let extras: Vec<ExtraLibrary> = db.extra_libraries().into_iter().filter(|l| Some(&l.src) != main_src.as_ref()).collect();
+    let mut playlists_done: HashSet<String> = main_tag.map(str::to_string).into_iter().collect();
+    for lib in &extras {
+        if cancel.load(Ordering::Acquire) {
+            return;
+        }
+        let src = lib.src.clone();
+        let prev = match db.read_async(move |c| store::sync_state_in(c, &src)).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("library {} not synced: {e}", lib.src);
+                continue;
+            }
+        };
+        let ctx = Ctx {
+            db: db.clone(),
+            source: lib.source.clone(),
+            cancel: cancel.clone(),
+            last_changed_emit: Mutex::new(None),
+            last_sync_at: prev.as_ref().and_then(|p| p.last_sync_at),
+            src: lib.src.clone(),
+            playlists: playlists_done.insert(lib.tag.clone()).then(|| Some(lib.tag.clone())),
+        };
+        match run_ctx(&ctx, prev, full).await {
+            Ok(outcome) => tracing::info!(src = %lib.src, ?outcome, "other library synced"),
+            Err(e) => tracing::warn!("library {} not synced: {e}", lib.src),
+        }
+    }
+    let keep: Vec<String> = extras.iter().map(|l| l.src.clone()).collect();
+    // Without the main server's tag there's no telling whose playlists are whose.
+    let tags: Option<Vec<String>> = main_tag.map(|_| playlists_done.into_iter().collect());
+    let merged = db
+        .write_async(move |c| {
+            let tx = c.transaction()?;
+            let dropped = store::drop_libraries_except(&tx, &keep)?;
+            if let Some(tags) = &tags {
+                store::drop_playlists_except(&tx, tags)?;
+            }
+            super::merge::rebuild(&tx)?;
+            tx.commit()?;
+            Ok(dropped)
+        })
+        .await;
+    match merged {
+        Ok(n) if n > 0 => tracing::info!(rows = n, "libraries no longer included removed"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("libraries not merged: {e}"),
+    }
+}
+
 async fn pick_section(ctx: &Ctx, prev: Option<&SyncState>) -> AppResult<Option<MusicSection>> {
     let sections = ctx.source.music_sections().await?;
     if sections.is_empty() {
         return Ok(None);
+    }
+    if ctx.src != store::MAIN_SRC {
+        // The source reads one library; it's the only section it lists.
+        return Ok(sections.into_iter().next());
     }
     let wanted = ctx.db.read_async(|c| store::kv_get(c, SELECTED_SECTION_KEY)).await?;
     let by_id = |id: &str| sections.iter().find(|s| s.id == id).cloned();
@@ -188,10 +285,11 @@ async fn run_ctx(ctx: &Ctx, prev: Option<SyncState>, full: bool) -> AppResult<Sy
     let replaced = prev.as_ref().is_some_and(|p| p.section_uuid != section.uuid);
     if replaced {
         tracing::info!(old = ?prev.as_ref().map(|p| &p.section_uuid), new = %section.uuid, "library replaced; rebuilding cache");
+        let src = ctx.src.clone();
         ctx.db
-            .write_async(|c| {
+            .write_async(move |c| {
                 let tx = c.transaction()?;
-                store::wipe_library(&tx)?;
+                store::wipe_library_in(&tx, &src)?;
                 tx.commit()?;
                 Ok(())
             })
@@ -221,8 +319,8 @@ async fn run_ctx(ctx: &Ctx, prev: Option<SyncState>, full: bool) -> AppResult<Sy
         state.generation += 1;
         // Record the section before paging so a restart mid-sync knows it.
         {
-            let s = state.clone();
-            ctx.db.write_async(move |c| store::put_sync_state(c, &s)).await?;
+            let (s, src) = (state.clone(), ctx.src.clone());
+            ctx.db.write_async(move |c| store::put_sync_state_in(c, &src, &s)).await?;
         }
         match full_pass(ctx, &section.id, state.generation).await? {
             None => return Ok(SyncOutcome::Cancelled),
@@ -247,15 +345,17 @@ async fn run_ctx(ctx: &Ctx, prev: Option<SyncState>, full: bool) -> AppResult<Sy
         return Ok(SyncOutcome::Cancelled);
     }
     sync_history(ctx, &section.id).await?;
-    sync_playlists(ctx, do_full).await?;
+    if let Some(owner) = &ctx.playlists {
+        sync_playlists(ctx, do_full, owner.as_deref()).await?;
+    }
     // Ratings changed in other Plex apps don't always show in updatedAt.
     if let Err(e) = sync_ratings(ctx, &section.id).await {
         tracing::warn!("ratings not synced: {e}");
     }
 
     state.last_sync_at = Some(started);
-    let s = state.clone();
-    ctx.db.write_async(move |c| store::put_sync_state(c, &s)).await?;
+    let (s, src) = (state.clone(), ctx.src.clone());
+    ctx.db.write_async(move |c| store::put_sync_state_in(c, &src, &s)).await?;
     ctx.changed(true);
     // Build the typo vocabulary now so the first search doesn't pay for it.
     let db = ctx.db.clone();
@@ -307,13 +407,14 @@ async fn full_pass(ctx: &Ctx, section_id: &str, gen_: i64) -> AppResult<Option<(
     if ctx.cancelled() {
         return Ok(None);
     }
+    let src = ctx.src.clone();
     let deleted = ctx
         .db
         .write_async(move |c| {
             let tx = c.transaction()?;
             let mut n = 0;
             for k in [ItemKind::Track, ItemKind::Album, ItemKind::Artist] {
-                n += store::delete_unseen(&tx, k, gen_)?;
+                n += store::delete_unseen_in(&tx, k, gen_, &src)?;
             }
             tx.commit()?;
             Ok(n)
@@ -333,9 +434,10 @@ async fn fetch_and_store_page(
         ItemKind::Artist => {
             let items = ctx.source.artists(section_id, start, PAGE_SIZE).await?;
             let n = items.len() as u64;
+            let src = ctx.src.clone();
             ctx.db.write_async(move |c| {
                 let tx = c.transaction()?;
-                store::upsert_artists(&tx, &items, gen_)?;
+                store::upsert_artists_in(&tx, &items, gen_, &src)?;
                 tx.commit()?;
                 Ok(())
             })
@@ -345,9 +447,10 @@ async fn fetch_and_store_page(
         ItemKind::Album => {
             let items = ctx.source.albums(section_id, start, PAGE_SIZE).await?;
             let n = items.len() as u64;
+            let src = ctx.src.clone();
             ctx.db.write_async(move |c| {
                 let tx = c.transaction()?;
-                store::upsert_albums(&tx, &items, gen_)?;
+                store::upsert_albums_in(&tx, &items, gen_, &src)?;
                 tx.commit()?;
                 Ok(())
             })
@@ -357,9 +460,10 @@ async fn fetch_and_store_page(
         ItemKind::Track => {
             let items = ctx.source.tracks(section_id, start, PAGE_SIZE).await?;
             let n = items.len() as u64;
+            let src = ctx.src.clone();
             ctx.db.write_async(move |c| {
                 let tx = c.transaction()?;
-                store::upsert_tracks(&tx, &items, gen_)?;
+                store::upsert_tracks_in(&tx, &items, gen_, &src)?;
                 tx.commit()?;
                 Ok(())
             })
@@ -379,12 +483,13 @@ async fn incremental_pass(ctx: &Ctx, section_id: &str, since: i64, gen_: i64) ->
         return Ok(None);
     }
     if changed > 0 {
+        let src = ctx.src.clone();
         ctx.db
             .write_async(move |c| {
                 let tx = c.transaction()?;
-                store::upsert_artists(&tx, &changes.artists, gen_)?;
-                store::upsert_albums(&tx, &changes.albums, gen_)?;
-                store::upsert_tracks(&tx, &changes.tracks, gen_)?;
+                store::upsert_artists_in(&tx, &changes.artists, gen_, &src)?;
+                store::upsert_albums_in(&tx, &changes.albums, gen_, &src)?;
+                store::upsert_tracks_in(&tx, &changes.tracks, gen_, &src)?;
                 if !changes.albums.is_empty() {
                     store::refresh_artist_recency(&tx)?;
                 }
@@ -405,13 +510,14 @@ async fn incremental_pass(ctx: &Ctx, section_id: &str, since: i64, gen_: i64) ->
         let ids: HashSet<String> = ctx.source.all_ids(section_id, kind).await?.into_iter().collect();
         keep.push((kind, ids));
     }
+    let src = ctx.src.clone();
     let deleted = ctx
         .db
         .write_async(move |c| {
             let tx = c.transaction()?;
             let mut n = 0;
             for (kind, ids) in &keep {
-                n += store::delete_missing(&tx, *kind, ids)?;
+                n += store::delete_missing_in(&tx, *kind, ids, &src)?;
             }
             tx.commit()?;
             Ok(n)
@@ -444,13 +550,14 @@ async fn sync_history(ctx: &Ctx, section_id: &str) -> AppResult<()> {
     Ok(())
 }
 
-async fn sync_playlists(ctx: &Ctx, force_items: bool) -> AppResult<()> {
+async fn sync_playlists(ctx: &Ctx, force_items: bool, owner: Option<&str>) -> AppResult<()> {
+    let owner = owner.map(str::to_string);
     let lists = ctx.source.playlists().await?;
     let stale = ctx
         .db
         .write_async(move |c| {
             let tx = c.transaction()?;
-            let stale = store::replace_playlists(&tx, &lists, force_items)?;
+            let stale = store::replace_playlists_in(&tx, &lists, force_items, owner.as_deref())?;
             tx.commit()?;
             Ok(stale)
         })
@@ -492,11 +599,12 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool) -> AppResult<()> {
 
 async fn sync_ratings(ctx: &Ctx, section_id: &str) -> AppResult<()> {
     let Some(rated) = ctx.source.rated_tracks(section_id).await? else { return Ok(()) };
+    let src = ctx.src.clone();
     let changed = ctx
         .db
         .write_async(move |c| {
             let tx = c.transaction()?;
-            let changed = super::likes::apply_rated(&tx, &rated)?;
+            let changed = super::likes::apply_rated_in(&tx, &rated, &src)?;
             tx.commit()?;
             Ok(changed)
         })
@@ -512,4 +620,9 @@ async fn sync_ratings(ctx: &Ctx, section_id: &str) -> AppResult<()> {
 /// replaced" and rebuilds the cache.
 pub fn select_section(db: &DbHandle, section_id: &str) -> AppResult<()> {
     db.write(|c| store::kv_set(c, SELECTED_SECTION_KEY, section_id))
+}
+
+/// The section chosen with [`select_section`], if any.
+pub fn selected_section(db: &DbHandle) -> Option<String> {
+    db.read(|c| store::kv_get(c, SELECTED_SECTION_KEY)).ok().flatten()
 }

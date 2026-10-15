@@ -1042,7 +1042,7 @@ pub struct PlexMbid(pub crate::plex::PlexState);
 #[async_trait]
 impl MbidLookup for PlexMbid {
     async fn artist_mbid(&self, artist_id: &str) -> AppResult<Option<String>> {
-        Ok(self.0.client().await?.metadata(artist_id).await?.mbid())
+        Ok(self.0.client_for(artist_id).await?.metadata(artist_id).await?.mbid())
     }
 
     async fn album_mbid(&self, album_id: &str) -> AppResult<Option<String>> {

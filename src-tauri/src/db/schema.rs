@@ -59,6 +59,18 @@ pub fn migrate(conn: &mut Connection) -> AppResult<()> {
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
+/// A database as an older build left it: migrations up to `version` only.
+#[cfg(test)]
+pub(crate) fn migrate_to(conn: &mut Connection, version: usize) -> AppResult<()> {
+    for (i, sql) in MIGRATIONS[..version].iter().enumerate() {
+        let tx = conn.transaction()?;
+        tx.execute_batch(sql)?;
+        tx.pragma_update(None, "user_version", i as i64 + 1)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
 const MIGRATIONS: &[&str] = &[
     // v1 — library cache, search index, listen log, settings.
     // FTS tables: case- and diacritic-insensitive, prefix indexes for
@@ -568,6 +580,36 @@ CREATE TABLE IF NOT EXISTS sync_entries (
     r#"
 ALTER TABLE albums ADD COLUMN matched INTEGER;
 UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
+    // v21: server-qualified ids (crate::sid). Every Plex id and server image
+    // path in the cache gets its server's tag. That needs the server's
+    // machine id, so this only marks the rewrite as owed; db::qualify does
+    // it in place once the server is known and keeps that tag as the one
+    // older plain ids map to.
+    r#"
+INSERT OR REPLACE INTO kv (key, value) VALUES ('ids.pending', '1');
+"#,
+    // v22: more than one library. `src` names the library a row was read
+    // from ('' for the connected server's main library, which every row
+    // before this came from; `<server tag>/<section id>` for the others), so
+    // each library's sync only adds and removes its own rows. `mbid` holds
+    // the MusicBrainz id Plex matched, and `dupes` the albums, songs and
+    // artists that are the same as one on another server (db::merge).
+    r#"
+ALTER TABLE artists ADD COLUMN src TEXT NOT NULL DEFAULT '';
+ALTER TABLE albums ADD COLUMN src TEXT NOT NULL DEFAULT '';
+ALTER TABLE tracks ADD COLUMN src TEXT NOT NULL DEFAULT '';
+ALTER TABLE albums ADD COLUMN mbid TEXT;
+ALTER TABLE tracks ADD COLUMN mbid TEXT;
+CREATE INDEX IF NOT EXISTS artists_src ON artists (src);
+CREATE INDEX IF NOT EXISTS albums_src ON albums (src);
+CREATE INDEX IF NOT EXISTS tracks_src ON tracks (src);
+CREATE TABLE IF NOT EXISTS dupes (
+    id    TEXT PRIMARY KEY,
+    kind  TEXT NOT NULL,
+    canon TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS dupes_canon ON dupes (canon);
 "#,
 ];
 

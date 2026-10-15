@@ -7,6 +7,10 @@ and your own Plex server.
 
 - Your Plex server, for browsing, streaming, artwork, and reporting plays and
   progress (so your other Plex apps stay in sync).
+- Your other Plex servers and servers shared with you, only for the libraries
+  you include in Settings (and to list their libraries while Settings is
+  open). Plays, likes and playlists for their songs go to the server that
+  has the file.
 - plex.tv, to sign in (a PIN flow in your browser), to look up your
   server's addresses, to list your other Plex players, to list and switch
   Plex Home users, and to publish this computer's local addresses for your

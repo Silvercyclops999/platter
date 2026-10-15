@@ -42,7 +42,7 @@ fn json_vec(s: String) -> Vec<String> {
 
 pub fn row_album(r: &Row<'_>) -> rusqlite::Result<Album> {
     let section: String = r.get(9)?;
-    Ok(Album {
+    Ok(Album { mbid: None,
         id: r.get(0)?,
         title: r.get(1)?,
         sort_title: r.get(2)?,
@@ -68,7 +68,7 @@ pub fn row_album(r: &Row<'_>) -> rusqlite::Result<Album> {
 }
 
 pub fn row_track(r: &Row<'_>) -> rusqlite::Result<Track> {
-    Ok(Track {
+    Ok(Track { mbid: None,
         id: r.get(0)?,
         title: r.get(1)?,
         album_id: r.get(2)?,
@@ -113,26 +113,45 @@ pub fn row_playlist(r: &Row<'_>) -> rusqlite::Result<Playlist> {
 /// Upsert artists, stamping `seen_gen` (used to find deletions after a full
 /// pass).
 pub fn upsert_artists(tx: &Transaction<'_>, items: &[Artist], gen_: i64) -> AppResult<()> {
+    upsert_artists_in(tx, items, gen_, MAIN_SRC)
+}
+
+/// The rows from the connected server's main library carry this `src`;
+/// every other library's rows carry [`src_of`].
+pub const MAIN_SRC: &str = "";
+
+/// The `src` of rows read from a server's library (`<tag>/<section id>`).
+pub fn src_of(server_tag: &str, section_id: &str) -> String {
+    format!("{server_tag}/{section_id}")
+}
+
+/// [`upsert_artists`] for rows of library `src`.
+pub fn upsert_artists_in(tx: &Transaction<'_>, items: &[Artist], gen_: i64, src: &str) -> AppResult<()> {
     let mut st = tx.prepare_cached(
-        "INSERT INTO artists (id, title, sort_title, thumb, art, view_count, summary, seen_gen)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO artists (id, title, sort_title, thumb, art, view_count, summary, seen_gen, src)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, sort_title = excluded.sort_title,
            thumb = excluded.thumb, art = excluded.art, view_count = excluded.view_count,
-           summary = excluded.summary, seen_gen = excluded.seen_gen",
+           summary = excluded.summary, seen_gen = excluded.seen_gen, src = excluded.src",
     )?;
     // `similar` isn't on list items; the artist page fills it (db::similar).
     for a in items {
-        st.execute(params![a.id, a.title, a.sort_title, a.thumb, a.art, a.view_count, a.summary, gen_])?;
+        st.execute(params![a.id, a.title, a.sort_title, a.thumb, a.art, a.view_count, a.summary, gen_, src])?;
     }
     Ok(())
 }
 
 pub fn upsert_albums(tx: &Transaction<'_>, items: &[Album], gen_: i64) -> AppResult<()> {
+    upsert_albums_in(tx, items, gen_, MAIN_SRC)
+}
+
+/// [`upsert_albums`] for rows of library `src`.
+pub fn upsert_albums_in(tx: &Transaction<'_>, items: &[Album], gen_: i64, src: &str) -> AppResult<()> {
     let mut st = tx.prepare_cached(
         "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, year, thumb, format,
            subformats, section, section_rank, genres, track_count, added_at, view_count,
-           last_viewed_at, tint, seen_gen, released, studio, styles, moods, matched)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+           last_viewed_at, tint, seen_gen, released, studio, styles, moods, matched, src, mbid)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, sort_title = excluded.sort_title,
            artist_id = excluded.artist_id, artist_title = excluded.artist_title, year = excluded.year,
            thumb = excluded.thumb, format = excluded.format, subformats = excluded.subformats,
@@ -141,7 +160,8 @@ pub fn upsert_albums(tx: &Transaction<'_>, items: &[Album], gen_: i64) -> AppRes
            view_count = excluded.view_count, last_viewed_at = excluded.last_viewed_at,
            tint = excluded.tint, seen_gen = excluded.seen_gen,
            released = excluded.released, studio = excluded.studio,
-           styles = excluded.styles, moods = excluded.moods, matched = excluded.matched",
+           styles = excluded.styles, moods = excluded.moods, matched = excluded.matched, src = excluded.src,
+           mbid = COALESCE(excluded.mbid, albums.mbid)",
     )?;
     for a in items {
         st.execute(params![
@@ -167,20 +187,27 @@ pub fn upsert_albums(tx: &Transaction<'_>, items: &[Album], gen_: i64) -> AppRes
             a.studio,
             serde_json::to_string(&a.styles).unwrap_or_else(|_| "[]".into()),
             serde_json::to_string(&a.moods).unwrap_or_else(|_| "[]".into()),
-            a.matched
+            a.matched,
+            src,
+            a.mbid
         ])?;
     }
     Ok(())
 }
 
 pub fn upsert_tracks(tx: &Transaction<'_>, items: &[Track], gen_: i64) -> AppResult<()> {
+    upsert_tracks_in(tx, items, gen_, MAIN_SRC)
+}
+
+/// [`upsert_tracks`] for rows of library `src`.
+pub fn upsert_tracks_in(tx: &Transaction<'_>, items: &[Track], gen_: i64, src: &str) -> AppResult<()> {
     let mut st = tx.prepare_cached(
         "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_artist,
            track_number, disc_number, duration_ms, thumb, part_key, codec, container, bitrate,
            bit_depth, sample_rate, user_rating, view_count, last_viewed_at, seen_gen, rating_count,
-           rated_at, genres)
+           rated_at, genres, src, mbid)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-           ?19, ?20, ?21, ?22, ?23, ?24)
+           ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, album_id = excluded.album_id,
            album_title = excluded.album_title, artist_id = excluded.artist_id,
            artist_title = excluded.artist_title, track_artist = excluded.track_artist,
@@ -192,7 +219,8 @@ pub fn upsert_tracks(tx: &Transaction<'_>, items: &[Track], gen_: i64) -> AppRes
            view_count = excluded.view_count,
            last_viewed_at = excluded.last_viewed_at, seen_gen = excluded.seen_gen,
            rating_count = COALESCE(excluded.rating_count, tracks.rating_count),
-           genres = excluded.genres,
+           genres = excluded.genres, src = excluded.src,
+           mbid = COALESCE(excluded.mbid, tracks.mbid),
            -- A like made here that hasn't reached Plex yet wins over Plex.
            user_rating = CASE WHEN EXISTS (SELECT 1 FROM rating_ops o WHERE o.track_id = excluded.id)
                          THEN tracks.user_rating ELSE excluded.user_rating END,
@@ -224,7 +252,9 @@ pub fn upsert_tracks(tx: &Transaction<'_>, items: &[Track], gen_: i64) -> AppRes
             gen_,
             t.rating_count,
             t.rated_at,
-            serde_json::to_string(&t.genres).unwrap_or_else(|_| "[]".into())
+            serde_json::to_string(&t.genres).unwrap_or_else(|_| "[]".into()),
+            src,
+            t.mbid
         ])?;
     }
     Ok(())
@@ -251,10 +281,15 @@ pub fn delete_ids(tx: &Transaction<'_>, kind: ItemKind, ids: &[String]) -> AppRe
 
 /// Delete items of `kind` whose ids are not in `keep`. Returns rows deleted.
 pub fn delete_missing(tx: &Transaction<'_>, kind: ItemKind, keep: &HashSet<String>) -> AppResult<u64> {
+    delete_missing_in(tx, kind, keep, MAIN_SRC)
+}
+
+/// [`delete_missing`] among the rows of library `src`.
+pub fn delete_missing_in(tx: &Transaction<'_>, kind: ItemKind, keep: &HashSet<String>, src: &str) -> AppResult<u64> {
     let table = table_for(kind);
     let existing: Vec<String> = {
-        let mut st = tx.prepare(&format!("SELECT id FROM {table}"))?;
-        st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+        let mut st = tx.prepare(&format!("SELECT id FROM {table} WHERE src = ?1"))?;
+        st.query_map([src], |r| r.get(0))?.collect::<Result<_, _>>()?
     };
     let mut del = tx.prepare_cached(&format!("DELETE FROM {table} WHERE id = ?1"))?;
     let mut n = 0;
@@ -266,8 +301,39 @@ pub fn delete_missing(tx: &Transaction<'_>, kind: ItemKind, keep: &HashSet<Strin
 
 /// Delete items of `kind` not stamped with `gen_` (not seen in a full pass).
 pub fn delete_unseen(tx: &Transaction<'_>, kind: ItemKind, gen_: i64) -> AppResult<u64> {
+    delete_unseen_in(tx, kind, gen_, MAIN_SRC)
+}
+
+/// [`delete_unseen`] among the rows of library `src`.
+pub fn delete_unseen_in(tx: &Transaction<'_>, kind: ItemKind, gen_: i64, src: &str) -> AppResult<u64> {
     let table = table_for(kind);
-    Ok(tx.execute(&format!("DELETE FROM {table} WHERE seen_gen <> ?1"), [gen_])? as u64)
+    Ok(tx.execute(&format!("DELETE FROM {table} WHERE src = ?2 AND seen_gen <> ?1"), params![gen_, src])? as u64)
+}
+
+/// Remove every row of the libraries not in `keep` (no longer included),
+/// with their sync state. The main library's rows always stay. Returns
+/// rows deleted.
+pub fn drop_libraries_except(tx: &Transaction<'_>, keep: &[String]) -> AppResult<u64> {
+    let mut n = 0;
+    for table in ["tracks", "albums", "artists"] {
+        let srcs: Vec<String> = {
+            let mut st = tx.prepare(&format!("SELECT DISTINCT src FROM {table} WHERE src <> ''"))?;
+            st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+        };
+        for s in srcs.iter().filter(|s| !keep.contains(s)) {
+            n += tx.execute(&format!("DELETE FROM {table} WHERE src = ?1"), [s])? as u64;
+        }
+    }
+    let states: Vec<String> = {
+        let mut st = tx.prepare("SELECT key FROM kv WHERE substr(key, 1, length(?1)) = ?1")?;
+        st.query_map([SRC_STATE_PREFIX], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    for k in states {
+        if !keep.iter().any(|s| k[SRC_STATE_PREFIX.len()..] == **s) {
+            tx.execute("DELETE FROM kv WHERE key = ?1", [&k])?;
+        }
+    }
+    Ok(n)
 }
 
 fn table_for(kind: ItemKind) -> &'static str {
@@ -283,9 +349,9 @@ fn table_for(kind: ItemKind) -> &'static str {
 pub fn wipe_library(tx: &Transaction<'_>) -> AppResult<()> {
     tx.execute_batch(
         "DELETE FROM playlist_items; DELETE FROM playlists; DELETE FROM playlist_ops;
-         DELETE FROM playlist_aliases; DELETE FROM tracks;
-         DELETE FROM albums; DELETE FROM artists; DELETE FROM play_history;
-         DELETE FROM sync_state;",
+         DELETE FROM playlist_aliases; DELETE FROM tracks WHERE src = '';
+         DELETE FROM albums WHERE src = ''; DELETE FROM artists WHERE src = '';
+         DELETE FROM play_history; DELETE FROM sync_state;",
     )?;
     Ok(())
 }
@@ -315,6 +381,18 @@ pub fn playlists_with_local_changes(c: &Connection) -> AppResult<HashSet<String>
 /// of them with `force_all`). Playlists with local changes that haven't
 /// reached Plex yet are left as they are.
 pub fn replace_playlists(tx: &Transaction<'_>, items: &[Playlist], force_all: bool) -> AppResult<Vec<String>> {
+    replace_playlists_in(tx, items, force_all, None)
+}
+
+/// [`replace_playlists`] for one server's playlists: with `owner` (a server
+/// tag, `crate::sid`), playlists of other servers are left alone.
+pub fn replace_playlists_in(
+    tx: &Transaction<'_>,
+    items: &[Playlist],
+    force_all: bool,
+    owner: Option<&str>,
+) -> AppResult<Vec<String>> {
+    let mine = |id: &str| owner.is_none_or(|o| crate::sid::tag_of(id).is_none_or(|t| t == o));
     let local = playlists_with_local_changes(tx)?;
     let items: Vec<&Playlist> = items.iter().filter(|p| !local.contains(&p.id)).collect();
     let mut stale = Vec::new();
@@ -334,13 +412,31 @@ pub fn replace_playlists(tx: &Transaction<'_>, items: &[Playlist], force_all: bo
         let mut st = tx.prepare("SELECT id FROM playlists")?;
         st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
     };
-    for id in existing.iter().filter(|id| !keep.contains(id.as_str()) && !local.contains(*id)) {
+    for id in existing.iter().filter(|id| mine(id) && !keep.contains(id.as_str()) && !local.contains(*id)) {
         tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
     }
     for p in items {
         upsert_playlist(tx, p)?;
     }
     Ok(stale)
+}
+
+/// Remove the playlists of servers not in `tags` (no library of theirs is
+/// included any more). Playlists without a server tag stay.
+pub fn drop_playlists_except(tx: &Transaction<'_>, tags: &[String]) -> AppResult<u64> {
+    let ids: Vec<String> = {
+        let mut st = tx.prepare("SELECT id FROM playlists")?;
+        st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    let mut n = 0;
+    for id in ids {
+        if let Some(t) = crate::sid::tag_of(&id)
+            && !tags.iter().any(|k| k == t)
+        {
+            n += tx.execute("DELETE FROM playlists WHERE id = ?1", [&id])? as u64;
+        }
+    }
+    Ok(n)
 }
 
 /// Insert or update one playlist row as Plex has it.
@@ -390,6 +486,57 @@ pub struct SyncState {
     pub last_sync_at: Option<i64>,
     pub last_full_sync_at: Option<i64>,
     pub generation: i64,
+}
+
+/// Where the sync state of a library other than the main one is kept
+/// (`kv`, followed by its `src`).
+pub const SRC_STATE_PREFIX: &str = "sync.src.";
+
+/// The sync state of library `src` ([`sync_state`] for the main one).
+pub fn sync_state_in(c: &Connection, src: &str) -> AppResult<Option<SyncState>> {
+    if src == MAIN_SRC {
+        return sync_state(c);
+    }
+    let Some(v) = kv_get(c, &format!("{SRC_STATE_PREFIX}{src}"))? else { return Ok(None) };
+    let v: serde_json::Value = serde_json::from_str(&v).unwrap_or_default();
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    let i = |k: &str| v.get(k).and_then(|x| x.as_i64());
+    Ok(Some(SyncState {
+        section_id: s("sectionId").unwrap_or_default(),
+        section_uuid: s("sectionUuid").unwrap_or_default(),
+        section_title: s("sectionTitle"),
+        last_sync_at: i("lastSyncAt"),
+        last_full_sync_at: i("lastFullSyncAt"),
+        generation: i("generation").unwrap_or(0),
+    }))
+}
+
+/// Save the sync state of library `src` ([`put_sync_state`] for the main one).
+pub fn put_sync_state_in(c: &Connection, src: &str, st: &SyncState) -> AppResult<()> {
+    if src == MAIN_SRC {
+        return put_sync_state(c, st);
+    }
+    let v = serde_json::json!({
+        "sectionId": st.section_id,
+        "sectionUuid": st.section_uuid,
+        "sectionTitle": st.section_title,
+        "lastSyncAt": st.last_sync_at,
+        "lastFullSyncAt": st.last_full_sync_at,
+        "generation": st.generation,
+    });
+    kv_set(c, &format!("{SRC_STATE_PREFIX}{src}"), &v.to_string())
+}
+
+/// Wipe the rows of library `src` ([`wipe_library`] for the main one).
+pub fn wipe_library_in(tx: &Transaction<'_>, src: &str) -> AppResult<()> {
+    if src == MAIN_SRC {
+        return wipe_library(tx);
+    }
+    for table in ["tracks", "albums", "artists"] {
+        tx.execute(&format!("DELETE FROM {table} WHERE src = ?1"), [src])?;
+    }
+    tx.execute("DELETE FROM kv WHERE key = ?1", [format!("{SRC_STATE_PREFIX}{src}")])?;
+    Ok(())
 }
 
 pub fn sync_state(c: &Connection) -> AppResult<Option<SyncState>> {

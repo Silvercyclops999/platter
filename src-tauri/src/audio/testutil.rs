@@ -17,7 +17,7 @@ use crate::error::{AppError, AppResult};
 use crate::model::Track;
 
 pub fn track(id: &str, artist: &str, part: &str) -> Track {
-    Track {
+    Track { mbid: None,
         id: id.into(),
         title: format!("Track {id}"),
         album_id: "al".into(),
