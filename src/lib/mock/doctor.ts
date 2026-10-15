@@ -92,7 +92,7 @@ export class MockDoctor {
         `unmatched:${a.id}`,
         a,
         `Plex didn't match ${a.title}`,
-        "MusicBrainz has this release, but Plex couldn't match it, so it's missing details like its cover choices and release date. Fix match lets you pick the right release.",
+        "MusicBrainz has this release, but your server couldn't match it, so it's missing details like its cover choices and release date. Fix match lets you pick the right release.",
         "match",
       );
       f.evidence = ["Plex couldn't match it to a release.", "MusicBrainz has a release by this artist with this title.", "No release type or ARCHIVE_VERSION in the files."];
@@ -106,7 +106,7 @@ export class MockDoctor {
         `duplicate:${a.id}`,
         a,
         `${q(t[0].title)} is on this album twice`,
-        "Plex has more than one file of the same recording here, so it plays twice. Open the album to compare the copies, then remove the one you don't want from your music folder.",
+        "Your library has more than one file of the same recording here, so it plays twice. Open the album to compare the copies, then remove the one you don't want from your music folder.",
         "openAlbum",
       );
       f.evidence = [`${q(t[0].title)} is here twice with the same ISRC: ${length(t[0].durationMs)}, FLAC 16-bit/44.1 kHz; ${length(t[0].durationMs)}, MP3 320 kbps.`];
@@ -132,7 +132,7 @@ export class MockDoctor {
         "cover",
       );
       if (px === null) f.thumb = null;
-      f.evidence = [px === null ? "Plex has no cover for this album." : `The cover is ${px} by ${px} pixels.`];
+      f.evidence = [px === null ? "This album has no cover." : `The cover is ${px} by ${px} pixels.`];
       out.push({ finding: f, coverPx: px ?? 0 });
     }
 

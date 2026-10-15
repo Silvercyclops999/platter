@@ -77,7 +77,7 @@ describe("the library doctor page", () => {
       "Albums split in two",
       "Missing album artist",
       "Low-quality copies",
-      "Albums Plex didn't match",
+      "Albums that weren't matched",
     ]);
     expect(within(section(/^Covers/)).getAllByRole("listitem")).toHaveLength(3);
     expect(within(section(/^Covers/)).getByText("No cover")).toBeInTheDocument();
@@ -143,7 +143,7 @@ describe("the library doctor page", () => {
     const d = usePlexEdit.getState().dialog!;
     expect(d.name).toBe("cover");
     expect(d.target.kind).toBe("album");
-    const unmatched = within(section(/^Albums Plex didn't match/)).getAllByRole("listitem")[0];
+    const unmatched = within(section(/^Albums that weren't matched/)).getAllByRole("listitem")[0];
     await user.click(within(unmatched).getByRole("button", { name: "Fix match" }));
     expect(usePlexEdit.getState().dialog!.name).toBe("match");
     // Nothing was written by opening them.

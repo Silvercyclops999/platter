@@ -32,7 +32,7 @@ export const KIND_LABEL: Record<DoctorKind, string> = {
   splitAlbum: "Albums split in two",
   albumArtist: "Missing album artist",
   lowQuality: "Low-quality copies",
-  unmatched: "Albums Plex didn't match",
+  unmatched: "Albums that weren't matched",
 };
 
 export const KIND_ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched"];
