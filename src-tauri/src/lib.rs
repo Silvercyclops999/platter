@@ -1,6 +1,7 @@
 pub mod archive;
 pub mod artistinfo;
 pub mod audio;
+pub mod backend;
 pub mod bookmarks;
 pub mod bridge;
 pub mod db;
