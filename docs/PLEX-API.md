@@ -552,3 +552,43 @@ language fields; every `thumb` was empty, so avatars come from the live
 session's `User.thumb` when there is one and fall back to the name's letter.
 plex.tv's `/api/v2/home/users` has `thumb` for Home users (6 here) but isn't
 used yet, and `/api/v2/friends` answered 410.
+
+### 2026-10-14: smart playlists
+
+Read only, from the 8 audio smart playlists on the server. `/playlists?playlistType=audio`
+lists them with `smart` true but no query. `/playlists/{id}` adds `content`,
+the query as a URI: `library://x/directory/` followed by the percent-encoded
+path, for example
+`/library/sections/<id>/all?type=10&track.userRating%3E%3E=4&group=guid&having=min(album.originallyAvailableAt)&sort=track.lastRatedAt`
+(after one decoding). The operator sits in the key, encoded again: `%3E%3E=`
+is `>>=`. Shapes seen: an empty filter (every song in the section),
+`track.userRating>>=4`, `track.lastViewedAt<<=-1mon`,
+`track.lastViewedAt>>=-2w`, `album.addedAt>>=-1mon`, and sorts
+`album.addedAt:desc`, `track.lastViewedAt:desc`, `lastViewedAt`,
+`track.lastRatedAt`. Four of them carry `group=guid&having=min(album.originallyAvailableAt)`,
+Plex Web's "one copy of each song".
+
+`/library/sections/<id>/all?type=10&includeMeta=1` lists the filter fields
+per type with their kinds and the operators per kind: tag `=` `!=`; integer
+`=` `!=` `>>=` `<<=`; string `=` (contains) `!=` `==` (is) `!==` `<=` (begins
+with) `>=` (ends with); boolean `=` `!=`; date `<<=` (before) `>>=` (after),
+with relative values like `-30d`, `-2w`, `-6mon`, `-1y`. Track fields:
+`track.mood`, `track.genre` (tags), `track.title`, `track.viewCount`,
+`track.lastViewedAt`, `track.skipCount`, `track.lastSkippedAt`,
+`track.userRating` (0 to 10), `track.lastRatedAt`, `track.addedAt`,
+`track.mediaSize`, `track.mediaBitrate`, `track.audioCodec`, `track.trash`,
+`track.location`, `track.source`. Album fields include `album.title`,
+`album.year`, `album.decade`, `album.genre`, `album.style`, `album.mood`,
+`album.format`, `album.subformat`, `album.addedAt`,
+`album.originallyAvailableAt`; artist fields include `artist.title`,
+`artist.genre`, `artist.style`, `artist.mood`. There is no track length
+field. Tag filters take tag ids: `/library/sections/<id>/genre?type=10`
+(and `type=9` for album tags) lists them as `Directory` entries with a
+numeric `key` and a `title`.
+
+Not checked against the server, because they write: creating with
+`POST /playlists?type=audio&title=<title>&smart=1&uri=server://<machine>/com.plexapp.plugins.library/library/sections/<id>/all?<query>`
+and changing the rules with `PUT /playlists/{id}/items?uri=<the same>`, as
+other Plex clients do, and "match any" as `push=1&<a>&or=1&<b>&pop=1`. The
+app tests these with a fake server only. `limit=<n>` caps the songs.
+

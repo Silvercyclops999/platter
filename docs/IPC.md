@@ -654,6 +654,108 @@ goes to the end of the host's queue. A host that doesn't answer for 10 s is
 A session that has ended answers 410; a request not signed with the
 session's key answers 401.
 
+## Smart playlists, hide, bookmarks and scrobbling
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `smart_preview` | `{ rules: SmartRules, picks: string[] \| null }` | `SmartPreview` |
+| `smart_save` | `{ request: SmartSaveRequest }` | `SmartSaved` |
+| `smart_list` | – | `SmartSummary[]` (Platter smart playlists) |
+| `smart_page` | `{ id }` (a `smart:` id) | `SmartPage` |
+| `smart_delete` | `{ id }` (a `smart:` id) | – |
+| `smart_plex_rules` | `{ id }` (a Plex smart playlist) | `SmartRules`, or `invalid` when its rules don't map to the editor |
+| `smart_prompt` | `{ prompt }` | `{ title, rules: SmartRules, picks: Track[] }` |
+| `ai_status` | – | `{ provider: "none"\|"anthropic", model, hasKey, ready }` |
+| `ai_key_set` | `{ key: string \| null }` | the same, after saving or removing the key |
+| `hidden_list` | – | `HiddenItem[]`, newest first |
+| `hidden_set` | `{ item: { kind: "track"\|"artist", id, title, subtitle?, thumb? }, on: bool }` | `HiddenItem[]` |
+| `bookmarks_list` | – | `Bookmark[]`, newest first |
+| `bookmark_add` | `{ bookmark: { kind: "track"\|"page", target, page?, title, subtitle?, thumb?, positionMs? } }` | `Bookmark` (the one already there for the same song second or page) |
+| `bookmark_remove` | `{ id }` | `Bookmark[]` |
+| `bookmark_open` | `{ id }` | `Bookmark`; a song bookmark plays from its time first |
+| `scrobble_status` | – | `ScrobbleStatus` |
+| `lastfm_secret_set` | `{ secret: string \| null }` | `ScrobbleStatus` |
+| `lastfm_sign_in_start` | – | `ScrobbleStatus`, after opening Last.fm's approval page in the browser |
+| `lastfm_sign_in_finish` | – | `ScrobbleStatus` (signed in), or `invalid` until the user approves |
+| `lastfm_sign_out` | – | `ScrobbleStatus` |
+| `listenbrainz_check` | – | `ScrobbleStatus` (asks ListenBrainz whose token it is) |
+
+`SmartRules = { matchAll, rules: { field, op, value, plexField? }[], limit?: { unit: "songs"|"hours", value }, sort, update: "live"|"daily"|"weekly", extra?: [string, string][] }`.
+Fields: `genre`, `style`, `mood` (is, isNot), `artist`, `album`, `version`
+(is, isNot, contains, notContains), `year`, `playCount`, `rating` (stars),
+`duration` (minutes) (is, isNot, gt, lt), `decade` (is, isNot, a year like
+1990), `addedAt`, `lastPlayed`, `playedHere` (inLast, notInLast, with `30d`,
+`2w`, `6m` or `1y`), `liked`, `explicit` (is, `"true"` or `"false"`) and
+`releaseType` (is, isNot, a release section key). Sorts: `none`, `random`,
+`mostPlayed`, `leastPlayed`, `recentlyAdded`, `recentlyPlayed`, `rating`.
+`extra` keeps Plex options the editor doesn't show (one copy per song, other
+sorts) so saving a Plex playlist back doesn't lose them.
+
+`SmartPreview = { count, durationMs, tracks: Track[] (the first 50), plexGaps: string[] }`.
+The count is worked out on this computer from the library cache, with the
+picks first. `plexGaps` says why the rules need a Platter smart playlist;
+empty means Plex can hold them.
+
+`SmartSaveRequest = { id?, title, summary?, rules, picks?: string[], prompt?, platter?: bool }`
+and `SmartSaved = { id, platter, note? }`. A new rule set Plex can express is
+created as a Plex smart playlist (see docs/PLEX-API.md "Smart playlists") and
+read back into the cache, so it shows with the other playlists. Rules Plex
+can't express (`playedHere`, `duration`, `releaseType`, `explicit`,
+`version`, a limit in hours, a daily or weekly update), prompt picks, or
+`platter: true` make a Platter smart playlist with a `smart:` id. When Plex
+refuses a rule set it's saved as a Platter one and `note` says so. Offline, a
+Plex one can't be made and the answer is a `network` error. Editing a Plex
+smart playlist (`id` set) keeps it in Plex; rules it can't hold are refused.
+
+`SmartSummary = { id, title, summary?, trackCount, durationMs, update, nextUpdateAt? (unix s), updatedAt, prompted }`
+and `SmartPage = { playlist: SmartSummary, rules, picks, prompt?, tracks }`.
+Platter smart playlists live in the sync store (`smartPlaylists`
+namespace). A live one is filled again each time its page opens; a daily or
+weekly one keeps its songs on this computer until the next whole day or week.
+A random sort holds for the same period. The library lists them as smart
+playlists with "Platter" where the owner goes; the playlist route with a
+`smart:` id opens their page.
+
+`smart_prompt` needs `aiProvider` set and a key saved. It asks the provider
+twice: once with the description and the library's most used genre, style
+and mood names and its years, for rules; then with up to 150 songs those
+rules find (title, artist, album, year; unreleased music left out), for the
+best 50 in order. Both answers are JSON in a fixed shape. The editor shows the
+rules and picks before anything is saved.
+
+`HiddenItem = { kind, id, title, subtitle?, thumb?, hiddenAt (unix s) }`.
+Hidden songs and artists (an artist hides every song whose album artist it
+is) are skipped by mixes, radio, "keep playing similar music" and shuffle
+play (`play_context` with `shuffle: true`, except the song picked to start).
+Picked directly, or played in order, they still play. A mix page leaves out
+songs hidden after it was made. They're kept in the sync store's `hidden`
+namespace, keyed `track:<id>` or `artist:<id>`.
+
+`Bookmark = { id, kind, target, page?, title, subtitle?, thumb?, positionMs?, createdAt (unix s) }`.
+`page` is a route name: `album`, `artist`, `playlist`, `smart`, `mix`,
+`radio`, `liked` or `discography`. Kept in the sync store's `bookmarks`
+namespace, keyed by id.
+
+`ScrobbleStatus = { lastfm: { hasKey, hasSecret, signedIn, user?, rejected, pending }, listenbrainz: { hasToken, user?, rejected }, queued }`.
+A song counts when it's longer than 30 s and was heard for half its length or
+4 minutes, whichever is less (seeks don't count). Each service on, signed in
+and not refusing the sign-in gets "now playing" when a song starts and the
+scrobble when it ends, with the time it started. Ones that can't go (offline,
+the service down, a refused sign-in) wait on this computer, at most 5000 and
+two weeks old, and go out oldest first, 50 at a time, once a minute or right
+after a new sign-in. A private session sends nothing and queues nothing.
+Unreleased music is left out unless `scrobbleUnreleased` is on. Last.fm
+signs in with its desktop flow: a token, the user approves Platter on
+last.fm, then a session key. The API key (shared with artist info), its
+shared secret and the session key are in the OS keychain, as is the
+ListenBrainz token.
+
+Events: `hidden://changed` → `HiddenItem[]`, `bookmarks://changed` →
+`Bookmark[]`, `smart://changed` → `SmartSummary[]` (also
+`library://changed`), and `scrobble://status` → `{ queued }` when the queue
+or a sign-in changes. Changes another device made through the sync file send
+the same events.
+
 ## Sync, folders and keys
 
 | Command | Args | Returns |
@@ -702,8 +804,9 @@ App-only state lives in the `sync_entries` table, one row per entry: a
 namespace, a key, a JSON value (none for a deletion), when it changed and on
 which device. The namespaces are `settings` (one entry per synced setting),
 `pins`, `folders`, `folderItems` (playlist id to folder id), `follows`,
-`hidden`, `bookmarks` and `lyrics` (lyrics written in the editor, by track
-id). Without a sync file this is simply where the state is kept.
+`hidden` (keyed `track:<id>` or `artist:<id>`), `bookmarks` (by bookmark id),
+`lyrics` (lyrics written in the editor, by track id) and `smartPlaylists`
+(Platter smart playlists, synced with the library folders). Without a sync file this is simply where the state is kept.
 
 Features use the typed store in `src-tauri/src/sync/store.rs`:
 `store.put(&FOLLOWS, id, &value)`, `store.get`, `store.list`, `store.remove`,
@@ -1241,6 +1344,12 @@ The rest of the fields, with their defaults:
 | `syncLibrary` | bool, true | What to sync: library folders and pins. This device only. |
 | `syncFollows` | bool, true | What to sync: followed artists, hidden and snoozed items, bookmarks. This device only. |
 | `syncLyrics` | bool, true | What to sync: lyrics written in the editor. This device only. |
+| `bookmarksInLibrary` | bool, true | A Bookmarks row under Liked Songs in the library. |
+| `scrobbleLastfm` | bool, false | Scrobble to Last.fm once signed in. This device only. |
+| `scrobbleListenbrainz` | bool, false | Scrobble to ListenBrainz with the user token. This device only. |
+| `scrobbleUnreleased` | bool, false | Unreleased music scrobbles too. |
+| `aiProvider` | `"none"` (default), `"anthropic"` | The AI provider for prompted playlists. None hides them. This device only (the key is in this computer's keychain). |
+| `aiModel` | string, `"claude-opus-5-5"` | The provider's model. Letters, numbers, dots, dashes; empty goes back to the default. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

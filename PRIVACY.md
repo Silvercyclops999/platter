@@ -124,10 +124,43 @@ goes through a server of ours, and your Plex token never leaves your
 computer. While you host a session and Discord status is on, Discord shows
 that you're in one and how many people are in it.
 
+## Scrobbling
+
+Scrobbling is off until you turn it on for Last.fm or ListenBrainz in
+Settings. When it's on, each song you play past the halfway point (or for 4
+minutes) is sent to that service with its title, artist, album, album artist,
+track number, length and the time you started it, and each song that starts
+is sent as "now playing". That's what shows on your profile there. Unreleased
+music is left out unless you turn on "Scrobble unreleased music", and a
+private session sends nothing. Plays that can't be sent right away wait on
+this computer for up to two weeks.
+
+Last.fm needs your own API key and its shared secret. Signing in opens
+Last.fm's site, where you approve Platter; Last.fm then gives Platter a
+session key. The key, the secret and the session key stay in your computer's
+keychain and are only ever sent to Last.fm. ListenBrainz uses your user
+token, kept the same way and only sent to ListenBrainz.
+
+## Prompted playlists and the AI provider
+
+The AI provider is None until you choose one and save its key. With
+Anthropic chosen, making a prompted playlist sends Anthropic your
+description, the names of your library's most used genres, styles and moods,
+and the range of years in it. A second request sends the titles, artists,
+albums and years of up to 150 songs that fit, so it can pick and order them.
+Unreleased music is never sent, and nothing is sent until you press Make
+rules. The key stays in your computer's keychain and is only sent to
+Anthropic. Anthropic's own terms cover what it does with requests.
+
+## Hidden songs, bookmarks and smart playlists
+
+Hidden songs and artists, bookmarks and smart playlists kept by Platter are
+stored on this computer, and in the sync file when you turn that on. Smart
+playlists whose rules Plex can hold are saved in Plex, like any playlist.
+
 Some optional features planned for later will talk to other services, but
-only once you turn them on. Examples are Last.fm or ListenBrainz
-scrobbling, Lidarr and Tautulli. Each one is off until you set it up, and
-this file will list exactly what each one sends.
+only once you turn them on. Examples are Lidarr and Tautulli. Each one is
+off until you set it up, and this file will list exactly what each one sends.
 
 ## The sync file
 
