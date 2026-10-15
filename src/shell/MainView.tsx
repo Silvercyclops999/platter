@@ -26,6 +26,7 @@ const BookmarksPage = lazy(() => import("../pages/BookmarksPage").then((m) => ({
 const ImportPage = lazy(() => import("../pages/ImportPage").then((m) => ({ default: m.ImportPage })));
 const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((m) => ({ default: m.SmartPlaylistPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
 const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
@@ -100,6 +101,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   settings: "Settings",
   recents: "Recents",
   whatsNew: "What's New",
+  stats: "Stats",
 };
 
 /**
@@ -151,6 +153,8 @@ function Page({ route }: { route: Route }) {
       return route.id.startsWith("smart:") ? <SmartPlaylistPage id={route.id} /> : <PlaylistPage id={route.id} />;
     case "bookmarks":
       return <BookmarksPage />;
+    case "stats":
+      return <StatsPage />;
     case "import":
       return <ImportPage key={route.view ?? "home"} view={route.view} />;
     case "liked":

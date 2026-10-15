@@ -145,6 +145,7 @@ export function AppMenu() {
   const avatar = useApp((s) => (showAvatar ? (s.auth?.avatar ?? null) : null));
   const privateSession = useSettings((s) => !!s.settings?.privateSession);
   const goOffline = useSettings((s) => !!s.settings?.goOffline);
+  const statsPage = useSettings((s) => s.settings?.statsPage !== false);
   const miniOpen = useMiniplayer((s) => s.open);
   const [open, setOpen] = useState(false);
   const confirmSignOut = useUi((s) => s.signOutOpen);
@@ -243,6 +244,11 @@ export function AppMenu() {
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "recents" }))}>
             <span>Recents</span>
           </button>
+          {statsPage && (
+            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "stats" }))}>
+              <span>Stats</span>
+            </button>
+          )}
           <button
             type="button"
             role="menuitemcheckbox"

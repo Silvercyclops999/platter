@@ -140,6 +140,17 @@ import type {
   ImportedListPage,
   MissingSong,
 } from "./importTypes";
+import type {
+  CompareResult,
+  CompareSummary,
+  ItemStats,
+  MonthRecap,
+  StatsItemKind,
+  StatsOverview,
+  StatsRange,
+  StatsSpan,
+  StatsTopKind,
+} from "./statsTypes";
 
 export type Unlisten = () => void;
 
@@ -572,6 +583,26 @@ export interface Backend {
   /** Take one song out of an imported list. */
   importListRemove(listId: string, songId: number): Promise<void>;
 
+  // Listening stats (docs/IPC.md)
+  /** Totals, chart, streak, busiest times and top lists for a range of days. */
+  statsOverview(range: StatsRange, limit?: number): Promise<StatsOverview>;
+  /** The first and last day with plays and the months with plays. */
+  statsSpan(): Promise<StatsSpan>;
+  /** One song's, artist's or album's numbers (the stats strip). */
+  statsItem(kind: StatsItemKind, id: string): Promise<ItemStats>;
+  /** A month's recap ("YYYY-MM"). */
+  statsMonthRecap(month: string): Promise<MonthRecap>;
+  /** Songs for a top list's Play these and Save as playlist, most played first. */
+  statsPlayIds(range: StatsRange, kind: StatsTopKind, limit?: number): Promise<string[]>;
+  /** Your summary to share with a friend (Compare must be on in Settings). */
+  statsCompareSummary(unreleasedOk: boolean, theirUnreleasedOk: boolean): Promise<CompareSummary>;
+  /** Compare a friend's summary with yours. */
+  statsCompare(theirs: CompareSummary, unreleasedOk: boolean): Promise<CompareResult>;
+  /** Summaries friends shared with you. */
+  statsFriends(): Promise<CompareSummary[]>;
+  /** Forget a friend's shared summary. */
+  statsFriendRemove(name: string): Promise<CompareSummary[]>;
+
   // Miniplayer window
   miniplayerState(): Promise<MiniplayerState>;
   /** Open or close the miniplayer; answers whether it's open now. */
@@ -849,6 +880,15 @@ export function createTauriBackend(): Backend {
     importForget: (source) => call("import_forget", { source }),
     importListRemove: (listId, songId) => call("import_list_remove", { listId, songId }),
     lidarrPick: ({ artist, artistId, title, song, isrc }) => call("lidarr_pick", { artist, artistId: artistId ?? null, title, song, isrc: isrc ?? null }),
+    statsOverview: (range, limit) => call("stats_overview", { range, limit: limit ?? null }),
+    statsSpan: () => call("stats_span"),
+    statsItem: (kind, id) => call("stats_item", { kind, id }),
+    statsMonthRecap: (month) => call("stats_month_recap", { month }),
+    statsPlayIds: (range, kind, limit) => call("stats_play_ids", { range, kind, limit: limit ?? null }),
+    statsCompareSummary: (unreleasedOk, theirUnreleasedOk) => call("stats_compare_summary", { unreleasedOk, theirUnreleasedOk }),
+    statsCompare: (theirs, unreleasedOk) => call("stats_compare", { theirs, unreleasedOk }),
+    statsFriends: () => call("stats_friends"),
+    statsFriendRemove: (name) => call("stats_friend_remove", { name }),
     lidarrRequestPreview: (input) => call("lidarr_request_preview", { input }),
     lidarrRequest: (input) => call("lidarr_request", { input }),
     lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),

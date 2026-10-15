@@ -471,6 +471,14 @@ pub struct Settings {
     pub sync_lyrics: bool,
     /// Bookmarks has a row in the library.
     pub bookmarks_in_library: bool,
+    /// The Stats page (profile menu and library row).
+    pub stats_page: bool,
+    /// The stats strip on song, artist and album pages.
+    pub stats_strip: bool,
+    /// This month's and last month's stats show (the Stats page's monthly section).
+    pub monthly_stats_on_profile: bool,
+    /// Compare stats with friends (a summary only, never the history).
+    pub stats_compare: bool,
     /// Scrobble to Last.fm (once signed in).
     pub scrobble_lastfm: bool,
     /// Scrobble to ListenBrainz (with the user token).
@@ -667,6 +675,10 @@ impl Default for Settings {
             sync_follows: true,
             sync_lyrics: true,
             bookmarks_in_library: true,
+            stats_page: true,
+            stats_strip: true,
+            monthly_stats_on_profile: true,
+            stats_compare: false,
             scrobble_lastfm: false,
             scrobble_listenbrainz: false,
             scrobble_unreleased: false,
@@ -767,6 +779,10 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "listenName",
     "listenHideUnreleased",
     "bookmarksInLibrary",
+    "statsPage",
+    "statsStrip",
+    "monthlyStatsOnProfile",
+    "statsCompare",
     "scrobbleUnreleased",
     "aiModel",
     "lidarrUrl",
@@ -980,6 +996,10 @@ pub struct SettingsPatch {
     pub sync_follows: Option<bool>,
     pub sync_lyrics: Option<bool>,
     pub bookmarks_in_library: Option<bool>,
+    pub stats_page: Option<bool>,
+    pub stats_strip: Option<bool>,
+    pub monthly_stats_on_profile: Option<bool>,
+    pub stats_compare: Option<bool>,
     pub scrobble_lastfm: Option<bool>,
     pub scrobble_listenbrainz: Option<bool>,
     pub scrobble_unreleased: Option<bool>,
@@ -1226,6 +1246,10 @@ impl Settings {
         }
         set(&mut self.discord_listen_along, p.discord_listen_along);
         set(&mut self.bookmarks_in_library, p.bookmarks_in_library);
+        set(&mut self.stats_page, p.stats_page);
+        set(&mut self.stats_strip, p.stats_strip);
+        set(&mut self.monthly_stats_on_profile, p.monthly_stats_on_profile);
+        set(&mut self.stats_compare, p.stats_compare);
         set(&mut self.scrobble_lastfm, p.scrobble_lastfm);
         set(&mut self.scrobble_listenbrainz, p.scrobble_listenbrainz);
         set(&mut self.scrobble_unreleased, p.scrobble_unreleased);
@@ -2221,6 +2245,20 @@ mod tests {
         s.apply(&SettingsPatch { lidarr_away_url: Some("https://lidarr.example.com/".into()), ..Default::default() }).unwrap();
         assert_eq!(s.lidarr_away_url, "https://lidarr.example.com");
         assert!(s.apply(&SettingsPatch { lidarr_away_url: Some("lidarr.example.com".into()), ..Default::default() }).is_err());
+    }
+
+    #[test]
+    fn stats_settings_default_sync_and_apply() {
+        let mut s = Settings::default();
+        assert!(s.stats_page && s.stats_strip && s.monthly_stats_on_profile);
+        assert!(!s.stats_compare, "comparing with friends is opt-in");
+        for k in ["statsPage", "statsStrip", "monthlyStatsOnProfile", "statsCompare"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let p: SettingsPatch =
+            serde_json::from_str(r#"{"statsPage":false,"statsStrip":false,"monthlyStatsOnProfile":false,"statsCompare":true}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.stats_page && !s.stats_strip && !s.monthly_stats_on_profile && s.stats_compare);
     }
 
     #[test]

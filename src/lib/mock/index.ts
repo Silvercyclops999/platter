@@ -26,6 +26,8 @@
  *   ?downloads=full as demo, with the storage limit already reached
  *   ?view=miniplayer show the miniplayer window's page
  *   ?import=demo    two library import sources on and already imported
+ *   ?stats=empty    no demo listening history (the Stats page's empty state)
+ *   ?compare=1      Compare stats with friends starts on
  */
 import type { Backend, Unlisten } from "../backend";
 import type {
@@ -130,6 +132,8 @@ import { MockSocial } from "./social";
 import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
+import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
+import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "../statsTypes";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -165,6 +169,10 @@ export interface MockOptions {
   lidarr?: LidarrDemo;
   /** Start with two import sources on and imported (?import=demo). */
   importDemo?: boolean;
+  /** No demo listening history for stats (?stats=empty). */
+  statsEmpty?: boolean;
+  /** Start with Compare stats with friends on (?compare=1). */
+  statsCompare?: boolean;
 }
 
 const isTestEnv = (() => {
@@ -206,6 +214,8 @@ export function optionsFromUrl(search: string): MockOptions {
     lidarr: isLidarrDemo(p.get("lidarr")) ? (p.get("lidarr") as LidarrDemo) : undefined,
     theme: (["dark", "light", "system", "midnight", "forest", "sand"] as const).find((t) => t === p.get("theme")),
     importDemo: p.get("import") === "demo",
+    statsEmpty: p.get("stats") === "empty",
+    statsCompare: p.get("compare") === "1",
   };
 }
 
@@ -325,6 +335,10 @@ export class MockBackend implements Backend {
   private contextPlays: ContextPlay[] = [];
   /** The listen log: every play here (feeds Recents and Recently played). */
   private listens: MockListen[] = [];
+  /** Listening stats over a demo history plus this session's plays. */
+  readonly stats: MockStats;
+  /** Friends' shared stats summaries (a demo friend). */
+  private friends: CompareSummary[] = [];
   private ctxInfo: QueueContextInfo | null = null;
   /** Context ids with shuffle on, least recently used first. */
   private shuffledIds: string[] = [];
@@ -362,6 +376,8 @@ export class MockBackend implements Backend {
     );
     this.contextPlays = this.seedContextPlays();
     this.listens = seedListens(this.fx, this.likes.ids());
+    this.stats = new MockStats(this.fx, this.opts.statsEmpty ? [] : seedStatsHistory(this.fx), () => this.listens, () => this.settings);
+    this.friends = this.opts.statsEmpty ? [] : [mockFriendSummary(this.fx, new Set(this.stats.plays().map((p) => p.trackId)))];
     this.share = new MockShare(
       this.fx,
       () => this.settings,
@@ -429,6 +445,7 @@ export class MockBackend implements Backend {
       offline: () => !!this.healthState?.cachedOnly,
     });
     if (this.opts.theme) this.settings = { ...this.settings, theme: this.opts.theme };
+    if (this.opts.statsCompare) this.settings = { ...this.settings, statsCompare: true };
     this.importMock = new MockImport(this.fx, () => this.settings.importSources);
     if (this.opts.importDemo) {
       this.settings = { ...this.settings, importSources: ["streaming", "transfer"] };
@@ -2648,6 +2665,42 @@ export class MockBackend implements Backend {
   }
   lidarrMissingReleases(artistId: string, _artist: string) {
     return this.delay(() => this.lidarr.missing(this.settings, artistId));
+  }
+
+  // ---------------------------------------------------------------- listening stats
+
+  statsOverview(range: StatsRange, limit?: number) {
+    return this.delay(() => this.stats.overview(range, limit));
+  }
+  statsSpan() {
+    return this.delay(() => this.stats.span());
+  }
+  statsItem(kind: StatsItemKind, id: string) {
+    return this.delay(() => this.stats.item(kind, id));
+  }
+  statsMonthRecap(month: string) {
+    return this.delay(() => this.stats.monthRecap(month));
+  }
+  statsPlayIds(range: StatsRange, kind: StatsTopKind, limit?: number) {
+    return this.delay(() => this.stats.playIds(range, kind, limit));
+  }
+  statsCompareSummary(unreleasedOk: boolean, theirUnreleasedOk: boolean) {
+    return this.delay(() => this.stats.compareSummary(unreleasedOk, theirUnreleasedOk));
+  }
+  statsCompare(theirs: CompareSummary, unreleasedOk: boolean) {
+    return this.delay(() => this.stats.compare(theirs, unreleasedOk));
+  }
+  statsFriends() {
+    return this.delay(() => {
+      if (!this.settings.statsCompare) throw { kind: "invalid", message: "Comparing stats with friends is off in Settings." };
+      return clone(this.friends);
+    });
+  }
+  statsFriendRemove(name: string) {
+    return this.delay(() => {
+      this.friends = this.friends.filter((f) => f.name !== name);
+      return clone(this.friends);
+    });
   }
 
   // ---------------------------------------------------------------- library import

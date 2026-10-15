@@ -73,7 +73,7 @@ describe("TrackRow", () => {
     fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
     const menu = await screen.findByRole("menu", { name: `Options for ${t1.title}` });
     const items = screen.getAllByRole("menuitem");
-    expect(items.map((i) => i.textContent)).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Bookmark", "Don't play this artist", "Add lyrics", "Share", "Copy song title"]);
+    expect(items.map((i) => i.textContent)).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title"]);
     expect(items[0]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(items[1]).toHaveFocus();

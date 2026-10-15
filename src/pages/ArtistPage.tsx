@@ -7,6 +7,8 @@ import { openContextMenu } from "../components/ContextMenu";
 import { shareItem } from "../components/ShareMenu";
 import { plexEditItem } from "../components/PlexEditMenu";
 import { bookmarkPageItem, dontPlayArtistItem } from "../stores/curate";
+import { yourStatsItem } from "../stores/stats";
+import { StatsStrip } from "../components/StatsStrip";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
@@ -149,6 +151,7 @@ function ArtistView({ id }: { id: string }) {
 
       <div className="detail-body">
         <ActionRow id={id} data={data} playing={isThisPlaying} onPlay={play} credited={credited} />
+        <StatsStrip kind="artist" id={id} />
 
         {!data && (
           <>
@@ -302,6 +305,7 @@ function ActionRow({
               { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${artist.id}` }) },
               dontPlayArtistItem({ id: artist.id, title: artist.title, thumb: artist.thumb }),
               bookmarkPageItem("artist", artist.id, artist.title, { thumb: artist.thumb }),
+              yourStatsItem("artist", artist.id, artist.title),
               ...(credited ? [] : [shareItem("artist", artist.id, artist.thumb)]),
               { label: pinned ? "Unpin from sidebar" : "Pin to sidebar", onSelect: togglePin },
               ...(credited ? [] : [plexEditItem({ id: artist.id, kind: "artist", title: artist.title, thumb: artist.thumb })]),

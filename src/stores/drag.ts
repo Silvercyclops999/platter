@@ -148,10 +148,10 @@ export type DropRule = "ok" | "dim";
 
 /** Whether a library row takes the songs: your playlists do, Liked does unless they're all liked. */
 export function libraryDropRule(
-  entry: { kind: string; id: string; smart: boolean; liked?: boolean; unavailable?: boolean; bookmarks?: boolean },
+  entry: { kind: string; id: string; smart: boolean; liked?: boolean; unavailable?: boolean; bookmarks?: boolean; stats?: boolean },
   songs: DragSongs,
 ): DropRule {
-  if (entry.unavailable || entry.bookmarks) return "dim";
+  if (entry.unavailable || entry.bookmarks || entry.stats) return "dim";
   if (entry.liked) return songs.tracks && songs.tracks.length > 0 && songs.tracks.every((t) => isLiked(t.id)) ? "dim" : "ok";
   if (entry.kind !== "playlist" || entry.smart || entry.id === songs.playlistId) return "dim";
   return "ok";

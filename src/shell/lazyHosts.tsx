@@ -8,10 +8,12 @@ import { useCurate } from "../stores/curate";
 import { useLyricsEditor } from "../stores/lyricsEditor";
 import { ensureLoaded, usePlexEdit } from "../stores/plexEdit";
 import { useShareCard } from "../stores/shareCard";
+import { useStatsDialog } from "../stores/stats";
 
 const SmartEditor = lazy(() => import("../components/SmartPlaylistEditor").then((m) => ({ default: m.SmartEditorHost })));
 const LyricsEditor = lazy(() => import("./LyricsEditor").then((m) => ({ default: m.LyricsEditorHost })));
 const ShareCard = lazy(() => import("../components/ShareCardDialog").then((m) => ({ default: m.ShareCardHost })));
+const StatsDialog = lazy(() => import("../components/StatsDialog").then((m) => ({ default: m.StatsDialogHost })));
 const PlexEdit = lazy(() => import("../components/PlexEditDialogs").then((m) => ({ default: m.PlexEditDialogs })));
 
 /** True from the first time `open` is true onwards. */
@@ -55,6 +57,15 @@ export function LazyShareCardHost() {
   return show ? (
     <Suspense fallback={null}>
       <ShareCard />
+    </Suspense>
+  ) : null;
+}
+
+export function LazyStatsDialogHost() {
+  const show = useOnceOpen(useStatsDialog((s) => !!s.subject));
+  return show ? (
+    <Suspense fallback={null}>
+      <StatsDialog />
     </Suspense>
   ) : null;
 }

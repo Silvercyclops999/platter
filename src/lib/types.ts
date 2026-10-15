@@ -879,6 +879,14 @@ export interface Settings {
   syncLyrics: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
+  /** The Stats page (profile menu and library row). */
+  statsPage: boolean;
+  /** The stats strip on song, artist and album pages (and "Your stats" in menus). */
+  statsStrip: boolean;
+  /** This month's and last month's stats show on the Stats page. */
+  monthlyStatsOnProfile: boolean;
+  /** Compare stats with friends: a summary only, never the history. */
+  statsCompare: boolean;
   /** Scrobble to Last.fm (once signed in). */
   scrobbleLastfm: boolean;
   /** Scrobble to ListenBrainz (with the user token). */
@@ -1125,6 +1133,10 @@ export const DEFAULT_SETTINGS: Settings = {
   syncFollows: true,
   syncLyrics: true,
   bookmarksInLibrary: true,
+  statsPage: true,
+  statsStrip: true,
+  monthlyStatsOnProfile: true,
+  statsCompare: false,
   scrobbleLastfm: false,
   scrobbleListenbrainz: false,
   scrobbleUnreleased: false,

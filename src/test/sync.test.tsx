@@ -123,9 +123,9 @@ describe("library folders", () => {
     const playlist = mock.fx.playlists.find((p) => !p.smart)!;
     await user.click(screen.getByRole("button", { name: "Create playlist or folder" }));
     await user.click(await screen.findByRole("menuitem", { name: "Folder" }));
-    // "New Folder", right under Liked Songs and Bookmarks, with no prompt.
-    await waitFor(() => expect(titles()[2]).toBe("New Folder"));
-    const folderRow = within(list()).getAllByRole("listitem")[2];
+    // "New Folder", right under Liked Songs, Bookmarks and Stats, with no prompt.
+    await waitFor(() => expect(titles()[3]).toBe("New Folder"));
+    const folderRow = within(list()).getAllByRole("listitem")[3];
     expect(within(folderRow).getByText("0 playlists")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
 
@@ -136,10 +136,10 @@ describe("library folders", () => {
     await user.click(within(menu).getByRole("menuitem", { name: "Move to folder" }));
     await user.click(await screen.findByRole("menuitem", { name: "New Folder" }));
     await waitFor(() => expect(titles()).not.toContain(playlist.title));
-    expect(within(within(list()).getAllByRole("listitem")[2]).getByText("1 playlist")).toBeInTheDocument();
+    expect(within(within(list()).getAllByRole("listitem")[3]).getByText("1 playlist")).toBeInTheDocument();
 
     // Opening the folder drills the list into it.
-    await user.click(within(list()).getAllByRole("listitem")[2].querySelector<HTMLButtonElement>(".lib-row__open")!);
+    await user.click(within(list()).getAllByRole("listitem")[3].querySelector<HTMLButtonElement>(".lib-row__open")!);
     expect(screen.getByRole("button", { name: "Back from New Folder" })).toBeInTheDocument();
     expect(titles("New Folder items")).toEqual([playlist.title]);
     await user.click(screen.getByRole("button", { name: "Back from New Folder" }));

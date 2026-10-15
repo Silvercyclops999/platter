@@ -42,7 +42,7 @@ import { startSocial } from "../stores/social";
 import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
-import { LazyLyricsEditorHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost } from "./lazyHosts";
+import { LazyLyricsEditorHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost } from "./lazyHosts";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
@@ -215,6 +215,7 @@ export function AppShell() {
       <FullWindow />
       <LazyShareCardHost />
       <DeckActions />
+      <LazyStatsDialogHost />
     </div>
   );
 }

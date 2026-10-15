@@ -288,9 +288,10 @@ describe("library sidebar", () => {
     await renderSidebar();
     expect(rows().length).toBeGreaterThan(3);
     await user.click(screen.getByRole("button", { name: "Playlists" }));
-    // Liked Songs and Bookmarks are pinned first among the playlists.
-    expect(rows()).toHaveLength(mock.fx.playlists.length + 2);
+    // Liked Songs, Bookmarks and Stats are pinned first among the playlists.
+    expect(rows()).toHaveLength(mock.fx.playlists.length + 3);
     expect(within(rows()[1]).getByText("Bookmarks")).toBeInTheDocument();
+    expect(within(rows()[2]).getByText("Stats")).toBeInTheDocument();
     // Type word gone: just the owner.
     expect(within(rows()[0]).getByText("listener")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Search in playlists" })).toBeInTheDocument();

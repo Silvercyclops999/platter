@@ -1,0 +1,110 @@
+//! Tauri commands for listening stats (docs/IPC.md). Each one first counts
+//! any days that changed since the last call, then reads.
+
+use tauri::State;
+
+use super::compare::{self, CompareResult, CompareSummary};
+use super::{ItemKind, ItemStats, MonthRecap, StatsOverview, StatsRange, StatsSpan, TopKind};
+use crate::db::DbHandle;
+use crate::error::{AppError, AppResult};
+
+/// Count the days that changed, when any did.
+pub async fn fresh(db: &DbHandle) -> AppResult<()> {
+    if db.read_async(super::needs_refresh).await? {
+        db.write_async(|c| super::refresh(c).map(|_| ())).await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stats_overview(db: State<'_, DbHandle>, range: StatsRange, limit: Option<u32>) -> AppResult<StatsOverview> {
+    fresh(&db).await?;
+    db.read_async(move |c| {
+        let d = super::resolve(c, &range)?;
+        super::overview(c, d, limit.unwrap_or(50))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn stats_span(db: State<'_, DbHandle>) -> AppResult<StatsSpan> {
+    fresh(&db).await?;
+    db.read_async(super::span).await
+}
+
+#[tauri::command]
+pub async fn stats_item(db: State<'_, DbHandle>, kind: ItemKind, id: String) -> AppResult<ItemStats> {
+    fresh(&db).await?;
+    db.read_async(move |c| {
+        let today = super::today(c)?;
+        super::item(c, kind, &id, today)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn stats_month_recap(db: State<'_, DbHandle>, month: String) -> AppResult<MonthRecap> {
+    fresh(&db).await?;
+    db.read_async(move |c| super::month_recap(c, &month)).await
+}
+
+/// Songs for a top list's "Play these" and "Save as playlist".
+#[tauri::command]
+pub async fn stats_play_ids(db: State<'_, DbHandle>, range: StatsRange, kind: TopKind, limit: Option<u32>) -> AppResult<Vec<String>> {
+    fresh(&db).await?;
+    db.read_async(move |c| {
+        let d = super::resolve(c, &range)?;
+        super::play_ids(c, d, kind, limit.unwrap_or(50))
+    })
+    .await
+}
+
+fn compare_on(db: &DbHandle) -> AppResult<crate::settings::Settings> {
+    let s = crate::settings::load(db);
+    if !s.stats_compare {
+        return Err(AppError::Invalid("Comparing stats with friends is off in Settings.".into()));
+    }
+    Ok(s)
+}
+
+/// Your summary to share with a friend. `their_unreleased_ok`: the friend
+/// agreed to include unreleased songs; they go in only when you did too.
+#[tauri::command]
+pub async fn stats_compare_summary(db: State<'_, DbHandle>, unreleased_ok: bool, their_unreleased_ok: bool) -> AppResult<CompareSummary> {
+    let s = compare_on(&db)?;
+    fresh(&db).await?;
+    let name = Some(s.listen_name.clone());
+    db.read_async(move |c| {
+        let today = super::today(c)?;
+        compare::summary(c, today, name, unreleased_ok, unreleased_ok && their_unreleased_ok)
+    })
+    .await
+}
+
+/// Summaries friends shared with you (empty until one arrives).
+#[tauri::command]
+pub async fn stats_friends(db: State<'_, DbHandle>) -> AppResult<Vec<CompareSummary>> {
+    compare_on(&db)?;
+    db.read_async(compare::friends).await
+}
+
+/// Forget a friend's shared summary.
+#[tauri::command]
+pub async fn stats_friend_remove(db: State<'_, DbHandle>, name: String) -> AppResult<Vec<CompareSummary>> {
+    db.write_async(move |c| compare::friend_remove(c, &name)).await
+}
+
+/// Compare a friend's summary with yours.
+#[tauri::command]
+pub async fn stats_compare(db: State<'_, DbHandle>, theirs: CompareSummary, unreleased_ok: bool) -> AppResult<CompareResult> {
+    compare_on(&db)?;
+    compare::validate(&theirs)?;
+    fresh(&db).await?;
+    db.read_async(move |c| {
+        let today = super::today(c)?;
+        let both = unreleased_ok && theirs.unreleased_ok;
+        let mine = compare::summary(c, today, None, unreleased_ok, both)?;
+        compare::compare(c, &mine, &theirs)
+    })
+    .await
+}

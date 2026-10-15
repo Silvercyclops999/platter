@@ -5,6 +5,8 @@ import { Badge, QualityBadge } from "../components/Badge";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { bookmarkPageItem } from "../stores/curate";
+import { yourStatsItem } from "../stores/stats";
+import { StatsStrip } from "../components/StatsStrip";
 import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem } from "../components/PlaylistPicker";
 import { plexEditItem } from "../components/PlexEditMenu";
@@ -177,6 +179,7 @@ export function AlbumPage({ id }: { id: string }) {
                   { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${album.artistId}` }) },
                   shareItem("album", album.id, album.thumb),
                   bookmarkPageItem("album", album.id, album.title, { subtitle: album.artistTitle, thumb: album.thumb }),
+                  yourStatsItem("album", album.id, album.title),
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
                     onSelect: () =>
@@ -209,6 +212,7 @@ export function AlbumPage({ id }: { id: string }) {
           </button>
         </div>
 
+        <StatsStrip kind="album" id={id} />
         <div className={`album-tracks album-tracks--${view}`}>
           <TrackList label={album ? `${album.title} tracks` : "Tracks"} showAlbum={false} showPlays>
             {data

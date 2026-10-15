@@ -759,6 +759,131 @@ CREATE TABLE IF NOT EXISTS import_albums (
     PRIMARY KEY (source, artist_fold, album_fold)
 ) WITHOUT ROWID;
 "#,
+    // v28: listening stats (stats::). Plays summed per local day (days since
+    // 1970-01-01 in local time) for each song, artist, album and genre, and
+    // per day and hour for totals. stats_song, stats_artist and stats_album
+    // hold each item's names and its all-time totals. Triggers mark the day
+    // of every play that's added, changed or removed in stats_dirty, and
+    // stats::refresh recounts only those days. Every day with plays starts
+    // dirty, so the first refresh counts the whole history once.
+    r#"
+CREATE TABLE IF NOT EXISTS stats_dirty (day INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS stats_hour (
+    day   INTEGER NOT NULL,
+    hour  INTEGER NOT NULL,
+    plays INTEGER NOT NULL,
+    ms    INTEGER NOT NULL,
+    PRIMARY KEY (day, hour)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS stats_song_day (
+    day      INTEGER NOT NULL,
+    song_key TEXT NOT NULL,
+    plays    INTEGER NOT NULL,
+    ms       INTEGER NOT NULL,
+    first_at INTEGER NOT NULL,
+    last_at  INTEGER NOT NULL,
+    PRIMARY KEY (day, song_key)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS stats_song_day_key ON stats_song_day (song_key, day, plays);
+CREATE TABLE IF NOT EXISTS stats_artist_day (
+    day        INTEGER NOT NULL,
+    artist_key TEXT NOT NULL,
+    plays      INTEGER NOT NULL,
+    ms         INTEGER NOT NULL,
+    PRIMARY KEY (day, artist_key)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS stats_artist_day_key ON stats_artist_day (artist_key, day, plays);
+CREATE TABLE IF NOT EXISTS stats_album_day (
+    day       INTEGER NOT NULL,
+    album_key TEXT NOT NULL,
+    plays     INTEGER NOT NULL,
+    ms        INTEGER NOT NULL,
+    PRIMARY KEY (day, album_key)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS stats_album_day_key ON stats_album_day (album_key, day, plays);
+CREATE TABLE IF NOT EXISTS stats_genre_day (
+    day   INTEGER NOT NULL,
+    genre TEXT NOT NULL,
+    plays INTEGER NOT NULL,
+    ms    INTEGER NOT NULL,
+    PRIMARY KEY (day, genre)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS stats_song (
+    song_key   TEXT PRIMARY KEY,
+    rating_key TEXT,
+    title      TEXT NOT NULL,
+    artist     TEXT NOT NULL,
+    album      TEXT,
+    artist_key TEXT NOT NULL,
+    album_key  TEXT,
+    seen_at    INTEGER NOT NULL,
+    plays      INTEGER NOT NULL DEFAULT 0,
+    ms         INTEGER NOT NULL DEFAULT 0,
+    first_at   INTEGER,
+    last_at    INTEGER
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS stats_song_rank ON stats_song (plays DESC, ms DESC);
+CREATE INDEX IF NOT EXISTS stats_song_artist ON stats_song (artist_key, first_at);
+CREATE INDEX IF NOT EXISTS stats_song_album ON stats_song (album_key, first_at);
+CREATE TABLE IF NOT EXISTS stats_artist (
+    artist_key TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    artist_id  TEXT,
+    seen_at    INTEGER NOT NULL,
+    plays      INTEGER NOT NULL DEFAULT 0,
+    ms         INTEGER NOT NULL DEFAULT 0,
+    first_at   INTEGER,
+    last_at    INTEGER
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS stats_artist_rank ON stats_artist (plays DESC, ms DESC);
+CREATE TABLE IF NOT EXISTS stats_album (
+    album_key TEXT PRIMARY KEY,
+    title     TEXT NOT NULL,
+    artist    TEXT NOT NULL,
+    album_id  TEXT,
+    seen_at   INTEGER NOT NULL,
+    plays     INTEGER NOT NULL DEFAULT 0,
+    ms        INTEGER NOT NULL DEFAULT 0,
+    first_at  INTEGER,
+    last_at   INTEGER
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS stats_album_rank ON stats_album (plays DESC, ms DESC);
+CREATE INDEX IF NOT EXISTS stats_album_id ON stats_album (album_id) WHERE album_id IS NOT NULL;
+
+CREATE TRIGGER IF NOT EXISTS stats_listen_ins AFTER INSERT ON listen_log BEGIN
+    INSERT OR IGNORE INTO stats_dirty VALUES
+        (CAST(julianday(date(NEW.started_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER));
+END;
+CREATE TRIGGER IF NOT EXISTS stats_listen_upd AFTER UPDATE OF
+    rating_key, started_at, ended_at, duration_ms, ms_listened, skipped,
+    snap_title, snap_artist, snap_album, snap_album_artist ON listen_log BEGIN
+    INSERT OR IGNORE INTO stats_dirty VALUES
+        (CAST(julianday(date(OLD.started_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER)),
+        (CAST(julianday(date(NEW.started_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER));
+END;
+CREATE TRIGGER IF NOT EXISTS stats_listen_del AFTER DELETE ON listen_log BEGIN
+    INSERT OR IGNORE INTO stats_dirty VALUES
+        (CAST(julianday(date(OLD.started_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER));
+END;
+CREATE TRIGGER IF NOT EXISTS stats_import_ins AFTER INSERT ON imported_plays BEGIN
+    INSERT OR IGNORE INTO stats_dirty VALUES
+        (CAST(julianday(date(NEW.played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER));
+END;
+CREATE TRIGGER IF NOT EXISTS stats_import_upd AFTER UPDATE OF
+    played_at, ms_played, title, artist, album, rating_key ON imported_plays BEGIN
+    INSERT OR IGNORE INTO stats_dirty VALUES
+        (CAST(julianday(date(OLD.played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER)),
+        (CAST(julianday(date(NEW.played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER));
+END;
+CREATE TRIGGER IF NOT EXISTS stats_import_del AFTER DELETE ON imported_plays BEGIN
+    INSERT OR IGNORE INTO stats_dirty VALUES
+        (CAST(julianday(date(OLD.played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER));
+END;
+INSERT OR IGNORE INTO stats_dirty
+    SELECT DISTINCT CAST(julianday(date(started_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER) FROM listen_log;
+INSERT OR IGNORE INTO stats_dirty
+    SELECT DISTINCT CAST(julianday(date(played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER) FROM imported_plays;
+"#,
 ];
 
 #[cfg(test)]

@@ -237,6 +237,8 @@ export interface LibEntry {
   liked?: boolean;
   /** Bookmarks (pinned after Liked Songs while its setting is on). */
   bookmarks?: boolean;
+  /** The Stats page (pinned after Bookmarks while its setting is on). */
+  stats?: boolean;
   /** A Platter smart playlist (kept and filled on this computer). */
   platter?: boolean;
   /** Kept on this computer (downloads). */
@@ -296,6 +298,7 @@ export function typeLabel(e: Pick<LibEntry, "kind" | "smart" | "format" | "folde
  */
 export function subtitle(e: LibEntry, filtered: boolean): string {
   if (e.bookmarks) return "Songs and pages";
+  if (e.stats) return "Your listening";
   if (e.unavailable) return "Not available";
   if (e.folder) return e.folder.count === 1 ? "1 playlist" : `${e.folder.count} playlists`;
   if (filtered) return e.kind === "artist" ? "" : (e.creator ?? "");

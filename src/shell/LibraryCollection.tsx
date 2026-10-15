@@ -25,6 +25,9 @@ import { folders } from "../stores/folders";
 import "./folders.css";
 
 /** A folder's tile: a folder glyph on a plain square. */
+/** The drawn cover for Liked Songs, Bookmarks and Stats. */
+const coverIcon = (e: LibEntry) => (e.bookmarks ? "bookmark" : e.stats ? "stats" : "heart");
+
 function FolderArt({ size, fluid = false }: { size?: number; fluid?: boolean }) {
   const s = fluid ? undefined : size;
   return (
@@ -145,7 +148,7 @@ function useItemDnd(e: LibEntry) {
           ? dropOnLiked(songs)
           : dropOnPlaylist(e.id, songs),
   );
-  const source = songDrags && !folder && !e.unavailable && !e.liked && !e.bookmarks && !e.platter && (e.kind === "album" || e.kind === "playlist");
+  const source = songDrags && !folder && !e.unavailable && !e.liked && !e.bookmarks && !e.stats && !e.platter && (e.kind === "album" || e.kind === "playlist");
   return {
     className: `${drop.over ? "is-drop-target" : ""} ${drop.dimmed ? "is-drop-dim" : ""}`,
     props: {
@@ -164,7 +167,7 @@ function useItemDnd(e: LibEntry) {
 }
 
 function PlayOverlay({ e, playing, className }: { e: LibEntry; playing: boolean; className: string }) {
-  if (e.unavailable || e.folder) return null;
+  if (e.unavailable || e.folder || e.stats) return null;
   return (
     <button
       type="button"
@@ -208,8 +211,8 @@ function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filter
         <span className="lib-row__art">
           {e.folder ? (
             <FolderArt size={LIST_ART} />
-          ) : e.liked || e.bookmarks ? (
-            <LikedCover size={LIST_ART} icon={e.bookmarks ? "bookmark" : "heart"} />
+          ) : e.liked || e.bookmarks || e.stats ? (
+            <LikedCover size={LIST_ART} icon={coverIcon(e)} />
           ) : (
             <Art path={e.thumb} size={LIST_ART} round={e.kind === "artist"} kind={e.kind} />
           )}
@@ -288,7 +291,7 @@ function Cell({ e, index, setSize, tabIndex, selected, isContext, playing, filte
       onDoubleClick={() => !e.unavailable && void playEntry(e)}
     >
       <span className="lib-cell__art">
-        {e.folder ? <FolderArt fluid /> : e.liked || e.bookmarks ? <LikedCover fluid icon={e.bookmarks ? "bookmark" : "heart"} /> : <Art path={e.thumb} fluid round={e.kind === "artist"} kind={e.kind} />}
+        {e.folder ? <FolderArt fluid /> : e.liked || e.bookmarks || e.stats ? <LikedCover fluid icon={coverIcon(e)} /> : <Art path={e.thumb} fluid round={e.kind === "artist"} kind={e.kind} />}
         <PlayOverlay e={e} playing={isContext && playing} className={`lib-cell__play ${isContext && playing ? "is-on" : ""}`} />
       </span>
       <button
@@ -345,8 +348,8 @@ function Tile({ e, index, setSize, tabIndex, selected, onMenu }: ItemProps) {
         >
           {e.folder ? (
             <FolderArt size={RAIL_ART} />
-          ) : e.liked || e.bookmarks ? (
-            <LikedCover size={RAIL_ART} icon={e.bookmarks ? "bookmark" : "heart"} />
+          ) : e.liked || e.bookmarks || e.stats ? (
+            <LikedCover size={RAIL_ART} icon={coverIcon(e)} />
           ) : (
             <Art path={e.thumb} size={RAIL_ART} round={e.kind === "artist"} kind={e.kind} />
           )}
@@ -464,7 +467,7 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   }, [g.rowHeight, g.cols, v]);
 
   // Keyboard focus: one tab stop in the list, arrows move it.
-  const selectedIndex = entries.findIndex((e) => !e.unavailable && (e.liked ? route.name === "liked" : e.bookmarks ? route.name === "bookmarks" : sameRoute(route, { name: e.kind, id: e.id })));
+  const selectedIndex = entries.findIndex((e) => !e.unavailable && (e.liked ? route.name === "liked" : e.bookmarks ? route.name === "bookmarks" : e.stats ? route.name === "stats" : sameRoute(route, { name: e.kind, id: e.id })));
   const [cursor, setCursor] = useState<number | null>(null);
   const pending = useRef<number | null>(null);
   const vrows = v.getVirtualItems();

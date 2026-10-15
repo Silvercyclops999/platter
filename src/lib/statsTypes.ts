@@ -1,0 +1,176 @@
+/** Listening stats (mirrors src-tauri/src/stats). Times are ms; days are local "YYYY-MM-DD". */
+import type { Track } from "./types";
+
+/** Days to count, both ends included. No ends: all time. */
+export interface StatsRange {
+  from: string | null;
+  to: string | null;
+}
+
+export interface StatsTotals {
+  ms: number;
+  plays: number;
+  songs: number;
+  artists: number;
+  albums: number;
+  /** Days with at least one play. */
+  days: number;
+}
+
+export interface StatsPoint {
+  /** "YYYY-MM-DD" for days, "YYYY-MM" for months. */
+  key: string;
+  plays: number;
+  ms: number;
+}
+
+export interface StatsStreak {
+  days: number;
+  from: string;
+  to: string;
+}
+
+export interface TopSong {
+  key: string;
+  trackId: string | null;
+  title: string;
+  artist: string;
+  album: string | null;
+  plays: number;
+  ms: number;
+  /** Counts in your own stats; never leaves the device in anything shared. */
+  unreleased: boolean;
+  track: Track | null;
+}
+
+export interface TopArtist {
+  key: string;
+  artistId: string | null;
+  name: string;
+  thumb: string | null;
+  plays: number;
+  ms: number;
+}
+
+export interface TopAlbum {
+  key: string;
+  albumId: string | null;
+  title: string;
+  artist: string;
+  thumb: string | null;
+  plays: number;
+  ms: number;
+  unreleased: boolean;
+}
+
+export interface TopGenre {
+  name: string;
+  plays: number;
+  ms: number;
+}
+
+export interface StatsOverview {
+  from: string;
+  to: string;
+  totals: StatsTotals;
+  bucket: "day" | "month";
+  series: StatsPoint[];
+  streak: StatsStreak | null;
+  /** Listening time per hour of the day. */
+  hours: number[];
+  /** Listening time per weekday, 0 is Sunday. */
+  weekdays: number[];
+  busiestHour: number | null;
+  busiestWeekday: number | null;
+  topSongs: TopSong[];
+  topArtists: TopArtist[];
+  topAlbums: TopAlbum[];
+  topGenres: TopGenre[];
+}
+
+/** What the range pickers offer. */
+export interface StatsSpan {
+  first: string | null;
+  last: string | null;
+  /** Months with plays, newest first ("YYYY-MM"). */
+  months: string[];
+  today: string;
+}
+
+export type StatsTopKind = "songs" | "artists" | "albums" | "genres";
+export type StatsItemKind = "song" | "artist" | "album";
+
+export interface PlayedFrom {
+  /** album | playlist | artist | mix | radio | search | tracks | liked | imported */
+  kind: string;
+  id: string | null;
+  title: string | null;
+}
+
+export interface FirstListen {
+  at: number;
+  song: string;
+  trackId: string | null;
+  from: PlayedFrom | null;
+}
+
+export interface ItemStats {
+  kind: StatsItemKind;
+  plays: number;
+  ms: number;
+  first: FirstListen | null;
+  lastAt: number | null;
+  /** Place in your all-time top for its kind. */
+  rank: number | null;
+  /** Plays per month, the last 12 months, oldest first. */
+  series: StatsPoint[];
+}
+
+export interface MonthRecap {
+  /** "YYYY-MM". */
+  month: string;
+  totals: StatsTotals;
+  prevMs: number;
+  topSongs: TopSong[];
+  topArtists: TopArtist[];
+  topAlbum: TopAlbum | null;
+  topGenre: string | null;
+  daily: StatsPoint[];
+  biggestDay: StatsPoint | null;
+}
+
+export interface WeightedArtist {
+  name: string;
+  weight: number;
+}
+
+export interface WeightedSong {
+  artist: string;
+  title: string;
+  weight: number;
+}
+
+/** What one side shares to compare: top names with weights, no history. */
+export interface CompareSummary {
+  version: number;
+  name: string | null;
+  artists: WeightedArtist[];
+  songs: WeightedSong[];
+  unreleasedOk: boolean;
+}
+
+export interface CommonArtist {
+  name: string;
+  artistId: string | null;
+  thumb: string | null;
+  mine: number;
+  theirs: number;
+}
+
+export interface CompareResult {
+  friend: string | null;
+  /** 0 to 100. */
+  overlap: number;
+  commonArtists: CommonArtist[];
+  theirSongsNew: { artist: string; title: string; track: Track | null }[];
+}

@@ -28,6 +28,7 @@ pub mod share;
 pub mod sid;
 pub mod smart;
 pub mod social;
+pub mod stats;
 pub mod sync;
 pub mod tags;
 pub mod themes;
@@ -909,6 +910,7 @@ pub fn run() {
             db::commands::album_page,
             db::commands::recent_tracks,
             db::commands::recents,
+            stats::commands::stats_overview, stats::commands::stats_span, stats::commands::stats_item, stats::commands::stats_month_recap, stats::commands::stats_play_ids, stats::commands::stats_compare_summary, stats::commands::stats_compare, stats::commands::stats_friends, stats::commands::stats_friend_remove,
             db::commands::playlist_page,
             mixes::commands::mixes_home,
             mixes::commands::mix_page,

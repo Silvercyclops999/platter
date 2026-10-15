@@ -1233,6 +1233,39 @@ Events: `hidden://changed` → `HiddenItem[]`, `bookmarks://changed` →
 or a sign-in changes. Changes another device made through the sync file send
 the same events.
 
+## Listening stats
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `stats_overview` | `{ range: { from, to }, limit? }` | `StatsOverview` |
+| `stats_span` | – | `{ first, last, months: string[], today }` |
+| `stats_item` | `{ kind: "song"\|"artist"\|"album", id }` | `ItemStats` |
+| `stats_month_recap` | `{ month }` ("YYYY-MM") | `MonthRecap` |
+| `stats_play_ids` | `{ range, kind: "songs"\|"artists"\|"albums"\|"genres", limit? }` | track ids, most played first |
+| `stats_compare_summary` | `{ unreleasedOk, theirUnreleasedOk }` | `CompareSummary`, or `invalid` while Compare is off |
+| `stats_compare` | `{ theirs: CompareSummary, unreleasedOk }` | `CompareResult`, or `invalid` while Compare is off |
+
+Stats count every play that wasn't a skip, from the listen log and imported
+plays together. A range is two local dates ("YYYY-MM-DD"), both included; no
+dates means all time. Plays are summed per local day for each song, artist,
+album and genre, and per day and hour. Changing, adding or removing a play
+marks its day, and the next stats call counts only the marked days again.
+
+`StatsOverview = { from, to, totals: { ms, plays, songs, artists, albums, days }, bucket: "day"|"month", series: { key, plays, ms }[], streak: { days, from, to } | null, hours: number[24], weekdays: number[7], busiestHour, busiestWeekday, topSongs, topArtists, topAlbums, topGenres }`.
+The chart is by day for ranges under 92 days and by month for longer ones.
+Weekdays start on Sunday. Top lists rank by plays, then minutes. A top song
+is `{ key, trackId, title, artist, album, plays, ms, unreleased, track }`;
+`track` is the library song when it's still there.
+
+`ItemStats = { kind, plays, ms, first: { at, song, trackId, from: { kind, id, title } | null } | null, lastAt, rank, series }`.
+`rank` is the place in your all-time top for that kind, `series` the plays
+per month for the last 12 months.
+
+`CompareSummary = { version, name, artists: { name, weight }[], songs: { artist, title, weight }[], unreleasedOk }`
+is all that's shared with a friend: up to 50 artists and 50 songs from about
+the last six months, each with its share of the plays. Unreleased songs are
+only in it when both sides agreed. `CompareResult = { friend, overlap (0 to 100), commonArtists, theirSongsNew }`.
+
 ## Lidarr
 
 Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` settings. The API key and any extra proxy headers are in the OS keychain and never cross back to the UI. The check only reads from Lidarr. Requests send exactly three kinds of write: `POST /api/v1/artist` (monitored, but with `monitorNewItems` and `addOptions.monitor` set to `none` and no search), `PUT /api/v1/album/monitor` and `POST /api/v1/command` with `AlbumSearch`. Before any of them the release group is checked on MusicBrainz again and the whole setup check runs again; a red finding stops the request.
