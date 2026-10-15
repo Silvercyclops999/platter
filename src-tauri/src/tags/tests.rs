@@ -623,13 +623,20 @@ fn save(c: &Connection, part: &str, t: &FileTags) {
     store::save(c, part, Status::Ok, t, 1).unwrap();
 }
 
-struct Parts(String);
+/// Serves every part from one base URL, noting which track asked.
+struct Parts(String, parking_lot::Mutex<Vec<String>>);
+impl Parts {
+    fn new(base: String) -> Self {
+        Self(base, parking_lot::Mutex::default())
+    }
+}
 #[async_trait::async_trait]
 impl PartSource for Parts {
-    async fn part(&self, part_key: &str) -> AppResult<StreamSource> {
+    async fn part(&self, track_id: &str, part_key: &str) -> AppResult<StreamSource> {
         if self.0.is_empty() {
             return Err(AppError::Network("offline".into()));
         }
+        self.1.lock().push(track_id.to_string());
         Ok(StreamSource { url: format!("{}{part_key}", self.0), ..Default::default() })
     }
 }
@@ -675,7 +682,7 @@ async fn the_scan_reads_each_file_once_and_again_when_it_changes() {
     let events = Arc::new(Events::default());
     let scan = TagScanner::new(
         db.clone(),
-        Arc::new(Parts(server.uri())),
+        Arc::new(Parts::new(server.uri())),
         reader(TransferGate::new(), None),
         Some(events.clone()),
     );
@@ -703,6 +710,21 @@ async fn the_scan_reads_each_file_once_and_again_when_it_changes() {
     // The scan pruned the row for the key no track has any more.
     assert!(db.read(|c| store::get(c, &t1.part_key)).unwrap().is_none());
     assert_eq!(db.write(|c| store::prune(c)).unwrap(), 0);
+}
+
+#[tokio::test]
+async fn each_file_is_asked_of_the_server_its_track_is_on() {
+    // Part keys don't carry a server; the track id says which one has the file.
+    let id = format!("{}:21", crate::sid::tag("other-server"));
+    let mut t = track("21", "1", 1, "flac");
+    t.id = id.clone();
+    let server = serve(&[(t.part_key.as_str(), flac(&[streaminfo()]))], false, Duration::ZERO).await;
+    let (db, _d) = db_with(&[album("1", "ar", None, 1, &[])], &[t]);
+    let parts = Arc::new(Parts::new(server.uri()));
+    let scan = TagScanner::new(db.clone(), parts.clone(), reader(TransferGate::new(), None), None);
+    scan.spawn();
+    until(|| scan.status().done == 1 && !scan.status().running).await;
+    assert_eq!(*parts.1.lock(), [id]);
 }
 
 #[tokio::test]
@@ -734,7 +756,7 @@ async fn files_read_by_an_older_build_are_read_again_for_their_ids() {
     ];
     let refs: Vec<(&str, Vec<u8>)> = files.iter().map(|(p, b)| (p.as_str(), b.clone())).collect();
     let server = serve(&refs, false, Duration::ZERO).await;
-    let scan = TagScanner::new(db.clone(), Arc::new(Parts(server.uri())), reader(TransferGate::new(), None), None);
+    let scan = TagScanner::new(db.clone(), Arc::new(Parts::new(server.uri())), reader(TransferGate::new(), None), None);
     scan.spawn();
     until(|| scan.status().done == 2 && !scan.status().running).await;
     let (_, t) = db.read(|c| store::get(c, &t1.part_key)).unwrap().unwrap();
@@ -757,7 +779,7 @@ async fn files_read_by_an_older_build_are_read_again_for_their_ids() {
 async fn the_scan_pauses_offline_and_when_turned_off() {
     let (db, _d) = db_with(&[album("1", "ar", None, 1, &[])], &[track("11", "1", 1, "flac")]);
     let events = Arc::new(Events::default());
-    let scan = TagScanner::new(db.clone(), Arc::new(Parts(String::new())), reader(TransferGate::new(), None), Some(events.clone()));
+    let scan = TagScanner::new(db.clone(), Arc::new(Parts::new(String::new())), reader(TransferGate::new(), None), Some(events.clone()));
     scan.spawn();
     until(|| scan.status().paused).await;
     assert_eq!(scan.status().done, 0, "nothing marked while offline");

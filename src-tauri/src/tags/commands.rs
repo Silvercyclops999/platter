@@ -21,14 +21,14 @@ pub const EV_CHANGED: &str = "tags://changed";
 
 const CLIENT_WAIT: Duration = Duration::from_secs(15);
 
-/// Parts through the connected server. Not over the relay: it's slow and
-/// capped, so tags wait for a direct connection.
+/// Parts through the server each track is on. Not over the relay: it's
+/// slow and capped, so tags wait for a direct connection.
 pub struct PlexParts(pub PlexState);
 
 #[async_trait]
 impl PartSource for PlexParts {
-    async fn part(&self, part_key: &str) -> AppResult<StreamSource> {
-        let client = self.0.client_when_ready(CLIENT_WAIT).await?;
+    async fn part(&self, track_id: &str, part_key: &str) -> AppResult<StreamSource> {
+        let client = self.0.client_for_when_ready(track_id, CLIENT_WAIT).await?;
         if client.connection() == Some(ConnectionKind::Relay) {
             return Err(AppError::Network("relay only: tags wait for a direct connection".into()));
         }

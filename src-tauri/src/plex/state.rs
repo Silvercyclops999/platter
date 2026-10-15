@@ -1832,4 +1832,51 @@ mod tests {
     async fn art_loads_over_the_relay() {
         art_away_from_home(true).await;
     }
+
+    /// Signed in to m1, with a second server m2 on the account whose album 5
+    /// has a MusicBrainz id. Both answer `/library/metadata/5`, differently.
+    async fn two_servers() -> (MockServer, MockServer, MockServer, tempfile::TempDir, PlexState) {
+        let m1 = pms("m1", true).await;
+        let m2 = pms("m2", true).await;
+        for (s, guid) in [(&m1, "mbid://wrong-server"), (&m2, "mbid://right-server")] {
+            Mock::given(method("GET"))
+                .and(path("/library/metadata/5"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "MediaContainer": {"Metadata": [{"ratingKey": "5", "type": "album", "title": "Album", "Guid": [{"id": guid}]}]}
+                })))
+                .mount(s)
+                .await;
+        }
+        let tv = plex_tv(serde_json::json!([resource("m1", &m1.uri()), resource("m2", &m2.uri())])).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new());
+        store.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+        let (st, _rec) = state(dir.path(), &tv.uri(), store);
+        st.restore().await.unwrap();
+        if st.tag().await.is_none() {
+            st.select_server("m1").await.unwrap();
+        }
+        assert_eq!(st.tag().await, Some(crate::sid::tag("m1")));
+        (m1, m2, tv, dir, st)
+    }
+
+    #[tokio::test]
+    async fn an_albums_details_come_from_its_own_server() {
+        use crate::artistinfo::service::{MbidLookup, PlexMbid};
+        let (_m1, _m2, _tv, _dir, st) = two_servers().await;
+        let album = format!("{}:5", crate::sid::tag("m2"));
+        let mbid = PlexMbid(st.clone()).album_mbid(&album).await.unwrap();
+        assert_eq!(mbid.as_deref(), Some("right-server"));
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_tracks_file_is_read_from_its_own_server() {
+        use crate::tags::scan::PartSource;
+        let (_m1, m2, _tv, _dir, st) = two_servers().await;
+        let track = format!("{}:6", crate::sid::tag("m2"));
+        let src = crate::tags::commands::PlexParts(st.clone()).part(&track, "/library/parts/9/1/file.flac").await.unwrap();
+        assert_eq!(src.url, format!("{}/library/parts/9/1/file.flac", m2.uri()));
+        st.sign_out().await.unwrap();
+    }
 }

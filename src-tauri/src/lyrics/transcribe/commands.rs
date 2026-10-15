@@ -67,7 +67,7 @@ impl SongReader for AppSongs {
         if let Ok(bytes) = tokio::fs::read(&cached).await {
             return Ok(SongAudio { bytes, hint });
         }
-        let src = self.parts.part(&track.part_key).await.map_err(|e| AudioError::Unreachable(e.to_string()))?;
+        let src = self.parts.part(&track.id, &track.part_key).await.map_err(|e| AudioError::Unreachable(e.to_string()))?;
         let bytes = audio::read_whole(&self.reader, &src, cancel).await?;
         Ok(SongAudio { bytes, hint })
     }

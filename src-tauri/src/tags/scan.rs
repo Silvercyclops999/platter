@@ -32,12 +32,13 @@ const IDLE_RECHECK: Duration = Duration::from_secs(60);
 const BACKOFF: Duration = Duration::from_secs(60);
 const PROGRESS_EVERY: Duration = Duration::from_millis(750);
 
-/// Where a part key can be read: the server's direct file URL plus the
-/// token header. Fails while there's no usable connection (offline, or only
-/// the relay, which is too slow to spend on tags).
+/// Where a track's part key can be read: its server's direct file URL plus
+/// the token header. The track id names the server (part keys don't).
+/// Fails while there's no usable connection (offline, or only the relay,
+/// which is too slow to spend on tags).
 #[async_trait]
 pub trait PartSource: Send + Sync {
-    async fn part(&self, part_key: &str) -> AppResult<StreamSource>;
+    async fn part(&self, track_id: &str, part_key: &str) -> AppResult<StreamSource>;
 }
 
 /// Scan progress for Settings (`tag_scan_status`, `tags://progress`).
@@ -239,7 +240,7 @@ impl TagScanner {
             if !self.enabled() {
                 break;
             }
-            let src = match self.0.parts.part(&item.part_key).await {
+            let src = match self.0.parts.part(&item.track_id, &item.part_key).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::debug!("tag scan paused: {e}");
