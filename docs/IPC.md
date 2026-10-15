@@ -63,7 +63,7 @@ Event `auth://changed` → `AuthStatus`.
 | `albums` | `{ sort: "name"|"artist"|"year"|"recent"|"plays", offset, limit, section?: ReleaseSection }` | `Page<Album>` |
 | `playlists` | – | `Playlist[]` |
 | `library_items` | – | `LibraryItem[]` (every playlist, album and artist, unordered) |
-| `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[], appearsOn: Album[] }` |
+| `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[], appearsOn: Album[], popularPending }` |
 | `album_page` | `{ id }` | `AlbumPage { album, tracks: Track[], totalDurationMs, moreByArtist: Album[], artistThumb?, released?, studio? }` (`released` is YYYY-MM-DD and `studio` the label, both from Plex when it has them) |
 | `recent_tracks` | `{ limit?: number }` | `Track[]` played on this device (the listen log), newest first, repeats kept; limit defaults to 50 and caps at 200 |
 | `recents` | `{ limit?: number }` | `RecentsEntry[]` for the Recents page, newest first (see below) |
@@ -103,11 +103,21 @@ artist credits, so a split keeps them whole; their ids are `credit:` ids.
 credited as a whole name in the track artist line, at most 10, one copy per
 song. With `popularSource` "global", songs on the artist's global top list
 (see Artist info) come first in list order, matched by title folded for
-comparison (case, brackets, "feat.", version suffixes like "2011 Remaster" and
-punctuation ignored). The rest follow by your own plays, then most recent
-play; a track's `ratingCount` only breaks ties there. Until the list has
-arrived, or when there is none, the whole list is in plays order. `appearsOn`
-lists albums by others whose tracks credit the artist, newest first.
+comparison (case, "feat." credits, edition notes like "2011 Remaster" or
+"Bonus Track" and punctuation ignored). Version qualifiers such as
+"(Interlude)", "(Live)", "- Demo", "(Radio Edit)" or "(Radio Sessions)" count,
+so a variant only matches a list entry with the same qualifier. When several
+copies match one entry, one shows: the copy on the release the list names,
+then released over unreleased, a studio album over other release types, the
+earliest year, lossless then higher bitrate, most played. The rest follow by
+your own plays, then most recent play, with variants of listed songs after
+the others; a track's `ratingCount` only breaks ties there. When there is no
+list, the whole list is in plays order. `popularPending` is true while
+`popularSource` is "global", a source for the list is on and none has been
+fetched for the artist yet; the page then shows placeholder rows until
+`artistinfo://changed` brings the list, `artistinfo://popular` says the fetch
+finished without one, or 1.5 s pass. `appearsOn` lists albums by others whose
+tracks credit the artist, newest first.
 
 Every name in a track line that has no library artist gets a credited
 artist page with the id `credit:<name in lower case>` (while the
@@ -251,10 +261,18 @@ while `popularSource` is "global": ListenBrainz top recordings by the
 artist's MusicBrainz id (no key; an optional user token, sent as
 `Authorization: Token`, lets it answer artists it hasn't cached), and when
 ListenBrainz has nothing, Last.fm top tracks if Last.fm is on with a key.
-Copies of a song are merged and the top 100 are kept for 7 days, "none found"
-too. Offline, busy or a bad answer stores nothing and is tried again on a
-later page open. A new list emits `artistinfo://changed`, and the artist page
-then asks `artist_page` again.
+Copies of a song are merged and the top 100, with the release names each came
+out on, are kept for 7 days, "none found" too. Offline, busy or a bad answer
+stores nothing and is tried again on a later page open. The list is fetched
+before the other sources. A new list emits `artistinfo://changed`, and the
+artist page then asks `artist_page` again; every finished list fetch, found or
+not, also emits `artistinfo://popular` with `{ id }`.
+
+At startup and after each library sync the core also fetches missing or stale
+lists in the background for the artists on Home's shortcuts and Recently
+played and the most played artists (60 at most), one artist every 20 seconds,
+so most artist pages open with the list ready. Only the list is fetched this
+way; the other sources wait for the page.
 
 `artist_info` also takes `credit:` ids. Their name comes from the tracks that
 credit it, and their MusicBrainz id from a MusicBrainz artist search, taking

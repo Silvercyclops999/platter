@@ -247,6 +247,8 @@ export class MockBackend implements Backend {
   /** Outside artist info: keys entered in Settings, and artists already "fetched". */
   private infoKeys: MockInfoKeys = { keys: {}, rejected: new Set() };
   private infoFetched = new Set<string>();
+  /** Artists whose global Popular list has "arrived" (browser timelines only). */
+  private popularFetched = new Set<string>();
 
   // player
   private status: PlayerState["status"] = "idle";
@@ -791,7 +793,9 @@ export class MockBackend implements Backend {
       const about = this.plexBio(idx, artist.title);
       const similar = idx >= this.fx.artists.length - 3 ? [] : [1, 2].map((d) => this.fx.artists[(idx + d) % this.fx.artists.length]);
       const appearsOn = this.albumsOf(this.fx.tracks.filter((t) => t.artistId !== id && credits(t, artist.title, lookup)));
-      return { artist, popular, sections, plays, about, similar, appearsOn };
+      // In the browser a first open waits for the global list, like the core.
+      const popularPending = !!this.opts.timelines && this.popularSource() === "global" && !this.popularFetched.has(id);
+      return { artist, popular, sections, plays, about, similar, appearsOn, popularPending };
     });
   }
   /** Featured names with no library artist, for search (while "Link featured artists" is on). */
@@ -1969,6 +1973,12 @@ export class MockBackend implements Backend {
       const fetched = !this.opts.timelines || this.infoFetched.has(id);
       if (!fetched) {
         this.infoFetched.add(id);
+        // The Popular list lands first, then the rest.
+        this.later(400, () => {
+          this.popularFetched.add(id);
+          this.emit("artistinfo://changed", { id });
+          this.emit("artistinfo://popular", { id });
+        });
         this.later(600, () => this.emit("artistinfo://changed", { id }));
       }
       return mockArtistInfo(artist, idx, this.plexBio(idx, artist.title), this.fx.artists, this.settings, this.infoKeys, fetched);
@@ -1988,6 +1998,7 @@ export class MockBackend implements Backend {
     return this.delay(() => {
       const n = this.infoFetched.size;
       this.infoFetched.clear();
+      this.popularFetched.clear();
       return n;
     });
   }

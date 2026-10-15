@@ -25,6 +25,7 @@ import { AboutCard, useArtistInfo } from "./ArtistAbout";
 import {
   POPULAR_FIRST,
   POPULAR_MORE,
+  POPULAR_WAIT_MS,
   aboutText,
   artistSections,
   bannerPath,
@@ -47,6 +48,9 @@ function ArtistView({ id }: { id: string }) {
   // Similar artists and the global Popular list arrive in the background
   // after the page opened; the page is asked again when they do.
   const [fresh, setFresh] = useState<ArtistPageData | null>(null);
+  // While the global Popular list is on its way, Popular shows placeholder
+  // rows; plays order shows only if the fetch fails or takes too long.
+  const [gaveUp, setGaveUp] = useState(false);
   useEffect(() => {
     let alive = true;
     const reload = (e: { id: string }) => {
@@ -56,13 +60,25 @@ function ArtistView({ id }: { id: string }) {
         () => {},
       );
     };
-    const uns = [backend.listen("artist://changed", reload), backend.listen("artistinfo://changed", reload)];
+    const done = (e: { id: string }) => {
+      if (e.id !== id) return;
+      setGaveUp(true);
+      reload(e);
+    };
+    const timer = setTimeout(() => alive && setGaveUp(true), POPULAR_WAIT_MS);
+    const uns = [
+      backend.listen("artist://changed", reload),
+      backend.listen("artistinfo://changed", reload),
+      backend.listen("artistinfo://popular", done),
+    ];
     return () => {
       alive = false;
+      clearTimeout(timer);
       uns.forEach((un) => un.then((f) => f()));
     };
   }, [id]);
   const data = fresh ?? loaded;
+  const popularWaiting = !!data?.popularPending && !gaveUp;
   const credited = isCreditId(id);
   const artist = data?.artist;
   const info = useArtistInfo(id);
@@ -130,14 +146,7 @@ function ArtistView({ id }: { id: string }) {
 
         {!data && (
           <>
-            <section className="detail-section">
-              <h2 className="section-title">Popular</h2>
-              <TrackList label="Popular tracks" header={false}>
-                {Array.from({ length: POPULAR_FIRST }, (_, i) => (
-                  <TrackRowSkeleton key={i} showArt />
-                ))}
-              </TrackList>
-            </section>
+            <PopularSkeleton />
             <Shelf title="Discography" loading />
           </>
         )}
@@ -146,7 +155,7 @@ function ArtistView({ id }: { id: string }) {
           sections.map((s) => {
             switch (s) {
               case "popular":
-                return <PopularSection key={s} id={id} data={data} />;
+                return popularWaiting ? <PopularSkeleton key={s} /> : <PopularSection key={s} id={id} data={data} />;
               case "discography":
                 return <Discography key={s} id={id} sections={data.sections} />;
               case "appearsOn":
@@ -299,6 +308,20 @@ function ActionRow({
 }
 
 // ---------------------------------------------------------------- sections
+
+/** Popular's placeholder rows, while the page or the global list loads. */
+function PopularSkeleton() {
+  return (
+    <section className="detail-section" aria-busy="true">
+      <h2 className="section-title">Popular</h2>
+      <TrackList label="Popular tracks" header={false}>
+        {Array.from({ length: POPULAR_FIRST }, (_, i) => (
+          <TrackRowSkeleton key={i} showArt />
+        ))}
+      </TrackList>
+    </section>
+  );
+}
 
 function PopularSection({ id, data }: { id: string; data: ArtistPageData }) {
   const [more, setMore] = useState(false);

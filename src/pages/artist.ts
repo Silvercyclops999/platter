@@ -5,6 +5,8 @@ import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, BioLink,
 /** Popular songs shown at first, and after "See more". */
 export const POPULAR_FIRST = 5;
 export const POPULAR_MORE = 10;
+/** How long Popular waits for the global list before showing plays order. */
+export const POPULAR_WAIT_MS = 1500;
 
 /** Cards in the "Popular releases" row. */
 export const POPULAR_RELEASES_N = 10;

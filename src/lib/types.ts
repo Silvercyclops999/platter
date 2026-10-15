@@ -253,6 +253,12 @@ export interface ArtistPage {
   similar: Artist[];
   /** Albums by others with tracks that credit this artist, newest first. */
   appearsOn: Album[];
+  /**
+   * Popular ranks by the global list and none has been fetched yet: the
+   * page shows placeholder rows until it lands, the fetch fails, or a
+   * moment passes, instead of plays order that reshuffles.
+   */
+  popularPending?: boolean;
 }
 
 export interface AlbumPage {
@@ -1610,6 +1616,8 @@ export interface EventMap {
   "artist://changed": { id: string };
   /** New outside info arrived for an artist (artistInfo can be asked again). */
   "artistinfo://changed": { id: string };
+  /** A fetch of the global Popular list finished, found or not. */
+  "artistinfo://popular": { id: string };
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

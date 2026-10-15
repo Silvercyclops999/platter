@@ -209,6 +209,67 @@ describe("artist page", () => {
       spy.mockRestore();
     }
   });
+
+  /** Popular's section: placeholder rows are busy, the list isn't. */
+  const popularSection = () => screen.getByRole("heading", { name: "Popular" }).closest("section")!;
+
+  it("shows placeholder rows while the global list is on its way, then the list", async () => {
+    const a = artistAt(0);
+    const real = mock.artistPage.bind(mock);
+    const hit = mock.fx.tracks.find((t) => t.artistId !== a.id)!;
+    let arrived = false;
+    const spy = vi.spyOn(mock, "artistPage").mockImplementation(async (id) => {
+      const page = await real(id);
+      return arrived ? { ...page, popular: [{ ...hit, title: "Global Number One" }], popularPending: false } : { ...page, popularPending: true };
+    });
+    try {
+      render(<ArtistPage id={a.id} />);
+      await screen.findByRole("heading", { level: 1, name: a.title });
+      // Plays order never shows: placeholders until the list lands.
+      expect(popularSection()).toHaveAttribute("aria-busy", "true");
+      const first = (await real(a.id)).popular[0];
+      expect(within(popularSection()).queryByRole("row", { name: new RegExp(first.title) })).toBeNull();
+      arrived = true;
+      act(() => mock.emit("artistinfo://changed", { id: a.id }));
+      expect(await screen.findByRole("row", { name: /Global Number One/ })).toBeInTheDocument();
+      expect(popularSection()).not.toHaveAttribute("aria-busy");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("falls back to plays order when the global list fails", async () => {
+    const a = artistAt(0);
+    const real = mock.artistPage.bind(mock);
+    const spy = vi.spyOn(mock, "artistPage").mockImplementation(async (id) => ({ ...(await real(id)), popularPending: true }));
+    try {
+      render(<ArtistPage id={a.id} />);
+      await screen.findByRole("heading", { level: 1, name: a.title });
+      expect(popularSection()).toHaveAttribute("aria-busy", "true");
+      act(() => mock.emit("artistinfo://popular", { id: a.id }));
+      await vi.waitFor(() => expect(popularSection()).not.toHaveAttribute("aria-busy"));
+      const first = (await real(a.id)).popular[0];
+      expect(within(popularSection()).getByRole("row", { name: new RegExp(first.title) })).toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("falls back to plays order when the global list is slow", async () => {
+    const a = artistAt(0);
+    const real = mock.artistPage.bind(mock);
+    const spy = vi.spyOn(mock, "artistPage").mockImplementation(async (id) => ({ ...(await real(id)), popularPending: true }));
+    try {
+      render(<ArtistPage id={a.id} />);
+      await screen.findByRole("heading", { level: 1, name: a.title });
+      expect(popularSection()).toHaveAttribute("aria-busy", "true");
+      // No word from the fetch: after about 1.5 s the plays order shows.
+      await vi.waitFor(() => expect(popularSection()).not.toHaveAttribute("aria-busy"), { timeout: 3000 });
+      expect(within(popularSection()).getAllByRole("row").length).toBeGreaterThan(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe("credited artist page", () => {
