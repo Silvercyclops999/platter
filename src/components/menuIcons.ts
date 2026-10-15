@@ -53,6 +53,7 @@ const RULES: [RegExp, LucideIcon][] = [
   [/^Copy .*link/, Link],
   [/^Copy /, Copy],
   [/^Edit details$/, Pencil],
+  [/^Rename$/, Pencil],
   [/^Delete$/, Trash2],
   [/^Duplicate$/, CopyPlus],
   [/^Create playlist$/, Plus],

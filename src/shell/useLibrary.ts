@@ -1,4 +1,5 @@
 /** Data, recents and menus shared by the library sidebar, its rail and wide mode. */
+import { FolderPlus } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { useUi, type MenuItem } from "../stores/ui";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
@@ -241,7 +242,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
     items.push(...playlistEditItems(pl));
     items.push(moveToFolderItem({ kind: "playlist", id: e.id, title: e.title }));
     items.push({ label: "Create playlist", separator: true, onSelect: () => void createPlaylist() });
-    items.push({ label: "Create folder", onSelect: () => void folders.create(null) });
+    items.push({ label: "Create folder", icon: FolderPlus, onSelect: () => void folders.create(null) });
   }
   if (e.kind === "album" || e.kind === "playlist") items.push(...downloadMenuItems({ kind: e.kind, id: e.id, title: e.title }));
   if (e.kind === "album" || e.kind === "playlist") items.push(startSessionItem(() => void playEntry(e)));
