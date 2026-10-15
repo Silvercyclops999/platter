@@ -66,13 +66,16 @@ fn with_token(mut u: Url, token: &Token) -> String {
 }
 
 fn direct(server: &ServerCtx, token: &Token, client_id: &str, t: &Track) -> Option<DirectItem> {
+    // Ids carry their server's tag (crate::sid); the server wants its own.
+    let key = crate::sid::key(&t.id);
+    let part = crate::sid::key(&t.part_key);
     let (url, content_type) = match cast_type(t) {
-        Some(ct) if t.part_key.starts_with('/') => (with_token(server.url(&t.part_key).ok()?, token), ct),
+        Some(ct) if part.starts_with('/') => (with_token(server.url(part).ok()?, token), ct),
         // Anything else goes through the server's transcoder as MP3.
         _ => {
             let mut u = server.url("/music/:/transcode/universal/start.mp3").ok()?;
             u.query_pairs_mut()
-                .append_pair("path", &format!("/library/metadata/{}", t.id))
+                .append_pair("path", &format!("/library/metadata/{key}"))
                 .append_pair("mediaIndex", "0")
                 .append_pair("partIndex", "0")
                 .append_pair("protocol", "http")
@@ -92,7 +95,7 @@ fn direct(server: &ServerCtx, token: &Token, client_id: &str, t: &Track) -> Opti
         .and_then(|p| server.url(p).ok())
         .map(|u| with_token(u, token));
     Some(DirectItem {
-        rating_key: crate::sid::key(&t.id).to_string(),
+        rating_key: key.to_string(),
         url,
         content_type: content_type.to_string(),
         title: t.title.clone(),
@@ -103,7 +106,14 @@ fn direct(server: &ServerCtx, token: &Token, client_id: &str, t: &Track) -> Opti
     })
 }
 
+/// Whether a song is on `server`: songs from another of the account's
+/// servers can't be played through this one.
+fn on_server(server: &ServerCtx, t: &Track) -> bool {
+    crate::sid::tag_of(&t.id).is_none_or(|tag| tag == crate::sid::tag(&server.machine_id))
+}
+
 /// The plan for `tracks` (the current song first), starting at `offset_ms`.
+/// Songs on another server are left out.
 pub fn plan(
     server: &ServerCtx,
     token: &Token,
@@ -127,6 +137,7 @@ pub fn plan(
         plex,
         items: tracks
             .iter()
+            .filter(|t| on_server(server, t))
             .take(MAX_ITEMS)
             .filter_map(|t| direct(server, token, client_id, t))
             .collect(),
@@ -178,5 +189,31 @@ mod tests {
         assert_eq!(p.items[1].content_type, "audio/mpeg");
         assert!(!p.items.iter().any(|i| i.url.contains("server-token")));
         assert_eq!((p.offset_ms, p.repeat), (12_000, Repeat::All));
+    }
+
+    #[test]
+    fn tagged_ids_reach_the_server_as_its_own_and_other_servers_songs_stay_out() {
+        let tag = crate::sid::tag("srv");
+        let other = crate::sid::tag("elsewhere");
+        let mut a = track(&format!("{tag}:41"), "A", "/library/parts/1/2/file.m4a");
+        a.codec = Some("alac".into());
+        a.thumb = Some(format!("{tag}:/library/metadata/40/thumb/9"));
+        let mut b = track(&format!("{other}:42"), "A", "/library/parts/5/6/file.flac");
+        b.codec = Some("flac".into());
+        let mut c = track(&format!("{tag}:43"), "A", "/library/parts/7/8/file.flac");
+        c.codec = Some("flac".into());
+        let tok = Token::new("transient").unwrap();
+        let p = plan(&server(), &tok, "me", "55", &[a, b, c], 0, Repeat::Off);
+        assert_eq!(p.plex.unwrap().rating_key, "41");
+        assert_eq!(p.items.len(), 2, "the other server's song is left out");
+        let u = Url::parse(&p.items[0].url).unwrap();
+        let path = u.query_pairs().find(|(k, _)| k == "path").unwrap().1.into_owned();
+        assert_eq!(path, "/library/metadata/41");
+        assert_eq!(p.items[0].rating_key, "41");
+        let img = Url::parse(p.items[0].image.as_deref().unwrap()).unwrap();
+        assert_eq!(img.path(), "/library/metadata/40/thumb/9");
+        assert_eq!(p.items[1].rating_key, "43");
+        assert_eq!(Url::parse(&p.items[1].url).unwrap().path(), "/library/parts/7/8/file.flac");
+        assert!(!p.items.iter().any(|i| i.url.contains(&tag) || i.url.contains(&other)));
     }
 }

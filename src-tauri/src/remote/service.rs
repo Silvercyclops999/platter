@@ -178,6 +178,10 @@ struct Active {
     lan: Option<Arc<dyn LanLink>>,
     session: RemoteSession,
     play_queue_id: Option<String>,
+    /// An item on the server the session plays from (the song it started
+    /// with): its play queue lives there, and the song ids the device
+    /// reports are that server's (`crate::sid`).
+    server_of: String,
     started: Instant,
     seen_playing: bool,
     misses: u32,
@@ -228,6 +232,11 @@ const MIRROR_RECHECK: Duration = Duration::from_secs(10);
 
 fn track_ids(items: &[crate::audio::queue::QueueItem]) -> Vec<String> {
     items.iter().map(|i| i.track.id.clone()).collect()
+}
+
+/// [`Active::server_of`] for a session starting on its song.
+fn server_of(s: &RemoteSession) -> String {
+    s.track.as_ref().map(|t| t.id.clone()).unwrap_or_default()
 }
 
 /// Cheap to clone; managed by Tauri.
@@ -828,6 +837,7 @@ impl RemoteService {
             found,
             routes: Vec::new(),
             lan: Some(link),
+            server_of: server_of(&session),
             session,
             play_queue_id,
             started: Instant::now(),
@@ -871,7 +881,8 @@ impl RemoteService {
         let Some(track) = st.track.clone() else {
             return Err(AppError::Invalid("Play something first, then move it.".into()));
         };
-        let server = self.inner.env.server().await?;
+        // The server the song is on, which the other device must play from.
+        let server = self.inner.env.server_for(&track.id).await?;
         let client = self
             .peer_client()
             .await
@@ -936,6 +947,7 @@ impl RemoteService {
             found,
             routes: Vec::new(),
             lan: Some(Arc::new(link)),
+            server_of: server_of(&session),
             session,
             play_queue_id: None,
             started: Instant::now(),
@@ -974,7 +986,7 @@ impl RemoteService {
             ("address", host),
             ("port", port),
             ("token", server.token.expose().to_string()),
-            ("key", format!("/library/metadata/{}", track.id)),
+            ("key", format!("/library/metadata/{}", crate::sid::key(&track.id))),
             ("offset", st.position_ms.to_string()),
             ("containerKey", format!("/playQueues/{}?window=100&own=1", pq.id)),
             ("type", "music".to_string()),
@@ -1021,6 +1033,7 @@ impl RemoteService {
             found,
             routes,
             lan: None,
+            server_of: server_of(&session),
             session,
             play_queue_id: Some(pq.id),
             started: Instant::now(),
@@ -1096,7 +1109,7 @@ impl RemoteService {
             // The player moved on past Platter's queue: take its play queue.
             let mut ids = Vec::new();
             if let Some(pq) = &a.play_queue_id
-                && let Ok(server) = self.inner.env.server().await
+                && let Ok(server) = self.session_server(a).await
             {
                 ids = playqueue::items(&self.inner.http, &server, pq).await.unwrap_or_default();
             }
@@ -1176,8 +1189,9 @@ impl RemoteService {
 
     /// The active device's timeline: Ok(None) when it stopped, Err when it
     /// didn't answer.
+    /// The song id comes back as the cache has it, with its server's tag.
     async fn poll_active(&self, a: &Active) -> AppResult<Option<Timeline>> {
-        match &a.lan {
+        let mut tl = match &a.lan {
             Some(link) => link.poll().await,
             None => self
                 .inner
@@ -1185,6 +1199,30 @@ impl RemoteService {
                 .send(&a.found.player.id, &a.routes, "/player/timeline/poll", &[("wait", "0".into())])
                 .await
                 .map(|body| companion::parse_timeline(&body)),
+        }?;
+        if let Some(t) = &mut tl
+            && let Some(k) = &t.rating_key
+        {
+            t.rating_key = Some(self.cache_id(a, k).await);
+        }
+        Ok(tl)
+    }
+
+    /// The server the session plays from (where its play queue lives).
+    async fn session_server(&self, a: &Active) -> AppResult<ServerCtx> {
+        self.inner.env.server_for(&a.server_of).await
+    }
+
+    /// A song id a device reported, as the cache has it: players report the
+    /// server's own id; the cache's carries its tag (`crate::sid`).
+    async fn cache_id(&self, a: &Active, k: &str) -> String {
+        let tag = match crate::sid::owner(&a.server_of) {
+            Some(t) => Some(t),
+            None => self.inner.env.server().await.ok().map(|s| crate::sid::tag(&s.machine_id)),
+        };
+        match tag {
+            Some(t) => crate::sid::qualify(&t, k),
+            None => crate::sid::resolve(k),
         }
     }
 
@@ -1231,7 +1269,7 @@ impl RemoteService {
             AppError::Network(format!("Couldn't update the queue on {name}"))
         };
         let st = self.inner.local.state().await?;
-        let server = self.inner.env.server().await?;
+        let server = self.session_server(&a).await?;
         let snap = playqueue::read(&self.inner.http, &server, &pq).await.map_err(failed)?;
         let item_id = self.inner.mirror.lock().item_id.clone();
         let key = a.session.track.as_ref().map(|t| t.id.clone());
@@ -1251,6 +1289,9 @@ impl RemoteService {
         }
         let mut want = user;
         want.extend(next);
+        // Songs on another server can't go in this server's play queue.
+        let tag = crate::sid::tag(&server.machine_id);
+        want.retain(|k| crate::sid::tag_of(k).is_none_or(|t| t == tag));
         want.truncate(playqueue::MAX_ITEMS.saturating_sub(1));
         playqueue::set_upcoming(&self.inner.http, &server, &pq, &snap, at, &want)
             .await
@@ -1305,7 +1346,7 @@ impl RemoteService {
                 return;
             }
         }
-        let r = self.mirror_play_queue(&pq, t).await;
+        let r = self.mirror_play_queue(a, &pq, t).await;
         let mut m = self.inner.mirror.lock();
         if m.generation == generation {
             m.checked = Some(Instant::now());
@@ -1320,8 +1361,8 @@ impl RemoteService {
     }
 
     /// Put the queue here on the play queue a Plex player is playing.
-    async fn mirror_play_queue(&self, pq: &str, t: &Timeline) -> AppResult<()> {
-        let server = self.inner.env.server().await?;
+    async fn mirror_play_queue(&self, a: &Active, pq: &str, t: &Timeline) -> AppResult<()> {
+        let server = self.session_server(a).await?;
         let snap = playqueue::read(&self.inner.http, &server, pq).await?;
         let Some(at) = snap.position(t.play_queue_item_id.as_deref(), t.rating_key.as_deref()) else {
             return Ok(());
@@ -1406,12 +1447,9 @@ impl RemoteService {
         if let Some(pq) = &t.play_queue_id {
             a.play_queue_id = Some(pq.clone());
         }
-        // Players report the server's own id; the cache's carries its tag.
+        // Tagged already when polled; again here costs nothing.
         let key = match &t.rating_key {
-            Some(k) => Some(match self.inner.env.server().await {
-                Ok(s) => crate::sid::qualify(&crate::sid::tag(&s.machine_id), k),
-                Err(_) => crate::sid::resolve(k),
-            }),
+            Some(k) => Some(self.cache_id(a, k).await),
             None => None,
         };
         if let Some(key) = &key

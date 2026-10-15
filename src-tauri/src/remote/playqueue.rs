@@ -38,18 +38,21 @@ pub fn items_uri(machine_id: &str, ids: &[String]) -> String {
     format!("server://{machine_id}/{LIBRARY}/library/metadata/{}", ids.join(","))
 }
 
-/// Create a play queue holding `ids` (in order, at most [`MAX_ITEMS`]) with
-/// `start` selected. Shuffle is off: the order already is the shuffled one.
-pub async fn create(http: &reqwest::Client, server: &ServerCtx, ids: &[String], start: &str, repeat: Repeat) -> AppResult<PlayQueue> {
-    // The server's own ids (the cache's carry a server tag, crate::sid);
-    // songs on another server can't be in its play queue.
+/// The server's own ids for `ids` (the cache's carry a server tag,
+/// crate::sid); songs on another server can't be in its play queue.
+fn own_ids(server: &ServerCtx, ids: &[String]) -> Vec<String> {
     let tag = crate::sid::tag(&server.machine_id);
-    let ids: Vec<String> = ids
-        .iter()
+    ids.iter()
         .filter(|i| crate::sid::tag_of(i).is_none_or(|t| t == tag))
         .take(MAX_ITEMS)
         .map(|i| crate::sid::key(i).to_string())
-        .collect();
+        .collect()
+}
+
+/// Create a play queue holding `ids` (in order, at most [`MAX_ITEMS`]) with
+/// `start` selected. Shuffle is off: the order already is the shuffled one.
+pub async fn create(http: &reqwest::Client, server: &ServerCtx, ids: &[String], start: &str, repeat: Repeat) -> AppResult<PlayQueue> {
+    let ids = own_ids(server, ids);
     let start = crate::sid::key(start);
     if ids.is_empty() {
         return Err(AppError::Invalid("Nothing to play.".into()));
@@ -99,13 +102,20 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    fn parse(v: &Value) -> Self {
+    /// Keys come back with the server's tag, like every id Platter keeps.
+    fn parse(v: &Value, server: &ServerCtx) -> Self {
+        let tag = crate::sid::tag(&server.machine_id);
         let mc = &v["MediaContainer"];
         let entries: Vec<Entry> = mc["Metadata"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|m| Some(Entry { item_id: s(&m["playQueueItemID"])?, key: s(&m["ratingKey"])? }))
+            .filter_map(|m| {
+                Some(Entry {
+                    item_id: s(&m["playQueueItemID"])?,
+                    key: crate::sid::qualify(&tag, &s(&m["ratingKey"])?),
+                })
+            })
             .collect();
         let total = s(&mc["playQueueTotalCount"]).and_then(|t| t.parse::<usize>().ok());
         Self {
@@ -153,23 +163,27 @@ pub async fn read(http: &reqwest::Client, server: &ServerCtx, id: &str) -> AppRe
         .await
         .map_err(map_send_error)?;
     let v: Value = check_status(resp).await?.json().await.map_err(map_send_error)?;
-    Ok(Snapshot::parse(&v))
+    Ok(Snapshot::parse(&v, server))
 }
 
 /// Adds songs to a play queue (the server puts them after what's coming
 /// up). Answers the queue after the change.
 pub async fn add(http: &reqwest::Client, server: &ServerCtx, id: &str, ids: &[String]) -> AppResult<Snapshot> {
     check_id(id)?;
+    let ids = own_ids(server, ids);
+    if ids.is_empty() {
+        return Err(AppError::Invalid("Those songs are on another server.".into()));
+    }
     let url = server.url(&format!("/playQueues/{id}"))?;
     let resp = http
         .put(url)
-        .query(&[("uri", items_uri(&server.machine_id, ids)), ("next", "0".into())])
+        .query(&[("uri", items_uri(&server.machine_id, &ids)), ("next", "0".into())])
         .header("x-plex-token", server.token.header_value()?)
         .send()
         .await
         .map_err(map_send_error)?;
     let resp = check_status(resp).await?;
-    let snap = resp.json::<Value>().await.ok().map(|v| Snapshot::parse(&v)).unwrap_or_default();
+    let snap = resp.json::<Value>().await.ok().map(|v| Snapshot::parse(&v, server)).unwrap_or_default();
     if snap.entries.is_empty() { read(http, server, id).await } else { Ok(snap) }
 }
 
@@ -289,7 +303,7 @@ pub async fn set_upcoming(
     Ok(())
 }
 
-/// Rating keys of a play queue's items, in order.
+/// Ids of a play queue's items (with the server's tag), in order.
 pub async fn items(http: &reqwest::Client, server: &ServerCtx, id: &str) -> AppResult<Vec<String>> {
     if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err(AppError::Invalid("bad play queue id".into()));
@@ -302,11 +316,13 @@ pub async fn items(http: &reqwest::Client, server: &ServerCtx, id: &str) -> AppR
         .await
         .map_err(map_send_error)?;
     let v: Value = check_status(resp).await?.json().await.map_err(map_send_error)?;
+    let tag = crate::sid::tag(&server.machine_id);
     Ok(v["MediaContainer"]["Metadata"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|m| s(&m["ratingKey"]))
+        .map(|k| crate::sid::qualify(&tag, &k))
         .collect())
 }
 

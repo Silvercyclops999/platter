@@ -314,6 +314,15 @@ fn cfg(plex_tv: &MockServer) -> RemoteConfig {
 
 /// A server listing one fake player ("Desk", id "amp") in `/clients`.
 async fn rig() -> Rig {
+    let entries = json!([
+        {"ratingKey": "a", "playQueueItemID": 1}, {"ratingKey": "b", "playQueueItemID": 2}, {"ratingKey": "c", "playQueueItemID": 3}
+    ]);
+    rig_with(Local::playing("a", &["b", "c"], 61_000), entries).await
+}
+
+/// [`rig`] with this computer playing `local`, and play queue 55 holding
+/// `entries` on the server.
+async fn rig_with(local: Arc<Local>, entries: serde_json::Value) -> Rig {
     let server = MockServer::start().await;
     let player = MockServer::start().await;
     let pu = Url::parse(&player.uri()).unwrap();
@@ -337,9 +346,7 @@ async fn rig() -> Rig {
         .await;
     Mock::given(method("GET"))
         .and(path("/playQueues/55"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer": {"Metadata": [
-            {"ratingKey": "a", "playQueueItemID": 1}, {"ratingKey": "b", "playQueueItemID": 2}, {"ratingKey": "c", "playQueueItemID": 3}
-        ], "playQueueSelectedItemID": 1}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer": {"Metadata": entries, "playQueueSelectedItemID": 1}})))
         .mount(&server)
         .await;
     let tl = Timeline::new();
@@ -353,7 +360,6 @@ async fn rig() -> Rig {
         .respond_with(ResponseTemplate::new(200).set_body_string("<Response code=\"200\" status=\"OK\"/>"))
         .mount(&player)
         .await;
-    let local = Local::playing("a", &["b", "c"], 61_000);
     let events = Arc::new(Events::default());
     let switches = RemoteSwitches::default();
     let remote = RemoteService::new(
@@ -453,6 +459,54 @@ async fn move_creates_a_queue_plays_it_at_the_offset_and_pauses_here() {
     // Timeline follows a song change.
     r.tl.set(200, timeline("playing", Some("b"), 1_000));
     wait_for("song b", || r.remote.state().session.and_then(|s| s.track).is_some_and(|t| t.id == "b")).await;
+}
+
+/// Ids as the cache keeps them, with the fake server's tag.
+fn tagged(k: &str) -> String {
+    format!("{}:{k}", crate::sid::tag("srv"))
+}
+
+#[tokio::test]
+async fn tagged_ids_go_to_the_player_as_the_servers_own_and_come_back_tagged() {
+    let (a, b, c) = (tagged("1"), tagged("2"), tagged("3"));
+    let entries = json!([
+        {"ratingKey": "1", "playQueueItemID": 1}, {"ratingKey": "2", "playQueueItemID": 2}, {"ratingKey": "3", "playQueueItemID": 3}
+    ]);
+    let r = rig_with(Local::playing(&a, &[&b, &c], 61_000), entries).await;
+    r.remote.players().await;
+    r.remote.move_to("amp").await.unwrap();
+
+    let pq = q(&requests(&r.server, "/playQueues").await[0]);
+    assert_eq!(pq["uri"], "server://srv/com.plexapp.plugins.library/library/metadata/1,2,3");
+    assert_eq!(pq["key"], "/library/metadata/1");
+    let pm = q(&requests(&r.player, "/player/playback/playMedia").await[0]);
+    assert_eq!(pm["key"], "/library/metadata/1");
+
+    // The player names songs by the server's ids; here they're the cache's.
+    r.tl.set(200, timeline("playing", Some("2"), 1_000));
+    wait_for("song 2", || r.remote.state().session.and_then(|s| s.track).is_some_and(|t| t.id == b)).await;
+    // The queue here moves along to it rather than being replaced.
+    let want = format!("jump q{b} 1000 false");
+    wait_for("queue follows", || r.local.log().contains(&want)).await;
+    assert!(!r.local.log().iter().any(|l| l.starts_with("adopt")), "{:?}", r.local.log());
+}
+
+#[tokio::test]
+async fn return_takes_the_play_queue_with_tagged_ids() {
+    let entries = json!([
+        {"ratingKey": "1", "playQueueItemID": 1}, {"ratingKey": "2", "playQueueItemID": 2}, {"ratingKey": "9", "playQueueItemID": 3}
+    ]);
+    let r = rig_with(Local::playing(&tagged("1"), &[&tagged("2")], 0), entries).await;
+    r.switches.set(true, false, true);
+    r.remote.players().await;
+    r.remote.move_to("amp").await.unwrap();
+    r.tl.set(200, timeline("paused", Some("9"), 5_000));
+    // The queue here stays its own while the player plays (old device kept
+    // going), so coming back takes the player's play queue whole.
+    r.remote.return_here().await.unwrap();
+    let (one, two, nine) = (tagged("1"), tagged("2"), tagged("9"));
+    let want = format!("play {one},{two},{nine} from {nine} at 5000 false");
+    assert!(r.local.log().contains(&want), "{:?}", r.local.log());
 }
 
 #[tokio::test]
@@ -918,6 +972,27 @@ async fn add_to_queue_on_a_plex_player_goes_into_its_play_queue() {
 }
 
 #[tokio::test]
+async fn queue_edits_with_tagged_ids_reach_the_play_queue_as_the_servers_own() {
+    let (one, two) = (tagged("1"), tagged("2"));
+    let r = rig_with(Local::playing(&one, &[&two], 0), json!([])).await;
+    let fq = FakeQueue::new(&["1", "2"]);
+    fq.mount(&r.server).await;
+    r.remote.players().await;
+    r.remote.move_to("amp").await.unwrap();
+    r.tl.set(200, timeline_at("playing", "1", 1, 1, 1_000));
+    wait_for("playing", || r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+    // A song from this server and one from another server are queued here.
+    let elsewhere = format!("{}:7", crate::sid::tag("another-server"));
+    let five = tagged("5");
+    r.local.queue(&[&five, &elsewhere], false);
+    r.remote.queue_edited().await.unwrap();
+    // Only this server's song goes in, by its own id; nothing already there moves.
+    assert_eq!(fq.keys(), strs(&["1", "5", "2"]));
+    let gone = r.server.received_requests().await.unwrap().into_iter().filter(|x| x.method.as_str() == "DELETE").count();
+    assert_eq!(gone, 0);
+}
+
+#[tokio::test]
 async fn remove_reorder_and_clear_reach_the_play_queue() {
     let (r, fq) = on_player().await;
     r.local.queue(&["x", "y"], false);
@@ -1373,6 +1448,39 @@ mod peers {
         assert!(a.remote.players().await.iter().all(|p| p.id != "mac"));
         let gone = reqwest::Client::new().get(format!("http://127.0.0.1:{port}{PATH_HELLO}")).send().await;
         assert!(gone.is_err(), "the control port is closed");
+    }
+
+    #[tokio::test]
+    async fn another_platter_takes_tagged_ids_and_tags_plain_ones() {
+        let (one, two) = (tagged("1"), tagged("2"));
+        let r = rig_with(Local::playing(&one, &[&two], 3_000), json!([])).await;
+        let lan = MemoryLan::new();
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        a.remote.players().await;
+        a.remote.move_to("mac").await.unwrap();
+        assert_eq!(b.local.log(), [format!("adopt {one},{two} |  | shuffle false Off at 3000 true")]);
+
+        // A sender from before ids carried their server sends plain ids.
+        let http = reqwest::Client::new();
+        let key = PeerKey::from_token(&Token::new("account-token").unwrap());
+        let req = peer::PlayRequest {
+            server_id: "srv".into(),
+            current: "4".into(),
+            user_queue: vec![],
+            next_up: vec!["5".into()],
+            context: None,
+            position_ms: 0,
+            shuffle: false,
+            repeat: Repeat::Off,
+            play: true,
+        };
+        let body = serde_json::to_vec(&req).unwrap();
+        let auth = sign(&key, "POST", "/platter/v1/play", "pc", "mac", now_ms(), &nonce(), &body);
+        let resp = http.post(format!("{}platter/v1/play", b.base())).header("x-platter-auth", auth).body(body).send().await.unwrap();
+        assert_eq!(resp.status(), 200);
+        let want = format!("adopt {},{} |  | shuffle false Off at 0 true", tagged("4"), tagged("5"));
+        assert_eq!(b.local.log().last(), Some(&want));
     }
 
     #[tokio::test]

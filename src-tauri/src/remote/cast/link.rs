@@ -157,7 +157,7 @@ fn plex_load(p: &PlexLoad, session: &str) -> Value {
         "type": "LOAD",
         "sessionId": session,
         "media": {
-            "contentId": format!("/library/metadata/{}", p.rating_key),
+            "contentId": format!("/library/metadata/{}", crate::sid::key(&p.rating_key)),
             "streamType": "BUFFERED",
             "contentType": "audio",
             "customData": {
@@ -462,5 +462,20 @@ mod unit {
         assert_eq!(v["media"]["customData"]["server"]["isVerifiedHostname"], true);
         assert_eq!(v["currentTime"], 61.5);
         assert_eq!(v["media"]["contentType"], "audio");
+    }
+
+    #[test]
+    fn plex_load_names_the_song_as_its_server_knows_it() {
+        let p = PlexLoad {
+            rating_key: format!("{}:7", crate::sid::tag("srv")),
+            offset_ms: 0,
+            machine_id: "srv".into(),
+            protocol: "https".into(),
+            address: "a.b.plex.direct".into(),
+            port: 32400,
+            token: "transient".into(),
+            play_queue_id: "99".into(),
+        };
+        assert_eq!(plex_load(&p, "s1")["media"]["contentId"], "/library/metadata/7");
     }
 }

@@ -305,10 +305,16 @@ fn num(params: &HashMap<String, String>, k: &str) -> Option<i64> {
 #[async_trait]
 impl TargetHandler for PlayerTarget {
     async fn timeline(&self) -> TargetTimeline {
-        let machine = self.env.server().await.ok().map(|s| s.machine_id);
         let Ok(s) = self.local.state().await else {
             return TargetTimeline { state: "stopped", ..Default::default() };
         };
+        // The server the song is on (its id names it, crate::sid).
+        let machine = match &s.track {
+            Some(t) => self.env.server_for(&t.id).await,
+            None => self.env.server().await,
+        }
+        .ok()
+        .map(|s| s.machine_id);
         let state = match (s.status, &s.track) {
             (_, None) | (PlayerStatus::Idle, _) | (PlayerStatus::Error, _) => "stopped",
             (PlayerStatus::Playing, _) => "playing",

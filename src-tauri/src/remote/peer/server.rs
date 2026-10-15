@@ -397,17 +397,29 @@ impl PeerHandler for PlayerPeer {
     }
 
     async fn play(&self, req: PlayRequest) -> AppResult<()> {
-        let server = self.env.server().await?;
-        if req.server_id != server.machine_id {
-            return Err(AppError::Invalid("That computer plays from a different Plex server.".into()));
-        }
-        let ok_id = |s: &String| !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric());
+        // Ids carry their server's tag (crate::sid); a sender from before
+        // tags sends the plain ids of the server it names.
+        let ok_id = |s: &String| {
+            let k = crate::sid::key(s);
+            !k.is_empty() && s.len() <= 64 && k.chars().all(|c| c.is_ascii_alphanumeric())
+        };
         if !ok_id(&req.current) || !req.user_queue.iter().chain(&req.next_up).all(ok_id) {
             return Err(AppError::Invalid("Bad song ids.".into()));
         }
-        let mut ids = vec![req.current.clone()];
-        ids.extend(req.next_up.iter().take(MAX_SONGS).cloned());
-        let user: Vec<String> = req.user_queue.into_iter().take(MAX_SONGS).collect();
+        let tag = crate::sid::tag(&req.server_id);
+        let own = |s: &String| crate::sid::qualify(&tag, s);
+        let current = own(&req.current);
+        // The songs' server: the one this computer is on, or another of the
+        // account's servers it can reach.
+        let server = self.env.server().await?;
+        if req.server_id != server.machine_id
+            && self.env.server_for(&current).await.map(|s| s.machine_id).ok().as_deref() != Some(req.server_id.as_str())
+        {
+            return Err(AppError::Invalid("That computer plays from a different Plex server.".into()));
+        }
+        let mut ids = vec![current];
+        ids.extend(req.next_up.iter().take(MAX_SONGS).map(own));
+        let user: Vec<String> = req.user_queue.iter().take(MAX_SONGS).map(own).collect();
         self.local
             .adopt(req.context, ids, user, req.shuffle, req.repeat, req.position_ms, req.play)
             .await
