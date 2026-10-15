@@ -132,8 +132,7 @@ pub async fn queue_add(
     track_ids: Vec<String>,
     at: AddAt,
 ) -> AppResult<()> {
-    player.queue_add(track_ids, at).await?;
-    edited(&remote).await
+    remote.edit_queue(|| player.queue_add(track_ids, at)).await
 }
 
 #[tauri::command]
@@ -142,8 +141,7 @@ pub async fn queue_remove(
     remote: State<'_, RemoteService>,
     item_id: String,
 ) -> AppResult<()> {
-    player.queue_remove(item_id).await?;
-    edited(&remote).await
+    remote.edit_queue(|| player.queue_remove(item_id)).await
 }
 
 #[tauri::command]
@@ -153,19 +151,13 @@ pub async fn queue_move(
     item_id: String,
     to_index: usize,
 ) -> AppResult<()> {
-    player.queue_move(item_id, to_index).await?;
-    edited(&remote).await
+    remote.edit_queue(|| player.queue_move(item_id, to_index)).await
 }
 
+// While another device plays, it gets each edit too (`edit_queue`).
 #[tauri::command]
 pub async fn queue_clear(player: State<'_, PlayerHandle>, remote: State<'_, RemoteService>) -> AppResult<()> {
-    player.queue_clear().await?;
-    edited(&remote).await
-}
-
-/// While another device plays, it gets the edit too.
-async fn edited(remote: &RemoteService) -> AppResult<()> {
-    if remote.is_remote() { remote.queue_edited().await } else { Ok(()) }
+    remote.edit_queue(|| player.queue_clear()).await
 }
 
 #[tauri::command]

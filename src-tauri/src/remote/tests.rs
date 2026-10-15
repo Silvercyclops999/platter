@@ -954,8 +954,7 @@ async fn the_queue_here_follows_the_player_along_its_play_queue() {
 async fn add_to_queue_on_a_plex_player_goes_into_its_play_queue() {
     let (r, fq) = on_player().await;
     // Add to queue: the song lands after the playing one, before the rest.
-    r.local.queue(&["x"], false);
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.queue(&["x"], false); }).await.unwrap();
     assert_eq!(fq.keys(), strs(&["a", "x", "b", "c"]));
     let adds: Vec<_> = r.server.received_requests().await.unwrap().into_iter().filter(|x| x.method.as_str() == "PUT" && x.url.path() == "/playQueues/55").collect();
     assert_eq!(adds.len(), 1);
@@ -966,11 +965,9 @@ async fn add_to_queue_on_a_plex_player_goes_into_its_play_queue() {
     assert_eq!((q(&refresh[0])["playQueueID"].as_str(), q(&refresh[0])["type"].as_str()), ("55", "music"));
     assert_eq!(requests(&r.player, "/player/playback/playMedia").await.len(), 1, "no new playMedia");
     // Play next goes ahead of it; adding several keeps their order.
-    r.local.queue(&["y"], true);
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.queue(&["y"], true); }).await.unwrap();
     assert_eq!(fq.keys(), strs(&["a", "y", "x", "b", "c"]));
-    r.local.queue(&["p", "q"], false);
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.queue(&["p", "q"], false); }).await.unwrap();
     assert_eq!(fq.keys(), strs(&["a", "y", "x", "p", "q", "b", "c"]));
     // The player reports the new version: the panel keeps showing them as queued.
     r.tl.set(200, timeline_at("playing", "a", 1, fq.version(), 63_000));
@@ -998,8 +995,7 @@ async fn queue_edits_with_tagged_ids_reach_the_play_queue_as_the_servers_own() {
     // A song from this server and one from another server are queued here.
     let elsewhere = format!("{}:7", crate::sid::tag("another-server"));
     let five = tagged("5");
-    r.local.queue(&[&five, &elsewhere], false);
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.queue(&[&five, &elsewhere], false); }).await.unwrap();
     // Only this server's song goes in, by its own id; nothing already there moves.
     assert_eq!(fq.keys(), strs(&["1", "5", "2"]));
     let gone = r.server.received_requests().await.unwrap().into_iter().filter(|x| x.method.as_str() == "DELETE").count();
@@ -1009,26 +1005,22 @@ async fn queue_edits_with_tagged_ids_reach_the_play_queue_as_the_servers_own() {
 #[tokio::test]
 async fn remove_reorder_and_clear_reach_the_play_queue() {
     let (r, fq) = on_player().await;
-    r.local.queue(&["x", "y"], false);
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.queue(&["x", "y"], false); }).await.unwrap();
     assert_eq!(fq.keys(), strs(&["a", "x", "y", "b", "c"]));
     // Remove an upcoming context song.
-    r.local.state.lock().queue.next_up.retain(|i| i.track.id != "c");
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.state.lock().queue.next_up.retain(|i| i.track.id != "c"); }).await.unwrap();
     assert_eq!(fq.keys(), strs(&["a", "x", "y", "b"]));
     let dels: Vec<_> = r.server.received_requests().await.unwrap().into_iter().filter(|x| x.method.as_str() == "DELETE").collect();
     assert_eq!(dels.len(), 1);
     assert_eq!(dels[0].url.path(), "/playQueues/55/items/3");
     // Drag y above x: one move.
-    r.local.state.lock().queue.user_queue.reverse();
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.state.lock().queue.user_queue.reverse(); }).await.unwrap();
     assert_eq!(fq.keys(), strs(&["a", "y", "x", "b"]));
     let moves = r.server.received_requests().await.unwrap().into_iter().filter(|x| x.url.path().ends_with("/move")).count();
     // Two to put the first adds after a, one for this drag.
     assert_eq!(moves, 3);
     // Clear queue: only the queued songs go.
-    r.local.state.lock().queue.user_queue.clear();
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.state.lock().queue.user_queue.clear(); }).await.unwrap();
     assert_eq!(fq.keys(), strs(&["a", "b"]));
     assert_eq!(requests(&r.player, "/player/playback/refreshPlayQueue").await.len(), 4);
 }
@@ -1044,8 +1036,7 @@ async fn an_edit_while_the_player_is_a_song_ahead_goes_after_its_song() {
     fq.0.lock().selected = 2;
     r.tl.set(200, timeline_at("playing", "b", 2, 1, 1_000));
     wait_for("on b", || r.remote.state().session.and_then(|s| s.track).is_some_and(|t| t.id == "b")).await;
-    r.local.queue(&["x"], false);
-    r.remote.queue_edited().await.unwrap();
+    edit(&r.remote, || { r.local.queue(&["x"], false); }).await.unwrap();
     assert_eq!(fq.keys(), strs(&["a", "b", "x", "c"]));
 }
 
@@ -1063,12 +1054,49 @@ async fn a_shuffle_on_the_player_shows_in_the_queue_here() {
 async fn a_play_queue_that_doesnt_answer_says_the_queue_wasnt_updated() {
     let (r, fq) = on_player().await;
     fq.0.lock().fail = true;
-    r.local.queue(&["x"], false);
-    let e = r.remote.queue_edited().await.unwrap_err();
+    let e = edit(&r.remote, || { r.local.queue(&["x"], false); }).await.unwrap_err();
     assert!(matches!(&e, AppError::Network(m) if m == "Couldn't update the queue on Desk"), "{e:?}");
     assert!(requests(&r.player, "/player/playback/refreshPlayQueue").await.is_empty());
     // Still playing there.
     assert!(r.remote.state().session.is_some());
+}
+
+/// A queue edit here, sent on to the player the way the app does it.
+async fn edit(remote: &RemoteService, f: impl FnOnce()) -> AppResult<()> {
+    remote
+        .edit_queue(|| async {
+            f();
+            Ok(())
+        })
+        .await
+}
+
+#[tokio::test]
+async fn a_poll_between_an_edit_and_sending_it_does_not_undo_it() {
+    let (r, fq) = on_player().await;
+    // The worst moment: the edit is made here, and the player is polled,
+    // with its play queue due a re-read, before the edit has been sent.
+    edit(&r.remote, || r.local.queue(&["x"], false)).await.unwrap();
+    let r2 = &r;
+    r.remote
+        .edit_queue(|| async move {
+            r2.local.queue(&["y"], false);
+            r2.remote.recheck_play_queue();
+            let polls = requests(&r2.player, "/player/timeline/poll").await.len();
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            while requests(&r2.player, "/player/timeline/poll").await.len() < polls + 1 {
+                assert!(std::time::Instant::now() < deadline, "the player was never polled");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            // Room for that poll to take the player's queue over this one,
+            // which it must not do while the edit is on its way.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(fq.keys(), strs(&["a", "x", "y", "b", "c"]));
+    assert_eq!(r.local.now(), ("a".into(), strs(&["x", "y"]), strs(&["b", "c"])));
 }
 
 #[tokio::test]
@@ -1549,8 +1577,7 @@ mod peers {
         assert_eq!(a.local.now(), ("b".into(), vec![], strs(&["c"])));
         assert_eq!(a.local.state.lock().status, PlayerStatus::Paused);
         // Add to queue here: the Mac gets the queue with it, on the same song.
-        a.local.queue(&["x"], false);
-        a.remote.queue_edited().await.unwrap();
+        edit(&a.remote, || { a.local.queue(&["x"], false); }).await.unwrap();
         let last = b.local.log().last().cloned().unwrap_or_default();
         assert!(last.starts_with("adopt b,c | x | "), "{last}");
         assert_eq!(b.local.now(), ("b".into(), strs(&["x"]), strs(&["c"])));

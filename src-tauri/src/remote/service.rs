@@ -1246,7 +1246,37 @@ impl RemoteService {
     /// A Plex player's play queue is edited in place and the player told
     /// to read it again, so the song playing there carries on.
     pub async fn queue_edited(&self) -> AppResult<()> {
-        let _op = self.inner.op.lock().await;
+        let op = self.inner.op.lock().await;
+        self.send_queue_edit(op).await
+    }
+
+    /// Makes a queue edit here and, while another device plays, sends it
+    /// there with no poll of that device in between. A poll that read the
+    /// device's play queue after the edit here but before it was sent would
+    /// take the device's older queue as the newer one and undo the edit.
+    pub async fn edit_queue<F, Fut>(&self, edit: F) -> AppResult<()>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = AppResult<()>>,
+    {
+        if !self.is_remote() {
+            return edit().await;
+        }
+        let op = self.inner.op.lock().await;
+        edit().await?;
+        self.send_queue_edit(op).await
+    }
+
+    /// Makes the next poll read the player's play queue again, as it does
+    /// every [`MIRROR_RECHECK`] (tests).
+    #[cfg(test)]
+    pub(crate) fn recheck_play_queue(&self) {
+        self.inner.mirror.lock().checked = None;
+    }
+
+    /// Sends the queue here to the device playing it (the caller holds
+    /// `op`, so no poll runs meanwhile).
+    async fn send_queue_edit(&self, _op: tokio::sync::MutexGuard<'_, ()>) -> AppResult<()> {
         let Some(a) = self.inner.active.lock().clone() else {
             return Ok(());
         };
