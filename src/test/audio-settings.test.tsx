@@ -123,7 +123,7 @@ describe("equalizer", () => {
     fireEvent.pointerDown(svg, { button: 0, clientX: x1k + 4, clientY: yPlus6, pointerId: 1 });
     fireEvent.pointerUp(svg, { pointerId: 1 });
     await waitFor(async () => expect((await core()).eqBands[5]).toBe(6));
-    expect(band("1 kHz")).toHaveAttribute("aria-valuenow", "6");
+    await waitFor(() => expect(band("1 kHz")).toHaveAttribute("aria-valuenow", "6"));
   });
 
   it("presets set the whole curve", async () => {

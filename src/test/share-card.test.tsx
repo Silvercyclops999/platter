@@ -81,11 +81,12 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  // Close first, so nothing still open draws on a canvas that's real again.
   act(() => useShareCard.getState().close());
   act(() => useUi.setState({ menu: null }));
   useLyricPick.getState().cancel();
   usePlayer.setState({ state: null, local: null, positionMs: 0 });
+  vi.restoreAllMocks();
 });
 
 const toasts = () => useToasts.getState().toasts.map((t) => t.message);
@@ -161,7 +162,9 @@ describe("the share card dialog", () => {
     await waitFor(() => expect(copy).toBeEnabled());
     fireEvent.click(copy);
     await waitFor(() => expect(mock.cardsCopied).toEqual([{ width: 1080, height: 1920, bytes: 1080 * 1920 * 4 }]));
-    expect(toasts()).toContain("Image copied");
+    // The toast and the button coming back follow the copy's answer, a step later.
+    await waitFor(() => expect(toasts()).toContain("Image copied"));
+    await waitFor(() => expect(copy).toBeEnabled());
     fireEvent.click(screen.getByRole("radio", { name: "Square" }));
     expect(screen.getByRole("radio", { name: "Square" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(copy);
@@ -177,10 +180,13 @@ describe("the share card dialog", () => {
     await waitFor(() => expect(mock.cardsSaved).toHaveLength(1));
     expect(mock.cardsSaved[0].name).toMatch(/\.png$/);
     await waitFor(() => expect(toasts()).toContain(`Saved ${mock.cardsSaved[0].name}`));
+    await waitFor(() => expect(save).toBeEnabled());
     useToasts.setState({ toasts: [] });
     mock.cardSaveCancels = true;
     fireEvent.click(save);
+    expect(save).toBeDisabled();
     await waitFor(() => expect(save).toBeEnabled());
+    expect(mock.cardsSaved).toHaveLength(1);
     expect(toasts()).toEqual([]);
   });
 
@@ -201,7 +207,9 @@ describe("the share card dialog", () => {
     act(() => openShareCard({ kind: "track", id: released.id, title: released.title, subtitle: "x", durationMs: released.durationMs }));
     expect(await screen.findByRole("switch", { name: "Show where the song is" })).toHaveAttribute("aria-checked", "true");
     await waitFor(() => expect(qrSpy).toHaveBeenCalledWith("track", released.id, 83));
-    const q = await qrSpy.mock.results[0].value;
+    // The answer to that call, whichever call it was.
+    const at = qrSpy.mock.calls.findIndex((c) => c[2] === 83);
+    const q = await qrSpy.mock.results[at].value;
     expect(q.text).toMatch(new RegExp(`^platter://song/${released.id}\\?t=83&s=[0-9a-f]{8}$`));
     expect(q.text).not.toMatch(/http|plex|mock-machine|\d+\.\d+\.\d+\.\d+/);
     // Turning the QR off stops asking for one.

@@ -227,11 +227,17 @@ describe("app states", () => {
   it("player unreachable mid-session: toast, back here paused at the last position", async () => {
     await moveToDesk();
     await act(() => player.seek(20_000));
-    act(() => mock.remote.loseRemote());
+    // The player keeps playing on a real one-second tick, so a slow run can be past 20 s.
+    let last = 0;
+    act(() => {
+      last = mock.remote.state().session!.positionMs;
+      mock.remote.loseRemote();
+    });
+    expect(last).toBeGreaterThanOrEqual(20_000);
     await waitFor(() => expect(usePlayer.getState().remote).toBeNull());
     expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Couldn't reach Studio Desk");
     expect(usePlayer.getState().local?.status).toBe("paused");
-    expect(usePlayer.getState().local?.positionMs).toBe(20_000);
+    expect(usePlayer.getState().local?.positionMs).toBe(last);
   });
 
   it("player stopped by someone else: the strip says so and controls are local again", async () => {

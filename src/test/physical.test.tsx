@@ -283,7 +283,8 @@ describe("Discogs", () => {
     const preview = vi.spyOn(mock, "lidarrRequestPreview");
     await userEvent.click(within(rows[0]).getByRole("button", { name: "Request Harbour Static" }));
     await screen.findByRole("dialog", {}, SLOW);
-    expect(preview).toHaveBeenCalledWith(expect.objectContaining({ releaseGroupId: MockCatalogue.albumId(12), artist: "Cold Coast" }));
+    // The open dialog asks for the preview from an effect, which can run after it shows.
+    await waitFor(() => expect(preview).toHaveBeenCalledWith(expect.objectContaining({ releaseGroupId: MockCatalogue.albumId(12), artist: "Cold Coast" })));
     preview.mockRestore();
   });
 

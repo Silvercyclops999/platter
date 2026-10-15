@@ -4,9 +4,9 @@
  * now), auto-request from the artist page's menu, and the settings.
  * MusicBrainz and Lidarr are the browser mock's.
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
@@ -169,11 +169,17 @@ describe("the page", () => {
 
 describe("auto-request on the artist page", () => {
   const artist = () => mock.fx.artists[0];
+  let lidarrStatus: MockInstance<typeof backend.lidarrStatus>;
+  beforeEach(() => {
+    lidarrStatus = vi.spyOn(backend, "lidarrStatus");
+  });
+  afterEach(() => lidarrStatus.mockRestore());
 
   async function openMenu(user: ReturnType<typeof userEvent.setup>) {
     await screen.findByRole("heading", { level: 1, name: artist().title });
-    // The menu waits for Lidarr's status.
-    await new Promise((r) => setTimeout(r, 30));
+    // The menu offers auto-request once Lidarr's status has answered.
+    await waitFor(() => expect(lidarrStatus).toHaveBeenCalled());
+    await act(() => Promise.allSettled(lidarrStatus.mock.results.map((r) => r.value)));
     await user.click(screen.getByRole("button", { name: `More options for ${artist().title}` }));
     return screen.findByRole("menu");
   }

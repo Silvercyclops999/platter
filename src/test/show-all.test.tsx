@@ -39,6 +39,8 @@ describe("Show all pages", () => {
 
   it("is a plain grid: the title, the same cards, nothing else", async () => {
     withShelves();
+    // Only the shelf's own cards: MusicBrainz's extra fans would land at a moment of their own.
+    vi.spyOn(mock, "catalogueFansAlsoLike").mockResolvedValue([]);
     render(<ArtistShelfPage id={mock.fx.artists[0].id} shelf="fansAlsoLike" />);
     const grid = await screen.findByRole("list", { name: "Fans also like" });
     await vi.waitFor(() => expect(within(grid).getAllByRole("listitem")).toHaveLength(5));

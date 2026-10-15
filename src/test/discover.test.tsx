@@ -127,7 +127,8 @@ describe("catalogue artist page", () => {
     await userEvent.click(await within(card).findByRole("button", { name: "Request Low Tide Radio" }, SLOW));
     const dialog = await screen.findByRole("dialog", {}, SLOW);
     expect(within(dialog).getByText(/Low Tide Radio/)).toBeInTheDocument();
-    expect(preview).toHaveBeenCalledWith(expect.objectContaining({ releaseGroupId: LOW_TIDE, artist: "Cold Coast", artistMbid: COLD }));
+    // The open dialog asks for the preview from an effect, which can run after it shows.
+    await waitFor(() => expect(preview).toHaveBeenCalledWith(expect.objectContaining({ releaseGroupId: LOW_TIDE, artist: "Cold Coast", artistMbid: COLD })));
     preview.mockRestore();
   });
 });
