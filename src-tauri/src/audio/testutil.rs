@@ -317,6 +317,10 @@ pub struct FakeResolver {
     pub playable: Mutex<Option<std::collections::HashSet<String>>>,
     /// Every `left_out_offline` call.
     pub left_out: Mutex<Vec<usize>>,
+    /// Batches `more` hands out, first first (ids of known tracks).
+    pub more_batches: Mutex<Vec<Vec<String>>>,
+    /// Every `more` request.
+    pub more_calls: Mutex<Vec<super::source::MoreRequest>>,
 }
 
 impl FakeResolver {
@@ -327,6 +331,8 @@ impl FakeResolver {
             tracks: Mutex::new(HashMap::new()),
             playable: Mutex::new(None),
             left_out: Mutex::new(Vec::new()),
+            more_batches: Mutex::new(Vec::new()),
+            more_calls: Mutex::new(Vec::new()),
         })
     }
 }
@@ -373,5 +379,13 @@ impl TrackLookup for FakeResolver {
     }
     fn left_out_offline(&self, n: usize) {
         self.left_out.lock().push(n);
+    }
+    async fn more(&self, req: &super::source::MoreRequest) -> AppResult<Vec<Track>> {
+        self.more_calls.lock().push(req.clone());
+        let ids = {
+            let mut b = self.more_batches.lock();
+            if b.is_empty() { Vec::new() } else { b.remove(0) }
+        };
+        self.tracks(&ids).await
     }
 }

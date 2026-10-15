@@ -69,6 +69,18 @@ pub async fn set_shuffle(player: State<'_, PlayerHandle>, shuffle: bool) -> AppR
     player.set_shuffle(shuffle).await
 }
 
+/// Smart shuffle: shuffle on, with similar songs from the library mixed in.
+#[tauri::command]
+pub async fn set_smart_shuffle(player: State<'_, PlayerHandle>, on: bool) -> AppResult<()> {
+    player.set_smart_shuffle(on).await
+}
+
+/// Crossfade for the playing context only (a mix's smooth transitions).
+#[tauri::command]
+pub async fn set_smooth_transitions(player: State<'_, PlayerHandle>, on: bool) -> AppResult<()> {
+    player.set_smooth_transitions(on).await
+}
+
 /// Shuffle preference for an album/playlist/artist by id. Applies now if
 /// it's the playing context, otherwise the next time it plays.
 #[tauri::command]

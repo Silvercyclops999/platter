@@ -640,6 +640,8 @@ impl PlexMetadata {
                 .and_then(|c| non_empty(&c.top_left)),
             released: self.released(),
             studio: non_empty(&self.studio),
+            styles: self.style.iter().map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
+            moods: self.mood.iter().map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
         }
     }
 

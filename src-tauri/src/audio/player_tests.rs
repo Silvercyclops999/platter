@@ -1086,3 +1086,106 @@ fn playable_part_wraps_round_to_find_a_start() {
     assert_eq!(playable_part(&tracks, Some("a"), &ok), (Some("a".into()), 2));
     assert_eq!(playable_part(&tracks, None, &ok), (None, 2));
 }
+
+fn radio(ids: &[&str]) -> PlayContext {
+    PlayContext {
+        kind: ContextKind::Radio,
+        id: Some("track:a".into()),
+        track_ids: Some(ids.iter().map(|s| s.to_string()).collect()),
+    }
+}
+
+fn next_ids(s: &PlayerState) -> Vec<String> {
+    s.queue.next_up.iter().map(|i| i.track.id.clone()).collect()
+}
+
+#[tokio::test]
+async fn radio_refills_when_it_runs_low_without_repeats() {
+    let r = rig(&["a", "b", "c", "d", "e", "f", "g", "h"], 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["d".into(), "e".into(), "f".into(), "g".into(), "h".into()]];
+    r.player.play_context(radio(&["a", "b", "c"]), None, Some(false)).await.unwrap();
+    let s = wait_state(&r.player, |s| s.queue.next_up.len() == 7).await;
+    assert_eq!(next_ids(&s), vec!["b", "c", "d", "e", "f", "g", "h"]);
+    let calls = r.resolver.more_calls.lock().clone();
+    assert_eq!(calls.len(), 1, "one refill at a time");
+    assert_eq!(calls[0].kind, ContextKind::Radio);
+    assert_eq!(calls[0].id.as_deref(), Some("track:a"));
+    assert_eq!(calls[0].n, super::player::REFILL_BATCH);
+    for id in ["a", "b", "c"] {
+        assert!(calls[0].avoid.iter().any(|x| x == id), "queued songs are avoided: {:?}", calls[0].avoid);
+    }
+}
+
+#[tokio::test]
+async fn a_radio_that_finds_nothing_is_not_asked_again() {
+    let r = rig(&["a", "b"], 30.0, true, PlayerConfig::default()).await;
+    r.player.play_context(radio(&["a", "b"]), None, Some(false)).await.unwrap();
+    wait_state(&r.player, |_| !r.resolver.more_calls.lock().is_empty()).await;
+    r.player.next().await.unwrap();
+    wait_state(&r.player, |s| tid(&s.track) == "b").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.resolver.more_calls.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn similar_music_follows_the_last_song_when_keep_playing_is_on() {
+    let r = rig(&["a", "b", "c", "d"], 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["c".into(), "d".into()]];
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(r.resolver.more_calls.lock().is_empty(), "not before the last song");
+    r.player.next().await.unwrap();
+    let s = wait_state(&r.player, |s| s.queue.next_up.len() == 2).await;
+    assert_eq!(next_ids(&s), vec!["c", "d"]);
+    assert!(s.queue.next_up.iter().all(|i| i.source == super::queue::ItemSource::Autoplay));
+    let calls = r.resolver.more_calls.lock().clone();
+    assert_eq!(calls[0].kind, ContextKind::Tracks);
+    assert_eq!(calls[0].seed_ids, vec!["a".to_string(), "b".to_string()], "the songs that played are the seed");
+}
+
+#[tokio::test]
+async fn stop_at_the_end_asks_for_nothing() {
+    let r = rig(&["a", "b"], 30.0, true, PlayerConfig { autoplay: false, ..Default::default() }).await;
+    r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(r.resolver.more_calls.lock().is_empty());
+    // Turning it on while the last song plays asks at once.
+    r.player.set_autoplay(true).await.unwrap();
+    wait_state(&r.player, |_| !r.resolver.more_calls.lock().is_empty()).await;
+    // Repeat on: the context loops, nothing is added.
+    let r = rig(&["a", "b"], 30.0, true, PlayerConfig::default()).await;
+    r.player.set_repeat(Repeat::All).await.unwrap();
+    r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(r.resolver.more_calls.lock().is_empty());
+}
+
+#[tokio::test]
+async fn smart_shuffle_mixes_similar_songs_in_and_takes_them_out_again() {
+    let r = rig(&["a", "b", "c", "d", "e", "f", "g", "x", "y"], 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["x".into(), "y".into()]];
+    r.player.play_context(album("al", &["a", "b", "c", "d", "e", "f", "g"]), Some("a".into()), Some(false)).await.unwrap();
+    r.player.set_smart_shuffle(true).await.unwrap();
+    let s = wait_state(&r.player, |s| s.queue.next_up.iter().any(|i| i.source == super::queue::ItemSource::Smart)).await;
+    assert!(s.shuffle && s.smart_shuffle);
+    let smart: Vec<String> = s.queue.next_up.iter().filter(|i| i.source == super::queue::ItemSource::Smart).map(|i| i.track.id.clone()).collect();
+    assert_eq!(smart, vec!["x", "y"]);
+    let req = r.resolver.more_calls.lock()[0].clone();
+    assert!(req.smart && req.kind == ContextKind::Album);
+    assert_eq!(req.n, 2, "one for every three songs left");
+    // Plain shuffle off ends smart shuffle and its songs.
+    r.player.set_shuffle(false).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert!(!s.smart_shuffle);
+    assert!(s.queue.next_up.iter().all(|i| i.source != super::queue::ItemSource::Smart));
+}
+
+#[tokio::test]
+async fn smooth_transitions_last_for_the_context_they_were_turned_on_for() {
+    let r = rig(&["a", "b", "c"], 30.0, true, PlayerConfig::default()).await;
+    r.player.play_context(album("al", &["a", "b"]), None, Some(false)).await.unwrap();
+    r.player.set_smooth_transitions(true).await.unwrap();
+    assert!(r.player.state().await.unwrap().smooth_transitions);
+    r.player.play_context(ctx(&["c"]), None, Some(false)).await.unwrap();
+    assert!(!r.player.state().await.unwrap().smooth_transitions, "another context: off again");
+}

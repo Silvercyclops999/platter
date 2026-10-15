@@ -88,6 +88,12 @@ pub enum ContextKind {
     /// Liked Songs (id "liked"), newest like first, or `track_ids` when
     /// given (the page's sort or filter).
     Liked,
+    /// A made-for-you mix (id from `mixes_home`), or `track_ids` when given
+    /// (a steered mix).
+    Mix,
+    /// Song or artist radio (id `track:<id>` or `artist:<id>`). Endless: the
+    /// player asks for more as it runs low.
+    Radio,
 }
 
 /// `play_context.context` payload.
@@ -126,6 +132,25 @@ pub trait TrackLookup: Send + Sync {
     }
     /// `n` songs were left out of a play because they need the server.
     fn left_out_offline(&self, _n: usize) {}
+    /// More songs for a context that's running out: the next radio batch,
+    /// or similar music after a context ends. Empty when there are none.
+    async fn more(&self, _req: &MoreRequest) -> AppResult<Vec<Track>> {
+        Ok(Vec::new())
+    }
+}
+
+/// What [`TrackLookup::more`] is asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoreRequest {
+    pub kind: ContextKind,
+    pub id: Option<String>,
+    /// The context's songs nearest the end (what "similar" means).
+    pub seed_ids: Vec<String>,
+    /// Songs already queued or just played.
+    pub avoid: Vec<String>,
+    pub n: usize,
+    /// For smart shuffle (songs to mix in), not for after the context.
+    pub smart: bool,
 }
 
 #[cfg(test)]

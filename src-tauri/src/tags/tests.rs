@@ -510,6 +510,8 @@ fn album(id: &str, artist: &str, year: Option<i32>, added: i64, subformats: &[&s
         tint: None,
         released: None,
         studio: None,
+        styles: vec![],
+        moods: vec![],
     }
 }
 
@@ -774,7 +776,7 @@ async fn album_contexts_skip_explicit_songs_with_one_notice() {
     use crate::audio::source::{ContextKind, PlayContext, TrackLookup};
     let (db, _d) = grouped_library();
     db.set_tag_view(TagView { filter_explicit: true, ..TagView::default() });
-    let lookup = crate::bridge::CacheLookup(db.clone(), None, Default::default());
+    let lookup = crate::bridge::CacheLookup(db.clone(), None, Default::default(), None);
     let ctx = PlayContext { kind: ContextKind::Album, id: Some("2".into()), track_ids: None };
     let (r, skipped) = lookup.context_with(&ctx, db.tag_view()).await.unwrap();
     assert_eq!(r.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["22"]);

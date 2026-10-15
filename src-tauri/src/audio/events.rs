@@ -56,6 +56,12 @@ pub struct PlayerState {
     /// The A-B loop on the playing track, if one is set.
     #[serde(default)]
     pub ab_loop: Option<AbLoop>,
+    /// Shuffle mixes similar songs from the library into the context.
+    #[serde(default)]
+    pub smart_shuffle: bool,
+    /// Crossfade is on for this playback only (a mix's smooth transitions).
+    #[serde(default)]
+    pub smooth_transitions: bool,
 }
 
 /// An A-B loop: playback that reaches B goes back to A (ms, A before B).
@@ -239,6 +245,8 @@ mod tests {
             repeat: Repeat::One,
             queue: QueueView::default(),
             ab_loop: Some(AbLoop { a_ms: 1_000, b_ms: 4_000 }),
+            smart_shuffle: false,
+            smooth_transitions: false,
         };
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["abLoop"]["aMs"], 1_000);

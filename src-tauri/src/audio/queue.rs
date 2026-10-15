@@ -72,6 +72,10 @@ pub enum Repeat {
 pub enum ItemSource {
     User,
     Context,
+    /// Similar music added after the context ran out (keep playing).
+    Autoplay,
+    /// A similar song smart shuffle put in among the context's songs.
+    Smart,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -847,6 +851,86 @@ impl Queue {
         }
     }
 
+    /// Adds songs at the end of the context's play order (a radio refill,
+    /// or similar music once the context runs out).
+    pub fn extend_context(&mut self, tracks: Vec<Track>, source: ItemSource) {
+        for t in tracks {
+            let item_id = self.new_id();
+            self.items.push(QueueItem { item_id, track: t, source });
+            self.order.push(self.items.len() - 1);
+        }
+    }
+
+    /// Puts smart shuffle songs in among the upcoming context songs, one
+    /// after every `every` songs.
+    pub fn insert_smart(&mut self, tracks: Vec<Track>, every: usize) {
+        let split = ((self.pos + 1).max(0) as usize).min(self.order.len());
+        let rest: Vec<usize> = self.order.split_off(split);
+        let mut added = Vec::with_capacity(tracks.len());
+        for t in tracks {
+            let item_id = self.new_id();
+            self.items.push(QueueItem { item_id, track: t, source: ItemSource::Smart });
+            added.push(self.items.len() - 1);
+        }
+        let mut added = added.into_iter();
+        for (i, idx) in rest.into_iter().enumerate() {
+            self.order.push(idx);
+            if (i + 1) % every.max(1) == 0
+                && let Some(a) = added.next()
+            {
+                self.order.push(a);
+            }
+        }
+    }
+
+    /// Smart shuffle songs still to come.
+    pub fn smart_upcoming(&self) -> usize {
+        let from = ((self.pos + 1).max(0) as usize).min(self.order.len());
+        self.order[from..].iter().filter(|&&i| self.items[i].source == ItemSource::Smart).count()
+    }
+
+    /// Takes the smart shuffle songs still to come out of the play order.
+    pub fn drop_smart_upcoming(&mut self) {
+        let from = ((self.pos + 1).max(0) as usize).min(self.order.len());
+        let items = &self.items;
+        let mut keep: Vec<usize> = self.order[from..].iter().copied().filter(|&i| items[i].source != ItemSource::Smart).collect();
+        self.order.truncate(from);
+        self.order.append(&mut keep);
+    }
+
+    /// The context's own songs (not added ones), first `n`.
+    pub fn context_sample(&self, n: usize) -> Vec<String> {
+        self.items.iter().filter(|i| i.source == ItemSource::Context).take(n).map(|i| i.track.id.clone()).collect()
+    }
+
+    /// Context entries still to play after the current one.
+    pub fn remaining(&self) -> usize {
+        self.order.len().saturating_sub((self.pos + 1).max(0) as usize)
+    }
+
+    /// Number of context entries (changes when the context grows).
+    pub fn context_len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Track ids of the context up to the current position, newest last.
+    pub fn played_context_ids(&self, n: usize) -> Vec<String> {
+        let end = ((self.pos + 1).max(0) as usize).min(self.order.len());
+        let start = end.saturating_sub(n);
+        self.order[start..end].iter().map(|&i| self.items[i].track.id.clone()).collect()
+    }
+
+    /// Every track id the queue holds or has played lately.
+    pub fn known_ids(&self) -> Vec<String> {
+        self.items
+            .iter()
+            .chain(self.user.iter())
+            .chain(self.history.iter())
+            .chain(self.current.iter())
+            .map(|i| i.track.id.clone())
+            .collect()
+    }
+
     pub fn view(&self) -> QueueView {
         let next_up = self
             .order
@@ -876,6 +960,35 @@ impl Queue {
 mod tests {
     use super::*;
     use crate::audio::testutil::track;
+
+    #[test]
+    fn smart_shuffle_songs_go_in_among_the_upcoming_ones_and_come_out_again() {
+        let mut q = Queue::with_seed(1);
+        let ts: Vec<Track> = (0..7).map(|i| track(&i.to_string(), "A", "/p")).collect();
+        q.set_context(ctx(), ts, Some(0), Some(false));
+        q.insert_smart(vec![track("s1", "B", "/p"), track("s2", "B", "/p")], 3);
+        let ids: Vec<String> = q.view().next_up.iter().map(|i| i.track.id.clone()).collect();
+        assert_eq!(ids, vec!["1", "2", "3", "s1", "4", "5", "6", "s2"]);
+        assert_eq!(q.smart_upcoming(), 2);
+        assert_eq!(q.context_sample(2), vec!["0".to_string(), "1".to_string()]);
+        q.drop_smart_upcoming();
+        assert_eq!(q.smart_upcoming(), 0);
+        assert_eq!(q.view().next_up.len(), 6);
+    }
+
+    #[test]
+    fn extending_the_context_adds_to_the_end_of_the_play_order() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx(), vec![track("1", "A", "/p"), track("2", "A", "/p")], Some(1), Some(false));
+        assert_eq!(q.remaining(), 0);
+        q.extend_context(vec![track("3", "B", "/p"), track("4", "B", "/p")], ItemSource::Autoplay);
+        assert_eq!(q.remaining(), 2);
+        assert_eq!(q.context_len(), 4);
+        let next = q.advance_auto().unwrap();
+        assert_eq!((next.track.id.as_str(), next.source), ("3", ItemSource::Autoplay));
+        assert_eq!(q.played_context_ids(2), vec!["2".to_string(), "3".to_string()]);
+        assert!(q.known_ids().contains(&"4".to_string()));
+    }
 
     fn ctx() -> ContextInfo {
         ContextInfo {

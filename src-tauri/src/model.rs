@@ -67,6 +67,12 @@ pub struct Album {
     /// Record label (Plex `studio`). Album page footer only, like `released`.
     #[serde(skip)]
     pub studio: Option<String>,
+    /// Plex style tags (finer genres). Stored for mixes; not sent to the UI.
+    #[serde(skip)]
+    pub styles: Vec<String>,
+    /// Plex mood tags. Stored for mixes; not sent to the UI.
+    #[serde(skip)]
+    pub moods: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

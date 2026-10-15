@@ -6,6 +6,7 @@ pub mod downloads;
 pub mod error;
 pub mod likes;
 pub mod lyrics;
+pub mod mixes;
 pub mod model;
 pub mod monitor;
 pub mod notify;
@@ -182,6 +183,11 @@ pub fn run() {
                 ..Default::default()
             };
             *live.downloads.lock() = Some(downloads.clone());
+            // Mixes, radio and the daylist, made here from the cache.
+            let mix_service = mixes::MixService::new(db.clone());
+            mix_service.set_options(initial.mix_options());
+            mix_service.set_events(Arc::new(app.handle().clone()));
+            *live.mixes.lock() = Some(mix_service.clone());
             let artist_info = artistinfo::ArtistInfoService::new(
                 db.clone(),
                 info_http,
@@ -203,6 +209,7 @@ pub fn run() {
                     db.clone(),
                     Some(plex.clone()),
                     bridge::OfflinePlay::new(audio_dir.clone()).with_downloads(local_files.clone()),
+                    Some(mix_service.clone()),
                 )),
                 {
                     use audio::output::AudioOutput;
@@ -220,6 +227,7 @@ pub fn run() {
                     precache_count: initial.precache_count as usize,
                     dsp: initial.dsp(),
                     local_files: Some(local_files.clone()),
+                    autoplay: initial.queue_end == settings::QueueEnd::KeepPlaying,
                     ..Default::default()
                 },
             );
@@ -410,6 +418,8 @@ pub fn run() {
             );
             app.manage(monitor::cached::AudioCacheDir(audio_dir));
             app.manage(downloads);
+            mixes::service::spawn_schedule(mix_service.clone());
+            app.manage(mix_service);
 
             app.manage(plex);
             app.manage(db);
@@ -460,6 +470,10 @@ pub fn run() {
             db::commands::recent_tracks,
             db::commands::recents,
             db::commands::playlist_page,
+            mixes::commands::mixes_home,
+            mixes::commands::mix_page,
+            mixes::commands::mix_refresh,
+            mixes::commands::radio_page,
             playlists::playlist_create,
             playlists::playlist_add,
             playlists::playlist_duplicates,
@@ -497,6 +511,8 @@ pub fn run() {
             audio::commands::set_muted,
             audio::commands::set_shuffle,
             audio::commands::set_context_shuffle,
+            audio::commands::set_smart_shuffle,
+            audio::commands::set_smooth_transitions,
             audio::commands::set_repeat,
             audio::commands::set_ab_loop,
             audio::commands::queue_add,

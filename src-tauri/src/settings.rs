@@ -133,6 +133,20 @@ pub enum ExplicitContent {
     Filtered,
 }
 
+/// What plays when the queue runs out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QueueEnd {
+    /// Similar music follows (from the mix engine's radio).
+    #[default]
+    KeepPlaying,
+    /// The context rewinds to its first song and stops.
+    Stop,
+}
+
+/// Hours between daylist refreshes the setting offers.
+pub const DAYLIST_HOURS: [u32; 3] = [1, 3, 6];
+
 /// Missing fields (settings saved by an older build) take their defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -323,6 +337,24 @@ pub struct Settings {
     /// Go offline: no network use at all, only music on this computer plays
     /// (this device only).
     pub go_offline: bool,
+    /// Home shows the Made for you and mood and genre mix shelves.
+    pub home_mixes: bool,
+    /// How much of a mix is favourites.
+    pub mix_variety: crate::mixes::Variety,
+    /// Artist ids left out of mixes and radio.
+    pub mix_exclude_artists: Vec<String>,
+    /// Genre, style or mood names left out of mixes and radio.
+    pub mix_exclude_genres: Vec<String>,
+    /// Album ids left out of mixes and radio.
+    pub mix_exclude_albums: Vec<String>,
+    /// Unreleased music (demos and archive versions) can be in mixes.
+    pub mix_unreleased: bool,
+    /// Hours between daylist refreshes: 1, 3 or 6.
+    pub daylist_hours: u32,
+    /// When the queue ends: keep playing similar music, or stop.
+    pub queue_end: QueueEnd,
+    /// The shuffle button has a third state, smart shuffle.
+    pub smart_shuffle: bool,
 }
 
 impl Default for Settings {
@@ -414,6 +446,15 @@ impl Default for Settings {
             download_home_only: true,
             download_liked: false,
             go_offline: false,
+            home_mixes: true,
+            mix_variety: crate::mixes::Variety::Balanced,
+            mix_exclude_artists: Vec::new(),
+            mix_exclude_genres: Vec::new(),
+            mix_exclude_albums: Vec::new(),
+            mix_unreleased: true,
+            daylist_hours: 3,
+            queue_end: QueueEnd::KeepPlaying,
+            smart_shuffle: false,
         }
     }
 }
@@ -505,9 +546,32 @@ pub struct SettingsPatch {
     pub download_home_only: Option<bool>,
     pub download_liked: Option<bool>,
     pub go_offline: Option<bool>,
+    pub home_mixes: Option<bool>,
+    pub mix_variety: Option<crate::mixes::Variety>,
+    pub mix_exclude_artists: Option<Vec<String>>,
+    pub mix_exclude_genres: Option<Vec<String>>,
+    pub mix_exclude_albums: Option<Vec<String>>,
+    pub mix_unreleased: Option<bool>,
+    /// 1, 3 or 6.
+    pub daylist_hours: Option<u32>,
+    pub queue_end: Option<QueueEnd>,
+    pub smart_shuffle: Option<bool>,
 }
 
 impl SettingsPatch {
+    /// Whether the patch changes what goes in mixes.
+    pub fn touches_mixes(&self) -> bool {
+        self.mix_variety.is_some()
+            || self.mix_exclude_artists.is_some()
+            || self.mix_exclude_genres.is_some()
+            || self.mix_exclude_albums.is_some()
+            || self.mix_unreleased.is_some()
+            || self.daylist_hours.is_some()
+            || self.explicit_content.is_some()
+            || self.show_fan_edits.is_some()
+            || self.liked_means.is_some()
+    }
+
     /// Whether the patch touches the player's sound stage.
     pub fn touches_dsp(&self) -> bool {
         self.crossfade.is_some()
@@ -604,6 +668,35 @@ impl Settings {
         set(&mut self.download_home_only, p.download_home_only);
         set(&mut self.download_liked, p.download_liked);
         set(&mut self.go_offline, p.go_offline);
+        set(&mut self.home_mixes, p.home_mixes);
+        set(&mut self.mix_variety, p.mix_variety);
+        set(&mut self.mix_unreleased, p.mix_unreleased);
+        set(&mut self.queue_end, p.queue_end);
+        set(&mut self.smart_shuffle, p.smart_shuffle);
+        if let Some(h) = p.daylist_hours {
+            if !DAYLIST_HOURS.contains(&h) {
+                return Err(AppError::Invalid("The daylist refreshes every 1, 3 or 6 hours.".into()));
+            }
+            self.daylist_hours = h;
+        }
+        let tidy = |v: &Vec<String>| {
+            let mut out: Vec<String> = Vec::new();
+            for x in v.iter().map(|x| x.trim()).filter(|x| !x.is_empty()) {
+                if !out.iter().any(|o| o.eq_ignore_ascii_case(x)) {
+                    out.push(x.to_string());
+                }
+            }
+            out
+        };
+        if let Some(v) = &p.mix_exclude_artists {
+            self.mix_exclude_artists = tidy(v);
+        }
+        if let Some(v) = &p.mix_exclude_genres {
+            self.mix_exclude_genres = tidy(v);
+        }
+        if let Some(v) = &p.mix_exclude_albums {
+            self.mix_exclude_albums = tidy(v);
+        }
         if let Some(name) = &p.computer_name {
             let name = name.trim();
             if name.chars().count() > COMPUTER_NAME_MAX {
@@ -628,6 +721,9 @@ impl Settings {
         self.precache_count = self.precache_count.clamp(PRECACHE_MIN, PRECACHE_MAX);
         self.art_cache_mb = self.art_cache_mb.clamp(ART_CACHE_MIN_MB, ART_CACHE_MAX_MB);
         self.download_limit_gb = self.download_limit_gb.clamp(downloads::LIMIT_MIN_GB, downloads::LIMIT_MAX_GB);
+        if !DAYLIST_HOURS.contains(&self.daylist_hours) {
+            self.daylist_hours = 3;
+        }
         eqprofile::clamp(self);
     }
 
@@ -651,6 +747,20 @@ impl Settings {
             media_session: self.media_session,
             close_to_tray: self.close_to_tray,
             launch_at_login: self.launch_at_login,
+        }
+    }
+
+    /// What shapes the mixes.
+    pub fn mix_options(&self) -> crate::mixes::MixOptions {
+        crate::mixes::MixOptions {
+            variety: self.mix_variety,
+            exclude_artists: self.mix_exclude_artists.clone(),
+            exclude_genres: self.mix_exclude_genres.clone(),
+            exclude_albums: self.mix_exclude_albums.clone(),
+            include_unreleased: self.mix_unreleased,
+            daylist_hours: self.daylist_hours,
+            tag_view: self.tag_view(),
+            liked_min: self.liked_min_rating(),
         }
     }
 
@@ -750,6 +860,8 @@ pub struct Live {
     pub downloads: Arc<parking_lot::Mutex<Option<downloads::Downloads>>>,
     /// The Plex connection (Go offline stops it).
     pub plex: Option<crate::plex::PlexState>,
+    /// The mix engine, once it exists.
+    pub mixes: Arc<parking_lot::Mutex<Option<crate::mixes::MixService>>>,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -772,6 +884,9 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.lyrics_show_auto.store(s.show_auto_lyrics, Ordering::Relaxed);
     if let Some(t) = live.transcriber.lock().as_ref() {
         t.set_options(s.transcribe_lyrics, s.transcribe_model);
+    }
+    if let Some(m) = live.mixes.lock().as_ref() {
+        m.set_options(s.mix_options());
     }
     // Global with no source for it on quietly ranks by plays.
     db.set_popular_source(if s.info_listenbrainz || s.info_lastfm { s.popular_source } else { PopularSource::MyPlays });
@@ -896,6 +1011,14 @@ async fn apply_to_player(player: &PlayerHandle, s: &Settings, patch: &SettingsPa
     if patch.ab_loop_handles == Some(false) {
         player.set_ab_loop(None).await?;
     }
+    if patch.queue_end.is_some() {
+        player.set_autoplay(s.queue_end == QueueEnd::KeepPlaying).await?;
+    }
+    // Turning the setting off ends smart shuffle (plain shuffle stays).
+    if patch.smart_shuffle == Some(false) && player.state().await.is_ok_and(|p| p.smart_shuffle) {
+        player.set_smart_shuffle(false).await?;
+        player.set_shuffle(true).await?;
+    }
     Ok(())
 }
 
@@ -917,6 +1040,7 @@ pub async fn settings_set(
     settings: State<'_, SettingsState>,
     player: State<'_, PlayerHandle>,
     downloads: State<'_, downloads::Downloads>,
+    mixes: State<'_, crate::mixes::MixService>,
     patch: SettingsPatch,
 ) -> AppResult<()> {
     let s = settings.set(patch.clone()).await?;
@@ -928,6 +1052,15 @@ pub async fn settings_set(
         } else {
             downloads.remove(key).await?;
         }
+    }
+    if patch.touches_mixes() {
+        // Made again in the background; Home hears `mixes://changed`.
+        let m = mixes.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = m.ensure_fresh(crate::mixes::service::now_ms()).await {
+                tracing::warn!("mixes not made: {e}");
+            }
+        });
     }
     apply_to_player(&player, &s, &patch).await
 }
@@ -1049,6 +1182,45 @@ mod tests {
         assert!(!s.transcribe_lyrics && s.show_auto_lyrics);
         assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Small);
         assert_eq!(s.explicit_content, ExplicitContent::Allowed);
+        assert!(s.home_mixes && s.mix_unreleased);
+        assert_eq!(s.mix_variety, crate::mixes::Variety::Balanced);
+        assert!(s.mix_exclude_artists.is_empty() && s.mix_exclude_genres.is_empty() && s.mix_exclude_albums.is_empty());
+        assert_eq!(s.daylist_hours, 3);
+        assert_eq!(s.queue_end, QueueEnd::KeepPlaying);
+        assert!(!s.smart_shuffle, "smart shuffle is opt-in");
+    }
+
+    #[test]
+    fn mix_settings_apply_and_reach_the_mix_engine() {
+        let (db, _d) = db();
+        let live = Live::default();
+        let mixes = crate::mixes::MixService::new(db.clone());
+        *live.mixes.lock() = Some(mixes.clone());
+        let mut s = Settings::default();
+        s.apply(&SettingsPatch {
+            mix_variety: Some(crate::mixes::Variety::Adventurous),
+            mix_exclude_genres: Some(vec![" Rock ".into(), "rock".into(), "".into(), "Jazz".into()]),
+            mix_exclude_artists: Some(vec!["12".into()]),
+            mix_unreleased: Some(false),
+            daylist_hours: Some(6),
+            queue_end: Some(QueueEnd::Stop),
+            explicit_content: Some(ExplicitContent::Filtered),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(s.mix_exclude_genres, vec!["Rock", "Jazz"], "trimmed, no repeats in any case");
+        publish(&s, &live, &db);
+        let o = mixes.options();
+        assert_eq!(o.variety, crate::mixes::Variety::Adventurous);
+        assert_eq!(o.exclude_artists, vec!["12"]);
+        assert!(!o.include_unreleased && o.tag_view.filter_explicit);
+        assert_eq!(o.daylist_hours, 6);
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["queueEnd"], "stop");
+        assert_eq!(json["mixVariety"], "adventurous");
+        assert!(s.apply(&SettingsPatch { daylist_hours: Some(2), ..Default::default() }).is_err());
+        assert!(SettingsPatch { mix_unreleased: Some(true), ..Default::default() }.touches_mixes());
+        assert!(!SettingsPatch { home_mixes: Some(false), ..Default::default() }.touches_mixes());
     }
 
     #[test]
@@ -1203,6 +1375,15 @@ mod tests {
             download_home_only: Some(false),
             download_liked: Some(true),
             go_offline: Some(false),
+            home_mixes: Some(false),
+            mix_variety: Some(crate::mixes::Variety::Familiar),
+            mix_exclude_artists: Some(vec!["7".into()]),
+            mix_exclude_genres: None,
+            mix_exclude_albums: Some(vec![]),
+            mix_unreleased: Some(false),
+            daylist_hours: Some(1),
+            queue_end: Some(QueueEnd::Stop),
+            smart_shuffle: Some(true),
         })
         .await
         .unwrap();

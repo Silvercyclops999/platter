@@ -521,6 +521,34 @@ CREATE TABLE IF NOT EXISTS download_files (
 );
 CREATE INDEX IF NOT EXISTS download_files_queue ON download_files (state, seq);
 "#,
+    // v18: made-for-you mixes (mixes::). Albums keep their Plex style and
+    // mood tags (collected per tag value, like format); the next sync runs as
+    // a full pass to fill them. Generated mixes are cached with their songs
+    // in order; `day` is the local day they were made for (after 4 am).
+    r#"
+ALTER TABLE albums ADD COLUMN styles TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE albums ADD COLUMN moods TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE IF NOT EXISTS mixes (
+    id           TEXT PRIMARY KEY,
+    kind         TEXT NOT NULL,
+    position     INTEGER NOT NULL,
+    title        TEXT NOT NULL,
+    description  TEXT NOT NULL,
+    color        TEXT NOT NULL,
+    artist_ids   TEXT NOT NULL DEFAULT '[]',
+    tag          TEXT,
+    day          TEXT NOT NULL,
+    generated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mix_tracks (
+    mix_id   TEXT NOT NULL REFERENCES mixes (id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    track_id TEXT NOT NULL,
+    familiar INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (mix_id, position)
+) WITHOUT ROWID;
+UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
 ];
 
 #[cfg(test)]
@@ -749,6 +777,40 @@ mod tests {
         let row = "INSERT INTO user_lyrics (track_id, body, updated_at) VALUES ('1', 'Hello', 1)";
         c.execute(row, []).unwrap();
         assert!(c.execute(row, []).is_err(), "one row per track");
+    }
+
+    #[test]
+    fn v18_adds_album_styles_and_moods_and_the_mix_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        for m in &MIGRATIONS[..17] {
+            c.execute_batch(m).unwrap();
+        }
+        c.pragma_update(None, "user_version", 17).unwrap();
+        c.execute(
+            "INSERT INTO sync_state (id, section_id, section_uuid, last_sync_at, last_full_sync_at)
+             VALUES (1, '1', 'u', 100, 100)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO albums (id, title, sort_title, artist_id, artist_title) VALUES ('a', 'A', 'A', 'r', 'R')", [])
+            .unwrap();
+        migrate(&mut c).unwrap();
+        let (styles, moods): (String, String) =
+            c.query_row("SELECT styles, moods FROM albums", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((styles.as_str(), moods.as_str()), ("[]", "[]"));
+        let full: Option<i64> = c.query_row("SELECT last_full_sync_at FROM sync_state", [], |r| r.get(0)).unwrap();
+        assert_eq!(full, None);
+        c.execute(
+            "INSERT INTO mixes (id, kind, position, title, description, color, day, generated_at)
+             VALUES ('daily:1', 'daily', 0, 'Daily Mix 1', 'd', '#fff', '2026-10-14', 1)",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO mix_tracks (mix_id, position, track_id) VALUES ('daily:1', 0, 't')", []).unwrap();
+        c.execute("DELETE FROM mixes", []).unwrap();
+        let n: i64 = c.query_row("SELECT count(*) FROM mix_tracks", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0, "a mix's songs go with it");
     }
 
     #[test]

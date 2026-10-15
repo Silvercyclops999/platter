@@ -107,6 +107,8 @@ pub enum SyncOutcome {
 }
 
 /// One album, artist or playlist on Home (shortcut tile or mixed shelf).
+// Albums carry more than the others; Home lists are short, so no boxing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HomeItem {

@@ -89,6 +89,8 @@ impl Local {
                     context: None,
                 },
                 ab_loop: None,
+                smart_shuffle: false,
+                smooth_transitions: false,
             }),
             log: Mutex::default(),
             output: Mutex::default(),

@@ -343,6 +343,8 @@ pub(crate) mod tests {
             repeat: Repeat::Off,
             queue: QueueView::default(),
             ab_loop: None,
+            smart_shuffle: false,
+            smooth_transitions: false,
         }
     }
 

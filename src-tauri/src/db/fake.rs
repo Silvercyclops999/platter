@@ -176,6 +176,8 @@ pub fn album(id: &str, title: &str, artist: &Artist, year: i32, format: Option<&
         tint: None,
         released: None,
         studio: None,
+        styles: vec![],
+        moods: vec![],
     }
 }
 

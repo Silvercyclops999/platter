@@ -7,13 +7,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use rusqlite::OptionalExtension as _;
 
 use crate::db::artcache::sniff_content_type;
 use crate::db::source::{
     ArtBytes, Changes, HistoryEntry, ItemKind, MusicSection, PlaylistEntry, RemoteHits, RemoteSearch,
     SimilarArtist,
 };
-use crate::audio::source::{ContextKind, PlayContext, ResolvedContext, StreamSource, TrackLookup, TrackResolver};
+use crate::audio::source::{ContextKind, MoreRequest, PlayContext, ResolvedContext, StreamSource, TrackLookup, TrackResolver};
 use crate::audio::dsp::TrackAudio;
 use crate::db::{ArtFetcher, DbHandle, LibrarySource, queries, trackaudio};
 use crate::error::AppResult;
@@ -35,13 +36,28 @@ fn meta_type(kind: ItemKind) -> MetaType {
     }
 }
 
-/// Release-type tags per album id. The album list endpoint doesn't include
-/// `Format`/`Subformat`, so they're collected in bulk with one filtered list
-/// per tag value and merged into each album page.
+/// Release-type, style and mood tags per album id. The album list endpoint
+/// doesn't include `Format`/`Subformat`/`Style`/`Mood`, so they're collected
+/// in bulk with one filtered list per tag value and merged into each album
+/// page.
 #[derive(Default, Clone)]
 struct AlbumTags {
     format: HashMap<String, String>,
     subformats: HashMap<String, Vec<String>>,
+    styles: HashMap<String, Vec<String>>,
+    moods: HashMap<String, Vec<String>>,
+}
+
+/// Tag fields read per value, and how many filtered lists run at once.
+const TAG_FIELDS: [&str; 4] = ["format", "subformat", "style", "mood"];
+const TAG_LISTS_AT_ONCE: usize = 4;
+
+fn merge_tags(into: &mut Vec<String>, more: Option<&Vec<String>>) {
+    for t in more.into_iter().flatten() {
+        if !into.iter().any(|x| x.eq_ignore_ascii_case(t)) {
+            into.push(t.clone());
+        }
+    }
 }
 
 impl AlbumTags {
@@ -53,6 +69,20 @@ impl AlbumTags {
             album.subformats = s.clone();
         }
         album.section = crate::db::release_section(album.format.as_deref(), &album.subformats);
+        merge_tags(&mut album.styles, self.styles.get(&album.id));
+        merge_tags(&mut album.moods, self.moods.get(&album.id));
+    }
+
+    fn add(&mut self, field: &str, tag: &str, album_id: String) {
+        match field {
+            "format" => {
+                self.format.insert(album_id, tag.to_lowercase());
+            }
+            "subformat" => self.subformats.entry(album_id).or_default().push(tag.to_lowercase()),
+            // Styles and moods keep Plex's own spelling (they're shown as mix names).
+            "style" => self.styles.entry(album_id).or_default().push(tag.to_string()),
+            _ => self.moods.entry(album_id).or_default().push(tag.to_string()),
+        }
     }
 }
 
@@ -71,20 +101,29 @@ impl PlexLibrary {
 
     async fn load_tags(&self, section: &str) -> AppResult<Arc<AlbumTags>> {
         let client = self.plex.client().await?;
-        let mut tags = AlbumTags::default();
-        for field in ["format", "subformat"] {
+        let mut lists = Vec::new();
+        for field in TAG_FIELDS {
             for value in client.tag_values(section, field, MetaType::Album).await? {
-                let albums = client
-                    .list_all(section, MetaType::Album, &[(field, value.key.clone())])
-                    .await?;
-                let tag = value.title.to_lowercase();
-                for a in albums {
-                    if field == "format" {
-                        tags.format.insert(a.rating_key, tag.clone());
-                    } else {
-                        tags.subformats.entry(a.rating_key).or_default().push(tag.clone());
-                    }
-                }
+                lists.push((field, value));
+            }
+        }
+        // A few filtered lists at a time (one per tag value).
+        let mut found: Vec<(&'static str, String, Vec<PlexMetadata>)> = Vec::with_capacity(lists.len());
+        for chunk in lists.chunks(TAG_LISTS_AT_ONCE) {
+            let mut calls = Vec::with_capacity(chunk.len());
+            for (field, value) in chunk {
+                let filter = [(*field, value.key.clone())];
+                let client = client.clone();
+                calls.push(Box::pin(async move { client.list_all(section, MetaType::Album, &filter).await }));
+            }
+            for ((field, value), albums) in chunk.iter().zip(futures::future::try_join_all(calls).await?) {
+                found.push((field, value.title.clone(), albums));
+            }
+        }
+        let mut tags = AlbumTags::default();
+        for (field, tag, albums) in found {
+            for a in albums {
+                tags.add(field, &tag, a.rating_key);
             }
         }
         let tags = Arc::new(tags);
@@ -429,7 +468,8 @@ fn unix_now() -> i64 {
 /// Contexts and tracks from the cache. With a `PlexState`, a toast says when
 /// the explicit filter or hidden fan edits left songs out of a context.
 /// The third part says which songs can play while the server is out of reach.
-pub struct CacheLookup(pub DbHandle, pub Option<PlexState>, pub OfflinePlay);
+/// The fourth makes radio and similar music (none: those find nothing).
+pub struct CacheLookup(pub DbHandle, pub Option<PlexState>, pub OfflinePlay, pub Option<crate::mixes::MixService>);
 
 /// While only music on this computer can play, plays keep to the songs in
 /// the audio cache, and the first play that leaves songs out says so once.
@@ -519,6 +559,37 @@ impl TrackLookup for CacheLookup {
             plex.toast("info", m);
         }
     }
+
+    /// The next radio batch, or similar music after a context.
+    async fn more(&self, req: &MoreRequest) -> AppResult<Vec<Track>> {
+        use crate::mixes::radio::Seed;
+        let Some(mixes) = self.3.clone() else { return Ok(Vec::new()) };
+        let seed = match req.kind {
+            ContextKind::Radio => match req.id.as_deref().and_then(Seed::parse) {
+                Some(s) => s,
+                None => return Ok(Vec::new()),
+            },
+            _ => Seed::Tracks(req.seed_ids.clone()),
+        };
+        let avoid: std::collections::HashSet<String> = req.avoid.iter().cloned().collect();
+        let n = req.n;
+        let ids = tokio::task::spawn_blocking(move || mixes.radio_ids(&seed, &avoid, n, false))
+            .await
+            .map_err(|e| crate::error::AppError::Internal(format!("radio task: {e}")))??;
+        let view = self.0.tag_view();
+        let mut tracks = self
+            .0
+            .read_async(move |c| {
+                let mut t = queries::tracks_by_ids(c, &ids)?;
+                crate::tags::store::drop_hidden(c, &mut t, view)?;
+                Ok(t)
+            })
+            .await?;
+        if let Some(ok) = self.playable_now().await {
+            tracks.retain(|t| ok.contains(&t.id));
+        }
+        Ok(tracks)
+    }
 }
 
 impl CacheLookup {
@@ -531,6 +602,24 @@ impl CacheLookup {
         let ctx = ctx.clone();
         let popular = self.0.popular_source();
         let liked_min = crate::settings::load(&self.0).liked_min_rating();
+        // A radio's first songs come from the mix engine.
+        let radio_ids: Option<Vec<String>> = match (ctx.kind, &self.3, ctx.id.as_deref()) {
+            // Played from its page: the page's songs.
+            (ContextKind::Radio, _, _) if ctx.track_ids.is_some() => ctx.track_ids.clone(),
+            (ContextKind::Radio, Some(mixes), Some(id)) => {
+                let seed = crate::mixes::radio::Seed::parse(id)
+                    .ok_or_else(|| crate::error::AppError::Invalid(format!("not a radio: {id}")))?;
+                let mixes = mixes.clone();
+                Some(
+                    tokio::task::spawn_blocking(move || {
+                        mixes.radio_ids(&seed, &Default::default(), crate::mixes::radio::RADIO_BATCH, true)
+                    })
+                    .await
+                    .map_err(|e| crate::error::AppError::Internal(format!("radio task: {e}")))??,
+                )
+            }
+            _ => None,
+        };
         self.0
             .read_async(move |c| {
                 let hidden = crate::tags::store::hidden_albums(c, view)?;
@@ -576,6 +665,34 @@ impl CacheLookup {
                         },
                         title: Some("Liked Songs".into()),
                     },
+                    ContextKind::Mix => {
+                        let title = c
+                            .query_row("SELECT title FROM mixes WHERE id = ?1", [&id], |r| r.get::<_, String>(0))
+                            .optional()?;
+                        let tracks = match &ctx.track_ids {
+                            Some(ids) => queries::tracks_by_ids(c, ids)?,
+                            None => crate::mixes::store::tracks(c, &id)?.0,
+                        };
+                        if title.is_none() && ctx.track_ids.is_none() {
+                            return Err(crate::error::AppError::NotFound(format!("mix {id}")));
+                        }
+                        ResolvedContext { tracks, title }
+                    }
+                    ContextKind::Radio => {
+                        let title = match id.split_once(':') {
+                            Some(("track", t)) => c
+                                .query_row("SELECT title FROM tracks WHERE id = ?1", [t], |r| r.get::<_, String>(0))
+                                .optional()?,
+                            Some(("artist", a)) => c
+                                .query_row("SELECT title FROM artists WHERE id = ?1", [a], |r| r.get::<_, String>(0))
+                                .optional()?,
+                            _ => None,
+                        };
+                        ResolvedContext {
+                            tracks: queries::tracks_by_ids(c, radio_ids.as_deref().unwrap_or_default())?,
+                            title: title.map(|t| format!("{t} Radio")),
+                        }
+                    }
                     ContextKind::Tracks | ContextKind::Search => ResolvedContext {
                         tracks: queries::tracks_by_ids(c, &ctx.track_ids.clone().unwrap_or_default())?,
                         title: None,
@@ -657,6 +774,8 @@ mod tests {
             tint: None,
             released: None,
             studio: None,
+            styles: vec![],
+            moods: vec![],
         }
     }
 
@@ -713,6 +832,21 @@ mod tests {
         assert_eq!(b.section, ReleaseSection::Soundtracks);
         assert_eq!(c.section, ReleaseSection::Albums);
         assert_eq!(c.format, None);
+    }
+
+    #[test]
+    fn styles_and_moods_merge_into_albums() {
+        let mut t = AlbumTags::default();
+        t.add("style", "Trap", "1".into());
+        t.add("mood", "Brooding", "1".into());
+        t.add("mood", "Night", "1".into());
+        t.add("format", "EP", "1".into());
+        let mut a = album("1");
+        a.moods = vec!["night".into()];
+        t.apply(&mut a);
+        assert_eq!(a.styles, vec!["Trap"]);
+        assert_eq!(a.moods, vec!["night", "Brooding"], "no repeats, any case");
+        assert_eq!(a.format.as_deref(), Some("ep"));
     }
     #[test]
     fn search_hubs_sort_into_kinds() {

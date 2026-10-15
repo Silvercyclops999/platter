@@ -25,9 +25,9 @@ use super::events::{
 };
 use super::output::{AudioOutput, OutputState};
 use super::persist::{self, Persisted};
-use super::queue::{AddAt, ContextInfo, Queue, QueueItem, Repeat, ShuffleStyle};
+use super::queue::{AddAt, ContextInfo, ItemSource, Queue, QueueItem, Repeat, ShuffleStyle};
 use super::dsp::DspSettings;
-use super::source::{ContextKind, PlayContext, TrackLookup, TrackResolver};
+use super::source::{ContextKind, MoreRequest, PlayContext, TrackLookup, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
 
@@ -58,6 +58,14 @@ pub fn playable_part(tracks: &[Track], start: Option<&str>, ok: &HashSet<String>
 pub const PREVIOUS_RESTART_MS: u64 = 3_000;
 /// The shortest A-B loop.
 pub const MIN_LOOP_MS: u64 = 1_000;
+/// Songs a radio refill or a keep-playing batch asks for.
+pub const REFILL_BATCH: usize = 20;
+/// A radio refills when fewer songs than this are left.
+pub const RADIO_LOW: usize = 5;
+/// Smart shuffle puts a similar song after every this many.
+pub const SMART_EVERY: usize = 3;
+/// Songs at the end of a context that "similar music" is like.
+const SIMILAR_SEEDS: usize = 10;
 const PROBLEMS_CAP: usize = 200;
 
 #[derive(Debug, Clone)]
@@ -82,6 +90,8 @@ pub struct PlayerConfig {
     pub dsp: DspSettings,
     /// Downloaded songs: played first, and never pre-cached.
     pub local_files: Option<super::source::LocalFiles>,
+    /// When the queue ends, keep playing similar music (from settings).
+    pub autoplay: bool,
 }
 
 impl Default for PlayerConfig {
@@ -99,6 +109,7 @@ impl Default for PlayerConfig {
             resume_contexts: true,
             dsp: DspSettings::default(),
             local_files: None,
+            autoplay: true,
         }
     }
 }
@@ -149,6 +160,18 @@ enum Cmd {
     },
     /// Like QueueJump, but starts at a position and plays or stays paused.
     JumpAt(String, u64, bool, Reply<()>),
+    /// Keep playing similar music when the queue ends.
+    SetAutoplay(bool, Reply<()>),
+    /// Smart shuffle on (shuffle on too) or off.
+    SetSmartShuffle(bool, Reply<()>),
+    /// Crossfade on for the playing context only.
+    SetSmoothTransitions(bool, Reply<()>),
+    /// Songs from a refill (`TrackLookup::more`) for the context `key` names.
+    Extend {
+        key: String,
+        tracks: Vec<Track>,
+        source: ItemSource,
+    },
     /// Take over a queue from another device (see `Queue::adopt`).
     Adopt {
         info: ContextInfo,
@@ -258,6 +281,13 @@ impl PlayerHandle {
         let (outputs, _) = broadcast::channel(16);
 
         let actor = Actor {
+            lookup: lookup.clone(),
+            self_tx: tx.downgrade(),
+            refilling: None,
+            refill_dead: None,
+            smart: false,
+            dsp: config.dsp,
+            transitions_for: None,
             engine,
             queue,
             status,
@@ -391,6 +421,21 @@ impl PlayerHandle {
         self.call(|r| Cmd::SetResumeContexts(on, r)).await
     }
     /// How many upcoming tracks to keep pre-cached (at least 1).
+    /// Keep playing similar music when the queue ends (or stop).
+    pub async fn set_autoplay(&self, on: bool) -> AppResult<()> {
+        self.call(|r| Cmd::SetAutoplay(on, r)).await
+    }
+
+    /// Smart shuffle: shuffle with similar songs from the library mixed in.
+    pub async fn set_smart_shuffle(&self, on: bool) -> AppResult<()> {
+        self.call(|r| Cmd::SetSmartShuffle(on, r)).await
+    }
+
+    /// Crossfade for the playing context only (off again when it changes).
+    pub async fn set_smooth_transitions(&self, on: bool) -> AppResult<()> {
+        self.call(|r| Cmd::SetSmoothTransitions(on, r)).await
+    }
+
     pub async fn set_precache_count(&self, n: usize) -> AppResult<()> {
         self.call(|r| Cmd::SetPrecacheCount(n, r)).await
     }
@@ -548,6 +593,20 @@ impl PlayerHandle {
 }
 
 struct Actor {
+    /// Asked for more songs when a radio or a context runs low.
+    lookup: Arc<dyn TrackLookup>,
+    /// Refills report back here (weak, so dropping the handles still stops the actor).
+    self_tx: mpsc::WeakUnboundedSender<Cmd>,
+    /// The refill in flight, by context key.
+    refilling: Option<String>,
+    /// A context state a refill found nothing for (not asked again).
+    refill_dead: Option<String>,
+    /// Smart shuffle is on (acts while the context is shuffled).
+    smart: bool,
+    /// The sound settings from Settings (smooth transitions lay over them).
+    dsp: DspSettings,
+    /// The context smooth transitions are on for.
+    transitions_for: Option<String>,
     engine: Engine,
     queue: Queue,
     status: PlayerStatus,
@@ -665,6 +724,8 @@ impl Actor {
             repeat: self.queue.repeat(),
             queue: self.queue.view(),
             ab_loop: self.current_loop(),
+            smart_shuffle: self.smart && self.queue.shuffle(),
+            smooth_transitions: self.transitions_for.is_some(),
         }
     }
 
@@ -765,7 +826,98 @@ impl Actor {
         let _ = self.outputs.send(state.clone());
     }
 
+    /// The playing context, by kind and id.
+    fn context_key(&self) -> Option<String> {
+        self.queue.context().map(|c| format!("{:?}|{}", c.kind, c.id.as_deref().unwrap_or("")))
+    }
+
+    /// The sound settings, with crossfade on while smooth transitions are.
+    fn apply_dsp(&self) {
+        let mut dsp = self.dsp;
+        if self.transitions_for.is_some() && dsp.crossfade == crate::audio::dsp::Crossfade::Off {
+            dsp.crossfade = crate::audio::dsp::Crossfade::Smart;
+        }
+        self.engine.set_dsp(dsp);
+    }
+
+    /// Smooth transitions end when another context starts.
+    fn check_transitions(&mut self) {
+        if self.transitions_for.is_some() && self.transitions_for != self.context_key() {
+            self.transitions_for = None;
+            self.apply_dsp();
+        }
+    }
+
+    /// Names the context and how far it reaches, so a refill that comes back
+    /// late (the context changed or grew meanwhile) is dropped.
+    fn refill_key(&self) -> Option<String> {
+        let c = self.queue.context()?;
+        Some(format!("{:?}|{}|{}", c.kind, c.id.as_deref().unwrap_or(""), self.queue.context_len()))
+    }
+
+    /// Radio running low, or the last song of a context playing with "keep
+    /// playing similar music" on: ask for more in the background.
+    fn maybe_refill(&mut self) {
+        let Some(ctx) = self.queue.context().cloned() else { return };
+        let Some(key) = self.refill_key() else { return };
+        if self.refilling.is_some() || self.refill_dead.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        let remaining = self.queue.remaining();
+        let radio = ctx.kind == ContextKind::Radio;
+        let smart_kinds = matches!(ctx.kind, ContextKind::Album | ContextKind::Playlist | ContextKind::Liked | ContextKind::Artist);
+        if self.smart && self.queue.shuffle() && smart_kinds && self.queue.smart_upcoming() == 0 && remaining >= SMART_EVERY {
+            let Some(tx) = self.self_tx.upgrade() else { return };
+            self.refilling = Some(key.clone());
+            let req = MoreRequest {
+                kind: ctx.kind,
+                id: ctx.id.clone(),
+                seed_ids: self.queue.context_sample(SIMILAR_SEEDS),
+                avoid: self.queue.known_ids(),
+                n: (remaining / SMART_EVERY).clamp(1, REFILL_BATCH),
+                smart: true,
+            };
+            let lookup = self.lookup.clone();
+            tokio::spawn(async move {
+                let tracks = lookup.more(&req).await.unwrap_or_default();
+                let _ = tx.send(Cmd::Extend { key, tracks, source: ItemSource::Smart });
+            });
+            return;
+        }
+        let due = if radio {
+            remaining < RADIO_LOW
+        } else {
+            self.config.autoplay && self.queue.repeat() == Repeat::Off && remaining == 0 && self.queue.current().is_some()
+        };
+        if !due {
+            return;
+        }
+        let Some(tx) = self.self_tx.upgrade() else { return };
+        self.refilling = Some(key.clone());
+        let req = MoreRequest {
+            kind: ctx.kind,
+            id: ctx.id.clone(),
+            seed_ids: self.queue.played_context_ids(SIMILAR_SEEDS),
+            avoid: self.queue.known_ids(),
+            n: REFILL_BATCH,
+            smart: false,
+        };
+        let source = if radio { ItemSource::Context } else { ItemSource::Autoplay };
+        let lookup = self.lookup.clone();
+        tokio::spawn(async move {
+            let tracks = match lookup.more(&req).await {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::debug!("no more songs for {:?}: {e}", req.kind);
+                    Vec::new()
+                }
+            };
+            let _ = tx.send(Cmd::Extend { key, tracks, source });
+        });
+    }
+
     fn update_next(&mut self) {
+        self.maybe_refill();
         self.sync_album_context();
         if let Some(cur) = self.cur_key {
             let next = self.pick_next().map(|i| (i.track, i.item_id));
@@ -973,13 +1125,39 @@ impl Actor {
                 self.mark_dirty();
                 let _ = reply.send(Ok(()));
             }
+            Cmd::SetSmartShuffle(on, reply) => {
+                self.smart = on;
+                if on && !self.queue.shuffle() {
+                    self.queue.set_shuffle(true);
+                }
+                if !on {
+                    self.queue.drop_smart_upcoming();
+                }
+                self.refill_dead = None;
+                self.update_next();
+                self.mark_dirty();
+                let _ = reply.send(Ok(()));
+            }
+            Cmd::SetSmoothTransitions(on, reply) => {
+                self.transitions_for = if on { self.context_key() } else { None };
+                self.apply_dsp();
+                let _ = reply.send(Ok(()));
+            }
             Cmd::SetShuffle(s, reply) => {
+                if !s {
+                    self.smart = false;
+                    self.queue.drop_smart_upcoming();
+                }
                 self.queue.set_shuffle(s);
                 self.update_next();
                 self.mark_dirty();
                 let _ = reply.send(Ok(()));
             }
             Cmd::SetContextShuffle(id, s, reply) => {
+                if !s {
+                    self.smart = false;
+                    self.queue.drop_smart_upcoming();
+                }
                 self.queue.set_context_shuffle(&id, s);
                 self.update_next();
                 self.mark_dirty();
@@ -993,13 +1171,42 @@ impl Actor {
                 self.queue.set_resume_contexts(on);
                 let _ = reply.send(Ok(()));
             }
+            Cmd::SetAutoplay(on, reply) => {
+                self.config.autoplay = on;
+                self.refill_dead = None;
+                self.update_next();
+                let _ = reply.send(Ok(()));
+            }
+            Cmd::Extend { key, tracks, source } => {
+                if self.refilling.as_deref() == Some(key.as_str()) {
+                    self.refilling = None;
+                }
+                // The context changed while the songs were found.
+                if self.refill_key().as_deref() != Some(key.as_str()) {
+                    return;
+                }
+                if tracks.is_empty() {
+                    self.refill_dead = Some(key);
+                    return;
+                }
+                if source == ItemSource::Smart {
+                    if self.smart && self.queue.shuffle() {
+                        self.queue.insert_smart(tracks, SMART_EVERY);
+                    }
+                } else {
+                    self.queue.extend_context(tracks, source);
+                }
+                self.update_next();
+                self.mark_dirty();
+            }
             Cmd::SetPrecacheCount(n, reply) => {
                 self.config.precache_count = n.max(1);
                 self.refresh_precache();
                 let _ = reply.send(Ok(()));
             }
             Cmd::SetDsp(dsp, reply) => {
-                self.engine.set_dsp(dsp);
+                self.dsp = dsp;
+                self.apply_dsp();
                 let _ = reply.send(Ok(()));
                 return;
             }
@@ -1108,6 +1315,7 @@ impl Actor {
                 let _ = reply.send(r);
             }
         }
+        self.check_transitions();
         self.emit_state();
     }
 

@@ -55,6 +55,8 @@ fn log_context(ctx: &Option<ContextInfo>) -> (Option<ContextKind>, Option<String
                 PlayContextKind::Tracks => ContextKind::Tracks,
                 PlayContextKind::Search => ContextKind::Search,
                 PlayContextKind::Liked => ContextKind::Liked,
+                PlayContextKind::Mix => ContextKind::Mix,
+                PlayContextKind::Radio => ContextKind::Radio,
             }),
             c.id.clone(),
         ),
