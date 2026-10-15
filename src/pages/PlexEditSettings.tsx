@@ -13,12 +13,12 @@ export const PLEX_EDIT_ROWS: { key: Key; title: string; description: string }[] 
     key: "plexEditShow",
     title: "Show editing options",
     description:
-      "Adds Edit in Plex to album and artist menus: change the cover or photo, fix the match, edit details, merge and split artists. Only on servers you own or administer, and only Plex's own data changes, never your files.",
+      "Adds Edit to album and artist menus: change the cover or photo, fix the match, edit details, merge and split artists. Changes save to your server and show in every app that uses it. Only on servers you own or administer, and your music files are never touched.",
   },
   {
     key: "plexEditLock",
     title: "Lock fields I edit",
-    description: "Fields you change in Edit details are locked in Plex, so refreshing the album or artist keeps your changes.",
+    description: "Fields you change in Edit details are locked, so refreshing the album or artist keeps your changes.",
   },
   {
     key: "plexEditMatchUnreleased",
@@ -66,7 +66,7 @@ export function PlexEditSettings() {
   return (
     <section className="settings__group" aria-labelledby="settings-edit-in-plex">
       <h2 id="settings-edit-in-plex" className="settings__heading">
-        Edit in Plex
+        Editing
       </h2>
       {none && (
         <p className="setting-row__desc" role="note">

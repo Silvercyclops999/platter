@@ -39,20 +39,20 @@ describe("release status", () => {
     const pop = screen.getByRole("dialog", { name: "Probably unreleased" });
     expect(within(pop).getByText("Plex couldn't match it to a known release.")).toBeInTheDocument();
     expect(within(pop).getByText(/MusicBrainz has no release/)).toBeInTheDocument();
-    expect(within(pop).queryByText(/Fix Match/)).toBeNull();
+    expect(within(pop).queryByText(/Fix match/)).toBeNull();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Probably unreleased" })).toBeNull();
     expect(why).toHaveFocus();
   });
 
-  it("an album Plex missed says so and points at Fix Match", async () => {
+  it("an album Plex missed says so and points at Fix match", async () => {
     const user = userEvent.setup();
     render(<AlbumPage id={missed.id} />);
     expect(await screen.findByText("Released, Plex missed it")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Why released, plex missed it?" }));
     const pop = screen.getByRole("dialog", { name: "Released, Plex missed it" });
     expect(within(pop).getByText(/MusicBrainz has an official release/)).toBeInTheDocument();
-    expect(within(pop).getByText(/Fix Match/)).toBeInTheDocument();
+    expect(within(pop).getByText(/Fix match/)).toBeInTheDocument();
   });
 
   it("tagged and plainly released albums show no label", async () => {

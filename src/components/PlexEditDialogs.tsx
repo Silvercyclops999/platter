@@ -642,7 +642,7 @@ function MergeDialog({ target, onClose }: { target: EditTarget; onClose: () => v
   return (
     <Dialog open onClose={onClose} label={`Merge ${target.title}`} className="pe" initialFocus={findRef}>
       <h2 className="pe__title">Merge with another artist</h2>
-      <p className="pe__sub">Their albums and songs move under one artist in Plex. You can split them again later.</p>
+      <p className="pe__sub">Their albums and songs move under one artist. You can split them again later.</p>
       {!other ? (
         <>
           <label className="pe-field" htmlFor={`${id}-find`}>

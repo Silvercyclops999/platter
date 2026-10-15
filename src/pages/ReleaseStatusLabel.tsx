@@ -93,7 +93,7 @@ export function ReleaseStatusLabel({ status }: { status: AlbumReleaseStatus | nu
             ))}
           </ul>
           {status.status === "plexMissed" && (
-            <p className="release-status__hint">You can fix the match in Plex with Fix Match on this album.</p>
+            <p className="release-status__hint">You can fix it with Edit, then Fix match, on this album.</p>
           )}
         </div>
       )}

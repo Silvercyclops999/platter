@@ -185,12 +185,12 @@ describe("An imported playlist", () => {
     const like = vi.spyOn(mock, "likesSet");
     await open("Road Trip");
     expect(create).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Save as Plex playlist" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save as playlist" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent('A new Plex playlist named "Road Trip" gets the 10 songs in your library. 2 songs aren\'t in your library and stay out.');
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(create).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Save as Plex playlist" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save as playlist" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Save playlist" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0][0]).toBe("Road Trip");
@@ -204,9 +204,9 @@ describe("An imported playlist", () => {
     const create = vi.spyOn(mock, "playlistCreate");
     await open("Liked songs");
     expect(like).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Like matched songs in Plex" }));
+    fireEvent.click(screen.getByRole("button", { name: "Like matched songs" }));
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("17 songs in your library will be liked in Plex. 3 songs aren't in your library and stay out.");
+    expect(dialog).toHaveTextContent("17 songs in your library will be liked. 3 songs aren't in your library and stay out.");
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Like 17 songs" }));
     });

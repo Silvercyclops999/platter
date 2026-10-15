@@ -1,5 +1,5 @@
 /**
- * The "Edit in Plex" submenu on album and artist menus. Shown only for items
+ * The "Edit" submenu on album and artist menus. Shown only for items
  * on servers this account can edit, with editing turned on in Settings.
  */
 import { GitMerge, History, ImageIcon, Pencil, RefreshCw, ScanSearch, Split, Unlink, Wallpaper } from "lucide-react";
@@ -13,7 +13,7 @@ import { MenuIcon } from "./ContextMenu";
 
 export function plexEditItem(target: EditTarget): MenuItem {
   return {
-    label: "Edit in Plex",
+    label: "Edit",
     icon: Pencil,
     when: () => canEditNow(target.id),
     submenu: (ctx) => <PlexEditSubmenu target={target} ctx={ctx} />,

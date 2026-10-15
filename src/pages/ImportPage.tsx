@@ -298,7 +298,7 @@ function ListView({ id }: { id: string }) {
           Play
         </Button>
         <Button disabled={!ids.length} onClick={() => setAsk(true)}>
-          {list.liked ? "Like matched songs in Plex" : "Save as Plex playlist"}
+          {list.liked ? "Like matched songs" : "Save as playlist"}
         </Button>
       </div>
       <ul className="import-rows" aria-label={list.name}>
@@ -315,8 +315,8 @@ function ListView({ id }: { id: string }) {
       {ask &&
         (list.liked ? (
           <Confirm
-            title="Like these songs in Plex?"
-            body={`${n(ids.length)} ${ids.length === 1 ? "song" : "songs"} in your library will be liked in Plex.${leftNote}`}
+            title="Like these songs?"
+            body={`${n(ids.length)} ${ids.length === 1 ? "song" : "songs"} in your library will be liked.${leftNote}`}
             confirm={`Like ${n(ids.length)} ${ids.length === 1 ? "song" : "songs"}`}
             onConfirm={() => void setLiked(tracks, true)}
             onClose={() => setAsk(false)}

@@ -61,8 +61,8 @@ async function openEditMenu(user: ReturnType<typeof userEvent.setup>, card: "alb
     </>,
   );
   fireEvent.contextMenu(screen.getByText(item.title), { clientX: 10, clientY: 10 });
-  await user.click(await screen.findByRole("menuitem", { name: "Edit in Plex" }));
-  return screen.findByRole("menu", { name: "Edit in Plex" });
+  await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+  return screen.findByRole("menu", { name: "Edit" });
 }
 
 describe("who sees it", () => {
@@ -104,7 +104,7 @@ describe("who sees it", () => {
     );
     fireEvent.contextMenu(screen.getByText(released().title), { clientX: 10, clientY: 10 });
     await screen.findByRole("menuitem", { name: "Play" });
-    expect(screen.queryByRole("menuitem", { name: "Edit in Plex" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).not.toBeInTheDocument();
   });
 
   it("turned off in Settings, it's hidden", async () => {
@@ -117,7 +117,7 @@ describe("who sees it", () => {
     );
     fireEvent.contextMenu(screen.getByText(released().title), { clientX: 10, clientY: 10 });
     await screen.findByRole("menuitem", { name: "Play" });
-    expect(screen.queryByRole("menuitem", { name: "Edit in Plex" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).not.toBeInTheDocument();
   });
 
   it("Fix match hides on unreleased albums when that setting is off; Unmatch stays", async () => {
