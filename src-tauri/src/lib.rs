@@ -1147,6 +1147,8 @@ pub fn run() {
             lyrics::commands::lyrics_offset,
             lyrics::commands::lyrics_choices_count,
             lyrics::commands::lyrics_choices_clear,
+            lyrics::commands::lyrics_pronounce,
+            lyrics::commands::lyrics_translate,
             lyrics::transcribe::commands::transcribe_status,
             lyrics::transcribe::commands::transcribe_model_download,
             lyrics::transcribe::commands::transcribe_model_cancel,

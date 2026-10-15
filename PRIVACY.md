@@ -119,6 +119,12 @@ and your own Plex server.
   song without lyrics, unreleased ones included. Answers are kept on your
   computer for 30 days (7 days when there were none).
 
+- A translation service you enter yourself, only if you set "Translation
+  service" in Settings and press Translate under some lyrics. The lyrics
+  lines and the language you picked go to that address. There's no default
+  service. Pronunciation lines under lyrics are made on your computer and
+  send nothing.
+
 - Hugging Face (huggingface.co), only if you turn on "Transcribe songs
   without lyrics on this computer" and download a speech model. The model
   file is downloaded once from the whisper.cpp model repository there. The

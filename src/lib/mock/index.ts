@@ -1465,6 +1465,19 @@ export class MockBackend implements Backend {
   ownLyricsIds() {
     return this.delay(() => [...this.own.keys()].sort());
   }
+  /** Makes the mock translation service unreachable. */
+  translateFails = false;
+  lyricsPronounce(lines: string[]) {
+    // A stand-in: lines outside the Latin range get "~" plus the line.
+    return this.delay(() => lines.map((l) => (/[^\u0000-ɏ\s]/.test(l) ? `~${l}` : null)));
+  }
+  lyricsTranslate(lines: string[]) {
+    return this.delay(() => {
+      if (!this.settings.translationService) throw { kind: "invalid", message: "Set a translation service in Settings first." };
+      if (this.translateFails) throw { kind: "network", message: "Couldn't reach the translation service." };
+      return lines.map((l) => (l.trim() ? `[${this.settings.translateTo}] ${l}` : ""));
+    });
+  }
   lyricsExport(text: string, fileName: string) {
     return this.delay(() => {
       if (this.exportCancels) return null;

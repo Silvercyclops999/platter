@@ -1048,6 +1048,9 @@ export interface Settings {
   syncLyrics: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
+  translateTo: string;
+  translationService: string;
+  showPronunciation: boolean;
   pinsInLibrary: boolean;
   /** The Stats page (profile menu and library row). */
   statsPage: boolean;
@@ -1360,6 +1363,9 @@ export const DEFAULT_SETTINGS: Settings = {
   syncFollows: true,
   syncLyrics: true,
   bookmarksInLibrary: true,
+  translateTo: "en",
+  translationService: "",
+  showPronunciation: false,
   pinsInLibrary: true,
   statsPage: true,
   statsStrip: true,

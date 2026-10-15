@@ -595,6 +595,12 @@ pub struct Settings {
     pub show_physical_collection: bool,
     /// "Missing from the shelf": albums played most that aren't owned.
     pub shelf_missing_list: bool,
+    /// The language lyrics are translated into.
+    pub translate_to: String,
+    /// Where lyrics translations come from (a LibreTranslate-compatible address); empty: no translation.
+    pub translation_service: String,
+    /// A romanised line under Japanese, Korean, Chinese, Hindi and Cyrillic lyrics.
+    pub show_pronunciation: bool,
     /// Pins sit at the top of the library sidebar.
     pub pins_in_library: bool,
 }
@@ -812,6 +818,9 @@ impl Default for Settings {
             dismissed_artists: Vec::new(),
             show_physical_collection: true,
             shelf_missing_list: false,
+            translate_to: "en".into(),
+            translation_service: String::new(),
+            show_pronunciation: false,
             pins_in_library: true,
         }
     }
@@ -928,12 +937,15 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "dismissedArtists",
     "showPhysicalCollection",
     "shelfMissingList",
+    "translateTo",
+    "showPronunciation",
     "pinsInLibrary",
 ];
 
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
     "privateSession",
+    "translationService",
     "lookStepDone",
     "volume",
     "precacheCount",
@@ -1195,6 +1207,9 @@ pub struct SettingsPatch {
     pub dismissed_artists: Option<Vec<crate::discover::Dismissed>>,
     pub show_physical_collection: Option<bool>,
     pub shelf_missing_list: Option<bool>,
+    pub translate_to: Option<String>,
+    pub translation_service: Option<String>,
+    pub show_pronunciation: Option<bool>,
     pub pins_in_library: Option<bool>,
 }
 
@@ -1449,6 +1464,9 @@ impl Settings {
         set(&mut self.catalogue_search, p.catalogue_search);
         set(&mut self.fans_also_like_catalogue, p.fans_also_like_catalogue);
         set(&mut self.home_new_to_you, p.home_new_to_you);
+        if let Some(l) = &p.translate_to { self.translate_to = crate::lyrics::translate::language(l).ok_or_else(|| AppError::Invalid("Pick a language to translate into.".into()))?; }
+        if let Some(u) = &p.translation_service { self.translation_service = if u.trim().is_empty() { String::new() } else { crate::lyrics::translate::service_url(u).ok_or_else(|| AppError::Invalid("The translation service is a web address like https://translate.example.com.".into()))? }; }
+        set(&mut self.show_pronunciation, p.show_pronunciation);
         set(&mut self.pins_in_library, p.pins_in_library);
         if let Some(list) = &p.dismissed_artists {
             self.dismissed_artists = crate::discover::tidy_dismissed(list);
@@ -3295,5 +3313,22 @@ mod tests {
         s.apply(&serde_json::from_str(r#"{"pinsInLibrary":false}"#).unwrap()).unwrap();
         assert!(!s.pins_in_library);
         assert!(serde_json::from_str::<Settings>("{}").unwrap().pins_in_library, "older settings read as on");
+    }
+
+    #[test]
+    fn pronunciation_and_translation_settings() {
+        let mut s = Settings::default();
+        assert!(!s.show_pronunciation && s.translation_service.is_empty() && s.translate_to == "en");
+        assert!(SYNCED_SETTINGS.contains(&"showPronunciation") && SYNCED_SETTINGS.contains(&"translateTo"));
+        assert!(DEVICE_SETTINGS.contains(&"translationService"), "a service can be on this computer only");
+        for bad in [r#"{"translationService":"translate.example.com"}"#, r#"{"translateTo":"English"}"#] {
+            assert!(s.apply(&serde_json::from_str(bad).unwrap()).is_err(), "{bad}");
+        }
+        s.apply(&serde_json::from_str(r#"{"showPronunciation":true,"translationService":"https://tr.example.com/","translateTo":"pt"}"#).unwrap())
+            .unwrap();
+        assert!(s.show_pronunciation);
+        assert_eq!((s.translation_service.as_str(), s.translate_to.as_str()), ("https://tr.example.com", "pt"));
+        s.apply(&serde_json::from_str(r#"{"translationService":"  "}"#).unwrap()).unwrap();
+        assert!(s.translation_service.is_empty(), "blank turns it off");
     }
 }

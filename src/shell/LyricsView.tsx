@@ -12,6 +12,7 @@ import { openShareCard, useLyricPick } from "../stores/shareCard";
 import { LYRIC_LINES_MAX } from "../lib/shareCard";
 import { trackArtistLine } from "../lib/format";
 import { useSettings } from "../stores/settings";
+import { LyricExtras, TranslateButton, useLyricExtras, type Extras } from "./lyricExtras";
 import { currentLineIndex, currentWordIndex, followTarget, interpolate, lineState, lyricsSourceLabel, timedLines, useLyrics } from "./lyrics";
 import { useCoverColors } from "./nowPlaying";
 import { TranscribeOffer } from "./TranscribeOffer";
@@ -91,6 +92,7 @@ function SyncedLyrics({
   footer,
   tools,
   onTap,
+  extras,
 }: {
   lines: LyricLine[];
   credit?: string;
@@ -100,6 +102,7 @@ function SyncedLyrics({
   tools?: ReactNode;
   /** A line clicked while tapping to sync (true: used, don't seek). */
   onTap?: (line: LyricLine) => boolean;
+  extras: Extras;
 }) {
   const { line: current, word, jump } = usePlayhead(lines);
   const picking = useLyricPick((s) => s.picking);
@@ -187,6 +190,7 @@ function SyncedLyrics({
                     • • •
                   </span>
                 )}
+                {l.text && <LyricExtras extras={extras} i={i} />}
               </button>
             );
           })}
@@ -210,6 +214,7 @@ function PlainLyrics({
   credit,
   className,
   footer,
+  extras,
   note = UNSYNCED_NOTE,
   tools,
 }: {
@@ -217,6 +222,7 @@ function PlainLyrics({
   credit?: string;
   className: string;
   footer?: ReactNode;
+  extras: Extras;
   note?: string;
   tools?: ReactNode;
 }) {
@@ -237,10 +243,12 @@ function PlainLyrics({
                 onClick={() => useLyricPick.getState().toggle(i)}
               >
                 {l}
+                <LyricExtras extras={extras} i={i} />
               </button>
             ) : l ? (
               <p key={i} className="lyrics__line">
                 {l}
+                <LyricExtras extras={extras} i={i} />
               </p>
             ) : (
               <span key={i} className="lyrics__break" aria-hidden="true" />
@@ -269,8 +277,10 @@ export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) 
   const cls = "lyrics--full";
   const texts = timed ? timed.map((l) => l.text) : lyrics.lines;
   const borrowed = !!lyrics.borrowedTiming;
+  const extras = useLyricExtras(texts);
   const footer = (
     <>
+      <TranslateButton extras={extras} />
       {borrowed && timed && <p className="lyrics__borrowed">{BORROWED_NOTE}</p>}
       <LyricPickBar track={track} texts={texts} />
       <LyricsSourceLine lyrics={lyrics} track={track} />
@@ -287,6 +297,7 @@ export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) 
       footer={footer}
       tools={tools}
       onTap={(l) => tapLine(track.id, l, lyrics)}
+      extras={extras}
     />
   ) : (
     <PlainLyrics
@@ -295,6 +306,7 @@ export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) 
       credit={lyrics.credit}
       className={cls}
       footer={footer}
+      extras={extras}
       note={borrowed ? BORROWED_NOTE : UNSYNCED_NOTE}
       tools={tools}
     />

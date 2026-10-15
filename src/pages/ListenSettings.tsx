@@ -10,8 +10,9 @@ export const INVITE_HOURS = [
 ] as const;
 
 /**
- * A text setting saved on blur or Enter: the listen along relay or the
- * name others see. Empty means the default (ntfy.sh, or the Plex name).
+ * A text setting saved on blur or Enter: the listen along relay, the name
+ * others see, or the lyrics translation service. Empty means the default
+ * (ntfy.sh, the Plex name, or no translation).
  */
 export function ListenTextSetting({
   field,
@@ -19,7 +20,7 @@ export function ListenTextSetting({
   maxLength,
   ids,
 }: {
-  field: "listenRelay" | "listenName";
+  field: "listenRelay" | "listenName" | "translationService";
   placeholder: string;
   maxLength: number;
   ids: { title: string; desc: string };

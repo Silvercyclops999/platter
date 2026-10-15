@@ -349,6 +349,10 @@ export interface Backend {
   lyricsChoicesCount(): Promise<number>;
   /** Forget every lyrics choice and offset; answers how many there were. */
   lyricsChoicesClear(): Promise<number>;
+  /** A romanised line per lyrics line (null where there's nothing to romanise). Made on this computer. */
+  lyricsPronounce(lines: string[]): Promise<(string | null)[]>;
+  /** The lines translated by the service set in Settings (errors when none is set). */
+  lyricsTranslate(lines: string[]): Promise<string[]>;
 
   // Search
   search(args: SearchArgs): Promise<SearchResults>;
@@ -918,6 +922,8 @@ export function createTauriBackend(): Backend {
     lyricsOffset: (trackId, offsetMs) => call("lyrics_offset", { trackId, offsetMs }),
     lyricsChoicesCount: () => call("lyrics_choices_count"),
     lyricsChoicesClear: () => call("lyrics_choices_clear"),
+    lyricsPronounce: (lines) => call("lyrics_pronounce", { lines }),
+    lyricsTranslate: (lines) => call("lyrics_translate", { lines }),
 
     search: (args) => call("search", { ...args }),
     searchCompletions: (query, limit) => call("search_completions", { query, limit }),

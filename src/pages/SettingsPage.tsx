@@ -171,6 +171,29 @@ const LYRICS_MODE = [
   { value: "autoShow", label: "Auto-show when available" },
   { value: "off", label: "Off" },
 ] as const satisfies SelectOption<Settings["lyricsMode"]>[];
+/** Languages lyrics can be translated into (language codes the service takes). */
+const TRANSLATE_TO: SelectOption<string>[] = [
+  ["en", "English"],
+  ["es", "Spanish"],
+  ["fr", "French"],
+  ["de", "German"],
+  ["it", "Italian"],
+  ["pt", "Portuguese"],
+  ["nl", "Dutch"],
+  ["sv", "Swedish"],
+  ["pl", "Polish"],
+  ["tr", "Turkish"],
+  ["ru", "Russian"],
+  ["uk", "Ukrainian"],
+  ["ar", "Arabic"],
+  ["hi", "Hindi"],
+  ["id", "Indonesian"],
+  ["vi", "Vietnamese"],
+  ["ja", "Japanese"],
+  ["ko", "Korean"],
+  ["zh", "Chinese"],
+].map(([value, label]) => ({ value, label }));
+
 const DISCORD_STATUS_LINE = [
   { value: "app", label: "Platter" },
   { value: "artist", label: "Artist" },
@@ -2137,6 +2160,29 @@ export function SettingsPage() {
       description:
         "Lyrics you picked with Wrong lyrics?, songs you turned lyrics off for, and timing you moved. They win over everything automatic and travel in your sync file. Reset lets Platter pick again.",
       control: (ids) => <LyricsChoicesControl labelledBy={ids.title} />,
+    },
+    {
+      key: "showPronunciation",
+      section: "Appearance",
+      title: "Show pronunciation",
+      description:
+        "A romanised line under lyrics in Japanese, Korean, Chinese, Hindi and Cyrillic scripts, also in synced lyrics as they play. Made on this computer; nothing is sent anywhere.",
+      control: (ids) => toggle(s, "showPronunciation", ids),
+    },
+    {
+      key: "translationService",
+      section: "Appearance",
+      title: "Translation service",
+      description:
+        "The address of a LibreTranslate-compatible service, like one you run yourself. With one set, lyrics have a Translate button that sends their lines there. Not set: lyrics are never sent for translation.",
+      control: (ids) => <ListenTextSetting field="translationService" placeholder="https://translate.example.com" maxLength={200} ids={ids} />,
+    },
+    {
+      key: "translateTo",
+      section: "Appearance",
+      title: "Translate lyrics into",
+      description: "The language the Translate button asks for.",
+      control: (ids) => select(s, (x) => x.translateTo, TRANSLATE_TO, ids, (v) => updateSettings({ translateTo: v })),
     },
     {
       key: "fullWindowHideControls",

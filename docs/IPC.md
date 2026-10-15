@@ -1202,6 +1202,26 @@ to 0.1 s, at most a minute either way). Picks and offsets win over anything
 automatic and travel in the sync file (`lyricsChoices`); `lyrics://choices`
 says some arrived from another device.
 
+| Command | Args | Returns |
+| --- | --- | --- |
+| `lyrics_pronounce` | `{ lines: string[] }` | `(string \| null)[]` |
+| `lyrics_translate` | `{ lines: string[] }` | `string[]` |
+
+`lyrics_pronounce` gives a romanised line for each lyrics line, or `null`
+where there's nothing to romanise. It's made on this computer: Japanese with
+the kakasi crate (KAKASI's dictionary, Hepburn), Chinese with the pinyin
+crate (tone marks, one reading per character), and Korean, Hindi
+(Devanagari) and Cyrillic from tables in `lyrics/pronounce.rs`. Kanji read
+as Chinese unless the song has kana somewhere. The UI asks only while
+`showPronunciation` is on.
+
+`lyrics_translate` sends the non-blank lines to the service in
+`translationService` (`POST {service}/translate` with `q`, `source: "auto"`,
+`target` from `translateTo` and `format: "text"`, the LibreTranslate API)
+and returns one line per line, blank lines left blank. With no service set
+it fails with "Set a translation service in Settings first." and sends
+nothing. There's no default service.
+
 ## Lyrics transcription
 | Command | Args | Returns |
 | --- | --- | --- |

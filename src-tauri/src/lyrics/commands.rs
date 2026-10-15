@@ -161,3 +161,24 @@ pub async fn lyrics_export(app: AppHandle, text: String, file_name: String) -> A
         .map_err(|e| AppError::Internal(format!("export: {e}")))??;
     Ok(Some(name))
 }
+
+/// Pronunciation lines for lyrics lines (docs/IPC.md `lyrics_pronounce`):
+/// one per line, null where there's nothing to romanise. Made here, no
+/// service involved.
+#[tauri::command]
+pub async fn lyrics_pronounce(lines: Vec<String>) -> AppResult<Vec<Option<String>>> {
+    if lines.len() > super::translate::MAX_LINES {
+        return Err(AppError::Invalid("Those lyrics are too long.".into()));
+    }
+    tokio::task::spawn_blocking(move || super::pronounce::pronounce(&lines))
+        .await
+        .map_err(|e| AppError::Internal(format!("pronounce: {e}")))
+}
+
+/// Lyrics lines translated by the service set in Settings (docs/IPC.md
+/// `lyrics_translate`). Errors when none is set.
+#[tauri::command]
+pub async fn lyrics_translate(settings: State<'_, crate::settings::SettingsState>, lines: Vec<String>) -> AppResult<Vec<String>> {
+    let s = settings.get().await?;
+    super::translate::translate(&crate::audio::http::http_client(), &s.translation_service, &s.translate_to, &lines).await
+}

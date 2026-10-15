@@ -20,6 +20,8 @@
 //! - [`check`]      comparing heard words with lyrics, offsets, drift (pure)
 //! - [`checker`]    the check's worker and its tables
 //! - [`choice`]     the user's pick and timing offset per song
+//! - [`pronounce`] romanised lines under lyrics (local)
+//! - [`translate`] translation through the service the user set
 //! - [`commands`]   the Tauri commands and the Plex side
 //!
 //! Any source being down is silent: the view says there are no lyrics.
@@ -32,7 +34,9 @@ pub mod choice;
 pub mod commands;
 pub mod live;
 pub mod lrclib;
+pub mod pronounce;
 pub mod transcribe;
+pub mod translate;
 pub mod user;
 
 #[cfg(test)]
