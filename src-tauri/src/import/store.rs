@@ -575,6 +575,33 @@ pub fn queue_counts(c: &Connection) -> AppResult<(u64, u64)> {
     .map_err(Into::into)
 }
 
+/// Takes a song out of one imported list (every place it sits in it). A song
+/// no other list wants is forgotten. Importing the same file again brings it
+/// back, the same as any other change to an imported list.
+pub fn remove_from_list(c: &mut Connection, list_id: &str, song_id: i64) -> AppResult<()> {
+    let tx = c.transaction()?;
+    let gone = if let Some(source) = list_id.strip_prefix("liked:") {
+        tx.execute("DELETE FROM import_likes WHERE source = ?1 AND song_id = ?2", params![source, song_id])?
+    } else {
+        let id: i64 = list_id
+            .strip_prefix("pl:")
+            .and_then(|n| n.parse().ok())
+            .ok_or_else(|| AppError::NotFound(format!("imported list {list_id}")))?;
+        tx.execute("DELETE FROM import_playlist_items WHERE playlist_id = ?1 AND song_id = ?2", params![id, song_id])?
+    };
+    if gone == 0 {
+        return Err(AppError::NotFound(format!("song {song_id} in imported list {list_id}")));
+    }
+    tx.execute(
+        "DELETE FROM import_songs WHERE id = ?1
+           AND NOT EXISTS (SELECT 1 FROM import_playlist_items i WHERE i.song_id = ?1)
+           AND NOT EXISTS (SELECT 1 FROM import_likes l WHERE l.song_id = ?1)",
+        [song_id],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Forgets everything imported from a source, plays included.
 pub fn forget(c: &mut Connection, source: &str) -> AppResult<()> {
     let tx = c.transaction()?;

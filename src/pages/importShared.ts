@@ -72,6 +72,31 @@ export function useImportOverview(): [ImportOverview | null, string | null, () =
 /** Reset between tests. */
 export function resetImportListeners() {
   listeners = new Set();
+  missingFocus = null;
+}
+
+/** How the Missing list knows a song: folded artist and title. */
+export function missingKey(artist: string, title: string): string {
+  const f = (s: string) => s.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+  return `${f(artist)}\u001f${f(title)}`;
+}
+
+let missingFocus: string | null = null;
+
+/** Open the Missing list scrolled to one song. */
+export function showInMissing(artist: string, title: string) {
+  missingFocus = missingKey(artist, title);
+  nav.go({ name: "import", view: "missing" });
+}
+
+/** The song the Missing list should bring into view. */
+export function missingFocusKey(): string | null {
+  return missingFocus;
+}
+
+/** Once the Missing list has shown that song. */
+export function clearMissingFocus() {
+  missingFocus = null;
 }
 
 /** Pick a file or folder and import it. Resolves to the report, or null when cancelled or failed. */

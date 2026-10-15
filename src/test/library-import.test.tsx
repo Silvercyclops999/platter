@@ -10,11 +10,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { importSourceName } from "../lib/importStrings";
+import { importSourceName, storeLinks } from "../lib/importStrings";
 import { ImportPage } from "../pages/ImportPage";
 import { LibraryImportSettings, importMatches } from "../pages/LibraryImportSettings";
-import { countParts, resetImportListeners, skippedLine, songsLine } from "../pages/importShared";
-import { useRouter } from "../stores/router";
+import { countParts, missingFocusKey, missingKey, resetImportListeners, showInMissing, skippedLine, songsLine } from "../pages/importShared";
+import { listHeaderLine } from "../pages/ImportListView";
+import { player } from "../stores/player";
+import { useUi } from "../stores/ui";
+import { nav, useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 import { useLikes } from "../stores/likes";
@@ -164,22 +167,6 @@ describe("An imported playlist", () => {
     return list;
   }
 
-  it("is read only, with songs not in the library dimmed and labelled", async () => {
-    await open("Road Trip");
-    const rows = within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem");
-    expect(rows).toHaveLength(12);
-    const missing = rows.filter((r) => r.dataset.status === "missing");
-    expect(missing).toHaveLength(2);
-    for (const r of missing) {
-      expect(r).toHaveClass("import-row--missing");
-      expect(r).toHaveTextContent("Not in your library");
-      expect(r).not.toHaveAttribute("tabindex");
-    }
-    expect(rows[0]).toHaveClass("import-row--playable");
-    expect(screen.getByText(/10 of 12 songs in your library/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /remove/i })).toBeNull();
-  });
-
   it("saves to Plex only after the click and the confirm", async () => {
     const create = vi.spyOn(mock, "playlistCreate");
     const like = vi.spyOn(mock, "likesSet");
@@ -215,8 +202,197 @@ describe("An imported playlist", () => {
     expect(like.mock.calls[0][1]).toBe(true);
     expect(create).not.toHaveBeenCalled();
   });
+
+  it("shows songs not in the library dimmed and labelled, with covers like any list", async () => {
+    await open("Road Trip");
+    const rows = within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem");
+    expect(rows).toHaveLength(12);
+    const missing = rows.filter((r) => r.dataset.status === "missing");
+    expect(missing).toHaveLength(2);
+    for (const r of missing) {
+      expect(r).toHaveClass("import-row--missing");
+      expect(r).toHaveTextContent("Not in your library");
+      // Still a row: focusable and selectable, with the placeholder cover.
+      expect(r).toHaveAttribute("tabindex", "0");
+      expect(r.querySelector(".art__fallback")).not.toBeNull();
+      expect(r.querySelector("img")).toBeNull();
+    }
+    expect(rows[0]).toHaveClass("import-row--playable");
+    // Songs in the library show their album's cover.
+    expect(rows[0].querySelector(".import-row__art img, .import-row__art .art__skeleton")).not.toBeNull();
+    expect(screen.getByText(/10 of 12 songs in your library, \d+ min/)).toBeInTheDocument();
+  });
+
+  it("selects a dimmed row and explains why it's dimmed", async () => {
+    await open("Road Trip");
+    const row = within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem").find((r) => r.dataset.status === "missing")!;
+    fireEvent.click(row);
+    expect(row).toHaveClass("is-selected");
+    fireEvent.mouseEnter(row);
+    expect(await screen.findByRole("tooltip", {}, { timeout: 2000 })).toHaveTextContent("couldn't find this song in your library");
+  });
+
+  it("says why a dimmed row doesn't play, and links to it on the Missing list", async () => {
+    const play = vi.spyOn(player, "playTracks");
+    await open("Road Trip");
+    const row = within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem").find((r) => r.dataset.status === "missing")!;
+    fireEvent.doubleClick(row);
+    await waitFor(() => expect(toasts()).toContain("This song isn't in your library"));
+    expect(play).not.toHaveBeenCalled();
+    useToasts.setState({ toasts: [] });
+    fireEvent.keyDown(row, { key: "Enter" });
+    await waitFor(() => expect(toasts()).toContain("This song isn't in your library"));
+    const t = useToasts.getState().toasts[0];
+    expect(t.action?.label).toBe("See in Missing");
+    act(() => t.action!.run());
+    expect(route()).toEqual({ name: "import", view: "missing" });
+    expect(missingFocusKey()).toBe(missingKey("Harbor Lights", "Paper Boats"));
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it("plays a song in the library from where it's double-clicked", async () => {
+    const play = vi.spyOn(player, "playTracks");
+    await open("Road Trip");
+    const rows = within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem");
+    fireEvent.doubleClick(rows[4]);
+    expect(play).toHaveBeenCalledTimes(1);
+    const [ids, start] = play.mock.calls[0];
+    expect(ids).toHaveLength(10);
+    expect(start).toBe(ids[3]);
+  });
+
+  it("asks to check an unsure match instead of playing it", async () => {
+    await open("Rainy Day");
+    const row = within(screen.getByRole("list", { name: "Rainy Day" })).getAllByRole("listitem").find((r) => r.dataset.status === "unsure")!;
+    fireEvent.doubleClick(row);
+    await waitFor(() => expect(toasts()).toContain("Platter isn't sure this song is in your library"));
+  });
+
+  it("Play, Shuffle and Add to queue skip dimmed rows", async () => {
+    const play = vi.spyOn(player, "playTracks");
+    const queue = vi.spyOn(player, "addToQueue");
+    await open("Road Trip");
+    fireEvent.click(screen.getByRole("button", { name: "Play Road Trip" }));
+    expect(play.mock.calls[0][0]).toHaveLength(10);
+    fireEvent.click(screen.getByRole("button", { name: "Shuffle Road Trip" }));
+    const shuffled = play.mock.calls[1][0];
+    expect([...shuffled].sort()).toEqual([...play.mock.calls[0][0]].sort());
+    fireEvent.click(screen.getByRole("button", { name: "More options for Road Trip" }));
+    const item = useUi.getState().menu!.items.find((i) => i.label === "Add to queue")!;
+    item.onSelect!();
+    expect(queue.mock.calls[0][0]).toHaveLength(10);
+  });
+
+  it("hides the big play button when nothing in the list can play, and says so", async () => {
+    await enable("lists");
+    mock.importMock.run("lists", "Evening.csv");
+    const list = (await mock.importOverview()).lists[0];
+    for (const r of (await mock.importListPage(list.id)).rows.filter((x) => x.track)) await mock.importListRemove(list.id, r.songId);
+    render(<ImportPage view={`list:${list.id}`} />);
+    await screen.findByRole("heading", { name: "Evening" });
+    expect(screen.getByText(/0 of 1 song in your library/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Play Evening" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Shuffle Evening" }));
+    expect(toasts()).toContain("None of these songs are in your library yet.");
+  });
+
+  it("gives a dimmed row a short menu and a library song its usual one", async () => {
+    await open("Road Trip");
+    const rows = within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem");
+    const dim = rows.find((r) => r.dataset.status === "missing")!;
+    fireEvent.contextMenu(dim);
+    const labels = useUi.getState().menu!.items.map((i) => i.label);
+    expect(labels).toEqual(["Find in Missing", "Search Bandcamp", "Search Qobuz", "Search iTunes", "Remove from this list"]);
+    useUi.getState().closeMenu();
+    fireEvent.contextMenu(rows[0]);
+    const full = useUi.getState().menu!.items.map((i) => i.label);
+    expect(full).toContain("Add to playlist");
+    expect(full).toContain("Add to queue");
+    expect(full.indexOf("Remove from this list")).toBeGreaterThan(full.indexOf("Add to playlist"));
+  });
+
+  it("opens a store search from a dimmed row's menu", async () => {
+    await open("Road Trip");
+    const dim = within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem").find((r) => r.dataset.status === "missing")!;
+    fireEvent.contextMenu(dim);
+    useUi.getState().menu!.items.find((i) => i.label === "Search Bandcamp")!.onSelect!();
+    await waitFor(() => expect(mock.importLinksOpened).toEqual([storeLinks("Harbor Lights", "Paper Boats").bandcamp]));
+  });
+
+  it("removes a song from this list only", async () => {
+    const list = await open("Road Trip");
+    const dim = within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem").find((r) => r.dataset.status === "missing")!;
+    fireEvent.contextMenu(dim);
+    useUi.getState().menu!.items.find((i) => i.label === "Remove from this list")!.onSelect!();
+    await waitFor(() => expect(within(screen.getByRole("list", { name: "Road Trip" })).getAllByRole("listitem")).toHaveLength(11));
+    expect(screen.getByText(/10 of 11 songs in your library/)).toBeInTheDocument();
+    expect(toasts()).toContain("Removed from Road Trip");
+    expect((await mock.importListPage(list.id)).rows).toHaveLength(11);
+    // Other lists that want the song keep it.
+    expect((await mock.importMissing()).some((s) => s.title === "Paper Boats")).toBe(true);
+  });
 });
 
+describe("A list that's gone", () => {
+  it("opens a centred page with the reason, Remove from your library and Home", async () => {
+    await enable("streaming");
+    mock.importMock.run("streaming", "my_data.zip");
+    const list = (await mock.importOverview()).lists.find((l) => l.name === "Road Trip")!;
+    nav.go({ name: "import" });
+    nav.go({ name: "import", view: `list:${list.id}` });
+    await mock.importForget("streaming");
+    render(<ImportPage view={`list:${list.id}`} />);
+    expect(await screen.findByRole("heading", { name: "This playlist isn't available" })).toBeInTheDocument();
+    expect(screen.getByText(/import was removed/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove from your library" }));
+    expect(route()).toEqual({ name: "import" });
+    // Back no longer lands on it.
+    expect(useRouter.getState().entries.some((e) => e.route.name === "import" && e.route.view === `list:${list.id}`)).toBe(false);
+  });
+
+  it("Home goes home", async () => {
+    await enable("streaming");
+    render(<ImportPage view="list:pl:999" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Home" }));
+    expect(route()).toEqual({ name: "home" });
+  });
+});
+
+describe("header and links", () => {
+  const row = (track: boolean, ms = 60_000) => ({
+    songId: 1,
+    artist: "A",
+    title: "T",
+    album: null,
+    durationMs: ms,
+    status: track ? ("matched" as const) : ("missing" as const),
+    track: track ? ({ durationMs: ms } as never) : null,
+  });
+
+  it("counts and times only songs that can play", () => {
+    expect(listHeaderLine([row(true), row(true, 120_000), row(false, 600_000)])).toBe("2 of 3 songs in your library, 3 min");
+    expect(listHeaderLine([row(true), row(true)])).toBe("2 songs, 2 min");
+    expect(listHeaderLine([row(false)])).toBe("0 of 1 song in your library");
+  });
+
+  it("builds the same store links as the core", () => {
+    expect(storeLinks("Harbor Lights", "Paper Boats").bandcamp).toBe("https://bandcamp.com/search?q=Harbor%20Lights%20Paper%20Boats&item_type=t");
+    expect(storeLinks("AC/DC", "T.N.T.").qobuz).toBe("https://www.qobuz.com/search?q=AC%2FDC%20T%2EN%2ET%2E");
+  });
+
+  it("history forgets a page that's gone", () => {
+    const r = useRouter.getState();
+    r.reset({ name: "home" });
+    r.navigate({ name: "import", view: "list:pl:1" });
+    r.navigate({ name: "import" });
+    r.navigate({ name: "import", view: "list:pl:1" });
+    useRouter.getState().drop({ name: "import", view: "list:pl:1" });
+    const s = useRouter.getState();
+    expect(s.entries.map((e) => e.route)).toEqual([{ name: "home" }, { name: "import" }]);
+    expect(s.index).toBe(1);
+  });
+});
 describe("Missing songs", () => {
   it("ranks by how many lists want each song and opens store searches", async () => {
     await enable("streaming", "transfer");
@@ -235,6 +411,20 @@ describe("Missing songs", () => {
     expect(within(rows[0]).getByRole("button", { name: /iTunes/ })).toBeInTheDocument();
     // Nothing here asks Lidarr for anything.
     expect(screen.queryByRole("button", { name: /request/i })).toBeNull();
+  });
+
+  it("brings the song from See in Missing into view", async () => {
+    await enable("streaming", "transfer");
+    mock.importMock.run("streaming", "my_data.zip");
+    mock.importMock.run("transfer", "library.csv");
+    showInMissing("Cass Morrow", "Thin Ice Waltz");
+    render(<ImportPage view="missing" />);
+    const list = await screen.findByRole("list", { name: "Missing songs" });
+    const focused = within(list).getAllByRole("listitem").filter((r) => r.classList.contains("is-focused"));
+    expect(focused).toHaveLength(1);
+    expect(focused[0]).toHaveAttribute("aria-label", "Thin Ice Waltz by Cass Morrow");
+    await waitFor(() => expect(document.activeElement).toBe(focused[0]));
+    expect(missingFocusKey()).toBeNull();
   });
 
   it("refuses links that aren't store searches", async () => {

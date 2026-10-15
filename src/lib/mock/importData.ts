@@ -257,6 +257,14 @@ export class MockImport {
     };
   }
 
+  /** Takes a song out of one list; a song nothing wants is forgotten. */
+  removeFromList(listId: string, songId: number) {
+    const l = this.lists.find((x) => x.id === listId);
+    if (!l || !l.songIds.includes(songId)) throw { kind: "notFound", message: `song ${songId} in imported list ${listId}` };
+    l.songIds = l.songIds.filter((id) => id !== songId);
+    if (!this.lists.some((x) => x.songIds.includes(songId))) this.songs = this.songs.filter((s) => s.songId !== songId);
+  }
+
   missingSongs(): MissingSong[] {
     const groups = new Map<string, { s: Song; wants: Set<string>; names: Set<string>; sources: Set<ImportSourceId> }>();
     for (const l of this.lists) {

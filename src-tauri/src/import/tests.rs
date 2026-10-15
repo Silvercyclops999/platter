@@ -468,6 +468,37 @@ fn imported_playlist_pages_show_missing_rows() {
 }
 
 #[test]
+fn a_song_comes_out_of_one_list_and_is_forgotten_when_nothing_wants_it() {
+    let (_d, mut c) = db();
+    library(&c);
+    let p = StreamingExport.parse(&export_files()).unwrap();
+    import(&mut c, "streaming", p, 10);
+    let road = store::lists(&c).unwrap().into_iter().find(|l| l.name == "Road Trip").unwrap();
+    let gone = store::list_page(&c, &road.id).unwrap().rows[1].song_id;
+    let others: Vec<String> = store::lists(&c)
+        .unwrap()
+        .into_iter()
+        .filter(|l| l.id != road.id && store::list_page(&c, &l.id).unwrap().rows.iter().any(|r| r.song_id == gone))
+        .map(|l| l.id)
+        .collect();
+    store::remove_from_list(&mut c, &road.id, gone).unwrap();
+    let page = store::list_page(&c, &road.id).unwrap();
+    assert!(page.rows.iter().all(|r| r.song_id != gone));
+    assert_eq!(page.list.total, 1);
+    // Already out: not found, and nothing else changes.
+    assert!(matches!(store::remove_from_list(&mut c, &road.id, gone), Err(crate::error::AppError::NotFound(_))));
+    assert!(matches!(store::remove_from_list(&mut c, "pl:x", gone), Err(crate::error::AppError::NotFound(_))));
+    let n = |c: &Connection| c.query_row("SELECT count(*) FROM import_songs WHERE id = ?1", [gone], |r| r.get::<_, i64>(0)).unwrap();
+    for id in &others {
+        assert_eq!(n(&c), 1, "another list still wants it");
+        store::remove_from_list(&mut c, id, gone).unwrap();
+    }
+    assert_eq!(n(&c), 0, "a song nothing wants is forgotten");
+    // Other lists keep their songs.
+    assert!(!store::list_page(&c, "liked:streaming").unwrap().rows.is_empty());
+}
+
+#[test]
 fn private_fields_are_never_stored() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.db");

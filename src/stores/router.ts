@@ -54,6 +54,8 @@ interface RouterState {
   back: () => void;
   forward: () => void;
   reset: (route?: Route) => void;
+  /** Forget every history entry for a page that's gone (Back and Forward skip it). */
+  drop: (route: Route) => void;
 }
 
 let seq = 1;
@@ -97,6 +99,15 @@ export const useRouter = create<RouterState>()((set, get) => ({
       route = { name: "home" };
     }
     set({ entries: [entry(route)], index: 0 });
+  },
+  drop: (route) => {
+    const { entries, index } = get();
+    const kept = entries.filter((e) => !sameRoute(e.route, route));
+    if (kept.length === entries.length) return;
+    // The entry that was showing, or the nearest one before it that stays.
+    const before = entries.slice(0, index + 1).filter((e) => !sameRoute(e.route, route)).length;
+    const next = kept.length ? kept : [entry({ name: "home" })];
+    set({ entries: next, index: Math.max(0, Math.min(before - 1, next.length - 1)) });
   },
 }));
 

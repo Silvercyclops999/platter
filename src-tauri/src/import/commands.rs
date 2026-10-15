@@ -126,3 +126,9 @@ pub async fn import_open_link(app: AppHandle, url: String) -> AppResult<()> {
 pub async fn import_forget(db: State<'_, DbHandle>, source: String) -> AppResult<()> {
     db.write_async(move |c| store::forget(c, &source)).await
 }
+
+/// Takes a song out of one imported list.
+#[tauri::command]
+pub async fn import_list_remove(db: State<'_, DbHandle>, list_id: String, song_id: i64) -> AppResult<()> {
+    db.write_async(move |c| store::remove_from_list(c, &list_id, song_id)).await
+}

@@ -1,31 +1,25 @@
 /**
  * Library import: each source's report, the review queue for unsure
- * matches, imported playlists (read-only, songs not in the library dimmed)
- * and the Missing list. Nothing here writes to Plex except "Save as Plex
- * playlist" and "Like matched songs in Plex", each after a confirm.
+ * matches, imported playlists (songs not in the library dimmed) and the
+ * Missing list. Nothing here writes to Plex except "Save as Plex playlist"
+ * and "Like matched songs", each after a confirm.
  */
 import { Heart, ListMusic } from "lucide-react";
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
-import { Dialog } from "../components/Dialog";
 import { Skeleton, SkeletonLines } from "../components/Skeleton";
 import { backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
-import { STORE_LINKS, importSourceName } from "../lib/importStrings";
-import type { ImportDecision, ImportReport, ImportReviewItem, ImportedList, ImportedListPage, ImportedRow, MissingSong } from "../lib/importTypes";
+import { importSourceName } from "../lib/importStrings";
+import type { ImportDecision, ImportReport, ImportReviewItem, ImportedList } from "../lib/importTypes";
 import type { Track } from "../lib/types";
-import { setLiked } from "../stores/likes";
-import { player } from "../stores/player";
-import { createPlaylist } from "../stores/playlists";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import { countParts, errText, importChanged, skippedLine, songsLine, useImportOverview } from "./importShared";
-import { VirtualRows } from "../components/VirtualRows";
+import { ListView } from "./ImportListView";
+import { MissingView } from "./ImportMissing";
 import "./library-import.css";
-
-/** About how tall an import row is (56 px minimum plus the reason line). */
-const IMPORT_ROW_H = 60;
 
 const n = (v: number) => v.toLocaleString();
 
@@ -35,30 +29,6 @@ function when(ms: number): string {
 
 function artistOf(t: Track): string {
   return t.trackArtist ?? t.artistTitle;
-}
-
-/** A small confirm with counts (the two Plex writes). */
-function Confirm({ title, body, confirm, onConfirm, onClose }: { title: string; body: string; confirm: string; onConfirm: () => void; onClose: () => void }) {
-  return (
-    <Dialog open onClose={onClose} label={title} className="confirm">
-      <h2 className="confirm__title">{title}</h2>
-      <p className="confirm__body">{body}</p>
-      <div className="confirm__actions">
-        <Button variant="ghost" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          onClick={() => {
-            onClose();
-            onConfirm();
-          }}
-        >
-          {confirm}
-        </Button>
-      </div>
-    </Dialog>
-  );
 }
 
 // ------------------------------------------------------------------ reports
@@ -234,174 +204,6 @@ function Home() {
         </section>
       )}
     </>
-  );
-}
-
-function Row({ row, index, onPlay }: { row: ImportedRow; index: number; onPlay?: () => void }) {
-  const t = row.track;
-  const playable = !!t && !!onPlay;
-  const key = (e: KeyboardEvent) => {
-    if (playable && e.key === "Enter") {
-      e.preventDefault();
-      onPlay!();
-    }
-  };
-  const why = row.status === "unsure" ? "Not sure it's in your library" : "Not in your library";
-  return (
-    <li
-      className={`import-row ${t ? "import-row--playable" : "import-row--missing"}`}
-      tabIndex={playable ? 0 : undefined}
-      onDoubleClick={playable ? onPlay : undefined}
-      onKeyDown={key}
-      aria-label={t ? `${t.title} by ${artistOf(t)}` : `${row.title} by ${row.artist}, ${why.toLowerCase()}`}
-      data-status={t ? "matched" : row.status}
-    >
-      <span className="import-row__n">{index + 1}</span>
-      <span className="import-row__main">
-        <span className="import-row__title truncate">{t?.title ?? row.title}</span>
-        <span className="import-row__artist truncate">{t ? artistOf(t) : row.artist}</span>
-        {!t && <span className="import-row__why">{why}</span>}
-      </span>
-      <span className="import-row__album truncate">{t?.albumTitle ?? row.album ?? ""}</span>
-      <span className="import-row__dur">{t ? formatDuration(t.durationMs) : row.durationMs ? formatDuration(row.durationMs) : ""}</span>
-    </li>
-  );
-}
-
-function ListView({ id }: { id: string }) {
-  const [page, setPage] = useState<ImportedListPage | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [ask, setAsk] = useState(false);
-  useEffect(() => {
-    backend.importListPage(id).then(setPage, (e) => setErr(errText(e) || "Couldn't load this list"));
-  }, [id]);
-  if (err) return <p className="import-empty" role="alert">{err}</p>;
-  if (!page) {
-    return (
-      <div aria-busy="true">
-        <Skeleton width={280} height={40} />
-        <div style={{ height: 24 }} />
-        <SkeletonLines lines={6} widths={["90%", "85%", "88%", "80%", "86%", "70%"]} gap={20} />
-      </div>
-    );
-  }
-  const { list, rows } = page;
-  const tracks = rows.map((r) => r.track).filter((t): t is Track => !!t);
-  const ids = [...new Set(tracks.map((t) => t.id))];
-  const left = list.total - tracks.length;
-  const playFrom = (t: Track) => player.playTracks(ids, t.id);
-  const leftNote = left ? ` ${n(left)} ${left === 1 ? "song isn't" : "songs aren't"} in your library and stay out.` : "";
-  return (
-    <>
-      <h1 className="page-title">{list.name}</h1>
-      <p className="import-page__sub">
-        {importSourceName(list.source)} • {n(list.matched)} of {n(list.total)} songs in your library • Read only
-      </p>
-      <div className="import-actions">
-        <Button variant="primary" disabled={!ids.length} onClick={() => player.playTracks(ids)}>
-          Play
-        </Button>
-        <Button disabled={!ids.length} onClick={() => setAsk(true)}>
-          {list.liked ? "Like matched songs" : "Save as playlist"}
-        </Button>
-      </div>
-      <ul className="import-rows" aria-label={list.name}>
-        <li className="import-row import-row--header" aria-hidden="true">
-          <span className="import-row__n">#</span>
-          <span>Title</span>
-          <span>Album</span>
-          <span className="import-row__dur">Length</span>
-        </li>
-        <VirtualRows
-          count={rows.length}
-          rowHeight={IMPORT_ROW_H}
-          renderRow={(i) => {
-            const r = rows[i];
-            return <Row key={`${r.songId}-${i}`} row={r} index={i} onPlay={r.track ? () => playFrom(r.track!) : undefined} />;
-          }}
-        />
-      </ul>
-      {ask &&
-        (list.liked ? (
-          <Confirm
-            title="Like these songs?"
-            body={`${n(ids.length)} ${ids.length === 1 ? "song" : "songs"} in your library will be liked.${leftNote}`}
-            confirm={`Like ${n(ids.length)} ${ids.length === 1 ? "song" : "songs"}`}
-            onConfirm={() => void setLiked(tracks, true)}
-            onClose={() => setAsk(false)}
-          />
-        ) : (
-          <Confirm
-            title="Save as a Plex playlist?"
-            body={`A new Plex playlist named "${list.name}" gets the ${n(ids.length)} ${ids.length === 1 ? "song" : "songs"} in your library.${leftNote}`}
-            confirm="Save playlist"
-            onConfirm={() => void createPlaylist({ trackIds: ids, title: list.name, open: false })}
-            onClose={() => setAsk(false)}
-          />
-        ))}
-    </>
-  );
-}
-
-// ------------------------------------------------------------------ missing
-
-function MissingView() {
-  const [songs, setSongs] = useState<MissingSong[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
-    backend.importMissing().then(setSongs, (e) => setErr(errText(e) || "Couldn't load missing songs"));
-  }, []);
-  const open = (url: string) => backend.importOpenLink(url).catch((e) => toast.error(`Couldn't open the link${errText(e) ? `: ${errText(e)}` : ""}`));
-  return (
-    <>
-      <h1 className="page-title">Missing songs</h1>
-      <p className="import-page__sub">Songs from your imported playlists and likes that aren't in your library, the most wanted first.</p>
-      {err && (
-        <p className="import-empty" role="alert">
-          {err}
-        </p>
-      )}
-      {!songs && !err && <SkeletonLines lines={6} widths={["90%", "85%", "88%", "80%", "86%", "70%"]} gap={20} />}
-      {songs && songs.length === 0 && (
-        <p className="import-empty" role="status">
-          Every imported song is in your library.
-        </p>
-      )}
-      {songs && songs.length > 0 && (
-        <ul className="import-rows" aria-label="Missing songs">
-          <li className="import-row missing-row import-row--header" aria-hidden="true">
-            <span className="import-row__n">#</span>
-            <span>Title</span>
-            <span>Album</span>
-            <span>Find it</span>
-          </li>
-          <VirtualRows count={songs.length} rowHeight={IMPORT_ROW_H} renderRow={(i) => <MissingRow key={`${songs[i].artist}-${songs[i].title}`} s={songs[i]} i={i} open={open} />} />
-        </ul>
-      )}
-    </>
-  );
-}
-
-function MissingRow({ s, i, open }: { s: MissingSong; i: number; open: (url: string) => unknown }) {
-  return (
-    <li className="import-row missing-row" aria-label={`${s.title} by ${s.artist}`}>
-      <span className="import-row__n">{i + 1}</span>
-      <span className="import-row__main">
-        <span className="import-row__title truncate">{s.title}</span>
-        <span className="import-row__artist truncate">{s.artist}</span>
-        <span className="missing-row__wants" title={s.wantedBy.join(", ")}>
-          Wanted by {s.wants === 1 ? s.wantedBy[0] ?? "1 list" : `${n(s.wants)} lists`}
-        </span>
-      </span>
-      <span className="import-row__album truncate">{s.album ?? ""}</span>
-      <span className="missing-row__links">
-        {STORE_LINKS.map((st) => (
-          <Button key={st.key} size="sm" variant="ghost" onClick={() => void open(s.links[st.key])} aria-label={`Search ${st.name} for ${s.title}`}>
-            {st.name}
-          </Button>
-        ))}
-      </span>
-    </li>
   );
 }
 

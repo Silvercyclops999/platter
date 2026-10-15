@@ -44,6 +44,23 @@ export const STORE_LINKS = [
   { key: "itunes", name: "iTunes" },
 ] as const;
 
+/** Percent-encodes every byte but letters and digits, as the core does for store links. */
+function encodeAll(s: string): string {
+  return Array.from(new TextEncoder().encode(s), (b) =>
+    (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, "0")}`,
+  ).join("");
+}
+
+/** Store search pages for a song, the same links the Missing list gets from the core. */
+export function storeLinks(artist: string, title: string): Record<(typeof STORE_LINKS)[number]["key"], string> {
+  const q = encodeAll(`${artist} ${title}`);
+  return {
+    bandcamp: `https://bandcamp.com/search?q=${q}&item_type=t`,
+    qobuz: `https://www.qobuz.com/search?q=${q}`,
+    itunes: `https://music.apple.com/search?term=${q}`,
+  };
+}
+
 export function importSourceName(id: string): string {
   return IMPORT_SOURCES.find((s) => s.id === id)?.name ?? id;
 }
