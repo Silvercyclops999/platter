@@ -205,6 +205,8 @@ struct Inner {
     peer_http: reqwest::Client,
     /// More routes the control API answers (key copy).
     extra: peer::server::ExtraSlot,
+    /// Who may sign requests to the control API.
+    peer_keys: Arc<peer::devices::AccountKeys>,
     /// What the queue here last mirrored of a player's play queue.
     mirror: Mutex<Mirror>,
 }
@@ -271,8 +273,10 @@ impl RemoteService {
         cfg: RemoteConfig,
     ) -> AppResult<Self> {
         let http = companion::http_client(identity, cfg.timeout)?;
+        let peer_keys = Arc::new(peer::devices::AccountKeys::new(env.clone(), http.clone(), cfg.plex_tv.clone()));
         Ok(Self {
             inner: Arc::new(Inner {
+                peer_keys,
                 env,
                 local,
                 sink,
@@ -310,6 +314,12 @@ impl RemoteService {
     }
     pub fn switches(&self) -> &RemoteSwitches {
         &self.inner.switches
+    }
+
+    /// This computer's key and the keys of the account's other devices,
+    /// for checking control API requests.
+    pub fn peer_keys(&self) -> Arc<peer::devices::AccountKeys> {
+        self.inner.peer_keys.clone()
     }
 
     /// Where more control API routes plug in.
@@ -900,7 +910,7 @@ impl RemoteService {
                     self.start_companion(found).await
                 }
                 PeerError::Unreachable => Err(AppError::Network(couldnt_reach(&name))),
-                PeerError::Refused(why) => Err(AppError::Auth(format!("{}: {why}.", couldnt_reach(&name)))),
+                PeerError::Refused(why) => Err(AppError::Auth(format!("Couldn't play on {name}. {why}."))),
                 PeerError::Failed(why) => Err(AppError::Invalid(why)),
             };
         };

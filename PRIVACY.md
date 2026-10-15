@@ -13,8 +13,8 @@ and your own Plex server.
   has the file.
 - plex.tv, to sign in (a PIN flow in your browser), to look up your
   server's addresses, to list your other Plex players, to list and switch
-  Plex Home users, and to publish this computer's local addresses for your
-  other Platter computers (see below).
+  Plex Home users, to read your account's device list, and to publish this
+  computer's local addresses for your other Platter computers (see below).
 - GitHub, to check for and download app updates.
 - Wikipedia and Wikidata, for artist bios and facts (on by default, can be
   turned off in Settings). The request carries the artist's name or
@@ -62,8 +62,11 @@ and your own Plex server.
   The app also opens a port on its local network addresses (32520, or the
   next free one up to 32529) so your other Platter computers can start and
   control playback here. A request is only accepted when it's signed with a
-  key made from your Plex sign-in, and the request never contains the token
-  itself. The app tells plex.tv those local addresses, the way Plex players
+  key made from the sending computer's Plex sign-in, and the request never
+  contains the token itself. To check it, this computer reads your account's
+  device list from plex.tv (the same list Plex shows you under authorized
+  devices) and keeps only a one-way hash of each device's token, in memory.
+  The app tells plex.tv those local addresses, the way Plex players
   do, so your other computers can find this one through Plex. Turning the
   setting off stops the announcement and closes the port.
 - Discord, when Discord status is on (it is by default) and the Discord app

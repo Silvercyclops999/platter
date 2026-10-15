@@ -1,6 +1,7 @@
 //! The sending side: signed requests to another Platter device, and the
 //! link the Listen on service follows while playback is there.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -21,14 +22,57 @@ use crate::remote::types::{RemoteCommand, repeat_code};
 pub enum PeerError {
     /// No answer (off, another network, or a firewall).
     Unreachable,
-    /// It answered but refused the signature (not the same account, or the
-    /// clocks are far apart).
+    /// It answered but refused the request; the text says why (see
+    /// [`refusal`]).
     Refused(String),
     /// It answered with another error.
     Failed(String),
 }
 
-pub const NOT_SAME_ACCOUNT: &str = "Couldn't confirm it's signed in to your Plex account";
+pub const NOT_SAME_ACCOUNT: &str = "It's signed in to a different Plex account or Home user";
+pub const NEEDS_UPDATE: &str = "It needs the latest version of Platter";
+pub const CANT_CHECK: &str = "It couldn't check this computer with plex.tv. Try again in a moment";
+pub const SIGNED_OUT: &str = "It isn't signed in to Plex";
+pub const NOT_ACCEPTED: &str = "It didn't accept the request";
+
+/// "Its clock is 7 minutes behind this computer's".
+pub fn clock_message(theirs_minus_ours_ms: i64) -> String {
+    let mins = (theirs_minus_ours_ms.unsigned_abs() + 30_000) / 60_000;
+    let way = if theirs_minus_ours_ms < 0 { "behind" } else { "ahead of" };
+    let amount = match mins {
+        0 | 1 => "about a minute".to_string(),
+        m if m < 120 => format!("{m} minutes"),
+        m if m < 48 * 60 => format!("{} hours", (m + 30) / 60),
+        m => format!("{} days", (m + 12 * 60) / (24 * 60)),
+    };
+    format!("Its clock is {amount} {way} this computer's. Set both to the right time")
+}
+
+/// What a 401 answer means, from its body. `now_ms` is this computer's
+/// clock when the answer came.
+pub fn refusal(body: &str, now_ms: u64) -> String {
+    let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+    let checks_devices = v["auth"].as_u64().is_some_and(|a| a >= 2);
+    match v["error"].as_str().unwrap_or_default() {
+        "clock" => match v["now"].as_u64() {
+            Some(theirs) => clock_message(theirs as i64 - now_ms as i64),
+            None => "The two computers' clocks are too far apart. Set both to the right time".into(),
+        },
+        // Before devices checked senders against the account's device list,
+        // they refused every other device this way.
+        "notYourAccount" if !checks_devices => NEEDS_UPDATE.into(),
+        "notYourAccount" => NOT_SAME_ACCOUNT.into(),
+        "cantCheck" => CANT_CHECK.into(),
+        "signedOut" => SIGNED_OUT.into(),
+        _ => NOT_ACCEPTED.into(),
+    }
+}
+
+/// The receiver's clock, when it refused a request for the time.
+fn their_clock(body: &str) -> Option<u64> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    (v["error"] == "clock").then(|| v["now"].as_u64()).flatten()
+}
 
 impl From<PeerError> for AppError {
     fn from(e: PeerError) -> Self {
@@ -46,11 +90,18 @@ pub struct PeerClient {
     http: reqwest::Client,
     own_id: String,
     key: PeerKey,
+    clock: Arc<dyn Fn() -> u64 + Send + Sync>,
 }
 
 impl PeerClient {
     pub fn new(http: reqwest::Client, own_id: String, key: PeerKey) -> Self {
-        Self { http, own_id, key }
+        Self { http, own_id, key, clock: Arc::new(now_ms) }
+    }
+
+    /// Another clock than the system's (tests).
+    pub fn with_clock(mut self, clock: Arc<dyn Fn() -> u64 + Send + Sync>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// This computer's device id.
@@ -68,23 +119,40 @@ impl PeerClient {
     ) -> Result<T, PeerError> {
         let method = if body.is_some() { "POST" } else { "GET" };
         let body = body.unwrap_or_default();
-        let auth = sign(&self.key, method, path, &self.own_id, to, now_ms(), &nonce(), &body);
         let url = base.join(path).map_err(|_| PeerError::Unreachable)?;
-        let req = if method == "POST" {
-            self.http.post(url).header("content-type", "application/json").body(body)
-        } else {
-            self.http.get(url)
+        // Signed with this computer's time; if the other one says its clock
+        // is far off, once more with its time.
+        let mut ts = (self.clock)();
+        let mut corrected = false;
+        let (status, text) = loop {
+            let auth = sign(&self.key, method, path, &self.own_id, to, ts, &nonce(), &body);
+            let req = if method == "POST" {
+                self.http.post(url.clone()).header("content-type", "application/json").body(body.clone())
+            } else {
+                self.http.get(url.clone())
+            };
+            let sent = (self.clock)();
+            let resp = req
+                .header(AUTH_HEADER, auth)
+                .timeout(timeout)
+                .send()
+                .await
+                .map_err(|_| PeerError::Unreachable)?;
+            let status = resp.status().as_u16();
+            let text = resp.text().await.map_err(|_| PeerError::Unreachable)?;
+            if status == 401
+                && !corrected
+                && let Some(theirs) = their_clock(&text)
+            {
+                tracing::info!(off_ms = theirs as i64 - sent as i64, "the other Platter's clock is off; signing with its time");
+                ts = theirs.saturating_add((self.clock)().saturating_sub(sent) / 2);
+                corrected = true;
+                continue;
+            }
+            break (status, text);
         };
-        let resp = req
-            .header(AUTH_HEADER, auth)
-            .timeout(timeout)
-            .send()
-            .await
-            .map_err(|_| PeerError::Unreachable)?;
-        let status = resp.status().as_u16();
-        let text = resp.text().await.map_err(|_| PeerError::Unreachable)?;
         if status == 401 {
-            return Err(PeerError::Refused(NOT_SAME_ACCOUNT.into()));
+            return Err(PeerError::Refused(refusal(&text, (self.clock)())));
         }
         if !(200..300).contains(&status) {
             let msg = serde_json::from_str::<serde_json::Value>(&text)
@@ -185,5 +253,35 @@ impl LanLink for PeerLink {
         if stop && let Err(e) = self.client.stop(&self.base, &self.id, self.timeout).await {
             tracing::info!(?e, "the other Platter didn't take stop");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refusals_say_what_went_wrong() {
+        let now = 50_000_000;
+        let body = |code: &str| format!(r#"{{"error":"{code}","message":"x","auth":2,"now":{now}}}"#);
+        assert_eq!(refusal(&body("notYourAccount"), now), NOT_SAME_ACCOUNT);
+        assert_eq!(refusal(&body("cantCheck"), now), CANT_CHECK);
+        assert_eq!(refusal(&body("signedOut"), now), SIGNED_OUT);
+        assert_eq!(refusal(&body("replayed"), now), NOT_ACCEPTED);
+        assert_eq!(refusal("not json", now), NOT_ACCEPTED);
+        // An older Platter refused every other device this way.
+        let old = r#"{"error":"notYourAccount","message":"That device isn't signed in to the same Plex account."}"#;
+        assert_eq!(refusal(old, now), NEEDS_UPDATE);
+        let old_clock = r#"{"error":"clock","message":"x"}"#;
+        assert!(refusal(old_clock, now).starts_with("The two computers' clocks are too far apart"));
+    }
+
+    #[test]
+    fn clock_differences_read_naturally() {
+        assert_eq!(clock_message(-7 * 60_000), "Its clock is 7 minutes behind this computer's. Set both to the right time");
+        assert_eq!(clock_message(150_000), "Its clock is 3 minutes ahead of this computer's. Set both to the right time");
+        assert!(clock_message(60_000).contains("about a minute ahead"));
+        assert!(clock_message(-5 * 3_600_000).contains("5 hours behind"));
+        assert!(clock_message(3 * 86_400_000).contains("3 days ahead"));
     }
 }

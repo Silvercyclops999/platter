@@ -434,19 +434,44 @@ Read-only checks with the probe script (booleans and counts only):
 - Running Platter installs are not in `/api/v2/resources` at all (they
   publish no connections), but `/devices.xml` lists them with
   `provides="player"`, `product="Platter"` and `lastSeenAt`.
-- The account token matches `authToken` from `/api/v2/user`, and the
-  `accessToken` plex.tv gives for the owned server and for an owned TV
-  player is that same token. So the token looks account-wide, which is what
-  the Platter-to-Platter key relies on.
+- `authToken` from `/api/v2/user` and the owned server's `accessToken` in
+  resources are just the token the request was made with. That made the
+  token look account-wide, which turned out to be wrong (next section).
 
 Not tried yet (needs Platter running on two computers):
 - `PUT /devices/<client id>?Connection[][uri]=http://<lan address>:32520`
   (what Platter now sends every 5 minutes while showing itself): the
   computer then shows in `/api/v2/resources` with those connections and a
   fresh `lastSeenAt`.
-- Whether a second computer signed in with the PIN flow gets the same token.
-  If not, the picker lists it greyed with "Couldn't confirm it's signed in
-  to your Plex account".
+
+### 2026-10-14: every device has its own token
+
+Two Platter computers on one account couldn't control each other: each
+signed its requests with a key from its own token and checked others with
+the same key. Read-only checks with the probe script (token values never
+printed, only compared):
+- `GET /api/v2/devices` (JSON, account token) lists every device signed in
+  to the account: `id`, `name`, `product`, `platform`, `provides`,
+  `clientIdentifier`, `createdAt`, `lastSeenAt`, `presence`, `connections`
+  and `token`. Every entry has a 20 character token and no two are the
+  same. The token the probe uses matches exactly one entry, so the listed
+  token is the one that device really uses. Without a token the endpoint
+  answers 401.
+- A device can be listed twice under one `clientIdentifier` with different
+  tokens (seen once, a TV app), so every listed token counts.
+- `/api/v2/resources` lists clients (Plexamp, Platter) with `accessToken`
+  empty; only the owned server has one, and it's the caller's own token.
+- `/api/v2/home/users` lists the Home's users, each with its own id, so a
+  Home user's account tag differs from the admin's. Which list a device
+  shows up in after switching Home users wasn't tried (it would mean
+  switching on a real device).
+
+What Platter does with it: a receiver fetches this list with its own token
+(cached 5 minutes, fetched again for a sender it doesn't know or whose key
+doesn't match, at most every 10 seconds), keeps only a hash of each token,
+and checks the sender's signature against the keys listed for its client
+id. No token is sent between devices. A device signed in as another account
+or another Home user isn't in the list under that token and is refused.
 
 ### 2026-10-14: loudness fields
 - Track detail `Media[0].Part[0].Stream[]` with `streamType: 2` carries

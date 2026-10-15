@@ -1,9 +1,9 @@
 //! The control API's part in copying keys between devices (the exchange
 //! itself is in `crate::sync::keycopy`). Plugged into the control port's
-//! extra routes ([`KeyCopyRoutes`]). Requests are signed with the account
-//! key like every other control request, so only devices of the same Plex
-//! account get this far; the code then proves it's the device the user is
-//! looking at.
+//! extra routes ([`KeyCopyRoutes`]). Requests are signed and checked like
+//! every other control request, so only devices of the same Plex account
+//! get this far; the code then proves it's the device the user is looking
+//! at.
 //!
 //! - `GET  /platter/v1/keys/waiting` → [`KeysWaiting`]: is a code showing here?
 //! - `POST /platter/v1/keys/hello`   ← [`KeysHello`] → [`KeysHelloReply`]
@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::auth::{Verifier, now_ms};
-use super::server::{ExtraRoutes, KeySource, app_err, json_err, refused};
+use super::server::{ExtraRoutes, KeySource, app_err, check, json_err, refused};
 use crate::error::AppResult;
 
 pub const PATH_KEYS_WAITING: &str = "/platter/v1/keys/waiting";
@@ -95,8 +95,7 @@ impl ExtraRoutes for KeyCopyRoutes {
         if method != want {
             return (404, json_err("notFound", "Not found"));
         }
-        let key = self.keys.key().await;
-        let from = match self.verifier.verify(key.as_ref(), auth, method, target, &self.own_id, body, now_ms()) {
+        let from = match check(&self.verifier, self.keys.as_ref(), auth, method, target, &self.own_id, body, now_ms()).await {
             Ok(from) => from,
             Err(r) => {
                 tracing::info!(reason = ?r, "refused a key copy request");

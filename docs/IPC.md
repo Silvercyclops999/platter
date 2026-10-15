@@ -1494,10 +1494,22 @@ nextUp, context, positionMs, shuffle, repeat, play), `POST
 (pauses). Every request carries
 `X-Platter-Auth: v1 from=<sender id>;ts=<unix ms>;nonce=<hex>;sig=<hex>`,
 where `sig` is HMAC-SHA256 with the key SHA-256("platter-peer-key-v1\n" +
-the Plex account token) over the method, path, sender id, receiver id,
-time, nonce and the SHA-256 of the body. The receiver refuses (401) a
-missing or wrong signature, a time more than 30 s from its clock, and a
-nonce it has seen. The token itself is never sent.
+the sender's own Plex token) over the method, path, sender id, receiver id,
+time, nonce and the SHA-256 of the body. Every device has its own token, so
+the receiver looks the sender id up in the account's device list from
+plex.tv (`/api/v2/devices`, fetched with its own token, cached 5 minutes and
+fetched again for a sender it can't vouch for, at most every 10 s) and
+checks the signature with the key of the token listed there. No token is
+sent between devices.
+
+The receiver refuses (401) with JSON `{error, message, auth: 2, now}`:
+`unsigned`, `notYourAccount` (not on the device list, or signed with another
+token: a different account or Home user), `cantCheck` (no device list from
+plex.tv yet), `clock` (more than 2 minutes from its clock; `now` is its
+time), `replayed` (a nonce it has seen) and `signedOut`. A sender refused
+for the clock signs once more with the receiver's time. Versions before
+`auth: 2` refused every other device with `notYourAccount`; the sender says
+that one needs updating.
 
 `remote_move` to a Platter computer sends its queue as it is (the current
 song, the user queue and next up in play order, the context, shuffle,
@@ -1509,8 +1521,9 @@ there it works like a Plex player: the sender pauses, shows "Playing on
 `remote_return` reads the position and sends `/stop`. When the computer
 doesn't answer directly but is registered with the server as a Plex player
 (its `actAsPlexPlayer` is on), the move goes through the Plex companion path
-instead. A refused signature is an `auth` error ("Couldn't reach <name>:
-Couldn't confirm it's signed in to your Plex account.").
+instead. A refused request is an `auth` error that says why, for example
+"Couldn't play on <name>. It's signed in to a different Plex account or Home
+user.", and the picker row shows the same reason.
 
 Events:
 - `remote://state` → `RemoteState` (on every change and every poll while remote)

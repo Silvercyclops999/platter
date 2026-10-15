@@ -1221,7 +1221,7 @@ mod peers {
     use tokio::sync::watch;
 
     use crate::remote::peer::auth::{PeerKey, account_tag, nonce, now_ms, sign};
-    use crate::remote::peer::client::{NOT_SAME_ACCOUNT, PeerClient, PeerError};
+    use crate::remote::peer::client::{CANT_CHECK, NOT_SAME_ACCOUNT, PeerClient, PeerError, refusal};
     use crate::remote::peer::directory::{MemoryDirectory, MemoryLan};
     use crate::remote::peer::runtime::{self, RuntimeConfig};
     use crate::remote::peer::{self, PATH_HELLO, SERVICE};
@@ -1453,6 +1453,7 @@ mod peers {
     #[tokio::test]
     async fn requests_must_be_signed_by_the_same_account() {
         let (r, lan) = net().await;
+        device_list(&r.server, "account-token", &[("pc", "pc-token"), ("mac", "account-token")]).await;
         let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
         let http = reqwest::Client::new();
         let url = format!("{}platter/v1/play", b.base());
@@ -1491,16 +1492,96 @@ mod peers {
         assert_eq!(b.local.log().len(), 1, "only the good request did anything");
     }
 
+    /// plex.tv's device list as the holder of `token` sees it: `(device id,
+    /// that device's token)`.
+    async fn device_list(server: &MockServer, token: &str, devices: &[(&str, &str)]) {
+        let body: Vec<serde_json::Value> = devices
+            .iter()
+            .map(|(id, t)| json!({"clientIdentifier": id, "product": "Platter", "provides": "player", "token": t}))
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/api/v2/devices"))
+            .and(header("x-plex-token", token))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
     #[tokio::test]
-    async fn same_account_tag_but_a_different_key_is_listed_but_not_playable() {
+    async fn two_devices_with_their_own_tokens_trust_each_other() {
         let (r, lan) = net().await;
+        // Every device gets its own token when it signs in.
+        let both = [("pc", "account-token"), ("mac", "mac-token")];
+        device_list(&r.server, "account-token", &both).await;
+        device_list(&r.server, "mac-token", &both).await;
         let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
-        let _b = start(&r.server, &lan, idle(), Opts { token: "other-device-token", ..Opts::new("mac", "Studio Mac") }).await;
+        let b = start(&r.server, &lan, idle(), Opts { token: "mac-token", ..Opts::new("mac", "Studio Mac") }).await;
+        let list = a.remote.players().await;
+        assert_eq!(list[0].id, "mac");
+        assert_eq!(list[0].unsupported, None);
+        a.remote.move_to("mac").await.unwrap();
+        wait_for("playing there", || b.local.log().iter().any(|l| l.starts_with("adopt") || l.starts_with("play"))).await;
+        // And the other way: the Mac's requests to the PC check out too.
+        let mac = b.remote.peer_client().await.unwrap();
+        let hello = mac.hello(&a.base(), "pc", Duration::from_secs(2)).await.unwrap();
+        assert_eq!(hello.name, "Studio PC");
+        // Nothing but keys and signatures crossed: no request carried a token
+        // other than to plex.tv.
+        for req in r.server.received_requests().await.unwrap() {
+            if let Some(t) = req.headers.get("x-plex-token") {
+                assert!(["account-token", "mac-token", "server-token"].contains(&t.to_str().unwrap()));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn another_account_or_home_user_is_listed_as_refused() {
+        let (r, lan) = net().await;
+        // The PC's account lists the Mac with the token the account holder
+        // signed in with there, but the Mac now runs as another Home user
+        // (same account tag at worst) with its own token.
+        device_list(&r.server, "account-token", &[("pc", "account-token"), ("mac", "mac-admin-token")]).await;
+        device_list(&r.server, "home-user-token", &[("mac", "home-user-token")]).await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts { token: "home-user-token", ..Opts::new("mac", "Studio Mac") }).await;
         let list = a.remote.players().await;
         assert_eq!(list[0].unsupported.as_deref(), Some(NOT_SAME_ACCOUNT));
         let e = a.remote.move_to("mac").await.unwrap_err();
         assert!(matches!(e, AppError::Auth(_)), "{e}");
+        assert_eq!(e.to_string().split_once(": ").map(|x| x.1), Some(format!("Couldn't play on Studio Mac. {NOT_SAME_ACCOUNT}.").as_str()));
         assert!(a.local.log().is_empty(), "nothing paused here");
+        assert!(b.local.log().is_empty(), "nothing played there");
+        // The other way: the Home user's Mac doesn't list the PC at all.
+        let mac = b.remote.peer_client().await.unwrap();
+        assert_eq!(mac.hello(&a.base(), "pc", Duration::from_secs(2)).await, Err(PeerError::Refused(NOT_SAME_ACCOUNT.into())));
+        // A device of another account entirely.
+        let stranger = PeerClient::new(reqwest::Client::new(), "stranger".into(), PeerKey::from_token(&Token::new("their-token").unwrap()));
+        assert_eq!(stranger.hello(&b.base(), "mac", Duration::from_secs(2)).await, Err(PeerError::Refused(NOT_SAME_ACCOUNT.into())));
+    }
+
+    #[tokio::test]
+    async fn without_the_device_list_another_token_cant_be_checked() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let _b = start(&r.server, &lan, idle(), Opts { token: "mac-token", ..Opts::new("mac", "Studio Mac") }).await;
+        // plex.tv has no device list for the Mac here (it's down).
+        let list = a.remote.players().await;
+        assert_eq!(list[0].unsupported.as_deref(), Some(CANT_CHECK));
+    }
+
+    #[tokio::test]
+    async fn a_clock_far_off_is_corrected_once_or_named() {
+        let (r, lan) = net().await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        let key = PeerKey::from_token(&Token::new("account-token").unwrap());
+        // This computer's clock is 7 minutes slow: the Mac says so, and the
+        // request goes again with the Mac's time.
+        let slow = PeerClient::new(reqwest::Client::new(), "pc".into(), key.clone()).with_clock(Arc::new(|| now_ms() - 7 * 60_000));
+        let hello = slow.hello(&b.base(), "mac", Duration::from_secs(2)).await.unwrap();
+        assert_eq!(hello.id, "mac");
+        // A refusal for the time names it.
+        let refused = format!(r#"{{"error":"clock","message":"x","auth":2,"now":{}}}"#, 1_000_000 + 7 * 60_000);
+        assert_eq!(refusal(&refused, 1_000_000), "Its clock is 7 minutes ahead of this computer's. Set both to the right time");
     }
 
     #[tokio::test]

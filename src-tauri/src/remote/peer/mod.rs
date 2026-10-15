@@ -8,6 +8,7 @@
 //! playback to it and back.
 //!
 //! - [`auth`]: the request signatures (same Plex account only, no replays).
+//! - [`devices`]: the keys of the account's other devices, from plex.tv.
 //! - [`server`]: the receiving side (the local player as a target).
 //! - [`client`]: the sending side, and the link the Listen on service
 //!   follows.
@@ -18,6 +19,7 @@
 
 pub mod auth;
 pub mod client;
+pub mod devices;
 pub mod directory;
 pub mod keys;
 pub mod publish;

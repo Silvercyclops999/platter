@@ -708,7 +708,7 @@ pub fn run() {
                     use remote::peer::server::ExtraRoutes;
                     let copy: Arc<dyn ExtraRoutes> = Arc::new(KeyCopyRoutes::new(
                         plex.identity().client_id.clone(),
-                        Arc::new(remote::peer::server::EnvKey(remote.env())),
+                        remote.peer_keys(),
                         Arc::new(keys.clone()),
                     ));
                     let slot = remote.extra_routes();

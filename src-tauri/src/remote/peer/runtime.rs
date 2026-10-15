@@ -12,7 +12,7 @@ use tokio::time::Instant;
 use url::Url;
 
 use super::directory::{Announce, PeerDirectory};
-use super::server::{self, EnvKey, PeerServer, PlayerPeer};
+use super::server::{self, PeerServer, PlayerPeer};
 use crate::remote::service::RemoteService;
 
 /// This computer's LAN addresses (the real one reads the interfaces).
@@ -67,7 +67,8 @@ pub async fn run(remote: RemoteService, dir: Arc<dyn PeerDirectory>, addrs: Addr
         version: cfg.version.clone(),
         name: Arc::new(move || name_switches.computer_name()),
     });
-    let server = Arc::new(PeerServer::new(own_id.clone(), handler, Arc::new(EnvKey(remote.env()))).with_extra(remote.extra_routes()));
+    let keys = remote.peer_keys();
+    let server = Arc::new(PeerServer::new(own_id.clone(), handler, keys.clone()).with_extra(remote.extra_routes()));
     let mut running: Option<Running> = None;
     loop {
         let want = *on.borrow_and_update();
@@ -98,6 +99,10 @@ pub async fn run(remote: RemoteService, dir: Arc<dyn PeerDirectory>, addrs: Addr
                     }
                 }
                 if let Some(r) = running.as_mut() {
+                    // Keep the account's device list fresh, so the first
+                    // request from another device doesn't wait on plex.tv.
+                    let k = keys.clone();
+                    tokio::spawn(async move { k.warm().await });
                     let a = Announce {
                         id: own_id.clone(),
                         txt: super::txt(&own_id, &switches.computer_name(), &cfg.platform, &cfg.version, &tag),

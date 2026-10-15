@@ -40,12 +40,20 @@ pub trait PeerHandler: Send + Sync {
     async fn stop(&self) -> AppResult<()>;
 }
 
-/// Where the account key comes from (the signed-in account's token).
+/// The keys requests may be signed with.
 #[async_trait]
 pub trait KeySource: Send + Sync {
+    /// This computer's own key (from its token); None when signed out.
     async fn key(&self) -> Option<PeerKey>;
+    /// The keys of the device `from` on this account's device list (empty
+    /// when it isn't on it). `fresh` asks for the list to be fetched again
+    /// if it may have changed.
+    async fn device_keys(&self, _from: &str, _fresh: bool) -> Result<Vec<PeerKey>, Refused> {
+        Ok(Vec::new())
+    }
 }
 
+/// Only this computer's own key (no device list).
 pub struct EnvKey(pub Arc<dyn RemoteEnv>);
 
 #[async_trait]
@@ -53,6 +61,36 @@ impl KeySource for EnvKey {
     async fn key(&self) -> Option<PeerKey> {
         self.0.account_token().await.map(|t| PeerKey::from_token(&t))
     }
+}
+
+/// Check a request: signed by this computer's own key, or by the sender's
+/// key from the device list (fetched again once when it doesn't match).
+/// The sender's id when it's good.
+#[allow(clippy::too_many_arguments)]
+pub async fn check(
+    verifier: &Verifier,
+    keys: &dyn KeySource,
+    auth: Option<&str>,
+    method: &str,
+    target: &str,
+    own_id: &str,
+    body: &[u8],
+    now_ms: u64,
+) -> Result<String, Refused> {
+    let signed = verifier.open(auth, now_ms)?;
+    let own = keys.key().await.ok_or(Refused::NoKey)?;
+    if verifier.signed_by(&signed, &own, method, target, own_id, body) {
+        return verifier.accept(signed, now_ms);
+    }
+    let mut listed = false;
+    for fresh in [false, true] {
+        let theirs = keys.device_keys(signed.from(), fresh).await?;
+        listed |= !theirs.is_empty();
+        if theirs.iter().any(|k| verifier.signed_by(&signed, k, method, target, own_id, body)) {
+            return verifier.accept(signed, now_ms);
+        }
+    }
+    Err(if listed { Refused::BadSignature } else { Refused::UnknownDevice })
 }
 
 /// More routes on the same port, with their own checks (a listening
@@ -79,15 +117,23 @@ pub(crate) fn json_err(code: &str, message: &str) -> String {
     serde_json::json!({ "error": code, "message": message }).to_string()
 }
 
+/// Marks refusals from devices that check senders against the device list
+/// (older ones refused every other device with "notYourAccount").
+pub const AUTH_VERSION: u32 = 2;
+
 pub(crate) fn refused(r: Refused) -> (u16, String) {
     let (code, msg) = match r {
         Refused::Missing => ("unsigned", "Only your own Platter devices can control this one."),
-        Refused::BadSignature => ("notYourAccount", "That device isn't signed in to the same Plex account."),
+        Refused::BadSignature | Refused::UnknownDevice => {
+            ("notYourAccount", "That device isn't signed in to the same Plex account or Home user.")
+        }
+        Refused::CantCheck => ("cantCheck", "Couldn't check the device with plex.tv."),
         Refused::Stale => ("clock", "The two computers' clocks are too far apart."),
         Refused::Replayed => ("replayed", "That request was already used."),
         Refused::NoKey => ("signedOut", "This computer isn't signed in to Plex."),
     };
-    (401, json_err(code, msg))
+    let body = serde_json::json!({ "error": code, "message": msg, "auth": AUTH_VERSION, "now": now_ms() });
+    (401, body.to_string())
 }
 
 pub(crate) fn app_err(e: AppError) -> (u16, String) {
@@ -126,8 +172,7 @@ impl PeerServer {
         if !known {
             return (404, json_err("notFound", "Not found"));
         }
-        let key = self.keys.key().await;
-        if let Err(r) = self.verifier.verify(key.as_ref(), auth, method, target, &self.own_id, body, now_ms()) {
+        if let Err(r) = check(&self.verifier, self.keys.as_ref(), auth, method, target, &self.own_id, body, now_ms()).await {
             tracing::info!(reason = ?r, "refused a control request");
             return refused(r);
         }

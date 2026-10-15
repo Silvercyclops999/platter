@@ -1,9 +1,13 @@
 //! Who may control this computer: only Platter devices signed in to the
-//! same Plex account.
+//! same Plex account (and the same Home user).
 //!
-//! Both sides derive the same key from the account token
-//! (`SHA-256("platter-peer-key-v1\n" + token)`); the token itself never
-//! leaves the computer. Every request carries
+//! Every device has its own Plex token. A sender signs with a key derived
+//! from its own token (`SHA-256("platter-peer-key-v1\n" + token)`). The
+//! receiver finds the sender's token in the account's device list on
+//! plex.tv, fetched with its own token (see [`super::devices`]), derives the
+//! same key and checks the signature. No token is ever sent between
+//! devices, and plex.tv lists a device's token only to the account (or
+//! Home user) it belongs to. Every request carries
 //! `X-Platter-Auth: v1 from=<id>;ts=<unix ms>;nonce=<hex>;sig=<hex>`, where
 //! `sig` is HMAC-SHA256 over the method, path, sender, receiver, time, nonce
 //! and a hash of the body. The receiver accepts it only within
@@ -20,8 +24,9 @@ use sha2::{Digest, Sha256};
 use crate::plex::Token;
 
 pub const AUTH_HEADER: &str = "x-platter-auth";
-/// How far a request's time may be from this computer's clock.
-pub const MAX_SKEW_MS: u64 = 30_000;
+/// How far a request's time may be from this computer's clock. A sender
+/// refused for this corrects for the receiver's clock and tries once more.
+pub const MAX_SKEW_MS: u64 = 120_000;
 /// Nonces remembered at most (oldest dropped first).
 const MAX_NONCES: usize = 4096;
 
@@ -105,8 +110,13 @@ pub enum Refused {
     Stale,
     /// The same nonce again.
     Replayed,
-    /// Signed with another key (another account) or for something else.
+    /// Signed with another key (another account or Home user) or for
+    /// something else.
     BadSignature,
+    /// The sender isn't on this account's device list.
+    UnknownDevice,
+    /// The device list couldn't be fetched to check the sender.
+    CantCheck,
     /// This computer isn't signed in, so it has no key.
     NoKey,
 }
@@ -143,6 +153,19 @@ fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// A header that parsed and is within the time window, before its
+/// signature is checked.
+pub struct Signed<'a> {
+    p: Parsed<'a>,
+}
+
+impl Signed<'_> {
+    /// The device the request says it's from.
+    pub fn from(&self) -> &str {
+        self.p.from
+    }
+}
+
 /// Checks requests and remembers nonces.
 #[derive(Default)]
 pub struct Verifier {
@@ -154,7 +177,23 @@ impl Verifier {
         Self::default()
     }
 
-    /// The sender's id when the request is good.
+    /// The header, parsed and within the time window.
+    pub fn open<'a>(&self, header: Option<&'a str>, now_ms: u64) -> Result<Signed<'a>, Refused> {
+        let p = header.and_then(parse).ok_or(Refused::Missing)?;
+        if p.ts.abs_diff(now_ms) > MAX_SKEW_MS {
+            return Err(Refused::Stale);
+        }
+        Ok(Signed { p })
+    }
+
+    /// Whether `key` made the signature (for this request to `own_id`).
+    pub fn signed_by(&self, s: &Signed<'_>, key: &PeerKey, method: &str, path: &str, own_id: &str, body: &[u8]) -> bool {
+        let p = &s.p;
+        let want = hmac_sha256(&key.0, canonical(method, path, p.from, own_id, p.ts, p.nonce, body).as_bytes());
+        same(hex(&want).as_bytes(), p.sig.to_ascii_lowercase().as_bytes())
+    }
+
+    /// The sender's id when the request is good, checked against one key.
     #[allow(clippy::too_many_arguments)]
     pub fn verify(
         &self,
@@ -166,15 +205,18 @@ impl Verifier {
         body: &[u8],
         now_ms: u64,
     ) -> Result<String, Refused> {
-        let p = header.and_then(parse).ok_or(Refused::Missing)?;
+        let s = self.open(header, now_ms)?;
         let key = key.ok_or(Refused::NoKey)?;
-        if p.ts.abs_diff(now_ms) > MAX_SKEW_MS {
-            return Err(Refused::Stale);
-        }
-        let want = hmac_sha256(&key.0, canonical(method, path, p.from, own_id, p.ts, p.nonce, body).as_bytes());
-        if !same(hex(&want).as_bytes(), p.sig.to_ascii_lowercase().as_bytes()) {
+        if !self.signed_by(&s, key, method, path, own_id, body) {
             return Err(Refused::BadSignature);
         }
+        self.accept(s, now_ms)
+    }
+
+    /// Takes a request whose signature checked out, once per nonce: the
+    /// sender's id.
+    pub fn accept(&self, s: Signed<'_>, now_ms: u64) -> Result<String, Refused> {
+        let p = s.p;
         let mut seen = self.seen.lock();
         seen.retain(|_, t| t.abs_diff(now_ms) <= 2 * MAX_SKEW_MS);
         if seen.contains_key(p.nonce) {
