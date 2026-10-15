@@ -541,6 +541,12 @@ pub struct Settings {
     /// The artist page lists official releases the library lacks (with
     /// Request) when Lidarr is set up and its check passed.
     pub show_missing_releases: bool,
+    /// Lidarr's staging folder for upgrades, as Lidarr sees it: one of its
+    /// root folders that Plex does not scan. Empty: upgrades are off.
+    pub lidarr_staging_folder: String,
+    /// Upgrades ask before each swap (off swaps on their own, under the
+    /// same rules).
+    pub upgrades_ask: bool,
     /// The miniplayer window stays above other windows (this device only).
     pub miniplayer_on_top: bool,
     /// The miniplayer's card takes a colour from the cover (this device only).
@@ -656,6 +662,25 @@ pub const STATUS_VALUE_LEN_MAX: usize = 60;
 
 /// Longest model name accepted.
 pub const AI_MODEL_MAX: usize = 100;
+
+/// Longest staging folder path accepted.
+pub const STAGING_FOLDER_MAX: usize = 400;
+
+/// Lidarr's staging folder as stored: a full folder path as Lidarr sees it
+/// (`/downloads/upgrades`, `D:\Upgrades`, `\\nas\upgrades`), with no
+/// trailing separator; blank clears it.
+pub fn staging_folder(f: &str) -> AppResult<String> {
+    let f = f.trim();
+    let f = if f.len() > 1 { f.trim_end_matches(['/', '\\']) } else { f };
+    if f.is_empty() {
+        return Ok(String::new());
+    }
+    let bad = || AppError::Invalid("Write the folder's full path as Lidarr sees it, like /downloads/upgrades.".into());
+    let b = f.as_bytes();
+    let absolute = f.starts_with('/') || f.starts_with("\\\\") || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/'));
+    let ok = absolute && f.len() <= STAGING_FOLDER_MAX && !f.chars().any(char::is_control) && f.split(['/', '\\']).all(|p| p != "..");
+    if ok && f.split(['/', '\\']).any(|p| !p.is_empty() && !p.ends_with(':')) { Ok(f.to_string()) } else { Err(bad()) }
+}
 
 /// Lidarr's address as stored: an http(s) address with no query, sign-in or
 /// trailing slash; blank clears it.
@@ -841,6 +866,8 @@ impl Default for Settings {
             lidarr_url: String::new(),
             lidarr_away_url: String::new(),
             show_missing_releases: true,
+            lidarr_staging_folder: String::new(),
+            upgrades_ask: true,
             miniplayer_on_top: true,
             miniplayer_tint: true,
             miniplayer_queue: false,
@@ -983,6 +1010,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "lidarrUrl",
     "lidarrAwayUrl",
     "showMissingReleases",
+    "lidarrStagingFolder",
+    "upgradesAsk",
     "powerKeys",
     "hintKey",
     "importSources",
@@ -1259,6 +1288,8 @@ pub struct SettingsPatch {
     pub lidarr_url: Option<String>,
     pub lidarr_away_url: Option<String>,
     pub show_missing_releases: Option<bool>,
+    pub lidarr_staging_folder: Option<String>,
+    pub upgrades_ask: Option<bool>,
     pub miniplayer_on_top: Option<bool>,
     pub miniplayer_tint: Option<bool>,
     pub miniplayer_queue: Option<bool>,
@@ -1659,6 +1690,10 @@ impl Settings {
             self.lidarr_away_url = lidarr_url(u)?;
         }
         set(&mut self.show_missing_releases, p.show_missing_releases);
+        if let Some(f) = &p.lidarr_staging_folder {
+            self.lidarr_staging_folder = staging_folder(f)?;
+        }
+        set(&mut self.upgrades_ask, p.upgrades_ask);
         if let Some(name) = &p.computer_name {
             let name = name.trim();
             if name.chars().count() > COMPUTER_NAME_MAX {
@@ -2816,6 +2851,33 @@ mod tests {
         let p: SettingsPatch = serde_json::from_str(r#"{"showDescribePlaylist":false}"#).unwrap();
         s.apply(&p).unwrap();
         assert!(!s.show_describe_playlist);
+    }
+
+    #[test]
+    fn upgrade_settings_default_sync_check_and_round_trip() {
+        let mut s = Settings::default();
+        assert!(s.lidarr_staging_folder.is_empty(), "upgrades are off until a staging folder is set");
+        assert!(s.upgrades_ask, "asking before each swap is on by default");
+        for k in ["lidarrStagingFolder", "upgradesAsk"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let p: SettingsPatch = serde_json::from_str(r#"{"lidarrStagingFolder":" /downloads/upgrades/ ","upgradesAsk":false}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert_eq!(s.lidarr_staging_folder, "/downloads/upgrades");
+        assert!(!s.upgrades_ask);
+        // Through the stored form and back.
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!((back.lidarr_staging_folder.as_str(), back.upgrades_ask), ("/downloads/upgrades", false));
+        for ok in [r"D:\Upgrades\", r"\\nas\upgrades", "/up"] {
+            assert!(staging_folder(ok).is_ok(), "{ok}");
+        }
+        for bad in ["upgrades", "/", r"D:\", "/a/../b", "D:"] {
+            assert!(staging_folder(bad).is_err(), "{bad}");
+        }
+        s.apply(&SettingsPatch { lidarr_staging_folder: Some("  ".into()), ..Default::default() }).unwrap();
+        assert!(s.lidarr_staging_folder.is_empty(), "blank turns upgrades off");
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.upgrades_ask && old.lidarr_staging_folder.is_empty());
     }
 
     #[test]

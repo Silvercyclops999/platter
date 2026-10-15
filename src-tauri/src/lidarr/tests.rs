@@ -69,9 +69,9 @@ fn lidarr(roots: Vec<RootFolder>) -> LidarrSnapshot {
         roots,
         artists: vec![],
         naming: NamingConfig { rename_tracks: false },
-        metadata: MetadataProviderConfig { write_audio_tags: "newFiles".into(), scrub_audio_tags: false },
+        metadata: MetadataProviderConfig { write_audio_tags: "no".into(), scrub_audio_tags: false },
         media: MediaManagementConfig { delete_empty_folders: false, recycle_bin: "/recycle".into() },
-        profiles: vec![QualityProfile { id: 1, name: "Lossless".into(), upgrade_allowed: false }],
+        profiles: vec![QualityProfile { id: 1, name: "Lossless".into(), upgrade_allowed: false, ..Default::default() }],
         lists: vec![],
         listings: HashMap::new(),
     }
@@ -89,7 +89,7 @@ fn listing(dirs: &[&str], files: &[(&str, i64)]) -> Option<Listing> {
 }
 
 fn ctx() -> CheckContext {
-    CheckContext { confirmed_roots: vec![], unencrypted: vec![], route: Some(api::Route::Home), now: 1_800_000_000 }
+    CheckContext { confirmed_roots: vec![], unencrypted: vec![], route: Some(api::Route::Home), now: 1_800_000_000, staging: None }
 }
 
 /// Run the check like the service does: keep answering the folders it
@@ -329,14 +329,15 @@ fn safe_settings_give_no_amber() {
 #[test]
 fn each_amber_setting_is_found_and_explained() {
     type Tweak = fn(&mut LidarrSnapshot);
-    let cases: [(&str, Tweak); 8] = [
+    let cases: [(&str, Tweak); 9] = [
         ("renameTracks", |l| l.naming.rename_tracks = true),
+        ("writeAudioTags", |l| l.metadata.write_audio_tags = "newFiles".into()),
         ("writeAudioTags", |l| l.metadata.write_audio_tags = "allFiles".into()),
         ("writeAudioTags", |l| l.metadata.write_audio_tags = "sync".into()),
         ("scrubAudioTags", |l| l.metadata.scrub_audio_tags = true),
         ("deleteEmptyFolders", |l| l.media.delete_empty_folders = true),
         ("recycleBin", |l| l.media.recycle_bin = " ".into()),
-        ("upgradeAllowed", |l| l.profiles.push(QualityProfile { id: 2, name: "Any".into(), upgrade_allowed: true })),
+        ("upgradeAllowed", |l| l.profiles.push(QualityProfile { id: 2, name: "Any".into(), upgrade_allowed: true, ..Default::default() })),
         ("importLists", |l| l.lists.push(ImportList { id: 1, name: "Charts".into(), enable_automatic_add: true, enable: None })),
     ];
     for (id, tweak) in cases {
@@ -349,11 +350,79 @@ fn each_amber_setting_is_found_and_explained() {
         assert!(f.fix.as_deref().is_some_and(|x| x.starts_with("In Lidarr")), "{id}");
         assert_eq!(r.findings[0].level, Level::Amber, "amber comes before OK");
     }
-    // New-files-only tag writing is fine.
+    // Writing tags into new downloads is worth changing too, with its own words.
     let (p, mut l, disk) = separate();
     l.metadata.write_audio_tags = "newFiles".into();
-    assert!(ids(&run(&p, l, &ctx(), &disk), Level::Amber).is_empty());
+    let r = run(&p, l, &ctx(), &disk);
+    let f = r.findings.iter().find(|f| f.id == "writeAudioTags").unwrap();
+    assert_eq!(f.level, Level::Amber);
+    assert!(f.title.contains("files it downloads"), "{}", f.title);
 }
+
+// ------------------------------------------------------------------ the staging folder
+
+fn with_staging(path: &str) -> CheckContext {
+    CheckContext { staging: Some(path.into()), ..ctx() }
+}
+
+#[test]
+fn a_separate_staging_root_passes() {
+    let (p, mut l, mut disk) = separate();
+    l.roots.push(RootFolder { id: 2, ..root("/staging/upgrades", &["Northlight"]) });
+    disk.insert("/staging/upgrades/Northlight/".into(), listing(&["Second Wind"], &[]));
+    let r = run(&p, l, &with_staging("/staging/upgrades/"), &disk);
+    assert!(r.passed, "{r:?}");
+    assert!(!r.findings.iter().any(|f| f.id.starts_with("staging")));
+}
+
+#[test]
+fn a_staging_folder_lidarr_doesnt_have_is_red() {
+    let (p, l, disk) = separate();
+    let r = run(&p, l, &with_staging("/staging/upgrades"), &disk);
+    assert!(!r.passed);
+    assert_eq!(ids(&r, Level::Red), vec!["stagingNotRoot"]);
+    // Without a staging folder there's nothing to say.
+    let (p, l, disk) = separate();
+    assert!(run(&p, l, &ctx(), &disk).passed);
+}
+
+#[test]
+fn a_staging_folder_plex_scans_is_red_by_path_and_by_content() {
+    // By path: Plex's second music folder is the staging folder.
+    let (mut p, mut l, disk) = separate();
+    p.locations.push("/downloads/upgrades".into());
+    l.roots.push(RootFolder { id: 2, ..root("/downloads/upgrades", &[]) });
+    let r = run(&p, l, &with_staging("/downloads/upgrades"), &disk);
+    assert!(ids(&r, Level::Red).contains(&"stagingScanned".to_string()), "{r:?}");
+    let f = r.findings.iter().find(|f| f.id == "stagingScanned").unwrap();
+    assert!(f.title.contains("scanned by Plex"), "{}", f.title);
+    assert!(!r.passed);
+    // Inside the music folder.
+    let (p, mut l, disk) = separate();
+    l.roots.push(RootFolder { id: 2, ..root("/data/music/Upgrades", &[]) });
+    let r = run(&p, l, &with_staging("/data/music/Upgrades"), &disk);
+    assert!(ids(&r, Level::Red).contains(&"stagingScanned".to_string()), "{r:?}");
+    assert!(!ids(&r, Level::Red).contains(&"rootOverlap".to_string()), "one finding for the staging folder, not two");
+    // By content: Lidarr's /up is the folder Plex reads as /data/music.
+    let (p, mut l, mut disk) = separate();
+    l.roots.push(RootFolder { id: 2, ..root("/up", &["Northlight"]) });
+    disk.insert("/up/Northlight/".into(), listing(&["First Light"], &[]));
+    disk.insert("/up/Northlight/First Light/".into(), listing(&[], &[("01 Dawn.flac", 31_000_111)]));
+    let r = run(&p, l, &with_staging("/up"), &disk);
+    assert!(ids(&r, Level::Red).contains(&"stagingScanned".to_string()), "{r:?}");
+}
+
+#[test]
+fn a_staging_folder_next_to_the_music_folder_is_red() {
+    let (p, mut l, disk) = separate();
+    l.roots.push(RootFolder { id: 2, ..root("/data/upgrades", &[]) });
+    let mut c = with_staging("/data/upgrades");
+    c.confirmed_roots = vec!["data/upgrades".into()];
+    let r = run(&p, l, &c, &disk);
+    assert_eq!(ids(&r, Level::Red), vec!["stagingBeside"], "{r:?}");
+    assert!(r.findings[0].fix.as_deref().unwrap().contains("separate path"));
+}
+
 
 #[test]
 fn only_plain_http_to_a_public_host_is_a_warning() {
@@ -508,9 +577,9 @@ async fn a_whole_check_sends_nothing_but_gets_with_the_key_in_a_header() {
     let r = rig("http://10.20.30.40:8686");
     r.lidarr.set_key(Some("abc123")).unwrap();
     let report = r.lidarr.check().await.unwrap();
-    // Docker remap: same files under /music, so it's red, plus two ambers.
+    // Docker remap: same files under /music, so it's red, plus its ambers (writing tags into new downloads among them).
     assert_eq!(ids(&report, Level::Red), vec!["rootOverlap"]);
-    assert_eq!(ids(&report, Level::Amber), vec!["renameTracks", "deleteEmptyFolders", "recycleBin"]);
+    assert_eq!(ids(&report, Level::Amber), vec!["renameTracks", "writeAudioTags", "deleteEmptyFolders", "recycleBin"]);
     assert!(report.findings[0].detail.contains("same sizes"), "listings were followed: {:?}", report.findings[0]);
     assert_eq!(report.version, "2.8.2.4493");
     let log = r.web.log.lock().clone();

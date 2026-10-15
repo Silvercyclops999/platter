@@ -175,6 +175,8 @@ pub struct CheckContext {
     pub unencrypted: Vec<String>,
     pub route: Option<Route>,
     pub now: i64,
+    /// The staging folder for upgrades (Lidarr's path), when set.
+    pub staging: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,6 +332,27 @@ fn root_name(r: &RootFolder) -> String {
 
 const ROOT_FIX: &str = "In Lidarr, open Settings > Media Management > Root Folders and add a separate, empty folder for downloads (for example a Lidarr folder next to your music, added to the Plex music library as a second folder). Then remove this root folder from Lidarr. Platter never changes Lidarr's folders itself.";
 
+const STAGING_FIX: &str = "Use a staging folder well away from your music, on a separate path (for example a downloads folder elsewhere on the server), that no Plex library includes. Add it in Lidarr as a root folder, then set it in Platter's settings.";
+
+/// The staging root's own red finding, when Plex can see it.
+fn staging_scanned(path: &str, v: &RootVerdict) -> Option<Finding> {
+    let (how, plex_path) = match v {
+        RootVerdict::ByPath(Relation::Contains, p) => ("holds your Plex music folder", Some(p.clone())),
+        RootVerdict::ByPath(_, p) => ("is scanned by Plex", Some(p.clone())),
+        RootVerdict::Overlap { relation: Some((Relation::Contains, p)), .. } => ("holds your Plex music folder", Some(p.clone())),
+        RootVerdict::Overlap { relation, .. } => ("is scanned by Plex", relation.as_ref().map(|(_, p)| p.clone())),
+        _ => return None,
+    };
+    let where_ = plex_path.map(|p| format!(" (Plex reads {p})")).unwrap_or_default();
+    Some(Finding::new(
+        "stagingScanned",
+        Level::Red,
+        format!("The staging folder {path} {how}"),
+        format!("Better copies wait in the staging folder until you swap them in. If Plex reads it{where_}, half-finished downloads show up in your library next to the albums they're meant to replace."),
+        Some(STAGING_FIX.into()),
+    ))
+}
+
 fn list_names(names: &[String], max: usize) -> String {
     let shown: Vec<&str> = names.iter().take(max).map(String::as_str).collect();
     let more = names.len().saturating_sub(max);
@@ -370,8 +393,17 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         verdicts.push((r, v));
     }
     let mut separate = Vec::new();
+    let staging = ctx.staging.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let staging_norm = staging.map(NormPath::parse);
+    let is_staging = |r: &RootFolder| staging_norm.as_ref().is_some_and(|s| !s.is_empty() && NormPath::parse(&r.path) == *s);
     for (r, v) in &verdicts {
         let path = root_name(r);
+        if is_staging(r)
+            && let Some(f) = staging_scanned(&path, v)
+        {
+            red.push(f);
+            continue;
+        }
         match v {
             RootVerdict::ByPath(rel, plex_path) => {
                 let how = match rel {
@@ -456,6 +488,36 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         ));
     }
 
+    // ---- The staging folder for upgrades.
+    if let (Some(staging), Some(sn)) = (staging, staging_norm.as_ref()) {
+        if !lidarr.roots.iter().any(is_staging) {
+            red.push(Finding::new(
+                "stagingNotRoot",
+                Level::Red,
+                format!("The staging folder {staging} isn't one of Lidarr's root folders"),
+                "Better copies download into the staging folder, so Lidarr has to have it as a root folder. Until then upgrades can't be requested.",
+                Some("In Lidarr, add it in Settings > Media Management > Root Folders, or change the staging folder in Platter's settings. Platter never adds root folders itself.".into()),
+            ));
+        }
+        let beside: Vec<&String> = plex
+            .locations
+            .iter()
+            .filter(|(_, l)| relation(sn, l).is_none() && sn.parent().is_some() && sn.parent() == l.parent())
+            .map(|(raw, _)| raw)
+            .collect();
+        if let Some(music) = beside.first() {
+            red.push(Finding::new(
+                "stagingBeside",
+                Level::Red,
+                format!("The staging folder {staging} sits next to your Plex music folder"),
+                format!(
+                    "It's in the same parent folder as {music}. A folder that close to your library is easy to add to Plex, or to mix up with it, by mistake."
+                ),
+                Some(STAGING_FIX.into()),
+            ));
+        }
+    }
+
     // ---- Lidarr artists whose folders are in the Plex music folders.
     if plex_known {
         let mut inside: Vec<String> = Vec::new();
@@ -531,14 +593,25 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         "Track renaming is off",
     );
     let tags = lidarr.metadata.write_audio_tags.trim().to_ascii_lowercase();
-    setting(
-        tags == "allfiles" || tags == "sync",
-        "writeAudioTags",
-        "Lidarr rewrites tags in files it already has",
-        "With this setting Lidarr goes back and retags files it manages, not just new downloads.",
-        "In Lidarr, set Settings > Metadata > Write Audio Tags to Never or to new downloads only.",
-        "Lidarr doesn't rewrite tags in existing files",
-    );
+    if tags == "allfiles" || tags == "sync" {
+        setting(
+            true,
+            "writeAudioTags",
+            "Lidarr rewrites tags in files it already has",
+            "With this setting Lidarr goes back and retags files it manages, not just new downloads.",
+            "In Lidarr, set Settings > Metadata > Write Audio Tags to Never.",
+            "",
+        );
+    } else {
+        setting(
+            !tags.is_empty() && tags != "no",
+            "writeAudioTags",
+            "Lidarr writes its own tags into the files it downloads",
+            "Downloads get Lidarr's tags instead of keeping their own.",
+            "In Lidarr, set Settings > Metadata > Write Audio Tags to Never.",
+            "Lidarr doesn't write tags into files",
+        );
+    }
     setting(
         lidarr.metadata.scrub_audio_tags,
         "scrubAudioTags",
