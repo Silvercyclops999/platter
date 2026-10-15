@@ -13,9 +13,12 @@ export type Route =
   | { name: "search"; query?: string }
   /** Wide library; a tab opens it filtered to that type. */
   | { name: "library"; tab?: LibraryTab }
-  | { name: "artist"; id: string }
-  /** An artist's whole discography, optionally filtered to one release type. */
-  | { name: "discography"; id: string; type?: ReleaseSection }
+  /** An artist page, filtered to one era when `era` is set (Back clears it). */
+  | { name: "artist"; id: string; era?: string }
+  /** An artist's whole discography, optionally filtered to one release type (or `custom:<name>`). */
+  | { name: "discography"; id: string; type?: ReleaseSection | `custom:${string}` }
+  /** One era of an artist (ARCHIVE_ERA). */
+  | { name: "era"; id: string; era: string }
   | { name: "album"; id: string }
   | { name: "playlist"; id: string }
   /** Liked Songs. */

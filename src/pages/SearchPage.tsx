@@ -1,5 +1,5 @@
-import { MoreHorizontal, Pause, Play } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { ChevronDown, MoreHorizontal, Pause, Play } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Art } from "../components/Art";
 import { CardSkeleton } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
@@ -18,6 +18,7 @@ import { nav } from "../stores/router";
 import { MAX_QUERY } from "../shell/SearchBox";
 import { hitInfo, hitOf, mixedHits, openHit, playHit, rememberHit, type HitInfo } from "../shell/searchModel";
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
+import { otherVersionsText } from "./era";
 import "./search.css";
 
 export { MAX_QUERY };
@@ -141,6 +142,23 @@ function Remember({ hit, children }: { hit: SearchHit; children: ReactNode }) {
   return <div onClickCapture={() => rememberHit(hit)}>{children}</div>;
 }
 
+/** "N other versions" under a song that has them; expands in place. */
+function VersionsToggle({ id, count, open, onToggle, as }: { id: string; count: number; open: boolean; onToggle: () => void; as: "li" | "row" }) {
+  const button = (
+    <button type="button" className="sr-versions__toggle" aria-expanded={open} aria-controls={`versions-${id}`} onClick={onToggle}>
+      <ChevronDown size={14} aria-hidden="true" className={open ? "is-open" : ""} />
+      {otherVersionsText(count)}
+    </button>
+  );
+  return as === "li" ? (
+    <li className="sr-versions">{button}</li>
+  ) : (
+    <div role="row" className="sr-versions">
+      <span role="gridcell">{button}</span>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- loading
 
 function ResultsSkeleton({ filter }: { filter: SearchFilter }) {
@@ -222,6 +240,15 @@ export function SearchPage({ query }: { query: string }) {
   const res = shown && shown.filter === filter ? shown.res : null;
   const songIds = useMemo(() => (res ? res.songs.map((s) => s.id) : []), [res]);
   const rows = useMemo(() => (res && filter === "all" ? mixedHits(res) : []), [res, filter]);
+  // Songs whose other versions are showing (search groups versions under the released one).
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   if (!q)
     return (
@@ -275,29 +302,88 @@ export function SearchPage({ query }: { query: string }) {
           {filter === "all" && (
             <div className="sr-all">
               {res.top && <TopResult hit={res.top} songIds={songIds} />}
+              {res.top?.kind === "track" && res.top.track && !!res.versions?.[res.top.track.id]?.length && (
+                <ul className="sr-list sr-list--top-versions" aria-label={`Other versions of ${res.top.track.title}`}>
+                  <VersionsToggle
+                    id={res.top.track.id}
+                    count={res.versions[res.top.track.id].length}
+                    open={expanded.has(res.top.track.id)}
+                    onToggle={() => toggle(res.top!.track!.id)}
+                    as="li"
+                  />
+                  {expanded.has(res.top.track.id) && (
+                    <li id={`versions-${res.top.track.id}`} className="sr-versions__list">
+                      <ul>
+                        {res.versions[res.top.track.id].map((o) => (
+                          <ResultRow key={o.id} hit={hitOf.track(o)} songIds={res.versions![res.top!.track!.id].map((x) => x.id)} />
+                        ))}
+                      </ul>
+                    </li>
+                  )}
+                </ul>
+              )}
               <ul className="sr-list" aria-label="Results">
-                {rows.map((h) => (
-                  <ResultRow key={hitInfo(h)!.key} hit={h} songIds={songIds} />
-                ))}
+                {rows.map((h) => {
+                  const others = h.kind === "track" && h.track ? res.versions?.[h.track.id] : undefined;
+                  if (!others?.length) return <ResultRow key={hitInfo(h)!.key} hit={h} songIds={songIds} />;
+                  const id = h.track!.id;
+                  const open = expanded.has(id);
+                  return (
+                    <Fragment key={hitInfo(h)!.key}>
+                      <ResultRow hit={h} songIds={songIds} />
+                      <VersionsToggle id={id} count={others.length} open={open} onToggle={() => toggle(id)} as="li" />
+                      {open && (
+                        <li id={`versions-${id}`} className="sr-versions__list">
+                          <ul aria-label={`Other versions of ${h.track!.title}`}>
+                            {others.map((o) => (
+                              <ResultRow key={o.id} hit={hitOf.track(o)} songIds={others.map((x) => x.id)} />
+                            ))}
+                          </ul>
+                        </li>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </ul>
             </div>
           )}
           {filter === "songs" && (
             <TrackList label="Songs">
-              {res.songs.map((t, i) => (
-                <TrackRow
-                  key={t.id}
-                  track={t}
-                  index={i + 1}
-                  showArt
-                  active={t.id === nowTrackId}
-                  playing={t.id === nowTrackId && status === "playing"}
-                  onPlay={() => {
-                    rememberHit(hitOf.track(t));
-                    void player.playTracks(songIds, t.id, "search");
-                  }}
-                />
-              ))}
+              {res.songs.map((t, i) => {
+                const others = res.versions?.[t.id] ?? [];
+                const open = expanded.has(t.id);
+                return (
+                  <Fragment key={t.id}>
+                    <TrackRow
+                      track={t}
+                      index={i + 1}
+                      showArt
+                      active={t.id === nowTrackId}
+                      playing={t.id === nowTrackId && status === "playing"}
+                      onPlay={() => {
+                        rememberHit(hitOf.track(t));
+                        void player.playTracks(songIds, t.id, "search");
+                      }}
+                    />
+                    {others.length > 0 && <VersionsToggle id={t.id} count={others.length} open={open} onToggle={() => toggle(t.id)} as="row" />}
+                    {open &&
+                      others.map((o, j) => (
+                        <TrackRow
+                          key={`${t.id}:${o.id}`}
+                          rowKey={`${t.id}:${o.id}`}
+                          track={o}
+                          index={j + 1}
+                          showArt
+                          compact={false}
+                          labelNote={`another version of ${t.title}`}
+                          active={o.id === nowTrackId}
+                          playing={o.id === nowTrackId && status === "playing"}
+                          onPlay={() => void player.playTracks(others.map((x) => x.id), o.id, "search")}
+                        />
+                      ))}
+                  </Fragment>
+                );
+              })}
             </TrackList>
           )}
           {filter === "albums" && (

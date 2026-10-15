@@ -7,7 +7,7 @@ import { openContextMenu } from "../components/ContextMenu";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
-import type { Album, ReleaseSection, Track } from "../lib/types";
+import type { Album, Track } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
@@ -26,15 +26,16 @@ import {
   type DiscographySort,
   type DiscographyType,
   type DiscographyView,
+  type SectionId,
 } from "./discography";
 import "./discography.css";
 
 /** Starts over (type filter) for each artist; sort and view are remembered on this device. */
-export function DiscographyPage({ id, type }: { id: string; type?: ReleaseSection }) {
+export function DiscographyPage({ id, type }: { id: string; type?: SectionId }) {
   return <DiscographyView key={id} id={id} type={type} />;
 }
 
-function DiscographyView({ id, type: startType }: { id: string; type?: ReleaseSection }) {
+function DiscographyView({ id, type: startType }: { id: string; type?: SectionId }) {
   const { data, error } = useLoad(() => backend.artistPage(id), [id]);
   const [type, setType] = useState<DiscographyType>(startType ?? "all");
   const [prefs, setPrefs] = useState<DiscographyPrefs>(loadDiscographyPrefs);

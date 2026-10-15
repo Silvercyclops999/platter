@@ -2,7 +2,18 @@
 import { SECTION_LABELS, plural, releaseTypeLabel } from "../lib/format";
 import type { Album, ArtistPageSection, ReleaseSection } from "../lib/types";
 
-export type DiscographyType = "all" | ReleaseSection;
+/** A section's id: its release type, or `custom:<name>` for one of the user's own. */
+export type SectionId = ReleaseSection | `custom:${string}`;
+
+export function sectionId(s: Pick<ArtistPageSection, "section" | "custom">): SectionId {
+  return s.custom ? `custom:${s.custom}` : s.section;
+}
+
+export function sectionLabel(s: Pick<ArtistPageSection, "section" | "custom">): string {
+  return s.custom ?? SECTION_LABELS[s.section];
+}
+
+export type DiscographyType = "all" | SectionId;
 export type DiscographySort = "date" | "name";
 export type DiscographyView = "list" | "grid";
 
@@ -16,12 +27,12 @@ export interface TypeOption {
 
 /** All, then one entry per release type the artist has, in the page's section order. */
 export function typeOptions(sections: ArtistPageSection[]): TypeOption[] {
-  return [{ id: "all", label: "All" }, ...sections.filter((s) => s.albums.length).map((s) => ({ id: s.section, label: SECTION_LABELS[s.section] }))];
+  return [{ id: "all", label: "All" }, ...sections.filter((s) => s.albums.length).map((s) => ({ id: sectionId(s), label: sectionLabel(s) }))];
 }
 
 /** A type the artist no longer has falls back to All. */
 export function validType(sections: ArtistPageSection[], type: DiscographyType | undefined): DiscographyType {
-  return type && type !== "all" && sections.some((s) => s.section === type && s.albums.length) ? type : "all";
+  return type && type !== "all" && sections.some((s) => sectionId(s) === type && s.albums.length) ? type : "all";
 }
 
 /** Newest first: by year, then by when it was added. Releases without a year go last. */
@@ -39,7 +50,7 @@ export function discographyReleases(sections: ArtistPageSection[], type: Discogr
   const seen = new Set<string>();
   const out: Album[] = [];
   for (const s of sections) {
-    if (type !== "all" && s.section !== type) continue;
+    if (type !== "all" && sectionId(s) !== type) continue;
     for (const a of s.albums) {
       if (seen.has(a.id)) continue;
       seen.add(a.id);

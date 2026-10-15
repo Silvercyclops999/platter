@@ -18,7 +18,8 @@ import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { formatLongDuration, plural, releaseTypeLabel } from "../lib/format";
-import type { AlbumCredits } from "../lib/types";
+import type { AlbumArchive, AlbumCredits } from "../lib/types";
+import { formatArchiveDate } from "./era";
 import { useAlbumCredits } from "../lib/useAlbumCredits";
 import { useLoad } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
@@ -145,6 +146,7 @@ export function AlbumPage({ id }: { id: string }) {
       )}
 
       <div className="detail-body">
+        {album && data!.archive && <EraBanner archive={data!.archive} artistId={album.artistId} />}
         <div className="action-row">
           <IconButton
             label={isThisPlaying ? `Pause ${album?.title ?? "album"}` : `Play ${album?.title ?? "album"}`}
@@ -317,6 +319,25 @@ function AlbumCreditsSection({ credits }: { credits: AlbumCredits }) {
         </p>
       )}
     </section>
+  );
+}
+
+/** An unreleased build's era, date, edition and source, under the header. The era opens its page. */
+function EraBanner({ archive, artistId }: { archive: AlbumArchive; artistId: string }) {
+  const date = archive.date ? formatArchiveDate(archive.date) : null;
+  return (
+    <aside className="album-era" aria-label="From the archive">
+      {archive.era ? (
+        <button type="button" className="link album-era__name" onClick={() => nav.go({ name: "era", id: artistId, era: archive.era! })}>
+          {archive.era} era
+        </button>
+      ) : (
+        <span className="album-era__name">From the archive</span>
+      )}
+      {date && <span>{date}</span>}
+      {archive.edition && <span>{archive.edition}</span>}
+      {archive.source && <span className="album-era__source">Source: {archive.source}</span>}
+    </aside>
   );
 }
 

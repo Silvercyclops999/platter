@@ -45,7 +45,7 @@
   top: calc(100% + var(--space-2));
   left: 0;
   z-index: 50;
-  width: 300px;
+  width: min(340px, calc(100vw - 48px));
   padding: var(--space-4);
   border-radius: var(--radius-card);
   background: var(--color-bg-overlay);
@@ -55,6 +55,32 @@
   font-size: var(--font-size-sm);
   user-select: text;
 }
-.release-status__title { display: block; margin-bottom: var(--space-2); font-size: var(--font-size-md); }
-.release-status__reasons { display: grid; gap: var(--space-1); margin: 0; padding-left: var(--space-4); color: var(--color-text-secondary); }
+.release-status__title { display: block; margin-bottom: var(--space-1); font-size: var(--font-size-md); }
+.release-status__strength { display: block; margin-bottom: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.release-status__reasons { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; color: var(--color-text-secondary); }
+.release-status__reason { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; line-height: 1.4; }
+.release-status__reason[data-decides] { color: var(--color-text-primary); }
+/* A dot per piece: filled leans unreleased, hollow leans released, faint says nothing. */
+.release-status__dot { width: 8px; height: 8px; border-radius: 999px; transform: translateY(1px); background: var(--color-version); }
+.release-status__reason[data-lean="released"] .release-status__dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-text-secondary); }
+.release-status__reason[data-lean="none"] .release-status__dot { background: var(--color-text-muted); opacity: 0.5; }
+.release-status__note { font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .release-status__hint { margin-top: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.release-status__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+.release-status__fine { margin-top: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+
+/* An unreleased build's era banner under the header. */
+.album-era {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 var(--space-4) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+.album-era__name { font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.album-era__source { flex-basis: 100%; font-size: var(--font-size-xs); color: var(--color-text-muted); }

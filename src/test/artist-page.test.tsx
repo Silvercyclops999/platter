@@ -140,7 +140,9 @@ describe("artist page", () => {
     await user.click(albums);
     expect(albums).toHaveAttribute("aria-pressed", "true");
     expect(popular).toHaveAttribute("aria-pressed", "false");
-    const own = mock.fx.albums.filter((x) => x.artistId === a.id && x.section === "albums");
+    // Builds Plex couldn't match count as unreleased and have a section of their own.
+    const own = mock.fx.albums.filter((x) => x.artistId === a.id && x.section === "albums" && x.format !== null);
+    expect(within(chips).getByRole("button", { name: "Unreleased" })).toBeInTheDocument();
     const discography = screen.getByRole("heading", { name: "Discography" }).closest("section")!;
     const cards = within(discography).getAllByRole("listitem");
     expect(cards).toHaveLength(own.length);

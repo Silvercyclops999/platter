@@ -86,6 +86,7 @@ import type {
   EditKind,
   ImageKind,
   MatchCandidate,
+  ReleaseMark,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { CREDIT_PREFIX, buildArtistLookup, creditId, creditKey, isCreditId, splitCredits } from "../credits";
@@ -100,7 +101,6 @@ import {
   mockMatched,
   mockMbCheckOn,
   mockPlexMissed,
-  mockReleaseStatus,
   mockUnreleased,
   mulberry32,
   type Fixtures,
@@ -135,6 +135,7 @@ import { MockPlexEdit } from "./plexEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
 import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
 import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "../statsTypes";
+import { MockArchive } from "./archive";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -264,6 +265,8 @@ export class MockBackend implements Backend {
   readonly plexEdit: MockPlexEdit;
   /** Mixes and radio, made from the fixtures. */
   readonly mixes: MockMixes;
+  /** The archive: release status and marks, versions, sections, eras (and its demo artist). */
+  readonly archive: MockArchive;
   /** Smooth transitions (player state). */
   private smoothFor: string | null = null;
   /** Friend activity, follows, What's New, listening sessions (test hooks: access, guestJoins, hostGone, hostEnds, addRelease). */
@@ -403,6 +406,9 @@ export class MockBackend implements Backend {
       },
       !this.opts.tagScan,
     );
+    // The archive demo artist joins after the tags mock is built, with its own tags.
+    this.archive = new MockArchive(this.fx, () => this.settings);
+    this.tags.addBadges(this.archive.install());
     this.mixes = new MockMixes(this.fx, (list) => this.tags.forPlay(list).tracks);
     this.transcribe = new MockTranscribe({
       settings: () => this.settings,
@@ -921,15 +927,13 @@ export class MockBackend implements Backend {
       const lookup = this.nameLookup();
       if (isCreditId(id)) return this.creditedPage(id, lookup);
       const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
-      const popular = popularTracks(this.fx.tracks.filter((t) => this.popularVisible(t, id)), artist, lookup, this.popularSource());
+      const popular = this.archive.annotate(
+        popularTracks(this.fx.tracks.filter((t) => this.popularVisible(t, id)), artist, lookup, this.popularSource()),
+      );
       const albums = this.tags.visibleAlbums(this.fx.albums.filter((a) => a.artistId === id));
-      const order: ReleaseSection[] = ["albums", "singlesEps", "live", "compilations", "soundtracks", "remixes", "demos", "mixtapes"];
-      const sections = order
-        .map((section) => ({
-          section,
-          albums: albums.filter((a) => a.section === section).sort((a, b) => (b.year ?? 9999) - (a.year ?? 9999)),
-        }))
-        .filter((s) => s.albums.length > 0);
+      // Sections by release type and status, then the user's own (archive).
+      const sections = this.archive.sections(albums);
+      const eras = this.archive.eras(id);
       const plays = this.fx.tracks.filter((t) => t.artistId === id).reduce((n, t) => n + t.viewCount, 0);
       const idx = this.fx.artists.indexOf(artist);
       // Most artists have a biography; every third has none. Similar artists
@@ -939,7 +943,7 @@ export class MockBackend implements Backend {
       const appearsOn = this.albumsOf(this.fx.tracks.filter((t) => t.artistId !== id && credits(t, artist.title, lookup)));
       // In the browser a first open waits for the global list, like the core.
       const popularPending = !!this.opts.timelines && this.popularSource() === "global" && !this.popularFetched.has(id);
-      return { artist, popular, sections, plays, about, similar, appearsOn, popularPending };
+      return { artist, popular, sections, plays, about, similar, appearsOn, popularPending, eras };
     });
   }
   /** Featured names with no library artist, for search (while "Link featured artists" is on). */
@@ -978,7 +982,7 @@ export class MockBackend implements Backend {
   albumPage(id: string) {
     return this.delay(() => {
       const album = this.fx.albums.find((a) => a.id === id) ?? this.notFound("Album");
-      const tracks = this.tags.albumTracks(this.fx.tracksByAlbum.get(id) ?? []);
+      const tracks = this.archive.annotate(this.tags.albumTracks(this.fx.tracksByAlbum.get(id) ?? []));
       const editions = new Set(this.tags.index().groups[this.tags.index().albums[id]?.group ?? ""]?.map((e) => e.albumId) ?? []);
       // Plex has a release date for most albums and a label for some.
       const n = Number(id) || 0;
@@ -992,6 +996,7 @@ export class MockBackend implements Backend {
         artistThumb: this.fx.artists.find((a) => a.id === album.artistId)?.thumb ?? null,
         released,
         studio,
+        archive: this.archive.albumArchive(album),
         moreByArtist: this.tags
           .visibleAlbums(this.fx.albums)
           .filter((a) => a.artistId === album.artistId && a.id !== id && !editions.has(a.id)),
@@ -1017,7 +1022,7 @@ export class MockBackend implements Backend {
       const ids = this.fx.playlistTracks.get(id) ?? [];
       const itemIds = this.pl.itemIds(id);
       const rows = ids.map((tid, i) => ({ track: this.trackById(tid), itemId: itemIds[i] ?? `it-${id}-${i}` })).filter((r) => r.track);
-      return { playlist, tracks: rows.map((r) => r.track!), itemIds: rows.map((r) => r.itemId) };
+      return { playlist, tracks: this.archive.annotate(rows.map((r) => r.track!)), itemIds: rows.map((r) => r.itemId) };
     });
   }
 
@@ -1227,7 +1232,7 @@ export class MockBackend implements Backend {
       if (songs[0] && score(songs[0].title) > 0) cands.push([score(songs[0].title), { kind: "track", track: songs[0] }]);
       if (playlists[0]) cands.push([score(playlists[0].title) + 0.1, { kind: "playlist", playlist: playlists[0] }]);
       if (cands.length) top = cands.sort((a, b) => b[0] - a[0])[0][1];
-      return {
+      return this.archive.groupSearch({
         top,
         songs: songs.slice(0, limit),
         artists: artists.slice(0, limit),
@@ -1235,7 +1240,7 @@ export class MockBackend implements Backend {
         playlists: playlists.slice(0, limit),
         tookMs: Math.round((performance.now() - started) * 10) / 10,
         source: "local",
-      };
+      });
     });
   }
   searchCompletions(query: string, limit = 4) {
@@ -2386,8 +2391,42 @@ export class MockBackend implements Backend {
   albumReleaseStatus(id: string) {
     return this.delay(() => {
       const album = this.fx.albums.find((a) => a.id === id) ?? this.notFound("Album");
-      return mockReleaseStatus(this.fx.albums, album, this.settings);
+      return this.archive.status(album);
     });
+  }
+
+  // ---------------------------------------------------------------- archive
+
+  releaseMarkSet(kind: "album" | "track", id: string, mark: ReleaseMark | null) {
+    return this.delay(() => {
+      this.archive.setMark(kind, id, mark);
+      const album = kind === "album" ? this.fx.albums.find((a) => a.id === id) : this.fx.albums.find((a) => a.id === this.trackById(id)?.albumId);
+      if (album) {
+        this.later(0, () => {
+          this.emit("releasestatus://changed", { id: album.id });
+          this.emit("artist://changed", { id: album.artistId });
+        });
+      }
+    });
+  }
+  trackVersions(id: string) {
+    return this.delay(() => {
+      if (!this.trackById(id)) this.notFound("Song");
+      const items = this.archive.versions(id);
+      return this.settings.showFanEdits ? items : items.filter((v) => v.current || !this.tags.index().tracks[v.track.id]?.edit);
+    });
+  }
+  eraPage(artistId: string, name: string) {
+    return this.delay(() => this.archive.eraPage(artistId, name) ?? this.notFound("Era"));
+  }
+  albumSectionSet(albumId: string, artistId: string, name: string | null) {
+    return this.delay(() => {
+      this.archive.setSection(albumId, artistId, name);
+      this.later(0, () => this.emit("artist://changed", { id: artistId }));
+    });
+  }
+  artistSections(artistId: string) {
+    return this.delay(() => this.archive.sectionNames(artistId));
   }
   artistInfoKeys() {
     return this.delay(() => mockKeysStatus(this.infoKeys));

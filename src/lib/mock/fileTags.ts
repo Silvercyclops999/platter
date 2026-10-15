@@ -89,6 +89,12 @@ export class MockFileTags {
     }
   }
 
+  /** Badges of songs and albums added after the build (the archive demo artist). */
+  addBadges(b: { tracks: Record<string, TrackBadges>; albums: TagIndex["albums"] }) {
+    Object.assign(this.tracks, b.tracks);
+    Object.assign(this.albumTags, b.albums);
+  }
+
   index(): TagIndex {
     return { tracks: this.tracks, albums: this.albumTags, groups: this.groups };
   }

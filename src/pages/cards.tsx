@@ -15,6 +15,7 @@ import type { Album, Artist, HomeItem, PlayContextKind, Playlist } from "../lib/
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
+import { moveToSectionItem } from "../stores/archive";
 
 /** Whether this album / artist / playlist is the current play context, and playing. */
 export function useContextState(kind: PlayContextKind, id: string): { isContext: boolean; playing: boolean } {
@@ -56,6 +57,7 @@ export function useAlbumActions(album: Album): ItemActions & { openMenu: (at: { 
         addToPlaylistItem(albumSongs(album.id)),
         { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
         { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${album.artistId}` }) },
+        moveToSectionItem(album),
         shareItem("album", album.id, album.thumb),
         {
           label: pinned ? "Unpin from sidebar" : "Pin to sidebar",

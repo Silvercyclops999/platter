@@ -48,6 +48,7 @@ export const SECTION_LABELS: Record<ReleaseSection, string> = {
   remixes: "Remixes",
   demos: "Demos",
   mixtapes: "Mixtapes",
+  unreleased: "Unreleased",
 };
 
 /** "Album", "EP", "Single", "Live album", "Soundtrack"… */

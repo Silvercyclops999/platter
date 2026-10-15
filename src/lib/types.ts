@@ -15,7 +15,9 @@ export type ReleaseSection =
   | "soundtracks"
   | "remixes"
   | "demos"
-  | "mixtapes";
+  | "mixtapes"
+  /** Unreleased material, by release status (artist pages only). */
+  | "unreleased";
 
 export interface Artist {
   id: string;
@@ -77,7 +79,17 @@ export interface Track {
   ratedAt?: number | null;
   /** Plex genre and mood tags on the track itself. */
   genres?: string[];
+  /** How many other versions of the song the library has (pages that fill it in). */
+  otherVersions?: number | null;
+  /** The song's own release status (pages that fill it in). */
+  songStatus?: SongStatus | null;
 }
+
+/**
+ * One song's release status. probablyAlternate: on an album that's probably
+ * unreleased, with the title of a released song (still unreleased).
+ */
+export type SongStatus = "released" | "unreleased" | "probablyUnreleased" | "probablyAlternate";
 
 /** A library artist's name and id (`artist_names`). */
 export interface ArtistName {
@@ -294,6 +306,50 @@ export interface AlbumsArgs {
 export interface ArtistPageSection {
   section: ReleaseSection;
   albums: Album[];
+  /** A section of the user's own, by name (`section` then means nothing). */
+  custom?: string | null;
+}
+
+/** One of an artist's eras (ARCHIVE_ERA). Dates are ARCHIVE_DATE as tagged, else album years. */
+export interface Era {
+  name: string;
+  start?: string | null;
+  end?: string | null;
+  trackCount: number;
+  albumCount: number;
+  cover?: string | null;
+  coverAlbumId?: string | null;
+  albumIds: string[];
+  trackIds: string[];
+}
+
+/** `era_page`: an era's songs by album or build, newest first. */
+export interface EraPage {
+  artist: Artist;
+  era: Era;
+  groups: { album: Album; date?: string | null; edition?: string | null; tracks: Track[] }[];
+}
+
+/** An unreleased build's era banner on its album page. */
+export interface AlbumArchive {
+  era?: string | null;
+  date?: string | null;
+  edition?: string | null;
+  source?: string | null;
+}
+
+/** One version in the Other versions panel (`track_versions`). */
+export interface VersionItem {
+  track: Track;
+  status: SongStatus;
+  version?: string | null;
+  quality?: string | null;
+  date?: string | null;
+  era?: string | null;
+  edition?: string | null;
+  year?: number | null;
+  /** The song the panel was opened from. */
+  current: boolean;
 }
 
 export interface ArtistPage {
@@ -314,6 +370,8 @@ export interface ArtistPage {
    * moment passes, instead of plays order that reshuffles.
    */
   popularPending?: boolean;
+  /** The artist's eras, oldest first. */
+  eras?: Era[];
 }
 
 export interface AlbumPage {
@@ -321,6 +379,8 @@ export interface AlbumPage {
   tracks: Track[];
   totalDurationMs: number;
   moreByArtist: Album[];
+  /** An unreleased build's era banner. */
+  archive?: AlbumArchive | null;
   /** The album artist's photo, for the header. */
   artistThumb?: string | null;
   /** Release date from Plex, YYYY-MM-DD, when it has one. */
@@ -462,6 +522,8 @@ export interface SearchResults {
   playlists: Playlist[];
   tookMs: number;
   source: "local" | "server";
+  /** Other versions of songs in `songs`, under the song's id. */
+  versions?: Record<string, Track[]>;
 }
 
 // ---------------------------------------------------------------- playback & queue
@@ -927,6 +989,12 @@ export interface Settings {
   allowStreamDeck: boolean;
   /** Library import sources turned on ("streaming", "transfer", "lists"). All off until picked. */
   importSources: string[];
+  /** Folder names on a song's path that hint it's unreleased (they only add weight). */
+  archiveFolderKeywords: string[];
+  /** Era cards on artist pages. */
+  showEraCards: boolean;
+  /** "+N versions" on song rows. */
+  showVersionCounts: boolean;
   /** Dark, Light, Match system, or another built-in theme. */
   theme: ThemeSetting;
   /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
@@ -1161,6 +1229,9 @@ export const DEFAULT_SETTINGS: Settings = {
   nowPlayingFeedPort: 32540,
   allowStreamDeck: false,
   importSources: [],
+  archiveFolderKeywords: ["Unreleased", "Leaks", "Demos", "Sessions", "Snippets"],
+  showEraCards: true,
+  showVersionCounts: true,
   theme: "dark",
   accent: "ivory",
   themeFile: null,
@@ -1946,7 +2017,30 @@ export interface AlbumCreditRow {
  * or an unreleased version tag. probablyUnreleased: Plex couldn't match it and
  * nothing is tagged. plexMissed: Plex couldn't match it but MusicBrainz has it.
  */
-export type ReleaseStatus = "taggedUnreleased" | "probablyUnreleased" | "plexMissed" | "released";
+export type ReleaseStatus = "taggedUnreleased" | "confirmedUnreleased" | "probablyUnreleased" | "plexMissed" | "released";
+
+/** The user's answer for an album or a song. */
+export type ReleaseMark = "unreleased" | "released";
+
+export type EvidenceKind =
+  | "tag"
+  | "mark"
+  | "markOverridden"
+  | "unmatched"
+  | "untyped"
+  | "musicbrainz"
+  | "notChecked"
+  | "folder"
+  | "duration";
+
+/** One piece of evidence: weight leans unreleased (positive) or released (negative). */
+export interface Evidence {
+  kind: EvidenceKind;
+  text: string;
+  weight: number;
+  /** This piece settled the status. */
+  decides: boolean;
+}
 
 /** `album_release_status`; `releasestatus://changed` fires when it changes. */
 export interface AlbumReleaseStatus {
@@ -1954,6 +2048,13 @@ export interface AlbumReleaseStatus {
   status: ReleaseStatus;
   /** Plain sentences for "Why?". */
   reasons: string[];
+  artistId?: string;
+  /** Every piece of evidence with its weight. */
+  evidence?: Evidence[];
+  /** The user's mark on the album. */
+  mark?: ReleaseMark | null;
+  /** The weights summed. */
+  score?: number;
 }
 
 /** An album's original release date, label and credits from MusicBrainz. */
@@ -2150,6 +2251,8 @@ export interface EventMap {
   /** An album's MusicBrainz credits were looked up (found or not). */
   "albumcredits://changed": { id: string };
   "releasestatus://changed": { id: string };
+  /** Release marks or the user's sections changed on another device. */
+  "archive://changed": Record<string, never>;
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

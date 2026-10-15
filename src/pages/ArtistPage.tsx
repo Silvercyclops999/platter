@@ -1,8 +1,8 @@
-import { Ellipsis, Pause, Pin, PinOff, Play, Shuffle } from "lucide-react";
+import { Ellipsis, Pause, Pin, PinOff, Play, Shuffle, X } from "lucide-react";
 import { Suspense, lazy, useEffect, useId, useState, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
-import { CardSkeleton } from "../components/Card";
+import { Card, CardSkeleton } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { shareItem } from "../components/ShareMenu";
 import { plexEditItem } from "../components/PlexEditMenu";
@@ -17,12 +17,14 @@ import { artUrl, backend } from "../lib/backend";
 import { isCreditId } from "../lib/credits";
 import { useLoad } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
-import type { Album, Artist, ArtistPage as ArtistPageData, ArtistPageSection } from "../lib/types";
+import type { Album, Artist, ArtistPage as ArtistPageData, ArtistPageSection, Era } from "../lib/types";
+import { useSettings } from "../stores/settings";
+import { eraRange, filterByEra, showEraCards } from "./era";
 import { usePins } from "../stores/pins";
 import { setFollow, useSocial } from "../stores/social";
 import "../shell/social.css";
 import { player, usePlayer } from "../stores/player";
-import { nav } from "../stores/router";
+import { nav, useRouter } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
@@ -46,12 +48,12 @@ import {
   type DiscographyFilter,
 } from "./artist";
 
-/** Page state (see more, chip, expanded rows) starts over for each artist. */
-export function ArtistPage({ id }: { id: string }) {
-  return <ArtistView key={id} id={id} />;
+/** Page state (see more, chip, expanded rows) starts over for each artist. `era` filters it to one era. */
+export function ArtistPage({ id, era }: { id: string; era?: string }) {
+  return <ArtistView key={id} id={id} era={era} />;
 }
 
-function ArtistView({ id }: { id: string }) {
+function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
   const { data: loaded, error } = useLoad(() => backend.artistPage(id), [id]);
   // Similar artists and the global Popular list arrive in the background
   // after the page opened; the page is asked again when they do.
@@ -78,6 +80,7 @@ function ArtistView({ id }: { id: string }) {
       backend.listen("artist://changed", reload),
       backend.listen("artistinfo://changed", reload),
       backend.listen("artistinfo://popular", done),
+      backend.listen("archive://changed", () => reload({ id })),
     ];
     return () => {
       alive = false;
@@ -85,7 +88,11 @@ function ArtistView({ id }: { id: string }) {
       uns.forEach((un) => un.then((f) => f()));
     };
   }, [id]);
-  const data = fresh ?? loaded;
+  const page = fresh ?? loaded;
+  const eraCardsOn = useSettings((s) => s.settings?.showEraCards);
+  const era = (eraName && page?.eras?.find((e) => e.name === eraName)) || null;
+  // The era filter covers Popular, every section and Appears on.
+  const data = page && era ? filterByEra(page, era) : page;
   const popularWaiting = !!data?.popularPending && !gaveUp;
   const credited = isCreditId(id);
   const artist = data?.artist;
@@ -103,7 +110,14 @@ function ArtistView({ id }: { id: string }) {
 
   // A library artist keeps About without a bio; a credited name needs something to say.
   const sections = data
-    ? artistSections({ ...data, about, listeners: info?.listeners, photo: credited ? null : photoPath(data.artist, info), plays: credited ? 0 : data.plays })
+    ? artistSections({
+        ...data,
+        about,
+        listeners: info?.listeners,
+        photo: credited ? null : photoPath(data.artist, info),
+        plays: credited ? 0 : data.plays,
+        eras: showEraCards(data.eras, eraCardsOn) ? data.eras : undefined,
+      })
     : [];
   const text = artist ? (
     <>
@@ -152,6 +166,7 @@ function ArtistView({ id }: { id: string }) {
       <div className="detail-body">
         <ActionRow id={id} data={data} playing={isThisPlaying} onPlay={play} credited={credited} />
         <StatsStrip kind="artist" id={id} />
+        {era && <EraFilterChip id={id} era={era} />}
 
         {!data && (
           <>
@@ -165,6 +180,8 @@ function ArtistView({ id }: { id: string }) {
             switch (s) {
               case "popular":
                 return popularWaiting ? <PopularSkeleton key={s} /> : <PopularSection key={s} id={id} data={data} />;
+              case "eras":
+                return <EraShelf key={s} id={id} eras={data.eras ?? []} selected={era?.name ?? null} />;
               case "discography":
                 return <Discography key={s} id={id} sections={data.sections} artist={credited ? undefined : data.artist.title} />;
               case "appearsOn":
@@ -314,6 +331,73 @@ function ActionRow({
           )
         }
       />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- eras
+
+/** "Era: Glass Season" with a way out, and the era's own page. */
+function EraFilterChip({ id, era }: { id: string; era: Era }) {
+  return (
+    <div className="era-filter" role="group" aria-label="Era filter">
+      <button
+        type="button"
+        className="chip is-selected era-filter__chip"
+        aria-label={`Era: ${era.name}. Show everything`}
+        onClick={() => useRouter.getState().replace({ name: "artist", id })}
+      >
+        <span>Era: {era.name}</span>
+        <X size={14} aria-hidden="true" />
+      </button>
+      <button type="button" className="link era-filter__page" onClick={() => nav.go({ name: "era", id, era: era.name })}>
+        Open the era page
+      </button>
+    </div>
+  );
+}
+
+/** One card per era, oldest first: the most played album's cover, the dates and the song count. */
+function EraShelf({ id, eras, selected }: { id: string; eras: Era[]; selected: string | null }) {
+  return (
+    <div className="era-shelf">
+      <Shelf title="Eras">
+        {eras.map((e) => {
+          const range = eraRange(e);
+          const songs = `${e.trackCount} ${e.trackCount === 1 ? "song" : "songs"}`;
+          return (
+            <ShelfItem key={e.name}>
+              <div className={`era-card ${selected === e.name ? "is-selected" : ""}`} aria-current={selected === e.name || undefined}>
+                <Card
+                  kind="album"
+                  title={e.name}
+                  subtitle={range ? `${range} · ${songs}` : songs}
+                  thumb={e.cover}
+                  onOpen={() =>
+                    selected === e.name
+                      ? useRouter.getState().replace({ name: "artist", id })
+                      : nav.go({ name: "artist", id, era: e.name })
+                  }
+                  onPlay={() => void player.playTracks(e.trackIds)}
+                  onContextMenu={(ev) => {
+                    ev.preventDefault();
+                    openContextMenu(
+                      `Options for ${e.name}`,
+                      [
+                        { label: "Show only this era", onSelect: () => nav.go({ name: "artist", id, era: e.name }) },
+                        { label: "Open the era page", onSelect: () => nav.go({ name: "era", id, era: e.name }) },
+                        { label: "Play", onSelect: () => void player.playTracks(e.trackIds) },
+                        { label: "Add to queue", onSelect: () => void player.addToQueue(e.trackIds.map((t) => ({ id: t, thumb: e.cover ?? null }))) },
+                      ],
+                      ev,
+                    );
+                  }}
+                />
+              </div>
+            </ShelfItem>
+          );
+        })}
+      </Shelf>
     </div>
   );
 }

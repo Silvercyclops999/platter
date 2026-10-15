@@ -70,7 +70,9 @@ describe("release status", () => {
     await loadSettings();
     const s = await backend.albumReleaseStatus(missed.id);
     expect(s.status).toBe("probablyUnreleased");
-    expect(s.reasons.some((r) => r.includes("MusicBrainz"))).toBe(false);
+    // MusicBrainz says nothing either way; "Why?" says it wasn't asked.
+    expect(s.reasons.some((r) => r.includes("MusicBrainz has"))).toBe(false);
+    expect(s.reasons).toContain("MusicBrainz not checked.");
     // So does MusicBrainz itself being off.
     await backend.settingsSet({ checkUnmatchedMusicbrainz: true, infoMusicbrainz: false });
     expect((await backend.albumReleaseStatus(missed.id)).status).toBe("probablyUnreleased");

@@ -1,6 +1,6 @@
 /** Artist page decisions, kept apart from the component so they can be tested. */
-import { SECTION_LABELS } from "../lib/format";
-import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, BioLink, InfoRelated, ReleaseSection } from "../lib/types";
+import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, BioLink, InfoRelated } from "../lib/types";
+import { sectionId, sectionLabel, type SectionId } from "./discography";
 
 /** Popular songs shown at first, and after "See more". */
 export const POPULAR_FIRST = 5;
@@ -71,7 +71,7 @@ export function relatedGroups(related: InfoRelated[]): [string, InfoRelated[]][]
   return [...groups];
 }
 
-export type DiscographyFilter = "popular" | ReleaseSection;
+export type DiscographyFilter = "popular" | SectionId;
 
 export interface Chip {
   id: DiscographyFilter;
@@ -80,7 +80,7 @@ export interface Chip {
 
 /** "Popular releases" first, then one chip per release type the artist has, in section order. */
 export function discographyChips(sections: ArtistPageSection[]): Chip[] {
-  return [{ id: "popular", label: "Popular releases" }, ...sections.map((s) => ({ id: s.section, label: SECTION_LABELS[s.section] }))];
+  return [{ id: "popular", label: "Popular releases" }, ...sections.map((s) => ({ id: sectionId(s), label: sectionLabel(s) }))];
 }
 
 export interface DiscographyItem {
@@ -104,7 +104,7 @@ export function discographyItems(
   filter: DiscographyFilter,
   limit: number = POPULAR_RELEASES_N,
 ): DiscographyItem[] {
-  const section = filter === "popular" ? undefined : sections.find((s) => s.section === filter);
+  const section = filter === "popular" ? undefined : sections.find((s) => sectionId(s) === filter);
   if (section) return [...section.albums].sort(newer).map((album) => ({ album, latest: false }));
   const all = sections.flatMap((s) => s.albums);
   if (!all.length) return [];
@@ -116,7 +116,7 @@ export function discographyItems(
   return [{ album: latest, latest: true }, ...rest.map((album) => ({ album, latest: false }))];
 }
 
-export type ArtistSectionId = "popular" | "discography" | "about" | "fansAlsoLike" | "appearsOn";
+export type ArtistSectionId = "popular" | "eras" | "discography" | "about" | "fansAlsoLike" | "appearsOn";
 
 /**
  * Sections in page order, leaving out the ones with nothing to show. About
@@ -129,10 +129,13 @@ export function artistSections(
     listeners?: number | null;
     photo?: string | null;
     plays?: number;
+    /** Era cards to show (none when hidden or fewer than two). */
+    eras?: unknown[];
   },
 ): ArtistSectionId[] {
   const out: ArtistSectionId[] = [];
   if (page.popular.length) out.push("popular");
+  if ((page.eras?.length ?? 0) >= 2) out.push("eras");
   if (page.sections.some((s) => s.albums.length)) out.push("discography");
   if (page.about?.trim() || page.listeners || page.photo || page.plays) out.push("about");
   if (page.similar.length) out.push("fansAlsoLike");

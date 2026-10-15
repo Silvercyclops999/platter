@@ -42,6 +42,9 @@ import { bookmarkTrackItem, dontPlayArtistItem } from "../stores/curate";
 import { yourStatsItem } from "../stores/stats";
 import { Skeleton } from "./Skeleton";
 import { useOwnDoubleClick } from "../lib/doubleClick";
+import { openVersions, otherVersionsItem } from "../stores/archive";
+import { showVersionLink, versionLinkText } from "../pages/era";
+import "./archive.css";
 
 /** Whether the album page for `albumId` is the one showing. */
 export function onAlbumPage(albumId: string): boolean {
@@ -95,6 +98,7 @@ export function trackMenuItems(
     ...goToArtistItems(track),
     { label: "Go to album", when: () => !onAlbumPage(track.albumId), onSelect: () => nav.go({ name: "album", id: track.albumId }) },
     { label: "Go to song radio", onSelect: () => nav.go({ name: "radio", seed: `track:${track.id}` }) },
+    ...otherVersionsItem(track),
     bookmarkTrackItem(track),
     yourStatsItem("song", track.id, track.title),
     dontPlayArtistItem({ id: track.artistId, title: track.artistTitle }),
@@ -347,6 +351,21 @@ export function TrackRow({
   const PlayIcon = active && playing ? Pause : Play;
   const playLabel = `${active && playing ? "Pause" : "Play"} ${track.title} by ${artists}`;
   const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
+  const versionsOn = useSettings((s) => s.settings?.showVersionCounts);
+  const versions = showVersionLink(track, versionsOn) ? (
+    <button
+      type="button"
+      tabIndex={-1}
+      className="versions-link"
+      aria-label={`${versionLinkText(track.otherVersions!)} of ${track.title}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        openVersions(track);
+      }}
+    >
+      {versionLinkText(track.otherVersions!)}
+    </button>
+  ) : null;
 
   // A drag takes the whole selection when this row is part of it, otherwise
   // just this row, which gets the selected highlight for the drag.
@@ -519,13 +538,14 @@ export function TrackRow({
           </span>
         )}
         <div className="track-row__text">
-          {versionLabel(badges.version) || archiveQualityLabel(badges.quality, track) || ((badges.explicit || downloaded) && !showArtist) ? (
+          {versionLabel(badges.version) || archiveQualityLabel(badges.quality, track) || versions || ((badges.explicit || downloaded) && !showArtist) ? (
             <div className="track-row__title-line">
               <div className="track-row__title truncate">{track.title}</div>
               {downloaded && !showArtist && <DownloadedMark trackId={track.id} />}
               {badges.explicit && !showArtist && <ExplicitBadge />}
               <VersionBadge version={badges.version} />
               <ArchiveQualityBadge track={track} />
+              {versions}
             </div>
           ) : (
             <div className="track-row__title truncate">{track.title}</div>

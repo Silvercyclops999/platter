@@ -244,7 +244,8 @@ describe("mock backend covers the whole contract", () => {
 
   it("has a realistic invented library", () => {
     const m = new MockBackend({ timelines: false, latencyMs: 0 });
-    expect(m.fx.artists).toHaveLength(12);
+    // Twelve generated artists, plus the archive demo artist.
+    expect(m.fx.artists).toHaveLength(13);
     expect(m.fx.albums.length).toBeGreaterThanOrEqual(55);
     expect(m.fx.tracks.length).toBeGreaterThanOrEqual(500);
     const sections = new Set(m.fx.albums.map((a) => a.section));

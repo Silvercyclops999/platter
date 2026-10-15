@@ -30,6 +30,9 @@ import type {
   ArtistInfo,
   AlbumCredits,
   AlbumReleaseStatus,
+  EraPage,
+  ReleaseMark,
+  VersionItem,
   ArtistPage,
   ArtistsArgs,
   AuthStatus,
@@ -388,6 +391,18 @@ export interface Backend {
   albumCredits(id: string): Promise<AlbumCredits>;
   /** Whether an album counts as released and why; `releasestatus://changed` fires when it changes. */
   albumReleaseStatus(id: string): Promise<AlbumReleaseStatus>;
+
+  // Archive (nothing here writes to Plex or files)
+  /** Mark an album or song unreleased or released, or clear the mark (null). */
+  releaseMarkSet(kind: "album" | "track", id: string, mark: ReleaseMark | null): Promise<void>;
+  /** A song and its other versions, released ones first. */
+  trackVersions(id: string): Promise<VersionItem[]>;
+  /** An artist's era: its songs by album or build, newest first. */
+  eraPage(artistId: string, name: string): Promise<EraPage>;
+  /** Move an album to a section of the user's own (null: back to its own). */
+  albumSectionSet(albumId: string, artistId: string, name: string | null): Promise<void>;
+  /** An artist's own section names. */
+  artistSections(artistId: string): Promise<string[]>;
   artistInfoKeys(): Promise<InfoKeysStatus>;
   /** Save a source's key in the keychain (null removes it); answers whether it was refused. */
   artistInfoKeySet(source: KeyedInfoSource, key: string | null): Promise<InfoKeyState>;
@@ -789,6 +804,11 @@ export function createTauriBackend(): Backend {
     artistInfo: (id) => call("artist_info", { id }),
     albumCredits: (id) => call("album_credits", { id }),
     albumReleaseStatus: (id) => call("album_release_status", { id }),
+    releaseMarkSet: (kind, id, mark) => call("release_mark_set", { kind, id, mark }),
+    trackVersions: (id) => call("track_versions", { id }),
+    eraPage: (artistId, name) => call("era_page", { artistId, name }),
+    albumSectionSet: (albumId, artistId, name) => call("album_section_set", { albumId, artistId, name }),
+    artistSections: (artistId) => call("artist_sections", { artistId }),
     artistInfoKeys: () => call("artist_info_keys"),
     artistInfoKeySet: (source, key) => call("artist_info_key_set", { source, key }),
     artistInfoCacheClear: () => call("artist_info_cache_clear"),

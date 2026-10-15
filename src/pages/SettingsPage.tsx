@@ -38,6 +38,7 @@ import { PlaylistNameSetting } from "./PlaylistSettings";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { StreamDeckSettings, streamDeckMatches } from "./StreamDeckSettings";
 import { MixExclusions } from "./MixExclusions";
+import { FolderKeywords } from "./ArchiveSettings";
 import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { FeedNote, FeedPortField, useFeedStatus } from "./FeedSettings";
@@ -1954,6 +1955,34 @@ export function SettingsPage() {
         ) : (
           <Skeleton width={40} height={24} radius="pill" />
         ),
+    },
+    // Library: the archive (unreleased music, versions and eras)
+    {
+      key: "archiveFolderKeywords",
+      section: "Library",
+      group: "Archive",
+      title: "Folder names that hint at unreleased music",
+      description:
+        "When a song's folder has one of these names, Why? lists it for albums that are probably unreleased. A folder name adds weight but never decides on its own. Leave the list empty to stop using folder names.",
+      control: (ids) => (s ? <FolderKeywords settings={s} ids={ids} /> : <Skeleton width={240} height={32} />),
+    },
+    {
+      key: "showVersionCounts",
+      section: "Library",
+      group: "Archive",
+      title: "Show other versions on songs",
+      description:
+        "Released songs with demos, leaks or other versions in your library show +N versions next to the title. Other versions stays in the song's menu either way.",
+      control: (ids) => toggle(s, "showVersionCounts", ids),
+    },
+    {
+      key: "showEraCards",
+      section: "Library",
+      group: "Archive",
+      title: "Show era cards on artist pages",
+      description:
+        "Artists whose songs are tagged with two or more eras get a row of era cards under Popular. Picking one shows only that era, released and unreleased.",
+      control: (ids) => toggle(s, "showEraCards", ids),
     },
     // Library: drag and drop
     {

@@ -44,6 +44,7 @@ import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
 import { LazyLyricsEditorHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost } from "./lazyHosts";
 import { QueuePanel } from "./QueuePanel";
+import { ArchiveDialogs } from "../components/ArchiveDialogs";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -206,6 +207,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <ArchiveDialogs />
       <LazyPlexEditDialogs />
       <LazySmartEditorHost />
       <FolderDialogs />

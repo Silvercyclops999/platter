@@ -171,13 +171,18 @@ export function mockMatched(a: Album): boolean {
   return a.format !== null || a.subformats.length > 0;
 }
 
+/** The archive demo artist (mock/archive), added after the generated library. */
+export const ARCHIVE_ARTIST_ID = "190";
+
 /**
  * An album Plex couldn't match that MusicBrainz has anyway ("Plex missed
- * it"). In the mock it's the last unmatched album.
+ * it"). In the mock it's the last unmatched album of the generated library.
  */
 export function mockPlexMissed(albums: Album[], a: Album): boolean {
-  if (mockMatched(a)) return false;
-  for (let i = albums.length - 1; i >= 0; i--) if (!mockMatched(albums[i])) return albums[i].id === a.id;
+  if (mockMatched(a) || a.artistId === ARCHIVE_ARTIST_ID) return false;
+  for (let i = albums.length - 1; i >= 0; i--) {
+    if (albums[i].artistId !== ARCHIVE_ARTIST_ID && !mockMatched(albums[i])) return albums[i].id === a.id;
+  }
   return false;
 }
 

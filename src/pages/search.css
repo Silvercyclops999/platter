@@ -133,3 +133,16 @@
   .sr-top { min-height: 104px; }
   .sr-top__title { font-size: var(--font-size-xl); }
 }
+
+/* "N other versions" under a song; its versions expand in place. */
+.sr-versions { display: flex; align-items: center; min-height: 28px; padding-left: calc(48px + var(--space-3) + var(--space-2)); list-style: none; }
+.track-list .sr-versions { padding-left: calc(32px + 40px + var(--space-4) * 2); }
+.sr-versions__toggle { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border-radius: var(--radius-pill); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); }
+.sr-versions__toggle:hover { color: var(--color-text-primary); background: var(--color-state-hover); }
+.sr-versions__toggle svg { transform: rotate(-90deg); }
+.sr-versions__toggle svg.is-open { transform: none; }
+.sr-versions__list { list-style: none; }
+.sr-versions__list > ul { margin: 0; padding: 0 0 0 var(--space-6); border-left: 2px solid var(--color-state-selected); margin-left: calc(24px + var(--space-2)); }
+.sr-list--top-versions > .sr-versions { padding-left: var(--space-4); }
+/* Search groups versions itself, so rows don't repeat +N versions. */
+.sr .versions-link { display: none; }

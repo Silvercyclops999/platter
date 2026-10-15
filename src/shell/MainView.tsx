@@ -28,6 +28,7 @@ const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
 const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
+const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
@@ -143,7 +144,9 @@ function Page({ route }: { route: Route }) {
     case "library":
       return <LibraryPage tab={route.tab} />;
     case "artist":
-      return <ArtistPage id={route.id} />;
+      return <ArtistPage id={route.id} era={route.era} />;
+    case "era":
+      return <EraPage key={`${route.id}:${route.era}`} artistId={route.id} name={route.era} />;
     case "discography":
       return <DiscographyPage id={route.id} type={route.type} />;
     case "album":
