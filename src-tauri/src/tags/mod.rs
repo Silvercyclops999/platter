@@ -46,14 +46,21 @@ pub struct FileTags {
     /// MusicBrainz recording id, lower case (Vorbis MUSICBRAINZ_TRACKID, ID3
     /// UFID owned by musicbrainz.org, MP4 freeform "MusicBrainz Track Id").
     pub recording_mbid: Option<String>,
+    /// The album name the file carries (ALBUM, ID3 TALB, MP4 "©alb").
+    pub album: Option<String>,
+    /// The album artist the file carries (ALBUMARTIST, ID3 TPE2, MP4 aART).
+    pub album_artist: Option<String>,
+    /// The year its date starts with (DATE or YEAR, ID3 TDRC or TYER, MP4 "©day").
+    pub year: Option<i32>,
 }
 
 /// Raised whenever the parsers start keeping something new, so files read
 /// by an older build are read again (at the scan's background priority).
 /// 1: ISRC and the MusicBrainz recording id.
-pub const CACHE_VERSION: i64 = 1;
+/// 2: album, album artist and year (the library doctor compares them).
+pub const CACHE_VERSION: i64 = 2;
 
-const KEYS: [&str; 14] = [
+const KEYS: [&str; 20] = [
     "ARCHIVE_VERSION",
     "ARCHIVE_ERA",
     "ARCHIVE_QUALITY",
@@ -68,6 +75,12 @@ const KEYS: [&str; 14] = [
     "ISRC",
     "MUSICBRAINZ_TRACKID",
     "MUSICBRAINZ TRACK ID",
+    "ALBUM",
+    "ALBUMARTIST",
+    "ALBUM ARTIST",
+    "ALBUM_ARTIST",
+    "DATE",
+    "YEAR",
 ];
 
 impl FileTags {
@@ -132,6 +145,13 @@ impl FileTags {
                     self.recording_mbid = v.split([';', '/', ',']).find_map(clean_mbid);
                 }
             }
+            "ALBUM" => first(&mut self.album, v.to_string()),
+            "ALBUMARTIST" | "ALBUM ARTIST" | "ALBUM_ARTIST" => first(&mut self.album_artist, v.to_string()),
+            "DATE" | "YEAR" => {
+                if self.year.is_none() {
+                    self.year = year_of(v);
+                }
+            }
             "EXPLICIT" => match v.to_ascii_lowercase().as_str() {
                 "1" | "true" | "yes" | "explicit" => self.set_explicit(Some(true)),
                 "0" | "false" | "no" | "clean" => self.set_explicit(Some(false)),
@@ -165,6 +185,17 @@ pub fn clean_mbid(v: &str) -> Option<String> {
     let ok = s.len() == 36
         && s.char_indices().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() });
     ok.then_some(s)
+}
+
+/// The year a date tag starts with ("2016", "2016-05-04", "2016/05",
+/// "20160504"), or None when it doesn't start with one.
+pub fn year_of(v: &str) -> Option<i32> {
+    let v = v.trim();
+    let d: String = v.chars().take_while(char::is_ascii_digit).collect();
+    if d.len() != 4 && d.len() != 8 {
+        return None;
+    }
+    d[..4].parse().ok().filter(|y| (1000..=2999).contains(y))
 }
 
 /// Whether a comma-separated flag list holds `flag` (fan or AI edit).

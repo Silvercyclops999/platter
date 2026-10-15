@@ -240,6 +240,9 @@ fn frames(s: &Sparse, start: u64, end: u64, ver: u8, ext: bool, frame_unsync: bo
             b"TXXX" | b"TXX" => Some(Frame::UserText),
             b"TSRC" | b"TRC" => Some(Frame::Isrc),
             b"UFID" | b"UFI" => Some(Frame::Ufid),
+            b"TALB" | b"TAL" => Some(Frame::Text("ALBUM")),
+            b"TPE2" | b"TP2" => Some(Frame::Text("ALBUMARTIST")),
+            b"TDRC" | b"TYER" | b"TYE" => Some(Frame::Text("YEAR")),
             _ => None,
         };
         if let Some(kind) = kind {
@@ -259,6 +262,7 @@ fn frames(s: &Sparse, start: u64, end: u64, ver: u8, ext: bool, frame_unsync: bo
                     Frame::UserText => txxx(d, tags),
                     Frame::Isrc => text_frame(d, "ISRC", tags),
                     Frame::Ufid => ufid(d, tags),
+                    Frame::Text(key) => text_frame(d, key, tags),
                 }
             }
         }
@@ -318,6 +322,8 @@ enum Frame {
     Isrc,
     /// UFID: an id owned by a database; MusicBrainz keeps its recording id here.
     Ufid,
+    /// A standard text frame kept under this name (album, album artist, year).
+    Text(&'static str),
 }
 
 /// A standard text frame (encoding byte, then one or more values) stored as `key`.
@@ -420,6 +426,19 @@ fn mp4(s: &Sparse, tags: &mut FileTags) -> R<()> {
                         Some(2) => tags.set_explicit(Some(false)),
                         _ => {}
                     }
+                }
+            }
+            // Album, album artist and date: plain text in a data child.
+            b"\xa9alb" | b"aART" | b"\xa9day" => {
+                if let Some(d) = find_child(s, item.body, item.end, b"data")? {
+                    let v = need(s, d.body, ((d.end - d.body) as usize).min(1024))?;
+                    let value = String::from_utf8_lossy(v.get(8..).unwrap_or(&[])).into_owned();
+                    let key = match &item.kind {
+                        b"aART" => "ALBUMARTIST",
+                        b"\xa9day" => "YEAR",
+                        _ => "ALBUM",
+                    };
+                    tags.set(key, &value);
                 }
             }
             b"----" => {

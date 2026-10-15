@@ -97,6 +97,12 @@ pub async fn plex_edit_merge(
     editor.merge(&target, others, photo_from).await
 }
 
+/// Merge albums Plex shows apart into `target`.
+#[tauri::command]
+pub async fn plex_edit_merge_albums(editor: State<'_, PlexEditor>, target: String, others: Vec<String>) -> AppResult<EditChange> {
+    editor.merge_albums(&target, others).await
+}
+
 #[tauri::command]
 pub async fn plex_edit_split(editor: State<'_, PlexEditor>, id: String) -> AppResult<EditChange> {
     editor.split(&id).await

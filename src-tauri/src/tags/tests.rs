@@ -949,3 +949,53 @@ fn archive_versions_make_shares_and_discord_unreleased() {
     assert_eq!(db.read(|c| store::album_version(c, "1")).unwrap().as_deref(), Some("released"));
     assert_eq!(db.read(|c| store::track_version(c, "42")).unwrap(), None);
 }
+
+// ------------------------------------------------------------------ album, album artist, year
+
+#[test]
+fn album_album_artist_and_year_are_kept_from_every_format() {
+    let want = |t: &FileTags, who: &str| {
+        assert_eq!(t.album.as_deref(), Some("Night Drive"), "{who}");
+        assert_eq!(t.album_artist.as_deref(), Some("Made Up Band"), "{who}");
+        assert_eq!(t.year, Some(2016), "{who}");
+    };
+    let f = flac(&[streaminfo(), (4, vorbis(&["ALBUM=Night Drive", "ALBUMARTIST=Made Up Band", "DATE=2016-05-04"]))]);
+    want(&run(&f, Some("flac")).0, "flac");
+    let text = |v: &str| [&[3u8][..], v.as_bytes()].concat();
+    for (ver, year_frame) in [(4u8, &b"TDRC"[..]), (3, &b"TYER"[..])] {
+        let f = [id3(ver, &[(b"TALB", text("Night Drive")), (b"TPE2", text("Made Up Band")), (year_frame, text("2016"))]), vec![0xff; 400]]
+            .concat();
+        want(&run(&f, Some("mp3")).0, &format!("id3 v2.{ver}"));
+    }
+    let f = id3(2, &[(b"TAL", text("Night Drive")), (b"TP2", text("Made Up Band")), (b"TYE", text("2016"))]);
+    want(&run(&f, Some("mp3")).0, "id3 v2.2");
+    let item = |kind: &[u8; 4], v: &str| atom(kind, &data_atom(1, v.as_bytes()));
+    let f = mp4(&[item(b"\xa9alb", "Night Drive"), item(b"aART", "Made Up Band"), item(b"\xa9day", "2016-05-04T07:00:00Z")], false, 2000, true);
+    want(&run(&f, Some("mp4")).0, "mp4");
+    // Vorbis spells album artist a few ways.
+    let f = flac(&[streaminfo(), (4, vorbis(&["album=Night Drive", "ALBUM ARTIST=Made Up Band", "YEAR=2016"]))]);
+    want(&run(&f, Some("flac")).0, "flac, other spellings");
+}
+
+#[test]
+fn years_come_from_the_start_of_a_date() {
+    use super::year_of;
+    assert_eq!(year_of("2016"), Some(2016));
+    assert_eq!(year_of(" 2016-05-04 "), Some(2016));
+    assert_eq!(year_of("2016/05"), Some(2016));
+    assert_eq!(year_of("20160504"), Some(2016));
+    assert_eq!(year_of("May 2016"), None);
+    assert_eq!(year_of("16"), None);
+    assert_eq!(year_of("0000"), None);
+}
+
+#[test]
+fn album_tags_round_trip_through_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("t.db")).unwrap();
+    let t = FileTags { album: Some("Night Drive".into()), album_artist: Some("Made Up Band".into()), year: Some(2016), ..Default::default() };
+    db.write(|c| store::save(c, "/p/x", Status::Ok, &t, 1)).unwrap();
+    let (status, back) = db.read(|c| store::get(c, "/p/x")).unwrap().unwrap();
+    assert_eq!(status, "ok");
+    assert_eq!(back, t);
+}

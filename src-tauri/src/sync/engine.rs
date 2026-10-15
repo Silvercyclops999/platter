@@ -27,8 +27,8 @@ use crate::error::{AppError, AppResult};
 pub struct Groups {
     /// Settings marked Synced.
     pub settings: bool,
-    /// Library folders and pins, release status marks and artist page
-    /// sections.
+    /// Library folders and pins, release status marks, artist page
+    /// sections and ignored library doctor findings.
     pub library: bool,
     /// Followed artists, hidden and snoozed items, bookmarks.
     pub follows: bool,
@@ -57,6 +57,7 @@ impl Groups {
                 store::SMART.name(),
                 store::RELEASE_MARKS.name(),
                 store::ALBUM_SECTIONS.name(),
+                store::DOCTOR_IGNORED.name(),
             ]);
         }
         if self.follows {

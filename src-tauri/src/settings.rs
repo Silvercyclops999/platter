@@ -533,6 +533,12 @@ pub struct Settings {
     pub show_era_cards: bool,
     /// "+N versions" on song rows that have other versions.
     pub show_version_counts: bool,
+    /// The library doctor checks the library in the background.
+    pub library_doctor: bool,
+    /// Which of its checks run.
+    pub doctor_checks: crate::doctor::Checks,
+    /// Album covers smaller than this (longest side, pixels) count as small.
+    pub doctor_cover_px: u32,
 }
 
 /// Most folder keywords kept, and the longest one.
@@ -719,6 +725,9 @@ impl Default for Settings {
             archive_folder_keywords: crate::db::release::default_folder_keywords(),
             show_era_cards: true,
             show_version_counts: true,
+            library_doctor: true,
+            doctor_checks: crate::doctor::Checks::default(),
+            doctor_cover_px: crate::doctor::DEFAULT_COVER_PX,
         }
     }
 }
@@ -816,6 +825,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "archiveFolderKeywords",
     "showEraCards",
     "showVersionCounts",
+    "libraryDoctor",
+    "doctorChecks",
+    "doctorCoverPx",
 ];
 
 /// Settings kept on this device only.
@@ -1047,6 +1059,9 @@ pub struct SettingsPatch {
     pub archive_folder_keywords: Option<Vec<String>>,
     pub show_era_cards: Option<bool>,
     pub show_version_counts: Option<bool>,
+    pub library_doctor: Option<bool>,
+    pub doctor_checks: Option<crate::doctor::Checks>,
+    pub doctor_cover_px: Option<u32>,
 }
 
 impl SettingsPatch {
@@ -1260,6 +1275,14 @@ impl Settings {
         }
         set(&mut self.show_era_cards, p.show_era_cards);
         set(&mut self.show_version_counts, p.show_version_counts);
+        set(&mut self.library_doctor, p.library_doctor);
+        set(&mut self.doctor_checks, p.doctor_checks);
+        if let Some(px) = p.doctor_cover_px {
+            if !crate::doctor::COVER_PX_CHOICES.contains(&px) {
+                return Err(AppError::Invalid("Pick one of the cover sizes offered.".into()));
+            }
+            self.doctor_cover_px = px;
+        }
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -1344,6 +1367,9 @@ impl Settings {
         if !DAYLIST_HOURS.contains(&self.daylist_hours) {
             self.daylist_hours = 3;
         }
+        if !crate::doctor::COVER_PX_CHOICES.contains(&self.doctor_cover_px) {
+            self.doctor_cover_px = crate::doctor::DEFAULT_COVER_PX;
+        }
         // A hand-edited accent or theme falls back rather than reaching the UI.
         self.accent = crate::themes::accent_value(&self.accent).unwrap_or_else(|| "ivory".into());
         if self.theme_file.as_ref().is_some_and(|t| crate::themes::check(t).is_err()) {
@@ -1393,6 +1419,10 @@ impl Settings {
     }
 
     /// How file tags shape lists and play contexts.
+    pub fn doctor_options(&self) -> crate::doctor::Options {
+        crate::doctor::Options { on: self.library_doctor, checks: self.doctor_checks, cover_px: self.doctor_cover_px }
+    }
+
     pub fn tag_view(&self) -> crate::tags::TagView {
         crate::tags::TagView {
             group_editions: self.group_editions,
@@ -1625,6 +1655,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     if keywords || before != after {
         crate::archive::refresh_soon(db);
     }
+    crate::doctor::set_options(s.doctor_options());
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
         scan.set_enabled(s.read_file_tags);
     }

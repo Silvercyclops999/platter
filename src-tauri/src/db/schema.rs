@@ -912,6 +912,36 @@ CREATE INDEX IF NOT EXISTS versions_group ON versions (group_key);
 CREATE INDEX IF NOT EXISTS versions_artist ON versions (artist_id);
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
+    // v30: the library doctor (doctor::). file_tags keeps each file's own
+    // album, album artist and year (read again at the scan's background
+    // priority). doctor_findings holds what the last check of each album
+    // artist found (JSON), doctor_artists what that check saw (a signature,
+    // so unchanged artists are skipped), and doctor_covers each album
+    // cover's size in pixels, read from the image's first bytes.
+    r#"
+ALTER TABLE file_tags ADD COLUMN album TEXT;
+ALTER TABLE file_tags ADD COLUMN album_artist TEXT;
+ALTER TABLE file_tags ADD COLUMN year INTEGER;
+CREATE TABLE IF NOT EXISTS doctor_findings (
+    id        TEXT PRIMARY KEY,
+    artist_id TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    body      TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS doctor_findings_artist ON doctor_findings (artist_id);
+CREATE TABLE IF NOT EXISTS doctor_artists (
+    artist_id  TEXT PRIMARY KEY,
+    sig        TEXT NOT NULL,
+    checked_at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS doctor_covers (
+    album_id   TEXT PRIMARY KEY,
+    thumb      TEXT NOT NULL,
+    width      INTEGER,
+    height     INTEGER,
+    checked_at INTEGER NOT NULL
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

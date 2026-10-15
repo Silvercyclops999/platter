@@ -90,10 +90,13 @@ pub const RELEASE_MARKS: Ns<crate::db::release::Mark> = Ns::new("releaseMarks");
 /// Albums moved to a section of the user's own on the artist page, keyed
 /// by album id.
 pub const ALBUM_SECTIONS: Ns<crate::archive::CustomSection> = Ns::new("albumSections");
+/// Library doctor findings the user chose to ignore, keyed by finding id.
+pub const DOCTOR_IGNORED: Ns<crate::doctor::Ignored> = Ns::new("doctorIgnored");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 11] = [
+pub const NAMESPACES: [&str; 12] = [
+    DOCTOR_IGNORED.name(),
     RELEASE_MARKS.name(),
     ALBUM_SECTIONS.name(),
     SETTINGS.name(),

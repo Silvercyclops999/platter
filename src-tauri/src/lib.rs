@@ -4,6 +4,7 @@ pub mod audio;
 pub mod bookmarks;
 pub mod bridge;
 pub mod db;
+pub mod doctor;
 pub mod downloads;
 pub mod error;
 pub mod feed;
@@ -875,6 +876,7 @@ pub fn run() {
 
             plex.start(app.handle().clone());
             watch_library(app.handle().clone(), plex.clone(), db.clone());
+            doctor::spawn(app.handle().clone(), db.clone(), Arc::new(tags::commands::PlexParts(plex.clone())), tags::fetch::Reader::new(audio::http::http_client(), player.transfer_gate(), Some(player.transfer_host())));
             monitor::files::spawn(plex.clone(), db.clone(), player.clone());
             monitor::net::spawn(plex.clone());
             monitor::disk::spawn(
@@ -1059,6 +1061,11 @@ pub fn run() {
             archive::commands::era_page,
             archive::commands::album_section_set,
             archive::commands::artist_sections,
+            doctor::commands::doctor_report,
+            doctor::commands::doctor_count,
+            doctor::commands::doctor_ignore,
+            doctor::commands::doctor_run,
+            plexedit::commands::plex_edit_merge_albums,
             feed::commands::feed_status,
             feed::deck::commands::deck_status,
             feed::deck::commands::deck_revoke,

@@ -445,6 +445,38 @@ impl PlexEditor {
         ))
     }
 
+    /// Merge albums Plex shows apart into `target` (the library doctor's
+    /// "split in two" fix). Undo splits them again.
+    pub async fn merge_albums(&self, target: &str, others: Vec<String>) -> AppResult<EditChange> {
+        let c = self.guard(target).await?;
+        if others.is_empty() || others.iter().any(|o| o == target) {
+            return Err(AppError::Invalid("Pick another album to merge with.".into()));
+        }
+        for o in &others {
+            if crate::sid::tag_of(o) != crate::sid::tag_of(target) {
+                return Err(AppError::Invalid("Albums on different servers can't be merged.".into()));
+            }
+        }
+        let name = self.note(target, c.editable(target).await)?.fields.title;
+        self.note(target, c.merge(target, &others).await)?;
+        let mut ids = vec![target.to_string()];
+        ids.extend(others.iter().cloned());
+        self.inner.hooks.changed(EditKind::Album, &ids, true, true).await;
+        let label = match others.len() {
+            1 => format!("Merged the two parts of {name}"),
+            n => format!("Merged {} parts of {name}", n + 1),
+        };
+        Ok(self.record(
+            self.next_id(),
+            target,
+            EditKind::Album,
+            EditAction::Merge,
+            label,
+            true,
+            Some(Undo::Merge { target: target.to_string() }),
+        ))
+    }
+
     pub async fn split(&self, id: &str) -> AppResult<EditChange> {
         let c = self.guard(id).await?;
         self.note(id, c.split(id).await)?;
@@ -507,7 +539,7 @@ impl PlexEditor {
             }
             Undo::Merge { target } => {
                 self.note(id, c.split(&target).await)?;
-                self.inner.hooks.changed(EditKind::Artist, &[target], true, true).await;
+                self.inner.hooks.changed(kind, &[target], true, true).await;
             }
         }
         let mut log = self.inner.log.lock();

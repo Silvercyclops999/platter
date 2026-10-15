@@ -291,6 +291,7 @@ there (setting `playlistAskDuplicates`).
 | `plex_edit_unmatch` | `{ id, kind }` | `EditChange` |
 | `plex_edit_details` | `{ id, fields }` | `EditChange` |
 | `plex_edit_merge` | `{ target, others: string[], photoFrom? }` | `EditChange` |
+| `plex_edit_merge_albums` | `{ target, others: string[] }` | `EditChange` |
 | `plex_edit_split` | `{ id }` | `EditChange` |
 | `plex_edit_refresh` | `{ id, kind }` | `EditChange` |
 | `plex_edit_undo` | `{ changeId }` | `EditChange` (now `undone`) |
@@ -525,6 +526,46 @@ Dates come from `ARCHIVE_DATE`, else the album years.
 `EraPage = { artist, era, groups: { album, date?, edition?, tracks }[] }`,
 newest build first. `album_page` adds `archive?: { era?, date?, edition?, source? }`
 for unreleased albums with archive tags.
+
+## Library doctor
+| Command | Args | Returns |
+| --- | --- | --- |
+| `doctor_report` | – | `DoctorReport` |
+| `doctor_count` | – | number of findings to fix (the badge) |
+| `doctor_ignore` | `{ id, kind, title, ignore: boolean }` | – |
+| `doctor_run` | – | – (check every artist again soon) |
+
+`DoctorReport = { on, findings: DoctorFinding[], ignored: DoctorFinding[], count, running, checkedAt?, tagsRead, tagsTotal }`
+
+`DoctorFinding = { id, kind, artistId, artist, albumId, album, thumb?, title, text, evidence: string[], fix, tracks: string[], others: { id, title, thumb? }[], table: { trackId, title, album?, albumArtist?, year? }[] }`
+
+`kind` is one of `duplicate` (the same recording twice on one album),
+`cover` (no cover, or one smaller than `doctorCoverPx` on its longest side),
+`albumTags` (album name, album artist or year differ between an album's
+files), `splitAlbum` (one album shown as two or more: same title and album
+artist, no shared songs, the same year, edition, version and release
+status), `albumArtist` (files with no album artist on an album whose songs
+credit several artists, or whose name is also under another artist),
+`lowQuality` (a lossy copy next to a lossless one of the same recording on
+another album, or a low bitrate well under another lossy copy) and
+`unmatched` (Plex couldn't match it and the MusicBrainz check found it).
+Unreleased songs never match anything, so they are never duplicates or
+low-quality copies, and unreleased albums are never `unmatched`.
+
+`fix` names the app's own flow: `cover` (Change cover), `match` (Fix match),
+`mergeAlbums` (`plex_edit_merge_albums` after a confirm), `openAlbum` or
+`tags` (each song's tags in `table`; they are changed in a tagger). Low
+quality findings also offer a Lidarr request when Lidarr is ready. Nothing
+here writes to Plex or to files.
+
+The check runs in the background after a sync, after file tags are read and
+after marks change, once the library has been quiet for a short while. It
+goes one album artist at a time and skips artists whose albums haven't
+changed. Cover sizes are read from the first bytes of each cover through the
+same low-priority reads as file tags. `doctor://changed` (`{ count, running }`)
+fires when findings or ignores change. Ignored findings are app state in the
+sync store (`doctorIgnored`, keyed by finding id) and sync with the library
+group.
 
 ## Sharing
 | Command | Args | Returns |
@@ -831,7 +872,10 @@ song: the ISRC (ID3 `TSRC`, Vorbis `ISRC`, MP4 `ISRC`) and the MusicBrainz
 recording id (Vorbis `MUSICBRAINZ_TRACKID`, ID3 `UFID` owned by
 `http://musicbrainz.org`, MP4 `MusicBrainz Track Id`). Songs are matched by
 ISRC, then the recording id from file tags, else Plex's track id, then
-artist and title. Each cached row carries the cache version it was read
+artist and title. The file's own album, album artist and year are kept too
+(Vorbis `ALBUM`, `ALBUMARTIST` or `ALBUM ARTIST`, `DATE` or `YEAR`; ID3
+`TALB`, `TPE2`, `TDRC` or `TYER`; MP4 `©alb`, `aART`, `©day`), for the
+library doctor. Each cached row carries the cache version it was read
 with; when a new version keeps more, older rows are read again after every
 unread file, and they keep working until then.
 
@@ -2039,6 +2083,9 @@ The rest of the fields, with their defaults:
 | `syncFollows` | bool, true | What to sync: followed artists, hidden and snoozed items, bookmarks. This device only. |
 | `syncLyrics` | bool, true | What to sync: lyrics written in the editor. This device only. |
 | `bookmarksInLibrary` | bool, true | A Bookmarks row under Liked Songs in the library. |
+| `libraryDoctor` | bool, true | The library doctor checks the library in the background and shows a count in the app menu. |
+| `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched }`, all true | Which library doctor checks run. |
+| `doctorCoverPx` | 300, 500, 600 (default), 800, 1000 or 1400 | Covers smaller than this on their longest side count as small. |
 | `scrobbleLastfm` | bool, false | Scrobble to Last.fm once signed in. This device only. |
 | `scrobbleListenbrainz` | bool, false | Scrobble to ListenBrainz with the user token. This device only. |
 | `scrobbleUnreleased` | bool, false | Unreleased music scrobbles too. |

@@ -50,8 +50,8 @@ pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i
     c.execute(
         "INSERT OR REPLACE INTO file_tags
              (part_key, status, explicit, version, era, quality, date, edition, grp, source, flags, scanned_at,
-              isrc, recording_mbid, ver)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+              isrc, recording_mbid, ver, album, album_artist, year)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             part_key,
             status.key(),
@@ -67,7 +67,10 @@ pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i
             now,
             t.isrc,
             t.recording_mbid,
-            CACHE_VERSION
+            CACHE_VERSION,
+            t.album,
+            t.album_artist,
+            t.year
         ],
     )?;
     Ok(())
@@ -76,7 +79,8 @@ pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i
 /// Read tags for one part key (tests and diagnostics).
 pub fn get(c: &Connection, part_key: &str) -> AppResult<Option<(String, FileTags)>> {
     Ok(c.query_row(
-        "SELECT status, explicit, version, era, quality, date, edition, grp, source, flags, isrc, recording_mbid
+        "SELECT status, explicit, version, era, quality, date, edition, grp, source, flags, isrc, recording_mbid,
+                album, album_artist, year
          FROM file_tags WHERE part_key = ?1",
         [part_key],
         |r| {
@@ -94,6 +98,9 @@ pub fn get(c: &Connection, part_key: &str) -> AppResult<Option<(String, FileTags
                     flags: r.get(9)?,
                     isrc: r.get(10)?,
                     recording_mbid: r.get(11)?,
+                    album: r.get(12)?,
+                    album_artist: r.get(13)?,
+                    year: r.get(14)?,
                 },
             ))
         },
