@@ -265,13 +265,24 @@ pub fn run() {
             db::artcache::respond(cache, req.uri().to_string(), responder);
         })
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
+            let root_dir = app.path().app_data_dir()?;
             let cache_dir = app.path().app_cache_dir()?;
+            std::fs::create_dir_all(&root_dir)?;
+            monitor::crash::install(&root_dir);
+            // The Plex Home user this run belongs to: their own folder and
+            // keychain entries (the user who signed in keeps the top folder).
+            let (profile, data_dir) = plex::home::startup(&root_dir);
+            plex::keychain::set_profile(profile.clone());
             std::fs::create_dir_all(&data_dir)?;
-            monitor::crash::install(&data_dir);
             let audio_dir = cache_dir.join("audio");
 
             let plex = PlexState::new(data_dir.clone())?;
+            app.manage(plex::home::Home::new(
+                root_dir.clone(),
+                profile,
+                plex.plex_tv().clone(),
+                Arc::new(plex::home::KeyringProfiles),
+            ));
             let db = DbHandle::open(data_dir.join("library.sqlite"))?;
             db.set_source(Arc::new(bridge::PlexLibrary::new(plex.clone())));
             db.set_events(Arc::new(monitor::library::SyncHealth {
@@ -744,6 +755,9 @@ pub fn run() {
             plex::commands::server_select,
             plex::commands::health,
             plex::commands::open_local_network_settings,
+            plex::commands::home_users,
+            plex::commands::home_switch,
+            plex::commands::home_remember_set,
             plex::details::now_playing_details,
             lyrics::commands::lyrics_get,
             lyrics::commands::lyrics_own_get,

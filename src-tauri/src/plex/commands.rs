@@ -40,6 +40,9 @@ pub const COMMANDS: &[&str] = &[
     "server_select",
     "health",
     "open_local_network_settings",
+    "home_users",
+    "home_switch",
+    "home_remember_set",
 ];
 
 #[tauri::command]
@@ -67,8 +70,13 @@ pub async fn auth_cancel(state: State<'_, PlexState>) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub async fn auth_sign_out(state: State<'_, PlexState>) -> AppResult<()> {
-    state.sign_out().await
+pub async fn auth_sign_out(app: AppHandle, state: State<'_, PlexState>, home: State<'_, super::home::Home>) -> AppResult<()> {
+    state.sign_out().await?;
+    // Signing out as another Home user goes back to the user who signed in.
+    if home.signed_out()? {
+        app.request_restart();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -103,4 +111,32 @@ pub async fn open_local_network_settings(app: AppHandle, state: State<'_, PlexSt
         .map_err(|e| AppError::Internal(format!("open settings: {e}")))?;
     state.recheck();
     Ok(())
+}
+
+/// The account's Plex Home users (docs/IPC.md "Home users"). Empty when the
+/// account isn't a Home.
+#[tauri::command]
+pub async fn home_users(home: State<'_, super::home::Home>) -> AppResult<super::home::HomeUsers> {
+    home.users().await
+}
+
+/// Switch to another Home user (with their PIN when they have one). On
+/// success the app restarts as that user; the queue is saved first.
+#[tauri::command]
+pub async fn home_switch(app: AppHandle, home: State<'_, super::home::Home>, uuid: String, pin: Option<String>) -> AppResult<()> {
+    let pin = pin.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    let switched = home.switch(&uuid, pin).await?;
+    if switched.restart {
+        use tauri::Emitter;
+        let _ = app.emit(super::home::EVENT_HOME_CHANGED, serde_json::json!({ "restarting": true }));
+        // Exiting saves the queue and ends a listening session.
+        app.request_restart();
+    }
+    Ok(())
+}
+
+/// Settings: remember the last Home user on this device.
+#[tauri::command]
+pub async fn home_remember_set(home: State<'_, super::home::Home>, on: bool) -> AppResult<()> {
+    home.set_remember(on)
 }

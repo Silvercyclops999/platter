@@ -23,25 +23,61 @@ pub trait TokenStore: Send + Sync {
     fn delete(&self, account: &str) -> AppResult<()>;
 }
 
+/// The Plex Home user whose keychain entries this run uses (see
+/// `plex::home`). Set once at startup, before any store is made; None is
+/// the user who signed in, whose entries have no prefix.
+static PROFILE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Use `profile`'s keychain entries for the rest of this run. Only the first
+/// call counts.
+pub fn set_profile(profile: Option<String>) {
+    let _ = PROFILE.set(profile);
+}
+
+/// The keychain account name for `account` in a profile: unchanged for the
+/// user who signed in, `u.<profile>.<account>` for another Home user.
+pub fn profile_account(profile: Option<&str>, account: &str) -> String {
+    match profile {
+        Some(p) => format!("u.{p}.{account}"),
+        None => account.to_string(),
+    }
+}
+
 /// OS keychain store.
 #[derive(Debug, Default)]
 pub struct KeyringStore {
     service: String,
+    profile: Option<String>,
 }
 
 impl KeyringStore {
+    /// The app's store, namespaced to this run's Home user.
     pub fn new() -> Self {
-        Self::with_service(KEYRING_SERVICE)
+        KeyringStore {
+            service: KEYRING_SERVICE.to_string(),
+            profile: PROFILE.get().cloned().flatten(),
+        }
+    }
+
+    /// A store for one Home user's entries (switching writes the new user's
+    /// token there).
+    pub fn for_profile(profile: Option<&str>) -> Self {
+        KeyringStore {
+            service: KEYRING_SERVICE.to_string(),
+            profile: profile.map(str::to_string),
+        }
     }
 
     pub fn with_service(service: &str) -> Self {
         KeyringStore {
             service: service.to_string(),
+            profile: None,
         }
     }
 
     fn entry(&self, account: &str) -> AppResult<keyring::Entry> {
-        keyring::Entry::new(&self.service, account).map_err(map_keyring)
+        let account = profile_account(self.profile.as_deref(), account);
+        keyring::Entry::new(&self.service, &account).map_err(map_keyring)
     }
 }
 
@@ -126,6 +162,13 @@ mod tests {
         assert_eq!(store.get(account).unwrap(), None);
         // deleting twice is fine
         store.delete(account).unwrap();
+    }
+
+    #[test]
+    fn home_users_get_their_own_keychain_names() {
+        assert_eq!(profile_account(None, ACCOUNT_TOKEN), "plex-token");
+        assert_eq!(profile_account(Some("0a1b2c3d"), ACCOUNT_TOKEN), "u.0a1b2c3d.plex-token");
+        assert_ne!(profile_account(Some("a"), ACCOUNT_TOKEN), profile_account(Some("b"), ACCOUNT_TOKEN));
     }
 
     #[test]

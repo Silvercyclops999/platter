@@ -164,6 +164,27 @@ export interface AuthStatus {
   reauthRequired?: boolean;
 }
 
+/** One Plex Home user (home_users). */
+export interface HomeUser {
+  uuid: string;
+  name: string;
+  /** Profile picture as an art path, or null. */
+  avatar: string | null;
+  admin: boolean;
+  restricted: boolean;
+  /** Switching to them needs their PIN. */
+  protected: boolean;
+  /** The user Platter is running as. */
+  current: boolean;
+}
+
+export interface HomeUsers {
+  /** Empty when the account isn't a Plex Home. */
+  users: HomeUser[];
+  /** Settings: remember the last user on this device. */
+  remember: boolean;
+}
+
 export interface PinInfo {
   code: string;
   authUrl: string;
@@ -1798,6 +1819,8 @@ export interface UpdateInfo {
 /** Every event in docs/IPC.md → its payload. */
 export interface EventMap {
   "auth://changed": AuthStatus;
+  /** A Home user switch went through; the app restarts as them. */
+  "home://changed": { restarting: boolean };
   "sync://progress": SyncStatus;
   "library://changed": null;
   /** One artist's page data changed outside a sync (similar artists fetched). */

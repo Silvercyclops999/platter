@@ -18,6 +18,8 @@ import "./social.css";
 import { Logo } from "./Logo";
 import { shortcutLabel } from "./shortcuts";
 import { SearchBox } from "./SearchBox";
+import { HomePinDialog, HomeUserItems, switchHomeUser, useHomeUsers } from "./HomeUsers";
+import type { HomeUser } from "../lib/types";
 import "./topbar.css";
 
 /** Below this window width the search pill becomes a round button beside Home. */
@@ -145,6 +147,8 @@ export function AppMenu() {
   const miniOpen = useMiniplayer((s) => s.open);
   const [open, setOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const homeUsers = useHomeUsers(open).users;
+  const [pinFor, setPinFor] = useState<HomeUser | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const viaKeyboard = useRef(false);
@@ -230,6 +234,7 @@ export function AppMenu() {
               <span className="appmenu__who-name">{username}</span>
             </div>
           )}
+          <HomeUserItems users={homeUsers} onPick={(u) => run(() => switchHomeUser(u, setPinFor))()} />
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => void createPlaylist())}>
             <span>Create playlist</span>
           </button>
@@ -284,6 +289,7 @@ export function AppMenu() {
           </button>
         </div>
       )}
+      <HomePinDialog user={pinFor} onClose={() => setPinFor(null)} />
       <Dialog open={confirmSignOut} onClose={() => setConfirmSignOut(false)} label="Sign out of Plex?" className="confirm">
         <h2 className="confirm__title">Sign out of Plex?</h2>
         <p className="confirm__body">Platter forgets your Plex sign-in on this computer. You'll need to sign in again to play your music.</p>

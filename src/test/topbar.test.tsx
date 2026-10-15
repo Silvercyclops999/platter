@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { artUrl, backend } from "../lib/backend";
+import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { Sidebar } from "../shell/Sidebar";
 import { TOPBAR_COLLAPSE_WIDTH, TopBar } from "../shell/TopBar";
@@ -25,11 +26,14 @@ beforeEach(() => {
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useUi.setState({ paletteOpen: false, searchFocusTick: 0, menu: null });
   useApp.setState({ auth: { state: "signedIn", username: "listener", needsServerPick: false } });
+  // The menu without Plex Home users (home-users.test.tsx has those).
+  (backend as MockBackend).homeUsersMock.notAHome = true;
   setWidth(1280);
 });
 afterEach(() => {
   vi.restoreAllMocks();
   setWidth(startWidth);
+  (backend as MockBackend).homeUsersMock.notAHome = false;
 });
 
 describe("back and forward", () => {

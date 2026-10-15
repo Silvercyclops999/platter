@@ -92,6 +92,7 @@ import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
 import * as eq from "./eq";
 import { MockHome, type ContextPlay } from "./home";
+import { MockHomeUsers } from "./homeUsers";
 import { MockLikes } from "./likes";
 import { buildRecents, seedListens, type MockListen } from "./recents";
 import { MockPlaylists } from "./playlists";
@@ -239,6 +240,8 @@ export class MockBackend implements Backend {
 
   // auth
   private auth: AuthStatus;
+  /** Plex Home users (test hooks: notAHome, switches). */
+  readonly homeUsersMock = new MockHomeUsers();
   // health / sync
   private healthState: Health;
   /** The offline "skipped songs" toast was shown (once per offline spell). */
@@ -637,6 +640,26 @@ export class MockBackend implements Backend {
     this.auth = { state: "signedOut", needsServerPick: false };
     this.emit("auth://changed", this.auth);
     return this.delay(() => undefined);
+  }
+  homeUsers() {
+    return this.delay(() => this.homeUsersMock.list());
+  }
+  homeSwitch(uuid: string, pin?: string) {
+    return this.delay(() => {
+      const was = this.homeUsersMock.current().uuid;
+      const to = this.homeUsersMock.switchTo(uuid, pin);
+      if (to.uuid === was) return;
+      // The app restarts as them; here the signed-in name and picture change.
+      this.emit("home://changed", { restarting: true });
+      this.auth = { ...this.auth, username: to.name, avatar: to.avatar };
+      this.emit("auth://changed", this.auth);
+      this.emit("toast", { kind: "info", message: `Switched to ${to.name}` });
+    });
+  }
+  homeRememberSet(on: boolean) {
+    return this.delay(() => {
+      this.homeUsersMock.remember = on;
+    });
   }
   serversList() {
     return this.delay(() => [SERVER, { ...SERVER, machineId: "mock-machine-02", name: "Cabin NAS", owned: false, online: false, connection: null }]);

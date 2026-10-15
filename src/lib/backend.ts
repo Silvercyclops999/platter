@@ -35,6 +35,7 @@ import type {
   EventMap,
   EventName,
   Health,
+  HomeUsers,
   HomeData,
   HomeItem,
   RecentsEntry,
@@ -123,6 +124,12 @@ export interface Backend {
   authSignOut(): Promise<void>;
   serversList(): Promise<ServerInfo[]>;
   serverSelect(machineId: string): Promise<void>;
+  /** The account's Plex Home users (empty when it isn't a Home). */
+  homeUsers(): Promise<HomeUsers>;
+  /** Switch to a Home user, with their PIN when they have one. The app restarts as them. */
+  homeSwitch(uuid: string, pin?: string): Promise<void>;
+  /** Settings: remember the last Home user on this device. */
+  homeRememberSet(on: boolean): Promise<void>;
 
   // Library
   syncStatus(): Promise<SyncStatus>;
@@ -507,6 +514,9 @@ export function createTauriBackend(): Backend {
     authSignOut: () => call("auth_sign_out"),
     serversList: () => call("servers_list"),
     serverSelect: (machineId) => call("server_select", { machineId }),
+    homeUsers: () => call("home_users"),
+    homeSwitch: (uuid, pin) => call("home_switch", { uuid, pin: pin ?? null }),
+    homeRememberSet: (on) => call("home_remember_set", { on }),
 
     syncStatus: () => call("sync_status"),
     syncNow: (full) => call("sync_now", { full }),

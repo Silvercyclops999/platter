@@ -27,6 +27,7 @@ import type {
 import { useApp } from "../stores/app";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { NowPlayingSettings } from "../shell/NowPlayingSettings";
+import { useHomeUsers } from "../shell/HomeUsers";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { reloadLikes } from "../stores/likes";
 import { updateSettings, useSettings } from "../stores/settings";
@@ -475,6 +476,8 @@ export function SettingsPage() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<UpdateState>({ kind: "idle" });
   const [dialog, setDialog] = useState<"signOut" | "server" | "notices" | null>(null);
+  const home = useHomeUsers(true);
+  const [rememberHome, setRememberHome] = useState<boolean | null>(null);
 
   const [accentIssue, setAccentIssue] = useState<string | null>(null);
   const [themeFolder, reloadThemes] = useThemeFolder();
@@ -577,6 +580,31 @@ export function SettingsPage() {
       description: "Shows your Plex account's picture on the app menu button. Off shows the first letter of your name. This device only.",
       control: (ids) => toggle(s, "showPlexAvatar", ids),
     },
+    ...(home.users.length > 1
+      ? ([
+          {
+            key: "homeRemember",
+            section: "Account",
+            title: "Remember the last Home user",
+            description:
+              "Platter starts as whoever used it last. Off always starts as the account that signed in. Switch users from the app menu. This device only.",
+            control: (ids) => (
+              <Switch
+                checked={rememberHome ?? home.remember}
+                onChange={(v) => {
+                  setRememberHome(v);
+                  backend.homeRememberSet(v).catch(() => {
+                    setRememberHome(!v);
+                    toast.error("Couldn't change this setting");
+                  });
+                }}
+                labelledBy={ids.title}
+                describedBy={ids.desc}
+              />
+            ),
+          },
+        ] satisfies RowDef[])
+      : []),
     // Audio quality
     {
       key: "qualityHome",

@@ -18,6 +18,8 @@ Every server request sends:
 | Start PIN sign-in | `POST https://plex.tv/api/v2/pins?strong=true` | Returns pin id + code; open the auth URL in the browser |
 | Poll for token | `GET https://plex.tv/api/v2/pins/{id}` | `authToken` appears once approved |
 | List servers | `GET https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1` | Each server lists connections: local, remote, relay. Try local first |
+| Home users | `GET https://plex.tv/api/v2/home/users` | `{ users: [...] }` with `uuid`, `title`, `friendlyName`, `thumb`, `admin`, `restricted`, `protected` (needs a PIN to switch) |
+| Switch Home user | `POST https://plex.tv/api/v2/home/users/{uuid}/switch` | Form body `pin=NNNN` when the user has one. Answers the user with `authToken`; 401/403 means a wrong or missing PIN. Not called against the real account |
 
 ## Server health
 | Purpose | Request |
@@ -466,7 +468,18 @@ Not tried yet (needs Platter running on two computers):
   art cache, which scales it down.
 - On a Plex Home account the same call has `home: true`, `homeSize` and
   `homeAdmin`, and `thumb` is the picture of the user the token belongs to.
-  Switching Home users isn't handled yet.
+
+### 2026-10-14: Home users (read-only)
+- `GET plex.tv/api/v2/home/users` answers `{ id, name, guestUserID,
+  guestUserUUID, guestEnabled, subscription, users }`. A Home of six here.
+- Each user has `id`, `uuid`, `title`, `username` (null for a managed user),
+  `email`, `friendlyName` (often null), `thumb`, `hasPassword`, `restricted`,
+  `admin`, `guest`, `protected` and `updatedAt`. `protected` is the PIN flag;
+  `hasPassword` only says the user has a plex.tv password.
+- The admin's entry also carries a `pin` field. Platter never reads it.
+- Switching (`POST .../home/users/{uuid}/switch`) wasn't tried against the
+  real account; it's covered by faked plex.tv tests only. Check it once by
+  hand with a test Home user.
 
 ### 2026-10-14: lyrics streams
 - Track detail lists lyrics as `streamType: 4` streams next to the audio

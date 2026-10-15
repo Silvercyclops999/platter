@@ -8,8 +8,9 @@ and your own Plex server.
 - Your Plex server, for browsing, streaming, artwork, and reporting plays and
   progress (so your other Plex apps stay in sync).
 - plex.tv, to sign in (a PIN flow in your browser), to look up your
-  server's addresses, to list your other Plex players, and to publish this
-  computer's local addresses for your other Platter computers (see below).
+  server's addresses, to list your other Plex players, to list and switch
+  Plex Home users, and to publish this computer's local addresses for your
+  other Platter computers (see below).
 - GitHub, to check for and download app updates.
 - Wikipedia and Wikidata, for artist bios and facts (on by default, can be
   turned off in Settings). The request carries the artist's name or
@@ -245,6 +246,12 @@ and nothing else: no token, no server address, no library. It answers only
 requests addressed to 127.0.0.1 or localhost and gives web pages no way to
 read it from another site. A private session blanks it, and turning it off
 closes the port.
+
+If your Plex account is a Plex Home, each Home user you switch to in Platter
+gets their own folder inside the data folder and their own keychain entries,
+so their library, likes, history, queue, downloads and settings stay apart.
+Switching asks plex.tv for that user's token. A user's PIN is typed by you,
+sent once to plex.tv to switch and never saved.
 
 Downloads are copies of songs from your own Plex server, kept in the app's
 data folder (or a folder you pick) with their album covers. They never go

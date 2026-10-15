@@ -8,7 +8,7 @@ use reqwest::header::{ACCEPT, HeaderMap, HeaderName, HeaderValue};
 use crate::error::{AppError, AppResult};
 
 pub const PRODUCT: &str = "Platter";
-const ID_FILE: &str = "plex-client-id";
+pub(crate) const ID_FILE: &str = "plex-client-id";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientIdentity {

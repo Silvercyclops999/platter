@@ -172,6 +172,45 @@
 .appmenu__check { color: var(--color-accent); }
 .appmenu__sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
 
+/* Plex Home users at the top of the app menu. */
+.appmenu__user-who { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.appmenu__user-face {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-bg-raised);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+}
+.appmenu__user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+
+.home-pin__input {
+  display: block;
+  width: 10ch;
+  height: 48px;
+  margin-top: var(--space-4);
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-xl);
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+.home-pin__input:focus { outline: none; border-color: rgba(255, 240, 220, 0.28); background: var(--color-bg-overlay); }
+.home-pin__input:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+.home-pin__input[aria-invalid="true"] { border-color: var(--color-error); }
+
 /* Windows window buttons, flush with the top-right corner. */
 .topbar__controls { display: flex; align-self: flex-start; height: 32px; margin-left: var(--space-2); }
 .topbar__winbtn {

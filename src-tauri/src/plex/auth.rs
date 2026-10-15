@@ -125,6 +125,14 @@ impl PlexTv {
             .map_err(|e| AppError::Internal(format!("url: {e}")))
     }
 
+    pub(crate) fn url_for(&self, path: &str) -> AppResult<Url> {
+        self.url(path)
+    }
+
+    pub(crate) fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
     /// `POST /api/v2/pins?strong=true`
     pub async fn create_pin(&self) -> AppResult<Pin> {
         let resp = self

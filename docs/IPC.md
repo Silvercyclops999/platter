@@ -51,6 +51,30 @@ banner asks the user to sign in again.
 
 Event `auth://changed` → `AuthStatus`.
 
+### Home users
+| Command | Args | Returns |
+| --- | --- | --- |
+| `home_users` | – | `HomeUsers { users: HomeUser[], remember: bool }` |
+| `home_switch` | `{ uuid, pin?: string }` | – (the app restarts as that user) |
+| `home_remember_set` | `{ on: bool }` | – |
+
+`HomeUser = { uuid, name, avatar: string \| null, admin, restricted, protected, current }`.
+`users` is empty when the account isn't a Plex Home (or has one user).
+`protected` means switching needs that user's 4-digit PIN; it's typed by the
+user, sent once to plex.tv in a form body and never stored. A wrong PIN is
+`{ kind: "invalid", message: "That PIN isn't right." }` and changes nothing.
+
+Each Home user has their own data folder (`users/<key>/` under the app data
+folder, `key` a hash of their uuid; the user who signed in keeps the top
+folder) and their own keychain entries (`u.<key>.` names). A switch gets the
+user's token from plex.tv, stores it in their entries, records the choice in
+`home-user.json` and restarts the app, which saves the queue first. Nothing
+on a Plex server changes. `remember` (Settings, this device) off starts as
+the user who signed in. Signing out as another Home user goes back to the
+user who signed in.
+
+Event `home://changed` → `{ restarting: bool }` just before the restart.
+
 ## Library
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1601,6 +1625,11 @@ The rest of the fields, with their defaults:
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
+
+Settings belong to the Plex Home user Platter runs as (each has their own
+data folder). One setting is for the whole device and isn't a field here:
+Remember the last Home user (default on), read with `home_users` and set
+with `home_remember_set` (see Home users).
 
 Settings marked This device only stay on this computer. Every other one
 travels in the sync file while sync is on and `syncSettings` is. The two
