@@ -233,6 +233,25 @@ body:has(.mini) {
   -webkit-app-region: no-drag;
 }
 
+/* Wide windows: the art on the left, the title, like and up next beside it. */
+.mini__body--wide .mini__card {
+  flex-direction: row;
+  align-items: stretch;
+  gap: var(--space-6);
+  padding: var(--space-4);
+}
+.mini__side {
+  flex: 0 0 clamp(200px, 38%, 360px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-6);
+}
+.mini__body--wide .mini__title { font-size: var(--font-size-2xl); line-height: 1.2; }
+.mini__body--wide .mini__artist { font-size: var(--font-size-md); }
+.mini__side .mini-queue { padding: 0; }
+
 /* Up next, under the card when the window is tall enough. */
 .mini-queue { flex: none; padding: 0 var(--space-1); }
 .mini-queue__title {

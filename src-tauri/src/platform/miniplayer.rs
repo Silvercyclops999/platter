@@ -25,8 +25,9 @@ pub const LABEL: &str = "miniplayer";
 pub const DEFAULT_SIZE: (f64, f64) = (340.0, 365.0);
 /// Smallest size the grip allows.
 pub const MIN_SIZE: (f64, f64) = (240.0, 260.0);
-/// Largest size kept (a bigger saved size is from a bad value).
-pub const MAX_SIZE: (f64, f64) = (1200.0, 1400.0);
+/// Largest size the window can be resized to (and kept). It's a small
+/// player; past this the main window does the job better.
+pub const MAX_SIZE: (f64, f64) = (900.0, 900.0);
 /// Gap from the screen edges when it opens in the corner.
 const CORNER_GAP: f64 = 24.0;
 /// How long the window has to sit still before its place is saved.
@@ -162,8 +163,12 @@ pub async fn open<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
         .title("Platter miniplayer")
         .inner_size(w, h)
         .min_inner_size(MIN_SIZE.0, MIN_SIZE.1)
+        .max_inner_size(MAX_SIZE.0, MAX_SIZE.1)
         .decorations(false)
         .resizable(true)
+        // No maximize: a double click on the top strip (the drag region)
+        // would otherwise fill the screen.
+        .maximizable(false)
         .always_on_top(s.miniplayer_on_top)
         .background_color(tauri::window::Color(0x0E, 0x0D, 0x0C, 0xFF))
         .visible(true)
@@ -324,6 +329,14 @@ mod tests {
         let b = WindowBounds { x: 10.0, y: 10.0, width: 50.0, height: 50.0 };
         let (w, h, _) = place(Some(b), &[SCREEN], Some(&SCREEN));
         assert_eq!((w, h), MIN_SIZE);
+    }
+
+    #[test]
+    fn a_saved_size_past_the_maximum_comes_back_clamped() {
+        let b = WindowBounds { x: 10.0, y: 10.0, width: 2000.0, height: 1200.0 };
+        let (w, h, _) = place(Some(b), &[SCREEN], Some(&SCREEN));
+        assert_eq!((w, h), MAX_SIZE);
+        assert!(MAX_SIZE.0 >= DEFAULT_SIZE.0 && MAX_SIZE.1 >= DEFAULT_SIZE.1);
     }
 
     #[test]

@@ -43,9 +43,9 @@ import { updateSettings, useSettings } from "../stores/settings";
 import { useCoverColors } from "./nowPlaying";
 import "./miniplayer.css";
 
-/** The up-next list shows once the window is at least this tall. */
+/** The up-next list shows under the art once the window is at least this tall. */
 export const QUEUE_MIN_HEIGHT = 480;
-/** Songs listed under the art. */
+/** Songs listed under the art at that height (taller windows list more). */
 export const QUEUE_ROWS = 4;
 
 /** The next songs after the current one: the user's queue first, then the context. */
@@ -54,12 +54,15 @@ export function upNext(q: { userQueue: QueueItem[]; nextUp: QueueItem[] } | null
   return [...q.userQueue, ...q.nextUp].slice(0, n);
 }
 
-/** Track an element's size. */
-function useSize<T extends HTMLElement>(): [React.RefObject<T | null>, { w: number; h: number }] {
-  const ref = useRef<T>(null);
+/**
+ * Track an element's size. Returns a callback ref, so an element that is
+ * swapped out (the settings panel replaces the art and puts it back) is
+ * measured again instead of the old, detached one reading 0 forever.
+ */
+function useSize<T extends HTMLElement>(): [(el: T | null) => void, { w: number; h: number }] {
+  const [el, setEl] = useState<T | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
-    const el = ref.current;
     if (!el) return;
     const read = () => setSize((s) => (s.w === el.clientWidth && s.h === el.clientHeight ? s : { w: el.clientWidth, h: el.clientHeight }));
     read();
@@ -67,8 +70,28 @@ function useSize<T extends HTMLElement>(): [React.RefObject<T | null>, { w: numb
     const ro = new ResizeObserver(read);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
-  return [ref, size];
+  }, [el]);
+  return [setEl, size];
+}
+
+/** Wide windows put the title and queue beside the art from this width up. */
+export const WIDE_MIN_WIDTH = 560;
+/** ...when the window is at least this much wider than it is tall. */
+export const WIDE_RATIO = 1.25;
+
+/**
+ * How the window lays out at a size: side by side when wide, else stacked;
+ * and how many up-next rows fit (0: none) when the queue is on. A taller
+ * window lists more songs instead of only growing the art.
+ */
+export function miniLayout(w: number, h: number, queueOn: boolean): { wide: boolean; queueRows: number } {
+  const wide = w >= WIDE_MIN_WIDTH && w >= h * WIDE_RATIO;
+  if (!queueOn) return { wide, queueRows: 0 };
+  if (wide) return { wide, queueRows: h >= 300 ? Math.min(10, Math.max(2, Math.floor((h - 200) / 44))) : 0 };
+  if (h < QUEUE_MIN_HEIGHT) return { wide, queueRows: 0 };
+  // Rows past the first few only use height the full-width art can't.
+  const spare = h - w - 120;
+  return { wide, queueRows: Math.min(8, Math.max(QUEUE_ROWS, Math.floor(spare / 44))) };
 }
 
 /** A vertical volume slider in a small pill (opens over the mute button). */
@@ -240,6 +263,18 @@ function LikeControl({ track }: { track: Track }) {
   );
 }
 
+function Meta({ track }: { track: Track }) {
+  return (
+    <div className="mini__meta">
+      <div className="mini__text">
+        <p className="mini__title truncate">{track.title}</p>
+        <p className="mini__artist truncate">{trackArtistLine(track)}</p>
+      </div>
+      <LikeControl track={track} />
+    </div>
+  );
+}
+
 function SettingsPanel({ onDone }: { onDone: () => void }) {
   const s = useSettings((x) => x.settings);
   const tint = s?.miniplayerTint ?? true;
@@ -257,7 +292,7 @@ function SettingsPanel({ onDone }: { onDone: () => void }) {
         <span id="mini-queue">Show the queue</span>
         <Switch checked={queue} labelledBy="mini-queue" onChange={(v) => void updateSettings({ miniplayerQueue: v })} />
       </div>
-      <p className="mini-settings__note">The queue shows when the window is tall enough.</p>
+      <p className="mini-settings__note">The queue shows when the window is big enough.</p>
       <Button variant="primary" className="mini-settings__done" onClick={onDone}>
         Done
       </Button>
@@ -297,8 +332,8 @@ export function Miniplayer() {
   const [active, setActive] = useState(false);
   const [rootRef, root] = useSize<HTMLDivElement>();
   const [artBox, box] = useSize<HTMLDivElement>();
-  const showQueue = (settings?.miniplayerQueue ?? false) && root.h >= QUEUE_MIN_HEIGHT;
-  const next = showQueue ? upNext(queueView) : [];
+  const { wide, queueRows } = miniLayout(root.w, root.h, settings?.miniplayerQueue ?? false);
+  const next = queueRows > 0 ? upNext(queueView, queueRows) : [];
   const artSize = Math.max(0, Math.floor(Math.min(box.w, box.h)));
 
   useEffect(() => {
@@ -326,7 +361,7 @@ export function Miniplayer() {
       {settingsOpen ? (
         <SettingsPanel onDone={() => setSettingsOpen(false)} />
       ) : (
-        <main className="mini__body">
+        <main className={`mini__body ${wide ? "mini__body--wide" : ""}`}>
           <div className="mini__card">
             <div ref={artBox} className="mini__art-area">
               {track ? (
@@ -348,17 +383,16 @@ export function Miniplayer() {
                 <p className="mini__empty">Nothing playing</p>
               )}
             </div>
-            {track && (
-              <div className="mini__meta">
-                <div className="mini__text">
-                  <p className="mini__title truncate">{track.title}</p>
-                  <p className="mini__artist truncate">{trackArtistLine(track)}</p>
-                </div>
-                <LikeControl track={track} />
+            {wide ? (
+              <div className="mini__side">
+                {track && <Meta track={track} />}
+                <UpNext items={next} />
               </div>
+            ) : (
+              track && <Meta track={track} />
             )}
           </div>
-          {showQueue && <UpNext items={next} />}
+          {!wide && <UpNext items={next} />}
         </main>
       )}
       <button

@@ -1727,7 +1727,7 @@ export function SettingsPage() {
       section: "Appearance",
       group: "Miniplayer",
       title: "Show the queue in the miniplayer",
-      description: "Lists the next few songs under the art when the miniplayer is tall enough. This device only.",
+      description: "Lists the next few songs under the art when the miniplayer is tall enough, or beside it when it is wide. Bigger windows list more. This device only.",
       control: (ids) => toggle(s, "miniplayerQueue", ids),
     },
     // Library: tags read from the files

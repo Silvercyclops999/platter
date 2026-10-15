@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type PlayerState, type QueueItem, type Track } from "../lib/types";
-import { Miniplayer, upNext } from "../shell/Miniplayer";
+import { Miniplayer, miniLayout, QUEUE_ROWS, upNext } from "../shell/Miniplayer";
 import { PlayerBar } from "../shell/PlayerBar";
 import { AppMenu } from "../shell/TopBar";
 import { connectMiniplayer, isMiniplayerWindow, MINIPLAYER_FAILED, useMiniplayer } from "../stores/miniplayer";
@@ -204,5 +204,99 @@ describe("its settings panel", () => {
     const q = upNext({ userQueue: [item(a, 1)], nextUp: [item(b, 2), item(c, 3)] }, 2);
     expect(q.map((x) => x.track.id)).toEqual([a.id, b.id]);
     expect(upNext(null)).toEqual([]);
+  });
+});
+
+describe("at any window size", () => {
+  /**
+   * jsdom has no layout: elements get a size from `measure` while on the
+   * page and 0 once removed. Returns a function that tells every observer
+   * about every element it watches (detached ones too, as browsers do).
+   */
+  function fakeLayout(measure: (el: HTMLElement) => { w: number; h: number }) {
+    const observers: { cb: ResizeObserverCallback; els: Set<Element> }[] = [];
+    class FakeRO {
+      rec: { cb: ResizeObserverCallback; els: Set<Element> };
+      constructor(cb: ResizeObserverCallback) {
+        this.rec = { cb, els: new Set() };
+        observers.push(this.rec);
+      }
+      observe(el: Element) {
+        this.rec.els.add(el);
+      }
+      unobserve(el: Element) {
+        this.rec.els.delete(el);
+      }
+      disconnect() {
+        this.rec.els.clear();
+      }
+    }
+    vi.stubGlobal("ResizeObserver", FakeRO);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.isConnected ? measure(this).w : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.isConnected ? measure(this).h : 0;
+    });
+    return () =>
+      act(() => {
+        for (const o of observers) if (o.els.size) o.cb([], {} as ResizeObserver);
+      });
+  }
+  const artArea = (w: number, h: number) => (el: HTMLElement) => (el.classList.contains("mini__art-area") ? { w, h } : { w: 0, h: 0 });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("the art is square and as big as fits its area", () => {
+    fakeLayout(artArea(500, 300));
+    play(track());
+    render(<Miniplayer />);
+    expect(screen.getByTestId("mini-art")).toHaveStyle({ width: "300px", height: "300px" });
+  });
+
+  it("the art comes back after the settings panel (it used to stay at 0)", () => {
+    const resize = fakeLayout(artArea(400, 400));
+    play(track());
+    render(<Miniplayer />);
+    fireEvent.click(screen.getByRole("button", { name: "Miniplayer settings" }));
+    resize();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    resize();
+    const art = screen.getByTestId("mini-art");
+    expect(art).toHaveStyle({ width: "400px", height: "400px" });
+    // The controls are still there to point at.
+    fireEvent.pointerEnter(art);
+    expect(within(art).getByRole("button", { name: "Play" })).toBeInTheDocument();
+  });
+
+  it("small and tall windows stack; wide ones go side by side", () => {
+    expect(miniLayout(340, 365, false)).toEqual({ wide: false, queueRows: 0 });
+    expect(miniLayout(600, 400, false).wide).toBe(true);
+    expect(miniLayout(900, 900, false).wide).toBe(false);
+    // Wider than tall but too small to split stays stacked.
+    expect(miniLayout(500, 300, false).wide).toBe(false);
+  });
+
+  it("the queue uses spare height, more rows in bigger windows", () => {
+    expect(miniLayout(340, 365, true).queueRows).toBe(0);
+    expect(miniLayout(340, 480, true).queueRows).toBe(QUEUE_ROWS);
+    expect(miniLayout(340, 900, true).queueRows).toBe(8);
+    const wide = miniLayout(900, 600, true);
+    expect(wide.wide).toBe(true);
+    expect(wide.queueRows).toBeGreaterThan(QUEUE_ROWS);
+  });
+
+  it("a wide window puts the title and up next beside the art", () => {
+    fakeLayout((el) => (el.classList.contains("mini") ? { w: 900, h: 600 } : { w: 300, h: 300 }));
+    const [a, b] = mock.fx.tracks;
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, miniplayerQueue: true } }));
+    play(a, { queue: { current: null, userQueue: [item(b, 1)], nextUp: [], history: [], context: null } });
+    const { container } = render(<Miniplayer />);
+    const side = container.querySelector<HTMLElement>(".mini__side");
+    expect(side).not.toBeNull();
+    expect(within(side!).getByText(a.title)).toBeInTheDocument();
+    expect(within(side!).getByRole("region", { name: "Up next" })).toBeInTheDocument();
   });
 });
