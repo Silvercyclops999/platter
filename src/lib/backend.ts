@@ -73,6 +73,7 @@ import type {
   DeepLinkOpen,
   DiscordStatus,
   FeedStatus,
+  DeckStatus,
   DownloadKind,
   DownloadStatus,
   ShareInfo,
@@ -394,6 +395,10 @@ export interface Backend {
   discordStatus(): Promise<DiscordStatus>;
   /** The now-playing feed for widgets: serving, off, or why its port couldn't open. */
   feedStatus(): Promise<FeedStatus>;
+  /** The Stream Deck control API: on or off, the pairing code, paired. */
+  deckStatus(): Promise<DeckStatus>;
+  /** Forget the paired Stream Deck and make a new code. */
+  deckRevoke(): Promise<DeckStatus>;
   /** Save the Imgur client ID in the keychain (null removes it); answers whether Imgur refused it. */
   discordImgurKeySet(key: string | null): Promise<InfoKeyState>;
 
@@ -753,6 +758,8 @@ export function createTauriBackend(): Backend {
     shareCardSave: (png, name) => invokeRaw("share_card_save", png, { "x-card-name": encodeURIComponent(name) }),
     discordStatus: () => call("discord_status"),
     feedStatus: () => call("feed_status"),
+    deckStatus: () => call("deck_status"),
+    deckRevoke: () => call("deck_revoke"),
     discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
     tagsIndex: () => call("tags_index"),
     tagScanStatus: () => call("tag_scan_status"),

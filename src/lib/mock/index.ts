@@ -79,6 +79,7 @@ import type {
   SmartRules,
   SmartSaveRequest,
   FeedStatus,
+  DeckStatus,
   EditFields,
   EditKind,
   ImageKind,
@@ -2173,6 +2174,10 @@ export class MockBackend implements Backend {
         const st = this.feed();
         this.later(0, () => this.emit("feed://status", st));
       }
+      if (patch.allowStreamDeck !== undefined) {
+        const st = this.deck();
+        this.later(0, () => this.emit("deck://status", st));
+      }
       if (patch.listenGuestsControl !== undefined) this.social.settingsChanged();
       // Another server's music, or more libraries: every list reloads.
       if (patch.serverView !== undefined || patch.libraries !== undefined) this.later(0, () => this.emit("library://changed", null));
@@ -2699,6 +2704,27 @@ export class MockBackend implements Backend {
   }
   feedStatus() {
     return this.delay(() => this.feed());
+  }
+
+  // ---------------------------------------------------------------- stream deck
+
+  private deckCode = "482913";
+  private deckPaired = false;
+  private deck(): DeckStatus {
+    if (!this.settings.allowStreamDeck) return { state: "off", code: null, paired: this.deckPaired };
+    return { state: "on", port: 32541, code: this.deckCode, paired: this.deckPaired };
+  }
+  deckStatus() {
+    return this.delay(() => this.deck());
+  }
+  deckRevoke() {
+    return this.delay(() => {
+      this.deckPaired = false;
+      this.deckCode = String((Number(this.deckCode) + 104729) % 1000000).padStart(6, "0");
+      const st = this.deck();
+      this.later(0, () => this.emit("deck://status", st));
+      return st;
+    });
   }
   discordImgurKeySet(key: string | null) {
     return this.delay(() => this.discord.setKey(key));

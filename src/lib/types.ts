@@ -911,6 +911,8 @@ export interface Settings {
   nowPlayingFeed: boolean;
   /** The feed's port, 1024 to 65535 (this device only). */
   nowPlayingFeedPort: number;
+  /** Let a paired Stream Deck see what's playing and control it, on 127.0.0.1 (this device only). */
+  allowStreamDeck: boolean;
   /** Library import sources turned on ("streaming", "transfer", "lists"). All off until picked. */
   importSources: string[];
   /** Dark, Light, Match system, or another built-in theme. */
@@ -928,6 +930,17 @@ export type FeedStatus =
   | { state: "on"; port: number; url: string }
   | { state: "portInUse"; port: number }
   | { state: "failed"; port: number; message: string };
+
+/** The Stream Deck control API: the port's state, the pairing code while it's on, and whether one is paired. */
+export type DeckStatus = (
+  | { state: "off" }
+  | { state: "on"; port: number }
+  | { state: "portInUse"; port: number }
+  | { state: "failed"; port: number; message: string }
+) & { code: string | null; paired: boolean };
+
+/** What a Stream Deck key asked the window to show. */
+export type DeckAction = { kind: "listenAlong" } | { kind: "requestAlbum"; input: LidarrRequestInput };
 
 /** The feed's default port. */
 export const FEED_DEFAULT_PORT = 32540;
@@ -1128,6 +1141,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hintKey: "f",
   nowPlayingFeed: false,
   nowPlayingFeedPort: 32540,
+  allowStreamDeck: false,
   importSources: [],
   theme: "dark",
   accent: "ivory",
@@ -2104,6 +2118,10 @@ export interface EventMap {
   "discord://status": DiscordStatus;
   /** The now-playing feed started, stopped or couldn't open its port. */
   "feed://status": FeedStatus;
+  /** The Stream Deck control API started, stopped, was paired or revoked. */
+  "deck://status": DeckStatus;
+  /** A Stream Deck key asked for Request album or Listen along. */
+  "deck://action": DeckAction;
   /** The file tag scan moved on, started, paused or finished. */
   "tags://progress": TagScanStatus;
   /** File tags changed: badges, editions and filters should be read again. */

@@ -507,6 +507,9 @@ pub struct Settings {
     pub now_playing_feed: bool,
     /// The feed's port (this device only).
     pub now_playing_feed_port: u16,
+    /// Let a paired Stream Deck see what's playing and control it, on
+    /// 127.0.0.1 (this device only).
+    pub allow_stream_deck: bool,
     /// Library import sources turned on (ids from `import::sources`).
     pub import_sources: Vec<String>,
 }
@@ -680,6 +683,7 @@ impl Default for Settings {
             hint_key: HintKey::F,
             now_playing_feed: false,
             now_playing_feed_port: crate::feed::DEFAULT_PORT,
+            allow_stream_deck: false,
             import_sources: Vec::new(),
         }
     }
@@ -839,6 +843,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "miniplayerBounds",
     "nowPlayingFeed",
     "nowPlayingFeedPort",
+    "allowStreamDeck",
 ];
 
 /// A partial update; absent fields are left alone.
@@ -990,6 +995,7 @@ pub struct SettingsPatch {
     pub hint_key: Option<HintKey>,
     pub now_playing_feed: Option<bool>,
     pub now_playing_feed_port: Option<u16>,
+    pub allow_stream_deck: Option<bool>,
     pub import_sources: Option<Vec<String>>,
 }
 
@@ -1102,6 +1108,7 @@ impl Settings {
         set(&mut self.power_keys, p.power_keys);
         set(&mut self.hint_key, p.hint_key);
         set(&mut self.now_playing_feed, p.now_playing_feed);
+        set(&mut self.allow_stream_deck, p.allow_stream_deck);
         if let Some(port) = p.now_playing_feed_port {
             if port < crate::feed::PORT_MIN {
                 return Err(AppError::Invalid("Pick a port from 1024 to 65535.".into()));
@@ -1464,6 +1471,8 @@ pub struct Live {
     pub scrobble: crate::scrobble::ScrobbleSwitches,
     /// The now-playing feed for widgets.
     pub feed: crate::feed::FeedSwitch,
+    /// The Stream Deck control API.
+    pub deck: crate::feed::deck::DeckSwitch,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -1503,6 +1512,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         port: s.now_playing_feed_port,
         private_session: s.private_session,
     });
+    live.deck.set(crate::feed::deck::DeckConfig { enabled: s.allow_stream_deck, private_session: s.private_session });
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
@@ -1929,6 +1939,23 @@ mod tests {
         assert_eq!(s.now_playing_feed_port, 40000);
         // The feed stays on this computer.
         assert!(DEVICE_SETTINGS.contains(&"nowPlayingFeed") && DEVICE_SETTINGS.contains(&"nowPlayingFeedPort"));
+    }
+
+    #[test]
+    fn stream_deck_is_off_until_allowed_and_stays_on_this_computer() {
+        let live = Live::default();
+        let (db, _d) = db();
+        let mut s = Settings::default();
+        assert!(!s.allow_stream_deck, "the Stream Deck control API is opt-in");
+        publish(&s, &live, &db);
+        assert!(!live.deck.get().enabled);
+        s.apply(&SettingsPatch { allow_stream_deck: Some(true), private_session: Some(true), ..Default::default() }).unwrap();
+        publish(&s, &live, &db);
+        assert_eq!(live.deck.get(), crate::feed::deck::DeckConfig { enabled: true, private_session: true });
+        s.apply(&SettingsPatch { allow_stream_deck: Some(false), ..Default::default() }).unwrap();
+        publish(&s, &live, &db);
+        assert!(!live.deck.get().enabled);
+        assert!(DEVICE_SETTINGS.contains(&"allowStreamDeck"));
     }
 
     #[test]

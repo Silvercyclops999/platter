@@ -620,6 +620,49 @@ otherwise). No CORS header is sent.
   cache (300 px unless `s` asks for 64 to 1200). Any other track id, or a
   private session, is 404.
 
+## Stream Deck
+| Command | Args | Returns |
+| --- | --- | --- |
+| `deck_status` | – | `DeckStatus` |
+| `deck_revoke` | – | `DeckStatus` |
+
+`DeckStatus` is the port's state as in `FeedStatus` (`off`, `on` with
+`port`, `portInUse`, `failed`) plus `code` (the six-digit pairing code, only
+while it's on) and `paired`. Event `deck://status` carries it whenever it
+changes, including after a pairing. `deck_revoke` forgets the paired Stream
+Deck and makes a new code. It's turned on with `settings_set`
+(`allowStreamDeck`).
+
+Request album and Listen along from a Stream Deck bring the window up and
+send `deck://action` to the UI, which shows the usual confirmation:
+`{ kind: "requestAlbum", input: LidarrRequestInput }` opens the Lidarr
+request dialog, and `{ kind: "listenAlong" }` starts a session (or shows the
+open invite).
+
+The control API itself is plain HTTP with JSON on `127.0.0.1:32541`, for the
+Stream Deck plugin in `streamdeck/` and other local programs. It binds the
+loopback address only, answers only loopback peers whose `Host` is
+`127.0.0.1:32541` or `localhost:32541`, refuses any request with an `Origin`
+header or a `Sec-Fetch-Site` other than `none` (403), and allows 20 requests
+a second (429 past that). Bodies are at most 4 KB.
+
+- `GET /v1/hello` → `{ app: "Platter", api: 1, paired }`; `paired` says
+  whether the bearer token sent is the paired one.
+- `POST /v1/pair` with `{ code }` → `{ token }`. One try every two seconds;
+  a wrong code is 401 and five in a row make a new code. A success also
+  makes a new code and replaces any earlier token. Only the token's SHA-256
+  is kept, in the keychain.
+- Everything else needs `Authorization: Bearer <token>` (401 without it).
+- `GET /v1/state?cover=<coverKey>` → `{ api, playing, private, title, artist,
+  album, trackId, liked, volume, muted, coverKey, cover, canRequest }`.
+  `volume` is 0 to 100. `cover` is a 144 px `data:image/...;base64,` image,
+  left out when `cover` in the query already names it. A private session
+  leaves out the song and cover.
+- `POST /v1/command` with `{ command }`: `playPause`, `next`, `previous`,
+  `like` (toggles), `volumeSet` and `volumeStep` (with `value` in percent),
+  `requestAlbum`, `listenAlong` → `{ ok: true }`, or 409 with `{ error }`
+  saying why (nothing playing, Lidarr not set up, no album to request).
+
 ## Discord
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1912,6 +1955,7 @@ The rest of the fields, with their defaults:
 | `hintKey` | `"f"` (default), `"h"`, `";"`, `"'"` | The key that shows the jump hints. |
 | `nowPlayingFeed` | bool, false | Serve the playing song on 127.0.0.1 for widgets (see Now-playing feed). This device only. |
 | `nowPlayingFeedPort` | 1024 to 65535, 32540 | The feed's port. Lower ports are refused with `invalid`. This device only. |
+| `allowStreamDeck` | bool, false | Let a paired Stream Deck control playback on 127.0.0.1 (see Stream Deck). This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.

@@ -41,6 +41,7 @@ import { FriendActivityPanel } from "./FriendActivityPanel";
 import { startSocial } from "../stores/social";
 import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
+import { DeckActions } from "./DeckActions";
 import { LazyLyricsEditorHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost } from "./lazyHosts";
 import { QueuePanel } from "./QueuePanel";
 import { ResizeHandle } from "./ResizeHandle";
@@ -213,6 +214,7 @@ export function AppShell() {
       <LazyLyricsEditorHost />
       <FullWindow />
       <LazyShareCardHost />
+      <DeckActions />
     </div>
   );
 }

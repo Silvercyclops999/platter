@@ -19,6 +19,7 @@
 //! page, [`commands`] the Tauri command (docs/IPC.md "Now-playing feed").
 
 pub mod commands;
+pub mod deck;
 pub mod page;
 pub mod server;
 

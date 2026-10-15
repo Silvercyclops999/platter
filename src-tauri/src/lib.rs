@@ -850,6 +850,13 @@ pub fn run() {
                 Arc::new(feed::AppSource { player: player.clone(), art: art.clone() }),
                 Arc::new(plex::state::TauriSink(app.handle().clone())),
             ));
+            // The Stream Deck control API, on 127.0.0.1 while it's allowed.
+            app.manage(feed::deck::spawn(
+                live.deck.clone(),
+                Arc::new(feed::deck::app::AppDeck::new(app.handle().clone(), player.clone(), art.clone())),
+                Arc::new(feed::deck::pairing::Pairing::new(Arc::new(plex::keychain::KeyringStore::new()))),
+                Arc::new(plex::state::TauriSink(app.handle().clone())),
+            ));
             app.manage(art);
             app.manage(artist_info);
             app.manage(player);
@@ -992,6 +999,8 @@ pub fn run() {
             artistinfo::commands::album_credits,
             artistinfo::commands::album_release_status,
             feed::commands::feed_status,
+            feed::deck::commands::deck_status,
+            feed::deck::commands::deck_revoke,
             artistinfo::commands::artist_info_keys,
             artistinfo::commands::artist_info_key_set,
             artistinfo::commands::artist_info_cache_clear,

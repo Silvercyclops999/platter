@@ -179,6 +179,19 @@ impl Likes {
         Ok(changed)
     }
 
+    /// Whether one song is liked (false when it isn't in the cache).
+    pub async fn is_liked(&self, track_id: &str) -> AppResult<bool> {
+        let min = self.min_rating();
+        let id = track_id.to_owned();
+        self.db()
+            .read_async(move |c| {
+                let rating: Option<f64> =
+                    c.query_row("SELECT user_rating FROM tracks WHERE id = ?1", [&id], |r| r.get(0)).optional()?.flatten();
+                Ok(rating.is_some_and(|r| r >= min))
+            })
+            .await
+    }
+
     /// Every liked track id, newest like first.
     pub async fn ids(&self) -> AppResult<Vec<String>> {
         let min = self.min_rating();

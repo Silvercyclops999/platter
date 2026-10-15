@@ -36,6 +36,7 @@ import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
+import { StreamDeckSettings, streamDeckMatches } from "./StreamDeckSettings";
 import { MixExclusions } from "./MixExclusions";
 import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
@@ -2003,6 +2004,7 @@ export function SettingsPage() {
       {nowPlayingMatches(query) && <NowPlayingSettings />}
       {importMatches(query) && <LibraryImportSettings />}
       {plexEditMatches(query) && <PlexEditSettings />}
+      {streamDeckMatches(query) && <StreamDeckSettings />}
       <p className="settings__hint">Shortcut: {modKey}+,</p>
       <ConfirmDialog
         open={dialog === "signOut"}
