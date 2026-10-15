@@ -32,7 +32,7 @@
 }
 .lidarr-state--searching,
 .lidarr-state--downloading { color: var(--color-text-primary); }
-.lidarr-state--imported { color: var(--color-success); }
+.lidarr-state--imported { color: var(--color-accent); }
 .lidarr-state--failed { color: var(--color-error-text); background: var(--color-error-surface); }
 
 /* The request dialog. */
