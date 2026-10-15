@@ -336,16 +336,24 @@ impl ArtCache {
         // Worked out here, not on the blocking thread, so the key always
         // sees the legacy server tag.
         let key = cache_key(path, w, h);
-        {
-            let me = self.clone();
-            let k = key.clone();
-            let hit = tokio::task::spawn_blocking(move || me.lookup_key(&k))
-                .await
-                .map_err(|e| AppError::Internal(format!("art task: {e}")))??;
-            if let Some(hit) = hit {
-                return Ok(hit);
-            }
+        if let Some(hit) = self.lookup_async(&key).await? {
+            return Ok(hit);
         }
+        self.join_or_fetch(path, w, h, key).await
+    }
+
+    async fn lookup_async(&self, key: &str) -> AppResult<Option<ArtBytes>> {
+        let me = self.clone();
+        let k = key.to_owned();
+        tokio::task::spawn_blocking(move || me.lookup_key(&k))
+            .await
+            .map_err(|e| AppError::Internal(format!("art task: {e}")))?
+    }
+
+    /// Joins the fetch already running for `key`, or starts one. A fetch
+    /// that finished between the caller's cache miss and here has stored
+    /// its image and left `inflight`, so a new fetch first looks again.
+    async fn join_or_fetch(&self, path: &str, w: u32, h: u32, key: String) -> AppResult<ArtBytes> {
         let fut = {
             let mut inflight = self.inner.inflight.lock();
             if let Some(f) = inflight.get(&key) {
@@ -355,7 +363,10 @@ impl ArtCache {
                 let p = path.to_owned();
                 let k = key.clone();
                 let f: BoxFuture<'static, Result<ArtBytes, Arc<AppError>>> = async move {
-                    let res = me.fetch_and_store(p, w, h, k.clone()).await;
+                    let res = match me.lookup_async(&k).await {
+                        Ok(Some(hit)) => Ok(hit),
+                        _ => me.fetch_and_store(p, w, h, k.clone()).await,
+                    };
                     me.inner.inflight.lock().remove(&k);
                     res.map_err(Arc::new)
                 }
@@ -518,6 +529,11 @@ mod tests {
             assert_eq!(r.unwrap().unwrap().bytes.len(), 500);
         }
         assert_eq!(f.calls.load(Ordering::SeqCst), 1);
+        // A request that missed the cache just before that fetch stored its
+        // image, and reached `inflight` just after it left, doesn't fetch
+        // again.
+        c.join_or_fetch("/a", 100, 100, cache_key("/a", 100, 100)).await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 1, "fetched twice");
         // Errors are shared too, and not cached.
         let e = c.get_or_fetch("/missing", 1, 1).await.unwrap_err();
         assert_eq!(e.kind(), "notFound");
