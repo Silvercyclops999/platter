@@ -219,11 +219,10 @@ export function sessionItems(trackIds: () => string[], play: () => void): MenuIt
 }
 
 /**
- * Listening sessions are switched off while their transport is rebuilt to go
- * through a relay, so participants never connect to each other directly.
- * Tests switch it on to keep covering the flow.
+ * Listening sessions on or off for the whole app. They go through a relay,
+ * so participants never connect to each other directly.
  */
-export const listenAlong = { enabled: false };
+export const listenAlong = { enabled: true };
 
 /** "Start a listening session": plays the item, then hosts. Only while there's no session. */
 export function startSessionItem(play: () => void): MenuItem {
