@@ -13,7 +13,8 @@ use super::fake_ntfy::FakeNtfy;
 use super::invite::{self, Token};
 use super::relay::{self, Ntfy, RelayEvent, RelayHealth};
 use super::seal::{self, Channel, Envelope, Rejected, ReplayGuard, Sender};
-use super::wire::{Msg, Op, Person, Queued, State};
+use super::matching::{Cand, Found};
+use super::wire::{Msg, Op, Person, Queued, Song, State};
 use super::*;
 use crate::error::AppResult;
 use crate::plex::state::EventSink;
@@ -147,6 +148,41 @@ impl ListenPlayer for FakePlayer {
     }
 }
 
+/// A library: the ids it has (None: every id the host plays), who the
+/// host's songs are, and songs to match against.
+#[derive(Default)]
+struct FakeLib {
+    have: Mutex<Option<Vec<String>>>,
+    songs: Mutex<std::collections::HashMap<String, Song>>,
+    here: Mutex<Vec<Cand>>,
+}
+
+impl FakeLib {
+    fn has_only(&self, ids: &[&str]) {
+        *self.have.lock() = Some(ids.iter().map(|s| s.to_string()).collect());
+    }
+    fn song(&self, id: &str, s: Song) {
+        self.songs.lock().insert(id.into(), s);
+    }
+    fn copy(&self, id: &str, title: &str, artist: &str, ms: u64, mbid: Option<&str>) {
+        self.here.lock().push(Cand { id: id.into(), title: title.into(), artist: artist.into(), track_artist: None, duration_ms: ms, mbid: mbid.map(str::to_string) });
+    }
+}
+
+#[async_trait]
+impl ListenLibrary for FakeLib {
+    async fn songs(&self, ids: Vec<String>) -> std::collections::HashMap<String, Song> {
+        let all = self.songs.lock();
+        ids.into_iter().filter_map(|k| all.get(&k).cloned().map(|s| (k, s))).collect()
+    }
+    async fn has(&self, id: &str) -> bool {
+        self.have.lock().as_ref().is_none_or(|h| h.iter().any(|x| x == id))
+    }
+    async fn find(&self, song: &Song) -> Option<Found> {
+        matching::best(song, &self.here.lock())
+    }
+}
+
 struct FakeServer(Mutex<Option<String>>);
 
 #[async_trait]
@@ -167,6 +203,7 @@ struct Peer {
     events: Arc<Events>,
     settings: ListenSettings,
     server: Arc<FakeServer>,
+    lib: Arc<FakeLib>,
     plain: Arc<Mutex<Vec<String>>>,
 }
 
@@ -189,6 +226,7 @@ fn peer(name: &str, relay: &FakeNtfy) -> Peer {
     let events = Arc::new(Events::default());
     let settings = ListenSettings::default();
     let server = Arc::new(FakeServer(Mutex::new(Some(MACHINE_ID.into()))));
+    let lib = Arc::new(FakeLib::default());
     let plain: Arc<Mutex<Vec<String>>> = Arc::default();
     let name = name.to_string();
     let tap = plain.clone();
@@ -197,13 +235,14 @@ fn peer(name: &str, relay: &FakeNtfy) -> Peer {
         relays: Arc::new(Ntfy::new().unwrap()),
         events: events.clone(),
         server: server.clone(),
+        library: lib.clone(),
         name: Arc::new(move || name.clone()),
         settings: settings.clone(),
         default_relay: relay.url.clone(),
         cfg: cfg(),
         tap: Some(Arc::new(move |s: &str| tap.lock().push(s.to_string()))),
     });
-    Peer { listen, player, events, settings, server, plain }
+    Peer { listen, player, events, settings, server, lib, plain }
 }
 
 async fn eventually(what: &str, mut f: impl FnMut() -> bool) {
@@ -325,11 +364,12 @@ fn a_full_state_still_fits_the_relay_limit() {
     let mut st = State {
         srv: "0".repeat(24),
         t: Some("1234567890".into()),
+        ts: None,
         tby: None,
         p: 123_456,
         d: 456_789,
         pl: true,
-        q: (0..UP_NEXT).map(|i| Queued { k: format!("{i:064}"), by: Some("f".repeat(16)) }).collect(),
+        q: (0..UP_NEXT).map(|i| Queued { k: format!("{i:064}"), by: Some("f".repeat(16)), s: None }).collect(),
         ctl: true,
         ppl: (0..=MAX_GUESTS).map(|i| Person { id: format!("{i:016}"), name: "N".repeat(NAME_MAX), av: None }).collect(),
     };
@@ -390,11 +430,12 @@ fn st(track: Option<&str>, pos: u64, playing: bool) -> State {
     State {
         srv: "s".into(),
         t: track.map(str::to_string),
+        ts: None,
         tby: None,
         p: pos,
         d: 200_000,
         pl: playing,
-        q: vec![Queued { k: "b".into(), by: None }, Queued { k: "c".into(), by: Some("g1".into()) }],
+        q: vec![Queued { k: "b".into(), by: None, s: None }, Queued { k: "c".into(), by: Some("g1".into()), s: None }],
         ctl: true,
         ppl: Vec::new(),
     }
@@ -661,17 +702,165 @@ async fn replayed_relay_messages_are_ignored_mid_session() {
     assert!(h.player.playing(), "the copy was dropped");
 }
 
+const MB: &str = "0f6a1b2c-3d4e-4f50-8a9b-0c1d2e3f4a5b";
+
+fn song(mb: Option<&str>, n: &str, a: &str) -> Song {
+    Song { mb: mb.map(str::to_string), n: Some(n.into()), a: Some(a.into()), d: 200_000, u: false }
+}
+
+/// A guest on another server, with none of the host's songs.
+async fn elsewhere(relay: &FakeNtfy, name: &str, link: &str, setup: impl FnOnce(&FakeLib)) -> Peer {
+    let g = peer(name, relay);
+    *g.server.0.lock() = Some("another-server-entirely".into());
+    g.lib.has_only(&[]);
+    setup(&g.lib);
+    g.listen.join(link).await.unwrap();
+    eventually("guest live", || status(&g) == Some(SessionStatus::Live)).await;
+    g
+}
+
 #[tokio::test]
-async fn a_guest_without_the_hosts_server_is_told_and_leaves() {
+async fn a_guest_without_the_hosts_copy_plays_its_own_by_musicbrainz_id_or_by_text() {
+    let relay = FakeNtfy::start().await;
+    let h = peer("Sam", &relay);
+    h.lib.song("a", song(Some(MB), "Night Drive", "The Band"));
+    h.lib.song("b", song(None, "Second Song", "The Band"));
+    h.player.set("a", 30_000, true, &["b"]);
+    let link = h.listen.start().await.unwrap().invite.unwrap().link;
+    let g = elsewhere(&relay, "Alex", &link, |lib| {
+        lib.copy("x1", "Something Else", "Other", 201_000, Some(&MB.to_uppercase()));
+        lib.copy("x2", "second song!", "THE BAND", 202_500, None);
+    })
+    .await;
+    // "a" by its MusicBrainz id, at the host's spot; "b" by artist, title and length.
+    eventually("guest plays its copy", || g.player.track().as_deref() == Some("x1")).await;
+    assert!(g.player.log.lock()[0].starts_with("play x1 at 30"), "{:?}", g.player.log.lock());
+    eventually("its copy of what's next is queued", || g.player.user() == ["x2"]).await;
+    let v = g.listen.view();
+    assert_eq!(v.queue.first().map(|q| q.track_id.as_str()), Some("x2"), "the queue shows the copy here");
+    assert!(v.missing.is_none() && !v.another_version);
+    h.player.set("b", 0, true, &[]);
+    eventually("guest on its copy of b", || g.player.track().as_deref() == Some("x2")).await;
+    assert!(!g.listen.view().another_version, "within 3 s is the same version");
+    assert!(h.listen.view().cant_hear.is_empty());
+    assert!(g.events.last(EVENT_NOTICE).is_none(), "no toasts");
+}
+
+#[tokio::test]
+async fn another_version_plays_from_the_same_share_of_the_song() {
+    let relay = FakeNtfy::start().await;
+    let h = peer("Sam", &relay);
+    h.lib.song("a", song(Some(MB), "Night Drive", "The Band"));
+    h.player.set("a", 100_000, true, &[]);
+    let link = h.listen.start().await.unwrap().invite.unwrap().link;
+    // The host's runs 200 s; the copy here 300 s: halfway is 150 s.
+    let g = elsewhere(&relay, "Alex", &link, |lib| lib.copy("x1", "Night Drive (Extended)", "The Band", 300_000, Some(MB))).await;
+    eventually("guest plays its copy", || g.player.track().as_deref() == Some("x1")).await;
+    assert!(g.player.log.lock()[0].starts_with("play x1 at 150"), "{:?}", g.player.log.lock());
+    eventually("marked another version", || g.listen.view().another_version).await;
+    assert_eq!(g.events.last(EVENT).unwrap()["anotherVersion"], true);
+}
+
+#[tokio::test]
+async fn nothing_found_waits_quietly_tells_the_host_and_rejoins_at_the_next_song() {
+    let relay = FakeNtfy::start().await;
+    let h = peer("Sam", &relay);
+    h.lib.song("a", song(None, "Gone Song", "The Band"));
+    h.lib.song("b", song(None, "Next Song", "The Band"));
+    h.player.set("a", 30_000, true, &["b"]);
+    let link = h.listen.start().await.unwrap().invite.unwrap().link;
+    // From another server, with only the host's next song.
+    let g = elsewhere(&relay, "Alex", &link, |lib| lib.has_only(&["b"])).await;
+    eventually("the song isn't here", || g.listen.view().missing.is_some()).await;
+    let m = g.listen.view().missing.unwrap();
+    assert_eq!((m.title.as_deref(), m.artist.as_deref(), m.unreleased), (Some("Gone Song"), Some("The Band"), false));
+    assert_eq!(g.events.last(EVENT).unwrap()["missing"]["title"], "Gone Song");
+    assert!(g.player.track().is_none() && !g.player.playing(), "nothing plays");
+    assert_eq!(status(&g), Some(SessionStatus::Live), "still in the session");
+    // The host sees who can't hear it, in the people list and by now playing.
+    eventually("the host is told", || h.listen.view().cant_hear == ["Alex"]).await;
+    assert!(h.listen.view().people.iter().any(|p| p.name == "Alex" && p.cant_hear));
+    // The next song is here: the guest plays it.
+    h.player.set("b", 0, true, &["a"]);
+    eventually("guest rejoins at the next song", || g.player.track().as_deref() == Some("b") && g.player.playing()).await;
+    eventually("the mark clears", || h.listen.view().cant_hear.is_empty()).await;
+    assert!(g.listen.view().missing.is_none());
+    // Playing, then a song that isn't here: a quiet pause.
+    h.player.set("a", 0, true, &[]);
+    eventually("guest waits again", || !g.player.playing() && g.listen.view().missing.is_some()).await;
+    eventually("and the host sees it again", || h.listen.view().cant_hear == ["Alex"]).await;
+    assert!(g.events.last(EVENT_NOTICE).is_none(), "never an error toast");
+}
+
+#[tokio::test]
+async fn unreleased_songs_are_never_matched_and_their_titles_can_be_hidden() {
+    let relay = FakeNtfy::start().await;
+    let h = peer("Sam", &relay);
+    h.lib.song("a", Song { u: true, ..song(Some(MB), "From The Vault", "The Band") });
+    h.player.set("a", 30_000, true, &[]);
+    let link = h.listen.start().await.unwrap().invite.unwrap().link;
+    // A guest with the very same song elsewhere still doesn't hear it.
+    let g = elsewhere(&relay, "Alex", &link, |lib| lib.copy("x1", "From The Vault", "The Band", 200_000, Some(MB))).await;
+    // A guest with the host's own copy does.
+    let other = joined(&relay, "Bo", &h.listen.invite(true).unwrap().invite.unwrap().link).await;
+    assert_eq!(other.player.track().as_deref(), Some("a"));
+    eventually("not matched", || g.listen.view().missing.is_some()).await;
+    let m = g.listen.view().missing.unwrap();
+    assert_eq!((m.title.as_deref(), m.unreleased), (Some("From The Vault"), true), "the title shows by default");
+    assert!(g.player.track().is_none());
+    assert!(!h.plain.lock().iter().any(|p| p.contains(MB)), "an unreleased song's MusicBrainz id isn't sent");
+    // "Hide unreleased titles from guests".
+    h.settings.hide_unreleased.store(true, Ordering::SeqCst);
+    eventually("the title is hidden", || g.listen.view().missing.is_some_and(|m| m.title.is_none() && m.artist.is_none() && m.unreleased)).await;
+    let n = h.plain.lock().len();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!h.plain.lock()[n.saturating_sub(1)..].iter().any(|p| p.contains("From The Vault")));
+}
+
+#[test]
+fn song_identity_is_optional_both_ways() {
+    // A state from a host without it reads; a guest without it ignores it.
+    let old = r#"{"srv":"s","t":"a","p":1,"d":2,"pl":true,"q":[{"k":"b"}],"ctl":true,"ppl":[]}"#;
+    let st: State = serde_json::from_str(old).unwrap();
+    assert_eq!((st.ts.as_ref(), st.q[0].s.as_ref()), (None, None));
+    assert!(!serde_json::to_string(&st).unwrap().contains("\"ts\""), "nothing extra when unknown");
+    let new = serde_json::to_value(State { ts: Some(song(Some(MB), "T", "A")), ..st }).unwrap();
+    assert_eq!(new["ts"], serde_json::json!({ "mb": MB, "n": "T", "a": "A", "d": 200_000 }));
+    let m: Msg = serde_json::from_str(r#"{"k":"cantHear","t":"a"}"#).unwrap();
+    assert_eq!(m, Msg::CantHear { t: Some("a".into()) });
+    assert_eq!(serde_json::from_str::<Msg>(r#"{"k":"cantHear"}"#).unwrap(), Msg::CantHear { t: None });
+    // Song ids with their server tag can be added.
+    assert!(ok_song("0a1b2c3d:12345") && ok_song("12345") && !ok_song("../x") && !ok_song("0a1b2c3d:") && !ok_song("a:b:c"));
+}
+
+#[test]
+fn a_long_queue_drops_who_the_songs_are_before_the_songs() {
+    let mut st = State {
+        srv: "0".repeat(24),
+        t: Some("0a1b2c3d:1".into()),
+        ts: Some(song(Some(MB), &"T".repeat(80), &"A".repeat(80))),
+        tby: None,
+        p: 1,
+        d: 2,
+        pl: true,
+        q: (0..UP_NEXT).map(|i| Queued { k: format!("0a1b2c3d:{i}"), by: None, s: Some(song(Some(MB), &"T".repeat(60), &"A".repeat(40))) }).collect(),
+        ctl: true,
+        ppl: Vec::new(),
+    };
+    fit(&mut st, 2);
+    assert_eq!(st.q.len(), UP_NEXT, "every song still goes");
+    assert!(st.ts.is_some() && st.q[0].s.is_some(), "the songs playing and next keep who they are");
+    assert!(st.q.last().unwrap().s.is_none());
+}
+
+#[tokio::test]
+async fn a_guest_on_another_server_can_join_but_not_without_one() {
     let relay = FakeNtfy::start().await;
     let (h, link) = hosting(&relay).await;
-    let g = peer("Alex", &relay);
-    *g.server.0.lock() = Some("another-server-entirely".into());
-    let e = g.listen.join(&link).await.unwrap_err();
-    assert_eq!(e.to_string(), "invalid: You need access to Sam's Plex library to listen along.");
-    assert_eq!(g.listen.view().role, Role::None);
+    let g = elsewhere(&relay, "Alex", &link, |_| {}).await;
+    eventually("the host sees Alex", || h.listen.view().listeners == ["Alex"]).await;
     assert!(g.player.log.lock().is_empty(), "nothing played");
-    eventually("the host frees the place", || h.listen.view().people.len() == 1).await;
+    g.listen.stop().await.unwrap();
     // Not signed in to any server: can't join or host.
     *g.server.0.lock() = None;
     assert!(g.listen.join(&h.listen.invite(true).unwrap().invite.unwrap().link).await.is_err());

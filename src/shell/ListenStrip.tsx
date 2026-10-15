@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { QrCode } from "../components/QrCode";
-import type { ListenPerson, ListenView } from "../lib/types";
+import type { ListenMissing, ListenPerson, ListenView } from "../lib/types";
 import { closeInvite, copyInvite, endSession, listenAlong, openInvite, removePerson, startSession, useSocial } from "../stores/social";
 import "./social.css";
 
@@ -30,6 +30,35 @@ export function addedBy(v: ListenView, trackId: string, current = false): Listen
   if (v.role === "none") return null;
   const id = current ? v.nowBy : v.queue.find((q) => q.trackId === trackId)?.by;
   return (id && v.people.find((p) => p.id === id)) || null;
+}
+
+/** "Not in your library: Song · Artist" (no title when the host hides it). */
+export function missingText(m: ListenMissing): string {
+  const what = m.title ? `${m.title}${m.artist ? ` · ${m.artist}` : ""}` : m.unreleased ? "an unreleased song" : "this song";
+  return `Not in your library: ${what}`;
+}
+
+/**
+ * The note on the session's song: for a guest, that it isn't in their
+ * library or that a copy of another length plays; for the host, who can't
+ * hear it. Null when there's nothing to say.
+ */
+export function listenNote(v: ListenView): string | null {
+  if (v.status !== "live") return null;
+  if (v.role === "guest") return v.missing ? missingText(v.missing) : v.anotherVersion ? "Another version" : null;
+  if (v.role === "host" && v.cantHear.length > 0) return `${namesLine(v.cantHear)} can't hear this song`;
+  return null;
+}
+
+/** The note under the song in the player bar (quiet text, never a toast). */
+export function ListenMark() {
+  const note = useSocial((s) => listenNote(s.listen));
+  if (!note) return null;
+  return (
+    <div className="listen-mark truncate" role="status">
+      {note}
+    </div>
+  );
 }
 
 function stripText(v: ListenView): string {
@@ -69,6 +98,7 @@ export function ListenStrip() {
   if (v.role === "none") return <InviteDialog />;
   const stopped = v.status === "hostGone" || v.status === "ended" || v.status === "removed";
   const relay = !stopped ? RELAY_TEXT[v.relay] : undefined;
+  const note = listenNote(v);
   return (
     <div className={`listen-strip ${stopped ? "listen-strip--stopped" : ""}`} role="region" aria-label="Listening session">
       <UsersRound size={14} aria-hidden="true" />
@@ -80,7 +110,15 @@ export function ListenStrip() {
       <span className="listen-strip__text truncate" role="status">
         {stripText(v)}
         {relay && <span className="listen-strip__relay"> · {relay}</span>}
+        {note && (
+          <span className="listen-strip__note">
+            {" · "}
+            {note}
+            {v.missing && ". Waiting for the next song."}
+          </span>
+        )}
       </span>
+      {/* Later, next to a missing song: "Add to Missing list", and "Request" through this person's own Lidarr when they set one up. */}
       {!stopped && v.people.length > 0 && (
         <div className="listen-people" ref={people}>
           <button type="button" className="listen-strip__btn" aria-expanded={peopleOpen} onClick={() => setPeopleOpen((o) => !o)}>
@@ -114,6 +152,7 @@ function PeopleList({ v }: { v: ListenView }) {
             {p.name}
             {p.me && <span className="listen-people__tag"> (you)</span>}
             {p.host && <span className="listen-people__tag"> · host</span>}
+            {p.cantHear && <span className="listen-people__tag listen-people__tag--cant"> · can't hear this song</span>}
           </span>
           {v.role === "host" && !p.host && (
             <IconButton size="sm" label={`Remove ${p.name}`} icon={<UserMinus size={16} />} onClick={() => void removePerson(p.id)} />
@@ -161,8 +200,8 @@ export function InviteDialog() {
       {inv ? (
         <>
           <p className="confirm__body">
-            Send this link, or let them scan the code. It works for one person, once, and runs out in {expiresIn(inv.expiresAt)}. They need access to
-            your Plex library, and they only ever see your name.
+            Send this link, or let them scan the code. It works for one person, once, and runs out in {expiresIn(inv.expiresAt)}. They play from
+            your Plex library if they have access, else their own copy of each song, and they only ever see your name.
           </p>
           <div className="invite-dialog__code">
             {inv.qr && <QrCode qr={inv.qr} label="QR code for the invite link" className="invite-dialog__qr" />}
@@ -240,7 +279,7 @@ export function SessionCard({ dismissable = false }: { dismissable?: boolean }) 
         {dismissable && <IconButton size="sm" label="Dismiss" icon={<X size={16} />} onClick={dismiss} />}
       </div>
       <p className="session-card__text">
-        Start a listening session and people with access to your Plex library can listen with you, from anywhere. They add songs, and can play, pause
+        Start a listening session and people can listen with you, from anywhere, from your Plex library or their own. They add songs, and can play, pause
         and skip if you let them.
       </p>
       <Button size="sm" variant="primary" icon={<UsersRound size={14} />} onClick={() => void startSession()}>

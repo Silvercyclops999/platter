@@ -444,6 +444,9 @@ pub struct Settings {
     /// The name others in a listening session see; empty means the Plex
     /// display name.
     pub listen_name: String,
+    /// "Hide unreleased titles from guests": in a session you host, an
+    /// unreleased song goes to guests without its title and artist.
+    pub listen_hide_unreleased: bool,
     /// Discord shows a listening session you host.
     pub discord_listen_along: bool,
     /// Keep app-only state in a sync file in a folder (this device only).
@@ -612,6 +615,7 @@ impl Default for Settings {
             listen_relay: String::new(),
             listen_invite_hours: 24,
             listen_name: String::new(),
+            listen_hide_unreleased: false,
             discord_listen_along: true,
             sync_enabled: false,
             sync_folder: String::new(),
@@ -710,6 +714,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "listenRelay",
     "listenInviteHours",
     "listenName",
+    "listenHideUnreleased",
     "bookmarksInLibrary",
     "scrobbleUnreleased",
     "aiModel",
@@ -908,6 +913,7 @@ pub struct SettingsPatch {
     /// 1, 24 or 168.
     pub listen_invite_hours: Option<u32>,
     pub listen_name: Option<String>,
+    pub listen_hide_unreleased: Option<bool>,
     pub discord_listen_along: Option<bool>,
     pub sync_enabled: Option<bool>,
     pub sync_settings: Option<bool>,
@@ -1128,6 +1134,7 @@ impl Settings {
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
         set(&mut self.notify_new_releases, p.notify_new_releases);
         set(&mut self.listen_guests_control, p.listen_guests_control);
+        set(&mut self.listen_hide_unreleased, p.listen_hide_unreleased);
         if let Some(r) = &p.listen_relay {
             self.listen_relay = if r.trim().is_empty() {
                 String::new()
@@ -1408,6 +1415,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         *so.listen.relay.write() = s.listen_relay.clone();
         so.listen.invite_hours.store(s.listen_invite_hours, Ordering::Relaxed);
         *so.listen.name.write() = s.listen_name.clone();
+        so.listen.hide_unreleased.store(s.listen_hide_unreleased, Ordering::Relaxed);
         so.private_session.store(s.private_session, Ordering::Relaxed);
     }
     {
@@ -1938,6 +1946,8 @@ mod tests {
         assert!(s.show_friend_activity && s.share_activity && s.whats_new_announcements);
         assert!(!s.notify_new_releases);
         assert!(s.listen_guests_control && s.discord_listen_along);
+        // Unreleased titles go to guests unless the host hides them.
+        assert!(!s.listen_hide_unreleased);
         // Listen along: ntfy.sh, invites good for a day, the Plex name.
         assert!(s.listen_relay.is_empty() && s.listen_name.is_empty());
         assert_eq!(s.listen_invite_hours, 24);
@@ -2213,6 +2223,7 @@ mod tests {
             listen_relay: Some(" https://relay.example.org/ ".into()),
             listen_invite_hours: Some(1),
             listen_name: Some(" DJ Sam ".into()),
+            listen_hide_unreleased: Some(true),
             discord_listen_along: Some(false),
             bookmarks_in_library: Some(false),
             scrobble_lastfm: Some(true),
@@ -2235,6 +2246,7 @@ mod tests {
         assert_eq!(*live.social.listen.relay.read(), "https://relay.example.org");
         assert_eq!(live.social.listen.invite_hours.load(Ordering::Relaxed), 1);
         assert_eq!(*live.social.listen.name.read(), "DJ Sam");
+        assert!(live.social.listen.hide_unreleased.load(Ordering::Relaxed));
         assert!(live.social.private_session.load(Ordering::Relaxed));
         assert!(!live.tracking.share_activity.load(Ordering::Relaxed));
         assert!(!live.discord.get().listen_along);

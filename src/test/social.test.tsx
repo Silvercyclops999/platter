@@ -19,7 +19,7 @@ import { ArtistPage } from "../pages/ArtistPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { WhatsNewPage } from "../pages/WhatsNewPage";
 import { FriendActivityPanel } from "../shell/FriendActivityPanel";
-import { ListenStrip, SessionCard, addedBy, namesLine } from "../shell/ListenStrip";
+import { ListenMark, ListenStrip, SessionCard, addedBy, namesLine } from "../shell/ListenStrip";
 import { player } from "../stores/player";
 import { Sidebar } from "../shell/Sidebar";
 import { TopBar } from "../shell/TopBar";
@@ -313,13 +313,60 @@ describe("listening sessions", () => {
     expect(toasts()).toContain(`${MOCK_FRIENDS[1]} removed you from the listening session.`);
   });
 
-  it("a join that fails says why: a used or expired invite, or no access to the host's library", async () => {
-    for (const why of ["That invite was already used. Ask for a new one.", `You need access to ${MOCK_FRIENDS[1]}'s Plex library to listen along.`]) {
+  it("a join that fails says why: a used invite or a full session", async () => {
+    for (const why of ["That invite was already used. Ask for a new one.", "That listening session is full."]) {
       mock.social.failNextJoin = why;
       await openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE });
       expect(toasts()).toContain(why);
       expect(useSocial.getState().listen.role).toBe("none");
     }
+  });
+
+  it("a guest without the song sees it quietly, unreleased titles can be hidden, and another version is marked", async () => {
+    render(
+      <>
+        <ListenStrip />
+        <ListenMark />
+      </>,
+    );
+    await join();
+    const strip = await screen.findByRole("region", { name: "Listening session" });
+    useToasts.setState({ toasts: [] });
+    act(() => mock.social.songNotHere("Night Drive"));
+    await waitFor(() => expect(strip).toHaveTextContent("Not in your library: Night Drive · Fixture Artist. Waiting for the next song."));
+    expect(screen.getAllByText(/Not in your library: Night Drive/)).toHaveLength(2);
+    // The host hides unreleased titles: only that it's an unreleased song.
+    act(() => mock.social.songNotHere(null, true));
+    await waitFor(() => expect(strip).toHaveTextContent("Not in your library: an unreleased song"));
+    expect(strip).not.toHaveTextContent("Night Drive");
+    // The next song plays here, as a copy of another length.
+    act(() => mock.social.anotherVersion(true));
+    await waitFor(() => expect(strip).not.toHaveTextContent("Not in your library"));
+    expect(strip).toHaveTextContent("Another version");
+    act(() => mock.social.anotherVersion(false));
+    await waitFor(() => expect(strip).not.toHaveTextContent("Another version"));
+    expect(toasts()).toEqual([]);
+  });
+
+  it("the host sees who can't hear the song, in the people list and under the song, until they can", async () => {
+    render(
+      <>
+        <ListenStrip />
+        <ListenMark />
+      </>,
+    );
+    act(() => {
+      mock.social.start();
+    });
+    act(() => mock.social.guestJoins("Casey"));
+    const strip = await screen.findByRole("region", { name: "Listening session" });
+    await waitFor(() => expect(strip).toHaveTextContent("Casey"));
+    act(() => mock.social.guestCantHear("Casey", true));
+    await waitFor(() => expect(screen.getAllByText(/Casey can't hear this song/)).toHaveLength(2));
+    await userEvent.click(within(strip).getByRole("button", { name: /^People/ }));
+    expect(within(strip).getByRole("list", { name: "People in the session" })).toHaveTextContent("Casey · can't hear this song");
+    act(() => mock.social.guestCantHear("Casey", false));
+    await waitFor(() => expect(screen.queryByText(/can't hear this song/)).toBeNull());
   });
 
   it("a guest's controls and additions go to the host, and add-only hosts say so", async () => {
@@ -377,5 +424,9 @@ describe("settings", () => {
     const name = within(social).getByRole("textbox", { name: "Your name in listening sessions" });
     await userEvent.type(name, "DJ Sam{Enter}");
     await waitFor(async () => expect((await mock.settingsGet()).listenName).toBe("DJ Sam"));
+    // Unreleased titles go to guests unless hidden.
+    expect(sw("Hide unreleased titles from guests")).not.toBeChecked();
+    await userEvent.click(sw("Hide unreleased titles from guests"));
+    await waitFor(async () => expect((await mock.settingsGet()).listenHideUnreleased).toBe(true));
   });
 });

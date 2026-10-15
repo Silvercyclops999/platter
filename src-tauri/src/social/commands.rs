@@ -10,7 +10,9 @@ use tauri::{AppHandle, Runtime, State};
 use super::activity::{ActivityPanel, ActivitySource};
 use super::follows::{FollowedArtist, WhatsNew};
 use super::listen::wire::Op;
-use super::listen::{ListenAlong, ListenPlayer, ListenView, PlayerNow, ServerId};
+use super::listen::matching::{self, Found};
+use super::listen::wire::Song;
+use super::listen::{ListenAlong, ListenLibrary, ListenPlayer, ListenView, PlayerNow, ServerId};
 use super::{Notifier, Social};
 use crate::audio::events::PlayerStatus;
 use crate::audio::player::PlayerHandle;
@@ -127,6 +129,33 @@ pub struct PlexServerId(pub PlexState);
 impl ServerId for PlexServerId {
     async fn machine_id(&self) -> Option<String> {
         self.0.machine_id().await
+    }
+}
+
+/// Songs from the library cache: who they are (the host's side) and their
+/// copies here (a guest's).
+pub struct DbListenLibrary(pub DbHandle);
+
+#[async_trait]
+impl ListenLibrary for DbListenLibrary {
+    async fn songs(&self, ids: Vec<String>) -> std::collections::HashMap<String, Song> {
+        match self.0.read_async(move |c| matching::describe(c, &ids)).await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::debug!(kind = e.kind(), "listen along couldn't describe songs");
+                Default::default()
+            }
+        }
+    }
+
+    async fn has(&self, id: &str) -> bool {
+        let id = id.to_string();
+        self.0.read_async(move |c| matching::has(c, &id)).await.unwrap_or(false)
+    }
+
+    async fn find(&self, song: &Song) -> Option<Found> {
+        let song = song.clone();
+        self.0.read_async(move |c| matching::find(c, &song)).await.ok().flatten()
     }
 }
 

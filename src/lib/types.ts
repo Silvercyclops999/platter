@@ -855,6 +855,8 @@ export interface Settings {
   listenInviteHours: number;
   /** The name others in a listening session see; empty means the Plex display name. */
   listenName: string;
+  /** In a session you host, unreleased songs go to guests without their title and artist. */
+  listenHideUnreleased: boolean;
   /** Discord shows a listening session you host. */
   discordListenAlong: boolean;
   /** Keep app-only state in a sync file in a folder. This device only. */
@@ -1084,6 +1086,7 @@ export const DEFAULT_SETTINGS: Settings = {
   listenRelay: "",
   listenInviteHours: 24,
   listenName: "",
+  listenHideUnreleased: false,
   discordListenAlong: true,
   syncEnabled: false,
   syncFolder: "",
@@ -1620,6 +1623,16 @@ export interface ListenPerson {
   avatar: string | null;
   host: boolean;
   me: boolean;
+  /** The host's view: this guest has no copy of the song playing. */
+  cantHear: boolean;
+}
+
+/** A guest's view: the host's song has no copy in this library. */
+export interface ListenMissing {
+  /** Null when the host hides unreleased titles. */
+  title: string | null;
+  artist: string | null;
+  unreleased: boolean;
 }
 
 /** An invite: a single-use link that runs out. */
@@ -1650,6 +1663,12 @@ export interface ListenView {
   queue: { trackId: string; by: string | null }[];
   status: ListenStatus | null;
   relay: RelayHealth;
+  /** Host: the names of guests who can't hear the song playing. */
+  cantHear: string[];
+  /** Guest: the song playing isn't in this library; the player waits for the next one. */
+  missing: ListenMissing | null;
+  /** Guest: playing a copy of another length. */
+  anotherVersion: boolean;
 }
 
 /** What a guest asks the host to do (`listen_control`). */

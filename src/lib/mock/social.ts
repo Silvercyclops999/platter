@@ -4,7 +4,8 @@
  *
  * Test hooks: `access` ("ok", "notAdmin", "offline"), `failNextJoin`,
  * `guestJoins(name)`, `hostGone()`, `hostEnds()`, `removedByHost()`,
- * `relay(health)`, `setHostControl(on)`, `addRelease(albumId)`.
+ * `relay(health)`, `setHostControl(on)`, `addRelease(albumId)`, `songNotHere(title)`,
+ * `anotherVersion(on)`, `guestCantHear(name, on)`.
  *
  * Invites look like the real ones: a random token and nothing else.
  */
@@ -42,6 +43,9 @@ const NONE: ListenView = {
   queue: [],
   status: null,
   relay: "ok",
+  cantHear: [],
+  missing: null,
+  anotherVersion: false,
 };
 export const MOCK_INVITE = "platter://join/AV8MKp57HUw4puL5CxfT5EXMOOHwS3stlqDkyLHT9XopaPBRgA";
 
@@ -157,11 +161,19 @@ export class MockSocial {
   // ---------------------------------------------------------------- listen along
 
   listenState(): ListenView {
-    return { ...this.listen, people: this.listen.people.map((p) => ({ ...p })), listeners: [...this.listen.listeners], queue: [...this.listen.queue] };
+    return {
+      ...this.listen,
+      people: this.listen.people.map((p) => ({ ...p })),
+      listeners: [...this.listen.listeners],
+      queue: [...this.listen.queue],
+      cantHear: [...this.listen.cantHear],
+      missing: this.listen.missing && { ...this.listen.missing },
+    };
   }
 
   private setListen(v: ListenView) {
     v.listeners = v.people.filter((p) => !p.me).map((p) => p.name);
+    v.cantHear = v.role === "host" ? v.people.filter((p) => p.cantHear).map((p) => p.name) : [];
     this.listen = v;
     this.hooks.emitListen(this.listenState());
   }
@@ -182,7 +194,7 @@ export class MockSocial {
         sessionId: "5f0c2a9e7b1d4c38a6e2f90b1c7d3e45",
         hostName: name,
         invite: this.newInvite(),
-        people: [{ id: "host", name, avatar: null, host: true, me: true }],
+        people: [{ id: "host", name, avatar: null, host: true, me: true, cantHear: false }],
         guestsCanControl: this.hooks.settings().listenGuestsControl,
         status: "live",
         relay: "ok",
@@ -203,7 +215,7 @@ export class MockSocial {
   guestJoins(name: string) {
     if (this.listen.role !== "host" || this.listen.people.some((p) => p.name === name)) return;
     const id = `g${this.listen.people.length}0c4e1a7b9d2f3`;
-    this.setListen({ ...this.listen, invite: null, people: [...this.listen.people, { id, name, avatar: null, host: false, me: false }] });
+    this.setListen({ ...this.listen, invite: null, people: [...this.listen.people, { id, name, avatar: null, host: false, me: false, cantHear: false }] });
   }
 
   remove(personId: string): ListenView {
@@ -226,7 +238,7 @@ export class MockSocial {
       throw { kind: "invalid", message };
     }
     const host = MOCK_FRIENDS[1];
-    const other = { id: "a91f3c0d5e7b2468", name: MOCK_FRIENDS[2], avatar: null, host: false, me: false };
+    const other = { id: "a91f3c0d5e7b2468", name: MOCK_FRIENDS[2], avatar: null, host: false, me: false, cantHear: false };
     const t = this.fx.tracks;
     this.setListen({
       ...NONE,
@@ -234,9 +246,9 @@ export class MockSocial {
       sessionId: "c3a8e1f04b7d2956a0e4c8b1d3f57a29",
       hostName: host,
       people: [
-        { id: "host", name: host, avatar: null, host: true, me: false },
+        { id: "host", name: host, avatar: null, host: true, me: false, cantHear: false },
         other,
-        { id: "me", name: this.hooks.settings().listenName || "listener", avatar: null, host: false, me: true },
+        { id: "me", name: this.hooks.settings().listenName || "listener", avatar: null, host: false, me: true, cantHear: false },
       ],
       guestsCanControl: this.hostControl,
       nowBy: other.id,
@@ -290,6 +302,24 @@ export class MockSocial {
   /** The host removes this guest (test hook). */
   removedByHost() {
     if (this.listen.role === "guest") this.setListen({ ...this.listen, status: "removed" });
+  }
+
+  /** The host's song has no copy here (`null`: back to one that has), test hook. */
+  songNotHere(title: string | null, unreleased = false) {
+    if (this.listen.role !== "guest") return;
+    const missing = title === null && !unreleased ? null : { title, artist: title === null ? null : "Fixture Artist", unreleased };
+    this.setListen({ ...this.listen, missing, anotherVersion: false });
+  }
+
+  /** This guest plays a copy of another length (test hook). */
+  anotherVersion(on: boolean) {
+    if (this.listen.role === "guest") this.setListen({ ...this.listen, missing: null, anotherVersion: on });
+  }
+
+  /** A guest says they can't hear the song playing, or can again (test hook). */
+  guestCantHear(name: string, on: boolean) {
+    if (this.listen.role !== "host") return;
+    this.setListen({ ...this.listen, people: this.listen.people.map((p) => (p.name === name ? { ...p, cantHear: on } : p)) });
   }
 
   /** The relay can't be reached, is busy, or is back (test hook). */

@@ -22,6 +22,9 @@ export const NO_SESSION: ListenView = {
   queue: [],
   status: null,
   relay: "ok",
+  cantHear: [],
+  missing: null,
+  anotherVersion: false,
 };
 
 interface SocialState {

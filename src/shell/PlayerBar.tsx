@@ -22,6 +22,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { TextLink } from "../components/ArtistLinks";
+import { ListenMark } from "./ListenStrip";
 import { ExplicitMark } from "../components/FileTagBadges";
 import { openContextMenu } from "../components/ContextMenu";
 import { SaveButton } from "../components/SaveButton";
@@ -425,6 +426,7 @@ export function PlayerBar() {
                 <ExplicitMark trackId={track.id} />
               </div>
               <PlayerSubline track={track} />
+              <ListenMark />
             </div>
             <SuggestionButtons />
             <SaveButton track={track} place="bar" />

@@ -568,6 +568,7 @@ pub fn run() {
                 relays: Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
                 events: Arc::new(plex::state::TauriSink(app.handle().clone())),
                 server: Arc::new(social::commands::PlexServerId(plex.clone())),
+                library: Arc::new(social::commands::DbListenLibrary(db.clone())),
                 name: {
                     let plex_name = listen_name.0.clone();
                     let chosen = live.social.listen.name.clone();

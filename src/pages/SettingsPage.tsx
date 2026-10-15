@@ -1480,7 +1480,7 @@ export function SettingsPage() {
       group: "Listening sessions",
       title: "Let others change what's playing",
       description:
-        "People listening along with you can play, pause, skip and reorder the queue. Off, they can only add songs. Anyone who joins needs access to your Plex library and plays from it themselves.",
+        "People listening along with you can play, pause, skip and reorder the queue. Off, they can only add songs. Each person plays from your Plex library when they have access to it, else from their own copy of the same song.",
       control: (ids) => toggle(s, "listenGuestsControl", ids),
     },
     {
@@ -1507,6 +1507,15 @@ export function SettingsPage() {
       description:
         "Everyone in a session connects only to this relay, never to each other, so nobody learns anyone else's address. Messages are sealed end to end; the relay sees only scrambled text and each person's connection. Leave it empty for ntfy.sh (free, about 250 messages a day per connection), or enter your own ntfy server. Your own server's address goes in your invites.",
       control: (ids) => <ListenTextSetting field="listenRelay" placeholder="https://ntfy.sh" maxLength={200} ids={ids} />,
+    },
+    {
+      key: "listenHideUnreleased",
+      section: "Social",
+      group: "Listening sessions",
+      title: "Hide unreleased titles from guests",
+      description:
+        "Unreleased songs only play for people with access to your Plex library. Everyone else sees that a song isn't in their library; with this on, they don't see its title or artist either.",
+      control: (ids) => toggle(s, "listenHideUnreleased", ids),
     },
     // Integrations: scrobbling
     {

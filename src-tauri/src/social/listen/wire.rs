@@ -3,6 +3,12 @@
 //! 4 KB limit. Songs are the Plex server's rating keys; which server is
 //! [`crate::social::listen::seal::server_hash`]. Nothing here is an address,
 //! a port, a Plex token, a machine id or a stream URL.
+//!
+//! Songs can also carry who they are ([`Song`]: a MusicBrainz id, title,
+//! artist, length), so a guest without the host's copy can play its own.
+//! Those fields are optional both ways: a guest from before them follows by
+//! rating key, and a host from before them sends none (its guests then play
+//! only the host's own copies).
 
 use serde::{Deserialize, Serialize};
 
@@ -16,12 +22,35 @@ pub struct Person {
     pub av: Option<String>,
 }
 
+/// Who a song is, for a guest looking for its own copy. Metadata only.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Song {
+    /// The MusicBrainz track id, when Plex matched the song.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mb: Option<String>,
+    /// Title and artist. Left out of an unreleased song while the host hides
+    /// those from guests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a: Option<String>,
+    /// Length, ms.
+    #[serde(default)]
+    pub d: u64,
+    /// Unreleased: never matched to a copy on another server.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub u: bool,
+}
+
 /// One song in the shared queue and who added it (a person id).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Queued {
     pub k: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<String>,
+    /// Who the song is (dropped from the end of a long queue to fit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub s: Option<Song>,
 }
 
 /// What guests follow.
@@ -31,6 +60,9 @@ pub struct State {
     pub srv: String,
     /// The song playing (a rating key).
     pub t: Option<String>,
+    /// Who the song playing is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts: Option<Song>,
     /// Who added the song playing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tby: Option<String>,
@@ -114,4 +146,10 @@ pub enum Msg {
     Ping,
     Cmd(Op),
     Leave,
+    /// The song playing (`t`, the host's id) has no copy here; None: this
+    /// guest hears the session again. A host from before this drops it.
+    CantHear {
+        #[serde(default)]
+        t: Option<String>,
+    },
 }

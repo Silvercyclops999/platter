@@ -5,8 +5,10 @@
 //! each other. Every message is sealed end to end ([`seal`]); the relay sees
 //! random topic names and ciphertext. Invites are random single-use tokens
 //! ([`invite`]). Guests play from their own access to the host's server, so
-//! songs travel as rating keys only; no stream URL, server address or Plex
-//! token is ever sent.
+//! songs travel as rating keys, with who each song is (MusicBrainz id,
+//! title, artist, length) for guests without the host's copy, who play the
+//! same song from their own library when they have it ([`matching`]). No
+//! stream URL, path, server address or Plex token is ever sent.
 //!
 //! Channels (each a topic and a key from a secret only participants hold):
 //! - per invite: `invite up` (guest → host) and `invite down` (host →
@@ -24,6 +26,7 @@
 //! gone, and picks up again if the host comes back.
 
 pub mod invite;
+pub mod matching;
 pub mod relay;
 pub mod seal;
 pub mod wire;
@@ -33,6 +36,7 @@ mod fake_ntfy;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
@@ -50,7 +54,8 @@ use crate::sync::keycopy::Qr;
 use invite::Token;
 use relay::{Relay, RelayError, RelayEvent, RelayFactory, RelayHealth};
 use seal::{Channel, Envelope, ReplayGuard, Sender};
-use wire::{Msg, Op, Person, Queued, State, Welcome, Why};
+use matching::Found;
+use wire::{Msg, Op, Person, Queued, Song, State, Welcome, Why};
 
 pub const EVENT: &str = "listen://state";
 /// A guest's request was turned down, or something else worth a toast.
@@ -128,6 +133,9 @@ pub struct ListenSettings {
     pub invite_hours: Arc<AtomicU32>,
     /// The name others see; empty means the Plex display name.
     pub name: Arc<RwLock<String>>,
+    /// "Hide unreleased titles from guests": an unreleased song goes out
+    /// without its title and artist.
+    pub hide_unreleased: Arc<AtomicBool>,
 }
 
 impl Default for ListenSettings {
@@ -137,6 +145,7 @@ impl Default for ListenSettings {
             relay: Arc::default(),
             invite_hours: Arc::new(AtomicU32::new(24)),
             name: Arc::default(),
+            hide_unreleased: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -180,6 +189,17 @@ pub trait ListenPlayer: Send + Sync {
 #[async_trait]
 pub trait ServerId: Send + Sync {
     async fn machine_id(&self) -> Option<String>;
+}
+
+/// The library, as a session needs it.
+#[async_trait]
+pub trait ListenLibrary: Send + Sync {
+    /// Who these songs are (the host's side); unknown ids are left out.
+    async fn songs(&self, ids: Vec<String>) -> HashMap<String, Song>;
+    /// The host's own copy plays here (this library has that id).
+    async fn has(&self, id: &str) -> bool;
+    /// The same song here by the multi-server rules; never an unreleased one.
+    async fn find(&self, song: &Song) -> Option<Found>;
 }
 
 /// One step a guest takes to match the host.
@@ -280,6 +300,8 @@ pub struct PersonView {
     pub avatar: Option<String>,
     pub host: bool,
     pub me: bool,
+    /// The host's view: this guest has no copy of the song playing.
+    pub cant_hear: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -297,6 +319,16 @@ pub struct InviteView {
     pub qr: Option<Qr>,
     /// Unix ms.
     pub expires_at: u64,
+}
+
+/// A guest's view: the host's song has no copy here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingSong {
+    /// None when the host hides unreleased titles (or sent none).
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub unreleased: bool,
 }
 
 /// `listen_state` and the `listen://state` event.
@@ -318,6 +350,13 @@ pub struct ListenView {
     pub queue: Vec<QueuedView>,
     pub status: Option<SessionStatus>,
     pub relay: RelayHealth,
+    /// Host: the names of guests who can't hear the song playing.
+    pub cant_hear: Vec<String>,
+    /// Guest: the song playing isn't in this library; the player waits for
+    /// the next one.
+    pub missing: Option<MissingSong>,
+    /// Guest: playing a copy of another length ("another version").
+    pub another_version: bool,
 }
 
 impl ListenView {
@@ -334,6 +373,9 @@ impl ListenView {
             queue: Vec::new(),
             status: None,
             relay: RelayHealth::Ok,
+            cant_hear: Vec::new(),
+            missing: None,
+            another_version: false,
         }
     }
 }
@@ -361,6 +403,14 @@ fn clean_name(s: &str) -> String {
 
 fn ok_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// A song id: a rating key, with its server tag in front (`crate::sid`).
+fn ok_song(s: &str) -> bool {
+    match crate::sid::split(s) {
+        (Some(_), k) => ok_id(k) && s.len() <= 64,
+        (None, k) => ok_id(k),
+    }
 }
 
 fn invite_channels(t: &Token) -> (Channel, Channel) {
@@ -404,6 +454,8 @@ struct HostGuest {
     tag: [u8; 32],
     seen: Instant,
     hello_at: Option<Instant>,
+    /// The song (host id) they said they have no copy of.
+    cant: Option<String>,
 }
 
 /// The last state broadcast.
@@ -431,6 +483,8 @@ struct Hosting {
     last: Option<Sent>,
     /// The state as last built (for the host's own view).
     shown: Option<State>,
+    /// Who songs are, looked up once each (None: not in the library).
+    songs: HashMap<String, Option<Song>>,
 }
 
 impl Hosting {
@@ -474,6 +528,13 @@ struct Following {
     last: Option<State>,
     heard: Instant,
     topics: watch::Sender<Vec<String>>,
+    /// The host's songs and their copies here (None: none).
+    found: HashMap<String, Option<Found>>,
+    /// The song playing has no copy here.
+    missing: Option<MissingSong>,
+    other_version: bool,
+    /// The song we last told the host we can't hear.
+    told: Option<String>,
 }
 
 impl Following {
@@ -498,6 +559,8 @@ pub struct ListenDeps {
     pub relays: Arc<dyn RelayFactory>,
     pub events: Arc<dyn EventSink>,
     pub server: Arc<dyn ServerId>,
+    /// Who songs are, and finding them here.
+    pub library: Arc<dyn ListenLibrary>,
     /// The name others see.
     pub name: Arc<dyn Fn() -> String + Send + Sync>,
     pub settings: ListenSettings,
@@ -594,8 +657,15 @@ impl ListenAlong {
             },
             Mode::Host(h) => {
                 let me = self.my_name();
-                let mut people = vec![PersonView { id: HOST_ID.into(), name: me.clone(), avatar: None, host: true, me: true }];
-                people.extend(h.guests.iter().map(|g| PersonView { id: g.id.clone(), name: g.name.clone(), avatar: None, host: false, me: false }));
+                let mut people = vec![PersonView { id: HOST_ID.into(), name: me.clone(), avatar: None, host: true, me: true, cant_hear: false }];
+                people.extend(h.guests.iter().map(|g| PersonView {
+                    id: g.id.clone(),
+                    name: g.name.clone(),
+                    avatar: None,
+                    host: false,
+                    me: false,
+                    cant_hear: g.cant.is_some(),
+                }));
                 let invite = h.current_invite(now_ms()).map(|i| InviteView { link: i.link.clone(), qr: qr_for(&i.link), expires_at: i.expires_ms });
                 ListenView {
                     role: Role::Host,
@@ -609,6 +679,9 @@ impl ListenAlong {
                     queue: h.shown.as_ref().map(queue_view).unwrap_or_default(),
                     status: Some(SessionStatus::Live),
                     relay: h.health,
+                    cant_hear: h.guests.iter().filter(|g| g.cant.is_some()).map(|g| g.name.clone()).collect(),
+                    missing: None,
+                    another_version: false,
                 }
             }
             Mode::Guest(f) => {
@@ -618,7 +691,7 @@ impl ListenAlong {
                 };
                 let people: Vec<PersonView> = ppl
                     .iter()
-                    .map(|p| PersonView { id: p.id.clone(), name: p.name.clone(), avatar: None, host: p.id == HOST_ID, me: p.id == f.me })
+                    .map(|p| PersonView { id: p.id.clone(), name: p.name.clone(), avatar: None, host: p.id == HOST_ID, me: p.id == f.me, cant_hear: false })
                     .collect();
                 ListenView {
                     role: Role::Guest,
@@ -629,9 +702,23 @@ impl ListenAlong {
                     people,
                     guests_can_control: f.last.as_ref().is_some_and(|s| s.ctl),
                     now_by: f.last.as_ref().and_then(|s| s.tby.clone()),
-                    queue: f.last.as_ref().map(queue_view).unwrap_or_default(),
+                    // Songs with a copy here show as that copy (the queue panel lists it).
+                    queue: f
+                        .last
+                        .as_ref()
+                        .map(queue_view)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|q| match f.found.get(&q.track_id) {
+                            Some(Some(here)) => QueuedView { track_id: here.id.clone(), ..q },
+                            _ => q,
+                        })
+                        .collect(),
                     status: Some(f.status),
                     relay: f.health,
+                    cant_hear: Vec::new(),
+                    missing: if f.status == SessionStatus::Live { f.missing.clone() } else { None },
+                    another_version: f.status == SessionStatus::Live && f.other_version,
                 }
             }
         }
@@ -836,6 +923,7 @@ impl ListenAlong {
             health: RelayHealth::Connecting,
             last: None,
             shown: None,
+            songs: HashMap::new(),
         };
         self.add_invite(&mut h);
         let generation = {
@@ -934,6 +1022,7 @@ impl ListenAlong {
                         tag,
                         seen: Instant::now(),
                         hello_at: None,
+                        cant: None,
                     });
                     h.refresh_topics();
                     Some((down, answer, true))
@@ -994,6 +1083,14 @@ impl ListenAlong {
                     }
                 }
                 Msg::Ping => Then::Nothing,
+                Msg::CantHear { t } => {
+                    let t = t.filter(|t| ok_song(t));
+                    if h.guests[i].cant != t {
+                        h.guests[i].cant = t;
+                        renamed = true;
+                    }
+                    Then::Nothing
+                }
                 Msg::Cmd(op) => Then::Op(gid, op),
                 Msg::Leave => {
                     h.guests.remove(i);
@@ -1053,7 +1150,7 @@ impl ListenAlong {
             Op::Previous => p.previous().await.map_err(failed),
             Op::Seek { ms } => p.seek(ms).await.map_err(failed),
             Op::Add { ids } => {
-                if ids.is_empty() || ids.len() > MAX_ADD || !ids.iter().all(|t| ok_id(t)) {
+                if ids.is_empty() || ids.len() > MAX_ADD || !ids.iter().all(|t| ok_song(t)) {
                     return Err("Those songs couldn't be added.".into());
                 }
                 p.queue_add(ids.clone()).await.map_err(|_| "Those songs couldn't be added.".to_string())?;
@@ -1078,8 +1175,25 @@ impl ListenAlong {
         let now = self.inner.deps.player.now().await.unwrap_or_default();
         let ctl = self.can_control();
         let me = self.my_name();
+        let hide = self.inner.deps.settings.hide_unreleased.load(Ordering::Relaxed);
+        // Who the songs are: looked up once each, outside the lock.
+        let ids: Vec<String> = now.track_id.iter().chain(now.up_next.iter().take(UP_NEXT)).cloned().collect();
+        let unknown: Vec<String> = match &*self.inner.mode.lock() {
+            Mode::Host(h) => ids.iter().filter(|k| !h.songs.contains_key(*k)).cloned().collect(),
+            _ => return None,
+        };
+        let looked = if unknown.is_empty() { HashMap::new() } else { self.inner.deps.library.songs(unknown.clone()).await };
         let mut mode = self.inner.mode.lock();
         let Mode::Host(h) = &mut *mode else { return None };
+        if h.songs.len() + unknown.len() > 2000 {
+            h.songs.clear();
+        }
+        for k in unknown {
+            let s = looked.get(&k).cloned();
+            h.songs.insert(k, s);
+        }
+        let songs = &h.songs;
+        let song = |k: &str| songs.get(k).cloned().flatten().map(|s| matching::shown(s, hide));
         let mut pool = std::mem::take(&mut h.added);
         let mut kept = Vec::new();
         let mut take = |k: &str| {
@@ -1090,11 +1204,12 @@ impl ListenAlong {
             Some(by)
         };
         let tby = now.track_id.as_deref().and_then(&mut take);
-        let q: Vec<Queued> = now.up_next.iter().take(UP_NEXT).map(|k| Queued { k: k.clone(), by: take(k) }).collect();
+        let q: Vec<Queued> = now.up_next.iter().take(UP_NEXT).map(|k| Queued { k: k.clone(), by: take(k), s: song(k) }).collect();
+        let ts = now.track_id.as_deref().and_then(song);
         h.added = kept;
         let mut ppl = vec![Person { id: HOST_ID.into(), name: me, av: None }];
         ppl.extend(h.guests.iter().map(|g| Person { id: g.id.clone(), name: g.name.clone(), av: None }));
-        let mut st = State { srv: h.srv.clone(), t: now.track_id, tby, p: now.position_ms, d: now.duration_ms, pl: now.playing, q, ctl, ppl };
+        let mut st = State { srv: h.srv.clone(), t: now.track_id, ts, tby, p: now.position_ms, d: now.duration_ms, pl: now.playing, q, ctl, ppl };
         fit(&mut st, h.guests.len());
         h.shown = Some(st.clone());
         Some(st)
@@ -1348,11 +1463,11 @@ impl ListenAlong {
         }
         let (gup, gdown, tag) = guest_channels(&gsecret);
         let host = Person { id: HOST_ID.into(), name: clean_name(&welcome.host.name), av: None };
+        // Another server than the host's is fine: each song plays from the
+        // host's copy when this library has it, else the same song here, else
+        // waits for the next one.
         if seal::server_hash(&token.session, machine) != welcome.srv {
-            // Free the place we were given, then say why.
-            let _ = self.send(relay, &gup, Sender::Guest, &welcome.id, Msg::Leave, &[]).await;
-            let who = if host.name.is_empty() { "the host".to_string() } else { host.name.clone() };
-            return Err(AppError::Invalid(format!("You need access to {who}'s Plex library to listen along.")));
+            tracing::info!("listening along from another server");
         }
         let bcast = Channel::new(&bsecret, "broadcast");
         let topics = watch::channel(vec![bcast.topic.clone(), gdown.topic.clone()]).0;
@@ -1372,6 +1487,10 @@ impl ListenAlong {
             last: None,
             heard: Instant::now(),
             topics,
+            found: HashMap::new(),
+            missing: None,
+            other_version: false,
+            told: None,
         })
     }
 
@@ -1452,14 +1571,124 @@ impl ListenAlong {
             return;
         }
         let player = &self.inner.deps.player;
-        if let Ok(local) = player.now().await {
-            let steps = plan(&local, &st, LATENCY_MS);
-            if !steps.is_empty()
-                && let Err(e) = apply(player.as_ref(), steps).await
-            {
-                tracing::debug!(kind = e.kind(), "couldn't follow the host");
+        let Ok(local) = player.now().await else { return };
+        let here = self.localize(&st).await;
+        let mut cant = None;
+        let steps = match &here {
+            Some(mapped) => plan(&local, mapped, LATENCY_MS),
+            // Nothing to play here: wait quietly for the next song.
+            None => {
+                cant = st.t.clone();
+                if local.playing { vec![Step::Pause] } else { Vec::new() }
+            }
+        };
+        let loads = steps.iter().any(|s| matches!(s, Step::Load { .. }));
+        if !steps.is_empty()
+            && let Err(e) = apply(player.as_ref(), steps).await
+        {
+            tracing::debug!(kind = e.kind(), "couldn't follow the host");
+            if loads {
+                // The copy wouldn't load: the same as having none.
+                let _ = player.pause().await;
+                cant = st.t.clone();
+                self.set_here(generation, Some(missing_song(st.ts.as_ref())), false);
+            } else {
                 self.notice("A song in the session couldn't play here.");
             }
+        }
+        self.tell_host(generation, cant).await;
+    }
+
+    /// The host's state as this library plays it: the song playing as the
+    /// host's copy or one here (at the same share of the song when its
+    /// length differs), and the up next songs that have a copy here, up to
+    /// the first that has none. None: the song playing has no copy here.
+    async fn localize(&self, st: &State) -> Option<State> {
+        let generation = self.inner.generation.load(Ordering::SeqCst);
+        let Some(t) = st.t.clone() else {
+            self.set_here(generation, None, false);
+            return Some(st.clone());
+        };
+        let Some(found) = self.copy_here(&t, st.ts.as_ref()).await else {
+            self.set_here(generation, Some(missing_song(st.ts.as_ref())), false);
+            return None;
+        };
+        let other = found.id != t && found.duration_ms > 0 && st.d > 0 && found.duration_ms.abs_diff(st.d) > matching::SLACK_MS;
+        let mut mapped = st.clone();
+        mapped.t = Some(found.id.clone());
+        if other {
+            mapped.p = matching::map_position(st.p, st.d, found.duration_ms);
+            mapped.d = found.duration_ms;
+        }
+        mapped.q = Vec::new();
+        for q in &st.q {
+            match self.copy_here(&q.k, q.s.as_ref()).await {
+                Some(f) => mapped.q.push(Queued { k: f.id, ..q.clone() }),
+                None => break,
+            }
+        }
+        self.set_here(generation, None, other);
+        Some(mapped)
+    }
+
+    /// The copy here of the host's song `id`: the host's own when this
+    /// library has it, else the same song by `song`. Remembered per song.
+    async fn copy_here(&self, id: &str, song: Option<&Song>) -> Option<Found> {
+        if let Mode::Guest(f) = &*self.inner.mode.lock()
+            && let Some(hit) = f.found.get(id)
+        {
+            return hit.clone();
+        }
+        let lib = &self.inner.deps.library;
+        let hit = if lib.has(id).await {
+            Some(Found { id: id.to_string(), duration_ms: song.map(|s| s.d).unwrap_or(0) })
+        } else {
+            match song {
+                Some(s) if !s.u => lib.find(s).await,
+                _ => None,
+            }
+        };
+        // Without who the song is (a long queue's tail), ask again later.
+        if (hit.is_some() || song.is_some())
+            && let Mode::Guest(f) = &mut *self.inner.mode.lock()
+        {
+            if f.found.len() >= 2000 {
+                f.found.clear();
+            }
+            f.found.insert(id.to_string(), hit.clone());
+        }
+        hit
+    }
+
+    /// Show whether the song playing has a copy here.
+    fn set_here(&self, generation: u64, missing: Option<MissingSong>, other_version: bool) {
+        let differs = match &mut *self.inner.mode.lock() {
+            Mode::Guest(f) if self.current(generation) => {
+                let before = (f.missing.clone(), f.other_version);
+                f.missing = missing;
+                f.other_version = other_version;
+                before != (f.missing.clone(), f.other_version)
+            }
+            _ => false,
+        };
+        if differs {
+            self.changed();
+        }
+    }
+
+    /// Tell the host which song we can't hear (None: we hear it again), once.
+    async fn tell_host(&self, generation: u64, cant: Option<String>) {
+        let target = match &mut *self.inner.mode.lock() {
+            Mode::Guest(f) if self.current(generation) && f.told != cant => {
+                f.told = cant.clone();
+                Some((f.relay.clone(), f.up.clone(), f.me.clone()))
+            }
+            _ => None,
+        };
+        if let Some((relay, up, me)) = target
+            && let Err(e) = self.send(&relay, &up, Sender::Guest, &me, Msg::CantHear { t: cant }, &[]).await
+        {
+            self.set_health(generation, e.into());
         }
     }
 
@@ -1498,7 +1727,7 @@ impl ListenAlong {
     /// Ask the host to do something (guest), or do it (host).
     pub async fn control(&self, op: Op) -> AppResult<()> {
         if let Op::Add { ids } = &op
-            && (ids.is_empty() || ids.len() > MAX_ADD || !ids.iter().all(|t| ok_id(t)))
+            && (ids.is_empty() || ids.len() > MAX_ADD || !ids.iter().all(|t| ok_song(t)))
         {
             return Err(AppError::Invalid("Bad song ids.".into()));
         }
@@ -1522,17 +1751,33 @@ impl ListenAlong {
     }
 }
 
+fn missing_song(s: Option<&Song>) -> MissingSong {
+    MissingSong {
+        title: s.and_then(|s| s.n.clone()),
+        artist: s.and_then(|s| s.a.clone()),
+        unreleased: s.is_some_and(|s| s.u),
+    }
+}
+
 fn queue_view(st: &State) -> Vec<QueuedView> {
     st.q.iter().map(|q| QueuedView { track_id: q.k.clone(), by: q.by.clone() }).collect()
 }
 
-/// Drop songs from the end of the queue until the sealed message fits the
-/// relay's size limit.
+/// Fit the sealed message in the relay's size limit: first drop who the
+/// songs are from the end of the queue (the next song keeps it), then songs
+/// from the end.
 fn fit(st: &mut State, guests: usize) {
     let size = |st: &State| {
         let plain = serde_json::to_vec(&Msg::State(st.clone())).map(|v| v.len()).unwrap_or(usize::MAX) + 96;
         2 + (12 + plain + 16).div_ceil(3) * 4 + 1 + (guests * 16).div_ceil(3) * 4
     };
+    let mut known = st.q.iter().filter(|q| q.s.is_some()).count();
+    while size(st) > seal::MAX_BODY && known > 1 {
+        known = known.div_ceil(2).min(known - 1);
+        for q in st.q.iter_mut().filter(|q| q.s.is_some()).skip(known) {
+            q.s = None;
+        }
+    }
     while size(st) > seal::MAX_BODY && !st.q.is_empty() {
         let keep = st.q.len() / 2;
         st.q.truncate(keep);

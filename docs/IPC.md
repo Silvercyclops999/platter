@@ -920,7 +920,13 @@ retried. The queue survives restarts.
 
 `WhatsNew = { following: bool, items: { album: Album, new: bool }[], unseen }`
 
-`ListenView = { role: "none"|"host"|"guest", sessionId?, hostName?, invite?: { link, qr?: { size, rows }, expiresAt (unix ms) }, people: { id, name, avatar?, host, me }[], listeners: string[], guestsCanControl, nowBy?, queue: { trackId, by? }[], status?: "connecting"|"live"|"hostGone"|"ended"|"removed", relay: "connecting"|"ok"|"unreachable"|"limited" }`
+`ListenView = { role: "none"|"host"|"guest", sessionId?, hostName?, invite?: { link, qr?: { size, rows }, expiresAt (unix ms) }, people: { id, name, avatar?, host, me, cantHear }[], listeners: string[], guestsCanControl, nowBy?, queue: { trackId, by? }[], status?: "connecting"|"live"|"hostGone"|"ended"|"removed", relay: "connecting"|"ok"|"unreachable"|"limited", cantHear: string[], missing?: { title?, artist?, unreleased }, anotherVersion }`
+
+For the host, `cantHear` on a person and the `cantHear` names say who has no
+copy of the song playing. For a guest, `missing` says the host's song isn't
+in this library (no title or artist when the host hides unreleased titles)
+and `anotherVersion` that a copy of another length plays. A guest's `queue`
+shows the copy here of each song that has one.
 
 `ListenOp = { op: "play" } | { op: "pause" } | { op: "next" } | { op: "previous" } | { op: "seek", ms } | { op: "add", ids } | { op: "move", from, to }`
 
@@ -954,9 +960,26 @@ Everyone in a session connects only to a relay, never to each other, so
 nobody learns anyone else's address. The relay is an ntfy server: ntfy.sh
 unless `listenRelay` names another. Nothing goes to it but random topic
 names and sealed text. Guests play from their own access to the host's Plex
-server, so songs travel as rating keys and the server as a hash of its
-machine id keyed with the session id. No address, port, Plex token, machine
-id or stream URL is ever sent.
+server, so songs travel as ids and the server as a hash of its machine id
+keyed with the session id. No address, port, path, Plex token, machine id or
+stream URL is ever sent.
+
+Each song can also carry who it is, `{ mb?, n?, a?, d, u? }`: the
+MusicBrainz track id, title, artist, length in ms, and whether it's
+unreleased (the one release rule the app uses everywhere). For every song it's asked
+to play, a guest uses the host's copy when its own library has that id,
+else the same song in its library (the same MusicBrainz id, else the same
+artist and title with lengths within 3 s), else none. A copy whose length
+differs by more than 3 s plays from the same share of the song and shows as
+another version. Unreleased songs are never matched (they go without a
+MusicBrainz id), and with `listenHideUnreleased` on they go without a title
+and artist too. With no copy the guest's player pauses, stays in the
+session and picks up at the next song it has; it tells the host with
+`cantHear` (the song's id, or none once it hears the session again). These
+fields are optional: an older guest ignores them and an older host sends
+none, so its guests play only its own copies. When the state is too big for
+the relay, the identity of songs at the end of the queue goes first, then
+the songs.
 
 An invite is `platter://join/<token>`, the token being base64url of a
 version byte, a random 16-byte session id, a random 16-byte invite secret,
@@ -980,15 +1003,15 @@ topic. The first one the host sees gets `accepted`: the host's SPAKE2 answer
 and, sealed with the key they agreed, the guest's id, its own secret, the
 broadcast secret and the hashed server. Someone else holding the same link
 can't open that, and gets `refused` with `used`, `expired` or `full`. A
-guest whose own server hashes differently says "You need access to
-<host>'s Plex library to listen along" and leaves.
+guest on another server joins too, and plays its own copies.
 
 Then each guest has its own up and down topics, and everyone listens on the
 broadcast topic. The host sends `state` (song, position, length, playing,
 up to 50 songs next with who added each, whether guests may change what's
 playing, and everyone's names) when it changes and at least every 3
 minutes, only while someone is listening. Guests send `hello` (send me the
-state), `ping` every 3 minutes, `cmd` (a `ListenOp`) and `leave`. The host
+state), `ping` every 3 minutes, `cmd` (a `ListenOp`), `cantHear` and
+`leave`. The host
 answers a turned-down `cmd` with `denied`. Removing a guest sends them
 `removed`; a guest leaving or being removed gives everyone else a new
 broadcast secret (`rekey`). Ending sends `ended` and forgets every key and
@@ -998,7 +1021,7 @@ more shows `hostGone`, and goes back to `live` if the host comes back.
 | Message | From | Topic |
 | --- | --- | --- |
 | `join`, `accepted`, `refused` | guest, host | the invite's up and down |
-| `hello`, `ping`, `cmd`, `leave` | guest | the guest's up |
+| `hello`, `ping`, `cmd`, `cantHear`, `leave` | guest | the guest's up |
 | `state`, `rekey`, `removed`, `denied` | host | the guest's down |
 | `state`, `ended` | host | broadcast |
 
@@ -1778,6 +1801,7 @@ The rest of the fields, with their defaults:
 | `listenInviteHours` | 1, 24 or 168, 24 | How long an invite works (each works once). |
 | `listenName` | string, `""` | The name others in a listening session see; empty is your Plex name. 40 characters at most. |
 | `listenRelay` | string, `""` | The listen along relay, an ntfy server URL; empty is ntfy.sh. A URL of your own goes in your invites. |
+| `listenHideUnreleased` | bool, false | In a session you host, unreleased songs go to guests without their title and artist. Synced. |
 | `discordListenAlong` | bool, true | Discord shows a listening session you host and how many are in it. This device only. |
 | `syncEnabled` | bool, false | Keep app-only state in a sync file in `syncFolder`. On with no folder counts as off. This device only. See Sync, folders and keys. |
 | `syncFolder` | string, `""` | The folder the sync file goes in. Changed with `sync_file_use_folder` or `sync_file_choose_folder`, not `settings_set`. This device only. |
