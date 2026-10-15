@@ -210,7 +210,7 @@ pub fn refresh_albums(c: &Connection) -> AppResult<()> {
         }
     }
     // Album facts for choosing each group's face.
-    let mut info = c.prepare_cached("SELECT year, added_at, format, subformats FROM albums WHERE id = ?1")?;
+    let mut info = c.prepare_cached("SELECT year, added_at, format, subformats, studio, matched FROM albums WHERE id = ?1")?;
     let mut groups: HashMap<String, Vec<Member>> = HashMap::new();
     for (id, a) in &acc {
         if let Some(g) = most_common(&a.groups) {
@@ -221,16 +221,18 @@ pub fn refresh_albums(c: &Connection) -> AppResult<()> {
                         r.get::<_, i64>(1)?,
                         r.get::<_, Option<String>>(2)?,
                         r.get::<_, String>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                        r.get::<_, Option<bool>>(5)?,
                     ))
                 })
                 .optional()?;
-            let Some((year, added_at, format, subs)) = row else { continue };
+            let Some((year, added_at, format, subs, studio, matched)) = row else { continue };
             let subs: Vec<String> = serde_json::from_str(&subs).unwrap_or_default();
             groups.entry(g).or_default().push(Member {
                 album_id: id.clone(),
                 edition: most_common(&a.editions),
                 version: most_common(&a.versions),
-                unreleased_type: is_unreleased(format.as_deref(), &subs, None),
+                unreleased_type: is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), None),
                 year,
                 added_at,
             });

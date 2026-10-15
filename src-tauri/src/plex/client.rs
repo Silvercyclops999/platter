@@ -285,6 +285,10 @@ pub struct PlexMetadata {
     pub child_count: Option<i64>,
     #[serde(default)]
     pub studio: Option<String>,
+    /// The item's own id with the agent that matched it: `plex://album/...`
+    /// when Plex matched an album, `local://<n>` when it couldn't.
+    #[serde(default, deserialize_with = "lenient::opt_string")]
+    pub guid: Option<String>,
     /// Artist biography (and album review text on albums).
     #[serde(default, deserialize_with = "lenient::opt_string")]
     pub summary: Option<String>,
@@ -640,6 +644,7 @@ impl PlexMetadata {
                 .and_then(|c| non_empty(&c.top_left)),
             released: self.released(),
             studio: non_empty(&self.studio),
+            matched: self.matched(),
             styles: self.style.iter().map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
             moods: self.mood.iter().map(|t| t.tag.clone()).filter(|t| !t.is_empty()).collect(),
         }
@@ -647,6 +652,14 @@ impl PlexMetadata {
 
     /// `originallyAvailableAt` as YYYY-MM-DD (Plex sends a date, sometimes
     /// with a time after it).
+    fn matched(&self) -> Option<bool> {
+        let g = self.guid.as_deref()?.trim();
+        if g.is_empty() {
+            return None;
+        }
+        Some(!g.starts_with("local://"))
+    }
+
     fn released(&self) -> Option<String> {
         let d = self.originally_available_at.as_deref()?.trim();
         let day = d.get(..10).unwrap_or(d);
@@ -1659,6 +1672,21 @@ mod tests {
         assert_eq!(a.released.as_deref(), Some("2013-06-18"));
         assert_eq!(a.studio, None);
         assert_eq!(album(serde_json::json!({ "originallyAvailableAt": "June" })).released, None);
+    }
+
+    #[test]
+    fn album_guid_says_whether_plex_matched_it() {
+        let album = |extra: serde_json::Value| {
+            let mut v = serde_json::json!({ "ratingKey": "1", "type": "album", "title": "LP" });
+            v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            serde_json::from_value::<PlexMetadata>(v).unwrap().to_album()
+        };
+        let a = album(serde_json::json!({ "guid": "plex://album/5d07c1a1403c640290f3a2b1", "Guid": [{"id": "mbid://x"}] }));
+        assert_eq!(a.matched, Some(true));
+        let a = album(serde_json::json!({ "guid": "local://4711", "Guid": [] }));
+        assert_eq!(a.matched, Some(false));
+        assert_eq!(album(serde_json::json!({})).matched, None);
+        assert_eq!(album(serde_json::json!({ "guid": "" })).matched, None);
     }
 
     #[test]

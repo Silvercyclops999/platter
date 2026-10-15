@@ -340,8 +340,9 @@ are read leniently: `track` for `song`, `t` as seconds or `m:ss`, a missing
 `s`.
 
 `public` says whether `share_public_link` can work: `unreleased` for music
-whose album release type is a demo (the one rule lives in
-`db::release::is_unreleased`, where archive tags will join it), `off` when the
+whose album release type is a demo, whose `ARCHIVE_VERSION` says so, or whose
+album Plex couldn't match (see `countUnmatchedUnreleased`; the one rule lives
+in `db::release::is_unreleased`), `off` when the
 `sharePublicLinks` setting is off, `none` for artists and playlists.
 
 `share_public_link` searches the iTunes Search API with the artist and title
@@ -1547,6 +1548,7 @@ The rest of the fields, with their defaults:
 | `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |
 | `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |
+| `countUnmatchedUnreleased` | bool, true | Albums Plex couldn't match (guid `local://`, or no release type and no label before the next sync) count as unreleased for sharing, Discord, scrobbling, mixes, smart playlists and lyrics transcription until a release type or `ARCHIVE_VERSION` says otherwise. Off: only demo release types and archive version tags count. |
 | `groupEditions` | bool, true | Albums sharing `ARCHIVE_GROUP` list as one album (the face) in the library, artist pages and Home's album shelves. |
 | `dragAndDrop` | bool, true | Songs, albums and playlists can be dragged onto playlists, Liked Songs and the queue. Off stops those drags; reordering inside a playlist or the queue still works. |
 | `showToMyDevices` | bool, true | Announce this computer to the user's other Platter computers, open the control port and publish its addresses to plex.tv. Off withdraws the announcement and closes the port. Independent of `actAsPlexPlayer`. This device only. |

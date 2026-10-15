@@ -890,6 +890,24 @@ async fn album_page_has_release_date_label_and_artist_photo() {
 }
 
 #[tokio::test]
+async fn sync_keeps_whether_plex_matched_each_album() {
+    let t = open();
+    let mut lib = sectioned_library();
+    lib.albums[0].matched = Some(true);
+    lib.albums[1].matched = Some(false);
+    sync(&t.db, &Arc::new(FakeSource::new(lib)), false).await;
+    let matched = |id: &'static str| {
+        t.db.read(move |c| Ok(c.query_row("SELECT matched FROM albums WHERE id = ?1", [id], |r| r.get::<_, Option<bool>>(0))?))
+            .unwrap()
+    };
+    assert_eq!(matched("10"), Some(true));
+    assert_eq!(matched("11"), Some(false));
+    assert_eq!(matched("12"), None);
+    let json = serde_json::to_value(t.db.read(|c| queries::album_page(c, "11")).unwrap().album).unwrap();
+    assert!(json.get("matched").is_none(), "not sent to the UI");
+}
+
+#[tokio::test]
 async fn recent_tracks_are_newest_first_with_repeats() {
     let t = open();
     sync(&t.db, &Arc::new(FakeSource::new(sectioned_library())), false).await;

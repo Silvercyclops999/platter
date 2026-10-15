@@ -446,6 +446,37 @@ async fn no_words_found_is_remembered() {
     assert!(!f.db.read(|c| store::done(c, "801")).unwrap());
 }
 
+#[test]
+fn the_todo_list_picks_up_albums_plex_couldnt_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("t.db")).unwrap();
+    db.write(|c| {
+        c.execute_batch(
+            r#"
+            INSERT INTO albums (id, title, sort_title, artist_id, artist_title, format, subformats, studio, matched)
+              VALUES ('50', 'First Light', 'First Light', '7', 'A', 'album', '[]', 'Night Records', 1),
+                     ('60', 'Loose Ends', 'Loose Ends', '7', 'A', NULL, '[]', NULL, 0),
+                     ('70', 'Old Cache', 'Old Cache', '7', 'A', NULL, '[]', NULL, NULL),
+                     ('71', 'Old Label', 'Old Label', '7', 'A', NULL, '[]', 'Night Records', NULL);
+            INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, duration_ms, part_key, track_number)
+              VALUES ('501', 'Opening', '50', 'First Light', '7', 'A', 1000, '/p/1', 1),
+                     ('601', 'Loose One', '60', 'Loose Ends', '7', 'A', 1000, '/p/6', 1),
+                     ('602', 'Loose Two', '60', 'Loose Ends', '7', 'A', 1000, '/p/7', 2),
+                     ('701', 'Old One', '70', 'Old Cache', '7', 'A', 1000, '/p/8', 1),
+                     ('711', 'Labelled', '71', 'Old Label', '7', 'A', 1000, '/p/9', 1);
+            INSERT INTO file_tags (part_key, status, version, scanned_at) VALUES ('/p/7', 'ok', 'released', 1);
+            "#,
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    // A file tagged released wins over the guess.
+    assert_eq!(db.read(store::unreleased_todo).unwrap(), vec!["601", "701"]);
+    crate::db::release::set_count_unmatched(false);
+    assert!(db.read(store::unreleased_todo).unwrap().is_empty(), "off: only real tags count");
+    crate::db::release::set_count_unmatched(true);
+}
+
 #[tokio::test]
 async fn transcription_failure_is_reported_for_the_song() {
     let f = fx();

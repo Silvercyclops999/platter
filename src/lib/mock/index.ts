@@ -83,7 +83,7 @@ import { mockArtUrl } from "./art";
 import { mockLyrics, mockNowPlayingDetails } from "./details";
 import { lyricsFromText } from "../lrc";
 import { credits, globalTop, popularTracks, rankPopular } from "./popular";
-import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mulberry32, type Fixtures } from "./fixtures";
+import { BROKEN_TRACK_TITLE_SUFFIX, LEARNED_NAMES, buildFixtures, mockMatched, mockUnreleased, mulberry32, type Fixtures } from "./fixtures";
 import { mockBio } from "./bio";
 import { MOCK_CLOUD_FOLDERS, MockSync } from "./sync";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
@@ -345,7 +345,7 @@ export class MockBackend implements Backend {
       albumTracks: (albumId) => (this.fx.tracksByAlbum.get(albumId) ?? []).map((t) => t.id).filter((id) => !this.own.has(id)),
       unreleasedTracks: () =>
         this.fx.albums
-          .filter((a) => a.format === null || a.subformats.includes("demo"))
+          .filter((a) => mockUnreleased(a, this.settings.countUnmatchedUnreleased !== false))
           .flatMap((a) => this.fx.tracksByAlbum.get(a.id) ?? [])
           .map((t) => t.id)
           .filter((id) => !this.own.has(id)),
@@ -865,7 +865,8 @@ export class MockBackend implements Backend {
       // Plex has a release date for most albums and a label for some.
       const n = Number(id) || 0;
       const released = album.year ? `${album.year}-${String((n % 12) + 1).padStart(2, "0")}-${String((n % 27) + 1).padStart(2, "0")}` : null;
-      const studio = n % 3 === 0 ? null : MOCK_LABELS[n % MOCK_LABELS.length];
+      // Albums Plex couldn't match have no label.
+      const studio = n % 3 === 0 || !mockMatched(album) ? null : MOCK_LABELS[n % MOCK_LABELS.length];
       return {
         album,
         tracks,

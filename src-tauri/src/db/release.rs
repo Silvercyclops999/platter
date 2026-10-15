@@ -56,11 +56,81 @@ pub fn release_section<S: AsRef<str>>(format: Option<&str>, subformats: &[S]) ->
 /// subformat), or an ARCHIVE_VERSION read from the files that isn't a
 /// released one (see [`version_is_unreleased`]). For an album, pass the
 /// version most of its files carry.
-pub fn is_unreleased<S: AsRef<str>>(format: Option<&str>, subformats: &[S], archive_version: Option<&str>) -> bool {
+///
+/// With [`count_unmatched`] on (the default), an album Plex couldn't match
+/// counts as probably unreleased too, until it's tagged. `matched` comes
+/// from the album's guid; when it isn't known yet (a cache from before the
+/// guid was kept), no release type and no label (`studio`) stands in for
+/// it. Any release type or ARCHIVE_VERSION is a real tag and wins.
+pub fn is_unreleased<S: AsRef<str>>(
+    format: Option<&str>,
+    subformats: &[S],
+    matched: Option<bool>,
+    studio: Option<&str>,
+    archive_version: Option<&str>,
+) -> bool {
+    unreleased_reason(format, subformats, matched, studio, archive_version).is_some()
+}
+
+/// How sure [`is_unreleased`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unreleased {
+    /// A demo release type or an unreleased ARCHIVE_VERSION says so.
+    Tagged,
+    /// Plex couldn't match the album and nothing is tagged.
+    Probably,
+}
+
+/// [`is_unreleased`] with its reason; None when the album counts as released.
+pub fn unreleased_reason<S: AsRef<str>>(
+    format: Option<&str>,
+    subformats: &[S],
+    matched: Option<bool>,
+    studio: Option<&str>,
+    archive_version: Option<&str>,
+) -> Option<Unreleased> {
     let demo = |s: &str| s.to_ascii_lowercase().contains("demo");
-    format.is_some_and(demo)
-        || subformats.iter().any(|s| demo(s.as_ref()))
-        || archive_version.is_some_and(version_is_unreleased)
+    let blank = |s: Option<&str>| s.is_none_or(|s| s.trim().is_empty());
+    if format.is_some_and(demo) || subformats.iter().any(|s| demo(s.as_ref())) {
+        return Some(Unreleased::Tagged);
+    }
+    if !blank(archive_version) {
+        return archive_version.is_some_and(version_is_unreleased).then_some(Unreleased::Tagged);
+    }
+    let typed = !blank(format) || subformats.iter().any(|s| !s.as_ref().trim().is_empty());
+    if typed || !count_unmatched() {
+        return None;
+    }
+    let unmatched = match matched {
+        Some(m) => !m,
+        None => blank(studio),
+    };
+    unmatched.then_some(Unreleased::Probably)
+}
+
+// The "count albums Plex couldn't match as unreleased" setting. Tests keep
+// it per thread so they can't see each other's changes.
+#[cfg(not(test))]
+static COUNT_UNMATCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+#[cfg(test)]
+thread_local! {
+    static COUNT_UNMATCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Whether albums Plex couldn't match count as unreleased.
+pub fn count_unmatched() -> bool {
+    #[cfg(not(test))]
+    return COUNT_UNMATCHED.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    return COUNT_UNMATCHED.with(|c| c.get());
+}
+
+/// Set from the settings.
+pub fn set_count_unmatched(on: bool) {
+    #[cfg(not(test))]
+    COUNT_UNMATCHED.store(on, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    COUNT_UNMATCHED.with(|c| c.set(on));
 }
 
 /// ARCHIVE_VERSION values that mean the music was never released. Remix and
@@ -120,27 +190,73 @@ mod tests {
         assert_eq!(release_section(None, &["Live", "Demo"]), ReleaseSection::Demos);
     }
 
+    const NONE: [&str; 0] = [];
+    const LABEL: Option<&str> = Some("Night Records");
+    const MATCHED: Option<bool> = Some(true);
+    const LOCAL: Option<bool> = Some(false);
+
     #[test]
     fn demos_are_unreleased() {
-        let none: [&str; 0] = [];
-        assert!(!is_unreleased(None, &none, None));
-        assert!(!is_unreleased(Some("album"), &["live", "compilation"], None));
-        assert!(is_unreleased(Some("album"), &["demo"], None));
-        assert!(is_unreleased(None, &["Live", "Demo"], None));
-        assert!(is_unreleased(Some("Demo"), &none, None));
+        assert!(!is_unreleased(Some("album"), &NONE, MATCHED, LABEL, None));
+        assert!(!is_unreleased(Some("album"), &["live", "compilation"], MATCHED, None, None));
+        assert!(is_unreleased(Some("album"), &["demo"], MATCHED, LABEL, None));
+        assert!(is_unreleased(None, &["Live", "Demo"], MATCHED, LABEL, None));
+        assert!(is_unreleased(Some("Demo"), &NONE, MATCHED, LABEL, None));
+        assert_eq!(unreleased_reason(Some("Demo"), &NONE, MATCHED, LABEL, None), Some(Unreleased::Tagged));
     }
 
     #[test]
     fn archive_versions_join_the_unreleased_check() {
-        let none: [&str; 0] = [];
         for v in ["leak", "Demo", "snippet", "session", "build", "alternate", "unreleased"] {
-            assert!(is_unreleased(Some("album"), &none, Some(v)), "{v}");
+            assert!(is_unreleased(Some("album"), &NONE, MATCHED, None, Some(v)), "{v}");
+            assert_eq!(unreleased_reason(None, &NONE, LOCAL, None, Some(v)), Some(Unreleased::Tagged), "{v}");
         }
         for v in ["released", "remix", "live", ""] {
-            assert!(!is_unreleased(Some("album"), &none, Some(v)), "{v}");
+            assert!(!is_unreleased(Some("album"), &NONE, MATCHED, None, Some(v)), "{v}");
         }
         // A demo release type stays unreleased whatever the files say.
-        assert!(is_unreleased(Some("album"), &["demo"], Some("released")));
+        assert!(is_unreleased(Some("album"), &["demo"], MATCHED, None, Some("released")));
+    }
+
+    #[test]
+    fn albums_plex_couldnt_match_are_probably_unreleased() {
+        // local:// guid, nothing tagged.
+        assert_eq!(unreleased_reason(None, &NONE, LOCAL, None, None), Some(Unreleased::Probably));
+        assert_eq!(unreleased_reason(None, &NONE, LOCAL, LABEL, None), Some(Unreleased::Probably));
+        assert!(is_unreleased(Some(" "), &[""], LOCAL, Some(""), Some("")));
+        // Matched by Plex: released even with no type and no label.
+        assert!(!is_unreleased(None, &NONE, MATCHED, None, None));
+        // A release type means someone tagged it.
+        assert!(!is_unreleased(Some("Album"), &NONE, LOCAL, None, None));
+        assert!(!is_unreleased(None, &["Live"], LOCAL, None, None));
+        // A real version tag wins over the guess.
+        assert!(!is_unreleased(None, &NONE, LOCAL, None, Some("released")));
+        assert!(is_unreleased(None, &["Demo"], LOCAL, None, Some("released")));
+    }
+
+    #[test]
+    fn without_a_guid_no_type_and_no_label_stands_in() {
+        // No format and no studio: Plex found no match.
+        assert_eq!(unreleased_reason(None, &NONE, None, None, None), Some(Unreleased::Probably));
+        // Format only, studio only: matched.
+        assert!(!is_unreleased(Some("album"), &NONE, None, None, None));
+        assert!(!is_unreleased(None, &NONE, None, LABEL, None));
+        // Version tags still win.
+        assert!(!is_unreleased(None, &NONE, None, None, Some("released")));
+        assert!(is_unreleased(None, &NONE, None, None, Some("leak")));
+        assert!(is_unreleased(None, &["demo"], None, LABEL, None));
+    }
+
+    #[test]
+    fn the_setting_off_restores_the_tag_only_rule() {
+        set_count_unmatched(false);
+        assert!(!count_unmatched());
+        assert!(!is_unreleased(None, &NONE, LOCAL, None, None));
+        assert!(!is_unreleased(None, &NONE, None, None, None));
+        assert!(is_unreleased(None, &["demo"], LOCAL, None, None));
+        assert!(is_unreleased(None, &NONE, LOCAL, None, Some("leak")));
+        set_count_unmatched(true);
+        assert!(is_unreleased(None, &NONE, LOCAL, None, None));
     }
 
     #[test]

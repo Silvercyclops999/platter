@@ -310,7 +310,8 @@ pub fn copy_info(c: &Connection, t: &Track) -> AppResult<CopyInfo> {
         .prepare_cached(
             "SELECT al.year, al.format, al.subformats, al.section,
                     coalesce((SELECT ft.version FROM file_tags ft WHERE ft.part_key = ?2),
-                             (SELECT at.version FROM album_tags at WHERE at.album_id = ?1))
+                             (SELECT at.version FROM album_tags at WHERE at.album_id = ?1)),
+                    al.studio, al.matched
              FROM albums al WHERE al.id = ?1",
         )?
         .query_row(params![t.album_id, t.part_key], |r| {
@@ -318,11 +319,13 @@ pub fn copy_info(c: &Connection, t: &Track) -> AppResult<CopyInfo> {
             let subs: Option<String> = r.get(2)?;
             let section: Option<String> = r.get(3)?;
             let version: Option<String> = r.get(4)?;
+            let studio: Option<String> = r.get(5)?;
+            let matched: Option<bool> = r.get(6)?;
             let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
             Ok(CopyInfo {
                 year: r.get(0)?,
                 section: section.as_deref().map(super::release::section_from_key),
-                unreleased: super::release::is_unreleased(format.as_deref(), &subs, version.as_deref()),
+                unreleased: super::release::is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref()),
             })
         })
         .optional()?;

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenuHost, openContextMenu } from "../components/ContextMenu";
@@ -6,6 +6,7 @@ import { shareItem } from "../components/ShareMenu";
 import { TrackList, TrackRow } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
+import { mockMatched, mockUnreleased } from "../lib/mock/fixtures";
 import { mockHasNoMatch } from "../lib/mock/share";
 import { DEFAULT_SETTINGS, type PlayerState, type ShareKind, type Track } from "../lib/types";
 import { usePlayer } from "../stores/player";
@@ -17,7 +18,9 @@ import { useUi } from "../stores/ui";
 const mock = backend as MockBackend;
 const fx = mock.fx;
 const demoAlbum = fx.albums.find((a) => a.subformats.includes("demo"))!;
-const releasedAlbums = fx.albums.filter((a) => !a.subformats.includes("demo") && a.format !== "demo");
+const releasedAlbums = fx.albums.filter((a) => !mockUnreleased(a, true));
+const buildAlbum = fx.albums.find((a) => !mockMatched(a))!;
+const buildTrack = fx.tracks.find((t) => t.albumId === buildAlbum.id)!;
 const released = fx.tracks.find((t) => releasedAlbums.some((a) => a.id === t.albumId) && !mockHasNoMatch(t.id))!;
 const noMatch = fx.tracks.find((t) => releasedAlbums.some((a) => a.id === t.albumId) && mockHasNoMatch(t.id))!;
 const demoTrack = fx.tracks.find((t) => t.albumId === demoAlbum.id)!;
@@ -103,6 +106,20 @@ describe("Share submenu", () => {
     await user.click(item);
     expect(spy).not.toHaveBeenCalled();
     expect(clip).toEqual([]);
+  });
+
+  it("albums Plex couldn't match count as unreleased unless the setting is off", async () => {
+    const { sub } = await openShare("track", buildTrack.id);
+    const item = await within(sub).findByRole("menuitem", { name: /Copy song link/ });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveTextContent("Not released");
+    act(() => useUi.setState({ menu: null }));
+    cleanup();
+    await backend.settingsSet({ countUnmatchedUnreleased: false });
+    const again = await openShare("track", buildTrack.id);
+    const on = await within(again.sub).findByRole("menuitem", { name: /Copy song link/ });
+    expect(on).not.toHaveAttribute("aria-disabled", "true");
+    expect(on).not.toHaveTextContent("Not released");
   });
 
   it("copies the Platter link, and playlists and artists only get that", async () => {
@@ -200,8 +217,9 @@ describe("opening platter:// links", () => {
     const stop = connectShare(backend);
     act(() => mock.share.openLink(`platter://album/${album.id}?s=00000000`));
     await waitFor(() => expect(toasts().map((t) => t.message)).toEqual(["This isn't in your library"]));
+    act(() => useToasts.setState({ toasts: [] }));
     act(() => mock.share.openLink("platter://song/does-not-exist"));
-    await waitFor(() => expect(toasts()).toHaveLength(2));
+    await waitFor(() => expect(toasts().map((t) => t.message)).toEqual(["This isn't in your library"]));
     expect(route()).toEqual({ name: "home" });
     stop();
   });

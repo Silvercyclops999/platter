@@ -299,8 +299,8 @@ fn add_track(db: &DbHandle, id: &str, album: &str, genre: &str, plays: u32, sect
     let (id, album, genre, section) = (id.to_string(), album.to_string(), genre.to_string(), section.to_string());
     db.write(move |c| {
         c.execute(
-            "INSERT OR IGNORE INTO albums (id, title, sort_title, artist_id, artist_title, year, genres, section, added_at, format, subformats)
-             VALUES (?1, ?1, ?1, 'r', 'Band', 1999, ?2, ?3, 1, NULL, ?4)",
+            "INSERT OR IGNORE INTO albums (id, title, sort_title, artist_id, artist_title, year, genres, section, added_at, format, subformats, matched)
+             VALUES (?1, ?1, ?1, 'r', 'Band', 1999, ?2, ?3, 1, NULL, ?4, 1)",
             rusqlite::params![album, format!("[\"{genre}\"]"), section, if section == "demos" { "[\"Demo\"]" } else { "[]" }],
         )?;
         c.execute(
@@ -499,6 +499,30 @@ async fn a_prompt_becomes_rules_and_ranked_picks_without_unreleased_music() {
     let page = r.smart.page(&saved.id).await.unwrap();
     assert_eq!(page.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>()[..2], ["2", "1"]);
     assert!(page.playlist.prompted);
+}
+
+#[test]
+fn songs_on_albums_plex_couldnt_match_count_as_unreleased() {
+    let r = rig();
+    add_track(&r.db, "5", "al5", "Rock", 1, "albums");
+    add_track(&r.db, "6", "al6", "Rock", 1, "albums");
+    r.db.write(|c| {
+        // al5: Plex found no match. al6: an old cache row, no guid known, no label.
+        c.execute("UPDATE albums SET matched = 0 WHERE id = 'al5'", [])?;
+        c.execute("UPDATE albums SET matched = NULL WHERE id = 'al6'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let unreleased = || {
+        let rows = r.db.read(eval::read_rows).unwrap();
+        let mut ids: Vec<String> = rows.into_iter().filter(|x| x.unreleased).map(|x| x.id).collect();
+        ids.sort();
+        ids
+    };
+    assert_eq!(unreleased(), ["4", "5", "6"]);
+    crate::db::release::set_count_unmatched(false);
+    assert_eq!(unreleased(), ["4"], "off: only the demo");
+    crate::db::release::set_count_unmatched(true);
 }
 
 #[tokio::test]

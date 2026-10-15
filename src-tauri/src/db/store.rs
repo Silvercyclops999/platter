@@ -61,6 +61,7 @@ pub fn row_album(r: &Row<'_>) -> rusqlite::Result<Album> {
         tint: r.get(15)?,
         released: None,
         studio: None,
+        matched: None,
         styles: Vec::new(),
         moods: Vec::new(),
     })
@@ -130,8 +131,8 @@ pub fn upsert_albums(tx: &Transaction<'_>, items: &[Album], gen_: i64) -> AppRes
     let mut st = tx.prepare_cached(
         "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, year, thumb, format,
            subformats, section, section_rank, genres, track_count, added_at, view_count,
-           last_viewed_at, tint, seen_gen, released, studio, styles, moods)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+           last_viewed_at, tint, seen_gen, released, studio, styles, moods, matched)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, sort_title = excluded.sort_title,
            artist_id = excluded.artist_id, artist_title = excluded.artist_title, year = excluded.year,
            thumb = excluded.thumb, format = excluded.format, subformats = excluded.subformats,
@@ -140,7 +141,7 @@ pub fn upsert_albums(tx: &Transaction<'_>, items: &[Album], gen_: i64) -> AppRes
            view_count = excluded.view_count, last_viewed_at = excluded.last_viewed_at,
            tint = excluded.tint, seen_gen = excluded.seen_gen,
            released = excluded.released, studio = excluded.studio,
-           styles = excluded.styles, moods = excluded.moods",
+           styles = excluded.styles, moods = excluded.moods, matched = excluded.matched",
     )?;
     for a in items {
         st.execute(params![
@@ -165,7 +166,8 @@ pub fn upsert_albums(tx: &Transaction<'_>, items: &[Album], gen_: i64) -> AppRes
             a.released,
             a.studio,
             serde_json::to_string(&a.styles).unwrap_or_else(|_| "[]".into()),
-            serde_json::to_string(&a.moods).unwrap_or_else(|_| "[]".into())
+            serde_json::to_string(&a.moods).unwrap_or_else(|_| "[]".into()),
+            a.matched
         ])?;
     }
     Ok(())

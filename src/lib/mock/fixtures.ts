@@ -162,6 +162,21 @@ export interface Fixtures {
 }
 
 /** Track IDs the mock treats as unplayable (to demo "Skipped: file unavailable"). */
+/**
+ * Whether Plex matched the album (guid plex://album/...). The untagged
+ * builds are the ones it couldn't match (guid local://...): no release type
+ * and no label.
+ */
+export function mockMatched(a: Album): boolean {
+  return a.format !== null || a.subformats.length > 0;
+}
+
+/** The app's one unreleased rule, as the mock sees it. */
+export function mockUnreleased(a: Album, countUnmatched: boolean): boolean {
+  if (a.format?.includes("demo") || a.subformats.some((s) => s.includes("demo"))) return true;
+  return countUnmatched && !mockMatched(a);
+}
+
 export const BROKEN_TRACK_TITLE_SUFFIX = " (corrupt rip)";
 
 const NOW = Date.UTC(2026, 9, 13, 12, 0, 0) / 1000;

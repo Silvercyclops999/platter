@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { mockLyricsKind } from "../lib/mock/details";
+import { mockMatched } from "../lib/mock/fixtures";
 import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { LyricsPane } from "../shell/LyricsView";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -109,6 +110,20 @@ describe("Settings", () => {
     await within(settingRow("transcribeUnreleased")).findByText(/Transcribing: \d+ of \d+ songs\./);
     await userEvent.click(within(settingRow("transcribeUnreleased")).getByRole("button", { name: "Cancel" }));
     await within(settingRow("transcribeUnreleased")).findByRole("button", { name: "Transcribe now" });
+  });
+
+  it("the unreleased batch takes albums Plex couldn't match unless that setting is off", async () => {
+    await turnOn();
+    const tracksOf = (match: (a: (typeof mock.fx.albums)[number]) => boolean) =>
+      mock.fx.albums.filter(match).reduce((n, a) => n + (mock.fx.tracksByAlbum.get(a.id)?.length ?? 0), 0);
+    const demos = tracksOf((a) => a.subformats.includes("demo"));
+    const builds = tracksOf((a) => !mockMatched(a));
+    expect(builds).toBeGreaterThan(0);
+    expect(await mock.transcribeUnreleased()).toBe(demos + builds);
+    mock.transcribe.reset();
+    await mock.settingsSet({ countUnmatchedUnreleased: false });
+    expect(await mock.transcribeUnreleased()).toBe(demos);
+    await mock.settingsSet({ countUnmatchedUnreleased: true });
   });
 
   it("lists whisper.cpp and the model source in the notices", async () => {

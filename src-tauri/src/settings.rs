@@ -355,6 +355,9 @@ pub struct Settings {
     pub explicit_content: ExplicitContent,
     /// Show fan and AI edits (ARCHIVE_FLAGS).
     pub show_fan_edits: bool,
+    /// Albums Plex couldn't match count as unreleased until they're tagged
+    /// (off: only demo release types and archive version tags do).
+    pub count_unmatched_unreleased: bool,
     /// Albums sharing ARCHIVE_GROUP show as one card with an edition picker.
     pub group_editions: bool,
     /// Drag songs, albums and playlists onto playlists, Liked Songs and the queue.
@@ -554,6 +557,7 @@ impl Default for Settings {
             read_file_tags: true,
             explicit_content: ExplicitContent::Allowed,
             show_fan_edits: false,
+            count_unmatched_unreleased: true,
             group_editions: true,
             drag_and_drop: true,
             transcribe_lyrics: false,
@@ -661,6 +665,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "fullWindowHideControls",
     "explicitContent",
     "showFanEdits",
+    "countUnmatchedUnreleased",
     "groupEditions",
     "dragAndDrop",
     "showAutoLyrics",
@@ -834,6 +839,7 @@ pub struct SettingsPatch {
     pub read_file_tags: Option<bool>,
     pub explicit_content: Option<ExplicitContent>,
     pub show_fan_edits: Option<bool>,
+    pub count_unmatched_unreleased: Option<bool>,
     pub group_editions: Option<bool>,
     pub drag_and_drop: Option<bool>,
     pub transcribe_lyrics: Option<bool>,
@@ -906,6 +912,7 @@ impl SettingsPatch {
             || self.daylist_hours.is_some()
             || self.explicit_content.is_some()
             || self.show_fan_edits.is_some()
+            || self.count_unmatched_unreleased.is_some()
             || self.liked_means.is_some()
     }
 
@@ -1020,6 +1027,7 @@ impl Settings {
         set(&mut self.read_file_tags, p.read_file_tags);
         set(&mut self.explicit_content, p.explicit_content);
         set(&mut self.show_fan_edits, p.show_fan_edits);
+        set(&mut self.count_unmatched_unreleased, p.count_unmatched_unreleased);
         set(&mut self.group_editions, p.group_editions);
         set(&mut self.drag_and_drop, p.drag_and_drop);
         set(&mut self.transcribe_lyrics, p.transcribe_lyrics);
@@ -1370,6 +1378,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.sync.set(s.sync_config());
     live.discord.set(s.discord());
     db.set_tag_view(s.tag_view());
+    crate::db::release::set_count_unmatched(s.count_unmatched_unreleased);
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
         scan.set_enabled(s.read_file_tags);
     }
@@ -1865,6 +1874,27 @@ mod tests {
         let json = serde_json::to_value(&s).unwrap();
         assert_eq!(json["explicitContent"], "filtered");
         assert_eq!(json["readFileTags"], true);
+    }
+
+    #[test]
+    fn unmatched_albums_setting_reaches_the_unreleased_rule() {
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = Settings::default();
+        assert!(s.count_unmatched_unreleased, "on by default");
+        assert!(SYNCED_SETTINGS.contains(&"countUnmatchedUnreleased"));
+        publish(&s, &live, &db);
+        assert!(crate::db::release::count_unmatched());
+        let patch = SettingsPatch { count_unmatched_unreleased: Some(false), ..Default::default() };
+        assert!(patch.touches_mixes(), "mixes rebuild with the new rule");
+        s.apply(&patch).unwrap();
+        publish(&s, &live, &db);
+        assert!(!crate::db::release::count_unmatched());
+        assert!(!crate::db::release::is_unreleased(None, &[] as &[&str], Some(false), None, None));
+        assert_eq!(serde_json::to_value(&s).unwrap()["countUnmatchedUnreleased"], false);
+        s.apply(&SettingsPatch { count_unmatched_unreleased: Some(true), ..Default::default() }).unwrap();
+        publish(&s, &live, &db);
+        assert!(crate::db::release::count_unmatched());
     }
 
     #[test]

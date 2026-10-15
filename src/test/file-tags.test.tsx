@@ -261,6 +261,16 @@ describe("settings", () => {
     expect([s.readFileTags, s.showFanEdits, s.groupEditions, s.explicitContent]).toEqual([false, true, false, "filtered"]);
   });
 
+  it("albums Plex couldn't match count as unreleased by default, and the switch turns it off", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    const row = await screen.findByRole("switch", { name: "Count albums Plex couldn't match as unreleased" });
+    expect(row).toBeChecked();
+    expect(row.closest("[data-setting]")).toHaveTextContent(/no release type and no label/);
+    await user.click(row);
+    expect((await backend.settingsGet()).countUnmatchedUnreleased).toBe(false);
+  });
+
   it("turning reading off says nothing about progress (app state: scan off)", async () => {
     await updateSettings({ readFileTags: false });
     act(() => useFileTags.getState().setScan(status({ enabled: false, done: 10 })));

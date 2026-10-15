@@ -563,6 +563,12 @@ CREATE TABLE IF NOT EXISTS sync_entries (
     PRIMARY KEY (ns, key)
 ) WITHOUT ROWID;
 "#,
+    // v20: whether Plex matched each album (guid plex://... = 1, local://... =
+    // 0, NULL until the next sync fills it). Feeds the unreleased guess.
+    r#"
+ALTER TABLE albums ADD COLUMN matched INTEGER;
+UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
 ];
 
 #[cfg(test)]

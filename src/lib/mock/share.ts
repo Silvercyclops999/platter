@@ -7,7 +7,7 @@
  * stable: those show the "Couldn't find" toast.
  */
 import type { DeepLinkOpen, PublicLinkState, Settings, ShareInfo, ShareKind } from "../types";
-import type { Fixtures } from "./fixtures";
+import { type Fixtures, mockUnreleased } from "./fixtures";
 
 const SERVER_TAG = "5e7c0a11";
 const WORD: Record<ShareKind, string> = { track: "song", album: "album", artist: "artist", playlist: "playlist" };
@@ -97,7 +97,7 @@ export class MockShare {
   private unreleased(kind: ShareKind, id: string): boolean {
     const albumId = kind === "track" ? this.fx.tracks.find((t) => t.id === id)?.albumId : id;
     const a = albumId ? this.album(albumId) : undefined;
-    return !!a && (a.format?.includes("demo") || a.subformats.some((s) => s.includes("demo")));
+    return !!a && mockUnreleased(a, this.settings().countUnmatchedUnreleased !== false);
   }
 
   private status(kind: ShareKind, id: string): PublicLinkState {

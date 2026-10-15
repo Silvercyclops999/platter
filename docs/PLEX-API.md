@@ -513,6 +513,19 @@ Here every one of 86 albums had a date and 44 had a studio. The app stores both
 for the album page footer and takes the first ten characters of the date, in
 case a time follows it.
 
+### 2026-10-14: albums Plex couldn't match
+
+Every album has a `guid`. When Plex matched it to its music agent the guid is
+`plex://album/<id>`, and with `includeGuids=1` the `Guid` array holds an
+`mbid://` entry. When it found no match the guid is `local://<n>` and `Guid` is
+empty. Here 41 of 86 albums were `local://` and 45 were `plex://`, and the 41
+are exactly the albums with no `studio`; none of them had a release type
+either. In this library those are the unreleased albums. The app stores
+whether each album was matched (`albums.matched`) and, unless the user turns it
+off in Settings, counts an unmatched album with no release type and no
+ARCHIVE_VERSION as probably unreleased. For cache rows saved before the guid
+was kept, no release type and no studio stands in until the next full sync.
+
 ### 2026-10-14: genre, style and mood tags (mixes)
 
 Album and track list items carry `Genre` only: 85 of 86 albums and 1433 of

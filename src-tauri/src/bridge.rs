@@ -810,6 +810,7 @@ mod tests {
             tint: None,
             released: None,
             studio: None,
+            matched: None,
             styles: vec![],
             moods: vec![],
         }

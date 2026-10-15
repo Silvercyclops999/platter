@@ -1729,6 +1729,15 @@ export function SettingsPage() {
         "Albums that share a group tag, like a deluxe edition or builds of an unreleased album, show as one card. The album page gets an edition picker.",
       control: (ids) => toggle(s, "groupEditions", ids),
     },
+    {
+      key: "countUnmatchedUnreleased",
+      section: "Library",
+      group: "File tags",
+      title: "Count albums Plex couldn't match as unreleased",
+      description:
+        "Albums Plex found no match for, which usually have no release type and no label, are treated as unreleased until you tag them. That covers lyrics transcription, sharing, Discord, mixes and smart playlists.",
+      control: (ids) => toggle(s, "countUnmatchedUnreleased", ids),
+    },
     // Library: drag and drop
     {
       key: "dragAndDrop",

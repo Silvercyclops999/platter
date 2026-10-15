@@ -718,6 +718,8 @@ export interface Settings {
   explicitContent: ExplicitContent;
   /** Show fan and AI edits. */
   showFanEdits: boolean;
+  /** Albums Plex couldn't match count as unreleased until they're tagged. */
+  countUnmatchedUnreleased: boolean;
   /** Albums sharing a group tag show as one card with an edition picker. */
   groupEditions: boolean;
   /** Drag songs, albums and playlists onto playlists, Liked Songs and the queue. */
@@ -972,6 +974,7 @@ export const DEFAULT_SETTINGS: Settings = {
   readFileTags: true,
   explicitContent: "allowed",
   showFanEdits: false,
+  countUnmatchedUnreleased: true,
   groupEditions: true,
   dragAndDrop: true,
   transcribeLyrics: false,

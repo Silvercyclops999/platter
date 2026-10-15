@@ -67,6 +67,11 @@ pub struct Album {
     /// Record label (Plex `studio`). Album page footer only, like `released`.
     #[serde(skip)]
     pub studio: Option<String>,
+    /// Whether Plex matched the album to its metadata agent (`guid`
+    /// `plex://album/...`) or not (`local://...`). None when unknown.
+    /// Feeds the unreleased guess; not sent to the UI.
+    #[serde(skip)]
+    pub matched: Option<bool>,
     /// Plex style tags (finer genres). Stored for mixes; not sent to the UI.
     #[serde(skip)]
     pub styles: Vec<String>,

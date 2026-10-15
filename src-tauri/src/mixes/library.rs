@@ -161,8 +161,9 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
     }
     {
         let mut st = c.prepare(
-            "SELECT al.id, al.artist_id, al.thumb, al.added_at, al.genres, al.styles, al.moods, al.format, al.subformats
-             FROM albums al",
+            "SELECT al.id, al.artist_id, al.thumb, al.added_at, al.genres, al.styles, al.moods, al.format, al.subformats, al.studio,
+                    at.version, al.matched
+             FROM albums al LEFT JOIN album_tags at ON at.album_id = al.id",
         )?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
@@ -178,13 +179,16 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
             }
             let format: Option<String> = r.get(7)?;
             let subformats = json_vec(&r.get::<_, String>(8)?);
+            let studio: Option<String> = r.get(9)?;
+            let version: Option<String> = r.get(10)?;
+            let matched: Option<bool> = r.get(11)?;
             raw.albums.push(RawAlbum {
                 id: r.get(0)?,
                 artist_id: r.get(1)?,
                 thumb: r.get(2)?,
                 added_at: r.get(3)?,
                 tags,
-                unreleased: crate::db::release::is_unreleased(format.as_deref(), &subformats, None),
+                unreleased: crate::db::release::is_unreleased(format.as_deref(), &subformats, matched, studio.as_deref(), version.as_deref()),
             });
         }
     }
