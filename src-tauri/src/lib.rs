@@ -38,6 +38,9 @@ pub mod tracking;
 pub mod updates;
 pub mod web;
 
+#[cfg(test)]
+mod plex_requests_tests;
+
 use std::sync::Arc;
 use std::time::Duration;
 
