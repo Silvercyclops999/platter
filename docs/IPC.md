@@ -615,10 +615,13 @@ retried. The queue survives restarts.
 | `whats_new` | – | `WhatsNew` |
 | `whats_new_seen` | – | – |
 | `listen_state` | – | `ListenView` |
-| `listen_start` | – | `ListenView` with the invite link |
+| `listen_start` | – | `ListenView` with the first invite |
+| `listen_invite` | `{ fresh: bool }` | `ListenView` with an unused invite (a new one when `fresh`, or when the last was used or ran out). Host only |
 | `listen_stop` | – | – (ends the session you host, or leaves the one you're in) |
-| `listen_join` | `{ link }` | `ListenView` |
-| `listen_add` | `{ trackIds: string[] }` | – |
+| `listen_join` | `{ link }` | `ListenView` (`connecting` until the host's first state arrives) |
+| `listen_add` | `{ trackIds: string[] }` | – (a guest's go to the host) |
+| `listen_control` | `{ op: ListenOp }` | – (a guest's go to the host; refused when the host only lets others add) |
+| `listen_remove` | `{ personId }` | `ListenView`. Host only |
 
 `ActivityPanel = { state: "ok"|"notAdmin"|"off"|"offline", friends: FriendActivity[] }`
 
@@ -628,11 +631,15 @@ retried. The queue survives restarts.
 
 `WhatsNew = { following: bool, items: { album: Album, new: bool }[], unseen }`
 
-`ListenView = { role: "none"|"host"|"guest", sessionId?, hostName?, invite?, listeners: string[], guestsCanAdd, status?: "connecting"|"live"|"hostGone"|"ended" }`
+`ListenView = { role: "none"|"host"|"guest", sessionId?, hostName?, invite?: { link, qr?: { size, rows }, expiresAt (unix ms) }, people: { id, name, avatar?, host, me }[], listeners: string[], guestsCanControl, nowBy?, queue: { trackId, by? }[], status?: "connecting"|"live"|"hostGone"|"ended"|"removed", relay: "connecting"|"ok"|"unreachable"|"limited" }`
+
+`ListenOp = { op: "play" } | { op: "pause" } | { op: "next" } | { op: "previous" } | { op: "seek", ms } | { op: "add", ids } | { op: "move", from, to }`
 
 Events: `follows://changed` → `FollowedArtist[]`, `whatsnew://changed` →
-`{ unseen }` (0 while What's New announcements are off), and `listen://state`
-→ `ListenView` whenever a session starts, someone joins or leaves, or it ends.
+`{ unseen }` (0 while What's New announcements are off), `listen://state`
+→ `ListenView` whenever a session starts, someone joins or leaves, the
+shared queue or the relay's state changes, or it ends, and `listen://notice`
+→ `{ message }` when the host turns a guest's request down.
 
 Friend activity reads the server's `/status/sessions` (live) and
 `/status/sessions/history/all` for the music section (the newest 500 plays,
@@ -652,27 +659,64 @@ albums added since the last check by artists followed before they were added
 raise one desktop notification when `notifyNewReleases` is on and no private
 session is.
 
-A listening session runs on the host's Platter control port (the one "Show
-this computer to my other devices" opens), so hosting needs that setting on
-and a local network. The invite is
-`platter://join/<session>?k=<secret>&s=<server tag>&h=<ip:port,...>&n=<host name>`;
-opening one (or `listen_join`) joins. Guests sign every request with a key
-made from the secret, ask for the host's state about once a second and
-follow it: the same song and spot (half the request's round trip added while
-playing), pauses and skips. With `listenGuestsAdd` on, guests' `listen_add`
-goes to the end of the host's queue. A host that doesn't answer for 10 s is
-`hostGone`; one that ended the session is `ended`.
+### Listening sessions
 
-| Route on the control port | Body | Answer |
+Everyone in a session connects only to a relay, never to each other, so
+nobody learns anyone else's address. The relay is an ntfy server: ntfy.sh
+unless `listenRelay` names another. Nothing goes to it but random topic
+names and sealed text. Guests play from their own access to the host's Plex
+server, so songs travel as rating keys and the server as a hash of its
+machine id keyed with the session id. No address, port, Plex token, machine
+id or stream URL is ever sent.
+
+An invite is `platter://join/<token>`, the token being base64url of a
+version byte, a random 16-byte session id, a random 16-byte invite secret,
+the expiry (u32, unix seconds) and, only for a relay other than ntfy.sh, its
+URL. Each invite works once and runs out after `listenInviteHours`.
+
+Every direction of every conversation has its own topic (40 hex characters,
+160 bits of an HMAC-SHA256 derivation) and key from a secret only the
+people in it hold. A message is `1.<base64url(nonce, ciphertext)>`, sealed
+with ChaCha20-Poly1305 with the topic as associated data. Inside is
+`{ r: "h"|"g", f: <sender id>, c: <counter>, x: <expiry, unix ms>, m: <message> }`;
+receivers drop anything expired or whose counter isn't above the last one
+from that sender on that topic. Broadcasts from the host add
+`.<base64url(tags)>`, one 128-bit HMAC tag per guest with a key only the
+host and that guest share, so a guest can't pass a message off as the
+host's.
+
+Joining: the guest listens on the invite's down topic and sends `join` (a
+nonce, its first SPAKE2 message over the invite secret, its name) on the up
+topic. The first one the host sees gets `accepted`: the host's SPAKE2 answer
+and, sealed with the key they agreed, the guest's id, its own secret, the
+broadcast secret and the hashed server. Someone else holding the same link
+can't open that, and gets `refused` with `used`, `expired` or `full`. A
+guest whose own server hashes differently says "You need access to
+<host>'s Plex library to listen along" and leaves.
+
+Then each guest has its own up and down topics, and everyone listens on the
+broadcast topic. The host sends `state` (song, position, length, playing,
+up to 50 songs next with who added each, whether guests may change what's
+playing, and everyone's names) when it changes and at least every 3
+minutes, only while someone is listening. Guests send `hello` (send me the
+state), `ping` every 3 minutes, `cmd` (a `ListenOp`) and `leave`. The host
+answers a turned-down `cmd` with `denied`. Removing a guest sends them
+`removed`; a guest leaving or being removed gives everyone else a new
+broadcast secret (`rekey`). Ending sends `ended` and forgets every key and
+invite. A guest that hears nothing from the host for a heartbeat and 30 s
+more shows `hostGone`, and goes back to `live` if the host comes back.
+
+| Message | From | Topic |
 | --- | --- | --- |
-| `POST /platter/v1/session/join` | `{ name }` | `HostState` |
-| `GET /platter/v1/session/state` | – | `HostState` |
-| `POST /platter/v1/session/add` | `{ trackIds }` | `{}`, or 403 when the host doesn't let guests add |
-| `POST /platter/v1/session/leave` | – | `{}` |
+| `join`, `accepted`, `refused` | guest, host | the invite's up and down |
+| `hello`, `ping`, `cmd`, `leave` | guest | the guest's up |
+| `state`, `rekey`, `removed`, `denied` | host | the guest's down |
+| `state`, `ended` | host | broadcast |
 
-`HostState = { sessionId, hostName, trackId?, positionMs, durationMs, playing, upNext: string[] (50 at most), guests: { id, name }[], guestsCanAdd }`.
-A session that has ended answers 410; a request not signed with the
-session's key answers 401.
+ntfy as used: `POST <relay>/<topic>` with the sealed text and
+`X-Firebase: no`, and `GET <relay>/<topic>,<topic>/json[?since=<id>]`, read
+line by line. A 429 shows as `limited`, anything else that fails as
+`unreachable`; both retry with a growing wait.
 
 ## Smart playlists, hide, bookmarks and scrobbling
 
@@ -1356,7 +1400,10 @@ The rest of the fields, with their defaults:
 | `shareActivity` | bool, true | Send Plex now-playing timelines, so friends on the server see you live. Off (and in a private session) none go out; finished plays still reach Plex's history. |
 | `whatsNewAnnouncements` | bool, true | The bell's dot for unseen What's New items. |
 | `notifyNewReleases` | bool, false | A desktop notification when a followed artist gets new music in the library. This device only. |
-| `listenGuestsAdd` | bool, true | Guests in a listening session you host can add songs to your queue. |
+| `listenGuestsControl` | bool, true | "Let others change what's playing": guests in a session you host can play, pause, skip, seek and reorder. Off, they can only add songs. |
+| `listenInviteHours` | 1, 24 or 168, 24 | How long an invite works (each works once). |
+| `listenName` | string, `""` | The name others in a listening session see; empty is your Plex name. 40 characters at most. |
+| `listenRelay` | string, `""` | The listen along relay, an ntfy server URL; empty is ntfy.sh. A URL of your own goes in your invites. |
 | `discordListenAlong` | bool, true | Discord shows a listening session you host and how many are in it. This device only. |
 | `syncEnabled` | bool, false | Keep app-only state in a sync file in `syncFolder`. On with no folder counts as off. This device only. See Sync, folders and keys. |
 | `syncFolder` | string, `""` | The folder the sync file goes in. Changed with `sync_file_use_folder` or `sync_file_choose_folder`, not `settings_set`. This device only. |

@@ -26,6 +26,8 @@ and your own Plex server.
 - MusicBrainz, to find the MusicBrainz id of a featured artist who has no
   albums in your library, when you open their page. The request carries the
   artist's name, nothing else.
+- ntfy.sh (or your own ntfy server), only during a listening session. It
+  carries the session's sealed messages; see Listening sessions below.
 - Apple's iTunes Search, only when you copy a public link for a song or album
   from a Share menu (on by default, can be turned off in Settings). The search
   carries the artist and the song or album title, nothing else. Unreleased
@@ -114,14 +116,38 @@ off, and other Plex apps the owner uses can see that history.
 The artists you follow are kept in the app's data folder on this computer,
 and in the sync file if you turn that on (see below).
 
-A listening session connects Platter computers on your local network
-directly. The invite link holds the session's id, a random secret, the
-host's local addresses and the host's Plex name. Anyone with the link can
-join while the session runs, so send it only to people you mean to. Guests
-see the host's name, who else is listening and the songs playing, and they
-play those songs from the same Plex server with their own sign-in. Nothing
-goes through a server of ours, and your Plex token never leaves your
-computer. While you host a session and Discord status is on, Discord shows
+### Listening sessions
+
+People in a listening session never connect to each other. Everyone
+connects only to a relay, so nobody in the session, the host included,
+learns anyone else's IP address. The relay is ntfy.sh, a free public ntfy
+server, unless you set your own ntfy server in Settings.
+
+What the relay sees: random topic names, and messages sealed end to end
+(ChaCha20-Poly1305) that it can't read, kept for up to 12 hours on ntfy.sh.
+Like any website, the relay's operator also sees the IP address each person
+connects from. It never passes one person's address to another. Platter
+asks ntfy.sh not to forward the messages to Firebase.
+
+What the others in a session see: the name you choose in Settings (your
+Plex name if you leave it empty), the songs playing and in the queue, and
+who added each one. No email, location, computer name or picture.
+
+The invite link holds only a random token: a session id, a secret, when it
+runs out, and your relay's address if you set your own. It never holds an
+IP address, a host name, a port, your Plex server's address or id, or a
+token. Each link works for one person, once, and runs out after 24 hours
+(you can choose 1 hour or 7 days). Removing someone takes their keys away,
+and ending the session takes everyone's.
+
+Guests play the songs from their own access to your Plex server. Platter
+never sends your Plex token, your server's address or a stream link, so
+someone without access to your library can't listen along. Note that your
+server itself sees the address of each guest who streams from it, as it
+always does for anyone you share your library with.
+
+Platter's logs never record addresses, tokens, keys or topic names from a
+session. While you host a session and Discord status is on, Discord shows
 that you're in one and how many people are in it.
 
 ## Scrobbling

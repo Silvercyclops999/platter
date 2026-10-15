@@ -592,3 +592,38 @@ and changing the rules with `PUT /playlists/{id}/items?uri=<the same>`, as
 other Plex clients do, and "match any" as `push=1&<a>&or=1&<b>&pop=1`. The
 app tests these with a fake server only. `limit=<n>` caps the songs.
 
+### 2026-10-14: can Plex carry listen along between accounts?
+
+Listen along needs a channel between people on different Plex accounts
+where nobody learns anyone else's address, invites carry only a random
+token, and nobody gets more of the host's server than their own access
+already gives them. Three Plex paths were looked at, read-only:
+
+- Relay connections. plex.tv resources list a server's connections with
+  `protocol`, `address`, `port`, `uri`, `local`, `relay` and `IPv6`; the one
+  with `relay: true` answered `/identity` here. A relay only proxies HTTP to
+  a Plex Media Server that registered it. Players and apps have no relay
+  entry (Plexamp and Platter list only `local` or direct connections), so
+  there's no relay address one app could reach another app through.
+- plex.tv pubsub. Plexamp lists `provides: "client,player,pubsub-player"`;
+  other players list `client,player`. The pubsub service isn't documented,
+  and what's known publicly is that it carries control messages between
+  devices on one account. Nothing suggests one account can send to another
+  account's device through it, and using it would mean sending Plex tokens
+  to an undocumented service on behalf of the user.
+- The shared server itself. `GET /playQueues/<id>` for an id that isn't
+  yours answers an empty container (`size: 0`, `playQueueVersion: -1`), and
+  `GET /playQueues` lists nothing; play queues belong to the account that
+  made them. Playlists are per account too, and `/status/sessions` (position
+  and state) only answers the owner. A guest would also have to write to the
+  host's server to send anything back. The server's root says
+  `companionProxy: true`, but that forwards player commands from the server
+  to a player's own address, which means the server connecting to each
+  guest's computer.
+
+None of these works across accounts without either exposing an address or
+writing to the server, so listen along uses an ntfy relay (behind a relay
+interface, so a Plex path can be added if Plex ever offers one). What it
+does use from Plex: each guest's own access to the server, rating keys, and
+the server's machine id, hashed with the session id before it's sent.
+
