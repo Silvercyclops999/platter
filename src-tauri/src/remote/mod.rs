@@ -18,6 +18,7 @@
 //! - [`cast`]: Google Cast (Plex's receiver with a play queue, or the
 //!   default media receiver).
 //! - [`airplay`]: AirPlay audio, played through a network output.
+//! - [`dlna`]: DLNA / UPnP renderers found with SSDP, fed stream URLs.
 //! - [`peer`]: the user's other Platter devices (announce, find, control).
 //! - [`commands`]: Tauri commands.
 //!
@@ -27,6 +28,7 @@ pub mod airplay;
 pub mod cast;
 pub mod commands;
 pub mod companion;
+pub mod dlna;
 pub mod discovery;
 pub mod lan;
 pub mod peer;
@@ -54,6 +56,8 @@ pub struct RemoteSwitches {
     pub show_players: Arc<AtomicBool>,
     /// Show Cast devices and AirPlay receivers (mDNS runs only while on).
     pub show_cast: Arc<AtomicBool>,
+    /// Show DLNA / UPnP renderers (searched for only while on).
+    pub show_dlna: Arc<AtomicBool>,
     /// Moving playback stops it on the device it leaves.
     pub stop_old: Arc<AtomicBool>,
     /// Let other Plex apps play on this computer (starts the companion
@@ -73,6 +77,7 @@ impl Default for RemoteSwitches {
         Self {
             show_players: Arc::new(AtomicBool::new(true)),
             show_cast: Arc::new(AtomicBool::new(true)),
+            show_dlna: Arc::new(AtomicBool::new(true)),
             stop_old: Arc::new(AtomicBool::new(true)),
             allow_casting: watch::channel(false).0,
             announce: watch::channel(true).0,
@@ -121,6 +126,12 @@ impl RemoteSwitches {
     }
     pub fn show_cast(&self) -> bool {
         self.show_cast.load(Ordering::Relaxed)
+    }
+    pub fn set_show_dlna(&self, on: bool) {
+        self.show_dlna.store(on, Ordering::Relaxed);
+    }
+    pub fn show_dlna(&self) -> bool {
+        self.show_dlna.load(Ordering::Relaxed)
     }
     pub fn show_players(&self) -> bool {
         self.show_players.load(Ordering::Relaxed)

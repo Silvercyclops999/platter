@@ -1606,6 +1606,14 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "showCastDevices", ids),
     },
     {
+      key: "showDlnaDevices",
+      section: "Playback",
+      title: "Show DLNA and UPnP devices",
+      description:
+        "Lists receivers, smart speakers and TVs that play over DLNA or UPnP under Listen on. They play straight from your server: the original file when the device takes its format, otherwise a version your server converts. Off stops Platter looking for them.",
+      control: (ids) => toggle(s, "showDlnaDevices", ids),
+    },
+    {
       key: "showToMyDevices",
       section: "Playback",
       title: "Show this computer to my other devices",

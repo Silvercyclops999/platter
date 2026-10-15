@@ -204,6 +204,8 @@ struct Inner {
     /// Moves and returns one at a time.
     op: tokio::sync::Mutex<()>,
     lan: Mutex<Option<LanEnv>>,
+    /// DLNA renderers (None until the app sets it up).
+    dlna: Mutex<Option<Arc<dyn super::dlna::DlnaSource>>>,
     /// The user's other Platter devices (None until the app sets it up).
     peers: Mutex<Option<Arc<dyn PeerDirectory>>>,
     peer_http: reqwest::Client,
@@ -300,6 +302,7 @@ impl RemoteService {
                 generation: AtomicU64::new(0),
                 op: tokio::sync::Mutex::new(()),
                 lan: Mutex::new(None),
+                dlna: Mutex::new(None),
                 peers: Mutex::new(None),
                 extra: Default::default(),
                 mirror: Mutex::default(),
@@ -380,6 +383,34 @@ impl RemoteService {
     /// Turns on Cast and AirPlay devices.
     pub fn set_lan(&self, lan: LanEnv) {
         *self.inner.lan.lock() = Some(lan);
+    }
+
+    /// Turns on DLNA renderers.
+    pub fn set_dlna(&self, source: Arc<dyn super::dlna::DlnaSource>) {
+        *self.inner.dlna.lock() = Some(source);
+    }
+
+    /// DLNA renderers on this network, as picker rows.
+    async fn dlna_devices(&self) -> Vec<Found> {
+        let src = self.inner.dlna.lock().clone();
+        let Some(src) = src else { return Vec::new() };
+        let mut list: Vec<Found> = src
+            .renderers()
+            .await
+            .into_iter()
+            .map(|d| Found {
+                player: d.player(),
+                direct: Vec::new(),
+                token: None,
+                via_server: false,
+                sonos: false,
+                lan: Some(LanDevice::Dlna(Box::new(d))),
+                peer: None,
+                last_seen: None,
+            })
+            .collect();
+        list.sort_by_key(|f| f.player.name.to_lowercase());
+        list
     }
 
     fn lan(&self) -> AppResult<LanEnv> {
@@ -491,17 +522,24 @@ impl RemoteService {
     pub async fn players(&self) -> Vec<RemotePlayer> {
         let plex = self.inner.switches.show_players();
         let cast = self.inner.switches.show_cast();
+        let dlna = self.inner.switches.show_dlna();
         if !cast && let Some(l) = self.inner.lan.lock().as_ref() {
             l.mdns.stop();
         }
-        let (found, lan, mdns_peers) = tokio::join!(
+        if !dlna && let Some(d) = self.inner.dlna.lock().as_ref() {
+            d.stop();
+        }
+        let (found, lan, mdns_peers, renderers) = tokio::join!(
             async {
                 if plex { self.discover().await } else { Vec::new() }
             },
             async {
                 if cast { self.lan_devices().await } else { Vec::new() }
             },
-            self.peer_answers()
+            self.peer_answers(),
+            async {
+                if dlna { self.dlna_devices().await } else { Vec::new() }
+            }
         );
         let (platter, mut found): (Vec<Found>, Vec<Found>) =
             found.into_iter().partition(|f| f.player.product == peer::PRODUCT);
@@ -517,6 +555,7 @@ impl RemoteService {
             .collect();
         rows.append(&mut found);
         rows.extend(lan);
+        rows.extend(renderers);
         let found = rows;
         let list: Vec<RemotePlayer> = found.iter().map(|f| f.player.clone()).collect();
         *self.inner.players.lock() = found;
@@ -758,8 +797,11 @@ impl RemoteService {
 
     /// Start on a Cast device or AirPlay receiver.
     async fn start_lan(&self, found: Found, password: Option<String>) -> AppResult<RemoteState> {
-        let lan = self.lan()?;
         let name = found.player.name.clone();
+        let lan = match found.lan {
+            Some(LanDevice::Dlna(_)) => None,
+            _ => Some(self.lan()?),
+        };
         if let Some(why) = &found.player.unsupported {
             return Err(AppError::Invalid(format!("Can't play on {name}: {why}.")));
         }
@@ -769,6 +811,7 @@ impl RemoteService {
         };
         let (link, play_queue_id): (Arc<dyn LanLink>, Option<String>) = match found.lan.clone() {
             Some(LanDevice::Cast(dev)) => {
+                let lan = lan.clone().ok_or_else(|| AppError::Invalid("Cast and AirPlay devices aren't available.".into()))?;
                 let server = self.inner.env.server_for(&track.id).await?;
                 let mut tracks = vec![track.clone()];
                 tracks.extend(st.queue.user_queue.iter().map(|i| i.track.clone()));
@@ -796,7 +839,33 @@ impl RemoteService {
                 }
                 (Arc::new(link), Some(pq.id))
             }
+            Some(LanDevice::Dlna(dev)) => {
+                let server = self.inner.env.server_for(&track.id).await?;
+                let mut tracks = vec![track.clone()];
+                tracks.extend(st.queue.user_queue.iter().map(|i| i.track.clone()));
+                tracks.extend(st.queue.next_up.iter().map(|i| i.track.clone()));
+                let token = match cast::plan::transient_token(&self.inner.http, &server).await {
+                    Some(t) => t,
+                    None => server.token.clone(),
+                };
+                let items = super::dlna::plan(&server, &token, &self.inner.own_id, &dev, &tracks);
+                let soap = super::dlna::soap::Soap::new(self.inner.http.clone(), self.inner.cfg.timeout);
+                let link = super::dlna::DlnaLink::start(*dev, items, 0, st.position_ms, st.repeat, soap).await.map_err(|e| match e {
+                    AppError::Invalid(why) => AppError::Invalid(format!("Can't play on {name}: {}.", why.to_lowercase())),
+                    other => {
+                        tracing::info!(kind = other.kind(), "renderer didn't start");
+                        AppError::Network(couldnt_reach(&name))
+                    }
+                })?;
+                if self.inner.switches.stop_old()
+                    && let Err(e) = self.inner.local.pause().await
+                {
+                    tracing::warn!("pausing here after a move failed: {e}");
+                }
+                (Arc::new(link), None)
+            }
             Some(LanDevice::AirPlay(dev)) => {
+                let lan = lan.clone().ok_or_else(|| AppError::Invalid("Cast and AirPlay devices aren't available.".into()))?;
                 let password = match password {
                     Some(p) => Some(p),
                     None => lan

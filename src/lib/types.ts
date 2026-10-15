@@ -1048,6 +1048,7 @@ export interface Settings {
   syncLyrics: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
+  showDlnaDevices: boolean;
   allowAutomation: boolean;
   translateTo: string;
   translationService: string;
@@ -1377,6 +1378,7 @@ export const DEFAULT_SETTINGS: Settings = {
   syncFollows: true,
   syncLyrics: true,
   bookmarksInLibrary: true,
+  showDlnaDevices: true,
   allowAutomation: false,
   translateTo: "en",
   translationService: "",
@@ -2542,7 +2544,7 @@ export interface BitPerfectOutput {
 export type PlayerKind = "computer" | "phone" | "speaker" | "browser" | "tv" | "group";
 
 /** How Platter reaches a device: another Platter computer, a Plex player, a Cast device, or an AirPlay receiver. */
-export type PlayerVia = "platter" | "plex" | "cast" | "airplay";
+export type PlayerVia = "platter" | "plex" | "cast" | "airplay" | "dlna";
 
 /** A Plex player in the device picker. */
 export interface RemotePlayer {

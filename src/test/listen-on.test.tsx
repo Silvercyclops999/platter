@@ -87,7 +87,7 @@ describe("the Listen on section", () => {
 
   it("is hidden when the setting is off", async () => {
     mock.remote.setPlatterDevices([]);
-    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false, showCastDevices: false } }));
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false, showCastDevices: false, showDlnaDevices: false } }));
     render(<AppShell />);
     await within(picker()).findByRole("heading", { name: "This computer" });
     expect(within(picker()).queryByRole("region", { name: "Listen on" })).toBeNull();

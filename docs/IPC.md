@@ -2056,7 +2056,7 @@ Events:
 
 ## Listen on
 The user's other computers running Platter, Plex players Platter can move
-playback to (Plexamp, Plex apps, Sonos linked to Plex), Chromecasts and
+playback to (Plexamp, Plex apps, Sonos linked to Plex), DLNA renderers, Chromecasts and
 AirPlay speakers on the local network, and remote mode while one plays.
 
 | Command | Args |
@@ -2158,6 +2158,25 @@ work."); a speaker that only takes paired AirPlay 2 senders is an `auth`
 error saying so. Coming back puts the output and volume back. If the
 speaker drops off, the output falls back to this computer paused (the usual
 lost-device path) and `stoppedOn` names it.
+
+DLNA and UPnP renderers are found with an SSDP search for
+`urn:schemas-upnp-org:device:MediaRenderer:1` each time the list is
+refreshed. Only answers whose description URL is plain http on the address
+that answered are read, and only control URLs on that same host are used.
+Their ids are `dlna:<UDN>`, `via` is `dlna` and `product` is the model.
+A move asks `GetProtocolInfo` which formats the renderer takes and hands it
+one song at a time with `SetAVTransportURI` (with DIDL-Lite title, artist,
+album and cover), then `Play` and `Seek` to the position. The URL is the
+original file on the server when the renderer takes its format (FLAC, MP3,
+AAC, Ogg, WAV), else the server's MP3 transcode; a renderer that refuses the
+original (UPnP error) gets the transcode. If it refuses that too, the move
+fails with "Can't play on <device>: doesn't play this song's format." and
+playback stays here. Platter keeps the queue: when a song plays to its end
+the next one is handed over (repeat one and all are followed; shuffle can't
+change there). Pause, seek and stop are AVTransport calls; volume is
+RenderingControl `SetVolume`. A renderer that stops answering ends the
+session like a Plex player ("Couldn't reach <device>"); one that's stopped
+midway, or starts playing something else, ends it with `stoppedOn`.
 
 AirPlay receivers that belong to a computer are never listed: a Mac model in
 the `am` TXT key, no model with video and screen mirroring in `ft`, or a
@@ -2380,6 +2399,7 @@ The rest of the fields, with their defaults:
 | `moveStopsOldDevice` | bool, true | Moving playback to a player pauses it here, and coming back stops the player. Off leaves both playing. |
 | `actAsPlexPlayer` | bool, false | Platter answers as a Plex player so other Plex apps can play here. Opens a local port. This device only. |
 | `showCastDevices` | bool, true | List Chromecasts, Cast groups and AirPlay speakers under Listen on. Off stops mDNS browsing. |
+| `showDlnaDevices` | bool, true | List DLNA / UPnP renderers under Listen on (`via: "dlna"`). Off stops SSDP searches. |
 | `crossfade` | `"smart"`, `"fixed"`, `"off"`, `"smart"` | How one song moves into the next. See Sound below. |
 | `crossfadeSeconds` | 1 to 12, 6 | Length of a fixed crossfade. |
 | `crossfadeSkipAlbums` | bool, true | Songs of one album played in album order never crossfade. |

@@ -796,6 +796,7 @@ pub fn run() {
                 passwords: Arc::new(plex::keychain::KeyringStore::new()),
                 tls: remote::cast::conn::tls_config()?,
             });
+            remote.set_dlna(Arc::new(remote::dlna::Ssdp::new(audio::http::http_client())));
             app.manage(remote);
 
             // Share links, and platter:// links opened from elsewhere.

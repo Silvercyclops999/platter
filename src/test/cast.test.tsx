@@ -167,4 +167,33 @@ describe("settings", () => {
     expect(await screen.findByText("Show Chromecast and AirPlay devices")).toBeInTheDocument();
     expect(DEFAULT_SETTINGS.showCastDevices).toBe(true);
   });
+
+  it("has the DLNA row, on by default", async () => {
+    render(<SettingsPage />);
+    expect(await screen.findByRole("switch", { name: "Show DLNA and UPnP devices" })).toBeChecked();
+    expect(DEFAULT_SETTINGS.showDlnaDevices).toBe(true);
+  });
+});
+
+describe("DLNA receivers", () => {
+  it("list under Listen on with their model, and hide with their own setting", async () => {
+    render(<AppShell />);
+    const section = await findListenOn();
+    const row = await within(section).findByRole("button", { name: "Play on Hall Receiver" });
+    expect(row).toHaveTextContent("AV-100");
+    await mock.settingsSet({ showDlnaDevices: false });
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showAirplayLocked: true, showDlnaDevices: false } }));
+    await waitFor(() => expect(within(section).queryByRole("button", { name: "Play on Hall Receiver" })).toBeNull());
+    // Chromecasts stay.
+    expect(within(section).getByRole("button", { name: "Play on Den TV" })).toBeInTheDocument();
+    await mock.settingsSet({ showDlnaDevices: true });
+  });
+
+  it("playing there shows it as the current device", async () => {
+    await act(() => mock.playResume());
+    render(<AppShell />);
+    fireEvent.click(await within(await findListenOn()).findByRole("button", { name: "Play on Hall Receiver" }));
+    await screen.findByRole("button", { name: /Playing on Hall Receiver/ });
+    expect(within(picker()).getByRole("group", { name: "Listening on" })).toHaveTextContent("Hall Receiver");
+  });
 });

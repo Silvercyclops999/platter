@@ -63,8 +63,8 @@ describe("Platter computers under Listen on", () => {
   });
 
   it("still show with Plex players and Cast devices turned off", async () => {
-    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false, showCastDevices: false } }));
-    await mock.settingsSet({ showPlexPlayers: false, showCastDevices: false });
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false, showCastDevices: false, showDlnaDevices: false } }));
+    await mock.settingsSet({ showPlexPlayers: false, showCastDevices: false, showDlnaDevices: false });
     render(<AppShell />);
     const section = await findListenOn();
     expect(await within(section).findByRole("button", { name: "Play on Studio MacBook" })).toBeInTheDocument();

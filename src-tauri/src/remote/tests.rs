@@ -1250,6 +1250,73 @@ mod lan_devices {
         assert!(l.r.remote.state().session.is_none());
     }
 
+    async fn renderer(l: &Lan) -> crate::remote::dlna::fake::FakeRenderer {
+        let fake = crate::remote::dlna::fake::FakeRenderer::start().await;
+        l.r.remote.set_dlna(Arc::new(crate::remote::dlna::Ssdp::fixed(reqwest::Client::new(), vec![fake.location()])));
+        fake
+    }
+
+    #[tokio::test]
+    async fn dlna_renderers_list_next_to_cast_and_hide_with_their_setting() {
+        let l = lan(vec![at(CAST_SERVICE, "g", 9, &[("id", "g1"), ("fn", "Everywhere"), ("md", "Google Cast Group")])]).await;
+        let _fake = renderer(&l).await;
+        let list = l.r.remote.players().await;
+        let ids: Vec<_> = list.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["amp", "cast:g1", "dlna:1234-abcd"]);
+        assert_eq!((list[2].name.as_str(), list[2].product.as_str(), list[2].via), ("Den Receiver", "AV-100", PlayerVia::Dlna));
+        l.r.switches.set_show_dlna(false);
+        let ids: Vec<_> = l.r.remote.players().await.into_iter().map(|p| p.id).collect();
+        assert_eq!(ids, ["amp", "cast:g1"]);
+    }
+
+    #[tokio::test]
+    async fn moving_to_a_renderer_streams_from_the_server_and_comes_back() {
+        let l = lan(vec![]).await;
+        let fake = renderer(&l).await;
+        l.r.remote.players().await;
+        let st = l.r.remote.move_to("dlna:1234-abcd").await.unwrap();
+        assert_eq!(st.session.unwrap().player_name, "Den Receiver");
+        {
+            let s = fake.state.lock();
+            // Song a has no known format: the server's MP3 transcode, with the transient token.
+            assert!(s.uri.contains("/music/:/transcode/universal/start.mp3"), "{}", s.uri.split('?').next().unwrap_or(""));
+            assert!(s.uri.contains("X-Plex-Token=transient-1"));
+            assert_eq!(s.seeks, ["0:01:01"]);
+        }
+        assert!(l.r.local.log().contains(&"pause".to_string()));
+        fake.at(62_000);
+        wait_for("playing", || l.r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+        l.r.remote.command(RemoteCommand::Volume { volume: 0.5 }).await.unwrap();
+        wait_for("volume", || fake.state.lock().volume == 50).await;
+        let st = l.r.remote.return_here().await.unwrap();
+        assert!(st.session.is_none());
+        assert_eq!(fake.actions().last().map(String::as_str), Some("Stop"));
+        assert!(l.r.local.log().iter().any(|e| e.starts_with("seek ")));
+    }
+
+    #[tokio::test]
+    async fn a_renderer_that_goes_away_is_reported() {
+        let l = lan(vec![]).await;
+        let fake = renderer(&l).await;
+        l.r.remote.players().await;
+        l.r.remote.move_to("dlna:1234-abcd").await.unwrap();
+        fake.vanish();
+        wait_for("gone", || l.r.remote.state().session.is_none()).await;
+        assert_eq!(l.r.events.toasts(), vec!["Couldn't reach Den Receiver".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_renderer_that_refuses_the_format_leaves_playback_here() {
+        let l = lan(vec![]).await;
+        let fake = renderer(&l).await;
+        fake.state.lock().refuse = vec!["audio/mpeg".into()];
+        l.r.remote.players().await;
+        let e = l.r.remote.move_to("dlna:1234-abcd").await.unwrap_err();
+        assert_eq!(e.to_string(), "invalid: Can't play on Den Receiver: doesn't play this song's format.");
+        assert!(!l.r.local.log().contains(&"pause".to_string()));
+        assert!(l.r.remote.state().session.is_none());
+    }
+
     #[tokio::test]
     async fn airplay_moves_the_sound_and_controls_flush_the_receiver() {
         let fake = FakeRaop::start(FakeOptions::default());

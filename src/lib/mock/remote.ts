@@ -33,7 +33,7 @@ export const NEEDS_PASSWORD = "This speaker needs its AirPlay password.";
 export const WRONG_PASSWORD = "That AirPlay password didn't work.";
 
 const plex = { via: "plex" as const, needsPassword: false, unsupported: null, unreachable: false };
-const lan = (via: "cast" | "airplay") => ({ via, needsPassword: false, unsupported: null, playing: null, online: true, unreachable: false });
+const lan = (via: "cast" | "airplay" | "dlna") => ({ via, needsPassword: false, unsupported: null, playing: null, online: true, unreachable: false });
 
 /** Other Platter computers signed in to the same account. */
 export function mockPlatterDevices(unreachable = false): RemotePlayer[] {
@@ -53,7 +53,7 @@ export function mockPlatterDevices(unreachable = false): RemotePlayer[] {
   ];
 }
 
-/** Cast devices and AirPlay receivers "on the network". */
+/** Cast devices, AirPlay receivers and a DLNA renderer "on the network". */
 export function mockLanDevices(): RemotePlayer[] {
   return [
     { id: "cast:den", name: "Den TV", product: "Chromecast", kind: "tv", ...lan("cast") },
@@ -67,6 +67,7 @@ export function mockLanDevices(): RemotePlayer[] {
       ...lan("airplay"),
       unsupported: "Needs AirPlay encryption Platter doesn't support",
     },
+    { id: "dlna:hall", name: "Hall Receiver", product: "AV-100", kind: "speaker", ...lan("dlna") },
   ];
 }
 
@@ -126,7 +127,8 @@ export class MockRemote {
       .map((p) => ({ ...p, needsPassword: p.needsPassword && !this.passwords.has(p.id) }))
       // Receivers that ask for a password are hidden unless the setting shows them.
       .filter((p) => s.showAirplayLocked || !p.needsPassword);
-    return [...this.platterList, ...(s.showPlexPlayers ? this.list : []), ...(s.showCastDevices ? lan : [])];
+    const shown = lan.filter((p) => (p.via === "dlna" ? s.showDlnaDevices : s.showCastDevices));
+    return [...this.platterList, ...(s.showPlexPlayers ? this.list : []), ...shown];
   }
 
   players(): RemotePlayer[] {

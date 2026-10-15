@@ -144,23 +144,24 @@ function FirewallNote({ name }: { name: string }) {
 }
 
 /** "Listen on": your other Platter computers, Plex players, Cast devices and
- * AirPlay speakers to move playback to, and this computer while remote. */
+ * AirPlay speakers and DLNA receivers to move playback to, and this computer while remote. */
 export function ListenOn() {
   // The server's own players, when it has any.
   const serverPlayers = useCap("remotePlayers");
   const showPlex = useSettings((s) => s.settings?.showPlexPlayers ?? true) && serverPlayers;
   const showCast = useSettings((s) => s.settings?.showCastDevices ?? true);
+  const showDlna = useSettings((s) => s.settings?.showDlnaDevices ?? true);
   const showLocked = useSettings((s) => s.settings?.showAirplayLocked ?? false);
   const players = useRemote((s) => s.players);
   const busy = useRemote((s) => s.busy);
   const session = usePlayer((s) => s.remote);
 
   // Platter computers are always looked for; the settings add the rest.
-  useEffect(() => watchPlayers(), [showPlex, showCast, showLocked]);
+  useEffect(() => watchPlayers(), [showPlex, showCast, showDlna, showLocked]);
 
   const others = (players ?? []).filter((p) => p.id !== session?.playerId);
   const platters = others.filter((p) => p.via === "platter");
-  const show = showPlex || showCast || platters.length > 0;
+  const show = showPlex || showCast || showDlna || platters.length > 0;
   if (!show && !session) return null;
   const unreachable = platters.find((p) => p.unreachable);
 
@@ -200,8 +201,8 @@ export function ListenOn() {
       {show && players === null && <Skeleton height={48} radius="card" style={{ marginTop: 4 }} />}
       {show && players !== null && others.length === 0 && (
         <p className="output-empty">
-          {showCast
-            ? "No devices found. Open Platter on your other computers, Plexamp or another Plex app, or turn on a Chromecast or AirPlay speaker on this network."
+          {showCast || showDlna
+            ? "No devices found. Open Platter on your other computers, Plexamp or another Plex app, or turn on a Chromecast, AirPlay speaker or DLNA receiver on this network."
             : "No devices found. Open Platter on your other computers, or Plexamp or another Plex app on a device signed in to your account."}
         </p>
       )}

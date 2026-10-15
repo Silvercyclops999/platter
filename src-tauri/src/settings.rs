@@ -595,6 +595,8 @@ pub struct Settings {
     pub show_physical_collection: bool,
     /// "Missing from the shelf": albums played most that aren't owned.
     pub shelf_missing_list: bool,
+    /// List DLNA / UPnP renderers under Listen on (SSDP searches only while on).
+    pub show_dlna_devices: bool,
     /// platter:// command links, scripts and the command line can control playback (through the local control API).
     pub allow_automation: bool,
     /// The language lyrics are translated into.
@@ -820,6 +822,7 @@ impl Default for Settings {
             dismissed_artists: Vec::new(),
             show_physical_collection: true,
             shelf_missing_list: false,
+            show_dlna_devices: true,
             allow_automation: false,
             translate_to: "en".into(),
             translation_service: String::new(),
@@ -940,6 +943,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "dismissedArtists",
     "showPhysicalCollection",
     "shelfMissingList",
+    "showDlnaDevices",
     "translateTo",
     "showPronunciation",
     "pinsInLibrary",
@@ -1211,6 +1215,7 @@ pub struct SettingsPatch {
     pub dismissed_artists: Option<Vec<crate::discover::Dismissed>>,
     pub show_physical_collection: Option<bool>,
     pub shelf_missing_list: Option<bool>,
+    pub show_dlna_devices: Option<bool>,
     pub allow_automation: Option<bool>,
     pub translate_to: Option<String>,
     pub translation_service: Option<String>,
@@ -1469,6 +1474,7 @@ impl Settings {
         set(&mut self.catalogue_search, p.catalogue_search);
         set(&mut self.fans_also_like_catalogue, p.fans_also_like_catalogue);
         set(&mut self.home_new_to_you, p.home_new_to_you);
+        set(&mut self.show_dlna_devices, p.show_dlna_devices);
         set(&mut self.allow_automation, p.allow_automation);
         if let Some(l) = &p.translate_to { self.translate_to = crate::lyrics::translate::language(l).ok_or_else(|| AppError::Invalid("Pick a language to translate into.".into()))?; }
         if let Some(u) = &p.translation_service { self.translation_service = if u.trim().is_empty() { String::new() } else { crate::lyrics::translate::service_url(u).ok_or_else(|| AppError::Invalid("The translation service is a web address like https://translate.example.com.".into()))? }; }
@@ -1903,6 +1909,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     }
     live.remote.set(s.show_plex_players && on, s.move_stops_old_device, s.act_as_plex_player && on);
     live.remote.set_show_cast(s.show_cast_devices && on);
+    live.remote.set_show_dlna(s.show_dlna_devices && on);
     live.remote.set_peer(s.show_to_my_devices && on, &s.computer_name, s.show_airplay_locked);
     let cap = s.art_cache_bytes();
     let old = live.art_cap.swap(cap, Ordering::Relaxed);
@@ -3353,5 +3360,19 @@ mod tests {
         publish(&s, &live, &db);
         let c = live.deck.get();
         assert!(c.automation && !c.enabled && c.listening(), "the port opens for automation alone");
+    }
+
+    #[test]
+    fn dlna_devices_show_by_default_and_follow_the_setting() {
+        let mut s = Settings::default();
+        assert!(s.show_dlna_devices);
+        assert!(SYNCED_SETTINGS.contains(&"showDlnaDevices"));
+        let live = Live::default();
+        let (db, _d) = db();
+        publish(&s, &live, &db);
+        assert!(live.remote.show_dlna());
+        s.apply(&serde_json::from_str(r#"{"showDlnaDevices":false}"#).unwrap()).unwrap();
+        publish(&s, &live, &db);
+        assert!(!live.remote.show_dlna(), "off stops the search");
     }
 }

@@ -58,6 +58,12 @@ and your own Plex server.
   Chromecast, it gets the songs from your Plex server with a short-lived
   token your server hands out for this. When you play on an AirPlay speaker,
   the app sends it the audio.
+- DLNA and UPnP receivers on your own network. While "Show DLNA and UPnP
+  devices" is on, the app asks for them with an SSDP search on the local
+  network (nothing leaves it) and reads each one's description. When you
+  play on one, it gets the songs from your Plex server with the same kind of
+  short-lived token, along with each song's title, artist, album and cover
+  link so it can show them.
 - Your other computers running Platter. While "Show this computer to my
   other devices" is on (it is by default), the app announces itself on your
   local network with multicast DNS. The announcement holds an id for this

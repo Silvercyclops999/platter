@@ -35,6 +35,8 @@ pub enum PlayerVia {
     AirPlay,
     /// Another Platter device signed in to the same Plex account.
     Platter,
+    /// A DLNA / UPnP media renderer on this network.
+    Dlna,
 }
 
 /// One Plex player in the device picker.

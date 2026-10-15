@@ -44,8 +44,9 @@ pub fn token_from(body: &str) -> Option<Token> {
     Token::new(&body[at..end]).ok()
 }
 
-/// Codecs Cast devices play from the original file.
-fn cast_type(t: &Track) -> Option<&'static str> {
+/// Codecs Cast devices play from the original file (also what a DLNA
+/// renderer is asked about).
+pub(crate) fn cast_type(t: &Track) -> Option<&'static str> {
     let codec = t.codec.as_deref().unwrap_or("").to_ascii_lowercase();
     let container = t.container.as_deref().unwrap_or("").to_ascii_lowercase();
     match (codec.as_str(), container.as_str()) {
@@ -60,7 +61,7 @@ fn cast_type(t: &Track) -> Option<&'static str> {
     }
 }
 
-fn with_token(mut u: Url, token: &Token) -> String {
+pub(crate) fn with_token(mut u: Url, token: &Token) -> String {
     u.query_pairs_mut().append_pair("X-Plex-Token", token.expose());
     u.to_string()
 }
@@ -72,20 +73,7 @@ fn direct(server: &ServerCtx, token: &Token, client_id: &str, t: &Track) -> Opti
     let (url, content_type) = match cast_type(t) {
         Some(ct) if part.starts_with('/') => (with_token(server.url(part).ok()?, token), ct),
         // Anything else goes through the server's transcoder as MP3.
-        _ => {
-            let mut u = server.url("/music/:/transcode/universal/start.mp3").ok()?;
-            u.query_pairs_mut()
-                .append_pair("path", &format!("/library/metadata/{key}"))
-                .append_pair("mediaIndex", "0")
-                .append_pair("partIndex", "0")
-                .append_pair("protocol", "http")
-                .append_pair("directPlay", "0")
-                .append_pair("directStream", "0")
-                .append_pair("musicBitrate", "320")
-                .append_pair("session", &uuid::Uuid::new_v4().to_string())
-                .append_pair("X-Plex-Client-Identifier", client_id);
-            (with_token(u, token), "audio/mpeg")
-        }
+        _ => (transcode_mp3(server, token, client_id, key)?, "audio/mpeg"),
     };
     let image = t
         .thumb
@@ -106,9 +94,26 @@ fn direct(server: &ServerCtx, token: &Token, client_id: &str, t: &Track) -> Opti
     })
 }
 
+/// The server's transcoder turning a song into 320 kbps MP3, as a URL
+/// carrying `token`.
+pub(crate) fn transcode_mp3(server: &ServerCtx, token: &Token, client_id: &str, key: &str) -> Option<String> {
+    let mut u = server.url("/music/:/transcode/universal/start.mp3").ok()?;
+    u.query_pairs_mut()
+        .append_pair("path", &format!("/library/metadata/{key}"))
+        .append_pair("mediaIndex", "0")
+        .append_pair("partIndex", "0")
+        .append_pair("protocol", "http")
+        .append_pair("directPlay", "0")
+        .append_pair("directStream", "0")
+        .append_pair("musicBitrate", "320")
+        .append_pair("session", &uuid::Uuid::new_v4().to_string())
+        .append_pair("X-Plex-Client-Identifier", client_id);
+    Some(with_token(u, token))
+}
+
 /// Whether a song is on `server`: songs from another of the account's
 /// servers can't be played through this one.
-fn on_server(server: &ServerCtx, t: &Track) -> bool {
+pub(crate) fn on_server(server: &ServerCtx, t: &Track) -> bool {
     crate::sid::tag_of(&t.id).is_none_or(|tag| tag == crate::sid::tag(&server.machine_id))
 }
 

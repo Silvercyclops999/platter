@@ -69,6 +69,7 @@ pub trait MdnsSource: Send + Sync {
 pub enum LanDevice {
     Cast(CastDevice),
     AirPlay(AirPlayDevice),
+    Dlna(Box<super::dlna::DlnaDevice>),
 }
 
 /// Picker entries for the devices in `answers`. Computers' own AirPlay
