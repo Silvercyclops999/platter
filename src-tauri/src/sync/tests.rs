@@ -643,7 +643,10 @@ fn cloud_folders_are_found_on_windows_and_macos() {
         "/Users/a/Library/CloudStorage/GoogleDrive-a@example.com/My Drive",
         "/Users/a/Dropbox",
     ];
-    let is_dir = |p: &Path| dirs.iter().any(|d| Path::new(d) == p);
+    // Compared with forward slashes so the Windows paths also match when the
+    // tests run on Linux or macOS, where a backslash is not a separator.
+    let slash = |s: &str| s.replace('\\', "/");
+    let is_dir = |p: &Path| dirs.iter().any(|d| slash(d) == slash(&p.to_string_lossy()));
     let env = |k: &str| match k {
         "OneDrive" => Some(r"C:\Users\a\OneDrive".to_string()),
         "APPDATA" => Some(r"C:\Users\a\AppData\Roaming".to_string()),
