@@ -10,6 +10,9 @@
 //!
 //! The Plex client adds the tag to everything it reads and takes it off
 //! everything it sends, so the rest of the app treats ids as opaque strings.
+//! Clients for servers whose ids aren't rating keys use [`qualify_any`], and
+//! their tags come from [`tag_for`] with a kind prefix; a Plex server's tag
+//! is made exactly as before.
 //!
 //! Ids saved before servers were named (a plain rating key, all digits) still
 //! work: [`resolve`] maps them to the server the library came from when the
@@ -80,6 +83,60 @@ pub fn qualify(tag: &str, id: &str) -> String {
         return id.to_string();
     }
     format!("{tag}:{id}")
+}
+
+/// Put `tag` on any id or image path from a server whose ids aren't Plex
+/// rating keys (long hex ids, short text ids). Empty values, values that
+/// already have a tag and outside image links stay as they are. Plex ids go
+/// through [`qualify`], which leaves app-made ids alone.
+pub fn qualify_any(tag: &str, id: &str) -> String {
+    if id.is_empty() || split(id).0.is_some() || id.starts_with(crate::artistinfo::art::EXT_PREFIX) {
+        return id.to_string();
+    }
+    format!("{tag}:{id}")
+}
+
+/// What a server's tag is made from. A Plex server's tag is a hash of its
+/// machine id alone, as it always was, so every saved id keeps its tag.
+/// Other kinds hash a kind prefix with their own server id, so the same
+/// text from two kinds of server never makes the same tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagInput<'a> {
+    /// The Plex machine identifier.
+    Plex(&'a str),
+    /// The Jellyfin server id (`/System/Info/Public` `Id`).
+    Jellyfin(&'a str),
+    /// The server's base URL; see [`normalize_base_url`].
+    Subsonic(&'a str),
+}
+
+/// The tag for a server of any kind.
+pub fn tag_for(input: TagInput<'_>) -> String {
+    match input {
+        TagInput::Plex(machine_id) => tag(machine_id),
+        TagInput::Jellyfin(server_id) => tag(&format!("jellyfin:{}", server_id.trim().to_ascii_lowercase())),
+        TagInput::Subsonic(url) => tag(&format!("subsonic:{}", normalize_base_url(url))),
+    }
+}
+
+/// A server base URL as one string per server: scheme and host in lower
+/// case, no trailing slash, no `/rest` API suffix, no query.
+pub fn normalize_base_url(url: &str) -> String {
+    let url = url.trim();
+    let url = url.split(['?', '#']).next().unwrap_or_default();
+    let (scheme, rest) = match url.split_once("://") {
+        Some((s, r)) => (s.to_ascii_lowercase(), r),
+        None => ("http".to_string(), url),
+    };
+    let (host, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let mut path = path.trim_end_matches('/');
+    if let Some(p) = path.strip_suffix("/rest") {
+        path = p;
+    }
+    format!("{scheme}://{}{}", host.to_ascii_lowercase(), path.trim_end_matches('/'))
 }
 
 /// [`qualify`] for an optional value.
@@ -340,6 +397,101 @@ mod tests {
         assert_eq!(storage_form("/ext/https://x/y.jpg"), "/ext/https://x/y.jpg");
         set_legacy(None);
         assert_eq!(storage_form("0a1b2c3d:9"), "0a1b2c3d:9");
+    }
+
+    #[test]
+    fn plex_tags_are_unchanged_by_kind_prefixes() {
+        // The Plex input is the machine id alone, as before.
+        assert_eq!(tag_for(TagInput::Plex("machine-a")), tag("machine-a"));
+        assert_eq!(tag_for(TagInput::Plex("machine-a")), crate::share::link::server_tag("machine-a"));
+        // Known values, so a change to the hash shows up here.
+        assert_eq!(tag(""), "811c9dc5");
+        assert_eq!(tag("m1"), tag_for(TagInput::Plex("m1")));
+        // Other kinds never share a Plex server's tag for the same text.
+        let raw = "4f6a0c";
+        let tags = [
+            tag_for(TagInput::Plex(raw)),
+            tag_for(TagInput::Jellyfin(raw)),
+            tag_for(TagInput::Subsonic(raw)),
+        ];
+        assert_ne!(tags[0], tags[1]);
+        assert_ne!(tags[0], tags[2]);
+        assert_ne!(tags[1], tags[2]);
+        for t in &tags {
+            assert!(is_tag(t));
+        }
+        // A Jellyfin server id in either case is one server.
+        assert_eq!(
+            tag_for(TagInput::Jellyfin("ABCDEF0123456789ABCDEF0123456789")),
+            tag_for(TagInput::Jellyfin("abcdef0123456789abcdef0123456789"))
+        );
+    }
+
+    #[test]
+    fn subsonic_urls_normalize_to_one_server() {
+        let one = normalize_base_url("http://music.example.org:4533");
+        for same in [
+            "http://music.example.org:4533/",
+            "HTTP://Music.Example.org:4533",
+            "http://music.example.org:4533/rest",
+            "http://music.example.org:4533/rest/",
+            " http://music.example.org:4533/?u=x ",
+        ] {
+            assert_eq!(normalize_base_url(same), one, "{same}");
+            assert_eq!(tag_for(TagInput::Subsonic(same)), tag_for(TagInput::Subsonic(&one)));
+        }
+        assert_eq!(normalize_base_url("https://h.example/navidrome/"), "https://h.example/navidrome");
+        assert_eq!(normalize_base_url("h.example"), "http://h.example");
+        assert_ne!(normalize_base_url("https://h.example"), normalize_base_url("http://h.example"));
+    }
+
+    #[test]
+    fn qualify_any_tags_every_server_id_shape() {
+        let t = tag_for(TagInput::Jellyfin("srv"));
+        for id in [
+            "6f1b2c3d4e5f60718293a4b5c6d7e8f9", // Jellyfin GUID
+            "al-1a2b3c",                        // Navidrome-style
+            "tr_0042",
+            "3bQx9ZkP2mYw7LrT8nVc1d", // base62
+            "123",                    // digits from a non-Plex server
+            "/Items/abc/Images/Primary?tag=x",
+            "/cover/al-1",
+        ] {
+            let q = qualify_any(&t, id);
+            assert_eq!(q, format!("{t}:{id}"));
+            assert_eq!(split(&q), (Some(t.as_str()), id));
+            assert_eq!(owner(&q).as_deref(), Some(t.as_str()));
+            assert_eq!(qualify_any(&t, &q), q, "never twice");
+            assert_eq!(from_file_part(&file_part(&q)), q);
+        }
+        for left in ["", "/ext/https://img.example/a.jpg"] {
+            assert_eq!(qualify_any(&t, left), left);
+        }
+        // Plex's qualify still leaves non-Plex shapes alone (unchanged).
+        assert_eq!(qualify(&t, "6f1b2c3d4e5f60718293a4b5c6d7e8f9"), "6f1b2c3d4e5f60718293a4b5c6d7e8f9");
+        assert_eq!(qualify(&t, "local:abc"), "local:abc");
+    }
+
+    #[test]
+    fn legacy_resolve_stays_plex_only() {
+        set_legacy(Some("0a1b2c3d".into()));
+        // Plain rating keys and paths still go to the legacy Plex server...
+        assert_eq!(resolve("123"), "0a1b2c3d:123");
+        assert_eq!(resolve_key("album:123"), "album:0a1b2c3d:123");
+        // ...but ids that never were Plex rating keys are not claimed by it.
+        let jf = "6f1b2c3d4e5f60718293a4b5c6d7e8f9";
+        assert_eq!(resolve(jf), jf);
+        assert_eq!(resolve_key(&format!("album:{jf}")), format!("album:{jf}"));
+        assert_eq!(owner(jf), None);
+        // Tagged ids from another kind of server are left as they are.
+        let t = tag_for(TagInput::Subsonic("http://h.example"));
+        let id = qualify_any(&t, "al-1");
+        assert_eq!(resolve(&id), id);
+        assert_eq!(legacy_variant(&id), None);
+        // Storage names: only the legacy Plex server drops its tag.
+        assert_eq!(storage_form(&id), id);
+        assert_eq!(storage_form("0a1b2c3d:/library/metadata/4/thumb/1"), "/library/metadata/4/thumb/1");
+        set_legacy(None);
     }
 
     #[test]
