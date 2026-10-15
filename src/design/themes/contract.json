@@ -1,6 +1,21 @@
 {
-  "themes": ["dark", "light", "system", "midnight", "forest", "sand"],
-  "accents": ["ivory", "sage", "sky", "lilac", "amber", "rose", "teal"],
+  "themes": [
+    "dark",
+    "light",
+    "system",
+    "midnight",
+    "forest",
+    "sand"
+  ],
+  "accents": [
+    "ivory",
+    "sage",
+    "sky",
+    "lilac",
+    "amber",
+    "rose",
+    "teal"
+  ],
   "tokens": {
     "color-bg-base": "colour",
     "color-bg-raised": "colour",
@@ -37,5 +52,96 @@
     "radius-row": "length",
     "radius-card": "length",
     "radius-pill": "length"
+  },
+  "look": {
+    "version": 1,
+    "fonts": [
+      "inter",
+      "atkinson",
+      "manrope",
+      "fraunces"
+    ],
+    "density": [
+      "compact",
+      "comfortable",
+      "spacious"
+    ],
+    "shadow": [
+      "flat",
+      "subtle",
+      "soft"
+    ],
+    "blur": [
+      "off",
+      "low",
+      "medium"
+    ],
+    "borderMax": 3,
+    "layout": {
+      "sidebarSide": [
+        "left",
+        "right"
+      ],
+      "nowPlaying": [
+        "right",
+        "left",
+        "off"
+      ],
+      "playerStyle": [
+        "classic",
+        "compact",
+        "largeArt"
+      ],
+      "headerStyle": [
+        "bigArt",
+        "banner",
+        "minimal"
+      ],
+      "coverShape": [
+        "square",
+        "rounded",
+        "circle"
+      ],
+      "motion": [
+        "full",
+        "reduced",
+        "off"
+      ],
+      "quickAccess": [
+        4,
+        6,
+        8
+      ],
+      "sidebarSections": [
+        "servers",
+        "filters",
+        "tools",
+        "status"
+      ],
+      "playerButtons": [
+        "like",
+        "lyrics",
+        "queue",
+        "devices",
+        "volume",
+        "miniplayer",
+        "fullWindow"
+      ],
+      "homeShelves": [
+        "madeForYou",
+        "recentlyPlayed",
+        "mixMoods",
+        "mixGenres",
+        "jumpBackIn",
+        "playlists",
+        "recentlyAdded",
+        "topArtists"
+      ],
+      "trackColumns": [
+        "album",
+        "info",
+        "duration"
+      ]
+    }
   }
 }

@@ -222,6 +222,12 @@ pub struct Settings {
     pub accent: String,
     /// The theme file in use, held whole so it travels in the sync file.
     pub theme_file: Option<crate::themes::ThemeFile>,
+    /// Layout options (Classic by default).
+    pub layout: crate::themes::Layout,
+    /// Appearance shows the "Make your own" look builder.
+    pub show_look_builder: bool,
+    /// The "Pick a look" step was shown or skipped on this computer.
+    pub look_step_done: bool,
     /// Chosen output device id; None follows the system default. Changed
     /// with `output_select`, not `settings_set`.
     pub output_device: Option<String>,
@@ -586,6 +592,9 @@ impl Default for Settings {
             theme: ThemeMode::Dark,
             accent: "ivory".into(),
             theme_file: None,
+            layout: crate::themes::Layout::default(),
+            show_look_builder: true,
+            look_step_done: false,
             output_device: None,
             home_shortcuts: true,
             home_colour_wash: true,
@@ -748,6 +757,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "theme",
     "accent",
     "themeFile",
+    "layout",
+    "showLookBuilder",
     "homeShortcuts",
     "homeColourWash",
     "searchSuggestions",
@@ -833,6 +844,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
     "privateSession",
+    "lookStepDone",
     "volume",
     "precacheCount",
     "artCacheMb",
@@ -923,6 +935,9 @@ pub struct SettingsPatch {
     /// Null clears it.
     #[serde(default, deserialize_with = "some_or_null")]
     pub theme_file: Option<Option<crate::themes::ThemeFile>>,
+    pub layout: Option<crate::themes::Layout>,
+    pub show_look_builder: Option<bool>,
+    pub look_step_done: Option<bool>,
     pub home_shortcuts: Option<bool>,
     pub home_colour_wash: Option<bool>,
     pub search_suggestions: Option<bool>,
@@ -1138,6 +1153,14 @@ impl Settings {
             }
             self.theme_file = f.clone();
         }
+        if let Some(l) = &p.layout {
+            if let Some(why) = crate::themes::layout_problem(l) {
+                return Err(AppError::Invalid(why));
+            }
+            self.layout = l.clone();
+        }
+        set(&mut self.show_look_builder, p.show_look_builder);
+        set(&mut self.look_step_done, p.look_step_done);
         set(&mut self.home_shortcuts, p.home_shortcuts);
         set(&mut self.home_colour_wash, p.home_colour_wash);
         set(&mut self.search_suggestions, p.search_suggestions);
@@ -1374,6 +1397,9 @@ impl Settings {
         self.accent = crate::themes::accent_value(&self.accent).unwrap_or_else(|| "ivory".into());
         if self.theme_file.as_ref().is_some_and(|t| crate::themes::check(t).is_err()) {
             self.theme_file = None;
+        }
+        if crate::themes::layout_problem(&self.layout).is_some() {
+            self.layout = crate::themes::Layout::default();
         }
         eqprofile::clamp(self);
     }
@@ -2874,6 +2900,33 @@ mod tests {
         s.clamp();
         assert_eq!(s.accent, "ivory");
         assert!(s.theme_file.is_none());
+    }
+
+    #[test]
+    fn layout_and_look_settings() {
+        let mut s = Settings::default();
+        assert_eq!(s.layout, crate::themes::Layout::default());
+        assert!(s.show_look_builder && !s.look_step_done);
+        assert!(SYNCED_SETTINGS.contains(&"layout") && SYNCED_SETTINGS.contains(&"showLookBuilder"));
+        assert!(DEVICE_SETTINGS.contains(&"lookStepDone"));
+        let p: SettingsPatch = serde_json::from_str(r#"{"layout":{"sidebarSide":"right","quickAccess":6},"showLookBuilder":false,"lookStepDone":true}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert_eq!((s.layout.sidebar_side.as_str(), s.layout.quick_access), ("right", 6));
+        assert!(!s.show_look_builder && s.look_step_done);
+        // A layout with an unknown choice is refused and the old one stays.
+        let p: SettingsPatch = serde_json::from_str(r#"{"layout":{"playerButtons":["rocket"]}}"#).unwrap();
+        assert!(matches!(s.apply(&p), Err(AppError::Invalid(m)) if m.contains("playerButtons")));
+        assert_eq!(s.layout.sidebar_side, "right");
+        // A look held whole in themeFile is checked too.
+        let p: SettingsPatch = serde_json::from_str(
+            r#"{"themeFile":{"file":"d.platter-look","name":"D","base":"dark","tokens":{},"fonts":{"text":"comic"}}}"#,
+        )
+        .unwrap();
+        assert!(s.apply(&p).is_err());
+        // A hand-edited layout falls back to Classic.
+        let mut s: Settings = serde_json::from_str(r#"{"layout":{"headerStyle":"huge"}}"#).unwrap();
+        s.clamp();
+        assert_eq!(s.layout, crate::themes::Layout::default());
     }
 
     #[test]

@@ -1,0 +1,30 @@
+[
+  {
+    "case": "good look",
+    "text": "{\"version\":1,\"name\":\"Dusk\",\"author\":\"A listener\",\"base\":\"dark\",\"tokens\":{\"color-accent\":\"#AABBCC\",\"radius-card\":\"14px\"},\"style\":{\"density\":\"compact\",\"shadow\":\"soft\",\"blur\":\"low\",\"border\":1},\"fonts\":{\"text\":\"manrope\",\"headings\":\"fraunces\"},\"layout\":{\"sidebarSide\":\"right\",\"nowPlaying\":\"left\",\"playerStyle\":\"largeArt\",\"playerButtons\":[\"queue\",\"lyrics\",\"volume\"],\"homeShelves\":[\"playlists\",\"recentlyPlayed\"],\"homeGreeting\":true,\"quickAccess\":4,\"headerStyle\":\"banner\",\"trackColumns\":[\"duration\",\"album\"],\"coverShape\":\"circle\",\"spinRecord\":true,\"motion\":\"reduced\",\"sidebarSections\":[\"tools\",\"filters\"],\"sidebarCollapsed\":true}}",
+    "ok": true,
+    "notes": 0
+  },
+  { "case": "only a name and base", "text": "{\"version\":1,\"name\":\"Bare\",\"base\":\"light\"}", "ok": true, "notes": 0 },
+  {
+    "case": "unknown keys are left out with a note",
+    "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"css\":\"body{}\",\"tokens\":{\"font-family\":\"Comic Sans\"},\"layout\":{\"rocket\":true},\"style\":{\"glow\":9},\"fonts\":{\"mono\":\"x\"}}",
+    "ok": true,
+    "notes": 5
+  },
+  { "case": "newer format", "text": "{\"version\":2,\"name\":\"X\",\"base\":\"dark\"}", "ok": false, "reason": "newer Platter" },
+  { "case": "version zero", "text": "{\"version\":0,\"name\":\"X\",\"base\":\"dark\"}", "ok": false, "reason": "version must be" },
+  { "case": "version as text", "text": "{\"version\":\"1\",\"name\":\"X\",\"base\":\"dark\"}", "ok": false, "reason": "version must be" },
+  { "case": "CSS in a token", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-accent\":\"red; } body { display: none\"}}", "ok": false, "reason": "has CSS in it" },
+  { "case": "url() in a token", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-bg-base\":\"url(https://example.com/a.png)\"}}", "ok": false, "reason": "url()" },
+  { "case": "script in a token", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"tokens\":{\"color-accent\":\"<script>alert(1)</script>\"}}", "ok": false, "reason": "has CSS in it" },
+  { "case": "markup in the author", "text": "{\"version\":1,\"name\":\"X\",\"author\":\"<img src=x>\",\"base\":\"dark\"}", "ok": false, "reason": "author can be" },
+  { "case": "font not bundled", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"fonts\":{\"text\":\"https://fonts.example.com/a.woff2\"}}", "ok": false, "reason": "fonts.text" },
+  { "case": "bad layout choice", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"layout\":{\"sidebarSide\":\"top\"}}", "ok": false, "reason": "layout.sidebarSide" },
+  { "case": "unknown player button", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"layout\":{\"playerButtons\":[\"queue\",\"<b>\"]}}", "ok": false, "reason": "layout.playerButtons" },
+  { "case": "button twice", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"layout\":{\"playerButtons\":[\"queue\",\"queue\"]}}", "ok": false, "reason": "twice" },
+  { "case": "grid size", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"layout\":{\"quickAccess\":12}}", "ok": false, "reason": "4, 6 or 8" },
+  { "case": "border too thick", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"style\":{\"border\":9}}", "ok": false, "reason": "style.border" },
+  { "case": "layout not an object", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"layout\":\"wide\"}", "ok": false, "reason": "must be an object" },
+  { "case": "flag as text", "text": "{\"version\":1,\"name\":\"X\",\"base\":\"dark\",\"layout\":{\"spinRecord\":\"yes\"}}", "ok": false, "reason": "true or false" }
+]
