@@ -111,7 +111,8 @@ session, and Platter stops doing that. Songs you finish still go into Plex's
 play history unless you're in a private session or "Report plays to Plex" is
 off, and other Plex apps the owner uses can see that history.
 
-The artists you follow are kept in the app's data folder on this computer.
+The artists you follow are kept in the app's data folder on this computer,
+and in the sync file if you turn that on (see below).
 
 A listening session connects Platter computers on your local network
 directly. The invite link holds the session's id, a random secret, the
@@ -127,6 +128,35 @@ Some optional features planned for later will talk to other services, but
 only once you turn them on. Examples are Last.fm or ListenBrainz
 scrobbling, Lidarr and Tautulli. Each one is off until you set it up, and
 this file will list exactly what each one sends.
+
+## The sync file
+
+Sync with a folder is off until you turn it on in Settings. When it's on,
+Platter keeps one small file, `Platter/sync-<tag>.json`, in a folder you pick,
+usually one your cloud app (OneDrive, iCloud Drive, Google Drive, Dropbox)
+already keeps in step. Platter never uploads it anywhere itself; your cloud
+app does that like any other file. The tag is a hash of your Plex account id,
+not the id.
+
+The file holds the settings that aren't marked This device only, your pins,
+library folders and which playlists are in them, followed artists, hidden and
+snoozed items, bookmarks, lyrics you wrote in the editor, and for each of your
+devices its name and when it last wrote the file. You choose which of these go
+in under What to sync. It never holds your Plex token, API keys, the
+ListenBrainz token, the Imgur client ID, AirPlay passwords or any other
+secret: the app refuses to put anything shaped like one in, and a test checks
+the written file.
+
+To find a folder to suggest, Platter looks for the usual OneDrive, iCloud
+Drive, Google Drive and Dropbox folders on this computer. It only looks; it
+writes nothing until you pick one.
+
+Copying keys between your computers (Settings, Sync) never uses the file.
+The two computers talk directly on your local network, both signed in to the
+same Plex account. The 6-digit code shown on one is typed on the other; it
+turns into a one-time key, and the keys you tick are sent sealed with it and
+go straight into the receiving computer's keychain. The code and the keys are
+never logged.
 
 ## What stays on your machine
 

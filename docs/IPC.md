@@ -621,7 +621,9 @@ newest first; the viewer's own account is left out. Only the server owner's
 token may read these, so anyone else gets `notAdmin`.
 
 Follows are artist ids (a library artist, or a credited artist's `credit:`
-id), kept in this computer's database for now. What's New lists albums added
+id), kept in the sync store (the `follows` namespace, see Sync, folders and
+keys), so they travel in the sync file when it's on. A list kept by an older
+build moves over once at startup. What's New lists albums added
 in the last 90 days by followed artists (credited artists bring the albums of
 songs that credit them), or everything recently added while nothing is
 followed, at most 60, newest first. `new` means added since `whats_new_seen`
@@ -651,6 +653,120 @@ goes to the end of the host's queue. A host that doesn't answer for 10 s is
 `HostState = { sessionId, hostName, trackId?, positionMs, durationMs, playing, upNext: string[] (50 at most), guests: { id, name }[], guestsCanAdd }`.
 A session that has ended answers 410; a request not signed with the
 session's key answers 401.
+
+## Sync, folders and keys
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `sync_file_status` | – | `SyncFileStatus` |
+| `sync_file_now` | – | `SyncFileStatus` after a pass |
+| `sync_file_folders` | – | `CloudFolder[]`, cloud folders found on this computer |
+| `sync_file_use_folder` | `{ path }` | `SyncFileStatus` (sets `syncFolder`, turns `syncEnabled` on) |
+| `sync_file_choose_folder` | – | `SyncFileStatus`, or null when the picker was cancelled |
+| `sync_file_replace` | – | `SyncFileStatus` (an unreadable file is moved aside, a new one written) |
+| `pins_get` | – | `Pin[]`, newest first, 12 at most |
+| `pins_toggle` | `{ pin: Pin }` | `Pin[]` |
+| `pins_import` | `{ pins: Pin[] }` | `Pin[]` (taken only into a store that never had pins) |
+| `folders_get` | – | `Folders` |
+| `folder_create` | `{ name: string \| null, parent: string \| null }` | `Folder` ("New Folder" without a name) |
+| `folder_rename` | `{ id, name }` | – |
+| `folder_delete` | `{ id }` | – |
+| `folder_move` | `{ id, parent: string \| null }` | – |
+| `playlist_folder_set` | `{ playlistId, folderId: string \| null }` | – |
+| `keys_available` | – | `KeyKind[]`, the keys this computer has |
+| `keys_receive_start` | – | `ReceiveState` with a new code |
+| `keys_receive_state` | – | `ReceiveState` |
+| `keys_receive_cancel` | – | – |
+| `keys_send` | `{ code, kinds: KeyKind[] }` | `{ device, sent: KeyKind[] }` |
+
+`SyncFileStatus = { state: "off"|"signedOut"|"ok"|"folderMissing"|"unreadable"|"newer"|"error", folder?, file?, lastSyncedAt? (ms), devices: { name, lastSeen (ms), thisDevice }[], mergedCopies, message? }`
+
+`CloudFolder = { provider: "OneDrive"|"iCloud Drive"|"Google Drive"|"Dropbox", path }`
+
+`Pin = { kind: "album"|"artist"|"playlist", id, title, subtitle, thumb?, pinnedAt? (ms) }`
+
+`Folders = { folders: { id, name, parent?, createdAt (ms) }[] (newest first), items: { [playlistId]: folderId } }`
+
+`KeyKind = "listenbrainz"|"lastfm"|"fanart"|"audiodb"|"imgur"|"catbox"`
+
+`ReceiveState = { phase: "idle"|"waiting"|"receiving"|"received"|"expired"|"locked", code?, qr?: { size, rows: string[] }, expiresAt? (ms), from?, received: KeyKind[] }`
+
+Events: `sync-file://status` → `SyncFileStatus` when it changes,
+`syncstore://changed` → `{ namespaces: string[], remote: bool }` after any
+change to the store (`remote` when it came from the sync file), and
+`keys://receive` → `ReceiveState`.
+
+### The sync store
+
+App-only state lives in the `sync_entries` table, one row per entry: a
+namespace, a key, a JSON value (none for a deletion), when it changed and on
+which device. The namespaces are `settings` (one entry per synced setting),
+`pins`, `folders`, `folderItems` (playlist id to folder id), `follows`,
+`hidden`, `bookmarks` and `lyrics` (lyrics written in the editor, by track
+id). Without a sync file this is simply where the state is kept.
+
+Features use the typed store in `src-tauri/src/sync/store.rs`:
+`store.put(&FOLLOWS, id, &value)`, `store.get`, `store.list`, `store.remove`,
+`store.write_many` for several changes at once, and `store.subscribe()` for
+changes. Values are refused when a field name looks like a secret (token,
+password, secret, API key, client ID), so keys can't end up in the file. The
+followed artists go through the social module's `FollowStore`
+(`sync::follows::SyncFollows`).
+
+### The sync file
+
+With `syncEnabled` and a folder, Platter keeps `Platter/sync-<tag>.json` in
+that folder, where the tag is the hash of the Plex account id that Platter
+devices announce with, so each Plex account has its own file. A pass reads
+the file and any conflicted copies a cloud app left beside it
+(`sync-<tag> (conflicted copy).json`, `sync-<tag>-PC.json` and the like),
+takes every entry that wins into the store, adds this device's entries that
+win, writes the file back when anything changed, and deletes the copies. The
+later change wins per entry; on the same millisecond the larger device id
+does. A deletion stays as a tombstone for 90 days. Entries of groups turned
+off in What to sync are neither sent nor taken, and other devices' entries
+for them stay in the file. The file also lists each device's name and when it
+last wrote.
+
+Writes go to a temp file beside the file, then a rename, so a cloud app never
+picks up half a file. A pass runs 2 s after the last change here, when the
+file's size or time changes (checked every 3 s), every 60 s and on
+`sync_file_now`. While the folder can't be reached the changes stay in the
+store and go out with the next pass that can write. A file that isn't a sync
+file Platter can read is left alone (`unreadable`) until `sync_file_replace`
+moves it aside as `sync-<tag>.broken-<ms>.json`; one written by a newer
+Platter (`newer`) is never overwritten. Folder detection only looks: it never
+creates anything until a folder is chosen.
+
+### Library folders
+
+Plex has no folders, so these are Platter's own. `folder_create` makes "New
+Folder" at once. Deleting a folder moves its playlists and folders up to
+where it was; playlists are never deleted with a folder. A folder can't move
+into itself or a folder inside it, and folders nest 8 deep at most. After a
+merge, a folder whose parent is gone shows at the top, a loop of parents is
+broken at the folder with the smallest id, and a playlist placed in a missing
+folder shows at the top.
+
+### Copying keys
+
+Keys never go through the sync file. `keys_receive_start` shows a 6-digit
+code (and a QR code of `platter://copy-keys/<code>`) for 5 minutes. On a
+computer signed in to the same Plex account, `keys_send` asks the user's
+other Platter devices on the control port which one is showing a code, runs
+a SPAKE2 exchange (Ed25519 group) over the code with it, checks that the
+receiver reached the same key, then sends the chosen keys sealed with
+ChaCha20-Poly1305 under a key made from the exchange, with both device ids
+bound in. The receiver stores each key through the feature that uses it, so
+it lands in the OS keychain. A wrong code fails the exchange and uses up one
+of 5 tries per code; after that the code stops working (`locked`). The
+control port requests are signed with the account key like the others.
+
+| Route on the control port | Body | Answer |
+| --- | --- | --- |
+| `GET /platter/v1/keys/waiting` | – | `{ waiting }` |
+| `POST /platter/v1/keys/hello` | `{ msg (hex), name }` | `{ msg (hex), confirm (hex) }`, 404 when no code is showing |
+| `POST /platter/v1/keys/deliver` | `{ nonce (hex), sealed (hex) }` | `{}` |
 
 ## Search
 | Command | Args | Returns |
@@ -1097,7 +1213,7 @@ The rest of the fields, with their defaults:
 | `dragAndDrop` | bool, true | Songs, albums and playlists can be dragged onto playlists, Liked Songs and the queue. Off stops those drags; reordering inside a playlist or the queue still works. |
 | `showToMyDevices` | bool, true | Announce this computer to the user's other Platter computers, open the control port and publish its addresses to plex.tv. Off withdraws the announcement and closes the port. Independent of `actAsPlexPlayer`. This device only. |
 | `computerName` | string, `""` | The name other devices see, up to 60 characters, trimmed. Empty uses the OS computer name. This device only. |
-| `showAirplayLocked` | bool, false | List AirPlay receivers that need a password or a pairing code. Computers' own receivers are never listed. |
+| `showAirplayLocked` | bool, false | List AirPlay receivers that need a password or a pairing code. Computers' own receivers are never listed. This device only. |
 | `downloadQuality` | `"original"`, `"320"`, `"192"` or `"128"`, `"original"` | Original keeps the file as it is; the others are MP3s from the server's transcoder. Applies to new downloads. This device only. |
 | `downloadLimitGb` | number, 20 | Downloads stop at this size, 1 to 4096. This device only. |
 | `downloadFolder` | string, `""` | Where downloads go; empty is the app data folder. Changed with `downloads_choose_folder`, not `settings_set`. This device only. |
@@ -1116,12 +1232,25 @@ The rest of the fields, with their defaults:
 | `showFriendActivity` | bool, true | The top bar's friend activity button and panel. |
 | `shareActivity` | bool, true | Send Plex now-playing timelines, so friends on the server see you live. Off (and in a private session) none go out; finished plays still reach Plex's history. |
 | `whatsNewAnnouncements` | bool, true | The bell's dot for unseen What's New items. |
-| `notifyNewReleases` | bool, false | A desktop notification when a followed artist gets new music in the library. |
+| `notifyNewReleases` | bool, false | A desktop notification when a followed artist gets new music in the library. This device only. |
 | `listenGuestsAdd` | bool, true | Guests in a listening session you host can add songs to your queue. |
-| `discordListenAlong` | bool, true | Discord shows a listening session you host and how many are in it. |
+| `discordListenAlong` | bool, true | Discord shows a listening session you host and how many are in it. This device only. |
+| `syncEnabled` | bool, false | Keep app-only state in a sync file in `syncFolder`. On with no folder counts as off. This device only. See Sync, folders and keys. |
+| `syncFolder` | string, `""` | The folder the sync file goes in. Changed with `sync_file_use_folder` or `sync_file_choose_folder`, not `settings_set`. This device only. |
+| `syncSettings` | bool, true | What to sync: settings that aren't this device only. This device only. |
+| `syncLibrary` | bool, true | What to sync: library folders and pins. This device only. |
+| `syncFollows` | bool, true | What to sync: followed artists, hidden and snoozed items, bookmarks. This device only. |
+| `syncLyrics` | bool, true | What to sync: lyrics written in the editor. This device only. |
 
 Quality changes apply from the next track. Settings saved by an older build
 load with these defaults for anything missing.
+
+Settings marked This device only stay on this computer. Every other one
+travels in the sync file while sync is on and `syncSettings` is. The two
+lists are `SYNCED_SETTINGS` and `DEVICE_SETTINGS` in `settings.rs`, and a test
+checks every setting is in exactly one. A synced setting changed on another
+computer arrives as a `settings_set` patch would, and the UI hears
+`settings://changed` with the whole `Settings`.
 
 The last four only touch the core's platform layer (`src-tauri/src/platform/`).
 It follows the player through the same state and position events the UI gets
