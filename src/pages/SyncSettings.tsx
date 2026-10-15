@@ -23,7 +23,7 @@ export const KEY_LABEL: Record<KeyKind, string> = {
   fanart: "Fanart.tv API key",
   audiodb: "TheAudioDB API key",
   imgur: "Imgur client ID",
-  catbox: "catbox.moe uploads turned on",
+  catbox: "Cover uploads for unreleased songs turned on",
 };
 const KEY_ORDER: KeyKind[] = ["listenbrainz", "lastfm", "fanart", "audiodb", "imgur", "catbox"];
 

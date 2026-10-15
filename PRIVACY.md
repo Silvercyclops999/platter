@@ -93,12 +93,19 @@ and your own Plex server.
   images are public to anyone who has the link, so unreleased covers can be
   kept off Discord (and out of uploads) in Settings. Platter doesn't delete
   uploads.
-- catbox.moe, only if you turn on "Upload covers to catbox.moe" in Settings
-  (it's off by default) and Imgur isn't in use. For albums Cover Art Archive
-  doesn't have, the 512 px cover image is uploaded once, without an account.
-  Nothing else about the song goes with it. The image is public to anyone
-  with the link and can't be deleted from Platter. catbox.moe's own rules
-  apply to what's uploaded.
+- Free image hosts that need no account, only if you turn on "Upload covers
+  for unreleased songs" in Settings (it's off by default). For albums Cover
+  Art Archive doesn't have, mostly unreleased ones, the cover is uploaded as
+  a JPEG of at most 512 px, without an account. Nothing else about the song
+  goes with it. The image is public to anyone with the link and can't be
+  deleted from Platter. "Where covers are uploaded" picks the host:
+  Automatic tries Litterbox (litterbox.catbox.moe, keeps it 3 days), then
+  x0.at (keeps it 3 to 100 days, longer for smaller files, so about 100 days
+  for a cover), then uguu.se (keeps it 3 hours), then catbox.moe (keeps it
+  for good), or you can pick one of them. Platter uploads the cover again
+  before its host deletes it, and to the next host if Discord can't show it,
+  so one cover can end up on more than one host. Each host's own rules apply
+  to what's uploaded.
 - LRCLIB (lrclib.net), only if you turn on "Lyrics from LRCLIB when Plex has
   none" in Settings (it's off by default). For a song your Plex server has no
   lyrics for, it gets the artist, title, album and length. If that finds

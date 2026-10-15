@@ -93,7 +93,7 @@ impl AppVault {
 
     async fn catbox(&self) -> bool {
         match self.app.try_state::<SettingsState>() {
-            Some(s) => s.get().await.map(|s| s.discord_upload_catbox).unwrap_or(false),
+            Some(s) => s.get().await.map(|s| s.discord_upload_covers).unwrap_or(false),
             None => false,
         }
     }
@@ -131,8 +131,8 @@ impl KeyVault for AppVault {
                 let settings = self.app.state::<SettingsState>();
                 settings
                     .modify_and_publish(move |s| {
-                        let changed = s.discord_upload_catbox != on;
-                        s.discord_upload_catbox = on;
+                        let changed = s.discord_upload_covers != on;
+                        s.discord_upload_covers = on;
                         Ok(changed)
                     })
                     .await?;

@@ -8,8 +8,11 @@
 //!    for an album Plex couldn't match (`artistinfo::releasecheck`), else a
 //!    MusicBrainz search by album artist and title; only a sure match is
 //!    taken, and its release group's cover on Cover Art Archive is used.
-//! 3. Otherwise the 512 px cover is uploaded once and its link kept: to
-//!    Imgur with the user's own client id, else to catbox.moe when that's on.
+//! 3. Otherwise the 512 px cover is uploaded and its link kept: to Imgur
+//!    with the user's own client id, else (or when Imgur fails) to the
+//!    keyless hosts in [`super::hosts`] in order, when cover uploads are on.
+//!    A link from a host that deletes files is used until about 12 hours
+//!    before it goes, then the cover is uploaded again.
 //! 4. Otherwise nothing (the activity uses the app icon).
 //!
 //! Unreleased albums skip steps 1 and 2: their cover is only ever uploaded,
@@ -17,9 +20,13 @@
 //!
 //! Answers are kept per album in the `discord_art` table. A cover uploaded
 //! during a lookup is fetched once right away, so the host serves it by the
-//! time Discord's image proxy asks.
+//! time Discord's image proxy asks; a host that answers that fetch with
+//! something other than an image is skipped. When Discord's proxy can't
+//! show an uploaded cover, [`ArtResolver::replace`] uploads it to the next
+//! host.
 
 use std::collections::HashSet;
+use std::io::Cursor;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -28,6 +35,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
 use super::activity::image_allowed;
+pub use super::hosts::{CATBOX_UPLOAD, CoverHost, Host};
 use crate::artistinfo::http::{HttpResponse, InfoHttp};
 use crate::artistinfo::is_mbid;
 use crate::artistinfo::limit::Limiter;
@@ -46,10 +54,15 @@ pub const IMGUR_UPLOAD: &str = "https://api.imgur.com/3/image";
 pub const IMGUR_CHECK: &str = "https://api.imgur.com/3/credits";
 pub const CAA: &str = "https://coverartarchive.org/release";
 pub const CAA_GROUP: &str = "https://coverartarchive.org/release-group";
-/// catbox.moe's anonymous upload (no account, no key).
-pub const CATBOX_UPLOAD: &str = "https://catbox.moe/user/api.php";
 /// Cover size uploaded and asked of Cover Art Archive.
 pub const COVER_PX: u32 = 512;
+/// A JPEG cover up to this size and [`COVER_PX`] is uploaded as it is;
+/// anything else is made a [`COVER_PX`] JPEG first.
+pub const SMALL_COVER_BYTES: usize = 200 * 1024;
+pub const JPEG_QUALITY: u8 = 85;
+/// An uploaded link is replaced when less than this is left before its host
+/// deletes it (or half its life, for a host that keeps files only hours).
+pub const REUPLOAD_MARGIN: i64 = 12 * 3600;
 
 const DAY: i64 = 24 * 3600;
 /// A Cover Art Archive cover is checked again after a month...
@@ -80,27 +93,123 @@ pub trait UploadHttp: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub url: Option<String>,
+    /// "caa", or the upload host's name.
     pub source: String,
+    pub fetched_at: i64,
     pub expires_at: i64,
+    /// The upload host's name (None for Cover Art Archive).
+    pub host: Option<String>,
+    /// When the upload host deletes the file (None: kept, or not an upload).
+    pub link_expires_at: Option<i64>,
+}
+
+impl Row {
+    /// The upload host of this row's link, if it's an upload.
+    pub fn upload_host(&self) -> Option<Host> {
+        self.url
+            .as_deref()
+            .and_then(Host::from_url)
+            .or_else(|| self.host.as_deref().and_then(Host::from_name))
+            .or_else(|| Host::from_name(&self.source))
+    }
+
+    /// An uploaded link with enough time left before its host deletes it.
+    pub fn link_fresh(&self, now: i64) -> bool {
+        match self.link_expires_at {
+            None => true,
+            Some(end) => {
+                let life = (end - self.fetched_at).max(0);
+                end - now > REUPLOAD_MARGIN.min(life / 2)
+            }
+        }
+    }
 }
 
 pub fn get(c: &Connection, album_id: &str) -> AppResult<Option<Row>> {
     Ok(c.query_row(
-        "SELECT url, source, expires_at FROM discord_art WHERE album_id = ?1",
+        "SELECT url, source, fetched_at, expires_at, host, link_expires_at FROM discord_art WHERE album_id = ?1",
         params![album_id],
-        |r| Ok(Row { url: r.get(0)?, source: r.get(1)?, expires_at: r.get(2)? }),
+        |r| {
+            Ok(Row {
+                url: r.get(0)?,
+                source: r.get(1)?,
+                fetched_at: r.get(2)?,
+                expires_at: r.get(3)?,
+                host: r.get(4)?,
+                link_expires_at: r.get(5)?,
+            })
+        },
     )
     .optional()?)
 }
 
+/// A Cover Art Archive answer (a link, or a miss).
 pub fn put(c: &Connection, album_id: &str, url: Option<&str>, source: &str, now: i64, expires_at: i64) -> AppResult<()> {
+    put_row(c, album_id, url, source, now, expires_at, None, None)
+}
+
+/// An uploaded link, with its host and when the host deletes it.
+pub fn put_upload(c: &Connection, album_id: &str, url: &str, host: Host, now: i64, link_expires_at: Option<i64>) -> AppResult<()> {
+    let expires_at = link_expires_at.unwrap_or(i64::MAX);
+    put_row(c, album_id, Some(url), host.name(), now, expires_at, Some(host.name()), link_expires_at)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn put_row(
+    c: &Connection,
+    album_id: &str,
+    url: Option<&str>,
+    source: &str,
+    now: i64,
+    expires_at: i64,
+    host: Option<&str>,
+    link_expires_at: Option<i64>,
+) -> AppResult<()> {
     c.execute(
-        "INSERT INTO discord_art (album_id, url, source, fetched_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO discord_art (album_id, url, source, fetched_at, expires_at, host, link_expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT (album_id) DO UPDATE SET url = excluded.url, source = excluded.source,
-             fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
-        params![album_id, url, source, now, expires_at],
+             fetched_at = excluded.fetched_at, expires_at = excluded.expires_at,
+             host = excluded.host, link_expires_at = excluded.link_expires_at",
+        params![album_id, url, source, now, expires_at, host, link_expires_at],
     )?;
     Ok(())
+}
+
+// ---------------------------------------------------------------- image
+
+/// The cover as uploaded: a small JPEG is sent as it is, anything else is
+/// scaled to fit [`COVER_PX`] and made a JPEG. If it can't be read it goes
+/// as it came.
+pub fn prepare_cover(bytes: Vec<u8>, content_type: String) -> (Vec<u8>, String) {
+    let jpeg = content_type.contains("jpeg") || content_type.contains("jpg");
+    let dims = image::ImageReader::new(Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()
+        .and_then(|r| r.into_dimensions().ok());
+    if jpeg && bytes.len() <= SMALL_COVER_BYTES && dims.is_some_and(|(w, h)| w.max(h) <= COVER_PX) {
+        return (bytes, content_type);
+    }
+    match reencode(&bytes) {
+        Ok(out) => (out, "image/jpeg".into()),
+        Err(e) => {
+            tracing::debug!("couldn't make the cover a JPEG, sending it as it is: {e}");
+            (bytes, content_type)
+        }
+    }
+}
+
+fn reencode(bytes: &[u8]) -> Result<Vec<u8>, image::ImageError> {
+    let img = image::load_from_memory(bytes)?;
+    let img = if img.width().max(img.height()) > COVER_PX {
+        img.resize(COVER_PX, COVER_PX, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+    let rgb = image::DynamicImage::ImageRgb8(img.to_rgb8());
+    let mut out = Vec::new();
+    rgb.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY))?;
+    Ok(out)
 }
 
 // ---------------------------------------------------------------- multipart
@@ -130,22 +239,6 @@ pub fn multipart(bytes: &[u8], content_type: &str) -> (Vec<u8>, String) {
     multipart_form(&[("type", "file")], "image", bytes, content_type)
 }
 
-/// Where a cover is uploaded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Host {
-    Imgur,
-    Catbox,
-}
-
-impl Host {
-    fn source(self) -> &'static str {
-        match self {
-            Self::Imgur => "imgur",
-            Self::Catbox => "catbox",
-        }
-    }
-}
-
 // ---------------------------------------------------------------- resolver
 
 /// What to look for, for one album.
@@ -162,8 +255,10 @@ pub struct ArtRequest {
     pub use_archive: bool,
     /// Upload to Imgur (with a client id).
     pub upload: bool,
-    /// Upload to catbox.moe (when Imgur isn't used).
-    pub catbox: bool,
+    /// Upload to the keyless hosts (after Imgur, when it's used).
+    pub anon: bool,
+    /// Which keyless hosts.
+    pub hosts: CoverHost,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -276,14 +371,15 @@ impl ArtResolver {
             None
         });
         let mut archive_missed = false;
-        if let Some(row) = &cached
-            && row.expires_at > now
-        {
+        if let Some(row) = &cached {
             match (&row.url, row.source.as_str()) {
-                (Some(u), "imgur") if req.upload => return ArtOutcome::Url(u.clone()),
-                (Some(u), "catbox") if req.catbox => return ArtOutcome::Url(u.clone()),
-                (Some(u), "caa") if req.use_archive && !req.unreleased => return ArtOutcome::Url(u.clone()),
-                (None, "caa") => archive_missed = true,
+                (Some(u), "caa") if row.expires_at > now && req.use_archive && !req.unreleased => {
+                    return ArtOutcome::Url(u.clone());
+                }
+                (None, "caa") if row.expires_at > now => archive_missed = true,
+                (Some(u), _) if row.link_fresh(now) && row.upload_host().is_some_and(|h| allowed(req, h)) => {
+                    return ArtOutcome::Url(u.clone());
+                }
                 _ => {}
             }
         }
@@ -294,7 +390,18 @@ impl ArtResolver {
                 Err(e) => tracing::debug!("cover art archive: {e}"),
             }
         }
-        self.upload(req, now).await
+        self.upload(req, now, &[]).await
+    }
+
+    /// Discord's proxy couldn't show `failed` (the covers tried so far this
+    /// play): upload the cover to the next host that isn't one of theirs.
+    /// None when none is left or the covers weren't uploads.
+    pub async fn replace(&self, req: &ArtRequest, failed: &[String]) -> ArtOutcome {
+        let exclude: Vec<Host> = failed.iter().filter_map(|u| Host::from_url(u)).collect();
+        if exclude.is_empty() {
+            return ArtOutcome::None;
+        }
+        self.upload(req, now_s(), &exclude).await
     }
 
     /// A public cover from Cover Art Archive: by the album's release id, else
@@ -376,55 +483,98 @@ impl ArtResolver {
     }
 
     /// Upload the cover: to Imgur when it's on with a working client id,
-    /// else to catbox.moe when that's on.
-    async fn upload(&self, req: &ArtRequest, now: i64) -> ArtOutcome {
+    /// then to the keyless hosts in order when they're on, leaving out
+    /// `exclude`. The first host that gives a direct image link wins.
+    async fn upload(&self, req: &ArtRequest, now: i64, exclude: &[Host]) -> ArtOutcome {
         let Some(thumb) = req.thumb.as_deref() else { return ArtOutcome::None };
         let imgur_key = if req.upload { self.key() } else { None };
         let rejected = *self.rejected.lock();
-        let (host, key) = match imgur_key {
-            Some(k) if !rejected => (Host::Imgur, Some(k)),
-            _ if req.catbox => (Host::Catbox, None),
-            Some(_) => return ArtOutcome::UploadFailed("Imgur refused the client ID".into()),
-            None => return ArtOutcome::None,
-        };
-        if self.failed.lock().contains(&req.album_id) {
+        let mut hosts = Vec::new();
+        if imgur_key.is_some() && !rejected {
+            hosts.push(Host::Imgur);
+        }
+        if req.anon {
+            hosts.extend_from_slice(req.hosts.chain());
+        }
+        hosts.retain(|h| !exclude.contains(h));
+        if hosts.is_empty() {
+            if imgur_key.is_some() && exclude.is_empty() {
+                return ArtOutcome::UploadFailed("Imgur refused the client ID".into());
+            }
+            return ArtOutcome::None;
+        }
+        if exclude.is_empty() && self.failed.lock().contains(&req.album_id) {
             return ArtOutcome::UploadFailed("an earlier upload failed".into());
         }
-        let sent = match &key {
-            Some(k) => self.try_upload(k, thumb).await,
-            None => self.try_catbox(thumb).await,
+        let cover = match self.covers.cover(thumb, COVER_PX).await {
+            Ok((bytes, ty)) => tokio::task::spawn_blocking(move || prepare_cover(bytes, ty))
+                .await
+                .map_err(|e| AppError::Internal(e.to_string())),
+            Err(e) => Err(e),
         };
-        match sent {
-            Ok(url) => {
-                let (id, u) = (req.album_id.clone(), url.clone());
-                if let Err(e) = self.db.write_async(move |c| put(c, &id, Some(&u), host.source(), now, i64::MAX)).await {
-                    tracing::debug!("discord art cache: {e}");
-                }
-                self.warm(&url).await;
-                ArtOutcome::Url(url)
-            }
+        let (bytes, ty) = match cover {
+            Ok(c) => c,
             Err(e) => {
                 tracing::info!("cover upload failed: {e}");
                 self.failed.lock().insert(req.album_id.clone());
-                ArtOutcome::UploadFailed(e.to_string())
+                return ArtOutcome::UploadFailed(e.to_string());
+            }
+        };
+        let mut last = String::new();
+        for host in hosts {
+            let sent = match (host, &imgur_key) {
+                (Host::Imgur, Some(k)) => self.try_upload(k, &bytes, &ty).await,
+                _ => self.try_keyless(host, &bytes, &ty).await,
+            };
+            let url = match sent {
+                Ok(u) => u,
+                Err(e) => {
+                    tracing::info!("cover upload to {} failed: {e}", host.label());
+                    last = e.to_string();
+                    continue;
+                }
+            };
+            if !self.warm(&url).await {
+                tracing::info!("{} doesn't serve the cover as an image; trying the next host", host.label());
+                last = format!("{} gave no direct image link", host.label());
+                continue;
+            }
+            let link_expires_at = host.adapter().and_then(|a| a.keeps(bytes.len())).map(|t| now + t);
+            let (id, u) = (req.album_id.clone(), url.clone());
+            if let Err(e) = self.db.write_async(move |c| put_upload(c, &id, &u, host, now, link_expires_at)).await {
+                tracing::debug!("discord art cache: {e}");
+            }
+            return ArtOutcome::Url(url);
+        }
+        if exclude.is_empty() {
+            self.failed.lock().insert(req.album_id.clone());
+        }
+        ArtOutcome::UploadFailed(last)
+    }
+
+    /// Fetch a fresh upload once before Discord sees it, so the host has the
+    /// file ready when Discord's image proxy asks. False only when the host
+    /// answers with something other than an image (a page, not the file); a
+    /// failed fetch changes nothing.
+    async fn warm(&self, url: &str) -> bool {
+        match self.http.get(url, &[]).await {
+            Ok(r) if r.ok() => r
+                .content_type
+                .as_deref()
+                .is_none_or(|t| t.trim().to_ascii_lowercase().starts_with("image/")),
+            Ok(r) => {
+                tracing::debug!("the fresh cover answered {}", r.status);
+                true
+            }
+            Err(e) => {
+                tracing::debug!("fetching the fresh cover: {e}");
+                true
             }
         }
     }
 
-    /// Fetch a fresh upload once before Discord sees it, so the host has the
-    /// file ready when Discord's image proxy asks. Only the outcome is
-    /// logged; a failure here changes nothing.
-    async fn warm(&self, url: &str) {
-        match self.http.get(url, &[]).await {
-            Ok(r) if r.ok() => {}
-            Ok(r) => tracing::debug!("the fresh cover answered {}", r.status),
-            Err(e) => tracing::debug!("fetching the fresh cover: {e}"),
-        }
-    }
-
-    async fn try_upload(&self, key: &Token, thumb: &str) -> AppResult<String> {
-        let (bytes, ty) = self.covers.cover(thumb, COVER_PX).await?;
-        let (body, ct) = multipart(&bytes, &ty);
+    async fn try_upload(&self, key: &Token, bytes: &[u8], ty: &str) -> AppResult<String> {
+        let (body, ct) = multipart(bytes, ty);
         let r = self
             .upload
             .post(IMGUR_UPLOAD, &[("Authorization", format!("Client-ID {}", key.expose()))], &ct, body)
@@ -444,19 +594,22 @@ impl ArtResolver {
         Ok(link)
     }
 
-    /// catbox.moe's anonymous upload. The answer is the file's link as text.
-    async fn try_catbox(&self, thumb: &str) -> AppResult<String> {
-        let (bytes, ty) = self.covers.cover(thumb, COVER_PX).await?;
-        let (body, ct) = multipart_form(&[("reqtype", "fileupload")], "fileToUpload", &bytes, &ty);
-        let r = self.upload.post(CATBOX_UPLOAD, &[], &ct, body).await?;
-        if !r.ok() {
-            return Err(AppError::Server(format!("catbox.moe answered {}", r.status)));
-        }
-        let link = String::from_utf8_lossy(&r.body).trim().replace("http://", "https://");
-        if !link.starts_with("https://files.catbox.moe/") || !image_allowed(&link) {
-            return Err(AppError::Decode("catbox.moe gave no usable link".into()));
-        }
-        Ok(link)
+    /// An upload to a keyless host, through its adapter.
+    async fn try_keyless(&self, host: Host, bytes: &[u8], ty: &str) -> AppResult<String> {
+        let Some(adapter) = host.adapter() else {
+            return Err(AppError::Internal(format!("{} needs a key", host.label())));
+        };
+        let form = adapter.form(bytes, ty);
+        let r = self.upload.post(form.url, &[], &form.content_type, form.body).await?;
+        adapter.link(&r)
+    }
+}
+
+/// Whether the request lets a link on `host` be used.
+fn allowed(req: &ArtRequest, host: Host) -> bool {
+    match host {
+        Host::Imgur => req.upload,
+        h => req.anon && req.hosts.chain().contains(&h),
     }
 }
 

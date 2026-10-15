@@ -583,22 +583,42 @@ edition notes are folded, and only when one group matches; its cover is
 `coverartarchive.org/release-group/<id>/front-500`, cached the same way. A
 search that fails isn't cached. Unreleased albums skip both. Then, with a
 saved client ID and `discordUploadArt` on, the 512 px cover from the art cache
-uploaded once to Imgur and its `i.imgur.com` link kept for good; else, with
-`discordUploadCatbox` on, the same upload to catbox.moe's anonymous API
-(`reqtype=fileupload`, `fileToUpload`) and its `files.catbox.moe` link kept for
-good. Only those hosts are ever sent; anything else falls back to the app
-icon. A fresh upload is fetched once from its link before the status is sent,
-so the host has it ready. A failed upload isn't retried
-until the next start or a new client ID.
+uploaded to Imgur and its `i.imgur.com` link kept for good. With
+`discordUploadCovers` on (and after Imgur when Imgur fails), the cover goes to
+the keyless hosts `discordCoverHost` picks, in this order for `"auto"`:
+Litterbox (`litterbox.catbox.moe/resources/internals/api.php`,
+`reqtype=fileupload`, `time=72h`, `fileToUpload`; a `litter.catbox.moe` link
+kept 72 hours), x0.at (POST `file` to `x0.at`; kept 3 to 100 days by size),
+uguu.se (`uguu.se/upload`, `files[]`, a JSON answer; a `*.uguu.se` link kept
+3 hours) and catbox.moe (`reqtype=fileupload`, `fileToUpload`; a
+`files.catbox.moe` link kept for good). The first host whose answer is a
+direct image link on that host wins. The upload is the art cache's 512 px
+cover, sent as it is when it's a JPEG of 200 KB or less, else scaled to fit
+512 px and made a JPEG at quality 85. `discord_art` keeps the link with its
+host and the time the host deletes it; a link is used until 12 hours before
+that (half its life for a host that keeps files less than a day), then the
+cover is uploaded again. Links kept from earlier builds stay in use. Only
+these hosts are ever sent; anything else falls back to the app icon. A fresh
+upload is fetched once from its link before the status is sent, so the host
+has it ready, and a host that answers that fetch with something other than
+an image is skipped. When every host fails, the upload isn't retried until
+the next start or a new client ID.
 
 Discord answers SET_ACTIVITY with the external cover rewritten as
 `mp:external/<signed>/https/<host>/<path>`, and its client keeps a broken
 image if its proxy's first fetch failed. So after Discord takes a status with
 a cover, `https://media.discordapp.net/<the part after mp:>` is fetched once
 in the background (a 200 with an image type is good). If it fails it's tried
-again after 5 s, 15 s and 40 s; when a later try works the same status is sent
-once more (still at most one update per 15 s) so the client loads the cover
-again, and when none work the song shows the app icon for this play. Nothing
+again after 5 s, 15 s and 40 s. An uploaded cover that fails the first fetch
+is also uploaded right away to the next host in the order that hasn't failed
+this play (a kept catbox.moe link starts again from the top), and the status
+is sent with the new link without waiting the 15 s; that link is checked the
+same way. When a later try of the first link works before a new link is
+sent, the same status is sent once more (still at most one update per 15 s)
+so the client loads the cover again. When no link works and no host is left,
+the song shows the app icon for this play. However they come about, at most 5
+SET_ACTIVITY calls go in any 20 s; a change held back by that goes out when
+there's room, as the latest state. Nothing
 is remembered, so the next play tries the cover again. Logs name only the
 image host, never the signed path. The client ID lives in the keychain;
 saving one checks it with one request that uploads nothing, and `rejected`
@@ -1087,7 +1107,7 @@ the same events.
 
 `Folders = { folders: { id, name, parent?, createdAt (ms) }[] (newest first), items: { [playlistId]: folderId } }`
 
-`KeyKind = "listenbrainz"|"lastfm"|"fanart"|"audiodb"|"imgur"|"catbox"`
+`KeyKind = "listenbrainz"|"lastfm"|"fanart"|"audiodb"|"imgur"|"catbox"` (`catbox` carries the `discordUploadCovers` choice; the name is kept so older copies understand it)
 
 `ReceiveState = { phase: "idle"|"waiting"|"receiving"|"received"|"expired"|"locked", code?, qr?: { size, rows: string[] }, expiresAt? (ms), from?, received: KeyKind[] }`
 
@@ -1668,7 +1688,8 @@ The rest of the fields, with their defaults:
 | `discordFindSong` | bool, true | The Find this song button. Also needs `sharePublicLinks`. |
 | `discordCoverArchive` | bool, true | Covers from Cover Art Archive by MusicBrainz release id, or by a MusicBrainz search on album artist and title for released albums. |
 | `discordUploadArt` | bool, false | Upload covers Cover Art Archive lacks to Imgur. Only used while a client ID is saved and wasn't refused. |
-| `discordUploadCatbox` | bool, false | Upload covers Cover Art Archive lacks to catbox.moe (no key) when Imgur isn't used. Uploads are public and can't be deleted. |
+| `discordUploadCovers` | bool, false | Upload covers Cover Art Archive lacks (mostly unreleased songs) to keyless image hosts. Uploads are public to anyone with the link and can't be deleted. Saved as `discordUploadCatbox` by earlier builds, which loads into this. This device only. |
+| `discordCoverHost` | `"auto"\|"litterbox"\|"x0"\|"uguu"\|"catbox"`, `"auto"` | Where covers are uploaded: automatic (Litterbox, x0.at, uguu.se, catbox.moe in that order) or one host. This device only. |
 | `discordStatusLine` | `"app"\|"artist"\|"song"`, `"app"` | What the member list shows after "Listening to" (`status_display_type`). |
 | `showPlexAvatar` | bool, true | The app menu button shows the Plex profile picture (`AuthStatus.avatar`). Off shows the first letter of the username. This device only. |
 | `libraries` | string[], [] | Libraries included besides the connected server's main one, as `<machineId>/<sectionId>` (see More than one library). Changing it starts a sync. This device only. |

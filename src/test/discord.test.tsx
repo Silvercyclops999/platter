@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type DiscordStatus } from "../lib/types";
-import { catboxNote, discordNote, imgurNote } from "../pages/DiscordSettings";
+import { coversNote, discordNote, imgurNote } from "../pages/DiscordSettings";
 import { SettingsPage } from "../pages/SettingsPage";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -61,28 +61,32 @@ describe("Discord settings", () => {
     expect(within(group).getByRole("switch", { name: "Find this song button" })).toBeChecked();
     expect(within(group).getByRole("switch", { name: "Covers from Cover Art Archive" })).toBeChecked();
     expect(await within(group).findByLabelText("Imgur client ID")).toBeInTheDocument();
-    expect(within(group).getByRole("switch", { name: "Upload covers to catbox.moe" })).not.toBeChecked();
-    expect(within(row("discordUploadCatbox")).getByText(/can't be deleted/)).toBeInTheDocument();
-    expect(within(row("discordUploadCatbox")).getByText(/Where covers come from/)).toBeInTheDocument();
+    expect(within(group).getByRole("switch", { name: "Upload covers for unreleased songs" })).not.toBeChecked();
+    expect(within(row("discordUploadCovers")).getByText(/Anyone with the link can see/)).toBeInTheDocument();
+    expect(within(row("discordUploadCovers")).getByText(/Where covers come from/)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Where covers are uploaded" })).toHaveValue("auto");
+    expect(within(row("discordCoverHost")).getByText(/Litterbox keeps a cover 3 days/)).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Status line shows" })).toHaveValue("app");
   });
 
-  it("the catbox switch and the status line save their settings", async () => {
+  it("the cover upload switch, its host and the status line save their settings", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
-    await user.click(await screen.findByRole("switch", { name: "Upload covers to catbox.moe" }));
-    expect(useSettings.getState().settings?.discordUploadCatbox).toBe(true);
+    await user.click(await screen.findByRole("switch", { name: "Upload covers for unreleased songs" }));
+    expect(useSettings.getState().settings?.discordUploadCovers).toBe(true);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Where covers are uploaded" }), "x0");
+    expect(useSettings.getState().settings?.discordCoverHost).toBe("x0");
     await user.selectOptions(screen.getByRole("combobox", { name: "Status line shows" }), "artist");
     expect(useSettings.getState().settings?.discordStatusLine).toBe("artist");
   });
 
   it("a failed upload is noted on the host that was used", () => {
     const failed = status({ uploadFailed: true });
-    expect(catboxNote(failed, true)).toMatch(/couldn't be uploaded/);
-    expect(catboxNote(failed, false)).toBeUndefined();
+    expect(coversNote(failed, true)).toMatch(/couldn't be uploaded/);
+    expect(coversNote(failed, false)).toBeUndefined();
     expect(imgurNote(failed)).toBeUndefined();
     const imgur = status({ uploadFailed: true, imgurKey: { saved: true, rejected: false } });
-    expect(catboxNote(imgur, true)).toBeUndefined();
+    expect(coversNote(imgur, true)).toBeUndefined();
     expect(imgurNote(imgur)).toMatch(/couldn't be uploaded/);
   });
 

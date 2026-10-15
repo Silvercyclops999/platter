@@ -39,7 +39,7 @@ import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { FeedNote, FeedPortField, useFeedStatus } from "./FeedSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
-import { catboxNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
+import { coversNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
 import { BatchControl, BatchNote, ModelControl, TranscribeNote } from "./TranscribeSettings";
@@ -136,6 +136,13 @@ const DISCORD_STATUS_LINE = [
   { value: "artist", label: "Artist" },
   { value: "song", label: "Song" },
 ] as const satisfies SelectOption<Settings["discordStatusLine"]>[];
+const DISCORD_COVER_HOST = [
+  { value: "auto", label: "Automatic" },
+  { value: "litterbox", label: "Litterbox (3 days)" },
+  { value: "x0", label: "x0.at (up to 100 days)" },
+  { value: "uguu", label: "uguu.se (3 hours)" },
+  { value: "catbox", label: "catbox.moe (kept)" },
+] as const satisfies SelectOption<Settings["discordCoverHost"]>[];
 const ART_SIZES_MB = [512, 1024, 2048, 5120, 10240, 20480];
 const LEVELING = [
   { value: "smart", label: "Smart" },
@@ -1625,16 +1632,26 @@ export function SettingsPage() {
             control: (ids) => <ImgurKeyControl ids={ids} status={discord} setKey={setImgurKey} />,
           },
           {
-            key: "discordUploadCatbox",
+            key: "discordUploadCovers",
             section: "Integrations",
             group: "Discord",
-            title: "Upload covers to catbox.moe",
+            title: "Upload covers for unreleased songs",
             description:
-              "Covers Cover Art Archive doesn't have are uploaded once to catbox.moe, which needs no account. An uploaded cover is public to anyone with the link and can't be deleted. Imgur is used instead when it's set up.",
-            note: errorNote(catboxNote(discord, s?.discordUploadCatbox)),
+              "Covers Cover Art Archive doesn't have, mostly for unreleased songs, are uploaded to a free image host that needs no account, so Discord can show them. Anyone with the link can see an uploaded cover, and Platter can't delete it. Imgur is used first when it's set up.",
+            note: errorNote(coversNote(discord, s?.discordUploadCovers)),
             footnote:
-              "Where covers come from: Cover Art Archive first, then an upload to Imgur or catbox.moe if one is on. Without a cover, Discord shows the Platter icon.",
-            control: (ids) => toggle(s, "discordUploadCatbox", ids),
+              "Where covers come from: Cover Art Archive first, then an upload to Imgur or the host below if one is on. Without a cover, Discord shows the Platter icon.",
+            control: (ids) => toggle(s, "discordUploadCovers", ids),
+          },
+          {
+            key: "discordCoverHost",
+            section: "Integrations",
+            group: "Discord",
+            title: "Where covers are uploaded",
+            description:
+              "Automatic tries Litterbox first, then x0.at, uguu.se and catbox.moe, moving on when Discord can't show a cover from one. Litterbox keeps a cover 3 days, x0.at up to 100 days, uguu.se 3 hours, and catbox.moe keeps it. Platter uploads a cover again before its host deletes it.",
+            control: (ids) =>
+              select(s, (x) => x.discordCoverHost, DISCORD_COVER_HOST, ids, (v) => updateSettings({ discordCoverHost: v })),
           },
           {
             key: "discordStatusLine",

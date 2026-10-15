@@ -55,8 +55,8 @@ export function imgurNote(status: DiscordStatus | null): string | undefined {
   return undefined;
 }
 
-/** The note under the catbox.moe row: a failed upload, when catbox was the host used. */
-export function catboxNote(status: DiscordStatus | null, on: boolean | undefined): string | undefined {
+/** The note under the cover upload row: a failed upload, when Imgur wasn't the host used. */
+export function coversNote(status: DiscordStatus | null, on: boolean | undefined): string | undefined {
   if (!status || !on || !status.uploadFailed) return undefined;
   if (status.imgurKey.saved && !status.imgurKey.rejected) return undefined;
   return "The last cover couldn't be uploaded, so Discord shows the Platter icon.";

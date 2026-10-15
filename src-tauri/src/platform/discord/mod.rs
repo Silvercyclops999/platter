@@ -4,28 +4,37 @@
 //! Layout:
 //! - [`ipc`]      the socket, frames, handshake and SET_ACTIVITY
 //! - [`activity`] what Discord shows (pure), and which URLs may go there
-//! - [`art`]      public cover art (Cover Art Archive, Imgur, catbox.moe) and its cache
+//! - [`art`]      public cover art (Cover Art Archive or an upload) and its cache
+//! - [`hosts`]    the keyless image hosts covers can be uploaded to
 //! - [`commands`] Tauri commands and the real Plex, art cache and share glue
 //!
 //! The service follows the player's tracking events on its own task, so a
 //! missing, slow or closing Discord never touches playback. Updates are
-//! coalesced: at most one per [`Config::gap`], always with the latest state.
+//! coalesced: at most one per [`Config::gap`], always with the latest state,
+//! and never more than [`Config::send_limit`] in any [`Config::send_window`]
+//! whatever the reason (Discord stops taking updates after about a dozen
+//! quick ones).
 //!
 //! Discord fetches an external cover through its own image proxy, and the
 //! client keeps a broken image if that first fetch fails (common right after
 //! an upload). So once Discord accepts a status with a cover, the proxied
-//! image is checked in the background; if it only works on a later check
-//! the same status is sent once more so the client loads it again, and if it
-//! never works the song shows the app icon instead.
+//! image is checked in the background. If the first check fails, an uploaded
+//! cover is uploaded again to the next host and the status sent with that
+//! link right away; the first link is still checked again for about a
+//! minute. If it only works on a later check the same status is sent once
+//! more so the client loads it again, and if no link works the song shows
+//! the app icon instead.
 
 pub mod activity;
 pub mod art;
 pub mod commands;
+pub mod hosts;
 pub mod ipc;
 
 #[cfg(test)]
 mod tests;
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,6 +50,7 @@ use crate::artistinfo::service::KeyState;
 use crate::audio::events::TrackingEvent;
 use activity::{Kind, Song, StatusLine};
 use art::{ArtOutcome, ArtRequest, ArtResolver};
+use hosts::CoverHost;
 use ipc::{Connector, IpcClient, Reply};
 
 /// Discord's image proxy: an image Discord reports as `mp:<path>` is served
@@ -69,8 +79,11 @@ pub struct DiscordSettings {
     pub find_song: bool,
     pub cover_archive: bool,
     pub upload_art: bool,
-    /// Upload covers to catbox.moe (no key).
-    pub upload_catbox: bool,
+    /// Upload covers Cover Art Archive lacks (mostly unreleased songs) to
+    /// the keyless hosts.
+    pub upload_covers: bool,
+    /// Which keyless hosts.
+    pub cover_host: CoverHost,
     /// What the member list shows after "Listening to".
     pub status_line: StatusLine,
     /// A private session hides everything.
@@ -90,7 +103,8 @@ impl Default for DiscordSettings {
             find_song: true,
             cover_archive: true,
             upload_art: false,
-            upload_catbox: false,
+            upload_covers: false,
+            cover_host: CoverHost::Auto,
             status_line: StatusLine::App,
             private_session: false,
         }
@@ -150,6 +164,11 @@ pub trait Library: Send + Sync {
 #[async_trait]
 pub trait CoverArt: Send + Sync {
     async fn resolve(&self, req: &ArtRequest) -> ArtOutcome;
+    /// Discord's proxy couldn't show the covers in `failed`: another link
+    /// for the same cover, from a host none of them came from.
+    async fn replace(&self, _req: &ArtRequest, _failed: &[String]) -> ArtOutcome {
+        ArtOutcome::None
+    }
     /// Reads the keychain the first time.
     fn key_state(&self) -> KeyState;
     /// The key state without touching the keychain: None until something
@@ -163,6 +182,9 @@ pub trait CoverArt: Send + Sync {
 impl CoverArt for ArtResolver {
     async fn resolve(&self, req: &ArtRequest) -> ArtOutcome {
         ArtResolver::resolve(self, req).await
+    }
+    async fn replace(&self, req: &ArtRequest, failed: &[String]) -> ArtOutcome {
+        ArtResolver::replace(self, req, failed).await
     }
     fn key_state(&self) -> KeyState {
         ArtResolver::key_state(self)
@@ -180,7 +202,12 @@ pub struct Config {
     pub app_id: String,
     pub clock: Clock,
     /// The least time between two updates (Discord allows about one per 15 s).
+    /// A status with a replaced cover doesn't wait for it.
     pub gap: Duration,
+    /// At most this many SET_ACTIVITY calls in any [`Config::send_window`],
+    /// counting every kind (updates, resends, retries, clears).
+    pub send_limit: usize,
+    pub send_window: Duration,
     /// Changes are gathered this long before an update (a track ending and
     /// the next starting is one change).
     pub settle: Duration,
@@ -201,6 +228,8 @@ impl Config {
             app_id: app_id.to_owned(),
             clock: Arc::new(now_ms),
             gap: Duration::from_secs(15),
+            send_limit: 5,
+            send_window: Duration::from_secs(20),
             settle: Duration::from_millis(300),
             retry: Duration::from_secs(15),
             art_wait: Duration::from_millis(1500),
@@ -287,6 +316,8 @@ pub fn spawn(
         force: false,
         not_before: Instant::now(),
         party: None,
+        urgent: false,
+        sends: VecDeque::new(),
     };
     let task = tokio::spawn(runner.run(events, settings, side_rx));
     (handle, task)
@@ -298,12 +329,16 @@ enum Side {
     Link { track_id: String, url: Option<String> },
     /// How Discord's proxy did with the cover `image` of this song.
     Proxy { track_id: String, image: String, result: ProxyCheck },
+    /// Another link for the cover `old`, which Discord's proxy couldn't show.
+    Replaced { track_id: String, old: String, outcome: ArtOutcome },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProxyCheck {
     /// Served on the first check.
     Good,
+    /// Not served on the first check (more checks follow).
+    FirstFailed,
     /// Served only on a later check: the client may hold a broken image.
     Recovered,
     /// Never served.
@@ -331,6 +366,10 @@ struct Current {
     link: Lookup,
     /// The cover whose proxied image was checked (once per song and cover).
     proxy_checked: Option<String>,
+    /// Covers Discord's proxy couldn't show on the first check, this play.
+    failed_covers: Vec<String>,
+    /// Discord's proxy served the current cover.
+    cover_ok: bool,
 }
 
 /// A position this far from where it should be is a seek or a stall.
@@ -364,6 +403,10 @@ struct Runner {
     not_before: Instant,
     /// The hosted listening session as last shown.
     party: Option<activity::Party>,
+    /// Send without waiting for [`Config::gap`] (a replaced cover).
+    urgent: bool,
+    /// When the recent SET_ACTIVITY calls went, for the send limit.
+    sends: VecDeque<Instant>,
 }
 
 impl Runner {
@@ -453,6 +496,8 @@ impl Runner {
                     art: Lookup::NotAsked,
                     link: Lookup::NotAsked,
                     proxy_checked: None,
+                    failed_covers: Vec::new(),
+                    cover_ok: false,
                 });
                 self.lookups();
                 self.mark();
@@ -504,12 +549,15 @@ impl Runner {
         if let Some(c) = self.cur.as_mut()
             && (s.cover_archive != self.settings.cover_archive
                 || s.upload_art != self.settings.upload_art
-                || s.upload_catbox != self.settings.upload_catbox)
+                || s.upload_covers != self.settings.upload_covers
+                || s.cover_host != self.settings.cover_host)
             && c.art == Lookup::Done
         {
             c.art = Lookup::NotAsked;
             c.song.image = None;
             c.proxy_checked = None;
+            c.failed_covers.clear();
+            c.cover_ok = false;
         }
         self.settings = s;
         self.lookups();
@@ -545,9 +593,29 @@ impl Runner {
                     return;
                 };
                 match result {
-                    ProxyCheck::Good => return,
+                    ProxyCheck::Good => {
+                        c.cover_ok = true;
+                        return;
+                    }
+                    ProxyCheck::FirstFailed => {
+                        // Upload it to the next host now; the checks of this
+                        // link go on meanwhile.
+                        c.failed_covers.push(image);
+                        let req = art_request(c, &self.settings);
+                        let failed = c.failed_covers.clone();
+                        let old = failed.last().cloned().unwrap_or_default();
+                        let (art, tx, track_id) = (self.deps.art.clone(), self.side_tx.clone(), c.track_id.clone());
+                        tokio::spawn(async move {
+                            let outcome = art.replace(&req, &failed).await;
+                            let _ = tx.send(Side::Replaced { track_id, old, outcome });
+                        });
+                        return;
+                    }
                     // Same status again, so the client loads the cover anew.
-                    ProxyCheck::Recovered => self.force = true,
+                    ProxyCheck::Recovered => {
+                        c.cover_ok = true;
+                        self.force = true;
+                    }
                     ProxyCheck::Failed => {
                         tracing::info!(
                             "Discord couldn't show the cover from {}; using the app icon for this song",
@@ -556,6 +624,24 @@ impl Runner {
                         // Only for this play: the next one tries the cover again.
                         c.song.image = None;
                     }
+                }
+            }
+            Side::Replaced { track_id, old, outcome } => {
+                let Some(c) = self
+                    .cur
+                    .as_mut()
+                    .filter(|c| c.track_id == track_id && c.song.image.as_deref() == Some(old.as_str()) && !c.cover_ok)
+                else {
+                    return;
+                };
+                match outcome {
+                    ArtOutcome::Url(new) if new != old => {
+                        tracing::info!("sending the cover from {} instead of {}", image_host(&new), image_host(&old));
+                        c.song.image = Some(new);
+                        self.urgent = true;
+                    }
+                    // No other host: the checks of the old link decide.
+                    _ => return,
                 }
             }
         }
@@ -573,19 +659,10 @@ impl Runner {
         if c.song.unreleased && !s.show_unreleased {
             return;
         }
-        let art_wanted = (s.cover_archive || s.upload_art || s.upload_catbox) && (!c.song.unreleased || s.unreleased_art);
+        let art_wanted = (s.cover_archive || s.upload_art || s.upload_covers) && (!c.song.unreleased || s.unreleased_art);
         if c.art == Lookup::NotAsked && art_wanted {
             c.art = Lookup::Pending;
-            let req = ArtRequest {
-                album_id: c.album_id.clone(),
-                thumb: c.thumb.clone(),
-                artist: c.album_artist.clone(),
-                album: c.song.album.clone(),
-                unreleased: c.song.unreleased,
-                use_archive: s.cover_archive,
-                upload: s.upload_art,
-                catbox: s.upload_catbox,
-            };
+            let req = art_request(c, &s);
             let (art, tx, track_id) = (self.deps.art.clone(), self.side_tx.clone(), c.track_id.clone());
             tokio::spawn(async move {
                 let outcome = art.resolve(&req).await;
@@ -621,13 +698,28 @@ impl Runner {
         let url = format!("{MEDIA_PROXY}{path}");
         let (http, tx, track_id) = (self.deps.http.clone(), self.side_tx.clone(), c.track_id.clone());
         tokio::spawn(async move {
-            let result = proxy_check(http.as_ref(), &url, image_host(&image)).await;
+            let first = {
+                let (tx, track_id, image) = (tx.clone(), track_id.clone(), image.clone());
+                move || {
+                    let _ = tx.send(Side::Proxy { track_id, image, result: ProxyCheck::FirstFailed });
+                }
+            };
+            let result = proxy_check(http.as_ref(), &url, image_host(&image), first).await;
             let _ = tx.send(Side::Proxy { track_id, image, result });
         });
     }
 
+    /// When the next SET_ACTIVITY may go under the send limit (None: now).
+    fn send_slot(&mut self, now: Instant) -> Option<Instant> {
+        while self.sends.front().is_some_and(|t| *t + self.cfg.send_window <= now) {
+            self.sends.pop_front();
+        }
+        (self.sends.len() >= self.cfg.send_limit.max(1)).then(|| self.sends[0] + self.cfg.send_window)
+    }
+
     fn drop_conn(&mut self, now: Instant, retry_in: Duration) {
         self.force = false;
+        self.urgent = false;
         self.conn = None;
         self.last_sent = None;
         self.last_send_at = None;
@@ -697,10 +789,17 @@ impl Runner {
         }
         if let Some(t) = self.last_send_at
             && now < t + self.cfg.gap
+            && !self.urgent
         {
             self.not_before = t + self.cfg.gap;
             return;
         }
+        // Over the send limit: wait, then send whatever is latest by then.
+        if let Some(at) = self.send_slot(now) {
+            self.not_before = at;
+            return;
+        }
+        self.sends.push_back(now);
         let Some(conn) = self.conn.as_mut() else { return };
         let sent = tokio::time::timeout(
             self.cfg.reply_timeout,
@@ -710,6 +809,7 @@ impl Runner {
         match sent {
             Ok(Ok(Reply::Ok(reply))) => {
                 self.force = false;
+                self.urgent = false;
                 self.check_proxy(want.as_ref(), reply.as_ref());
                 self.last_sent = want;
                 self.last_send_at = Some(now);
@@ -759,6 +859,21 @@ impl Runner {
     }
 }
 
+/// The cover lookup for the current song under these settings.
+fn art_request(c: &Current, s: &DiscordSettings) -> ArtRequest {
+    ArtRequest {
+        album_id: c.album_id.clone(),
+        thumb: c.thumb.clone(),
+        artist: c.album_artist.clone(),
+        album: c.song.album.clone(),
+        unreleased: c.song.unreleased,
+        use_archive: s.cover_archive,
+        upload: s.upload_art,
+        anon: s.upload_covers,
+        hosts: s.cover_host,
+    }
+}
+
 /// The host of a cover URL, for logs (never the full path).
 fn image_host(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
@@ -780,12 +895,13 @@ async fn proxy_serves(http: &dyn InfoHttp, url: &str) -> bool {
 }
 
 /// Check the proxied cover, and again after each of [`PROXY_RECHECKS`]
-/// while it fails.
-async fn proxy_check(http: &dyn InfoHttp, url: &str, host: &str) -> ProxyCheck {
+/// while it fails. `first_failed` runs as soon as the first check fails.
+async fn proxy_check(http: &dyn InfoHttp, url: &str, host: &str, first_failed: impl FnOnce()) -> ProxyCheck {
     if proxy_serves(http, url).await {
         return ProxyCheck::Good;
     }
     tracing::info!("Discord can't show the cover from {host} yet; checking again shortly");
+    first_failed();
     for wait in PROXY_RECHECKS {
         tokio::time::sleep(wait).await;
         if proxy_serves(http, url).await {

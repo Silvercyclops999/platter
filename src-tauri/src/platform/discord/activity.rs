@@ -20,7 +20,16 @@ const TEXT_MAX: usize = 128;
 const IMAGE_MAX: usize = 256;
 const BUTTON_URL_MAX: usize = 512;
 
-const IMAGE_HOSTS: &[&str] = &["coverartarchive.org", "i.imgur.com", "files.catbox.moe"];
+/// Cover hosts. An entry starting with a dot takes any name under it
+/// (uguu.se serves files from a few lettered subdomains).
+const IMAGE_HOSTS: &[&str] = &[
+    "coverartarchive.org",
+    "i.imgur.com",
+    "files.catbox.moe",
+    "litter.catbox.moe",
+    "x0.at",
+    ".uguu.se",
+];
 const BUTTON_HOSTS: &[&str] = &["song.link", "album.link"];
 
 /// Listening (2), or Playing (0) when the client refuses Listening.
@@ -123,10 +132,15 @@ fn host_ok(url: &str, hosts: &[&str], max: usize) -> bool {
         && u.query().is_none()
         && u.username().is_empty()
         && u.port().is_none()
-        && u.host_str().is_some_and(|h| hosts.contains(&h))
+        && u.host_str().is_some_and(|h| {
+            hosts.iter().any(|allowed| match allowed.strip_prefix('.') {
+                Some(parent) => h.strip_suffix(parent).is_some_and(|sub| sub.len() > 1 && sub.ends_with('.')),
+                None => h == *allowed,
+            })
+        })
 }
 
-/// Public cover hosts only (Cover Art Archive, Imgur and catbox.moe).
+/// Public cover hosts only (Cover Art Archive and the upload hosts).
 pub fn image_allowed(url: &str) -> bool {
     host_ok(url, IMAGE_HOSTS, IMAGE_MAX)
 }
@@ -362,6 +376,10 @@ mod tests {
             "https://abc.plex.direct:32400/photo/:/transcode?url=x",
             "https://i.imgur.com/a.jpg?X-Plex-Token=secret",
             "https://i.imgur.com.evil.example/a.jpg",
+            "https://uguu.se.evil.example/a.jpg",
+            "https://eviluguu.se/a.jpg",
+            "https://.uguu.se/a.jpg",
+            "https://x0.at.evil.example/a.jpg",
             "/library/metadata/1/thumb/2",
         ] {
             assert!(!image_allowed(bad), "{bad}");
@@ -371,6 +389,9 @@ mod tests {
             assert!(a.get("buttons").is_none());
         }
         assert!(image_allowed("https://i.imgur.com/AbC123.jpg"));
+        for good in ["https://litter.catbox.moe/a1.jpg", "https://x0.at/Ab3.jpg", "https://n.uguu.se/xYz.jpg"] {
+            assert!(image_allowed(good), "{good}");
+        }
         assert!(button_allowed("https://album.link/i/5"));
     }
 

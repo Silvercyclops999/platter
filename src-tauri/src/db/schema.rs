@@ -624,6 +624,15 @@ CREATE TABLE IF NOT EXISTS album_mb_check (
     expires_at       INTEGER NOT NULL
 ) WITHOUT ROWID;
 "#,
+    // v24: Discord covers go to more than one upload host, some of which
+    // delete files after hours or days (platform::discord::hosts). `host`
+    // names the upload host and `link_expires_at` is when it deletes the
+    // file (NULL: kept). Earlier Imgur and catbox.moe links are kept.
+    r#"
+ALTER TABLE discord_art ADD COLUMN host TEXT;
+ALTER TABLE discord_art ADD COLUMN link_expires_at INTEGER;
+UPDATE discord_art SET host = source WHERE source IN ('imgur', 'catbox');
+"#,
 ];
 
 #[cfg(test)]
@@ -803,6 +812,31 @@ mod tests {
                 .is_err(),
             "one row per album"
         );
+    }
+
+    #[test]
+    fn discord_art_gets_upload_hosts_and_keeps_earlier_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        let before = MIGRATIONS.iter().position(|m| m.contains("link_expires_at")).unwrap();
+        migrate_to(&mut c, before).unwrap();
+        c.execute_batch(
+            "INSERT INTO discord_art (album_id, url, source, fetched_at, expires_at) VALUES
+                 ('1', 'https://files.catbox.moe/a.jpg', 'catbox', 1, 9223372036854775807),
+                 ('2', NULL, 'caa', 1, 2)",
+        )
+        .unwrap();
+        migrate(&mut c).unwrap();
+        let row = |id: &str| {
+            c.query_row(
+                "SELECT url, host, link_expires_at, expires_at FROM discord_art WHERE album_id = ?1",
+                [id],
+                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, i64>(3)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(row("1"), (Some("https://files.catbox.moe/a.jpg".into()), Some("catbox".into()), None, i64::MAX));
+        assert_eq!(row("2"), (None, None, None, 2));
     }
 
     #[test]

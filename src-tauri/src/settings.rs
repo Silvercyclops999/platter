@@ -23,6 +23,7 @@ use crate::db::{ArtCache, DbHandle, PopularSource};
 use crate::downloads::{self, DownloadQuality};
 use crate::error::{AppError, AppResult};
 use crate::platform::discord::activity::StatusLine;
+use crate::platform::discord::hosts::CoverHost;
 use crate::platform::discord::{DiscordSettings, DiscordSwitches};
 use crate::platform::{PlatformSettings, Switches};
 use crate::tracking::TrackingSettings;
@@ -332,8 +333,11 @@ pub struct Settings {
     pub discord_cover_archive: bool,
     /// Upload covers to Imgur with the user's client id (kept in the keychain).
     pub discord_upload_art: bool,
-    /// Upload covers to catbox.moe (no key; public and permanent).
-    pub discord_upload_catbox: bool,
+    /// Upload covers Cover Art Archive lacks (mostly unreleased songs) to
+    /// keyless image hosts. Saved as `discordUploadCatbox` before.
+    pub discord_upload_covers: bool,
+    /// Which keyless hosts: automatic (in order) or one.
+    pub discord_cover_host: CoverHost,
     /// What Discord's member list shows after "Listening to".
     pub discord_status_line: StatusLine,
     /// The top bar shows the Plex profile picture (this device only).
@@ -558,7 +562,8 @@ impl Default for Settings {
             discord_find_song: true,
             discord_cover_archive: true,
             discord_upload_art: false,
-            discord_upload_catbox: false,
+            discord_upload_covers: false,
+            discord_cover_host: CoverHost::Auto,
             discord_status_line: StatusLine::App,
             show_plex_avatar: true,
             libraries: Vec::new(),
@@ -740,7 +745,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "discordFindSong",
     "discordCoverArchive",
     "discordUploadArt",
-    "discordUploadCatbox",
+    "discordUploadCovers",
+    "discordCoverHost",
     "discordStatusLine",
     "showPlexAvatar",
     "libraries",
@@ -848,7 +854,8 @@ pub struct SettingsPatch {
     pub discord_find_song: Option<bool>,
     pub discord_cover_archive: Option<bool>,
     pub discord_upload_art: Option<bool>,
-    pub discord_upload_catbox: Option<bool>,
+    pub discord_upload_covers: Option<bool>,
+    pub discord_cover_host: Option<CoverHost>,
     pub discord_status_line: Option<StatusLine>,
     pub show_plex_avatar: Option<bool>,
     /// Every included library besides the main one (replaces the list).
@@ -1043,7 +1050,8 @@ impl Settings {
         set(&mut self.discord_find_song, p.discord_find_song);
         set(&mut self.discord_cover_archive, p.discord_cover_archive);
         set(&mut self.discord_upload_art, p.discord_upload_art);
-        set(&mut self.discord_upload_catbox, p.discord_upload_catbox);
+        set(&mut self.discord_upload_covers, p.discord_upload_covers);
+        set(&mut self.discord_cover_host, p.discord_cover_host);
         set(&mut self.discord_status_line, p.discord_status_line);
         set(&mut self.show_plex_avatar, p.show_plex_avatar);
         if let Some(v) = &p.libraries {
@@ -1280,7 +1288,8 @@ impl Settings {
             find_song: self.discord_find_song,
             cover_archive: self.discord_cover_archive,
             upload_art: self.discord_upload_art,
-            upload_catbox: self.discord_upload_catbox,
+            upload_covers: self.discord_upload_covers,
+            cover_host: self.discord_cover_host,
             status_line: self.discord_status_line,
             private_session: self.private_session,
             listen_along: self.discord_listen_along,
@@ -1294,7 +1303,9 @@ pub fn load(db: &DbHandle) -> Settings {
         .read(|c| kv_get(c, KEY))
         .ok()
         .flatten()
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .map(migrate_names)
+        .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
     s.clamp();
     // Ids saved before they carried their server (crate::sid).
@@ -1302,6 +1313,21 @@ pub fn load(db: &DbHandle) -> Settings {
         *ids = crate::sid::resolve_all(ids);
     }
     s
+}
+
+/// Settings saved under an earlier name keep their value under the new one.
+pub fn migrate_names(mut v: serde_json::Value) -> serde_json::Value {
+    const RENAMED: &[(&str, &str)] = &[("discordUploadCatbox", "discordUploadCovers")];
+    if let Some(o) = v.as_object_mut() {
+        for (old, new) in RENAMED {
+            if let Some(val) = o.remove(*old)
+                && !o.contains_key(*new)
+            {
+                o.insert((*new).to_owned(), val);
+            }
+        }
+    }
+    v
 }
 
 pub fn save(db: &DbHandle, s: &Settings) -> AppResult<()> {
@@ -1781,7 +1807,7 @@ mod tests {
         assert!(s.discord_status && s.discord_show_unreleased && s.discord_unreleased_art && s.discord_clear_on_pause);
         assert!(s.discord_find_song && s.discord_cover_archive && !s.discord_upload_art);
         assert_eq!(s.discord_status_line, StatusLine::App);
-        assert!(!s.discord_upload_catbox);
+        assert!(!s.discord_upload_covers);
         assert!(s.show_plex_avatar);
         assert!(s.read_file_tags && s.group_editions && !s.show_fan_edits);
         assert!(s.drag_and_drop);
@@ -2008,7 +2034,7 @@ mod tests {
             discord_clear_on_pause: Some(false),
             discord_upload_art: Some(true),
             discord_status_line: Some(StatusLine::Artist),
-            discord_upload_catbox: Some(true),
+            discord_upload_covers: Some(true),
             private_session: Some(true),
             ..Default::default()
         })
@@ -2017,7 +2043,7 @@ mod tests {
         let d = live.discord.get();
         assert!(!d.enabled && !d.clear_on_pause && d.upload_art && d.private_session);
         assert_eq!(d.status_line, StatusLine::Artist);
-        assert!(d.upload_catbox);
+        assert!(d.upload_covers);
         assert_eq!(serde_json::to_value(&s).unwrap()["discordStatusLine"], "artist");
         assert!(d.show_unreleased && d.unreleased_art && d.find_song && d.cover_archive);
     }
@@ -2040,6 +2066,29 @@ mod tests {
         );
         assert_eq!((s.precache_count, s.art_cache_mb), (5, 2048));
         assert_eq!((s.popular_source, s.artwork_colours, s.reduce_motion), (PopularSource::Global, true, ReduceMotion::System));
+    }
+
+    #[test]
+    fn the_old_catbox_switch_becomes_cover_uploads_with_automatic_hosts() {
+        let (db, _d) = db();
+        db.write(|c| kv_set(c, KEY, r#"{"discordUploadCatbox":true,"discordUploadArt":true}"#)).unwrap();
+        let s = load(&db);
+        assert!(s.discord_upload_covers && s.discord_upload_art);
+        assert_eq!(s.discord_cover_host, CoverHost::Auto);
+        let saved = serde_json::to_value(&s).unwrap();
+        assert_eq!(saved["discordUploadCovers"], true);
+        assert!(saved.get("discordUploadCatbox").is_none(), "saved under the new name only");
+        db.write(|c| kv_set(c, KEY, r#"{"discordUploadCatbox":false}"#)).unwrap();
+        assert!(!load(&db).discord_upload_covers);
+        // The new name wins if both are somehow there.
+        let v = migrate_names(serde_json::json!({ "discordUploadCatbox": true, "discordUploadCovers": false }));
+        assert_eq!(v, serde_json::json!({ "discordUploadCovers": false }));
+        // The host choice is saved and published.
+        let mut s = Settings::default();
+        s.apply(&serde_json::from_str(r#"{"discordUploadCovers":true,"discordCoverHost":"x0"}"#).unwrap()).unwrap();
+        assert_eq!((s.discord().upload_covers, s.discord().cover_host), (true, CoverHost::X0));
+        assert!(serde_json::from_str::<SettingsPatch>(r#"{"discordCoverHost":"imgur"}"#).is_err());
+        assert!(DEVICE_SETTINGS.contains(&"discordUploadCovers") && DEVICE_SETTINGS.contains(&"discordCoverHost"));
     }
 
     #[test]
@@ -2120,7 +2169,7 @@ mod tests {
             discord_find_song: Some(false),
             discord_cover_archive: Some(false),
             discord_upload_art: Some(true),
-            discord_upload_catbox: Some(true),
+            discord_upload_covers: Some(true),
             discord_status_line: Some(StatusLine::Song),
             show_plex_avatar: Some(false),
             lyrics_mode: Some(LyricsMode::Off),

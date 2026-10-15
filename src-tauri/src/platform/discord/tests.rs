@@ -48,11 +48,20 @@ struct FakeArt {
     outcome: Mutex<ArtOutcome>,
     delay: Duration,
     calls: AtomicUsize,
+    /// What a re-upload gives, and the failed links each one was asked with.
+    replacement: Mutex<ArtOutcome>,
+    replaced: Mutex<Vec<Vec<String>>>,
 }
 
 impl FakeArt {
     fn new(outcome: ArtOutcome) -> Self {
-        Self { outcome: Mutex::new(outcome), delay: Duration::ZERO, calls: AtomicUsize::new(0) }
+        Self {
+            outcome: Mutex::new(outcome),
+            delay: Duration::ZERO,
+            calls: AtomicUsize::new(0),
+            replacement: Mutex::new(ArtOutcome::None),
+            replaced: Mutex::default(),
+        }
     }
 }
 
@@ -62,6 +71,10 @@ impl CoverArt for FakeArt {
         self.calls.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(self.delay).await;
         self.outcome.lock().clone()
+    }
+    async fn replace(&self, _: &ArtRequest, failed: &[String]) -> ArtOutcome {
+        self.replaced.lock().push(failed.to_vec());
+        self.replacement.lock().clone()
     }
     fn key_state(&self) -> KeyState {
         KeyState::default()
@@ -122,6 +135,10 @@ struct Rig {
 }
 
 fn rig_with(art: FakeArt, lib: FakeLib, settings: DiscordSettings) -> Rig {
+    rig_cfg(art, lib, settings, |_| {})
+}
+
+fn rig_cfg(art: FakeArt, lib: FakeLib, settings: DiscordSettings, tweak: impl FnOnce(&mut Config)) -> Rig {
     let discord = FakeDiscord::new();
     let (events, rx) = broadcast::channel(64);
     let switches = DiscordSwitches::default();
@@ -139,6 +156,7 @@ fn rig_with(art: FakeArt, lib: FakeLib, settings: DiscordSettings) -> Rig {
     };
     let mut cfg = Config::new("1234567890");
     cfg.clock = Arc::new(now_ms);
+    tweak(&mut cfg);
     let (handle, task) = spawn(cfg, deps, rx, switches.subscribe());
     Rig { proxy, discord, events, switches, handle, art, lib, statuses, task }
 }
@@ -605,14 +623,27 @@ type Post = (String, Vec<(&'static str, String)>, String, Vec<u8>);
 #[derive(Default)]
 struct FakeUpload {
     answer: Mutex<Option<HttpResponse>>,
+    /// Answers by upload URL, ahead of `answer` (None: the host is down).
+    routes: Mutex<Vec<(&'static str, Option<HttpResponse>)>>,
     log: Mutex<Vec<Post>>,
+}
+
+impl FakeUpload {
+    fn route(&self, url: &'static str, r: Option<HttpResponse>) {
+        self.routes.lock().retain(|(u, _)| *u != url);
+        self.routes.lock().push((url, r));
+    }
+    fn urls(&self) -> Vec<String> {
+        self.log.lock().iter().map(|p| p.0.clone()).collect()
+    }
 }
 
 #[async_trait]
 impl UploadHttp for FakeUpload {
     async fn post(&self, url: &str, headers: &[(&'static str, String)], ct: &str, body: Vec<u8>) -> crate::error::AppResult<HttpResponse> {
         self.log.lock().push((url.into(), headers.to_vec(), ct.into(), body));
-        match self.answer.lock().clone() {
+        let routed = self.routes.lock().iter().find(|(u, _)| *u == url).map(|(_, r)| r.clone());
+        match routed.unwrap_or_else(|| self.answer.lock().clone()) {
             Some(r) => Ok(r),
             None => Err(crate::error::AppError::Network("connection refused".into())),
         }
@@ -633,6 +664,7 @@ struct Covers3 {
     mbids: Arc<Mbids>,
     keys: Arc<MemoryStore>,
     r: ArtResolver,
+    db: DbHandle,
     _dir: tempfile::TempDir,
 }
 
@@ -643,9 +675,9 @@ fn resolver(mbid: Option<&str>) -> Covers3 {
     let up = Arc::new(FakeUpload::default());
     let mbids = Arc::new(Mbids(mbid.map(str::to_owned), AtomicUsize::new(0)));
     let keys = Arc::new(MemoryStore::new());
-    let r = ArtResolver::new(db, http.clone(), up.clone(), mbids.clone(), Arc::new(Covers), keys.clone())
+    let r = ArtResolver::new(db.clone(), http.clone(), up.clone(), mbids.clone(), Arc::new(Covers), keys.clone())
         .with_musicbrainz_limiter(Arc::new(crate::artistinfo::limit::Limiter::per_second(1000.0)));
-    Covers3 { http, up, mbids, keys, r, _dir: dir }
+    Covers3 { http, up, mbids, keys, r, db, _dir: dir }
 }
 
 use crate::db::DbHandle;
@@ -659,7 +691,8 @@ fn req(upload: bool) -> ArtRequest {
         unreleased: false,
         use_archive: true,
         upload,
-        catbox: false,
+        anon: false,
+        hosts: CoverHost::Auto,
     }
 }
 
@@ -744,7 +777,7 @@ async fn unreleased_albums_are_never_looked_up_only_uploaded() {
     assert!(c.http.urls().is_empty(), "nothing sent: {:?}", c.http.urls());
     assert_eq!(c.mbids.1.load(Ordering::SeqCst), 0);
     *c.up.answer.lock() = Some(catbox_ok());
-    let demo = ArtRequest { catbox: true, ..demo };
+    let demo = ArtRequest { anon: true, hosts: CoverHost::Catbox, ..demo };
     assert_eq!(c.r.resolve(&demo).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
     assert_eq!(c.http.urls(), vec!["https://files.catbox.moe/ab12cd.jpg".to_string()], "only the fresh upload is fetched");
 }
@@ -772,7 +805,7 @@ async fn order_is_release_id_then_search_then_upload_then_icon() {
     c.http.route("musicbrainz.org", 200, r#"{"release-groups":[]}"#);
     c.keys.set(IMGUR_ACCOUNT, &crate::plex::token::Token::new("k").unwrap()).unwrap();
     *c.up.answer.lock() = Some(imgur_ok());
-    let both = ArtRequest { catbox: true, ..req(true) };
+    let both = ArtRequest { anon: true, hosts: CoverHost::Catbox, ..req(true) };
     assert_eq!(c.r.resolve(&both).await, ArtOutcome::Url("https://i.imgur.com/AbC123.jpg".into()));
     assert_eq!(c.up.log.lock()[0].0, IMGUR_UPLOAD);
 
@@ -788,7 +821,7 @@ async fn catbox_uploads_once_without_a_key() {
     let c = resolver(None);
     c.http.route("musicbrainz.org", 200, r#"{"release-groups":[]}"#);
     *c.up.answer.lock() = Some(catbox_ok());
-    let r = ArtRequest { catbox: true, ..req(false) };
+    let r = ArtRequest { anon: true, hosts: CoverHost::Catbox, ..req(false) };
     assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
     assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
     assert_eq!(c.up.log.lock().len(), 1, "one upload per album");
@@ -804,7 +837,7 @@ async fn catbox_uploads_once_without_a_key() {
     c.http.route("api.imgur.com/3/credits", 403, "{}");
     c.r.set_key(Some("bad".into())).await.unwrap();
     *c.up.answer.lock() = Some(catbox_ok());
-    let both = ArtRequest { catbox: true, ..req(true) };
+    let both = ArtRequest { anon: true, hosts: CoverHost::Catbox, ..req(true) };
     assert_eq!(c.r.resolve(&both).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
 }
 
@@ -813,12 +846,12 @@ async fn a_catbox_answer_that_isnt_its_file_link_is_not_used() {
     for body in ["https://evil.example/a.jpg", "Something went wrong", "https://catbox.moe/a.jpg"] {
         let c = resolver(None);
         *c.up.answer.lock() = Some(HttpResponse { status: 200, body: body.to_owned().into(), ..Default::default() });
-        let r = ArtRequest { catbox: true, use_archive: false, ..req(false) };
+        let r = ArtRequest { anon: true, hosts: CoverHost::Catbox, use_archive: false, ..req(false) };
         assert!(matches!(c.r.resolve(&r).await, ArtOutcome::UploadFailed(_)), "{body}");
     }
     let c = resolver(None);
     *c.up.answer.lock() = Some(HttpResponse { status: 412, ..Default::default() });
-    let r = ArtRequest { catbox: true, use_archive: false, ..req(false) };
+    let r = ArtRequest { anon: true, hosts: CoverHost::Catbox, use_archive: false, ..req(false) };
     assert!(matches!(c.r.resolve(&r).await, ArtOutcome::UploadFailed(_)));
     assert!(matches!(c.r.resolve(&r).await, ArtOutcome::UploadFailed(_)));
     assert_eq!(c.up.log.lock().len(), 1, "not retried this session");
@@ -919,7 +952,7 @@ async fn a_fresh_upload_is_fetched_once_before_use_and_a_cached_one_is_not() {
     let c = resolver(None);
     c.http.route("musicbrainz.org", 200, r#"{"release-groups":[]}"#);
     *c.up.answer.lock() = Some(catbox_ok());
-    let r = ArtRequest { catbox: true, ..req(false) };
+    let r = ArtRequest { anon: true, hosts: CoverHost::Catbox, ..req(false) };
     assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
     assert_eq!(c.http.urls().last().unwrap(), "https://files.catbox.moe/ab12cd.jpg");
     assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
@@ -941,7 +974,7 @@ async fn a_fresh_upload_is_fetched_once_before_use_and_a_cached_one_is_not() {
     let c = resolver(None);
     c.http.fail("files.catbox.moe");
     *c.up.answer.lock() = Some(catbox_ok());
-    let r = ArtRequest { catbox: true, use_archive: false, ..req(false) };
+    let r = ArtRequest { anon: true, hosts: CoverHost::Catbox, use_archive: false, ..req(false) };
     assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url("https://files.catbox.moe/ab12cd.jpg".into()));
 
     // Cover Art Archive covers aren't uploads: never fetched by us.
@@ -967,6 +1000,325 @@ fn an_empty_build_time_id_means_unavailable() {
     if let Some(id) = app_id() {
         assert!(id.bytes().all(|b| b.is_ascii_digit()));
     }
+}
+
+// ---------------------------------------------------------------- upload hosts
+
+use super::hosts::{HostAdapter, LITTERBOX_UPLOAD, UGUU_UPLOAD, X0_UPLOAD, direct_image};
+use crate::db::queries::now_s;
+
+const LITTER: &str = "https://litter.catbox.moe/ab12cd.jpg";
+const X0_LINK: &str = "https://x0.at/Qr7.jpg";
+const UGUU_LINK: &str = "https://n.uguu.se/xYzAbC.jpg";
+const CATBOX_LINK: &str = "https://files.catbox.moe/ab12cd.jpg";
+
+fn text(body: &str) -> Option<HttpResponse> {
+    Some(HttpResponse { status: 200, body: body.to_owned().into(), ..Default::default() })
+}
+
+fn uguu_ok() -> Option<HttpResponse> {
+    text(&format!(r#"{{"success":true,"files":[{{"hash":"h","filename":"xYzAbC.jpg","url":"{UGUU_LINK}","size":9}}]}}"#))
+}
+
+fn server_error() -> Option<HttpResponse> {
+    Some(HttpResponse { status: 502, ..Default::default() })
+}
+
+/// Keyless uploads on, automatic hosts, no Cover Art Archive.
+fn keyless(hosts: CoverHost) -> ArtRequest {
+    ArtRequest { anon: true, hosts, use_archive: false, unreleased: true, ..req(false) }
+}
+
+fn all_hosts_ok(c: &Covers3) {
+    c.up.route(LITTERBOX_UPLOAD, text(LITTER));
+    c.up.route(X0_UPLOAD, text(X0_LINK));
+    c.up.route(UGUU_UPLOAD, uguu_ok());
+    c.up.route(CATBOX_UPLOAD, text(CATBOX_LINK));
+}
+
+#[tokio::test]
+async fn keyless_hosts_go_litterbox_then_x0_then_uguu_then_catbox() {
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(LITTER.into()));
+    assert_eq!(c.up.urls(), vec![LITTERBOX_UPLOAD.to_string()]);
+    let body = String::from_utf8_lossy(&c.up.log.lock()[0].3).into_owned();
+    assert!(body.contains("name=\"reqtype\"\r\n\r\nfileupload\r\n") && body.contains("name=\"time\"\r\n\r\n72h\r\n"));
+    assert!(body.contains("name=\"fileToUpload\"") && body.contains("JPEGDATA") && !body.contains("Record"));
+
+    // Each host down in turn: the next one.
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    c.up.route(LITTERBOX_UPLOAD, server_error());
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(X0_LINK.into()));
+    assert!(String::from_utf8_lossy(&c.up.log.lock()[1].3).contains("name=\"file\""));
+
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    c.up.route(LITTERBOX_UPLOAD, None);
+    c.up.route(X0_UPLOAD, server_error());
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(UGUU_LINK.into()));
+    assert!(String::from_utf8_lossy(&c.up.log.lock()[2].3).contains("name=\"files[]\""));
+
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    c.up.route(LITTERBOX_UPLOAD, None);
+    c.up.route(X0_UPLOAD, None);
+    c.up.route(UGUU_UPLOAD, server_error());
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(CATBOX_LINK.into()));
+    assert_eq!(c.up.urls(), vec![LITTERBOX_UPLOAD, X0_UPLOAD, UGUU_UPLOAD, CATBOX_UPLOAD]);
+
+    // All down: a failure, and not tried again this session.
+    let c = resolver(None);
+    assert!(matches!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::UploadFailed(_)));
+    assert_eq!(c.up.urls().len(), 4);
+    assert!(matches!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::UploadFailed(_)));
+    assert_eq!(c.up.urls().len(), 4);
+
+    // One host picked: only that one.
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Uguu)).await, ArtOutcome::Url(UGUU_LINK.into()));
+    assert_eq!(c.up.urls(), vec![UGUU_UPLOAD]);
+}
+
+#[test]
+fn each_host_only_takes_a_direct_image_link_on_itself() {
+    let ok = |b: &str| HttpResponse { status: 200, body: b.to_owned().into(), ..Default::default() };
+    assert_eq!(super::hosts::Litterbox.link(&ok(" https://litter.catbox.moe/a1.jpg\n")).unwrap(), "https://litter.catbox.moe/a1.jpg");
+    assert_eq!(super::hosts::X0.link(&ok("http://x0.at/Ab.png")).unwrap(), "https://x0.at/Ab.png");
+    for (host, bad) in [
+        (Host::Litterbox, "https://files.catbox.moe/a.jpg"),
+        (Host::Litterbox, "https://litter.catbox.moe/"),
+        (Host::Litterbox, "https://litter.catbox.moe/a.html"),
+        (Host::X0, "https://x0.at/a"),
+        (Host::X0, "https://x0.at/dir/a.jpg"),
+        (Host::X0, "https://x0.at/a.jpg?x=1"),
+        (Host::Uguu, "https://uguu.se.evil.example/a.jpg"),
+        (Host::Catbox, "https://catbox.moe/a.jpg"),
+        (Host::Catbox, "Something went wrong"),
+    ] {
+        assert!(!direct_image(bad, host), "{bad}");
+    }
+    assert!(super::hosts::X0.link(&ok("File too large")).is_err());
+    assert!(super::hosts::Litterbox.link(&HttpResponse { status: 412, ..Default::default() }).is_err());
+    let uguu = |b: &str| super::hosts::Uguu.link(&ok(b));
+    assert_eq!(uguu(&String::from_utf8(uguu_ok().unwrap().body.to_vec()).unwrap()).unwrap(), UGUU_LINK);
+    assert!(uguu(r#"{"success":false,"files":[{"url":"https://n.uguu.se/a.jpg"}]}"#).is_err());
+    assert!(uguu(r#"{"success":true,"files":[{"url":"https://evil.example/a.jpg"}]}"#).is_err());
+    assert!(uguu("<html>busy</html>").is_err());
+    // How long each keeps a file.
+    assert_eq!(super::hosts::Litterbox.keeps(50_000), Some(72 * 3600));
+    assert_eq!(super::hosts::Uguu.keeps(50_000), Some(3 * 3600));
+    assert_eq!(super::hosts::Catbox.keeps(50_000), None);
+    let small = super::hosts::X0.keeps(60_000).unwrap();
+    assert!(small > 99 * 86_400 && small <= 100 * 86_400, "{small}");
+    assert_eq!(super::hosts::X0.keeps(usize::MAX), Some(3 * 86_400));
+}
+
+#[tokio::test]
+async fn a_host_that_answers_with_a_page_is_skipped() {
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    c.http.route_resp(
+        "litter.catbox.moe",
+        HttpResponse { status: 200, content_type: Some("text/html".into()), body: "<html>".into(), ..Default::default() },
+    );
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(X0_LINK.into()));
+}
+
+#[tokio::test]
+async fn imgur_stays_first_when_its_client_id_is_set() {
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    c.keys.set(IMGUR_ACCOUNT, &crate::plex::token::Token::new("client123").unwrap()).unwrap();
+    c.up.route(IMGUR_UPLOAD, Some(imgur_ok()));
+    let both = ArtRequest { upload: true, ..keyless(CoverHost::Auto) };
+    assert_eq!(c.r.resolve(&both).await, ArtOutcome::Url("https://i.imgur.com/AbC123.jpg".into()));
+    assert_eq!(c.up.urls(), vec![IMGUR_UPLOAD]);
+
+    // Imgur failing hands over to the keyless hosts.
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    c.keys.set(IMGUR_ACCOUNT, &crate::plex::token::Token::new("client123").unwrap()).unwrap();
+    c.up.route(IMGUR_UPLOAD, server_error());
+    assert_eq!(c.r.resolve(&both).await, ArtOutcome::Url(LITTER.into()));
+    assert_eq!(c.up.urls(), vec![IMGUR_UPLOAD, LITTERBOX_UPLOAD]);
+}
+
+fn put_link(c: &Covers3, url: &'static str, host: Host, fetched: i64, ends: Option<i64>) {
+    c.db.write(|db| put_upload(db, "al1", url, host, fetched, ends)).unwrap();
+}
+
+#[tokio::test]
+async fn short_lived_links_are_uploaded_again_before_they_go() {
+    let now = now_s();
+    let h = 3600;
+    // Litterbox: plenty left, used as is.
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    put_link(&c, "https://litter.catbox.moe/old.jpg", Host::Litterbox, now - 10 * h, Some(now + 62 * h));
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url("https://litter.catbox.moe/old.jpg".into()));
+    assert!(c.up.urls().is_empty());
+    // Under 12 hours left: uploaded again, and the new link kept with its end.
+    put_link(&c, "https://litter.catbox.moe/old.jpg", Host::Litterbox, now - 61 * h, Some(now + 11 * h));
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(LITTER.into()));
+    assert_eq!(c.up.urls().len(), 1);
+    let row = c.db.read(|db| get(db, "al1")).unwrap().unwrap();
+    assert_eq!((row.source.as_str(), row.host.as_deref()), ("litterbox", Some("litterbox")));
+    let ends = row.link_expires_at.unwrap() - row.fetched_at;
+    assert_eq!(ends, 72 * h);
+    // Gone already: uploaded again.
+    put_link(&c, "https://litter.catbox.moe/old.jpg", Host::Litterbox, now - 80 * h, Some(now - 8 * h));
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(LITTER.into()));
+    assert_eq!(c.up.urls().len(), 2);
+    // uguu.se keeps 3 hours: used for the first half of that.
+    put_link(&c, "https://n.uguu.se/old.jpg", Host::Uguu, now - h, Some(now + 2 * h));
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url("https://n.uguu.se/old.jpg".into()));
+    put_link(&c, "https://n.uguu.se/old.jpg", Host::Uguu, now - 2 * h, Some(now + h));
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(LITTER.into()));
+    assert_eq!(c.up.urls().len(), 3);
+}
+
+#[tokio::test]
+async fn earlier_catbox_links_are_kept() {
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    // As an earlier build saved it (and the migration filled in the host).
+    c.db.write(|db| {
+        db.execute(
+            "INSERT INTO discord_art (album_id, url, source, fetched_at, expires_at, host) VALUES ('al1', ?1, 'catbox', 1, ?2, 'catbox')",
+            rusqlite::params![CATBOX_LINK, i64::MAX],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(CATBOX_LINK.into()));
+    assert!(c.up.urls().is_empty(), "no new upload");
+    assert!(c.http.urls().is_empty(), "not fetched again");
+    // With one other host picked, that host's link is made instead.
+    assert_eq!(c.r.resolve(&keyless(CoverHost::X0)).await, ArtOutcome::Url(X0_LINK.into()));
+    // Uploads off: no uploaded link is used.
+    let off = ArtRequest { anon: false, ..keyless(CoverHost::Auto) };
+    assert_eq!(c.r.resolve(&off).await, ArtOutcome::None);
+}
+
+#[tokio::test]
+async fn replacing_a_cover_moves_down_the_chain() {
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    let r = keyless(CoverHost::Auto);
+    assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url(LITTER.into()));
+    assert_eq!(c.r.replace(&r, &[LITTER.into()]).await, ArtOutcome::Url(X0_LINK.into()));
+    assert_eq!(c.db.read(|db| get(db, "al1")).unwrap().unwrap().url.as_deref(), Some(X0_LINK), "the new link is kept");
+    assert_eq!(c.r.resolve(&r).await, ArtOutcome::Url(X0_LINK.into()));
+    assert_eq!(c.r.replace(&r, &[LITTER.into(), X0_LINK.into()]).await, ArtOutcome::Url(UGUU_LINK.into()));
+    assert_eq!(
+        c.r.replace(&r, &[LITTER.into(), X0_LINK.into(), UGUU_LINK.into()]).await,
+        ArtOutcome::Url(CATBOX_LINK.into())
+    );
+    let n = c.up.urls().len();
+    let all = [LITTER.into(), X0_LINK.into(), UGUU_LINK.into(), CATBOX_LINK.into()];
+    assert_eq!(c.r.replace(&r, &all).await, ArtOutcome::None, "nothing left");
+    // A kept catbox link that fails starts the chain from the top.
+    assert_eq!(c.r.replace(&r, &[CATBOX_LINK.into()]).await, ArtOutcome::Url(LITTER.into()));
+    // Not an upload: nothing to replace.
+    assert_eq!(c.r.replace(&r, &[COVER.into()]).await, ArtOutcome::None);
+    assert_eq!(c.up.urls().len(), n + 1);
+}
+
+#[test]
+fn covers_are_sent_as_small_jpegs() {
+    // A big PNG becomes a 512 px JPEG.
+    let img = image::RgbImage::from_pixel(1200, 900, image::Rgb([200, 40, 40]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let (out, ty) = prepare_cover(png, "image/png".into());
+    assert_eq!(ty, "image/jpeg");
+    let back = image::load_from_memory(&out).unwrap();
+    assert_eq!((back.width(), back.height()), (512, 384));
+    assert_eq!(image::guess_format(&out).unwrap(), image::ImageFormat::Jpeg);
+    // A small JPEG goes as it is.
+    let mut jpeg = Vec::new();
+    image::DynamicImage::ImageRgb8(image::RgbImage::new(300, 300))
+        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+        .unwrap();
+    assert_eq!(prepare_cover(jpeg.clone(), "image/jpeg".into()), (jpeg, "image/jpeg".to_string()));
+    // Something unreadable goes as it came.
+    assert_eq!(prepare_cover(b"nope".to_vec(), "image/jpeg".into()), (b"nope".to_vec(), "image/jpeg".to_string()));
+}
+
+// ---------------------------------------------------------------- proxy failure and the send limit
+
+#[tokio::test(start_paused = true)]
+async fn a_cover_the_proxy_refuses_is_uploaded_to_the_next_host_and_sent_once_more() {
+    let art = FakeArt::new(ArtOutcome::Url(LITTER.into()));
+    *art.replacement.lock() = ArtOutcome::Url(X0_LINK.into());
+    let r = rig_with(art, FakeLib::default(), DiscordSettings::default());
+    r.proxy.script.lock().push_back((502, "text/plain"));
+    r.events.send(started(song("1"))).unwrap();
+    wait(3.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 2, "sent again at once, not after the gap: {acts:?}");
+    assert_eq!(acts[0].as_ref().unwrap()["assets"]["large_image"], LITTER);
+    assert_eq!(acts[1].as_ref().unwrap()["assets"]["large_image"], X0_LINK);
+    assert_eq!(*r.art.replaced.lock(), vec![vec![LITTER.to_string()]]);
+    assert!(r.proxy.log.lock()[1].0.contains("x0.at"), "the new link is checked");
+    // The first link's own recheck still runs, but changes nothing now.
+    wait(70.0).await;
+    assert_eq!(r.discord.activities().len(), 2, "exactly one resend");
+    assert_eq!(r.art.replaced.lock().len(), 1);
+    assert_eq!(r.proxy.calls(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn when_no_host_is_left_the_song_shows_the_app_icon() {
+    let art = FakeArt::new(ArtOutcome::Url(LITTER.into()));
+    *art.replacement.lock() = ArtOutcome::Url(X0_LINK.into());
+    let r = rig_with(art, FakeLib::default(), DiscordSettings::default());
+    *r.proxy.then.lock() = (502, "text/plain");
+    r.events.send(started(song("1"))).unwrap();
+    wait(3.0).await;
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], X0_LINK);
+    // The second host fails too, and nothing is left.
+    *r.art.replacement.lock() = ArtOutcome::None;
+    wait(70.0).await;
+    assert_eq!(*r.art.replaced.lock(), vec![vec![LITTER.to_string()], vec![LITTER.to_string(), X0_LINK.to_string()]]);
+    assert_eq!(last(&r.discord).unwrap()["assets"]["large_image"], APP_ICON);
+    assert_eq!(last(&r.discord).unwrap()["details"], "Song 1");
+}
+
+#[tokio::test(start_paused = true)]
+async fn with_no_other_host_a_link_that_works_later_is_sent_again() {
+    let art = FakeArt::new(ArtOutcome::Url(LITTER.into()));
+    *art.replacement.lock() = ArtOutcome::None;
+    let r = rig_with(art, FakeLib::default(), DiscordSettings::default());
+    r.proxy.script.lock().push_back((502, "text/plain"));
+    r.events.send(started(song("1"))).unwrap();
+    wait(30.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 2, "{acts:?}");
+    assert_eq!(acts[1], acts[0], "the same status again");
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_more_than_five_updates_in_20s_and_the_last_state_still_goes() {
+    let r = rig_cfg(FakeArt::new(ArtOutcome::Url(COVER.into())), FakeLib::default(), DiscordSettings::default(), |c| {
+        c.gap = Duration::from_millis(100);
+    });
+    for i in 1..=12 {
+        r.events.send(started(song(&i.to_string()))).unwrap();
+        wait(1.0).await;
+    }
+    assert_eq!(r.discord.activities().len(), 5);
+    wait(7.0).await; // 19 s in
+    assert_eq!(r.discord.activities().len(), 5, "held back by the limit");
+    wait(3.0).await;
+    let acts = r.discord.activities();
+    assert_eq!(acts.len(), 6, "{acts:?}");
+    assert_eq!(last(&r.discord).unwrap()["details"], "Song 12", "newest wins");
+    wait(60.0).await;
+    assert_eq!(r.discord.activities().len(), 6);
 }
 
 #[tokio::test]

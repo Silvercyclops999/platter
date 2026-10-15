@@ -423,6 +423,7 @@ export interface LyricWord {
 
 export type LyricsMode = "autoShow" | "off";
 export type DiscordStatusLine = "app" | "artist" | "song";
+export type DiscordCoverHost = "auto" | "litterbox" | "x0" | "uguu" | "catbox";
 
 /** `now_playing_details`: extras for the now-playing panel. */
 export interface NowPlayingDetails {
@@ -758,8 +759,10 @@ export interface Settings {
   discordCoverArchive: boolean;
   /** Covers uploaded to Imgur with the user's client ID. */
   discordUploadArt: boolean;
-  /** Covers uploaded to catbox.moe (no key; public and permanent). */
-  discordUploadCatbox: boolean;
+  /** Covers Cover Art Archive lacks (mostly unreleased songs) uploaded to keyless image hosts. */
+  discordUploadCovers: boolean;
+  /** Which keyless host: automatic (in order) or one. */
+  discordCoverHost: DiscordCoverHost;
   /** What Discord's member list shows after "Listening to". */
   discordStatusLine: DiscordStatusLine;
   /** The top bar shows the Plex profile picture. This device only. */
@@ -1033,7 +1036,8 @@ export const DEFAULT_SETTINGS: Settings = {
   discordFindSong: true,
   discordCoverArchive: true,
   discordUploadArt: false,
-  discordUploadCatbox: false,
+  discordUploadCovers: false,
+  discordCoverHost: "auto",
   discordStatusLine: "app",
   showPlexAvatar: true,
   libraries: [],

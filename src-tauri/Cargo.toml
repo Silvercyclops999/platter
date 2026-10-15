@@ -34,6 +34,7 @@ tracing = "0.1.44"
 parking_lot = "0.12.5"
 futures = "0.3.34"
 url = "2.5.8"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 rand = "0.10.3"
 bytes = "1.12.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

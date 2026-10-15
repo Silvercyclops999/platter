@@ -305,7 +305,7 @@ describe("copying keys", () => {
     const lastfm = await within(dialog).findByRole("checkbox", { name: "Last.fm API key" });
     expect(lastfm).toBeChecked();
     expect(within(dialog).queryByRole("checkbox", { name: "Fanart.tv API key" })).toBeNull();
-    await user.click(within(dialog).getByRole("checkbox", { name: "catbox.moe uploads turned on" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: "Cover uploads for unreleased songs turned on" }));
     const field = within(dialog).getByRole("textbox", { name: "Code" });
     const sendButton = within(dialog).getByRole("button", { name: "Send" });
     expect(sendButton).toBeDisabled();
