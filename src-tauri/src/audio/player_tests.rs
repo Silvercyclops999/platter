@@ -310,10 +310,13 @@ async fn next_reports_a_skip_and_previous_follows_the_3s_rule() {
     let s = r.player.state().await.unwrap();
     assert_eq!(tid(&s.track), "b");
     assert_eq!(s.position_ms, 0);
-    // Within 3 s: previous goes back to "a".
+    // Within 3 s: previous goes back to "a", from its start. It plays at
+    // once, so on a busy machine a few blocks may be out before the state
+    // is read; anywhere near the 3 s mark would mean it didn't restart.
     r.player.previous().await.unwrap();
-    let s = wait_state(&r.player, |s| tid(&s.track) == "a").await;
-    assert_eq!(s.position_ms, 0);
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "a");
+    assert!(s.position_ms < 1_000, "{}", s.position_ms);
     next_tracking(&mut r.tracking, started("a")).await;
 }
 
@@ -350,6 +353,27 @@ async fn missing_first_track_skips_to_the_next() {
     next_tracking(&mut r.tracking, ended("b")).await;
     assert_eq!(r.player.problems().len(), 1);
     let want = concat(&r, &["b"]);
+    assert_eq!(settled_samples(&r.cap, want.len()).await, want);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn missing_next_track_failing_as_the_output_runs_dry_is_tried_once() {
+    // The preloaded next fails just as the playing track runs out: the
+    // failure must reach the player before the "ran dry" signal, or the
+    // player picks the broken entry again and reports it twice.
+    super::engine::HOLD_AFTER_FAIL.lock().push("held-gone".into());
+    let mut r = rig(&["held-a", "held-gone", "held-c"], 0.3, false, PlayerConfig::default()).await;
+    r.server.state.routes.lock().remove("/t/held-gone");
+    r.player
+        .play_context(ctx(&["held-a", "held-gone", "held-c"]), None, Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, ended("held-c")).await;
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert_eq!(r.player.problems().len(), 1);
+    assert_eq!(r.server.state.ranges_for("/t/held-gone").len(), 1, "fetched again");
+    let want = concat(&r, &["held-a", "held-c"]);
     assert_eq!(settled_samples(&r.cap, want.len()).await, want);
 }
 

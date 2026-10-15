@@ -1756,20 +1756,41 @@ fn mark_done(env: &Arc<Env>, key: u64, generation: u64) {
     }
 }
 
+/// Drops a segment that couldn't load and reports it. The event is sent
+/// under the mix lock: once the segment is gone the output can run dry and
+/// report `Drained`, and the player must see the failure first or it would
+/// pick the broken entry again.
 fn fail(env: &Env, key: u64, track: &Track, error: AppError) {
-    let tag = {
+    {
         let mut m = env.core.mix.lock();
         let Some(idx) = m.segments.iter().position(|s| s.key == key) else { return };
         let seg = m.segments.remove(idx).expect("index valid");
-        seg.tag
-    };
+        let _ = env.core.events.send(EngineEvent::Failed {
+            key,
+            tag: seg.tag,
+            track_id: track.id.clone(),
+            error,
+        });
+    }
     env.core.cv.notify_all();
-    let _ = env.core.events.send(EngineEvent::Failed {
-        key,
-        tag,
-        track_id: track.id.clone(),
-        error,
-    });
+    #[cfg(test)]
+    hold_after_fail(&env.core, &track.id);
+}
+
+/// Track ids whose failure holds the loader (after the segment is gone)
+/// until the output has run dry, so tests get the worst ordering.
+#[cfg(test)]
+pub(crate) static HOLD_AFTER_FAIL: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+#[cfg(test)]
+fn hold_after_fail(core: &Core, track_id: &str) {
+    if !HOLD_AFTER_FAIL.lock().iter().any(|id| id == track_id) {
+        return;
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !core.mix.lock().drained_sent && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<LoaderCtl>) {
