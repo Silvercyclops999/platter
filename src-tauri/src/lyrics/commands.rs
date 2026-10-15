@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use super::user::{self, OwnLyrics};
-use super::{LyricsService, ServerLyrics, Shown};
+use super::{CandidateList, LyricsService, ServerLyrics, Shown};
 use crate::error::{AppError, AppResult};
 use crate::plex::PlexState;
 use crate::plex::details::{Lyrics, fetch_lyrics};
@@ -24,6 +24,72 @@ impl ServerLyrics for PlexSource {
 #[tauri::command]
 pub async fn lyrics_get(lyrics: State<'_, LyricsService>, track_id: String) -> AppResult<Option<Shown>> {
     lyrics.shown(&track_id).await
+}
+
+/// A song's candidates were judged against the recording: `{ trackId }`.
+pub const EV_CHECKED: &str = "lyrics://checked";
+/// Lyrics choices changed (from the sync file).
+pub const EV_CHOICES: &str = "lyrics://choices";
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Checked<'a> {
+    track_id: &'a str,
+}
+
+impl<R: tauri::Runtime> super::checker::CheckEvents for AppHandle<R> {
+    fn checked(&self, track_id: &str) {
+        use tauri::Emitter;
+        let _ = self.emit(EV_CHECKED, Checked { track_id });
+    }
+}
+
+/// Every set of lyrics found for the song, for "Wrong lyrics?".
+#[tauri::command]
+pub async fn lyrics_candidates(lyrics: State<'_, LyricsService>, track_id: String) -> AppResult<CandidateList> {
+    lyrics.candidates(&track_id).await
+}
+
+/// Pick a song's lyrics: a candidate key, "none", or null for automatic.
+#[tauri::command]
+pub async fn lyrics_choose(
+    lyrics: State<'_, LyricsService>,
+    sync: State<'_, crate::sync::commands::SyncService>,
+    track_id: String,
+    pick: Option<String>,
+) -> AppResult<()> {
+    let c = lyrics.choose(&track_id, pick).await?;
+    sync.store.run(move |s| crate::sync::lyrics::chose(s, &track_id, &c)).await
+}
+
+/// Set a song's timing offset in ms (positive: the lyrics come later).
+#[tauri::command]
+pub async fn lyrics_offset(
+    lyrics: State<'_, LyricsService>,
+    sync: State<'_, crate::sync::commands::SyncService>,
+    track_id: String,
+    offset_ms: i32,
+) -> AppResult<()> {
+    let c = lyrics.set_offset(&track_id, offset_ms).await?;
+    sync.store.run(move |s| crate::sync::lyrics::chose(s, &track_id, &c)).await
+}
+
+/// How many songs have a lyrics choice (Settings).
+#[tauri::command]
+pub async fn lyrics_choices_count(lyrics: State<'_, LyricsService>) -> AppResult<usize> {
+    lyrics.choice_count().await
+}
+
+/// Forget every lyrics choice (Settings). Returns how many there were.
+#[tauri::command]
+pub async fn lyrics_choices_clear(
+    lyrics: State<'_, LyricsService>,
+    sync: State<'_, crate::sync::commands::SyncService>,
+) -> AppResult<usize> {
+    let ids = lyrics.clear_choices().await?;
+    let n = ids.len();
+    sync.store.run(move |s| crate::sync::lyrics::cleared(s, &ids)).await?;
+    Ok(n)
 }
 
 #[tauri::command]

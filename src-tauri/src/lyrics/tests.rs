@@ -46,6 +46,7 @@ struct Fx {
     prefer: Arc<AtomicBool>,
     show_auto: Arc<AtomicBool>,
     live_timing: Arc<AtomicBool>,
+    released_ok: Arc<AtomicBool>,
     db: DbHandle,
     _dir: tempfile::TempDir,
 }
@@ -76,14 +77,17 @@ fn fx() -> Fx {
     let prefer = Arc::new(AtomicBool::new(false));
     let show_auto = Arc::new(AtomicBool::new(true));
     let live_timing = Arc::new(AtomicBool::new(false));
+    let released_ok = Arc::new(AtomicBool::new(false));
     let switches = Switches {
         lrclib: on.clone(),
         prefer_own: prefer.clone(),
         show_auto: show_auto.clone(),
         live_timing: live_timing.clone(),
+        fix_timing: Arc::new(AtomicBool::new(true)),
+        released_ok: released_ok.clone(),
     };
     let svc = LyricsService::with_gap(db.clone(), http.clone(), plex.clone(), switches, Duration::from_millis(1));
-    Fx { svc, http, plex, on, prefer, show_auto, live_timing, db, _dir: dir }
+    Fx { svc, http, plex, on, prefer, show_auto, live_timing, released_ok, db, _dir: dir }
 }
 
 const SYNCED: &str = "[00:01.00]Hello\n[00:02.00]World";
@@ -116,12 +120,12 @@ fn urls_carry_only_the_words_and_length() {
 #[test]
 fn exact_reply_prefers_synced_and_skips_instrumentals() {
     let r = record("A", "B", 1.0, Some(SYNCED), Some("Hello\nWorld"));
-    assert_eq!(lrclib::parse_get(r.to_string().as_bytes()).unwrap().as_deref(), Some(SYNCED));
+    assert_eq!(lrclib::parse_get(r.to_string().as_bytes()).unwrap().and_then(|r| r.text(true)).as_deref(), Some(SYNCED));
     let plain = record("A", "B", 1.0, None, Some("Hello"));
-    assert_eq!(lrclib::parse_get(plain.to_string().as_bytes()).unwrap().as_deref(), Some("Hello"));
+    assert_eq!(lrclib::parse_get(plain.to_string().as_bytes()).unwrap().and_then(|r| r.text(true)).as_deref(), Some("Hello"));
     let mut inst = record("A", "B", 1.0, Some(SYNCED), None);
     inst["instrumental"] = true.into();
-    assert_eq!(lrclib::parse_get(inst.to_string().as_bytes()).unwrap(), None);
+    assert!(lrclib::parse_get(inst.to_string().as_bytes()).unwrap().is_none());
     assert!(lrclib::parse_get(b"not json").is_err());
 }
 
@@ -131,29 +135,32 @@ fn search_needs_the_same_artist_and_title() {
         record("Someone Else", "Opening", 200.0, Some(SYNCED), None),
         record("Test Artist", "Opening Night", 200.0, Some(SYNCED), None),
     ]);
-    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap(), None);
+    assert!(lrclib::search_hits(&q(200_000), body.to_string().as_bytes()).unwrap().is_empty());
     // Case, accents and a featured artist don't matter.
     let body = serde_json::json!([record("TEST ARTIST", "Opening (feat. Guest)", 200.0, None, Some("Words"))]);
-    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(), Some("Words"));
+    let hits = lrclib::search_hits(&q(200_000), body.to_string().as_bytes()).unwrap();
+    assert_eq!(hits[0].text(true).as_deref(), Some("Words"));
+}
+
+fn texts(hits: &[lrclib::Record]) -> Vec<String> {
+    hits.iter().filter_map(|r| r.text(true)).collect()
 }
 
 #[test]
-fn search_prefers_synced_then_the_closest_length() {
+fn search_hits_come_closest_length_first_synced_first_on_a_tie() {
     let body = serde_json::json!([
-        record("Test Artist", "Opening", 200.0, None, Some("plain, exact length")),
         record("Test Artist", "Opening", 206.0, Some("[00:01.00]far"), None),
+        record("Test Artist", "Opening", 200.0, None, Some("plain, exact length")),
         record("Test Artist", "Opening", 203.0, Some("[00:01.00]near"), None),
+        record("Test Artist", "Opening", 203.0, None, Some("near plain")),
     ]);
-    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(), Some("[00:01.00]near"));
-    // Synced lyrics more than 10 s off lose their times (they'd drift).
-    let body = serde_json::json!([record("Test Artist", "Opening", 260.0, Some("[00:01.00]Late line"), None)]);
-    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(), Some("Late line"));
-    // Then plain text with the closest length wins over synced text far off.
-    let body = serde_json::json!([
-        record("Test Artist", "Opening", 290.0, Some("[00:01.00]far"), Some("far plain")),
-        record("Test Artist", "Opening", 201.0, None, Some("close plain")),
-    ]);
-    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(), Some("close plain"));
+    let hits = lrclib::search_hits(&q(200_000), body.to_string().as_bytes()).unwrap();
+    assert_eq!(texts(&hits), vec!["plain, exact length", "[00:01.00]near", "near plain", "[00:01.00]far"]);
+    // Instrumentals and empty records are left out.
+    let mut inst = record("Test Artist", "Opening", 200.0, Some(SYNCED), None);
+    inst["instrumental"] = true.into();
+    let body = serde_json::json!([inst, record("Test Artist", "Opening", 200.0, None, None)]);
+    assert!(lrclib::search_hits(&q(200_000), body.to_string().as_bytes()).unwrap().is_empty());
 }
 
 // ---------------------------------------------------------------- service
@@ -225,6 +232,13 @@ async fn unreleased_songs_get_lyrics_matched_by_title() {
         200,
         &serde_json::json!([record("Test Artist", "Opening", 191.0, Some(SYNCED), None)]).to_string(),
     );
+    // Found for another album: held back from an unreleased song...
+    let s = f.svc.shown("801").await.unwrap().unwrap();
+    assert_eq!(s.notice, Some(Notice::VersionHeld));
+    assert!(s.lyrics.lines.is_empty());
+    assert_eq!(f.svc.get("801").await.unwrap(), None);
+    // ...until "Use released lyrics for other versions" is on.
+    f.released_ok.store(true, Ordering::Relaxed);
     let l = f.svc.get("801").await.unwrap().unwrap();
     assert!(l.synced);
     assert_eq!(l.credit.as_deref(), Some(CREDIT_MATCHED));
@@ -294,7 +308,9 @@ async fn preferring_own_lyrics_per_song_or_for_every_song() {
     assert_eq!(f.svc.get("501").await.unwrap().unwrap().source, LyricsSource::Plex);
     f.prefer.store(true, Ordering::Relaxed);
     assert_eq!(f.svc.get("501").await.unwrap().unwrap().source, LyricsSource::User);
-    // The setting alone shows nothing new for songs without their own.
+    // The setting alone shows nothing new for songs without their own (801
+    // is unreleased: its server lyrics need "Use released lyrics" too).
+    f.released_ok.store(true, Ordering::Relaxed);
     f.plex.set("801", Ok(Some(plex_lyrics())));
     assert_eq!(f.svc.get("801").await.unwrap().unwrap().source, LyricsSource::Plex);
 }
@@ -355,8 +371,13 @@ async fn transcriptions_show_after_plex_and_never_replace_the_users_own() {
     // The editor sees them, marked.
     assert_eq!(f.svc.own("801").await.unwrap().unwrap().auto.as_deref(), Some("small"));
     assert!(!f.svc.has_other("801").await, "a transcription isn't another source");
-    // Plex's lyrics win over a transcription even with "prefer my own" on.
+    // On this unreleased song, Plex's lyrics (found for the released
+    // version) don't beat the transcription of this recording...
     f.plex.set("801", Ok(Some(plex_lyrics())));
+    assert_eq!(f.svc.get("801").await.unwrap().unwrap().source, LyricsSource::Auto);
+    // ...unless other versions take released lyrics: then they win, even
+    // with "prefer my own" on.
+    f.released_ok.store(true, Ordering::Relaxed);
     assert_eq!(f.svc.get("801").await.unwrap().unwrap().source, LyricsSource::Plex);
     // Saving in the editor makes them the user's own.
     f.svc.save_own("801", "Fixed words", false).await.unwrap();
@@ -447,6 +468,11 @@ async fn borrowed_timing_on_a_live_version_shows_unsynced() {
     let f = fx();
     // Plex's licensed lyrics are matched by artist and title.
     f.plex.set("601", Ok(Some(synced_from(LyricsSource::Plex))));
+    // A live version doesn't take them unasked ("Use anyway").
+    let s = f.svc.shown("601").await.unwrap().unwrap();
+    assert_eq!(s.notice, Some(Notice::VersionHeld));
+    assert_eq!(s.pick.as_deref(), Some("server"));
+    f.released_ok.store(true, Ordering::Relaxed);
     let s = f.svc.shown("601").await.unwrap().unwrap();
     assert!(s.borrowed_timing);
     assert!(!s.lyrics.synced && s.lyrics.timed.is_empty());
@@ -464,6 +490,7 @@ async fn borrowed_timing_on_a_live_version_shows_unsynced() {
 #[tokio::test]
 async fn lrclib_timing_on_a_live_version_is_borrowed_too() {
     let f = fx();
+    f.released_ok.store(true, Ordering::Relaxed);
     f.http.route("api/get", 200, &record("Test Artist", "Opening", 245.0, Some(SYNCED), None).to_string());
     let s = f.svc.shown("601").await.unwrap().unwrap();
     assert_eq!(s.lyrics.source, LyricsSource::Lrclib);
@@ -489,6 +516,7 @@ async fn lyrics_tied_to_the_file_keep_their_sync_on_live_versions() {
 async fn the_setting_keeps_borrowed_timing_but_still_says_so() {
     let f = fx();
     f.live_timing.store(true, Ordering::Relaxed);
+    f.released_ok.store(true, Ordering::Relaxed);
     f.plex.set("601", Ok(Some(synced_from(LyricsSource::Plex))));
     let s = f.svc.shown("601").await.unwrap().unwrap();
     assert!(s.borrowed_timing && s.lyrics.synced && s.lyrics.timed.len() == 2);
@@ -511,28 +539,14 @@ async fn a_transcription_beats_borrowed_timing_on_a_live_version() {
     assert!(s.lyrics.synced && !s.borrowed_timing);
     // Hidden transcriptions don't, and on the studio version Plex's still win.
     f.show_auto.store(false, Ordering::Relaxed);
+    assert_eq!(f.svc.shown("601").await.unwrap().unwrap().notice, Some(Notice::VersionHeld));
+    f.released_ok.store(true, Ordering::Relaxed);
     assert!(f.svc.shown("601").await.unwrap().unwrap().borrowed_timing);
+    // With them shown, a transcription still beats borrowed timing.
+    f.show_auto.store(true, Ordering::Relaxed);
+    assert_eq!(f.svc.shown("601").await.unwrap().unwrap().lyrics.source, LyricsSource::Auto);
     f.show_auto.store(true, Ordering::Relaxed);
     f.plex.set("501", Ok(Some(synced_from(LyricsSource::Plex))));
     f.db.write(|c| user::put_auto(c, "501", MINE, "small", now)).unwrap();
     assert_eq!(f.svc.shown("501").await.unwrap().unwrap().lyrics.source, LyricsSource::Plex);
-}
-
-#[test]
-fn search_prefers_a_synced_hit_within_3_seconds() {
-    let body = serde_json::json!([
-        record("Test Artist", "Opening", 208.0, Some("[00:01.00]remaster"), None),
-        record("Test Artist", "Opening", 197.5, Some("[00:01.00]same take"), None),
-        record("Test Artist", "Opening", 200.0, None, Some("plain, exact length")),
-    ]);
-    assert_eq!(
-        lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(),
-        Some("[00:01.00]same take")
-    );
-    // Only a synced hit 3 to 10 s off: still synced.
-    let body = serde_json::json!([record("Test Artist", "Opening", 207.0, Some("[00:01.00]near"), None)]);
-    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(), Some("[00:01.00]near"));
-    // The only synced hit is over 10 s off (an extended edit): words only, on any track.
-    let body = serde_json::json!([record("Test Artist", "Opening", 211.0, Some("[00:01.00]Extended"), None)]);
-    assert_eq!(lrclib::best_search_hit(&q(200_000), body.to_string().as_bytes()).unwrap().as_deref(), Some("Extended"));
 }

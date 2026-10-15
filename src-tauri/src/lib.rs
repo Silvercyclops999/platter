@@ -915,30 +915,33 @@ pub fn run() {
                     prefer_own: live.lyrics_prefer_own.clone(),
                     show_auto: live.lyrics_show_auto.clone(),
                     live_timing: live.lyrics_live_timing.clone(),
+                    fix_timing: live.lyrics_fix_timing.clone(),
+                    released_ok: live.lyrics_released_ok.clone(),
                 },
             );
-            // Lyrics transcribed on this computer (opt-in, model downloaded on request).
+            // Lyrics transcribed on this computer (opt-in, model downloaded on
+            // request), and lyrics checked against the song with the same model.
             {
                 use lyrics::transcribe::{self as tr, commands as trc};
+                let models = tr::model::ModelStore::new(data_dir.join("models"), tr::model::catalogue(), tr::model::os_free_space());
+                // One recognizer (one loaded model) for both.
+                let recognizer = tr::engine::default_recognizer();
+                let songs: Arc<dyn tr::SongReader> = Arc::new(trc::AppSongs {
+                    player: player.clone(),
+                    audio_dir: audio_dir.clone(),
+                    parts: Arc::new(backend::routed::RoutedParts(backends.clone())),
+                    reader: tags::fetch::Reader::new(
+                        audio::http::http_client(),
+                        player.transfer_gate(),
+                        Some(player.transfer_host()),
+                    ),
+                });
                 let transcriber = tr::Transcriber::new(tr::Deps {
                     db: db.clone(),
-                    models: tr::model::ModelStore::new(
-                        data_dir.join("models"),
-                        tr::model::catalogue(),
-                        tr::model::os_free_space(),
-                    ),
+                    models: models.clone(),
                     fetch: Arc::new(tr::model::HttpFetch(reqwest::Client::new())),
-                    recognizer: tr::engine::default_recognizer(),
-                    songs: Arc::new(trc::AppSongs {
-                        player: player.clone(),
-                        audio_dir: audio_dir.clone(),
-                        parts: Arc::new(backend::routed::RoutedParts(backends.clone())),
-                        reader: tags::fetch::Reader::new(
-                            audio::http::http_client(),
-                            player.transfer_gate(),
-                            Some(player.transfer_host()),
-                        ),
-                    }),
+                    recognizer: recognizer.clone(),
+                    songs: songs.clone(),
                     other: Arc::new(trc::AppOther(lyrics_service.clone())),
                     conditions: Arc::new(trc::AppConditions { player: player.clone(), plex: plex.clone() }),
                     events: Arc::new(app.handle().clone()),
@@ -949,6 +952,24 @@ pub fn run() {
                     let t = transcriber.clone();
                     async move { t.spawn() }
                 });
+                let checker = lyrics::checker::Checker::new(lyrics::checker::CheckerDeps {
+                    db: db.clone(),
+                    models,
+                    recognizer,
+                    audio: Arc::new(lyrics::checker::DecodedSongs(songs)),
+                    events: Arc::new(app.handle().clone()),
+                    enabled: live.lyrics_check_audio.clone(),
+                    // Nothing found matched: transcribe the song, when transcription is on.
+                    none_matched: Some({
+                        let t = transcriber.clone();
+                        Arc::new(move |id: &str| t.transcribe_quietly(id))
+                    }),
+                });
+                tauri::async_runtime::spawn({
+                    let c = checker.clone();
+                    async move { c.spawn() }
+                });
+                lyrics_service.set_checker(Arc::new(checker));
                 app.manage(transcriber);
             }
             app.manage(lyrics_service);
@@ -1121,6 +1142,11 @@ pub fn run() {
             lyrics::commands::lyrics_own_delete,
             lyrics::commands::lyrics_own_ids,
             lyrics::commands::lyrics_export,
+            lyrics::commands::lyrics_candidates,
+            lyrics::commands::lyrics_choose,
+            lyrics::commands::lyrics_offset,
+            lyrics::commands::lyrics_choices_count,
+            lyrics::commands::lyrics_choices_clear,
             lyrics::transcribe::commands::transcribe_status,
             lyrics::transcribe::commands::transcribe_model_download,
             lyrics::transcribe::commands::transcribe_model_cancel,

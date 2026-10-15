@@ -214,6 +214,16 @@ pub fn spawn_listener(store: SyncStore, a: Appliers) {
                     tracing::warn!("synced lyrics not applied: {e}");
                 }
             }
+            if has(super::store::LYRICS_CHOICES.name()) {
+                let db = a.db.clone();
+                match store.run(move |st| super::lyrics::apply_choices(st, &db)).await {
+                    Ok(n) if n > 0 => {
+                        let _ = a.app.emit(crate::lyrics::commands::EV_CHOICES, ());
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("synced lyrics choices not applied: {e}"),
+                }
+            }
         }
     });
 }

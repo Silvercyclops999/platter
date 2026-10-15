@@ -84,6 +84,8 @@ pub const BOOKMARKS: Ns<Bookmark> = Ns::new("bookmarks");
 pub const SMART: Ns<crate::smart::SmartPlaylist> = Ns::new("smartPlaylists");
 /// Lyrics the user wrote, keyed by track id.
 pub const LYRICS: Ns<UserLyricsEntry> = Ns::new("lyrics");
+/// The user's lyrics pick and timing offset per song, keyed by track id.
+pub const LYRICS_CHOICES: Ns<crate::lyrics::choice::Choice> = Ns::new("lyricsChoices");
 /// Release status marks ("Confirm unreleased", "Not unreleased"), keyed
 /// `album:<id>` or `track:<id>`.
 pub const RELEASE_MARKS: Ns<crate::db::release::Mark> = Ns::new("releaseMarks");
@@ -97,7 +99,7 @@ pub const PHYSICAL: Ns<crate::physical::Owned> = Ns::new("physical");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 13] = [
+pub const NAMESPACES: [&str; 14] = [
     PHYSICAL.name(),
     DOCTOR_IGNORED.name(),
     RELEASE_MARKS.name(),
@@ -110,6 +112,7 @@ pub const NAMESPACES: [&str; 13] = [
     HIDDEN.name(),
     BOOKMARKS.name(),
     LYRICS.name(),
+    LYRICS_CHOICES.name(),
     SMART.name(),
 ];
 

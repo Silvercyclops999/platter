@@ -65,7 +65,7 @@ impl Groups {
             out.extend([store::FOLLOWS.name(), store::HIDDEN.name(), store::BOOKMARKS.name()]);
         }
         if self.lyrics {
-            out.push(store::LYRICS.name());
+            out.extend([store::LYRICS.name(), store::LYRICS_CHOICES.name()]);
         }
         out
     }

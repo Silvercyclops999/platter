@@ -964,6 +964,38 @@ CREATE INDEX IF NOT EXISTS sound_ids_status ON sound_ids (status);
 ALTER TABLE song_index ADD COLUMN sound_mbid TEXT;
 CREATE INDEX IF NOT EXISTS song_index_sound ON song_index (sound_mbid) WHERE sound_mbid IS NOT NULL;
 "#,
+    // v32: lyrics checked against the recording (lyrics::checker). lyrics_check
+    // keeps a verdict per song, candidate and text hash (with the measured
+    // offsets); lyrics_heard keeps the words heard in each window so a new
+    // candidate is judged without transcribing again. lyrics_choice keeps
+    // the user's pick and timing offset per song (lyrics::choice).
+    r#"
+CREATE TABLE IF NOT EXISTS lyrics_check (
+    track_id   TEXT NOT NULL,
+    cand_key   TEXT NOT NULL,
+    text_hash  TEXT NOT NULL,
+    verdict    TEXT NOT NULL,
+    score      REAL NOT NULL,
+    points     TEXT NOT NULL DEFAULT '[]',
+    checked_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    PRIMARY KEY (track_id, cand_key, text_hash)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS lyrics_heard (
+    track_id   TEXT NOT NULL,
+    start_ms   INTEGER NOT NULL,
+    end_ms     INTEGER NOT NULL,
+    words      TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (track_id, start_ms)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS lyrics_choice (
+    track_id   TEXT PRIMARY KEY,
+    pick       TEXT,
+    offset_ms  INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

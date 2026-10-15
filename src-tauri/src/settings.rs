@@ -407,6 +407,14 @@ pub struct Settings {
     pub transcribe_model: crate::lyrics::transcribe::model::ModelKind,
     /// Show lyrics transcribed on this computer.
     pub show_auto_lyrics: bool,
+    /// Check lyrics against the song with the speech model, when it's
+    /// installed (this device only).
+    pub lyrics_check_audio: bool,
+    /// Move or stretch checked lyrics to the measured timing (this device only).
+    pub lyrics_fix_timing: bool,
+    /// Other versions (unreleased, alternate, live, version tag) take lyrics
+    /// found for the released version without asking.
+    pub lyrics_released_for_versions: bool,
     /// Announce this computer to the user's other Platter devices on the
     /// network and through Plex, and let them play here (this device only).
     pub show_to_my_devices: bool,
@@ -719,6 +727,9 @@ impl Default for Settings {
             transcribe_lyrics: false,
             transcribe_model: Default::default(),
             show_auto_lyrics: true,
+            lyrics_check_audio: true,
+            lyrics_fix_timing: true,
+            lyrics_released_for_versions: false,
             show_to_my_devices: true,
             computer_name: String::new(),
             show_airplay_locked: false,
@@ -854,6 +865,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "lyricsPreferOwn",
     "lyricsShowAdd",
     "lyricsLiveTiming",
+    "lyricsReleasedForVersions",
     "fullWindowHideControls",
     "explicitContent",
     "showFanEdits",
@@ -957,6 +969,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "readFileTags",
     "transcribeLyrics",
     "transcribeModel",
+    "lyricsCheckAudio",
+    "lyricsFixTiming",
     "showToMyDevices",
     "computerName",
     "showAirplayLocked",
@@ -1094,6 +1108,9 @@ pub struct SettingsPatch {
     pub transcribe_lyrics: Option<bool>,
     pub transcribe_model: Option<crate::lyrics::transcribe::model::ModelKind>,
     pub show_auto_lyrics: Option<bool>,
+    pub lyrics_check_audio: Option<bool>,
+    pub lyrics_fix_timing: Option<bool>,
+    pub lyrics_released_for_versions: Option<bool>,
     pub show_to_my_devices: Option<bool>,
     /// Trimmed; empty goes back to the OS computer name.
     pub computer_name: Option<String>,
@@ -1341,6 +1358,9 @@ impl Settings {
         set(&mut self.transcribe_lyrics, p.transcribe_lyrics);
         set(&mut self.transcribe_model, p.transcribe_model);
         set(&mut self.show_auto_lyrics, p.show_auto_lyrics);
+        set(&mut self.lyrics_check_audio, p.lyrics_check_audio);
+        set(&mut self.lyrics_fix_timing, p.lyrics_fix_timing);
+        set(&mut self.lyrics_released_for_versions, p.lyrics_released_for_versions);
         set(&mut self.show_to_my_devices, p.show_to_my_devices);
         set(&mut self.show_airplay_locked, p.show_airplay_locked);
         set(&mut self.download_quality, p.download_quality);
@@ -1713,6 +1733,12 @@ pub struct Live {
     pub lyrics_show_auto: Arc<AtomicBool>,
     /// Live versions keep borrowed lyric timing.
     pub lyrics_live_timing: Arc<AtomicBool>,
+    /// Check lyrics against the song.
+    pub lyrics_check_audio: Arc<AtomicBool>,
+    /// Fix checked lyrics' timing.
+    pub lyrics_fix_timing: Arc<AtomicBool>,
+    /// Other versions take the released version's lyrics.
+    pub lyrics_released_ok: Arc<AtomicBool>,
     /// The file tag scan, once it exists (it starts after settings load).
     pub tag_scanner: Arc<parking_lot::Mutex<Option<crate::tags::scan::TagScanner>>>,
     /// Lyrics transcription, once it exists.
@@ -1788,6 +1814,9 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.lyrics_prefer_own.store(s.lyrics_prefer_own, Ordering::Relaxed);
     live.lyrics_show_auto.store(s.show_auto_lyrics, Ordering::Relaxed);
     live.lyrics_live_timing.store(s.lyrics_live_timing, Ordering::Relaxed);
+    live.lyrics_check_audio.store(s.lyrics_check_audio, Ordering::Relaxed);
+    live.lyrics_fix_timing.store(s.lyrics_fix_timing, Ordering::Relaxed);
+    live.lyrics_released_ok.store(s.lyrics_released_for_versions, Ordering::Relaxed);
     if let Some(t) = live.transcriber.lock().as_ref() {
         t.set_options(s.transcribe_lyrics, s.transcribe_model);
     }
@@ -3024,6 +3053,33 @@ mod tests {
         assert!(live.lyrics_prefer_own.load(Ordering::Relaxed));
         assert!(!s.lyrics_show_add);
         assert!(!s.full_window_hide_controls);
+    }
+
+    #[test]
+    fn lyrics_trust_settings_default_scope_and_reach_the_switches() {
+        let s = Settings::default();
+        // Checking is on (it runs once the speech model is installed), timing
+        // fixes are on, and other versions ask before taking released lyrics.
+        assert!(s.lyrics_check_audio && s.lyrics_fix_timing && !s.lyrics_released_for_versions);
+        assert!(DEVICE_SETTINGS.contains(&"lyricsCheckAudio") && DEVICE_SETTINGS.contains(&"lyricsFixTiming"));
+        assert!(SYNCED_SETTINGS.contains(&"lyricsReleasedForVersions"));
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = load(&db);
+        publish(&s, &live, &db);
+        assert!(live.lyrics_check_audio.load(Ordering::Relaxed) && live.lyrics_fix_timing.load(Ordering::Relaxed));
+        assert!(!live.lyrics_released_ok.load(Ordering::Relaxed));
+        s.apply(
+            &serde_json::from_str(r#"{"lyricsCheckAudio":false,"lyricsFixTiming":false,"lyricsReleasedForVersions":true}"#).unwrap(),
+        )
+        .unwrap();
+        publish(&s, &live, &db);
+        assert!(!live.lyrics_check_audio.load(Ordering::Relaxed) && !live.lyrics_fix_timing.load(Ordering::Relaxed));
+        assert!(live.lyrics_released_ok.load(Ordering::Relaxed));
+        // Kept.
+        save(&db, &s).unwrap();
+        let again = load(&db);
+        assert!(!again.lyrics_check_audio && !again.lyrics_fix_timing && again.lyrics_released_for_versions);
     }
 
     #[test]

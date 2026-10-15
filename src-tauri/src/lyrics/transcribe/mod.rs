@@ -497,6 +497,19 @@ impl Transcriber {
         self.enqueue(vec![track_id.to_owned()], false, false, true).map(|_| ())
     }
 
+    /// One song in the background, when transcription is on and its model
+    /// is installed (every lyrics candidate disagreed with the recording).
+    /// Never downloads a model or says anything when it can't.
+    pub fn transcribe_quietly(&self, track_id: &str) {
+        let ready = {
+            let st = self.inner.st.lock();
+            st.enabled && self.inner.deps.models.installed(st.model).is_some()
+        };
+        if ready && self.inner.deps.recognizer.unavailable().is_none() {
+            let _ = self.enqueue(vec![track_id.to_owned()], true, false, false);
+        }
+    }
+
     /// An album's songs without lyrics.
     pub async fn transcribe_album(&self, album_id: &str) -> AppResult<usize> {
         self.check_usable()?;

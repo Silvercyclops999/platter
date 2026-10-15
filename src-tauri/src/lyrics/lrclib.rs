@@ -1,8 +1,10 @@
 //! LRCLIB (lrclib.net): a free, keyless lyrics database. Two requests are
 //! used: `/api/get` with the artist, title, album and duration (an exact
 //! lookup), and `/api/search` with the artist and title only, for songs the
-//! exact lookup misses (unreleased songs, other editions). Only those words
-//! and the duration are sent.
+//! exact lookup misses (unreleased songs, other editions) or when the exact
+//! answer doesn't settle it. Every search hit with the same artist and title
+//! is a candidate (see lyrics::candidates). Only those words and the
+//! duration are sent.
 
 use serde::Deserialize;
 
@@ -10,12 +12,6 @@ use crate::error::{AppError, AppResult};
 use crate::share::matching::exact_key;
 
 pub const BASE: &str = "https://lrclib.net/api";
-/// A search hit's synced lyrics are used only when its length is this close
-/// to the track's; further off they would drift, so the plain text is used.
-pub const SYNC_TOLERANCE_S: f64 = 10.0;
-/// A synced hit this close in length is taken ahead of others within the
-/// tolerance: most likely the same recording, not a remaster or edit.
-pub const SYNC_CLOSE_S: f64 = 3.0;
 
 /// What a lookup sends.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,13 +49,15 @@ pub fn search_url(q: &Query) -> String {
 }
 
 /// One LRCLIB record.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Record {
     #[serde(default)]
     pub track_name: String,
     #[serde(default)]
     pub artist_name: String,
+    #[serde(default)]
+    pub album_name: Option<String>,
     #[serde(default)]
     pub duration: Option<f64>,
     #[serde(default)]
@@ -75,11 +73,11 @@ fn has_text(s: &Option<String>) -> bool {
 }
 
 impl Record {
-    fn synced(&self) -> bool {
+    pub fn synced(&self) -> bool {
         has_text(&self.synced_lyrics)
     }
 
-    fn usable(&self) -> bool {
+    pub fn usable(&self) -> bool {
         !self.instrumental && (self.synced() || has_text(&self.plain_lyrics))
     }
 
@@ -106,32 +104,24 @@ fn decode<T: serde::de::DeserializeOwned>(body: &[u8]) -> AppResult<T> {
     serde_json::from_slice(body).map_err(|e| AppError::Decode(format!("lyrics reply: {e}")))
 }
 
-/// The exact lookup's reply: the lyrics text, or None (instrumental or empty).
-pub fn parse_get(body: &[u8]) -> AppResult<Option<String>> {
-    Ok(decode::<Record>(body)?.text(true))
+/// The exact lookup's reply: the record, or None when it has no words
+/// (instrumental or empty).
+pub fn parse_get(body: &[u8]) -> AppResult<Option<Record>> {
+    let r: Record = decode(body)?;
+    Ok(r.usable().then_some(r))
 }
 
-/// The best search hit for the query: artist and title equal once folded;
-/// synced lyrics within 3 s of the track's length first, then synced within
-/// the 10 s tolerance, then the closest length. Synced lyrics further off
-/// than the tolerance keep only their words. Returns the text to keep.
-pub fn best_search_hit(q: &Query, body: &[u8]) -> AppResult<Option<String>> {
+/// Every search hit for the query with the same artist and title once
+/// folded and some words, closest length first (synced first on a tie).
+pub fn search_hits(q: &Query, body: &[u8]) -> AppResult<Vec<Record>> {
     let hits: Vec<Record> = decode(body)?;
     let (artist, title) = (exact_key(&q.artist), exact_key(&q.title));
     let secs = q.duration_ms as f64 / 1000.0;
     let diff = |r: &Record| r.duration.map(|d| (d - secs).abs()).unwrap_or(f64::INFINITY);
-    let best = hits
+    let mut out: Vec<Record> = hits
         .into_iter()
         .filter(|r| r.usable() && exact_key(&r.artist_name) == artist && exact_key(&r.track_name) == title)
-        .map(|r| {
-            // 0: synced and close, 1: synced within the tolerance, 2: the rest.
-            let tier = match (r.synced(), diff(&r)) {
-                (true, d) if d <= SYNC_CLOSE_S => 0,
-                (true, d) if d <= SYNC_TOLERANCE_S => 1,
-                _ => 2,
-            };
-            (r, tier)
-        })
-        .min_by(|(a, a_tier), (b, b_tier)| a_tier.cmp(b_tier).then(diff(a).total_cmp(&diff(b))));
-    Ok(best.and_then(|(r, tier)| r.text(tier < 2)))
+        .collect();
+    out.sort_by(|a, b| diff(a).total_cmp(&diff(b)).then(b.synced().cmp(&a.synced())));
+    Ok(out)
 }

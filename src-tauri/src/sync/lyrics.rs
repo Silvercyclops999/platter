@@ -1,12 +1,51 @@
 //! Lyrics the user wrote travel through the store (the `lyrics` namespace).
 //! The `user_lyrics` table stays what the lyrics views read; this keeps the
 //! two in step. Lyrics transcribed on this computer stay on it until the
-//! user edits and saves them.
+//! user edits and saves them. The user's lyrics choices per song (a pick
+//! and a timing offset) travel the same way in `lyricsChoices`.
 
-use super::store::{LYRICS, SyncStore, UserLyricsEntry};
+use super::store::{LYRICS, LYRICS_CHOICES, SyncStore, UserLyricsEntry};
 use crate::db::DbHandle;
 use crate::error::AppResult;
+use crate::lyrics::choice::{self, Choice};
 use crate::lyrics::user;
+
+/// After the user picks lyrics or nudges their timing here (an empty
+/// choice is removed).
+pub fn chose(store: &SyncStore, track_id: &str, c: &Choice) -> AppResult<()> {
+    if c.is_empty() {
+        return store.remove(&LYRICS_CHOICES, track_id).map(|_| ());
+    }
+    store.put(&LYRICS_CHOICES, track_id, c)
+}
+
+/// After "Reset lyrics choices" here.
+pub fn cleared(store: &SyncStore, track_ids: &[String]) -> AppResult<()> {
+    for id in track_ids {
+        store.remove(&LYRICS_CHOICES, id)?;
+    }
+    Ok(())
+}
+
+/// Bring the choices table in line with the store. Returns how many songs changed.
+pub fn apply_choices(store: &SyncStore, db: &DbHandle) -> AppResult<usize> {
+    let mut n = 0;
+    let now = (store.now() / 1000) as i64;
+    for (id, c) in store.list(&LYRICS_CHOICES)? {
+        if !user::valid_track_id(&id) || choice::check(&c).is_err() {
+            continue;
+        }
+        if db.write(|conn| choice::put(conn, &id, &c, now))? {
+            n += 1;
+        }
+    }
+    for id in store.deleted(&LYRICS_CHOICES)? {
+        if db.write(|conn| choice::put(conn, &id, &Choice::default(), now))? {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
 
 /// First run with the store: the user's own lyrics go in with the time they
 /// were saved.
