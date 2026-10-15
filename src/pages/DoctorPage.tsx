@@ -76,7 +76,9 @@ function useReport() {
   }, []);
   useEffect(() => {
     load();
-    const offs = [backend.listen("doctor://changed", load), backend.listen("library://changed", load)];
+    // A fresh callback each time: an earlier mount's late unlisten must not drop this one.
+    const again = () => load();
+    const offs = [backend.listen("doctor://changed", again), backend.listen("library://changed", again)];
     return () => {
       for (const o of offs) void o.then((u) => u());
     };
