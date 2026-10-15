@@ -1976,3 +1976,34 @@ async fn popular_with_a_warm_cache_is_quick() {
     let budget = if cfg!(debug_assertions) { 250 } else { 50 };
     assert!(ms < budget, "{ms} ms");
 }
+
+#[tokio::test]
+async fn popular_leaves_out_hidden_songs_and_artists() {
+    let own: Vec<Pop> = vec![("t1", "Own Song", None, 9, None, None, 200), ("t2", "Other Song", None, 5, None, None, 200)];
+    let moth: Vec<Pop> = vec![("m1", "Feature One", None, 7, None, Some("Moth & Meridian feat. Odessa Wren"), 200)];
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(popular_library(&own, &[("Moth & Meridian", &moth)]))), false).await;
+    let page_ids = |h: &crate::hidden::HiddenSet| -> Vec<String> {
+        t.db.read(|c| queries::artist_page_with(c, "a1", PopularSource::MyPlays, Some(h)))
+            .unwrap()
+            .popular
+            .into_iter()
+            .map(|p| p.id)
+            .collect()
+    };
+    let none = crate::hidden::HiddenSet::default();
+    assert_eq!(page_ids(&none), ["t1", "m1", "t2"]);
+    let mut h = crate::hidden::HiddenSet::default();
+    h.tracks.insert("t1".into());
+    h.artists.insert("a2".into());
+    assert_eq!(page_ids(&h), ["t2"], "the hidden song and the hidden artist's feature are gone");
+    // Hiding the page's own artist doesn't empty its page.
+    let mut h = crate::hidden::HiddenSet::default();
+    h.artists.insert("a1".into());
+    assert_eq!(page_ids(&h), ["t1", "m1", "t2"]);
+    // The guest's credited page leaves the hidden artist's songs out too.
+    let mut h = crate::hidden::HiddenSet::default();
+    h.artists.insert("a2".into());
+    let guest = t.db.read(|c| queries::artist_page_with(c, "credit:odessa wren", PopularSource::MyPlays, Some(&h)));
+    assert!(guest.unwrap().popular.is_empty());
+}

@@ -767,6 +767,10 @@ export class MockBackend implements Backend {
   private nameLookup() {
     return buildArtistLookup([...this.fx.artists, ...LEARNED_NAMES.map((n) => ({ id: creditId(n), title: n }))]);
   }
+  /** Like the core: Popular leaves out hidden songs, and hidden artists' songs on other pages. */
+  private popularVisible(t: Track, pageId: string) {
+    return !this.hidden.hides({ id: t.id, artistId: "" }) && (t.artistId === pageId || !this.hidden.hides({ id: "", artistId: t.artistId }));
+  }
   /** Global ranking only while a source for it is on (the core's rule). */
   private popularSource() {
     const s = this.settings;
@@ -777,7 +781,7 @@ export class MockBackend implements Backend {
       const lookup = this.nameLookup();
       if (isCreditId(id)) return this.creditedPage(id, lookup);
       const artist = this.fx.artists.find((a) => a.id === id) ?? this.notFound("Artist");
-      const popular = popularTracks(this.fx.tracks, artist, lookup, this.popularSource());
+      const popular = popularTracks(this.fx.tracks.filter((t) => this.popularVisible(t, id)), artist, lookup, this.popularSource());
       const albums = this.tags.visibleAlbums(this.fx.albums.filter((a) => a.artistId === id));
       const order: ReleaseSection[] = ["albums", "singlesEps", "live", "compilations", "soundtracks", "remixes", "demos", "mixtapes"];
       const sections = order
@@ -826,7 +830,8 @@ export class MockBackend implements Backend {
     if (!tracks.length) return this.notFound("Artist");
     const title = splitCredits(tracks[0].trackArtist!, lookup).find((c) => creditKey(c.name) === key)?.name ?? key;
     const plays = tracks.reduce((n, t) => n + t.viewCount, 0);
-    const popular = rankPopular(tracks, this.popularSource() === "global" ? globalTop(tracks) : null);
+    const shown = tracks.filter((t) => this.popularVisible(t, id));
+    const popular = rankPopular(shown, this.popularSource() === "global" ? globalTop(shown) : null);
     const artist: Artist = { id, title, sortTitle: title, thumb: null, art: null, viewCount: plays };
     return { artist, popular, sections: [], plays, about: null, similar: [], appearsOn: this.albumsOf(tracks) };
   }

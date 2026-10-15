@@ -606,6 +606,8 @@ impl CacheLookup {
         let ctx = ctx.clone();
         let popular = self.0.popular_source();
         let liked_min = crate::settings::load(&self.0).liked_min_rating();
+        // Popular leaves hidden songs and artists out.
+        let hidden_ids = self.3.as_ref().map(|m| m.hidden());
         // A radio's first songs come from the mix engine.
         let radio_ids: Option<Vec<String>> = match (ctx.kind, &self.3, ctx.id.as_deref()) {
             // Played from its page: the page's songs.
@@ -638,7 +640,7 @@ impl CacheLookup {
                         ResolvedContext { tracks: page.tracks, title: Some(page.playlist.title) }
                     }
                     ContextKind::Artist => {
-                        let page = queries::artist_page_by(c, &id, popular)?;
+                        let page = queries::artist_page_with(c, &id, popular, hidden_ids.as_deref())?;
                         let mut tracks = page.popular;
                         let mut seen: std::collections::HashSet<String> =
                             tracks.iter().map(|t| t.id.clone()).collect();

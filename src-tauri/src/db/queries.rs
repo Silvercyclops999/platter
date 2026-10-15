@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::{AppError, AppResult};
+use crate::hidden::HiddenSet;
 use crate::model::{Album, Artist, Playlist, ReleaseSection, Track};
 
 use super::popular::{self, POPULAR_N};
@@ -433,8 +434,26 @@ pub fn artist_page(c: &Connection, id: &str) -> AppResult<ArtistPage> {
 /// [`artist_page`] with Popular ranked by `source`. A `credit:` id gives a
 /// credited artist's page (see [`credited_page`]).
 pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppResult<ArtistPage> {
+    artist_page_with(c, id, source, None)
+}
+
+/// Popular candidates without hidden songs, or songs by hidden artists
+/// other than the page's own (a hidden artist's page still shows its songs:
+/// you opened it yourself).
+fn unhidden(tracks: Vec<Track>, page_id: &str, hidden: Option<&HiddenSet>) -> Vec<Track> {
+    match hidden {
+        Some(h) if !h.is_empty() => tracks
+            .into_iter()
+            .filter(|t| !h.tracks.contains(&t.id) && (t.artist_id == page_id || !h.artists.contains(&t.artist_id)))
+            .collect(),
+        _ => tracks,
+    }
+}
+
+/// [`artist_page_by`] leaving hidden songs and artists out of Popular.
+pub fn artist_page_with(c: &Connection, id: &str, source: PopularSource, hidden: Option<&HiddenSet>) -> AppResult<ArtistPage> {
     if let Some(key) = popular::credit_key(id) {
-        return credited_page(c, id, key, source);
+        return credited_page(c, id, key, source, hidden);
     }
     let artist = c
         .query_row(&format!("SELECT {ARTIST_COLS} FROM artists ar WHERE ar.id = ?1"), [id], row_artist)
@@ -445,8 +464,8 @@ pub fn artist_page_by(c: &Connection, id: &str, source: PopularSource) -> AppRes
     let credited = popular::credited_tracks(c, &artist.title, Some(id))?;
     let appears_on = appears_on(c, &credited)?;
     let global = global_for(c, id, source)?;
-    let popular =
-        popular::rank_with(own.into_iter().chain(credited).collect(), global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
+    let cands = unhidden(own.into_iter().chain(credited).collect(), id, hidden);
+    let popular = popular::rank_with(cands, global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
     let all = {
         let mut st = c.prepare_cached(&format!(
             "SELECT {ALBUM_COLS} FROM albums al WHERE al.artist_id = ?1
@@ -506,7 +525,13 @@ fn appears_on(c: &Connection, tracks: &[Track]) -> AppResult<Vec<Album>> {
 /// A page for a name that tracks credit but that has no library artist
 /// (a featured guest). Built from the tracks that credit the name: Popular,
 /// "Appears on" and the plays line. NotFound when nothing credits it.
-pub fn credited_page(c: &Connection, id: &str, key: &str, source: PopularSource) -> AppResult<ArtistPage> {
+pub fn credited_page(
+    c: &Connection,
+    id: &str,
+    key: &str,
+    source: PopularSource,
+    hidden: Option<&HiddenSet>,
+) -> AppResult<ArtistPage> {
     let tracks = popular::credited_tracks(c, key, None)?;
     if tracks.is_empty() {
         return Err(AppError::NotFound(format!("artist {id}")));
@@ -515,7 +540,7 @@ pub fn credited_page(c: &Connection, id: &str, key: &str, source: PopularSource)
     let plays: u64 = tracks.iter().map(|t| t.view_count as u64).sum();
     let appears_on = appears_on(c, &tracks)?;
     let global = global_for(c, id, source)?;
-    let popular = popular::rank_with(tracks, global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
+    let popular = popular::rank_with(unhidden(tracks, id, hidden), global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
     let artist = Artist {
         id: id.to_string(),
         sort_title: title.clone(),

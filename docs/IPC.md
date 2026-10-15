@@ -111,7 +111,9 @@ copies match one entry, one shows: the copy on the release the list names,
 then released over unreleased, a studio album over other release types, the
 earliest year, lossless then higher bitrate, most played. The rest follow by
 your own plays, then most recent play, with variants of listed songs after
-the others; a track's `ratingCount` only breaks ties there. When there is no
+the others; a track's `ratingCount` only breaks ties there. Hidden songs are
+left out, and so are songs by hidden artists on other artists' pages (a
+hidden artist's own page still lists its songs). When there is no
 list, the whole list is in plays order. `popularPending` is true while
 `popularSource` is "global", a source for the list is on and none has been
 fetched for the artist yet; the page then shows placeholder rows until

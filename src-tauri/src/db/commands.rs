@@ -112,15 +112,17 @@ pub async fn library_items(db: State<'_, DbHandle>) -> AppResult<Vec<LibraryItem
 pub async fn artist_page(
     db: State<'_, DbHandle>,
     info: State<'_, crate::artistinfo::ArtistInfoService>,
+    hidden: State<'_, crate::hidden::Hidden>,
     id: String,
 ) -> AppResult<ArtistPage> {
     let source = db.popular_source();
     let key = id.clone();
     let view = db.tag_view();
+    let hidden = hidden.ids().get();
     let started = std::time::Instant::now();
     let mut page = db
         .read_async(move |c| {
-            let mut page = queries::artist_page_by(c, &key, source)?;
+            let mut page = queries::artist_page_with(c, &key, source, Some(&hidden))?;
             crate::tags::view::artist_page(c, &mut page, view)?;
             Ok(page)
         })
