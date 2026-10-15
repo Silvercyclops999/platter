@@ -148,7 +148,8 @@ export class MockImport {
     const pick = (from: number, n: number) => t.slice(from, from + n);
     const fileName = path.split(/[\\/]/).pop() ?? null;
     if (source === "streaming") {
-      const road = [...pick(0, 10).map((x) => this.matched(source, x)), this.missing(source, 0), this.missing(source, 1)];
+      const found = pick(0, 10).map((x) => this.matched(source, x));
+      const road = [...found.slice(0, 3), this.missing(source, 0), ...found.slice(3, 7), this.missing(source, 1), ...found.slice(7)];
       const rainy = [...pick(12, 6).map((x) => this.matched(source, x)), this.unsure(source, t[20], t[21]), this.missing(source, 0)];
       const liked = [...pick(30, 17).map((x) => this.matched(source, x)), this.unsure(source, t[50], t[51]), this.missing(source, 2), this.missing(source, 0)];
       this.putList(source, "Road Trip", false, road);
