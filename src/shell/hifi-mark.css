@@ -15,7 +15,7 @@
 }
 .hifi-mark:hover { color: var(--color-text-primary); background: var(--color-state-hover); }
 .hifi-mark:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
-.hifi-mark.is-on { color: var(--color-success); }
+.hifi-mark.is-on { color: var(--color-accent); }
 .hifi-mark.is-fallback { color: var(--color-warning); }
 .hifi-mark__rate { white-space: nowrap; }
 
