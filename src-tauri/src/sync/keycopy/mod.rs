@@ -112,7 +112,12 @@ pub struct Qr {
 
 /// The QR code for a code: a `platter://copy-keys/<code>` link.
 pub fn qr(code: &str) -> Option<Qr> {
-    let q = qrcode::QrCode::with_error_correction_level(format!("platter://copy-keys/{code}"), qrcode::EcLevel::M).ok()?;
+    qr_text(&format!("platter://copy-keys/{code}"))
+}
+
+/// The QR code for any text (a listen along invite, say).
+pub fn qr_text(text: &str) -> Option<Qr> {
+    let q = qrcode::QrCode::with_error_correction_level(text, qrcode::EcLevel::M).ok()?;
     let size = q.width();
     let colors = q.to_colors();
     let rows = colors

@@ -1,17 +1,16 @@
 //! Tauri commands, and the glue to Plex, the player and notifications.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Runtime, State};
-use tokio::sync::watch;
 
 use super::activity::{ActivityPanel, ActivitySource};
 use super::follows::{FollowedArtist, WhatsNew};
-use super::listen::{ListenAlong, ListenPlayer, ListenView, PlayerNow};
+use super::listen::wire::Op;
+use super::listen::{ListenAlong, ListenPlayer, ListenView, PlayerNow, ServerId};
 use super::{Notifier, Social};
 use crate::audio::events::PlayerStatus;
 use crate::audio::player::PlayerHandle;
@@ -20,7 +19,6 @@ use crate::audio::source::{ContextKind, PlayContext};
 use crate::db::DbHandle;
 use crate::error::{AppError, AppResult};
 use crate::plex::PlexState;
-use crate::share::link::server_tag;
 
 // ---- Plex -------------------------------------------------------------------
 
@@ -68,13 +66,15 @@ impl ActivitySource for PlexActivity {
 impl ListenPlayer for PlayerHandle {
     async fn now(&self) -> AppResult<PlayerNow> {
         let s = self.state().await?;
-        let up_next = s.queue.user_queue.iter().chain(&s.queue.next_up).map(|i| i.track.id.clone()).collect();
+        let after = || s.queue.user_queue.iter().chain(&s.queue.next_up);
         Ok(PlayerNow {
             track_id: s.track.as_ref().map(|t| t.id.clone()),
             position_ms: s.position_ms,
             duration_ms: s.duration_ms,
             playing: matches!(s.status, PlayerStatus::Playing | PlayerStatus::Loading | PlayerStatus::Buffering),
-            up_next,
+            user_queue: s.queue.user_queue.iter().map(|i| i.track.id.clone()).collect(),
+            up_next: after().map(|i| i.track.id.clone()).collect(),
+            up_next_items: after().map(|i| i.item_id.clone()).collect(),
         })
     }
 
@@ -96,8 +96,35 @@ impl ListenPlayer for PlayerHandle {
         PlayerHandle::resume(self).await
     }
 
+    async fn next(&self) -> AppResult<()> {
+        PlayerHandle::next(self).await
+    }
+
+    async fn previous(&self) -> AppResult<()> {
+        PlayerHandle::previous(self).await
+    }
+
     async fn queue_add(&self, ids: Vec<String>) -> AppResult<()> {
         PlayerHandle::queue_add(self, ids, AddAt::End).await
+    }
+
+    async fn queue_clear(&self) -> AppResult<()> {
+        PlayerHandle::queue_clear(self).await
+    }
+
+    async fn queue_move(&self, item_id: String, to_index: usize) -> AppResult<()> {
+        PlayerHandle::queue_move(self, item_id, to_index).await
+    }
+}
+
+/// The connected server's machine id (it never leaves this computer; a
+/// session hashes it).
+pub struct PlexServerId(pub PlexState);
+
+#[async_trait]
+impl ServerId for PlexServerId {
+    async fn machine_id(&self) -> Option<String> {
+        self.0.machine_id().await
     }
 }
 
@@ -135,19 +162,8 @@ pub fn spawn_watch(social: Social, db: DbHandle) {
     });
 }
 
-/// The control API's addresses while it listens (hosting needs them).
-pub struct ListenAddrs {
-    pub port: watch::Receiver<Option<u16>>,
-}
-
-impl ListenAddrs {
-    pub fn now(&self) -> Vec<SocketAddr> {
-        let Some(port) = *self.port.borrow() else { return Vec::new() };
-        crate::remote::peer::lan_addrs().into_iter().map(|ip| SocketAddr::from((ip, port))).collect()
-    }
-}
-
-/// The signed-in user's name, for others in a session.
+/// The signed-in user's Plex display name, for others in a session (unless
+/// the user set another in Settings).
 #[derive(Clone, Default)]
 pub struct ListenName(pub Arc<Mutex<String>>);
 
@@ -157,10 +173,6 @@ impl ListenName {
             *self.0.lock() = n;
         }
     }
-}
-
-async fn tag(plex: &PlexState) -> Option<String> {
-    plex.machine_id().await.map(|m| server_tag(&m))
 }
 
 // ---- commands -----------------------------------------------------------------
@@ -208,14 +220,15 @@ pub async fn listen_state(listen: State<'_, ListenAlong>) -> AppResult<ListenVie
 }
 
 #[tauri::command]
-pub async fn listen_start(
-    listen: State<'_, ListenAlong>,
-    addrs: State<'_, ListenAddrs>,
-    name: State<'_, ListenName>,
-    plex: State<'_, PlexState>,
-) -> AppResult<ListenView> {
+pub async fn listen_start(listen: State<'_, ListenAlong>, name: State<'_, ListenName>, plex: State<'_, PlexState>) -> AppResult<ListenView> {
     name.refresh(&plex).await;
-    listen.start(tag(&plex).await, addrs.now())
+    listen.start().await
+}
+
+/// The invite to send; `fresh` makes a new link.
+#[tauri::command]
+pub async fn listen_invite(listen: State<'_, ListenAlong>, fresh: Option<bool>) -> AppResult<ListenView> {
+    listen.invite(fresh.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -224,17 +237,24 @@ pub async fn listen_stop(listen: State<'_, ListenAlong>) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub async fn listen_join(
-    listen: State<'_, ListenAlong>,
-    name: State<'_, ListenName>,
-    plex: State<'_, PlexState>,
-    link: String,
-) -> AppResult<ListenView> {
+pub async fn listen_join(listen: State<'_, ListenAlong>, name: State<'_, ListenName>, plex: State<'_, PlexState>, link: String) -> AppResult<ListenView> {
     name.refresh(&plex).await;
-    listen.join(&link, tag(&plex).await).await
+    listen.join(&link).await
 }
 
 #[tauri::command]
 pub async fn listen_add(listen: State<'_, ListenAlong>, track_ids: Vec<String>) -> AppResult<()> {
     listen.add(track_ids).await
+}
+
+/// Play, pause, skip, seek or move a song for everyone (a guest's go to the host).
+#[tauri::command]
+pub async fn listen_control(listen: State<'_, ListenAlong>, op: Op) -> AppResult<()> {
+    listen.control(op).await
+}
+
+/// Remove someone from the session you host.
+#[tauri::command]
+pub async fn listen_remove(listen: State<'_, ListenAlong>, person_id: String) -> AppResult<ListenView> {
+    listen.remove(&person_id).await
 }

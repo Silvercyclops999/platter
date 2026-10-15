@@ -363,8 +363,16 @@ pub struct Settings {
     pub whats_new_announcements: bool,
     /// A desktop notification when a followed artist gets new music.
     pub notify_new_releases: bool,
-    /// Guests in a listening session can add songs to the queue.
-    pub listen_guests_add: bool,
+    /// "Let others change what's playing": guests in a listening session can
+    /// play, pause, skip, seek and reorder. Off, they can only add songs.
+    pub listen_guests_control: bool,
+    /// The listen along relay (an ntfy server); empty means ntfy.sh.
+    pub listen_relay: String,
+    /// "Invites expire after", hours (1, 24 or 168).
+    pub listen_invite_hours: u32,
+    /// The name others in a listening session see; empty means the Plex
+    /// display name.
+    pub listen_name: String,
     /// Discord shows a listening session you host.
     pub discord_listen_along: bool,
     /// Keep app-only state in a sync file in a folder (this device only).
@@ -499,7 +507,10 @@ impl Default for Settings {
             share_activity: true,
             whats_new_announcements: true,
             notify_new_releases: false,
-            listen_guests_add: true,
+            listen_guests_control: true,
+            listen_relay: String::new(),
+            listen_invite_hours: 24,
+            listen_name: String::new(),
             discord_listen_along: true,
             sync_enabled: false,
             sync_folder: String::new(),
@@ -576,7 +587,10 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showFriendActivity",
     "shareActivity",
     "whatsNewAnnouncements",
-    "listenGuestsAdd",
+    "listenGuestsControl",
+    "listenRelay",
+    "listenInviteHours",
+    "listenName",
     "bookmarksInLibrary",
     "scrobbleUnreleased",
     "aiModel",
@@ -742,7 +756,11 @@ pub struct SettingsPatch {
     pub share_activity: Option<bool>,
     pub whats_new_announcements: Option<bool>,
     pub notify_new_releases: Option<bool>,
-    pub listen_guests_add: Option<bool>,
+    pub listen_guests_control: Option<bool>,
+    pub listen_relay: Option<String>,
+    /// 1, 24 or 168.
+    pub listen_invite_hours: Option<u32>,
+    pub listen_name: Option<String>,
     pub discord_listen_along: Option<bool>,
     pub sync_enabled: Option<bool>,
     pub sync_settings: Option<bool>,
@@ -905,7 +923,28 @@ impl Settings {
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
         set(&mut self.notify_new_releases, p.notify_new_releases);
-        set(&mut self.listen_guests_add, p.listen_guests_add);
+        set(&mut self.listen_guests_control, p.listen_guests_control);
+        if let Some(r) = &p.listen_relay {
+            self.listen_relay = if r.trim().is_empty() {
+                String::new()
+            } else {
+                crate::social::listen::invite::relay_url(r)
+                    .ok_or_else(|| AppError::Invalid("The relay is a web address like https://ntfy.example.com.".into()))?
+            };
+        }
+        if let Some(h) = p.listen_invite_hours {
+            if !crate::social::listen::INVITE_HOURS.contains(&h) {
+                return Err(AppError::Invalid("Invites expire after 1 hour, 24 hours or 7 days.".into()));
+            }
+            self.listen_invite_hours = h;
+        }
+        if let Some(n) = &p.listen_name {
+            let n = n.trim();
+            if n.chars().count() > crate::social::listen::NAME_MAX || n.chars().any(char::is_control) {
+                return Err(AppError::Invalid("Names can be up to 40 characters.".into()));
+            }
+            self.listen_name = n.to_string();
+        }
         set(&mut self.discord_listen_along, p.discord_listen_along);
         set(&mut self.bookmarks_in_library, p.bookmarks_in_library);
         set(&mut self.scrobble_lastfm, p.scrobble_lastfm);
@@ -1129,7 +1168,10 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         so.show_activity.store(s.show_friend_activity && on, Ordering::Relaxed);
         so.whats_new.store(s.whats_new_announcements, Ordering::Relaxed);
         so.notify_releases.store(s.notify_new_releases, Ordering::Relaxed);
-        so.guests_can_add.store(s.listen_guests_add, Ordering::Relaxed);
+        so.listen.guests_control.store(s.listen_guests_control, Ordering::Relaxed);
+        *so.listen.relay.write() = s.listen_relay.clone();
+        so.listen.invite_hours.store(s.listen_invite_hours, Ordering::Relaxed);
+        *so.listen.name.write() = s.listen_name.clone();
         so.private_session.store(s.private_session, Ordering::Relaxed);
     }
     {
@@ -1585,7 +1627,17 @@ mod tests {
         // session are on; new release notifications are off.
         assert!(s.show_friend_activity && s.share_activity && s.whats_new_announcements);
         assert!(!s.notify_new_releases);
-        assert!(s.listen_guests_add && s.discord_listen_along);
+        assert!(s.listen_guests_control && s.discord_listen_along);
+        // Listen along: ntfy.sh, invites good for a day, the Plex name.
+        assert!(s.listen_relay.is_empty() && s.listen_name.is_empty());
+        assert_eq!(s.listen_invite_hours, 24);
+        for bad in ["ftp://relay.example.org", "relay.example.org", "https://user:pw@relay.example.org", "https://relay.example.org/?x=1"] {
+            assert!(s.apply(&SettingsPatch { listen_relay: Some(bad.into()), ..Default::default() }).is_err(), "{bad}");
+        }
+        assert!(s.apply(&SettingsPatch { listen_invite_hours: Some(5), ..Default::default() }).is_err());
+        assert!(s.apply(&SettingsPatch { listen_name: Some("x".repeat(41)), ..Default::default() }).is_err());
+        s.apply(&SettingsPatch { listen_relay: Some(" ".into()), ..Default::default() }).unwrap();
+        assert!(s.listen_relay.is_empty(), "blank goes back to the default relay");
     }
 
     #[test]
@@ -1769,7 +1821,10 @@ mod tests {
             share_activity: Some(false),
             whats_new_announcements: Some(false),
             notify_new_releases: Some(true),
-            listen_guests_add: Some(false),
+            listen_guests_control: Some(false),
+            listen_relay: Some(" https://relay.example.org/ ".into()),
+            listen_invite_hours: Some(1),
+            listen_name: Some(" DJ Sam ".into()),
             discord_listen_along: Some(false),
             bookmarks_in_library: Some(false),
             scrobble_lastfm: Some(true),
@@ -1788,7 +1843,10 @@ mod tests {
         assert!(!live.social.show_activity.load(Ordering::Relaxed));
         assert!(!live.social.whats_new.load(Ordering::Relaxed));
         assert!(live.social.notify_releases.load(Ordering::Relaxed));
-        assert!(!live.social.guests_can_add.load(Ordering::Relaxed));
+        assert!(!live.social.listen.guests_control.load(Ordering::Relaxed));
+        assert_eq!(*live.social.listen.relay.read(), "https://relay.example.org");
+        assert_eq!(live.social.listen.invite_hours.load(Ordering::Relaxed), 1);
+        assert_eq!(*live.social.listen.name.read(), "DJ Sam");
         assert!(live.social.private_session.load(Ordering::Relaxed));
         assert!(!live.tracking.share_activity.load(Ordering::Relaxed));
         assert!(!live.discord.get().listen_along);

@@ -5,7 +5,7 @@
 //!   sessions and history, owner only).
 //! - [`follows`]: the follow list (behind a store a sync file can replace),
 //!   What's New, and the new-release announcement.
-//! - [`listen`]: listening sessions between Platter computers.
+//! - [`listen`]: listening sessions through a relay, end to end sealed.
 //! - [`commands`]: Tauri commands and the Plex, player and notification glue.
 
 pub mod activity;
@@ -42,7 +42,8 @@ pub struct SocialSwitches {
     pub show_activity: Arc<AtomicBool>,
     pub whats_new: Arc<AtomicBool>,
     pub notify_releases: Arc<AtomicBool>,
-    pub guests_can_add: Arc<AtomicBool>,
+    /// Listen along settings.
+    pub listen: listen::ListenSettings,
     /// A private session: no announcements.
     pub private_session: Arc<AtomicBool>,
 }
@@ -53,7 +54,7 @@ impl Default for SocialSwitches {
             show_activity: Arc::new(AtomicBool::new(true)),
             whats_new: Arc::new(AtomicBool::new(true)),
             notify_releases: Arc::new(AtomicBool::new(false)),
-            guests_can_add: Arc::new(AtomicBool::new(true)),
+            listen: listen::ListenSettings::default(),
             private_session: Arc::new(AtomicBool::new(false)),
         }
     }

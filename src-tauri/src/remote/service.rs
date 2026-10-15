@@ -198,7 +198,7 @@ struct Inner {
     /// The user's other Platter devices (None until the app sets it up).
     peers: Mutex<Option<Arc<dyn PeerDirectory>>>,
     peer_http: reqwest::Client,
-    /// More routes the control API answers (listening sessions, key copy).
+    /// More routes the control API answers (key copy).
     extra: peer::server::ExtraSlot,
 }
 

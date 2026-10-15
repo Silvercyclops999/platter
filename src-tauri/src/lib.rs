@@ -411,25 +411,30 @@ pub fn run() {
                     },
                 );
             }
-            let peer_port = {
+            {
                 let id = plex.identity();
-                remote::commands::spawn_peers(&remote, id.platform.clone(), id.version.clone())
-            };
-            // Listening sessions answer on the same control port.
+                remote::commands::spawn_peers(&remote, id.platform.clone(), id.version.clone());
+            }
+            // Listen along goes through a relay (ntfy), never computer to computer.
             let listen_name = social::commands::ListenName::default();
             let listen = social::listen::ListenAlong::new(social::listen::ListenDeps {
                 player: Arc::new(player.clone()),
-                transport: Arc::new(social::listen::HttpTransport::new()?),
+                relays: Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
                 events: Arc::new(plex::state::TauriSink(app.handle().clone())),
-                own_id: plex.identity().client_id.clone(),
+                server: Arc::new(social::commands::PlexServerId(plex.clone())),
                 name: {
-                    let n = listen_name.0.clone();
-                    Arc::new(move || n.lock().clone())
+                    let plex_name = listen_name.0.clone();
+                    let chosen = live.social.listen.name.clone();
+                    Arc::new(move || {
+                        let c = chosen.read().trim().to_string();
+                        if c.is_empty() { plex_name.lock().clone() } else { c }
+                    })
                 },
-                guests_can_add: live.social.guests_can_add.clone(),
+                settings: live.social.listen.clone(),
+                default_relay: social::listen::DEFAULT_RELAY.into(),
                 cfg: Default::default(),
+                tap: None,
             });
-            *remote.extra_routes().write() = Some(Arc::new(listen.clone()));
             let discord_party: Arc<parking_lot::Mutex<Option<platform::discord::activity::Party>>> = Arc::default();
             {
                 let mut rx = listen.subscribe_party();
@@ -442,7 +447,6 @@ pub fn run() {
                 });
             }
             app.manage(listen);
-            app.manage(social::commands::ListenAddrs { port: peer_port });
             app.manage(listen_name);
             remote.set_lan(remote::LanEnv {
                 mdns: Arc::new(remote::lan::MdnsSd::new()),
@@ -566,7 +570,7 @@ pub fn run() {
                 });
                 let keys = sync::keycopy::KeyReceiver::new(device, vault.clone(), Arc::new(sync::store::system_ms));
                 keys.set_events(Arc::new(app.handle().clone()));
-                // Key copy answers on the control port, beside listening sessions.
+                // Key copy answers on the control port (same account only).
                 {
                     use remote::peer::keys::{KeyCopyRoutes, RouteList};
                     use remote::peer::server::ExtraRoutes;
@@ -763,9 +767,12 @@ pub fn run() {
             social::commands::whats_new_seen,
             social::commands::listen_state,
             social::commands::listen_start,
+            social::commands::listen_invite,
             social::commands::listen_stop,
             social::commands::listen_join,
             social::commands::listen_add,
+            social::commands::listen_control,
+            social::commands::listen_remove,
             sync::commands::sync_file_status,
             sync::commands::sync_file_now,
             sync::commands::sync_file_folders,
@@ -831,6 +838,13 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let player = app.state::<PlayerHandle>().inner().clone();
                 tauri::async_runtime::block_on(player.flush());
+                // A hosted session ends for everyone; a guest says it left.
+                if let Some(listen) = app.try_state::<social::listen::ListenAlong>() {
+                    let listen = listen.inner().clone();
+                    tauri::async_runtime::block_on(async move {
+                        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), listen.stop()).await;
+                    });
+                }
             }
         });
 }

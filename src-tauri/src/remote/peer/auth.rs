@@ -66,14 +66,6 @@ impl PeerKey {
         h.update(token.expose().as_bytes());
         Self(h.finalize().into())
     }
-
-    /// The key for a listening session, from the secret in its invite.
-    pub fn from_secret(secret: &[u8]) -> Self {
-        let mut h = Sha256::new();
-        h.update(b"platter-session-key-v1\n");
-        h.update(secret);
-        Self(h.finalize().into())
-    }
 }
 
 /// The account tag in the network announcement: 16 hex digits of

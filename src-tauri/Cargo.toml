@@ -65,6 +65,8 @@ sha2 = "0.10"
 # the 6-digit code, then the keys sealed with an AEAD, and the code as a QR.
 spake2 = "0.4.0"
 chacha20poly1305 = "0.11.0"
+# Listen along: sealed messages through the relay are base64 text.
+base64 = "0.22.1"
 qrcode = { version = "0.14.1", default-features = false }
 # On-device lyrics transcription (the `transcribe` feature). Builds whisper.cpp
 # from source, so it needs CMake and a C++ compiler.
