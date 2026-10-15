@@ -557,6 +557,11 @@ impl ArtistInfoService {
         Ok((info, !snap.stale.is_empty() || snap.popular_stale))
     }
 
+    /// [`Self::mbid`] for other modules (Lidarr's release picker).
+    pub async fn artist_mbid(&self, id: &str, name: &str) -> Option<String> {
+        self.mbid(id, name, crate::db::queries::now_s()).await
+    }
+
     /// The artist's MusicBrainz id: Plex's (cached), else Wikidata's. For a
     /// credited artist, an exact MusicBrainz name match (cached).
     async fn mbid(&self, id: &str, name: &str, now: i64) -> Option<String> {

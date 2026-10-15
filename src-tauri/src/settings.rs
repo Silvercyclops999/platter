@@ -487,6 +487,9 @@ pub struct Settings {
     /// Lidarr's away address (a reverse proxy, tunnel or VPN), tried when the
     /// home one doesn't answer. Empty: none.
     pub lidarr_away_url: String,
+    /// The artist page lists official releases the library lacks (with
+    /// Request) when Lidarr is set up and its check passed.
+    pub show_missing_releases: bool,
     /// The miniplayer window stays above other windows (this device only).
     pub miniplayer_on_top: bool,
     /// The miniplayer's card takes a colour from the cover (this device only).
@@ -668,6 +671,7 @@ impl Default for Settings {
             ai_model: crate::smart::prompt::DEFAULT_MODEL.to_string(),
             lidarr_url: String::new(),
             lidarr_away_url: String::new(),
+            show_missing_releases: true,
             miniplayer_on_top: true,
             miniplayer_tint: true,
             miniplayer_queue: false,
@@ -763,6 +767,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "aiModel",
     "lidarrUrl",
     "lidarrAwayUrl",
+    "showMissingReleases",
     "powerKeys",
     "hintKey",
     "importSources",
@@ -977,6 +982,7 @@ pub struct SettingsPatch {
     pub ai_model: Option<String>,
     pub lidarr_url: Option<String>,
     pub lidarr_away_url: Option<String>,
+    pub show_missing_releases: Option<bool>,
     pub miniplayer_on_top: Option<bool>,
     pub miniplayer_tint: Option<bool>,
     pub miniplayer_queue: Option<bool>,
@@ -1231,6 +1237,7 @@ impl Settings {
         if let Some(u) = &p.lidarr_away_url {
             self.lidarr_away_url = lidarr_url(u)?;
         }
+        set(&mut self.show_missing_releases, p.show_missing_releases);
         if let Some(name) = &p.computer_name {
             let name = name.trim();
             if name.chars().count() > COMPUTER_NAME_MAX {

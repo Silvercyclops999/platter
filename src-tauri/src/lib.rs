@@ -494,14 +494,24 @@ pub fn run() {
                 scrobble::spawn(scrobbler.clone(), player.subscribe_tracking());
                 app.manage(scrobble::commands::ScrobbleState::new(scrobbler, lastfm, listenbrainz, db.clone()));
             }
-            // Lidarr: the read-only setup check.
-            app.manage(lidarr::Lidarr::new(lidarr::LidarrDeps {
+            // Lidarr: the setup check, requests and their background retry.
+            let lidarr_service = lidarr::Lidarr::new(lidarr::LidarrDeps {
                 web: web_out.clone(),
                 keys: keychain.clone(),
                 db: db.clone(),
                 plex: Arc::new(lidarr::PlexMusicFiles(plex.clone())),
                 clock: Arc::new(db::queries::now_s),
-            }));
+                mb: Arc::new(lidarr::mbpick::MbCached {
+                    http: artist_info.http(),
+                    limiter: artist_info.musicbrainz_limiter(),
+                    db: db.clone(),
+                    clock: Arc::new(db::queries::now_s),
+                }),
+                artist_mbid: Arc::new(lidarr::InfoMbid(artist_info.clone())),
+                album_wait: std::time::Duration::from_secs(2),
+            });
+            tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
+            app.manage(lidarr_service);
             let smart_service = smart::Smart::new(smart::SmartDeps {
                 db: db.clone(),
                 store: Arc::new(smart::SyncSmart { store: sync_store.clone(), db: db.clone() }),
@@ -1023,6 +1033,12 @@ pub fn run() {
             lidarr::commands::lidarr_headers_set,
             lidarr::commands::lidarr_check,
             lidarr::commands::lidarr_confirm_root,
+            lidarr::commands::lidarr_pick,
+            lidarr::commands::lidarr_request_preview,
+            lidarr::commands::lidarr_request,
+            lidarr::commands::lidarr_requests,
+            lidarr::commands::lidarr_request_cancel,
+            lidarr::commands::lidarr_missing_releases,
             platform::miniplayer::miniplayer_state,
             platform::miniplayer::miniplayer_set,
         ])

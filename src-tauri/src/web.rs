@@ -14,6 +14,7 @@ use crate::error::{AppError, AppResult};
 pub enum Method {
     Get,
     Post,
+    Put,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -54,6 +55,10 @@ impl WebRequest {
         Self { method: Method::Post, body: Body::Json(json), ..Self::get(url) }
     }
 
+    pub fn put_json(url: impl Into<String>, json: String) -> Self {
+        Self { method: Method::Put, body: Body::Json(json), ..Self::get(url) }
+    }
+
     pub fn header(mut self, k: &'static str, v: impl Into<String>) -> Self {
         self.headers.push((k, v.into()));
         self
@@ -92,6 +97,7 @@ impl Web for ReqwestWeb {
         let mut rb = match req.method {
             Method::Get => self.client.get(&req.url),
             Method::Post => self.client.post(&req.url),
+            Method::Put => self.client.put(&req.url),
         }
         .timeout(req.timeout);
         for (k, v) in &req.headers {

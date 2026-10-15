@@ -58,6 +58,7 @@ fn root(path: &str, unmapped: &[&str]) -> RootFolder {
             .iter()
             .map(|n| UnmappedFolder { name: n.to_string(), path: format!("{}{sep}{n}", path.trim_end_matches(['/', '\\'])) })
             .collect(),
+        ..Default::default()
     }
 }
 
@@ -266,7 +267,7 @@ fn without_plex_files_nothing_can_be_proven() {
 // ------------------------------------------------------------------ artists
 
 fn artist(name: &str, path: &str) -> Artist {
-    Artist { id: 1, artist_name: name.into(), path: path.into() }
+    Artist { id: 1, artist_name: name.into(), path: path.into(), ..Default::default() }
 }
 
 #[test]
@@ -495,6 +496,9 @@ fn rig_with(url: &str, away: &str) -> Rig {
         db: db.clone(),
         plex: Arc::new(FakePlex(library("/data/media/music"))),
         clock: Arc::new(|| 1_800_000_000),
+        mb: Arc::new(super::request_tests::NoMb),
+        artist_mbid: Arc::new(super::request_tests::NoMbid),
+        album_wait: std::time::Duration::ZERO,
     });
     Rig { _dir: dir, db, web, keys, lidarr }
 }

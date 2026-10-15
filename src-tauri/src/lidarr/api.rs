@@ -20,6 +20,7 @@ const API: &str = "/api/v1";
 
 pub const UNREACHABLE: &str = "Lidarr isn't reachable. Check the address, and that Lidarr is running.";
 pub const BAD_KEY: &str = "Lidarr didn't accept this API key. Copy it again from Lidarr's Settings > General.";
+pub const METADATA_DOWN: &str = "Lidarr can't look up albums right now. Its metadata service isn't answering; try again later.";
 pub const NOT_LIDARR: &str = "That address doesn't answer like Lidarr. Check the address and port.";
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -58,6 +59,10 @@ pub struct RootFolder {
     /// Folders under the root that no Lidarr artist uses.
     #[serde(default)]
     pub unmapped_folders: Vec<UnmappedFolder>,
+    #[serde(default)]
+    pub default_quality_profile_id: Option<i64>,
+    #[serde(default)]
+    pub default_metadata_profile_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -69,6 +74,17 @@ pub struct Artist {
     pub artist_name: String,
     #[serde(default)]
     pub path: String,
+    /// The artist's MusicBrainz id.
+    #[serde(default)]
+    pub foreign_artist_id: String,
+    #[serde(default)]
+    pub monitored: bool,
+    /// `all`, `none` or `new`.
+    #[serde(default)]
+    pub monitor_new_items: Option<String>,
+    /// The folder name Lidarr would use (lookups).
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -151,6 +167,98 @@ pub struct Listing {
     pub files: Vec<FsEntry>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataProfile {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumStatistics {
+    #[serde(default)]
+    pub track_file_count: i64,
+    #[serde(default)]
+    pub track_count: i64,
+    #[serde(default)]
+    pub percent_of_tracks: f64,
+}
+
+/// An album in Lidarr, or one a lookup found (`id` 0: not in Lidarr).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Album {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+    /// The MusicBrainz release group id.
+    #[serde(default)]
+    pub foreign_album_id: String,
+    #[serde(default)]
+    pub artist_id: i64,
+    #[serde(default)]
+    pub monitored: bool,
+    #[serde(default)]
+    pub statistics: Option<AlbumStatistics>,
+    #[serde(default)]
+    pub artist: Option<Artist>,
+}
+
+/// One download in Lidarr's queue.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueItem {
+    #[serde(default)]
+    pub album_id: Option<i64>,
+    /// `queued`, `downloading`, `paused`, `completed`, `failed`, `warning`...
+    #[serde(default)]
+    pub status: String,
+    /// `downloading`, `importPending`, `importing`, `imported`, `failedPending`, `failed`...
+    #[serde(default)]
+    pub tracked_download_state: Option<String>,
+    #[serde(default)]
+    pub size: Option<f64>,
+    #[serde(default)]
+    pub sizeleft: Option<f64>,
+}
+
+/// One event in Lidarr's history.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryItem {
+    #[serde(default)]
+    pub album_id: Option<i64>,
+    /// `grabbed`, `downloadFailed`, `trackFileImported`, `downloadImported`,
+    /// `albumImportIncomplete`, `downloadIgnored`...
+    #[serde(default)]
+    pub event_type: String,
+    #[serde(default)]
+    pub date: String,
+}
+
+/// A list Lidarr pages (`records`) or returns whole.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum Paged<T> {
+    Page {
+        #[serde(default = "Vec::new")]
+        records: Vec<T>,
+    },
+    All(Vec<T>),
+}
+
+impl<T> Paged<T> {
+    fn into_vec(self) -> Vec<T> {
+        match self {
+            Paged::Page { records } | Paged::All(records) => records,
+        }
+    }
+}
+
 /// Which way a request reached Lidarr.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -211,6 +319,22 @@ impl DirectRoute {
     pub fn with_timeout(mut self, t: Duration) -> Self {
         self.timeout = t;
         self
+    }
+
+    /// One of the fixed writes (see `write`), with the same key and headers.
+    pub(super) async fn send_write(&self, call: &super::write::WriteCall) -> AppResult<HttpResponse> {
+        use super::write::WriteMethod;
+        let url = format!("{}{API}{}", self.base, call.path());
+        let mut req = match call.method() {
+            WriteMethod::Post => WebRequest::post_json(url, call.body()),
+            WriteMethod::Put => WebRequest::put_json(url, call.body()),
+        }
+        .timeout(self.timeout.max(Duration::from_secs(20)));
+        for (k, v) in &self.headers {
+            req = req.header(header_name(k), v.expose());
+        }
+        req = req.header("X-Api-Key", self.key.expose());
+        self.web.send(req).await
     }
 }
 
@@ -297,6 +421,54 @@ impl LidarrClient {
 
     pub async fn import_lists(&self) -> AppResult<Vec<ImportList>> {
         self.get("/importlist", &[]).await
+    }
+
+    pub async fn artist(&self, id: i64) -> AppResult<Artist> {
+        self.get(&format!("/artist/{id}"), &[]).await
+    }
+
+    pub async fn metadata_profiles(&self) -> AppResult<Vec<MetadataProfile>> {
+        self.get("/metadataprofile", &[]).await
+    }
+
+    /// An artist's albums as Lidarr has them.
+    pub async fn albums_of(&self, artist_id: i64) -> AppResult<Vec<Album>> {
+        self.get("/album", &[("artistId", &artist_id.to_string())]).await
+    }
+
+    /// The album with this MusicBrainz release group id, when Lidarr has it.
+    pub async fn album_by_release_group(&self, rgid: &str) -> AppResult<Option<Album>> {
+        let all: Vec<Album> = self.get("/album", &[("foreignAlbumId", rgid)]).await?;
+        Ok(all.into_iter().find(|a| a.id > 0 && a.foreign_album_id.eq_ignore_ascii_case(rgid)))
+    }
+
+    /// Lidarr's metadata lookup for a release group. Needs Lidarr's own
+    /// metadata server, so its failures get their own message.
+    pub async fn album_lookup(&self, rgid: &str) -> AppResult<Vec<Album>> {
+        let term = format!("lidarr:{rgid}");
+        let resp = self.transport.get("/album/lookup", &[("term", term.as_str())]).await.map_err(|_| AppError::Network(UNREACHABLE.into()))?;
+        match resp.status {
+            200..=299 => serde_json::from_slice(&resp.body).map_err(|_| AppError::Decode(NOT_LIDARR.into())),
+            401 | 403 => Err(AppError::Auth(BAD_KEY.into())),
+            404 => Ok(Vec::new()),
+            _ => Err(AppError::Server(METADATA_DOWN.into())),
+        }
+    }
+
+    /// Downloads in Lidarr's queue for these albums.
+    pub async fn queue(&self, album_ids: &[i64]) -> AppResult<Vec<QueueItem>> {
+        let ids = album_ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+        let p: Paged<QueueItem> = self.get("/queue/details", &[("albumIds", ids.as_str())]).await?;
+        Ok(p.into_vec())
+    }
+
+    /// The newest history events for one album.
+    pub async fn history(&self, album_id: i64) -> AppResult<Vec<HistoryItem>> {
+        let id = album_id.to_string();
+        let p: Paged<HistoryItem> = self
+            .get("/history", &[("albumId", id.as_str()), ("page", "1"), ("pageSize", "20"), ("sortKey", "date"), ("sortDirection", "descending")])
+            .await?;
+        Ok(p.into_vec())
     }
 
     /// One folder's contents, with file sizes.

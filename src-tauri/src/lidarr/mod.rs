@@ -1,13 +1,20 @@
-//! Lidarr: the connection (address in Settings, API key in the OS keychain)
-//! and the read-only setup check that must pass before Platter ever asks
-//! Lidarr for anything. This part only reads: every request it sends is a
-//! GET (see `api`).
+//! Lidarr: the connection (address in Settings, API key in the OS keychain),
+//! the read-only setup check that must pass before Platter ever asks Lidarr
+//! for anything, and requests. The check only reads (`api` is GET only);
+//! requests go through the three fixed writes in `write`, and only after
+//! the whole check has passed again.
 
 pub mod api;
 pub mod check;
 pub mod commands;
+pub mod mbpick;
 pub mod paths;
+pub mod request;
+pub mod status;
+pub mod write;
 
+#[cfg(test)]
+mod request_tests;
 #[cfg(test)]
 mod tests;
 
@@ -73,12 +80,55 @@ impl PlexMusic for PlexMusicFiles {
     }
 }
 
+/// A library artist's MusicBrainz id (from Plex or the artist info cache).
+#[async_trait]
+pub trait ArtistMbid: Send + Sync {
+    async fn artist_mbid(&self, artist_id: &str, name: &str) -> Option<String>;
+}
+
+/// The artist info service's id lookup (Plex's, else Wikidata's).
+pub struct InfoMbid(pub crate::artistinfo::ArtistInfoService);
+
+#[async_trait]
+impl ArtistMbid for InfoMbid {
+    async fn artist_mbid(&self, artist_id: &str, name: &str) -> Option<String> {
+        self.0.artist_mbid(artist_id, name).await
+    }
+}
+
 pub struct LidarrDeps {
     pub web: Arc<dyn Web>,
     pub keys: Arc<dyn TokenStore>,
     pub db: DbHandle,
     pub plex: Arc<dyn PlexMusic>,
     pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// MusicBrainz, paced and cached.
+    pub mb: Arc<dyn mbpick::MbGet>,
+    pub artist_mbid: Arc<dyn ArtistMbid>,
+    /// How long to wait between looks for a newly added artist's albums.
+    pub album_wait: Duration,
+}
+
+/// A check that passed or not, with the connection it used.
+pub struct Checked {
+    pub report: CheckReport,
+    pub client: LidarrClient,
+    pub writer: write::LidarrWriter,
+    pub snap: LidarrSnapshot,
+}
+
+/// The last check's outcome, kept on this device.
+const LAST_CHECK_KEY: &str = "lidarr.lastCheck";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastCheck {
+    pub passed: bool,
+    pub checked_at: i64,
+    /// The address it was for (a changed address needs a new check).
+    pub url: String,
+    /// Lidarr's root folders then, for where queued requests will land.
+    pub roots: Vec<String>,
 }
 
 /// What Settings shows before a check.
@@ -100,6 +150,8 @@ pub struct LidarrStatus {
 #[derive(Clone)]
 pub struct Lidarr {
     inner: Arc<LidarrDeps>,
+    /// One request (or retry) at a time.
+    lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// The address as a key for stored confirmations.
@@ -150,7 +202,7 @@ pub fn parse_headers(text: &str) -> AppResult<Vec<(String, String)>> {
 
 impl Lidarr {
     pub fn new(deps: LidarrDeps) -> Self {
-        Self { inner: Arc::new(deps) }
+        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())) }
     }
 
     /// (home, away) addresses from Settings; empty when not set.
@@ -240,7 +292,7 @@ impl Lidarr {
     }
 
     /// The direct routes to try, home first.
-    fn routes(&self) -> AppResult<Vec<Arc<dyn LidarrGet>>> {
+    fn routes(&self) -> AppResult<Vec<Arc<DirectRoute>>> {
         let (home, away) = self.urls();
         if home.trim().is_empty() && away.trim().is_empty() {
             return Err(AppError::Invalid("Set Lidarr's address first.".into()));
@@ -250,7 +302,7 @@ impl Lidarr {
             .keys
             .get(KEY_ACCOUNT)?
             .ok_or_else(|| AppError::Invalid("Add Lidarr's API key first.".into()))?;
-        let mut out: Vec<Arc<dyn LidarrGet>> = Vec::new();
+        let mut out: Vec<Arc<DirectRoute>> = Vec::new();
         if !home.trim().is_empty() {
             let mut r = DirectRoute::new(self.inner.web.clone(), &home, key.clone(), vec![], Route::Home)?;
             if !away.trim().is_empty() {
@@ -267,12 +319,12 @@ impl Lidarr {
 
     /// The first route that answers like a Lidarr Platter can check. When
     /// none does, the home address's error unless it simply wasn't reachable.
-    pub async fn connect(routes: Vec<Arc<dyn LidarrGet>>) -> AppResult<(LidarrClient, SystemStatus)> {
+    pub async fn connect(routes: Vec<Arc<DirectRoute>>) -> AppResult<(LidarrClient, SystemStatus, Arc<DirectRoute>)> {
         let mut first_err: Option<AppError> = None;
         for t in routes {
-            let c = LidarrClient::new(t);
+            let c = LidarrClient::new(t.clone() as Arc<dyn LidarrGet>);
             match c.system_status().await {
-                Ok(s) => return Ok((c, s)),
+                Ok(s) => return Ok((c, s, t)),
                 Err(e) => {
                     let keep = match &first_err {
                         None => true,
@@ -328,14 +380,46 @@ impl Lidarr {
     /// it and Plex, then follow up with folder listings until the
     /// comparisons are settled (or the budget runs out).
     pub async fn check(&self) -> AppResult<CheckReport> {
+        Ok(self.check_full().await?.report)
+    }
+
+    /// The last check's outcome on this device, when it was for the
+    /// address set now.
+    pub fn last_check(&self) -> Option<LastCheck> {
+        let (home, away) = self.urls();
+        let url = url_key(if home.trim().is_empty() { &away } else { &home });
+        self.inner
+            .db
+            .read(|c| kv_get(c, LAST_CHECK_KEY))
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<LastCheck>(&s).ok())
+            .filter(|l| l.url == url && !url.is_empty())
+    }
+
+    fn remember_check(&self, report: &CheckReport, snap: &LidarrSnapshot) {
+        let (home, away) = self.urls();
+        let last = LastCheck {
+            passed: report.passed,
+            checked_at: report.checked_at,
+            url: url_key(if home.trim().is_empty() { &away } else { &home }),
+            roots: snap.roots.iter().map(|r| r.path.clone()).collect(),
+        };
+        if let Ok(json) = serde_json::to_string(&last) {
+            let _ = self.inner.db.write(|c| kv_set(c, LAST_CHECK_KEY, &json));
+        }
+    }
+
+    /// [`Self::check`], keeping the connection for a request.
+    pub async fn check_full(&self) -> AppResult<Checked> {
         let routes = self.routes()?;
         let (home, away) = self.urls();
         let connect = async {
-            let (client, status) = Self::connect(routes).await?;
+            let (client, status, route) = Self::connect(routes).await?;
             let snap = Self::snapshot(&client, status).await?;
-            Ok::<_, AppError>((client, snap))
+            Ok::<_, AppError>((client, snap, route))
         };
-        let ((client, mut snap), plex) = futures::try_join!(connect, self.inner.plex.music_files())?;
+        let ((client, mut snap, route), plex) = futures::try_join!(connect, self.inner.plex.music_files())?;
         let index = PlexIndex::new(&plex);
         let ctx = CheckContext {
             confirmed_roots: self.confirmations().remove(&url_key(if home.trim().is_empty() { &away } else { &home })).unwrap_or_default(),
@@ -365,6 +449,7 @@ impl Lidarr {
             route = ?client.route(),
             "lidarr setup check"
         );
-        Ok(report)
+        self.remember_check(&report, &snap);
+        Ok(Checked { report, client, writer: write::LidarrWriter::new(route as Arc<dyn write::LidarrWrite>), snap })
     }
 }
