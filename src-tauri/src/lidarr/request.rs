@@ -64,6 +64,9 @@ pub struct RequestRecord {
     /// What Platter did along the way (monitoring it turned off...).
     #[serde(default)]
     pub notes: Vec<String>,
+    /// Made by auto-request for a new release, not by hand.
+    #[serde(default)]
+    pub auto: bool,
 }
 
 /// What the UI sends to request (or preview) an album.
@@ -317,8 +320,24 @@ impl Lidarr {
         if let Some(r) = self.records().into_iter().find(|r| r.release_group_id == rgid && r.state != RequestState::Failed) {
             return Ok(r);
         }
+        let rec = self.new_record(&input, rgid, false);
+        let out = match self.send(rec.clone()).await {
+            Ok(r) => r,
+            Err(e) if e.kind() == "network" => {
+                let mut r = rec;
+                r.destination = self.guessed_destination(&r.artist);
+                r
+            }
+            Err(e) => return Err(e),
+        };
+        self.upsert(&out)?;
+        self.inner.db.write(|c| kv_set(c, TYPED_KEY, "1"))?;
+        Ok(out)
+    }
+
+    fn new_record(&self, input: &RequestInput, rgid: String, auto: bool) -> RequestRecord {
         let now = (self.inner.clock)();
-        let rec = RequestRecord {
+        RequestRecord {
             id: uuid::Uuid::new_v4().to_string(),
             release_group_id: rgid,
             title: input.title.trim().to_string(),
@@ -333,18 +352,32 @@ impl Lidarr {
             updated_at: now,
             message: Some(QUEUED_NOTE.into()),
             notes: Vec::new(),
-        };
+            auto,
+        }
+    }
+
+    /// An automatic request for a new release (auto-request is on for the
+    /// artist, which stands in for the typed name). The same MusicBrainz
+    /// guards and the same full setup check run before anything is sent.
+    /// A release asked for before (by hand or automatically, whatever came
+    /// of it) is never asked for again. Anything refused stays in the list
+    /// as failed, with why; a red setup check or an unreachable Lidarr
+    /// keeps it waiting, and the background retry checks everything again.
+    pub async fn request_auto(&self, input: RequestInput) -> AppResult<RequestRecord> {
+        let _one = self.lock.lock().await;
+        let rgid = input.release_group_id.trim().to_ascii_lowercase();
+        if let Some(r) = self.records().into_iter().find(|r| r.release_group_id == rgid) {
+            return Ok(r);
+        }
+        let rec = self.new_record(&input, rgid, true);
+        let now = (self.inner.clock)();
         let out = match self.send(rec.clone()).await {
             Ok(r) => r,
-            Err(e) if e.kind() == "network" => {
-                let mut r = rec;
-                r.destination = self.guessed_destination(&r.artist);
-                r
-            }
-            Err(e) => return Err(e),
+            Err(e) if e.kind() == "network" => RequestRecord { destination: self.guessed_destination(&rec.artist), ..rec },
+            Err(e) if e.to_string().contains("red items") => RequestRecord { message: Some(e.to_string()), updated_at: now, ..rec },
+            Err(e) => RequestRecord { state: RequestState::Failed, message: Some(e.to_string()), updated_at: now, ..rec },
         };
         self.upsert(&out)?;
-        self.inner.db.write(|c| kv_set(c, TYPED_KEY, "1"))?;
         Ok(out)
     }
 

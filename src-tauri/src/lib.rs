@@ -24,6 +24,7 @@ pub mod platform;
 pub mod playlists;
 pub mod plex;
 pub mod plexedit;
+pub mod radar;
 pub mod remote;
 pub mod scrobble;
 pub mod settings;
@@ -627,11 +628,13 @@ pub fn run() {
                     limiter: artist_info.musicbrainz_limiter(),
                     db: db.clone(),
                     clock: Arc::new(db::queries::now_s),
+                    ttl: lidarr::mbpick::CACHE_TTL,
                 }),
                 artist_mbid: Arc::new(lidarr::InfoMbid(artist_info.clone())),
                 album_wait: std::time::Duration::from_secs(2),
             });
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
+            let radar_lidarr = lidarr_service.clone();
             app.manage(lidarr_service);
             let smart_service = smart::Smart::new(smart::SmartDeps {
                 db: db.clone(),
@@ -791,6 +794,38 @@ pub fn run() {
             });
             social::commands::spawn_watch(social.clone(), db.clone());
             app.manage(social);
+
+            // Release radar: new releases on MusicBrainz, about once a day.
+            {
+                let mb = |ttl: i64| -> Arc<dyn lidarr::mbpick::MbGet> {
+                    Arc::new(lidarr::mbpick::MbCached {
+                        http: artist_info.http(),
+                        limiter: artist_info.musicbrainz_limiter(),
+                        db: db.clone(),
+                        clock: Arc::new(db::queries::now_s),
+                        ttl,
+                    })
+                };
+                let info = artist_info.clone();
+                let radar = radar::Radar::new(radar::RadarDeps {
+                    db: db.clone(),
+                    mb: mb(radar::MB_TTL),
+                    mbids: Arc::new(radar::commands::RadarMbids {
+                        info: Arc::new(lidarr::InfoMbid(artist_info.clone())),
+                        picker: lidarr::mbpick::Picker { mb: mb(lidarr::mbpick::CACHE_TTL) },
+                    }),
+                    follows: Arc::new(sync::follows::SyncFollows { store: sync_store.clone() }),
+                    top: Arc::new(radar::StatsTop(db.clone())),
+                    lidarr: Arc::new(radar_lidarr),
+                    notifier: Arc::new(social::commands::OsNotifier(app.handle().clone())),
+                    events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                    usable: Arc::new(move || info.usable(artistinfo::InfoSource::Musicbrainz)),
+                    private_session: live.tracking.private_session.clone(),
+                    clock: Arc::new(db::queries::now_s),
+                });
+                tauri::async_runtime::spawn(radar::watch(radar.clone()));
+                app.manage(radar);
+            }
 
             // Lyrics: the song's server first, then LRCLIB when its setting is on.
             let lyrics_service = lyrics::LyricsService::new(
@@ -1195,6 +1230,10 @@ pub fn run() {
             lidarr::commands::lidarr_requests,
             lidarr::commands::lidarr_request_cancel,
             lidarr::commands::lidarr_missing_releases,
+            radar::commands::release_radar,
+            radar::commands::release_radar_check,
+            radar::commands::radar_auto_artists,
+            radar::commands::radar_auto_set,
             platform::miniplayer::miniplayer_state,
             platform::miniplayer::miniplayer_set,
         ])

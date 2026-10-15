@@ -547,6 +547,15 @@ pub struct Settings {
     pub doctor_checks: crate::doctor::Checks,
     /// Album covers smaller than this (longest side, pixels) count as small.
     pub doctor_cover_px: u32,
+    /// Release radar: new releases from followed and most played artists
+    /// (MusicBrainz, about once a day), on Home and its own page.
+    pub release_radar: bool,
+    /// A notification when the radar finds new releases.
+    pub radar_notify: bool,
+    /// Auto-request new albums for artists it's turned on for (this device).
+    pub auto_request: bool,
+    /// Most automatic requests a day (this device).
+    pub auto_request_cap: u32,
 }
 
 /// Most folder keywords kept, and the longest one.
@@ -739,6 +748,10 @@ impl Default for Settings {
             library_doctor: true,
             doctor_checks: crate::doctor::Checks::default(),
             doctor_cover_px: crate::doctor::DEFAULT_COVER_PX,
+            release_radar: true,
+            radar_notify: true,
+            auto_request: false,
+            auto_request_cap: crate::radar::DEFAULT_CAP,
         }
     }
 }
@@ -841,6 +854,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "libraryDoctor",
     "doctorChecks",
     "doctorCoverPx",
+    "releaseRadar",
+    "radarNotify",
 ];
 
 /// Settings kept on this device only.
@@ -895,6 +910,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "downloadLiked",
     "goOffline",
     "notifyNewReleases",
+    "autoRequest",
+    "autoRequestCap",
     "discordListenAlong",
     "syncEnabled",
     "syncFolder",
@@ -1080,6 +1097,10 @@ pub struct SettingsPatch {
     pub library_doctor: Option<bool>,
     pub doctor_checks: Option<crate::doctor::Checks>,
     pub doctor_cover_px: Option<u32>,
+    pub release_radar: Option<bool>,
+    pub radar_notify: Option<bool>,
+    pub auto_request: Option<bool>,
+    pub auto_request_cap: Option<u32>,
 }
 
 impl SettingsPatch {
@@ -1309,6 +1330,15 @@ impl Settings {
             }
             self.doctor_cover_px = px;
         }
+        set(&mut self.release_radar, p.release_radar);
+        set(&mut self.radar_notify, p.radar_notify);
+        set(&mut self.auto_request, p.auto_request);
+        if let Some(cap) = p.auto_request_cap {
+            if !crate::radar::CAP_CHOICES.contains(&cap) {
+                return Err(AppError::Invalid("Pick one of the daily limits offered.".into()));
+            }
+            self.auto_request_cap = cap;
+        }
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -1395,6 +1425,9 @@ impl Settings {
         }
         if !crate::doctor::COVER_PX_CHOICES.contains(&self.doctor_cover_px) {
             self.doctor_cover_px = crate::doctor::DEFAULT_COVER_PX;
+        }
+        if !crate::radar::CAP_CHOICES.contains(&self.auto_request_cap) {
+            self.auto_request_cap = crate::radar::DEFAULT_CAP;
         }
         // A hand-edited accent or theme falls back rather than reaching the UI.
         self.accent = crate::themes::accent_value(&self.accent).unwrap_or_else(|| "ivory".into());
@@ -2968,5 +3001,27 @@ mod tests {
         assert_eq!(v["plexEditLock"], false);
         assert_eq!(v["plexEditMatchUnreleased"], false);
         assert_eq!(v["plexEditShow"], true);
+    }
+
+    #[test]
+    fn release_radar_settings_defaults_choices_and_where_they_live() {
+        let s = Settings::default();
+        assert!(s.release_radar && s.radar_notify, "the radar and its notifications start on");
+        assert!(!s.auto_request, "auto-request starts off");
+        assert_eq!(s.auto_request_cap, 3);
+        assert!(SYNCED_SETTINGS.contains(&"releaseRadar") && SYNCED_SETTINGS.contains(&"radarNotify"));
+        assert!(DEVICE_SETTINGS.contains(&"autoRequest") && DEVICE_SETTINGS.contains(&"autoRequestCap"), "requests are per device");
+        let mut s = s;
+        s.apply(&serde_json::from_str(r#"{"releaseRadar":false,"radarNotify":false,"autoRequest":true,"autoRequestCap":5}"#).unwrap())
+            .unwrap();
+        assert!(!s.release_radar && !s.radar_notify && s.auto_request);
+        assert_eq!(s.auto_request_cap, 5);
+        assert!(s.apply(&serde_json::from_str(r#"{"autoRequestCap":4}"#).unwrap()).is_err());
+        assert_eq!(s.auto_request_cap, 5, "a refused limit keeps the old one");
+        // A hand-edited stored limit falls back to the default.
+        let stored: Settings = serde_json::from_str(r#"{"autoRequestCap":99}"#).unwrap();
+        let mut stored = stored;
+        stored.clamp();
+        assert_eq!(stored.auto_request_cap, 3);
     }
 }

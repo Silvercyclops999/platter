@@ -525,6 +525,62 @@ async fn missing_releases_need_the_setting_and_a_green_check() {
 }
 
 #[tokio::test]
+async fn auto_requests_run_every_guard_and_the_full_check_without_a_typed_name() {
+    let r = rig();
+    let rec = r.lidarr.request_auto(input(RG_SECOND, "Second Wind", None)).await.unwrap();
+    assert!(rec.auto);
+    assert_eq!(rec.state, RequestState::Searching);
+    let log = r.web.log.lock().clone();
+    let first_write = log.iter().position(|(m, _, _)| *m != Method::Get).unwrap();
+    assert!(log[..first_write].iter().any(|(_, p, _)| p == "/api/v1/rootfolder"), "the full check ran first");
+    assert_only_allowed_writes(&r.web);
+    assert!(!r.lidarr.typed_confirmed(), "an automatic request doesn't stand in for the first typed one");
+    // Never asked for twice.
+    let before = r.web.writes().len();
+    let again = r.lidarr.request_auto(input(RG_SECOND, "Second Wind", None)).await.unwrap();
+    assert_eq!(again.id, rec.id);
+    assert_eq!(r.web.writes().len(), before);
+}
+
+#[tokio::test]
+async fn refused_auto_requests_are_kept_with_why_and_lidarr_is_not_asked() {
+    let r = rig();
+    let clash = r.lidarr.request_auto(input(RG_SKETCH, "Quiet Sketches", None)).await.unwrap();
+    assert_eq!(clash.state, RequestState::Failed);
+    assert!(clash.message.as_deref().unwrap().contains("unreleased album already in your library"));
+    let boot = r.lidarr.request_auto(input(RG_BOOT, "Basement Tapes", None)).await.unwrap();
+    assert_eq!(boot.state, RequestState::Failed);
+    assert!(boot.message.as_deref().unwrap().contains("bootleg"));
+    assert!(r.web.log.lock().is_empty(), "Lidarr wasn't contacted");
+    let list = r.lidarr.requests();
+    assert_eq!(list.len(), 2);
+    assert!(list.iter().all(|x| x.auto && x.state == RequestState::Failed));
+    // A refused one isn't tried again.
+    assert_eq!(r.lidarr.request_auto(input(RG_BOOT, "Basement Tapes", None)).await.unwrap().id, boot.id);
+}
+
+#[tokio::test]
+async fn a_red_check_or_no_lidarr_keeps_an_auto_request_waiting() {
+    let r = rig();
+    r.web.st.lock().red = true;
+    let rec = r.lidarr.request_auto(input(RG_SECOND, "Second Wind", None)).await.unwrap();
+    assert_eq!(rec.state, RequestState::Queued);
+    assert!(rec.message.as_deref().unwrap().contains("red items"));
+    assert!(r.web.writes().is_empty());
+    r.web.st.lock().down = true;
+    let rec = r.lidarr.request_auto(input(RG_EP, "Small Hours", None)).await.unwrap();
+    assert_eq!(rec.state, RequestState::Queued);
+    {
+        let mut st = r.web.st.lock();
+        st.down = false;
+        st.red = false;
+    }
+    r.lidarr.retry_queued().await.unwrap();
+    assert!(r.lidarr.requests().iter().all(|x| x.state == RequestState::Searching));
+    assert_only_allowed_writes(&r.web);
+}
+
+#[tokio::test]
 async fn picking_for_a_song_uses_musicbrainz_only() {
     let r = rig();
     let p = r.lidarr.pick("Northlight", Some("ar1"), "Breathe In", true, None).await.unwrap();
