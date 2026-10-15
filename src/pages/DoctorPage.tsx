@@ -13,7 +13,7 @@ import { SkeletonLines } from "../components/Skeleton";
 import { ChipRow } from "../components/Tabs";
 import { backend } from "../lib/backend";
 import { timeAgo } from "../lib/relativeTime";
-import type { DoctorFinding, DoctorKind, DoctorReport, LidarrRequestInput } from "../lib/types";
+import type { DoctorFinding, DoctorKind, DoctorSuggestedTags, DoctorReport, LidarrRequestInput } from "../lib/types";
 import { useDoctor } from "../stores/doctor";
 import { errText, runEdit, useCanEdit, usePlexEdit, type EditTarget } from "../stores/plexEdit";
 import { nav } from "../stores/router";
@@ -33,9 +33,10 @@ export const KIND_LABEL: Record<DoctorKind, string> = {
   albumArtist: "Missing album artist",
   lowQuality: "Low-quality copies",
   unmatched: "Albums that weren't matched",
+  soundsLike: "Songs that sound like another recording",
 };
 
-export const KIND_ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched"];
+export const KIND_ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched", "soundsLike"];
 
 const n = (v: number) => v.toLocaleString();
 
@@ -56,6 +57,8 @@ export function fixLabel(f: DoctorFinding): { label: string; edit: boolean } {
       return { label: f.others.length > 1 ? "Merge albums" : "Merge into one", edit: true };
     case "tags":
       return { label: "See the tags", edit: false };
+    case "suggestedTags":
+      return { label: "See suggested tags", edit: false };
     case "openAlbum":
       return { label: f.kind === "lowQuality" ? "Open the better copy" : "Open album", edit: false };
   }
@@ -305,6 +308,7 @@ function FindingRow({
       case "mergeAlbums":
         return onMerge(f);
       case "tags":
+      case "suggestedTags":
         return setWhy(true);
       case "openAlbum":
         return nav.go({ name: "album", id: f.kind === "lowQuality" && f.others[0] ? f.others[0].id : f.albumId });
@@ -350,6 +354,7 @@ function FindingRow({
               ))}
             </ul>
             {f.table.length > 0 && <TagTable f={f} />}
+            {f.suggest && <SuggestTable s={f.suggest} />}
             {!fixable && <p className="doctor-why__note">Editing is off in Settings, or this account can't edit this server, so the fix opens the album instead.</p>}
           </div>
         )}
@@ -396,6 +401,40 @@ function TagTable({ f }: { f: DoctorFinding }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** A song's own tags next to the ones its sound suggests. Shown only; nothing is written. */
+export function SuggestTable({ s }: { s: DoctorSuggestedTags }) {
+  const rows: [string, string, string | null][] = [
+    ["Title", s.title, s.newTitle],
+    ["Artist", s.artist, s.newArtist],
+    ["Album", s.album, s.newAlbum],
+    ["MusicBrainz recording", "", s.recordingMbid],
+  ];
+  return (
+    <>
+      <table className="doctor-tags doctor-suggest">
+        <caption className="sr-only">The file's tags and the ones its sound suggests</caption>
+        <thead>
+          <tr>
+            <th scope="col">Tag</th>
+            <th scope="col">Now</th>
+            <th scope="col">Suggested ({s.score}% match)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([name, now, next]) => (
+            <tr key={name}>
+              <th scope="row">{name}</th>
+              <td>{now || <span className="doctor-tags__none">None</span>}</td>
+              <td className={next && next !== now ? "doctor-tags__odd" : undefined}>{next || <span className="doctor-tags__none">None</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="doctor-why__note">Platter doesn't change the file. Copy these into your tagger if they're right.</p>
+    </>
   );
 }
 

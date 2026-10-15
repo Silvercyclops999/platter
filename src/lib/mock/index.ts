@@ -93,6 +93,8 @@ import type {
   ReleaseMark,
   DoctorFinding,
   DoctorKind,
+  SoundIdStatus,
+  SoundsLike,
   ThemeFile,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
@@ -102,6 +104,7 @@ import { mockLyrics, mockNowPlayingDetails } from "./details";
 import { lyricsFromText } from "../lrc";
 import { credits, globalTop, popularTracks, rankPopular } from "./popular";
 import {
+  ARCHIVE_ARTIST_ID,
   BROKEN_TRACK_TITLE_SUFFIX,
   LEARNED_NAMES,
   buildFixtures,
@@ -3174,6 +3177,62 @@ export class MockBackend implements Backend {
   }
   discordImgurKeySet(key: string | null) {
     return this.delay(() => this.discord.setKey(key));
+  }
+
+  // ---------------------------------------------------------------- identify by sound
+
+  /** Test hooks: whether the build has a key, the user's key, a refused key. */
+  readonly soundId = { appKey: false, userKey: null as string | null, refused: false };
+
+  private soundIdState(): SoundIdStatus {
+    const s = this.settings;
+    const scope = s.soundIdScope ?? "untagged";
+    const total = scope === "all" ? this.fx.tracks.length : Math.round(this.fx.tracks.length / 4);
+    const on = s.identifyBySound === true && !s.goOffline;
+    const configured = this.soundId.appKey || this.soundId.userKey !== null;
+    const done = on && configured ? Math.round(total * 0.6) : 0;
+    return {
+      on,
+      appKey: this.soundId.appKey,
+      userKey: this.soundId.userKey !== null,
+      keyRefused: this.soundId.refused,
+      configured,
+      running: false,
+      paused: false,
+      total,
+      done,
+      identified: Math.round(done * 0.7),
+    };
+  }
+  soundIdStatus() {
+    return this.delay(() => this.soundIdState());
+  }
+  soundIdKeySet(key: string | null) {
+    return this.delay(() => {
+      const k = key?.trim() ?? "";
+      if (k && !/^[A-Za-z0-9_-]{1,100}$/.test(k)) throw { kind: "invalid", message: "That doesn't look like an AcoustID application key." };
+      this.soundId.userKey = k || null;
+      this.soundId.refused = false;
+      return this.soundIdState();
+    });
+  }
+  trackSoundsLike(id: string) {
+    return this.delay((): SoundsLike | null => {
+      if (this.settings.identifyBySound !== true) return null;
+      const t = this.fx.tracks.find((x) => x.id === id);
+      if (!t || t.artistId !== ARCHIVE_ARTIST_ID) return null;
+      const released = this.fx.tracks.find((x) => x.artistId !== ARCHIVE_ARTIST_ID);
+      return {
+        trackId: id,
+        recordingMbid: "0f0e0d0c-0b0a-4909-8807-060504030201",
+        title: released?.title ?? "Night Drive",
+        artist: released?.artistTitle ?? "Ana",
+        album: released?.albumTitle ?? null,
+        score: 91,
+        unreleased: true,
+        inLibrary: released ? { trackId: released.id, albumId: released.albumId } : null,
+      };
+    });
   }
 
   // ---------------------------------------------------------------- file tags

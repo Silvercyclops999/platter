@@ -639,7 +639,9 @@ playing carries on as the same play. Now-playing outputs that follow
 
 `DoctorReport = { on, findings: DoctorFinding[], ignored: DoctorFinding[], count, running, checkedAt?, tagsRead, tagsTotal }`
 
-`DoctorFinding = { id, kind, artistId, artist, albumId, album, thumb?, title, text, evidence: string[], fix, tracks: string[], others: { id, title, thumb? }[], table: { trackId, title, album?, albumArtist?, year? }[] }`
+`DoctorFinding = { id, kind, artistId, artist, albumId, album, thumb?, title, text, evidence: string[], fix, tracks: string[], others: { id, title, thumb? }[], table: { trackId, title, album?, albumArtist?, year? }[], suggest? }`
+
+`DoctorSuggestedTags = { trackId, title, artist, album, newTitle, newArtist, newAlbum?, recordingMbid, score }` (score 0 to 100)
 
 `kind` is one of `duplicate` (the same recording twice on one album),
 `cover` (no cover, or one smaller than `doctorCoverPx` on its longest side),
@@ -650,13 +652,17 @@ status), `albumArtist` (files with no album artist on an album whose songs
 credit several artists, or whose name is also under another artist),
 `lowQuality` (a lossy copy next to a lossless one of the same recording on
 another album, or a low bitrate well under another lossy copy) and
-`unmatched` (Plex couldn't match it and the MusicBrainz check found it).
-Unreleased songs never match anything, so they are never duplicates or
-low-quality copies, and unreleased albums are never `unmatched`.
+`unmatched` (Plex couldn't match it and the MusicBrainz check found it) and
+`soundsLike` (identify by sound matched the file to another recording than
+its title, artist or recording id say; files whose names already agree are
+left alone). Unreleased songs never match anything, so they are never
+duplicates, low-quality copies or `soundsLike`, and unreleased albums are
+never `unmatched`.
 
 `fix` names the app's own flow: `cover` (Change cover), `match` (Fix match),
 `mergeAlbums` (`plex_edit_merge_albums` after a confirm), `openAlbum` or
-`tags` (each song's tags in `table`; they are changed in a tagger). Low
+`tags` (each song's tags in `table`; they are changed in a tagger) or
+`suggestedTags` (the file's tags next to the ones in `suggest`). Low
 quality findings also offer a Lidarr request when Lidarr is ready. Nothing
 here writes to Plex or to files.
 
@@ -668,6 +674,42 @@ same low-priority reads as file tags. `doctor://changed` (`{ count, running }`)
 fires when findings or ignores change. Ignored findings are app state in the
 sync store (`doctorIgnored`, keyed by finding id) and sync with the library
 group.
+
+## Identify by sound
+| Command | Args | Returns |
+| --- | --- | --- |
+| `sound_id_status` | – | `SoundIdStatus` |
+| `sound_id_key_set` | `{ key: string | null }` | `SoundIdStatus` |
+| `track_sounds_like` | `{ id }` | `SoundsLike` or null |
+
+`SoundIdStatus = { on, appKey, userKey, keyRefused, configured, running, paused, total, done, identified }`
+
+`SoundsLike = { trackId, recordingMbid, title, artist, album?, score, unreleased, inLibrary?: { trackId, albumId } }`
+
+While `identifyBySound` is on (and the app isn't offline), songs are
+fingerprinted one at a time: the first two minutes of the file are read in
+1 MB ranges at the tag scan's background priority on the transfer gate,
+decoded on this computer and turned into a Chromaprint fingerprint
+(`rusty-chromaprint`). The fingerprint and the song's length in seconds are
+posted to AcoustID's lookup (`meta=recordings releasegroups compress`) with
+the application key, nothing else, at most 2.5 requests a second, pausing
+after a 429 or 5xx. The best recording scoring 0.8 or more is kept per song
+and file; a changed file is done again. A fingerprint whose lookup has to
+wait (no key, a refused key, the service busy) is kept so the file isn't
+read twice.
+
+The key is the user's own from `sound_id_key_set` (kept in the keychain as
+`acoustid-key`), else the one the app was built with
+(`PLATTER_ACOUSTID_KEY`). With neither, `configured` is false and nothing
+runs. `keyRefused` is set when AcoustID answers with error code 4 and clears
+when a key is saved.
+
+The recording feeds the matcher's fingerprint tier (`song_index.sound_mbid`,
+between Plex's track id and the names) and the library doctor's
+`soundsLike` finding. It never goes against two different recording ids in
+the files' tags, and unreleased songs never match anything, so for them
+`track_sounds_like` is only a hint. `inLibrary` is a released copy of that
+recording in the library. `soundid://changed` fires as songs are done.
 
 ## Sharing
 | Command | Args | Returns |
@@ -2239,12 +2281,14 @@ The rest of the fields, with their defaults:
 | `syncLyrics` | bool, true | What to sync: lyrics written in the editor. This device only. |
 | `bookmarksInLibrary` | bool, true | A Bookmarks row under Liked Songs in the library. |
 | `libraryDoctor` | bool, true | The library doctor checks the library in the background and shows a count in the app menu. |
-| `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched }`, all true | Which library doctor checks run. |
+| `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched, soundsLike }`, all true | Which library doctor checks run. |
 | `doctorCoverPx` | 300, 500, 600 (default), 800, 1000 or 1400 | Covers smaller than this on their longest side count as small. |
 | `releaseRadar` | bool, true | The release radar looks for new releases about once a day and shows them on Home and its page. Synced. |
 | `radarNotify` | bool, true | A notification when the release radar finds something new (not in a private session). Synced. |
 | `autoRequest` | bool, false | Auto-request new albums for the artists it's on for. Turning it on for an artist turns this on. This device only. |
 | `autoRequestCap` | 1, 2, 3 (default), 5 or 10 | Most automatic requests a day. This device only. |
+| `identifyBySound` | bool, false | Fingerprint songs on this computer and look them up on AcoustID (only the fingerprint and length are sent). This device only. |
+| `soundIdScope` | `"untagged"` (default) or `"all"` | Which songs: files with no recording id or ISRC, or every song. This device only. |
 | `scrobbleLastfm` | bool, false | Scrobble to Last.fm once signed in. This device only. |
 | `scrobbleListenbrainz` | bool, false | Scrobble to ListenBrainz with the user token. This device only. |
 | `scrobbleUnreleased` | bool, false | Unreleased music scrobbles too. |

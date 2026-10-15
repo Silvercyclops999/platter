@@ -21,6 +21,7 @@ export const DOCTOR_CHECKS: { key: keyof DoctorChecks; label: string; hint: stri
   { key: "albumArtist", label: "Missing album artist", hint: "Songs with no album artist on albums that credit several artists." },
   { key: "lowQuality", label: "Low-quality copies", hint: "A song you also have in better quality on another album." },
   { key: "unmatched", label: "Albums that weren't matched", hint: "Albums MusicBrainz knows but your server couldn't match. Unreleased albums are never listed." },
+  { key: "soundsLike", label: "Songs that sound like another recording", hint: "Untagged or mislabelled files that identify by sound matched to another song. Needs Identify songs by sound. Unreleased songs are never listed." },
 ];
 
 export const COVER_PX_OPTIONS = [

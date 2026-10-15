@@ -14,9 +14,10 @@ const CHECK_OF: Record<DoctorKind, keyof Settings["doctorChecks"]> = {
   albumArtist: "albumArtist",
   lowQuality: "lowQuality",
   unmatched: "unmatched",
+  soundsLike: "soundsLike",
 };
 
-const ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched"];
+const ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched", "soundsLike"];
 
 const q = (s: string) => `“${s}”`;
 
@@ -213,6 +214,38 @@ export class MockDoctor {
       out.push({ finding: f });
     }
 
+    {
+      // Shown only while identify by sound is on (it needs its results).
+      const a = take();
+      const t = this.tracksOf(a)[0];
+      const f = this.finding(
+        "soundsLike",
+        `soundsLike:${t.id}:0f0e0d0c-0b0a-4909-8807-060504030201`,
+        a,
+        "Untagged or mislabelled file, sounds like Night Drive by Ana",
+        `${t.title} sounds like Night Drive by Ana. See the tags that recording suggests next to the file's own; nothing is changed, so a tagger is where to fix them.`,
+        "suggestedTags",
+      );
+      f.tracks = [t.id];
+      f.evidence = [
+        "Its audio fingerprint matched the MusicBrainz recording Night Drive by Ana (94% match, id 0f0e0d0c-0b0a-4909-8807-060504030201).",
+        `The file is tagged as ${t.title} by ${a.artistTitle}.`,
+        "Only the fingerprint and the file's length were sent to AcoustID to find this.",
+      ];
+      f.suggest = {
+        trackId: t.id,
+        title: t.title,
+        artist: a.artistTitle,
+        album: a.title,
+        newTitle: "Night Drive",
+        newArtist: "Ana",
+        newAlbum: "Lights",
+        recordingMbid: "0f0e0d0c-0b0a-4909-8807-060504030201",
+        score: 94,
+      };
+      out.push({ finding: f });
+    }
+
     this.built = out;
     return out;
   }
@@ -221,10 +254,11 @@ export class MockDoctor {
   all(): DoctorFinding[] {
     const s = this.settings();
     if (s.libraryDoctor === false) return [];
-    const checks = s.doctorChecks ?? { duplicates: true, covers: true, albumTags: true, splitAlbums: true, albumArtist: true, lowQuality: true, unmatched: true };
+    const checks = s.doctorChecks ?? { duplicates: true, covers: true, albumTags: true, splitAlbums: true, albumArtist: true, lowQuality: true, unmatched: true, soundsLike: true };
     const px = s.doctorCoverPx ?? 600;
     return this.build()
       .filter((b) => checks[CHECK_OF[b.finding.kind]] !== false)
+      .filter((b) => b.finding.kind !== "soundsLike" || s.identifyBySound === true)
       .filter((b) => b.coverPx === undefined || b.coverPx < px)
       .filter((b) => !this.fixed.has(b.finding.id))
       .map((b) => b.finding)

@@ -20,6 +20,7 @@ import { Button, IconButton } from "./Button";
 import { Dialog } from "./Dialog";
 import { archiveQualityLabel, versionLabel } from "./FileTagBadges";
 import { Skeleton } from "./Skeleton";
+import { SoundsLikeHint } from "./SoundsLikeHint";
 import "./archive.css";
 
 export function ArchiveDialogs() {
@@ -72,6 +73,7 @@ export function VersionsDialog({ trackId, title, onClose }: { trackId: string; t
           Versions of {title}
         </h2>
         <p className="versions__sub">{items ? (others === 1 ? "1 other version in your library" : `${others} other versions in your library`) : " "}</p>
+        <SoundsLikeHint trackId={trackId} onOpen={onClose} />
       </header>
       {failed ? (
         <p className="versions__empty">Couldn't load the versions.</p>

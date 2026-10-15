@@ -76,6 +76,10 @@
 .doctor-tags th:last-child { width: 64px; }
 .doctor-tags__odd { color: var(--color-warning-text); font-weight: var(--font-weight-bold); }
 .doctor-tags__none { color: var(--color-text-muted); font-style: italic; }
+/* Suggested tags: three columns that wrap, so long titles and ids read in full. */
+.doctor-suggest th, .doctor-suggest td { white-space: normal; overflow-wrap: anywhere; }
+.doctor-suggest th:first-child { width: 28%; }
+.doctor-suggest th:last-child { width: auto; }
 
 .doctor-merge { display: flex; gap: var(--space-4); margin-top: var(--space-4); }
 .doctor-merge__part { display: flex; flex-direction: column; gap: var(--space-2); width: 96px; font-size: var(--font-size-sm); color: var(--color-text-secondary); }

@@ -38,6 +38,12 @@ and your own Plex server.
   their MusicBrainz id) and an album's release date and credits (the album's
   MusicBrainz release id, or its artist and title when Plex has no id).
   Unreleased albums are never looked up.
+- AcoustID, only if you turn on "Identify songs by sound" in Settings (it is
+  off by default). Platter makes an audio fingerprint of a song on your
+  computer and sends the fingerprint and the song's length in seconds,
+  nothing else: no file, name, tag or account details. It goes with the app's
+  AcoustID key, or your own if you enter one. The answer names the
+  MusicBrainz recording the song sounds like.
 - ntfy.sh (or your own ntfy server), only during a listening session. It
   carries the session's sealed messages; see Listening sessions below.
 - Apple's iTunes Search, only when you copy a public link for a song or album

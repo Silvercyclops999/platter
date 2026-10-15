@@ -40,6 +40,7 @@ import { StreamDeckSettings, streamDeckMatches } from "./StreamDeckSettings";
 import { MixExclusions } from "./MixExclusions";
 import { FolderKeywords } from "./ArchiveSettings";
 import { COVER_PX_OPTIONS, DoctorChecksList, DoctorNote } from "./DoctorSettings";
+import { AcoustIdKeyControl, SOUND_ID_DESCRIPTION, SOUND_ID_SCOPE_OPTIONS, soundIdNote, useSoundIdStatus } from "./SoundIdSettings";
 import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
 import { ServerCount, ServerList } from "./ServerSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
@@ -223,6 +224,7 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "whisper.cpp and ggml (transcription)", licence: "MIT" },
   { name: "whisper-rs", licence: "Unlicense" },
   { name: "Whisper speech models (downloaded when asked)", licence: "MIT" },
+  { name: "rusty-chromaprint (audio fingerprints, a port of Chromaprint)", licence: "MIT" },
 ];
 
 /** Outside services (artist info, public share links), each under its own terms (shown under About). */
@@ -238,6 +240,7 @@ export const SOURCE_NOTICES: { name: string; licence: string }[] = [
   { name: "song.link (shared link pages)", licence: "Songlink terms" },
   { name: "Discord (status, when Discord is open)", licence: "Discord Developer Terms" },
   { name: "Cover Art Archive (covers on Discord)", licence: "Cover art owners' terms" },
+  { name: "AcoustID (identify by sound, when turned on)", licence: "AcoustID terms, non-commercial use" },
   { name: "Imgur (covers on Discord, with your client ID)", licence: "Imgur API terms" },
   { name: "LRCLIB (lyrics, when turned on)", licence: "LRCLIB terms" },
   { name: "Hugging Face (transcription model download, when asked)", licence: "Hugging Face terms" },
@@ -536,6 +539,7 @@ export function SettingsPage() {
     .sort((a, b) => a - b)
     .map((gb) => ({ value: String(gb), label: `${gb} GB` }));
   const { status: discord, setKey: setImgurKey } = useDiscordStatus();
+  const { status: soundId, setKey: setAcoustIdKey } = useSoundIdStatus();
   const discordOff = !!discord && !discord.available;
   const artMb = s?.artCacheMb;
   useEffect(() => {
@@ -2147,7 +2151,7 @@ export function SettingsPage() {
       group: "Library doctor",
       title: "What to check",
       description:
-        "Duplicate files, missing or small covers, album tags that differ, albums split in two, missing album artists, songs you have a better copy of, and albums Plex didn't match. Turning one off takes its findings out of the list and the count.",
+        "Duplicate files, missing or small covers, album tags that differ, albums split in two, missing album artists, songs you have a better copy of, albums Plex didn't match, and songs that sound like another recording. Turning one off takes its findings out of the list and the count.",
       control: () => null,
       block: () => (s ? <DoctorChecksList settings={s} /> : <Skeleton width={240} height={32} />),
     },
@@ -2158,6 +2162,34 @@ export function SettingsPage() {
       title: "Small cover size",
       description: "Covers smaller than this on their longest side count as small. Covers look soft in full window below about 600 pixels.",
       control: (ids) => select(s, (x) => String(x.doctorCoverPx ?? 600), COVER_PX_OPTIONS, ids, (v) => updateSettings({ doctorCoverPx: Number(v) })),
+    },
+    // Library: identify by sound
+    {
+      key: "identifyBySound",
+      section: "Library",
+      group: "Identify by sound",
+      title: "Identify songs by sound",
+      description: SOUND_ID_DESCRIPTION,
+      note: rowNote(soundIdNote(soundId, s?.identifyBySound)),
+      control: (ids) => toggle(s, "identifyBySound", ids),
+    },
+    {
+      key: "acoustidKey",
+      section: "Library",
+      group: "Identify by sound",
+      title: "Your own AcoustID key",
+      description:
+        "Optional. An application key you register for free on the AcoustID website, used instead of the one Platter comes with. Kept in this computer's keychain.",
+      control: (ids) => <AcoustIdKeyControl ids={ids} status={soundId} setKey={setAcoustIdKey} />,
+    },
+    {
+      key: "soundIdScope",
+      section: "Library",
+      group: "Identify by sound",
+      title: "Which songs",
+      description: "Songs whose files have no MusicBrainz recording id or ISRC, or every song. All songs takes longer and reads more from your server, a little at a time while nothing is playing.",
+      control: (ids) =>
+        select(s, (x) => x.soundIdScope ?? "untagged", SOUND_ID_SCOPE_OPTIONS, ids, (v) => void updateSettings({ soundIdScope: v })),
     },
     // Library: drag and drop
     {

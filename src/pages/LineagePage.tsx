@@ -5,6 +5,7 @@
  * computer first ("Preparing compare…"), then X switches between them at
  * the same moment, with an optional loop region.
  */
+import { SoundsLikeHint } from "../components/SoundsLikeHint";
 import { GitCompareArrows, MoreHorizontal, Pause, Play, Repeat, X as Close } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Art } from "../components/Art";
@@ -111,6 +112,7 @@ export function LineagePage({ id }: { id: string }) {
                 <span>• {plural(data.nodes.length, "version")}</span>
                 {span && <span>• {span}</span>}
               </div>
+              <SoundsLikeHint trackId={id} />
             </>
           ) : (
             <>

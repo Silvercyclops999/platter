@@ -1050,6 +1050,10 @@ export interface Settings {
   autoRequest: boolean;
   /** Most automatic requests a day: 1, 2, 3, 5 or 10 (this device). */
   autoRequestCap: number;
+  /** Fingerprint songs on this computer and look them up on AcoustID (this device). */
+  identifyBySound: boolean;
+  /** Which songs: untagged only, or all (this device). */
+  soundIdScope: SoundIdScope;
   /** Dark, Light, Match system, or another built-in theme. */
   theme: ThemeSetting;
   /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
@@ -1304,12 +1308,15 @@ export const DEFAULT_SETTINGS: Settings = {
     albumArtist: true,
     lowQuality: true,
     unmatched: true,
+    soundsLike: true,
   },
   doctorCoverPx: 600,
   releaseRadar: true,
   radarNotify: true,
   autoRequest: false,
   autoRequestCap: 3,
+  identifyBySound: false,
+  soundIdScope: "untagged",
   theme: "dark",
   accent: "ivory",
   themeFile: null,
@@ -2170,10 +2177,10 @@ export interface Evidence {
 // ---------------------------------------------------------------- library doctor
 
 /** What a library doctor finding is about. */
-export type DoctorKind = "duplicate" | "cover" | "albumTags" | "splitAlbum" | "albumArtist" | "lowQuality" | "unmatched";
+export type DoctorKind = "duplicate" | "cover" | "albumTags" | "splitAlbum" | "albumArtist" | "lowQuality" | "unmatched" | "soundsLike";
 
 /** The app flow a finding's fix opens. */
-export type DoctorFix = "cover" | "match" | "mergeAlbums" | "openAlbum" | "tags";
+export type DoctorFix = "cover" | "match" | "mergeAlbums" | "openAlbum" | "tags" | "suggestedTags";
 
 /** Which library doctor checks run (Settings). */
 export interface DoctorChecks {
@@ -2183,6 +2190,8 @@ export interface DoctorChecks {
   splitAlbums: boolean;
   albumArtist: boolean;
   lowQuality: boolean;
+  /** Songs identified by sound as another recording than their tags say. */
+  soundsLike?: boolean;
   unmatched: boolean;
 }
 
@@ -2207,6 +2216,63 @@ export interface DoctorFinding {
   others: { id: string; title: string; thumb: string | null }[];
   /** Each song's own tags (album tag and album artist findings). */
   table: { trackId: string; title: string; album: string | null; albumArtist: string | null; year: number | null }[];
+  /** The tags its sound suggests next to its own (sounds-like findings). Nothing is written. */
+  suggest?: DoctorSuggestedTags | null;
+}
+
+/** What a song's sound suggests, next to what its file says. */
+export interface DoctorSuggestedTags {
+  trackId: string;
+  title: string;
+  artist: string;
+  album: string;
+  newTitle: string;
+  newArtist: string;
+  newAlbum: string | null;
+  recordingMbid: string;
+  /** 0 to 100. */
+  score: number;
+}
+
+// ---------------------------------------------------------------- identify by sound
+
+/** Which songs identify by sound covers. */
+export type SoundIdScope = "untagged" | "all";
+
+/** `sound_id_status`; `soundid://changed` fires when it moves. */
+export interface SoundIdStatus {
+  /** Identify songs by sound is on (and not offline). */
+  on: boolean;
+  /** This build came with an AcoustID key. */
+  appKey: boolean;
+  /** The user saved their own key on this device. */
+  userKey: boolean;
+  /** AcoustID refused the key in use. */
+  keyRefused: boolean;
+  /** There's a key to use. */
+  configured: boolean;
+  running: boolean;
+  /** Waiting after network or service trouble. */
+  paused: boolean;
+  /** Songs the setting covers, done, and identified. */
+  total: number;
+  done: number;
+  identified: number;
+}
+
+/** `track_sounds_like`: the recording a song sounds like. A hint only. */
+export interface SoundsLike {
+  trackId: string;
+  recordingMbid: string;
+  title: string;
+  artist: string;
+  album: string | null;
+  /** 0 to 100. */
+  score: number;
+  /** The song is unreleased: never treated as that recording. */
+  unreleased: boolean;
+  /** A released copy of that recording in the library. */
+  inLibrary: { trackId: string; albumId: string } | null;
 }
 
 /** `doctor_report`. */
@@ -2535,6 +2601,8 @@ export interface EventMap {
   "archive://changed": Record<string, never>;
   /** Library doctor findings or what's ignored changed: the badge count and whether a check is going. */
   "doctor://changed": { count: number; running: boolean };
+  /** Identify by sound found something or moved on (read sound_id_status). */
+  "soundid://changed": null;
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

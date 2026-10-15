@@ -4,6 +4,9 @@
 .dialog.versions { width: min(680px, calc(100vw - 48px)); padding: var(--space-6) var(--space-4) var(--space-4); }
 .versions__head { padding: 0 var(--space-2); }
 .versions__title { margin: 0; font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.sounds-like { display: flex; align-items: center; gap: var(--space-1); margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.sounds-like svg { flex: none; }
+.sounds-like__note { color: var(--color-text-secondary); opacity: 0.8; }
 .versions__sub { margin: var(--space-1) 0 0; min-height: 1.3em; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .versions__empty { padding: var(--space-6) var(--space-2); color: var(--color-text-secondary); }
 .versions__list { display: grid; gap: 2px; margin: var(--space-4) 0 0; padding: 0; list-style: none; }

@@ -33,6 +33,8 @@ import type {
   EraPage,
   DoctorKind,
   DoctorReport,
+  SoundIdStatus,
+  SoundsLike,
   ReleaseMark,
   VersionItem,
   Lineage,
@@ -469,6 +471,12 @@ export interface Backend {
   doctorIgnore(id: string, kind: DoctorKind, title: string, ignore: boolean): Promise<void>;
   /** Check every artist again soon. */
   doctorRun(): Promise<void>;
+  /** Identify by sound: whether there's a key, and progress. */
+  soundIdStatus(): Promise<SoundIdStatus>;
+  /** Save the user's own AcoustID key in the keychain (null removes it). */
+  soundIdKeySet(key: string | null): Promise<SoundIdStatus>;
+  /** What a song sounds like, if it was identified by sound (a hint only). */
+  trackSoundsLike(id: string): Promise<SoundsLike | null>;
   artistInfoKeys(): Promise<InfoKeysStatus>;
   /** Save a source's key in the keychain (null removes it); answers whether it was refused. */
   artistInfoKeySet(source: KeyedInfoSource, key: string | null): Promise<InfoKeyState>;
@@ -909,6 +917,9 @@ export function createTauriBackend(): Backend {
     doctorCount: () => call("doctor_count"),
     doctorIgnore: (id, kind, title, ignore) => call("doctor_ignore", { id, kind, title, ignore }),
     doctorRun: () => call("doctor_run"),
+    soundIdStatus: () => call("sound_id_status"),
+    soundIdKeySet: (key) => call("sound_id_key_set", { key }),
+    trackSoundsLike: (id) => call("track_sounds_like", { id }),
     artistInfoKeys: () => call("artist_info_keys"),
     artistInfoKeySet: (source, key) => call("artist_info_key_set", { source, key }),
     artistInfoCacheClear: () => call("artist_info_cache_clear"),
