@@ -145,7 +145,7 @@ enum Cmd {
     SetShuffleStyle(ShuffleStyle, Reply<()>),
     SetResumeContexts(bool, Reply<()>),
     SetPrecacheCount(usize, Reply<()>),
-    SetDsp(DspSettings, Reply<()>),
+    SetDsp(Box<DspSettings>, Reply<()>),
     SetRepeat(Repeat, Reply<()>),
     SetLoop(Option<AbLoop>, Reply<()>),
     QueueAdd(Vec<Track>, AddAt, Reply<()>),
@@ -155,6 +155,8 @@ enum Cmd {
     QueueJump(String, Reply<()>),
     Output(oneshot::Sender<OutputState>),
     SelectOutput(Option<String>, Reply<OutputState>),
+    ExclusiveOutputs(Vec<String>, Reply<OutputState>),
+    CorrectionBypass(bool, Reply<()>),
     State(oneshot::Sender<PlayerState>),
     Flush(oneshot::Sender<()>),
     /// Like SetContext, but starts at `start_ms` and plays or stays paused.
@@ -356,7 +358,7 @@ impl PlayerHandle {
 
     /// Applies crossfade, leveling, EQ and limiter settings (ramped).
     pub async fn set_dsp(&self, dsp: DspSettings) -> AppResult<()> {
-        self.call(|r| Cmd::SetDsp(dsp, r)).await
+        self.call(|r| Cmd::SetDsp(Box::new(dsp), r)).await
     }
 
     /// Output device changes (the same states `output://changed` carries).
@@ -635,6 +637,15 @@ impl PlayerHandle {
     /// and play state.
     pub async fn select_output(&self, device_id: Option<String>) -> AppResult<OutputState> {
         self.call(|r| Cmd::SelectOutput(device_id, r)).await
+    }
+    /// Output devices (by id) that play bit-perfect: exclusive, at each
+    /// song's own rate, with volume and the sound settings bypassed.
+    pub async fn set_exclusive_outputs(&self, ids: Vec<String>) -> AppResult<OutputState> {
+        self.call(|r| Cmd::ExclusiveOutputs(ids, r)).await
+    }
+    /// Turns headphone correction off (true) or back on, to compare.
+    pub async fn set_correction_bypass(&self, bypass: bool) -> AppResult<()> {
+        self.call(|r| Cmd::CorrectionBypass(bypass, r)).await
     }
     /// Play-tracking events.
     pub fn subscribe_tracking(&self) -> broadcast::Receiver<TrackingEvent> {
@@ -1198,6 +1209,25 @@ impl Actor {
                 let r = self.select_output(id);
                 let _ = reply.send(r);
             }
+            Cmd::ExclusiveOutputs(ids, reply) => {
+                let r = self.engine.set_exclusive_devices(ids);
+                if let Err(e) = &r {
+                    self.pause_for_output();
+                    self.sink.error(&ErrorPayload {
+                        track_id: None,
+                        kind: e.kind().into(),
+                        message: e.to_string(),
+                    });
+                }
+                let state = self.engine.output_state();
+                self.emit_output(&state);
+                let _ = reply.send(r.map(|_| state));
+            }
+            Cmd::CorrectionBypass(on, reply) => {
+                self.engine.set_correction_bypass(on);
+                let _ = reply.send(Ok(()));
+                return;
+            }
             Cmd::Flush(tx) => {
                 self.dirty = true;
                 self.persist_now();
@@ -1396,7 +1426,7 @@ impl Actor {
                 let _ = reply.send(Ok(()));
             }
             Cmd::SetDsp(dsp, reply) => {
-                self.dsp = dsp;
+                self.dsp = *dsp;
                 self.apply_dsp();
                 let _ = reply.send(Ok(()));
                 return;

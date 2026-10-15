@@ -89,6 +89,8 @@ pub struct DspSettings {
     pub limiter: bool,
     /// Band gains in dB; None is EQ off.
     pub eq: Option<[f32; EQ_BANDS]>,
+    /// Headphone correction for the output in use, run before the EQ.
+    pub correction: Option<Correction>,
 }
 
 impl Default for DspSettings {
@@ -100,6 +102,183 @@ impl Default for DspSettings {
             preamp_db: 0.0,
             limiter: false,
             eq: None,
+            correction: None,
+        }
+    }
+}
+
+impl DspSettings {
+    /// Nothing that changes a sample: what bit-perfect output plays with.
+    pub fn untouched() -> Self {
+        Self::default()
+    }
+}
+
+// ------------------------------------------------------ headphone correction
+
+/// Most filters a correction profile can have (published ones use 10).
+pub const CORRECTION_MAX: usize = 20;
+
+/// Parametric filter shapes used by headphone correction profiles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FilterKind {
+    Peaking,
+    LowShelf,
+    HighShelf,
+}
+
+/// One parametric filter: centre (or corner) frequency in Hz, gain in dB, Q.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeqFilter {
+    pub kind: FilterKind,
+    pub freq: f32,
+    pub gain_db: f32,
+    pub q: f32,
+}
+
+impl PeqFilter {
+    const NONE: Self = Self { kind: FilterKind::Peaking, freq: 1000.0, gain_db: 0.0, q: 1.0 };
+
+    fn coefs(&self, rate: f64) -> Option<Coefs> {
+        let ok = self.freq.is_finite()
+            && self.gain_db.is_finite()
+            && self.q.is_finite()
+            && self.freq > 0.0
+            && self.q > 0.0
+            && self.gain_db != 0.0
+            && (self.freq as f64) < rate * 0.45;
+        if !ok {
+            return None;
+        }
+        let (f, db, q) = (self.freq as f64, self.gain_db as f64, self.q as f64);
+        Some(match self.kind {
+            FilterKind::Peaking => Coefs::peaking_q(rate, f, db, q),
+            FilterKind::LowShelf => Coefs::shelf(rate, f, db, q, false),
+            FilterKind::HighShelf => Coefs::shelf(rate, f, db, q, true),
+        })
+    }
+}
+
+/// A headphone correction curve: a preamp (negative, so boosts can't clip)
+/// and up to [`CORRECTION_MAX`] filters. Fixed size so settings stay `Copy`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Correction {
+    pub preamp_db: f32,
+    filters: [PeqFilter; CORRECTION_MAX],
+    len: usize,
+}
+
+impl Correction {
+    /// Extra filters past [`CORRECTION_MAX`] are dropped.
+    pub fn new(preamp_db: f32, filters: &[PeqFilter]) -> Self {
+        let mut f = [PeqFilter::NONE; CORRECTION_MAX];
+        let len = filters.len().min(CORRECTION_MAX);
+        f[..len].copy_from_slice(&filters[..len]);
+        Self {
+            preamp_db: if preamp_db.is_finite() { preamp_db.clamp(-30.0, 0.0) } else { 0.0 },
+            filters: f,
+            len,
+        }
+    }
+
+    pub fn filters(&self) -> &[PeqFilter] {
+        &self.filters[..self.len]
+    }
+
+    /// The curve's gain in dB at `freq`, preamp included.
+    pub fn response_db(&self, rate: u32, freq: f64) -> f64 {
+        let rate = rate.max(8_000) as f64;
+        let w = 2.0 * PI * freq / rate;
+        let m: f64 = self.filters().iter().filter_map(|f| f.coefs(rate)).map(|c| c.magnitude(w)).product();
+        20.0 * m.log10() + self.preamp_db as f64
+    }
+
+    /// The loudest the curve gets in the audible range (linear), preamp
+    /// included. Used for the limiter's skip test.
+    pub fn max_gain(&self, rate: u32) -> f32 {
+        let top = (rate.max(8_000) as f64 * 0.5).min(22_000.0);
+        let steps = 240;
+        let max = (0..=steps)
+            .map(|i| self.response_db(rate, 20.0 * (top / 20.0).powf(i as f64 / steps as f64)))
+            .fold(f64::MIN, f64::max);
+        (10f64.powf(max / 20.0) * 1.06) as f32
+    }
+}
+
+/// Runs a [`Correction`]: preamp, then its filters in series.
+/// Allocation-free once configured.
+pub struct CorrectionStage {
+    rate: f64,
+    ch: usize,
+    on: Option<Correction>,
+    gain: f32,
+    coefs: Vec<Coefs>,
+    state: Vec<[f64; 2]>,
+}
+
+impl CorrectionStage {
+    pub fn new(rate: u32, ch: usize) -> Self {
+        let mut s = Self {
+            rate: 48_000.0,
+            ch: 2,
+            on: None,
+            gain: 1.0,
+            coefs: Vec::with_capacity(CORRECTION_MAX),
+            state: Vec::new(),
+        };
+        s.configure(rate, ch);
+        s
+    }
+
+    /// New output format (allocates; not for the callback).
+    pub fn configure(&mut self, rate: u32, ch: usize) {
+        self.rate = rate.max(8_000) as f64;
+        self.ch = ch.max(1);
+        self.state = vec![[0.0; 2]; CORRECTION_MAX * self.ch];
+        let on = self.on;
+        self.set(on);
+    }
+
+    /// Swaps the curve at once (the chain dips around it while playing).
+    pub fn set(&mut self, c: Option<Correction>) {
+        self.on = c;
+        self.coefs.clear();
+        self.state.iter_mut().for_each(|z| *z = [0.0; 2]);
+        self.gain = 1.0;
+        if let Some(c) = c {
+            self.gain = db_to_lin(c.preamp_db);
+            for f in c.filters() {
+                if let Some(k) = f.coefs(self.rate) {
+                    self.coefs.push(k);
+                }
+            }
+        }
+    }
+
+    pub fn current(&self) -> Option<Correction> {
+        self.on
+    }
+
+    #[inline]
+    pub fn process(&mut self, frame: &mut [f32]) {
+        if self.on.is_none() {
+            return;
+        }
+        if self.gain != 1.0 {
+            frame.iter_mut().for_each(|s| *s *= self.gain);
+        }
+        let ch = self.ch;
+        for (i, c) in self.coefs.iter().enumerate() {
+            let st = &mut self.state[i * ch..(i + 1) * ch];
+            for (s, z) in frame.iter_mut().zip(st.iter_mut()) {
+                let x = *s as f64;
+                let y = c.b0 * x + z[0];
+                z[0] = c.b1 * x - c.a1 * y + z[1];
+                z[1] = c.b2 * x - c.a2 * y;
+                *s = y as f32;
+            }
         }
     }
 }
@@ -179,10 +358,14 @@ impl Coefs {
     /// A peaking filter (the usual bilinear-transform design): exactly `db`
     /// at `f0`, octave-wide.
     fn peaking(rate: f64, f0: f64, db: f64) -> Self {
+        Self::peaking_q(rate, f0, db, EQ_Q)
+    }
+
+    fn peaking_q(rate: f64, f0: f64, db: f64, q: f64) -> Self {
         let a = 10f64.powf(db / 40.0);
         let w0 = 2.0 * PI * f0 / rate;
         let (sn, cs) = w0.sin_cos();
-        let alpha = sn / (2.0 * EQ_Q);
+        let alpha = sn / (2.0 * q);
         let a0 = 1.0 + alpha / a;
         Self {
             b0: (1.0 + alpha * a) / a0,
@@ -191,6 +374,25 @@ impl Coefs {
             a1: -2.0 * cs / a0,
             a2: (1.0 - alpha / a) / a0,
         }
+    }
+
+    /// A low or high shelf (same bilinear-transform family): `db` well past
+    /// the corner, half of it at `f0`.
+    fn shelf(rate: f64, f0: f64, db: f64, q: f64, high: bool) -> Self {
+        let a = 10f64.powf(db / 40.0);
+        let w0 = 2.0 * PI * f0 / rate;
+        let (sn, cs) = w0.sin_cos();
+        let alpha = sn / (2.0 * q);
+        let k = 2.0 * a.sqrt() * alpha;
+        let s = if high { -1.0 } else { 1.0 };
+        // Low shelf, with the sign of every (A-1) term flipped for a high one.
+        let b0 = a * ((a + 1.0) - s * (a - 1.0) * cs + k);
+        let b1 = 2.0 * s * a * ((a - 1.0) - s * (a + 1.0) * cs);
+        let b2 = a * ((a + 1.0) - s * (a - 1.0) * cs - k);
+        let a0 = (a + 1.0) + s * (a - 1.0) * cs + k;
+        let a1 = -2.0 * s * ((a - 1.0) + s * (a + 1.0) * cs);
+        let a2 = (a + 1.0) + s * (a - 1.0) * cs - k;
+        Self { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
     }
 
     /// |H| at angular frequency `w` (radians per sample).
@@ -518,9 +720,13 @@ impl Limiter {
     }
 }
 
-/// EQ then limiter, with a short dip when the limiter is switched (its
-/// delay comes or goes).
+/// Headphone correction, EQ, then limiter, with a short dip when the
+/// limiter is switched (its delay comes or goes) or the correction changes.
 pub struct Chain {
+    corr: CorrectionStage,
+    /// The correction to swap in at the bottom of the next dip.
+    corr_want: Option<Correction>,
+    corr_pending: bool,
     pub eq: Eq,
     lim: Limiter,
     lim_on: bool,
@@ -539,6 +745,9 @@ pub struct Chain {
 impl Chain {
     pub fn new(rate: u32, ch: usize) -> Self {
         let mut c = Self {
+            corr: CorrectionStage::new(rate, ch),
+            corr_want: None,
+            corr_pending: false,
             eq: Eq::new(rate, ch),
             lim: Limiter::new(rate, ch),
             lim_on: false,
@@ -556,6 +765,9 @@ impl Chain {
 
     /// New output format (allocates; not for the callback).
     pub fn configure(&mut self, rate: u32, ch: usize) {
+        self.corr.configure(rate, ch);
+        self.corr.set(self.corr_want);
+        self.corr_pending = false;
         self.eq.configure(rate, ch);
         self.lim.configure(rate, ch);
         self.lim_on = self.lim_want;
@@ -581,7 +793,7 @@ impl Chain {
     pub fn set_limiter(&mut self, on: bool, live: bool) {
         self.lim_want = on;
         if self.lim_on == on {
-            if self.dip_phase == 1 {
+            if self.dip_phase == 1 && !self.corr_pending {
                 self.dip_phase = 2;
             }
             return;
@@ -596,6 +808,31 @@ impl Chain {
             self.dip_phase = 0;
             self.dip = 1.0;
         }
+    }
+
+    /// Sets the headphone correction. `live`: audio is flowing, so dip
+    /// around the swap; otherwise swap at once.
+    pub fn set_correction(&mut self, c: Option<Correction>, live: bool) {
+        self.corr_want = c;
+        if !live {
+            self.corr.set(c);
+            self.corr_pending = false;
+            return;
+        }
+        if self.corr.current() == c {
+            self.corr_pending = false;
+            if self.dip_phase == 1 && self.lim_on == self.lim_want {
+                self.dip_phase = 2;
+            }
+            return;
+        }
+        self.corr_pending = true;
+        self.dip_phase = 1;
+    }
+
+    /// The correction in use (or about to be, after a dip).
+    pub fn correction(&self) -> Option<Correction> {
+        self.corr_want
     }
 
     /// Audio still sits in the limiter's delay.
@@ -625,6 +862,7 @@ impl Chain {
 
     #[inline]
     fn run(&mut self, frame: &mut [f32], quiet: bool) {
+        self.corr.process(frame);
         self.eq.process(frame);
         if self.lim_on {
             self.lim.process(frame, quiet);
@@ -635,11 +873,18 @@ impl Chain {
                 self.dip -= self.dip_step;
                 if self.dip <= 0.0 {
                     self.dip = 0.0;
-                    self.lim_on = self.lim_want;
-                    self.lim.reset();
-                    // Coming on, its delay starts empty: stay silent until
-                    // audio comes out of it.
-                    self.hold = if self.lim_on { self.lim.latency() } else { 0 };
+                    if self.corr_pending {
+                        self.corr.set(self.corr_want);
+                        self.corr_pending = false;
+                    }
+                    self.hold = 0;
+                    if self.lim_on != self.lim_want {
+                        self.lim_on = self.lim_want;
+                        self.lim.reset();
+                        // Coming on, its delay starts empty: stay silent
+                        // until audio comes out of it.
+                        self.hold = if self.lim_on { self.lim.latency() } else { 0 };
+                    }
                     self.dip_phase = 2;
                 }
                 frame.iter_mut().for_each(|s| *s *= self.dip);

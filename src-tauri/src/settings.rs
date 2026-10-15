@@ -310,6 +310,12 @@ pub struct Settings {
     pub eq_fallback: Option<EqChoice>,
     /// The output device the EQ last followed.
     pub eq_last_output: Option<String>,
+    /// Headphone correction profiles bound to output devices (this device
+    /// only). Changed with the headphone_correction commands.
+    pub headphone_correction: Vec<crate::audio::hifi::DeviceCorrection>,
+    /// Output devices that play bit-perfect (this device only). Changed
+    /// with bit_perfect_set.
+    pub bit_perfect_outputs: Vec<crate::audio::hifi::BitPerfectOutput>,
     /// Share menus find public links for released music (iTunes Search and
     /// song.link). Off leaves only Platter links.
     pub share_public_links: bool,
@@ -604,6 +610,8 @@ impl Default for Settings {
             eq_outputs: Vec::new(),
             eq_fallback: None,
             eq_last_output: None,
+            headphone_correction: Vec::new(),
+            bit_perfect_outputs: Vec::new(),
             share_public_links: true,
             share_card_qr: true,
             share_card_song_link: true,
@@ -816,6 +824,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "eqOutputs",
     "eqFallback",
     "eqLastOutput",
+    "headphoneCorrection",
+    "bitPerfectOutputs",
     "discordStatus",
     "discordShowUnreleased",
     "discordUnreleasedArt",

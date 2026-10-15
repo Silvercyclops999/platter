@@ -45,6 +45,7 @@ import { useUi } from "../stores/ui";
 import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtras";
 import { useLyrics } from "./lyrics";
 import { normalizeLoop } from "./playerRules";
+import { HifiMark } from "./HifiMark";
 
 /** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
 export const SEEK_KEY_STEP = 5_000;
@@ -454,6 +455,7 @@ export function PlayerBar() {
         <PrivateSession />
         <LyricsButton />
         <QueueButton />
+        <HifiMark />
         <IconButton label="Connect to a device" pressed={outputOpen} icon={<MonitorSpeaker size={18} />} onClick={toggleOutput} />
         <Volume />
         <MiniplayerButton />

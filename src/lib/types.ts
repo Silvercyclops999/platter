@@ -737,6 +737,10 @@ export interface Settings {
   eqFallback?: { preset: string; bands: number[] } | null;
   /** The output device the EQ last followed. Read only. */
   eqLastOutput?: string | null;
+  /** Headphone correction per output device. Read only: use headphoneCorrectionSet. */
+  headphoneCorrection: DeviceCorrection[];
+  /** Output devices that play bit-perfect. Read only: use bitPerfectSet. */
+  bitPerfectOutputs: BitPerfectOutput[];
   /** Share menus find public links for released music (iTunes Search and song.link). */
   sharePublicLinks: boolean;
   /** Share cards include a QR code with the Platter link. */
@@ -1062,6 +1066,8 @@ export const DEFAULT_SETTINGS: Settings = {
   eqOutputs: [],
   eqFallback: null,
   eqLastOutput: null,
+  headphoneCorrection: [],
+  bitPerfectOutputs: [],
   sharePublicLinks: true,
   shareCardQr: true,
   shareCardSongLink: true,
@@ -2003,6 +2009,44 @@ export interface OutputState {
   selected: string | null;
   /** The device playing, or the one the next play would open. */
   current: OutputDevice | null;
+  /** How the open stream holds its device (bit-perfect output). */
+  exclusive?: Exclusive;
+}
+
+/** Bit-perfect state of the open output: shared, exclusive at the music's rate, or shared after an exclusive open failed. */
+export type Exclusive = { state: "off" } | { state: "on"; rate: number; bits: number } | { state: "fallback"; reason: string };
+
+/** One parametric filter of a headphone correction profile. */
+export interface PeqFilter {
+  kind: "peaking" | "lowShelf" | "highShelf";
+  freq: number;
+  gainDb: number;
+  q: number;
+}
+
+/** A headphone in the bundled correction index (headphoneSearch). */
+export interface HeadphoneEntry {
+  name: string;
+  /** Who measured it, and on what rig when they used several. */
+  source: string;
+  /** earbud, in-ear or over-ear. */
+  form: string;
+  /** Its place in the index; pass to headphoneCorrectionSet. */
+  path: string;
+}
+
+/** A correction profile used whenever an output device plays. */
+export interface DeviceCorrection extends HeadphoneEntry {
+  deviceId: string;
+  deviceName: string;
+  preampDb: number;
+  filters: PeqFilter[];
+}
+
+/** An output device that plays bit-perfect. */
+export interface BitPerfectOutput {
+  deviceId: string;
+  deviceName: string;
 }
 
 // ---------------------------------------------------------------- listen on

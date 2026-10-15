@@ -1578,8 +1578,14 @@ Events:
 | `output_devices` | – → `OutputState` |
 | `output_select` | `{ deviceId: string \| null }` → `OutputState` (null follows the system default) |
 
-`OutputState = { devices: OutputDevice[], selected: string | null, current: OutputDevice | null }`
+`OutputState = { devices: OutputDevice[], selected: string | null, current: OutputDevice | null, exclusive: Exclusive }`
 `OutputDevice = { id, name, isDefault }`
+`Exclusive = { state: "off" } | { state: "on", rate, bits } | { state: "fallback", reason }`
+
+`exclusive` says how the open stream holds its device. It's `on` while
+bit-perfect output (below) has the device to itself at `rate` Hz with `bits`
+significant bits, and `fallback` when bit-perfect was asked for but the
+device is playing shared, with a plain `reason`.
 
 `devices` is every output the system reports, in its order: virtual devices
 included, inputs and disconnected devices left out. The device in use is
@@ -1905,6 +1911,8 @@ The rest of the fields, with their defaults:
 | `eqOutputs` | `{ deviceId, deviceName, preset }[]`, empty | Read only here. The preset or profile each output device uses. Set with `eq_use_for_output`. |
 | `eqFallback` | `{ preset, bands }` or null | Read only. The choice for devices without their own, kept from the last such device. |
 | `eqLastOutput` | device id or null | Read only. The device the EQ last followed. |
+| `headphoneCorrection` | `{ deviceId, deviceName, name, source, form, path, preampDb, filters }[]`, empty | Read only here. The headphone correction each output device uses. Set with `headphone_correction_set`. This device only. |
+| `bitPerfectOutputs` | `{ deviceId, deviceName }[]`, empty | Read only here. Output devices that play bit-perfect. Set with `bit_perfect_set`. This device only. |
 | `shareCardQr` | bool, true | Share cards include a QR code that opens the item in Platter (the `platter://` link only). |
 | `shareCardSongLink` | bool, true | Share cards for released songs and albums include the song.link line. Also needs `sharePublicLinks`. |
 | `sharePublicLinks` | bool, true | Share menus find public links for released songs and albums (iTunes Search and song.link). Off leaves only Platter links and sends nothing. |
@@ -2018,9 +2026,18 @@ art cache, never as a server URL.
 | `eq_profile_rename` | `{ from, to }` → `Settings`. Outputs using it keep it. |
 | `eq_profile_delete` | `{ name }` → `Settings`. Outputs using it lose their binding; if it was selected the curve stays as `"custom"`. |
 | `eq_use_for_output` | `{ on }` → `Settings`. Binds the selected preset or profile to the output device in use (`on: false` unbinds it). A custom curve has to be saved first (`invalid`). |
+| `headphone_search` | `{ query }` → `HeadphoneEntry[]` (at most 50). Headphones in the bundled correction index whose name has every word of `query`, ignoring case and accents. |
+| `headphone_correction_set` | `{ path: string \| null }` → `Settings`. Uses that headphone's correction whenever the output device in use plays; null turns it off there. The profile is fetched the first time (`network`, `notFound`, `decode` errors) and kept on disk. |
+| `headphone_correction_compare` | `{ bypass }` → –. Plays without the correction while true, to compare. Not saved. |
+| `bit_perfect_set` | `{ on }` → `Settings`. Bit-perfect output on or off for the output device in use; the stream reopens at once, keeping position and play state. |
+
+`HeadphoneEntry = { name, source, form, path }`: `source` is who measured
+it (and on what rig when they used several), `form` is earbud, in-ear or
+over-ear, and `path` is its place in the index.
 
 Everything runs in the core between decode and output, so it works with the
-window hidden. The chain is leveling gain, crossfade mix, EQ, limiter,
+window hidden. The chain is leveling gain, crossfade mix, headphone
+correction, EQ, limiter,
 volume.
 
 Crossfade. Fixed fades the outgoing song out and the next one in over the
@@ -2050,10 +2067,31 @@ Band changes ramp over 200 ms; a flat EQ costs nothing. The limiter looks
 peaks Plex reports, the gain and the EQ curve can't reach that. Turning it on
 or off dips the sound for about 10 ms.
 
+Headphone correction. Profiles come from the AutoEq project (MIT). The app
+ships a small index of names and folders; a profile's parametric EQ text is
+fetched from raw.githubusercontent.com (the only host allowed) when someone
+picks it, and cached under the app's cache folder. Peaking, low shelf and
+high shelf filters are used, with the profile's preamp (never above 0 dB,
+and worked out from the biggest boost when a file has none), so a
+correction can't clip. It runs before the EQ. Switching profiles while
+playing dips the sound for about 10 ms.
+
+Bit-perfect output. On Windows the device opens in WASAPI exclusive mode;
+on macOS it's taken in hog mode with its sample rate set to the music's.
+Each song plays at its own sample rate (the stream reopens between songs at
+different rates, so those aren't gapless), and the samples go out as
+decoded: volume, EQ, headphone correction, leveling, preamp, limiter and
+crossfades are all bypassed. Mute still works. If the device is busy, its
+exclusive use is turned off in the system settings, or it can't play the
+rate, playback carries on shared with `exclusive.state` `fallback` and a
+reason. Streams Plex transcodes are converted to the device's rate, so
+they're played exclusively but aren't bit-perfect.
+
 When the output device changes (a switch, a new system default, an unplug),
 the core switches to the preset or profile bound to the new device, or back
 to the earlier choice on a device without one, saves it and sends
-`settings://changed`.
+`settings://changed`. The device's headphone correction and bit-perfect
+choice follow it the same way.
 
 Events:
 - `settings://changed` → `Settings` (the core changed a setting itself)

@@ -114,6 +114,7 @@ import { mockAlbumCredits } from "./albumCredits";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
 import * as eq from "./eq";
+import * as hifi from "./hifi";
 import { MockHome, type ContextPlay } from "./home";
 import { MockHomeUsers } from "./homeUsers";
 import { MockLibraries } from "./libraries";
@@ -306,6 +307,8 @@ export class MockBackend implements Backend {
   private themes = new MockThemes();
   // output devices (invented)
   private outputs: OutputDevice[] = MOCK_OUTPUTS.map((d) => ({ ...d }));
+  /** Headphone correction A/B: off while comparing. */
+  correctionBypassed = false;
   private outputSelected: string | null = null;
   /** Bytes in the (pretend) artwork cache. */
   private artUsed = 412 * 1024 * 1024;
@@ -1744,10 +1747,13 @@ export class MockBackend implements Backend {
 
   private outputState(): OutputState {
     const sel = this.outputs.find((d) => d.id === this.outputSelected);
+    const current = sel ?? this.outputs.find((d) => d.isDefault) ?? null;
+    const t = this.current?.track;
     return {
       devices: this.outputs,
       selected: this.outputSelected,
-      current: sel ?? this.outputs.find((d) => d.isDefault) ?? null,
+      current,
+      exclusive: hifi.exclusiveFor(this.settings, current, t?.sampleRate, t?.bitDepth),
     };
   }
   outputDevices() {
@@ -2250,6 +2256,32 @@ export class MockBackend implements Backend {
   }
   eqProfileDelete(name: string) {
     return this.changeEq((s) => eq.remove(s, name));
+  }
+  headphoneSearch(query: string) {
+    return this.delay(() => hifi.search(query));
+  }
+  headphoneCorrectionSet(path: string | null) {
+    return this.changeEq((s) => {
+      const d = this.outputState().current;
+      if (!d) throw { kind: "notFound", message: "No output device on this computer is in use." };
+      const entry = path === null ? null : hifi.MOCK_HEADPHONES.find((h) => h.path === path);
+      if (entry === undefined) throw { kind: "notFound", message: `headphone ${path}` };
+      hifi.setCorrection(s, d, entry);
+    });
+  }
+  headphoneCorrectionCompare(bypass: boolean) {
+    return this.delay(() => {
+      this.correctionBypassed = bypass;
+    });
+  }
+  bitPerfectSet(on: boolean) {
+    const r = this.changeEq((s) => {
+      const d = this.outputState().current;
+      if (!d) throw { kind: "notFound", message: "No output device on this computer is in use." };
+      hifi.setBitPerfect(s, d, on);
+    });
+    void r.then(() => this.emit("output://changed", this.outputState()), () => {});
+    return r;
   }
   eqUseForOutput(on: boolean) {
     return this.changeEq((s) => {

@@ -57,6 +57,7 @@ import type {
   OwnLyrics,
   NowPlayingDetails,
   OutputState,
+  HeadphoneEntry,
   Page,
   PinInfo,
   PlayContextArgs,
@@ -359,6 +360,14 @@ export interface Backend {
   eqProfileDelete(name: string): Promise<Settings>;
   /** Uses the selected EQ preset or profile whenever the output in use plays (false removes it). */
   eqUseForOutput(on: boolean): Promise<Settings>;
+  /** Headphones in the bundled correction index matching `query` (at most 50). */
+  headphoneSearch(query: string): Promise<HeadphoneEntry[]>;
+  /** Uses a headphone's correction whenever the output in use plays (null turns it off there). Fetches the profile once. */
+  headphoneCorrectionSet(path: string | null): Promise<Settings>;
+  /** A/B: plays without the correction while true. Not saved. */
+  headphoneCorrectionCompare(bypass: boolean): Promise<void>;
+  /** Bit-perfect output on or off for the output in use. */
+  bitPerfectSet(on: boolean): Promise<Settings>;
   artCacheInfo(): Promise<ArtCacheInfo>;
   /** Deletes every cached image; resolves to the bytes freed. */
   artCacheClear(): Promise<number>;
@@ -767,6 +776,10 @@ export function createTauriBackend(): Backend {
     eqProfileRename: (from, to) => call("eq_profile_rename", { from, to }),
     eqProfileDelete: (name) => call("eq_profile_delete", { name }),
     eqUseForOutput: (on) => call("eq_use_for_output", { on }),
+    headphoneSearch: (query) => call("headphone_search", { query }),
+    headphoneCorrectionSet: (path) => call("headphone_correction_set", { path }),
+    headphoneCorrectionCompare: (bypass) => call("headphone_correction_compare", { bypass }),
+    bitPerfectSet: (on) => call("bit_perfect_set", { on }),
     artCacheInfo: () => call("art_cache_info"),
     artCacheClear: () => call("art_cache_clear"),
     appInfo: () => call("app_info"),

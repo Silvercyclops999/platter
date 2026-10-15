@@ -42,6 +42,7 @@ import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
 import { InfoKeyControl, keyNote, useInfoKeys } from "./ArtistInfoSettings";
 import { FeedNote, FeedPortField, useFeedStatus } from "./FeedSettings";
 import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
+import { hifiRows } from "./HifiSettings";
 import { coversNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
@@ -192,6 +193,7 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "rustls", licence: "Apache-2.0, ISC or MIT" },
   { name: "Symphonia", licence: "MPL-2.0" },
   { name: "cpal", licence: "Apache-2.0" },
+  { name: "AutoEq (headphone correction profiles)", licence: "MIT" },
   { name: "rusqlite", licence: "MIT" },
   { name: "SQLite", licence: "Public domain" },
   { name: "keyring", licence: "MIT or Apache-2.0" },
@@ -1460,6 +1462,7 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "eqEnabled", ids),
       block: () => <EqEditor />,
     },
+    ...hifiRows(),
     // Sharing
     {
       key: "sharePublicLinks",

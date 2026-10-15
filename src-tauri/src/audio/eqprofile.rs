@@ -151,6 +151,7 @@ pub fn dsp(s: &Settings) -> DspSettings {
         preamp_db: s.preamp_db,
         limiter: s.limiter,
         eq: s.eq_enabled.then_some(s.eq_bands),
+        correction: super::hifi::correction_for(s, s.eq_last_output.as_deref()),
     }
 }
 

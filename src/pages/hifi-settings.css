@@ -1,0 +1,57 @@
+/* Headphone correction and bit-perfect output rows. */
+.hifi { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); padding-top: var(--space-2); max-width: 720px; }
+
+.hifi-profile {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+}
+.hifi-profile__icon { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--color-accent-soft); color: var(--color-text-primary); }
+.hifi-profile__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hifi-profile__name { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.hifi-profile__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+
+/* A/B: two halves of one pill. */
+.hifi-ab { flex: none; display: inline-flex; padding: 2px; border-radius: var(--radius-pill, 999px); background: var(--color-bg-overlay); }
+.hifi-ab__btn {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill, 999px);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  transition: background var(--motion-very-quick) var(--motion-easing), color var(--motion-very-quick) var(--motion-easing);
+}
+.hifi-ab__btn:hover { color: var(--color-text-primary); }
+.hifi-ab__btn.is-on { background: var(--color-accent); color: var(--color-text-on-accent); }
+.hifi-ab__btn:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+
+.hifi-search { width: 100%; max-width: 420px; }
+.hifi-results { list-style: none; margin: 0; padding: 0; width: 100%; max-width: 520px; display: flex; flex-direction: column; }
+.hifi-result {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  text-align: left;
+  color: var(--color-text-primary);
+  transition: background var(--motion-very-quick) var(--motion-easing);
+}
+.hifi-result:hover { background: var(--color-state-hover); }
+.hifi-result:active { background: var(--color-state-pressed); }
+.hifi-result[aria-busy="true"] { cursor: progress; }
+.hifi-result__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hifi-result__name { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); }
+.hifi-result__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.hifi-result__check { flex: none; color: var(--color-text-primary); }
+
+.hifi-note { margin: 0; font-size: var(--font-size-md); color: var(--color-text-secondary); }
+.hifi-credit { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.hifi-warning { color: var(--color-warning); }

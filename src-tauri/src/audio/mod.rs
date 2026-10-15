@@ -9,6 +9,7 @@
 //! 3. Register the commands in [`commands`].
 //! 4. Subscribe to [`player::PlayerHandle::subscribe_tracking`] for play tracking.
 
+pub mod autoeq;
 pub mod cache;
 pub mod commands;
 pub mod convert;
@@ -17,6 +18,8 @@ pub mod dsp;
 pub mod engine;
 pub mod eqprofile;
 pub mod events;
+mod exclusive;
+pub mod hifi;
 pub mod gate;
 pub mod http;
 pub mod netsink;
@@ -35,6 +38,8 @@ pub use source::{PlayContext, StreamSource, TrackLookup, TrackResolver};
 mod engine_tests;
 #[cfg(test)]
 mod dsp_tests;
+#[cfg(test)]
+mod hifi_tests;
 #[cfg(test)]
 mod player_tests;
 #[cfg(test)]

@@ -248,6 +248,23 @@ impl AudioOutput for RoutedOutput {
             self.local.set_idle(idle);
         }
     }
+
+    // Bit-perfect is for this computer's devices only.
+    fn set_exclusive_devices(&mut self, ids: Vec<String>) {
+        self.local.set_exclusive_devices(ids);
+    }
+
+    fn exclusive_wanted(&self) -> bool {
+        self.net_id.lock().is_none() && self.local.exclusive_wanted()
+    }
+
+    fn set_preferred_rate(&mut self, rate: Option<u32>) {
+        self.local.set_preferred_rate(rate);
+    }
+
+    fn exclusive(&self) -> super::output::Exclusive {
+        if self.net.is_some() { super::output::Exclusive::Off } else { self.local.exclusive() }
+    }
 }
 
 #[cfg(test)]

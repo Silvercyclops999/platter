@@ -10,6 +10,7 @@ import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
 import { ListenOn, RemoteCurrent } from "./ListenOn";
 import { SessionCard } from "./ListenStrip";
+import { HifiLine } from "./HifiMark";
 import { streamQuality } from "./streamQuality";
 import "./output.css";
 
@@ -48,6 +49,7 @@ function CurrentDevice({ device, followsDefault }: { device: OutputDevice; follo
         <div className="output-current__sub truncate" title={device.name}>
           {["This computer", splitDeviceName(device.name).detail, quality].filter(Boolean).join(" • ")}
         </div>
+        <HifiLine />
       </div>
     </div>
   );

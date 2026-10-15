@@ -65,6 +65,27 @@ pub struct OutputDevice {
     pub is_default: bool,
 }
 
+/// How the open stream holds its device (bit-perfect output).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "state")]
+pub enum Exclusive {
+    /// Shared with other apps, through the system mixer.
+    #[default]
+    Off,
+    /// The device is ours alone, at the music's own sample rate.
+    #[serde(rename_all = "camelCase")]
+    On { rate: u32, bits: u16 },
+    /// Exclusive was asked for but the device is playing shared.
+    #[serde(rename_all = "camelCase")]
+    Fallback { reason: String },
+}
+
+impl Exclusive {
+    pub fn is_on(&self) -> bool {
+        matches!(self, Self::On { .. })
+    }
+}
+
 /// `output_devices` result and `output://changed` payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +95,9 @@ pub struct OutputState {
     pub selected: Option<String>,
     /// The device playing, or the one the next play would open.
     pub current: Option<OutputDevice>,
+    /// Bit-perfect state of the open stream.
+    #[serde(default)]
+    pub exclusive: Exclusive,
 }
 
 impl OutputState {
@@ -99,6 +123,7 @@ impl OutputState {
             devices,
             selected,
             current,
+            exclusive: Exclusive::Off,
         }
     }
 }
@@ -162,6 +187,23 @@ pub trait AudioOutput: Send {
     /// pulling again (false). The device stays open, so resuming is quick,
     /// but a paused player no longer wakes on every device period.
     fn set_idle(&mut self, _idle: bool) {}
+    /// Devices (by id) that open in exclusive mode for bit-perfect output.
+    fn set_exclusive_devices(&mut self, _ids: Vec<String>) {}
+    /// Whether the device the next `open` uses is one of those.
+    fn exclusive_wanted(&self) -> bool {
+        false
+    }
+    /// The sample rate an exclusive open asks for (the music's own).
+    fn set_preferred_rate(&mut self, _rate: Option<u32>) {}
+    /// How the open stream holds its device.
+    fn exclusive(&self) -> Exclusive {
+        Exclusive::Off
+    }
+}
+
+/// Whether `device` is in the exclusive list.
+pub fn wants_exclusive(ids: &[String], device: Option<&OutputDevice>) -> bool {
+    device.is_some_and(|d| ids.contains(&d.id))
 }
 
 // ---------------------------------------------------------------- capture
@@ -179,6 +221,11 @@ struct CaptureShared {
     opens: AtomicUsize,
     /// Held still by `set_idle`: pulls nothing.
     idle: AtomicBool,
+    exclusive_ids: Mutex<Vec<String>>,
+    preferred_rate: Mutex<Option<u32>>,
+    /// Exclusive opens fail with this reason (a busy device, say).
+    exclusive_fails: Mutex<Option<String>>,
+    exclusive: Mutex<Exclusive>,
 }
 
 /// Test output: pulls as fast as audio is available and records only real
@@ -265,6 +312,10 @@ impl CaptureHandle {
     pub fn is_idle(&self) -> bool {
         self.0.idle.load(Ordering::SeqCst)
     }
+    /// Makes exclusive opens fall back to shared with `reason` (None: they work).
+    pub fn fail_exclusive(&self, reason: Option<&str>) {
+        *self.0.exclusive_fails.lock() = reason.map(str::to_string);
+    }
 }
 
 impl CaptureOutput {
@@ -304,8 +355,19 @@ impl AudioOutput for CaptureOutput {
         }
         self.shared.opens.fetch_add(1, Ordering::SeqCst);
         self.shared.idle.store(false, Ordering::SeqCst);
+        let mut fmt = self.format;
+        *self.shared.exclusive.lock() = if self.exclusive_wanted() {
+            match self.shared.exclusive_fails.lock().clone() {
+                Some(reason) => Exclusive::Fallback { reason },
+                None => {
+                    fmt.sample_rate = self.shared.preferred_rate.lock().unwrap_or(fmt.sample_rate);
+                    Exclusive::On { rate: fmt.sample_rate, bits: 32 }
+                }
+            }
+        } else {
+            Exclusive::Off
+        };
         let shared = self.shared.clone();
-        let fmt = self.format;
         let pace = self.pace;
         self.thread = Some(std::thread::spawn(move || {
             let ch = fmt.channels as usize;
@@ -376,6 +438,24 @@ impl AudioOutput for CaptureOutput {
     fn set_idle(&mut self, idle: bool) {
         self.shared.idle.store(idle, Ordering::SeqCst);
     }
+
+    fn set_exclusive_devices(&mut self, ids: Vec<String>) {
+        *self.shared.exclusive_ids.lock() = ids;
+    }
+
+    fn exclusive_wanted(&self) -> bool {
+        let devices = self.shared.devices.lock();
+        let next = pick_device(&devices, self.shared.selected.lock().as_deref());
+        wants_exclusive(&self.shared.exclusive_ids.lock(), next.as_ref())
+    }
+
+    fn set_preferred_rate(&mut self, rate: Option<u32>) {
+        *self.shared.preferred_rate.lock() = rate;
+    }
+
+    fn exclusive(&self) -> Exclusive {
+        if self.is_open() { self.shared.exclusive.lock().clone() } else { Exclusive::Off }
+    }
 }
 
 impl Drop for CaptureOutput {
@@ -407,10 +487,14 @@ pub struct CpalOutput {
     pub last_device: Arc<Mutex<Option<(String, String)>>>,
     selected: Arc<Mutex<Option<String>>>,
     opened: Arc<Mutex<Option<OutputDevice>>>,
+    /// Devices that open exclusively (bit-perfect).
+    exclusive_ids: Arc<Mutex<Vec<String>>>,
+    preferred_rate: Option<u32>,
+    exclusive: Arc<Mutex<Exclusive>>,
 }
 
 /// What the stream thread is told: close, or hold still / pull again.
-enum StreamCtl {
+pub(crate) enum StreamCtl {
     Stop,
     Idle(bool),
 }
@@ -583,6 +667,19 @@ where
     )
 }
 
+/// A stereo config at `rate`, f32 if the device has it.
+fn config_at(device: &cpal::Device, rate: u32) -> Option<cpal::SupportedStreamConfig> {
+    use cpal::traits::DeviceTrait;
+    let mut fits: Vec<cpal::SupportedStreamConfig> = device
+        .supported_output_configs()
+        .ok()?
+        .filter(|c| c.channels() == 2)
+        .filter_map(|c| c.try_with_sample_rate(rate))
+        .collect();
+    fits.sort_by_key(|c| c.sample_format() != cpal::SampleFormat::F32);
+    fits.into_iter().next()
+}
+
 impl AudioOutput for CpalOutput {
     fn open(
         &mut self,
@@ -595,6 +692,10 @@ impl AudioOutput for CpalOutput {
         let last = self.last_device.clone();
         let selected = self.selected.clone();
         let opened = self.opened.clone();
+        let exclusive_ids = self.exclusive_ids.lock().clone();
+        let preferred_rate = self.preferred_rate;
+        let exclusive = self.exclusive.clone();
+        *exclusive.lock() = Exclusive::Off;
         let thread = std::thread::Builder::new()
             .name("audio-output".into())
             .spawn(move || {
@@ -610,19 +711,57 @@ impl AudioOutput for CpalOutput {
                     let _ = ready_tx.send(Err(AppError::Io("no audio output device".into())));
                     return;
                 };
-                let supported = match device.default_output_config() {
+                let default_config = match device.default_output_config() {
                     Ok(c) => c,
                     Err(e) => {
                         let _ = ready_tx.send(Err(AppError::Io(format!("audio device: {e}"))));
                         return;
                     }
                 };
+                let info = cpal_device_info(&device, cpal_default_id(&host).as_deref());
+                // Bit-perfect: the device on its own, at the music's rate.
+                let mut supported = default_config;
+                let mut _hog = None;
+                if let Some(d) = info.as_ref().filter(|d| wants_exclusive(&exclusive_ids, Some(d))) {
+                    let rate = preferred_rate.unwrap_or(default_config.sample_rate());
+                    match super::exclusive::open(&d.id, rate, 2) {
+                        Ok(super::exclusive::Opened::Own { stream, rate, channels, bits }) => {
+                            *exclusive.lock() = Exclusive::On { rate, bits };
+                            *last.lock() = Some((d.name.clone(), format!("exclusive {bits}-bit")));
+                            *opened.lock() = info.clone();
+                            let _ = ready_tx.send(Ok(OutputFormat { sample_rate: rate, channels }));
+                            let lost_opened = opened.clone();
+                            let lost: Box<dyn FnOnce(String) + Send> = Box::new(move |why| {
+                                let present = cpal_list();
+                                let was = lost_opened.lock().clone();
+                                on_event(classify_loss(why, &selected, was.as_ref(), &present));
+                            });
+                            stream.run(renderer, stop_rx, lost);
+                            return;
+                        }
+                        Ok(super::exclusive::Opened::Device { guard, rate, bits }) => match config_at(&device, rate) {
+                            Some(c) => {
+                                supported = c;
+                                _hog = Some(guard);
+                                *exclusive.lock() = Exclusive::On { rate, bits };
+                            }
+                            None => {
+                                *exclusive.lock() = Exclusive::Fallback {
+                                    reason: format!("The device can't play {rate} Hz directly."),
+                                };
+                            }
+                        },
+                        Err(reason) => {
+                            tracing::info!("bit-perfect output fell back to shared: {reason}");
+                            *exclusive.lock() = Exclusive::Fallback { reason };
+                        }
+                    }
+                }
                 let config = supported.config();
                 let fmt = OutputFormat {
                     sample_rate: config.sample_rate,
                     channels: config.channels,
                 };
-                let info = cpal_device_info(&device, cpal_default_id(&host).as_deref());
                 let name = info.as_ref().map_or_else(|| "unknown device".into(), |d| d.name.clone());
                 *last.lock() = Some((name, format!("{:?}", supported.sample_format())));
                 *opened.lock() = info;
@@ -728,6 +867,35 @@ impl AudioOutput for CpalOutput {
         if let Some(tx) = &self.stop_tx {
             let _ = tx.send(StreamCtl::Idle(idle));
         }
+    }
+
+    fn set_exclusive_devices(&mut self, ids: Vec<String>) {
+        *self.exclusive_ids.lock() = ids;
+    }
+
+    fn exclusive_wanted(&self) -> bool {
+        let ids = self.exclusive_ids.lock().clone();
+        if ids.is_empty() {
+            return false;
+        }
+        if let Some(o) = self.opened() {
+            // The open stream's device is the one a reopen would use,
+            // unless the choice moved since.
+            let sel = self.selected.lock().clone();
+            if sel.is_none() || sel.as_deref() == Some(o.id.as_str()) {
+                return wants_exclusive(&ids, Some(&o));
+            }
+        }
+        let devices = cpal_list_isolated();
+        wants_exclusive(&ids, pick_device(&devices, self.selected.lock().as_deref()).as_ref())
+    }
+
+    fn set_preferred_rate(&mut self, rate: Option<u32>) {
+        self.preferred_rate = rate;
+    }
+
+    fn exclusive(&self) -> Exclusive {
+        if self.is_open() { self.exclusive.lock().clone() } else { Exclusive::Off }
     }
 }
 

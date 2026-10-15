@@ -453,6 +453,7 @@ pub fn run() {
                     use audio::output::AudioOutput;
                     let mut out = audio::output::CpalOutput::new();
                     out.select(initial.output_device.clone());
+                    out.set_exclusive_devices(audio::hifi::bit_perfect_ids(&initial));
                     // AirPlay plays through a network output behind this one.
                     Box::new(audio::netsink::RoutedOutput::new(Box::new(out), net_route.clone()))
                 },
@@ -509,6 +510,7 @@ pub fn run() {
                 async move { s.spawn() }
             });
             app.manage(tag_scanner);
+            app.manage(audio::autoeq::Fetcher::new(cache_dir.join("headphone-profiles")));
             tauri::async_runtime::spawn(audio::commands::follow_output(
                 app.handle().clone(),
                 player.clone(),
@@ -988,6 +990,10 @@ pub fn run() {
             audio::commands::eq_profile_rename,
             audio::commands::eq_profile_delete,
             audio::commands::eq_use_for_output,
+            audio::hifi::headphone_search,
+            audio::hifi::headphone_correction_set,
+            audio::hifi::headphone_correction_compare,
+            audio::hifi::bit_perfect_set,
             settings::settings_get,
             settings::settings_set,
             settings::art_cache_info,

@@ -420,6 +420,14 @@ struct Mix {
     album_ctx: Option<String>,
     /// Loudest the EQ curve gets (linear), for the limiter's skip test.
     eq_max: f32,
+    /// The settings asked for; `dsp` is what runs (nothing while
+    /// bit-perfect, no correction during an A/B comparison).
+    user_dsp: DspSettings,
+    /// The output is exclusive at the music's own rate: samples go out
+    /// untouched (no volume, EQ, leveling, crossfade or limiter).
+    bit_perfect: bool,
+    /// Headphone correction is bypassed for an A/B comparison.
+    corr_bypass: bool,
 }
 
 impl Mix {
@@ -481,6 +489,58 @@ impl Mix {
         self.tail = tail;
         self.fade_in = n;
         self.drop_fading();
+    }
+
+    /// What actually runs, given the user's settings and the output.
+    fn effective_dsp(&self) -> DspSettings {
+        if self.bit_perfect {
+            return DspSettings::untouched();
+        }
+        let mut d = self.user_dsp;
+        if self.corr_bypass {
+            d.correction = None;
+        }
+        d
+    }
+
+    /// Applies crossfade, leveling, correction, EQ and limiter settings.
+    /// `live_ok`: changes may ramp or dip if audio is flowing.
+    fn apply_dsp(&mut self, live_ok: bool) {
+        let s = self.effective_dsp();
+        let old = self.dsp;
+        self.dsp = s;
+        if old.leveling != s.leveling || old.preamp_db != s.preamp_db {
+            self.update_gains(true);
+        }
+        let live = live_ok && self.output_open && self.playing;
+        if old.eq != s.eq {
+            let target = s.eq.unwrap_or([0.0; dsp::EQ_BANDS]);
+            let ramp = if live { self.chain.ramp_frames() } else { 0 };
+            self.chain.eq.set_target(target, ramp);
+        }
+        if old.correction != s.correction || self.chain.correction() != s.correction {
+            self.chain.set_correction(s.correction, live && !self.segments.is_empty());
+        }
+        if old.limiter != s.limiter {
+            self.chain.set_limiter(s.limiter, live && !self.segments.is_empty());
+        }
+        self.refresh_eq_max(Some(old));
+    }
+
+    /// The loudest the correction and EQ can make anything (linear), while
+    /// either changes taking the louder of before and after.
+    fn refresh_eq_max(&mut self, old: Option<DspSettings>) {
+        let rate = self.format.sample_rate;
+        let eq = |b: Option<[f32; dsp::EQ_BANDS]>| b.map_or(1.0, |b| dsp::eq_max_gain(&b, rate));
+        let corr = |c: Option<dsp::Correction>| c.map_or(1.0, |c| c.max_gain(rate).max(1.0));
+        let cur = self.chain.eq.current();
+        let mut e = eq(self.dsp.eq).max(dsp::eq_max_gain(&cur, rate));
+        let mut c = corr(self.dsp.correction);
+        if let Some(o) = old {
+            e = e.max(eq(o.eq));
+            c = c.max(corr(o.correction));
+        }
+        self.eq_max = e * c;
     }
 
     fn drop_fading(&mut self) {
@@ -857,7 +917,7 @@ impl Renderer for Core {
                         break;
                     }
                     Fetch::Empty if m.fading.is_some() => o.fill(0.0),
-                    Fetch::Empty if m.chain.pending() => flush = true,
+                    Fetch::Empty if !m.bit_perfect && m.chain.pending() => flush = true,
                     Fetch::Empty => {
                         if m.next.is_none() && !m.drained_sent {
                             m.drained_sent = true;
@@ -878,7 +938,9 @@ impl Renderer for Core {
                     }
                 }
             }
-            if flush {
+            if m.bit_perfect {
+                // Untouched: nothing in the chain runs.
+            } else if flush {
                 m.chain.flush(o);
             } else {
                 m.chain.process(o, quiet);
@@ -892,7 +954,9 @@ impl Renderer for Core {
                     m.gain = (m.gain - ramp_step).max(0.0);
                 }
             }
-            let g = m.gain * m.volume;
+            // Bit-perfect keeps mute but not the volume level.
+            let vol = if m.bit_perfect { if m.volume_target > 0.0 { 1.0 } else { 0.0 } } else { m.volume };
+            let g = m.gain * vol;
             if g != 1.0 {
                 for s in o.iter_mut() {
                     *s *= g;
@@ -1009,6 +1073,9 @@ impl Engine {
                 fading: None,
                 album_ctx: None,
                 eq_max: 1.0,
+                user_dsp: DspSettings::default(),
+                bit_perfect: false,
+                corr_bypass: false,
             }),
             cv: Condvar::new(),
             events: tx,
@@ -1074,7 +1141,12 @@ impl Engine {
             let _ = core.events.send(ev);
         });
         let renderer: Arc<dyn Renderer> = self.env.core.clone();
-        let fmt = self.output.lock().open(renderer, cb)?;
+        let (fmt, exclusive) = {
+            let mut out = self.output.lock();
+            let fmt = out.open(renderer, cb)?;
+            (fmt, out.exclusive())
+        };
+        let bit_perfect = exclusive.is_on();
         let mut m = self.core().mix.lock();
         let changed = m.format != fmt;
         m.format = fmt;
@@ -1082,9 +1154,17 @@ impl Engine {
         if changed {
             m.rescale_loops();
             m.chain.configure(fmt.sample_rate, fmt.channels as usize);
-            if let Some(bands) = m.dsp.eq {
-                m.eq_max = dsp::eq_max_gain(&bands, fmt.sample_rate);
-            }
+            m.refresh_eq_max(None);
+        }
+        let mode_changed = m.bit_perfect != bit_perfect;
+        if mode_changed {
+            m.bit_perfect = bit_perfect;
+            m.apply_dsp(false);
+        }
+        drop(m);
+        // The device picker shows how the device is held.
+        if mode_changed || exclusive != super::output::Exclusive::Off {
+            let _ = self.core().events.send(EngineEvent::OutputChanged);
         }
         Ok(changed)
     }
@@ -1093,28 +1173,71 @@ impl Engine {
     /// changes ramp; the limiter switches with a short dip.
     pub fn set_dsp(&self, s: DspSettings) {
         let mut m = self.core().mix.lock();
-        let old = m.dsp;
-        m.dsp = s;
-        if old.leveling != s.leveling || old.preamp_db != s.preamp_db {
-            m.update_gains(true);
-        }
-        if old.eq != s.eq {
-            let target = s.eq.unwrap_or([0.0; dsp::EQ_BANDS]);
-            let live = m.output_open && m.playing;
-            let ramp = if live { m.chain.ramp_frames() } else { 0 };
-            let rate = m.format.sample_rate;
-            let cur = m.chain.eq.current();
-            m.eq_max = dsp::eq_max_gain(&target, rate).max(dsp::eq_max_gain(&cur, rate));
-            m.chain.eq.set_target(target, ramp);
-        }
-        if old.limiter != s.limiter {
-            let live = m.output_open && m.playing && !m.segments.is_empty();
-            m.chain.set_limiter(s.limiter, live);
+        m.user_dsp = s;
+        m.apply_dsp(true);
+    }
+
+    /// The settings running now (see [`Engine::bit_perfect`]).
+    pub fn dsp(&self) -> DspSettings {
+        self.core().mix.lock().dsp
+    }
+
+    /// Headphone correction off (true) or back on, to compare.
+    pub fn set_correction_bypass(&self, bypass: bool) {
+        let mut m = self.core().mix.lock();
+        if m.corr_bypass != bypass {
+            m.corr_bypass = bypass;
+            m.apply_dsp(true);
         }
     }
 
-    pub fn dsp(&self) -> DspSettings {
-        self.core().mix.lock().dsp
+    pub fn correction_bypassed(&self) -> bool {
+        self.core().mix.lock().corr_bypass
+    }
+
+    /// Whether samples go out untouched (an exclusive output is open).
+    pub fn bit_perfect(&self) -> bool {
+        self.core().mix.lock().bit_perfect
+    }
+
+    /// Devices (by id) that play bit-perfect. An open stream reopens so a
+    /// change applies at once, keeping position and play state.
+    pub fn set_exclusive_devices(&self, ids: Vec<String>) -> AppResult<()> {
+        let rate = self.core().mix.lock().segments.front().and_then(|s| s.track.sample_rate);
+        let (was, now) = {
+            let mut out = self.output.lock();
+            let was = out.exclusive_wanted();
+            out.set_exclusive_devices(ids);
+            let now = out.exclusive_wanted();
+            out.set_preferred_rate(if now { rate } else { None });
+            (was, now)
+        };
+        let open = self.core().mix.lock().output_open;
+        if was != now && open {
+            self.reopen_output()?;
+        }
+        Ok(())
+    }
+
+    /// Bit-perfect plays each song at its own rate: before loading one at
+    /// another rate, the output closes so it reopens at the new one.
+    fn match_rate(&self, track: &Track) {
+        let rate = track.sample_rate.filter(|r| (8_000..=768_000).contains(r));
+        {
+            let mut out = self.output.lock();
+            if !out.exclusive_wanted() {
+                return;
+            }
+            out.set_preferred_rate(rate);
+        }
+        let reopen = {
+            let m = self.core().mix.lock();
+            m.output_open && rate.is_some_and(|r| r != m.format.sample_rate)
+        };
+        if reopen {
+            self.core().mix.lock().tail.clear();
+            self.close_output();
+        }
     }
 
     /// The album playing in album order (None: anything else). Leveling's
@@ -1142,7 +1265,9 @@ impl Engine {
     /// The output devices, the choice and the device in use.
     pub fn output_state(&self) -> OutputState {
         let out = self.output.lock();
-        OutputState::build(out.devices(), out.selected(), out.opened())
+        let mut s = OutputState::build(out.devices(), out.selected(), out.opened());
+        s.exclusive = out.exclusive();
+        s
     }
 
     /// Chooses the output device (None follows the system default). An open
@@ -1174,6 +1299,7 @@ impl Engine {
 
     /// Flushes everything and starts `track` at `start_ms`. Returns the key.
     pub fn load(&self, track: Track, tag: String, start_ms: u64, play: bool) -> AppResult<u64> {
+        self.match_rate(&track);
         if let Err(e) = self.ensure_output() {
             tracing::warn!("audio output unavailable: {e}");
             if play {
@@ -1215,6 +1341,10 @@ impl Engine {
             if m.segments.front().map(|s| s.key) != Some(current_key) {
                 return None;
             }
+            // Bit-perfect: a song at another rate can't join gaplessly; it
+            // loads on its own when this one ends, at its own rate.
+            let rate = m.format.sample_rate;
+            let next = next.filter(|(t, _)| !m.bit_perfect || t.sample_rate.is_none_or(|r| r == rate));
             match next {
                 None => {
                     while m.segments.len() > 1 {

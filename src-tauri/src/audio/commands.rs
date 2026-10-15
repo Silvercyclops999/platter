@@ -284,12 +284,24 @@ pub async fn follow_output<R: tauri::Runtime>(app: tauri::AppHandle<R>, player: 
             if last.as_ref() != Some(&id) {
                 last = Some(id);
                 let device = state.current.clone();
-                match settings.modify(|s| Ok(eqprofile::output_changed(s, device.as_ref()))).await {
+                let changed = settings
+                    .modify(|s| {
+                        let before = s.eq_last_output.clone();
+                        let eq = eqprofile::output_changed(s, device.as_ref());
+                        Ok(eq || s.eq_last_output != before)
+                    })
+                    .await;
+                // The device's own EQ, headphone correction and bit-perfect choice.
+                match changed {
                     Ok(Some(s)) => {
-                        let _ = player.set_dsp(s.dsp()).await;
+                        let _ = super::hifi::apply_for_output(&player, &s).await;
                         let _ = app.emit(EV_SETTINGS, &s);
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        if let Ok(s) = settings.get().await {
+                            let _ = super::hifi::apply_for_output(&player, &s).await;
+                        }
+                    }
                     Err(e) => tracing::warn!("EQ output switch failed: {e}"),
                 }
             }

@@ -3968,6 +3968,8 @@ dependencies = [
  "keyring",
  "md-5",
  "mdns-sd",
+ "objc2-core-audio",
+ "objc2-core-foundation",
  "parking_lot",
  "percent-encoding",
  "qrcode",

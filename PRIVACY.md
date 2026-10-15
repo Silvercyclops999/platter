@@ -118,6 +118,12 @@ and your own Plex server.
   file is downloaded once from the whisper.cpp model repository there. The
   request carries nothing about you or your music.
 
+- GitHub (raw.githubusercontent.com), only when you pick headphones under
+  "Headphone correction" in Settings. It downloads that model's profile from
+  the AutoEq project, once, and keeps it on your computer. The request names
+  the headphones and nothing about you or your music. Searching for a model
+  happens on your computer.
+
 Lyrics transcription runs entirely on your computer: songs are read from your
 own server (or the app's cache), turned into text on this machine, and saved
 in the app's data folder. No audio or text from it is sent anywhere.

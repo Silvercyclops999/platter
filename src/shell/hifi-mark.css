@@ -1,0 +1,25 @@
+/* Bit-perfect / headphone correction marks (player bar, device picker). */
+.hifi-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  transition: color var(--motion-very-quick) var(--motion-easing), background var(--motion-very-quick) var(--motion-easing);
+}
+.hifi-mark:hover { color: var(--color-text-primary); background: var(--color-state-hover); }
+.hifi-mark:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.hifi-mark.is-on { color: var(--color-success); }
+.hifi-mark.is-fallback { color: var(--color-warning); }
+.hifi-mark__rate { white-space: nowrap; }
+
+.hifi-line { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); }
+.hifi-line__row { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; font-size: var(--font-size-sm); line-height: 1.4; color: var(--color-text-secondary); }
+.hifi-line__row svg { flex: none; margin-top: 2px; }
+.hifi-line__row.is-fallback { color: var(--color-warning); }
