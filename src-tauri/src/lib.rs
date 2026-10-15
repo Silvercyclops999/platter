@@ -22,6 +22,7 @@ pub mod mixes;
 pub mod model;
 pub mod monitor;
 pub mod notify;
+pub mod physical;
 pub mod platform;
 pub mod playlists;
 pub mod plex;
@@ -890,6 +891,20 @@ pub fn run() {
                 app.manage(discover);
             }
 
+            // The physical collection: owned albums in the sync store, and the
+            // optional Discogs import (token in the keychain).
+            app.manage(physical::commands::Physical::new(
+                db.clone(),
+                sync_store.clone(),
+                Arc::new(plex::keychain::KeyringStore::new()),
+                physical::discogs::DiscogsClient {
+                    http: artist_info.http(),
+                    limiter: Arc::new(artistinfo::limit::Limiter::per_second(1.0)),
+                },
+                Arc::new(plex::state::TauriSink(app.handle().clone())),
+                Arc::new(db::queries::now_s),
+            ));
+
             // Lyrics: the song's server first, then LRCLIB when its setting is on.
             let lyrics_service = lyrics::LyricsService::new(
                 db.clone(),
@@ -1341,6 +1356,13 @@ pub fn run() {
             discover::commands::catalogue_album,
             discover::commands::catalogue_fans_also_like,
             discover::commands::new_to_you,
+            physical::commands::physical_list,
+            physical::commands::physical_set,
+            physical::commands::physical_stats,
+            physical::commands::physical_find_release,
+            physical::commands::discogs_status,
+            physical::commands::discogs_token_set,
+            physical::commands::discogs_import,
             radar::commands::release_radar_check,
             radar::commands::radar_auto_artists,
             radar::commands::radar_auto_set,

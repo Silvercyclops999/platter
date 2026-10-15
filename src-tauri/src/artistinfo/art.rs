@@ -28,6 +28,8 @@ const ALLOWED_HOSTS: &[&str] = &[
     // Covers of official releases the library lacks (answered by a redirect
     // to the archive that holds the image).
     "coverartarchive.org",
+    // Covers of records in a Discogs collection the library doesn't have.
+    "i.discogs.com",
 ];
 
 /// Largest image accepted from a source.

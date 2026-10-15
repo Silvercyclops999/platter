@@ -580,6 +580,11 @@ pub struct Settings {
     pub home_new_to_you: bool,
     /// Artists the user said "Not interested" to (never suggested again).
     pub dismissed_artists: Vec<crate::discover::Dismissed>,
+    /// Badges, the On the shelf filter and the Stats shelf for albums the
+    /// user owns on vinyl, CD, cassette or another format.
+    pub show_physical_collection: bool,
+    /// "Missing from the shelf": albums played most that aren't owned.
+    pub shelf_missing_list: bool,
 }
 
 /// Minutes between Subsonic change checks the setting offers.
@@ -789,6 +794,8 @@ impl Default for Settings {
             fans_also_like_catalogue: true,
             home_new_to_you: true,
             dismissed_artists: Vec::new(),
+            show_physical_collection: true,
+            shelf_missing_list: false,
         }
     }
 }
@@ -900,6 +907,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "fansAlsoLikeCatalogue",
     "homeNewToYou",
     "dismissedArtists",
+    "showPhysicalCollection",
+    "shelfMissingList",
 ];
 
 /// Settings kept on this device only.
@@ -1158,6 +1167,8 @@ pub struct SettingsPatch {
     pub fans_also_like_catalogue: Option<bool>,
     pub home_new_to_you: Option<bool>,
     pub dismissed_artists: Option<Vec<crate::discover::Dismissed>>,
+    pub show_physical_collection: Option<bool>,
+    pub shelf_missing_list: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -1411,6 +1422,8 @@ impl Settings {
         if let Some(list) = &p.dismissed_artists {
             self.dismissed_artists = crate::discover::tidy_dismissed(list);
         }
+        set(&mut self.show_physical_collection, p.show_physical_collection);
+        set(&mut self.shelf_missing_list, p.shelf_missing_list);
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -3179,5 +3192,20 @@ mod tests {
         assert!(!s.catalogue_search && !s.fans_also_like_catalogue && !s.home_new_to_you);
         assert_eq!(s.dismissed_artists.len(), 1, "one entry per artist, real ids only");
         assert_eq!(s.dismissed_artists[0].mbid, a);
+    }
+
+    #[test]
+    fn physical_collection_settings_defaults_and_where_they_live() {
+        let s = Settings::default();
+        assert!(s.show_physical_collection, "on");
+        assert!(!s.shelf_missing_list, "off until the user turns it on");
+        for k in ["showPhysicalCollection", "shelfMissingList"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let mut s = s;
+        s.apply(&serde_json::from_str(r#"{"showPhysicalCollection":false,"shelfMissingList":true}"#).unwrap()).unwrap();
+        assert!(!s.show_physical_collection && s.shelf_missing_list);
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.show_physical_collection && !old.shelf_missing_list);
     }
 }

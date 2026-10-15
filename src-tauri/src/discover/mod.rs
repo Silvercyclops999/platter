@@ -449,6 +449,22 @@ impl Discover {
         Ok(CatalogueSearch { shown: true, artists, albums, songs })
     }
 
+    /// Albums from MusicBrainz for a search, whatever the library has (to
+    /// find the release group of a record on the user's shelf).
+    pub async fn search_albums(&self, query: &str) -> AppResult<Vec<CatAlbum>> {
+        if !self.online() {
+            return Err(AppError::Network("You're offline.".into()));
+        }
+        let q: String = query.trim().chars().take(200).collect();
+        if q.chars().count() < 2 {
+            return Ok(Vec::new());
+        }
+        let requests = self.inner.requests.states();
+        let missing = self.missing_ids().await;
+        let Some(v) = self.inner.mb.get(&mb::group_search_url(&q)).await? else { return Ok(Vec::new()) };
+        Ok(mb::parse_groups(&v).into_iter().map(|(g, credit, first)| self.album(&g, credit, first, &requests, &missing)).collect())
+    }
+
     /// Similar artists from ListenBrainz with the library ones marked.
     async fn similar_of(&self, mbid: &str, ix: &LibraryIndex) -> Vec<CatArtist> {
         let list = match self.inner.similar.similar(mbid).await {

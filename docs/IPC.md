@@ -1612,6 +1612,27 @@ Music that isn't in the library, from MusicBrainz (the shared one-a-second limit
 
 Requests from these pages use `lidarr_request_preview` and `lidarr_request` with `artistMbid` in the input, so the artist is known without a name search. Store links open through `import_open_link`. Artists marked "Not interested" are the synced `dismissedArtists` setting (`{ mbid, name }[]`).
 
+## Physical collection
+
+Albums the user owns on vinyl, CD, cassette or another format, with notes on each copy. Marks live in the sync store's `physical` namespace (keyed by album id, synced with the library group). The optional Discogs import reads the user's own collection with their personal token, which is kept in the keychain under `discogs-token` and never returned, logged or put in a URL. Discogs is asked at most once a second; a 429 pauses it.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `physical_list` | – | `OwnedAlbum[]` by artist then title |
+| `physical_set` | `{ albumId, owned: { copies, title, artist, thumb } }` | `OwnedAlbum`, or null when `copies` is empty (the mark comes off) |
+| `physical_stats` | – | `ShelfStats` |
+| `physical_find_release` | `{ artist, title }` | the `CatAlbum` MusicBrainz has for a record on the shelf, or null |
+| `discogs_status` | – | `{ saved, username, importing, report }` |
+| `discogs_token_set` | `{ token }` | the status; Discogs is asked whose token it is before it's saved (`invalid` when refused). null removes it and the last report |
+| `discogs_import` | – | `DiscogsReport` |
+
+`OwnedCopy = { format: "vinyl"|"cd"|"cassette"|"other", pressing, colour, condition, notes, discogs?: { releaseId, instanceId } }`, at most 20 per album, each note up to 300 characters.
+`OwnedAlbum = { albumId, title, artist, thumb, copies, formats, at }`; `formats` lists each format once in that order.
+`ShelfStats = { albums, copies, byFormat: { format, albums, copies }[], mostPlayed: ShelfAlbum[], missing: ShelfAlbum[] | null }`, counting only albums the library has. `missing` is the albums played most that aren't owned (not unreleased ones), null while `shelfMissingList` is off.
+`DiscogsReport = { username, importedAt, total, matched, added, unmatched: { releaseId, artist, title, year, format, thumb, links }[] }`.
+
+An import matches each collection item to a library album: a Discogs release already linked to an album stays with it, then the folded artist and title (`identity::fold`, Discogs' " (2)" and "*" taken off, the first credited artist when the whole credit doesn't match). Unreleased albums never match. Copies added by hand stay, a Discogs copy keeps the user's edits, and copies of records no longer in the collection go. Marks on albums the library doesn't list right now are left alone, and an empty library refuses to import. `physical://changed` fires after any change; `syncstore://changed` names `physical` when another device changed the marks. Settings: `showPhysicalCollection` (on) and `shelfMissingList` (off), both synced.
+
 ## Sync, folders and keys
 
 | Command | Args | Returns |
