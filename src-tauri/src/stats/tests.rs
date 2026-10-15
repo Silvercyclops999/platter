@@ -581,11 +581,9 @@ fn fast_at_100k_plays() {
         let took = fastest(|| assert!(overview(&c, d, 50).unwrap().totals.plays > 0));
         eprintln!("overview {r:?}: {took:?}");
         assert!(took.as_millis() < budget_ms, "{r:?} took {took:?}");
-        let t = Instant::now();
-        let m = moments(&c, d).unwrap();
-        let took = t.elapsed();
+        // Best of five, like the overview: one run on a busy CI machine can stall.
+        let took = fastest(|| assert!(moments(&c, d).unwrap().first_song.is_some()));
         eprintln!("moments {r:?}: {took:?}");
-        assert!(m.first_song.is_some());
         assert!(took.as_millis() < budget_ms, "moments {r:?} took {took:?}");
     }
     let t = Instant::now();
