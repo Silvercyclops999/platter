@@ -607,7 +607,7 @@ pub fn run() {
                 web: web_out.clone(),
                 keys: keychain.clone(),
                 db: db.clone(),
-                plex: Arc::new(lidarr::PlexMusicFiles(plex.clone())),
+                plex: Arc::new(backend::routed::RoutedFilePaths(backends.clone())),
                 clock: Arc::new(db::queries::now_s),
                 mb: Arc::new(lidarr::mbpick::MbCached {
                     http: artist_info.http(),
@@ -623,7 +623,7 @@ pub fn run() {
             let smart_service = smart::Smart::new(smart::SmartDeps {
                 db: db.clone(),
                 store: Arc::new(smart::SyncSmart { store: sync_store.clone(), db: db.clone() }),
-                remote: Arc::new(smart::commands::PlexSmart { plex: plex.clone(), db: db.clone() }),
+                remote: Arc::new(backend::routed::RoutedSmart(backends.clone())),
                 ai: Arc::new(smart::prompt::Anthropic::new(web_out.clone(), keychain.clone())),
                 events: Arc::new(plex::state::TauriSink(app.handle().clone())),
                 clock: Arc::new(db::queries::now_s),
@@ -666,7 +666,7 @@ pub fn run() {
 
             // Listen on: other Plex players, and Platter as one (setting).
             let remote = remote::RemoteService::new(
-                Arc::new(remote::commands::PlexRemoteEnv::new(plex.clone())),
+                Arc::new(backend::routed::RoutedRemote(backends.clone())),
                 Arc::new(player.clone()),
                 Arc::new(plex::state::TauriSink(app.handle().clone())),
                 plex.identity(),
@@ -770,7 +770,7 @@ pub fn run() {
                     }
                     Arc::new(sync::follows::SyncFollows { store: sync_store.clone() })
                 },
-                activity: Arc::new(social::commands::PlexActivity { plex: plex.clone(), db: db.clone() }),
+                activity: Arc::new(backend::routed::RoutedActivity(backends.clone())),
                 events: Arc::new(plex::state::TauriSink(app.handle().clone())),
                 notifier: Arc::new(social::commands::OsNotifier(app.handle().clone())),
                 switches: live.social.clone(),
@@ -779,11 +779,11 @@ pub fn run() {
             social::commands::spawn_watch(social.clone(), db.clone());
             app.manage(social);
 
-            // Lyrics: Plex first, then LRCLIB when its setting is on.
+            // Lyrics: the song's server first, then LRCLIB when its setting is on.
             let lyrics_service = lyrics::LyricsService::new(
                 db.clone(),
                 lyrics_http,
-                Arc::new(lyrics::commands::PlexSource(plex.clone())),
+                Arc::new(backend::routed::RoutedLyrics(backends.clone())),
                 lyrics::Switches {
                     lrclib: live.lyrics_lrclib.clone(),
                     prefer_own: live.lyrics_prefer_own.clone(),
@@ -890,8 +890,13 @@ pub fn run() {
 
             plex.start(app.handle().clone());
             watch_library(app.handle().clone(), plex.clone(), db.clone());
-            doctor::spawn(app.handle().clone(), db.clone(), Arc::new(tags::commands::PlexParts(plex.clone())), tags::fetch::Reader::new(audio::http::http_client(), player.transfer_gate(), Some(player.transfer_host())));
-            monitor::files::spawn(plex.clone(), db.clone(), player.clone());
+            doctor::spawn(app.handle().clone(), db.clone(), Arc::new(backend::routed::RoutedParts(backends.clone())), tags::fetch::Reader::new(audio::http::http_client(), player.transfer_gate(), Some(player.transfer_host())));
+            monitor::files::spawn(
+                plex.clone(),
+                db.clone(),
+                player.clone(),
+                Arc::new(backend::routed::RoutedFiles(backends.clone())),
+            );
             monitor::net::spawn(plex.clone());
             monitor::disk::spawn(
                 plex.clone(),
@@ -906,7 +911,7 @@ pub fn run() {
 
             app.manage(plexedit::PlexEditor::new(
                 data_dir.join("plex-edits"),
-                Arc::new(plexedit::PlexEditServers(plex.clone())),
+                Arc::new(backend::routed::RoutedEdit(backends.clone())),
                 Arc::new(plexedit::AppEditHooks { db: db.clone(), art: art.clone() }),
             ));
             app.manage(plex);

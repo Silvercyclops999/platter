@@ -11,7 +11,7 @@ use crate::audio::dsp::TrackAudio;
 use crate::audio::source::{StreamSource, TrackResolver};
 use crate::db::source::{ArtBytes, ArtFetcher, PlaylistEntry, RemoteHits, RemoteSearch};
 use crate::downloads::{DownloadSource, Fetch};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::likes::LikeRemote;
 use crate::model::{Playlist, Track};
 use crate::playlists::PlaylistRemote;
@@ -208,5 +208,159 @@ impl crate::share::ServerId for RoutedServerId {
 impl crate::social::listen::ServerId for RoutedServerId {
     async fn machine_id(&self) -> Option<String> {
         self.0.primary().ok()?.server_id().await
+    }
+}
+
+// ---------------------------------------------------------------- capabilities
+
+const NO_SMART: &str = "This server can't keep smart playlists.";
+const NO_ACTIVITY: &str = "This server doesn't share what others are playing.";
+const NO_FILE_PATHS: &str =
+    "Your server doesn't say where its files are, so Platter can't compare its folders with Lidarr's.";
+const NO_EDIT: &str = "This server's details can't be edited from Platter.";
+const NO_REMOTE: &str = "Playing on the server's other devices isn't available with this server.";
+
+/// Lyrics from each track's server; none when it keeps no lyrics.
+pub struct RoutedLyrics(pub Backends);
+
+#[async_trait]
+impl crate::lyrics::ServerLyrics for RoutedLyrics {
+    async fn lyrics(&self, track_id: &str) -> AppResult<Option<crate::plex::details::Lyrics>> {
+        match self.0.for_id(track_id)?.lyrics() {
+            Some(l) => l.lyrics(track_id).await,
+            None => Ok(None),
+        }
+    }
+}
+
+/// Smart playlists saved on the primary server.
+pub struct RoutedSmart(pub Backends);
+
+impl RoutedSmart {
+    fn smart(&self) -> AppResult<std::sync::Arc<dyn crate::smart::SmartRemote>> {
+        self.0.primary()?.smart().ok_or_else(|| AppError::Invalid(NO_SMART.into()))
+    }
+}
+
+#[async_trait]
+impl crate::smart::SmartRemote for RoutedSmart {
+    async fn online(&self) -> bool {
+        match self.smart() {
+            Ok(s) => s.online().await,
+            Err(_) => false,
+        }
+    }
+    async fn target(&self) -> AppResult<(String, String)> {
+        self.smart()?.target().await
+    }
+    async fn tags(&self, section_id: &str, plex_field: &str) -> AppResult<Vec<(String, String)>> {
+        self.smart()?.tags(section_id, plex_field).await
+    }
+    async fn create(&self, title: &str, uri: &str) -> AppResult<String> {
+        self.smart()?.create(title, uri).await
+    }
+    async fn update(&self, id: &str, uri: &str) -> AppResult<()> {
+        self.smart()?.update(id, uri).await
+    }
+    async fn rename(&self, id: &str, title: &str) -> AppResult<()> {
+        self.smart()?.rename(id, title).await
+    }
+    async fn content(&self, id: &str) -> AppResult<String> {
+        self.smart()?.content(id).await
+    }
+    async fn fetch(&self, id: &str) -> AppResult<(Playlist, Vec<PlaylistEntry>)> {
+        self.smart()?.fetch(id).await
+    }
+}
+
+/// What others play on the primary server. Without the capability it reads
+/// as not connected.
+pub struct RoutedActivity(pub Backends);
+
+impl RoutedActivity {
+    fn source(&self) -> AppResult<std::sync::Arc<dyn crate::social::activity::ActivitySource>> {
+        self.0.primary()?.activity().ok_or_else(|| AppError::Invalid(NO_ACTIVITY.into()))
+    }
+}
+
+#[async_trait]
+impl crate::social::activity::ActivitySource for RoutedActivity {
+    async fn owned(&self) -> Option<bool> {
+        self.source().ok()?.owned().await
+    }
+    async fn sessions(&self) -> AppResult<Vec<u8>> {
+        self.source()?.sessions().await
+    }
+    async fn history(&self, size: u64) -> AppResult<Vec<u8>> {
+        self.source()?.history(size).await
+    }
+    async fn accounts(&self) -> AppResult<Vec<u8>> {
+        self.source()?.accounts().await
+    }
+}
+
+/// Whether a track's file can be read, from its server (unknown when the
+/// server can't say).
+pub struct RoutedFiles(pub Backends);
+
+#[async_trait]
+impl crate::monitor::files::FileProbe for RoutedFiles {
+    async fn readable(&self, track_id: &str) -> Option<bool> {
+        self.0.for_id(track_id).ok()?.files()?.readable(track_id).await
+    }
+}
+
+/// The primary server's folders and files, for the Lidarr check.
+pub struct RoutedFilePaths(pub Backends);
+
+#[async_trait]
+impl crate::lidarr::PlexMusic for RoutedFilePaths {
+    async fn music_files(&self) -> AppResult<crate::lidarr::check::PlexFiles> {
+        let paths = self.0.primary()?.file_paths().ok_or_else(|| AppError::Invalid(NO_FILE_PATHS.into()))?;
+        paths.music_files().await
+    }
+}
+
+/// Editing on the item's server.
+pub struct RoutedEdit(pub Backends);
+
+#[async_trait]
+impl crate::plexedit::EditServers for RoutedEdit {
+    async fn client_for(&self, id: &str) -> AppResult<crate::plex::client::PlexClient> {
+        let edit = self.0.for_id(id)?.edit().ok_or_else(|| AppError::Invalid(NO_EDIT.into()))?;
+        edit.client_for(id).await
+    }
+    async fn owned(&self) -> (Vec<String>, bool) {
+        match self.0.primary().ok().and_then(|s| s.edit()) {
+            Some(e) => e.owned().await,
+            None => (Vec::new(), false),
+        }
+    }
+}
+
+/// The primary server's other players (an item's own server for its play
+/// queue).
+pub struct RoutedRemote(pub Backends);
+
+impl RoutedRemote {
+    fn primary(&self) -> AppResult<std::sync::Arc<dyn crate::remote::RemoteEnv>> {
+        self.0.primary()?.remote().ok_or_else(|| AppError::Invalid(NO_REMOTE.into()))
+    }
+}
+
+#[async_trait]
+impl crate::remote::RemoteEnv for RoutedRemote {
+    async fn server(&self) -> AppResult<crate::remote::ServerCtx> {
+        self.primary()?.server().await
+    }
+    async fn server_for(&self, id: &str) -> AppResult<crate::remote::ServerCtx> {
+        let env = self.0.for_id(id)?.remote().ok_or_else(|| AppError::Invalid(NO_REMOTE.into()))?;
+        env.server_for(id).await
+    }
+    async fn account_token(&self) -> Option<crate::plex::token::Token> {
+        self.primary().ok()?.account_token().await
+    }
+    async fn account_id(&self) -> Option<String> {
+        self.primary().ok()?.account_id().await
     }
 }

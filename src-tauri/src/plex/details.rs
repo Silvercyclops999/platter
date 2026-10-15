@@ -635,8 +635,12 @@ fn from_stream(mut l: Lyrics, file: bool) -> Lyrics {
 #[tauri::command]
 pub async fn now_playing_details(
     state: State<'_, PlexState>,
+    backends: State<'_, crate::backend::Backends>,
     track_id: String,
 ) -> AppResult<NowPlayingDetails> {
+    if !backends.caps_for(&track_id).has(crate::backend::Caps::TRACK_DETAILS) {
+        return Err(AppError::NotFound("This server has no details for the song.".into()));
+    }
     let client = state.client_for(&track_id).await?;
     fetch(&client, &track_id).await
 }

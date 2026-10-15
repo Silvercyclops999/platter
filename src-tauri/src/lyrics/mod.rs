@@ -49,11 +49,14 @@ pub const LRCLIB_GAP: Duration = Duration::from_millis(500);
 pub const CREDIT: &str = "Lyrics from LRCLIB";
 pub const CREDIT_MATCHED: &str = "Lyrics from LRCLIB, matched by title";
 
-/// The Plex side: a track's lyrics stream, if it has one.
+/// The server side: a track's lyrics from its server, if it has some.
 #[async_trait]
-pub trait PlexLyrics: Send + Sync {
+pub trait ServerLyrics: Send + Sync {
     async fn lyrics(&self, track_id: &str) -> AppResult<Option<Lyrics>>;
 }
+
+/// The name the server side had when Plex was the only server.
+pub use ServerLyrics as PlexLyrics;
 
 /// What LRCLIB is asked about a library track: the track artist (or the
 /// album artist), title, album and length.

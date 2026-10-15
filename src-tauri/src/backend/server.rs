@@ -57,4 +57,37 @@ pub trait MusicServer: Send + Sync {
     fn plays(&self) -> Arc<dyn PlayReporter>;
     /// MusicBrainz ids the server matched.
     fn mbids(&self) -> Arc<dyn crate::artistinfo::service::MbidLookup>;
+
+    // Capabilities a server may not have. Each comes with its flag.
+
+    /// Lyrics the server keeps ([`Caps::LYRICS`]).
+    fn lyrics(&self) -> Option<Arc<dyn crate::lyrics::ServerLyrics>> {
+        None
+    }
+    /// Smart playlists saved on the server ([`Caps::SERVER_SMART_PLAYLISTS`]).
+    fn smart(&self) -> Option<Arc<dyn crate::smart::SmartRemote>> {
+        None
+    }
+    /// What other people on the server play ([`Caps::FRIEND_ACTIVITY`]).
+    fn activity(&self) -> Option<Arc<dyn crate::social::activity::ActivitySource>> {
+        None
+    }
+    /// Whether a song's file can be read now ([`Caps::CHECK_FILES`]).
+    fn files(&self) -> Option<Arc<dyn crate::monitor::files::FileProbe>> {
+        None
+    }
+    /// The music's folders and files on the server's disks, for the Lidarr
+    /// check ([`Caps::REAL_FILE_PATHS`]).
+    fn file_paths(&self) -> Option<Arc<dyn crate::lidarr::PlexMusic>> {
+        None
+    }
+    /// Editing titles, artwork and grouping ([`Caps::METADATA_EDIT`]).
+    fn edit(&self) -> Option<Arc<dyn crate::plexedit::EditServers>> {
+        None
+    }
+    /// The server's other players: handoff, and playing as one of them
+    /// ([`Caps::REMOTE_PLAYERS`], [`Caps::PLAY_QUEUE_HANDOFF`]).
+    fn remote(&self) -> Option<Arc<dyn crate::remote::RemoteEnv>> {
+        None
+    }
 }

@@ -13,3 +13,6 @@ pub use backends::Backends;
 pub use caps::Caps;
 pub use server::MusicServer;
 pub use registry::{BackendKind, ServerRecord, ServersFile};
+
+#[cfg(test)]
+mod tests;

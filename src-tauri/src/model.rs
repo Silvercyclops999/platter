@@ -104,7 +104,9 @@ pub struct Track {
     pub disc_number: u32,
     pub duration_ms: u64,
     pub thumb: Option<String>,
-    /// Plex media part key, e.g. `/library/parts/1/2/file.flac`.
+    /// Where the track's server keeps the original file: what streams,
+    /// downloads and the tag scan ask for. On Plex the media part key, e.g.
+    /// `/library/parts/1/2/file.flac`.
     pub part_key: String,
     pub codec: Option<String>,
     pub container: Option<String>,

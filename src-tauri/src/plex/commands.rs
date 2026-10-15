@@ -114,9 +114,15 @@ pub async fn open_local_network_settings(app: AppHandle, state: State<'_, PlexSt
 }
 
 /// The account's Plex Home users (docs/IPC.md "Home users"). Empty when the
-/// account isn't a Home.
+/// account isn't a Home, or no server in use has Home users.
 #[tauri::command]
-pub async fn home_users(home: State<'_, super::home::Home>) -> AppResult<super::home::HomeUsers> {
+pub async fn home_users(
+    home: State<'_, super::home::Home>,
+    backends: State<'_, crate::backend::Backends>,
+) -> AppResult<super::home::HomeUsers> {
+    if !backends.caps_all().has(crate::backend::Caps::HOME_USERS) {
+        return Ok(super::home::HomeUsers { users: Vec::new(), remember: false });
+    }
     home.users().await
 }
 

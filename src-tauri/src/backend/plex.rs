@@ -40,13 +40,33 @@ pub struct PlexServer {
     likes: Arc<crate::likes::PlexRatings>,
     playlists: Arc<crate::playlists::PlexPlaylists>,
     mbids: Arc<crate::artistinfo::service::PlexMbid>,
+    lyrics: Arc<crate::lyrics::commands::PlexSource>,
+    files: Arc<crate::monitor::files::PlexProbe>,
+    file_paths: Arc<crate::lidarr::PlexMusicFiles>,
+    edit: Arc<crate::plexedit::PlexEditServers>,
+    remote: Arc<crate::remote::commands::PlexRemoteEnv>,
+    /// Need the library cache (its music section).
+    smart: Option<Arc<crate::smart::commands::PlexSmart>>,
+    activity: Option<Arc<crate::social::commands::PlexActivity>>,
 }
 
 impl PlexServer {
     /// `prefs` are the streaming quality caps from Settings; `db` keeps
-    /// loudness and measured silence.
+    /// loudness and measured silence, and names the music section smart
+    /// playlists and friend activity use (without it those are off).
     pub fn new(plex: PlexState, prefs: Arc<StreamPrefs>, db: Option<DbHandle>) -> Self {
         Self {
+            lyrics: Arc::new(crate::lyrics::commands::PlexSource(plex.clone())),
+            files: Arc::new(crate::monitor::files::PlexProbe(plex.clone())),
+            file_paths: Arc::new(crate::lidarr::PlexMusicFiles(plex.clone())),
+            edit: Arc::new(crate::plexedit::PlexEditServers(plex.clone())),
+            remote: Arc::new(crate::remote::commands::PlexRemoteEnv::new(plex.clone())),
+            smart: db
+                .clone()
+                .map(|db| Arc::new(crate::smart::commands::PlexSmart { plex: plex.clone(), db })),
+            activity: db
+                .clone()
+                .map(|db| Arc::new(crate::social::commands::PlexActivity { plex: plex.clone(), db })),
             library: Arc::new(PlexLibrary::new(plex.clone())),
             search: Arc::new(PlexSearch(plex.clone())),
             art: Arc::new(PlexArt(plex.clone())),
@@ -72,7 +92,14 @@ impl MusicServer for PlexServer {
     }
 
     fn caps(&self) -> Caps {
-        plex_caps()
+        let mut caps = plex_caps();
+        if self.smart.is_none() {
+            caps = caps - Caps::SERVER_SMART_PLAYLISTS;
+        }
+        if self.activity.is_none() {
+            caps = caps - Caps::FRIEND_ACTIVITY - Caps::FRIEND_HISTORY;
+        }
+        caps
     }
 
     async fn tag(&self) -> Option<String> {
@@ -129,5 +156,33 @@ impl MusicServer for PlexServer {
 
     fn mbids(&self) -> Arc<dyn crate::artistinfo::service::MbidLookup> {
         self.mbids.clone()
+    }
+
+    fn lyrics(&self) -> Option<Arc<dyn crate::lyrics::ServerLyrics>> {
+        Some(self.lyrics.clone())
+    }
+
+    fn smart(&self) -> Option<Arc<dyn crate::smart::SmartRemote>> {
+        self.smart.clone().map(|s| s as Arc<dyn crate::smart::SmartRemote>)
+    }
+
+    fn activity(&self) -> Option<Arc<dyn crate::social::activity::ActivitySource>> {
+        self.activity.clone().map(|a| a as Arc<dyn crate::social::activity::ActivitySource>)
+    }
+
+    fn files(&self) -> Option<Arc<dyn crate::monitor::files::FileProbe>> {
+        Some(self.files.clone())
+    }
+
+    fn file_paths(&self) -> Option<Arc<dyn crate::lidarr::PlexMusic>> {
+        Some(self.file_paths.clone())
+    }
+
+    fn edit(&self) -> Option<Arc<dyn crate::plexedit::EditServers>> {
+        Some(self.edit.clone())
+    }
+
+    fn remote(&self) -> Option<Arc<dyn crate::remote::RemoteEnv>> {
+        Some(self.remote.clone())
     }
 }

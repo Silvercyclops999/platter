@@ -77,7 +77,8 @@ impl FailureWatch {
     }
 }
 
-struct PlexProbe(PlexState);
+/// Asks Plex whether the track's file is there (`checkFiles`).
+pub struct PlexProbe(pub PlexState);
 
 #[async_trait]
 impl FileProbe for PlexProbe {
@@ -98,7 +99,7 @@ async fn sample_ids(db: &DbHandle) -> AppResult<Vec<String>> {
     .await
 }
 
-async fn run_check(plex: &PlexState, db: &DbHandle) {
+async fn run_check(plex: &PlexState, db: &DbHandle, probe: &dyn FileProbe) {
     if !plex.connected() {
         return;
     }
@@ -106,7 +107,7 @@ async fn run_check(plex: &PlexState, db: &DbHandle) {
         Ok(ids) if !ids.is_empty() => ids,
         _ => return,
     };
-    if let Some(ok) = check(&PlexProbe(plex.clone()), &ids).await {
+    if let Some(ok) = check(probe, &ids).await {
         if ok != plex.files_available() {
             tracing::info!("music files available: {ok}");
         }
@@ -126,7 +127,8 @@ fn next_look(active: bool, last_look: tokio::time::Instant, last_check: tokio::t
 
 /// Background loop. Also re-runs the library sync every minute while the
 /// server has no music library, so one that's added later shows up.
-pub fn spawn(plex: PlexState, db: DbHandle, player: PlayerHandle) {
+/// `probe` asks each track's server about its file.
+pub fn spawn(plex: PlexState, db: DbHandle, player: PlayerHandle, probe: Arc<dyn FileProbe>) {
     let player = Arc::new(player);
     let mut tracking = player.subscribe_tracking();
     tauri::async_runtime::spawn(async move {
@@ -160,7 +162,7 @@ pub fn spawn(plex: PlexState, db: DbHandle, player: PlayerHandle) {
             let burst = watch.new_file_failures(&problems) >= FAILURE_BURST;
             if burst || last_check.elapsed() >= CHECK_EVERY {
                 last_check = Instant::now();
-                run_check(&plex, &db).await;
+                run_check(&plex, &db, probe.as_ref()).await;
                 if plex.connected() && plex.no_music_library() {
                     let _ = db.start_sync(false);
                 }

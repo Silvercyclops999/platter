@@ -68,6 +68,12 @@ impl Backends {
         Self::build(None, Some(fallback), None)
     }
 
+    /// No servers at all (tests).
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Self::build(None, None, None)
+    }
+
     fn build(plex: Option<Arc<PlexServer>>, fallback: Option<Arc<dyn MusicServer>>, status: Option<Arc<dyn AppStatus>>) -> Self {
         Self {
             inner: Arc::new(Inner {
