@@ -136,14 +136,19 @@
 /* ---------------------------------------------------------------- settings */
 .setting-text {
   width: 220px;
+  max-width: 100%;
   height: 32px;
-  padding: 0 var(--space-3);
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: var(--color-state-pressed);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-overlay);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 16%, transparent);
   color: var(--color-text-primary);
   font: inherit;
   font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  transition: box-shadow var(--motion-fast) var(--motion-easing);
 }
-.setting-text:focus { outline: none; border-color: color-mix(in srgb, var(--color-ink) 28%, transparent); }
-.setting-text:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+.setting-text::placeholder { color: var(--color-text-muted); }
+.setting-text:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 32%, transparent); }
+.setting-text:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }

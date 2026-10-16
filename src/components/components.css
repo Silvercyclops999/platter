@@ -501,6 +501,7 @@
   display: inline-flex;
   align-items: center;
   flex: none;
+  max-width: 100%;
 }
 .select__input,
 .number-field {
@@ -517,6 +518,8 @@
 }
 .select__input {
   min-width: 132px;
+  max-width: 100%;
+  text-overflow: ellipsis;
   padding: 0 36px 0 var(--space-4);
   appearance: none;
   cursor: pointer;

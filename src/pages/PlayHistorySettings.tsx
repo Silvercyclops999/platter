@@ -171,7 +171,7 @@ export function HistorySourceControl({
           Try again
         </Button>
       )}
-      <Button size="sm" variant="ghost" disabled={st.plays === 0} onClick={() => onRemove(source)}>
+      <Button size="sm" variant="secondary" disabled={st.plays === 0} onClick={() => onRemove(source)}>
         Remove
       </Button>
     </span>
