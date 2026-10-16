@@ -1,0 +1,32 @@
+# Platter Bridge (optional). See docs/BRIDGE.md.
+#
+# 1. In Platter on your computer: Settings > Bridge > Pair a Bridge.
+# 2. Put the code below, then `docker compose up -d`. Keep Platter open
+#    until Settings > Bridge shows the Bridge (a few seconds).
+# 3. After that the code can stay or go; it only ever works once.
+services:
+  platter-bridge:
+    image: ghcr.io/silvercyclops999/platter-bridge:latest
+    container_name: platter-bridge
+    restart: unless-stopped
+    # The user that owns ./appdata on your server (run `id` to see yours).
+    user: "1000:1000"
+    environment:
+      BRIDGE_PAIR_CODE: "PB1-paste-the-code-from-Platter-here"
+      BRIDGE_NAME: "Platter Bridge"
+      TZ: "Etc/UTC"
+      # Optional: add new protected albums from the server.
+      # The path Plex uses for the music folder mounted at /music below:
+      # MUSIC_PLEX_PATH: "/data/media/Music"
+      # Lidarr's staging folder, mounted at /staging below:
+      # STAGING_DIR: "/staging"
+      # Optional: your own ntfy server instead of ntfy.sh.
+      # BRIDGE_RELAY: "https://ntfy.example.org"
+    volumes:
+      - ./appdata:/data
+      # Read-only: the Bridge only reads, and additions wait for a computer.
+      # - /path/to/music:/music:ro
+      # Read-write: the Bridge can add new protected albums itself.
+      # - /path/to/music:/music
+      # - /path/to/staging:/staging
+    # No ports: the Bridge only makes outgoing connections.

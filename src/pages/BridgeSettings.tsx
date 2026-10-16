@@ -25,7 +25,7 @@ export function bridgeMatches(query: string): boolean {
 }
 
 const MUSIC: Record<BridgeMusicAccess, string> = {
-  readWrite: "Music folder mounted read-write: it adds protected albums and better copies itself.",
+  readWrite: "Music folder mounted read-write: it adds new protected albums itself.",
   readOnly: "Music folder mounted read-only: additions wait for a computer.",
   none: "No music folder mounted: additions wait for a computer.",
 };

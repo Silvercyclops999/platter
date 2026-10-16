@@ -1,0 +1,11 @@
+# Platter Bridge image (docker/bridge/Dockerfile): only the sources it builds from.
+.git
+node_modules
+dist
+src-tauri/target
+src-tauri/gen
+streamdeck/node_modules
+docs/screenshots
+**/*.sqlite*
+.env
+.env.*

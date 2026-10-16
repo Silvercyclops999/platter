@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>platter-bridge</Name>
+  <Repository>ghcr.io/silvercyclops999/platter-bridge:latest</Repository>
+  <Registry>https://github.com/Silvercyclops999/platter/pkgs/container/platter-bridge</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Silvercyclops999/platter/issues</Support>
+  <Project>https://github.com/Silvercyclops999/platter/blob/main/docs/BRIDGE.md</Project>
+  <Overview>Optional home side for Platter, the desktop music player for Plex. While no computer has Platter open, the Bridge catches up with Lidarr: it scans just the folders of new downloads, keeps protected albums out of Lidarr's way and, with the music folder mounted read-write, adds new protected albums the way Platter would. Platter works fully without it. It opens no ports and talks to Platter only through a sealed relay. Pair it once: in Platter, Settings &gt; Bridge &gt; Pair a Bridge, then paste the code below.</Overview>
+  <Category>MediaApp:Music Tools:</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/Silvercyclops999/platter/main/docker/bridge/platter-bridge.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Silvercyclops999/platter/main/src-tauri/icons/128x128.png</Icon>
+  <ExtraParams>--user 99:100</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Platter on a computer, open while you pair (once).</Requires>
+  <Config Name="Pair code" Target="BRIDGE_PAIR_CODE" Default="" Mode="" Description="From Platter: Settings &gt; Bridge &gt; Pair a Bridge. Works once, within an hour, while Platter is open." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Name" Target="BRIDGE_NAME" Default="Platter Bridge" Mode="" Description="What Platter calls this Bridge." Type="Variable" Display="always" Required="false" Mask="false">Platter Bridge</Config>
+  <Config Name="App data" Target="/data" Default="/mnt/user/appdata/platter-bridge" Mode="rw" Description="Where the Bridge keeps its pairing and state." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/platter-bridge</Config>
+  <Config Name="Music folder" Target="/music" Default="" Mode="ro" Description="Optional. Your music folder. Leave it read-only and additions wait for a computer; make it read-write (rw) and the Bridge adds new protected albums itself." Type="Path" Display="always" Required="false" Mask="false"/>
+  <Config Name="Plex's path for the music folder" Target="MUSIC_PLEX_PATH" Default="" Mode="" Description="Optional, with Music folder: the same folder as Plex sees it, like /data/media/Music." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Lidarr staging folder" Target="/staging" Default="" Mode="rw" Description="Optional, with a read-write music folder: Lidarr's staging folder for protected artists." Type="Path" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Staging folder inside the container" Target="STAGING_DIR" Default="/staging" Mode="" Description="Leave as /staging when you set the staging folder above." Type="Variable" Display="advanced" Required="false" Mask="false">/staging</Config>
+  <Config Name="Relay" Target="BRIDGE_RELAY" Default="" Mode="" Description="Optional. Your own ntfy server instead of ntfy.sh (Platter must use the same one)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Time zone" Target="TZ" Default="Etc/UTC" Mode="" Description="For the log's times." Type="Variable" Display="advanced" Required="false" Mask="false">Etc/UTC</Config>
+</Container>
