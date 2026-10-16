@@ -417,6 +417,9 @@ export function ListeningCalendar({ points, from, to, footnote }: { points: Stat
   );
 }
 
+/** "10 PM" and "Oct 14" never break across lines. */
+const keepTogether = (s: string) => s.replace(/(\d) (AM|PM)\b/g, "$1\u00a0$2").replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d)/g, "$1\u00a0$2");
+
 /** One story: a small heading, the sentence, the chart under it. */
 function Story({ id, heading, sentence, layout = "stack", children }: { id: string; heading: string; sentence: ReactNode; layout?: "stack" | "side"; children: ReactNode }) {
   return (
@@ -425,7 +428,7 @@ function Story({ id, heading, sentence, layout = "stack", children }: { id: stri
         <h3 id={id} className="story__heading">
           {heading}
         </h3>
-        <p className="story__sentence">{sentence}</p>
+        <p className="story__sentence">{typeof sentence === "string" ? keepTogether(sentence) : sentence}</p>
       </div>
       <div className="story__chart">{children}</div>
     </article>
