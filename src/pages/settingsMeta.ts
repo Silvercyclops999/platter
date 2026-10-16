@@ -86,7 +86,6 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "fullWindowRememberMode",
   "miniplayerTint",
   "miniplayerQueue",
-  "transcribeModel",
   "transcribePauseBusy",
   "transcribeFasterAway",
   "transcribeUnreleased",

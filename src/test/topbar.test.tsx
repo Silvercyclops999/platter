@@ -160,7 +160,7 @@ describe("app menu", () => {
     expect(screen.getByRole("menuitem", { name: "Help" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemcheckbox", { name: "Private session" })).toHaveFocus();
-    await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}");
+    await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toHaveFocus();
   });
 

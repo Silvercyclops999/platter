@@ -5,7 +5,7 @@ How to connect Lidarr to Platter, what its safety check looks for, and how reque
 ## Connecting Lidarr
 
 1. Open Settings, Integrations, Lidarr.
-2. In **Lidarr address at home**, type Lidarr's address on your home network with its port, like http://192.168.1.20:8686.
+2. In **Lidarr address at home**, type Lidarr's address on your home network with its port, like http://192.168.x.x:8686.
 3. To reach Lidarr away from home, also fill in **Lidarr address away from home** (a reverse proxy, tunnel or VPN you set up). Use https so the key travels encrypted. If your proxy needs headers, add them in **Extra sign-in details for the away address**.
 4. In Lidarr, open Settings, General and copy the API key. Paste it into **Lidarr key** and choose **Save key**. It's kept in this computer's keychain.
 5. Choose **Check setup**.

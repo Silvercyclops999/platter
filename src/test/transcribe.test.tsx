@@ -173,7 +173,7 @@ describe("Settings", () => {
     expect(use).toHaveValue("auto");
     await within(row).findByText("Uses your graphics card (NVIDIA GeForce RTX 5090).");
     expect(row).toHaveTextContent("This device only.");
-    const model = within(settingRow("transcribeModel")).getByRole("combobox", { name: "Transcription model" });
+    const model = within(settingRow("transcribeModel")).getByRole("combobox", { name: "Speech model" });
     await waitFor(() => expect(model).toHaveValue("turbo"));
     expect(within(model).getByRole("option", { name: /^Turbo .*a few seconds per song on your graphics card$/ })).toBeInTheDocument();
     expect(within(settingRow("transcribeModel")).getByRole("button", { name: `Download ${modelSize(574_041_195)}` })).toBeInTheDocument();
@@ -188,7 +188,7 @@ describe("Settings", () => {
   it("keeps Small on a computer without a graphics card and a model someone picked", async () => {
     await turnOn({ transcribeModel: null });
     render(<SettingsPage />);
-    const model = await within(await waitFor(() => settingRow("transcribeModel"))).findByRole("combobox", { name: "Transcription model" });
+    const model = await within(await waitFor(() => settingRow("transcribeModel"))).findByRole("combobox", { name: "Speech model" });
     await waitFor(() => expect(model).toHaveValue("small"));
     expect(within(model).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["small", "medium", "turbo"]);
     await within(settingRow("transcribeGpu")).findByText("Uses the processor: no graphics card that can help was found.");
