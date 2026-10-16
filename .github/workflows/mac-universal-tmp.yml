@@ -1,0 +1,33 @@
+name: mac-universal-tmp
+
+# Temporary: the release's macOS universal build with transcription, unsigned
+# and without publishing anything.
+on:
+  push:
+    branches: [mac-metal]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: 'aarch64-apple-darwin,x86_64-apple-darwin' }
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: npm ci
+      - env:
+          WHISPER_DONT_GENERATE_BINDINGS: 1
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+        run: npm run tauri build -- --target universal-apple-darwin --features transcribe --bundles app -c '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Check the universal binary
+        run: |
+          bin=src-tauri/target/universal-apple-darwin/release/platter
+          lipo -info "$bin"
+          otool -L "$bin" | grep -E "Metal|MetalKit|Foundation"
+          for a in arm64 x86_64; do
+            echo "$a: $(otool -arch $a -l "$bin" | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' | grep -E 'minos|version' | head -1)"
+          done

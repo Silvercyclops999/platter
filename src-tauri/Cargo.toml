@@ -70,8 +70,9 @@ chacha20poly1305 = "0.11.0"
 base64 = "0.22.1"
 qrcode = { version = "0.14.1", default-features = false }
 # On-device lyrics transcription (the `transcribe` feature). Builds whisper.cpp
-# from source, so it needs CMake and a C++ compiler.
-whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend"] }
+# from source, so it needs CMake and a C++ compiler. The raw API is for asking
+# which GPU it will use.
+whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend", "raw-api"] }
 tauri-plugin-clipboard-manager = "2.5.0"
 # Identify by sound: a pure Rust port of Chromaprint (MIT).
 rusty-chromaprint = "0.3.0"
@@ -98,8 +99,8 @@ objc2-core-audio = { version = "0.3.2", default-features = false, features = ["s
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString"] }
 # The thermal state (background speech work waits while the Mac runs warm).
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSProcessInfo"] }
-# Transcription on the GPU with Metal: off until the macOS link needs
-# (compiler-rt's availability check) are sorted out; the CPU path is used.
+# Transcription on the GPU with Metal (build.rs links the clang runtime it needs).
+whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend", "raw-api", "metal"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 # Line tables only: full debug info grew past what the Windows linker's

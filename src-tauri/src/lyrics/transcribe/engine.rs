@@ -130,10 +130,41 @@ pub mod whisper {
         }
     }
 
+    /// The GPU whisper.cpp picks when asked for one, if this build has one.
+    fn gpu_name() -> Option<String> {
+        use whisper_rs::whisper_rs_sys as sys;
+        // SAFETY: the device registry is static; names are C strings it owns.
+        unsafe {
+            (0..sys::ggml_backend_dev_count()).map(|i| sys::ggml_backend_dev_get(i)).find_map(|dev| {
+                let kind = sys::ggml_backend_dev_type(dev);
+                let gpu = kind == sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU
+                    || kind == sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU;
+                let name = sys::ggml_backend_dev_description(dev);
+                (gpu && !name.is_null()).then(|| std::ffi::CStr::from_ptr(name).to_string_lossy().into_owned())
+            })
+        }
+    }
+
     fn load(path: &Path, kind: ModelKind) -> Result<WhisperContext, RecognizeError> {
+        // Metal on macOS (much cooler than the processor); the processor elsewhere.
+        let gpu = if cfg!(target_os = "macos") { gpu_name() } else { None };
+        if let Some(name) = &gpu {
+            match load_on(path, kind, true) {
+                Ok(ctx) => {
+                    tracing::info!("speech model on the GPU ({name})");
+                    return Ok(ctx);
+                }
+                Err(e) => tracing::warn!("speech model didn't load on the GPU ({name}), using the processor: {e:?}"),
+            }
+        } else if cfg!(target_os = "macos") {
+            tracing::info!("no GPU for speech, using the processor");
+        }
+        load_on(path, kind, false)
+    }
+
+    fn load_on(path: &Path, kind: ModelKind, use_gpu: bool) -> Result<WhisperContext, RecognizeError> {
         let p = WhisperContextParameters {
-            // Metal on macOS (much cooler than the processor); the processor elsewhere.
-            use_gpu: cfg!(target_os = "macos"),
+            use_gpu,
             // Word times from the attention heads, steadier than token guesses.
             dtw_parameters: DtwParameters { mode: DtwMode::ModelPreset { model_preset: preset(kind) }, ..Default::default() },
             ..Default::default()
