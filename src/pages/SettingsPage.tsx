@@ -93,7 +93,16 @@ import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNo
 import { LookCards } from "./looks/LookCards";
 import { looks } from "../stores/looks";
 import { CLASSIC_LAYOUT, type Layout } from "../design/themes";
-import type { AiProvider, CapName } from "../lib/types";
+import type { AiProvider, CapName, PlayHistorySource } from "../lib/types";
+import {
+  HistorySourceControl,
+  INCLUDE_KEYS,
+  SOURCE_NAMES,
+  TautulliKeyControl,
+  TautulliUrlField,
+  historyNote,
+  usePlayHistory,
+} from "./PlayHistorySettings";
 import { ensureCaps, useCaps, useServerName } from "../stores/caps";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
@@ -545,6 +554,8 @@ export function SettingsPage() {
   const scrobble = useScrobble();
   const ai = useAi();
   const lidarr = useLidarr();
+  const history = usePlayHistory();
+  const [removeHistory, setRemoveHistory] = useState<PlayHistorySource | null>(null);
   ensureCaps();
   const caps = useCaps((x) => x.all.caps);
   const hasSubsonic = useApp((x) => !!x.servers?.some((v) => v.kind === "subsonic"));
@@ -639,6 +650,32 @@ export function SettingsPage() {
             : "You're up to date."
           : undefined;
 
+  /** A history source's Include switch (with how its import stands) and its Remove row. */
+  const historyRows = (source: PlayHistorySource, title: string, description: string): RowDef[] => {
+    const st = history.source(source);
+    const rows: RowDef[] = [
+      {
+        key: INCLUDE_KEYS[source],
+        section: "Library",
+        group: "Stats",
+        title,
+        description,
+        note: historyNote(st),
+        control: (ids) => toggle(s, INCLUDE_KEYS[source], ids),
+      },
+    ];
+    if (st && (st.plays > 0 || st.importing || st.error || st.paused)) {
+      rows.push({
+        key: `remove-${source}`,
+        section: "Library",
+        group: "Stats",
+        title: `Remove imported plays from ${SOURCE_NAMES[source]}`,
+        description: `Deletes only the plays Platter brought in from ${SOURCE_NAMES[source]}. Your own plays in Platter stay.`,
+        control: () => <HistorySourceControl history={history} source={source} onRemove={setRemoveHistory} />,
+      });
+    }
+    return rows;
+  };
   const rows: RowDef[] = [
     // Account
     {
@@ -1417,6 +1454,14 @@ export function SettingsPage() {
       description: "See your taste overlap with a Platter friend who shares theirs. Only a summary is shared, your top artists and songs, never your history. Unreleased songs stay out unless you both agree.",
       control: (ids) => toggle(s, "statsCompare", ids),
     },
+    // Library: stats from your listening before Platter and in other apps
+    ...historyRows("plexHistory", "Include my Plex listening history", "Stats, mixes, On Repeat and recaps also count what you played on your Plex server before Platter and in other Plex apps. Only your own plays, never other people's on the server, and a play from Platter counts once."),
+    ...(history.source("tautulli")?.setUp
+      ? historyRows("tautulli", "Include Tautulli history", "Stats, mixes, On Repeat and recaps also count your music plays in Tautulli. Plays too short to count are left out, and a play Plex or Platter already has counts once.")
+      : []),
+    ...(history.source("lastfm")?.setUp
+      ? historyRows("lastfm", "Include Last.fm scrobbles", "Stats, mixes, On Repeat and recaps also count your Last.fm scrobbles, matched to your library by artist, song and album. Songs you don't have still count for their artists. Platter's own scrobbles count once.")
+      : []),
     // Library: the physical collection
     {
       key: "showPhysicalCollection",
@@ -1890,6 +1935,25 @@ export function SettingsPage() {
           },
         ] satisfies RowDef[])
       : []),
+    // Integrations: Tautulli (its play history counts in Stats once set up)
+    {
+      key: "tautulliUrl",
+      section: "Integrations",
+      group: "Tautulli",
+      title: "Tautulli address",
+      description:
+        "Tautulli's address with its port, like http://192.168.x.x:8181. With its API key saved, your music plays in Tautulli count in Stats, mixes and recaps. Empty keeps Tautulli off.",
+      control: (ids) => <TautulliUrlField ids={ids} />,
+    },
+    {
+      key: "tautulliKey",
+      section: "Integrations",
+      group: "Tautulli",
+      title: "Tautulli API key",
+      description: "From Tautulli's Settings > Web Interface. Kept in this computer's keychain, never in settings or logs. Platter only reads your history.",
+      note: history.tautulli?.hasKey ? "Saved." : undefined,
+      control: (ids) => <TautulliKeyControl history={history} ids={ids} />,
+    },
     // Integrations: Lidarr (only its address and key fields until both are set)
     {
       key: "lidarrUrl",
@@ -2565,6 +2629,14 @@ export function SettingsPage() {
         confirm="Sign out"
         onConfirm={() => void signOut()}
         onClose={() => setDialog(null)}
+      />
+      <ConfirmDialog
+        open={removeHistory !== null}
+        title={`Remove your plays from ${removeHistory ? SOURCE_NAMES[removeHistory] : ""}?`}
+        body={`Platter deletes the plays it brought in from ${removeHistory ? SOURCE_NAMES[removeHistory] : ""} and turns this source off. Nothing changes there, and Platter's own plays stay. Turn it on again to bring them back.`}
+        confirm="Remove plays"
+        onConfirm={() => removeHistory && void history.remove(removeHistory)}
+        onClose={() => setRemoveHistory(null)}
       />
       <ServerDialog open={dialog === "server"} onClose={() => setDialog(null)} current={auth?.server?.machineId} />
       <NoticesDialog open={dialog === "notices"} onClose={() => setDialog(null)} />

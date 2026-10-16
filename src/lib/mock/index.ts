@@ -33,6 +33,7 @@ import type { Backend, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
 import type {
   SetOwned,
+  PlayHistorySource,
   WantedAlbum,
   CompareNow,
   CompareReady,
@@ -162,6 +163,7 @@ import { MockSocial } from "./social";
 import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
+import { MockPlayHistory } from "./playhistory";
 import { MockRadar } from "./radar";
 import { MockCatalogue } from "./catalogue";
 import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
@@ -324,6 +326,7 @@ export class MockBackend implements Backend {
   readonly smart: MockSmart;
   /** Scrobbling (test hook: reject). */
   readonly scrobble: MockScrobble;
+  readonly playHistory: MockPlayHistory;
   /** Lidarr's setup check (test hook: setDemo). */
   readonly lidarr: MockLidarr;
   /** The release radar (test hooks: setEmpty, reset). */
@@ -605,6 +608,10 @@ export class MockBackend implements Backend {
       requests: () => this.lidarr.list(),
     });
     this.scrobble = new MockScrobble((queued) => this.emit("scrobble://status", { queued }));
+    this.playHistory = new MockPlayHistory(
+      () => this.settings,
+      () => this.scrobble.status().lastfm.signedIn,
+    );
     const link = this.opts.link;
     if (link) this.later(1500, () => this.share.openLink(link));
     this.remote = new MockRemote(
@@ -2529,6 +2536,11 @@ export class MockBackend implements Backend {
         next.listenRelay = r;
       }
       if (patch.listenName !== undefined) next.listenName = patch.listenName.trim();
+      if (patch.tautulliUrl !== undefined) {
+        const u = patch.tautulliUrl.trim().replace(/\/+$/, "");
+        if (u && !/^https?:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(u)) throw { kind: "invalid", message: "Tautulli's address is a web address like http://192.168.x.x:8181." };
+        next.tautulliUrl = u;
+      }
       for (const k of ["lidarrUrl", "lidarrAwayUrl"] as const) {
         if (patch[k] === undefined) continue;
         const u = patch[k].trim().replace(/\/+$/, "");
@@ -2544,6 +2556,7 @@ export class MockBackend implements Backend {
       checkThemePatch(patch);
       if (patch.accent !== undefined && patch.accent.startsWith("#")) next.accent = patch.accent.toUpperCase();
       this.settings = next;
+      this.playHistory.follow();
       if (patch.nowPlayingFeed !== undefined || patch.nowPlayingFeedPort !== undefined) {
         const st = this.feed();
         this.later(0, () => this.emit("feed://status", st));
@@ -3368,6 +3381,28 @@ export class MockBackend implements Backend {
   }
   physicalFindRelease(artist: string, title: string) {
     return this.delay(() => this.catalogue.findAlbum(artist, title));
+  }
+  playHistoryStatus() {
+    return this.delay(() => this.playHistory.status());
+  }
+  playHistoryUpdate() {
+    return this.delay(() => {
+      const st = this.playHistory.update();
+      this.later(0, () => this.emit("playhistory://status", st));
+      return st;
+    });
+  }
+  playHistoryCancel() {
+    return this.delay(() => this.playHistory.status());
+  }
+  playHistoryRemove(source: PlayHistorySource) {
+    return this.delay(() => this.playHistory.remove(source));
+  }
+  tautulliStatus() {
+    return this.delay(() => this.playHistory.tautulli());
+  }
+  tautulliKeySet(key: string | null) {
+    return this.delay(() => this.playHistory.setKey(key));
   }
   discogsStatus() {
     return this.delay(() => this.physical.status());

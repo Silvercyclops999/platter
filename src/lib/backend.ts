@@ -14,6 +14,9 @@ import { createMockBackend } from "./mock";
 import type {
   DiscogsReport,
   DiscogsStatus,
+  PlayHistorySource,
+  PlayHistoryStatus,
+  TautulliStatus,
   OwnedAlbum,
   SetOwned,
   ShelfStats,
@@ -757,6 +760,17 @@ export interface Backend {
   physicalStats(): Promise<ShelfStats>;
   /** The MusicBrainz album a record on the shelf is (to request it); null when MusicBrainz doesn't know it. */
   physicalFindRelease(artist: string, title: string): Promise<CatAlbum | null>;
+  /** Play history from Plex, Tautulli and Last.fm: each source's import. */
+  playHistoryStatus(): Promise<PlayHistoryStatus>;
+  /** Look for new plays from every source now (failed ones too). */
+  playHistoryUpdate(): Promise<PlayHistoryStatus>;
+  /** Stop the read going on; it goes on from the same place later. */
+  playHistoryCancel(): Promise<PlayHistoryStatus>;
+  /** Delete the plays brought in from one source (only that source's). */
+  playHistoryRemove(source: PlayHistorySource): Promise<PlayHistoryStatus>;
+  tautulliStatus(): Promise<TautulliStatus>;
+  /** Save Tautulli's API key in the keychain, or null to remove it. */
+  tautulliKeySet(key: string | null): Promise<TautulliStatus>;
   discogsStatus(): Promise<DiscogsStatus>;
   /** Save the personal token (Discogs checks it first), or null to remove it. */
   discogsTokenSet(token: string | null): Promise<DiscogsStatus>;
@@ -1149,6 +1163,12 @@ export function createTauriBackend(): Backend {
     physicalSet: (albumId, owned) => call("physical_set", { albumId, owned }),
     physicalStats: () => call("physical_stats"),
     physicalFindRelease: (artist, title) => call("physical_find_release", { artist, title }),
+    playHistoryStatus: () => call("play_history_status"),
+    playHistoryUpdate: () => call("play_history_update"),
+    playHistoryCancel: () => call("play_history_cancel"),
+    playHistoryRemove: (source) => call("play_history_remove", { source }),
+    tautulliStatus: () => call("tautulli_status"),
+    tautulliKeySet: (key) => call("tautulli_key_set", { key }),
     discogsStatus: () => call("discogs_status"),
     discogsTokenSet: (token) => call("discogs_token_set", { token }),
     discogsImport: () => call("discogs_import"),

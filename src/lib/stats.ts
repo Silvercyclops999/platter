@@ -148,7 +148,7 @@ export function sparkPath(values: number[], w: number, h: number, pad = 2): stri
 }
 
 /** Where a first listen happened, as words. */
-export function playedFromLabel(from: { kind: string; title: string | null } | null): string | null {
+export function playedFromLabel(from: { kind: string; title: string | null; id?: string | null } | null): string | null {
   if (!from) return null;
   switch (from.kind) {
     case "album":
@@ -164,7 +164,16 @@ export function playedFromLabel(from: { kind: string; title: string | null } | n
     case "search":
       return "from search";
     case "imported":
-      return "in your imported history";
+      switch (from.id) {
+        case "plex_history":
+          return "from your Plex history";
+        case "tautulli":
+          return "from Tautulli";
+        case "lastfm":
+          return "from Last.fm";
+        default:
+          return "in your imported history";
+      }
     default:
       return null;
   }

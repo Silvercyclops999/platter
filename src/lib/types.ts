@@ -1074,6 +1074,14 @@ export interface Settings {
   translationService: string;
   showPronunciation: boolean;
   pinsInLibrary: boolean;
+  /** Stats, mixes and recaps count your play history on your Plex server. */
+  includePlexHistory: boolean;
+  /** The same for Tautulli's history, once Tautulli is set up. */
+  includeTautulliHistory: boolean;
+  /** The same for your Last.fm scrobbles, once Last.fm is connected. */
+  includeLastfmHistory: boolean;
+  /** Tautulli's address (empty: not set up). Its API key is in the keychain. */
+  tautulliUrl: string;
   /** The Stats page (profile menu and library row). */
   statsPage: boolean;
   /** The stats strip on song, artist and album pages (and "Your stats" in menus). */
@@ -1410,6 +1418,10 @@ export const DEFAULT_SETTINGS: Settings = {
   translationService: "",
   showPronunciation: false,
   pinsInLibrary: true,
+  includePlexHistory: true,
+  includeTautulliHistory: true,
+  includeLastfmHistory: true,
+  tautulliUrl: "",
   statsPage: true,
   statsStrip: true,
   monthlyStatsOnProfile: true,
@@ -2898,6 +2910,8 @@ export interface EventMap {
   "smart://changed": SmartSummary[];
   /** Scrobbles waiting to be sent, or a service's sign-in changed. */
   "scrobble://status": { queued: number };
+  /** Play history from Plex, Tautulli or Last.fm: a run started, moved on or ended. */
+  "playhistory://status": PlayHistoryStatus;
   /** The miniplayer window opened or closed. */
   "miniplayer://changed": MiniplayerState;
   /** A menu bar item was picked (macOS): the UI action to run. */
@@ -3195,6 +3209,48 @@ export interface DiscogsReport {
   matched: number;
   added: number;
   unmatched: ShelfOnly[];
+}
+
+/** Where play history from before Platter and other apps comes from. */
+export type PlayHistorySource = "plexHistory" | "tautulli" | "lastfm";
+
+/** One source of imported play history (`play_history_status`). */
+export interface PlayHistorySourceStatus {
+  source: PlayHistorySource;
+  /** Signed in to a Plex server; Tautulli's address and key saved; Last.fm connected. */
+  setUp: boolean;
+  /** Its Include setting. */
+  included: boolean;
+  /** Plays brought in (kept while the setting is off, but not counted). */
+  plays: number;
+  /** Of those, plays of songs that aren't in your library. */
+  notInLibrary: number;
+  /** Plays left out for being too short to count (Tautulli). */
+  shortPlays: number;
+  /** Unix ms of the last finished update. */
+  updatedAt: number | null;
+  /** The whole history has been read once. */
+  firstReadDone: boolean;
+  importing: boolean;
+  /** Plays read so far in this update, and the total when known. */
+  done: number;
+  total: number | null;
+  /** Why the last update stopped, in words. Tried again later. */
+  error: string | null;
+  /** Its plays were removed; nothing comes in until it's turned back on. */
+  removed: boolean;
+  /** You stopped a read; it goes on when you ask for an update. */
+  paused: boolean;
+}
+
+export interface PlayHistoryStatus {
+  sources: PlayHistorySourceStatus[];
+}
+
+/** `tautulli_status`. The key itself never comes back. */
+export interface TautulliStatus {
+  urlSet: boolean;
+  hasKey: boolean;
 }
 
 /** `discogs_status`. The token itself never comes back. */

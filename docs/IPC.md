@@ -1765,7 +1765,7 @@ the same events.
 | `stats_compare` | `{ theirs: CompareSummary, unreleasedOk }` | `CompareResult`, or `invalid` while Compare is off |
 
 Stats count every play that wasn't a skip, from the listen log and imported
-plays together. A range is two local dates ("YYYY-MM-DD"), both included; no
+plays together (see Play history from before Platter and other apps below). A range is two local dates ("YYYY-MM-DD"), both included; no
 dates means all time. Plays are summed per local day for each song, artist,
 album and genre, and per day and hour. Changing, adding or removing a play
 marks its day, and the next stats call counts only the marked days again.
@@ -1795,6 +1795,69 @@ per month for the last 12 months.
 is all that's shared with a friend: up to 50 artists and 50 songs from about
 the last six months, each with its share of the plays. Unreleased songs are
 only in it when both sides agreed. `CompareResult = { friend, overlap (0 to 100), commonArtists, theirSongsNew }`.
+
+### Play history from before Platter and other apps
+
+Stats, mixes (On Repeat included), recaps and smart playlists read every play
+from one place, `db::listens::ALL_PLAYS`: the listen log plus
+`imported_plays`. Besides history files (the import page), imported plays come
+from three sources, each on its own once set up and while its setting is on:
+
+- `plexHistory`: the music section's history on the connected Plex server
+  (`/status/sessions/history/all`), the signed-in user's account only. The
+  account is the one named like the user in the server's `/accounts`, or the
+  owner's (1) on a server they own; it is asked for with `accountID` and
+  every entry is checked again, so other Home users' and friends' plays never
+  count. When the account can't be told, nothing is read. Each entry maps to
+  its song by rating key; when the song is gone, by artist, title and album
+  (as history files are matched), else it's kept by its names.
+- `tautulli`: Tautulli's `get_history` for the user's music plays (Tautulli's
+  `user`, the Plex user name). Plays too short to count (under 30 seconds and
+  not heard to the end, Platter's own skip rule) are left out.
+- `lastfm`: the connected account's `user.getRecentTracks`, matched to library
+  songs by artist, title and album. Scrobbles that don't match are kept by
+  their names and still count where no library song is needed (top artists).
+
+The first read of a source takes the whole history in the background, 200 at
+a time with a second between pages, and can be stopped (it goes on from the
+same page). Later reads take only what's newer than the newest play already
+brought in, after each library sync and every 6 hours. A play is saved once
+per source id (the history entry id, Tautulli's row id, Last.fm's time and
+song), so reading again adds nothing.
+
+Nothing counts twice: an imported play of the same song within 3 minutes of
+a local play (before it started or after it ended) is that play reported
+elsewhere, and the same play from several sources counts once, from the
+first of Plex history, Tautulli, Last.fm, a file (same song within 3 minutes
+plus its length; unmatched ones by title and artist). Both rules live in the
+view, so they hold whichever play arrived first.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `play_history_status` | – | `{ sources: PlayHistorySourceStatus[] }` (Plex, Tautulli, Last.fm in that order) |
+| `play_history_update` | – | the status; every source set up and turned on is read now, failed ones too |
+| `play_history_cancel` | – | the status; the read going on stops after its page and goes on later |
+| `play_history_remove` | `{ source: "plexHistory"\|"tautulli"\|"lastfm" }` | the status; deletes only that source's imported plays. Nothing comes in from it again until its setting is turned off and on (the UI turns it off) |
+| `tautulli_status` | – | `{ urlSet, hasKey }` |
+| `tautulli_key_set` | `{ key: string \| null }` | the same, after saving the key in the OS keychain (`tautulli-api-key`) or removing it; `invalid` unless letters and numbers. Never returned, logged or put in settings |
+
+`PlayHistorySourceStatus = { source, setUp, included, plays, notInLibrary, shortPlays, updatedAt, firstReadDone, importing, done, total, error, removed }`.
+`setUp` is a Plex server with a music library, Tautulli's address and key,
+or Last.fm connected for scrobbling. `plays` counts what was brought in
+(kept while `included` is off, but not counted anywhere), `notInLibrary` the
+ones not matched to a library song. While `importing`, `done` and `total`
+say how far it is. `error` is why the last read stopped, in words for
+Settings; it's tried again 30 minutes later or on the next sync.
+`playhistory://status` carries the same status whenever a read starts, moves
+on a page or ends.
+
+Settings (all synced): `includePlexHistory`, `includeTautulliHistory` and
+`includeLastfmHistory` (on; off leaves that source's plays out of every count
+at once and stops reading it), and `tautulliUrl` (empty: Tautulli isn't set
+up). A first listen's `from` in `stats_item` is `{ kind: "imported", id }`
+for an imported play, `id` naming the source (`plex_history`, `tautulli`,
+`lastfm` or `file`), shown as "from your Plex history", "from Tautulli",
+"from Last.fm" or "in your imported history".
 
 ## Lidarr
 

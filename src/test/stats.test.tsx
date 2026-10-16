@@ -79,6 +79,10 @@ describe("stats helpers", () => {
     expect(sparkPath([0, 4], 100, 20)).toBe("M2.0 18.0 L98.0 2.0");
     expect(playedFromLabel({ kind: "album", title: "First" })).toBe("from First");
     expect(playedFromLabel({ kind: "imported", title: null })).toBe("in your imported history");
+    expect(playedFromLabel({ kind: "imported", title: null, id: "plex_history" })).toBe("from your Plex history");
+    expect(playedFromLabel({ kind: "imported", title: null, id: "tautulli" })).toBe("from Tautulli");
+    expect(playedFromLabel({ kind: "imported", title: null, id: "lastfm" })).toBe("from Last.fm");
+    expect(playedFromLabel({ kind: "imported", title: null, id: "file" })).toBe("in your imported history");
     expect(playedFromLabel(null)).toBeNull();
   });
 });
