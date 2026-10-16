@@ -1357,6 +1357,11 @@ mod tests {
         assert_eq!(srv.connection, Some(ConnectionKind::Local));
         assert!(!a.needs_server_pick);
         assert_eq!(store.get(ACCOUNT_TOKEN).unwrap().unwrap().expose(), ACCT);
+        // Health follows the sign-in a moment later, from the background check.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while st.health().status != HealthStatus::Local && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
         assert_eq!(st.health().status, HealthStatus::Local);
         assert!(st.client().await.is_ok());
 
