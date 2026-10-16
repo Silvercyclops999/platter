@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PlatterClient, PlatterError, type Request, type Response, StatePoller } from "../src/client.js";
 import { AutoPair } from "../src/pairing.js";
-import { playPauseView, volumeFeedback } from "../src/view.js";
+import { dialImage, newDial } from "../src/dials.js";
+import { Live } from "../src/live.js";
+import { svgOf } from "../src/render.js";
+import { settingsFor } from "../src/settings.js";
+import { APPROVE, keyView } from "../src/views.js";
 
 /** A fake Platter: answers pairing requests the way the real one does. */
 function platter() {
@@ -57,8 +61,10 @@ function rig(token: string | null = null) {
     onChange: () => void poller.refresh(),
   });
   const poller = new StatePoller(client, 1000, 5000, pairer);
-  const titles: (string | undefined)[] = [];
-  const stop = poller.subscribe((s, err) => titles.push(s ? "state" : playPauseView(s, err).title));
+  // What the keys show: the connection state, with no grace period for Platter missing.
+  const live = new Live(Date.now, 0);
+  const titles: string[] = [];
+  const stop = poller.subscribe((s, err) => titles.push(live.update(s, err).conn));
   return { p, client, pairer, poller, kept, titles, stop, asks: () => p.sent.filter((r) => r.path === "/v1/pair/request").length };
 }
 
@@ -72,18 +78,18 @@ describe("pairing on first connect", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(r.asks()).toBe(1);
     expect(r.p.sent[0]).toEqual({ method: "POST", path: "/v1/pair/request", body: { client: "streamdeck" } });
-    expect(r.titles.at(-1)).toBe("Approve\nin Platter");
+    expect(r.titles.at(-1)).toBe("approve");
     expect(r.kept.request).toBe("req1");
     // Waiting: checks for an answer, never asks twice.
     await vi.advanceTimersByTimeAsync(10_000);
     expect(r.asks()).toBe(1);
     expect(r.client.paired).toBe(false);
-    expect(r.titles.at(-1)).toBe("Approve\nin Platter");
+    expect(r.titles.at(-1)).toBe("approve");
     r.p.answer = "allowed";
     await vi.advanceTimersByTimeAsync(1000);
     expect(r.client.paired).toBe(true);
     expect(r.kept).toEqual({ token: "tok", request: null });
-    expect(r.titles.at(-1)).toBe("state");
+    expect(r.titles.at(-1)).toBe("ok");
     // Every key uses that one pairing.
     const states = r.p.sent.filter((x) => x.path.startsWith("/v1/state"));
     expect(states.every((x) => x.token === "tok")).toBe(true);
@@ -97,7 +103,7 @@ describe("pairing on first connect", () => {
     r.pairer.start();
     await vi.advanceTimersByTimeAsync(20_000);
     expect(r.asks()).toBe(0);
-    expect(r.titles.at(-1)).toBe("state");
+    expect(r.titles.at(-1)).toBe("ok");
     r.stop();
   });
 
@@ -109,7 +115,7 @@ describe("pairing on first connect", () => {
     r.p.answer = "denied";
     await vi.advanceTimersByTimeAsync(1000);
     expect(r.pairer.phase).toBe("denied");
-    expect(r.titles.at(-1)).toBe("Pair");
+    expect(r.titles.at(-1)).toBe("unpaired");
     expect(r.client.paired).toBe(false);
     // Polling never asks again by itself.
     r.p.open = null;
@@ -118,7 +124,7 @@ describe("pairing on first connect", () => {
     r.pairer.press();
     await vi.advanceTimersByTimeAsync(0);
     expect(r.asks()).toBe(2);
-    expect(r.titles.at(-1)).toBe("Approve\nin Platter");
+    expect(r.titles.at(-1)).toBe("approve");
     r.stop();
     r.pairer.stop();
   });
@@ -129,7 +135,7 @@ describe("pairing on first connect", () => {
     r.p.up = false;
     r.pairer.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(r.titles.at(-1)).toBe("Off");
+    expect(r.titles.at(-1)).toBe("offline");
     await vi.advanceTimersByTimeAsync(5000);
     expect(r.asks()).toBeGreaterThanOrEqual(2);
     r.p.up = true;
@@ -161,7 +167,7 @@ describe("pairing on first connect", () => {
     r.pairer.start();
     await vi.advanceTimersByTimeAsync(0);
     expect(r.pairer.phase).toBe("asking");
-    expect(r.titles.at(-1)).toBe("Approve\nin Platter");
+    expect(r.titles.at(-1)).toBe("approve");
     r.p.open = null;
     await vi.advanceTimersByTimeAsync(5000);
     expect(r.pairer.phase).toBe("waiting");
@@ -193,12 +199,17 @@ describe("pairing on first connect", () => {
     expect(r.pairer.phase).toBe("idle");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(r.asks()).toBe(1);
-    expect(r.titles.at(-1)).toBe("Pair");
+    expect(r.titles.at(-1)).toBe("unpaired");
     r.stop();
   });
 
-  it("the dial shows it on one line", () => {
-    expect(volumeFeedback(null, new PlatterError("approve", "x")).value).toBe("Approve in Platter");
-    expect(volumeFeedback(null, new PlatterError("denied", "x")).value).toBe("Pair");
+  it("keys say Approve in Platter, the dial on one line; Don't allow shows the not-paired badge", () => {
+    const live = new Live(Date.now, 0);
+    const approve = live.update(null, new PlatterError("approve", "x"));
+    expect(approve.conn).toBe("approve");
+    expect(keyView("next", {}, { snap: approve, now: 0, cover: () => null, item: () => undefined }).title).toBe(APPROVE);
+    const dial = svgOf(dialImage("volume", settingsFor("volume", {}) as unknown as Record<string, unknown>, newDial(), approve, 0, { browse: [], queue: [], devices: [] }, () => null));
+    expect(dial).toContain("Approve in Platter");
+    expect(live.update(null, new PlatterError("denied", "x")).conn).toBe("unpaired");
   });
 });

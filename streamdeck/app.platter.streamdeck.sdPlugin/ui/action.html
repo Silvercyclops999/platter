@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Platter</title>
+    <style>
+      body { margin: 0; padding: 8px 12px 16px; font: 12px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: #d8d8d8; background: #2d2d2d; }
+      p { margin: 0 0 8px; }
+      .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+      .row > label:first-child { flex: 0 0 104px; color: #b8b8b8; }
+      .row > .ctl { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; }
+      input[type="text"], input[type="number"], select { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit; color: #fff; background: #3d3d3d; border: 1px solid #555; border-radius: 3px; }
+      input[type="number"] { width: 72px; }
+      input.code { width: 96px; letter-spacing: 0.15em; }
+      button { padding: 4px 10px; font: inherit; color: #fff; background: #3d3d3d; border: 1px solid #555; border-radius: 3px; cursor: pointer; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .hint { color: #9a9a9a; font-size: 11px; margin: -4px 0 8px 112px; }
+      h2 { font-size: 12px; font-weight: 600; color: #fff; margin: 14px 0 8px; }
+      #status { min-height: 18px; }
+      .error { color: #ff8a80; }
+      .ok { color: #9ccc65; }
+      .thumb { width: 36px; height: 36px; border-radius: 3px; background: #3d3d3d center / cover no-repeat; flex: 0 0 36px; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <p id="status">Checking Platter…</p>
+    <div id="pairing" hidden>
+      <p>Press any Platter key, or Ask Platter, and choose Allow in Platter's window.</p>
+      <div class="row">
+        <button id="ask">Ask Platter</button>
+      </div>
+      <p>Or type the pairing code from Platter's Settings (Stream Deck, Allow Stream Deck).</p>
+      <div class="row">
+        <input id="code" class="code" type="text" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="123456" aria-label="Pairing code" />
+        <button id="pair">Pair</button>
+      </div>
+    </div>
+    <div id="paired" hidden class="row">
+      <button id="unpair">Unpair</button>
+    </div>
+    <div id="form"></div>
+    <div id="pictures"></div>
+    <script>
+      let socket = null;
+      let context = null;
+      let actionId = null;
+      let settings = {};
+      const lists = {};
+      const $ = (id) => document.getElementById(id);
+      const el = (tag, props = {}, ...kids) => {
+        const e = Object.assign(document.createElement(tag), props);
+        for (const k of kids) e.append(k);
+        return e;
+      };
+
+      // Each action's settings. Defaults match the plugin's (src/settings.ts).
+      const PLAY = (kind, label) => [
+        { key: "id", type: "pick", list: kind, label, nameKey: "name" },
+        { key: "mode", type: "select", label: "Press", options: [["play", "Play now"], ["queue", "Add to queue"]], def: "play" },
+        { key: "shuffle", type: "toggle", label: "Shuffle", def: false, when: (s) => s.mode !== "queue" },
+        { key: "start", type: "number", label: "Start at (s)", min: 0, max: 86400, def: 0, when: (s) => s.mode !== "queue", hint: "Seconds into the first song." },
+      ];
+      const STEP = { key: "step", type: "number", label: "Step", min: 1, max: 25, def: 5 };
+      const FORMS = {
+        playpause: [
+          { key: "time", type: "select", label: "Time", options: [["off", "Off"], ["elapsed", "Elapsed"], ["remaining", "Remaining"]], def: "off" },
+          { key: "showTitle", type: "toggle", label: "Song title", def: false },
+          { key: "pausedLook", type: "select", label: "When paused", options: [["circle", "Circle with play symbol"], ["label", "Small Paused label"]], def: "circle" },
+          { key: "group", type: "select", label: "Big cover", options: [["off", "Off"], ["auto", "Find Play / Pause keys next to it"], ["manual", "Part of a group"]], def: "off", hint: "Play / Pause keys side by side share one big cover." },
+          { key: "groupSize", type: "select", label: "Group size", options: [["2", "2 x 2"], ["3", "3 x 3"], ["4", "4 x 4"]], def: "2", when: (s) => s.group === "manual" },
+          { key: "groupCol", type: "number", label: "Column", min: 1, max: 4, def: 1, when: (s) => s.group === "manual" },
+          { key: "groupRow", type: "number", label: "Row", min: 1, max: 4, def: 1, when: (s) => s.group === "manual" },
+        ],
+        previous: [{ key: "cover", type: "toggle", label: "Previous cover", def: false }],
+        next: [{ key: "cover", type: "toggle", label: "Next cover", def: false }],
+        seekback: [{ key: "seconds", type: "number", label: "Seconds", min: 1, max: 600, def: 10 }],
+        seekforward: [{ key: "seconds", type: "number", label: "Seconds", min: 1, max: 600, def: 10 }],
+        songinfo: [
+          { key: "output", type: "select", label: "Also write", options: [["none", "Nothing"], ["clipboard", "To the clipboard"], ["file", "To a text file"]], def: "none", hint: "For streaming overlays: written on every song change." },
+          { key: "format", type: "text", label: "Format", def: "{title} - {artist}", when: (s) => s.output !== "none", hint: "{title}, {artist}, {album}, {elapsed}, {total}" },
+          { key: "file", type: "text", label: "File", def: "", when: (s) => s.output === "file", hint: "The full path of the text file." },
+        ],
+        volumeup: [STEP, { key: "show", type: "select", label: "Show", options: [["none", "Nothing"], ["bar", "Level bar"], ["number", "Level number"]], def: "none" }],
+        volumedown: [STEP, { key: "show", type: "select", label: "Show", options: [["none", "Nothing"], ["bar", "Level bar"], ["number", "Level number"]], def: "none" }],
+        volumeset: [{ key: "level", type: "number", label: "Level (%)", min: 0, max: 100, def: 50 }],
+        addtoplaylist: [{ key: "playlist", type: "pick", list: "playlists", label: "Playlist", nameKey: "playlistName", ask: "Ask in Platter", hint: "Press again on the same song to take it out." }],
+        removefromplaylist: [{ key: "playlist", type: "pick", list: "playlists", label: "Playlist", nameKey: "playlistName" }],
+        rate: [{ key: "stars", type: "select", label: "Stars", options: [["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]], def: "5", hint: "Pressing the rating the song has clears it." }],
+        playplaylist: PLAY("playlists", "Playlist"),
+        playalbum: PLAY("albums", "Album"),
+        playartist: PLAY("artists", "Artist"),
+        playmix: PLAY("mixes", "Mix"),
+        playlink: [{ key: "link", type: "text", label: "Link", def: "", hint: "A platter:// link from Share in Platter." }],
+        playsearch: [{ key: "query", type: "text", label: "Search", def: "" }],
+        listenon: [{ key: "device", type: "pick", list: "devices", label: "Device", nameKey: "deviceName", ask: "Ask in Platter" }],
+        sleep: [
+          { key: "endOfSong", type: "toggle", label: "End of song", def: false },
+          { key: "minutes", type: "number", label: "Minutes", min: 1, max: 720, def: 30, when: (s) => !s.endOfSong },
+          { key: "whileRunning", type: "select", label: "While running", options: [["stop", "Press stops it"], ["add", "Press adds time"]], def: "stop", hint: "Hold the key to start again." },
+          { key: "addMinutes", type: "number", label: "Add (min)", min: 1, max: 240, def: 15, when: (s) => s.whileRunning === "add" },
+        ],
+        volume: [
+          { key: "turn", type: "select", label: "Turning", options: [["volume", "Volume"], ["seek", "Seek"], ["skip", "Skip songs"]], def: "volume" },
+          { key: "step", type: "number", label: "Step", min: 1, max: 25, def: 5 },
+          { key: "browse", type: "select", label: "Browse", options: [["playlists", "Playlists"], ["albums", "Albums"], ["mixes", "Mixes"]], def: "playlists", hint: "Press the dial twice to browse." },
+          { key: "browser", type: "select", label: "Browser style", options: [["covers", "Covers"], ["list", "List"]], def: "covers" },
+        ],
+        volumedial: [STEP],
+      };
+      // The states a key can have its own picture for.
+      const TOGGLES = ["shuffle", "repeat", "crossfade", "private", "mute", "volumeset", "addtoplaylist", "rate", "listenon", "lyrics", "miniplayer", "window", "sleep"];
+      const NO_PICTURES = ["songinfo", "queue", "volume", "playpausedial", "volumedial", "queuedial", "listenondial", "nowplaying"];
+      const pictureStates = (a) =>
+        NO_PICTURES.includes(a) ? [] : a === "playpause" ? [["playing", "Playing"], ["paused", "Paused"]] : a === "like" ? [["liked", "Liked"], ["unliked", "Not liked"]] : TOGGLES.includes(a) ? [["on", "On"], ["off", "Off"]] : [["normal", "Picture"]];
+
+      function send(payload) {
+        if (!socket || socket.readyState !== 1) return;
+        socket.send(JSON.stringify({ event: "sendToPlugin", action: actionId, context, payload }));
+      }
+      function save() {
+        if (!socket || socket.readyState !== 1) return;
+        socket.send(JSON.stringify({ event: "setSettings", context, payload: settings }));
+      }
+      const short = () => (actionId || "").split(".").pop();
+      const value = (f) => (settings[f.key] !== undefined ? settings[f.key] : f.def);
+
+      function draw() {
+        const form = $("form");
+        form.textContent = "";
+        const fields = FORMS[short()] || [];
+        for (const f of fields) {
+          if (f.when && !f.when({ ...Object.fromEntries(fields.map((x) => [x.key, value(x)])) })) continue;
+          let ctl;
+          if (f.type === "toggle") {
+            ctl = el("input", { type: "checkbox", checked: !!value(f) });
+            ctl.addEventListener("change", () => set(f.key, ctl.checked));
+          } else if (f.type === "select") {
+            ctl = el("select");
+            for (const [v, label] of f.options) ctl.append(el("option", { value: v, textContent: label }));
+            ctl.value = String(value(f));
+            ctl.addEventListener("change", () => set(f.key, /^\d+$/.test(ctl.value) ? Number(ctl.value) : ctl.value));
+          } else if (f.type === "number") {
+            ctl = el("input", { type: "number", min: f.min, max: f.max, value: value(f) });
+            ctl.addEventListener("change", () => set(f.key, Math.min(f.max, Math.max(f.min, Number(ctl.value) || f.def))));
+          } else if (f.type === "text") {
+            ctl = el("input", { type: "text", value: value(f) ?? "", spellcheck: false });
+            ctl.addEventListener("change", () => set(f.key, ctl.value));
+          } else if (f.type === "pick") {
+            ctl = el("select");
+            const items = lists[f.list];
+            ctl.append(el("option", { value: "", textContent: f.ask || (items ? "Pick one" : "Loading…") }));
+            for (const it of items || []) ctl.append(el("option", { value: it.id, textContent: it.subtitle && f.list !== "playlists" ? `${it.title} (${it.subtitle})` : it.title }));
+            const cur = value(f) || "";
+            if (cur && !(items || []).some((it) => it.id === cur)) ctl.append(el("option", { value: cur, textContent: settings[f.nameKey] || cur }));
+            ctl.value = cur;
+            ctl.addEventListener("change", () => {
+              const it = (lists[f.list] || []).find((x) => x.id === ctl.value);
+              settings[f.nameKey] = it ? it.title : "";
+              set(f.key, ctl.value);
+            });
+            if (!items) send({ list: f.list });
+          }
+          form.append(el("div", { className: "row" }, el("label", { textContent: f.label }), el("div", { className: "ctl" }, ctl)));
+          if (f.hint) form.append(el("p", { className: "hint", textContent: f.hint }));
+        }
+        drawPictures();
+      }
+
+      function set(key, v) {
+        settings[key] = v;
+        save();
+        draw();
+      }
+
+      // Pictures: scaled to 144 px, kept in the key's settings.
+      function drawPictures() {
+        const box = $("pictures");
+        box.textContent = "";
+        const states = pictureStates(short());
+        if (!states.length) return;
+        box.append(el("h2", { textContent: "Your own pictures" }));
+        for (const [state, label] of states) {
+          const have = settings.images && settings.images[state];
+          const thumb = el("div", { className: "thumb" });
+          if (have) thumb.style.backgroundImage = `url("${have}")`;
+          const file = el("input", { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml", hidden: true });
+          const choose = el("button", { textContent: have ? "Change" : "Choose" });
+          choose.addEventListener("click", () => file.click());
+          file.addEventListener("change", () => file.files[0] && shrink(file.files[0]).then((url) => setImage(state, url)));
+          const kids = [thumb, choose, file];
+          if (have) {
+            const clear = el("button", { textContent: "Clear" });
+            clear.addEventListener("click", () => setImage(state, null));
+            kids.push(clear);
+          }
+          box.append(el("div", { className: "row" }, el("label", { textContent: label }), el("div", { className: "ctl" }, ...kids)));
+        }
+      }
+
+      function setImage(state, url) {
+        const images = { ...(settings.images || {}) };
+        if (url) images[state] = url;
+        else delete images[state];
+        set("images", images);
+      }
+
+      function shrink(f) {
+        return new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onerror = reject;
+          r.onload = () => {
+            const img = new Image();
+            img.onerror = reject;
+            img.onload = () => {
+              const c = document.createElement("canvas");
+              c.width = c.height = 144;
+              const s = Math.min(img.width, img.height);
+              c.getContext("2d").drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 144, 144);
+              resolve(c.toDataURL("image/png"));
+            };
+            img.src = r.result;
+          };
+          r.readAsDataURL(f);
+        });
+      }
+
+      function status(msg) {
+        const s = $("status");
+        if (msg.paired) {
+          s.textContent = "Paired with Platter.";
+          s.className = "ok";
+        } else if (msg.asking) {
+          s.textContent = "Approve in Platter: choose Allow in its window.";
+          s.className = "";
+          // Check again until it's answered.
+          setTimeout(() => send({ status: true }), 2000);
+        } else if (!msg.reachable) {
+          s.textContent = msg.error || "Platter isn't running, or Allow Stream Deck is off in its Settings.";
+          s.className = "error";
+        } else {
+          s.textContent = msg.error || "Not paired yet.";
+          s.className = msg.error ? "error" : "";
+        }
+        $("pairing").hidden = !!msg.paired;
+        $("paired").hidden = !msg.paired;
+        $("pair").disabled = false;
+      }
+
+      $("pair").addEventListener("click", () => {
+        $("pair").disabled = true;
+        $("status").textContent = "Pairing…";
+        $("status").className = "";
+        send({ pair: $("code").value });
+      });
+      $("ask").addEventListener("click", () => {
+        send({ ask: true });
+      });
+      $("code").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") $("pair").click();
+      });
+      $("unpair").addEventListener("click", () => send({ unpair: true, status: true }));
+
+      // Called by the Stream Deck app when the panel opens.
+      window.connectElgatoStreamDeckSocket = (port, uuid, registerEvent, info, actionInfo) => {
+        context = uuid;
+        try {
+          const a = JSON.parse(actionInfo);
+          actionId = a.action;
+          settings = (a.payload && a.payload.settings) || {};
+        } catch {
+          actionId = null;
+        }
+        draw();
+        socket = new WebSocket(`ws://127.0.0.1:${port}`);
+        socket.onopen = () => {
+          socket.send(JSON.stringify({ event: registerEvent, uuid }));
+          send({ status: true });
+        };
+        socket.onmessage = (e) => {
+          const m = JSON.parse(e.data);
+          if (m.event === "didReceiveSettings" && m.payload) {
+            settings = m.payload.settings || {};
+            draw();
+          }
+          if (m.event !== "sendToPropertyInspector" || !m.payload) return;
+          if (m.payload.list) {
+            lists[m.payload.list] = m.payload.items || [];
+            draw();
+          } else status(m.payload);
+        };
+      };
+    </script>
+  </body>
+</html>

@@ -1,27 +1,8 @@
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { httpTransport, PlatterClient, PlatterError, type PlatterState, type Request, type Response, StatePoller, toError } from "../src/client.js";
-import { likeView, playPauseView, plainView, volumeFeedback } from "../src/view.js";
-
-function state(over: Partial<PlatterState> = {}): PlatterState {
-  return {
-    api: 1,
-    playing: true,
-    private: false,
-    title: "Night Drive",
-    artist: "Rue Ellis",
-    album: "Late",
-    trackId: "t1",
-    liked: false,
-    volume: 50,
-    muted: false,
-    coverKey: "k1",
-    cover: "data:image/jpeg;base64,AAA",
-    canRequest: true,
-    ...over,
-  };
-}
+import { httpTransport, normalize, PlatterClient, PlatterError, type Request, type Response, StatePoller, toError } from "../src/client.js";
+import { state } from "./fixtures.js";
 
 /** A transport that answers from a script and records what was sent. */
 function fake(answer: (r: Request) => Response | Promise<Response>) {
@@ -77,7 +58,7 @@ describe("PlatterClient", () => {
     expect((await c.state()).cover).toBe("data:image/jpeg;base64,AAA");
     expect((await c.state()).cover).toBe("data:image/jpeg;base64,BBB");
     expect((await c.state()).cover).toBeNull();
-    expect(sent.map((r) => r.path)).toEqual(["/v1/state", "/v1/state?cover=k1", "/v1/state?cover=k1", "/v1/state?cover=k2"]);
+    expect(sent.map((r) => r.path)).toEqual(["/v1/state?size=288", "/v1/state?size=288&cover=k1", "/v1/state?size=288&cover=k1", "/v1/state?size=288&cover=k2"]);
   });
 
   it("without a token it doesn't ask at all", async () => {
@@ -185,26 +166,39 @@ describe("StatePoller", () => {
   });
 });
 
-describe("key views", () => {
-  const off = new PlatterError("offline", "x");
-  const unpaired = new PlatterError("unpaired", "x");
-
-  it("play / pause shows the cover, or the play and pause images", () => {
-    expect(playPauseView(state(), null)).toEqual({ state: 1, image: "data:image/jpeg;base64,AAA" });
-    expect(playPauseView(state({ playing: false, cover: null }), null)).toEqual({ state: 0, image: undefined });
-    expect(playPauseView(null, unpaired)).toEqual({ state: 0, title: "Pair" });
-    expect(playPauseView(null, off).title).toBe("Off");
+describe("lists and covers", () => {
+  it("fills in what an older Platter leaves out", () => {
+    const s = normalize({ api: 1, playing: true, title: "A" });
+    expect(s).toMatchObject({ playing: true, title: "A", positionMs: 0, durationMs: 0, repeat: "off", playlists: [], next: null, previous: null, sleep: null, device: null });
   });
 
-  it("like follows the song", () => {
-    expect(likeView(state({ liked: true }), null).state).toBe(1);
-    expect(likeView(state(), null).state).toBe(0);
-    expect(plainView(state(), null).title).toBeUndefined();
+  it("fetches a cover by key once and keeps it", async () => {
+    const { t, sent } = fake(() => ({ status: 200, body: { key: "k9", cover: "data:image/png;base64,CCC" } }));
+    const c = new PlatterClient(t, "tok");
+    expect(c.coverKept("k9")).toBeNull();
+    expect(await c.coverFor("k9")).toBe("data:image/png;base64,CCC");
+    expect(await c.coverFor("k9")).toBe("data:image/png;base64,CCC");
+    expect(c.coverKept("k9")).toBe("data:image/png;base64,CCC");
+    expect(await c.coverFor(null)).toBeNull();
+    expect(sent.map((r) => r.path)).toEqual(["/v1/cover?key=k9&size=288"]);
   });
 
-  it("the dial shows the volume, or muted", () => {
-    expect(volumeFeedback(state({ volume: 42 }), null)).toEqual({ title: "Volume", value: "42%", indicator: 42 });
-    expect(volumeFeedback(state({ muted: true }), null)).toEqual({ title: "Volume", value: "Muted", indicator: 0 });
-    expect(volumeFeedback(null, off).value).toBe("Off");
+  it("a missing cover is null, not an error", async () => {
+    const { t } = fake(() => ({ status: 404, body: { error: "No such cover." } }));
+    expect(await new PlatterClient(t, "tok").coverFor("nope")).toBeNull();
+  });
+
+  it("lists the library, the queue and devices", async () => {
+    const { t, sent } = fake((r) => {
+      if (r.path.startsWith("/v1/library")) return { status: 200, body: { kind: "albums", items: [{ id: "a1", title: "Late", subtitle: "Rue Ellis", coverKey: "c1" }] } };
+      if (r.path === "/v1/queue") return { status: 200, body: { items: [{ itemId: "i1", title: "Shoreline", artist: "Ana Vale", coverKey: null }] } };
+      return { status: 200, body: { items: [{ id: "local", name: "This computer", active: true, needsWindow: false }] } };
+    });
+    const c = new PlatterClient(t, "tok");
+    expect((await c.library("albums"))[0].title).toBe("Late");
+    expect((await c.queue())[0].itemId).toBe("i1");
+    expect((await c.devices())[0].name).toBe("This computer");
+    expect(sent.map((r) => r.path)).toEqual(["/v1/library?kind=albums", "/v1/queue", "/v1/devices"]);
+    expect(sent.every((r) => r.token === "tok" && r.method === "GET")).toBe(true);
   });
 });

@@ -1,9 +1,9 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "Platter",
-  "Version": "0.2.0.0",
+  "Version": "0.3.0.0",
   "Author": "Platter",
-  "Description": "Control Platter, the music player for your Plex library: the cover on a key, play and pause, skip, like, volume, request the album and Listen along.",
+  "Description": "Control Platter, the music player for your library: the cover on a key, playback, modes, volume, likes and ratings, playlists, mixes, the queue, Listen on, the sleep timer and more, on keys, dials and the Neo info bar.",
   "URL": "https://github.com/Silvercyclops999/platter",
   "Icon": "imgs/plugin/icon",
   "Category": "Platter",
@@ -13,7 +13,7 @@
   "UUID": "app.platter.streamdeck",
   "SDKVersion": 2,
   "Software": {
-    "MinimumVersion": "6.6"
+    "MinimumVersion": "7.6"
   },
   "Nodejs": {
     "Version": "20"
@@ -32,34 +32,15 @@
     {
       "UUID": "app.platter.streamdeck.playpause",
       "Name": "Play / Pause",
-      "Tooltip": "Plays or pauses. Shows the cover of what's playing.",
+      "Tooltip": "Plays or pauses, with the cover on the key. Press twice for next, three times or hold for previous.",
       "Icon": "imgs/actions/play",
       "Controllers": [
         "Keypad"
       ],
+      "PropertyInspectorPath": "ui/action.html",
       "States": [
         {
-          "Image": "imgs/actions/play",
-          "ShowTitle": false
-        },
-        {
-          "Image": "imgs/actions/pause",
-          "ShowTitle": false
-        }
-      ]
-    },
-    {
-      "UUID": "app.platter.streamdeck.next",
-      "Name": "Next",
-      "Tooltip": "Skips to the next song.",
-      "Icon": "imgs/actions/next",
-      "Controllers": [
-        "Keypad"
-      ],
-      "States": [
-        {
-          "Image": "imgs/actions/next",
-          "ShowTitle": false
+          "Image": "imgs/keys/play"
         }
       ]
     },
@@ -71,10 +52,190 @@
       "Controllers": [
         "Keypad"
       ],
+      "PropertyInspectorPath": "ui/action.html",
       "States": [
         {
-          "Image": "imgs/actions/previous",
-          "ShowTitle": false
+          "Image": "imgs/keys/previous"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.next",
+      "Name": "Next",
+      "Tooltip": "Skips to the next song.",
+      "Icon": "imgs/actions/next",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/next"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.seekback",
+      "Name": "Seek back",
+      "Tooltip": "Goes back a few seconds. Hold to keep going.",
+      "Icon": "imgs/actions/seekBack",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/seekBack"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.seekforward",
+      "Name": "Seek forward",
+      "Tooltip": "Goes forward a few seconds. Hold to keep going.",
+      "Icon": "imgs/actions/seekForward",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/seekForward"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.songinfo",
+      "Name": "Song info",
+      "Tooltip": "The song, its artist and the time over the cover. Press to open now playing.",
+      "Icon": "imgs/actions/info",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/info"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.shuffle",
+      "Name": "Shuffle",
+      "Tooltip": "Turns shuffle on or off. Hold for smart shuffle.",
+      "Icon": "imgs/actions/shuffle",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/shuffle"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.repeat",
+      "Name": "Repeat",
+      "Tooltip": "Repeat off, all, one.",
+      "Icon": "imgs/actions/repeat",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/repeat"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.crossfade",
+      "Name": "Crossfade",
+      "Tooltip": "Turns crossfade on or off.",
+      "Icon": "imgs/actions/crossfade",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/crossfade"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.private",
+      "Name": "Private session",
+      "Tooltip": "Turns a private session on or off.",
+      "Icon": "imgs/actions/private",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/private"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.volumeup",
+      "Name": "Volume up",
+      "Tooltip": "Turns Platter up. Hold to keep going.",
+      "Icon": "imgs/actions/volumeUp",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/volumeUp"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.volumedown",
+      "Name": "Volume down",
+      "Tooltip": "Turns Platter down. Hold to keep going.",
+      "Icon": "imgs/actions/volumeDown",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/volumeDown"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.mute",
+      "Name": "Mute",
+      "Tooltip": "Mutes and unmutes, keeping the volume.",
+      "Icon": "imgs/actions/mute",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/mute"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.volumeset",
+      "Name": "Volume set",
+      "Tooltip": "Sets the volume to a level.",
+      "Icon": "imgs/actions/volumeSet",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/volumeSet"
         }
       ]
     },
@@ -86,37 +247,310 @@
       "Controllers": [
         "Keypad"
       ],
+      "PropertyInspectorPath": "ui/action.html",
       "States": [
         {
-          "Image": "imgs/actions/heart",
-          "ShowTitle": false
-        },
-        {
-          "Image": "imgs/actions/heart-filled",
-          "ShowTitle": false
+          "Image": "imgs/keys/heart"
         }
       ]
     },
     {
-      "UUID": "app.platter.streamdeck.volume",
-      "Name": "Volume",
-      "Tooltip": "Turn to change Platter's volume, press to play or pause.",
-      "Icon": "imgs/actions/volume",
+      "UUID": "app.platter.streamdeck.addtoplaylist",
+      "Name": "Add to playlist",
+      "Tooltip": "Adds the playing song to a playlist, or takes it out again.",
+      "Icon": "imgs/actions/addToPlaylist",
       "Controllers": [
-        "Encoder"
+        "Keypad"
       ],
-      "Encoder": {
-        "layout": "$B1",
-        "Icon": "imgs/actions/volume",
-        "TriggerDescription": {
-          "Rotate": "Volume",
-          "Push": "Play / Pause",
-          "Touch": "Play / Pause"
-        }
-      },
+      "PropertyInspectorPath": "ui/action.html",
       "States": [
         {
-          "Image": "imgs/actions/volume"
+          "Image": "imgs/keys/addToPlaylist"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.removefromplaylist",
+      "Name": "Remove from playlist",
+      "Tooltip": "Takes the playing song out of a playlist.",
+      "Icon": "imgs/actions/removeFromPlaylist",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/removeFromPlaylist"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.rate",
+      "Name": "Rate",
+      "Tooltip": "Gives the playing song a star rating (Plex).",
+      "Icon": "imgs/actions/star",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/star"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.playplaylist",
+      "Name": "Play playlist",
+      "Tooltip": "Plays a playlist, or adds it to the queue.",
+      "Icon": "imgs/actions/playlist",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/playlist"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.playalbum",
+      "Name": "Play album",
+      "Tooltip": "Plays an album, or adds it to the queue.",
+      "Icon": "imgs/actions/album",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/album"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.playartist",
+      "Name": "Play artist",
+      "Tooltip": "Plays an artist, or adds them to the queue.",
+      "Icon": "imgs/actions/artist",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/artist"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.playmix",
+      "Name": "Play mix",
+      "Tooltip": "Plays one of your mixes, or adds it to the queue.",
+      "Icon": "imgs/actions/mix",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/mix"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.playlink",
+      "Name": "Play link",
+      "Tooltip": "Plays what a platter:// link points at.",
+      "Icon": "imgs/actions/link",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/link"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.playsearch",
+      "Name": "Play search",
+      "Tooltip": "Plays the top songs for a search.",
+      "Icon": "imgs/actions/search",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/search"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.radio",
+      "Name": "Song radio",
+      "Tooltip": "Starts radio from the playing song.",
+      "Icon": "imgs/actions/radio",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/radio"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.daylist",
+      "Name": "Daylist",
+      "Tooltip": "Plays your daylist.",
+      "Icon": "imgs/actions/daylist",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/daylist"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.discover",
+      "Name": "Discover",
+      "Tooltip": "Plays your Discover mix.",
+      "Icon": "imgs/actions/discover",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/discover"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.likedsongs",
+      "Name": "Liked Songs",
+      "Tooltip": "Plays your Liked Songs.",
+      "Icon": "imgs/actions/liked",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/liked"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.queue",
+      "Name": "Queue",
+      "Tooltip": "Shows the next song. Press to open the queue.",
+      "Icon": "imgs/actions/queue",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/queue"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.listenon",
+      "Name": "Listen on",
+      "Tooltip": "Plays on a device from Listen on.",
+      "Icon": "imgs/actions/device",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/device"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.lyrics",
+      "Name": "Lyrics",
+      "Tooltip": "Opens or closes the lyrics.",
+      "Icon": "imgs/actions/lyrics",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/lyrics"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.miniplayer",
+      "Name": "Miniplayer",
+      "Tooltip": "Opens or closes the miniplayer.",
+      "Icon": "imgs/actions/miniplayer",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/miniplayer"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.window",
+      "Name": "Show / hide Platter",
+      "Tooltip": "Shows or hides Platter's window.",
+      "Icon": "imgs/actions/window",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/window"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.sleep",
+      "Name": "Sleep timer",
+      "Tooltip": "Pauses after a while, or at the end of the song.",
+      "Icon": "imgs/actions/sleep",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/sleep"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.bookmark",
+      "Name": "Bookmark",
+      "Tooltip": "Bookmarks this moment of the playing song.",
+      "Icon": "imgs/actions/bookmark",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/bookmark"
         }
       ]
     },
@@ -128,10 +562,10 @@
       "Controllers": [
         "Keypad"
       ],
+      "PropertyInspectorPath": "ui/action.html",
       "States": [
         {
-          "Image": "imgs/actions/request",
-          "ShowTitle": false
+          "Image": "imgs/keys/request"
         }
       ]
     },
@@ -143,10 +577,145 @@
       "Controllers": [
         "Keypad"
       ],
+      "PropertyInspectorPath": "ui/action.html",
       "States": [
         {
-          "Image": "imgs/actions/listen",
-          "ShowTitle": false
+          "Image": "imgs/keys/listen"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.volume",
+      "Name": "Multimedia",
+      "Tooltip": "Turn for volume, press to play or pause, press twice to browse.",
+      "Icon": "imgs/actions/volume",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "Encoder": {
+        "layout": "layouts/canvas.json",
+        "Icon": "imgs/actions/volume",
+        "TriggerDescription": {
+          "Rotate": "Volume",
+          "Push": "Play / Pause (twice: browse)",
+          "Touch": "Play / Pause"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/keys/volume"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.playpausedial",
+      "Name": "Play / Pause dial",
+      "Tooltip": "The song on the strip. Turn to seek, press to play or pause.",
+      "Icon": "imgs/actions/play",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "Encoder": {
+        "layout": "layouts/canvas.json",
+        "Icon": "imgs/actions/play",
+        "TriggerDescription": {
+          "Rotate": "Seek",
+          "Push": "Play / Pause",
+          "Touch": "Play / Pause"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/keys/play"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.volumedial",
+      "Name": "Volume dial",
+      "Tooltip": "Turn for volume, press to mute.",
+      "Icon": "imgs/actions/volume",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "Encoder": {
+        "layout": "layouts/canvas.json",
+        "Icon": "imgs/actions/volume",
+        "TriggerDescription": {
+          "Rotate": "Volume",
+          "Push": "Mute",
+          "Touch": "Mute"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/keys/volume"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.queuedial",
+      "Name": "Queue dial",
+      "Tooltip": "Turn through what's next, press to play it.",
+      "Icon": "imgs/actions/queue",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "Encoder": {
+        "layout": "layouts/canvas.json",
+        "Icon": "imgs/actions/queue",
+        "TriggerDescription": {
+          "Rotate": "Up next",
+          "Push": "Play this",
+          "Touch": "Play this"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/keys/queue"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.listenondial",
+      "Name": "Listen on dial",
+      "Tooltip": "Turn through devices, press to play there.",
+      "Icon": "imgs/actions/device",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "Encoder": {
+        "layout": "layouts/canvas.json",
+        "Icon": "imgs/actions/device",
+        "TriggerDescription": {
+          "Rotate": "Devices",
+          "Push": "Play here",
+          "Touch": "Play here"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/keys/device"
+        }
+      ]
+    },
+    {
+      "UUID": "app.platter.streamdeck.nowplaying",
+      "Name": "Now playing",
+      "Tooltip": "The song on the Stream Deck Neo info bar.",
+      "Icon": "imgs/actions/info",
+      "Controllers": [
+        "Neo"
+      ],
+      "PropertyInspectorPath": "ui/action.html",
+      "States": [
+        {
+          "Image": "imgs/keys/info"
         }
       ]
     }

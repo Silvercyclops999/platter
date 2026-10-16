@@ -1,30 +1,37 @@
-// Writes the plugin's monochrome key and list icons (simple shapes, white on
-// transparent). Run with `node scripts/icons.mjs` after changing one.
-import { mkdirSync, writeFileSync } from "node:fs";
+// Writes the plugin's icons from the glyphs in scripts/glyphs.mjs: the
+// action list icons (white on transparent) and each key's starting picture
+// (the glyph on Platter's dark tile). Run with `node scripts/icons.mjs`
+// after changing a glyph.
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { GLYPHS } from "./glyphs.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "app.platter.streamdeck.sdPlugin", "imgs");
 const W = "#fff";
+const TILE = "#171513";
+const TEXT = "#F4EFE8";
 
-const heart = "M72 112 34 74a22 22 0 0 1 38-30 22 22 0 0 1 38 30z";
-const icons = {
-  "actions/play": `<path d="M52 38v68l56-34z" fill="${W}"/>`,
-  "actions/pause": `<rect x="44" y="38" width="20" height="68" rx="4" fill="${W}"/><rect x="80" y="38" width="20" height="68" rx="4" fill="${W}"/>`,
-  "actions/next": `<path d="M40 40v64l48-32z" fill="${W}"/><rect x="92" y="40" width="12" height="64" rx="3" fill="${W}"/>`,
-  "actions/previous": `<path d="M104 40v64L56 72z" fill="${W}"/><rect x="40" y="40" width="12" height="64" rx="3" fill="${W}"/>`,
-  "actions/heart": `<path d="${heart}" fill="none" stroke="${W}" stroke-width="8" stroke-linejoin="round"/>`,
-  "actions/heart-filled": `<path d="${heart}" fill="${W}" stroke="${W}" stroke-width="8" stroke-linejoin="round"/>`,
-  "actions/volume": `<path d="M30 58h20l26-22v72L50 86H30z" fill="${W}"/><path d="M90 54a26 26 0 0 1 0 36M100 42a42 42 0 0 1 0 60" fill="none" stroke="${W}" stroke-width="8" stroke-linecap="round"/>`,
-  "actions/request": `<circle cx="66" cy="66" r="40" fill="none" stroke="${W}" stroke-width="8"/><circle cx="66" cy="66" r="8" fill="${W}"/><path d="M110 92v32M94 108h32" stroke="${W}" stroke-width="8" stroke-linecap="round"/>`,
-  "actions/listen": `<path d="M32 92V76a40 40 0 0 1 80 0v16" fill="none" stroke="${W}" stroke-width="8"/><rect x="26" y="84" width="22" height="34" rx="6" fill="${W}"/><rect x="96" y="84" width="22" height="34" rx="6" fill="${W}"/>`,
-};
-
-for (const [name, body] of Object.entries(icons)) {
+const svg = (body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 144" width="144" height="144">${body}</svg>\n`;
+const put = (name, body) => {
   const file = join(root, `${name}.svg`);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 144" width="144" height="144">${body}</svg>\n`);
+  writeFileSync(file, svg(body));
+};
+
+// Start clean so a renamed glyph leaves nothing behind.
+for (const dir of ["actions", "keys"]) {
+  try {
+    for (const f of readdirSync(join(root, dir))) if (f.endsWith(".svg")) rmSync(join(root, dir, f));
+  } catch {
+    /* not there yet */
+  }
 }
+for (const [name, draw] of Object.entries(GLYPHS)) {
+  put(`actions/${name}`, draw(W));
+  put(`keys/${name}`, `<rect width="144" height="144" fill="${TILE}"/><g transform="translate(72 72) scale(0.66) translate(-72 -72)">${draw(TEXT)}</g>`);
+}
+const icons = GLYPHS;
 // The plugin and category icons must also be PNG: rings and a centre dot,
 // drawn here with simple anti-aliasing, white on transparent.
 import { deflateSync } from "node:zlib";
@@ -85,4 +92,4 @@ for (const [name, shapes, size] of [
 ]) {
   writeFileSync(join(root, `${name}.png`), png(size, shapes));
 }
-console.log(`wrote ${Object.keys(icons).length} icons and 4 PNGs`);
+console.log(`wrote ${Object.keys(icons).length * 2} icons and 4 PNGs`);

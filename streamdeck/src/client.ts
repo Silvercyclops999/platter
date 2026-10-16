@@ -7,6 +7,9 @@ import * as http from "node:http";
 
 export const DEFAULT_PORT = 32541;
 
+export type Repeat = "off" | "all" | "one";
+export type LibraryKind = "playlists" | "albums" | "artists" | "mixes";
+
 /** What Platter says is playing (GET /v1/state). */
 export interface PlatterState {
   api: number;
@@ -24,6 +27,50 @@ export interface PlatterState {
   /** A data image, kept by the client between polls. */
   cover?: string | null;
   canRequest: boolean;
+  positionMs: number;
+  durationMs: number;
+  shuffle: boolean;
+  smartShuffle: boolean;
+  repeat: Repeat;
+  crossfade: boolean;
+  lyrics: boolean;
+  miniplayer: boolean;
+  window: boolean;
+  /** The Listen on device playing now; null is this computer. */
+  device: string | null;
+  /** 0 to 5. */
+  stars: number;
+  canRate: boolean;
+  /** Ids of the playlists holding the song. */
+  playlists: string[];
+  next: { title: string; artist: string; coverKey: string | null } | null;
+  previous: { title: string; artist: string; coverKey: string | null } | null;
+  context: { kind: string; id: string | null } | null;
+  sleep: { remainingMs: number | null; endOfSong: boolean } | null;
+}
+
+/** One thing a key can play (GET /v1/library). */
+export interface LibraryItem {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  coverKey: string | null;
+}
+
+/** One song coming up (GET /v1/queue). */
+export interface QueueItem {
+  itemId: string;
+  title: string;
+  artist: string;
+  coverKey: string | null;
+}
+
+/** A Listen on device (GET /v1/devices); `local` is this computer. */
+export interface Device {
+  id: string;
+  name: string;
+  active: boolean;
+  needsWindow: boolean;
 }
 
 export type Command =
@@ -34,7 +81,69 @@ export type Command =
   | { command: "volumeSet"; value: number }
   | { command: "volumeStep"; value: number }
   | { command: "requestAlbum" }
-  | { command: "listenAlong" };
+  | { command: "listenAlong" }
+  | { command: "seekBy"; value: number }
+  | { command: "shuffle"; smart?: boolean }
+  | { command: "repeat" }
+  | { command: "mute" }
+  | { command: "crossfade" }
+  | { command: "privateSession" }
+  | { command: "addToPlaylist"; playlist?: string }
+  | { command: "removeFromPlaylist"; playlist: string }
+  | { command: "rate"; stars: number }
+  | { command: "playItem"; kind: LibraryKind; id: string; shuffle?: boolean; queue?: boolean; start?: number }
+  | { command: "playLink"; link: string }
+  | { command: "playSearch"; query: string }
+  | { command: "radio" }
+  | { command: "playShortcut"; name: "daylist" | "discover" | "liked" }
+  | { command: "queueJump"; itemId: string }
+  | { command: "listenOn"; device?: string }
+  | { command: "lyrics" }
+  | { command: "miniplayer" }
+  | { command: "window" }
+  | { command: "nowPlaying" }
+  | { command: "queue" }
+  | { command: "sleep"; minutes?: number; endOfSong?: boolean }
+  | { command: "sleepCancel" }
+  | { command: "bookmark" };
+
+/** Fill in what an older Platter leaves out of the state. */
+export function normalize(s: Partial<PlatterState> & { api: number }): PlatterState {
+  return {
+    playing: false,
+    private: false,
+    title: null,
+    artist: null,
+    album: null,
+    trackId: null,
+    liked: false,
+    volume: 0,
+    muted: false,
+    coverKey: null,
+    canRequest: false,
+    positionMs: 0,
+    durationMs: 0,
+    shuffle: false,
+    smartShuffle: false,
+    repeat: "off",
+    crossfade: false,
+    lyrics: false,
+    miniplayer: false,
+    window: false,
+    device: null,
+    stars: 0,
+    canRate: false,
+    playlists: [],
+    next: null,
+    previous: null,
+    context: null,
+    sleep: null,
+    ...s,
+  };
+}
+
+/** Pixels asked for covers: enough for an XL or high-DPI key. */
+export const COVER_PX = 288;
 
 export interface Request {
   method: "GET" | "POST";
@@ -121,6 +230,9 @@ export function toError(res: Response): PlatterError {
 
 export class PlatterClient {
   private cover: { key: string; data: string } | null = null;
+  /** Covers fetched by key (lists, the next song), newest last. */
+  private covers = new Map<string, string>();
+  private static readonly COVERS_MAX = 96;
 
   constructor(
     private readonly send: Transport,
@@ -197,8 +309,9 @@ export class PlatterClient {
   /** What's playing. The cover is only fetched when it changes. */
   async state(): Promise<PlatterState> {
     if (!this.token) throw new PlatterError("unpaired", "Pair with Platter first.");
-    const have = this.cover ? `?cover=${encodeURIComponent(this.cover.key)}` : "";
-    const s = (await this.call({ method: "GET", path: `/v1/state${have}`, token: this.token })) as PlatterState;
+    const have = this.cover ? `&cover=${encodeURIComponent(this.cover.key)}` : "";
+    const raw = (await this.call({ method: "GET", path: `/v1/state?size=${COVER_PX}${have}`, token: this.token })) as PlatterState;
+    const s = normalize(raw);
     if (!s.coverKey) {
       this.cover = null;
       s.cover = null;
@@ -213,6 +326,53 @@ export class PlatterClient {
   async command(cmd: Command): Promise<void> {
     if (!this.token) throw new PlatterError("unpaired", "Pair with Platter first.");
     await this.call({ method: "POST", path: "/v1/command", token: this.token, body: cmd });
+  }
+
+  private async get(path: string): Promise<unknown> {
+    if (!this.token) throw new PlatterError("unpaired", "Pair with Platter first.");
+    return this.call({ method: "GET", path, token: this.token });
+  }
+
+  /** A cover named by a key from the state or a list (kept, so it's asked for once). */
+  async coverFor(key: string | null | undefined): Promise<string | null> {
+    if (!key) return null;
+    const kept = this.covers.get(key);
+    if (kept) {
+      this.covers.delete(key);
+      this.covers.set(key, kept);
+      return kept;
+    }
+    if (this.cover?.key === key) return this.cover.data;
+    try {
+      const b = (await this.get(`/v1/cover?key=${encodeURIComponent(key)}&size=${COVER_PX}`)) as { cover?: string };
+      if (!b?.cover) return null;
+      this.covers.set(key, b.cover);
+      while (this.covers.size > PlatterClient.COVERS_MAX) this.covers.delete(this.covers.keys().next().value as string);
+      return b.cover;
+    } catch {
+      return null;
+    }
+  }
+
+  /** A cover already fetched, without asking. */
+  coverKept(key: string | null | undefined): string | null {
+    if (!key) return null;
+    return this.covers.get(key) ?? (this.cover?.key === key ? this.cover.data : null);
+  }
+
+  async library(kind: LibraryKind): Promise<LibraryItem[]> {
+    const b = (await this.get(`/v1/library?kind=${kind}`)) as { items?: LibraryItem[] };
+    return b?.items ?? [];
+  }
+
+  async queue(): Promise<QueueItem[]> {
+    const b = (await this.get("/v1/queue")) as { items?: QueueItem[] };
+    return b?.items ?? [];
+  }
+
+  async devices(): Promise<Device[]> {
+    const b = (await this.get("/v1/devices")) as { items?: Device[] };
+    return b?.items ?? [];
   }
 }
 

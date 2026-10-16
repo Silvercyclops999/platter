@@ -1,8 +1,8 @@
 {
   "name": "platter-streamdeck",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Stream Deck plugin for Platter: what's playing on a key, and play, skip, like, volume, request album and Listen along.",
+  "description": "Stream Deck plugin for Platter: keys, dials and the Neo info bar for playback, modes, volume, library, the queue, devices and more.",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@elgato/streamdeck": "^2.1.2"
+    "@elgato/streamdeck": "^3.0.2"
   },
   "devDependencies": {
     "@elgato/cli": "^1.10.2",
