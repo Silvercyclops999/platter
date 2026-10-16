@@ -219,6 +219,7 @@ fn playing() -> DeckNow {
         position_ms: 61_000,
         duration_ms: 200_000,
         next: Some(next),
+        previous: Some(track("t0", "Old Band", "/p")),
         ..Default::default()
     }
 }
@@ -1073,6 +1074,7 @@ async fn state_has_position_modes_next_and_extras() {
     assert_eq!(b["next"]["title"], "Shoreline");
     assert_eq!(b["next"]["artist"], "Ana Vale");
     assert_eq!(b["next"]["coverKey"], cover_key("/library/metadata/8/thumb/1").as_str());
+    assert_eq!(b["previous"]["artist"], "Old Band");
     assert!(b["sleep"].is_null());
 }
 
@@ -1082,7 +1084,7 @@ async fn a_private_session_hides_what_comes_next() {
     r.server.set_config(DeckConfig { enabled: true, private_session: true, automation: false });
     let t = r.paired().await;
     let b = r.send(&req("GET", "/v1/state", Some(&t), "")).await.body;
-    assert!(b["next"].is_null());
+    assert!(b["next"].is_null() && b["previous"].is_null());
     assert_eq!(r.send(&req("GET", "/v1/queue", Some(&t), "")).await.body["items"], serde_json::json!([]));
 }
 

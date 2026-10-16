@@ -163,6 +163,8 @@ pub struct DeckNow {
     pub repeat: Repeat,
     /// The song after this one (the queue first, then the context).
     pub next: Option<Track>,
+    /// The song played before this one.
+    pub previous: Option<Track>,
     /// What's playing from: a playlist, an album...
     pub context: Option<(ContextKind, Option<String>)>,
 }
@@ -286,7 +288,7 @@ pub struct SleepView {
     pub end_of_song: bool,
 }
 
-/// The playing song after the one on now (`/v1/state`).
+/// The song after (or before) the one on now (`/v1/state`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NextUp {
@@ -348,6 +350,8 @@ pub struct DeckState {
     pub playlists: Vec<String>,
     /// The song after this one (left out in a private session).
     pub next: Option<NextUp>,
+    /// The song before this one (left out in a private session).
+    pub previous: Option<NextUp>,
     pub context: Option<ContextRef>,
     pub sleep: Option<SleepView>,
 }

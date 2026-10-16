@@ -23,6 +23,7 @@ use crate::audio::source::{ContextKind, PlayContext};
 use crate::error::AppError;
 use crate::feed::artist_line;
 use crate::feed::server::host_allowed;
+use crate::model::Track;
 use crate::plex::state::EventSink;
 
 const MAX_HEAD: usize = 8 * 1024;
@@ -330,11 +331,9 @@ impl DeckServer {
         out.artist = Some(artist_line(&t));
         out.album = Some(t.album_title.clone()).filter(|a| !a.is_empty());
         out.track_id = Some(t.id.clone());
-        out.next = now.next.map(|n| NextUp {
-            title: n.title.clone(),
-            artist: artist_line(&n),
-            cover_key: n.thumb.as_deref().map(|th| self.key_for(th)),
-        });
+        let up = |n: Track| NextUp { title: n.title.clone(), artist: artist_line(&n), cover_key: n.thumb.as_deref().map(|th| self.key_for(th)) };
+        out.next = now.next.map(up);
+        out.previous = now.previous.map(up);
         if let Some(thumb) = t.thumb.as_deref() {
             let key = self.key_for(thumb);
             if have != Some(key.as_str()) && have != Some("none") {

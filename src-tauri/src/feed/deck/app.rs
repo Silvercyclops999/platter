@@ -69,6 +69,7 @@ impl DeckHost for AppDeck {
     async fn now(&self) -> Option<DeckNow> {
         let s = self.player.state().await.ok()?;
         let next = s.queue.user_queue.first().or(s.queue.next_up.first()).map(|q| q.track.clone());
+        let previous = s.queue.history.first().map(|q| q.track.clone());
         Some(DeckNow {
             playing: matches!(s.status, PlayerStatus::Playing | PlayerStatus::Buffering),
             volume: s.volume,
@@ -79,6 +80,7 @@ impl DeckHost for AppDeck {
             smart_shuffle: s.smart_shuffle,
             repeat: s.repeat,
             next,
+            previous,
             context: s.queue.context.map(|c| (c.kind, c.id)),
             track: s.track,
         })
