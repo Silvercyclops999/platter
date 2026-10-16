@@ -1,8 +1,10 @@
 name: release
 
 # Pushing a vX.Y.Z tag runs lint and tests first, then builds Windows (NSIS) and
-# macOS (universal), then creates a draft GitHub release with the installers and
-# the updater manifest (latest.json).
+# macOS (universal), then creates a draft GitHub release with the installers,
+# the updater manifest (latest.json) and the Stream Deck plugin. The plugin is
+# also bundled into both apps (tauri.streamdeck.conf.json), so Settings can
+# install it with one click.
 #
 # If the RELEASES_OWNER and RELEASES_REPO variables are set (e.g.
 # "platter-releases"), the installers and latest.json go to that separate public
@@ -31,6 +33,9 @@ jobs:
         with: { workspaces: src-tauri }
       - run: npm ci
       - run: npm test
+      - name: Stream Deck plugin
+        working-directory: streamdeck
+        run: npm ci && npm run typecheck && npm test
       - working-directory: src-tauri
         env:
           WHISPER_DONT_GENERATE_BINDINGS: 1
@@ -52,13 +57,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            streamdeck/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: swatinem/rust-cache@v2
         with: { workspaces: src-tauri }
       - run: npm ci
+      # The Stream Deck plugin (Node 20 or newer), packed to
+      # streamdeck/dist/app.platter.streamdeck.streamDeckPlugin for the app to bundle.
+      - name: Stream Deck plugin
+        working-directory: streamdeck
+        run: npm ci && npm run pack
       # Transcription builds whisper.cpp with the runner's CMake. On Windows
       # its bindings are generated with the runner's LLVM (the shipped ones
       # are for 64-bit long, which Windows doesn't have); macOS can use the
@@ -102,6 +117,7 @@ jobs:
             echo "Mac signing and notarization: off (Apple secrets not set), building unsigned"
           fi
       - uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ vars.RELEASES_REPO && secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -119,4 +135,32 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           generateReleaseNotes: true
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --config src-tauri/tauri.streamdeck.conf.json
+      # The plugin as a release asset too, for people who install it by hand.
+      # Both builds try; the second finds it there already.
+      - name: Upload the Stream Deck plugin
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ steps.tauri.outputs.releaseId }}
+          OWNER: ${{ vars.RELEASES_OWNER || github.repository_owner }}
+          REPO: ${{ vars.RELEASES_REPO || github.event.repository.name }}
+        with:
+          github-token: ${{ vars.RELEASES_REPO && secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require("fs");
+            const name = "app.platter.streamdeck.streamDeckPlugin";
+            const { OWNER: owner, REPO: repo } = process.env;
+            const release_id = Number(process.env.RELEASE_ID);
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id });
+            if (assets.some((a) => a.name === name)) {
+              core.info(`${name} is already on the release`);
+              return;
+            }
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id,
+              name,
+              data: fs.readFileSync(`streamdeck/dist/${name}`),
+              headers: { "content-type": "application/octet-stream" },
+            });

@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../streamdeck/dist/app.platter.streamdeck.streamDeckPlugin": "streamdeck/app.platter.streamdeck.streamDeckPlugin"
+    }
+  }
+}
