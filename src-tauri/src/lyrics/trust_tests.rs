@@ -609,11 +609,13 @@ async fn a_check_waiting_on_a_busy_computer_says_so() {
     f.load.set(90.0);
     f.checker.spawn();
     f.svc.shown("701").await.unwrap();
-    for _ in 0..300 {
-        if f.checker.status("701").is_some_and(|s| s.state == CheckState::Waiting) {
+    // A hang guard, not a time budget: a busy CI machine can take a while.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        if f.checker.status("701").is_some_and(|s| s.state == CheckState::Waiting && s.reason.is_some()) {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(f.checker.status("701").unwrap().reason, Some(CheckReason::Busy));
 }
