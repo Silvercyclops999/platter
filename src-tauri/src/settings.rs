@@ -547,6 +547,16 @@ pub struct Settings {
     /// Upgrades ask before each swap (off swaps on their own, under the
     /// same rules).
     pub upgrades_ask: bool,
+    /// Ask Plex to scan just the new folder when a Managed album Lidarr
+    /// imported doesn't show up in Plex within about two minutes.
+    pub lidarr_scan_after_import: bool,
+    /// After adding a protected album to the library (and unmonitoring it
+    /// in Lidarr), free its copy in the staging folder.
+    pub lidarr_free_staging: bool,
+    /// Practice mode runs until this time (unix seconds): Platter logs what
+    /// it would have added or swapped without doing it. -1: the first week
+    /// after setup (kept in the shared Lidarr state); 0: off.
+    pub lidarr_practice_until: i64,
     /// A provenance note starting with this marks an official source
     /// (upgrades without ISRCs need it).
     pub upgrade_official_prefix: String,
@@ -871,6 +881,9 @@ impl Default for Settings {
             show_missing_releases: true,
             lidarr_staging_folder: String::new(),
             upgrades_ask: true,
+            lidarr_scan_after_import: true,
+            lidarr_free_staging: true,
+            lidarr_practice_until: -1,
             upgrade_official_prefix: "Official".into(),
             miniplayer_on_top: true,
             miniplayer_tint: true,
@@ -1016,6 +1029,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showMissingReleases",
     "lidarrStagingFolder",
     "upgradesAsk",
+    "lidarrScanAfterImport",
+    "lidarrFreeStaging",
+    "lidarrPracticeUntil",
     "upgradeOfficialPrefix",
     "powerKeys",
     "hintKey",
@@ -1295,6 +1311,9 @@ pub struct SettingsPatch {
     pub show_missing_releases: Option<bool>,
     pub lidarr_staging_folder: Option<String>,
     pub upgrades_ask: Option<bool>,
+    pub lidarr_scan_after_import: Option<bool>,
+    pub lidarr_free_staging: Option<bool>,
+    pub lidarr_practice_until: Option<i64>,
     pub upgrade_official_prefix: Option<String>,
     pub miniplayer_on_top: Option<bool>,
     pub miniplayer_tint: Option<bool>,
@@ -1700,6 +1719,11 @@ impl Settings {
             self.lidarr_staging_folder = staging_folder(f)?;
         }
         set(&mut self.upgrades_ask, p.upgrades_ask);
+        set(&mut self.lidarr_scan_after_import, p.lidarr_scan_after_import);
+        set(&mut self.lidarr_free_staging, p.lidarr_free_staging);
+        if let Some(v) = p.lidarr_practice_until {
+            self.lidarr_practice_until = v.max(-1);
+        }
         if let Some(prefix) = &p.upgrade_official_prefix {
             let prefix = prefix.trim();
             if prefix.chars().count() > 60 || prefix.chars().any(char::is_control) {

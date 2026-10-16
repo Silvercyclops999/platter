@@ -8,11 +8,14 @@ pub mod api;
 pub mod audiomatch;
 pub mod changes;
 pub mod check;
+pub mod catchup;
 pub mod commands;
+pub mod conventions;
 pub mod mbpick;
 pub mod modes;
 pub mod paths;
 pub mod plexside;
+pub mod promote;
 pub mod provenance;
 pub mod quality;
 pub mod rematch;
@@ -25,6 +28,8 @@ pub mod upgrade;
 pub mod upmatch;
 pub mod write;
 
+#[cfg(test)]
+mod catchup_tests;
 #[cfg(test)]
 mod changes_tests;
 #[cfg(test)]
@@ -200,6 +205,10 @@ pub struct Lidarr {
     modes_cache: Arc<parking_lot::Mutex<Option<ModesAt>>>,
     /// Changes shown and waiting for a yes.
     proposals: Arc<changes::Proposals>,
+    /// Tells the user about new music (set by the app).
+    announcer: Arc<parking_lot::RwLock<Option<Arc<dyn catchup::Announcer>>>>,
+    /// Where files are reached for adding albums to the library (set by the app).
+    hosts: Arc<parking_lot::RwLock<Option<Arc<dyn upgrade::Hosts>>>>,
 }
 
 /// The address as a key for stored confirmations.
@@ -250,7 +259,7 @@ pub fn parse_headers(text: &str) -> AppResult<Vec<(String, String)>> {
 
 impl Lidarr {
     pub fn new(deps: LidarrDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default() }
+        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default() }
     }
 
     /// (home, away) addresses from Settings; empty when not set.
@@ -519,6 +528,9 @@ impl Lidarr {
             "lidarr setup check"
         );
         self.remember_check(&report, &snap);
+        if report.managed_ok {
+            self.start_practice();
+        }
         let plex_locations = plex.locations.clone();
         Ok(Checked { report, client, writer: write::LidarrWriter::new(route as Arc<dyn write::LidarrWrite>), snap, plex_locations, modes })
     }

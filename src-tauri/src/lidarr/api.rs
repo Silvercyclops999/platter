@@ -207,6 +207,11 @@ pub struct TrackFile {
     pub path: String,
     #[serde(default)]
     pub size: Option<i64>,
+    /// Below the profile's cutoff: Lidarr is still looking for better.
+    #[serde(default)]
+    pub quality_cutoff_not_met: bool,
+    #[serde(default)]
+    pub quality: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -315,7 +320,13 @@ pub struct QueueItem {
 #[serde(rename_all = "camelCase")]
 pub struct HistoryItem {
     #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
     pub album_id: Option<i64>,
+    #[serde(default)]
+    pub artist_id: Option<i64>,
+    #[serde(default)]
+    pub download_id: Option<String>,
     /// `grabbed`, `downloadFailed`, `trackFileImported`, `downloadImported`,
     /// `albumImportIncomplete`, `downloadIgnored`...
     #[serde(default)]
@@ -332,6 +343,9 @@ pub struct AlbumRelease {
     pub id: i64,
     #[serde(default)]
     pub title: String,
+    /// MusicBrainz's release status: `Official`, `Promotion`, `Bootleg`...
+    #[serde(default)]
+    pub status: String,
     #[serde(default)]
     pub monitored: bool,
     #[serde(default)]
@@ -348,6 +362,14 @@ pub struct AlbumDetail {
     pub title: String,
     #[serde(default)]
     pub artist_id: i64,
+    #[serde(default)]
+    pub foreign_album_id: String,
+    #[serde(default)]
+    pub monitored: bool,
+    #[serde(default)]
+    pub secondary_types: Vec<String>,
+    #[serde(default)]
+    pub release_date: Option<String>,
     #[serde(default)]
     pub releases: Vec<AlbumRelease>,
 }
@@ -670,6 +692,20 @@ impl LidarrClient {
             .get("/history", &[("albumId", id.as_str()), ("page", "1"), ("pageSize", "20"), ("sortKey", "date"), ("sortDirection", "descending")])
             .await?;
         Ok(p.into_vec())
+    }
+
+    /// Every history event after `date` (ISO 8601), oldest first.
+    pub async fn history_since(&self, date: &str) -> AppResult<Vec<HistoryItem>> {
+        let mut v: Vec<HistoryItem> = self.get("/history/since", &[("date", date)]).await?;
+        v.sort_by(|a, b| a.date.cmp(&b.date).then(a.id.cmp(&b.id)));
+        Ok(v)
+    }
+
+    /// The oldest event Lidarr still keeps in its history.
+    pub async fn oldest_history(&self) -> AppResult<Option<HistoryItem>> {
+        let p: Paged<HistoryItem> =
+            self.get("/history", &[("page", "1"), ("pageSize", "1"), ("sortKey", "date"), ("sortDirection", "ascending")]).await?;
+        Ok(p.into_vec().into_iter().next())
     }
 
     /// An album's tracks, with the files Lidarr matched to them.

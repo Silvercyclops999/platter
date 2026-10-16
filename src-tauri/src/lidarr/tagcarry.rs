@@ -27,7 +27,7 @@ use lofty::ogg::tag::VorbisComments;
 use lofty::ogg::{OggPictureStorage, OpusFile, VorbisFile};
 use lofty::picture::Picture;
 use lofty::probe::Probe;
-use lofty::tag::{ItemKey, ItemValue, SplitTag, Tag, TagExt, TagItem, TagType};
+use lofty::tag::{ItemKey, ItemValue, MergeTag, SplitTag, Tag, TagExt, TagItem, TagType};
 
 use crate::error::{AppError, AppResult};
 
@@ -432,6 +432,114 @@ pub fn carry(old: &Path, new: &Path) -> AppResult<()> {
     }
     if same && old_bag.uncarried.len() != after.uncarried.len() {
         return Err(copy_err("some of its tags came out different on the new copy"));
+    }
+    Ok(())
+}
+
+/// Set (Some) or remove (None) tags by their neutral names, keeping every
+/// other tag, then read the file back to prove only those changed.
+/// `pictures`: Some replaces the embedded pictures (an empty list removes
+/// them); None keeps them.
+pub fn apply_edits(path: &Path, edits: &[(String, Option<String>)], pictures: Option<Vec<Picture>>) -> AppResult<()> {
+    let (kind, bag, raw) = read_raw(path)?;
+    let keys: Vec<String> = edits.iter().map(|(k, _)| k.trim().to_ascii_uppercase()).collect();
+    let mut pairs: Vec<(String, String)> = bag.pairs.iter().filter(|(k, _)| !keys.contains(k)).cloned().collect();
+    for (k, v) in edits {
+        if let Some(v) = v {
+            pairs.push((k.trim().to_ascii_uppercase(), v.clone()));
+        }
+    }
+    let pics = pictures.clone().unwrap_or_else(|| bag.pictures.clone());
+    match (kind, raw) {
+        (Kind::Vorbis, _) => write(path, kind, &pairs, &pics, None)?,
+        (Kind::Id3, Raw::Id3(t)) => {
+            let (rest, mut g) = (*t).split_tag();
+            for k in &keys {
+                if let Some(item) = generic(k) {
+                    g.remove_key(item);
+                }
+            }
+            let mut custom = Vec::new();
+            for (k, v) in edits {
+                let k = k.trim().to_ascii_uppercase();
+                match (generic(&k).filter(|i| i.map_key(TagType::Id3v2).is_some()), v) {
+                    (Some(item), Some(v)) => {
+                        g.push_unchecked(TagItem::new(item, ItemValue::Text(v.clone())));
+                    }
+                    (None, v) => custom.push((k, v.clone())),
+                    _ => {}
+                }
+            }
+            if let Some(p) = &pictures {
+                while g.picture_count() > 0 {
+                    g.remove_picture(0);
+                }
+                for x in p {
+                    g.push_picture(x.clone());
+                }
+            }
+            let mut id3: Id3v2Tag = rest.merge_tag(g);
+            for (k, v) in custom {
+                id3.remove_user_text(&k);
+                if let Some(v) = v {
+                    id3.insert_user_text(k, v);
+                }
+            }
+            save(&id3, path)?;
+        }
+        (Kind::Mp4, Raw::Mp4(t)) => {
+            let (rest, mut g) = (*t).split_tag();
+            for k in &keys {
+                if let Some(item) = generic(k) {
+                    g.remove_key(item);
+                }
+            }
+            let mut custom = Vec::new();
+            for (k, v) in edits {
+                let k = k.trim().to_ascii_uppercase();
+                match (generic(&k).filter(|i| i.map_key(TagType::Mp4Ilst).is_some()), v) {
+                    (Some(item), Some(v)) => {
+                        g.push_unchecked(TagItem::new(item, ItemValue::Text(v.clone())));
+                    }
+                    (None, v) => custom.push((k, v.clone())),
+                    _ => {}
+                }
+            }
+            if let Some(p) = &pictures {
+                while g.picture_count() > 0 {
+                    g.remove_picture(0);
+                }
+                for x in p {
+                    g.push_picture(x.clone());
+                }
+            }
+            let mut ilst: Ilst = rest.merge_tag(g);
+            for (k, v) in custom {
+                ilst.retain(|a| !matches!(a.ident(), AtomIdent::Freeform { name, .. } if name.eq_ignore_ascii_case(&k)));
+                if let Some(v) = v {
+                    add_freeform(&mut ilst, &k, vec![v]);
+                }
+            }
+            save(&ilst, path)?;
+        }
+        (k, _) => write(path, k, &pairs, &pics, None)?,
+    }
+    // Read back: the edits took, and nothing else changed.
+    let after = read(path)?;
+    for (k, v) in edits {
+        let k = k.trim().to_ascii_uppercase();
+        let got: Vec<&str> = after.pairs.iter().filter(|(n, _)| *n == k).map(|(_, x)| x.as_str()).collect();
+        let ok = match v {
+            Some(v) => got == [v.as_str()],
+            None => got.is_empty(),
+        };
+        if !ok {
+            return Err(copy_err(format!("{k} didn't take on {}", show(path))));
+        }
+    }
+    let rest = |b: &Bag| count(&b.pairs.iter().filter(|(k, _)| !keys.contains(k)).cloned().collect::<Vec<_>>());
+    if rest(&bag) != rest(&after) {
+        return Err(copy_err(format!("other tags came out different on {}", show(path))));
     }
     Ok(())
 }

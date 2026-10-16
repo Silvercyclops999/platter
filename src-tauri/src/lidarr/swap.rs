@@ -52,6 +52,18 @@ pub trait ShareFs: Send + Sync {
     /// A small text file, or None when it isn't there.
     fn read_text(&self, p: &Path) -> io::Result<Option<String>>;
     fn write_text(&self, p: &Path, text: &str) -> io::Result<()>;
+    /// A new file with these bytes (a cover image).
+    fn write_bytes(&self, p: &Path, bytes: &[u8]) -> io::Result<()> {
+        std::fs::write(p, bytes)
+    }
+    /// Move a folder (Undo of an added album).
+    fn rename_dir(&self, from: &Path, to: &Path) -> io::Result<()> {
+        std::fs::rename(from, to)
+    }
+    /// Remove a folder Platter made, when it's empty.
+    fn remove_empty_dir(&self, p: &Path) -> io::Result<()> {
+        std::fs::remove_dir(p)
+    }
 }
 
 /// Reading and carrying tags.

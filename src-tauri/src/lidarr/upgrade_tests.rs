@@ -1170,6 +1170,13 @@ async fn with_asking_off_a_clean_album_swaps_on_its_own_and_a_mixed_one_waits() 
     assert_eq!(r.up.auto_swap().await, 0, "the unreleased file makes it wait for a person");
     assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
     drop_sketch(&r);
+    // The first week after setup is practice: it's logged, not swapped.
+    assert!(r.lidarr.practice_active());
+    assert_eq!(r.up.auto_swap().await, 0);
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    assert!(r.lidarr.changes().iter().any(|e| e.practice && e.what.starts_with("Would swap")));
+    let s = crate::settings::Settings { lidarr_practice_until: 0, ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
     assert_eq!(r.up.auto_swap().await, 1);
     assert!(r.b.share("Northlight/First Light/01 Dawn.flac").exists());
     assert!(r.b.share("Northlight/First Light/02 Noon.flac").exists());

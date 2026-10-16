@@ -355,7 +355,7 @@ fn folders_lidarr_and_plex_name_differently_stop_protected_work() {
 #[test]
 fn unmatched_files_under_managed_artists_are_offered_only_with_renaming_off() {
     let (p, mut l, c) = green();
-    l.unmapped = vec![super::api::TrackFile { id: 3, path: "/data/media/Music/Lidarr/Northlight/Second Wind/01 Rise.flac".into(), size: Some(5) }];
+    l.unmapped = vec![super::api::TrackFile { id: 3, path: "/data/media/Music/Lidarr/Northlight/Second Wind/01 Rise.flac".into(), size: Some(5), ..Default::default() }];
     let r = run(&p, l.clone(), &c, &no_disk());
     let f = r.findings.iter().find(|f| f.id == "unmappedManaged").unwrap();
     assert_eq!(f.level, Level::Ok);

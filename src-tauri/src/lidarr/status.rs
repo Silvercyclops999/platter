@@ -71,7 +71,7 @@ mod tests {
     }
 
     fn h(ev: &str) -> HistoryItem {
-        HistoryItem { album_id: Some(7), event_type: ev.into(), date: String::new() }
+        HistoryItem { album_id: Some(7), event_type: ev.into(), ..Default::default() }
     }
 
     #[test]

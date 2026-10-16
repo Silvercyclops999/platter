@@ -921,10 +921,24 @@ impl Upgrades {
         let mut n = 0;
         let ready: Vec<UpgradeRecord> =
             self.records().into_iter().filter(|r| r.request.state == RequestState::Imported && r.swaps.is_empty() && r.failure.is_none()).collect();
+        let practice = self.inner.lidarr.practice_active();
         for r in ready {
             let Ok(o) = self.offer(&r.request.id).await else { continue };
-            if o.status == OfferStatus::Ready && !o.ask_each && !o.upgrade.is_empty() && self.swap(&r.request.id, None).await.is_ok() {
-                n += 1;
+            if o.status == OfferStatus::Ready && !o.ask_each && !o.upgrade.is_empty() {
+                if practice {
+                    // Practice mode: say what would have been swapped, once.
+                    if self.inner.lidarr.practice_noted(&format!("swap:{}", r.request.id)) {
+                        let _ = self.inner.lidarr.log_practice(
+                            &format!("Would swap {} songs on {} by {}", o.upgrade.len(), r.request.title, r.request.artist),
+                            "Current copies",
+                            "Better copies from staging",
+                        );
+                    }
+                    continue;
+                }
+                if self.swap(&r.request.id, None).await.is_ok() {
+                    n += 1;
+                }
             }
         }
         n

@@ -402,7 +402,7 @@ mod tests {
     #[test]
     fn only_files_inside_the_staging_folder_can_be_freed() {
         use super::super::api::TrackFile;
-        let f = |id, p: &str| TrackFile { id, path: p.into(), size: None };
+        let f = |id, p: &str| TrackFile { id, path: p.into(), ..Default::default() };
         let ok = StagingFiles::check(&[f(1, "/data/staging/music/A/B/01.flac"), f(2, r"\DATA\staging\music\A\B\02.flac")], "/data/staging/music").unwrap();
         let call = WriteCall::FreeStaging(ok);
         assert_eq!((call.method(), call.path().as_str()), (WriteMethod::Delete, "/trackfile/bulk"));

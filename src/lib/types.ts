@@ -1118,6 +1118,12 @@ export interface Settings {
   lidarrStagingFolder: string;
   /** Upgrades ask before each swap (off swaps on their own, under the same rules). */
   upgradesAsk: boolean;
+  /** Ask Plex to scan just the new folder when a Managed import doesn't show up within about two minutes. */
+  lidarrScanAfterImport: boolean;
+  /** Free a protected album's staging copy once it's in the library and unmonitored. */
+  lidarrFreeStaging: boolean;
+  /** Practice mode until (unix seconds); -1 the first week after setup; 0 off. */
+  lidarrPracticeUntil: number;
   /** A provenance note starting with this marks an official source (upgrades without ISRCs need it). */
   upgradeOfficialPrefix: string;
   /** The miniplayer window stays above other windows (this device only). */
@@ -1451,6 +1457,9 @@ export const DEFAULT_SETTINGS: Settings = {
   showMissingReleases: true,
   lidarrStagingFolder: "",
   upgradesAsk: true,
+  lidarrScanAfterImport: true,
+  lidarrFreeStaging: true,
+  lidarrPracticeUntil: -1,
   upgradeOfficialPrefix: "Official",
   miniplayerOnTop: true,
   miniplayerTint: true,

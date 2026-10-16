@@ -267,7 +267,7 @@ mod tests {
     const DIR: &str = "/data/media/Music/Lidarr/Northlight/First Light (2019)";
 
     fn tf(id: i64, p: &str) -> TrackFile {
-        TrackFile { id, path: p.into(), size: None }
+        TrackFile { id, path: p.into(), ..Default::default() }
     }
 
     fn rt(id: i64, disc: i64, n: i64, has: bool) -> ReleaseTrack {
@@ -294,9 +294,10 @@ mod tests {
             title: "First Light".into(),
             artist_id: 3,
             releases: vec![
-                AlbumRelease { id: 100, title: "CD".into(), monitored: true, track_count: 3 },
-                AlbumRelease { id: 101, title: "Deluxe".into(), monitored: false, track_count: 5 },
+                AlbumRelease { id: 100, title: "CD".into(), monitored: true, track_count: 3, ..Default::default() },
+                AlbumRelease { id: 101, title: "Deluxe".into(), monitored: false, track_count: 5, ..Default::default() },
             ],
+            ..Default::default()
         };
         let tracks = HashMap::from([(100, vec![rt(501, 1, 1, true), rt(502, 1, 2, false), rt(503, 2, 1, false)])]);
         (unmapped, HashMap::from([(10, album)]), tracks)
