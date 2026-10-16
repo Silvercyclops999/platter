@@ -1205,6 +1205,83 @@ More by. Play contexts and album pages follow `explicitContent` and
 `showFanEdits` (see Settings). A context that loses every song fails with
 `invalid`.
 
+## Tag editor
+| Command | Args | Returns |
+| --- | --- | --- |
+| `tagedit_pick_music_folder` | – | `MusicFolderCheck \| null` (null when the dialog is cancelled) |
+| `tagedit_set_music_folder` | `{ path }` | `MusicFolderCheck` |
+| `tagedit_clear_music_folder` | – | – |
+| `tagedit_music_folder_status` | – | `MusicFolderCheck \| null` (null when not set) |
+| `tagedit_open` | `{ albumId \| null, trackIds: string[] }` | `TagEditorData` |
+| `tagedit_save` | `{ request: { label, files: { trackId, stamp, edits }[] } }` | `TagSaveResult` |
+| `tagedit_undo` | `{ id }` | `TagSaveResult` |
+| `tagedit_history` | – | `{ id, at, label, files }[]`, newest first, at most 20 |
+| `tagedit_check` | `{ scope: { kind: "album" \| "artist", id } \| { kind: "library" } }` | `TagCheckReport` |
+| `tagedit_check_fine` | `{ id, fine }` | – |
+| `tagedit_fix_preview` | `{ kind: "discTags" \| "releaseStatus", albumId }` | `TagFixPreview` |
+| `tagedit_isrc_releases` | `{ albumId }` | `{ candidates: IsrcRelease[], wanted, message }` |
+| `tagedit_isrc_preview` | `{ albumId, release: IsrcRelease }` | `TagFixPreview` |
+| `tagedit_explicit_preview` | `{ albumIds: string[], explicit, artistId \| null, era \| null }` | `TagFixPreview` |
+| `tagedit_library_settings` | – | `{ id, title, agent, items: { label, ok, help }[], ok }[]` |
+
+The only commands that write to the user's files. They work on the music
+folder (`musicFolder`): the folder this computer sees the server's music in.
+Picking it (or typing a path) looks for 5 random songs: Plex's file path for
+each one is matched to the folder by the longest end of the path found under
+it, and the file must have the size Plex has. `MusicFolderCheck` is `{ ok,
+found, checked, message, mapping: { server, local } \| null, probes }`, with
+`message` like "Connected, 5 of 5 files found" or what's wrong. The folder is
+saved (as `musicFolder` and `musicFolderServer`) when at least one file was
+found.
+
+`TagEditorData` is `{ title, files, scheme, statusField, statusChoices,
+customKey, writable, reason, needsMusicFolder }`. Each file is `{ trackId,
+albumId, serverPath, localPath, fileName, format, id3Version, values, keys,
+stamp, error, durationMs }`; `values` maps field names (`albumArtist`,
+`album`, `year`, `genre`, `releaseType`, `edition`, `group`, `era`,
+`quality`, `explicit`, `trackNumber`, `trackTotal`, `discNumber`,
+`discTotal`, `title`, `artist`, `archiveVersion`, `status`, `picardStatus`,
+`customStatus`, `versionNote`, `archiveDate`, `source`, `flags`, `isrc`) to
+what the file holds. Without a music folder the values come from Plex and the
+tag cache, `stamp` is null and `needsMusicFolder` is true: details are view
+only. `scheme` (`archive`, `plain`, `picard` or `custom`) is where this
+album's release status is written, and `statusField` the field for it: the
+tag most of its files already carry, else the custom tag from Settings, else
+`ARCHIVE_VERSION`.
+
+`tagedit_save` sends only changed values, each with the `stamp` the file had
+when it was opened; `""` removes a tag. Values are checked first (an
+`invalid` error for a bad ISRC, track number or date, with nothing written).
+Then every file is read again: when any changed since it was opened, is gone,
+or its folder had a file changed by another program in the last minute,
+nothing is written and `problems` says why (`changed`, `gone`, `busy`). Each
+file is then written through a temp copy in its own folder and replaced; a
+failure leaves it as it was (`readOnly`, `locked`, `failed`). `TagSaveResult`
+is `{ saved, unchanged, problems, message, undoId, rescanned, rescanError }`,
+`message` like "Saved 12 files". With `rescanAfterTagEdit` on, Plex is asked
+to rescan each folder written to (`rescanned`, server paths). The tag cache
+takes the new values at once and `tags://changed` is sent.
+
+`tagedit_undo` puts back what an edit replaced on each file that is still as
+the edit left it; files changed since are kept as they are and listed in
+`problems`. An edit is undone once.
+
+`TagCheckReport` is `{ findings, styles, albums, files, ignored, fromFiles }`.
+A finding is `{ id, rule, severity: "error" \| "warning" \| "info", albumId,
+albumTitle, trackIds, what, why, fix }`; `fix` is `{ albumId, trackIds, field
+}` (opens the editor there), or null without a music folder. Findings marked
+fine with `tagedit_check_fine` are left out and counted in `ignored`.
+`styles` gives each album's learned style ("This album's style: ...").
+
+`TagFixPreview` is `{ kind, label, changes, kept, pickEach, message }`. Each
+change is `{ trackId, fileName, stamp, field, before, after, note }`; the UI
+saves the picked ones with `tagedit_save` and `label`, so they are logged and
+can be undone. `pickEach` (release status) means none start ticked. `kept`
+lists files left as they are with the reason. `IsrcRelease` is `{ source:
+"musicbrainz" \| "deezer", id, title, artist, date, country, tracks }`; the
+lookup errors with `network` ("MusicBrainz and Deezer couldn't be reached.
+Nothing was changed; try again later.") when neither answers.
+
 ## Now playing
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -2830,6 +2907,10 @@ The rest of the fields, with their defaults:
 | `lyricsReleasedForVersions` | bool, false | Other versions (unreleased, alternate, live, version tag) take lyrics found for the released version without asking. |
 | `fullWindowHideControls` | bool, true | The expanded view fades its header after 3 s without mouse movement or a key. |
 | `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
+| `musicFolder` | string, `""` | Where this computer sees the server's music files. Empty: tag details are view only. Set with `tagedit_pick_music_folder` or `tagedit_set_music_folder`, not `settings_set`. This device only. |
+| `musicFolderServer` | string, `""` | The start of Plex's file paths that stands for the music folder, found when it was set. This device only. |
+| `rescanAfterTagEdit` | bool, true | After tags are saved, Plex rescans just the folders written to. |
+| `askBeforeManyFiles` | bool, true | A tag save that changes more than 50 files asks first (in the UI). |
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |
 | `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |
 | `releaseStatusTag` | string, `""` | Where a file's release status is read from: `""` (Auto) reads `ARCHIVE_VERSION`, then `STATUS`, then Picard's release status and type; a tag name (up to 64 characters, no `=`; "auto" counts as Auto) reads that tag after `ARCHIVE_VERSION` instead. A new name reads the files again in the background. Synced. See File tags. |

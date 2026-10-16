@@ -4,8 +4,10 @@ Anything Plex already reads uses Plex's own tag, written the way Plex expects.
 Archive details that Plex has no field for go in `ARCHIVE_*` tags. Plex ignores
 those, so Plexamp and other Plex apps keep working as before.
 
-Check the MP3 release-type field name against current Plex docs before
-writing tag code. The forum thread that originally documented it is gone.
+In MP3 files the tag editor writes the release type as `TXXX:MusicBrainz
+Album Type`, as Mp3tag and Picard do, or in a `TXXX:RELEASETYPE` frame when
+the file already has one. Check against current Plex docs if Plex ever stops
+reading it: the forum thread that first documented the field is gone.
 
 ## Tags Plex reads
 
@@ -110,8 +112,9 @@ leaked song on a bonus disc is never shared as a released one.
 `ARCHIVE_VERSION` on an album's files works as it always has: the version
 most of its files carry rates the album.
 
-Platter never writes `STATUS`, `VERSION`, your custom tag or Picard's tags.
-They change only when you edit them yourself.
+Platter only writes `STATUS`, `VERSION`, your custom tag or Picard's tags
+when you change them in the tag editor, and then in the album's own scheme
+(below).
 
 ## How material shows up
 
@@ -130,10 +133,109 @@ They change only when you edit them yourself.
 - Personal Media agent available for albums not on MusicBrainz, so unreleased
   albums aren't overwritten by a wrong match.
 
-## Tag editor and tag check
-The tag editor edits a whole album at once, writes only the fields above, and
-then asks Plex to rescan just that folder.
+The check only reads. Settings, Library, Tag editor shows it for every music
+library with the steps in Plex for anything that's off, and Platter says so
+once after it first connects. Plex Music libraries have no separate embedded
+tags setting: they read the tags whenever local metadata is preferred.
 
-The tag check flags a missing album artist, a year or album name that differs
-within an album, a release type missing its second part, and an ARCHIVE_GROUP
-with only one member.
+## Tag editor and tag check
+
+### The music folder
+Platter edits tags in place, on the server's share. Settings, Library, Music
+folder is where this computer sees the server's music: a mapped drive or a
+network path (`\\server\music`) on Windows, a mounted share
+(`/Volumes/Music`) on a Mac. Plex's path for each file is matched to it by the
+longest end of the path found in that folder, and 5 random songs must be there
+with the size Plex has ("Connected, 5 of 5 files found"). Until it's set, tag
+details are view only.
+
+### What the editor writes
+"Edit tags..." on an album (or a song) edits the album fields (album artist,
+album, year, genre, release type in two parts, edition, group, era, quality,
+explicit) and each song's track and disc numbers with their totals, title,
+artist, release status, version note, date, source, flags, explicit and ISRC.
+When the songs differ, a field shows "(several)" and stays as each file has it
+unless you change it.
+
+| Field | FLAC / Ogg | MP3 | M4A |
+| --- | --- | --- | --- |
+| Album artist, album, title, artist | ALBUMARTIST, ALBUM, TITLE, ARTIST | TPE2, TALB, TIT2, TPE1 | aART, ©alb, ©nam, ©ART |
+| Year, genre | DATE, GENRE | TDRC (TYER in v2.3), TCON | ©day, ©gen |
+| Track and disc | TRACKNUMBER, TRACKTOTAL, DISCNUMBER, DISCTOTAL (or `n/total` when the file keeps them that way, or TOTALTRACKS and TOTALDISCS when it uses those) | TRCK, TPOS as `n/total` | trkn, disk |
+| Release type | RELEASETYPE | TXXX:MusicBrainz Album Type | ----:com.apple.iTunes:MusicBrainz Album Type |
+| Explicit | ITUNESADVISORY (or EXPLICIT when the file uses it) | TXXX:ITUNESADVISORY | rtng |
+| ISRC | ISRC | TSRC | ----:com.apple.iTunes:ISRC |
+| Archive tags, STATUS, VERSION, custom tag | as named | TXXX:name | ----:com.apple.iTunes:name |
+| Picard's release status | RELEASESTATUS | TXXX:MusicBrainz Album Status | ----:com.apple.iTunes:MusicBrainz Album Status |
+
+Only these fields are written, and only the ones you changed. Every other tag,
+picture and frame stays as it was, in its place, and nothing new is added
+besides what you set. An MP3 keeps its ID3 version: v2.3 stays v2.3, anything
+else is written as v2.4. The audio itself is never touched.
+
+The release status goes where the album already keeps it: whichever of
+`ARCHIVE_VERSION`, the custom tag from Settings, a plain `STATUS` or Picard's
+`RELEASESTATUS` most of its files carry. An album with none uses the custom
+tag when Settings names one, else `ARCHIVE_VERSION`. The version note is a
+plain `VERSION` tag.
+
+### Saving safely
+Before writing, every file is read again. When any file changed since the
+editor opened it, or another program changed a file in its folder in the last
+minute, nothing is saved. Each file is copied to a temp file in its own
+folder, the tags are written to the copy, the copy is read back (its tags must
+be what was asked and its length the original's), and only then does it
+replace the original. Any failure leaves the original as it was. Platter
+never renames or moves a file.
+
+After saving, Plex rescans just those folders (Settings, Rescan in Plex after
+saving) and Platter's own tag cache takes the new values. The last 20 edits
+keep what they replaced: "Undo" puts it back on every file that hasn't changed
+since. A save of more than 50 files asks first (Settings).
+
+"Mark as explicit" and "Mark as clean" on an album, or on an era's page, set
+explicit on every song after showing the changes.
+
+### The tag check
+Settings, Library, "Check tags" checks the library; "Check tags..." on an
+artist or album checks just that. Each finding says what's wrong and why it
+matters, with "Fix" (the editor, at that field) when the music folder is set,
+and "This is fine" to stop showing it. It learns each album's own style from
+most of its files (how ARTIST joins names, where featured artists go, how
+files are named) and shows it.
+
+It flags:
+- a missing album artist (an error)
+- a year, album name or album artist that differs within an album
+- a release type missing its first part, like `demo` for `album;demo`
+- an ARCHIVE_GROUP with only one album
+- one folder that Plex shows as two albums
+- ARCHIVE_* values and tags Platter doesn't know, and dates in other forms
+- missing disc numbers or totals on albums with more than one disc
+- a release status missing where the album's other songs have one, and gaps
+  in the provenance note
+- ARTIST joining names differently from the rest of the album, and featured
+  artists placed differently
+- repeated or missing track numbers on a disc, and a title twice
+- file names in another pattern than the album's, and numbers or titles that
+  disagree with the file name (a `/` in a title and ` - ` in its file name,
+  characters a file name can't hold, and case alone don't count)
+- ripper and player tags (ReplayGain, iTunNORM, encoder) that most of the
+  album doesn't use
+- songs under a minute, MP3s under 192 kbps, and released songs without an
+  ISRC, as information only
+
+### One-click fixes
+Each fix lists every change it would make and what it leaves alone before
+anything is written, then saves through the editor, so it can be undone.
+- Fill disc tags: `1/1` on songs of single-disc folders. A folder whose file
+  names (`1-01 - Title`), tags or folder names show more than one disc is left
+  for the editor.
+- Fill release status: a suggestion for each song without one, from the other
+  songs on its disc. Albums often mix statuses on purpose, so none is ticked
+  until you tick it.
+- Look up ISRCs: for released songs without one. Pick the one official release
+  the folder is from (MusicBrainz first, then Deezer's free public catalogue);
+  songs are matched by title, artist and a length within 1.5 seconds. Songs
+  whose length differs (a re-edit) or without a confident match are kept as
+  they are, and listed. Only the ISRC is written: credits never change.

@@ -2,7 +2,8 @@
 //!
 //! Plex ignores the `ARCHIVE_*` tags and the explicit flag, so Platter reads
 //! them from each file's header through Plex's own part URL with small Range
-//! requests. Nothing is installed on the server and no file is ever written.
+//! requests. Nothing is installed on the server and this reader never writes
+//! a file; the tag editor (`crate::tagedit`) is what does, on the user's say.
 //!
 //! - [`parse`]  header parsers (FLAC, ID3v2, MP4, Ogg) over partial reads
 //! - [`fetch`]  Range reads through the player's one-transfer gate
