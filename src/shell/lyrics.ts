@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { backend } from "../lib/backend";
-import type { LyricLine, LyricWord, Lyrics } from "../lib/types";
+import type { LyricLine, LyricWord, Lyrics, LyricsCheckStatus } from "../lib/types";
 import { useLyricsEditor } from "../stores/lyricsEditor";
 import { usePlayer } from "../stores/player";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
@@ -115,7 +115,32 @@ export function actionableNotice(l: Lyrics | null | undefined): boolean {
  * Lyrics checked against the song, a pick or an offset changed: `version`
  * moves so the views ask again.
  */
-export const useLyricsTrust = create<{ version: number }>()(() => ({ version: 0 }));
+export const useLyricsTrust = create<{ version: number; checks: Record<string, LyricsCheckStatus> }>()(() => ({ version: 0, checks: {} }));
+
+/** A song's check moved on. */
+export function setCheckStatus(s: LyricsCheckStatus) {
+  useLyricsTrust.setState((st) => ({ checks: { ...st.checks, [s.trackId]: s } }));
+}
+
+/** Ask the core where a song's check is (the view opened mid-check). */
+export async function loadCheckStatus(trackId: string): Promise<void> {
+  try {
+    const s = await backend.lyricsCheckStatus(trackId);
+    if (s && !useLyricsTrust.getState().checks[trackId]) setCheckStatus(s);
+  } catch {
+    // Nothing known: the plain checking note shows.
+  }
+}
+
+/** "Try again" after a check couldn't run: forget its status and ask for the lyrics again (which asks for a check). */
+export function retryCheck(trackId: string) {
+  useLyricsTrust.setState((st) => {
+    const checks = { ...st.checks };
+    delete checks[trackId];
+    return { checks };
+  });
+  lyricsChanged(trackId);
+}
 
 /** Forget a song's lyrics (or every song's) and ask again. */
 export function lyricsChanged(trackId?: string) {
@@ -135,6 +160,7 @@ export async function startLyricsTrust(): Promise<void> {
   if (trustStarted) return;
   trustStarted = true;
   await backend.listen("lyrics://checked", ({ trackId }) => lyricsChanged(trackId));
+  await backend.listen("lyrics://check-status", (s) => setCheckStatus(s));
   await backend.listen("lyrics://choices", () => lyricsChanged());
 }
 

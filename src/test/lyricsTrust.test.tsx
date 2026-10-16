@@ -12,8 +12,8 @@ import { mockLyrics, mockLyricsKind } from "../lib/mock/details";
 import { DEFAULT_SETTINGS, type Lyrics, type PlayerState, type Track, type TranscribeStatus } from "../lib/types";
 import { trackMenuItems } from "../components/TrackRow";
 import { LyricsPane } from "../shell/LyricsView";
-import { clearLyricsCache, lyricsChanged, loadLyrics, lyricsSeen } from "../shell/lyrics";
-import { CHECK_TEXT, NOTICE_TEXT, offsetText, tapOffset, WrongLyricsDialog } from "../shell/LyricsTrust";
+import { clearLyricsCache, lyricsChanged, loadLyrics, lyricsSeen, setCheckStatus, useLyricsTrust } from "../shell/lyrics";
+import { CHECK_TEXT, checkProgress, NOTICE_TEXT, offsetText, tapOffset, WrongLyricsDialog } from "../shell/LyricsTrust";
 import { SettingsPage } from "../pages/SettingsPage";
 import { usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
@@ -80,6 +80,8 @@ beforeEach(async () => {
   useTranscribe.setState({ status: null, empty: new Set() });
   useWrongLyrics.setState({ track: null, tapping: null });
   useRouter.getState().reset();
+  mock.checkStatuses.clear();
+  useLyricsTrust.setState({ checks: {} });
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -260,6 +262,34 @@ describe("when nothing is shown", () => {
     spy.mockResolvedValue({ synced: false, lines: [], notice: "noneMatched" });
     act(() => lyricsChanged(lines.id));
     expect(await screen.findByText(NOTICE_TEXT.noneMatched)).toBeInTheDocument();
+  });
+});
+
+describe("check progress", () => {
+  it("says what the check is doing in words, never just a spinner", () => {
+    const s = (state: string, reason?: string) => checkProgress({ trackId: "1", state, reason } as never);
+    expect(s("queued")?.text).toBe("Waiting to check against the song…");
+    expect(s("reading")?.text).toBe("Reading the song to check the lyrics…");
+    expect(s("listening")).toEqual({ text: "Checking against the song…", spin: true, retry: false });
+    expect(s("waiting", "busy")).toEqual({ text: "Waiting: your computer is busy", spin: false, retry: false });
+    expect(s("failed", "noModel")).toEqual({ text: "Can't check without the speech model", spin: false, retry: false });
+    expect(s("failed", "stuck")).toEqual({ text: "Couldn't check yet", spin: false, retry: true });
+    expect(s("done")).toBeNull();
+    expect(checkProgress(undefined)).toBeNull();
+  });
+
+  it("follows the check's status and offers Try again when it couldn't check", async () => {
+    const spy = vi.spyOn(backend, "lyrics").mockResolvedValue({ synced: false, lines: [], notice: "checking" });
+    mock.checkStatuses.set(lines.id, { trackId: lines.id, state: "waiting", reason: "busy" });
+    at(lines, 0);
+    render(<LyricsPane />);
+    expect(await screen.findByText(/Waiting: your computer is busy/)).toBeInTheDocument();
+    act(() => setCheckStatus({ trackId: lines.id, state: "failed", reason: "stuck" }));
+    expect(await screen.findByText(/Couldn't check yet/)).toBeInTheDocument();
+    const calls = spy.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(spy.mock.calls.length).toBeGreaterThan(calls));
+    expect(screen.queryByText(/Couldn't check yet/)).toBeNull();
   });
 });
 

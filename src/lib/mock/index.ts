@@ -79,6 +79,7 @@ import type {
   Lyrics,
   LyricsCandidate,
   LyricsCandidates,
+  LyricsCheckStatus,
   LyricsVerdict,
   KeyKind,
   PinRecord,
@@ -1401,6 +1402,11 @@ export class MockBackend implements Backend {
       }
       return l;
     });
+  }
+  /** Check statuses the tests set. */
+  checkStatuses = new Map<string, LyricsCheckStatus>();
+  lyricsCheckStatus(trackId: string) {
+    return this.delay(() => this.checkStatuses.get(trackId) ?? null);
   }
   lyricsCandidates(trackId: string) {
     return this.delay((): LyricsCandidates => {

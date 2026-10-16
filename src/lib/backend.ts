@@ -87,6 +87,7 @@ import type {
   LikedPage,
   Lyrics,
   LyricsCandidates,
+  LyricsCheckStatus,
   OwnLyrics,
   NowPlayingDetails,
   OutputState,
@@ -341,6 +342,8 @@ export interface Backend {
   lyricsExport(text: string, fileName: string): Promise<string | null>;
   /** Every set of lyrics found for the song, with what the check said ("Wrong lyrics?"). */
   lyricsCandidates(trackId: string): Promise<LyricsCandidates>;
+  /** Where the song's lyrics check is, while there is one. */
+  lyricsCheckStatus(trackId: string): Promise<LyricsCheckStatus | null>;
   /** Pick the song's lyrics: a candidate key, "none", or null for automatic. */
   lyricsChoose(trackId: string, pick: string | null): Promise<void>;
   /** The song's lyrics timing offset in ms (positive: later). */
@@ -922,6 +925,7 @@ export function createTauriBackend(): Backend {
     ownLyricsIds: () => call("lyrics_own_ids"),
     lyricsExport: (text, fileName) => call("lyrics_export", { text, fileName }),
     lyricsCandidates: (trackId) => call("lyrics_candidates", { trackId }),
+    lyricsCheckStatus: (trackId) => call("lyrics_check_status", { trackId }),
     lyricsChoose: (trackId, pick) => call("lyrics_choose", { trackId, pick }),
     lyricsOffset: (trackId, offsetMs) => call("lyrics_offset", { trackId, offsetMs }),
     lyricsChoicesCount: () => call("lyrics_choices_count"),

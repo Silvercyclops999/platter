@@ -510,6 +510,14 @@ export interface Lyrics {
 /** checked: matched against the song; notChecked: not compared with it; checking: being compared now. */
 export type LyricsCheck = "checked" | "notChecked" | "checking";
 
+/** Where a song's lyrics check is (`lyrics://check-status`, `lyricsCheckStatus`). */
+export interface LyricsCheckStatus {
+  trackId: string;
+  state: "queued" | "waiting" | "reading" | "listening" | "done" | "failed";
+  /** Why it waits or couldn't check: busy (waiting), noModel, unreadable, later or stuck (failed). */
+  reason?: "busy" | "noModel" | "unreadable" | "later" | "stuck";
+}
+
 /**
  * versionHeld: lyrics found for the released version, waiting for "Use anyway";
  * checking: being compared with the song and nothing safe to show yet;
@@ -2823,6 +2831,8 @@ export interface EventMap {
   "transcribe://done": { trackId: string; found: boolean };
   /** A song's lyrics were checked against the song: ask for them again. */
   "lyrics://checked": { trackId: string };
+  /** A song's lyrics check moved on. */
+  "lyrics://check-status": LyricsCheckStatus;
   /** Lyrics choices arrived from another device. */
   "lyrics://choices": null;
   /** Download progress, the queue's state and storage. */

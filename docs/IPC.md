@@ -1146,6 +1146,7 @@ the call: when the artist or lyrics request fails, that part is just left out.
 | `lyrics_own_ids` | – | `string[]` |
 | `lyrics_export` | `{ text, fileName }` | `string \| null` |
 | `lyrics_candidates` | `{ trackId }` | `LyricsCandidates` |
+| `lyrics_check_status` | `{ trackId }` | `CheckStatus` or null (see Checking lyrics against the song) |
 | `lyrics_choose` | `{ trackId, pick }` | – |
 | `lyrics_offset` | `{ trackId, offsetMs }` | – |
 | `lyrics_choices_count` | – | `number` |
@@ -1224,6 +1225,19 @@ lyrics from the server or LRCLIB's exact lookup show with `check:
 "checking"`; ones found only by title wait (`notice: "checking"`). When
 nothing matched, `notice: "noneMatched"` (and a transcription is queued when
 transcription is on). `lyrics://checked` (`{ trackId }`) says to ask again.
+
+The check has a helper process of its own (see Lyrics transcription), uses the
+smallest installed model and two threads, and takes the newest song first (the
+one playing); older requests wait, and beyond three the oldest are dropped.
+`lyrics://check-status` → `CheckStatus = { trackId, state, reason? }` says where
+a song's check is, and `lyrics_check_status { trackId }` returns the latest one
+(or null). `state` is `queued`, `waiting` (reason `busy`: the computer is busy),
+`reading` (the song), `listening` (the model on a window), `done`, or `failed`
+with reason `noModel`, `unreadable`, `later` (couldn't read or listen now, or
+dropped from the queue) or `stuck` (no progress for about two minutes). The
+lyrics view shows these in words ("Waiting: your computer is busy", "Can't
+check without the speech model", "Couldn't check yet" with Try again, which
+asks for the lyrics again and so for a new check).
 
 Without the check, lyrics show with `check: "notChecked"` and stricter rules:
 LRCLIB timing is kept only when its length is within 2 s of the song's, or
@@ -1306,7 +1320,11 @@ message, trackId? }` with kind `download`, `checksum`, `disk` or
 `transcribe`; it clears when something new starts.
 
 `transcribe_track` puts the song first and runs it now, battery or busy or
-not; a background song waiting for a pause to end gives way to it.
+not. A background song in progress stops at once (the model checks for a stop
+between steps), goes back in the queue after it with its decoded audio kept,
+and goes on once the asked-for song is done; a background song waiting for a
+pause to end gives way the same way. While the model loads and takes in its
+first stretch the song shows "Starting…", not 0%.
 `transcribe_album` queues the album's songs that have no lyrics in the app,
 and `transcribe_unreleased` every unreleased song (the same rule as sharing:
 demo release types or an unreleased `ARCHIVE_VERSION`) without them, in the
@@ -1325,7 +1343,9 @@ on battery. A slow connection never pauses anything: a song playback just
 fetched is read from disk, and before reading a song from the server it waits
 for playback's own download to end.
 
-The speech model runs in a helper process: the same Platter binary started
+The speech model runs in helper processes: transcription has one and the
+lyrics check another, so a check never waits behind a batch song. Each is the
+same Platter binary started
 with `--speech-worker`, which exits before any of the app starts (no window,
 tray, single-instance lock or link handling). The app sends it a request
 (model file, model kind, threads, language) and the song's 16 kHz samples on
@@ -1344,10 +1364,12 @@ queue goes on with a new one; after three crashes in a session albums, the
 batch and the lyrics check stop until Platter restarts (the error says so),
 and songs asked for still run.
 
-Threads follow `transcribeProcessor`: `light` gives albums, the batch and the
-lyrics check two and the one song asked for four; `balanced` four for both;
+Threads follow `transcribeProcessor`: `light` gives albums and the batch two
+and the one song asked for four, and a background song that starts while a
+lyrics check runs gets one (a song already running keeps its count for the
+check's few seconds); `balanced` four for both;
 `fast` half the logical cores, at most eight. Never more than half the
-logical cores. With `transcribeFasterAway`, while there has been no keyboard
+logical cores. A lyrics check gets two. With `transcribeFasterAway`, while there has been no keyboard
 or mouse input for 5 minutes and the computer isn't on battery, background
 work gets at least the `balanced` count; when input comes back, a song
 running with the extra threads starts again with the usual count. Background

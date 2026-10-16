@@ -11,7 +11,7 @@ import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { backend } from "../lib/backend";
 import { formatDuration, trackArtistLine } from "../lib/format";
-import type { LyricLine, Lyrics, LyricsCandidate, LyricsCandidates, LyricsVerdict, Track } from "../lib/types";
+import type { LyricLine, Lyrics, LyricsCandidate, LyricsCandidates, LyricsCheckStatus, LyricsVerdict, Track } from "../lib/types";
 import { openLyricsEditor } from "../stores/lyricsEditor";
 import { usePlayer } from "../stores/player";
 import { useSettings, updateSettings } from "../stores/settings";
@@ -26,7 +26,7 @@ import {
   setTapping,
   useWrongLyrics,
 } from "../stores/wrongLyrics";
-import { lyricsChanged, useLyricsTrust } from "./lyrics";
+import { loadCheckStatus, lyricsChanged, retryCheck, useLyricsTrust } from "./lyrics";
 import "./lyrics-trust.css";
 
 /** The small note on what the check said. */
@@ -48,6 +48,34 @@ export const NOTICE_TEXT = {
   noneMatched: "None of the lyrics found match this song",
   chosenNone: "You turned lyrics off for this song",
 } as const;
+
+/** What a check in progress is doing, in words; `stuck` when it couldn't run and Try again helps. */
+export function checkProgress(s: LyricsCheckStatus | undefined): { text: string; spin: boolean; retry: boolean } | null {
+  if (!s || s.state === "done") return null;
+  switch (s.state) {
+    case "queued":
+      return { text: "Waiting to check against the song…", spin: true, retry: false };
+    case "reading":
+      return { text: "Reading the song to check the lyrics…", spin: true, retry: false };
+    case "listening":
+      return { text: "Checking against the song…", spin: true, retry: false };
+    case "waiting":
+      return { text: "Waiting: your computer is busy", spin: false, retry: false };
+    case "failed":
+      return s.reason === "noModel"
+        ? { text: "Can't check without the speech model", spin: false, retry: false }
+        : { text: "Couldn't check yet", spin: false, retry: true };
+  }
+}
+
+/** The song's check status while its lyrics say checking. */
+function useCheckProgress(trackId: string, checking: boolean) {
+  const s = useLyricsTrust((st) => st.checks[trackId]);
+  useEffect(() => {
+    if (checking) void loadCheckStatus(trackId);
+  }, [checking, trackId]);
+  return checking ? checkProgress(s) : null;
+}
 
 /** "+1.5 s", "−0.5 s". */
 export function offsetText(ms: number): string {
@@ -115,9 +143,23 @@ export function CheckModelOffer({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function CheckChip({ lyrics }: { lyrics: Lyrics }) {
+function CheckChip({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) {
   const c = lyrics.check;
+  const p = useCheckProgress(trackId, c === "checking");
   if (!c) return null;
+  if (p) {
+    return (
+      <span className={`lyrics-trust__chip is-checking`} role="status">
+        {p.spin ? <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" /> : <CircleHelp size={14} aria-hidden="true" />}
+        {p.text}
+        {p.retry && (
+          <Button size="sm" variant="ghost" onClick={() => retryCheck(trackId)}>
+            Try again
+          </Button>
+        )}
+      </span>
+    );
+  }
   const icon =
     c === "checked" ? (
       <Check size={14} aria-hidden="true" />
@@ -213,7 +255,7 @@ export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: 
   return (
     <div className="lyrics-trust" role="toolbar" aria-label="Lyrics tools">
       <div className="lyrics-trust__bar">
-        <CheckChip lyrics={lyrics} />
+        <CheckChip lyrics={lyrics} trackId={track.id} />
         {lyrics.chosen && <span className="lyrics-trust__chip">Your pick</span>}
         {synced && <TimingNudge lyrics={lyrics} track={track} />}
         <button
@@ -253,6 +295,7 @@ export function tapLine(trackId: string, line: LyricLine, lyrics: Lyrics): boole
 /** What the lyrics view says instead of lyrics, and what can be done. */
 export function LyricsNotice({ info, track }: { info: Lyrics; track: Track }) {
   const n = info.notice;
+  const p = useCheckProgress(track.id, n === "checking");
   if (!n) return null;
   return (
     <div className="lyrics-page__empty-wrap lyrics-trust__notice">
@@ -262,12 +305,17 @@ export function LyricsNotice({ info, track }: { info: Lyrics; track: Track }) {
           This is another version of the song (unreleased, alternate, live or tagged with a version), so its words may differ.
         </p>
       )}
-      {n === "checking" && (
-        <p className="lyrics-trust__notice-note">
-          <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" /> The lyrics found are being compared with the song on
-          this computer.
-        </p>
-      )}
+      {n === "checking" &&
+        (p ? (
+          <p className="lyrics-trust__notice-note" role="status">
+            {p.spin && <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" />} {p.text}
+          </p>
+        ) : (
+          <p className="lyrics-trust__notice-note">
+            <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" /> The lyrics found are being compared with the song on
+            this computer.
+          </p>
+        ))}
       <div className="lyrics-trust__notice-actions">
         {n === "versionHeld" && info.pick && (
           <Button variant="primary" onClick={() => void chooseLyrics(track.id, info.pick!)}>
@@ -277,6 +325,11 @@ export function LyricsNotice({ info, track }: { info: Lyrics; track: Track }) {
         {n === "chosenNone" && (
           <Button variant="primary" onClick={() => void chooseLyrics(track.id, null)}>
             Show lyrics again
+          </Button>
+        )}
+        {p?.retry && (
+          <Button variant="primary" onClick={() => retryCheck(track.id)}>
+            Try again
           </Button>
         )}
         <Button variant={n === "versionHeld" || n === "chosenNone" ? "ghost" : "primary"} onClick={() => openWrongLyrics(track)}>

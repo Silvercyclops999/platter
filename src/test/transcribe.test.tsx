@@ -231,7 +231,7 @@ describe("Lyrics view", () => {
     page();
     await screen.findByText(/Downloads the 181 MB speech model first/);
     await userEvent.click(screen.getByRole("button", { name: "Transcribe this song" }));
-    await screen.findByText(/Downloading the speech model|Transcribing…/);
+    await screen.findByText(/Downloading the speech model|Transcribing…|Starting…|Reading the song…/);
     await screen.findByText("Auto-transcribed, may be wrong.", undefined, { timeout: 3000 });
     expect(screen.getByText("I walk the long way back to you")).toBeInTheDocument();
     // Edit opens the editor on the transcription.
