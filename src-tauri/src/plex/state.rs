@@ -1670,14 +1670,30 @@ mod tests {
         assert!(st.client().await.is_err(), "no server calls while offline");
         assert!(st.health().cached_only);
         assert_eq!(st.health().banner.unwrap().kind, "goneOffline");
+        // The connection is dropped in the background; wait for it so
+        // coming back below can't race it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while st.inner.session.read().await.current.as_ref().is_some_and(|c| c.client.is_some())
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
         // Requests made so far; a health tick sends none.
         let before = server.received_requests().await.unwrap_or_default().len();
         st.health_tick().await;
         assert_eq!(server.received_requests().await.unwrap_or_default().len(), before);
         st.set_offline_by_choice(false);
         assert!(!st.offline_by_choice());
-        st.health_tick().await;
-        st.health_tick().await;
+        // Reconnecting happens in the background; tick until it has.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            st.health_tick().await;
+            let back = st.health().status == HealthStatus::Local && st.client().await.is_ok();
+            if back || std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
         assert_eq!(st.health().status, HealthStatus::Local);
         assert!(st.client().await.is_ok());
         st.sign_out().await.unwrap();
