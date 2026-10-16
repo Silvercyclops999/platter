@@ -1,4 +1,5 @@
 import { Disc3, Ellipsis, List, Pause, Play, Rows3, Shuffle } from "lucide-react";
+import { PageMissing } from "../components/PageMissing";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { Badge, QualityBadge } from "../components/Badge";
@@ -92,7 +93,7 @@ function LibraryAlbumView({ id }: { id: string }) {
       el,
     );
 
-  if (error && !data) return <p className="page-pad page-error">Couldn't load this album: {error.message}</p>;
+  if (error && !data) return <PageMissing what="album" error={error} />;
 
   const firstTrack = data?.tracks[0];
   const untagged = album && album.format === null;
@@ -324,7 +325,7 @@ function CatalogueAlbumView({ rgid }: { rgid: string }) {
     if (owned) useRouter.getState().replace({ name: "album", id: owned });
   }, [owned]);
 
-  if (error && !data) return <p className="page-pad page-error">Couldn't load this album: {error.message}</p>;
+  if (error && !data) return <PageMissing what="album" error={error} missing="Couldn't find this album" />;
   const reload = () => setVersion((v) => v + 1);
   const total = data?.tracks.reduce((n, t) => n + (t.durationMs ?? 0), 0) ?? 0;
   const goArtist = () => {

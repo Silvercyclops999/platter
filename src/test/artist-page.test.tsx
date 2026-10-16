@@ -302,6 +302,6 @@ describe("credited artist page", () => {
 
   it("is not found when nothing credits the name", async () => {
     render(<ArtistPage id="credit:nobody at all" />);
-    expect(await screen.findByText(/Couldn't load this artist/)).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent("This artist isn't in your library");
   });
 });

@@ -1,4 +1,5 @@
 import { Ellipsis, Pause, Pin, PinOff, Play, Shuffle, X } from "lucide-react";
+import { PageMissing } from "../components/PageMissing";
 import { Suspense, lazy, useEffect, useId, useState, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
@@ -114,7 +115,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
   usePageBar(artist?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(artist?.title);
 
-  if (error && !data) return <p className="page-pad page-error">Couldn't load this artist: {error.message}</p>;
+  if (error && !data) return <PageMissing what="artist" error={error} />;
 
   // A library artist keeps About without a bio; a credited name needs something to say.
   const sections = data
@@ -561,7 +562,7 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
   }, [libraryId]);
   useArtTint(null, data?.artist.photo ?? undefined);
 
-  if (error && !data) return <p className="page-pad page-error">Couldn't load this artist: {error.message}</p>;
+  if (error && !data) return <PageMissing what="artist" error={error} missing="Couldn't find this artist" />;
   const artist = data?.artist;
   const meta = data ? [data.artist.disambiguation, data.area, data.lifeSpan].filter(Boolean).join(" · ") : "";
   const reload = () => setVersion((v) => v + 1);

@@ -1,4 +1,5 @@
 import { ArrowDownUp, Ellipsis, ListMusic, Pause, Pencil, Play } from "lucide-react";
+import { PageMissing } from "../components/PageMissing";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
@@ -145,7 +146,7 @@ export function PlaylistPage({ id }: { id: string }) {
     }
   }, [error, data]);
 
-  if (error && !data) return <p className="page-pad page-error">Couldn't load this playlist: {error.message}</p>;
+  if (error && !data) return <PageMissing what="playlist" error={error} />;
 
   /** Apply a new row order now, then ask the core. */
   const move = (ids: string[], after: string | null | undefined) => {
