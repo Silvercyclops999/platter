@@ -42,6 +42,7 @@ import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMa
 import { BridgeSettings, bridgeMatches } from "./BridgeSettings";
 import { MixExclusions } from "./MixExclusions";
 import { DismissedArtists } from "./DiscoverSettings";
+import { DefaultLibraries, InvitesToYou, PeopleWithAccess, ShareMyMusic } from "./SharingSettings";
 import { DISCOGS_TOKEN_DESCRIPTION, DiscogsImportControl, DiscogsTokenControl, discogsNote, useDiscogs } from "./DiscogsSettings";
 import { FolderKeywords, ReleaseStatusTag, ReleaseStatusValues } from "./ArchiveSettings";
 import { COVER_PX_OPTIONS, DoctorChecksList, DoctorNote } from "./DoctorSettings";
@@ -1878,6 +1879,69 @@ export function SettingsPage() {
       note: s && !s.sharePublicLinks ? "Turn on Public links for released music to use this." : undefined,
       control: (ids) => toggle(s, "shareCardSongLink", ids),
     },
+    // Sharing: your music through Plex
+    {
+      key: "shareMyMusic",
+      section: "Sharing",
+      group: "Share my music",
+      title: "Share my music",
+      description:
+        "Invite someone to your Plex server by Plex username or email, or send a link or QR code their Platter opens. You pick which music libraries; your other libraries are never shared. Platter tells you how many unreleased albums they hold first.",
+      control: (ids) => <ShareMyMusic ids={ids} />,
+    },
+    {
+      key: "sharePeople",
+      section: "Sharing",
+      group: "Share my music",
+      title: "People with access",
+      description: "Everyone your server is shared with, what they can see and when they were last on it.",
+      control: () => null,
+      block: () => <PeopleWithAccess />,
+    },
+    {
+      key: "shareDefaultLibraries",
+      section: "Sharing",
+      group: "Share my music",
+      title: "Libraries I share by default",
+      description: "What a share starts with, and what Let them listen from my server shares in one click. Music libraries only. None until you pick.",
+      control: () => null,
+      block: () => <DefaultLibraries />,
+    },
+    {
+      key: "shareHideUnreleased",
+      section: "Sharing",
+      group: "Share my music",
+      title: "Hide my unreleased music from people I share with",
+      description:
+        "Platter labels your unreleased albums in Plex and each share leaves that label out, so friends never see them. This uses Plex's own sharing restrictions, which need Plex Pass. Without it, Platter asks before sharing a library with unreleased music.",
+      control: (ids) => toggle(s, "shareHideUnreleased", ids),
+    },
+    {
+      key: "shareAllowDownloads",
+      section: "Sharing",
+      group: "Share my music",
+      title: "Allow downloads for people I share with",
+      description: "Lets them download your music for offline listening in their Plex apps. Plex's own rules decide where and how they can play it.",
+      control: (ids) => toggle(s, "shareAllowDownloads", ids),
+    },
+    {
+      key: "shareAcceptInvites",
+      section: "Sharing",
+      group: "Invites to you",
+      title: "Accept invites inside Platter",
+      description:
+        "When a friend shares their server with you, a notification and a card show here and in Listen along. One click accepts it and adds their music; no visit to plex.tv needed. In a listening session, only your Plex username goes to the host, sealed, when they ask.",
+      control: (ids) => toggle(s, "shareAcceptInvites", ids),
+    },
+    {
+      key: "shareInvites",
+      section: "Sharing",
+      group: "Invites to you",
+      title: "Invites waiting",
+      description: "Servers friends shared with you that you haven't accepted yet.",
+      control: () => null,
+      block: () => <InvitesToYou />,
+    },
     // Friends, following and listening sessions
     {
       key: "showFriendActivity",
@@ -2025,6 +2089,13 @@ export function SettingsPage() {
       title: "Include unreleased songs in what I share",
       description: "Off, demos and other unreleased songs stay out of your shared playlists, your taste summary and your Blends.",
       control: (ids) => toggle(s, "shareUnreleased", ids),
+      key: "shareOfferServer",
+      section: "Social",
+      group: "Listening sessions",
+      title: "Offer \"Let them listen from my server\"",
+      description:
+        "In a session you host, when someone can't hear a song because it isn't on any server they can reach, you can invite them to your Plex server with one click. Only the libraries you share by default, never the others.",
+      control: (ids) => toggle(s, "shareOfferServer", ids),
     },
     // Integrations: scrobbling
     {

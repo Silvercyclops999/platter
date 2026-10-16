@@ -28,6 +28,10 @@
  *   ?import=demo    two library import sources on and already imported
  *   ?stats=empty    no demo listening history (the Stats page's empty state)
  *   ?compare=1      Compare stats with friends starts on
+ *   ?listen=cantHear  host a listening session where Robin can't hear the song
+ *                   (shows "Let them listen from my server")
+ *   ?listen=invited a guest who can't hear the host's song, with the host's
+ *                   server invite waiting
  */
 import type { Backend, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
@@ -51,6 +55,7 @@ import type {
   UpgradeUnder,
   CachedLibrary,
   ListenOp,
+  ShareOptions,
   DownloadKind,
   AbLoop,
   AddPlace,
@@ -173,6 +178,7 @@ import { MockDownloads } from "./downloads";
 import { MockMixes } from "./mixes";
 import { MockSocial } from "./social";
 import { MockCircle } from "./circle";
+import { MockSharing } from "./sharing";
 import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockTagEdit } from "./tagEdit";
@@ -236,6 +242,8 @@ export interface MockOptions {
   statsCompare?: boolean;
   /** The day Top Songs and Wrapped take as today, "YYYY-MM-DD" (?today=2026-12-05). */
   today?: string;
+  /** Start in a listening session that shows sharing (?listen=cantHear or ?listen=invited). */
+  listenDemo?: "cantHear" | "invited";
 }
 
 const isTestEnv = (() => {
@@ -283,6 +291,7 @@ export function optionsFromUrl(search: string): MockOptions {
     statsSparse: p.get("stats") === "sparse",
     statsCompare: p.get("compare") === "1",
     today: /^\d{4}-\d{2}-\d{2}$/.test(p.get("today") ?? "") ? (p.get("today") as string) : undefined,
+    listenDemo: p.get("listen") === "cantHear" || p.get("listen") === "invited" ? (p.get("listen") as "cantHear" | "invited") : undefined,
   };
 }
 
@@ -342,6 +351,8 @@ export class MockBackend implements Backend {
   readonly social: MockSocial;
   /** Shared playlists and Blends (test hooks: relay, ownerOffline, memberAdds, ownerDeletes, failNextJoin, joinWaits, ring, personJoins, blendJoins). */
   readonly circle: MockCircle;
+  /** Sharing your music through Plex (test hooks: plexPass, owner, failNext, inviteArrives). */
+  readonly sharing: MockSharing;
   readonly syncFile: MockSync;
   /** Library import (test hook: failNext). */
   readonly importMock: MockImport;
@@ -607,6 +618,18 @@ export class MockBackend implements Backend {
         else if (op.op === "previous") void this.playPrevious();
         else if (op.op === "seek") void this.playSeek(op.ms);
       },
+      shareWithGuest: (u) => {
+        const s = this.settings;
+        return this.sharing.share(u, { libraries: s.shareDefaultLibraries.length ? s.shareDefaultLibraries : ["3"], hideUnreleased: s.shareHideUnreleased, allowDownloads: s.shareAllowDownloads });
+      },
+      hostShared: (host) => this.sharing.inviteArrives(host),
+    });
+    this.sharing = new MockSharing({
+      settings: () => this.settings,
+      emitInvites: (all) => this.emit("sharing://invites", all),
+      emitNotice: (message) => this.emit("sharing://notice", { message }),
+      later: (ms, fn) => this.later(ms, fn),
+      accepted: () => this.social.hostCopyHere(),
     });
     this.circle = new MockCircle(this.fx, {
       settings: () => this.settings,
@@ -721,6 +744,21 @@ export class MockBackend implements Backend {
     this.positionMs = 62_000;
 
     if (this.opts.timelines) this.runStartup();
+    if (this.opts.listenDemo) this.startListenDemo(this.opts.listenDemo);
+  }
+
+  /** ?listen=cantHear: hosting, Robin can't hear the song. ?listen=invited: a guest with the host's invite waiting. */
+  private startListenDemo(kind: "cantHear" | "invited") {
+    if (kind === "cantHear") {
+      this.social.start();
+      this.social.guestJoins("Robin");
+      this.social.guestJoins("Casey");
+      this.social.guestCantHear("Robin", true);
+      return;
+    }
+    this.social.join("platter://join/AV8MKp57HUw4puL5CxfT5EXMOOHwS3stlqDkyLHT9XopaPBRgA");
+    this.social.songNotHere("Basement Tapes No. 4");
+    this.sharing.inviteArrives(this.social.listenState().hostName ?? "Jules");
   }
 
   // ---------------------------------------------------------------- infra
@@ -2700,7 +2738,7 @@ export class MockBackend implements Backend {
         const st = this.deck();
         this.later(0, () => this.emit("deck://status", st));
       }
-      if (patch.listenGuestsControl !== undefined) this.social.settingsChanged();
+      if (patch.listenGuestsControl !== undefined || patch.shareOfferServer !== undefined) this.social.settingsChanged();
       // Another server's music, or more libraries: every list reloads.
       if (patch.serverView !== undefined || patch.libraries !== undefined) this.later(0, () => this.emit("library://changed", null));
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
@@ -3229,6 +3267,36 @@ export class MockBackend implements Backend {
   }
   listenRemove(personId: string) {
     return this.delay(() => this.social.remove(personId));
+  }
+  listenOfferServer(personId: string) {
+    return this.delay(() => this.social.offerServer(personId));
+  }
+
+  // ---------------------------------------------------------------- sharing
+
+  sharingOverview() {
+    return this.delay(() => this.sharing.overview());
+  }
+  sharingShare(invitee: string, options: ShareOptions) {
+    return this.delay(() => this.sharing.share(invitee, options));
+  }
+  sharingPeople() {
+    return this.delay(() => this.sharing.peopleList());
+  }
+  sharingRemove(id: string) {
+    return this.delay(() => this.sharing.remove(id));
+  }
+  sharingLink(options: ShareOptions) {
+    return this.delay(() => this.sharing.link(options));
+  }
+  sharingOpenLink(link: string) {
+    return this.delay(() => this.sharing.openLink(link));
+  }
+  sharingInvites() {
+    return this.delay(() => this.sharing.invitesList());
+  }
+  sharingAccept(id: string) {
+    return this.delay(() => this.sharing.accept(id));
   }
 
   deepLinkTake() {

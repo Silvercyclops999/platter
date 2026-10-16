@@ -141,6 +141,14 @@ import type {
   FollowedArtist,
   WhatsNew,
   ListenView,
+  InviteAccepted,
+  PersonWithAccess,
+  ReceivedInvite,
+  ShareLinkResult,
+  ShareLinkView,
+  ShareOptions,
+  ShareStatus,
+  SharingOverview,
   ListenOp,
   CircleView,
   CircleAccount,
@@ -739,6 +747,26 @@ export interface Backend {
   listenControl(op: ListenOp): Promise<void>;
   /** Remove someone from the session you host. */
   listenRemove(personId: string): Promise<ListenView>;
+  /** "Let them listen from my server" for someone in the session you host. */
+  listenOfferServer(personId: string): Promise<ListenView>;
+
+  // Sharing your music through Plex (docs/IPC.md "Sharing")
+  /** Your server's music libraries, their unreleased albums, and Plex Pass. */
+  sharingOverview(): Promise<SharingOverview>;
+  /** Share music libraries with a Plex username or email. */
+  sharingShare(invitee: string, options: ShareOptions): Promise<ShareStatus>;
+  /** Everyone your server is shared with. */
+  sharingPeople(): Promise<PersonWithAccess[]>;
+  /** Take someone's access away. */
+  sharingRemove(id: string): Promise<void>;
+  /** A link or QR code that lets someone ask for your music. */
+  sharingLink(options: ShareOptions): Promise<ShareLinkView>;
+  /** Open someone's share link. */
+  sharingOpenLink(link: string): Promise<ShareLinkResult>;
+  /** Server invites you received (`fresh` asks Plex). */
+  sharingInvites(fresh?: boolean): Promise<ReceivedInvite[]>;
+  /** Accept one: their server and its music join your library. */
+  sharingAccept(id: string): Promise<InviteAccepted>;
 
   // Shared playlists and Blends (docs/IPC.md "Shared playlists and Blends")
   /** Shared playlists, Blends, direct invites and the relay. */
@@ -1373,6 +1401,15 @@ export function createTauriBackend(): Backend {
     blendHide: (id, trackId) => call("blend_hide", { id, trackId }),
     blendRefresh: (id) => call("blend_refresh", { id }),
     blendLeave: (id) => call("blend_leave", { id }),
+    listenOfferServer: (personId) => call("listen_offer_server", { personId }),
+    sharingOverview: () => call("sharing_overview"),
+    sharingShare: (invitee, options) => call("sharing_share", { invitee, options }),
+    sharingPeople: () => call("sharing_people"),
+    sharingRemove: (id) => call("sharing_remove", { id }),
+    sharingLink: (options) => call("sharing_link", { options }),
+    sharingOpenLink: (link) => call("sharing_open_link", { link }),
+    sharingInvites: (fresh) => call("sharing_invites", { fresh: fresh ?? true }),
+    sharingAccept: (id) => call("sharing_accept", { id }),
     hiddenList: () => call("hidden_list"),
     hiddenSet: (item, on) => call("hidden_set", { item, on }),
     bookmarksList: () => call("bookmarks_list"),

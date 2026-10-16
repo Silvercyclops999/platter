@@ -401,11 +401,13 @@ describe("listening sessions", () => {
     const strip = await screen.findByRole("region", { name: "Listening session" });
     await waitFor(() => expect(strip).toHaveTextContent("Casey"));
     act(() => mock.social.guestCantHear("Casey", true));
-    await waitFor(() => expect(screen.getAllByText(/Casey can't hear this song/)).toHaveLength(2));
+    // In the strip, under the song, and on the card offering your server.
+    await waitFor(() => expect(screen.getAllByText(/Casey can't hear this/)).toHaveLength(3));
+    expect(within(strip).getByRole("group", { name: "People who can't hear this" })).toHaveTextContent("Casey can't hear this");
     await userEvent.click(within(strip).getByRole("button", { name: /^People/ }));
-    expect(within(strip).getByRole("list", { name: "People in the session" })).toHaveTextContent("Casey · can't hear this song");
+    expect(within(strip).getByRole("list", { name: "People in the session" })).toHaveTextContent("Casey · can't hear this");
     act(() => mock.social.guestCantHear("Casey", false));
-    await waitFor(() => expect(screen.queryByText(/can't hear this song/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/can't hear this/)).toBeNull());
   });
 
   it("a guest's controls and additions go to the host, and add-only hosts say so", async () => {

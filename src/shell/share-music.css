@@ -1,0 +1,150 @@
+/* ---------------------------------------------------------------- sharing your music */
+
+/* Cards that float above the listening session strip: "<name> can't hear
+   this" for the host, the host's invite for a guest. */
+.listen-strip { position: relative; }
+.share-callouts {
+  position: absolute;
+  right: var(--space-4);
+  bottom: calc(100% + var(--space-2));
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+.share-callout {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: min(560px, calc(100vw - 48px));
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-regular, 400);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.35);
+  animation: share-callout-in var(--motion-base, 200ms) var(--motion-easing) both;
+}
+.share-callout--invite { border-left-color: var(--color-status-local); }
+.share-callout--done { border-left-color: var(--color-success); }
+.share-callout--compact { box-shadow: none; max-width: none; animation: none; }
+@keyframes share-callout-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.share-callout__face { position: relative; flex: none; display: inline-flex; }
+.share-callout__glyph {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  color: var(--color-text-on-accent);
+  box-shadow: 0 0 0 2px var(--color-bg-overlay);
+}
+.share-callout__glyph--server { background: var(--color-status-local); }
+.share-callout__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.share-callout__title { font-weight: var(--font-weight-bold); font-size: var(--font-size-md); }
+.share-callout__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.share-callout__ok { flex: none; margin-right: var(--space-2); color: var(--color-success); }
+.share-callout .btn { flex: none; }
+
+/* ---------------------------------------------------------------- the share dialog */
+.dialog.share-dialog { width: min(560px, calc(100vw - 48px)); }
+.share-dialog__label { margin: var(--space-4) 0 var(--space-2); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); }
+.share-dialog__who { margin-top: var(--space-4); }
+.share-dialog__who > .share-dialog__label { display: block; margin-top: 0; }
+.share-dialog__who > input { width: 100%; }
+.share-dialog__note { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.share-dialog__result { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-row); background: var(--color-error-surface); color: var(--color-error-text); font-size: var(--font-size-sm); }
+.share-dialog__opts { margin-top: var(--space-3); }
+.share-dialog__link { margin-top: var(--space-4); }
+
+/* A library to pick is a record: grooves, and a label that lights up when chosen. */
+.share-libs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-2); }
+.share-lib {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-raised);
+  cursor: pointer;
+  transition: border-color var(--motion-quick) var(--motion-easing), background var(--motion-quick) var(--motion-easing);
+}
+.share-lib:hover { background: var(--color-state-hover); }
+.share-lib.is-on { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.share-lib__box { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.share-lib:has(.share-lib__box:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.share-lib__disc {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, var(--color-bg-raised) 0 2px, var(--color-text-muted) 2px 6px, transparent 6px),
+    repeating-radial-gradient(circle, #1b1916 0 1px, #24211d 1px 2.5px);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  transition: transform var(--motion-base, 200ms) var(--motion-easing);
+}
+.share-lib.is-on .share-lib__disc {
+  background:
+    radial-gradient(circle, var(--color-bg-raised) 0 2px, var(--color-accent) 2px 7px, transparent 7px),
+    repeating-radial-gradient(circle, #1b1916 0 1px, #2a2621 1px 2.5px);
+  transform: rotate(140deg);
+}
+.share-lib__text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.share-lib__title { font-weight: var(--font-weight-bold); font-size: var(--font-size-md); }
+.share-lib__sub { display: block; font-size: var(--font-size-xs, 11px); line-height: 1.35; color: var(--color-text-secondary); }
+.share-lib__sub > svg { display: inline; vertical-align: -1px; margin-right: 3px; }
+.share-lib__sub--vault { color: var(--color-warning); }
+
+/* What the choice holds that isn't released, and keeping it home. */
+.share-vault {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised2);
+}
+.share-vault__icon { flex: none; margin-top: 2px; color: var(--color-text-secondary); }
+.share-vault--has { box-shadow: inset 3px 0 0 var(--color-warning); }
+.share-vault--has .share-vault__icon { color: var(--color-warning); }
+.share-vault__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.share-vault__line { font-weight: var(--font-weight-semibold); }
+.share-vault__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--font-size-md); }
+.share-vault__hint { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.share-vault__stop { padding: var(--space-2) var(--space-3); border-radius: var(--radius-row); background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning-text); font-size: var(--font-size-sm); }
+.share-vault__stop > p { margin: 0 0 var(--space-2); }
+.share-vault__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* ---------------------------------------------------------------- Settings, Sharing */
+.share-panel { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-2); }
+.share-people { list-style: none; margin: 0; padding: 0; border-radius: var(--radius-card); background: var(--color-bg-raised); }
+.share-person { display: flex; align-items: center; gap: var(--space-3); min-height: 56px; padding: var(--space-2) var(--space-3); }
+.share-person + .share-person { border-top: 1px solid var(--color-border); }
+.share-person__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.share-person__name { font-weight: var(--font-weight-bold); }
+.share-person__meta { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.share-person__tags { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
+.share-tag { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--color-bg-raised2); font-size: var(--font-size-xs, 11px); color: var(--color-text-secondary); }
+.share-tag--vault { color: var(--color-warning); }
+.share-tag--pending { color: var(--color-info-text); }
+.share-empty { margin: 0; padding: var(--space-3); border-radius: var(--radius-card); background: var(--color-bg-raised); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.share-invites { display: flex; flex-direction: column; gap: var(--space-2); }
+.share-defaults { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }

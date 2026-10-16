@@ -6,6 +6,7 @@ import { Dialog } from "../components/Dialog";
 import { QrCode } from "../components/QrCode";
 import type { ListenMissing, ListenPerson, ListenView } from "../lib/types";
 import { closeInvite, copyInvite, endSession, listenAlong, openInvite, removePerson, startSession, useSocial } from "../stores/social";
+import { CantHearCallout, SessionInviteCard, offerText } from "./ShareMusic";
 import "./social.css";
 
 /** "Alex", "Alex and Sam", "Alex, Sam and 2 more". */
@@ -47,7 +48,7 @@ export function missingText(m: ListenMissing): string {
 export function listenNote(v: ListenView): string | null {
   if (v.status !== "live") return null;
   if (v.role === "guest") return v.missing ? missingText(v.missing) : v.anotherVersion ? "Another version" : null;
-  if (v.role === "host" && v.cantHear.length > 0) return `${namesLine(v.cantHear)} can't hear this song`;
+  if (v.role === "host" && v.cantHear.length > 0) return `${namesLine(v.cantHear)} can't hear this`;
   return null;
 }
 
@@ -102,6 +103,8 @@ export function ListenStrip() {
   const note = listenNote(v);
   return (
     <div className={`listen-strip ${stopped ? "listen-strip--stopped" : ""}`} role="region" aria-label="Listening session">
+      {!stopped && <CantHearCallout v={v} />}
+      {!stopped && <SessionInviteCard />}
       <UsersRound size={14} aria-hidden="true" />
       <span className="listen-strip__faces" aria-hidden="true">
         {v.people.slice(0, 5).map((p) => (
@@ -153,7 +156,8 @@ function PeopleList({ v }: { v: ListenView }) {
             {p.name}
             {p.me && <span className="listen-people__tag"> (you)</span>}
             {p.host && <span className="listen-people__tag"> · host</span>}
-            {p.cantHear && <span className="listen-people__tag listen-people__tag--cant"> · can't hear this song</span>}
+            {p.cantHear && <span className="listen-people__tag listen-people__tag--cant"> · can't hear this</span>}
+            {v.role === "host" && p.offer && <span className="listen-people__offer">{offerText(p)}</span>}
           </span>
           {v.role === "host" && !p.host && (
             <IconButton size="sm" label={`Remove ${p.name}`} icon={<UserMinus size={16} />} onClick={() => void removePerson(p.id)} />

@@ -5,11 +5,12 @@
  * Test hooks: `access` ("ok", "notAdmin", "offline"), `failNextJoin`,
  * `guestJoins(name)`, `hostGone()`, `hostEnds()`, `removedByHost()`,
  * `relay(health)`, `setHostControl(on)`, `addRelease(albumId)`, `songNotHere(title)`,
- * `anotherVersion(on)`, `guestCantHear(name, on)`.
+ * `anotherVersion(on)`, `guestCantHear(name, on)`, `guestTakesInvites(on)`,
+ * `guestAccepts(name)`, `hostCopyHere()`.
  *
  * Invites look like the real ones: a random token and nothing else.
  */
-import type { ActivityPanel, Album, FollowedArtist, FriendActivity, ListenInvite, ListenOp, ListenView, Track, WhatsNew } from "../types";
+import type { ActivityPanel, Album, FollowedArtist, FriendActivity, ListenInvite, ListenOffer, ListenOp, ListenView, ShareStatus, Track, WhatsNew } from "../types";
 import type { Fixtures } from "./fixtures";
 import { mockQr } from "./sync";
 
@@ -21,7 +22,7 @@ const HOUR = 3600;
 const DAY = 86400;
 
 export interface SocialHooks {
-  settings: () => { listenGuestsControl: boolean; listenInviteHours: number; listenName: string; showFriendActivity: boolean };
+  settings: () => { listenGuestsControl: boolean; listenInviteHours: number; listenName: string; showFriendActivity: boolean; shareOfferServer: boolean };
   emitFollows: (all: FollowedArtist[]) => void;
   emitBadge: (unseen: number) => void;
   emitListen: (v: ListenView) => void;
@@ -31,6 +32,10 @@ export interface SocialHooks {
   queueAdd: (ids: string[]) => void;
   /** Play, pause, skip or seek on the mock player (a guest's request reaching the host). */
   control: (op: ListenOp) => void;
+  /** Share the host's music with a guest's Plex account (the default libraries). */
+  shareWithGuest: (plexUser: string) => ShareStatus;
+  /** The host told this guest it shared its server: an invite arrives. */
+  hostShared: (host: string) => void;
 }
 
 const NONE: ListenView = {
@@ -48,6 +53,7 @@ const NONE: ListenView = {
   cantHear: [],
   missing: null,
   anotherVersion: false,
+  offerServer: false,
 };
 export const MOCK_INVITE = "platter://join/AV8MKp57HUw4puL5CxfT5EXMOOHwS3stlqDkyLHT9XopaPBRgA";
 
@@ -63,6 +69,8 @@ export class MockSocial {
   private listen: ListenView = { ...NONE };
   private invites = 0;
   private hostControl = true;
+  /** Guests' Platters answer with their Plex name (off: "Accept invites inside Platter" is off there). */
+  private guestsTakeInvites = true;
 
   constructor(
     private fx: Fixtures,
@@ -84,6 +92,7 @@ export class MockSocial {
     this.listen = { ...NONE };
     this.invites = 0;
     this.hostControl = true;
+    this.guestsTakeInvites = true;
   }
 
   // ---------------------------------------------------------------- activity
@@ -170,7 +179,7 @@ export class MockSocial {
   listenState(): ListenView {
     return {
       ...this.listen,
-      people: this.listen.people.map((p) => ({ ...p })),
+      people: this.listen.people.map((p) => ({ ...p, offer: p.offer ? { ...p.offer } : null })),
       listeners: [...this.listen.listeners],
       queue: [...this.listen.queue],
       cantHear: [...this.listen.cantHear],
@@ -203,6 +212,7 @@ export class MockSocial {
         invite: this.newInvite(),
         people: [{ id: "host", name, avatar: null, host: true, me: true, cantHear: false }],
         guestsCanControl: this.hooks.settings().listenGuestsControl,
+        offerServer: this.hooks.settings().shareOfferServer,
         status: "live",
         relay: "ok",
       });
@@ -293,7 +303,59 @@ export class MockSocial {
 
   /** The host's own setting changed. */
   settingsChanged() {
-    if (this.listen.role === "host") this.setListen({ ...this.listen, guestsCanControl: this.hooks.settings().listenGuestsControl });
+    const s = this.hooks.settings();
+    if (this.listen.role === "host") this.setListen({ ...this.listen, guestsCanControl: s.listenGuestsControl, offerServer: s.shareOfferServer });
+  }
+
+  private setOffer(personId: string, offer: ListenOffer | null) {
+    if (this.listen.role !== "host") return;
+    this.setListen({ ...this.listen, people: this.listen.people.map((p) => (p.id === personId ? { ...p, offer } : p)) });
+  }
+
+  /** "Let them listen from my server": ask the guest's Platter, then share through Plex. */
+  offerServer(personId: string): ListenView {
+    if (!this.hooks.settings().shareOfferServer) throw { kind: "invalid", message: "Sharing your server is turned off in Settings, Sharing." };
+    if (this.listen.role !== "host") throw { kind: "invalid", message: "Only the host can share their server." };
+    const p = this.listen.people.find((x) => x.id === personId && !x.host);
+    if (!p) throw { kind: "notFound", message: "They're not in the session anymore." };
+    this.setOffer(personId, { state: "asking" });
+    this.hooks.later(400, () => {
+      if (!this.guestsTakeInvites) return this.setOffer(personId, { state: "noInvites" });
+      this.setOffer(personId, { state: "inviting" });
+      this.hooks.later(500, () => {
+        const st = this.hooks.shareWithGuest(`${p.name.toLowerCase()}_on_plex`);
+        const offer: ListenOffer =
+          st.status === "invited"
+            ? { state: "invited" }
+            : st.status === "alreadyShared"
+              ? { state: "alreadyShared" }
+              : { state: "failed", message: "message" in st ? st.message : "Your unreleased music can only be kept out with Plex Pass. Share from Settings, Sharing to choose what to do." };
+        this.setOffer(personId, offer);
+        // In the demo they accept a few seconds later and hear your copy.
+        if (offer.state === "invited" && this.hooks.demo()) this.hooks.later(3000, () => this.guestAccepts(p.name));
+      });
+    });
+    return this.listenState();
+  }
+
+  /** Whether guests' Platters take invites inside Platter (test hook). */
+  guestTakesInvites(on: boolean) {
+    this.guestsTakeInvites = on;
+  }
+
+  /** A guest accepted and plays the host's copy now (test hook). */
+  guestAccepts(name: string) {
+    this.guestCantHear(name, false);
+  }
+
+  /** The host shared their server with this guest (test hook): the invite shows here. */
+  hostSharesServer() {
+    if (this.listen.role === "guest" && this.listen.hostName) this.hooks.hostShared(this.listen.hostName);
+  }
+
+  /** The host's server is in the library now: its copy of the song plays. */
+  hostCopyHere() {
+    if (this.listen.role === "guest") this.setListen({ ...this.listen, missing: null, anotherVersion: false });
   }
 
   /** The host stops answering (test hook). */

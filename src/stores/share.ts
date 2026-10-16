@@ -14,6 +14,7 @@ import type { AppError, DeepLinkOpen, ShareKind } from "../lib/types";
 import { player, usePlayer } from "./player";
 import { nav } from "./router";
 import { joinSession, listenAlong } from "./social";
+import { openShareLink } from "./sharing";
 import { toast, useToasts, type ToastArt } from "./toasts";
 
 export const LINK_COPIED = "Link copied";
@@ -157,6 +158,10 @@ export async function openDeepLink(o: DeepLinkOpen, b: Backend = backend): Promi
       return;
     }
     await joinSession(o.join, b);
+    return;
+  }
+  if (o.shareAsk) {
+    await openShareLink(o.shareAsk, b);
     return;
   }
   if (o.status === "notInLibrary") {

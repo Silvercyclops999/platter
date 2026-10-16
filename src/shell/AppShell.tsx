@@ -40,9 +40,11 @@ import { OutputPanel } from "./OutputPanel";
 import { PlayerBar } from "./PlayerBar";
 import { RemoteStrip } from "./RemoteStrip";
 import { ListenStrip } from "./ListenStrip";
+import { ShareMusicDialog } from "./ShareMusic";
 import { FriendActivityPanel } from "./FriendActivityPanel";
 import { startSocial } from "../stores/social";
 import { startCircle } from "../stores/circle";
+import { startSharing } from "../stores/sharing";
 import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
@@ -107,7 +109,7 @@ export function AppShell() {
       }),
     [],
   );
-  useEffect(() => afterFirstPaint(() => void startSocial()), []);
+  useEffect(() => afterFirstPaint(() => void startSocial().then(() => startSharing())), []);
   useEffect(() => afterFirstPaint(() => void startCircle()), []);
   useEffect(() => void startCurate(), []);
   const queueOpen = useUi((s) => s.queueOpen);
@@ -247,6 +249,7 @@ export function AppShell() {
       <CommandPalette />
       <LazyGuideHost />
       <WhatsNewDialog />
+      <ShareMusicDialog />
       <ShortcutsHelp />
       <PowerHints />
       <ContextMenuHost />

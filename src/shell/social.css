@@ -198,6 +198,7 @@
 .listen-people__row:hover { background: var(--color-state-hover); }
 .listen-people__name { flex: 1; min-width: 0; font-size: var(--font-size-md); }
 .listen-people__tag { color: var(--color-text-secondary); }
+.listen-people__offer { display: block; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .listen-strip__note { font-weight: var(--font-weight-regular, 400); }
 /* The session's song: not here, another version, or who can't hear it. */
 .listen-mark { margin-top: 2px; font-size: var(--font-size-xs, 11px); color: var(--color-text-secondary); }

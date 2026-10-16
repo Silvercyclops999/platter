@@ -1078,6 +1078,16 @@ export interface Settings {
   blends: boolean;
   /** Unreleased songs go into shared playlists and Blend taste summaries. */
   shareUnreleased: boolean;
+  /** Offer "Let them listen from my server" to a guest who can't hear the song (host only). */
+  shareOfferServer: boolean;
+  /** "Libraries I share by default": section ids on your server, music libraries only. None chosen at first. */
+  shareDefaultLibraries: string[];
+  /** "Hide my unreleased music from people I share with" (a Plex label the share leaves out; needs Plex Pass). */
+  shareHideUnreleased: boolean;
+  /** "Allow downloads for people I share with". */
+  shareAllowDownloads: boolean;
+  /** "Accept invites inside Platter": a friend's server invite shows here, one click to accept. */
+  shareAcceptInvites: boolean;
   /** Discord shows a listening session you host. */
   discordListenAlong: boolean;
   /** Keep app-only state in a sync file in a folder. This device only. */
@@ -1492,6 +1502,11 @@ export const DEFAULT_SETTINGS: Settings = {
   collabPlaylists: true,
   blends: true,
   shareUnreleased: false,
+  shareOfferServer: true,
+  shareDefaultLibraries: [],
+  shareHideUnreleased: true,
+  shareAllowDownloads: false,
+  shareAcceptInvites: true,
   discordListenAlong: true,
   syncEnabled: false,
   syncFolder: "",
@@ -1943,6 +1958,8 @@ export interface DeepLinkOpen {
   join?: string | null;
   /** A shared playlist or Blend invite (platter://collab/..., platter://blend/...) to join. */
   circle?: string | null;
+  /** A share link (platter://share/...): ask that person for their music. */
+  shareAsk?: string | null;
 }
 
 // ---------------------------------------------------------------- social
@@ -2708,7 +2725,14 @@ export interface ListenPerson {
   me: boolean;
   /** The host's view: this guest has no copy of the song playing. */
   cantHear: boolean;
+  /** The host's view: where "Let them listen from my server" is for them. */
+  offer?: ListenOffer | null;
 }
+
+/** "Let them listen from my server", for one guest (the host's view). */
+export type ListenOffer =
+  | { state: "asking" | "inviting" | "invited" | "alreadyShared" | "noInvites" }
+  | { state: "failed"; message: string };
 
 /** A guest's view: the host's song has no copy in this library. */
 export interface ListenMissing {
@@ -2752,7 +2776,88 @@ export interface ListenView {
   missing: ListenMissing | null;
   /** Guest: playing a copy of another length. */
   anotherVersion: boolean;
+  /** Host: "Let them listen from my server" can be offered. */
+  offerServer?: boolean;
 }
+
+// ---------------------------------------------------------------- sharing
+
+/** A music library on your server, for choosing what to share. */
+export interface SharingLibrary {
+  id: string;
+  title: string;
+  /** Unreleased albums in it; null when Platter hasn't read the library. */
+  unreleased: number | null;
+  /** In "Libraries I share by default". */
+  default: boolean;
+}
+
+/** `sharing_overview`: what you can share. */
+export interface SharingOverview {
+  serverName: string | null;
+  /** Only the server's owner shares it. */
+  owner: boolean;
+  /** Null when plex.tv couldn't say. */
+  plexPass: boolean | null;
+  /** Music libraries only. */
+  libraries: SharingLibrary[];
+}
+
+export interface ShareOptions {
+  libraries: string[];
+  hideUnreleased: boolean;
+  allowDownloads: boolean;
+}
+
+/** How a share went. */
+export type ShareStatus =
+  | { status: "invited"; hidden: number }
+  | { status: "alreadyShared" }
+  /** Hiding unreleased music needs Plex Pass; nothing was shared. `others`: chosen libraries without unreleased music. */
+  | { status: "needsPlexPass"; withUnreleased: string[]; others: string[] }
+  | { status: "unknownUser"; message: string }
+  | { status: "refused"; message: string }
+  | { status: "plexDown"; message: string };
+
+/** Someone with access to your server. */
+export interface PersonWithAccess {
+  id: string;
+  name: string;
+  libraries: string[];
+  allowDownloads: boolean;
+  unreleasedHidden: boolean;
+  /** Invited, not accepted yet. */
+  pending: boolean;
+  /** Unix seconds. */
+  lastSeenAt: number | null;
+}
+
+/** A server invite you received. */
+export interface ReceivedInvite {
+  id: string;
+  from: string;
+  servers: string[];
+  friend: boolean;
+  home: boolean;
+  server: boolean;
+  createdAt: number | null;
+}
+
+/** `sharing_accept`. */
+export interface InviteAccepted {
+  servers: string[];
+  libraries: number;
+}
+
+/** A share link and its QR code. */
+export interface ShareLinkView {
+  link: string;
+  qr: { size: number; rows: string[] } | null;
+  expiresAt: number;
+}
+
+/** What opening someone's share link did. */
+export type ShareLinkResult = { status: "invited" | "alreadyShared"; host: string } | { status: "failed"; message: string };
 
 /** What a guest asks the host to do (`listen_control`). */
 export type ListenOp =
@@ -3389,6 +3494,10 @@ export interface EventMap {
   "circle://changed": CircleView;
   /** Worth a toast: an edit the owner couldn't make, a deleted playlist, an invite. */
   "circle://notice": { message: string };
+  /** The server invites you received changed. */
+  "sharing://invites": ReceivedInvite[];
+  /** Someone used your share link. */
+  "sharing://notice": { message: string };
   /** The sync file's state changed. */
   "sync-file://status": SyncFileStatus;
   /** Pins, folders or other app-only state changed (here or from the sync file). */
