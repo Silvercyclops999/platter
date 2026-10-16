@@ -136,7 +136,18 @@ impl Social {
         {
             return p;
         }
-        let panel = activity::read(self.inner.activity.as_ref(), self.now()).await;
+        let mut panel = activity::read(self.inner.activity.as_ref(), self.now()).await;
+        let mut friends = panel.friends.clone();
+        match self.inner.db.read_async(move |c| activity::place(c, &mut friends).map(|_| friends)).await {
+            Ok(f) => panel.friends = f,
+            Err(e) => {
+                // Shown without links rather than with ids that may not be here.
+                tracing::debug!(kind = e.kind(), "friend activity couldn't be matched to the library");
+                for f in &mut panel.friends {
+                    (f.track_id, f.album_id, f.artist_id, f.in_library) = (None, None, None, false);
+                }
+            }
+        }
         *self.inner.cache.lock() = Some((Instant::now(), panel.clone()));
         panel
     }

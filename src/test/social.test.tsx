@@ -108,6 +108,44 @@ describe("friend activity", () => {
     expect(route()).toEqual({ name: "album", id: panel.albumId });
   });
 
+  it("opens a song from this server's library by its own ids", async () => {
+    render(<FriendActivityPanel />);
+    const list = await screen.findByRole("list", { name: "Friends' latest songs" });
+    const f = (await mock.friendActivity()).friends[2];
+    const row = within(list).getAllByRole("listitem")[2];
+    expect(row).not.toHaveTextContent("Not in your library");
+    await userEvent.click(within(row).getByRole("button", { name: f.album }));
+    expect(route()).toEqual({ name: "album", id: f.albumId });
+    await userEvent.click(within(row).getByRole("button", { name: f.artist }));
+    expect(route()).toEqual({ name: "artist", id: f.artistId });
+  });
+
+  it("opens the copy here of a song played on another server", async () => {
+    // The core found it here by title and artist: ids are this library's.
+    const t = mock.fx.tracks[3];
+    mock.social.extraFriends = [
+      { accountId: 40, name: "Avery", thumb: null, trackId: t.id, title: t.title, artist: t.artistTitle, artistId: t.artistId, albumId: t.albumId, album: t.albumTitle, cover: null, at: Math.floor(Date.now() / 1000) - 5 * 86400, now: false, inLibrary: true },
+    ];
+    render(<FriendActivityPanel />);
+    const row = await screen.findByRole("listitem", { name: /^Avery:/ });
+    expect(row).not.toHaveTextContent("Not in your library");
+    await userEvent.click(within(row).getByRole("button", { name: t.albumTitle }));
+    expect(route()).toEqual({ name: "album", id: t.albumId });
+  });
+
+  it("shows a song with no copy here as not in your library, without links", async () => {
+    mock.social.extraFriends = [
+      { accountId: 41, name: "Jordan", thumb: null, trackId: null, title: "Praise Song", artist: "Demo Choir", artistId: null, albumId: null, album: "Demo Hymns", cover: null, at: Math.floor(Date.now() / 1000) - 6 * 86400, now: false, inLibrary: false },
+    ];
+    render(<FriendActivityPanel />);
+    const row = await screen.findByRole("listitem", { name: /^Jordan:.*not in your library$/ });
+    expect(within(row).getByText("Not in your library")).toHaveClass("cat-tag");
+    expect(row).toHaveTextContent("Praise Song");
+    expect(row).toHaveTextContent("Demo Hymns");
+    expect(within(row).queryAllByRole("button")).toHaveLength(0);
+    expect(route()).toEqual({ name: "home" });
+  });
+
   it("tells someone who doesn't own the server that activity isn't available", async () => {
     mock.social.access = "notAdmin";
     render(<FriendActivityPanel />);

@@ -10,8 +10,10 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::db::merge::norm;
 use crate::error::{AppError, AppResult};
 
 /// History older than this isn't shown.
@@ -28,9 +30,13 @@ pub struct FriendActivity {
     pub name: String,
     /// Art path for the round avatar (through the art cache), if any.
     pub thumb: Option<String>,
-    pub track_id: String,
+    /// The song in this library (None when it isn't here).
+    pub track_id: Option<String>,
     pub title: String,
     pub artist: String,
+    /// The artist in this library, if found.
+    pub artist_id: Option<String>,
+    /// The album in this library, if found.
     pub album_id: Option<String>,
     pub album: String,
     /// Art path of the album cover.
@@ -39,6 +45,13 @@ pub struct FriendActivity {
     pub at: i64,
     /// Listening right now.
     pub now: bool,
+    /// The song is in this library ([`place`] found it).
+    pub in_library: bool,
+    /// The album's artist and year, for finding it here by name.
+    #[serde(skip)]
+    pub album_artist: String,
+    #[serde(skip)]
+    pub year: Option<i64>,
 }
 
 /// What the panel can show.
@@ -77,8 +90,11 @@ pub struct LiveRow {
     pub track_id: String,
     pub title: String,
     pub artist: String,
+    pub artist_id: Option<String>,
+    pub album_artist: String,
     pub album_id: Option<String>,
     pub album: String,
+    pub year: Option<i64>,
     pub cover: Option<String>,
     pub playing: bool,
 }
@@ -90,8 +106,11 @@ pub struct PlayedRow {
     pub track_id: String,
     pub title: String,
     pub artist: String,
+    pub artist_id: Option<String>,
+    pub album_artist: String,
     pub album_id: Option<String>,
     pub album: String,
+    pub year: Option<i64>,
     pub cover: Option<String>,
     pub viewed_at: i64,
 }
@@ -140,6 +159,12 @@ struct Meta {
     parent_rating_key: Option<String>,
     #[serde(default)]
     parent_key: Option<String>,
+    #[serde(default)]
+    grandparent_rating_key: Option<String>,
+    #[serde(default)]
+    grandparent_key: Option<String>,
+    #[serde(default)]
+    parent_year: Option<i64>,
     #[serde(default)]
     parent_thumb: Option<String>,
     #[serde(default)]
@@ -210,8 +235,30 @@ fn key_id(key: &str) -> Option<String> {
     (!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())).then(|| id.to_string())
 }
 
+/// A parent's id: its rating key (already tagged by the Plex client), else
+/// the id in its key path, tagged like the song (history rows only carry
+/// `parentKey`, and Platter's ids name their server, crate::sid).
+fn parent_id(m: &Meta, rating_key: &Option<String>, key: &Option<String>) -> Option<String> {
+    if let Some(k) = rating_key.clone().filter(|k| !k.is_empty()) {
+        return Some(k);
+    }
+    let id = key.as_deref().and_then(key_id)?;
+    Some(match m.rating_key.as_deref().and_then(crate::sid::tag_of) {
+        Some(t) => crate::sid::qualify(t, &id),
+        None => crate::sid::resolve(&id),
+    })
+}
+
 fn album_of(m: &Meta) -> Option<String> {
-    m.parent_rating_key.clone().filter(|k| !k.is_empty()).or_else(|| m.parent_key.as_deref().and_then(key_id))
+    parent_id(m, &m.parent_rating_key, &m.parent_key)
+}
+
+fn artist_id_of(m: &Meta) -> Option<String> {
+    parent_id(m, &m.grandparent_rating_key, &m.grandparent_key)
+}
+
+fn album_artist_of(m: &Meta) -> String {
+    non_empty(m.grandparent_title.clone()).unwrap_or_default()
 }
 
 fn artist_of(m: &Meta) -> String {
@@ -242,8 +289,11 @@ pub fn parse_sessions(body: &[u8]) -> AppResult<Vec<LiveRow>> {
                 track_id: m.rating_key.clone().filter(|k| !k.is_empty())?,
                 title: m.title.clone(),
                 artist: artist_of(&m),
+                artist_id: artist_id_of(&m),
+                album_artist: album_artist_of(&m),
                 album_id: album_of(&m),
                 album: m.parent_title.clone().unwrap_or_default(),
+                year: m.parent_year.filter(|y| *y > 0),
                 cover: art_path(m.parent_thumb.clone().or_else(|| m.thumb.clone())),
                 playing: m.player.as_ref().and_then(|p| p.state.as_deref()) != Some("paused"),
             })
@@ -263,8 +313,11 @@ pub fn parse_history(body: &[u8]) -> AppResult<Vec<PlayedRow>> {
                 track_id: m.rating_key.clone().filter(|k| !k.is_empty())?,
                 title: m.title.clone(),
                 artist: artist_of(&m),
+                artist_id: artist_id_of(&m),
+                album_artist: album_artist_of(&m),
                 album_id: album_of(&m),
                 album: m.parent_title.clone().unwrap_or_default(),
+                year: m.parent_year.filter(|y| *y > 0),
                 cover: art_path(m.parent_thumb.clone().or_else(|| m.thumb.clone())),
                 viewed_at: m.viewed_at?,
             })
@@ -299,14 +352,18 @@ pub fn build_rows(live: &[LiveRow], played: &[PlayedRow], accounts: &[Account], 
             account_id: l.account_id,
             name,
             thumb: l.user_thumb.clone().or_else(|| acct.and_then(|a| a.thumb.clone())),
-            track_id: l.track_id.clone(),
+            track_id: Some(l.track_id.clone()),
             title: l.title.clone(),
             artist: l.artist.clone(),
+            artist_id: l.artist_id.clone(),
             album_id: l.album_id.clone(),
             album: l.album.clone(),
             cover: l.cover.clone(),
             at: now,
             now: true,
+            in_library: false,
+            album_artist: l.album_artist.clone(),
+            year: l.year,
         };
         // Two sessions for one person: the one playing wins.
         match rows.get(&l.account_id) {
@@ -332,14 +389,18 @@ pub fn build_rows(live: &[LiveRow], played: &[PlayedRow], accounts: &[Account], 
                     account_id: p.account_id,
                     name: acct.name.clone(),
                     thumb: acct.thumb.clone(),
-                    track_id: p.track_id.clone(),
+                    track_id: Some(p.track_id.clone()),
                     title: p.title.clone(),
                     artist: p.artist.clone(),
+                    artist_id: p.artist_id.clone(),
                     album_id: p.album_id.clone(),
                     album: p.album.clone(),
                     cover: p.cover.clone(),
                     at: p.viewed_at.min(now),
                     now: false,
+                    in_library: false,
+                    album_artist: p.album_artist.clone(),
+                    year: p.year,
                 },
             );
         }
@@ -347,6 +408,169 @@ pub fn build_rows(live: &[LiveRow], played: &[PlayedRow], accounts: &[Account], 
     let mut out: Vec<FriendActivity> = rows.into_values().collect();
     out.sort_by(|a, b| b.now.cmp(&a.now).then(b.at.cmp(&a.at)).then(a.name.cmp(&b.name)));
     out
+}
+
+// ---- finding it in this library -------------------------------------------
+
+fn exists(c: &Connection, table: &str, id: &str) -> AppResult<bool> {
+    Ok(c.query_row(&format!("SELECT 1 FROM {table} WHERE id = ?1"), [id], |_| Ok(())).optional()?.is_some())
+}
+
+/// Years agree when either is unknown.
+fn same_year(a: Option<i64>, b: Option<i64>) -> bool {
+    a.is_none() || b.is_none() || a == b
+}
+
+struct TrackRow {
+    id: String,
+    title: String,
+    album_id: String,
+    album_title: String,
+    artist_id: String,
+    artist_title: String,
+    track_artist: Option<String>,
+    year: Option<i64>,
+}
+
+struct AlbumRow {
+    id: String,
+    title: String,
+    artist_id: String,
+    artist_title: String,
+    year: Option<i64>,
+}
+
+/// The library's songs, albums and artists, read once when a row needs
+/// finding by name.
+#[derive(Default)]
+struct ByName {
+    tracks: Vec<TrackRow>,
+    albums: Vec<AlbumRow>,
+    artists: Vec<(String, String)>,
+}
+
+impl ByName {
+    fn read(c: &Connection) -> AppResult<Self> {
+        let mut st = c.prepare(
+            "SELECT t.id, t.title, t.album_id, t.album_title, t.artist_id, t.artist_title, t.track_artist, a.year
+             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id ORDER BY t.id",
+        )?;
+        let tracks = st
+            .query_map([], |r| {
+                Ok(TrackRow {
+                    id: r.get(0)?,
+                    title: norm(&r.get::<_, String>(1)?),
+                    album_id: r.get(2)?,
+                    album_title: norm(&r.get::<_, String>(3)?),
+                    artist_id: r.get(4)?,
+                    artist_title: norm(&r.get::<_, String>(5)?),
+                    track_artist: r.get::<_, Option<String>>(6)?.map(|a| norm(&a)),
+                    year: r.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut st = c.prepare("SELECT id, title, artist_id, artist_title, year FROM albums ORDER BY id")?;
+        let albums = st
+            .query_map([], |r| {
+                Ok(AlbumRow {
+                    id: r.get(0)?,
+                    title: norm(&r.get::<_, String>(1)?),
+                    artist_id: r.get(2)?,
+                    artist_title: norm(&r.get::<_, String>(3)?),
+                    year: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut st = c.prepare("SELECT id, title FROM artists ORDER BY id")?;
+        let artists = st.query_map([], |r| Ok((r.get::<_, String>(0)?, norm(&r.get::<_, String>(1)?))))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { tracks, albums, artists })
+    }
+
+    /// The same song: title and artist, and the album and year when known.
+    fn track(&self, f: &FriendActivity) -> Option<&TrackRow> {
+        let (title, artist, album) = (norm(&f.title), norm(&f.artist), norm(&f.album));
+        if title.is_empty() || artist.is_empty() {
+            return None;
+        }
+        self.tracks.iter().find(|t| {
+            t.title == title
+                && (t.artist_title == artist || t.track_artist.as_deref() == Some(artist.as_str()))
+                && (album.is_empty() || t.album_title == album)
+                && same_year(t.year, f.year)
+        })
+    }
+
+    /// The same album: title and artist (the album's, or the song's), and
+    /// the year when known.
+    fn album(&self, f: &FriendActivity) -> Option<&AlbumRow> {
+        let title = norm(&f.album);
+        let artists = [norm(&f.album_artist), norm(&f.artist)];
+        if title.is_empty() {
+            return None;
+        }
+        self.albums.iter().find(|a| a.title == title && artists.iter().any(|n| !n.is_empty() && *n == a.artist_title) && same_year(a.year, f.year))
+    }
+
+    fn artist(&self, name: &str) -> Option<&str> {
+        let name = norm(name);
+        (!name.is_empty()).then(|| self.artists.iter().find(|(_, t)| *t == name).map(|(id, _)| id.as_str()))?
+    }
+}
+
+/// Point each row at this library: by id when the song (or album, or
+/// artist) is here, as it is when it came from this library's server; else
+/// by name (a play on another server, or ids this library doesn't have).
+/// What isn't found isn't linked, and a song not found is marked not in
+/// the library.
+pub fn place(c: &Connection, rows: &mut [FriendActivity]) -> AppResult<()> {
+    let mut by_name: Option<ByName> = None;
+    for f in rows.iter_mut() {
+        let here = match f.track_id.as_deref() {
+            Some(id) => c
+                .query_row("SELECT album_id, artist_id FROM tracks WHERE id = ?1", [id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .optional()?,
+            None => None,
+        };
+        if let Some((album, artist)) = here {
+            f.in_library = true;
+            f.album_id = Some(album);
+            f.artist_id = Some(artist);
+            continue;
+        }
+        f.track_id = None;
+        f.in_library = false;
+        if let Some(id) = f.album_id.take()
+            && exists(c, "albums", &id)?
+        {
+            f.album_id = Some(id);
+        }
+        if let Some(id) = f.artist_id.take()
+            && exists(c, "artists", &id)?
+        {
+            f.artist_id = Some(id);
+        }
+        let names = match &mut by_name {
+            Some(n) => n,
+            None => by_name.insert(ByName::read(c)?),
+        };
+        if let Some(t) = names.track(f) {
+            f.track_id = Some(t.id.clone());
+            f.in_library = true;
+            f.album_id = Some(t.album_id.clone());
+            f.artist_id = Some(t.artist_id.clone());
+            continue;
+        }
+        if f.album_id.is_none()
+            && let Some(a) = names.album(f)
+        {
+            f.album_id = Some(a.id.clone());
+            f.artist_id.get_or_insert_with(|| a.artist_id.clone());
+        }
+        if f.artist_id.is_none() {
+            f.artist_id = names.artist(&f.artist).or_else(|| names.artist(&f.album_artist)).map(str::to_string);
+        }
+    }
+    Ok(())
 }
 
 // ---- reading the server ---------------------------------------------------

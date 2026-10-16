@@ -53,6 +53,8 @@ export const MOCK_INVITE = "platter://join/AV8MKp57HUw4puL5CxfT5EXMOOHwS3stlqDky
 
 export class MockSocial {
   access: "ok" | "notAdmin" | "offline" = "ok";
+  /** Rows after the demo friends (a test hook: plays the core couldn't link). */
+  extraFriends: FriendActivity[] = [];
   failNextJoin: string | null = null;
   private follows: FollowedArtist[] = [];
   /** Albums already seen on What's New. */
@@ -72,6 +74,7 @@ export class MockSocial {
   reset() {
     const now = Math.floor(Date.now() / 1000);
     this.access = "ok";
+    this.extraFriends = [];
     this.failNextJoin = null;
     this.extra = [];
     this.follows = [this.fx.artists[0], this.fx.artists[2]].map((a, i) => ({ id: a.id, title: a.title, thumb: a.thumb, followedAt: now - (i + 3) * DAY }));
@@ -99,14 +102,16 @@ export class MockSocial {
         trackId: t.id,
         title: t.title,
         artist: t.trackArtist ?? t.artistTitle,
+        artistId: t.artistId,
         albumId: t.albumId,
         album: t.albumTitle,
         cover: t.thumb,
         at: now - ago[i],
         now: i === 0,
+        inLibrary: true,
       };
     });
-    return { state: "ok", friends };
+    return { state: "ok", friends: [...friends, ...this.extraFriends] };
   }
 
   // ---------------------------------------------------------------- follows

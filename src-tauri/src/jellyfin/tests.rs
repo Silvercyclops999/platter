@@ -671,7 +671,7 @@ async fn lyrics_mix_details_activity_and_files() {
     let panel = crate::social::activity::read(server.activity().unwrap().as_ref(), 1_000).await;
     assert_eq!(panel.state, crate::social::activity::ActivityState::Ok);
     assert_eq!(panel.friends.len(), 1);
-    assert_eq!((panel.friends[0].name.as_str(), panel.friends[0].track_id.as_str(), panel.friends[0].now), ("Sam", id("t2").as_str(), true));
+    assert_eq!((panel.friends[0].name.as_str(), panel.friends[0].track_id.as_deref(), panel.friends[0].now), ("Sam", Some(id("t2").as_str()), true));
 
     // The Lidarr check: the included music folders and every file.
     core.set_include(Some(vec!["v1".into()]));

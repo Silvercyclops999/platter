@@ -9,21 +9,43 @@ import { nav } from "../stores/router";
 import { loadActivity, useSocial } from "../stores/social";
 import { useUi } from "../stores/ui";
 import { AvatarFace } from "./TopBar";
+import "../pages/catalogue.css";
 import "./social.css";
 
 /** How often the panel reads activity again while it's open. */
 export const ACTIVITY_REFRESH_MS = 60_000;
 
+export const NOT_IN_LIBRARY = "Not in your library";
+
+/** A name that opens its page when it's in the library, plain text when not. */
+function Link({ text, open }: { text: string; open: (() => void) | null }) {
+  if (!open) return <span className="friend-row__plain">{text}</span>;
+  return (
+    <button type="button" className="friend-row__link" onClick={open}>
+      {text}
+    </button>
+  );
+}
+
 function FriendRow({ f, now }: { f: FriendActivity; now: number }) {
   const when = shortAgo(f.at, now, f.now);
-  const openAlbum = () => f.albumId && nav.go({ name: "album", id: f.albumId });
+  // Ids here come from the core, already pointed at this library (or null).
+  const { trackId, albumId, artistId } = f;
+  const openAlbum = albumId ? () => nav.go({ name: "album", id: albumId }) : null;
+  const openArtist = artistId ? () => nav.go({ name: "artist", id: artistId }) : null;
+  const missing = !f.inLibrary || !trackId;
   return (
-    <li className="friend-row" aria-label={`${f.name}: ${f.title} by ${f.artist}, ${f.now ? "listening now" : `${when} ago`}`}>
+    <li
+      className={`friend-row ${missing ? "is-missing" : ""}`}
+      aria-label={`${f.name}: ${f.title} by ${f.artist}, ${f.now ? "listening now" : `${when} ago`}${missing ? `, ${NOT_IN_LIBRARY.toLowerCase()}` : ""}`}
+    >
       <div className="friend-row__avatar">
         <AvatarFace path={f.thumb} size={48} className="friend-row__face" fallback={f.name.trim().charAt(0).toUpperCase()} />
-        <button type="button" className="friend-row__play" aria-label={`Play ${f.title}`} onClick={() => void player.playTracks([f.trackId], f.trackId)}>
-          <Play size={18} fill="currentColor" aria-hidden="true" />
-        </button>
+        {trackId && (
+          <button type="button" className="friend-row__play" aria-label={`Play ${f.title}`} onClick={() => void player.playTracks([trackId], trackId)}>
+            <Play size={18} fill="currentColor" aria-hidden="true" />
+          </button>
+        )}
         {f.now && <span className="friend-row__live" aria-hidden="true" />}
       </div>
       <div className="friend-row__text">
@@ -32,17 +54,23 @@ function FriendRow({ f, now }: { f: FriendActivity; now: number }) {
           <span className={`friend-row__when ${f.now ? "is-now" : ""}`}>{when}</span>
         </div>
         <div className="friend-row__line truncate">
-          <button type="button" className="friend-row__link" onClick={openAlbum} disabled={!f.albumId}>
-            {f.title}
-          </button>
-          {f.artist && <span> • {f.artist}</span>}
+          <Link text={f.title} open={openAlbum} />
+          {f.artist && (
+            <>
+              <span> • </span>
+              <Link text={f.artist} open={openArtist} />
+            </>
+          )}
         </div>
         {f.album && (
           <div className="friend-row__line friend-row__ctx truncate">
             <Music size={12} aria-hidden="true" />
-            <button type="button" className="friend-row__link" onClick={openAlbum} disabled={!f.albumId}>
-              {f.album}
-            </button>
+            <Link text={f.album} open={openAlbum} />
+          </div>
+        )}
+        {missing && (
+          <div className="friend-row__line">
+            <span className="cat-tag">{NOT_IN_LIBRARY}</span>
           </div>
         )}
       </div>

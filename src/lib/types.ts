@@ -1868,9 +1868,13 @@ export interface FriendActivity {
   name: string;
   /** Art path for the round avatar. */
   thumb: string | null;
-  trackId: string;
+  /** The song in this library; null when it isn't here. */
+  trackId: string | null;
   title: string;
   artist: string;
+  /** The artist in this library, if found. */
+  artistId: string | null;
+  /** The album in this library, if found. */
   albumId: string | null;
   album: string;
   cover: string | null;
@@ -1878,6 +1882,8 @@ export interface FriendActivity {
   at: number;
   /** Listening right now. */
   now: boolean;
+  /** The song is in this library (by id from this server, or by name from another). */
+  inLibrary: boolean;
 }
 
 /** "ok", or why there's nothing: not the server owner, turned off, or offline. */

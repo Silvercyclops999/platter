@@ -93,14 +93,17 @@ fn a_paused_session_still_counts_but_a_playing_one_wins() {
         track_id: track.into(),
         title: track.into(),
         artist: String::new(),
+        artist_id: None,
+        album_artist: String::new(),
         album_id: None,
         album: String::new(),
+        year: None,
         cover: None,
         playing,
     };
     let rows = activity::build_rows(&[row("1", true), row("2", false)], &[], &[], None, NOW);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].track_id, "1");
+    assert_eq!(rows[0].track_id.as_deref(), Some("1"));
     let only: Vec<PlayedRow> = Vec::new();
     let accounts = vec![Account { id: 3, name: "Lee".into(), thumb: None }];
     let rows = activity::build_rows(&[row("2", false)], &only, &accounts, None, NOW);
@@ -142,6 +145,176 @@ async fn admin_sees_activity_others_are_told_it_isnt_available() {
     assert_eq!(p.state, ActivityState::NotAdmin, "the server refusing the read means no admin rights");
     let p = activity::read(&FakeSource { owned: None, refuse: false }, NOW).await;
     assert_eq!(p.state, ActivityState::Offline);
+}
+
+// ---- linking activity to this library -----------------------------------------
+
+/// History as the Plex client hands it over: rating keys carry the server's
+/// tag, but `parentKey` paths don't (and history rows have no
+/// `parentRatingKey`).
+const TAGGED_HISTORY: &str = r#"{"MediaContainer":{"size":2,"Metadata":[
+ {"type":"track","ratingKey":"0a1b2c3d:30260","title":"Morning Light","grandparentTitle":"The Demo Band","parentTitle":"First Record","parentKey":"/library/metadata/30251","grandparentKey":"/library/metadata/30250","parentYear":2011,"viewedAt":1799999000,"accountID":9},
+ {"type":"track","ratingKey":"0a1b2c3d:30261","title":"Evening","grandparentTitle":"The Demo Band","parentTitle":"First Record","parentRatingKey":"0a1b2c3d:30251","viewedAt":1799998000,"accountID":9}
+]}}"#;
+
+const HERE: &str = "0a1b2c3d";
+const THERE: &str = "ffffffff";
+
+fn add_artist(db: &DbHandle, id: &str, title: &str) {
+    let (id, title) = (id.to_string(), title.to_string());
+    db.write(move |c| {
+        c.execute("INSERT INTO artists (id, title, sort_title) VALUES (?1, ?2, ?2)", rusqlite::params![id, title])?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn add_record(db: &DbHandle, id: &str, title: &str, artist: (&str, &str), year: Option<i64>) {
+    let (id, title, aid, artist) = (id.to_string(), title.to_string(), artist.0.to_string(), artist.1.to_string());
+    db.write(move |c| {
+        c.execute(
+            "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, year) VALUES (?1, ?2, ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, title, aid, artist, year],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn add_song(db: &DbHandle, id: &str, title: &str, album: (&str, &str), artist: (&str, &str)) {
+    let (id, title, alid, album, arid, artist) = (id.to_string(), title.to_string(), album.0.to_string(), album.1.to_string(), artist.0.to_string(), artist.1.to_string());
+    db.write(move |c| {
+        c.execute(
+            "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, part_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '/library/parts/1/f.flac')",
+            rusqlite::params![id, title, alid, album, arid, artist],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+/// The demo library: one artist, one album from 2011, two songs, all on
+/// the server tagged [`HERE`].
+fn library() -> (DbHandle, tempfile::TempDir) {
+    let (db, dir) = db();
+    let artist_id = format!("{HERE}:30250");
+    let artist = (artist_id.as_str(), "The Demo Band");
+    let album = format!("{HERE}:30251");
+    add_artist(&db, artist.0, artist.1);
+    add_record(&db, &album, "First Record", (artist.0, artist.1), Some(2011));
+    add_song(&db, &format!("{HERE}:30260"), "Morning Light", (&album, "First Record"), (artist.0, artist.1));
+    add_song(&db, &format!("{HERE}:30261"), "Evening", (&album, "First Record"), (artist.0, artist.1));
+    (db, dir)
+}
+
+fn friend(track: &str, title: &str, artist: &str, album_id: Option<&str>, album: &str, year: Option<i64>) -> activity::FriendActivity {
+    activity::FriendActivity {
+        account_id: 9,
+        name: "Alex".into(),
+        thumb: None,
+        track_id: Some(track.into()),
+        title: title.into(),
+        artist: artist.into(),
+        artist_id: None,
+        album_id: album_id.map(str::to_string),
+        album: album.into(),
+        cover: None,
+        at: NOW,
+        now: false,
+        in_library: false,
+        album_artist: artist.into(),
+        year,
+    }
+}
+
+fn placed(db: &DbHandle, mut rows: Vec<activity::FriendActivity>) -> Vec<activity::FriendActivity> {
+    db.read(move |c| activity::place(c, &mut rows).map(|_| rows)).unwrap()
+}
+
+#[test]
+fn history_album_and_artist_ids_carry_the_songs_server_tag() {
+    let h = activity::parse_history(TAGGED_HISTORY.as_bytes()).unwrap();
+    assert_eq!(h[0].track_id, format!("{HERE}:30260"));
+    assert_eq!(h[0].album_id.as_deref(), Some(&*format!("{HERE}:30251")), "never a bare 30251");
+    assert_eq!(h[0].artist_id.as_deref(), Some(&*format!("{HERE}:30250")));
+    assert_eq!(h[0].year, Some(2011));
+    assert_eq!(h[1].album_id.as_deref(), Some(&*format!("{HERE}:30251")), "a tagged parentRatingKey stays as it is");
+}
+
+#[test]
+fn a_play_from_this_librarys_server_links_by_id() {
+    let (db, _d) = library();
+    let played = activity::parse_history(TAGGED_HISTORY.as_bytes()).unwrap();
+    let accounts = vec![Account { id: 9, name: "Alex".into(), thumb: None }];
+    let rows = placed(&db, activity::build_rows(&[], &played, &accounts, Some(1), NOW));
+    let f = &rows[0];
+    assert!(f.in_library);
+    assert_eq!(f.track_id.as_deref(), Some(&*format!("{HERE}:30260")));
+    assert_eq!(f.album_id.as_deref(), Some(&*format!("{HERE}:30251")));
+    assert_eq!(f.artist_id.as_deref(), Some(&*format!("{HERE}:30250")));
+    // The album it links to opens.
+    let album = f.album_id.clone().unwrap();
+    assert!(db.read(move |c| crate::db::queries::album_page(c, &album)).is_ok());
+    // The bare rating key the panel used to link to isn't an album here.
+    assert!(matches!(db.read(|c| crate::db::queries::album_page(c, "30251")), Err(AppError::NotFound(_))));
+}
+
+#[test]
+fn a_play_from_another_server_is_found_here_by_name() {
+    let (db, _d) = library();
+    let rows = placed(
+        &db,
+        vec![
+            // Case and punctuation fold; the album and year agree.
+            friend(&format!("{THERE}:9"), "morning light!", "the demo band", Some(&format!("{THERE}:8")), "First Record", Some(2011)),
+            // The song isn't here, but its album is.
+            friend(&format!("{THERE}:10"), "B-Side", "The Demo Band", Some(&format!("{THERE}:8")), "First Record", None),
+        ],
+    );
+    assert!(rows[0].in_library);
+    assert_eq!(rows[0].track_id.as_deref(), Some(&*format!("{HERE}:30260")));
+    assert_eq!(rows[0].album_id.as_deref(), Some(&*format!("{HERE}:30251")));
+    assert_eq!(rows[0].artist_id.as_deref(), Some(&*format!("{HERE}:30250")));
+    assert!(!rows[1].in_library);
+    assert_eq!(rows[1].track_id, None);
+    assert_eq!(rows[1].album_id.as_deref(), Some(&*format!("{HERE}:30251")));
+    assert_eq!(rows[1].artist_id.as_deref(), Some(&*format!("{HERE}:30250")));
+}
+
+#[test]
+fn a_play_with_no_match_here_is_not_linked() {
+    let (db, _d) = library();
+    let rows = placed(
+        &db,
+        vec![
+            friend(&format!("{THERE}:9"), "Morning Light", "Someone Else", Some(&format!("{THERE}:8")), "Other Record", None),
+            // Same names, another year: another album.
+            friend(&format!("{THERE}:11"), "Unknown", "The Demo Band", Some(&format!("{THERE}:8")), "First Record", Some(1999)),
+            // A bare id that isn't in this library.
+            friend("30251", "Praise", "Nobody", Some("30251"), "Nothing", None),
+        ],
+    );
+    for f in &rows {
+        assert!(!f.in_library, "{}", f.title);
+        assert_eq!(f.track_id, None);
+    }
+    assert_eq!((rows[0].album_id.as_deref(), rows[0].artist_id.as_deref()), (None, None));
+    assert_eq!(rows[1].album_id, None, "the year rules the album out");
+    assert_eq!(rows[1].artist_id.as_deref(), Some(&*format!("{HERE}:30250")), "the artist is still here");
+    assert_eq!((rows[2].album_id.as_deref(), rows[2].artist_id.as_deref()), (None, None));
+    let json = serde_json::to_value(&rows[2]).unwrap();
+    assert_eq!(json["inLibrary"], false);
+    assert!(json["trackId"].is_null() && json["albumId"].is_null());
+    assert!(json.get("albumArtist").is_none() && json.get("year").is_none(), "matching hints stay in the core");
+}
+
+#[tokio::test]
+async fn the_panel_only_links_what_this_library_has() {
+    let r = rig();
+    // The fake server's history uses ids this library doesn't have.
+    let p = r.social.activity(true).await;
+    assert_eq!(p.state, ActivityState::Ok);
+    assert!(p.friends.iter().all(|f| !f.in_library && f.track_id.is_none() && f.album_id.is_none()));
 }
 
 // ---- follows and What's New ---------------------------------------------------
