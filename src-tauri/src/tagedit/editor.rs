@@ -686,3 +686,119 @@ pub fn spread(files: &[EditFile], album: &BTreeMap<Field, String>) -> Vec<SaveFi
         })
         .collect()
 }
+
+// ---------------------------------------------------------------- the tag check
+
+/// What the tag check looks at.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "id")]
+pub enum CheckScope {
+    Album(String),
+    Artist(String),
+    Library,
+}
+
+/// Findings marked "This is fine", kept in the library cache's key-value store.
+const IGNORED_KEY: &str = "tagcheck.ignored";
+
+pub fn ignored(c: &Connection) -> AppResult<std::collections::BTreeSet<String>> {
+    Ok(crate::db::store::kv_get(c, IGNORED_KEY)?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default())
+}
+
+pub fn set_ignored(c: &Connection, id: &str, fine: bool) -> AppResult<()> {
+    let mut all = ignored(c)?;
+    if fine {
+        all.insert(id.to_string());
+    } else {
+        all.remove(id);
+    }
+    crate::db::store::kv_set(c, IGNORED_KEY, &serde_json::to_string(&all).unwrap_or_default())
+}
+
+fn library_context(c: &Connection) -> AppResult<super::check::Library> {
+    let mut lib = super::check::Library::default();
+    let mut st = c.prepare("SELECT ft.grp, t.album_id FROM tracks t JOIN file_tags ft ON ft.part_key = t.part_key WHERE ft.grp IS NOT NULL AND ft.grp != ''")?;
+    for r in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (g, a) = r?;
+        lib.groups.entry(g).or_default().insert(a);
+    }
+    let mut st = c.prepare("SELECT file, album_id FROM tracks WHERE file IS NOT NULL AND file != ''")?;
+    for r in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (f, a) = r?;
+        lib.folders.entry(server_folder(&f)).or_default().insert(a);
+    }
+    let mut st = c.prepare("SELECT id, title FROM albums")?;
+    for r in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (id, t) = r?;
+        lib.titles.insert(id, t);
+    }
+    Ok(lib)
+}
+
+impl TagEditor {
+    /// The albums a scope covers.
+    pub fn scope_albums(&self, scope: &CheckScope) -> AppResult<Vec<String>> {
+        self.db.read(|c| {
+            let (sql, arg) = match scope {
+                CheckScope::Album(id) => return Ok(vec![id.clone()]),
+                CheckScope::Artist(id) => ("SELECT id FROM albums WHERE artist_id = ?1 ORDER BY year, sort_title", Some(id.clone())),
+                CheckScope::Library => ("SELECT id FROM albums ORDER BY artist_title COLLATE NOCASE, year, sort_title", None),
+            };
+            let mut st = c.prepare(sql)?;
+            let ids = match arg {
+                Some(a) => st.query_map([a], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?,
+                None => st.query_map([], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?,
+            };
+            Ok(ids)
+        })
+    }
+
+    /// One album as the check sees it: from the files when the music folder
+    /// is set, else from what Plex and the tag cache have.
+    pub fn check_album_data(&self, album_id: &str) -> AppResult<super::check::CheckAlbum> {
+        let rows = self.db.read(|c| album_rows(c, album_id))?;
+        let title = rows.first().map(|r| r.album_title.clone()).unwrap_or_default();
+        if rows.is_empty() {
+            return Ok(super::check::CheckAlbum { album_id: album_id.to_string(), title, files: Vec::new() });
+        }
+        let data = self.open_rows(&rows)?;
+        let files = rows
+            .iter()
+            .zip(data.files)
+            .map(|(r, f)| super::check::CheckFile {
+                track_id: r.id.clone(),
+                file_name: f.file_name,
+                folder: r.file.as_deref().map(server_folder).unwrap_or_default(),
+                values: f.values,
+                keys: f.keys,
+                duration_ms: r.duration_ms,
+                codec: r.codec.clone(),
+                bitrate: r.bitrate,
+                plex_disc: r.disc,
+            })
+            .collect();
+        Ok(super::check::CheckAlbum { album_id: album_id.to_string(), title, files })
+    }
+
+    /// The tag check over a scope (on the caller's thread: files are read).
+    pub fn check(&self, scope: &CheckScope) -> AppResult<super::check::Report> {
+        let ids = self.scope_albums(scope)?;
+        let mut albums = Vec::with_capacity(ids.len());
+        for id in &ids {
+            albums.push(self.check_album_data(id)?);
+        }
+        let opts = self.options();
+        let (mut lib, ign) = self.db.read(|c| Ok((library_context(c)?, ignored(c)?)))?;
+        // The files just read count for groups too.
+        for a in &albums {
+            for f in &a.files {
+                if let Some(g) = f.values.get(&Field::Group) {
+                    lib.groups.entry(g.clone()).or_default().insert(a.album_id.clone());
+                }
+            }
+        }
+        lib.custom_status = crate::tags::provenance::custom_key().is_some();
+        lib.can_fix = opts.mapping.is_some();
+        Ok(super::check::report(&albums, &lib, &ign, opts.mapping.is_some()))
+    }
+}
