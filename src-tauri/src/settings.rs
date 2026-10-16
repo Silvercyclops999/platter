@@ -380,6 +380,16 @@ pub struct Settings {
     pub full_window_hide_controls: bool,
     /// Read explicit, version and edition tags from the files (this device only).
     pub read_file_tags: bool,
+    /// Where this computer sees the server's music files (a mapped drive,
+    /// UNC path or mounted share). Empty: not set, tags are view-only.
+    pub music_folder: String,
+    /// The start of Plex's file paths that stands for the music folder,
+    /// found when it was picked.
+    pub music_folder_server: String,
+    /// Ask Plex to rescan a folder after its tags are saved.
+    pub rescan_after_tag_edit: bool,
+    /// Ask before saving tags to more than 50 files at once.
+    pub ask_before_many_files: bool,
     /// Explicit songs play, or are left out of what plays.
     pub explicit_content: ExplicitContent,
     /// Show fan and AI edits (ARCHIVE_FLAGS).
@@ -808,6 +818,10 @@ impl Default for Settings {
             lyrics_live_timing: false,
             full_window_hide_controls: true,
             read_file_tags: true,
+            music_folder: String::new(),
+            music_folder_server: String::new(),
+            rescan_after_tag_edit: true,
+            ask_before_many_files: true,
             explicit_content: ExplicitContent::Allowed,
             show_fan_edits: false,
             count_unmatched_unreleased: true,
@@ -1039,6 +1053,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "archiveFolderKeywords",
     "releaseStatusTag",
     "releaseStatusValues",
+    "rescanAfterTagEdit",
+    "askBeforeManyFiles",
     "showEraCards",
     "showVersionCounts",
     "libraryDoctor",
@@ -1065,6 +1081,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
 
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
+    "musicFolder",
+    "musicFolderServer",
     "privateSession",
     "allowAutomation",
     "translationService",
@@ -1237,6 +1255,8 @@ pub struct SettingsPatch {
     pub lyrics_live_timing: Option<bool>,
     pub full_window_hide_controls: Option<bool>,
     pub read_file_tags: Option<bool>,
+    pub rescan_after_tag_edit: Option<bool>,
+    pub ask_before_many_files: Option<bool>,
     pub explicit_content: Option<ExplicitContent>,
     pub show_fan_edits: Option<bool>,
     pub count_unmatched_unreleased: Option<bool>,
@@ -1511,6 +1531,8 @@ impl Settings {
         set(&mut self.lyrics_live_timing, p.lyrics_live_timing);
         set(&mut self.full_window_hide_controls, p.full_window_hide_controls);
         set(&mut self.read_file_tags, p.read_file_tags);
+        set(&mut self.rescan_after_tag_edit, p.rescan_after_tag_edit);
+        set(&mut self.ask_before_many_files, p.ask_before_many_files);
         set(&mut self.explicit_content, p.explicit_content);
         set(&mut self.show_fan_edits, p.show_fan_edits);
         set(&mut self.count_unmatched_unreleased, p.count_unmatched_unreleased);
@@ -1833,6 +1855,14 @@ impl Settings {
         crate::doctor::Options { on: self.library_doctor, checks: self.doctor_checks, cover_px: self.doctor_cover_px }
     }
 
+    /// What the tag editor follows: the music folder, once it's set.
+    pub fn tag_edit_options(&self) -> crate::tagedit::editor::Options {
+        let mapping = (!self.music_folder.trim().is_empty() && !self.music_folder_server.trim().is_empty()).then(|| {
+            crate::tagedit::paths::Mapping { server: self.music_folder_server.clone(), local: self.music_folder.clone() }
+        });
+        crate::tagedit::editor::Options { mapping, rescan: self.rescan_after_tag_edit }
+    }
+
     /// Where file release statuses are read from.
     pub fn release_status_config(&self) -> crate::tags::provenance::Config {
         crate::tags::provenance::Config::new(&self.release_status_tag, &self.release_status_values)
@@ -2105,6 +2135,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     crate::doctor::set_options(s.doctor_options());
     crate::playhistory::follow_settings(db, s);
     crate::soundid::set_options(s.sound_id_options());
+    crate::tagedit::publish(s.tag_edit_options());
     // File statuses follow the status tag and values; a new tag name means
     // reading the files again.
     let statuses = crate::tags::provenance::set_config(s.release_status_config());
@@ -2758,6 +2789,33 @@ mod tests {
         publish(&s, &live, &db);
         assert_eq!(provenance::custom_key(), None);
         provenance::set_config(provenance::Config::default());
+    }
+
+    #[test]
+    fn tag_editor_settings_round_trip_and_reach_the_editor() {
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = Settings::default();
+        assert!(s.music_folder.is_empty(), "not set");
+        assert!(s.rescan_after_tag_edit && s.ask_before_many_files, "both on");
+        for k in ["rescanAfterTagEdit", "askBeforeManyFiles"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        for k in ["musicFolder", "musicFolderServer"] {
+            assert!(DEVICE_SETTINGS.contains(&k), "{k} is this device only");
+        }
+        assert_eq!(s.tag_edit_options().mapping, None);
+        s.apply(&SettingsPatch { rescan_after_tag_edit: Some(false), ..Default::default() }).unwrap();
+        s.music_folder = "M:\\".into();
+        s.music_folder_server = "/data/music".into();
+        publish(&s, &live, &db);
+        let o = crate::tagedit::published();
+        assert!(!o.rescan);
+        assert_eq!(o.mapping.unwrap().to_local("/data/music/A/B/01.flac").as_deref(), Some("M:\\A\\B\\01.flac"));
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["musicFolder"], "M:\\");
+        assert_eq!(json["askBeforeManyFiles"], true);
+        crate::tagedit::publish(Default::default());
     }
 
     #[test]

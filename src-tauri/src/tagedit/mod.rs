@@ -11,9 +11,11 @@
 //! - [`check`]  the tag check rules, each with why it matters
 //! - [`fixes`]  one-click fixes: preview, apply through the editor, undo
 //! - [`lookup`] free catalogues for ISRCs (MusicBrainz, then Deezer)
+//! - [`commands`] Tauri commands (docs/IPC.md "Tag editor")
 //! - [`undo`]   the last 20 edits with what they replaced
 
 pub mod check;
+pub mod commands;
 pub mod doc;
 pub mod editor;
 pub mod fields;
@@ -43,3 +45,14 @@ use std::collections::BTreeMap;
 
 /// A file's fields that have a value.
 pub type Values = BTreeMap<fields::Field, String>;
+
+/// The editor options in effect (from Settings).
+static PUBLISHED: std::sync::LazyLock<parking_lot::RwLock<editor::Options>> = std::sync::LazyLock::new(Default::default);
+
+pub fn publish(o: editor::Options) {
+    *PUBLISHED.write() = o;
+}
+
+pub fn published() -> editor::Options {
+    PUBLISHED.read().clone()
+}

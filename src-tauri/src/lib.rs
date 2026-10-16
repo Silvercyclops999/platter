@@ -1181,6 +1181,12 @@ pub fn run() {
             mixes::service::spawn_schedule(mix_service.clone());
             app.manage(mix_service);
 
+            app.manage::<tagedit::commands::Editor>(Arc::new(tagedit::editor::TagEditor::new(
+                db.clone(),
+                Arc::new(tagedit::plexside::AppPlex(plex.clone())),
+                Arc::new(tagedit::write::NoHooks),
+                Some(data_dir.join("tag-edits.json")),
+            )));
             app.manage(plexedit::PlexEditor::new(
                 data_dir.join("plex-edits"),
                 Arc::new(backend::routed::RoutedEdit(backends.clone())),
@@ -1430,6 +1436,21 @@ pub fn run() {
             platform::discord::commands::discord_status,
             platform::discord::commands::discord_imgur_key_set,
             tags::commands::tags_index,
+            tagedit::commands::tagedit_pick_music_folder,
+            tagedit::commands::tagedit_set_music_folder,
+            tagedit::commands::tagedit_clear_music_folder,
+            tagedit::commands::tagedit_music_folder_status,
+            tagedit::commands::tagedit_open,
+            tagedit::commands::tagedit_save,
+            tagedit::commands::tagedit_undo,
+            tagedit::commands::tagedit_history,
+            tagedit::commands::tagedit_check,
+            tagedit::commands::tagedit_check_fine,
+            tagedit::commands::tagedit_fix_preview,
+            tagedit::commands::tagedit_isrc_releases,
+            tagedit::commands::tagedit_isrc_preview,
+            tagedit::commands::tagedit_explicit_preview,
+            tagedit::commands::tagedit_library_settings,
             tags::commands::tag_scan_status,
             social::commands::friend_activity,
             social::commands::follows_list,
