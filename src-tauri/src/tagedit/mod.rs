@@ -6,14 +6,26 @@
 //! - [`doc`]    one file's tags through `lofty`, per format
 //! - [`paths`]  the music folder: server paths to paths on this computer
 //! - [`write`]  the safe write: changed-file refusal, temp copy, replace
+//! - [`editor`] opening and saving files, Plex rescans, the tag cache
+//! - [`plexside`] folder rescans and the Plex library settings check
+//! - [`undo`]   the last 20 edits with what they replaced
 
 pub mod doc;
+pub mod editor;
 pub mod fields;
 pub mod paths;
+pub mod plexside;
+pub mod undo;
 pub mod write;
 
 #[cfg(test)]
+mod editor_tests;
+#[cfg(test)]
 mod paths_tests;
+#[cfg(test)]
+mod plexside_tests;
+#[cfg(test)]
+mod testkit;
 #[cfg(test)]
 mod write_tests;
 

@@ -136,6 +136,19 @@ impl Doc {
         }
     }
 
+    /// How a Vorbis file keeps its track total: Some(true) as `n/total` in
+    /// TRACKNUMBER, Some(false) in a tag of its own, None when it has none.
+    pub fn slash_numbers(&self) -> Option<bool> {
+        let v = self.vorbis()?;
+        if v.get("TRACKNUMBER").is_some_and(|n| n.contains('/')) {
+            Some(true)
+        } else if has(v, "TRACKTOTAL") || has(v, "TOTALTRACKS") {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
     /// Every field the file has a value for.
     pub fn values(&self, ctx: &Ctx) -> Values {
         Field::ALL.iter().filter_map(|f| self.get(*f, ctx).filter(|v| !v.trim().is_empty()).map(|v| (*f, v))).collect()
