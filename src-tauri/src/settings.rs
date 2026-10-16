@@ -2827,13 +2827,14 @@ mod tests {
         s.music_folder = "M:\\".into();
         s.music_folder_server = "/data/music".into();
         publish(&s, &live, &db);
-        let o = crate::tagedit::published();
+        // Read the options from the settings themselves: the published copy is
+        // shared by every test, and another test may reset it at the same time.
+        let o = s.tag_edit_options();
         assert!(!o.rescan);
         assert_eq!(o.mapping.unwrap().to_local("/data/music/A/B/01.flac").as_deref(), Some("M:\\A\\B\\01.flac"));
         let json = serde_json::to_value(&s).unwrap();
         assert_eq!(json["musicFolder"], "M:\\");
         assert_eq!(json["askBeforeManyFiles"], true);
-        crate::tagedit::publish(Default::default());
     }
 
     #[test]
