@@ -2049,6 +2049,9 @@ the same events.
 | `stats_play_ids` | `{ range, kind: "songs"\|"artists"\|"albums"\|"genres", limit? }` | track ids, most played first |
 | `stats_compare_summary` | `{ unreleasedOk, theirUnreleasedOk }` | `CompareSummary`, or `invalid` while Compare is off |
 | `stats_compare` | `{ theirs: CompareSummary, unreleasedOk }` | `CompareResult`, or `invalid` while Compare is off |
+| `top_songs_index` | – | `{ years, allTime, promoted, wrappedYears, currentYear }`, or `invalid` while Wrapped and Top Songs are off |
+| `top_songs_list` | `{ year? }` (no year: All-Time) | `TopSongsList`; `notFound` for a year without a list |
+| `stats_wrapped` | `{ year }` | `Wrapped` |
 
 Stats count every play that wasn't a skip, from the listen log and imported
 plays together (see Play history from before Platter and other apps below). A range is two local dates ("YYYY-MM-DD"), both included; no
@@ -2081,6 +2084,26 @@ per month for the last 12 months.
 is all that's shared with a friend: up to 50 artists and 50 songs from about
 the last six months, each with its share of the plays. Unreleased songs are
 only in it when both sides agreed. `CompareResult = { friend, overlap (0 to 100), commonArtists, theirSongsNew }`.
+
+Years for Wrapped and Top Songs are local calendar years. A year has a Top
+Songs list once it has 30 plays and is over enough: past years always, this
+year from December 1. `years` and `wrappedYears` are newest first;
+`wrappedYears` has every such year with any plays. `promoted` is the year
+Home shows: this year's list through December, last year's until January 15,
+null otherwise (and when that year has no list).
+
+`TopSongsList = { year, title, rows: { track, plays, ms, unreleased, firstOfYear }[], durationMs }`:
+up to 100 library songs, ranked by plays then minutes; the position is the
+rank. Each version is its own song, credited to the file played.
+
+`Wrapped = { year, totals, prevMs, topArtists, topSongs, topAlbums, topGenres, personality, hours, biggestDay, replayed, firstSong, newArtists }`,
+with up to five of each top list. `personality = { time: "morning"|"afternoon"|"evening"|"night", timeShare, repeatShare, repeats, newShare, mostlyNew } | null`:
+the part of the day with the most minutes (morning 5 to 12, afternoon 12 to
+5, evening 5 to 10, night 10 to 5) and its share; the share of plays on
+songs played 5 times or more that year (`repeats` from half, otherwise deep
+cuts); and the share on songs first heard that year (`mostlyNew` from
+half). Unreleased songs count and carry `unreleased`; the summary card
+leaves them off unless the person turns that on.
 
 ### Play history from before Platter and other apps
 

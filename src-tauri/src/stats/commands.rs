@@ -4,6 +4,7 @@
 use tauri::State;
 
 use super::compare::{self, CompareResult, CompareSummary};
+use super::wrapped::{self, TopSongsIndex, TopSongsList, Wrapped};
 use super::{ItemKind, ItemStats, Moments, MonthRecap, Point, StatsOverview, StatsRange, StatsSpan, TopKind};
 use crate::db::DbHandle;
 use crate::error::{AppError, AppResult};
@@ -133,4 +134,43 @@ pub async fn stats_compare(db: State<'_, DbHandle>, theirs: CompareSummary, unre
         compare::compare(c, &mine, &theirs)
     })
     .await
+}
+
+fn wrapped_on(db: &DbHandle) -> AppResult<()> {
+    if !crate::settings::load(db).wrapped_top_songs {
+        return Err(AppError::Invalid("Wrapped and Top Songs are off in Settings.".into()));
+    }
+    Ok(())
+}
+
+/// Which Top Songs lists and Wrapped years there are, and the year Home shows.
+#[tauri::command]
+pub async fn top_songs_index(db: State<'_, DbHandle>) -> AppResult<TopSongsIndex> {
+    wrapped_on(&db)?;
+    fresh(&db).await?;
+    db.read_async(|c| {
+        let today = super::today(c)?;
+        wrapped::index(c, today)
+    })
+    .await
+}
+
+/// A year's Top Songs list, or All-Time without a year.
+#[tauri::command]
+pub async fn top_songs_list(db: State<'_, DbHandle>, year: Option<i64>) -> AppResult<TopSongsList> {
+    wrapped_on(&db)?;
+    fresh(&db).await?;
+    db.read_async(move |c| {
+        let today = super::today(c)?;
+        wrapped::list(c, year, today)
+    })
+    .await
+}
+
+/// A year's Wrapped.
+#[tauri::command]
+pub async fn stats_wrapped(db: State<'_, DbHandle>, year: i64) -> AppResult<Wrapped> {
+    wrapped_on(&db)?;
+    fresh(&db).await?;
+    db.read_async(move |c| wrapped::wrapped(c, year)).await
 }

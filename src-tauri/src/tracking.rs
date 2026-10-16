@@ -573,6 +573,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn private_session_plays_stay_out_of_wrapped() {
+        let year = |db: &DbHandle| {
+            db.write(|c| crate::stats::refresh(c).map(|_| ())).unwrap();
+            db.read(|c| crate::stats::wrapped::wrapped(c, 1970)).unwrap().totals.plays
+        };
+        let open = rig(false, false);
+        full_play(&open.tracker).await;
+        assert_eq!(year(&open.db), 1, "a normal play counts");
+        let private = rig(true, false);
+        full_play(&private.tracker).await;
+        assert_eq!(year(&private.db), 0);
+    }
+
+    #[tokio::test]
     async fn sharing_off_hides_the_live_session_but_keeps_history() {
         let r = rig(false, true);
         r.tracker.settings.share_activity.store(false, Ordering::Relaxed);

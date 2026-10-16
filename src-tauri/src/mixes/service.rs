@@ -113,8 +113,8 @@ fn made_for_you_rank(kind: MixKind) -> Option<u8> {
         MixKind::NewInLibrary => 3,
         MixKind::OnRepeat => 4,
         MixKind::Rediscover => 5,
-        MixKind::TopSongs => 6,
-        MixKind::Genre | MixKind::Mood | MixKind::Radio => return None,
+        // Top Songs lists live in search and on the profile, not on Home.
+        MixKind::TopSongs | MixKind::Genre | MixKind::Mood | MixKind::Radio => return None,
     })
 }
 

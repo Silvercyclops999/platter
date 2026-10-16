@@ -17,6 +17,9 @@ pub mod commands;
 pub mod compare;
 #[cfg(test)]
 mod tests;
+pub mod wrapped;
+#[cfg(test)]
+mod wrapped_tests;
 
 use std::collections::HashMap;
 

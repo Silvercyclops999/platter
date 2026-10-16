@@ -570,7 +570,7 @@ async fn shelves_pages_steering_and_refresh() {
     assert!(shelves.made_for_you.iter().any(|m| m.kind == MixKind::Daily));
     assert!(shelves.moods.iter().all(|m| m.kind == MixKind::Mood));
     assert!(shelves.genres.iter().any(|m| m.title == "Rock Mix"));
-    assert!(shelves.made_for_you.iter().any(|m| m.kind == MixKind::TopSongs));
+    assert!(!shelves.made_for_you.iter().any(|m| m.kind == MixKind::TopSongs), "Top Songs stays off Made for you");
     let daylist = shelves.made_for_you.iter().find(|m| m.kind == MixKind::Daylist).unwrap();
     assert!(daylist.next_update_at.is_some_and(|t| t > now_ms()));
     let radio = s.radio_page("track:r0-al0-t0".into(), None, Some(1)).await.unwrap();

@@ -7,14 +7,14 @@ use super::*;
 use crate::db::listens::{self, ContextKind, ImportSource, ImportedPlay, PlayStart};
 use crate::db::schema::migrate;
 
-fn db() -> Connection {
+pub(super) fn db() -> Connection {
     let mut c = Connection::open_in_memory().unwrap();
     migrate(&mut c).unwrap();
     c
 }
 
 /// Unix ms for a local date and time.
-fn local_ms(c: &Connection, at: &str) -> i64 {
+pub(super) fn local_ms(c: &Connection, at: &str) -> i64 {
     c.query_row("SELECT CAST(strftime('%s', ?1, 'utc') AS INTEGER) * 1000", [at], |r| r.get(0)).unwrap()
 }
 
@@ -39,7 +39,7 @@ fn add_album(c: &Connection, id: &str, title: &str, artist_id: &str, artist: &st
 }
 
 /// A song on album `al1` by artist `ar1` ("Band") unless told otherwise.
-fn add_track(c: &Connection, id: &str, title: &str, album: (&str, &str), artist: (&str, &str), genres: &str) {
+pub(super) fn add_track(c: &Connection, id: &str, title: &str, album: (&str, &str), artist: (&str, &str), genres: &str) {
     c.execute(
         "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, part_key, duration_ms, genres)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, '/p', 200000, ?7)",
@@ -48,7 +48,7 @@ fn add_track(c: &Connection, id: &str, title: &str, album: (&str, &str), artist:
     .unwrap();
 }
 
-fn library(c: &Connection) {
+pub(super) fn library(c: &Connection) {
     add_artist(c, "ar1", "Band");
     add_artist(c, "ar2", "Other");
     add_album(c, "al1", "First", "ar1", "Band");
@@ -59,7 +59,7 @@ fn library(c: &Connection) {
 }
 
 /// A finished play of `ms` listened, from an album.
-fn play(c: &Connection, key: &str, at: i64, ms: u64) -> i64 {
+pub(super) fn play(c: &Connection, key: &str, at: i64, ms: u64) -> i64 {
     let id = listens::start_play(
         c,
         &PlayStart {
@@ -78,7 +78,7 @@ fn play(c: &Connection, key: &str, at: i64, ms: u64) -> i64 {
     id
 }
 
-const MIN: u64 = 60_000;
+pub(super) const MIN: u64 = 60_000;
 
 #[test]
 fn calendar_round_trips() {
@@ -622,6 +622,14 @@ fn fast_at_100k_plays() {
         eprintln!("moments {r:?}: {took:?}");
         assert!(took.as_millis() < moments_ms, "moments {r:?} took {took:?}");
     }
+    // Wrapped and a year's Top Songs list.
+    let took = fastest(|| {
+        let w = wrapped::wrapped(&c, 2025).unwrap();
+        assert!(w.totals.plays > 0 && w.personality.is_some());
+        assert_eq!(wrapped::list(&c, Some(2025), day("2026-10-15")).unwrap().rows.len(), wrapped::TOP_SONGS_LEN as usize);
+    });
+    eprintln!("wrapped 2025 and its list: {took:?}");
+    assert!(took.as_millis() < budget_ms * 2, "wrapped took {took:?}");
     let t = Instant::now();
     let cal = days(&c, day("2025-10-12"), day("2026-10-17")).unwrap();
     assert!(!cal.is_empty());

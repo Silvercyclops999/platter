@@ -532,6 +532,10 @@ pub struct Settings {
     pub monthly_stats_on_profile: bool,
     /// Compare stats with friends (a summary only, never the history).
     pub stats_compare: bool,
+    /// Wrapped and the yearly Top Songs lists.
+    pub wrapped_top_songs: bool,
+    /// "N plays" under titles on yearly Top Songs lists.
+    pub top_songs_show_plays: bool,
     /// Song lineage: "Lineage" in song menus, the versions panel and Your stats.
     pub show_lineage: bool,
     /// "Describe a playlist" in the create menu and the smart playlist editor.
@@ -900,6 +904,8 @@ impl Default for Settings {
             stats_strip: true,
             monthly_stats_on_profile: true,
             stats_compare: false,
+            wrapped_top_songs: true,
+            top_songs_show_plays: false,
             show_lineage: true,
             show_describe_playlist: true,
             compare_level_match: true,
@@ -1054,6 +1060,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "statsStrip",
     "monthlyStatsOnProfile",
     "statsCompare",
+    "wrappedTopSongs",
+    "topSongsShowPlays",
     "showLineage",
     "showDescribePlaylist",
     "compareLevelMatch",
@@ -1344,6 +1352,8 @@ pub struct SettingsPatch {
     pub stats_strip: Option<bool>,
     pub monthly_stats_on_profile: Option<bool>,
     pub stats_compare: Option<bool>,
+    pub wrapped_top_songs: Option<bool>,
+    pub top_songs_show_plays: Option<bool>,
     pub show_lineage: Option<bool>,
     pub show_describe_playlist: Option<bool>,
     pub compare_level_match: Option<bool>,
@@ -1747,6 +1757,8 @@ impl Settings {
         set(&mut self.stats_strip, p.stats_strip);
         set(&mut self.monthly_stats_on_profile, p.monthly_stats_on_profile);
         set(&mut self.stats_compare, p.stats_compare);
+        set(&mut self.wrapped_top_songs, p.wrapped_top_songs);
+        set(&mut self.top_songs_show_plays, p.top_songs_show_plays);
         set(&mut self.show_lineage, p.show_lineage);
         set(&mut self.show_describe_playlist, p.show_describe_playlist);
         set(&mut self.compare_level_match, p.compare_level_match);
@@ -3341,6 +3353,19 @@ mod tests {
             serde_json::from_str(r#"{"statsPage":false,"statsStrip":false,"monthlyStatsOnProfile":false,"statsCompare":true}"#).unwrap();
         s.apply(&p).unwrap();
         assert!(!s.stats_page && !s.stats_strip && !s.monthly_stats_on_profile && s.stats_compare);
+    }
+
+    #[test]
+    fn wrapped_settings_default_sync_and_apply() {
+        let mut s = Settings::default();
+        assert!(s.wrapped_top_songs, "Wrapped and Top Songs are on");
+        assert!(!s.top_songs_show_plays, "plays under titles are off on yearly lists");
+        for k in ["wrappedTopSongs", "topSongsShowPlays"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let p: SettingsPatch = serde_json::from_str(r#"{"wrappedTopSongs":false,"topSongsShowPlays":true}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.wrapped_top_songs && s.top_songs_show_plays);
     }
 
     #[test]
