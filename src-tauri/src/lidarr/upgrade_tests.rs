@@ -25,7 +25,7 @@ use super::request_tests::{NoMbid, Mbid};
 use super::status::RequestState;
 use super::swap::{self, BackupPlace, Failure, LocalFs, LoftyTags, NoteEdit, Planned, ShareFs, SwapHost, TagIo};
 use super::upgrade::{Hosts, OfferStatus, PlexFolders, UpgradeDeps, Upgrades};
-use super::provenance::ArchiveStatus;
+use super::provenance::TagStatus;
 use super::{Lidarr, LidarrDeps, PlexMusic};
 use crate::artistinfo::http::HttpResponse;
 use crate::db::DbHandle;
@@ -839,7 +839,7 @@ fn rig() -> Rig {
         hosts: hosts.clone(),
         plex: plex.clone(),
         clock: Arc::new(|| 1_800_000_000),
-        status: Arc::new(ArchiveStatus),
+        status: Arc::new(TagStatus),
     });
     Rig { b, db, web, mb, plex, hosts, up, lidarr }
 }

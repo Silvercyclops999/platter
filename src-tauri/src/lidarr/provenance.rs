@@ -1,10 +1,10 @@
 //! What a file says about where it came from: its release status and its
 //! provenance note, as upgrades see them.
 //!
-//! Upgrades only ask through [`StatusReader`]. [`ArchiveStatus`] reads the
-//! `ARCHIVE_*` tags the scan already parses (`ARCHIVE_VERSION` for the
-//! status, `ARCHIVE_SOURCE` for the note); a fuller reader (plain STATUS and
-//! VERSION tags, Picard's release status) plugs in behind the same trait.
+//! Upgrades only ask through [`StatusReader`]. [`TagStatus`] uses the
+//! library's provenance reader (`tags::provenance`): ARCHIVE_VERSION first,
+//! then a plain STATUS tag, Picard's release status and type, or the custom
+//! tag set in Settings. The note is a plain VERSION tag, else ARCHIVE_SOURCE.
 
 use std::path::Path;
 
@@ -58,17 +58,20 @@ pub trait StatusReader: Send + Sync {
     fn file_status(&self, tags: &FileTags) -> FileStatus;
 }
 
-/// The stub over the `ARCHIVE_*` fields.
-pub struct ArchiveStatus;
+/// The library's provenance reader, with the settings in effect.
+pub struct TagStatus;
 
-impl StatusReader for ArchiveStatus {
+impl StatusReader for TagStatus {
     fn file_status(&self, tags: &FileTags) -> FileStatus {
-        let status = match tags.version.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            Some(v) if v.eq_ignore_ascii_case("released") => ReleaseStatus::Released,
+        use crate::tags::provenance::{config, resolve};
+        let p = resolve(tags, &config());
+        let status = match p.status {
+            Some(s) if s.is_released() => ReleaseStatus::Released,
             Some(_) => ReleaseStatus::Unreleased,
             None => ReleaseStatus::Unknown,
         };
-        FileStatus { status, note: tags.source.clone().filter(|s| !s.trim().is_empty()), note_tag: NoteTag::ArchiveSource }
+        let note_tag = if tags.version_note.is_some() && tags.source.is_none() { NoteTag::Version } else { NoteTag::ArchiveSource };
+        FileStatus { status, note: p.note, note_tag }
     }
 }
 
@@ -115,13 +118,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_stub_reads_archive_version_and_source() {
-        let r = ArchiveStatus;
+    fn status_and_note_come_from_whichever_tags_the_file_uses() {
+        let r = TagStatus;
         let t = |v: Option<&str>, s: Option<&str>| FileTags { version: v.map(str::to_string), source: s.map(str::to_string), ..Default::default() };
         assert_eq!(r.file_status(&t(Some("released"), Some("Official CD"))).status, ReleaseStatus::Released);
         assert_eq!(r.file_status(&t(Some("leak"), None)).status, ReleaseStatus::Unreleased);
         assert_eq!(r.file_status(&t(None, None)).status, ReleaseStatus::Unknown);
-        assert_eq!(r.file_status(&t(None, Some("Official CD"))).note.as_deref(), Some("Official CD"));
+        let archive = r.file_status(&t(None, Some("Official CD")));
+        assert_eq!((archive.note.as_deref(), archive.note_tag), (Some("Official CD"), NoteTag::ArchiveSource));
+        // A plain STATUS tag and a VERSION note.
+        let plain = FileTags { status_tag: Some("Released".into()), version_note: Some("Official release (CD)".into()), ..Default::default() };
+        let f = r.file_status(&plain);
+        assert_eq!((f.status, f.note.as_deref(), f.note_tag), (ReleaseStatus::Released, Some("Official release (CD)"), NoteTag::Version));
+        // Picard's release status.
+        let picard = FileTags { mb_status: Some("bootleg".into()), ..Default::default() };
+        assert_eq!(r.file_status(&picard).status, ReleaseStatus::Unreleased);
+        // A value no scheme knows is never taken as released.
+        let odd = FileTags { status_tag: Some("whatever".into()), ..Default::default() };
+        assert_eq!(r.file_status(&odd).status, ReleaseStatus::Unknown);
         assert!(note_is_official(Some("  official CD rip"), "Official"));
         assert!(!note_is_official(Some("Unofficial bootleg"), "Official"));
         assert!(!note_is_official(None, "Official"));

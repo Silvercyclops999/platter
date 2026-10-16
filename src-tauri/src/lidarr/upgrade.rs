@@ -347,7 +347,7 @@ fn album_files(c: &Connection, album_id: &str) -> AppResult<Option<AlbumFiles>> 
     use crate::db::release::{album_unreleased, track_unreleased};
     let row = c
         .query_row(
-            "SELECT al.title, al.artist_id, al.artist_title, al.format, al.subformats, at.version, al.matched, al.studio, mc.found
+            "SELECT al.title, al.artist_id, al.artist_title, al.format, al.subformats, coalesce(at.version, at.release), al.matched, al.studio, mc.found
              FROM albums al LEFT JOIN album_tags at ON at.album_id = al.id LEFT JOIN album_mb_check mc ON mc.album_id = al.id
              WHERE al.id = ?1",
             [album_id],
@@ -370,7 +370,7 @@ fn album_files(c: &Connection, album_id: &str) -> AppResult<Option<AlbumFiles>> 
     let subs: Vec<String> = subs.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let unreleased = album_unreleased(album_id, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb);
     let mut st = c.prepare_cached(
-        "SELECT t.id, t.title, t.disc_number, t.track_number, t.codec, t.bitrate, t.bit_depth, t.file, ft.version, t.duration_ms
+        "SELECT t.id, t.title, t.disc_number, t.track_number, t.codec, t.bitrate, t.bit_depth, t.file, coalesce(ft.version, ft.release), t.duration_ms
          FROM tracks t LEFT JOIN file_tags ft ON ft.part_key = t.part_key
          WHERE t.album_id = ?1 ORDER BY t.disc_number, t.track_number, t.title",
     )?;

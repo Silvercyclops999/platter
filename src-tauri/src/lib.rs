@@ -720,7 +720,7 @@ pub fn run() {
                 hosts: Arc::new(lidarr::upgrade::DesktopHosts { db: db.clone() }),
                 plex: Arc::new(lidarr::upgrade::PlexRescan(plex.clone())),
                 clock: Arc::new(db::queries::now_s),
-                status: Arc::new(lidarr::provenance::ArchiveStatus),
+                status: Arc::new(lidarr::provenance::TagStatus),
             });
             tauri::async_runtime::spawn(lidarr::upgrade::watch(upgrades.clone()));
             app.manage(upgrades);

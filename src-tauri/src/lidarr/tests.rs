@@ -414,6 +414,35 @@ fn library_unreleased_comes_from_the_tags() {
     })
     .unwrap();
     assert!(db.read(library_has_unreleased).unwrap());
+    // Status from a plain STATUS or Picard tag lands in `release`.
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("y.db")).unwrap();
+    db.write(|c| {
+        c.execute_batch("INSERT INTO file_tags (part_key, status, scanned_at, release) VALUES ('/p/1', 'done', 1, 'released'), ('/p/2', 'done', 1, 'leaked');")?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(db.read(library_has_unreleased).unwrap());
+}
+
+#[test]
+fn two_plex_folders_with_separate_lidarr_and_staging_roots_are_green() {
+    let mut p = library("/data/media/Music");
+    let archive = plex("/data/media/Archive", &[("Quiet Hours/Tapes/01 Hiss.flac", 9_999)]);
+    p.locations.extend(archive.locations);
+    p.files.extend(archive.files);
+    let mut l = lidarr(vec![root("/downloads", &["Someone"])]);
+    l.roots.push(RootFolder { id: 2, ..root("/staging/upgrades", &["Northlight"]) });
+    let disk = HashMap::from([
+        ("/downloads/Someone/".to_string(), listing(&["Album"], &[])),
+        ("/staging/upgrades/Northlight/".to_string(), listing(&["Second Wind"], &[])),
+    ]);
+    let r = run(&p, l.clone(), &with_staging("/staging/upgrades"), &disk);
+    assert!(r.passed, "{r:?}");
+    // A Lidarr root inside either Plex folder is still red.
+    l.roots.push(RootFolder { id: 3, ..root("/data/media/Archive/New", &[]) });
+    let r = run(&p, l, &with_staging("/staging/upgrades"), &disk);
+    assert_eq!(ids(&r, Level::Red), vec!["rootOverlap"]);
 }
 
 // ------------------------------------------------------------------ the staging folder

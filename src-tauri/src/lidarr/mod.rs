@@ -128,11 +128,12 @@ pub struct Checked {
     pub plex_locations: Vec<String>,
 }
 
-/// Whether any file's tags (as the scan cached them) mark it unreleased:
-/// an `ARCHIVE_VERSION` other than released, on a file or an album.
+/// Whether any file's tags (as the scan cached them) mark it as not
+/// released: its release status (ARCHIVE_VERSION, else the status the
+/// provenance reader found) is anything but released, on a file or an album.
 pub fn library_has_unreleased(c: &rusqlite::Connection) -> AppResult<bool> {
-    let q = "SELECT EXISTS (SELECT 1 FROM file_tags WHERE trim(coalesce(version, '')) NOT IN ('', 'released'))
-             OR EXISTS (SELECT 1 FROM album_tags WHERE trim(coalesce(version, '')) NOT IN ('', 'released'))";
+    let q = "SELECT EXISTS (SELECT 1 FROM file_tags WHERE trim(coalesce(version, release, '')) NOT IN ('', 'released'))
+             OR EXISTS (SELECT 1 FROM album_tags WHERE trim(coalesce(version, release, '')) NOT IN ('', 'released'))";
     Ok(c.query_row(q, [], |r| r.get::<_, bool>(0))?)
 }
 
