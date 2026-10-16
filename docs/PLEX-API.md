@@ -20,6 +20,14 @@ Every server request sends:
 | List servers | `GET https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1` | Each server lists connections: local, remote, relay. Try local first |
 | Home users | `GET https://plex.tv/api/v2/home/users` | `{ users: [...] }` with `uuid`, `title`, `friendlyName`, `thumb`, `admin`, `restricted`, `protected` (needs a PIN to switch) |
 | Switch Home user | `POST https://plex.tv/api/v2/home/users/{uuid}/switch` | Form body `pin=NNNN` when the user has one. Answers the user with `authToken`; 401/403 means a wrong or missing PIN. Not called against the real account |
+| Plex Pass | `GET https://plex.tv/api/v2/user` | `subscription.active`, or a `plexpass` entry in `roles`. Label restrictions on shares need it |
+| A server's libraries, plex.tv ids | `GET https://plex.tv/api/servers/{machineId}` | XML. `Server/Section` with `id` (plex.tv's), `key` (the server's section id), `type`, `title`. Shares name sections by `id` |
+| Share a server | `POST https://plex.tv/api/servers/{machineId}/shared_servers` | JSON body, see "Sharing a server" below. Not sent to a real account |
+| Who a server is shared with | `GET https://plex.tv/api/servers/{machineId}/shared_servers` | XML `SharedServer` per person with `Section ... shared="1"` children. Carries `accessToken`, dropped while reading |
+| Remove a share | `DELETE https://plex.tv/api/servers/{machineId}/shared_servers/{id}` | They stay a Plex friend |
+| Last seen | `GET https://plex.tv/api/users` | XML `User/Server` with `machineIdentifier` and `lastSeenAt` (unix s) |
+| Invites received | `GET https://plex.tv/api/invites/requests` | XML `Invite` with `id`, `friend`, `home`, `server` (0/1), `friendlyName`, `username`; `Server name` children |
+| Accept an invite | `PUT https://plex.tv/api/invites/requests/{id}?friend=&home=&server=` | The flags as listed on the invite. Not sent to a real account |
 
 ## Server health
 | Purpose | Request |
@@ -712,6 +720,77 @@ writing to the server, so listen along uses an ntfy relay (behind a relay
 interface, so a Plex path can be added if Plex ever offers one). What it
 does use from Plex: each guest's own access to the server, rating keys, and
 the server's machine id, hashed with the session id before it's sent.
+
+### 2026-10-16: sharing a server (not sent to a real account)
+
+Share my music and Let them listen from my server use plex.tv's older
+`/api` sharing endpoints. Nothing below was sent to a real Plex account:
+the shapes come from python-plexapi (`MyPlexAccount.inviteFriend`,
+`_getSectionIds`, `_filterDictToStr`, `pendingInvites`, `acceptInvite`,
+`MyPlexServerShare`) and are tested against a faked plex.tv
+(`plex::sharing::tests`, `social::sharing::tests`). The ids, names and
+tokens here are made up.
+
+Sharing a server:
+
+```
+POST https://plex.tv/api/servers/{machineId}/shared_servers
+X-Plex-Token: <account token>
+Content-Type: application/json
+
+{
+  "server_id": "{machineId}",
+  "shared_server": { "library_section_ids": [901, 903], "invited_email": "robin_listens" },
+  "sharing_settings": {
+    "allowSync": "0", "allowCameraUpload": "0", "allowChannels": "0",
+    "filterMovies": "", "filterTelevision": "",
+    "filterMusic": "label!=platter-unreleased"
+  }
+}
+```
+
+- `library_section_ids` are plex.tv's section ids from
+  `GET /api/servers/{machineId}` (`Section id`), not the server's own
+  section keys. Platter looks them up each time and refuses any section
+  whose `type` isn't `artist`, before plex.tv is asked.
+- `invited_email` takes a Plex username or an email.
+- `filterMusic` is Plex's restriction string: keys `label`, `label!`,
+  `contentRating`, `contentRating!`, values joined with `%2C`, keys joined
+  with `|`. `label!=x` leaves out items labelled `x`. Restrictions need Plex
+  Pass on the owner's account.
+- Answers seen in other clients: 200/201 with an XML `SharedServer`; 400 with
+  a message when the user already has access (Platter looks for "already");
+  404 or 422 for an unknown user. Still to check against a real account.
+
+Unreleased albums get their label on the server with the tag edit Platter
+already uses (`label[N].tag.tag`, every label the album keeps plus the new
+one, and `label.locked=1`):
+
+```
+GET /library/metadata/{albumKey}                      (Label[] it has now)
+PUT /library/sections/{s}/all?type=9&id={albumKey}&label[0].tag.tag=Vinyl&label[1].tag.tag=platter-unreleased&label.locked=1
+```
+
+Invites received: `GET /api/invites/requests` answers
+
+```
+<MediaContainer size="1">
+  <Invite id="8001" createdAt="1760000000" friend="1" home="0" server="1" username="alex_hosts" friendlyName="Alex">
+    <Server name="Alex's Music" numLibraries="1"/>
+  </Invite>
+</MediaContainer>
+```
+
+and accepting is `PUT /api/invites/requests/8001?friend=1&home=0&server=1`.
+After that the server shows in `GET /api/v2/resources` with `owned: false`
+and its own `accessToken`, and Platter races its connections like any other
+server (`PlexState::refresh_servers`, `client_for_tag`).
+
+To check with a real account (owner and a second test account, with
+permission): the share's answer and its error bodies, whether
+`label!=` really hides labelled albums from the friend (and their search),
+whether Plex keeps `label.locked`, and how soon an invite shows in
+`/api/invites/requests`.
 
 ### 2026-10-15: editing metadata (reads checked, writes not sent)
 

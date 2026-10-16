@@ -54,6 +54,29 @@ are in `docs/screenshots/app-states/`.
 | Computer offline or Wi-Fi switch | `monitor/net.rs` checks the default route every 5 s (no packets sent); a failed re-race where plex.tv is also unreachable | Offline icon with the tooltip "You're offline." at once when the route disappears. A route change reconnects right away. Pre-cached music keeps playing | `net::wifi_switch_and_cable_pull`, `net::starting_without_network_reports_lost`, `health::no_internet_says_you_are_offline`, `health::no_network_route_is_offline_at_once`, `state::computer_offline_says_you_are_offline`, `state::network_lost_is_immediate_and_reconnect_recovers` | Done |
 | Stream drops mid-song | Audio engine HTTP reader | At most a brief pause; resumes from the last byte | `engine_tests::dropped_connection_resumes_without_changing_audio`, `engine_tests::http_source_resumes_byte_exact` | Done |
 
+## Sharing your music
+
+Share my music (Settings, Sharing) and Let them listen from my server
+(Listen along) share through plex.tv only (`social/sharing`,
+`plex/sharing.rs`); tests fake plex.tv and the server's label writes. In a
+browser, `/?listen=cantHear` hosts a session where Robin can't hear the song,
+and `/?listen=invited` is a guest with the host's invite waiting.
+
+| Situation | Detected in | User sees | Tests | Status |
+| --- | --- | --- | --- | --- |
+| A guest can't hear the song | Their Platter sends `CantHear` (listen along) | Card above the strip: "Robin can't hear this" with Let them listen from my server (setting Offer "Let them listen from my server", on). First time: the share dialog to pick libraries; after that one click | `listen::tests::the_host_invites_a_guest_who_cant_hear_and_they_hear_the_hosts_copy_after_accepting`; UI `sharing` first time, one click, setting off | Done |
+| Invite sent, then accepted | plex.tv share; the guest's Platter lists `/api/invites/requests`, accepts, asks plex.tv for servers again | Host: "Invited. Robin accepts in their Platter." Guest: a notification and a card "Sam shared their music with you" with Accept; after it the host's copy plays and the card on the host's side goes | `sharing::tests::a_server_invite_is_announced_once_and_accepting_adds_its_music_libraries`, `state::a_server_shared_with_this_account_appears_and_joins_the_connection_race`, `listen::tests::the_host_invites_...` (the switch to the host's copy); UI `sharing` the guest's invite | Done, needs a check with two real accounts |
+| Guest doesn't take invites in Platter | Their Platter answers with no Plex name | "Robin's Platter doesn't take invites. Share from Settings, Sharing with their Plex username." | `listen::tests::a_guest_who_doesnt_take_invites_in_platter_says_so_and_failures_show`, `sharing::tests::with_invites_kept_to_plex_...`; UI `sharing` says when the guest doesn't take invites | Done |
+| Already shared | plex.tv refuses with "already" | "Robin already has access..." and the guest is still told to look for the invite | `plex::sharing::tests::refused_already_shared_and_plex_down_are_told_apart`, `sharing::tests::invite_refused_already_shared_unknown_user_and_plex_down`; UI `sharing` refusals | Done |
+| Invite refused or unknown user | plex.tv 400/404/422 | In the dialog: "Plex doesn't know that username or email." or "Plex turned the invite down." Nothing shared | same | Done |
+| Plex down | plex.tv unreachable or 5xx | "Plex isn't answering right now. Try again in a while." Nothing shared | same, and `listen::tests::a_guest_who_doesnt_take_invites_...` | Done |
+| Unreleased music and no Plex Pass | `GET /api/v2/user` has no active subscription while the chosen libraries hold unreleased albums | The dialog says keeping unreleased music out needs Plex Pass and nothing is shared until the host picks Share without (the library) or Cancel | `sharing::tests::without_plex_pass_nothing_is_shared_and_the_other_libraries_are_offered`; UI `sharing` without Plex Pass | Done |
+| Labelling unreleased albums fails | A label write on the server fails (no permission, server down) | "Platter couldn't mark your unreleased albums on the server, so nothing was shared." | `sharing::tests::a_label_write_that_fails_shares_nothing` | Done |
+| A library Platter hasn't read | No sync state for it | "Not read by Platter yet"; with hiding on, the share is refused with how to fix it | `sharing::tests::a_library_platter_hasnt_read_counts_as_unknown`; UI `sharing` unread library | Done |
+| Not the server's owner | The connected server isn't owned | "Only the server's owner can share it." | `sharing::tests::the_overview_lists_music_libraries_only_...`; UI `sharing` shared server | Done |
+| Anything but a music library | Section `type` isn't `artist` on plex.tv | Never offered; the core refuses it before plex.tv is asked | `plex::sharing::tests::only_music_libraries_are_ever_shared`, `sharing::tests::non_music_libraries_are_never_shared` | Done |
+| Share link used twice, or the host away | The link's sealed channel on the relay | "That link was already used. Ask for a new one." / "No answer. They need Platter open for the link to work." | `sharing::tests::a_share_link_carries_the_request_through_the_sealed_relay_once`; UI `sharing` share link | Done |
+
 ## Account
 
 | Situation | Detected in | User sees | Tests | Status |

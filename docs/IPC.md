@@ -1911,11 +1911,56 @@ more shows `hostGone`, and goes back to `live` if the host comes back.
 | `hello`, `ping`, `cmd`, `cantHear`, `leave` | guest | the guest's up |
 | `state`, `rekey`, `removed`, `denied` | host | the guest's down |
 | `state`, `ended` | host | broadcast |
+| `offer`, `shared` | host | the guest's down |
+| `plexUser` | guest | the guest's up |
+
+Let them listen from my server: `listen_offer_server { personId }` (host
+only, while `shareOfferServer` is on) sends that guest `offer`. Their
+Platter answers `plexUser` with its Plex username, or none while
+`shareAcceptInvites` is off there; the username goes only inside this
+sealed message, and only when asked. The host shares its default libraries
+through Plex (see Sharing below) and, when the invite went out or they
+already have access, sends `shared`, and the guest looks for the invite.
+The host's view gives each guest `offer: { state: "asking" | "inviting" |
+"invited" | "alreadyShared" | "noInvites" } | { state: "failed", message }`,
+and `offerServer` says whether the button shows. After a guest accepts and
+the host's libraries are read, it looks for each song again, so the host's
+own copy plays.
 
 ntfy as used: `POST <relay>/<topic>` with the sealed text and
 `X-Firebase: no`, and `GET <relay>/<topic>,<topic>/json[?since=<id>]`, read
 line by line. A 429 shows as `limited`, anything else that fails as
 `unreachable`; both retry with a growing wait.
+
+### Sharing
+
+Sharing goes through plex.tv only (docs/PLEX-API.md, "Sharing a server"),
+of music libraries only.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `sharing_overview` | – | `{ serverName, owner, plexPass: bool \| null, libraries: { id, title, unreleased: number \| null, default }[] }`, music libraries only; `unreleased` is null for one Platter hasn't read |
+| `sharing_share` | `{ invitee, options: { libraries, hideUnreleased, allowDownloads } }` | `ShareStatus`: `{ status: "invited", hidden }`, `{ status: "alreadyShared" }`, `{ status: "needsPlexPass", withUnreleased: string[], others: string[] }`, `{ status: "unknownUser" \| "refused" \| "plexDown", message }`; `invalid` for anything but music libraries on a server you own |
+| `sharing_people` | – | `{ id, name, libraries, allowDownloads, unreleasedHidden, pending, lastSeenAt }[]` |
+| `sharing_remove` | `{ id }` | – |
+| `sharing_link` | `{ options }` | `{ link, qr, expiresAt }`: `platter://share/<token>` (the invite token), one person, once |
+| `sharing_open_link` | `{ link }` | `{ status: "invited" \| "alreadyShared", host } \| { status: "failed", message }` |
+| `sharing_invites` | `{ fresh? }` | `ReceivedInvite[]`: `{ id, from, servers, friend, home, server, createdAt }`, server invites only |
+| `sharing_accept` | `{ id }` | `{ servers, libraries }`: their music libraries are added to `libraries` and read |
+
+With `hideUnreleased`, the chosen libraries' unreleased albums get the Plex
+label `platter-unreleased` and the share's music filter is
+`label!=platter-unreleased`; that needs Plex Pass, and without it nothing is
+shared (`needsPlexPass`). A failed label write shares nothing.
+
+Events: `sharing://invites` (`ReceivedInvite[]`, when the list changes; new
+ones also get a desktop notification while `shareAcceptInvites` is on) and
+`sharing://notice` (`{ message }`, someone used your share link).
+
+A share link: the friend's Platter seals `{ n, u: <Plex username>, name, x }`
+for the link's `share up` topic; the host's answers `{ n, s: "invited" |
+"already" | "used" | "expired" | "failed", msg?, host }` on `share down`.
+`deep_link_take` hands a share link over as `shareAsk`.
 
 ## Smart playlists, hide, bookmarks and scrobbling
 
@@ -3239,6 +3284,11 @@ The rest of the fields, with their defaults:
 | `listenName` | string, `""` | The name others in a listening session see; empty is your Plex name. 40 characters at most. |
 | `listenRelay` | string, `""` | The listen along relay, an ntfy server URL; empty is ntfy.sh. A URL of your own goes in your invites. |
 | `listenHideUnreleased` | bool, false | In a session you host, unreleased songs go to guests without their title and artist. Synced. |
+| `shareOfferServer` | bool, true | Offer "Let them listen from my server" to a guest who can't hear the song (host only). Synced. |
+| `shareDefaultLibraries` | string[], [] | Libraries I share by default: section ids on your server, music only. None until picked. Synced. |
+| `shareHideUnreleased` | bool, true | Hide my unreleased music from people I share with (a Plex label the share leaves out; needs Plex Pass). Synced. |
+| `shareAllowDownloads` | bool, false | Allow downloads for people I share with. Synced. |
+| `shareAcceptInvites` | bool, true | Accept invites inside Platter: a notification and a card, one click to accept. Synced. |
 | `discordListenAlong` | bool, true | Discord shows a listening session you host and how many are in it. This device only. |
 | `syncEnabled` | bool, false | Keep app-only state in a sync file in `syncFolder`. On with no folder counts as off. This device only. See Sync, folders and keys. |
 | `syncFolder` | string, `""` | The folder the sync file goes in. Changed with `sync_file_use_folder` or `sync_file_choose_folder`, not `settings_set`. This device only. |

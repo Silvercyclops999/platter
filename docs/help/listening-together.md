@@ -1,6 +1,6 @@
 # Listening together
 
-How to host a listening session, invite people, see what friends play, show sessions on Discord and share links to music.
+How to host a listening session, invite people, share your music through Plex, see what friends play, show sessions on Discord and share links to music.
 
 ![A listening session strip with the People list open](images/listening-session.png)
 
@@ -26,6 +26,41 @@ Each guest plays from your Plex library when they have access to it, else from t
 - With Settings, Social, Listening sessions, Let others change what's playing on, guests can also play, pause, skip and reorder. Off, they can only add.
 - Your name in listening sessions is what others see. Leave it empty to use your Plex name. Nobody sees your email, location or computer.
 - Unreleased songs only play for people with access to your library. Turn on Hide unreleased titles from guests to hide their title and artist too.
+
+## Let them listen from my server
+
+When a guest can't hear a song because it isn't on any server they can reach, a card above the strip says so: Robin can't hear this. Choose Let them listen from my server to invite them to your Plex server.
+
+- The first time, pick which music libraries to share. They become your sharing defaults, so after that it's one click. Your other libraries (films, shows, photos) are never shared.
+- Their Platter tells yours their Plex username, sealed, only when you ask and only if Accept invites inside Platter is on for them. Plex sends the invite; Platter can't share any other way.
+- They accept in their Platter, your server joins theirs, and they hear your copy of the song from then on.
+
+Turn the card off with Settings, Social, Listening sessions, Offer "Let them listen from my server". If their Platter doesn't take invites, share from Settings, Sharing with their Plex username instead.
+
+## Sharing your music
+
+Settings, Sharing, Share my music invites anyone to your Plex server, in or out of a session:
+
+1. Type their Plex username or email, or choose Make a link instead for a link and QR code. Their Platter opens the link and asks your Platter for an invite through the relay. A link works for one person, once, and you need Platter open while they use it.
+2. Pick the music libraries to share. Each one says how many unreleased albums it holds.
+3. Allow downloads is off unless you turn it on (Allow downloads for people I share with sets the default).
+4. Choose Share. Plex may email them about it too.
+
+Only the server's owner can share it. Plex's own rules still decide whether friends can play your music away from your home network.
+
+## Keeping unreleased music home
+
+Before you share, Platter counts the unreleased albums in what you picked, using the same release status as everywhere else ([how Platter decides](archive-and-release-status.md#how-platter-decides)). With Hide my unreleased music from people I share with on (it starts on), Platter labels those albums in Plex and the share leaves that label out, so friends never see them.
+
+Leaving labelled albums out is one of Plex's sharing restrictions, which need Plex Pass on your account. Without it, Platter shares nothing until you choose: share the libraries that hold nothing unreleased, or cancel. A library Platter hasn't read yet can't be checked, so include it in Settings, Library first.
+
+## People with access
+
+Settings, Sharing, People with access lists everyone your server is shared with: the libraries they see, when they were last on your server, whether unreleased music is hidden from them and whether they can download. Choose Remove to take their access away. They stay your Plex friend.
+
+## Invites to you
+
+When a friend shares their server with you, Platter shows a notification and a card, in Listen along too while you listen with them. Choose Accept: their server and its music libraries join your library, and Platter finds the best way to reach it. You don't need to visit plex.tv. Turn this off with Settings, Sharing, Accept invites inside Platter; invites then wait in Plex as usual.
 
 ## Removing people and ending
 
