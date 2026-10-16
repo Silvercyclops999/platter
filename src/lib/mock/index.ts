@@ -98,6 +98,7 @@ import type {
   SmartRules,
   SmartSaveRequest,
   FeedStatus,
+  DeckPluginStatus,
   DeckStatus,
   EditFields,
   EditKind,
@@ -3631,6 +3632,44 @@ export class MockBackend implements Backend {
       const st = this.deck();
       this.later(0, () => this.emit("deck://status", st));
       return st;
+    });
+  }
+  /** Test hooks: what the plugin detector finds, and what was opened. */
+  readonly deckPlugin = { status: { state: "install", version: "0.2.0.0" } as DeckPluginStatus, opened: 0, downloadOpened: 0 };
+  private deckPrompt: string | null = null;
+  /** Test hook: the Stream Deck asks to pair. */
+  askDeckPairing(id = "req1") {
+    this.deckPrompt = id;
+    this.emit("deck://pair-request", { id });
+  }
+  deckPairPrompt() {
+    return this.delay(() => this.deckPrompt);
+  }
+  deckPairAnswer(id: string, allow: boolean) {
+    return this.delay(() => {
+      if (id !== this.deckPrompt) return false;
+      this.deckPrompt = null;
+      this.later(0, () => this.emit("deck://pair-request", { id: null }));
+      if (allow) {
+        this.deckPaired = true;
+        const st = this.deck();
+        this.later(0, () => this.emit("deck://status", st));
+      }
+      return true;
+    });
+  }
+  deckPluginStatus() {
+    return this.delay(() => this.deckPlugin.status);
+  }
+  deckPluginInstall() {
+    return this.delay(() => {
+      if (this.deckPlugin.status.state === "noApp" || this.deckPlugin.status.state === "notBundled") throw new Error("notFound");
+      this.deckPlugin.opened++;
+    });
+  }
+  deckAppDownload() {
+    return this.delay(() => {
+      this.deckPlugin.downloadOpened++;
     });
   }
   discordImgurKeySet(key: string | null) {

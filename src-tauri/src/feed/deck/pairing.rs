@@ -1,6 +1,8 @@
 //! Pairing: a six-digit code shown in Settings, swapped once for a random
 //! token. Only the token's SHA-256 is kept, in the keychain. Five wrong codes
-//! in a row make a new code; pairing again replaces the old token.
+//! in a row make a new code; pairing again replaces the old token. The
+//! Stream Deck can also ask for a token without a code ([`super::ask`]), and
+//! gets one only when the person allows it in Platter's window.
 
 use std::sync::Arc;
 
@@ -124,6 +126,17 @@ impl Pairing {
             }
             return Err(PairError::WrongCode);
         }
+        self.issue(&mut s)
+    }
+
+    /// A new token without a code: the person allowed it in Platter's window
+    /// (see [`super::ask`]). Replaces the old token, and the code changes.
+    pub fn approve(&self) -> Result<String, PairError> {
+        let mut s = self.state.lock();
+        self.issue(&mut s)
+    }
+
+    fn issue(&self, s: &mut State) -> Result<String, PairError> {
         let token = hex(&rand::random::<[u8; 32]>());
         let h = hash(&token);
         let stored = Token::new(h.clone()).map_err(|e| PairError::Keychain(e.to_string()))?;

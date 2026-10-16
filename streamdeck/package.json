@@ -1,6 +1,6 @@
 {
   "name": "platter-streamdeck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Stream Deck plugin for Platter: what's playing on a key, and play, skip, like, volume, request album and Listen along.",
   "license": "GPL-3.0-or-later",

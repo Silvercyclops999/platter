@@ -15,12 +15,19 @@ import streamDeck, {
   type WillDisappearEvent,
 } from "@elgato/streamdeck";
 import { type Command, httpTransport, PlatterClient, PlatterError, type PlatterState, StatePoller } from "./client.js";
+import { AutoPair } from "./pairing.js";
 import { DIAL_STEP, type KeyView, likeView, plainView, playPauseView, volumeFeedback } from "./view.js";
 
-type Globals = { token?: string };
+type Globals = { token?: string; request?: string };
 
 const client = new PlatterClient(httpTransport());
-const poller = new StatePoller(client);
+// Pairing without a code: ask Platter, and keep the token it gives for every key.
+const pairer: AutoPair = new AutoPair(client, {
+  onToken: (token) => streamDeck.settings.setGlobalSettings<Globals>({ token }),
+  onRequest: (request) => streamDeck.settings.setGlobalSettings<Globals>(request ? { request } : {}),
+  onChange: () => void poller.refresh(),
+});
+const poller = new StatePoller(client, undefined, undefined, pairer);
 
 async function run(cmd: Command, key?: { showAlert(): Promise<void>; showOk?(): Promise<void> }, ok = false): Promise<void> {
   try {
@@ -28,7 +35,9 @@ async function run(cmd: Command, key?: { showAlert(): Promise<void>; showOk?(): 
     if (ok) await key?.showOk?.();
   } catch (e) {
     streamDeck.logger.info(`${cmd.command} failed: ${e instanceof Error ? e.message : String(e)}`);
-    await key?.showAlert();
+    // Not paired (or no longer): pressing a key asks Platter again.
+    if (e instanceof PlatterError && e.kind === "unpaired") pairer.press();
+    else await key?.showAlert();
   }
   await poller.refresh();
 }
@@ -148,13 +157,20 @@ class Volume extends SingletonAction {
   }
 }
 
-// Pairing, from the property inspector: { pair: "123456" } or { status: true }.
-streamDeck.ui.onSendToPlugin<{ pair?: string; status?: boolean; unpair?: boolean }>(async (ev) => {
+// Pairing, from the property inspector: { ask: true } asks Platter,
+// { pair: "123456" } uses the code, { status: true } reports.
+streamDeck.ui.onSendToPlugin<{ pair?: string; status?: boolean; unpair?: boolean; ask?: boolean }>(async (ev) => {
   const p = ev.payload;
-  const reply = (payload: { paired: boolean; reachable: boolean; error?: string }) => streamDeck.ui.sendToPropertyInspector(payload);
+  const reply = (payload: { paired: boolean; reachable: boolean; asking?: boolean; error?: string }) =>
+    streamDeck.ui.sendToPropertyInspector(payload);
   if (p?.unpair) {
     client.setToken(null);
     await streamDeck.settings.setGlobalSettings<Globals>({});
+  }
+  if (p?.ask) {
+    pairer.press();
+    await reply({ paired: false, reachable: true, asking: true });
+    return;
   }
   if (typeof p?.pair === "string") {
     try {
@@ -169,7 +185,7 @@ streamDeck.ui.onSendToPlugin<{ pair?: string; status?: boolean; unpair?: boolean
   }
   try {
     const h = await client.hello();
-    await reply({ paired: h.paired, reachable: true });
+    await reply({ paired: h.paired, reachable: true, asking: !h.paired && (pairer.phase === "asking" || pairer.phase === "waiting") });
   } catch (e) {
     await reply({ paired: false, reachable: false, error: e instanceof Error ? e.message : String(e) });
   }
@@ -182,5 +198,7 @@ for (const a of [new PlayPause(), new Next(), new Previous(), new Like(), new Vo
 void streamDeck.connect().then(async () => {
   const g = await streamDeck.settings.getGlobalSettings<Globals>();
   client.setToken(g.token ?? null);
+  // First connect with no token: ask Platter to pair.
+  pairer.start(g.token ? null : (g.request ?? null));
   await poller.refresh();
 });

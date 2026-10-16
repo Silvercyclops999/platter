@@ -12,7 +12,8 @@ export interface KeyView {
 /** Short words for a key when Platter can't be used. */
 export function problemTitle(err: PlatterError | null): string | undefined {
   if (!err) return undefined;
-  if (err.kind === "unpaired" || err.kind === "wrongCode") return "Pair";
+  if (err.kind === "approve") return "Approve\nin Platter";
+  if (err.kind === "unpaired" || err.kind === "wrongCode" || err.kind === "denied") return "Pair";
   if (err.kind === "offline") return "Off";
   return undefined;
 }
@@ -34,7 +35,7 @@ export function plainView(s: PlatterState | null, err: PlatterError | null): Key
 
 /** The Stream Deck + dial's $B1 layout. */
 export function volumeFeedback(s: PlatterState | null, err: PlatterError | null): { title: string; value: string; indicator: number } {
-  if (!s) return { title: "Platter", value: problemTitle(err) ?? "", indicator: 0 };
+  if (!s) return { title: "Platter", value: problemTitle(err)?.replace("\n", " ") ?? "", indicator: 0 };
   const v = s.muted ? 0 : Math.max(0, Math.min(100, Math.round(s.volume)));
   return { title: "Volume", value: s.muted ? "Muted" : `${v}%`, indicator: v };
 }

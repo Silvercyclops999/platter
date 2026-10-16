@@ -159,4 +159,8 @@ impl DeckHost for AppDeck {
             tracing::warn!("emit deck://action failed: {e}");
         }
     }
+
+    fn raise(&self) {
+        crate::platform::show_window(&self.app);
+    }
 }

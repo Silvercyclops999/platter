@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "Platter",
-  "Version": "0.1.0.0",
+  "Version": "0.2.0.0",
   "Author": "Platter",
   "Description": "Control Platter, the music player for your Plex library: the cover on a key, play and pause, skip, like, volume, request the album and Listen along.",
   "URL": "https://github.com/Silvercyclops999/platter",

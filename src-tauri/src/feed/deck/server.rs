@@ -12,6 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 
+use super::ask::{AskError, AskState, Asks};
 use super::pairing::{PairError, Pairing, hex};
 use super::{
     API_VERSION, BURST, COVER_SIZE, Command, DeckConfig, DeckHost, DeckState, DeckStatus, Listening, PAIR_BURST, PAIR_RATE, RATE,
@@ -86,6 +87,7 @@ struct Inner {
     config: Mutex<DeckConfig>,
     limit: Mutex<RateLimit>,
     pair_limit: Mutex<RateLimit>,
+    asks: Mutex<Asks>,
 }
 
 /// The control API server. Cheap to clone.
@@ -111,6 +113,7 @@ impl DeckServer {
                 config: Mutex::new(DeckConfig::default()),
                 limit: Mutex::new(RateLimit::new(RATE, BURST)),
                 pair_limit: Mutex::new(RateLimit::new(PAIR_RATE, PAIR_BURST)),
+                asks: Mutex::new(Asks::default()),
             }),
         }
     }
@@ -168,6 +171,34 @@ impl DeckServer {
         if changed {
             self.emit_status();
         }
+    }
+
+    /// The "Allow Stream Deck to control Platter?" prompt showing now, if any.
+    pub fn pair_prompt(&self) -> Option<String> {
+        self.inner.asks.lock().current(Instant::now())
+    }
+
+    /// The person answered the prompt `id` in the window. False when that
+    /// prompt had already gone.
+    pub fn pair_answer(&self, id: &str, allow: bool) -> crate::error::AppResult<bool> {
+        self.pair_answer_at(id, allow, Instant::now())
+    }
+
+    pub fn pair_answer_at(&self, id: &str, allow: bool, now: Instant) -> crate::error::AppResult<bool> {
+        let pairing = &self.inner.pairing;
+        let done = self.inner.asks.lock().answer(id, allow, now, || pairing.approve()).map_err(|e| match e {
+            PairError::Keychain(m) => AppError::Internal(format!("couldn't save the Stream Deck pairing: {m}")),
+            PairError::WrongCode => AppError::Internal("pairing failed".into()),
+        })?;
+        self.emit_prompt(None);
+        if done && allow {
+            self.emit_status();
+        }
+        Ok(done)
+    }
+
+    fn emit_prompt(&self, id: Option<&str>) {
+        self.inner.events.emit("deck://pair-request", serde_json::json!({ "id": id }));
     }
 
     /// Forget the paired Stream Deck and show a new code.
@@ -308,6 +339,35 @@ impl DeckServer {
                     Err(PairError::Keychain(_)) => Reply::error(500, "Platter couldn't save the pairing in the keychain."),
                 }
             }
+            ("POST", "/v1/pair/request") => {
+                if !self.deck_on(&c) {
+                    return Reply::error(403, "Turn on Allow Stream Deck in Platter's Settings first.");
+                }
+                if !self.inner.pair_limit.lock().allow(now) {
+                    return Reply::error(429, "Too many tries. Wait a moment.");
+                }
+                let r = self.inner.asks.lock().open(now);
+                match r {
+                    Ok(id) => {
+                        self.inner.host.raise();
+                        self.emit_prompt(Some(&id));
+                        Reply::ok(serde_json::json!({ "request": id }))
+                    }
+                    Err(AskError::Busy) => Reply::error(409, "Platter is already asking. Answer it in Platter's window."),
+                    Err(AskError::TooSoon) => Reply::error(429, "Wait a moment before asking again."),
+                }
+            }
+            ("POST", "/v1/pair/status") => {
+                let body = serde_json::from_slice::<serde_json::Value>(&req.body).unwrap_or_default();
+                let id = body.get("request").and_then(|c| c.as_str()).unwrap_or_default();
+                let state = self.inner.asks.lock().status(id, now);
+                match state {
+                    AskState::Waiting => Reply::ok(serde_json::json!({ "state": "waiting" })),
+                    AskState::Allowed(token) => Reply::ok(serde_json::json!({ "state": "allowed", "token": token })),
+                    AskState::Denied => Reply::ok(serde_json::json!({ "state": "denied" })),
+                    AskState::Gone => Reply::ok(serde_json::json!({ "state": "gone" })),
+                }
+            }
             (_, "/v1/state" | "/v1/command") if !authed => Reply::error(401, "Pair with Platter first."),
             ("GET", "/v1/state") => {
                 let have = query.and_then(|q| url::form_urlencoded::parse(q.as_bytes()).find(|(k, _)| k == "cover").map(|(_, v)| v.into_owned()));
@@ -317,7 +377,7 @@ impl DeckServer {
                 Ok(cmd) => self.command(cmd).await,
                 Err(_) => Reply::error(400, "Unknown command."),
             },
-            (_, "/v1/hello" | "/v1/pair" | "/v1/state" | "/v1/command") => Reply::error(405, "Wrong method."),
+            (_, "/v1/hello" | "/v1/pair" | "/v1/pair/request" | "/v1/pair/status" | "/v1/state" | "/v1/command") => Reply::error(405, "Wrong method."),
             _ => Reply::error(404, "Not found."),
         }
     }

@@ -111,6 +111,7 @@ import type {
   DeepLinkOpen,
   DiscordStatus,
   FeedStatus,
+  DeckPluginStatus,
   DeckStatus,
   DownloadKind,
   DownloadStatus,
@@ -581,6 +582,16 @@ export interface Backend {
   deckRevoke(): Promise<DeckStatus>;
   /** Forget the paired script or command line and show a new automation code. */
   automationRevoke(): Promise<DeckStatus>;
+  /** The "Allow Stream Deck to control Platter?" prompt showing now (its id), if any. */
+  deckPairPrompt(): Promise<string | null>;
+  /** Answer that prompt; false when it had already gone. */
+  deckPairAnswer(id: string, allow: boolean): Promise<boolean>;
+  /** Whether the Stream Deck app is here and the Platter plugin installed and current. */
+  deckPluginStatus(): Promise<DeckPluginStatus>;
+  /** Open the plugin bundled with Platter, so the Stream Deck app installs it. */
+  deckPluginInstall(): Promise<void>;
+  /** Open Elgato's download page for the Stream Deck app. */
+  deckAppDownload(): Promise<void>;
   /** Save the Imgur client ID in the keychain (null removes it); answers whether Imgur refused it. */
   discordImgurKeySet(key: string | null): Promise<InfoKeyState>;
 
@@ -1130,6 +1141,11 @@ export function createTauriBackend(): Backend {
     deckStatus: () => call("deck_status"),
     deckRevoke: () => call("deck_revoke"),
     automationRevoke: () => call("automation_revoke"),
+    deckPairPrompt: () => call("deck_pair_prompt"),
+    deckPairAnswer: (id, allow) => call("deck_pair_answer", { id, allow }),
+    deckPluginStatus: () => call("deck_plugin_status"),
+    deckPluginInstall: () => call("deck_plugin_install"),
+    deckAppDownload: () => call("deck_app_download"),
     discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
     tagsIndex: () => call("tags_index"),
     tagScanStatus: () => call("tag_scan_status"),

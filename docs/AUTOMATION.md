@@ -94,6 +94,10 @@ Commands are `play`, `pause`, `playPause`, `next`, `previous`, `like`,
 `page`). Pairing a script replaces any script paired before; the Stream Deck
 has a pairing of its own and isn't affected.
 
+Scripts always pair with the code. Asking in Platter's window instead
+(`/v1/pair/request`) is only for the Stream Deck plugin, which Settings
+installs with Install for Stream Deck.
+
 ## Home Assistant
 
 Home Assistant usually runs on another machine, and Platter's API only

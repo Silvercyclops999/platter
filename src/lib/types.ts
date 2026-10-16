@@ -1227,6 +1227,18 @@ export type DeckStatus = (
   automationPaired: boolean;
 };
 
+/** The Platter plugin for the Stream Deck app (`deckPluginStatus`). */
+export type DeckPluginStatus =
+  /** The Stream Deck app isn't on this computer. */
+  | { state: "noApp" }
+  /** This copy of Platter has no plugin inside (a development build). */
+  | { state: "notBundled" }
+  | { state: "install"; version: string }
+  /** The same version, or a newer one, is installed. */
+  | { state: "installed"; version: string; installed: string }
+  /** An older version is installed. */
+  | { state: "update"; version: string; installed: string };
+
 /** What a Stream Deck key asked the window to show. */
 export type DeckAction =
   | { kind: "listenAlong" }
@@ -3248,6 +3260,8 @@ export interface EventMap {
   "deck://status": DeckStatus;
   /** A Stream Deck key asked for Request album or Listen along. */
   "deck://action": DeckAction;
+  /** The Stream Deck asked to pair (an id), or the prompt closed (null). */
+  "deck://pair-request": { id: string | null };
   /** The file tag scan moved on, started, paused or finished. */
   "tags://progress": TagScanStatus;
   /** File tags changed: badges, editions and filters should be read again. */

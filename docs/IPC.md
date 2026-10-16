@@ -943,6 +943,11 @@ otherwise). No CORS header is sent.
 | `deck_status` | – | `DeckStatus` |
 | `deck_revoke` | – | `DeckStatus` |
 | `automation_revoke` | – | `DeckStatus` |
+| `deck_pair_prompt` | – | `string \| null` |
+| `deck_pair_answer` | `{ id: string, allow: bool }` | `bool` |
+| `deck_plugin_status` | – | `DeckPluginStatus` |
+| `deck_plugin_install` | – | – |
+| `deck_app_download` | – | – |
 
 `DeckStatus` is the port's state as in `FeedStatus` (`off`, `on` with
 `port`, `portInUse`, `failed`) plus `code` (the six-digit pairing code, only
@@ -953,6 +958,28 @@ Deck and makes a new code. It's turned on with `settings_set`
 `automationCode` (only while `allowAutomation` is on) and
 `automationPaired`, and `automation_revoke` forgets it. The port is open
 while either setting is on. See [AUTOMATION.md](AUTOMATION.md).
+
+The Stream Deck plugin can pair without the code. When it asks
+(`POST /v1/pair/request`, below) the window comes up and event
+`deck://pair-request` carries `{ id }`; the UI shows "Allow Stream Deck to
+control Platter?" and answers with `deck_pair_answer` (`allow` false for
+Don't allow, and for closing the prompt). `deck://pair-request` with
+`{ id: null }` closes it, and `deck_pair_prompt` gives the open prompt's id
+when the window loads. Nothing else can allow it.
+
+`deck_plugin_status` says whether the Stream Deck app is on this computer
+and the bundled plugin installed: `DeckPluginStatus` is `{ state: "noApp" }`,
+`{ state: "notBundled" }` (a build without the plugin), `{ state: "install",
+version }`, `{ state: "installed", version, installed }` (same version or
+newer) or `{ state: "update", version, installed }`. Windows looks for
+`StreamDeck.exe` under Program Files and `%APPDATA%\Elgato\StreamDeck`;
+macOS for `/Applications/Elgato Stream Deck.app` and
+`~/Library/Application Support/com.elgato.StreamDeck`. The installed version
+is read from the plugin's `manifest.json` in that folder's `Plugins`.
+`deck_plugin_install` opens the bundled
+`streamdeck/app.platter.streamdeck.streamDeckPlugin` resource with the OS,
+so the Stream Deck app installs it (the UI turns on `allowStreamDeck`
+first). `deck_app_download` opens Elgato's download page.
 
 Request album and Listen along from a Stream Deck bring the window up and
 send `deck://action` to the UI, which shows the usual confirmation:
@@ -976,6 +1003,15 @@ a second (429 past that). Bodies are at most 4 KB.
   a wrong code is 401 and five in a row make a new code. A success also
   makes a new code and replaces any earlier token. Only the token's SHA-256
   is kept, in the keychain.
+- `POST /v1/pair/request` (Stream Deck only, 403 while Allow Stream Deck is
+  off) → `{ request }`, a random id, and the window asks the person. One
+  prompt at a time (409 while one is open), at least five seconds between
+  two asks and after an answer (429), and it shares the pairing limit above.
+  A prompt left for two minutes goes away.
+- `POST /v1/pair/status` with `{ request }` → `{ state: "waiting" }`,
+  `{ state: "allowed", token }` (once; the token replaces any earlier one,
+  as with the code), `{ state: "denied" }` or `{ state: "gone" }`
+  (expired, collected or unknown).
 - Everything else needs `Authorization: Bearer <token>` (401 without it).
 - `GET /v1/state?cover=<coverKey>` → `{ api, playing, private, title, artist,
   album, trackId, liked, volume, muted, coverKey, cover, canRequest }`.

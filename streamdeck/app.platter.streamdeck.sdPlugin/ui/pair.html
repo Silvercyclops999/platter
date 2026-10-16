@@ -19,7 +19,11 @@
   <body>
     <p id="status">Checking Platter…</p>
     <div id="pairing" hidden>
-      <p>In Platter, open Settings, turn on Allow Stream Deck, and type the pairing code here.</p>
+      <p>Press any Platter key, or Ask Platter, and choose Allow in Platter's window.</p>
+      <div class="row">
+        <button id="ask">Ask Platter</button>
+      </div>
+      <p>Or type the pairing code from Platter's Settings (Stream Deck, Allow Stream Deck).</p>
       <div class="row">
         <input id="code" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="123456" aria-label="Pairing code" />
         <button id="pair">Pair</button>
@@ -44,6 +48,11 @@
         if (msg.paired) {
           s.textContent = "Paired with Platter.";
           s.className = "ok";
+        } else if (msg.asking) {
+          s.textContent = "Approve in Platter: choose Allow in its window.";
+          s.className = "";
+          // Check again until it's answered.
+          setTimeout(() => send({ status: true }), 2000);
         } else if (!msg.reachable) {
           s.textContent = msg.error || "Platter isn't running, or Allow Stream Deck is off in its Settings.";
           s.className = "error";
@@ -61,6 +70,9 @@
         $("status").textContent = "Pairing…";
         $("status").className = "";
         send({ pair: $("code").value });
+      });
+      $("ask").addEventListener("click", () => {
+        send({ ask: true });
       });
       $("code").addEventListener("keydown", (e) => {
         if (e.key === "Enter") $("pair").click();

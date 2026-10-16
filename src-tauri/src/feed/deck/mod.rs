@@ -6,12 +6,17 @@
 //! it binds 127.0.0.1 only, answers only a loopback peer that names it by
 //! `127.0.0.1:<port>` or `localhost:<port>`, turns away anything a browser
 //! sends (an `Origin` or `Sec-Fetch-Site` header), and is rate limited.
-//! Apart from `/v1/hello` and `/v1/pair`, every request needs the token a
-//! client gets by pairing with the short code shown in Settings. Only a hash
+//! Apart from `/v1/hello` and the `/v1/pair` calls, every request needs the token a
+//! client gets by pairing: allowed in Platter's window, or with the short
+//! code shown in Settings. Only a hash
 //! of that token is kept, in the OS keychain; Revoke forgets it.
 //!
 //! - `GET  /v1/hello` the app and whether the bearer token is paired
 //! - `POST /v1/pair` `{"code": "123456"}` gives `{"token": "..."}`
+//! - `POST /v1/pair/request` asks the person in Platter's window, gives
+//!   `{"request": "<id>"}`; `POST /v1/pair/status` `{"request": "<id>"}`
+//!   gives `{"state": "waiting" | "allowed" | "denied" | "gone"}`, with the
+//!   token once allowed (see [`ask`])
 //! - `GET  /v1/state?cover=<key>` see [`DeckState`]; the cover is left out
 //!   when the client already has the one named by `cover`
 //! - `POST /v1/command` `{"command": "playPause"}` and the others in
@@ -24,15 +29,18 @@
 //! Off by default (Settings, this device only); the port is open while
 //! Allow Stream Deck or Allow automation is on.
 //!
-//! Layout: [`pairing`] the code and the token, [`server`] the listener and
+//! Layout: [`pairing`] the code and the token, [`ask`] pairing allowed in
+//! the window, [`install`] the bundled plugin, [`server`] the listener and
 //! the HTTP handling, [`app`] the real player, likes, Lidarr and Listen
 //! along behind [`DeckHost`], [`commands`] the Tauri commands,
 //! [`automation`] the `platter://` command links, [`cli`] the command line.
 
 pub mod app;
+pub mod ask;
 pub mod automation;
 pub mod cli;
 pub mod commands;
+pub mod install;
 pub mod pairing;
 pub mod server;
 
@@ -218,6 +226,8 @@ pub trait DeckHost: Send + Sync {
     async fn show(&self, route: serde_json::Value) -> AppResult<()>;
     /// Tell the window something didn't happen (a toast).
     fn notice(&self, message: &str);
+    /// Bring the window up (to ask about pairing).
+    fn raise(&self);
 }
 
 /// A token bucket: `rate` requests a second, up to `burst` at once.

@@ -93,6 +93,9 @@ impl DeckHost for Fake {
     fn notice(&self, message: &str) {
         self.calls.lock().push(format!("notice {message}"));
     }
+    fn raise(&self) {
+        self.calls.lock().push("raise".into());
+    }
 }
 
 #[derive(Default)]
@@ -243,6 +246,174 @@ async fn a_locked_keychain_fails_pairing_cleanly() {
     let r = s.respond(&req("POST", "/v1/pair", None, &format!(r#"{{"code":"{}"}}"#, pairing.code())), LOOP, PORT, Instant::now()).await;
     assert_eq!(r.status, 500);
     assert!(s.revoke().is_err());
+}
+
+// ---------------------------------------------------------------- pairing in the window
+
+impl Rig {
+    async fn at(&self, r: &Request, now: Instant) -> server::Reply {
+        self.server.respond(r, LOOP, PORT, now).await
+    }
+
+    async fn ask(&self, now: Instant) -> server::Reply {
+        self.at(&req("POST", "/v1/pair/request", None, r#"{"client":"streamdeck"}"#), now).await
+    }
+
+    async fn ask_status(&self, id: &str, now: Instant) -> server::Reply {
+        self.at(&req("POST", "/v1/pair/status", None, &format!(r#"{{"request":"{id}"}}"#)), now).await
+    }
+
+    fn prompts(&self) -> Vec<serde_json::Value> {
+        self.events.0.lock().iter().filter(|(e, _)| e == "deck://pair-request").map(|(_, p)| p.clone()).collect()
+    }
+}
+
+#[tokio::test]
+async fn asking_brings_the_window_up_and_allowing_pairs() {
+    let r = rig();
+    let t0 = Instant::now();
+    let a = r.ask(t0).await;
+    assert_eq!(a.status, 200, "{:?}", a.body);
+    let id = a.body["request"].as_str().unwrap().to_owned();
+    assert_eq!(id.len(), 32);
+    assert!(r.host.calls.lock().contains(&"raise".to_owned()), "the window comes up");
+    assert_eq!(r.prompts(), vec![serde_json::json!({ "id": id })]);
+    assert_eq!(r.server.pair_prompt().as_deref(), Some(id.as_str()));
+    // Nothing is paired while it waits, however often the plugin checks.
+    for _ in 0..3 {
+        assert_eq!(r.ask_status(&id, t0).await.body, serde_json::json!({ "state": "waiting" }));
+    }
+    assert!(!r.pairing.paired());
+    assert!(r.server.pair_answer_at(&id, true, t0 + Duration::from_secs(3)).unwrap());
+    assert_eq!(r.prompts().last(), Some(&serde_json::json!({ "id": null })), "the prompt closes");
+    assert!(r.server.pair_prompt().is_none());
+    let s = r.ask_status(&id, t0 + Duration::from_secs(4)).await;
+    assert_eq!(s.body["state"], "allowed");
+    let token = s.body["token"].as_str().unwrap().to_owned();
+    assert!(r.pairing.check(&token));
+    assert!(r.server.status().paired);
+    assert_eq!(r.command(&token, r#"{"command":"next"}"#).await.status, 200);
+    // The token is handed over once.
+    assert_eq!(r.ask_status(&id, t0 + Duration::from_secs(5)).await.body["state"], "gone");
+    // Only a hash is kept.
+    assert_ne!(r.store.get(TOKEN_ACCOUNT).unwrap().unwrap().expose(), token);
+}
+
+#[tokio::test]
+async fn dont_allow_pairs_nothing() {
+    let r = rig();
+    let t0 = Instant::now();
+    let id = r.ask(t0).await.body["request"].as_str().unwrap().to_owned();
+    assert!(r.server.pair_answer_at(&id, false, t0).unwrap());
+    assert_eq!(r.ask_status(&id, t0).await.body, serde_json::json!({ "state": "denied" }));
+    assert!(!r.pairing.paired());
+    // Answering again, or another id, does nothing.
+    assert!(!r.server.pair_answer_at(&id, true, t0).unwrap());
+    assert!(!r.server.pair_answer_at("nope", true, t0).unwrap());
+    assert!(!r.pairing.paired());
+    assert_eq!(r.ask_status("someone-else", t0).await.body["state"], "gone");
+}
+
+#[tokio::test]
+async fn one_prompt_at_a_time_and_a_few_seconds_between() {
+    let r = rig();
+    let t0 = Instant::now();
+    let id = r.ask(t0).await.body["request"].as_str().unwrap().to_owned();
+    // Another ask while it shows is turned away, and doesn't raise again.
+    let busy = r.ask(t0 + Duration::from_secs(10)).await;
+    assert_eq!(busy.status, 409, "{:?}", busy.body);
+    assert_eq!(r.host.calls.lock().iter().filter(|c| *c == "raise").count(), 1);
+    assert_eq!(r.prompts().len(), 1);
+    assert!(r.server.pair_answer_at(&id, false, t0 + Duration::from_secs(10)).unwrap());
+    // Right after an answer: too soon.
+    assert_eq!(r.ask(t0 + Duration::from_secs(12)).await.status, 429);
+    // A few seconds later it may ask again.
+    let again = r.ask(t0 + Duration::from_secs(10) + ask::GAP).await;
+    assert_eq!(again.status, 200, "{:?}", again.body);
+    assert_ne!(again.body["request"].as_str().unwrap(), id);
+}
+
+#[tokio::test]
+async fn asks_share_the_pairing_rate_limit() {
+    let r = rig();
+    let t0 = Instant::now();
+    let mut codes = vec![];
+    for _ in 0..5 {
+        codes.push(r.ask(t0).await.status);
+    }
+    // One prompt, then busy, then slowed down.
+    assert_eq!(codes, vec![200, 409, 409, 429, 429]);
+}
+
+#[test]
+fn an_unanswered_prompt_goes_away() {
+    let mut a = ask::Asks::default();
+    let t0 = Instant::now();
+    let id = a.open(t0).unwrap();
+    assert_eq!(a.current(t0 + ask::TTL - Duration::from_secs(1)).as_deref(), Some(id.as_str()));
+    assert_eq!(a.current(t0 + ask::TTL), None);
+    assert_eq!(a.status(&id, t0 + ask::TTL), ask::AskState::Gone);
+    // Too late to allow it.
+    let late: Result<bool, ()> = a.answer(&id, true, t0 + ask::TTL, || panic!("no token for a gone prompt"));
+    assert_eq!(late, Ok(false));
+    assert!(a.open(t0 + ask::TTL).is_ok());
+}
+
+#[test]
+fn nothing_is_allowed_without_an_answer() {
+    let mut a = ask::Asks::default();
+    let t0 = Instant::now();
+    let id = a.open(t0).unwrap();
+    for s in 0..200 {
+        assert!(!matches!(a.status(&id, t0 + Duration::from_secs(s)), ask::AskState::Allowed(_)));
+    }
+}
+
+#[tokio::test]
+async fn asking_needs_allow_stream_deck() {
+    let r = rig();
+    r.server.set_config(DeckConfig { enabled: false, private_session: false, automation: true });
+    let a = r.ask(Instant::now()).await;
+    assert_eq!(a.status, 403);
+    assert!(r.prompts().is_empty() && !r.host.calls.lock().contains(&"raise".to_owned()));
+}
+
+#[tokio::test]
+async fn the_code_still_works_and_asking_replaces_its_token() {
+    let r = rig();
+    let by_code = r.paired().await;
+    assert!(r.pairing.check(&by_code));
+    let t0 = Instant::now();
+    let id = r.ask(t0).await.body["request"].as_str().unwrap().to_owned();
+    // The code shown in Settings still pairs while a prompt is open.
+    let by_code_again = r.paired().await;
+    assert!(r.pairing.check(&by_code_again));
+    r.server.pair_answer_at(&id, true, t0).unwrap();
+    let token = r.ask_status(&id, t0).await.body["token"].as_str().unwrap().to_owned();
+    assert!(r.pairing.check(&token) && !r.pairing.check(&by_code_again), "one pairing, the newest");
+    // And the code still works after (once the pairing limit refills).
+    let code = r.pairing.code();
+    let last = r.at(&req("POST", "/v1/pair", None, &format!(r#"{{"code":"{code}"}}"#)), t0 + Duration::from_secs(10)).await;
+    assert!(r.pairing.check(last.body["token"].as_str().unwrap()));
+}
+
+#[tokio::test]
+async fn a_locked_keychain_fails_allowing_cleanly() {
+    let host = Arc::new(Fake::default());
+    let s = DeckServer::new(host, Arc::new(Pairing::new(Arc::new(Locked))), Arc::new(Events::default()));
+    let t0 = Instant::now();
+    let a = s.respond(&req("POST", "/v1/pair/request", None, "{}"), LOOP, PORT, t0).await;
+    let id = a.body["request"].as_str().unwrap().to_owned();
+    assert!(s.pair_answer_at(&id, true, t0).is_err());
+    // Still showing, so the person can try again.
+    assert_eq!(s.pair_prompt().as_deref(), Some(id.as_str()));
+}
+
+#[tokio::test]
+async fn the_pair_calls_want_post() {
+    let r = rig();
+    assert_eq!(r.send(&req("GET", "/v1/pair/request", None, "")).await.status, 405);
+    assert_eq!(r.send(&req("GET", "/v1/pair/status", None, "")).await.status, 405);
 }
 
 // ---------------------------------------------------------------- rate limit

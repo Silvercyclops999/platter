@@ -52,12 +52,17 @@ export interface Response {
 export type Transport = (req: Request) => Promise<Response>;
 
 /** Why a call failed. */
-export type ErrorKind = "offline" | "unpaired" | "wrongCode" | "busy" | "refused" | "failed";
+export type ErrorKind = "offline" | "unpaired" | "wrongCode" | "busy" | "refused" | "failed" | "approve" | "denied";
+
+/** Platter's answer to a pairing request (POST /v1/pair/status). */
+export type AskAnswer = { state: "waiting" } | { state: "allowed"; token: string } | { state: "denied" } | { state: "gone" };
 
 export class PlatterError extends Error {
   constructor(
     readonly kind: ErrorKind,
     message: string,
+    /** Platter's HTTP status, when it answered. */
+    readonly status?: number,
   ) {
     super(message);
     this.name = "PlatterError";
@@ -104,13 +109,13 @@ export function toError(res: Response): PlatterError {
   const text = errorText(res.body);
   switch (res.status) {
     case 401:
-      return new PlatterError("unpaired", text || "Pair with Platter first.");
+      return new PlatterError("unpaired", text || "Pair with Platter first.", res.status);
     case 429:
-      return new PlatterError("busy", text || "Too many requests.");
+      return new PlatterError("busy", text || "Too many requests.", res.status);
     case 403:
-      return new PlatterError("refused", text || "Platter refused the request.");
+      return new PlatterError("refused", text || "Platter refused the request.", res.status);
     default:
-      return new PlatterError("failed", text || `Platter answered ${res.status}.`);
+      return new PlatterError("failed", text || `Platter answered ${res.status}.`, res.status);
   }
 }
 
@@ -162,6 +167,33 @@ export class PlatterClient {
     }
   }
 
+  /**
+   * Ask Platter to pair: it brings its window up and asks the person. Gives
+   * the request's id, to check on with {@link pairStatus}. A 409 (already
+   * asking) is "approve", a 429 (asked too soon) is "busy".
+   */
+  async requestPairing(): Promise<string> {
+    try {
+      const b = (await this.call({ method: "POST", path: "/v1/pair/request", body: { client: "streamdeck" } })) as { request?: string };
+      if (!b?.request) throw new PlatterError("failed", "Platter didn't answer the request.");
+      return b.request;
+    } catch (e) {
+      if (e instanceof PlatterError && e.status === 409) throw new PlatterError("approve", e.message);
+      throw e;
+    }
+  }
+
+  /** Whether the person has answered; an allowed token is kept. */
+  async pairStatus(request: string): Promise<AskAnswer> {
+    const b = (await this.call({ method: "POST", path: "/v1/pair/status", body: { request } })) as Partial<{ state: string; token: string }>;
+    if (b?.state === "allowed" && typeof b.token === "string" && b.token) {
+      this.token = b.token;
+      return { state: "allowed", token: b.token };
+    }
+    if (b?.state === "waiting" || b?.state === "denied") return { state: b.state };
+    return { state: "gone" };
+  }
+
   /** What's playing. The cover is only fetched when it changes. */
   async state(): Promise<PlatterState> {
     if (!this.token) throw new PlatterError("unpaired", "Pair with Platter first.");
@@ -188,7 +220,8 @@ type Listener = (s: PlatterState | null, err: PlatterError | null) => void;
 
 /**
  * Polls the state while anyone listens: every second while Platter answers,
- * every five seconds while it doesn't, not at all while unpaired.
+ * every five seconds while it doesn't, not at all while unpaired (then the
+ * pairer, if any, may ask Platter to pair).
  */
 export class StatePoller {
   private listeners = new Set<Listener>();
@@ -200,6 +233,7 @@ export class StatePoller {
     private readonly client: PlatterClient,
     readonly fastMs = 1000,
     readonly slowMs = 5000,
+    private readonly pairer?: { auto(): void; problem(): PlatterError | null },
   ) {}
 
   subscribe(fn: Listener): () => void {
@@ -234,7 +268,8 @@ export class StatePoller {
     if (!this.running) return;
     let next = this.fastMs;
     if (!this.client.paired) {
-      this.emit(null, new PlatterError("unpaired", "Pair with Platter first."));
+      this.pairer?.auto();
+      this.emit(null, this.pairer?.problem() ?? new PlatterError("unpaired", "Pair with Platter first."));
       next = this.slowMs;
     } else {
       try {

@@ -44,6 +44,7 @@ import { startSocial } from "../stores/social";
 import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
+import { DeckPairPrompt } from "./DeckPairPrompt";
 import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost } from "./lazyHosts";
 import { LazyWrongLyricsHost } from "./lazyHosts";
 import { LookDrop } from "./LookDrop";
@@ -248,6 +249,7 @@ export function AppShell() {
       <FullWindow />
       <LazyShareCardHost />
       <DeckActions />
+      <DeckPairPrompt />
       <LazyStatsDialogHost />
       <LazyLookBuilderHost />
       <LazyPickLookHost />
