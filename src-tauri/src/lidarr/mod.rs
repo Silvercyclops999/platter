@@ -11,6 +11,7 @@ pub mod check;
 pub mod catchup;
 pub mod commands;
 pub mod hunt;
+pub mod homeside;
 pub mod conventions;
 pub mod mbpick;
 pub mod modes;
@@ -58,7 +59,7 @@ use crate::plex::keychain::TokenStore;
 use crate::plex::token::Token;
 use crate::web::Web;
 
-use api::{DirectRoute, LidarrClient, LidarrGet, Route, SystemStatus, parse_version};
+use api::{DirectRoute, LidarrClient, LidarrGet, LidarrRoute, Route, SystemStatus, parse_version};
 use check::{CheckContext, CheckReport, LidarrSnapshot, PlexFile, PlexFiles, PlexIndex, dedup_wanted, evaluate};
 use paths::NormPath;
 
@@ -210,6 +211,8 @@ pub struct Lidarr {
     announcer: Arc<parking_lot::RwLock<Option<Arc<dyn catchup::Announcer>>>>,
     /// Where files are reached for adding albums to the library (set by the app).
     hosts: Arc<parking_lot::RwLock<Option<Arc<dyn upgrade::Hosts>>>>,
+    /// Platter Bridge: bridge mode, and the route through a paired Bridge.
+    home: Arc<homeside::Hooks>,
 }
 
 /// The address as a key for stored confirmations.
@@ -260,7 +263,7 @@ pub fn parse_headers(text: &str) -> AppResult<Vec<(String, String)>> {
 
 impl Lidarr {
     pub fn new(deps: LidarrDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default() }
+        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default(), home: Default::default() }
     }
 
     /// (home, away) addresses from Settings; empty when not set.
@@ -352,8 +355,8 @@ impl Lidarr {
         self.inner.db.write(|c| kv_set(c, CONFIRMED_KEY, &json))
     }
 
-    /// The direct routes to try, home first.
-    fn routes(&self) -> AppResult<Vec<Arc<DirectRoute>>> {
+    /// The routes to try: home first, then away, then a paired Bridge.
+    fn routes(&self) -> AppResult<Vec<Arc<dyn LidarrRoute>>> {
         let (home, away) = self.urls();
         if home.trim().is_empty() && away.trim().is_empty() {
             return Err(AppError::Invalid("Set Lidarr's address first.".into()));
@@ -363,10 +366,11 @@ impl Lidarr {
             .keys
             .get(KEY_ACCOUNT)?
             .ok_or_else(|| AppError::Invalid("Add Lidarr's API key first.".into()))?;
-        let mut out: Vec<Arc<DirectRoute>> = Vec::new();
+        let bridge = self.bridge_route();
+        let mut out: Vec<Arc<dyn LidarrRoute>> = Vec::new();
         if !home.trim().is_empty() {
             let mut r = DirectRoute::new(self.inner.web.clone(), &home, key.clone(), vec![], Route::Home)?;
-            if !away.trim().is_empty() {
+            if !away.trim().is_empty() || bridge.is_some() {
                 r = r.with_timeout(HOME_TRY);
             }
             out.push(Arc::new(r));
@@ -375,12 +379,13 @@ impl Lidarr {
             let headers = self.headers().into_iter().filter_map(|(n, v)| Token::new(v).ok().map(|t| (n, t))).collect();
             out.push(Arc::new(DirectRoute::new(self.inner.web.clone(), &away, key, headers, Route::Away)?));
         }
+        out.extend(bridge);
         Ok(out)
     }
 
     /// The first route that answers like a Lidarr Platter can check. When
     /// none does, the home address's error unless it simply wasn't reachable.
-    pub async fn connect(routes: Vec<Arc<DirectRoute>>) -> AppResult<(LidarrClient, SystemStatus, Arc<DirectRoute>)> {
+    pub async fn connect(routes: Vec<Arc<dyn LidarrRoute>>) -> AppResult<(LidarrClient, SystemStatus, Arc<dyn LidarrRoute>)> {
         let mut first_err: Option<AppError> = None;
         for t in routes {
             let c = LidarrClient::new(t.clone() as Arc<dyn LidarrGet>);
@@ -533,6 +538,6 @@ impl Lidarr {
             self.start_practice();
         }
         let plex_locations = plex.locations.clone();
-        Ok(Checked { report, client, writer: write::LidarrWriter::new(route as Arc<dyn write::LidarrWrite>), snap, plex_locations, modes })
+        Ok(Checked { report, client, writer: self.writer_for(route), snap, plex_locations, modes })
     }
 }

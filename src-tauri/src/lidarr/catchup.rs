@@ -207,7 +207,7 @@ impl Lidarr {
         *self.announcer.write() = Some(a);
     }
 
-    fn server_key(&self) -> String {
+    pub(super) fn server_key(&self) -> String {
         let (home, away) = self.urls();
         super::url_key(if home.trim().is_empty() { &away } else { &home })
     }
@@ -242,7 +242,7 @@ impl Lidarr {
         let snap = Self::snapshot(&client, status).await?;
         let modes = self.modes_with(&client, &snap).await?;
         let staging = Some(crate::settings::load(&self.inner.db).lidarr_staging_folder).filter(|s| !s.trim().is_empty());
-        Ok(Ctx { client, writer: LidarrWriter::new(route as Arc<dyn super::write::LidarrWrite>), snap, modes, server: self.server_key(), staging })
+        Ok(Ctx { client, writer: self.writer_for(route), snap, modes, server: self.server_key(), staging })
     }
 
     /// One catch-up. Does nothing until Lidarr is set up.

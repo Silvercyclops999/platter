@@ -153,7 +153,7 @@ pub(super) type Proposals = parking_lot::Mutex<HashMap<String, (i64, Proposal)>>
 impl Lidarr {
     pub(super) async fn connection(&self) -> AppResult<(LidarrClient, LidarrWriter)> {
         let (client, _, route) = Self::connect(self.routes()?).await?;
-        Ok((client, LidarrWriter::new(route as std::sync::Arc<dyn super::write::LidarrWrite>)))
+        Ok((client, self.writer_for(route)))
     }
 
     /// Every logged change, newest first.

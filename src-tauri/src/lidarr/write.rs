@@ -211,6 +211,78 @@ pub enum WriteCall {
     /// Lidarr's manual import, moving files in place onto the album's
     /// current release, never switching it.
     ManualImport(Vec<ImportFile>),
+    /// One of the writes above as it arrived through a Bridge (the home
+    /// Platter route) or from the Bridge's queue, checked again here.
+    Relayed(RelayedWrite),
+}
+
+/// A write that came over the relay as method, path and body. Only
+/// [`RelayedWrite::check`] makes one, and it takes only the shapes the
+/// variants above produce.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayedWrite {
+    method: String,
+    path: String,
+    body: String,
+}
+
+/// Most bytes a relayed write's body may have.
+const RELAYED_MAX: usize = 1024 * 1024;
+
+fn numbered(path: &str, prefix: &str) -> bool {
+    path.strip_prefix(prefix).is_some_and(|n| !n.is_empty() && n.len() <= 12 && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+impl RelayedWrite {
+    pub fn check(method: &str, path: &str, body: &str) -> AppResult<Self> {
+        let refuse = || AppError::Invalid("That isn't one of the changes Platter makes to Lidarr, so the Bridge didn't send it.".into());
+        let m = method.to_ascii_uppercase();
+        if body.len() > RELAYED_MAX {
+            return Err(refuse());
+        }
+        let json = || serde_json::from_str::<serde_json::Value>(body).ok().filter(serde_json::Value::is_object);
+        let ok = match m.as_str() {
+            "POST" => match path {
+                "/artist" | "/importlistexclusion" | "/rootfolder" | "/qualityprofile" => json().is_some(),
+                "/command" => json().is_some_and(|v| matches!(v["name"].as_str(), Some("AlbumSearch" | "ManualImport"))),
+                _ => false,
+            },
+            "PUT" => {
+                (path == "/album/monitor"
+                    || ["/config/naming/", "/config/metadataprovider/", "/config/mediamanagement/"].iter().any(|p| numbered(path, p)))
+                    && json().is_some()
+            }
+            "DELETE" => {
+                (path == "/trackfile/bulk" && json().is_some())
+                    || (["/importlistexclusion/", "/rootfolder/", "/qualityprofile/"].iter().any(|p| numbered(path, p)) && body.trim().is_empty())
+            }
+            _ => false,
+        };
+        if !ok {
+            return Err(refuse());
+        }
+        Ok(Self { method: m, path: path.to_string(), body: body.to_string() })
+    }
+}
+
+impl WriteCall {
+    /// A change to Lidarr's own settings, profiles, roots or exclusions:
+    /// these always show the change and wait for a person's yes, so a
+    /// Bridge never makes one on its own.
+    pub fn is_settings_write(&self) -> bool {
+        match self {
+            WriteCall::AddExclusion { .. }
+            | WriteCall::RemoveExclusion { .. }
+            | WriteCall::PutConfig { .. }
+            | WriteCall::AddRootFolder(_)
+            | WriteCall::RemoveRootFolder { .. }
+            | WriteCall::AddQualityProfile(_)
+            | WriteCall::RemoveQualityProfile { .. } => true,
+            WriteCall::Relayed(r) => ["/importlistexclusion", "/config/", "/rootfolder", "/qualityprofile"].iter().any(|p| r.path.starts_with(p)),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -235,6 +307,16 @@ pub enum WriteMethod {
     Delete,
 }
 
+impl WriteMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WriteMethod::Post => "POST",
+            WriteMethod::Put => "PUT",
+            WriteMethod::Delete => "DELETE",
+        }
+    }
+}
+
 impl WriteCall {
     pub fn method(&self) -> WriteMethod {
         match self {
@@ -244,6 +326,11 @@ impl WriteCall {
             | WriteCall::AddRootFolder(_)
             | WriteCall::AddQualityProfile(_)
             | WriteCall::ManualImport(_) => WriteMethod::Post,
+            WriteCall::Relayed(r) => match r.method.as_str() {
+                "PUT" => WriteMethod::Put,
+                "DELETE" => WriteMethod::Delete,
+                _ => WriteMethod::Post,
+            },
             WriteCall::Monitor { .. } | WriteCall::PutConfig { .. } => WriteMethod::Put,
             WriteCall::RemoveExclusion { .. } | WriteCall::RemoveRootFolder { .. } | WriteCall::RemoveQualityProfile { .. } | WriteCall::FreeStaging(_) => {
                 WriteMethod::Delete
@@ -265,6 +352,7 @@ impl WriteCall {
             WriteCall::AddQualityProfile(_) => "/qualityprofile".into(),
             WriteCall::RemoveQualityProfile { id } => format!("/qualityprofile/{id}"),
             WriteCall::FreeStaging(_) => "/trackfile/bulk".into(),
+            WriteCall::Relayed(r) => r.path.clone(),
         }
     }
 
@@ -282,6 +370,7 @@ impl WriteCall {
                 serde_json::to_string(&json!({"name": "ManualImport", "importMode": "move", "replaceExistingFiles": false, "files": files}))
             }
             WriteCall::RemoveExclusion { .. } | WriteCall::RemoveRootFolder { .. } | WriteCall::RemoveQualityProfile { .. } => Ok(String::new()),
+            WriteCall::Relayed(r) => Ok(r.body.clone()),
         };
         v.unwrap_or_default()
     }
@@ -427,5 +516,27 @@ mod tests {
         let m = WriteCall::ManualImport(vec![]);
         let v: Value = serde_json::from_str(&m.body()).unwrap();
         assert_eq!((v["name"].as_str(), v["importMode"].as_str(), v["replaceExistingFiles"].as_bool()), (Some("ManualImport"), Some("move"), Some(false)));
+    }
+
+    #[test]
+    fn relayed_writes_take_only_the_fixed_shapes() {
+        let ok = |m: &str, p: &str, b: &str| RelayedWrite::check(m, p, b).is_ok();
+        assert!(ok("PUT", "/album/monitor", r#"{"albumIds": [1], "monitored": false}"#));
+        assert!(ok("post", "/command", r#"{"name": "AlbumSearch", "albumIds": [1]}"#));
+        assert!(ok("DELETE", "/importlistexclusion/12", ""));
+        assert!(ok("PUT", "/config/naming/1", r#"{"id": 1}"#));
+        assert!(ok("DELETE", "/trackfile/bulk", r#"{"trackFileIds": [1]}"#));
+        assert!(!ok("POST", "/command", r#"{"name": "DeleteArtist"}"#), "only the two commands Platter sends");
+        assert!(!ok("DELETE", "/artist/4", ""), "never deletes an artist");
+        assert!(!ok("PUT", "/config/host/1", r#"{"id": 1}"#), "not a page Platter writes");
+        assert!(!ok("DELETE", "/rootfolder/1/../x", ""));
+        assert!(!ok("GET", "/artist", ""));
+        assert!(!ok("PUT", "/album/monitor", "not json"));
+        let w = WriteCall::Relayed(RelayedWrite::check("PUT", "/config/naming/1", r#"{"id": 1}"#).unwrap());
+        assert!(w.is_settings_write());
+        assert_eq!((w.method(), w.path().as_str()), (WriteMethod::Put, "/config/naming/1"));
+        assert!(!WriteCall::Relayed(RelayedWrite::check("PUT", "/album/monitor", "{}").unwrap()).is_settings_write());
+        assert!(WriteCall::PutConfig { kind: ConfigKind::Naming, id: 1, body: json!({}) }.is_settings_write());
+        assert!(!WriteCall::Monitor { album_ids: vec![1], monitored: false }.is_settings_write());
     }
 }

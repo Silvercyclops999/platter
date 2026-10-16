@@ -478,6 +478,8 @@ pub enum Route {
     Home,
     /// The away address (a reverse proxy, tunnel or VPN the user set up).
     Away,
+    /// Through the user's Platter Bridge at home, over the sealed relay.
+    Bridge,
 }
 
 /// How GETs reach Lidarr. Only GETs exist at this layer, so nothing built
@@ -490,6 +492,12 @@ pub trait LidarrGet: Send + Sync {
     async fn get(&self, path: &str, query: &[(&str, &str)]) -> AppResult<HttpResponse>;
     fn route(&self) -> Route;
 }
+
+/// A way to reach Lidarr for both reads and the fixed writes: the direct
+/// routes, or a paired Bridge.
+pub trait LidarrRoute: LidarrGet + super::write::LidarrWrite {}
+
+impl<T: LidarrGet + super::write::LidarrWrite> LidarrRoute for T {}
 
 /// Header names the user adds for a proxy, kept for the life of the app
 /// (`WebRequest` takes static names; there are only ever a handful).
@@ -533,7 +541,7 @@ impl DirectRoute {
     }
 
     /// One of the fixed writes (see `write`), with the same key and headers.
-    pub(super) async fn send_write(&self, call: &super::write::WriteCall) -> AppResult<HttpResponse> {
+    pub(crate) async fn send_write(&self, call: &super::write::WriteCall) -> AppResult<HttpResponse> {
         use super::write::WriteMethod;
         let url = format!("{}{API}{}", self.base, call.path());
         let mut req = match call.method() {

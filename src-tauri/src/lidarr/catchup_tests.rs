@@ -145,6 +145,7 @@ impl Fake {
                     None => (404, json!({})),
                 }
             }
+            (Method::Put, p) if p.starts_with("/config/") => (202, json!({})),
             (Method::Put, "/album/monitor") => {
                 let b: Value = serde_json::from_str(body).unwrap();
                 for id in b["albumIds"].as_array().unwrap() {
@@ -622,4 +623,120 @@ async fn self_healing_unmonitors_protected_albums_lidarr_no_longer_needs() {
     assert_eq!(rep.healed, vec!["Sessions", "Gone"]);
     let w = r.web.writes();
     assert_eq!(serde_json::from_str::<Value>(&w[0].2).unwrap(), json!({"albumIds": [50, 51], "monitored": false}));
+}
+
+// ---------------------------------------------------------------- Platter Bridge
+
+/// A Bridge: the same Lidarr work, headless, in bridge mode.
+fn bridge(r: &Rig) -> Dev {
+    let d = device(r.tmp.path(), "bridge", r.clock.clone(), r.web.clone());
+    d.lidarr.set_bridge_mode(true);
+    d
+}
+
+#[tokio::test]
+async fn a_bridge_waits_for_a_desktops_modes_then_catches_up_headless() {
+    let r = rig();
+    let br = bridge(&r);
+    let err = br.lidarr.catch_up().await.unwrap_err();
+    assert!(err.to_string().contains("Waiting for a desktop"), "{err}");
+    assert!(!br.lidarr.has_shared_modes());
+    // A desktop works out the modes from the library's tags and shares them.
+    r.a.lidarr.catch_up().await.unwrap();
+    super::shared::tests::sync(&r.a.shared, &br.shared);
+    assert!(br.lidarr.has_shared_modes());
+    let modes = br.lidarr.modes_now().await.unwrap();
+    let qh = modes.iter().find(|m| m.name == "Quiet Hours").unwrap();
+    assert!(qh.protected(), "the desktop's protected artist is protected on the Bridge");
+    // A Managed import while the desktop is off: the Bridge scans and announces.
+    r.advance(10);
+    {
+        let mut st = r.web.st.lock();
+        st.albums.push(json!({"id": 20, "title": "Second Wind", "artistId": 9, "foreignAlbumId": "x", "monitored": true, "releases": []}));
+        st.track_files.push(json!({"id": 1, "albumId": 20, "path": "/data/media/Music/Lidarr/Northlight/Second Wind (2021)/01 Rise.flac"}));
+    }
+    r.event(5, "downloadImported", 20, 9);
+    let rep = r.pass(&br).await;
+    assert_eq!(rep.acted, 1);
+    r.advance(super::catchup::PLEX_GRACE_S as u64);
+    br.lidarr.catch_up().await.unwrap();
+    assert_eq!(*br.plex.scans.lock(), vec!["/data/media/Music/Lidarr/Northlight/Second Wind (2021)"], "a partial scan of just that folder");
+    r.advance(61);
+    assert_eq!(br.lidarr.catch_up().await.unwrap().announced, vec!["Second Wind"]);
+    assert!(r.a.plex.scans.lock().is_empty(), "the desktop did nothing");
+    assert_eq!(br.lidarr.catch_up_status().last_device.as_deref(), Some("bridge"));
+}
+
+#[tokio::test]
+async fn claims_keep_a_desktop_and_the_bridge_from_both_acting() {
+    let r = rig();
+    let br = bridge(&r);
+    r.a.lidarr.catch_up().await.unwrap();
+    super::shared::tests::sync(&r.a.shared, &br.shared);
+    br.lidarr.catch_up().await.unwrap();
+    super::shared::tests::sync(&br.shared, &r.a.shared);
+    r.advance(10);
+    {
+        let mut st = r.web.st.lock();
+        st.albums.push(json!({"id": 20, "title": "Second Wind", "artistId": 9, "foreignAlbumId": "x", "monitored": true, "releases": []}));
+        st.track_files.push(json!({"id": 1, "albumId": 20, "path": "/data/media/Music/Lidarr/Northlight/Second Wind (2021)/01 Rise.flac"}));
+    }
+    r.event(5, "downloadImported", 20, 9);
+    // The Bridge looks first; the desktop opens a moment later.
+    assert_eq!(br.lidarr.catch_up().await.unwrap().settling, 1);
+    r.advance(1);
+    assert_eq!(r.a.lidarr.catch_up().await.unwrap().settling, 1);
+    super::shared::tests::sync(&br.shared, &r.a.shared);
+    super::shared::tests::sync(&r.a.shared, &br.shared);
+    r.advance(CLAIM_SETTLE_MS / 1000 + 130);
+    let rb = br.lidarr.catch_up().await.unwrap();
+    let ra = r.a.lidarr.catch_up().await.unwrap();
+    assert_eq!((rb.acted, ra.acted), (1, 0), "the Bridge claimed first, so only it acts");
+    assert_eq!(ra.elsewhere, 1);
+    assert_eq!(r.a.plex.scans.lock().len() + br.plex.scans.lock().len(), 1, "one scan between them");
+    // Later passes on either side never handle it again.
+    super::shared::tests::sync(&br.shared, &r.a.shared);
+    r.advance(600);
+    assert_eq!(r.a.lidarr.catch_up().await.unwrap().acted, 0);
+    assert_eq!(br.lidarr.catch_up().await.unwrap().acted, 0);
+}
+
+#[tokio::test]
+async fn the_bridge_queues_lidarr_settings_writes_and_never_sends_them() {
+    use super::write::{ConfigKind, WriteCall};
+    let r = rig();
+    let br = bridge(&r);
+    let (_, _, route) = Lidarr::connect(br.lidarr.routes().unwrap()).await.unwrap();
+    let writer = br.lidarr.writer_for(route);
+    let put = WriteCall::PutConfig { kind: ConfigKind::Naming, id: 1, body: json!({"id": 1, "renameTracks": false}) };
+    assert!(writer.send_call(put).await.is_err());
+    r.advance(1);
+    assert!(writer.send_call(WriteCall::AddExclusion { foreign_id: QH.into(), artist_name: "Quiet Hours".into() }).await.is_err());
+    assert!(r.web.writes().is_empty(), "nothing reached Lidarr");
+    let q = br.lidarr.queued_writes();
+    assert_eq!(q.len(), 2);
+    assert_eq!(q[0].what, "Change Lidarr's file naming settings");
+    // Album writes the work itself makes still go through.
+    writer.monitor(vec![7], false).await.unwrap();
+    assert_eq!(r.web.writes().len(), 1);
+    // The Bridge can't say yes to its own queue; a person on a desktop can.
+    assert!(br.lidarr.apply_queued(&q[0].id).await.is_err());
+    super::shared::tests::sync(&br.shared, &r.a.shared);
+    r.a.lidarr.apply_queued(&q[0].id).await.unwrap();
+    let w = r.web.writes();
+    assert_eq!((w[1].0, w[1].1.as_str()), (Method::Put, "/api/v1/config/naming/1"));
+    assert_eq!(r.a.lidarr.queued_writes().len(), 1);
+    r.a.lidarr.dismiss_queued(&q[1].id).unwrap();
+    assert!(r.a.lidarr.queued_writes().is_empty());
+    assert!(r.a.lidarr.changes().iter().any(|c| c.asked && c.what == "Change Lidarr's file naming settings"));
+}
+
+#[tokio::test]
+async fn practice_mode_holds_on_the_bridge_too() {
+    let r = rig();
+    let br = bridge(&r);
+    let mut s = crate::settings::load(&br._db);
+    s.lidarr_practice_until = r.now_s() + 86_400;
+    crate::settings::save(&br._db, &s).unwrap();
+    assert!(br.lidarr.practice_active());
 }

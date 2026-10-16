@@ -484,6 +484,15 @@ impl super::Lidarr {
         {
             return Ok(m);
         }
+        // The Bridge can't read the library's tags; it works from what a
+        // desktop worked out.
+        if self.bridge_mode() {
+            let out = self.shared_modes().ok_or_else(|| {
+                crate::error::AppError::Invalid("Waiting for a desktop Platter to share which artists are protected.".into())
+            })?;
+            *self.modes_cache.lock() = Some((now, out.clone()));
+            return Ok(out);
+        }
         let mut library = self.inner.db.read_async(library_artists).await?;
         let lookups = futures::future::join_all(library.iter().map(|a| self.inner.artist_mbid.artist_mbid(&a.artist_id, &a.name))).await;
         for (a, m) in library.iter_mut().zip(lookups) {
@@ -505,6 +514,7 @@ impl super::Lidarr {
             prefs: self.artist_prefs(),
         };
         let out = assign(&inp);
+        self.publish_modes(&out);
         *self.modes_cache.lock() = Some((now, out.clone()));
         Ok(out)
     }
