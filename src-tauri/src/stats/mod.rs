@@ -1132,11 +1132,11 @@ pub fn moments(c: &Connection, d: Days) -> AppResult<Moments> {
     // played in the range.
     let back: Option<(String, i64, i64, i64, i64)> = c
         .prepare_cached(
-            "WITH played AS (SELECT DISTINCT song_key FROM stats_song_day WHERE day BETWEEN ?1 AND ?2),
-             gaps AS (SELECT x.song_key, x.day, x.plays, x.ms,
-                             x.day - lag(x.day) OVER (PARTITION BY x.song_key ORDER BY x.day) AS gap
-                      FROM stats_song_day x WHERE x.song_key IN (SELECT song_key FROM played) AND x.day <= ?2)
-             SELECT song_key, day, plays, ms, gap FROM gaps WHERE day >= ?1 AND gap >= ?3
+            "WITH gaps AS (SELECT x.song_key, x.day, x.plays, x.ms,
+                                  x.day - (SELECT max(o.day) FROM stats_song_day o
+                                           WHERE o.song_key = x.song_key AND o.day < x.day) AS gap
+                           FROM stats_song_day x WHERE x.day BETWEEN ?1 AND ?2)
+             SELECT song_key, day, plays, ms, gap FROM gaps WHERE gap >= ?3
              ORDER BY gap DESC, day DESC, song_key LIMIT 1",
         )?
         .query_row(params![d.lo, d.hi, COMEBACK_MIN_DAYS], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
