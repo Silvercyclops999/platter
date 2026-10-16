@@ -4,6 +4,7 @@ version = "0.2.21"
 description = "Platter — a desktop music player for your Plex library"
 authors = ["Adam"]
 edition = "2024"
+default-run = "platter"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,6 +14,15 @@ edition = "2024"
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "platter_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Platter Bridge: the home side without a window (docs/BRIDGE.md).
+[[bin]]
+name = "platter-bridge"
+path = "src/bin/platter-bridge.rs"
+
+[[bin]]
+name = "platter"
+path = "src/main.rs"
 
 [features]
 # On-device lyrics transcription with whisper.cpp. Off in plain builds so they
@@ -69,6 +79,8 @@ chacha20poly1305 = "0.11.0"
 # Listen along: sealed messages through the relay are base64 text.
 base64 = "0.22.1"
 qrcode = { version = "0.14.1", default-features = false }
+# Platter Bridge: sealed messages are compressed before they are split.
+flate2 = "1.1.10"
 # On-device lyrics transcription (the `transcribe` feature). Builds whisper.cpp
 # from source, so it needs CMake and a C++ compiler. The raw API is for asking
 # which GPU it will use.

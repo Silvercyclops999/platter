@@ -11,6 +11,7 @@ pub mod downloads;
 pub mod error;
 pub mod feed;
 pub mod hidden;
+pub mod homeside;
 pub mod identity;
 pub mod import;
 pub mod jellyfin;
@@ -743,6 +744,32 @@ pub fn run() {
             lidarr_service.set_announcer(Arc::new(lidarr::commands::AppAnnouncer { app: app.handle().clone(), plex: plex.clone() }));
             tauri::async_runtime::spawn(lidarr::catchup::watch(lidarr_service.clone()));
             app.manage(upgrades);
+            // Platter Bridge (optional): pairing, and the link to any paired Bridge.
+            let bridge_desktop = homeside::desktop::Desktop::new(homeside::desktop::DesktopDeps {
+                db: db.clone(),
+                keys: keychain.clone(),
+                relays: Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
+                clock: Arc::new(sync::store::system_ms),
+                store: sync_store.clone(),
+                lidarr: lidarr_service.clone(),
+                plex: Some(plex.clone()),
+                name: {
+                    let db = db.clone();
+                    Arc::new(move || {
+                        let n = settings::load(&db).computer_name;
+                        if n.trim().is_empty() { remote::peer::os_computer_name() } else { n }
+                    })
+                },
+            });
+            {
+                let app = app.handle().clone();
+                bridge_desktop.set_notify(Arc::new(move || {
+                    use tauri::Emitter;
+                    let _ = app.emit("bridge://changed", ());
+                }));
+            }
+            tauri::async_runtime::spawn(bridge_desktop.clone().run());
+            app.manage(bridge_desktop);
             let radar_lidarr = lidarr_service.clone();
             let discover_lidarr = lidarr_service.clone();
             app.manage(lidarr_service);
@@ -1521,6 +1548,13 @@ pub fn run() {
             scrobble::commands::lastfm_sign_in_finish,
             scrobble::commands::lastfm_sign_out,
             scrobble::commands::listenbrainz_check,
+            homeside::commands::bridge_overview,
+            homeside::commands::bridge_pair_start,
+            homeside::commands::bridge_pair_cancel,
+            homeside::commands::bridge_unpair,
+            homeside::commands::bridge_queued_apply,
+            homeside::commands::bridge_queued_dismiss,
+            homeside::commands::bridge_send_settings,
             lidarr::commands::lidarr_status,
             lidarr::commands::lidarr_key_set,
             lidarr::commands::lidarr_headers_set,

@@ -208,6 +208,45 @@ impl ReplayGuard {
     }
 }
 
+// ---- sealing any value for a channel (Platter Bridge) -------------------------
+
+/// Seal any JSON value for a channel: the same cipher, nonce and topic
+/// binding as [`seal`], without listen along's envelope.
+pub fn seal_value<T: Serialize>(ch: &Channel, v: &T) -> AppResult<String> {
+    let plain = serde_json::to_vec(v).map_err(|e| AppError::Internal(format!("seal: {e}")))?;
+    let nonce: [u8; 12] = rand::random();
+    let ct = ch
+        .cipher()
+        .encrypt(&Nonce::from(nonce), Payload { msg: &plain, aad: &ch.aad() })
+        .map_err(|_| AppError::Internal("couldn't seal".into()))?;
+    let mut body = Vec::with_capacity(12 + ct.len());
+    body.extend_from_slice(&nonce);
+    body.extend_from_slice(&ct);
+    Ok(format!("1.{}", B64.encode(body)))
+}
+
+/// Open what [`seal_value`] made.
+pub fn open_value<T: serde::de::DeserializeOwned>(ch: &Channel, text: &str) -> Result<T, Rejected> {
+    if text.len() > 64 * 1024 {
+        return Err(Rejected::Malformed);
+    }
+    let Some(sealed) = text.trim().strip_prefix("1.") else { return Err(Rejected::Malformed) };
+    if sealed.contains('.') {
+        return Err(Rejected::Malformed);
+    }
+    let raw = B64.decode(sealed).map_err(|_| Rejected::Malformed)?;
+    if raw.len() < 12 + 16 {
+        return Err(Rejected::Malformed);
+    }
+    let (nonce, ct) = raw.split_at(12);
+    let nonce: [u8; 12] = nonce.try_into().map_err(|_| Rejected::Malformed)?;
+    let plain = ch
+        .cipher()
+        .decrypt(&Nonce::from(nonce), Payload { msg: ct, aad: &ch.aad() })
+        .map_err(|_| Rejected::BadSeal)?;
+    serde_json::from_slice(&plain).map_err(|_| Rejected::Malformed)
+}
+
 // ---- sealing with a plain key (the join answer) -------------------------------
 
 pub fn seal_with(key: &[u8; 32], aad: &str, plain: &[u8]) -> AppResult<String> {

@@ -4100,6 +4100,7 @@ dependencies = [
  "cpal",
  "dotenvy",
  "encoding_rs",
+ "flate2",
  "fs4",
  "futures",
  "hound",

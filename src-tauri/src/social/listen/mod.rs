@@ -32,7 +32,7 @@ pub mod seal;
 pub mod wire;
 
 #[cfg(test)]
-mod fake_ntfy;
+pub(crate) mod fake_ntfy;
 #[cfg(test)]
 mod tests;
 
