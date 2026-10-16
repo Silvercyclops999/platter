@@ -930,3 +930,163 @@ async fn requests_merge_and_the_newest_song_goes_first() {
     assert_eq!(stored.verdict, Verdict::MatchOffset);
     assert_eq!(stored.points, vec![Point { at_ms: 20_000, offset_ms: 400 }]);
 }
+
+// ---------------------------------------------------------------- sure no match, transcriptions fill in
+
+fn judged(verdict: Verdict, score: f32) -> check::Judged {
+    check::Judged { verdict, score, offset_ms: 0, at_ms: None }
+}
+
+#[test]
+fn a_no_match_needs_two_sure_windows_that_agree() {
+    let no = judged(Verdict::NoMatch, 0.05);
+    // One window alone can't tell.
+    assert_eq!(check::agree(&[(no.clone(), 40)]).verdict, Verdict::CantTell);
+    // Two that agree, each with plenty heard: no match.
+    assert_eq!(check::agree(&[(no.clone(), 40), (no.clone(), 30)]).verdict, Verdict::NoMatch);
+    // A window that matches, or scores between the lines, says otherwise.
+    assert_eq!(check::agree(&[(no.clone(), 40), (no.clone(), 30), (judged(Verdict::Match, 0.8), 30)]).verdict, Verdict::CantTell);
+    assert_eq!(check::agree(&[(no.clone(), 40), (no.clone(), 30), (judged(Verdict::CantTell, 0.3), 30)]).verdict, Verdict::CantTell);
+    // Few words heard, or a score near the line, isn't sure.
+    assert_eq!(check::agree(&[(no.clone(), 40), (no.clone(), check::SURE_HEARD - 1)]).verdict, Verdict::CantTell);
+    assert_eq!(check::agree(&[(no.clone(), 40), (judged(Verdict::NoMatch, 0.2), 30)]).verdict, Verdict::CantTell);
+    // The other windows come from other parts of the song.
+    let w1 = check::first_window(Some(10_000), 200_000);
+    let more = check::confirm_windows(w1, 200_000);
+    assert_eq!(more, vec![(90_000, 120_000), (140_000, 170_000), (50_000, 80_000)]);
+    assert!(check::confirm_windows(check::first_window(Some(10_000), 40_000), 40_000).is_empty(), "too short for another");
+}
+
+#[test]
+fn a_transcription_only_fills_in() {
+    let cands = vec![cand("lrclib:a", Origin::LrclibExact, synced(KING_A)), cand("auto", Origin::Auto, synced(KING_B))];
+    let none = |_: &Candidate| None;
+    let cant = candidates::Stored { verdict: Verdict::CantTell, score: 0.1, points: vec![] };
+    let no = candidates::Stored { verdict: Verdict::NoMatch, score: 0.0, points: vec![] };
+    // Found lyrics come first: being checked, not checked, or can't tell.
+    assert_eq!(candidates::decide(&cands, none, true, false), Decision::Show { idx: 0, note: Some(candidates::Note::Checking) });
+    assert_eq!(candidates::decide(&cands, none, false, false), Decision::Show { idx: 0, note: Some(candidates::Note::NotChecked) });
+    let v = |c: &Candidate| (c.key != "auto").then_some(&cant);
+    assert_eq!(candidates::decide(&cands, v, true, false), Decision::Show { idx: 0, note: Some(candidates::Note::NotChecked) });
+    // Surely wrong, or nothing found: the transcription.
+    let v = |c: &Candidate| (c.key != "auto").then_some(&no);
+    assert_eq!(candidates::decide(&cands, v, true, false), Decision::Show { idx: 1, note: None });
+    assert_eq!(candidates::decide(&cands[1..], none, true, false), Decision::Show { idx: 0, note: None });
+    // A transcription is never sent to the check, wherever it sits.
+    assert!(!cands[1].checkable() && !cands[1].trusted());
+    assert_eq!(candidates::winner(&cands, none), None);
+}
+
+/// A recording sung all the way through: KING_A's lines, one every 4 s.
+fn sung_throughout() -> Vec<(u32, String)> {
+    let lines: Vec<(u32, &str)> = (0..49).map(|i| (500 + i as u32 * 4000, KING_A[i % KING_A.len()].1)).collect();
+    timeline(&lines, |t| t)
+}
+
+#[tokio::test]
+async fn one_window_no_match_keeps_found_lyrics_and_doesnt_transcribe() {
+    let f = fx();
+    // The exact lookup has lyrics; the recording's first part sounds
+    // different and the rest has no words the model can make out.
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_B)).to_string());
+    f.hears(timeline(&KING_A[..8], |t| t));
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.check, s.lyrics.timed[0].text.as_str()), (Some(candidates::Note::Checking), KING_B[0].1), "shown while checking");
+    f.checker.drain().await.unwrap();
+    assert!(f.rec.calls.load(Ordering::SeqCst) > 1, "other windows were heard");
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!(s.check, Some(candidates::Note::NotChecked));
+    assert_eq!(s.lyrics.timed[0].text, KING_B[0].1);
+    assert!(f.none_matched.lock().is_empty(), "no transcription");
+    let list = f.svc.candidates("702").await.unwrap();
+    assert_eq!(list.items[0].check, Some(Verdict::CantTell));
+}
+
+#[tokio::test]
+async fn two_agreeing_windows_hide_found_lyrics_and_allow_a_transcription() {
+    let f = fx();
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_B)).to_string());
+    f.hears(timeline(KING_A, |t| t));
+    f.svc.shown("702").await.unwrap();
+    f.checker.drain().await.unwrap();
+    assert_eq!(f.rec.calls.load(Ordering::SeqCst), 2, "the first window and the middle agreed");
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!(s.notice, Some(Notice::NoneMatched));
+    assert_eq!(*f.none_matched.lock(), vec!["702"]);
+    // The transcription that follows fills the song.
+    f.db.write(|c| crate::lyrics::transcribe::store::save(c, "702", &lrc(KING_A), "small", 1).map(|_| ())).unwrap();
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.pick.as_deref(), s.lyrics.source), (Some("auto"), LyricsSource::Auto));
+}
+
+#[tokio::test]
+async fn quiet_windows_are_skipped_when_making_sure() {
+    let f = fx();
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_B)).to_string());
+    f.hears(sung_throughout());
+    // The middle of the song is silent.
+    let mut pcm = song_pcm(205_000);
+    pcm[85 * RATE as usize..125 * RATE as usize].fill(0.0);
+    *f.pcm.0.lock() = Ok(pcm);
+    f.svc.shown("702").await.unwrap();
+    f.checker.drain().await.unwrap();
+    assert_eq!(f.rec.calls.load(Ordering::SeqCst), 2, "the silent window wasn't transcribed");
+    assert_eq!(f.rows("SELECT count(*) FROM lyrics_heard"), 3);
+    assert_eq!(f.svc.shown("702").await.unwrap().unwrap().notice, Some(Notice::NoneMatched));
+    assert_eq!(*f.none_matched.lock(), vec!["702"]);
+}
+
+#[tokio::test]
+async fn a_transcription_doesnt_outrank_found_lyrics_but_one_asked_for_does() {
+    let f = fx();
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_A)).to_string());
+    f.db.write(|c| crate::lyrics::transcribe::store::save(c, "702", &lrc(KING_B), "medium", 1).map(|_| ())).unwrap();
+    // Being checked, then can't tell: the found lyrics either way.
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.check, s.lyrics.source), (Some(candidates::Note::Checking), LyricsSource::Lrclib));
+    f.checker.drain().await.unwrap();
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.check, s.lyrics.source), (Some(candidates::Note::NotChecked), LyricsSource::Lrclib));
+    // Without the check too.
+    f.remove_model();
+    assert_eq!(f.svc.shown("702").await.unwrap().unwrap().lyrics.source, LyricsSource::Lrclib);
+    // "Transcribe this song" picks the transcription: it wins.
+    let list = f.svc.candidates("702").await.unwrap();
+    assert!(list.items.iter().any(|c| c.key == "auto" && !c.shown));
+    f.svc.choose("702", Some("auto".into())).await.unwrap();
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert!(s.chosen);
+    assert_eq!((s.pick.as_deref(), s.lyrics.source), (Some("auto"), LyricsSource::Auto));
+}
+
+#[tokio::test]
+async fn after_the_upgrade_found_lyrics_show_again_over_a_transcription() {
+    let f = fx();
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_A)).to_string());
+    f.remove_model();
+    let key = f.svc.candidates("702").await.unwrap().items[0].key.clone();
+    f.install_model();
+    // An older build: one window said no match, and a transcription followed.
+    let hash = key.trim_start_matches("lrclib:").to_owned();
+    f.db.write(|c| {
+        checker::save(c, "702", &key, &hash, &candidates::Stored { verdict: Verdict::NoMatch, score: 0.1, points: vec![] }, 1, None)?;
+        crate::lyrics::transcribe::store::save(c, "702", &lrc(KING_B), "medium", 1).map(|_| ())
+    })
+    .unwrap();
+    assert_eq!(f.svc.shown("702").await.unwrap().unwrap().pick.as_deref(), Some("auto"));
+    // The upgrade.
+    f.db.write(|c| {
+        c.pragma_update(None, "user_version", 35)?;
+        crate::db::schema::migrate(c)
+    })
+    .unwrap();
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.pick.as_deref(), s.check), (Some(key.as_str()), Some(candidates::Note::Checking)));
+    // Checked again, and the transcription is still there to pick.
+    f.hears(timeline(KING_A, |t| t));
+    f.checker.drain().await.unwrap();
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.pick.as_deref(), s.check), (Some(key.as_str()), Some(candidates::Note::Checked)));
+    assert!(f.svc.candidates("702").await.unwrap().items.iter().any(|c| c.key == "auto"));
+    assert_eq!(f.rows("SELECT count(*) FROM user_lyrics WHERE auto IS NOT NULL"), 1);
+}

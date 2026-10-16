@@ -12,9 +12,14 @@
 //! - Match: the words line up; synced lyrics are in time.
 //! - Match with offset: they line up but the timing is off by a steady
 //!   amount (measured, rounded to 0.1 s).
-//! - No match: enough was heard and it isn't these lyrics.
+//! - No match: enough was heard and it isn't these lyrics. A window's no
+//!   match is only kept when it is sure: at least two windows from
+//!   different parts of the song (quiet or instrumental ones skipped) each
+//!   heard plenty of words and scored well under the line, and no window
+//!   said otherwise (see [`agree`]).
 //! - Can't tell: too little was heard (an instrumental part, a quiet
-//!   window), or the lyrics aren't in a language the check can read.
+//!   window), the lyrics aren't in a language the check can read, or the
+//!   windows didn't agree that it's another song.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -40,6 +45,13 @@ pub const DRIFT_MIN_MS: i32 = 400;
 const NEAR_MS: u32 = 60_000;
 /// A window quieter than this (RMS) isn't transcribed: can't tell.
 pub const QUIET_RMS: f32 = 0.004;
+/// A window's no match counts toward a sure one with at least this many
+/// words heard...
+pub const SURE_HEARD: usize = 10;
+/// ...and a score at or below this (a margin under [`NO_MATCH_SCORE`]).
+pub const SURE_NO_MATCH_SCORE: f32 = 0.15;
+/// Windows that must be sure of no match before lyrics are hidden.
+pub const SURE_WINDOWS: usize = 2;
 
 /// Sounds that carry no words.
 const FILLERS: &[&str] = &[
@@ -421,6 +433,47 @@ pub fn first_window(first_line_ms: Option<u32>, duration_ms: u32) -> (u32, u32) 
     };
     let start = start.min(duration_ms.saturating_sub(WINDOW_MS));
     (start, (start + WINDOW_MS).min(duration_ms))
+}
+
+/// More windows for making sure of a no match: from the middle, later and
+/// earlier parts of the song, none overlapping the first or each other.
+pub fn confirm_windows(first: (u32, u32), duration_ms: u32) -> Vec<(u32, u32)> {
+    let mut taken = vec![first];
+    let mut out = Vec::new();
+    for pct in [45, 70, 25] {
+        let start = (duration_ms / 100 * pct).min(duration_ms.saturating_sub(WINDOW_MS));
+        let w = (start, (start + WINDOW_MS).min(duration_ms));
+        if w.1 - w.0 < WINDOW_MS / 2 || taken.iter().any(|t| w.0 < t.1 && t.0 < w.1) {
+            continue;
+        }
+        taken.push(w);
+        out.push(w);
+    }
+    out
+}
+
+/// One window's no match is sure: plenty heard, well under the line.
+pub fn sure_no(j: &Judged, heard: usize) -> bool {
+    j.verdict == Verdict::NoMatch && heard >= SURE_HEARD && j.score <= SURE_NO_MATCH_SCORE
+}
+
+/// A window that says these might be the lyrics after all: it matched, or
+/// its words scored between the lines.
+pub fn says_otherwise(j: &Judged) -> bool {
+    j.verdict.matched() || (j.verdict == Verdict::CantTell && j.score >= NO_MATCH_SCORE)
+}
+
+/// What the windows heard say together, each with how many words it heard
+/// (quiet and instrumental windows left out). No match only when
+/// [`SURE_WINDOWS`] are sure of it and none says otherwise; a single
+/// window, too few words or windows that disagree can't tell.
+pub fn agree(windows: &[(Judged, usize)]) -> Judged {
+    let best = windows.iter().map(|(j, _)| j.score).fold(0.0, f32::max);
+    let sure: Vec<f32> = windows.iter().filter(|(j, n)| sure_no(j, *n)).map(|(j, _)| j.score).collect();
+    if sure.len() >= SURE_WINDOWS && !windows.iter().any(|(j, _)| says_otherwise(j)) {
+        return Judged { verdict: Verdict::NoMatch, score: best, offset_ms: 0, at_ms: None };
+    }
+    Judged::cant_tell(best)
 }
 
 /// The second window for drift: near the last sung line, well after the

@@ -516,10 +516,10 @@ impl LyricsService {
     /// already won) to the check.
     fn ask_check(&self, r: &Resolved, ch: &dyn AudioCheck) {
         let verdict = |c: &Candidate| verdict_in(&r.verdicts, c);
-        let winner = r.cands.iter().position(|c| c.trusted() || verdict(c).is_some_and(|v| v.verdict.matched()));
+        let winner = candidates::winner(&r.cands, verdict);
         let todo: Vec<JobCand> = r.cands[..winner.unwrap_or(r.cands.len())]
             .iter()
-            .filter(|c| !c.trusted() && verdict(c).is_none())
+            .filter(|c| c.checkable() && verdict(c).is_none())
             .map(|c| JobCand { key: c.key.clone(), hash: c.hash.clone(), lyrics: c.lyrics.clone() })
             .collect();
         if todo.is_empty() || r.facts.duration_ms <= 0 {

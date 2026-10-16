@@ -1266,11 +1266,25 @@ text, so a check runs once. The audio never leaves the computer.
 A candidate that matches is shown with `check: "checked"`. When its timing is
 off by a steady amount, or drifts (measured again near the end), and
 `lyricsFixTiming` is on, the lines come back moved (`autoOffsetMs`,
-`retimed`). A candidate that doesn't match is skipped. While a check runs,
-lyrics from the server or LRCLIB's exact lookup show with `check:
-"checking"`; ones found only by title wait (`notice: "checking"`). When
-nothing matched, `notice: "noneMatched"` (and a transcription is queued when
-transcription is on). `lyrics://checked` (`{ trackId }`) says to ask again.
+`retimed`). A candidate is only skipped when the check is sure it doesn't
+match: the first window and at least one more from another part of the song
+(the middle, later or earlier; windows that are quiet or have too few words
+are skipped) each heard plenty of words and scored well under the line, and
+no window matched or came close. One window alone, too few words, or
+windows that disagree (a song with a beat switch) can't tell: the lyrics
+show with `check: "notChecked"`. While a check runs, lyrics from the server
+or LRCLIB's exact lookup show with `check: "checking"`; ones found only by
+title wait (`notice: "checking"`). When the check is sure nothing matched,
+`notice: "noneMatched"` (and a transcription is queued when transcription
+is on). `lyrics://checked` (`{ trackId }`) says to ask again.
+
+A transcription made on this computer only fills in: it shows when nothing
+found can be (none found, every one surely wrong, or held back as another
+version's), and never ahead of lyrics found for the song unless the user
+picks it ("Transcribe this song" picks the one it asks for). Updating from a
+build that judged lyrics on one window drops those no-match results, so the
+songs are checked again and the lyrics found show meanwhile; transcriptions
+they led to are kept and listed by `lyrics_candidates`.
 
 The check has a helper process of its own (see Lyrics transcription), uses the
 smallest installed model and two threads, and takes the newest song first (the

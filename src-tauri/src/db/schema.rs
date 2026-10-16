@@ -1043,6 +1043,14 @@ ALTER TABLE file_tags ADD COLUMN provenance TEXT;
 ALTER TABLE album_tags ADD COLUMN release TEXT;
 ALTER TABLE album_tags ADD COLUMN mixed INTEGER NOT NULL DEFAULT 0;
 "#,
+    // v36: a no match needs two windows of the song to agree
+    // (lyrics::check::agree). Older ones were heard in one window, so they
+    // go and the check judges those songs again; until then the lyrics
+    // found are shown, not a transcription it led to (kept, and offered
+    // under "Wrong lyrics?").
+    r#"
+DELETE FROM lyrics_check WHERE verdict = 'noMatch';
+"#,
 ];
 
 #[cfg(test)]

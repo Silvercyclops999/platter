@@ -6,11 +6,17 @@
 //! length first), then a transcription made on this computer.
 //!
 //! With the audio check, the first candidate that matches the recording
-//! wins; ones that don't are skipped. Without it (or when it can't tell),
-//! the first usable candidate is shown as not checked, with stricter rules:
-//! LRCLIB timing only when the length is close, and a song that is another
-//! version (unreleased, alternate, live, version tag) doesn't take lyrics
-//! found for the released version unless the user says so.
+//! wins; ones it is sure don't match are skipped. Without it (or when it
+//! can't tell), the first usable candidate is shown as not checked, with
+//! stricter rules: LRCLIB timing only when the length is close, and a song
+//! that is another version (unreleased, alternate, live, version tag)
+//! doesn't take lyrics found for the released version unless the user says
+//! so.
+//!
+//! A transcription made on this computer only fills a song nothing found
+//! can be shown for (none found, every one surely wrong, or held back as
+//! another version's). It never outranks found lyrics unless the user picks
+//! it ("Transcribe this song" picks the transcription it asks for).
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
@@ -64,9 +70,15 @@ impl Candidate {
         Self { key: key.into(), origin, lyrics, hash, album: None, duration_ms: None, other_version: false, sync_ok: true }
     }
 
-    /// The user's own and transcriptions of this recording aren't checked.
+    /// The user's own lyrics: shown without the check.
     pub fn trusted(&self) -> bool {
-        matches!(self.origin, Origin::User | Origin::Auto)
+        self.origin == Origin::User
+    }
+
+    /// Judged by the audio check (not the user's own, not a transcription
+    /// of this very recording).
+    pub fn checkable(&self) -> bool {
+        !matches!(self.origin, Origin::User | Origin::Auto)
     }
 
     /// Shown while its check runs (not one found only by its title).
@@ -142,6 +154,12 @@ pub enum Decision {
     Nothing,
 }
 
+/// The first candidate the user's own or the audio vouches for (never a
+/// transcription: it only fills in).
+pub fn winner<'a>(cands: &'a [Candidate], verdict: impl Fn(&Candidate) -> Option<&'a Stored>) -> Option<usize> {
+    cands.iter().position(|c| c.origin != Origin::Auto && (c.trusted() || verdict(c).is_some_and(|v| v.verdict.matched())))
+}
+
 /// Pick what to show. `verdict` gives a candidate's stored check;
 /// `checking`: the audio check is on and will judge candidates it hasn't;
 /// `released_ok`: "Use released lyrics for other versions".
@@ -151,11 +169,15 @@ pub fn decide<'a>(
     checking: bool,
     released_ok: bool,
 ) -> Decision {
-    // The first the user's own, a transcription, or the audio vouches for.
-    let winner = cands.iter().position(|c| c.trusted() || verdict(c).is_some_and(|v| v.verdict.matched()));
+    let winner = winner(cands, &verdict);
+    // A transcription: shown only when nothing found can be.
+    let fill = cands.iter().position(|c| c.origin == Origin::Auto);
     let before = winner.unwrap_or(cands.len());
     let (mut soft, mut pending, mut held, mut no) = (None, None, None, false);
     for (i, c) in cands[..before].iter().enumerate() {
+        if c.origin == Origin::Auto {
+            continue;
+        }
         let held_back = c.other_version && !released_ok;
         match verdict(c).map(|v| v.verdict) {
             Some(Verdict::NoMatch) => no = true,
@@ -181,6 +203,9 @@ pub fn decide<'a>(
         if let Some(w) = winner {
             return Decision::Show { idx: w, note: note_for(&cands[w], &verdict) };
         }
+        if let Some(a) = fill {
+            return Decision::Show { idx: a, note: None };
+        }
         return Decision::Notice(Notice::Checking);
     }
     if let Some(w) = winner {
@@ -194,6 +219,9 @@ pub fn decide<'a>(
     }
     if let Some(s) = soft {
         return Decision::Show { idx: s, note: Some(Note::NotChecked) };
+    }
+    if let Some(a) = fill {
+        return Decision::Show { idx: a, note: None };
     }
     if let Some(h) = held {
         return Decision::Held { idx: h };
@@ -220,7 +248,7 @@ pub fn disagrees<'a>(cands: &'a [Candidate], idx: usize, verdict: impl Fn(&Candi
     let shown = &cands[idx];
     cands.iter().enumerate().any(|(i, c)| {
         i != idx
-            && !c.trusted()
+            && c.checkable()
             && verdict(c).is_none_or(|v| v.verdict != Verdict::NoMatch)
             && check::disagree(&shown.lyrics, &c.lyrics)
     })

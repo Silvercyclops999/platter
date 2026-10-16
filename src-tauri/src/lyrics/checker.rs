@@ -6,8 +6,11 @@
 //! pre-cache first, else the server behind playback's transfer, giving way
 //! to it), decodes it, transcribes a 30 s window with the speech model on
 //! this computer, and judges the candidates in order until one matches.
-//! A synced match is checked again near the end for drift. Verdicts and the
-//! words heard are kept in SQLite. Nothing leaves the computer.
+//! A synced match is checked again near the end for drift. A no match is
+//! only kept when more windows from other parts of the song agree (a song
+//! with a beat switch or a long instrumental part can't tell instead).
+//! Verdicts and the words heard are kept in SQLite. Nothing leaves the
+//! computer.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -142,8 +145,9 @@ impl CheckState {
 /// Finished statuses are forgotten after this long.
 const KEEP_FINISHED: Duration = Duration::from_secs(600);
 
-/// Called when every candidate disagreed with the recording (the app
-/// queues a full transcription when transcription is on).
+/// Called when the check is sure every candidate disagrees with the
+/// recording (the app queues a full transcription when transcription is
+/// on). Never called when it couldn't tell.
 pub type NoneMatched = Arc<dyn Fn(&str) + Send + Sync>;
 
 pub struct CheckerDeps {
@@ -440,10 +444,13 @@ impl Checker {
         };
         let mut all_no = !job.cands.is_empty();
         for cand in &job.cands {
-            let j = check::judge(&heard1, &cand.lyrics, w1);
+            let mut j = check::judge(&heard1, &cand.lyrics, w1);
             let mut drift = None;
             if j.verdict.matched() && job.fix_timing && cand.lyrics.synced {
                 drift = self.drift(job, cand, &j, w1, &mut pcm, &model, kind).await;
+            }
+            if j.verdict == Verdict::NoMatch {
+                j = self.make_sure(job, cand, (j, heard1.len()), w1, &mut pcm, &model, kind).await;
             }
             let s = to_stored(&j, drift);
             all_no &= s.verdict == Verdict::NoMatch;
@@ -461,6 +468,37 @@ impl Checker {
         self.set(&job.track_id, CheckState::Done, None);
         d.events.checked(&job.track_id);
         Ok(())
+    }
+
+    /// A no match in the first window, heard again elsewhere in the song:
+    /// it stays a no match only when the windows are sure of it together
+    /// ([`check::agree`]); otherwise it can't tell. Quiet and instrumental
+    /// windows are skipped; a window that can't be heard ends the search.
+    #[allow(clippy::too_many_arguments)]
+    async fn make_sure(
+        &self,
+        job: &CheckJob,
+        cand: &JobCand,
+        first: (Judged, usize),
+        w1: (u32, u32),
+        pcm: &mut Option<Vec<f32>>,
+        model: &std::path::Path,
+        kind: ModelKind,
+    ) -> Judged {
+        let mut seen = vec![first];
+        for w in check::confirm_windows(w1, job.duration_ms) {
+            let Ok(heard) = self.heard(job, w, pcm, model, kind).await else { break };
+            if heard.len() < check::MIN_HEARD {
+                continue;
+            }
+            let j = check::judge(&heard, &cand.lyrics, w);
+            let otherwise = check::says_otherwise(&j);
+            seen.push((j, heard.len()));
+            if otherwise || check::agree(&seen).verdict == Verdict::NoMatch {
+                break;
+            }
+        }
+        check::agree(&seen)
     }
 
     /// The second window: the offset there, when it differs enough to be drift.
