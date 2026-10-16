@@ -218,3 +218,19 @@ fn a_song_outside_the_music_folder_or_gone_says_why() {
     assert!(!d.writable);
     assert!(d.reason.as_deref().unwrap().contains("Check that the share is connected"), "{:?}", d.reason);
 }
+
+#[test]
+fn the_ui_requests_read_as_sent() {
+    use super::editor::CheckScope;
+    let s: CheckScope = serde_json::from_value(serde_json::json!({ "kind": "library" })).unwrap();
+    assert_eq!(s, CheckScope::Library);
+    let s: CheckScope = serde_json::from_value(serde_json::json!({ "kind": "album", "id": "al1" })).unwrap();
+    assert_eq!(s, CheckScope::Album("al1".into()));
+    let r: SaveRequest = serde_json::from_value(serde_json::json!({
+        "label": "Edited tags", "files": [{ "trackId": "t1", "stamp": "s", "edits": { "genre": "Pop", "isrc": "" } }]
+    }))
+    .unwrap();
+    assert_eq!(r.files[0].edits, edits(&[(Field::Genre, "Pop"), (Field::Isrc, "")]));
+    let k: super::fixes::FixKind = serde_json::from_value(serde_json::json!("discTags")).unwrap();
+    assert_eq!(k, super::fixes::FixKind::DiscTags);
+}
