@@ -9,8 +9,18 @@
   --lyrics-future: color-mix(in srgb, #ffffff 58%, var(--lyrics-bg));
   --lyrics-past: color-mix(in srgb, #ffffff 26%, var(--lyrics-bg));
   --lyrics-now: #ffffff;
+  /* One height for every control under the lyrics (Sync, the toolbar). */
+  --lyrics-control: var(--space-8);
   position: relative;
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
+}
+/* The lines scroll here; the toolbar has its own row under it. */
+.lyrics__body {
+  position: relative;
+  flex: 1;
   min-height: 0;
 }
 .lyrics__scroll {
@@ -103,29 +113,33 @@
 .lyrics--full .lyrics__credit { max-width: none; padding-inline: 0; }
 .lyrics--synced .lyrics__credit { margin-top: calc(-50vh + var(--space-8)); }
 
+/* Back to the current line: bottom centre of the lines, above the toolbar,
+   only while the view isn't following. */
 .lyrics__sync {
   position: absolute;
   z-index: 3;
   left: 50%;
-  bottom: var(--space-6);
+  bottom: var(--space-3);
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
+  gap: 6px;
+  height: var(--lyrics-control);
+  padding: 0 var(--space-4);
   border: 0;
   border-radius: var(--radius-pill);
   background: var(--color-text-primary);
   color: #121110;
   font: inherit;
   font-weight: 700;
-  font-size: var(--font-size-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: var(--font-size-sm);
+  line-height: 1;
   cursor: pointer;
   animation: lyrics-rise var(--motion-quick) var(--motion-easing);
+  transition: background-color var(--motion-quick) var(--motion-easing);
 }
-.lyrics__sync:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 3px; }
-.lyrics__sync:hover { transform: translateX(-50%) scale(calc(1 + 0.04 * var(--motion-move))); }
+.lyrics__sync:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.lyrics__sync:hover { background: color-mix(in srgb, var(--color-text-primary) 85%, transparent); }
 @keyframes lyrics-rise {
   from { opacity: 0; transform: translate(-50%, calc(8px * var(--motion-move))); }
   to { opacity: 1; transform: translate(-50%, 0); }

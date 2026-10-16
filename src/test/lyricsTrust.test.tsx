@@ -13,12 +13,23 @@ import { DEFAULT_SETTINGS, type Lyrics, type PlayerState, type Track, type Trans
 import { trackMenuItems } from "../components/TrackRow";
 import { LyricsPane } from "../shell/LyricsView";
 import { clearLyricsCache, lyricsChanged, loadLyrics, lyricsSeen, setCheckStatus, useLyricsTrust } from "../shell/lyrics";
-import { CHECK_TEXT, checkProgress, NOTICE_TEXT, offsetText, tapOffset, WrongLyricsDialog } from "../shell/LyricsTrust";
+import {
+  CHECK_STUCK_MS,
+  CHECK_TEXT,
+  CHECK_WAIT_MS,
+  checkProgress,
+  NOTICE_TEXT,
+  offsetText,
+  resetCheckClocks,
+  tapOffset,
+  WrongLyricsDialog,
+} from "../shell/LyricsTrust";
 import { SettingsPage } from "../pages/SettingsPage";
 import { usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useTranscribe } from "../stores/transcribe";
+import { useUi } from "../stores/ui";
 import { useWrongLyrics } from "../stores/wrongLyrics";
 
 const mock = backend as MockBackend;
@@ -72,6 +83,7 @@ function status(installed: boolean): TranscribeStatus {
 beforeEach(async () => {
   await mock.settingsSet({ ...DEFAULT_SETTINGS });
   clearLyricsCache();
+  resetCheckClocks();
   mock.lyricsDown = false;
   mock.lyricsChoices.clear();
   mock.lyricsExtra.clear();
@@ -125,6 +137,102 @@ describe("the check note", () => {
     act(() => useTranscribe.setState({ status: status(true) }));
     expect(screen.queryByText(/so Platter can check lyrics/)).toBeNull();
     download.mockRestore();
+  });
+});
+
+describe("a check that takes long", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The server's lyrics, said to be being checked (with a reason, when given). */
+  function checking(checkWaiting?: string) {
+    const real = mock.lyrics.bind(mock);
+    return vi.spyOn(mock, "lyrics").mockImplementation(async (id) => {
+      const l = await real(id);
+      return l && { ...l, check: "checking", ...(checkWaiting ? { checkWaiting } : {}) };
+    });
+  }
+
+  /** Let `ms` pass, running what it lets finish (the lyrics fetch, the check timers). */
+  const pass = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  it("spins, then says it is waiting, then offers Try again", async () => {
+    const spy = checking();
+    at(lines, 0);
+    render(<LyricsPane />);
+    await pass(100);
+    expect(screen.getByText(CHECK_TEXT.checking)).toBeInTheDocument();
+    await pass(CHECK_WAIT_MS - 1000);
+    expect(screen.getByText(CHECK_TEXT.checking)).toBeInTheDocument();
+    await pass(1000);
+    expect(screen.getByText(CHECK_TEXT.waiting)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    await pass(CHECK_STUCK_MS - CHECK_WAIT_MS);
+    expect(screen.getByText(CHECK_TEXT.stuck)).toBeInTheDocument();
+    const calls = spy.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await pass(100);
+    // Asked again, and the clock starts over.
+    expect(spy.mock.calls.length).toBeGreaterThan(calls);
+    expect(screen.getByText(CHECK_TEXT.checking)).toBeInTheDocument();
+  });
+
+  it("says where the core says the check is, and stops spinning after a while", async () => {
+    checking();
+    mock.checkStatuses.set(lines.id, { trackId: lines.id, state: "queued" });
+    at(lines, 0);
+    const { container } = render(<LyricsPane />);
+    await pass(100);
+    const status = () => screen.getByRole("status");
+    expect(status()).toHaveTextContent("Waiting to check against the song…");
+    expect(container.querySelector(".lyrics-trust__check .lyrics-trust__spin")).not.toBeNull();
+    act(() => setCheckStatus({ trackId: lines.id, state: "listening" }));
+    expect(status()).toHaveTextContent(CHECK_TEXT.checking);
+    await pass(CHECK_WAIT_MS);
+    // Same words, no spinner; the core's own status, not the fallback.
+    expect(status()).toHaveTextContent(CHECK_TEXT.checking);
+    expect(container.querySelector(".lyrics-trust__check .lyrics-trust__spin")).toBeNull();
+    await pass(CHECK_STUCK_MS);
+    expect(screen.queryByText(CHECK_TEXT.stuck)).toBeNull();
+    act(() => setCheckStatus({ trackId: lines.id, state: "failed", reason: "stuck" }));
+    expect(status()).toHaveTextContent("Couldn't check yet");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("shows the result once the check ends", async () => {
+    const spy = checking();
+    at(lines, 0);
+    render(<LyricsPane />);
+    await pass(100);
+    await pass(CHECK_WAIT_MS);
+    expect(screen.getByText(CHECK_TEXT.waiting)).toBeInTheDocument();
+    spy.mockRestore();
+    mock.lyricsVerdicts.set(lines.id, { server: "match" });
+    act(() => lyricsChanged(lines.id));
+    await pass(100);
+    expect(screen.getByText(CHECK_TEXT.checked)).toBeInTheDocument();
+    await pass(CHECK_STUCK_MS);
+    expect(screen.queryByText(CHECK_TEXT.stuck)).toBeNull();
+  });
+});
+
+describe("the toolbar", () => {
+  it("has one timing control showing the offset, and More holds what the row has no room for", async () => {
+    at(lines, 0);
+    render(<LyricsPane />);
+    const timing = await screen.findByRole("group", { name: "Lyrics timing" });
+    expect(within(timing).getByText("0 s")).toBeInTheDocument();
+    // Hidden at this width (no layout here), so found by its label.
+    fireEvent.click(screen.getByLabelText("More lyrics tools"));
+    // jsdom lays nothing out, so every action that can move counts as moved.
+    expect(useUi.getState().menu?.items.map((i) => i.label)).toEqual(["Tap to sync", "Wrong lyrics?"]);
+    act(() => useUi.getState().menu?.items[0].onSelect?.());
+    expect(screen.getByRole("button", { name: "Tap to sync" })).toHaveAttribute("aria-pressed", "true");
+    act(() => useUi.setState({ menu: null }));
   });
 });
 

@@ -98,7 +98,7 @@ function SyncedLyrics({
   credit?: string;
   className: string;
   footer?: ReactNode;
-  /** Over the lyrics: the check note, timing nudge and Wrong lyrics?. */
+  /** Under the lyrics: the check note, timing stepper, Tap to sync and Wrong lyrics?. */
   tools?: ReactNode;
   /** A line clicked while tapping to sync (true: used, don't seek). */
   onTap?: (line: LyricLine) => boolean;
@@ -140,71 +140,73 @@ function SyncedLyrics({
 
   return (
     <div className={`lyrics lyrics--synced ${className}`}>
-      <div
-        ref={scroller}
-        className="lyrics__scroll"
-        tabIndex={0}
-        aria-label="Lyrics"
-        onWheel={pause}
-        onTouchMove={pause}
-        onKeyDown={onKey}
-        // A press on the scrollbar itself (not a line) is a hand scroll.
-        onPointerDown={(e) => e.target === scroller.current && pause()}
-      >
-        <div className="lyrics__lines">
-          {lines.map((l, i) => {
-            const state = lineState(i, current);
-            const words = state === "current" && l.words?.length ? l.words : null;
-            return (
-              <button
-                key={i}
-                type="button"
-                ref={(el) => {
-                  lineEls.current[i] = el;
-                }}
-                className={`lyrics__line is-${state} ${l.text ? "" : "lyrics__line--gap"} ${picking && picked.includes(i) ? "is-picked" : ""}`}
-                aria-current={state === "current" ? "true" : undefined}
-                aria-label={l.text || "Instrumental"}
-                aria-pressed={picking && l.text ? picked.includes(i) : undefined}
-                disabled={picking && !l.text}
-                onClick={() => {
-                  if (picking) return useLyricPick.getState().toggle(i);
-                  if (onTap?.(l)) return;
-                  jump(l.startMs);
-                  resume();
-                  void player.seek(l.startMs);
-                }}
-              >
-                {l.text ? (
-                  words ? (
-                    words.map((w, j) => (
-                      <span key={j} className={`lyrics__word ${j <= word ? "is-sung" : ""}`}>
-                        {w.text}
-                      </span>
-                    ))
+      <div className="lyrics__body">
+        <div
+          ref={scroller}
+          className="lyrics__scroll"
+          tabIndex={0}
+          aria-label="Lyrics"
+          onWheel={pause}
+          onTouchMove={pause}
+          onKeyDown={onKey}
+          // A press on the scrollbar itself (not a line) is a hand scroll.
+          onPointerDown={(e) => e.target === scroller.current && pause()}
+        >
+          <div className="lyrics__lines">
+            {lines.map((l, i) => {
+              const state = lineState(i, current);
+              const words = state === "current" && l.words?.length ? l.words : null;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  ref={(el) => {
+                    lineEls.current[i] = el;
+                  }}
+                  className={`lyrics__line is-${state} ${l.text ? "" : "lyrics__line--gap"} ${picking && picked.includes(i) ? "is-picked" : ""}`}
+                  aria-current={state === "current" ? "true" : undefined}
+                  aria-label={l.text || "Instrumental"}
+                  aria-pressed={picking && l.text ? picked.includes(i) : undefined}
+                  disabled={picking && !l.text}
+                  onClick={() => {
+                    if (picking) return useLyricPick.getState().toggle(i);
+                    if (onTap?.(l)) return;
+                    jump(l.startMs);
+                    resume();
+                    void player.seek(l.startMs);
+                  }}
+                >
+                  {l.text ? (
+                    words ? (
+                      words.map((w, j) => (
+                        <span key={j} className={`lyrics__word ${j <= word ? "is-sung" : ""}`}>
+                          {w.text}
+                        </span>
+                      ))
+                    ) : (
+                      l.text
+                    )
                   ) : (
-                    l.text
-                  )
-                ) : (
-                  <span className="lyrics__dots" aria-hidden="true">
-                    • • •
-                  </span>
-                )}
-                {l.text && <LyricExtras extras={extras} i={i} />}
-              </button>
-            );
-          })}
+                    <span className="lyrics__dots" aria-hidden="true">
+                      • • •
+                    </span>
+                  )}
+                  {l.text && <LyricExtras extras={extras} i={i} />}
+                </button>
+              );
+            })}
+          </div>
+          {credit && <p className="lyrics__credit">{credit}</p>}
+          {footer}
         </div>
-        {credit && <p className="lyrics__credit">{credit}</p>}
-        {footer}
+        {!following && (
+          <button type="button" className="lyrics__sync" aria-label="Sync to the current line" onClick={resume}>
+            <AudioLines size={14} aria-hidden="true" />
+            Sync
+          </button>
+        )}
       </div>
       {tools}
-      {!following && (
-        <button type="button" className="lyrics__sync" aria-label="Sync to the current line" onClick={resume}>
-          <AudioLines size={16} aria-hidden="true" />
-          Sync
-        </button>
-      )}
     </div>
   );
 }
@@ -230,33 +232,35 @@ function PlainLyrics({
   const picked = useLyricPick((s) => s.picked);
   return (
     <div className={`lyrics lyrics--plain ${className}`}>
-      <div className="lyrics__scroll" tabIndex={0} aria-label="Lyrics">
-        <div className="lyrics__lines">
-          <p className="lyrics__unsynced">{note}</p>
-          {lines.map((l, i) =>
-            l && picking ? (
-              <button
-                key={i}
-                type="button"
-                className={`lyrics__line lyrics__line--pick ${picked.includes(i) ? "is-picked" : ""}`}
-                aria-pressed={picked.includes(i)}
-                onClick={() => useLyricPick.getState().toggle(i)}
-              >
-                {l}
-                <LyricExtras extras={extras} i={i} />
-              </button>
-            ) : l ? (
-              <p key={i} className="lyrics__line">
-                {l}
-                <LyricExtras extras={extras} i={i} />
-              </p>
-            ) : (
-              <span key={i} className="lyrics__break" aria-hidden="true" />
-            ),
-          )}
+      <div className="lyrics__body">
+        <div className="lyrics__scroll" tabIndex={0} aria-label="Lyrics">
+          <div className="lyrics__lines">
+            <p className="lyrics__unsynced">{note}</p>
+            {lines.map((l, i) =>
+              l && picking ? (
+                <button
+                  key={i}
+                  type="button"
+                  className={`lyrics__line lyrics__line--pick ${picked.includes(i) ? "is-picked" : ""}`}
+                  aria-pressed={picked.includes(i)}
+                  onClick={() => useLyricPick.getState().toggle(i)}
+                >
+                  {l}
+                  <LyricExtras extras={extras} i={i} />
+                </button>
+              ) : l ? (
+                <p key={i} className="lyrics__line">
+                  {l}
+                  <LyricExtras extras={extras} i={i} />
+                </p>
+              ) : (
+                <span key={i} className="lyrics__break" aria-hidden="true" />
+              ),
+            )}
+          </div>
+          {credit && <p className="lyrics__credit">{credit}</p>}
+          {footer}
         </div>
-        {credit && <p className="lyrics__credit">{credit}</p>}
-        {footer}
       </div>
       {tools}
     </div>

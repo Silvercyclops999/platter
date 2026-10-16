@@ -5,17 +5,19 @@
  * shown (released lyrics held back, checking, nothing matched, none
  * chosen), and the offer to download the speech model.
  */
-import { AlertTriangle, AudioLines, Check, CircleHelp, Hand, Loader2, Minus, PenLine, Plus, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertTriangle, AudioLines, Check, CircleHelp, Clock, Globe, Hand, Loader2, Minus, MoreHorizontal, PenLine, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { openContextMenu } from "../components/ContextMenu";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { backend } from "../lib/backend";
 import { formatDuration, trackArtistLine } from "../lib/format";
-import type { LyricLine, Lyrics, LyricsCandidate, LyricsCandidates, LyricsCheckStatus, LyricsVerdict, Track } from "../lib/types";
+import type { LyricLine, Lyrics, LyricsCandidate, LyricsCandidates, LyricsCheck, LyricsCheckStatus, LyricsVerdict, Track } from "../lib/types";
 import { openLyricsEditor } from "../stores/lyricsEditor";
 import { usePlayer } from "../stores/player";
 import { useSettings, updateSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
+import type { MenuItem } from "../stores/ui";
 import { modelSize, transcribe, useTranscribe } from "../stores/transcribe";
 import {
   chooseLyrics,
@@ -35,13 +37,65 @@ export const CHECK_TEXT = {
   checked: "Checked",
   notChecked: "Not checked",
   checking: "Checking against the song…",
+  waiting: "Waiting to check",
+  stuck: "Couldn't check yet",
 } as const;
 
 export const CHECK_TITLE = {
   checked: "These lyrics were compared with the song on this computer and match it.",
   notChecked: "These lyrics weren't compared with the song, so they may be for another version or another song.",
   checking: "Comparing these lyrics with the song on this computer.",
+  waiting: "The check hasn't finished yet. It runs when the computer gets to it.",
+  stuck: "The check hasn't finished. Try again to ask for it again.",
 } as const;
+
+/** How long the spinner shows before the note says the check is waiting. */
+export const CHECK_WAIT_MS = 30_000;
+/** How long without a result before the note offers Try again. */
+export const CHECK_STUCK_MS = 120_000;
+
+export type CheckPhase = LyricsCheck | "waiting" | "stuck";
+
+/** When each song's check was first seen going (kept across views and reloads of its lyrics). */
+const checkSince = new Map<string, number>();
+
+/** Forget when checks started (tests). */
+export function resetCheckClocks() {
+  checkSince.clear();
+}
+
+/**
+ * How long a check has gone on: still going after CHECK_WAIT_MS is
+ * "waiting" (the spinner stops), after CHECK_STUCK_MS "stuck" (Try again,
+ * when the core hasn't said where the check is). The clock starts when the
+ * song's check is first seen going (or `retry` asks again) and stops with
+ * any other status.
+ */
+export function useCheckPhase(trackId: string, check: LyricsCheck | undefined): { phase: CheckPhase | undefined; retry: () => void } {
+  const [, setTick] = useState(0);
+  const going = check === "checking";
+  if (going && !checkSince.has(trackId)) checkSince.set(trackId, Date.now());
+  const at = going ? checkSince.get(trackId)! : 0;
+  useEffect(() => {
+    if (!going) {
+      checkSince.delete(trackId);
+      return;
+    }
+    const timers = [CHECK_WAIT_MS, CHECK_STUCK_MS].map((ms) => {
+      const left = at + ms - Date.now();
+      return left > 0 ? setTimeout(() => setTick((n) => n + 1), left) : null;
+    });
+    return () => timers.forEach((t) => t && clearTimeout(t));
+  }, [trackId, going, at]);
+  const retry = useCallback(() => {
+    checkSince.set(trackId, Date.now());
+    setTick((n) => n + 1);
+    retryCheck(trackId);
+  }, [trackId]);
+  if (!going) return { phase: check, retry };
+  const took = Date.now() - at;
+  return { phase: took >= CHECK_STUCK_MS ? "stuck" : took >= CHECK_WAIT_MS ? "waiting" : "checking", retry };
+}
 
 export const NOTICE_TEXT = {
   versionHeld: "Lyrics from the released version, may not match",
@@ -144,45 +198,70 @@ export function CheckModelOffer({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function CheckChip({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) {
-  const c = lyrics.check;
-  const p = useCheckProgress(trackId, c === "checking");
-  if (!c) return null;
+/** The quiet note on what the check said, with a small icon. */
+function CheckStatus({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
+  const { phase: c, retry } = useCheckPhase(track.id, lyrics.check);
+  const p = useCheckProgress(track.id, lyrics.check === "checking");
   if (p) {
+    // Where the core says the check is; the spinner stops after CHECK_WAIT_MS.
+    const spin = p.spin && c === "checking";
     return (
-      <span className={`lyrics-trust__chip is-checking`} role="status">
-        {p.spin ? <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" /> : <CircleHelp size={14} aria-hidden="true" />}
-        {p.text}
+      <span className="lyrics-trust__status">
+        <span className={`lyrics-trust__check is-${p.retry ? "stuck" : spin ? "checking" : "waiting"}`} role="status">
+          {spin ? (
+            <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" />
+          ) : p.retry ? (
+            <CircleHelp size={14} aria-hidden="true" />
+          ) : (
+            <Clock size={14} aria-hidden="true" />
+          )}
+          <span className="lyrics-trust__check-text">{p.text}</span>
+        </span>
         {p.retry && (
-          <Button size="sm" variant="ghost" onClick={() => retryCheck(trackId)}>
+          <button type="button" className="lyrics-trust__retry" onClick={retry}>
             Try again
-          </Button>
+          </button>
         )}
+        {lyrics.chosen && <span className="lyrics-trust__pick">Your pick</span>}
       </span>
     );
   }
+  if (!c && !lyrics.chosen) return null;
   const icon =
     c === "checked" ? (
       <Check size={14} aria-hidden="true" />
     ) : c === "checking" ? (
       <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" />
+    ) : c === "waiting" ? (
+      <Clock size={14} aria-hidden="true" />
     ) : (
       <CircleHelp size={14} aria-hidden="true" />
     );
   const extra = c === "checked" && (lyrics.retimed || lyrics.autoOffsetMs) ? ", timing fixed" : "";
   return (
-    <span className={`lyrics-trust__chip is-${c}`} title={CHECK_TITLE[c]} role="status">
-      {icon}
-      {CHECK_TEXT[c]}
-      {extra}
+    <span className="lyrics-trust__status">
+      {c && (
+        <span className={`lyrics-trust__check is-${c}`} title={CHECK_TITLE[c]} role="status">
+          {icon}
+          <span className="lyrics-trust__check-text">
+            {CHECK_TEXT[c]}
+            {extra}
+          </span>
+        </span>
+      )}
+      {c === "stuck" && (
+        <button type="button" className="lyrics-trust__retry" onClick={retry}>
+          Try again
+        </button>
+      )}
+      {lyrics.chosen && <span className="lyrics-trust__pick">Your pick</span>}
     </span>
   );
 }
 
-/** −/+ 0.5 s, the offset, and "Tap to sync". The - and + keys nudge too. */
-function TimingNudge({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
+/** −, the offset (click to reset) and +, in one control. The - and + keys nudge too. */
+function TimingStepper({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
   const offset = lyrics.offsetMs ?? 0;
-  const tapping = useWrongLyrics((s) => s.tapping === track.id);
   const pickerOpen = useWrongLyrics((s) => !!s.track);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -200,75 +279,73 @@ function TimingNudge({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
   // A new song ends tapping.
   useEffect(() => () => setTapping(null), [track.id]);
   return (
-    <span className="lyrics-trust__nudge" role="group" aria-label="Lyrics timing">
+    <span className="lyrics-trust__stepper" role="group" aria-label="Lyrics timing">
       <button
         type="button"
-        className="lyrics-trust__btn"
+        className="lyrics-trust__step"
         aria-label="Show lyrics 0.5 seconds earlier"
         title="Earlier (−)"
         onClick={() => void setLyricsOffset(track.id, offset - NUDGE_MS)}
       >
         <Minus size={14} aria-hidden="true" />
-        0.5 s
       </button>
-      {offset !== 0 && (
+      {offset !== 0 ? (
         <button
           type="button"
-          className="lyrics-trust__btn lyrics-trust__offset"
+          className="lyrics-trust__offset is-moved"
           aria-label={`Timing moved ${offsetText(offset)}. Reset`}
           title="Reset the timing"
           onClick={() => void setLyricsOffset(track.id, 0)}
         >
           {offsetText(offset)}
-          <X size={12} aria-hidden="true" />
         </button>
+      ) : (
+        <span className="lyrics-trust__offset" title="Timing as found">
+          0 s
+        </span>
       )}
       <button
         type="button"
-        className="lyrics-trust__btn"
+        className="lyrics-trust__step"
         aria-label="Show lyrics 0.5 seconds later"
         title="Later (+)"
         onClick={() => void setLyricsOffset(track.id, offset + NUDGE_MS)}
       >
         <Plus size={14} aria-hidden="true" />
-        0.5 s
-      </button>
-      <button
-        type="button"
-        className={`lyrics-trust__btn ${tapping ? "is-on" : ""}`}
-        aria-pressed={tapping}
-        title="Click a line as it's sung to line the lyrics up there"
-        onClick={() => setTapping(tapping ? null : track.id)}
-      >
-        <Hand size={14} aria-hidden="true" />
-        Tap to sync
       </button>
     </span>
   );
 }
 
+/** Hidden by the toolbar's width (collapsed into "More lyrics tools"). */
+function collapsed(el: HTMLElement | null): boolean {
+  return !!el && el.offsetParent === null;
+}
+
 /**
- * Over the lyrics: the check note, the timing nudge (synced lyrics) and
- * "Wrong lyrics?" (made plain when other lyrics found disagree).
+ * Under the lyrics, in its own row: the check note, the timing stepper
+ * (synced lyrics), "Tap to sync", "Wrong lyrics?" (made plain when other
+ * lyrics found disagree) and sharing a transcription. When the row gets
+ * narrow, sharing, then "Tap to sync", then "Wrong lyrics?" move into a
+ * "More lyrics tools" menu instead of wrapping.
  */
 export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: Track; synced: boolean }) {
   const tapping = useWrongLyrics((s) => s.tapping === track.id);
+  const tapRef = useRef<HTMLButtonElement>(null);
+  const wrongRef = useRef<HTMLButtonElement>(null);
+  const shareRef = useRef<HTMLSpanElement>(null);
+  const toggleTap = () => setTapping(tapping ? null : track.id);
+  const more = (e: MouseEvent<HTMLButtonElement>) => {
+    const items: MenuItem[] = [];
+    const share = shareRef.current?.querySelector("button") ?? null;
+    if (collapsed(share)) items.push({ label: share!.textContent ?? "", icon: Globe, onSelect: () => share!.click() });
+    if (collapsed(tapRef.current)) items.push({ label: "Tap to sync", icon: Hand, checked: tapping, onSelect: toggleTap });
+    if (collapsed(wrongRef.current)) items.push({ label: "Wrong lyrics?", icon: AlertTriangle, onSelect: () => openWrongLyrics(track) });
+    if (items.length) openContextMenu("More lyrics tools", items, e.currentTarget);
+  };
   return (
     <div className="lyrics-trust" role="toolbar" aria-label="Lyrics tools">
-      <div className="lyrics-trust__bar">
-        <CheckChip lyrics={lyrics} trackId={track.id} />
-        {lyrics.chosen && <span className="lyrics-trust__chip">Your pick</span>}
-        {synced && <TimingNudge lyrics={lyrics} track={track} />}
-        <button
-          type="button"
-          className={`lyrics-trust__btn lyrics-trust__wrong ${lyrics.disagree ? "is-prominent" : ""}`}
-          onClick={() => openWrongLyrics(track)}
-        >
-          {lyrics.disagree && <AlertTriangle size={14} aria-hidden="true" />}
-          Wrong lyrics?
-        </button>
-        <ShareTranscription lyrics={lyrics} track={track} />
-      </div>
+      {lyrics.check === "notChecked" && <CheckModelOffer compact />}
       {lyrics.disagree && <p className="lyrics-trust__hint">Other lyrics found for this song say something different.</p>}
       {tapping && (
         <p className="lyrics-trust__hint" role="status">
@@ -278,7 +355,45 @@ export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: 
           </button>
         </p>
       )}
-      {lyrics.check === "notChecked" && <CheckModelOffer compact />}
+      <div className="lyrics-trust__bar">
+        <CheckStatus lyrics={lyrics} track={track} />
+        <span className="lyrics-trust__actions">
+          {synced && <TimingStepper lyrics={lyrics} track={track} />}
+          {synced && (
+            <button
+              ref={tapRef}
+              type="button"
+              className={`lyrics-trust__btn lyrics-trust__tap ${tapping ? "is-on" : ""}`}
+              aria-pressed={tapping}
+              title="Click a line as it's sung to line the lyrics up there"
+              onClick={toggleTap}
+            >
+              Tap to sync
+            </button>
+          )}
+          <button
+            ref={wrongRef}
+            type="button"
+            className={`lyrics-trust__btn lyrics-trust__wrong ${lyrics.disagree ? "is-prominent" : ""}`}
+            onClick={() => openWrongLyrics(track)}
+          >
+            {lyrics.disagree && <AlertTriangle size={14} aria-hidden="true" />}
+            Wrong lyrics?
+          </button>
+          <span ref={shareRef} className="lyrics-trust__share">
+            <ShareTranscription lyrics={lyrics} track={track} />
+          </span>
+          <button
+            type="button"
+            className={`lyrics-trust__btn lyrics-trust__more ${synced ? "has-tap" : ""} ${lyrics.disagree ? "" : "has-wrong"}`}
+            aria-label="More lyrics tools"
+            title="More"
+            onClick={more}
+          >
+            <MoreHorizontal size={16} aria-hidden="true" />
+          </button>
+        </span>
+      </div>
     </div>
   );
 }
