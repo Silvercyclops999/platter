@@ -9,7 +9,7 @@ import { ARCHIVE_ARTIST_ID, mockFoldTitle } from "../lib/mock/archive";
 import type { ArtistPage as ArtistPageData, Era, Track } from "../lib/types";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
-import { cleanKeyword } from "../pages/ArchiveSettings";
+import { cleanKeyword, cleanStatusTag, foldStatusValue, withStatusValue } from "../pages/ArchiveSettings";
 import { ArtistPage } from "../pages/ArtistPage";
 import { EraPage } from "../pages/EraPage";
 import { eraRange, filterByEra, formatArchiveDate, otherVersionsText, showEraCards, showVersionLink, versionLinkText } from "../pages/era";
@@ -337,6 +337,26 @@ describe("artist page sections and eras", () => {
 
 // ---------------------------------------------------------------- settings
 
+describe("release status settings helpers", () => {
+  it("keeps a tag name, and blank or auto means Auto", () => {
+    expect(cleanStatusTag(" PROVENANCE ")).toBe("PROVENANCE");
+    expect(cleanStatusTag("")).toBeNull();
+    expect(cleanStatusTag("Auto")).toBeNull();
+    expect(cleanStatusTag("A=B")).toBeNull();
+    expect(cleanStatusTag("x".repeat(65))).toBeNull();
+  });
+
+  it("folds values like the core and replaces the same value", () => {
+    expect(foldStatusValue("  Vault_copy- ")).toBe("vault copy");
+    expect(foldStatusValue("OG-File")).toBe("og file");
+    const list = withStatusValue([{ value: "Vault copy", status: "unreleased" }], "vault-copy", "leaked");
+    expect(list).toEqual([{ value: "vault-copy", status: "leaked" }]);
+    expect(withStatusValue([], "  ", "released")).toBeNull();
+    const full = Array.from({ length: 50 }, (_, i) => ({ value: `v${i}`, status: "released" as const }));
+    expect(withStatusValue(full, "one more", "released")).toBeNull();
+  });
+});
+
 describe("archive settings", () => {
   it("rows sit under Library, Archive, and change the settings", async () => {
     const user = userEvent.setup();
@@ -349,6 +369,39 @@ describe("archive settings", () => {
     expect((await backend.settingsGet()).showEraCards).toBe(false);
     await user.click(versions);
     expect((await backend.settingsGet()).showVersionCounts).toBe(false);
+  });
+
+  it("the release status tag is Auto or a custom tag", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    const mode = await screen.findByRole("combobox", { name: "Release status tag" });
+    expect(mode).toHaveValue("auto");
+    expect(screen.queryByRole("textbox", { name: "Release status tag name" })).toBeNull();
+    await user.selectOptions(mode, "custom");
+    const name = screen.getByRole("textbox", { name: "Release status tag name" });
+    const use = screen.getByRole("button", { name: "Use" });
+    expect(use).toBeDisabled();
+    await user.type(name, "PROVENANCE");
+    await user.click(use);
+    await waitFor(async () => expect((await backend.settingsGet()).releaseStatusTag).toBe("PROVENANCE"));
+    await user.selectOptions(mode, "auto");
+    await waitFor(async () => expect((await backend.settingsGet()).releaseStatusTag).toBe(""));
+  });
+
+  it("release status values can be added and removed", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    const input = await screen.findByPlaceholderText("A value, like Vault copy");
+    const form = within(input.closest("form")!);
+    expect(form.getByRole("button", { name: "Add" })).toBeDisabled();
+    await user.type(input, "Vault copy");
+    await user.selectOptions(form.getByRole("combobox", { name: "Means" }), "unreleased");
+    await user.click(form.getByRole("button", { name: "Add" }));
+    await waitFor(async () => expect((await backend.settingsGet()).releaseStatusValues).toEqual([{ value: "Vault copy", status: "unreleased" }]));
+    const list = await screen.findByRole("list", { name: "Release status values" });
+    expect(within(list).getAllByRole("listitem").map((l) => l.textContent)).toEqual(["Vault copy: Unreleased"]);
+    await user.click(screen.getByRole("button", { name: "Remove Vault copy" }));
+    await waitFor(async () => expect((await backend.settingsGet()).releaseStatusValues).toEqual([]));
   });
 
   it("folder names can be added and removed", async () => {

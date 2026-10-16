@@ -3,7 +3,7 @@
  * (Leak, Demo...) and an archive quality badge (Lossless, CDQ, LQ) when it
  * says something the format badge doesn't.
  */
-import type { Track } from "../lib/types";
+import type { Track, TrackBadges } from "../lib/types";
 import { useTrackBadges } from "../stores/fileTags";
 import { Badge } from "./Badge";
 import "./file-tags.css";
@@ -11,6 +11,7 @@ import "./file-tags.css";
 const VERSION_LABEL: Record<string, string> = {
   unreleased: "Unreleased",
   leak: "Leak",
+  leaked: "Leak",
   demo: "Demo",
   snippet: "Snippet",
   alternate: "Alternate",
@@ -23,6 +24,11 @@ const VERSION_LABEL: Record<string, string> = {
 /** Badge text for an ARCHIVE_VERSION value; null for "released" and unknown values. */
 export function versionLabel(version: string | null | undefined): string | null {
   return (version && VERSION_LABEL[version.trim().toLowerCase()]) || null;
+}
+
+/** What a song's version badge shows: its ARCHIVE_VERSION, else its release status from other tags (STATUS, RELEASESTATUS or a custom tag). */
+export function badgeVersion(b: Pick<TrackBadges, "version" | "release">): string | undefined {
+  return b.version ?? b.release;
 }
 
 const QUALITY_LABEL: Record<string, string> = { lossless: "Lossless", cdq: "CDQ", lq: "LQ" };

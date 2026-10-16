@@ -42,7 +42,7 @@ import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMa
 import { MixExclusions } from "./MixExclusions";
 import { DismissedArtists } from "./DiscoverSettings";
 import { DISCOGS_TOKEN_DESCRIPTION, DiscogsImportControl, DiscogsTokenControl, discogsNote, useDiscogs } from "./DiscogsSettings";
-import { FolderKeywords } from "./ArchiveSettings";
+import { FolderKeywords, ReleaseStatusTag, ReleaseStatusValues } from "./ArchiveSettings";
 import { COVER_PX_OPTIONS, DoctorChecksList, DoctorNote } from "./DoctorSettings";
 import { AcoustIdKeyControl, SOUND_ID_DESCRIPTION, SOUND_ID_SCOPE_OPTIONS, soundIdNote, useSoundIdStatus } from "./SoundIdSettings";
 import { LibraryCount, LibrarySourceList } from "./LibrarySourceSettings";
@@ -2375,6 +2375,24 @@ export function SettingsPage() {
       description:
         "When a song's folder has one of these names, Why? lists it for albums that are probably unreleased. A folder name adds weight but never decides on its own. Leave the list empty to stop using folder names.",
       control: (ids) => (s ? <FolderKeywords settings={s} ids={ids} /> : <Skeleton width={240} height={32} />),
+    },
+    {
+      key: "releaseStatusTag",
+      section: "Library",
+      group: "Archive",
+      title: "Release status tag",
+      description:
+        "Where Platter reads whether a song is released, unreleased, leaked or an alternate version. Auto reads Platter's own ARCHIVE_VERSION, then a STATUS tag, then the release status MusicBrainz Picard writes. A custom tag is read after ARCHIVE_VERSION instead. Changing the tag reads your files again in the background.",
+      control: (ids) => (s ? <ReleaseStatusTag settings={s} ids={ids} /> : <Skeleton width={240} height={32} />),
+    },
+    {
+      key: "releaseStatusValues",
+      section: "Library",
+      group: "Archive",
+      title: "Release status values",
+      description:
+        "Values your tags use and what each one means. Common ones like Released, Official, Unreleased, Leak, Alt, Demo and OG file are known already. A value Platter doesn't know never counts as released.",
+      control: (ids) => (s ? <ReleaseStatusValues settings={s} ids={ids} /> : <Skeleton width={240} height={32} />),
     },
     {
       key: "showVersionCounts",

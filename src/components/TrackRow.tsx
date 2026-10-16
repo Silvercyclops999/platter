@@ -30,7 +30,7 @@ import type { MenuItem } from "../stores/ui";
 import { Art } from "./Art";
 import { ArtistLinks, TextLink, linkFeaturedNow } from "./ArtistLinks";
 import { QualityBadge } from "./Badge";
-import { ArchiveQualityBadge, archiveQualityLabel, ExplicitBadge, VersionBadge, versionLabel } from "./FileTagBadges";
+import { ArchiveQualityBadge, archiveQualityLabel, badgeVersion, ExplicitBadge, VersionBadge, versionLabel } from "./FileTagBadges";
 import { useTrackBadges } from "../stores/fileTags";
 import { openContextMenu } from "./ContextMenu";
 import { addToPlaylistItem } from "./PlaylistPicker";
@@ -549,12 +549,12 @@ export function TrackRow({
           </span>
         )}
         <div className="track-row__text">
-          {versionLabel(badges.version) || archiveQualityLabel(badges.quality, track) || versions || ((badges.explicit || downloaded) && !showArtist) ? (
+          {versionLabel(badgeVersion(badges)) || archiveQualityLabel(badges.quality, track) || versions || ((badges.explicit || downloaded) && !showArtist) ? (
             <div className="track-row__title-line">
               <div className="track-row__title truncate">{track.title}</div>
               {downloaded && !showArtist && <DownloadedMark trackId={track.id} />}
               {badges.explicit && !showArtist && <ExplicitBadge />}
-              <VersionBadge version={badges.version} />
+              <VersionBadge version={badgeVersion(badges)} />
               <ArchiveQualityBadge track={track} />
               {versions}
             </div>

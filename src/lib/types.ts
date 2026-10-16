@@ -84,6 +84,8 @@ export interface Track {
   otherVersions?: number | null;
   /** The song's own release status (pages that fill it in). */
   songStatus?: SongStatus | null;
+  /** What the song's file tags say about where it came from (pages that fill it in). */
+  fileRelease?: TrackRelease | null;
 }
 
 /**
@@ -1134,6 +1136,10 @@ export interface Settings {
   importSources: string[];
   /** Folder names on a song's path that hint it's unreleased (they only add weight). */
   archiveFolderKeywords: string[];
+  /** The tag a file's release status is read from: "" for Auto (ARCHIVE_VERSION, STATUS, RELEASESTATUS, RELEASETYPE), else a tag name. */
+  releaseStatusTag: string;
+  /** Custom release status values and what they mean, checked before the built-in ones. */
+  releaseStatusValues: ReleaseValueMap[];
   /** Era cards on artist pages. */
   showEraCards: boolean;
   /** "+N versions" on song rows. */
@@ -1448,6 +1454,8 @@ export const DEFAULT_SETTINGS: Settings = {
   allowStreamDeck: false,
   importSources: [],
   archiveFolderKeywords: ["Unreleased", "Leaks", "Demos", "Sessions", "Snippets"],
+  releaseStatusTag: "",
+  releaseStatusValues: [],
   showEraCards: true,
   showVersionCounts: true,
   libraryDoctor: true,
@@ -1705,6 +1713,22 @@ export interface LyricsShareInfo {
 
 // ---------------------------------------------------------------- file tags
 
+/** One file's release status from whichever tags it carries (docs/TAGGING.md "Release status"). */
+export type FileRelease = "released" | "unreleased" | "leaked" | "alternate";
+
+/** A custom release status value and what it means (Settings). */
+export interface ReleaseValueMap {
+  value: string;
+  status: FileRelease;
+}
+
+/** What a song's file tags say about where it came from. */
+export interface TrackRelease {
+  status?: FileRelease;
+  /** VERSION as tagged (free text), else ARCHIVE_SOURCE. */
+  provenance?: string;
+}
+
 /** Badges for one song from its file's tags (docs/IPC.md "File tags"). */
 export interface TrackBadges {
   explicit?: boolean;
@@ -1714,6 +1738,10 @@ export interface TrackBadges {
   quality?: string;
   /** A fan or AI edit. */
   edit?: boolean;
+  /** The file's release status from whichever tags it carries. */
+  release?: FileRelease;
+  /** Where the file came from, as tagged (VERSION, else ARCHIVE_SOURCE). */
+  provenance?: string;
 }
 
 /** What the file tags say about one album. */
@@ -1724,6 +1752,10 @@ export interface AlbumBadges {
   group?: string;
   /** ARCHIVE_EDITION label ("Standard", "Deluxe", "Build v2"). */
   edition?: string;
+  /** The album's status by its files' release status tags (disc 1 decides). */
+  release?: FileRelease;
+  /** Some files are released and some aren't. */
+  mixed?: boolean;
 }
 
 /** One edition in a group (the album page's picker). */
@@ -2510,6 +2542,8 @@ export interface AlbumReleaseStatus {
   mark?: ReleaseMark | null;
   /** The weights summed. */
   score?: number;
+  /** Its files mix released songs with unreleased, leaked or alternate ones. */
+  mixed?: boolean;
 }
 
 /** An album's original release date, label and credits from MusicBrainz. */

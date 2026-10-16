@@ -566,6 +566,13 @@ pub struct Settings {
     /// Folder names on a song's path that hint it's unreleased. They only
     /// add weight to "Why?", never decide on their own.
     pub archive_folder_keywords: Vec<String>,
+    /// The tag a file's release status is read from: empty for Auto
+    /// (ARCHIVE_VERSION, STATUS, RELEASESTATUS, RELEASETYPE), else a tag
+    /// name. ARCHIVE_VERSION always comes first.
+    pub release_status_tag: String,
+    /// Custom release status values and what they mean, checked before the
+    /// built-in ones.
+    pub release_status_values: Vec<crate::tags::provenance::ValueMap>,
     /// Era cards (ARCHIVE_ERA) on artist pages.
     pub show_era_cards: bool,
     /// "+N versions" on song rows that have other versions.
@@ -640,6 +647,12 @@ pub const SUBSONIC_CHECK_CHOICES: [u32; 5] = [1, 5, 15, 30, 60];
 /// Most folder keywords kept, and the longest one.
 pub const FOLDER_KEYWORDS_MAX: usize = 20;
 pub const FOLDER_KEYWORD_LEN_MAX: usize = 40;
+
+/// Longest custom release status tag name, most custom values, and the
+/// longest value.
+pub const STATUS_TAG_LEN_MAX: usize = 64;
+pub const STATUS_VALUES_MAX: usize = 50;
+pub const STATUS_VALUE_LEN_MAX: usize = 60;
 
 /// Longest model name accepted.
 pub const AI_MODEL_MAX: usize = 100;
@@ -839,6 +852,8 @@ impl Default for Settings {
             allow_stream_deck: false,
             import_sources: Vec::new(),
             archive_folder_keywords: crate::db::release::default_folder_keywords(),
+            release_status_tag: String::new(),
+            release_status_values: Vec::new(),
             show_era_cards: true,
             show_version_counts: true,
             library_doctor: true,
@@ -972,6 +987,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "hintKey",
     "importSources",
     "archiveFolderKeywords",
+    "releaseStatusTag",
+    "releaseStatusValues",
     "showEraCards",
     "showVersionCounts",
     "libraryDoctor",
@@ -1252,6 +1269,8 @@ pub struct SettingsPatch {
     pub allow_stream_deck: Option<bool>,
     pub import_sources: Option<Vec<String>>,
     pub archive_folder_keywords: Option<Vec<String>>,
+    pub release_status_tag: Option<String>,
+    pub release_status_values: Option<Vec<crate::tags::provenance::ValueMap>>,
     pub show_era_cards: Option<bool>,
     pub show_version_counts: Option<bool>,
     pub library_doctor: Option<bool>,
@@ -1509,6 +1528,34 @@ impl Settings {
             }
             self.archive_folder_keywords = v;
         }
+        if let Some(t) = &p.release_status_tag {
+            let t = t.trim();
+            if t.chars().count() > STATUS_TAG_LEN_MAX || t.chars().any(|c| c.is_control() || c == '=') {
+                return Err(AppError::Invalid(format!("A tag name of up to {STATUS_TAG_LEN_MAX} characters, without an equals sign.")));
+            }
+            // "Auto" and blank both mean Auto.
+            self.release_status_tag = crate::tags::provenance::clean_tag(t).map(|_| t.to_string()).unwrap_or_default();
+        }
+        if let Some(v) = &p.release_status_values {
+            let mut out: Vec<crate::tags::provenance::ValueMap> = Vec::new();
+            for m in v {
+                let value = m.value.trim();
+                if value.is_empty() {
+                    continue;
+                }
+                if value.chars().count() > STATUS_VALUE_LEN_MAX || value.chars().any(char::is_control) {
+                    return Err(AppError::Invalid(format!("Each value can be up to {STATUS_VALUE_LEN_MAX} characters.")));
+                }
+                // The same value again replaces the earlier one.
+                let fold = crate::tags::provenance::fold_value(value);
+                out.retain(|o| crate::tags::provenance::fold_value(&o.value) != fold);
+                out.push(crate::tags::provenance::ValueMap { value: value.to_string(), status: m.status });
+            }
+            if out.len() > STATUS_VALUES_MAX {
+                return Err(AppError::Invalid(format!("Up to {STATUS_VALUES_MAX} values.")));
+            }
+            self.release_status_values = out;
+        }
         set(&mut self.show_era_cards, p.show_era_cards);
         set(&mut self.show_version_counts, p.show_version_counts);
         set(&mut self.library_doctor, p.library_doctor);
@@ -1712,6 +1759,11 @@ impl Settings {
 
     pub fn doctor_options(&self) -> crate::doctor::Options {
         crate::doctor::Options { on: self.library_doctor, checks: self.doctor_checks, cover_px: self.doctor_cover_px }
+    }
+
+    /// Where file release statuses are read from.
+    pub fn release_status_config(&self) -> crate::tags::provenance::Config {
+        crate::tags::provenance::Config::new(&self.release_status_tag, &self.release_status_values)
     }
 
     pub fn tag_view(&self) -> crate::tags::TagView {
@@ -1981,8 +2033,16 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     crate::doctor::set_options(s.doctor_options());
     crate::playhistory::follow_settings(db, s);
     crate::soundid::set_options(s.sound_id_options());
+    // File statuses follow the status tag and values; a new tag name means
+    // reading the files again.
+    let statuses = crate::tags::provenance::set_config(s.release_status_config());
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
         scan.set_enabled(s.read_file_tags);
+        if statuses {
+            scan.restatus();
+        }
+    } else if statuses {
+        crate::tags::store::restatus_soon(db);
     }
     live.remote.set(s.show_plex_players && on, s.move_stops_old_device, s.act_as_plex_player && on);
     live.remote.set_show_cast(s.show_cast_devices && on);
@@ -2570,6 +2630,62 @@ mod tests {
         publish(&s, &live, &db);
         assert!(crate::db::release::folder_keywords().is_empty());
         crate::db::release::set_folder_keywords(crate::db::release::default_folder_keywords());
+    }
+
+    #[test]
+    fn release_status_settings_round_trip_validate_and_reach_the_reader() {
+        use crate::tags::provenance::{self, FileRelease, ValueMap};
+        let (db, _d) = db();
+        let live = Live::default();
+        let mut s = Settings::default();
+        assert_eq!(s.release_status_tag, "", "Auto by default");
+        assert!(s.release_status_values.is_empty());
+        for k in ["releaseStatusTag", "releaseStatusValues"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+            assert!(!DEVICE_SETTINGS.contains(&k), "{k} isn't device only");
+        }
+        let vm = |v: &str, s: FileRelease| ValueMap { value: v.into(), status: s };
+        s.apply(&SettingsPatch {
+            release_status_tag: Some(" Provenance ".into()),
+            release_status_values: Some(vec![
+                vm(" Vault copy ", FileRelease::Unreleased),
+                vm("", FileRelease::Released),
+                vm("vault-copy", FileRelease::Leaked),
+                vm("Web rip", FileRelease::Released),
+            ]),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(s.release_status_tag, "Provenance", "trimmed");
+        assert_eq!(s.release_status_values, [vm("vault-copy", FileRelease::Leaked), vm("Web rip", FileRelease::Released)], "blank dropped, the same value again replaces it");
+        publish(&s, &live, &db);
+        assert_eq!(provenance::custom_key().as_deref(), Some("PROVENANCE"));
+        assert_eq!(provenance::map_value("Vault Copy", &provenance::config()), Some(FileRelease::Leaked));
+        // Through JSON and back, as the sync file and the UI see it.
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["releaseStatusTag"], "Provenance");
+        assert_eq!(json["releaseStatusValues"][1], serde_json::json!({ "value": "Web rip", "status": "released" }));
+        let back: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(back.release_status_values, s.release_status_values);
+        let patch: SettingsPatch =
+            serde_json::from_value(serde_json::json!({ "releaseStatusValues": [{ "value": "OG", "status": "alternate" }] })).unwrap();
+        s.apply(&patch).unwrap();
+        assert_eq!(s.release_status_values, [vm("OG", FileRelease::Alternate)]);
+        // Refused: too long, an equals sign, too many values, a long value.
+        for bad in ["x".repeat(STATUS_TAG_LEN_MAX + 1), "A=B".to_string()] {
+            assert!(s.apply(&SettingsPatch { release_status_tag: Some(bad), ..Default::default() }).is_err());
+        }
+        let many: Vec<ValueMap> = (0..=STATUS_VALUES_MAX).map(|i| vm(&format!("v{i}"), FileRelease::Released)).collect();
+        assert!(s.apply(&SettingsPatch { release_status_values: Some(many), ..Default::default() }).is_err());
+        let long = vec![vm(&"x".repeat(STATUS_VALUE_LEN_MAX + 1), FileRelease::Released)];
+        assert!(s.apply(&SettingsPatch { release_status_values: Some(long), ..Default::default() }).is_err());
+        assert_eq!(s.release_status_tag, "Provenance", "a refused patch changes nothing");
+        // "Auto" and blank both go back to Auto.
+        s.apply(&SettingsPatch { release_status_tag: Some("auto".into()), ..Default::default() }).unwrap();
+        assert_eq!(s.release_status_tag, "");
+        publish(&s, &live, &db);
+        assert_eq!(provenance::custom_key(), None);
+        provenance::set_config(provenance::Config::default());
     }
 
     #[test]

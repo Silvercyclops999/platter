@@ -8,14 +8,14 @@ import { toast } from "../stores/toasts";
 
 /**
  * An album's release status from the core. Reloads when the MusicBrainz
- * check or a mark changes it, or the settings that feed it change. Failures
+ * check, a mark or the file tags change it, or the settings that feed it change. Failures
  * show nothing.
  */
 export function useReleaseStatus(albumId: string | null | undefined): AlbumReleaseStatus | null {
   const [status, setStatus] = useState<AlbumReleaseStatus | null>(null);
   const deps = useSettings((s) =>
     s.settings
-      ? `${s.settings.countUnmatchedUnreleased}:${s.settings.checkUnmatchedMusicbrainz}:${s.settings.infoMusicbrainz}:${(s.settings.archiveFolderKeywords ?? []).join("|")}`
+      ? `${s.settings.countUnmatchedUnreleased}:${s.settings.checkUnmatchedMusicbrainz}:${s.settings.infoMusicbrainz}:${(s.settings.archiveFolderKeywords ?? []).join("|")}:${s.settings.releaseStatusTag ?? ""}:${JSON.stringify(s.settings.releaseStatusValues ?? [])}`
       : "",
   );
   useEffect(() => {
@@ -33,6 +33,8 @@ export function useReleaseStatus(albumId: string | null | undefined): AlbumRelea
         if (e.id === albumId) void load();
       }),
       backend.listen("archive://changed", () => void load()),
+      // File statuses worked out again (a tag scan, or the release status settings).
+      backend.listen("tags://changed", () => void load()),
     ];
     return () => {
       alive = false;

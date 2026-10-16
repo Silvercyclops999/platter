@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { archiveQualityLabel, fileQualityClass, versionLabel } from "../components/FileTagBadges";
+import { archiveQualityLabel, badgeVersion, fileQualityClass, versionLabel } from "../components/FileTagBadges";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { skippedMessage } from "../lib/mock/fileTags";
@@ -52,6 +52,16 @@ describe("file tag helpers", () => {
     expect(versionLabel("released")).toBeNull();
     expect(versionLabel("something else")).toBeNull();
     expect(versionLabel(undefined)).toBeNull();
+  });
+
+  it("falls back to the release status from other tags for the version badge", () => {
+    expect(versionLabel(badgeVersion({ release: "leaked" }))).toBe("Leak");
+    expect(versionLabel(badgeVersion({ release: "alternate" }))).toBe("Alternate");
+    expect(versionLabel(badgeVersion({ release: "unreleased" }))).toBe("Unreleased");
+    expect(versionLabel(badgeVersion({ release: "released" }))).toBeNull();
+    // ARCHIVE_VERSION comes first.
+    expect(versionLabel(badgeVersion({ version: "demo", release: "leaked" }))).toBe("Demo");
+    expect(versionLabel(badgeVersion({}))).toBeNull();
   });
 
   it("shows source quality only when it differs from the file", () => {
