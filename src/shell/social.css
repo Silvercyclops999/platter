@@ -22,6 +22,8 @@
   background: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-bg-base);
 }
+/* Over the expanded view's artwork colour the cut-out ring would show as a dark halo. */
+.fw-open .topbar__dot { box-shadow: none; }
 
 /* ---------------------------------------------------------------- friend activity panel */
 .activity-panel__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); }
