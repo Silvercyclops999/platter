@@ -151,7 +151,7 @@ button.lyrics-trust__offset:hover { background: rgba(255, 255, 255, 0.12); color
 }
 .lyrics-trust__offer p { margin: 0; }
 .lyrics-trust__offer-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.wrong-lyrics .lyrics-trust__offer { max-width: none; margin: var(--space-3) var(--space-6) 0; background: var(--color-bg-overlay); color: var(--color-text-secondary); }
+.wrong-lyrics .lyrics-trust__offer { max-width: none; margin: var(--space-3) var(--space-3) 0; background: var(--color-state-hover); color: var(--color-text-secondary); }
 
 /* Nothing shown, and why. */
 .lyrics-trust__notice-note {
