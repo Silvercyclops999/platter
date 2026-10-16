@@ -5,6 +5,7 @@
  * sends `library://changed` and pages refetch.
  */
 import { create } from "zustand";
+import { addToShared, isShared } from "./circle";
 import { backend } from "../lib/backend";
 import type { AppError, Playlist, RemovedItem } from "../lib/types";
 import { useLibraryView } from "./library";
@@ -82,6 +83,8 @@ export async function createPlaylist(opts: { trackIds?: string[]; title?: string
 /** Add songs at the end. Asks first when some are already there (Settings). */
 export async function addToPlaylist(playlist: Playlist, trackIds: string[]): Promise<void> {
   if (!trackIds.length) return;
+  // Someone else's playlist: the songs go to its owner.
+  if (isShared(playlist.id)) return addToShared(playlist, trackIds);
   const ask = useSettings.getState().settings?.playlistAskDuplicates ?? true;
   if (ask) {
     try {

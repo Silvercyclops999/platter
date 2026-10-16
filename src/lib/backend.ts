@@ -142,6 +142,14 @@ import type {
   WhatsNew,
   ListenView,
   ListenOp,
+  CircleView,
+  CircleAccount,
+  JoinResult,
+  SharedInfo,
+  InviteLink,
+  SharedPage,
+  BlendCreated,
+  BlendPage,
   AiStatus,
   LidarrMissing,
   AlbumUpgrade,
@@ -732,6 +740,45 @@ export interface Backend {
   /** Remove someone from the session you host. */
   listenRemove(personId: string): Promise<ListenView>;
 
+  // Shared playlists and Blends (docs/IPC.md "Shared playlists and Blends")
+  /** Shared playlists, Blends, direct invites and the relay. */
+  circleState(): Promise<CircleView>;
+  /** People on your server or Plex Home you can invite without a link. */
+  circlePeople(): Promise<CircleAccount[]>;
+  /** Join from a platter://collab/ or platter://blend/ link. */
+  circleJoin(link: string): Promise<JoinResult>;
+  /** Join an invite that came straight to you. */
+  circleAccept(id: string): Promise<JoinResult>;
+  circleDismiss(id: string): Promise<void>;
+  /** Your playlist's sharing (null: not shared). */
+  collabInfo(playlistId: string): Promise<SharedInfo | null>;
+  /** A one-use invite link to your playlist. */
+  collabInviteLink(playlistId: string, role: "collaborator" | "listener"): Promise<InviteLink>;
+  /** Invite someone on your server or Home straight away. */
+  collabInvitePerson(playlistId: string, key: string, role: "collaborator" | "listener"): Promise<void>;
+  /** A playlist shared with you (`shared:<group>`). */
+  collabPage(id: string): Promise<SharedPage>;
+  /** As a collaborator: these go to the owner, now or when they're next online. */
+  collabAdd(id: string, trackIds: string[]): Promise<void>;
+  /** As a collaborator: remove songs you added. */
+  collabRemove(id: string, keys: string[]): Promise<void>;
+  collabLeave(id: string): Promise<void>;
+  /** Show or hide a playlist shared with you in your library (you stay in it). */
+  collabSetInLibrary(id: string, on: boolean): Promise<void>;
+  collabSetRole(playlistId: string, personId: string, role: "collaborator" | "listener"): Promise<void>;
+  collabRemovePerson(playlistId: string, personId: string): Promise<void>;
+  collabSetPublic(playlistId: string, isPublic: boolean): Promise<void>;
+  /** A Blend with you in it; the people picked are invited directly, the link is for anyone else. */
+  blendCreate(keys: string[]): Promise<BlendCreated>;
+  blendInviteLink(id: string): Promise<InviteLink>;
+  blendInvitePerson(id: string, key: string): Promise<void>;
+  blendPage(id: string): Promise<BlendPage>;
+  /** Hidden in this Blend: it doesn't come back when the Blend is made again. */
+  blendHide(id: string, trackId: string): Promise<void>;
+  blendRefresh(id: string): Promise<BlendPage>;
+  /** Deletes the Blend here and stops sharing. */
+  blendLeave(id: string): Promise<void>;
+
   // Sync file, library folders and keys (docs/IPC.md "Sync, folders and keys")
   syncFileStatus(): Promise<SyncFileStatus>;
   /** Run a sync pass now. */
@@ -1303,6 +1350,29 @@ export function createTauriBackend(): Backend {
     listenInvite: (fresh) => call("listen_invite", { fresh: fresh ?? false }),
     listenControl: (op) => call("listen_control", { op }),
     listenRemove: (personId) => call("listen_remove", { personId }),
+    circleState: () => call("circle_state"),
+    circlePeople: () => call("circle_people"),
+    circleJoin: (link) => call("circle_join", { link }),
+    circleAccept: (id) => call("circle_accept", { id }),
+    circleDismiss: (id) => call("circle_dismiss", { id }),
+    collabInfo: (playlistId) => call("collab_info", { playlistId }),
+    collabInviteLink: (playlistId, role) => call("collab_invite_link", { playlistId, role }),
+    collabInvitePerson: (playlistId, key, role) => call("collab_invite_person", { playlistId, key, role }),
+    collabPage: (id) => call("collab_page", { id }),
+    collabAdd: (id, trackIds) => call("collab_add", { id, trackIds }),
+    collabRemove: (id, keys) => call("collab_remove", { id, keys }),
+    collabLeave: (id) => call("collab_leave", { id }),
+    collabSetInLibrary: (id, on) => call("collab_set_in_library", { id, on }),
+    collabSetRole: (playlistId, personId, role) => call("collab_set_role", { playlistId, personId, role }),
+    collabRemovePerson: (playlistId, personId) => call("collab_remove_person", { playlistId, personId }),
+    collabSetPublic: (playlistId, isPublic) => call("collab_set_public", { playlistId, public: isPublic }),
+    blendCreate: (keys) => call("blend_create", { keys }),
+    blendInviteLink: (id) => call("blend_invite_link", { id }),
+    blendInvitePerson: (id, key) => call("blend_invite_person", { id, key }),
+    blendPage: (id) => call("blend_page", { id }),
+    blendHide: (id, trackId) => call("blend_hide", { id, trackId }),
+    blendRefresh: (id) => call("blend_refresh", { id }),
+    blendLeave: (id) => call("blend_leave", { id }),
     hiddenList: () => call("hidden_list"),
     hiddenSet: (item, on) => call("hidden_set", { item, on }),
     bookmarksList: () => call("bookmarks_list"),

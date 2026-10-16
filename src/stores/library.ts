@@ -126,11 +126,15 @@ export const useLibraryView = create<LibraryViewState>()((set, get) => {
     loadItems: async () => {
       const seq = ++loadSeq;
       try {
-        const [plex, smart] = await Promise.all([backend.libraryItems(), backend.smartList().catch(() => [])]);
-        // Platter smart playlists sit with the Plex playlists.
+        const [plex, smart, circle] = await Promise.all([backend.libraryItems(), backend.smartList().catch(() => []), backend.circleState().catch(() => null)]);
+        // Platter smart playlists, playlists shared with you and Blends sit with the Plex playlists.
         const items: LibraryItem[] = [
           ...plex,
           ...smart.map((s) => ({ kind: "playlist" as const, id: s.id, title: s.title, sortTitle: s.title, smart: true, platter: true, addedAt: s.updatedAt, playedAt: null })),
+          ...(circle?.playlists ?? [])
+            .filter((p) => p.role !== "owner" && p.inLibrary)
+            .map((p) => ({ kind: "playlist" as const, id: p.id, title: p.title, sortTitle: p.title, smart: false, addedAt: null, playedAt: null, shared: { owner: p.owner.name, role: p.role, gone: p.gone } })),
+          ...(circle?.blends ?? []).map((b) => ({ kind: "playlist" as const, id: b.id, title: b.title, sortTitle: b.title, smart: false, addedAt: null, playedAt: null, blend: true })),
         ];
         if (seq === loadSeq) set({ items });
       } catch {
@@ -243,6 +247,10 @@ export interface LibEntry {
   stats?: boolean;
   /** A Platter smart playlist (kept and filled on this computer). */
   platter?: boolean;
+  /** Someone else's playlist shared with you. */
+  shared?: { role: string; gone: boolean };
+  /** A Blend. */
+  blend?: boolean;
   /** Kept on this computer (downloads). */
   downloaded?: boolean;
   /** An artist you follow. */
@@ -275,7 +283,7 @@ export function toEntries(items: LibraryItem[], owner: string | null): LibEntry[
     title: i.title,
     sortTitle: i.sortTitle || i.title,
     // A Platter smart playlist shows the "Platter" mark where the owner goes.
-    creator: i.platter ? "Platter" : i.kind === "playlist" ? owner : (i.creator ?? null),
+    creator: i.platter ? "Platter" : i.shared ? i.shared.owner : i.blend ? null : i.kind === "playlist" ? owner : (i.creator ?? null),
     creatorId: i.creatorId ?? null,
     thumb: i.thumb ?? null,
     smart: i.smart,
@@ -284,12 +292,15 @@ export function toEntries(items: LibraryItem[], owner: string | null): LibEntry[
     playedAt: i.playedAt ?? null,
     pinned: false,
     ...(i.platter ? { platter: true } : {}),
+    ...(i.shared ? { shared: { role: i.shared.role, gone: i.shared.gone } } : {}),
+    ...(i.blend ? { blend: true } : {}),
   }));
 }
 
 /** "Playlist", "Smart playlist", "Album", "EP", "Single", "Artist". */
-export function typeLabel(e: Pick<LibEntry, "kind" | "smart" | "format" | "folder">): string {
+export function typeLabel(e: Pick<LibEntry, "kind" | "smart" | "format" | "folder" | "blend">): string {
   if (e.folder) return "Folder";
+  if (e.blend) return "Blend";
   if (e.kind === "playlist") return e.smart ? "Smart playlist" : "Playlist";
   if (e.kind === "artist") return "Artist";
   return e.format === "ep" ? "EP" : e.format === "single" ? "Single" : "Album";
@@ -371,7 +382,7 @@ export function libraryEntries(items: LibEntry[], opts: EntryOpts): LibEntry[] {
   const sub = opts.filter !== "all" && opts.sub && SUB_CHIPS[opts.filter].includes(opts.sub) ? opts.sub : null;
   const keep = (e: LibEntry) =>
     (opts.filter === "all" || e.kind === opts.filter) &&
-    (sub === null || (sub === "followed" ? !!e.followed : sub === "shelf" ? !!e.owned : sub === "smart" ? e.smart : !e.smart)) &&
+    (sub === null || (sub === "followed" ? !!e.followed : sub === "shelf" ? !!e.owned : sub === "smart" ? e.smart : !e.smart && !e.shared && !e.blend)) &&
     (!opts.downloadedOnly || !!e.downloaded) &&
     matchesQuery(e, opts.query);
   const pinned = items.filter((e) => e.pinned && keep(e));

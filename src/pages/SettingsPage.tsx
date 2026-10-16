@@ -2000,6 +2000,32 @@ export function SettingsPage() {
         "Unreleased songs only play for people with access to your Plex library. Everyone else sees that a song isn't in their library; with this on, they don't see its title or artist either.",
       control: (ids) => toggle(s, "listenHideUnreleased", ids),
     },
+    {
+      key: "collabPlaylists",
+      section: "Social",
+      group: "Shared playlists and Blends",
+      title: "Collaborative playlists",
+      description:
+        "Invite people to your playlists and join theirs. Nothing happens until someone sends or opens an invite. Everyone plays from the servers they already reach; only song details travel, sealed, through the relay.",
+      control: (ids) => toggle(s, "collabPlaylists", ids),
+    },
+    {
+      key: "blends",
+      section: "Social",
+      group: "Shared playlists and Blends",
+      title: "Blends",
+      description:
+        "Playlists made from your tastes and friends', new each day. Only a short summary of what you play most and your recent likes is shared, never plays from a private session.",
+      control: (ids) => toggle(s, "blends", ids),
+    },
+    {
+      key: "shareUnreleased",
+      section: "Social",
+      group: "Shared playlists and Blends",
+      title: "Include unreleased songs in what I share",
+      description: "Off, demos and other unreleased songs stay out of your shared playlists, your taste summary and your Blends.",
+      control: (ids) => toggle(s, "shareUnreleased", ids),
+    },
     // Integrations: scrobbling
     {
       key: "scrobbleLastfm",

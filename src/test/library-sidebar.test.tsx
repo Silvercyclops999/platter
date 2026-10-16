@@ -288,8 +288,9 @@ describe("library sidebar", () => {
     await renderSidebar();
     expect(rows().length).toBeGreaterThan(3);
     await user.click(screen.getByRole("button", { name: "Playlists" }));
-    // Liked Songs, Bookmarks and Stats are pinned first among the playlists.
-    expect(rows()).toHaveLength(mock.fx.playlists.length + 3);
+    // Liked Songs, Bookmarks and Stats are pinned first among the playlists,
+    // and the demo's playlist shared with you and its Blend are there too.
+    expect(rows()).toHaveLength(mock.fx.playlists.length + 3 + 2);
     expect(within(rows()[1]).getByText("Bookmarks")).toBeInTheDocument();
     expect(within(rows()[2]).getByText("Stats")).toBeInTheDocument();
     // Type word gone: just the owner.

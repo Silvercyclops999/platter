@@ -106,6 +106,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "listenInviteHours",
   "listenRelay",
   "listenHideUnreleased",
+  "shareUnreleased",
   "radarNotify",
   "notifyNewReleases",
   "dismissedArtists",

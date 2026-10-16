@@ -59,7 +59,9 @@ export type Route =
   /** Artists like the ones played most that aren't in the library. */
   | { name: "newToYou" }
   /** Albums owned on vinyl, CD or cassette, and what a Discogs import found. */
-  | { name: "shelf" };
+  | { name: "shelf" }
+  /** Create a Blend: pick people to combine tastes with. */
+  | { name: "blendNew" };
 
 export interface HistoryEntry {
   key: number;

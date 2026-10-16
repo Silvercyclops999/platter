@@ -1,11 +1,20 @@
-import { Plus } from "lucide-react";
+import { Plus, UserPlus, Users } from "lucide-react";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { backend } from "../lib/backend";
-import type { Playlist } from "../lib/types";
+import type { Playlist, SharedSummary } from "../lib/types";
 import { useApp } from "../stores/app";
+import { openCircleDialog, sharedNow, useCircle } from "../stores/circle";
+import { useSettings } from "../stores/settings";
 import { addToPlaylist, askDelete, createPlaylist, duplicatePlaylist, editDetails } from "../stores/playlists";
 import type { MenuItem, SubmenuContext } from "../stores/ui";
 import { Art } from "./Art";
+
+/** Playlists shared with you that you can add to, as playlists. */
+export function collaboratorPlaylists(shared: SharedSummary[]): Playlist[] {
+  return shared
+    .filter((s) => s.role === "collaborator" && !s.gone)
+    .map((s) => ({ id: s.id, title: s.title, smart: false, trackCount: s.trackCount, durationMs: 0, thumb: null, updatedAt: 0 }));
+}
 
 /** Playlists you can add to, most recently changed first. */
 export function editablePlaylists(all: Playlist[], query: string, exclude?: string): Playlist[] {
@@ -22,8 +31,11 @@ export function editablePlaylists(all: Playlist[], query: string, exclude?: stri
  */
 export function PlaylistPicker({ songs, ctx, exclude }: { songs: () => Promise<string[]> | string[]; ctx: SubmenuContext; exclude?: string }) {
   const all = useApp((s) => s.playlists);
+  const shared = useCircle((s) => s.view.playlists);
   const [query, setQuery] = useState("");
-  const list = useMemo(() => editablePlaylists(all ?? [], query, exclude), [all, query, exclude]);
+  // Your playlists, and the ones shared with you as a collaborator (a
+  // listener can't add, so theirs aren't here).
+  const list = useMemo(() => editablePlaylists([...(all ?? []), ...collaboratorPlaylists(shared)], query, exclude), [all, shared, query, exclude]);
   const root = useRef<HTMLDivElement>(null);
 
   const pick = (run: (ids: string[]) => unknown) => {
@@ -92,9 +104,20 @@ export const playlistSongs = (playlistId: string) => () => backend.playlistPage(
 export function playlistEditItems(p: Playlist): MenuItem[] {
   if (p.smart) return [{ label: "Duplicate", onSelect: () => void duplicatePlaylist(p) }];
   return [
+    ...collabItems(p),
     { label: "Edit details", onSelect: () => editDetails(p) },
     { label: "Delete", onSelect: () => askDelete(p) },
     addToPlaylistItem(playlistSongs(p.id), { label: "Add to other playlist", exclude: p.id }),
+  ];
+}
+
+/** Invite collaborators (and the permissions, once it's shared) for your own playlist. */
+export function collabItems(p: Pick<Playlist, "id" | "title">): MenuItem[] {
+  if (useSettings.getState().settings?.collabPlaylists === false) return [];
+  const shared = sharedNow(p.id);
+  return [
+    { label: "Invite collaborators", icon: UserPlus, onSelect: () => openCircleDialog({ kind: "invite", playlistId: p.id, title: p.title }) },
+    ...(shared ? [{ label: "Playlist permissions", icon: Users, onSelect: () => openCircleDialog({ kind: "permissions", playlistId: p.id }) }] : []),
   ];
 }
 

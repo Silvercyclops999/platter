@@ -172,6 +172,7 @@ import { MockLyricsShare } from "./lyricsShare";
 import { MockDownloads } from "./downloads";
 import { MockMixes } from "./mixes";
 import { MockSocial } from "./social";
+import { MockCircle } from "./circle";
 import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockTagEdit } from "./tagEdit";
@@ -339,6 +340,8 @@ export class MockBackend implements Backend {
   private smoothFor: string | null = null;
   /** Friend activity, follows, What's New, listening sessions (test hooks: access, guestJoins, hostGone, hostEnds, addRelease). */
   readonly social: MockSocial;
+  /** Shared playlists and Blends (test hooks: relay, ownerOffline, memberAdds, ownerDeletes, failNextJoin, joinWaits, ring, personJoins, blendJoins). */
+  readonly circle: MockCircle;
   readonly syncFile: MockSync;
   /** Library import (test hook: failNext). */
   readonly importMock: MockImport;
@@ -604,6 +607,29 @@ export class MockBackend implements Backend {
         else if (op.op === "previous") void this.playPrevious();
         else if (op.op === "seek") void this.playSeek(op.ms);
       },
+    });
+    this.circle = new MockCircle(this.fx, {
+      settings: () => this.settings,
+      // Before sign-in state is read (the first reset): the mock user.
+      me: () => ({ name: this.auth?.username ?? "listener", avatar: this.auth?.avatar ?? null }),
+      people: () => [
+        ...this.homeUsersMock
+          .list()
+          .users.filter((u) => !u.current)
+          .map((u) => ({ key: `home:${u.uuid}`, name: u.name, avatar: u.avatar, home: true })),
+        { key: "user:robin", name: "Robin", avatar: "/ext/https://plex.tv/users/mock1/avatar?c=1", home: false },
+        { key: "user:jules", name: "Jules", avatar: "/ext/https://plex.tv/users/mock2/avatar?c=1", home: false },
+      ],
+      emit: (v) => this.emit("circle://changed", v),
+      notice: (message) => this.emit("circle://notice", { message }),
+      later: (ms, fn) => this.later(ms, fn),
+      demo: () => !!this.opts.timelines,
+      track: (id) => this.trackById(id),
+      tracks: () => this.fx.tracks,
+      playlist: (id) => this.fx.playlists.find((p) => p.id === id),
+      itemIds: (id) => this.pl.itemIds(id),
+      trackIds: (id) => this.fx.playlistTracks.get(id) ?? [],
+      add: (id, ids) => void this.pl.add(id, ids),
     });
     this.hidden = new MockHidden((all) => this.emit("hidden://changed", all));
     this.bookmarks = new MockBookmarks(
@@ -1307,7 +1333,10 @@ export class MockBackend implements Backend {
     return this.delay(() => this.pl.setCover(id, bytes, contentType));
   }
   playlistDelete(id: string) {
-    return this.delay(() => this.pl.delete(id));
+    return this.delay(() => {
+      this.pl.delete(id);
+      this.circle.playlistDeleted(id);
+    });
   }
 
   // ---------------------------------------------------------------- edit in Plex
@@ -3105,6 +3134,78 @@ export class MockBackend implements Backend {
   whatsNewSeen() {
     return this.delay(() => this.social.markSeen());
   }
+  // ---------------------------------------------------------------- shared playlists and Blends
+
+  circleState() {
+    return this.delay(() => this.circle.view());
+  }
+  circlePeople() {
+    return this.delay(() => this.circle.people());
+  }
+  circleJoin(link: string) {
+    return this.delay(() => this.circle.join(link.trim()));
+  }
+  circleAccept(id: string) {
+    return this.delay(() => this.circle.accept(id));
+  }
+  circleDismiss(id: string) {
+    return this.delay(() => this.circle.dismiss(id));
+  }
+  collabInfo(playlistId: string) {
+    return this.delay(() => this.circle.info(playlistId));
+  }
+  collabInviteLink(playlistId: string, role: "collaborator" | "listener") {
+    return this.delay(() => this.circle.inviteLink(playlistId, role));
+  }
+  collabInvitePerson(playlistId: string, key: string, role: "collaborator" | "listener") {
+    return this.delay(() => this.circle.invitePerson(playlistId, key, role));
+  }
+  collabPage(id: string) {
+    return this.delay(() => this.circle.page(id));
+  }
+  collabAdd(id: string, trackIds: string[]) {
+    return this.delay(() => this.circle.add(id, trackIds));
+  }
+  collabRemove(id: string, keys: string[]) {
+    return this.delay(() => this.circle.remove(id, keys));
+  }
+  collabLeave(id: string) {
+    return this.delay(() => this.circle.leave(id));
+  }
+  collabSetInLibrary(id: string, on: boolean) {
+    return this.delay(() => this.circle.setInLibrary(id, on));
+  }
+  collabSetRole(playlistId: string, personId: string, role: "collaborator" | "listener") {
+    return this.delay(() => this.circle.setRole(playlistId, personId, role));
+  }
+  collabRemovePerson(playlistId: string, personId: string) {
+    return this.delay(() => this.circle.removePerson(playlistId, personId));
+  }
+  collabSetPublic(playlistId: string, isPublic: boolean) {
+    return this.delay(() => this.circle.setPublic(playlistId, isPublic));
+  }
+  blendCreate(keys: string[]) {
+    return this.delay(() => this.circle.blendCreate(keys));
+  }
+  blendInviteLink(id: string) {
+    return this.delay(() => this.circle.blendInviteLink(id));
+  }
+  blendInvitePerson(id: string, key: string) {
+    return this.delay(() => this.circle.blendInvitePerson(id, key));
+  }
+  blendPage(id: string) {
+    return this.delay(() => this.circle.blendPage(id));
+  }
+  blendHide(id: string, trackId: string) {
+    return this.delay(() => this.circle.blendHide(id, trackId));
+  }
+  blendRefresh(id: string) {
+    return this.delay(() => this.circle.blendRefresh(id));
+  }
+  blendLeave(id: string) {
+    return this.delay(() => this.circle.blendLeave(id));
+  }
+
   listenState() {
     return this.delay(() => this.social.listenState());
   }

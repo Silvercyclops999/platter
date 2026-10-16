@@ -1,4 +1,4 @@
-import { ArrowDownUp, Ellipsis, ListMusic, Pause, Pencil, Play } from "lucide-react";
+import { ArrowDownUp, Ellipsis, ListMusic, Pause, Pencil, Play, UserPlus } from "lucide-react";
 import { PageMissing } from "../components/PageMissing";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { Art } from "../components/Art";
@@ -14,7 +14,10 @@ import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton, likeItem, queueable, trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { formatLongDuration, plural, trackArtistLine } from "../lib/format";
-import type { Playlist, PlaylistPage as PlaylistData, Track } from "../lib/types";
+import type { Playlist, PlaylistPage as PlaylistData, SharedInfo, SharedSummary, Track } from "../lib/types";
+import { Faces } from "../components/Faces";
+import { bylineText, openCircleDialog, useCircle, useShared } from "../stores/circle";
+import { useSettings } from "../stores/settings";
 import { useLoad } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
 import { usePins } from "../stores/pins";
@@ -29,14 +32,17 @@ import { usePageBar, useTitleStep } from "./detail";
 import { PlaylistFinder } from "./PlaylistFinder";
 import "./playlist.css";
 
-export type PlaylistSort = "custom" | "title" | "artist" | "album" | "duration";
+export type PlaylistSort = "custom" | "title" | "artist" | "album" | "addedBy" | "duration";
 export const SORT_LABEL: Record<PlaylistSort, string> = {
   custom: "Custom order",
   title: "Title",
   artist: "Artist",
   album: "Album",
+  addedBy: "Added by",
   duration: "Duration",
 };
+/** "Added by" only sorts a shared playlist. */
+export const sortsFor = (shared: boolean) => (Object.keys(SORT_LABEL) as PlaylistSort[]).filter((s) => shared || s !== "addedBy");
 
 const DRAG_TYPE = "text/x-platter-playlist-rows";
 
@@ -45,11 +51,13 @@ interface Row {
   track: Track;
 }
 
-/** Rows in a sort; custom order is the playlist's own. */
-export function sortRows(rows: Row[], sort: PlaylistSort): Row[] {
+/** Rows in a sort; custom order is the playlist's own. `who` names who added a row ("" for the owner). */
+export function sortRows<R extends Row>(rows: R[], sort: PlaylistSort, who: (r: R) => string = () => ""): R[] {
   if (sort === "custom") return rows;
   const cmp = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
-  const by: Record<Exclude<PlaylistSort, "custom">, (a: Row, b: Row) => number> = {
+  const by: Record<Exclude<PlaylistSort, "custom">, (a: R, b: R) => number> = {
+    // The owner's songs first, then each person's, keeping the playlist's order within.
+    addedBy: (a, b) => cmp(who(a), who(b)),
     title: (a, b) => cmp(a.track.title, b.track.title),
     artist: (a, b) => cmp(trackArtistLine(a.track), trackArtistLine(b.track)) || cmp(a.track.albumTitle, b.track.albumTitle),
     album: (a, b) => cmp(a.track.albumTitle, b.track.albumTitle) || a.track.discNumber - b.track.discNumber || a.track.trackNumber - b.track.trackNumber,
@@ -99,13 +107,18 @@ function dropPoint(e: DragEvent, index: number): number {
 }
 
 export function PlaylistPage({ id }: { id: string }) {
-  const { data, error } = useLoad(() => backend.playlistPage(id), [id]);
+  // A shared playlist reads again when a member's change lands.
+  const circleVersion = useCircle((s) => (s.view.playlists.some((p) => p.id === id) ? s.version : 0));
+  const { data, error } = useLoad(() => backend.playlistPage(id), [id, circleVersion]);
   // An edit shows at once; the next load from the core replaces it.
   const [optimistic, setOptimistic] = useState<PlaylistData | null>(null);
   useEffect(() => setOptimistic(null), [data]);
   const shown = optimistic ?? data;
   const pl = shown?.playlist;
   const own = !!pl && !pl.smart;
+  const shared = useShared(own ? id : undefined);
+  const info = useSharedInfo(own ? id : null, !!shared, data);
+  const inviting = useSettings((s) => s.settings?.collabPlaylists !== false);
   useArtTint(null, pl?.thumb);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
@@ -133,7 +146,7 @@ export function PlaylistPage({ id }: { id: string }) {
     () => (shown ? shown.tracks.map((track, i) => ({ track, itemId: shown.itemIds[i] ?? `${track.id}-${i}` })) : []),
     [shown],
   );
-  const view = useMemo(() => sortRows(rows, sort), [rows, sort]);
+  const view = useMemo(() => sortRows(rows, sort === "addedBy" && !shared ? "custom" : sort, (r) => info?.addedBy[r.itemId]?.name ?? ""), [rows, sort, shared, info]);
   const order = rows.map((r) => r.itemId);
   const have = useMemo(() => new Set(rows.map((r) => r.track.id)), [rows]);
   const canDrag = own && sort === "custom" && rows.length > 1;
@@ -271,7 +284,7 @@ export function PlaylistPage({ id }: { id: string }) {
   const sortMenu = (el: HTMLElement) =>
     openContextMenu(
       "Sort songs",
-      (Object.keys(SORT_LABEL) as PlaylistSort[]).map((s, i) => ({
+      sortsFor(!!shared).map((s, i) => ({
         heading: i === 0 ? "Sort by" : undefined,
         label: SORT_LABEL[s],
         checked: sort === s,
@@ -318,6 +331,7 @@ export function PlaylistPage({ id }: { id: string }) {
                 </h1>
               )}
               {pl.summary && <p className="pl-summary">{pl.summary}</p>}
+              {shared && <Byline shared={shared} />}
               {!empty && (
                 <div className="detail-header__meta">
                   <span>{plural(pl.trackCount, "song")},</span>
@@ -350,6 +364,14 @@ export function PlaylistPage({ id }: { id: string }) {
               <DownloadButton kind="playlist" id={id} title={pl?.title ?? "this playlist"} disabled={!pl} />
             </>
           )}
+          {own && pl && inviting && (
+            <IconButton
+              label={`Invite collaborators to ${pl.title}`}
+              size="lg"
+              icon={<UserPlus size={22} />}
+              onClick={() => openCircleDialog({ kind: "invite", playlistId: pl.id, title: pl.title })}
+            />
+          )}
           <IconButton
             label={`More options for ${pl?.title ?? "playlist"}`}
             size="lg"
@@ -380,7 +402,7 @@ export function PlaylistPage({ id }: { id: string }) {
           )
         ) : (
           <div ref={listRef} onKeyDownCapture={onListKeys} onDragLeave={(e) => dragLeft(e) && setInsertAt(null)}>
-            <TrackList label={pl ? `${pl.title} tracks` : "Tracks"} multiMenu={multiMenu}>
+            <TrackList label={pl ? `${pl.title} tracks` : "Tracks"} multiMenu={multiMenu} byColumn={!!shared}>
               {shown
                 ? view.map((r, i) => (
                     <TrackRow
@@ -393,6 +415,7 @@ export function PlaylistPage({ id }: { id: string }) {
                       playing={r.track.id === nowTrackId && status === "playing"}
                       onPlay={() => player.playPlaylist(id, r.track.id)}
                       menuItems={rowMenu(r)}
+                      addedBy={shared ? (info?.addedBy[r.itemId] ?? null) : undefined}
                       {...dragProps(r, i)}
                     />
                   ))
@@ -413,6 +436,37 @@ export function PlaylistPage({ id }: { id: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** Who added what on your shared playlist, read again whenever it changes. */
+function useSharedInfo(id: string | null, shared: boolean, data: unknown): SharedInfo | null {
+  const version = useCircle((s) => s.version);
+  const [info, setInfo] = useState<SharedInfo | null>(null);
+  useEffect(() => {
+    if (!id || !shared) {
+      setInfo(null);
+      return;
+    }
+    let alive = true;
+    backend.collabInfo(id).then(
+      (i) => alive && setInfo(i),
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [id, shared, version, data]);
+  return info;
+}
+
+/** "<owner> and <member>" with their faces; opens Playlist permissions. */
+export function Byline({ shared }: { shared: SharedSummary }) {
+  return (
+    <button type="button" className="pl-byline" aria-label={`${bylineText(shared)}. Playlist permissions`} onClick={() => openCircleDialog({ kind: "permissions", playlistId: shared.id })}>
+      <Faces people={shared.people} size={24} />
+      <span className="pl-byline__names">{bylineText(shared)}</span>
+    </button>
   );
 }
 

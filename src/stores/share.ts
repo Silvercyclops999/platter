@@ -7,6 +7,7 @@
  * until that song plays (from the toast's Play button or its row), then the
  * player seeks there once.
  */
+import { joinCircle } from "./circle";
 import { backend, type Backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
 import type { AppError, DeepLinkOpen, ShareKind } from "../lib/types";
@@ -146,6 +147,10 @@ async function songTitle(albumId: string, trackId: string, b: Backend): Promise<
 
 /** Show what a link points at. */
 export async function openDeepLink(o: DeepLinkOpen, b: Backend = backend): Promise<void> {
+  if (o.circle) {
+    await joinCircle(o.circle, b);
+    return;
+  }
   if (o.join) {
     if (!listenAlong.enabled) {
       toast.info("Listening sessions are coming back in an update soon.");

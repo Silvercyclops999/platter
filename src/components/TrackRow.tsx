@@ -28,6 +28,7 @@ import { player } from "../stores/player";
 import { toast } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
 import { Art } from "./Art";
+import { Face } from "./Faces";
 import { ArtistLinks, TextLink, linkFeaturedNow } from "./ArtistLinks";
 import { QualityBadge } from "./Badge";
 import { ArchiveQualityBadge, archiveQualityLabel, badgeVersion, ExplicitBadge, VersionBadge, versionLabel } from "./FileTagBadges";
@@ -290,6 +291,11 @@ export interface TrackRowProps {
   likedQuiet?: boolean;
   /** "Date added" column text (in place of the quality badges). */
   added?: string;
+  /** Shared playlists and Blends: an "Added by" column after the album
+   *  (null: the owner's, left empty). */
+  addedBy?: { name: string; avatar: string | null } | null;
+  /** A song this library doesn't have ("Not in your library"): shown, not played. */
+  missing?: boolean;
   /** Fades in (a new like at the top of Liked Songs). */
   entering?: boolean;
   /** Dimmed (unliked on the Liked Songs page, until you leave it). */
@@ -338,6 +344,8 @@ export function TrackRow({
   selected,
   likedQuiet,
   added,
+  addedBy,
+  missing = false,
   entering,
   dimmed,
   draggable,
@@ -358,7 +366,7 @@ export function TrackRow({
   const badges = useTrackBadges(track.id);
   const downloaded = useIsDownloaded(track.id);
   const artists = trackArtistLine(track);
-  const label = `${track.title}${badges.explicit ? ", explicit" : ""} by ${artists}${downloaded ? ", downloaded" : ""}${unavailable ? ", not available right now" : ""}${labelNote ? `, ${labelNote}` : ""}`;
+  const label = `${track.title}${badges.explicit ? ", explicit" : ""} by ${artists}${downloaded ? ", downloaded" : ""}${unavailable ? ", not available right now" : ""}${missing ? ", not in your library" : ""}${labelNote ? `, ${labelNote}` : ""}`;
   // The hover button on the current track pauses / resumes instead of restarting.
   const playButton = () => (active ? player.toggle() : onPlay());
   const PlayIcon = active && playing ? Pause : Play;
@@ -476,7 +484,7 @@ export function TrackRow({
       ref={(el) => {
         if (el) tracksIn.set(el, track);
       }}
-      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${entering ? "is-entering" : ""} ${dimmed ? "is-dimmed" : ""} ${added !== undefined ? "track-row--added" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${playOnArt && !compact ? "track-row--art-play" : ""} ${notes?.length && !compact ? "track-row--notes" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
+      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${entering ? "is-entering" : ""} ${dimmed ? "is-dimmed" : ""} ${added !== undefined ? "track-row--added" : ""} ${addedBy !== undefined ? "track-row--by" : ""} ${missing ? "is-missing" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${playOnArt && !compact ? "track-row--art-play" : ""} ${notes?.length && !compact ? "track-row--notes" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
       onClick={onClick}
       onMouseDown={dbl.onMouseDown}
       onDoubleClick={(e) => {
@@ -595,6 +603,16 @@ export function TrackRow({
           </TextLink>
         </div>
       )}
+      {addedBy !== undefined && !compact && (
+        <div className="track-row__by" role="gridcell">
+          {addedBy && (
+            <>
+              <Face person={addedBy} size={20} />
+              <span className="truncate">{addedBy.name}</span>
+            </>
+          )}
+        </div>
+      )}
       {!compact &&
         (added !== undefined ? (
           <div className="track-row__added" role="gridcell">
@@ -656,6 +674,7 @@ export function TrackList({
   showPlays = false,
   header = true,
   addedColumn = false,
+  byColumn = false,
   rowCount,
   multiMenu = (_keys: string[], ids: string[], tracks: Track[]) => multiTrackMenuItems(ids, tracks),
 }: {
@@ -666,6 +685,8 @@ export function TrackList({
   header?: boolean;
   /** The header names a "Date added" column (rows pass `added`). */
   addedColumn?: boolean;
+  /** The header names an "Added by" column (rows pass `addedBy`). */
+  byColumn?: boolean;
   /** Menu for a multi-selection: row keys and track ids in list order. */
   multiMenu?: (keys: string[], trackIds: string[], tracks: Track[]) => MenuItem[];
   /** Total songs when only some rows are on the page (virtual lists; rows then pass `rowIndex`). */
@@ -702,7 +723,7 @@ export function TrackList({
     <SelectionContext.Provider value={selection}>
       <div className="track-list" data-tracklist ref={root} role="grid" aria-label={label} aria-multiselectable="true">
         {header && (
-          <div className={`track-list__head ${showAlbum ? "" : "track-row--no-album"} ${showPlays ? "track-row--plays" : ""} ${addedColumn ? "track-row--added" : ""}`} role="row">
+          <div className={`track-list__head ${showAlbum ? "" : "track-row--no-album"} ${showPlays ? "track-row--plays" : ""} ${addedColumn ? "track-row--added" : ""} ${byColumn ? "track-row--by" : ""}`} role="row">
             <span className="track-row__num" role="columnheader" aria-label="Number">
               #
             </span>
@@ -710,6 +731,11 @@ export function TrackList({
             {showAlbum && (
               <span className="track-list__album" role="columnheader">
                 Album
+              </span>
+            )}
+            {byColumn && (
+              <span className="track-list__by" role="columnheader">
+                Added by
               </span>
             )}
             {addedColumn ? (

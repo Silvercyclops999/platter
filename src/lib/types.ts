@@ -136,6 +136,10 @@ export interface LibraryItem {
   playedAt?: number | null;
   /** A Platter smart playlist (kept on this computer, filled here). */
   platter?: boolean;
+  /** A playlist someone shared with you (`shared:<group>`): its owner and your role. */
+  shared?: { owner: string; role: CollabRole; gone: boolean };
+  /** A Blend (`blend:<group>`). */
+  blend?: boolean;
 }
 
 // ---------------------------------------------------------------- errors
@@ -1068,6 +1072,12 @@ export interface Settings {
   listenName: string;
   /** In a session you host, unreleased songs go to guests without their title and artist. */
   listenHideUnreleased: boolean;
+  /** Collaborative playlists: invite people to your playlists and join theirs (needs an invite). */
+  collabPlaylists: boolean;
+  /** Blends: playlists made from friends' tastes (needs an invite). */
+  blends: boolean;
+  /** Unreleased songs go into shared playlists and Blend taste summaries. */
+  shareUnreleased: boolean;
   /** Discord shows a listening session you host. */
   discordListenAlong: boolean;
   /** Keep app-only state in a sync file in a folder. This device only. */
@@ -1479,6 +1489,9 @@ export const DEFAULT_SETTINGS: Settings = {
   listenInviteHours: 24,
   listenName: "",
   listenHideUnreleased: false,
+  collabPlaylists: true,
+  blends: true,
+  shareUnreleased: false,
   discordListenAlong: true,
   syncEnabled: false,
   syncFolder: "",
@@ -1928,6 +1941,8 @@ export interface DeepLinkOpen {
   atSeconds: number | null;
   /** A listening session invite (platter://join/...) to join. */
   join?: string | null;
+  /** A shared playlist or Blend invite (platter://collab/..., platter://blend/...) to join. */
+  circle?: string | null;
 }
 
 // ---------------------------------------------------------------- social
@@ -3370,6 +3385,10 @@ export interface EventMap {
   "listen://state": ListenView;
   /** Something to tell the user about the session (a request the host turned down). */
   "listen://notice": { message: string };
+  /** Shared playlists, Blends, invites or the relay changed. */
+  "circle://changed": CircleView;
+  /** Worth a toast: an edit the owner couldn't make, a deleted playlist, an invite. */
+  "circle://notice": { message: string };
   /** The sync file's state changed. */
   "sync-file://status": SyncFileStatus;
   /** Pins, folders or other app-only state changed (here or from the sync file). */
@@ -4016,4 +4035,147 @@ export interface BridgeOverview {
   bridges: BridgeInfo[];
   pairing: BridgePairStart | null;
   queued: BridgeQueuedWrite[];
+}
+
+// ---------------------------------------------------------------- shared playlists and Blends
+
+/** A role on a shared playlist. A follower left a public one and still sees it. */
+export type CollabRole = "owner" | "collaborator" | "listener" | "follower";
+
+export interface CirclePerson {
+  id: string;
+  name: string;
+  /** Art path for the round picture (null: the name's letter). */
+  avatar: string | null;
+  role: CollabRole | null;
+  /** This is you. */
+  you: boolean;
+  /** Songs they added. */
+  added: number;
+}
+
+/** A shared playlist: yours (id is the Plex playlist's) or someone else's (`shared:<group>`). */
+export interface SharedSummary {
+  id: string;
+  group: string;
+  title: string;
+  owner: CirclePerson;
+  /** Your role. */
+  role: CollabRole;
+  /** The owner first, then everyone it's shared with. */
+  people: CirclePerson[];
+  public: boolean;
+  /** Deleted by its owner, or you were taken off. */
+  gone: boolean;
+  inLibrary: boolean;
+  /** Your edits the owner hasn't confirmed yet. */
+  waiting: number;
+  /** Your edits were sent a few times without an answer. */
+  ownerUnreachable: boolean;
+  trackCount: number;
+}
+
+export interface BlendSummary {
+  /** `blend:<group>`. */
+  id: string;
+  /** Members' names joined with " + ". */
+  title: string;
+  description: string;
+  /** You first. */
+  people: CirclePerson[];
+  trackCount: number;
+}
+
+/** An invite that came straight to you (someone on your server or Home). */
+export interface CircleIncoming {
+  id: string;
+  from: string;
+  kind: "playlist" | "blend";
+  title: string;
+  at: number;
+}
+
+/** `circle_state` and `circle://changed`. */
+export interface CircleView {
+  relay: "connecting" | "ok" | "unreachable" | "limited";
+  playlists: SharedSummary[];
+  blends: BlendSummary[];
+  incoming: CircleIncoming[];
+  /** Invites sent and waiting for their owner's answer. */
+  joining: number;
+}
+
+/** Someone on your server or Plex Home you can invite without a link. */
+export interface CircleAccount {
+  key: string;
+  name: string;
+  avatar: string | null;
+  /** In your Plex Home. */
+  home: boolean;
+}
+
+export interface InviteLink {
+  link: string;
+  /** Unix ms. */
+  expiresAt: number;
+}
+
+export type JoinResult = { state: "joined"; id: string; kind: "playlist" | "blend" } | { state: "waiting"; kind: "playlist" | "blend" };
+
+/** The owner's view of who added what on their shared playlist. */
+export interface SharedInfo {
+  summary: SharedSummary;
+  /** Row (item) id → who added it. Rows the owner added aren't listed. */
+  addedBy: Record<string, CirclePerson>;
+}
+
+/** One row of a playlist shared with you. */
+export interface SharedRow {
+  key: string;
+  /** The copy you can play; null: Not in your library. */
+  track: Track | null;
+  title: string;
+  artist: string;
+  album: string | null;
+  durationMs: number;
+  releaseGroupId: string | null;
+  by: CirclePerson | null;
+  addedAt: number;
+  /** Your change, not confirmed by the owner yet. */
+  pending: boolean;
+  /** You added it, so you may remove it. */
+  removable: boolean;
+}
+
+export interface SharedPage {
+  summary: SharedSummary;
+  description: string | null;
+  durationMs: number;
+  rows: SharedRow[];
+}
+
+export interface BlendRow {
+  track: Track;
+  by: CirclePerson;
+}
+
+export interface BlendMissing {
+  title: string;
+  artist: string;
+  album: string | null;
+  releaseGroupId: string | null;
+  by: CirclePerson;
+}
+
+export interface BlendPage {
+  summary: BlendSummary;
+  rows: BlendRow[];
+  /** Members' songs that aren't in your library. */
+  missing: BlendMissing[];
+  durationMs: number;
+}
+
+export interface BlendCreated {
+  id: string;
+  invite: InviteLink;
 }

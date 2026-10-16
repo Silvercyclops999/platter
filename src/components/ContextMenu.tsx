@@ -158,7 +158,7 @@ export function ContextMenuHost() {
             aria-haspopup={item.submenu ? "menu" : undefined}
             aria-expanded={item.submenu ? sub === i : undefined}
             data-submenu={item.submenu ? i : undefined}
-            className={`context-menu__item ${item.danger ? "is-danger" : ""} ${item.checked ? "is-checked" : ""} ${item.submenu && sub === i ? "is-open" : ""}`}
+            className={`context-menu__item ${item.description ? "context-menu__item--two" : ""} ${item.danger ? "is-danger" : ""} ${item.checked ? "is-checked" : ""} ${item.submenu && sub === i ? "is-open" : ""}`}
             onClick={() => select(item, i)}
             onMouseEnter={() => !item.disabled && setSub(item.submenu ? i : null)}
             onFocus={() => {
@@ -167,7 +167,14 @@ export function ContextMenuHost() {
             }}
           >
             {iconColumn && <MenuIcon icon={icons[i]} />}
-            <span className="truncate context-menu__label">{item.label}</span>
+            {item.description ? (
+              <span className="context-menu__text">
+                <span className="truncate context-menu__label">{item.label}</span>
+                <span className="truncate context-menu__desc">{item.description}</span>
+              </span>
+            ) : (
+              <span className="truncate context-menu__label">{item.label}</span>
+            )}
             {item.shortcut && <span className="context-menu__shortcut">{item.shortcut}</span>}
             {item.checked && <Check size={16} aria-hidden="true" className="context-menu__check" />}
             {item.submenu && <ChevronRight size={16} aria-hidden="true" className="context-menu__chevron" />}

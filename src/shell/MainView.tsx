@@ -13,6 +13,9 @@ import { LibraryPage } from "../pages/LibraryPage";
 import { LikedPage } from "../pages/LikedPage";
 import { MixPage } from "../pages/MixPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
+import { SharedPlaylistPage } from "../pages/SharedPlaylistPage";
+import { BlendPage } from "../pages/BlendPage";
+import { BlendCreatePage } from "../pages/BlendCreatePage";
 import { RecentsPage } from "../pages/RecentsPage";
 import { SearchPage } from "../pages/SearchPage";
 import { NewToYouPage } from "../pages/NewToYou";
@@ -172,7 +175,11 @@ function Page({ route }: { route: Route }) {
       return <ShelfPage />;
     case "playlist":
       // A Platter smart playlist has its own page.
+      if (route.id.startsWith("blend:")) return <BlendPage key={route.id} id={route.id} />;
+      if (route.id.startsWith("shared:")) return <SharedPlaylistPage key={route.id} id={route.id} />;
       return route.id.startsWith("smart:") ? <SmartPlaylistPage id={route.id} /> : <PlaylistPage id={route.id} />;
+    case "blendNew":
+      return <BlendCreatePage />;
     case "bookmarks":
       return <BookmarksPage />;
     case "stats":

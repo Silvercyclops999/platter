@@ -264,6 +264,9 @@
   text-align: left;
   color: var(--color-text-primary);
 }
+.context-menu__item--two { height: 52px; }
+.context-menu__text { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 1px; }
+.context-menu__desc { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
 .context-menu__item:hover,
 .context-menu__item:focus-visible {
   background: var(--color-state-selected);

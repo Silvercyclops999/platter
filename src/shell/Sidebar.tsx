@@ -1,4 +1,4 @@
-import { ChevronLeft, Folder, ListMusic, Maximize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
+import { Blend, ChevronLeft, Folder, ListMusic, Maximize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
@@ -7,6 +7,7 @@ import { folders } from "../stores/folders";
 import { nav } from "../stores/router";
 import { smartCreateItems } from "../stores/curate";
 import { useLayout } from "../stores/theme";
+import { useSettings } from "../stores/settings";
 import { useUi, type MenuItem } from "../stores/ui";
 import { createPlaylistIn, folderMenu } from "./FolderMenus";
 import { LibraryCollection } from "./LibraryCollection";
@@ -21,6 +22,9 @@ export function createMenu(folderId: string | null): MenuItem[] {
   return [
     { label: "Playlist", icon: ListMusic, onSelect: () => void createPlaylistIn(folderId) },
     ...smartCreateItems(),
+    ...(useSettings.getState().settings?.blends === false
+      ? []
+      : [{ label: "Blend", icon: Blend, description: "Combine friends' tastes into a playlist", onSelect: () => nav.go({ name: "blendNew" }) }]),
     { label: "Folder", icon: Folder, onSelect: () => void folders.create(folderId) },
   ];
 }

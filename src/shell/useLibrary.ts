@@ -33,6 +33,7 @@ import { folders, useFolders, withFolders } from "../stores/folders";
 import { folderMenu, moveToFolderItem } from "./FolderMenus";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
+import { leavePlaylist, openCircleDialog, playBlend, playShared, setInLibrary } from "../stores/circle";
 
 /** Load the library items, and again after every library change. */
 export function useLibraryLoader() {
@@ -238,6 +239,8 @@ export function playEntry(e: LibEntry) {
   if (e.bookmarks) return nav.go({ name: "bookmarks" });
   if (e.stats) return nav.go({ name: "stats" });
   if (e.platter) return backend.smartPage(e.id).then((pg) => player.playTracks(pg.tracks.map((t) => t.id)), () => {});
+  if (e.blend) return playBlend(e.id);
+  if (e.shared) return playShared(e.id);
   const ctx = usePlayer.getState().state?.queue.context;
   if (e.liked) return ctx?.kind === "liked" ? player.toggle() : player.playLiked();
   if (ctx?.kind === e.kind && ctx.id === e.id) return player.toggle();
@@ -288,6 +291,21 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
       { label: "Edit rules", onSelect: () => void editSmartPlaylist(e.id, e.title) },
       bookmarkPageItem("smart", e.id, e.title),
       { label: "Delete", separator: true, onSelect: () => void deleteSmartPlaylist(e.id) },
+    ];
+  if (e.blend)
+    return [
+      play,
+      { label: "Add to queue", onSelect: () => void backend.blendPage(e.id).then((p) => player.addToQueue(p.rows.map((r) => r.track))) },
+      { label: "Leave Blend", separator: true, onSelect: () => openCircleDialog({ kind: "leaveBlend", id: e.id, title: e.title }) },
+      { ...pin, separator: true },
+    ];
+  if (e.shared)
+    return [
+      play,
+      ...(e.shared.gone ? [] : [{ label: "Playlist permissions", onSelect: () => openCircleDialog({ kind: "permissions", playlistId: e.id }) }]),
+      { label: "Remove from Your Library", onSelect: () => void setInLibrary(e.id, false) },
+      e.shared.gone ? { label: "Remove", onSelect: () => void leavePlaylist(e.id) } : { label: "Leave playlist", onSelect: () => openCircleDialog({ kind: "leave", playlistId: e.id }) },
+      { ...pin, separator: true },
     ];
   if (e.liked)
     return [

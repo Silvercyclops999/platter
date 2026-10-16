@@ -83,6 +83,8 @@ function loadSidebarArt(): boolean {
 
 export interface MenuItem {
   label: string;
+  /** A short second line under the label (the Create menu's Blend). */
+  description?: string;
   /** Leading icon. Left out, it's picked from the label; null means none. */
   icon?: import("lucide-react").LucideIcon | null;
   onSelect?: () => void;

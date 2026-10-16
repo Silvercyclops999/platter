@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { DragAnnouncer } from "../components/DragAnnouncer";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
+import { CircleDialogs } from "../components/CircleDialogs";
 import { FolderDialogs } from "./FolderMenus";
 import { SavedInHost } from "../components/SavedInMenu";
 import { Toaster } from "../components/Toast";
@@ -41,6 +42,7 @@ import { RemoteStrip } from "./RemoteStrip";
 import { ListenStrip } from "./ListenStrip";
 import { FriendActivityPanel } from "./FriendActivityPanel";
 import { startSocial } from "../stores/social";
+import { startCircle } from "../stores/circle";
 import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
@@ -106,6 +108,7 @@ export function AppShell() {
     [],
   );
   useEffect(() => afterFirstPaint(() => void startSocial()), []);
+  useEffect(() => afterFirstPaint(() => void startCircle()), []);
   useEffect(() => void startCurate(), []);
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
@@ -250,6 +253,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <CircleDialogs />
       <ArchiveDialogs />
       <PhysicalDialogHost />
       <LazyPlexEditDialogs />
