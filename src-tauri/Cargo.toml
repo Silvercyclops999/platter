@@ -78,6 +78,8 @@ tauri-plugin-clipboard-manager = "2.5.0"
 rusty-chromaprint = "0.3.0"
 # Library import: account data downloads come as zip files.
 zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# Tag editor: writes tags in place on the music share.
+lofty = "0.25.4"
 kakasi = "0.1.0"
 # Upgrades: carry a file's tags onto its better copy (any format to any format).
 lofty = "0.25.4"

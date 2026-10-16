@@ -41,6 +41,7 @@ pub mod soundid;
 pub mod subsonic;
 pub mod stats;
 pub mod sync;
+pub mod tagedit;
 pub mod tags;
 pub mod themes;
 pub mod tracking;

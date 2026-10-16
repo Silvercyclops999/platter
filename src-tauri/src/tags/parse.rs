@@ -421,7 +421,9 @@ fn mp4(s: &Sparse, tags: &mut FileTags) -> R<()> {
             b"rtng" => {
                 if let Some(d) = find_child(s, item.body, item.end, b"data")? {
                     let v = need(s, d.body, ((d.end - d.body) as usize).min(64))?;
-                    match v.get(8) {
+                    // A big-endian integer, one byte as iTunes writes it or wider.
+                    let n = v.get(8..).filter(|b| !b.is_empty()).and_then(|b| b.last().copied());
+                    match n {
                         Some(1) | Some(4) => tags.set_explicit(Some(true)),
                         Some(2) => tags.set_explicit(Some(false)),
                         _ => {}
