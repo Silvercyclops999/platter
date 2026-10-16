@@ -21,7 +21,7 @@
 }
 .versions__row:hover { background: var(--color-state-hover); }
 .versions__row.is-current { background: var(--color-state-selected); }
-.versions__row .art { border-radius: 4px; }
+.versions__row .art { border-radius: var(--radius-row); }
 .versions__text { min-width: 0; }
 .versions__name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--font-size-md); color: var(--color-text-primary); }
 .versions__here { flex: none; font-size: var(--font-size-xs); color: var(--color-text-muted); }
@@ -60,7 +60,7 @@
 .era-group { margin-top: var(--space-8); }
 .era-group:first-of-type { margin-top: 0; }
 .era-group__head { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-3); padding: 0 var(--space-4); }
-.era-group__art { flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; overflow: hidden; }
+.era-group__art { flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: var(--radius-row); overflow: hidden; }
 .era-group__text { flex: 1; min-width: 0; }
 .era-group__title { margin: 0; font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
 .era-group__title .link { color: inherit; text-align: left; }
@@ -70,7 +70,7 @@
 .versions-link {
   flex: none;
   padding: 0 var(--space-1);
-  border-radius: 4px;
+  border-radius: var(--radius-row);
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   white-space: nowrap;

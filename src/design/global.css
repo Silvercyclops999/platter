@@ -97,7 +97,7 @@ img {
   position: fixed;
   z-index: var(--z-scrollbar);
   width: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-ink) 40%, transparent);
   opacity: 0;
   pointer-events: none;

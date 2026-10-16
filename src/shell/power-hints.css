@@ -12,7 +12,7 @@
   justify-content: center;
   width: 26px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--radius-row);
   background: var(--color-accent);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   color: var(--color-text-on-accent);

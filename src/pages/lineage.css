@@ -73,7 +73,7 @@
 .lineage__node:hover .lineage__card { background: var(--color-state-hover); }
 .lineage__node.is-current .lineage__card { background: var(--color-state-selected); }
 .lineage__node.is-picked .lineage__card { box-shadow: inset 0 0 0 1px var(--color-accent); }
-.lineage__card .art { border-radius: 4px; }
+.lineage__card .art { border-radius: var(--radius-row); }
 .lineage__text { min-width: 0; }
 .lineage__name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--font-size-md); color: var(--color-text-primary); }
 .lineage__name .is-playing { color: var(--color-playing); }
@@ -89,7 +89,7 @@
   gap: 6px;
   height: 18px;
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-row);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
@@ -146,7 +146,7 @@
 .compare__note {
   height: 20px;
   padding: 0 var(--space-2);
-  border-radius: 4px;
+  border-radius: var(--radius-row);
   font-size: var(--font-size-xs);
   line-height: 20px;
   color: var(--color-text-secondary);
@@ -200,7 +200,7 @@
   margin-left: var(--space-2);
   padding: 0 5px;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-row);
   font: inherit;
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
