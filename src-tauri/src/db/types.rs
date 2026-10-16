@@ -297,4 +297,7 @@ pub struct SearchResults {
     /// (`archive::versions::group_search`).
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub versions: std::collections::HashMap<String, Vec<Track>>,
+    /// The query the results are for when the typo fallback changed a word.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corrected: Option<String>,
 }

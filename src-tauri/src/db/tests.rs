@@ -263,7 +263,9 @@ async fn library_replaced_wipes_and_rebuilds() {
     let recents = t.db.read(search::recent_list).unwrap();
     assert_eq!(recents.len(), 1);
     assert_eq!(recents[0].album.as_ref().unwrap().title, "Fresh Album");
-    assert!(search::search(&t.db, "artist 0", SearchFilter::Artists, None).unwrap().artists.is_empty());
+    // The old library's artists are gone from search too.
+    let r = search::search(&t.db, "artist 0", SearchFilter::Artists, None).unwrap();
+    assert_eq!(r.artists.iter().map(|a| a.title.as_str()).collect::<Vec<_>>(), ["Fresh Artist"]);
     assert_eq!(rec.outcomes.lock().last(), Some(&out));
 }
 
@@ -1322,8 +1324,235 @@ async fn search_tolerates_one_typo_on_long_words_only() {
     assert_eq!(r.albums[0].title, "Lemonade");
     // Two edits: no match.
     assert!(search::search(&t.db, "btaels", SearchFilter::Artists, None).unwrap().artists.is_empty());
-    // Short words (< 5 chars) are not fuzzed: "lova" ≠ "love".
+    // Words under 5 letters forgive no typos: "lova" ≠ "love".
     assert!(search::search(&t.db, "lova", SearchFilter::All, None).unwrap().songs.is_empty());
+}
+
+fn forgiving_library() -> FakeLibrary {
+    let mut lib = FakeLibrary { sections: vec![fake::section("1", "u")], ..Default::default() };
+    let marlo = fake::artist("1", "Marlo Vane");
+    let risky = fake::artist("2", "Ri$ky Tide");
+    let cafe = fake::artist("3", "Café Señorita");
+    let skies = fake::album("10", "Open Skies", &marlo, 2001, Some("album"), &[]);
+    let vol = fake::album("11", "Volume 4", &risky, 2010, Some("album"), &[]);
+    let late = fake::album("12", "Late Hours", &cafe, 2015, Some("album"), &[]);
+    let mut t = |id: &str, title: &str, al: &crate::model::Album, plays: u32| {
+        let mut tr = fake::track(id, title, al, 1, 1);
+        tr.view_count = plays;
+        lib.tracks.push(tr);
+    };
+    t("100", "Through the High Grass", &skies, 2);
+    t("101", "Thru the Nite", &skies, 1);
+    t("102", "Light Tho", &skies, 0);
+    t("103", "Part II", &skies, 0);
+    t("104", "No. 9 Dream", &skies, 0);
+    t("105", "Me & You", &skies, 0);
+    t("106", "Talk w/ Me", &skies, 0);
+    t("107", "Lullaby ft. Somebody", &skies, 0);
+    t("108", "Rock 'n' Roll Heart", &skies, 0);
+    t("109", "U Got It", &skies, 0);
+    t("110", "Your Turn", &skies, 0);
+    t("111", "Don't Look Down", &vol, 0);
+    t("112", "Dont Stop Now", &vol, 0);
+    t("113", "Sky-High", &vol, 0);
+    t("114", "Wanderlust", &vol, 5);
+    t("115", "Wanderlast", &vol, 0);
+    t("116", "And They Came Back / This One Here", &late, 0);
+    t("117", "This Is One Way Here", &late, 10);
+    for (i, title) in ["Lamp Light", "Lamplighter", "Lamp Post", "Lamps", "Lamp Oil", "Lampshade"].iter().enumerate() {
+        t(&format!("12{i}"), title, &late, 0);
+    }
+    t("130", "Lamb Chop", &late, 100);
+    t("140", "Tonight", &late, 0);
+    t("141", "Tonite", &late, 0);
+    t("150", "Mother Reach My Arms Pt. 1", &late, 0);
+    t("151", "Arms Reach", &late, 0);
+    t("160", "Shore Lights", &late, 0);
+    t("161", "Harbor Song / Shore Lights - Live", &late, 0);
+    t("170", "Glass Harbor", &late, 0);
+    t("172", "Glass Harbor Lights (Demo)", &late, 0);
+    {
+        let mut tr = fake::track("171", "Glass Harbor Lights", &late, 1, 1);
+        tr.view_count = 900;
+        tr.user_rating = Some(10.0);
+        lib.tracks.push(tr);
+    }
+    lib.albums = vec![skies, vol, late];
+    lib.artists = vec![marlo, risky, cafe];
+    lib
+}
+
+async fn forgiving_db() -> Db {
+    let t = open();
+    let src = Arc::new(FakeSource::new(forgiving_library()));
+    sync(&t.db, &src, false).await;
+    t
+}
+
+fn song_titles(r: &SearchResults) -> Vec<&str> {
+    r.songs.iter().map(|s| s.title.as_str()).collect()
+}
+
+fn first_song(db: &Db, q: &str) -> Option<String> {
+    search::search(&db.db, q, SearchFilter::Songs, Some(20)).unwrap().songs.first().map(|s| s.title.clone())
+}
+
+#[tokio::test]
+async fn search_shorthand_finds_the_long_spelling() {
+    let t = forgiving_db().await;
+    for q in ["thru the high", "Thru The High Grass", "grass thru"] {
+        assert_eq!(first_song(&t, q).as_deref(), Some("Through the High Grass"), "{q}");
+    }
+    // Both spellings match; the one spelled as typed comes first.
+    let r = search::search(&t.db, "thru the", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r)[..2], ["Thru the Nite", "Through the High Grass"]);
+}
+
+#[tokio::test]
+async fn search_spelling_variants_match_both_ways() {
+    let t = forgiving_db().await;
+    let cases: &[(&str, &str)] = &[
+        ("through the nite", "Thru the Nite"),
+        ("thru the night", "Thru the Nite"),
+        ("through the high", "Through the High Grass"),
+        ("lite tho", "Light Tho"),
+        ("light though", "Light Tho"),
+        ("part 2", "Part II"),
+        ("pt two", "Part II"),
+        ("number nine dream", "No. 9 Dream"),
+        ("no. 9", "No. 9 Dream"),
+        ("me and you", "Me & You"),
+        ("me n u", "Me & You"),
+        ("me + you", "Me & You"),
+        ("talk with me", "Talk w/ Me"),
+        ("lullaby featuring somebody", "Lullaby ft. Somebody"),
+        ("lullaby feat somebody", "Lullaby ft. Somebody"),
+        ("rock and roll heart", "Rock 'n' Roll Heart"),
+        ("rock n roll", "Rock 'n' Roll Heart"),
+        ("you got it", "U Got It"),
+        ("ur turn", "Your Turn"),
+    ];
+    for (q, want) in cases {
+        assert_eq!(first_song(&t, q).as_deref(), Some(*want), "{q}");
+    }
+    for q in ["volume four", "vol 4", "vol iv"] {
+        let r = search::search(&t.db, q, SearchFilter::Albums, None).unwrap();
+        assert_eq!(r.albums.first().map(|a| a.title.as_str()), Some("Volume 4"), "{q}");
+    }
+}
+
+#[tokio::test]
+async fn search_ignores_accents_apostrophes_dollar_and_hyphens() {
+    let t = forgiving_db().await;
+    for q in ["dont look down", "don't look down", "Don’t look"] {
+        assert_eq!(first_song(&t, q).as_deref(), Some("Don't Look Down"), "{q}");
+    }
+    assert_eq!(first_song(&t, "don't stop now").as_deref(), Some("Dont Stop Now"));
+    for q in ["skyhigh", "sky high", "sky-high"] {
+        assert_eq!(first_song(&t, q).as_deref(), Some("Sky-High"), "{q}");
+    }
+    for q in ["risky tide", "ri$ky", "RISKY"] {
+        let r = search::search(&t.db, q, SearchFilter::Artists, None).unwrap();
+        assert_eq!(r.artists.first().map(|a| a.title.as_str()), Some("Ri$ky Tide"), "{q}");
+    }
+    let r = search::search(&t.db, "cafe senorita", SearchFilter::Artists, None).unwrap();
+    assert_eq!(r.artists[0].title, "Café Señorita");
+}
+
+#[tokio::test]
+async fn search_forgives_typos_below_exact_matches() {
+    let t = forgiving_db().await;
+    // Wrong, missing, extra and swapped letters.
+    for q in ["wanderlusk", "wandrlust", "wanderluust", "wanderlsut"] {
+        let r = search::search(&t.db, q, SearchFilter::Songs, None).unwrap();
+        assert!(song_titles(&r).contains(&"Wanderlust"), "{q}: {:?}", song_titles(&r));
+        assert!(r.corrected.is_some(), "{q}");
+    }
+    let r = search::search(&t.db, "wanderlsut", SearchFilter::Songs, None).unwrap();
+    assert_eq!(r.corrected.as_deref(), Some("wanderlust"));
+    // One typo only.
+    assert!(search::search(&t.db, "wnaderlsut", SearchFilter::Songs, None).unwrap().songs.is_empty());
+    // An exact match ranks above a typo match with more plays, and is no correction.
+    let r = search::search(&t.db, "wanderlast", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Wanderlast", "Wanderlust"]);
+    assert_eq!(r.corrected, None);
+    // The setting turns the typo fallback off.
+    t.db.set_search_typos(false);
+    assert!(search::search(&t.db, "wanderlsut", SearchFilter::Songs, None).unwrap().songs.is_empty());
+}
+
+#[tokio::test]
+async fn search_adds_no_typo_matches_when_exact_ones_are_plenty() {
+    let t = forgiving_db().await;
+    let r = search::search(&t.db, "lamp", SearchFilter::Songs, Some(20)).unwrap();
+    let titles = song_titles(&r);
+    assert!(titles.len() >= search::FUZZY_BELOW, "{titles:?}");
+    assert!(!titles.contains(&"Lamb Chop"), "{titles:?}");
+    assert_eq!(r.corrected, None);
+    // With few exact matches, the typo match comes too, after them.
+    let r = search::search(&t.db, "lamb", SearchFilter::Songs, Some(20)).unwrap();
+    assert_eq!(song_titles(&r)[0], "Lamb Chop");
+}
+
+#[tokio::test]
+async fn search_drops_a_word_only_when_nothing_matches_them_all() {
+    let t = forgiving_db().await;
+    let r = search::search(&t.db, "high grass zebra", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Through the High Grass"]);
+    // Words in any order still need all of them.
+    let r = search::search(&t.db, "grass high", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Through the High Grass"]);
+    // Nothing found with every word: the one-word-dropped matches.
+    let r = search::search(&t.db, "wanderlust zebra", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r)[0], "Wanderlust");
+}
+
+#[tokio::test]
+async fn search_puts_the_typed_spelling_above_its_variant() {
+    let t = forgiving_db().await;
+    let r = search::search(&t.db, "tonite", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Tonite", "Tonight"]);
+    let r = search::search(&t.db, "tonight", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Tonight", "Tonite"]);
+}
+
+#[tokio::test]
+async fn search_small_and_unknown_words_do_not_block_a_match() {
+    let t = forgiving_db().await;
+    assert_eq!(first_song(&t, "the lamp of post").as_deref(), Some("Lamp Post"));
+    assert_eq!(first_song(&t, "grass high the").as_deref(), Some("Through the High Grass"));
+    // A word the library has nowhere is left out.
+    let r = search::search(&t.db, "zebra qqzzx wanderlust", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r)[0], "Wanderlust");
+}
+
+#[tokio::test]
+async fn search_ranks_mid_title_words_medley_parts_and_plays() {
+    let t = forgiving_db().await;
+    // Words mid-title count, and in a row beat the same words scattered.
+    assert_eq!(first_song(&t, "reach my arms").as_deref(), Some("Mother Reach My Arms Pt. 1"));
+    // A plain query: the song titled exactly that first, the medley after.
+    let r = search::search(&t.db, "shore lights", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r)[..2], ["Shore Lights", "Harbor Song / Shore Lights - Live"]);
+    // An extra word that hits a later part lifts that version.
+    assert_eq!(first_song(&t, "shore lights live").as_deref(), Some("Harbor Song / Shore Lights - Live"));
+    // A much played, top rated song with every word passes a never played
+    // exact title; an unplayed one does not.
+    let r = search::search(&t.db, "glass harbor", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Glass Harbor Lights", "Glass Harbor", "Glass Harbor Lights (Demo)"]);
+}
+
+#[tokio::test]
+async fn search_matches_a_part_of_a_two_part_title() {
+    let t = forgiving_db().await;
+    // "/" separates words; a query matching one part ranks like a title
+    // match, above the same words scattered (with a few more plays).
+    let r = search::search(&t.db, "this one here", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["And They Came Back / This One Here", "This Is One Way Here"]);
+    let r = search::search(&t.db, "came back", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r)[0], "And They Came Back / This One Here");
+    let r = search::search(&t.db, "this one here", SearchFilter::All, None).unwrap();
+    assert_eq!(r.top.unwrap().track.unwrap().title, "And They Came Back / This One Here");
 }
 
 #[tokio::test]
@@ -1826,6 +2055,35 @@ mod bench {
             let q = ["k", "l", "m", "b", "s", "a"][i % 6];
             search::search(db, q, SearchFilter::All, None).unwrap();
         });
+        // Fallbacks: a typo in a long title word (the typo pass runs), a
+        // word that is nowhere (typo pass, then one word dropped) and
+        // shorthand that expands to its spellings.
+        let mut typos: Vec<String> = Vec::new();
+        let mut missing: Vec<String> = Vec::new();
+        for _ in 0..100 {
+            let tr = &lib.tracks[rng.below(lib.tracks.len())];
+            let norm = search::normalize(&tr.title);
+            let w = norm.split(' ').max_by_key(|w| w.len()).unwrap_or_default();
+            let mut c: Vec<char> = w.chars().collect();
+            if c.len() >= 5 {
+                c.swap(1, 2);
+            }
+            typos.push(c.into_iter().collect());
+            missing.push(format!("{norm} qqzzx"));
+        }
+        let mut fuzzy_hits = 0;
+        time("search typo fallback", 100, &mut |i| {
+            let r = search::search(db, &typos[i % typos.len()], SearchFilter::All, None).unwrap();
+            fuzzy_hits += usize::from(r.corrected.is_some() || !r.songs.is_empty());
+        });
+        time("search missing-word fallback", 100, &mut |i| {
+            search::search(db, &missing[i % missing.len()], SearchFilter::All, None).unwrap();
+        });
+        time("search shorthand variants", 60, &mut |i| {
+            let q = ["thru the nite", "pt 2 vol iv", "me & u", "don't stop", "ft somebody", "no. 9"][i % 6];
+            search::search(db, q, SearchFilter::All, None).unwrap();
+        });
+        println!("typo queries with results: {fuzzy_hits}/101");
         let mut slow = lat.clone();
         slow.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         println!("slowest searches: {:?}", &slow[..8]);

@@ -3,24 +3,41 @@
 //! - FTS5 over artists, albums (+ album artist), tracks (+ album artist,
 //!   album, track artist) and playlists; tokenizer `unicode61
 //!   remove_diacritics 2`, so "beyonce" finds "Beyoncé".
-//! - Every query token is a prefix match (search as you type).
-//! - Typo tolerance: a token of ≥ 5 chars that is not a prefix of any indexed
-//!   word gets alternatives within 1 edit (insert / delete / substitute /
-//!   transpose) from an in-memory vocabulary built from the FTS vocab tables.
-//! - User input never reaches FTS syntax: it is folded, split into word
-//!   tokens and each token is double-quoted, so quotes, `*`, `-`, `NEAR`,
-//!   `AND`/`OR`/`NOT`, column filters and parentheses are inert.
-//! - Ranking: tier first (exact title > title prefix > word prefix > fuzzy),
-//!   then boosts for play count and recency, a small kind bias for the top
-//!   result (artist > album > track > playlist) and shorter titles first.
+//! - Words are read by [`searchtext`]: spelling variants and shorthand
+//!   ("thru" / "through", "pt 2" / "part II"), apostrophes, hyphens and "$"
+//!   fold the same way on both sides. Each query word becomes a group of
+//!   its spellings; every group must match, in any order, as a prefix.
+//! - The library's word list (from the FTS vocab tables, kept in memory)
+//!   adds the forms the index splits differently: "kayq" also finds
+//!   "Kay-Q", "kay q" also finds "Kayq".
+//! - "and" and small words like "the" between other words are not
+//!   required (names write them many ways or leave them out).
+//! - Fallbacks, ranked below everything found before them:
+//!   1. typos, when the words as typed find fewer than [`FUZZY_BELOW`]
+//!      results: each word of 5+ letters also matches library words one
+//!      edit away (wrong, missing, extra or swapped letter);
+//!   2. when nothing matches every word: words the library has nowhere
+//!      are left out, else one word at a time.
+//! - Typo corrections are silent: the corrected query comes back in
+//!   `corrected` for the search box to offer as a suggestion.
+//! - User input never reaches FTS syntax: it is folded into word tokens and
+//!   each one is double-quoted, so quotes, `*`, `-`, `NEAR`, `AND`/`OR`/
+//!   `NOT`, column filters and parentheses are inert.
+//! - Ranking: tier first (exact title, then title or title part prefix,
+//!   phrase, every word in the title, words in other fields, typo, missing
+//!   word), then boosts for plays, rating and recency, the query's own
+//!   spelling over a variant ("tonite" puts "Tonite" above "Tonight"), a
+//!   small kind bias for the top result (artist, album, track, playlist)
+//!   and shorter titles first. The tiers where every word is in
+//!   the title sit close together, so a much played song can pass a never
+//!   played exact title; the others stay 100 apart, which plays never
+//!   cross.
 
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, params};
-use unicode_normalization::UnicodeNormalization;
-use unicode_normalization::char::is_combining_mark;
 
 use crate::error::AppResult;
 use crate::model::{Album, Artist, Playlist, Track};
@@ -28,15 +45,20 @@ use crate::model::{Album, Artist, Playlist, Track};
 use super::DbHandle;
 use super::popular;
 use super::queries::now_s;
+use super::searchtext::{self, canon, canonical, edits_within, match_forms, max_typos, words};
 use super::store::{ALBUM_COLS, ARTIST_COLS, PLAYLIST_COLS, TRACK_COLS, row_album, row_artist, row_playlist, row_track};
 use super::source::RemoteHits;
 use super::types::*;
 
+pub use searchtext::normalize;
+
 const MAX_QUERY_CHARS: usize = 200;
 const MAX_TOKENS: usize = 8;
 const MAX_TOKEN_CHARS: usize = 40;
-const FUZZY_MIN_CHARS: usize = 5;
+/// The typo pass runs when the words as typed find fewer results than this.
+pub const FUZZY_BELOW: usize = 5;
 const MAX_FUZZY_ALTS: usize = 8;
+const MAX_SPLITS: usize = 3;
 const TRACK_CANDIDATES: i64 = 300;
 const OTHER_CANDIDATES: i64 = 120;
 const ALL_SONGS: usize = 4;
@@ -45,11 +67,6 @@ const FILTER_DEFAULT: usize = 50;
 const VOCAB_RELOAD_MIN: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------- text
-
-/// Lower-case, diacritic-free form used for matching and ranking.
-pub fn normalize(s: &str) -> String {
-    s.nfd().filter(|c| !is_combining_mark(*c)).flat_map(char::to_lowercase).collect()
-}
 
 /// Word tokens the way FTS5 unicode61 splits them (alphanumerics).
 pub fn tokens(normalized: &str) -> Vec<String> {
@@ -83,36 +100,53 @@ pub fn within_one_edit(a: &[char], b: &[char]) -> bool {
 
 // ---------------------------------------------------------------- vocab
 
+/// Every word in the index, with how many items use it.
 struct Vocab {
     generation: u64,
     loaded_at: Instant,
     /// Sorted, deduped terms (already folded by the tokenizer).
     sorted: Vec<String>,
-    /// Terms as chars, bucketed by char length.
-    by_len: Vec<Vec<Vec<char>>>,
+    /// Items per term, parallel to `sorted`.
+    docs: Vec<u32>,
+    /// Terms as chars with their index in `sorted`, bucketed by char length.
+    by_len: Vec<Vec<(Vec<char>, u32)>>,
 }
 
 impl Vocab {
     fn load(c: &Connection, generation: u64) -> AppResult<Self> {
-        let mut sorted = Vec::new();
+        let mut all: Vec<(String, u32)> = Vec::new();
         for t in ["artists_vocab", "albums_vocab", "tracks_vocab", "playlists_vocab"] {
-            let mut st = c.prepare(&format!("SELECT term FROM {t}"))?;
-            let rows = st.query_map([], |r| r.get::<_, String>(0))?;
+            let mut st = c.prepare(&format!("SELECT term, doc FROM {t}"))?;
+            let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?)))?;
             for r in rows {
-                sorted.push(r?);
+                all.push(r?);
             }
         }
-        sorted.sort_unstable();
-        sorted.dedup();
-        let mut by_len: Vec<Vec<Vec<char>>> = Vec::new();
-        for t in &sorted {
+        all.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let mut sorted: Vec<String> = Vec::with_capacity(all.len());
+        let mut docs: Vec<u32> = Vec::with_capacity(all.len());
+        for (t, d) in all {
+            if sorted.last() == Some(&t) {
+                let last = docs.last_mut().expect("parallel");
+                *last = last.saturating_add(d);
+            } else {
+                sorted.push(t);
+                docs.push(d);
+            }
+        }
+        let mut by_len: Vec<Vec<(Vec<char>, u32)>> = Vec::new();
+        for (i, t) in sorted.iter().enumerate() {
             let chars: Vec<char> = t.chars().collect();
             if by_len.len() <= chars.len() {
                 by_len.resize_with(chars.len() + 1, Vec::new);
             }
-            by_len[chars.len()].push(chars);
+            by_len[chars.len()].push((chars, i as u32));
         }
-        Ok(Self { generation, loaded_at: Instant::now(), sorted, by_len })
+        Ok(Self { generation, loaded_at: Instant::now(), sorted, docs, by_len })
+    }
+
+    fn contains(&self, term: &str) -> bool {
+        self.sorted.binary_search_by(|t| t.as_str().cmp(term)).is_ok()
     }
 
     fn has_prefix(&self, token: &str) -> bool {
@@ -120,21 +154,63 @@ impl Vocab {
         self.sorted.get(i).is_some_and(|t| t.starts_with(token))
     }
 
-    fn fuzzy(&self, token: &str) -> Vec<String> {
-        let q: Vec<char> = token.chars().collect();
+    /// Two library words that run together into `text` ("kayq" → "kay q";
+    /// a "$" read as "s": "risky" → "ri ky"), as FTS phrases.
+    fn splits(&self, text: &str) -> Vec<String> {
+        let chars: Vec<char> = text.chars().collect();
         let mut out = Vec::new();
-        for len in q.len().saturating_sub(1)..=q.len() + 1 {
-            let Some(bucket) = self.by_len.get(len) else { continue };
-            for cand in bucket {
-                if *cand != q && within_one_edit(&q, cand) {
-                    out.push(cand.iter().collect());
-                    if out.len() >= MAX_FUZZY_ALTS {
-                        return out;
-                    }
+        if chars.len() < 4 {
+            return out;
+        }
+        for i in 1..chars.len() {
+            let left: String = chars[..i].iter().collect();
+            if !self.contains(&left) {
+                continue;
+            }
+            let right: String = chars[i..].iter().collect();
+            if self.contains(&right) {
+                out.push(format!("{left} {right}"));
+            }
+            if chars[i] == 's' && i + 1 < chars.len() {
+                let right: String = chars[i + 1..].iter().collect();
+                if self.contains(&right) {
+                    out.push(format!("{left} {right}"));
                 }
+            }
+            if out.len() >= MAX_SPLITS {
+                break;
             }
         }
         out
+    }
+
+    /// Library words within `max` edits of `token`, closest and most used
+    /// first.
+    fn fuzzy(&self, token: &str, max: usize) -> Vec<String> {
+        if max == 0 {
+            return Vec::new();
+        }
+        let q: Vec<char> = token.chars().collect();
+        let mut found: Vec<(usize, u32, u32)> = Vec::new();
+        for len in q.len().saturating_sub(max)..=q.len() + max {
+            let Some(bucket) = self.by_len.get(len) else { continue };
+            for (cand, i) in bucket {
+                if *cand == q {
+                    continue;
+                }
+                let d = if max == 1 {
+                    within_one_edit(&q, cand).then_some(1)
+                } else {
+                    edits_within(&q, cand, max)
+                };
+                if let Some(d) = d {
+                    found.push((d, self.docs[*i as usize], *i));
+                }
+            }
+        }
+        found.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+        found.truncate(MAX_FUZZY_ALTS);
+        found.into_iter().map(|(_, _, i)| self.sorted[i as usize].clone()).collect()
     }
 }
 
@@ -167,13 +243,29 @@ impl VocabCache {
 
 // ---------------------------------------------------------------- query
 
+/// One query word.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QToken {
+    /// Folded and joined ("don't" → "dont").
+    pub text: String,
+    /// The parts the index stores for it ("don", "t").
+    pub pieces: Vec<String>,
+    /// "and" (or "&", "+") or a small word like "the" between other words:
+    /// names write them many ways or leave them out, so they are not
+    /// required.
+    pub optional: bool,
+}
+
 /// A parsed, sanitized query.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedQuery {
-    /// Folded query text (tokens joined by single spaces).
+    /// Canonical query text (canonical words joined by single spaces).
     pub norm: String,
+    /// The folded words as typed.
     pub tokens: Vec<String>,
-    /// FTS5 MATCH expression; None when there is nothing to search for.
+    pub toks: Vec<QToken>,
+    /// FTS5 MATCH expression for the words as typed and their spellings;
+    /// None when there is nothing to search for.
     pub fts: Option<String>,
     /// A lone 1–2 char token (first keystrokes). Matching every word with
     /// that prefix and bm25-ranking tens of thousands of rows is too slow
@@ -188,67 +280,250 @@ fn quote(t: &str) -> String {
     format!("\"{}\"", t.replace('"', "\"\""))
 }
 
-/// Parse user input into a safe FTS5 expression. `alts(token)` returns
-/// typo alternatives for a token (empty when none apply).
-pub fn parse_query(raw: &str, mut alts: impl FnMut(&str) -> Vec<String>) -> ParsedQuery {
+/// Parse user input into words and a safe FTS5 expression.
+pub fn parse_query(raw: &str) -> ParsedQuery {
     let clipped: String = raw.chars().take(MAX_QUERY_CHARS).collect();
-    let toks: Vec<String> = tokens(&normalize(&clipped))
+    let mut toks: Vec<QToken> = words(&clipped)
         .into_iter()
         .take(MAX_TOKENS)
-        .map(|t| t.chars().take(MAX_TOKEN_CHARS).collect())
-        .collect();
-    if toks.is_empty() {
-        return ParsedQuery { norm: String::new(), tokens: toks, fts: None, short: false };
-    }
-    if toks.len() == 1 && toks[0].chars().count() <= SHORT_MAX_CHARS {
-        let fts = format!("title : ^{}*", quote(&toks[0]));
-        return ParsedQuery { norm: toks[0].clone(), fts: Some(fts), tokens: toks, short: true };
-    }
-    let groups: Vec<String> = toks
-        .iter()
-        .map(|t| {
-            let mut parts = vec![format!("{}*", quote(t))];
-            parts.extend(alts(t).iter().map(|a| quote(a)));
-            if parts.len() == 1 { parts.remove(0) } else { format!("({})", parts.join(" OR ")) }
+        .map(|w| QToken {
+            text: w.text.chars().take(MAX_TOKEN_CHARS).collect(),
+            pieces: w.pieces.into_iter().map(|p| p.chars().take(MAX_TOKEN_CHARS).collect()).collect(),
+            optional: false,
         })
         .collect();
-    ParsedQuery { norm: toks.join(" "), fts: Some(groups.join(" ")), tokens: toks, short: false }
+    let n = toks.len();
+    for (i, t) in toks.iter_mut().enumerate() {
+        // "and" typed as a word may be the start of "android" while it is
+        // the last word; a symbol never is.
+        let small = canon(&t.text) == "and" || searchtext::STOPWORDS.contains(&t.text.as_str());
+        t.optional = small && (t.pieces.is_empty() || i + 1 < n);
+    }
+    let tokens: Vec<String> = toks.iter().map(|t| t.text.clone()).collect();
+    let norm = tokens.iter().map(|t| canon(t)).collect::<Vec<_>>().join(" ");
+    if toks.is_empty() {
+        return ParsedQuery { norm, tokens, toks, fts: None, short: false };
+    }
+    if toks.len() == 1 && toks[0].text.chars().count() <= SHORT_MAX_CHARS && !toks[0].pieces.is_empty() {
+        let fts = format!("title : ^{}*", quote(&toks[0].pieces.join(" ")));
+        return ParsedQuery { norm, tokens, toks, fts: Some(fts), short: true };
+    }
+    let mut q = ParsedQuery { norm, tokens, toks, fts: None, short: false };
+    q.fts = build_fts(&q, &Extra::default());
+    q
+}
+
+/// What the library's word list adds to a query.
+#[derive(Debug, Clone, Default)]
+pub struct Extra {
+    /// More spellings per word (FTS phrases, matched whole).
+    pub alts: Vec<Vec<String>>,
+    /// `joins[i]`: words i and i+1 also match run together as one word.
+    pub joins: Vec<bool>,
+    /// Words left out (the missing-word fallback).
+    pub skip: Vec<usize>,
+}
+
+/// One word's FTS group: as typed (prefix), its parts as a phrase, its
+/// spellings and any extra forms.
+fn group_expr(t: &QToken, extra: &[String]) -> String {
+    let mut parts = vec![format!("{}*", quote(&t.text))];
+    if !t.pieces.is_empty() && t.pieces != [t.text.clone()] {
+        parts.push(format!("{}*", quote(&t.pieces.join(" "))));
+    }
+    parts.extend(searchtext::variants(&t.text).map(quote));
+    parts.extend(extra.iter().map(|e| quote(e)));
+    let mut seen = std::collections::HashSet::new();
+    parts.retain(|p| seen.insert(p.clone()));
+    if parts.len() == 1 { parts.remove(0) } else { format!("({})", parts.join(" OR ")) }
+}
+
+/// The FTS5 expression for a parsed query plus extra forms.
+pub fn build_fts(q: &ParsedQuery, extra: &Extra) -> Option<String> {
+    let n = q.toks.len();
+    let kept = |i: &usize| !extra.skip.contains(i);
+    let mut idx: Vec<usize> = (0..n).filter(kept).filter(|i| !q.toks[*i].optional).collect();
+    if idx.is_empty() {
+        idx = (0..n).filter(kept).filter(|i| !q.toks[*i].pieces.is_empty()).collect();
+    }
+    if idx.is_empty() {
+        return None;
+    }
+    let none: Vec<String> = Vec::new();
+    let g = |i: usize| group_expr(&q.toks[i], extra.alts.get(i).unwrap_or(&none));
+    let mut parts = Vec::new();
+    let mut k = 0;
+    while k < idx.len() {
+        let i = idx[k];
+        if k + 1 < idx.len() && idx[k + 1] == i + 1 && extra.joins.get(i) == Some(&true) {
+            let joined = format!("{}{}", q.toks[i].text, q.toks[i + 1].text);
+            parts.push(format!("(({} AND {}) OR {}*)", g(i), g(i + 1), quote(&joined)));
+            k += 2;
+        } else {
+            parts.push(g(i));
+            k += 1;
+        }
+    }
+    // Explicit AND: FTS5 only joins bare phrases implicitly.
+    Some(parts.join(" AND "))
+}
+
+/// Every word but one, for each word that can be left out.
+fn drop_one_fts(q: &ParsedQuery, extra: &Extra) -> Option<String> {
+    let required: Vec<usize> = (0..q.toks.len()).filter(|i| !q.toks[*i].optional).collect();
+    if required.len() < 2 {
+        return None;
+    }
+    let ors: Vec<String> = required
+        .iter()
+        .filter_map(|&i| build_fts(q, &Extra { skip: vec![i], ..extra.clone() }))
+        .map(|e| format!("({e})"))
+        .collect();
+    Some(ors.join(" OR "))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tier {
-    Fuzzy = 0,
-    WordPrefix = 1,
-    TitlePrefix = 2,
-    Exact = 3,
+    /// Found with a word left out.
+    Partial = 0,
+    /// Found through a typo.
+    Fuzzy = 1,
+    /// Every word starts a word somewhere in the name or its fields.
+    WordPrefix = 2,
+    /// The words in a row inside the title.
+    Phrase = 3,
+    /// The title, or one part of a title like "A / B", starts with the query.
+    TitlePrefix = 4,
+    Exact = 5,
 }
 
-/// Match tier of a result given its title and other searchable fields.
+/// Separators that split a title into parts ("Side A / Side B", "Song -
+/// Live", "One + Two").
+const PART_SEPARATORS: &[&str] = &[" / ", "/", " - ", " – ", " — ", " + ", " | ", "; "];
+
+fn title_parts(title: &str) -> Vec<String> {
+    let mut parts = vec![title.to_string()];
+    for sep in PART_SEPARATORS {
+        parts = parts.iter().flat_map(|p| p.split(sep).map(str::to_string).collect::<Vec<_>>()).collect();
+    }
+    parts.retain(|p| !p.trim().is_empty());
+    parts
+}
+
+/// True when the query's canonical words appear in a row in `words`, the
+/// last one as a prefix.
+fn has_phrase(words: &[&str], q: &[&str]) -> bool {
+    let n = q.len();
+    if n == 0 || words.len() < n {
+        return false;
+    }
+    words.windows(n).any(|w| w[..n - 1] == q[..n - 1] && w[n - 1].starts_with(q[n - 1]))
+}
+
+/// How each query word matched one item.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Hit {
+    Missing,
+    Typo,
+    Word,
+}
+
+fn word_hits(q: &ParsedQuery, forms: &[String], typos: bool) -> Vec<Hit> {
+    let n = q.toks.len();
+    let mut hits = vec![Hit::Missing; n];
+    for (i, t) in q.toks.iter().enumerate() {
+        if t.optional {
+            hits[i] = Hit::Word;
+            continue;
+        }
+        let c = canon(&t.text);
+        if forms.iter().any(|f| f.starts_with(c) || f.starts_with(t.text.as_str())) {
+            hits[i] = Hit::Word;
+        }
+    }
+    // "kay q" against "Kayq": two words run together.
+    for i in 0..n.saturating_sub(1) {
+        if hits[i] == Hit::Word && hits[i + 1] == Hit::Word {
+            continue;
+        }
+        let joined = format!("{}{}", q.toks[i].text, q.toks[i + 1].text);
+        if forms.iter().any(|f| f.starts_with(&joined)) {
+            hits[i] = Hit::Word;
+            hits[i + 1] = Hit::Word;
+        }
+    }
+    if typos {
+        for (i, t) in q.toks.iter().enumerate() {
+            if hits[i] != Hit::Missing {
+                continue;
+            }
+            let qc: Vec<char> = t.text.chars().collect();
+            let max = max_typos(qc.len());
+            if max > 0 && forms.iter().any(|f| edits_within(&qc, &f.chars().collect::<Vec<_>>(), max).is_some()) {
+                hits[i] = Hit::Typo;
+            }
+        }
+    }
+    hits
+}
+
+/// Match tier of a result given its title and other searchable fields, and
+/// whether the title alone holds the match.
 pub fn tier(q: &ParsedQuery, title: &str, others: &[Option<&str>]) -> (Tier, bool) {
-    let t = normalize(title);
-    let t_join = tokens(&t).join(" ");
-    if t_join == q.norm {
+    let t = canonical(title);
+    if t == q.norm {
         return (Tier::Exact, true);
     }
-    if t_join.starts_with(&q.norm) {
+    if !q.norm.is_empty() && t.starts_with(&q.norm) {
         return (Tier::TitlePrefix, true);
     }
-    let title_toks = tokens(&t);
-    let mut all_toks = title_toks.clone();
-    for o in others.iter().flatten() {
-        all_toks.extend(tokens(&normalize(o)));
+    let parts = title_parts(title);
+    if parts.len() > 1 && parts.iter().any(|p| canonical(p).starts_with(&q.norm)) {
+        return (Tier::TitlePrefix, true);
     }
-    let hit = |toks: &[String]| q.tokens.iter().all(|qt| toks.iter().any(|w| w.starts_with(qt.as_str())));
-    if hit(&title_toks) {
-        (Tier::WordPrefix, true)
-    } else if hit(&all_toks) {
-        (Tier::WordPrefix, false)
-    } else {
-        (Tier::Fuzzy, false)
+    let t_words: Vec<&str> = t.split(' ').collect();
+    let q_words: Vec<&str> = q.norm.split(' ').collect();
+    if q_words.len() > 1 && has_phrase(&t_words, &q_words) {
+        return (Tier::Phrase, true);
+    }
+    let title_forms = match_forms(title);
+    let in_title = word_hits(q, &title_forms, false);
+    if in_title.iter().all(|h| *h == Hit::Word) {
+        return (Tier::WordPrefix, true);
+    }
+    let mut all_forms = title_forms;
+    for o in others.iter().flatten() {
+        all_forms.extend(match_forms(o));
+    }
+    let hits = word_hits(q, &all_forms, true);
+    let worst = hits.iter().copied().min().unwrap_or(Hit::Word);
+    let tier = match worst {
+        Hit::Word => Tier::WordPrefix,
+        Hit::Typo => Tier::Fuzzy,
+        Hit::Missing => Tier::Partial,
+    };
+    let title_holds = tier != Tier::WordPrefix && word_hits(q, &match_forms(title), true).iter().all(|h| *h != Hit::Missing);
+    (tier, title_holds)
+}
+
+/// Score of each tier, before boosts. Where every word is in the title the
+/// tiers sit close, so plays can carry a song past a never played exact
+/// title; elsewhere they stay 100 apart and boosts (under 60) never cross.
+fn tier_base(tier: Tier, in_title: bool) -> f64 {
+    let title = if in_title { 5.0 } else { 0.0 };
+    match tier {
+        Tier::Exact => 355.0,
+        Tier::TitlePrefix => 330.0,
+        Tier::Phrase => 320.0,
+        Tier::WordPrefix if in_title => 310.0,
+        Tier::WordPrefix => 200.0,
+        Tier::Fuzzy => 100.0 + title,
+        Tier::Partial => title,
     }
 }
 
-/// Final score: tier dominates (×100), boosts stay below 50.
+/// Final score: the tier's base plus boosts for plays, recency and short
+/// titles.
 pub fn score(tier: Tier, in_title: bool, plays: u32, last_viewed: Option<i64>, title_len: usize, now: i64) -> f64 {
     let plays_boost = (6.0 * (1.0 + plays as f64).ln()).min(25.0);
     let recency = match last_viewed {
@@ -258,9 +533,32 @@ pub fn score(tier: Tier, in_title: bool, plays: u32, last_viewed: Option<i64>, t
         }
         None => 0.0,
     };
-    let title_bonus = if in_title { 5.0 } else { 0.0 };
     let len_penalty = (title_len as f64 / 20.0).min(4.0);
-    tier as i32 as f64 * 100.0 + plays_boost + recency + title_bonus - len_penalty
+    tier_base(tier, in_title) + plays_boost + recency - len_penalty
+}
+
+/// Boost for a name holding every query word as typed, not only a variant
+/// of it: "tonite" ranks "Tonite" above "Tonight".
+const SPELLED_BONUS: f64 = 15.0;
+
+/// Up to 5 for a rated song (Plex ratings run 0 to 10).
+fn rating_boost(r: Option<f32>) -> f64 {
+    f64::from(r.unwrap_or(0.0).clamp(0.0, 10.0)) / 2.0
+}
+
+/// Tier, whether the title holds the match, and the spelling bonus.
+fn rate(q: &ParsedQuery, title: &str, others: &[Option<&str>]) -> (Tier, bool, f64) {
+    let (t, in_title) = tier(q, title, others);
+    if t < Tier::WordPrefix {
+        return (t, in_title, 0.0);
+    }
+    let mut forms: Vec<String> = Vec::new();
+    for w in words(title).into_iter().chain(others.iter().flatten().flat_map(|o| words(o))) {
+        forms.extend(w.pieces);
+        forms.push(w.text);
+    }
+    let spelled = q.toks.iter().filter(|t| !t.optional).all(|t| forms.iter().any(|f| f.starts_with(t.text.as_str())));
+    (t, in_title, if spelled { SPELLED_BONUS } else { 0.0 })
 }
 
 struct Scored<T> {
@@ -272,6 +570,18 @@ fn rank<T>(mut v: Vec<Scored<T>>, n: usize) -> Vec<Scored<T>> {
     v.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
     v.truncate(n);
     v
+}
+
+/// Add a later pass's results: one row per item (its best score), best `n`.
+fn merge<T>(into: &mut Vec<Scored<T>>, more: Vec<Scored<T>>, id: fn(&T) -> &str, n: usize) {
+    for s in more {
+        match into.iter_mut().find(|x| id(&x.item) == id(&s.item)) {
+            Some(x) => x.score = x.score.max(s.score),
+            None => into.push(s),
+        }
+    }
+    let v = std::mem::take(into);
+    *into = rank(v, n);
 }
 
 /// Candidate query for one kind. Normal queries take the best bm25 matches;
@@ -299,8 +609,8 @@ fn search_artists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize
     let mut v = Vec::new();
     for a in rows {
         let a = a?;
-        let (t, in_title) = tier(q, &a.title, &[]);
-        let s = score(t, in_title, a.view_count, None, a.title.len(), now) + 3.0;
+        let (t, in_title, bonus) = rate(q, &a.title, &[]);
+        let s = score(t, in_title, a.view_count, None, a.title.len(), now) + bonus + 3.0;
         v.push(Scored { item: a, score: s });
     }
     Ok(rank(v, n))
@@ -330,7 +640,7 @@ fn search_credited(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usiz
                 continue;
             }
             let (t, in_title) = tier(q, &name, &[]);
-            if !in_title || in_library.exists([&name])? {
+            if !in_title || t == Tier::Partial || in_library.exists([&name])? {
                 continue;
             }
             found.push((key, name, plays, t));
@@ -369,8 +679,8 @@ fn search_albums(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize)
     let mut v = Vec::new();
     for a in rows {
         let a = a?;
-        let (t, in_title) = tier(q, &a.title, &[Some(&a.artist_title)]);
-        let s = score(t, in_title, a.view_count, a.last_viewed_at, a.title.len(), now) + 2.0;
+        let (t, in_title, bonus) = rate(q, &a.title, &[Some(&a.artist_title)]);
+        let s = score(t, in_title, a.view_count, a.last_viewed_at, a.title.len(), now) + bonus + 2.0;
         v.push(Scored { item: a, score: s });
     }
     Ok(rank(v, n))
@@ -390,12 +700,12 @@ fn search_tracks(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize)
     let mut v = Vec::new();
     for tr in rows {
         let tr = tr?;
-        let (t, in_title) = tier(
+        let (t, in_title, bonus) = rate(
             q,
             &tr.title,
             &[Some(&tr.artist_title), Some(&tr.album_title), tr.track_artist.as_deref()],
         );
-        let s = score(t, in_title, tr.view_count, tr.last_viewed_at, tr.title.len(), now) + 1.0;
+        let s = score(t, in_title, tr.view_count, tr.last_viewed_at, tr.title.len(), now) + bonus + rating_boost(tr.user_rating) + 1.0;
         v.push(Scored { item: tr, score: s });
     }
     Ok(rank(v, n))
@@ -408,8 +718,8 @@ fn search_playlists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usi
     let mut v = Vec::new();
     for p in rows {
         let p = p?;
-        let (t, in_title) = tier(q, &p.title, &[]);
-        let s = score(t, in_title, 0, None, p.title.len(), now);
+        let (t, in_title, bonus) = rate(q, &p.title, &[]);
+        let s = score(t, in_title, 0, None, p.title.len(), now) + bonus;
         v.push(Scored { item: p, score: s });
     }
     Ok(rank(v, n))
@@ -427,7 +737,93 @@ fn kind_limit(filter: SearchFilter, limit: Option<u32>, kind: SearchFilter, all_
     }
 }
 
-/// Run a search on a read connection. `generation` keys the vocab cache.
+/// One pass's results per kind.
+#[derive(Default)]
+struct Found {
+    artists: Vec<Scored<Artist>>,
+    albums: Vec<Scored<Album>>,
+    songs: Vec<Scored<Track>>,
+    playlists: Vec<Scored<Playlist>>,
+}
+
+impl Found {
+    fn count(&self) -> usize {
+        self.artists.len() + self.albums.len() + self.songs.len() + self.playlists.len()
+    }
+}
+
+/// Per-kind result counts for one search.
+#[derive(Clone, Copy)]
+struct Limits {
+    artists: usize,
+    albums: usize,
+    songs: usize,
+    playlists: usize,
+    credited: bool,
+}
+
+fn run(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, l: Limits) -> AppResult<Found> {
+    let mut f = Found::default();
+    if l.artists > 0 {
+        let mut v = search_artists(c, q, fts, now, l.artists)?;
+        if l.credited {
+            v.extend(search_credited(c, q, fts, now, l.artists)?);
+            v = rank(v, l.artists);
+        }
+        f.artists = v;
+    }
+    if l.albums > 0 {
+        f.albums = search_albums(c, q, fts, now, l.albums)?;
+    }
+    if l.songs > 0 {
+        f.songs = search_tracks(c, q, fts, now, l.songs)?;
+    }
+    if l.playlists > 0 {
+        f.playlists = search_playlists(c, q, fts, now, l.playlists)?;
+    }
+    Ok(f)
+}
+
+fn merge_found(into: &mut Found, more: Found, l: Limits) {
+    merge(&mut into.artists, more.artists, |a| a.id.as_str(), l.artists);
+    merge(&mut into.albums, more.albums, |a| a.id.as_str(), l.albums);
+    merge(&mut into.songs, more.songs, |t| t.id.as_str(), l.songs);
+    merge(&mut into.playlists, more.playlists, |p| p.id.as_str(), l.playlists);
+}
+
+/// True when word `i` can match something in the library: as typed, in a
+/// spelling, or through `extra` (split forms; typos once that pass ran).
+fn in_library(q: &ParsedQuery, i: usize, v: &Vocab, extra: &Extra) -> bool {
+    let t = &q.toks[i];
+    v.has_prefix(&t.text)
+        || searchtext::variants(&t.text).any(|s| v.contains(s))
+        || (t.pieces.len() > 1 && t.pieces.last().is_some_and(|p| v.has_prefix(p)))
+        || extra.alts.get(i).is_some_and(|a| !a.is_empty())
+}
+
+/// The query with each word that matches nothing in the library replaced
+/// by its closest library word; None when no word changed.
+fn correction(q: &ParsedQuery, v: &Vocab, fuzzy: &[Vec<String>], extra: &Extra) -> Option<String> {
+    let mut changed = false;
+    let words: Vec<String> = q
+        .toks
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            match fuzzy.get(i).and_then(|f| f.first()) {
+                Some(best) if !t.optional && !in_library(q, i, v, extra) => {
+                    changed = true;
+                    best.clone()
+                }
+                _ => t.text.clone(),
+            }
+        })
+        .collect();
+    changed.then(|| words.join(" "))
+}
+
+/// Run a search on a read connection. `generation` keys the vocab cache;
+/// `typos` allows the typo fallback.
 // The read connection, its cache keys and the request: one call site.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn search_conn(
@@ -439,38 +835,82 @@ pub(crate) fn search_conn(
     limit: Option<u32>,
     now: i64,
     credited: bool,
+    typos: bool,
 ) -> AppResult<SearchResults> {
     let start = Instant::now();
     let mut out = SearchResults::default();
-
-    // Typo alternatives only for tokens that match nothing as typed.
-    let mut vocab_ref = None;
-    let mut vocab_err = None;
-    let q = parse_query(query, |t| {
-        if t.chars().count() < FUZZY_MIN_CHARS {
-            return Vec::new();
-        }
-        if vocab_ref.is_none() {
-            match vocab.get(c, generation) {
-                Ok(v) => vocab_ref = Some(v),
-                Err(e) => {
-                    vocab_err = Some(e);
-                    return Vec::new();
-                }
-            }
-        }
-        let v = vocab_ref.as_ref().expect("vocab loaded");
-        if v.has_prefix(t) { Vec::new() } else { v.fuzzy(t) }
-    });
-    if let Some(e) = vocab_err {
-        tracing::warn!("search vocab: {e}");
-    }
-    let Some(fts) = q.fts.as_deref() else {
+    let q = parse_query(query);
+    let Some(typed) = q.fts.clone() else {
         out.took_ms = start.elapsed().as_secs_f64() * 1000.0;
         return Ok(out);
     };
+    let l = Limits {
+        artists: kind_limit(filter, limit, SearchFilter::Artists, ALL_SHELF),
+        albums: kind_limit(filter, limit, SearchFilter::Albums, ALL_SHELF),
+        songs: kind_limit(filter, limit, SearchFilter::Songs, ALL_SONGS),
+        playlists: kind_limit(filter, limit, SearchFilter::Playlists, ALL_SHELF),
+        credited,
+    };
 
-    let n_for = |kind: SearchFilter, all_n: usize| kind_limit(filter, limit, kind, all_n);
+    let vocab = if q.short {
+        None
+    } else {
+        vocab.get(c, generation).map_err(|e| tracing::warn!("search vocab: {e}")).ok()
+    };
+    // Pass 1: the words as typed, their spellings, and the forms the index
+    // splits or joins differently.
+    let mut extra = Extra::default();
+    if let Some(v) = &vocab {
+        extra.alts = q.toks.iter().map(|t| if t.pieces.len() > 1 { Vec::new() } else { v.splits(&t.text) }).collect();
+        extra.joins = q.toks.windows(2).map(|w| v.has_prefix(&format!("{}{}", w[0].text, w[1].text))).collect();
+    }
+    let fts = if q.short { typed } else { build_fts(&q, &extra).unwrap_or(typed) };
+    let mut found = run(c, &q, &fts, now, l)?;
+
+    // Pass 2: typos, only when the words as typed found little.
+    if let (true, Some(v)) = (typos && found.count() < FUZZY_BELOW, &vocab) {
+        let fuzzy: Vec<Vec<String>> = q
+            .toks
+            .iter()
+            .map(|t| if t.optional { Vec::new() } else { v.fuzzy(&t.text, max_typos(t.text.chars().count())) })
+            .collect();
+        if fuzzy.iter().any(|f| !f.is_empty()) {
+            let mut wide = extra.clone();
+            for (i, f) in fuzzy.iter().enumerate() {
+                if let Some(a) = wide.alts.get_mut(i) {
+                    a.extend(f.iter().cloned());
+                }
+            }
+            let before = found.count();
+            if let Some(e) = build_fts(&q, &wide) {
+                let more = run(c, &q, &e, now, l)?;
+                merge_found(&mut found, more, l);
+            }
+            if found.count() > before {
+                out.corrected = correction(&q, v, &fuzzy, &extra);
+            }
+            extra = wide;
+        }
+    }
+
+    // Pass 3, when nothing matched every word: leave out the words the
+    // library has nowhere (in any spelling); failing that, one word at a time.
+    if found.count() == 0 && !q.short {
+        let unknown: Vec<usize> = match &vocab {
+            Some(v) => (0..q.toks.len()).filter(|&i| !q.toks[i].optional && !in_library(&q, i, v, &extra)).collect(),
+            None => Vec::new(),
+        };
+        let some_left = q.toks.iter().enumerate().any(|(i, t)| !t.optional && !unknown.contains(&i));
+        let e = if !unknown.is_empty() && some_left {
+            build_fts(&q, &Extra { skip: unknown, ..extra.clone() })
+        } else {
+            drop_one_fts(&q, &extra)
+        };
+        if let Some(e) = e {
+            let more = run(c, &q, &e, now, l)?;
+            merge_found(&mut found, more, l);
+        }
+    }
 
     let mut top: Option<(f64, SearchHit)> = None;
     let mut consider = |score: f64, hit: SearchHit| {
@@ -478,43 +918,23 @@ pub(crate) fn search_conn(
             top = Some((score, hit));
         }
     };
-
-    let n = n_for(SearchFilter::Artists, ALL_SHELF);
-    if n > 0 {
-        let mut v = search_artists(c, &q, fts, now, n)?;
-        if credited {
-            v.extend(search_credited(c, &q, fts, now, n)?);
-            v = rank(v, n);
-        }
-        if let Some(f) = v.first() {
-            consider(f.score, SearchHit { kind: SearchKind::Artist, artist: Some(f.item.clone()), album: None, track: None, playlist: None });
-        }
-        out.artists = v.into_iter().map(|s| s.item).collect();
+    let hit = |kind| SearchHit { kind, artist: None, album: None, track: None, playlist: None };
+    if let Some(f) = found.artists.first() {
+        consider(f.score, SearchHit { artist: Some(f.item.clone()), ..hit(SearchKind::Artist) });
     }
-    let n = n_for(SearchFilter::Albums, ALL_SHELF);
-    if n > 0 {
-        let v = search_albums(c, &q, fts, now, n)?;
-        if let Some(f) = v.first() {
-            consider(f.score, SearchHit { kind: SearchKind::Album, artist: None, album: Some(f.item.clone()), track: None, playlist: None });
-        }
-        out.albums = v.into_iter().map(|s| s.item).collect();
+    if let Some(f) = found.albums.first() {
+        consider(f.score, SearchHit { album: Some(f.item.clone()), ..hit(SearchKind::Album) });
     }
-    let n = n_for(SearchFilter::Songs, ALL_SONGS);
-    if n > 0 {
-        let v = search_tracks(c, &q, fts, now, n)?;
-        if let Some(f) = v.first() {
-            consider(f.score, SearchHit { kind: SearchKind::Track, artist: None, album: None, track: Some(f.item.clone()), playlist: None });
-        }
-        out.songs = v.into_iter().map(|s| s.item).collect();
+    if let Some(f) = found.songs.first() {
+        consider(f.score, SearchHit { track: Some(f.item.clone()), ..hit(SearchKind::Track) });
     }
-    let n = n_for(SearchFilter::Playlists, ALL_SHELF);
-    if n > 0 {
-        let v = search_playlists(c, &q, fts, now, n)?;
-        if let Some(f) = v.first() {
-            consider(f.score, SearchHit { kind: SearchKind::Playlist, artist: None, album: None, track: None, playlist: Some(f.item.clone()) });
-        }
-        out.playlists = v.into_iter().map(|s| s.item).collect();
+    if let Some(f) = found.playlists.first() {
+        consider(f.score, SearchHit { playlist: Some(f.item.clone()), ..hit(SearchKind::Playlist) });
     }
+    out.artists = found.artists.into_iter().map(|s| s.item).collect();
+    out.albums = found.albums.into_iter().map(|s| s.item).collect();
+    out.songs = found.songs.into_iter().map(|s| s.item).collect();
+    out.playlists = found.playlists.into_iter().map(|s| s.item).collect();
     if filter == SearchFilter::All {
         out.top = top.map(|(_, h)| h);
     }
@@ -531,7 +951,8 @@ pub(crate) fn warm(db: &DbHandle, c: &Connection) -> AppResult<()> {
 pub fn search(db: &DbHandle, query: &str, filter: SearchFilter, limit: Option<u32>) -> AppResult<SearchResults> {
     let generation = db.generation();
     let credited = db.link_featured();
-    db.read(|c| search_conn(c, &db.inner.vocab, generation, query, filter, limit, now_s(), credited))
+    let typos = db.search_typos();
+    db.read(|c| search_conn(c, &db.inner.vocab, generation, query, filter, limit, now_s(), credited, typos))
 }
 
 // ---------------------------------------------------------------- server fallback
@@ -551,7 +972,7 @@ pub fn rank_remote(
     now: i64,
 ) -> SearchResults {
     let start = Instant::now();
-    let q = parse_query(query, |_| Vec::new());
+    let q = parse_query(query);
     let mut out = SearchResults { source: SearchSource::Server, ..Default::default() };
     if q.fts.is_none() {
         return out;
@@ -569,8 +990,8 @@ pub fn rank_remote(
         hits.artists
             .into_iter()
             .map(|a| {
-                let (t, in_title) = tier(&q, &a.title, &[]);
-                let score = score(t, in_title, a.view_count, None, a.title.len(), now) + 3.0;
+                let (t, in_title, bonus) = rate(&q, &a.title, &[]);
+                let score = score(t, in_title, a.view_count, None, a.title.len(), now) + bonus + 3.0;
                 Scored { item: a, score }
             })
             .collect(),
@@ -583,8 +1004,8 @@ pub fn rank_remote(
         hits.albums
             .into_iter()
             .map(|a| {
-                let (t, in_title) = tier(&q, &a.title, &[Some(&a.artist_title)]);
-                let score = score(t, in_title, a.view_count, a.last_viewed_at, a.title.len(), now) + 2.0;
+                let (t, in_title, bonus) = rate(&q, &a.title, &[Some(&a.artist_title)]);
+                let score = score(t, in_title, a.view_count, a.last_viewed_at, a.title.len(), now) + bonus + 2.0;
                 Scored { item: a, score }
             })
             .collect(),
@@ -597,12 +1018,12 @@ pub fn rank_remote(
         hits.tracks
             .into_iter()
             .map(|tr| {
-                let (t, in_title) = tier(
+                let (t, in_title, bonus) = rate(
                     &q,
                     &tr.title,
                     &[Some(&tr.artist_title), Some(&tr.album_title), tr.track_artist.as_deref()],
                 );
-                let score = score(t, in_title, tr.view_count, tr.last_viewed_at, tr.title.len(), now) + 1.0;
+                let score = score(t, in_title, tr.view_count, tr.last_viewed_at, tr.title.len(), now) + bonus + rating_boost(tr.user_rating) + 1.0;
                 Scored { item: tr, score }
             })
             .collect(),
@@ -615,8 +1036,8 @@ pub fn rank_remote(
         hits.playlists
             .into_iter()
             .map(|p| {
-                let (t, in_title) = tier(&q, &p.title, &[]);
-                let score = score(t, in_title, 0, None, p.title.len(), now);
+                let (t, in_title, bonus) = rate(&q, &p.title, &[]);
+                let score = score(t, in_title, 0, None, p.title.len(), now) + bonus;
                 Scored { item: p, score }
             })
             .collect(),
@@ -650,7 +1071,7 @@ pub async fn search_with_fallback(
             .await
             .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
     };
-    let has_terms = parse_query(query, |_| Vec::new()).fts.is_some();
+    let has_terms = parse_query(query).fts.is_some();
     let remote = db.remote_search().filter(|_| has_terms);
     let Some(remote) = remote else {
         return local(db.clone(), query.to_string()).await;
@@ -691,12 +1112,13 @@ const COMPLETION_CANDIDATES: i64 = 24;
 /// Playlist names are left out: a completion runs a search, and a playlist
 /// name rarely finds more than the playlist itself.
 pub fn completions(c: &Connection, query: &str, limit: usize) -> AppResult<Vec<String>> {
-    let q = parse_query(query, |_| Vec::new());
-    if q.fts.is_none() || limit == 0 {
+    let q = parse_query(query);
+    let pieces: Vec<&str> = q.toks.iter().flat_map(|t| t.pieces.iter().map(String::as_str)).collect();
+    if q.fts.is_none() || pieces.is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
     // A phrase anchored at the start of the title, its last word a prefix.
-    let fts = format!("title : ^{}*", quote(&q.tokens.join(" ")));
+    let fts = format!("title : ^{}*", quote(&pieces.join(" ")));
     let mut cands: Vec<(String, u32)> = Vec::new();
     for table in ["artists", "albums", "tracks"] {
         let sql = format!(
@@ -716,7 +1138,7 @@ pub fn completions(c: &Connection, query: &str, limit: usize) -> AppResult<Vec<S
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for (title, _) in cands {
-        let norm = tokens(&normalize(&title)).join(" ");
+        let norm = canonical(&title);
         if !norm.starts_with(&q.norm) || !seen.insert(norm) {
             continue;
         }
@@ -840,36 +1262,87 @@ mod tests {
     fn normalizes_diacritics_and_case() {
         assert_eq!(normalize("Beyoncé"), "beyonce");
         assert_eq!(normalize("Sigur Rós"), "sigur ros");
-        assert_eq!(tokens(&normalize("AC/DC — Back in Black!")), vec!["ac", "dc", "back", "in", "black"]);
+        assert_eq!(tokens(&normalize("XY/ZW, Back in Blue!")), vec!["xy", "zw", "back", "in", "blue"]);
     }
 
     #[test]
     fn parse_neutralizes_fts_syntax() {
-        let none = |_: &str| Vec::new();
-        for raw in ["\"", "*", "-", "NEAR(a b)", "a OR b", "title:x", "(((", "^a", "a + b", "\"unterminated", "NOT", "--"] {
-            let q = parse_query(raw, none);
+        // Outside the quotes only our own syntax is left: parentheses, `*`
+        // and OR; inside, only folded word characters.
+        fn safe(f: &str) -> bool {
+            let mut outside = String::new();
+            for (i, part) in f.split('"').enumerate() {
+                if i % 2 == 1 {
+                    if !part.chars().all(|c| c.is_alphanumeric() || c == ' ') {
+                        return false;
+                    }
+                } else {
+                    outside.push_str(part);
+                }
+            }
+            outside.replace("OR", "").replace("AND", "").chars().all(|c| matches!(c, '(' | ')' | '*' | ' '))
+        }
+        for raw in ["\"", "*", "-", "NEAR(a b)", "a OR b", "title:x", "(((", "^a", "a + b", "\"unterminated", "NOT", "--", "x & y"] {
+            let q = parse_query(raw);
             if q.short {
                 assert_eq!(q.fts.as_deref(), Some(format!("title : ^\"{}\"*", q.tokens[0]).as_str()));
             } else if let Some(f) = &q.fts {
-                // Every token is quoted; only our own syntax remains.
-                for g in f.split(' ') {
-                    assert!(g.starts_with('"') && g.ends_with("\"*"), "{raw} → {f}");
-                }
+                assert!(safe(f), "{raw} → {f}");
             }
         }
-        assert_eq!(parse_query("", none).fts, None);
-        assert_eq!(parse_query("   --- ", none).fts, None);
-        let q = parse_query("Beyoncé halo", none);
-        assert_eq!(q.fts.as_deref(), Some("\"beyonce\"* \"halo\"*"));
-        let q = parse_query("beatls", |_| vec!["beatles".into()]);
-        assert_eq!(q.fts.as_deref(), Some("(\"beatls\"* OR \"beatles\")"));
-        let q = parse_query("Ré", none);
+        assert_eq!(parse_query("").fts, None);
+        assert_eq!(parse_query("   --- ").fts, None);
+        assert_eq!(parse_query(" & ").fts, None);
+        let q = parse_query("Beyoncé halo");
+        assert_eq!(q.fts.as_deref(), Some("\"beyonce\"* AND \"halo\"*"));
+        let q = parse_query("thru the nite");
+        assert_eq!(q.fts.as_deref(), Some("(\"thru\"* OR \"through\") AND (\"nite\"* OR \"night\")"));
+        assert_eq!(q.norm, "through the night");
+        let q = parse_query("don't");
+        assert_eq!(q.fts.as_deref(), Some("(\"dont\"* OR \"don t\"*)"));
+        // "and" (or "&") between words is not required; as the last word it
+        // may be the start of another word.
+        let q = parse_query("salt & pepper");
+        assert_eq!(q.fts.as_deref(), Some("\"salt\"* AND \"pepper\"*"));
+        assert!(parse_query("rock and").fts.unwrap().contains("\"and\"*"));
+        let q = parse_query("beatls");
+        let e = Extra { alts: vec![vec!["beatles".into()]], ..Default::default() };
+        assert_eq!(build_fts(&q, &e).as_deref(), Some("(\"beatls\"* OR \"beatles\")"));
+        let q = parse_query("kay q");
+        let e = Extra { joins: vec![true], ..Default::default() };
+        assert_eq!(build_fts(&q, &e).as_deref(), Some("((\"kay\"* AND \"q\"*) OR \"kayq\"*)"));
+        let q = parse_query("red sky blue");
+        assert_eq!(drop_one_fts(&q, &Extra::default()).as_deref(), Some("(\"sky\"* AND \"blue\"*) OR (\"red\"* AND \"blue\"*) OR (\"red\"* AND \"sky\"*)"));
+        // Small words between others are not required.
+        assert_eq!(parse_query("the sky of blue").fts.as_deref(), Some("\"sky\"* AND \"blue\"*"));
+        let q = parse_query("Ré");
         assert!(q.short);
         assert_eq!(q.fts.as_deref(), Some("title : ^\"re\"*"));
-        assert!(!parse_query("ab cd", none).short);
+        assert!(!parse_query("ab cd").short);
         let long = "a".repeat(10_000);
-        let q = parse_query(&long, none);
+        let q = parse_query(&long);
         assert!(q.tokens[0].chars().count() <= MAX_TOKEN_CHARS);
+    }
+
+    #[test]
+    fn tiers_follow_spellings_parts_and_phrases() {
+        let q = parse_query("thru the high");
+        assert_eq!(tier(&q, "Through the High Grass", &[]).0, Tier::TitlePrefix);
+        assert_eq!(tier(&q, "Through The High", &[]).0, Tier::Exact);
+        let q = parse_query("this one here");
+        assert_eq!(tier(&q, "And They Came Back / This One Here", &[]).0, Tier::TitlePrefix);
+        assert_eq!(tier(&q, "Was This the One Here", &[]).0, Tier::WordPrefix);
+        assert_eq!(tier(&q, "Oh This One Here Again", &[]).0, Tier::Phrase);
+        let q = parse_query("hold lemonaed");
+        assert_eq!(tier(&q, "Hold Lemonade", &[]).0, Tier::Fuzzy);
+        let q = parse_query("hold nothing");
+        assert_eq!(tier(&q, "Hold Up", &[]).0, Tier::Partial);
+        let q = parse_query("kay q");
+        assert_eq!(tier(&q, "Kayq", &[]).0, Tier::WordPrefix);
+        let q = parse_query("risky");
+        assert_eq!(tier(&q, "Ri$ky", &[]).0, Tier::Exact);
+        assert!(Tier::Exact > Tier::TitlePrefix && Tier::TitlePrefix > Tier::Phrase && Tier::Phrase > Tier::WordPrefix);
+        assert!(Tier::WordPrefix > Tier::Fuzzy && Tier::Fuzzy > Tier::Partial);
     }
 
     #[test]
@@ -879,8 +1352,14 @@ mod tests {
         let prefix_cold = score(Tier::WordPrefix, false, 0, None, 200, now);
         assert!(prefix_cold > fuzzy_hot);
         let exact = score(Tier::Exact, true, 0, None, 50, now);
-        let title_prefix_hot = score(Tier::TitlePrefix, true, 100_000, Some(now), 1, now);
-        assert!(exact > title_prefix_hot);
+        let title_prefix_warm = score(Tier::TitlePrefix, true, 40, None, 50, now);
+        assert!(exact > title_prefix_warm);
+        // Where every word is in the title, a much played song can pass a
+        // never played exact title.
+        let title_prefix_hot = score(Tier::TitlePrefix, true, 100_000, Some(now), 50, now);
+        assert!(title_prefix_hot > exact);
+        let elsewhere_hot = score(Tier::WordPrefix, false, 100_000, Some(now), 1, now) + SPELLED_BONUS + 5.0 + 3.0;
+        assert!(score(Tier::WordPrefix, true, 0, None, 200, now) > elsewhere_hot);
         assert!(score(Tier::Exact, true, 50, None, 5, now) > score(Tier::Exact, true, 0, None, 5, now));
     }
 }

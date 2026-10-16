@@ -2318,7 +2318,7 @@ control port requests are signed with the account key like the others.
 ## Search
 | Command | Args | Returns |
 | --- | --- | --- |
-| `search` | `{ query, filter: "all"|"songs"|"artists"|"albums"|"playlists", limit? }` | `SearchResults { top?: SearchHit, songs: Track[], artists: Artist[], albums: Album[], playlists: Playlist[], tookMs, source: "local"|"server" }` |
+| `search` | `{ query, filter: "all"|"songs"|"artists"|"albums"|"playlists", limit? }` | `SearchResults { top?: SearchHit, songs: Track[], artists: Artist[], albums: Album[], playlists: Playlist[], tookMs, source: "local"|"server", corrected?: string }` |
 | `search_completions` | `{ query, limit? }` | `string[]` |
 | `search_recents` | – | `SearchHit[]` |
 | `search_recent_add` | `{ kind, id }` | – |
@@ -2334,6 +2334,23 @@ cache. After the first sync, search never touches the network.
 
 With filter `all`, `limit` applies to every kind; without it, All returns
 four songs and ten of each other kind.
+
+Matching is forgiving (`db/searchtext.rs` holds the rules and the table of
+spellings): case, accents, apostrophes and most punctuation fold away, "$"
+inside a word reads as "s", "&" and "+" as "and", and shorthand matches its
+long form both ways (thru/through, tho/though, nite/night, tonite/tonight,
+lite/light, u/you, ur/your, n/and, w/with, pt/part, vol/volume,
+ft/feat/featuring, no/number, 1 to 10 as digits, words and roman numerals
+II to X). Words match in any order, each as a prefix; "and" and small words
+like "the" between others are not required. Titles split on " / ", " - "
+and "+" rank a match on one part like a title match.
+
+When the words as typed find fewer than five results, words of five or more
+letters also match library words one letter off (wrong, missing, extra or
+swapped), ranked below the rest; `corrected` then holds the query with the
+fix, which the search box offers as its first suggestion. Setting
+`searchTypos` turns this off. When nothing matches every word, words the
+library has nowhere are left out (else one word at a time), ranked lowest.
 
 `search_completions` returns up to `limit` (default 4, at most 10) whole
 artist, album and track names that start with the typed words, most played
@@ -2834,6 +2851,7 @@ The rest of the fields, with their defaults:
 | `homeShortcuts` | bool, true | Home shows the grid of recent and most played shortcuts. |
 | `homeColourWash` | bool, true | Home's top takes its colour from the shortcuts' artwork. Only applies while `artworkColours` is on. |
 | `searchSuggestions` | bool, true | Show completions and direct results under the search box while typing. |
+| `searchTypos` | bool, true | Search also shows matches one letter off when the words as typed find little ("Forgive typos in search"). |
 | `searchRecents` | bool, true | Show items opened from search when the empty search box is focused, and remember new ones. |
 | `mediaSession` | bool, true | Show the current track in the system media controls (the Windows media flyout and lock screen, macOS Now Playing) and take play, pause, next, previous and seek from them. |
 | `mediaKeys` | bool, true | Hardware media keys control Platter in the background. While `mediaSession` is on the OS sends the keys to that session; with it off, Platter registers the keys itself. |

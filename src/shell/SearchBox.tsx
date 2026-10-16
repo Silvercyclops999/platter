@@ -227,7 +227,8 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
     Promise.all([backend.searchCompletions(q, 4), backend.search({ query: q, filter: "all", limit: 4 })]).then(
       ([c, res]) => {
         if (mine !== seq.current) return;
-        setCompletions(uniqueCompletions(c));
+        // A corrected spelling leads the suggestions; the results already follow it.
+        setCompletions(uniqueCompletions(res.corrected ? [res.corrected, ...c] : c).slice(0, 4));
         setHits(dropdownHits(res));
       },
       () => {

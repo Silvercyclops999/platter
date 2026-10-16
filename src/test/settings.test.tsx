@@ -72,6 +72,7 @@ describe("settings page", () => {
     expect(screen.getByRole("combobox", { name: "Artwork and cache size" })).toHaveValue("2048");
     expect(screen.getByRole("switch", { name: "Artwork colours" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Show suggestions as you type" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Forgive typos in search" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Remember recent searches" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("button", { name: "Clear recent searches" })).toBeEnabled();
     expect(screen.getByRole("combobox", { name: "Reduce motion" })).toHaveValue("system");
@@ -199,6 +200,8 @@ describe("settings page", () => {
     expect(set).toHaveBeenCalledWith({ resumeContexts: false });
     await user.click(screen.getByRole("switch", { name: "Artwork colours" }));
     expect(set).toHaveBeenCalledWith({ artworkColours: false });
+    await user.click(screen.getByRole("switch", { name: "Forgive typos in search" }));
+    expect(set).toHaveBeenCalledWith({ searchTypos: false });
 
     // A fresh load reads the stored values back.
     useSettings.setState({ settings: null });

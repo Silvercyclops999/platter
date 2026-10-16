@@ -240,6 +240,8 @@ pub struct Settings {
     pub home_colour_wash: bool,
     /// Show completions and direct results under the search box as you type.
     pub search_suggestions: bool,
+    /// Search also shows close spellings when the words as typed find little.
+    pub search_typos: bool,
     /// Remember items opened from search (shown when the empty box is focused).
     pub search_recents: bool,
     /// Media keys work while Platter is in the background.
@@ -755,6 +757,7 @@ impl Default for Settings {
             home_shortcuts: true,
             home_colour_wash: true,
             search_suggestions: true,
+            search_typos: true,
             search_recents: true,
             media_keys: true,
             media_session: true,
@@ -966,6 +969,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "homeShortcuts",
     "homeColourWash",
     "searchSuggestions",
+    "searchTypos",
     "abLoopHandles",
     "upNextLine",
     "volumePercent",
@@ -1194,6 +1198,7 @@ pub struct SettingsPatch {
     pub home_shortcuts: Option<bool>,
     pub home_colour_wash: Option<bool>,
     pub search_suggestions: Option<bool>,
+    pub search_typos: Option<bool>,
     pub search_recents: Option<bool>,
     pub media_keys: Option<bool>,
     pub media_session: Option<bool>,
@@ -1463,6 +1468,7 @@ impl Settings {
         set(&mut self.home_shortcuts, p.home_shortcuts);
         set(&mut self.home_colour_wash, p.home_colour_wash);
         set(&mut self.search_suggestions, p.search_suggestions);
+        set(&mut self.search_typos, p.search_typos);
         set(&mut self.search_recents, p.search_recents);
         set(&mut self.media_keys, p.media_keys);
         set(&mut self.media_session, p.media_session);
@@ -2096,6 +2102,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     // Global with no source for it on quietly ranks by plays.
     db.set_popular_source(if s.info_listenbrainz || s.info_lastfm { s.popular_source } else { PopularSource::MyPlays });
     db.set_link_featured(s.link_featured);
+    db.set_search_typos(s.search_typos);
     db.set_server_view(crate::db::merge::ServerView::parse(&s.server_view));
     if let Some(plex) = &live.plex {
         let plex_extras = crate::libraries::extra_libraries(plex, &s.libraries);
@@ -2480,7 +2487,7 @@ mod tests {
         assert_eq!(s.popular_source, PopularSource::Global);
         assert_eq!(s.art_cache_mb, 2048);
         assert_eq!(s.reduce_motion, ReduceMotion::System);
-        assert!(s.search_suggestions && s.search_recents);
+        assert!(s.search_suggestions && s.search_typos && s.search_recents);
         assert!(s.media_keys && s.media_session && !s.close_to_tray && !s.launch_at_login);
         assert!(s.ab_loop_handles && s.up_next_line && s.volume_percent);
         assert!(!s.notify_track_change);
@@ -3430,6 +3437,9 @@ mod tests {
         assert_eq!(db.popular_source(), PopularSource::Global);
         st.set(SettingsPatch { link_featured: Some(false), ..Default::default() }).await.unwrap();
         assert!(!db.link_featured());
+        assert!(db.search_typos());
+        st.set(SettingsPatch { search_typos: Some(false), ..Default::default() }).await.unwrap();
+        assert!(!db.search_typos());
     }
 
     #[test]

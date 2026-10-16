@@ -36,6 +36,7 @@ pub mod queries;
 pub mod release;
 pub mod schema;
 pub mod search;
+pub mod searchtext;
 pub mod similar;
 pub mod source;
 pub mod store;
@@ -94,6 +95,7 @@ struct Inner {
     popular_by_plays: AtomicBool,
     /// Names in track lines without a library artist get pages (Settings).
     link_featured: AtomicBool,
+    search_typos: AtomicBool,
     /// How file tags shape the library (`tags::TagView` bits, Settings).
     tag_view: AtomicU8,
     /// Artist ids with a similar-artists fetch in flight (db::similar).
@@ -133,6 +135,7 @@ impl DbHandle {
                 vocab: search::VocabCache::default(),
                 popular_by_plays: AtomicBool::new(false),
                 link_featured: AtomicBool::new(true),
+                search_typos: AtomicBool::new(true),
                 tag_view: AtomicU8::new(crate::tags::TagView::default().bits()),
                 similar_in_flight: Mutex::new(HashSet::new()),
                 extra: Mutex::new(Vec::new()),
@@ -256,6 +259,15 @@ impl DbHandle {
 
     pub fn link_featured(&self) -> bool {
         self.inner.link_featured.load(Ordering::Acquire)
+    }
+
+    /// Search falls back to close spellings when the words as typed find little.
+    pub fn set_search_typos(&self, on: bool) {
+        self.inner.search_typos.store(on, Ordering::Release);
+    }
+
+    pub fn search_typos(&self) -> bool {
+        self.inner.search_typos.load(Ordering::Acquire)
     }
 
     /// How file tags shape lists and play contexts (from Settings).

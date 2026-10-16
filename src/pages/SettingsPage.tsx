@@ -1067,6 +1067,13 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "searchSuggestions", ids),
     },
     {
+      key: "searchTypos",
+      section: "Search",
+      title: "Forgive typos in search",
+      description: "When the words as typed find little, search also shows close spellings, below the exact matches.",
+      control: (ids) => toggle(s, "searchTypos", ids),
+    },
+    {
       key: "searchRecents",
       section: "Search",
       title: "Remember recent searches",

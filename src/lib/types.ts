@@ -635,6 +635,8 @@ export interface SearchResults {
   source: "local" | "server";
   /** Other versions of songs in `songs`, under the song's id. */
   versions?: Record<string, Track[]>;
+  /** The query with a typo corrected, when the typo fallback found the results (a dropdown suggestion). */
+  corrected?: string | null;
 }
 
 // ---------------------------------------------------------------- playback & queue
@@ -832,6 +834,8 @@ export interface Settings {
   homeColourWash: boolean;
   /** Completions and direct results under the search box while typing. */
   searchSuggestions: boolean;
+  /** Search forgives typos when the words as typed find little. */
+  searchTypos: boolean;
   /** Remember items opened from search (shown when the empty box is focused). */
   searchRecents: boolean;
   /** Media keys work while Platter is in the background. This device only. */
@@ -1331,6 +1335,7 @@ export const DEFAULT_SETTINGS: Settings = {
   homeShortcuts: true,
   homeColourWash: true,
   searchSuggestions: true,
+  searchTypos: true,
   searchRecents: true,
   mediaKeys: true,
   mediaSession: true,

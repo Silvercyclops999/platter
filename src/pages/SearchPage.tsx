@@ -313,8 +313,8 @@ export function SearchPage({ query }: { query: string }) {
       ) : empty ? (
         <>
           <div className="sr-empty">
-            <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}” in your library</h2>
-            <p>Check the spelling, or try fewer or different keywords.</p>
+            <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
+            <p>Check the spelling or try fewer words.</p>
           </div>
           <SearchCatalogue query={q} filter={filter} localCount={0} />
         </>

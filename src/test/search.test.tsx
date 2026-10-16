@@ -141,6 +141,21 @@ describe("results page", () => {
     expect(await screen.findByRole("heading", { name: "Search isn't available right now" })).toBeInTheDocument();
   });
 
+  it("shows typo matches silently, with no correction line", async () => {
+    vi.spyOn(backend, "search").mockResolvedValue({ ...results(["Through the Haze"]), corrected: "through the haze" });
+    render(<SearchPage query="thru the hzae" />);
+    expect(await screen.findByRole("listitem", { name: /^Through the Haze, Song/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Showing results for|Search instead for/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /No results for/ })).not.toBeInTheDocument();
+  });
+
+  it("says no results only when even the fallbacks found nothing", async () => {
+    vi.spyOn(backend, "search").mockResolvedValue(results([]));
+    render(<SearchPage query="qqzzx" />);
+    expect(await screen.findByRole("heading", { name: "No results for “qqzzx”" })).toBeInTheDocument();
+    expect(screen.getByText("Check the spelling or try fewer words.")).toBeInTheDocument();
+  });
+
   it("opening a result remembers it as a recent search", async () => {
     const add = vi.spyOn(backend, "searchRecentAdd");
     const user = userEvent.setup();
@@ -228,6 +243,21 @@ describe("search box dropdown", () => {
     expect(hits[0]).toHaveAccessibleName(/, Artist$/);
     // Completions come first.
     expect(rows.indexOf(completions[completions.length - 1])).toBeLessThan(rows.indexOf(hits[0]));
+  });
+
+  it("a corrected spelling leads the suggestions and searches it when picked", async () => {
+    vi.spyOn(backend, "searchCompletions").mockResolvedValue(["Wandering Home"]);
+    vi.spyOn(backend, "search").mockResolvedValue({ ...results(["Wanderlust"]), corrected: "wanderlust" });
+    const user = userEvent.setup();
+    render(<Host />);
+    await user.click(box());
+    await user.type(box(), "wanderlsut");
+    await waitFor(() => expect(options().length).toBeGreaterThan(2));
+    const completions = options().filter((r) => r.classList.contains("searchbox__row--completion"));
+    expect(completions.map((c) => c.textContent)).toEqual(["wanderlust", "Wandering Home"]);
+    expect(options().some((o) => /^Wanderlust, Song/.test(o.getAttribute("aria-label") ?? ""))).toBe(true);
+    await user.click(completions[0]);
+    expect(route()).toEqual({ name: "search", query: "wanderlust" });
   });
 
   it("with suggestions off, typing shows no dropdown", async () => {
