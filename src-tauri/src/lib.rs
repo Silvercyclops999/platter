@@ -731,6 +731,11 @@ pub fn run() {
                 status: Arc::new(lidarr::provenance::TagStatus),
             });
             tauri::async_runtime::spawn(lidarr::upgrade::watch(upgrades.clone()));
+            // Managed and protected artists: catching up with what Lidarr did,
+            // adding protected albums from staging, and telling the user.
+            lidarr_service.set_hosts(Arc::new(lidarr::upgrade::DesktopHosts { db: db.clone() }));
+            lidarr_service.set_announcer(Arc::new(lidarr::commands::AppAnnouncer { app: app.handle().clone(), plex: plex.clone() }));
+            tauri::async_runtime::spawn(lidarr::catchup::watch(lidarr_service.clone()));
             app.manage(upgrades);
             let radar_lidarr = lidarr_service.clone();
             let discover_lidarr = lidarr_service.clone();
@@ -1496,6 +1501,23 @@ pub fn run() {
             lidarr::commands::lidarr_upgrade_confirm,
             lidarr::commands::lidarr_allowlist,
             lidarr::commands::lidarr_allowlist_set,
+            lidarr::commands::lidarr_modes,
+            lidarr::commands::lidarr_mode_set,
+            lidarr::commands::lidarr_artist_choices,
+            lidarr::commands::lidarr_artist_choices_set,
+            lidarr::commands::lidarr_change_preview,
+            lidarr::commands::lidarr_hires_preview,
+            lidarr::commands::lidarr_change_apply,
+            lidarr::commands::lidarr_changes,
+            lidarr::commands::lidarr_change_put_back,
+            lidarr::commands::lidarr_rematch_preview,
+            lidarr::commands::lidarr_rematch_apply,
+            lidarr::commands::lidarr_work,
+            lidarr::commands::lidarr_catch_up,
+            lidarr::commands::lidarr_resume_protected,
+            lidarr::commands::lidarr_staged_add,
+            lidarr::commands::lidarr_staged_undo,
+            lidarr::commands::lidarr_hunt,
             lidarr::commands::music_share_get,
             lidarr::commands::music_share_set,
             lidarr::commands::music_share_plex_folders,

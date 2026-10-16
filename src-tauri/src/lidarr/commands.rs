@@ -196,3 +196,155 @@ pub async fn lidarr_allowlist(lidarr: State<'_, Lidarr>, artist: String, artist_
 pub async fn lidarr_allowlist_set(lidarr: State<'_, Lidarr>, artist: String, artist_id: Option<String>, release_group_ids: Vec<String>) -> AppResult<Vec<String>> {
     lidarr.set_allowlist(&artist, artist_id.as_deref(), release_group_ids).await
 }
+
+// ---------------------------------------------------------------- modes and work
+
+/// Every artist's mode, with why.
+#[tauri::command]
+pub async fn lidarr_modes(lidarr: State<'_, Lidarr>) -> AppResult<Vec<super::modes::ArtistMode>> {
+    lidarr.modes_now().await
+}
+
+/// Set an artist's mode; Managed needs `confirmations` of 2.
+#[tauri::command]
+pub async fn lidarr_mode_set(
+    lidarr: State<'_, Lidarr>,
+    key: String,
+    name: String,
+    mode: super::modes::ModeSetting,
+    confirmations: u8,
+) -> AppResult<super::modes::ArtistPrefs> {
+    let l = lidarr.inner().clone();
+    blocking(move || l.set_mode(&key, &name, mode, confirmations)).await
+}
+
+/// An artist's choices: add new albums on their own, look for better copies.
+#[tauri::command]
+pub async fn lidarr_artist_choices_set(
+    lidarr: State<'_, Lidarr>,
+    key: String,
+    name: String,
+    auto_add: Option<bool>,
+    hunt: bool,
+    target: super::modes::Target,
+) -> AppResult<super::modes::ArtistPrefs> {
+    let l = lidarr.inner().clone();
+    blocking(move || l.set_artist_choices(&key, &name, auto_add, hunt, target)).await
+}
+
+/// Every artist's choices, by key.
+#[tauri::command]
+pub async fn lidarr_artist_choices(lidarr: State<'_, Lidarr>) -> AppResult<std::collections::HashMap<String, super::modes::ArtistPrefs>> {
+    let l = lidarr.inner().clone();
+    blocking(move || Ok(l.artist_prefs())).await
+}
+
+/// Show what a fix would change (reads only).
+#[tauri::command]
+pub async fn lidarr_change_preview(lidarr: State<'_, Lidarr>, action: super::check::FixAction, input: Option<String>) -> AppResult<super::changes::Proposal> {
+    lidarr.propose(action, input).await
+}
+
+/// Show the "Platter Hi-Res" profile Platter would add (reads only).
+#[tauri::command]
+pub async fn lidarr_hires_preview(lidarr: State<'_, Lidarr>) -> AppResult<super::changes::Proposal> {
+    lidarr.propose_hires_profile().await
+}
+
+/// Make a change the user said yes to.
+#[tauri::command]
+pub async fn lidarr_change_apply(lidarr: State<'_, Lidarr>, id: String) -> AppResult<super::changes::ChangeEntry> {
+    lidarr.apply(&id).await
+}
+
+/// The changes log, newest first.
+#[tauri::command]
+pub async fn lidarr_changes(lidarr: State<'_, Lidarr>) -> AppResult<Vec<super::changes::ChangeEntry>> {
+    let l = lidarr.inner().clone();
+    blocking(move || Ok(l.changes())).await
+}
+
+/// Put a logged change back.
+#[tauri::command]
+pub async fn lidarr_change_put_back(lidarr: State<'_, Lidarr>, id: String) -> AppResult<super::changes::ChangeEntry> {
+    lidarr.put_back(&id).await
+}
+
+/// What re-matching an album folder would do (reads only).
+#[tauri::command]
+pub async fn lidarr_rematch_preview(lidarr: State<'_, Lidarr>, folder: String) -> AppResult<super::rematch::RematchPlan> {
+    lidarr.rematch_preview(&folder).await
+}
+
+/// Re-match an album folder the user confirmed.
+#[tauri::command]
+pub async fn lidarr_rematch_apply(lidarr: State<'_, Lidarr>, folder: String) -> AppResult<super::rematch::RematchPlan> {
+    lidarr.rematch_apply(&folder).await
+}
+
+/// What the Lidarr work is doing: who did it last, practice mode, albums
+/// waiting in staging.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LidarrWork {
+    pub catch_up: super::catchup::CatchUpStatus,
+    pub practice_until: Option<i64>,
+    pub practice: bool,
+    pub staged: Vec<super::promote::Staged>,
+}
+
+#[tauri::command]
+pub async fn lidarr_work(lidarr: State<'_, Lidarr>) -> AppResult<LidarrWork> {
+    let l = lidarr.inner().clone();
+    blocking(move || {
+        Ok(LidarrWork { catch_up: l.catch_up_status(), practice_until: l.practice_until(), practice: l.practice_active(), staged: l.staged() })
+    })
+    .await
+}
+
+/// Catch up with Lidarr now.
+#[tauri::command]
+pub async fn lidarr_catch_up(lidarr: State<'_, Lidarr>) -> AppResult<super::catchup::CatchUpReport> {
+    lidarr.catch_up().await
+}
+
+/// Resume protected work after a pause, keeping Lidarr's settings as they are.
+#[tauri::command]
+pub async fn lidarr_resume_protected(lidarr: State<'_, Lidarr>) -> AppResult<()> {
+    let l = lidarr.inner().clone();
+    blocking(move || l.resume_protected()).await
+}
+
+/// Add an album waiting in staging to the library; `always` adds the
+/// artist's later albums on their own.
+#[tauri::command]
+pub async fn lidarr_staged_add(lidarr: State<'_, Lidarr>, id: String, always: bool) -> AppResult<super::promote::Staged> {
+    lidarr.promotion_approve(&id, always).await
+}
+
+/// Take an added album out again; `trash_ok` lets Platter keep Plex's trash for the move.
+#[tauri::command]
+pub async fn lidarr_staged_undo(lidarr: State<'_, Lidarr>, id: String, trash_ok: bool) -> AppResult<super::promote::Staged> {
+    lidarr.promotion_undo(&id, trash_ok).await
+}
+
+/// Look for better copies for protected artists that asked for it.
+#[tauri::command]
+pub async fn lidarr_hunt(upgrades: State<'_, Upgrades>) -> AppResult<Vec<super::hunt::HuntItem>> {
+    upgrades.hunt().await
+}
+
+/// What's New and a notification for an album Lidarr brought in.
+pub struct AppAnnouncer {
+    pub app: tauri::AppHandle,
+    pub plex: crate::plex::PlexState,
+}
+
+impl super::catchup::Announcer for AppAnnouncer {
+    fn album_added(&self, artist: &str, album: &str) {
+        use tauri_plugin_notification::NotificationExt;
+        let text = if artist.is_empty() { format!("{album} is in your library") } else { format!("{album} by {artist} is in your library") };
+        self.plex.toast("info", text.clone());
+        let _ = self.app.notification().builder().title("New in your library").body(text).show();
+    }
+}

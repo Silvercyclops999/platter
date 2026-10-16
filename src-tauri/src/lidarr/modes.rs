@@ -456,6 +456,10 @@ pub fn library_artists(c: &Connection) -> AppResult<Vec<LibraryArtist>> {
 const MODES_TTL_S: i64 = 10 * 60;
 
 impl super::Lidarr {
+    pub(super) fn shared(&self) -> &super::shared::Shared {
+        &self.inner.shared
+    }
+
     /// Every artist's choices, by key.
     pub fn artist_prefs(&self) -> HashMap<String, ArtistPrefs> {
         self.inner.shared.list::<ArtistPrefs>("artist:").into_iter().collect()
@@ -503,5 +507,48 @@ impl super::Lidarr {
         let out = assign(&inp);
         *self.modes_cache.lock() = Some((now, out.clone()));
         Ok(out)
+    }
+}
+
+/// What switching an artist to Managed needs: the user said yes twice.
+pub const MANAGED_ASKS: u8 = 2;
+
+impl super::Lidarr {
+    /// Every artist's mode now (reads Lidarr and the library).
+    pub async fn modes_now(&self) -> AppResult<Vec<ArtistMode>> {
+        let (client, status, _) = Self::connect(self.routes()?).await?;
+        let snap = Self::snapshot(&client, status).await?;
+        self.modes_with(&client, &snap).await
+    }
+
+    /// Set an artist's mode. Managed hands the artist's folder to Lidarr, so
+    /// it takes two yeses (`confirmations`), each after the explanation.
+    pub fn set_mode(&self, key: &str, name: &str, mode: ModeSetting, confirmations: u8) -> AppResult<ArtistPrefs> {
+        if mode == ModeSetting::Managed && confirmations < MANAGED_ASKS {
+            return Err(crate::error::AppError::Invalid(
+                "Managed lets Lidarr rename, retag and replace this artist's files. Confirm twice to switch.".into(),
+            ));
+        }
+        let mut p = self.prefs_for(key);
+        p.mode = mode;
+        p.name = name.to_string();
+        self.save_prefs(key, &p)?;
+        self.log_change(&format!("Set {name} to {}", match mode {
+            ModeSetting::Auto => "Auto",
+            ModeSetting::Managed => "Managed",
+            ModeSetting::Protected => "Protected",
+        }), "", "", true, None)?;
+        Ok(p)
+    }
+
+    /// An artist's other choices (adding new albums on their own, better copies).
+    pub fn set_artist_choices(&self, key: &str, name: &str, auto_add: Option<bool>, hunt: bool, target: Target) -> AppResult<ArtistPrefs> {
+        let mut p = self.prefs_for(key);
+        p.auto_add = auto_add;
+        p.hunt = hunt;
+        p.target = target;
+        p.name = name.to_string();
+        self.save_prefs(key, &p)?;
+        Ok(p)
     }
 }

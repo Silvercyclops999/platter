@@ -328,17 +328,17 @@ struct Song {
 }
 
 #[derive(Debug, Clone)]
-struct AlbumFiles {
-    title: String,
-    artist: String,
+pub(super) struct AlbumFiles {
+    pub(super) title: String,
+    pub(super) artist: String,
     artist_id: String,
-    unreleased: bool,
+    pub(super) unreleased: bool,
     songs: Vec<Song>,
 }
 
 impl AlbumFiles {
     /// The lowest quality among released songs.
-    fn current(&self) -> Option<(Rank, String)> {
+    pub(super) fn current(&self) -> Option<(Rank, String)> {
         self.songs.iter().filter(|s| !s.unreleased).min_by_key(|s| s.rank).map(|s| (s.rank, s.rank.label(s.codec.as_deref())))
     }
 }
@@ -450,11 +450,15 @@ impl Upgrades {
         Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())) }
     }
 
-    fn lidarr(&self) -> &Lidarr {
+    pub(super) fn inner_db(&self) -> &DbHandle {
+        &self.inner.db
+    }
+
+    pub(super) fn lidarr(&self) -> &Lidarr {
         &self.inner.lidarr
     }
 
-    fn now(&self) -> i64 {
+    pub(super) fn now(&self) -> i64 {
         (self.inner.clock)()
     }
 
@@ -495,7 +499,7 @@ impl Upgrades {
         crate::settings::load(&self.inner.db).lidarr_staging_folder
     }
 
-    async fn album(&self, album_id: &str) -> AppResult<AlbumFiles> {
+    pub(super) async fn album(&self, album_id: &str) -> AppResult<AlbumFiles> {
         let id = album_id.to_string();
         self.inner
             .db
@@ -515,7 +519,7 @@ impl Upgrades {
         Ok(AlbumUpgrade { available, record, quality, confirmed })
     }
 
-    fn confirmations(&self) -> HashMap<String, Confirmed> {
+    pub(super) fn confirmations(&self) -> HashMap<String, Confirmed> {
         self.inner.db.read(|c| kv_get(c, CONFIRM_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
@@ -567,6 +571,12 @@ impl Upgrades {
     }
 
     async fn request_locked(&self, album_id: &str) -> AppResult<UpgradeRecord> {
+        self.request_aimed(album_id, None).await
+    }
+
+    /// [`Self::request`], asking Lidarr for at least `floor` (a profile
+    /// whose cutoff is above it), for "Look for better copies".
+    pub(super) async fn request_aimed(&self, album_id: &str, floor: Option<Rank>) -> AppResult<UpgradeRecord> {
         if self.staging().trim().is_empty() {
             return Err(AppError::Invalid("Set the Lidarr staging folder for upgrades in Settings first.".into()));
         }
@@ -598,7 +608,8 @@ impl Upgrades {
             ..Default::default()
         };
         let rec = l.new_record(&input, group.id.clone(), false);
-        let dest = Dest::Staging { album_id: album_id.to_string(), current, current_label: label.clone() };
+        let aim = floor.map_or(current, |f| f.max(current));
+        let dest = Dest::Staging { album_id: album_id.to_string(), current: aim, current_label: label.clone() };
         let sent = {
             let _req = l.lock.lock().await;
             l.send_to(rec.clone(), &dest).await
@@ -1124,7 +1135,16 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
 /// with asking off, imported ones swapped.
 pub async fn watch(u: Upgrades) {
     tokio::time::sleep(Duration::from_secs(45)).await;
+    let mut last_hunt: Option<std::time::Instant> = None;
     loop {
+        // "Look for better copies" for protected artists, once a day (each
+        // album at most weekly).
+        if last_hunt.is_none_or(|t| t.elapsed() > Duration::from_secs(86_400)) {
+            last_hunt = Some(std::time::Instant::now());
+            if let Err(e) = u.hunt().await {
+                tracing::debug!("better copies: {e}");
+            }
+        }
         let list = u.records();
         if list.iter().any(|r| !r.request.state.settled())
             && let Err(e) = u.refresh().await

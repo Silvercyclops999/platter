@@ -10,6 +10,7 @@ pub mod changes;
 pub mod check;
 pub mod catchup;
 pub mod commands;
+pub mod hunt;
 pub mod conventions;
 pub mod mbpick;
 pub mod modes;
