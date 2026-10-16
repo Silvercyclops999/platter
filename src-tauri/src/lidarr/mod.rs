@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod audiomatch;
+pub mod changes;
 pub mod check;
 pub mod commands;
 pub mod mbpick;
@@ -14,6 +15,7 @@ pub mod paths;
 pub mod plexside;
 pub mod provenance;
 pub mod quality;
+pub mod rematch;
 pub mod request;
 pub mod shared;
 pub mod status;
@@ -23,6 +25,8 @@ pub mod upgrade;
 pub mod upmatch;
 pub mod write;
 
+#[cfg(test)]
+mod changes_tests;
 #[cfg(test)]
 mod modes_tests;
 #[cfg(test)]
@@ -194,6 +198,8 @@ pub struct Lidarr {
     lock: Arc<tokio::sync::Mutex<()>>,
     /// The last modes worked out, with when (unix seconds).
     modes_cache: Arc<parking_lot::Mutex<Option<ModesAt>>>,
+    /// Changes shown and waiting for a yes.
+    proposals: Arc<changes::Proposals>,
 }
 
 /// The address as a key for stored confirmations.
@@ -244,7 +250,7 @@ pub fn parse_headers(text: &str) -> AppResult<Vec<(String, String)>> {
 
 impl Lidarr {
     pub fn new(deps: LidarrDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default() }
+        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default() }
     }
 
     /// (home, away) addresses from Settings; empty when not set.

@@ -15,6 +15,7 @@ pub enum Method {
     Get,
     Post,
     Put,
+    Delete,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -59,6 +60,12 @@ impl WebRequest {
         Self { method: Method::Put, body: Body::Json(json), ..Self::get(url) }
     }
 
+    /// DELETE, with a JSON body when `json` isn't empty.
+    pub fn delete_json(url: impl Into<String>, json: String) -> Self {
+        let body = if json.is_empty() { Body::None } else { Body::Json(json) };
+        Self { method: Method::Delete, body, ..Self::get(url) }
+    }
+
     pub fn header(mut self, k: &'static str, v: impl Into<String>) -> Self {
         self.headers.push((k, v.into()));
         self
@@ -98,6 +105,7 @@ impl Web for ReqwestWeb {
             Method::Get => self.client.get(&req.url),
             Method::Post => self.client.post(&req.url),
             Method::Put => self.client.put(&req.url),
+            Method::Delete => self.client.delete(&req.url),
         }
         .timeout(req.timeout);
         for (k, v) in &req.headers {

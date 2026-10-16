@@ -1,14 +1,20 @@
 //! The only things Platter ever asks Lidarr to do, kept apart from the
-//! read-only client. There are exactly three writes, each a fixed method
-//! and path:
+//! read-only client. Each write is a fixed method and path ([`WriteCall`]);
+//! nothing else can be built here:
 //!
-//! - `POST /api/v1/artist`: add an artist with nothing monitored
-//! - `PUT /api/v1/album/monitor`: turn monitoring on or off for albums
-//! - `POST /api/v1/command`: an `AlbumSearch` for albums
+//! - add an artist (only with a fresh exclusion check, [`Cleared`]), with
+//!   nothing monitored; protected artists unmonitored, into staging
+//! - monitor or unmonitor albums, and search for them
+//! - add or remove import list exclusions
+//! - write back one settings page with one value changed
+//! - add the staging root folder; add the "Platter Hi-Res" profile (and
+//!   take either away again when nothing uses it)
+//! - free imported files inside the staging folder ([`StagingFiles`])
+//! - a manual import onto an album's current release
 //!
-//! (The fourth call a request makes, the album lookup, is a read.) No other
-//! method or path can be built here, so nothing built on this can rename,
-//! retag, rescan or delete anything.
+//! Writes to Lidarr's settings, profiles, roots and exclusions always show
+//! the exact change and wait for a yes (`changes`). Nothing here renames,
+//! retags or rescans, and no root folder holding artists is ever removed.
 
 use std::sync::Arc;
 
@@ -100,12 +106,111 @@ impl AddArtist {
     }
 }
 
+/// One of Lidarr's settings pages, written back whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfigKind {
+    Naming,
+    MetadataProvider,
+    MediaManagement,
+}
+
+impl ConfigKind {
+    pub fn path(self) -> &'static str {
+        match self {
+            ConfigKind::Naming => "/config/naming",
+            ConfigKind::MetadataProvider => "/config/metadataprovider",
+            ConfigKind::MediaManagement => "/config/mediamanagement",
+        }
+    }
+}
+
+/// A new root folder (the staging folder): nothing in it is ever monitored
+/// by default.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRoot {
+    pub name: String,
+    pub path: String,
+    pub default_quality_profile_id: i64,
+    pub default_metadata_profile_id: i64,
+    pub default_monitor_option: &'static str,
+    pub default_new_item_monitor_option: &'static str,
+}
+
+impl NewRoot {
+    pub fn staging(path: &str, quality: i64, metadata: i64) -> Self {
+        Self {
+            name: "Staging".into(),
+            path: path.to_string(),
+            default_quality_profile_id: quality,
+            default_metadata_profile_id: metadata,
+            default_monitor_option: MONITOR_NONE,
+            default_new_item_monitor_option: MONITOR_NONE,
+        }
+    }
+}
+
+/// Imported files Platter may free: every one is inside the staging folder
+/// (checked when made, by whole folder names). Only [`StagingFiles::check`]
+/// makes one, so nothing outside staging can be deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagingFiles {
+    ids: Vec<i64>,
+}
+
+impl StagingFiles {
+    pub fn check(files: &[super::api::TrackFile], staging: &str) -> AppResult<StagingFiles> {
+        let root = super::paths::NormPath::parse(staging);
+        if root.is_empty() {
+            return Err(AppError::Invalid("No staging folder is set, so Platter won't free any files.".into()));
+        }
+        if let Some(f) = files.iter().find(|f| !super::paths::NormPath::parse(&f.path).starts_with(&root) || f.id <= 0) {
+            return Err(AppError::Invalid(format!("{} isn't in the staging folder, so Platter won't delete it. Nothing was freed.", f.path)));
+        }
+        Ok(StagingFiles { ids: files.iter().map(|f| f.id).collect() })
+    }
+
+    pub fn ids(&self) -> &[i64] {
+        &self.ids
+    }
+}
+
+/// One file for Lidarr's manual import, built by the re-match guard only.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFile {
+    pub path: String,
+    pub artist_id: i64,
+    pub album_id: i64,
+    pub album_release_id: i64,
+    pub track_ids: Vec<i64>,
+    pub quality: serde_json::Value,
+    pub indexer_flags: i64,
+    pub download_id: String,
+    pub disable_release_switching: bool,
+}
+
 /// One write. The method and path come from the variant.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteCall {
     AddArtist(AddArtist),
     Monitor { album_ids: Vec<i64>, monitored: bool },
     AlbumSearch { album_ids: Vec<i64> },
+    /// Put an artist on the import list exclusions.
+    AddExclusion { foreign_id: String, artist_name: String },
+    RemoveExclusion { id: i64 },
+    /// A settings page written back whole, with one value changed.
+    PutConfig { kind: ConfigKind, id: i64, body: serde_json::Value },
+    AddRootFolder(NewRoot),
+    RemoveRootFolder { id: i64 },
+    AddQualityProfile(serde_json::Value),
+    RemoveQualityProfile { id: i64 },
+    /// Lidarr deletes these imported files (into its recycling bin when one is set).
+    FreeStaging(StagingFiles),
+    /// Lidarr's manual import, moving files in place onto the album's
+    /// current release, never switching it.
+    ManualImport(Vec<ImportFile>),
 }
 
 #[derive(Serialize)]
@@ -127,30 +232,56 @@ struct CommandBody<'a> {
 pub enum WriteMethod {
     Post,
     Put,
+    Delete,
 }
 
 impl WriteCall {
     pub fn method(&self) -> WriteMethod {
         match self {
-            WriteCall::AddArtist(_) | WriteCall::AlbumSearch { .. } => WriteMethod::Post,
-            WriteCall::Monitor { .. } => WriteMethod::Put,
+            WriteCall::AddArtist(_)
+            | WriteCall::AlbumSearch { .. }
+            | WriteCall::AddExclusion { .. }
+            | WriteCall::AddRootFolder(_)
+            | WriteCall::AddQualityProfile(_)
+            | WriteCall::ManualImport(_) => WriteMethod::Post,
+            WriteCall::Monitor { .. } | WriteCall::PutConfig { .. } => WriteMethod::Put,
+            WriteCall::RemoveExclusion { .. } | WriteCall::RemoveRootFolder { .. } | WriteCall::RemoveQualityProfile { .. } | WriteCall::FreeStaging(_) => {
+                WriteMethod::Delete
+            }
         }
     }
 
     /// The path under `/api/v1`.
-    pub fn path(&self) -> &'static str {
+    pub fn path(&self) -> String {
         match self {
-            WriteCall::AddArtist(_) => "/artist",
-            WriteCall::Monitor { .. } => "/album/monitor",
-            WriteCall::AlbumSearch { .. } => "/command",
+            WriteCall::AddArtist(_) => "/artist".into(),
+            WriteCall::Monitor { .. } => "/album/monitor".into(),
+            WriteCall::AlbumSearch { .. } | WriteCall::ManualImport(_) => "/command".into(),
+            WriteCall::AddExclusion { .. } => "/importlistexclusion".into(),
+            WriteCall::RemoveExclusion { id } => format!("/importlistexclusion/{id}"),
+            WriteCall::PutConfig { kind, id, .. } => format!("{}/{id}", kind.path()),
+            WriteCall::AddRootFolder(_) => "/rootfolder".into(),
+            WriteCall::RemoveRootFolder { id } => format!("/rootfolder/{id}"),
+            WriteCall::AddQualityProfile(_) => "/qualityprofile".into(),
+            WriteCall::RemoveQualityProfile { id } => format!("/qualityprofile/{id}"),
+            WriteCall::FreeStaging(_) => "/trackfile/bulk".into(),
         }
     }
 
     pub fn body(&self) -> String {
+        use serde_json::json;
         let v = match self {
             WriteCall::AddArtist(a) => serde_json::to_string(a),
             WriteCall::Monitor { album_ids, monitored } => serde_json::to_string(&MonitorBody { album_ids, monitored: *monitored }),
             WriteCall::AlbumSearch { album_ids } => serde_json::to_string(&CommandBody { name: "AlbumSearch", album_ids }),
+            WriteCall::AddExclusion { foreign_id, artist_name } => serde_json::to_string(&json!({"foreignId": foreign_id, "artistName": artist_name})),
+            WriteCall::PutConfig { body, .. } | WriteCall::AddQualityProfile(body) => serde_json::to_string(body),
+            WriteCall::AddRootFolder(r) => serde_json::to_string(r),
+            WriteCall::FreeStaging(f) => serde_json::to_string(&json!({"trackFileIds": f.ids})),
+            WriteCall::ManualImport(files) => {
+                serde_json::to_string(&json!({"name": "ManualImport", "importMode": "move", "replaceExistingFiles": false, "files": files}))
+            }
+            WriteCall::RemoveExclusion { .. } | WriteCall::RemoveRootFolder { .. } | WriteCall::RemoveQualityProfile { .. } => Ok(String::new()),
         };
         v.unwrap_or_default()
     }
@@ -174,7 +305,7 @@ impl LidarrWrite for DirectRoute {
     }
 }
 
-/// The three writes with their answers checked.
+/// The writes with their answers checked.
 #[derive(Clone)]
 pub struct LidarrWriter {
     transport: Arc<dyn LidarrWrite>,
@@ -223,6 +354,13 @@ impl LidarrWriter {
     pub async fn search(&self, album_ids: Vec<i64>) -> AppResult<()> {
         self.send(WriteCall::AlbumSearch { album_ids }).await.map(|_| ())
     }
+
+    /// Any of the other writes; returns the id Lidarr gave a new item (0
+    /// when it doesn't say).
+    pub async fn send_call(&self, call: WriteCall) -> AppResult<i64> {
+        let resp = self.send(call).await?;
+        Ok(serde_json::from_slice::<Added>(&resp.body).map(|a| a.id).unwrap_or(0))
+    }
 }
 
 #[cfg(test)]
@@ -254,10 +392,40 @@ mod tests {
             })
         );
         let m = WriteCall::Monitor { album_ids: vec![7], monitored: true };
-        assert_eq!((m.method(), m.path()), (WriteMethod::Put, "/album/monitor"));
+        assert_eq!((m.method(), m.path().as_str()), (WriteMethod::Put, "/album/monitor"));
         assert_eq!(serde_json::from_str::<Value>(&m.body()).unwrap(), json!({"albumIds": [7], "monitored": true}));
         let s = WriteCall::AlbumSearch { album_ids: vec![7] };
-        assert_eq!((s.method(), s.path()), (WriteMethod::Post, "/command"));
+        assert_eq!((s.method(), s.path().as_str()), (WriteMethod::Post, "/command"));
         assert_eq!(serde_json::from_str::<Value>(&s.body()).unwrap(), json!({"name": "AlbumSearch", "albumIds": [7]}));
+    }
+
+    #[test]
+    fn only_files_inside_the_staging_folder_can_be_freed() {
+        use super::super::api::TrackFile;
+        let f = |id, p: &str| TrackFile { id, path: p.into(), size: None };
+        let ok = StagingFiles::check(&[f(1, "/data/staging/music/A/B/01.flac"), f(2, r"\DATA\staging\music\A\B\02.flac")], "/data/staging/music").unwrap();
+        let call = WriteCall::FreeStaging(ok);
+        assert_eq!((call.method(), call.path().as_str()), (WriteMethod::Delete, "/trackfile/bulk"));
+        assert_eq!(serde_json::from_str::<Value>(&call.body()).unwrap(), json!({"trackFileIds": [1, 2]}));
+        for bad in ["/data/media/Music/A/01.flac", "/data/staging/music-old/A/01.flac"] {
+            assert!(StagingFiles::check(&[f(1, "/data/staging/music/A/01.flac"), f(3, bad)], "/data/staging/music").is_err(), "{bad}");
+        }
+        assert!(StagingFiles::check(&[f(1, "/x/01.flac")], " ").is_err());
+    }
+
+    #[test]
+    fn the_other_writes_have_fixed_shapes() {
+        let c = WriteCall::PutConfig { kind: ConfigKind::Naming, id: 1, body: json!({"id": 1, "renameTracks": false}) };
+        assert_eq!((c.method(), c.path().as_str()), (WriteMethod::Put, "/config/naming/1"));
+        let r = WriteCall::AddRootFolder(NewRoot::staging("/data/staging/music", 2, 3));
+        let v: Value = serde_json::from_str(&r.body()).unwrap();
+        assert_eq!((v["defaultMonitorOption"].as_str(), v["defaultNewItemMonitorOption"].as_str()), (Some("none"), Some("none")));
+        let e = WriteCall::AddExclusion { foreign_id: "x".into(), artist_name: "Quiet Hours".into() };
+        assert_eq!((e.method(), e.path().as_str()), (WriteMethod::Post, "/importlistexclusion"));
+        assert_eq!(WriteCall::RemoveExclusion { id: 4 }.path(), "/importlistexclusion/4");
+        assert_eq!(WriteCall::RemoveExclusion { id: 4 }.body(), "");
+        let m = WriteCall::ManualImport(vec![]);
+        let v: Value = serde_json::from_str(&m.body()).unwrap();
+        assert_eq!((v["name"].as_str(), v["importMode"].as_str(), v["replaceExistingFiles"].as_bool()), (Some("ManualImport"), Some("move"), Some(false)));
     }
 }

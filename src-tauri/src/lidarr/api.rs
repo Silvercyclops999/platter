@@ -324,6 +324,98 @@ pub struct HistoryItem {
     pub date: String,
 }
 
+/// One release (edition) of an album; the monitored one is current.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumRelease {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub monitored: bool,
+    #[serde(default)]
+    pub track_count: i64,
+}
+
+/// An album with its releases (`GET /album/{id}`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumDetail {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist_id: i64,
+    #[serde(default)]
+    pub releases: Vec<AlbumRelease>,
+}
+
+impl AlbumDetail {
+    /// The release Lidarr has the album on now.
+    pub fn current_release(&self) -> Option<&AlbumRelease> {
+        self.releases.iter().find(|r| r.monitored)
+    }
+}
+
+/// A track of one release (`GET /track?albumReleaseId=`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseTrack {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub medium_number: i64,
+    #[serde(default)]
+    pub absolute_track_number: i64,
+    #[serde(default)]
+    pub has_file: bool,
+    #[serde(default)]
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdRef {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rejection {
+    #[serde(default)]
+    pub reason: String,
+    /// `permanent` or `temporary`.
+    #[serde(default, rename = "type")]
+    pub kind: String,
+}
+
+/// What Lidarr's manual import proposes for one file (`GET /manualimport`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportProposal {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub artist: Option<IdRef>,
+    #[serde(default)]
+    pub album: Option<IdRef>,
+    #[serde(default)]
+    pub album_release_id: Option<i64>,
+    #[serde(default)]
+    pub tracks: Vec<ReleaseTrack>,
+    #[serde(default)]
+    pub quality: Option<serde_json::Value>,
+    #[serde(default)]
+    pub download_id: Option<String>,
+    #[serde(default)]
+    pub rejections: Vec<Rejection>,
+}
+
 /// One of Lidarr's Connect entries (`GET /notification`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -425,6 +517,7 @@ impl DirectRoute {
         let mut req = match call.method() {
             WriteMethod::Post => WebRequest::post_json(url, call.body()),
             WriteMethod::Put => WebRequest::put_json(url, call.body()),
+            WriteMethod::Delete => WebRequest::delete_json(url, call.body()),
         }
         .timeout(self.timeout.max(Duration::from_secs(20)));
         for (k, v) in &self.headers {
@@ -475,6 +568,12 @@ impl LidarrClient {
 
     pub fn route(&self) -> Route {
         self.transport.route()
+    }
+
+    /// A settings page (or any object) as Lidarr sent it, so it can be
+    /// written back whole with one value changed.
+    pub async fn get_raw(&self, path: &str) -> AppResult<serde_json::Value> {
+        self.get(path, &[]).await
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, &str)]) -> AppResult<T> {
@@ -591,6 +690,23 @@ impl LidarrClient {
     /// Files Lidarr found in its root folders and couldn't match to an album.
     pub async fn unmapped_files(&self) -> AppResult<Vec<TrackFile>> {
         self.get("/trackfile", &[("unmapped", "true")]).await
+    }
+
+    /// An album with its releases.
+    pub async fn album_detail(&self, id: i64) -> AppResult<AlbumDetail> {
+        self.get(&format!("/album/{id}"), &[]).await
+    }
+
+    /// One release's tracks, with whether each has a file.
+    pub async fn release_tracks(&self, release_id: i64) -> AppResult<Vec<ReleaseTrack>> {
+        self.get("/track", &[("albumReleaseId", release_id.to_string().as_str())]).await
+    }
+
+    /// What Lidarr's manual import proposes for a folder. Asked with
+    /// filterExistingFiles=false (true can leave out files linked to another
+    /// release); the caller filters.
+    pub async fn manual_import(&self, folder: &str) -> AppResult<Vec<ImportProposal>> {
+        self.get("/manualimport", &[("folder", folder), ("filterExistingFiles", "false")]).await
     }
 
     /// Lidarr's Connect entries.

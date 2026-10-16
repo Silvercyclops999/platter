@@ -852,6 +852,7 @@ fn assert_only_allowed_writes(web: &FakeLidarr) {
             Method::Get => p.starts_with("/api/v1/"),
             Method::Post => p == "/api/v1/artist" || p == "/api/v1/command",
             Method::Put => p == "/api/v1/album/monitor",
+            Method::Delete => false,
         };
         assert!(ok, "Lidarr was sent {m:?} {p}");
     }

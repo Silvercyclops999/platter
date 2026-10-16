@@ -356,6 +356,15 @@ fn mp4_items_with_moov_up_front() {
 }
 
 #[test]
+fn mp4_freeform_status_and_version_are_read() {
+    // iTunes freeform atoms (----:com.apple.iTunes:STATUS / :VERSION), the way taggers write them in m4a files.
+    let f = mp4(&[freeform("STATUS", "Released"), freeform("VERSION", "Official release (CD)")], true, 300_000, true);
+    let t = run(&f, Some("mp4")).0;
+    assert_eq!(t.status_tag.as_deref(), Some("Released"));
+    assert_eq!(t.version_note.as_deref(), Some("Official release (CD)"));
+}
+
+#[test]
 fn mp4_moov_at_the_end_takes_a_second_read() {
     let f = mp4(&[atom(b"rtng", &data_atom(21, &[2])), freeform("ARCHIVE_QUALITY", "LQ")], true, 300_000, true);
     let (t, reads) = run(&f, Some("mp4"));
