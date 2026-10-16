@@ -80,6 +80,8 @@ pub enum Keep {
     /// No ISRC match, and its provenance note doesn't say official.
     NoOfficialNote,
     LengthDiffers,
+    /// Its length differs from the release's track by more than a second: another version.
+    DifferentVersion,
     SoundDiffers,
     /// More than one file could be the same song.
     Ambiguous,
@@ -96,6 +98,7 @@ impl Keep {
             Keep::NoReleasedTag => "Can't prove it's the same recording: no tag says it's the released one",
             Keep::NoOfficialNote => "Can't prove it's the same recording: its source note doesn't say official",
             Keep::LengthDiffers => "Can't prove it's the same recording: the lengths differ",
+            Keep::DifferentVersion => "A different version: its length differs from the release's",
             Keep::SoundDiffers => "Can't prove it's the same recording: it doesn't sound the same",
             Keep::Ambiguous => "More than one possible match",
             Keep::NotBetter => "The new copy isn't better",
@@ -162,14 +165,17 @@ fn candidate(o: &OldSong, tracks: &[OfficialTrack], new: &[NewSong], prefix: &st
         let same: Vec<usize> = new.iter().enumerate().filter(|(_, n)| isrc(&n.tags).as_deref() == Some(i.as_str())).map(|(k, _)| k).collect();
         match same.as_slice() {
             [one] => {
-                let on = tracks.iter().any(|t| t.new == Some(*one));
-                return if on { Ok((*one, "isrc")) } else { Err(Keep::NotOnRelease) };
+                let Some(t) = tracks.iter().find(|t| t.new == Some(*one)) else { return Err(Keep::NotOnRelease) };
+                return if differs(o.duration_ms, t.duration_ms) { Err(Keep::DifferentVersion) } else { Ok((*one, "isrc")) };
             }
             [] => {}
             _ => return Err(Keep::Ambiguous),
         }
     }
     let Some(t) = on_release(o, tracks) else { return Err(Keep::NotOnRelease) };
+    if differs(o.duration_ms, tracks[t].duration_ms) {
+        return Err(Keep::DifferentVersion);
+    }
     let Some(n) = tracks[t].new else { return Err(Keep::NotInNewCopy) };
     if o.status.status != ReleaseStatus::Released {
         return Err(Keep::NoReleasedTag);
@@ -185,6 +191,11 @@ fn candidate(o: &OldSong, tracks: &[OfficialTrack], new: &[NewSong], prefix: &st
         Some(c) if c >= MIN_CORRELATION => Ok((n, "sound")),
         _ => Err(Keep::SoundDiffers),
     }
+}
+
+/// Both lengths known and more than a second apart.
+fn differs(a: u64, b: u64) -> bool {
+    a > 0 && b > 0 && a.abs_diff(b) > MAX_LENGTH_DIFF_MS
 }
 
 /// One decision per old file, in order. `corr(old, new)` decodes and
@@ -273,9 +284,14 @@ mod tests {
         assert_eq!(run(&[old("t1", "Dawn", None, status(ReleaseStatus::Unknown, Some("Official CD")))], &t, &n, 0.9907), vec![Outcome::Keep(Keep::NoReleasedTag)]);
         assert_eq!(run(&[old("t1", "Dawn", None, status(ReleaseStatus::Released, Some("Web rip")))], &t, &n, 0.995), vec![Outcome::Keep(Keep::NoOfficialNote)]);
         assert_eq!(run(std::slice::from_ref(&ok), &t, &n, 0.98), vec![Outcome::Keep(Keep::SoundDiffers)]);
+        // The old file is off the release's length: another version.
         let mut long = ok.clone();
         long.duration_ms = 201_500;
-        assert_eq!(run(&[long], &t, &n, 0.999), vec![Outcome::Keep(Keep::LengthDiffers)]);
+        assert_eq!(run(&[long], &t, &n, 0.999), vec![Outcome::Keep(Keep::DifferentVersion)]);
+        // The new file is off the old one's length.
+        let mut off = new(None);
+        off.duration_ms = 198_500;
+        assert_eq!(run(std::slice::from_ref(&ok), &t, &[off], 0.999), vec![Outcome::Keep(Keep::LengthDiffers)]);
         // The release has the song, the new copy doesn't.
         assert_eq!(run(std::slice::from_ref(&ok), &[track("Dawn", R1, None)], &n, 0.999), vec![Outcome::Keep(Keep::NotInNewCopy)]);
     }
@@ -316,6 +332,16 @@ mod tests {
         let o = [old("t1", "Dawn", Some("USRC17607839"), released())];
         assert_eq!(run(&o, &[track("Dawn", R1, Some(0))], &[worse], 0.0), vec![Outcome::Keep(Keep::NotBetter)]);
         assert!(Keep::NotOnRelease.asks_each() && !Keep::NotBetter.asks_each());
+    }
+
+    #[test]
+    fn a_length_off_the_release_is_a_different_version_even_with_an_isrc() {
+        let mut t = track("Dawn", R1, Some(0));
+        t.duration_ms = 215_000; // the release's edit runs 15 s longer
+        let o = [old("t1", "Dawn", Some("USRC17607839"), released())];
+        assert_eq!(run(&o, std::slice::from_ref(&t), &[new(Some("USRC17607839"))], 0.999), vec![Outcome::Keep(Keep::DifferentVersion)]);
+        let o = [old("t1", "Dawn", None, released())];
+        assert_eq!(run(&o, &[t], &[new(None)], 0.999), vec![Outcome::Keep(Keep::DifferentVersion)]);
     }
 
     #[test]

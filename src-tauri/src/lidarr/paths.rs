@@ -166,6 +166,11 @@ mod tests {
         assert_eq!(relation(&NormPath::parse("/data"), &music), Some(Relation::Contains));
         assert_eq!(relation(&NormPath::parse("/data/musicals"), &music), None);
         assert_eq!(relation(&NormPath::parse("/DATA/Music"), &music), Some(Relation::Same));
+        // Whole names only: a folder whose name starts the same is another folder.
+        let media = NormPath::parse("/data/media/Music");
+        assert_eq!(relation(&NormPath::parse("/data/media/Music-archive"), &media), None);
+        assert!(!NormPath::parse("/data/media/Music-archive/X").starts_with(&media));
+        assert!(NormPath::parse(r"\data\media\music\X").starts_with(&media), "either separator, any case");
     }
 
     #[test]

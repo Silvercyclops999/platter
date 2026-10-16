@@ -176,6 +176,11 @@ mod tests {
         assert_eq!(m.staging_path("/downloads/upgrades", "/downloads/upgrades/Band/Album/01.flac"), Some(PathBuf::from("/mnt/upgrades/Band/Album/01.flac")));
         assert_eq!(m.staging_path("", "/downloads/upgrades/a.flac"), None);
         assert_eq!(ShareMap::default().music_path("/data/music/a.flac"), None, "no mapping, no path");
+        // A mapped Windows drive, and a folder that only starts like the music folder.
+        let win = ShareMap { music: vec![FolderPair { server: "/data/media/Music".into(), local: r"Z:\media\music".into() }], ..Default::default() };
+        let got = win.music_path("/data/media/Music/Band/x.flac").unwrap();
+        assert!(got.to_string_lossy().starts_with(r"Z:\media\music"), "{}", got.display());
+        assert_eq!(win.music_path("/data/media/Music-archive/Band/x.flac"), None);
     }
 
     #[test]
