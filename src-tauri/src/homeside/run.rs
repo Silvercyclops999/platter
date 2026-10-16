@@ -45,6 +45,7 @@ const SETTLE: Duration = Duration::from_secs(3);
 const USED_CODES_KEY: &str = "bridge.usedCodes";
 const CONFIG_KEY: &str = "bridge.config";
 const DEVICE_KEY: &str = "bridge.device";
+const SERVER_KEY: &str = "bridge.serverKey";
 
 /// Settings from the container's environment.
 #[derive(Clone, Default)]
@@ -138,6 +139,7 @@ pub struct Bridge {
 impl Bridge {
     pub fn new(p: Parts) -> Arc<Self> {
         p.lidarr.set_bridge_mode(true);
+        p.lidarr.set_server_key(p.db.read(|c| kv_get(c, SERVER_KEY)).ok().flatten());
         let links = Links::new(p.db.clone(), p.keys.clone());
         let wire = Arc::new(Wire::new(links, p.relays.clone(), p.clock.clone()));
         let status = BridgeStatus {
@@ -292,6 +294,9 @@ impl Bridge {
         s.lidarr_practice_until = cfg.practice_until;
         s.upgrades_ask = cfg.upgrades_ask;
         crate::settings::save(&self.p.db, &s)?;
+        let server = crate::lidarr::url_key(&cfg.lidarr_url);
+        self.p.db.write(|c| kv_set(c, SERVER_KEY, &server))?;
+        self.p.lidarr.set_server_key(Some(server));
         let key = self.p.env.lidarr_key.clone().or_else(|| cfg.lidarr_key.clone());
         if let Some(k) = key {
             self.p.lidarr.set_key(Some(&k))?;

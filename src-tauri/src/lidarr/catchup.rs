@@ -208,6 +208,9 @@ impl Lidarr {
     }
 
     pub(super) fn server_key(&self) -> String {
+        if let Some(k) = self.server_key_override() {
+            return k;
+        }
         let (home, away) = self.urls();
         super::url_key(if home.trim().is_empty() { &away } else { &home })
     }

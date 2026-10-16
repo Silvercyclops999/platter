@@ -21,7 +21,7 @@ fn main() {
         std::process::exit(if ok { 0 } else { 1 });
     }
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("BRIDGE_LOG").unwrap_or_else(|_| "info,platter_lib=info".into()))
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("BRIDGE_LOG").unwrap_or_else(|_| "info,platter_lib::db=warn".into()))
         .with_ansi(false)
         .with_target(false)
         .init();
@@ -40,7 +40,7 @@ async fn start(env: run::Env) -> i32 {
         }
     };
     tracing::info!("Music folder: {}", match parts.music {
-        platter_lib::homeside::wire::MusicAccess::ReadWrite => "mounted read-write, so new protected albums and better copies can be added",
+        platter_lib::homeside::wire::MusicAccess::ReadWrite => "mounted read-write, so new protected albums can be added",
         platter_lib::homeside::wire::MusicAccess::ReadOnly => "mounted read-only, so additions wait for a desktop",
         platter_lib::homeside::wire::MusicAccess::None => "not mounted, so additions wait for a desktop",
     });
@@ -65,9 +65,25 @@ async fn start(env: run::Env) -> i32 {
     }
     let (stop_tx, stop) = tokio::sync::watch::channel(false);
     let runner = tokio::spawn(Arc::clone(&bridge).run(stop));
-    let _ = tokio::signal::ctrl_c().await;
+    stopped().await;
     tracing::info!("Stopping.");
     let _ = stop_tx.send(true);
     let _ = runner.await;
     0
+}
+
+/// Ctrl-C, or `docker stop` (SIGTERM).
+async fn stopped() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = tokio::signal::ctrl_c() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }

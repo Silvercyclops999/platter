@@ -740,3 +740,18 @@ async fn practice_mode_holds_on_the_bridge_too() {
     crate::settings::save(&br._db, &s).unwrap();
     assert!(br.lidarr.practice_active());
 }
+
+#[tokio::test]
+async fn a_bridge_reaching_lidarr_at_another_address_shares_the_desktops_state() {
+    let r = rig();
+    let br = bridge(&r);
+    let mut s = crate::settings::load(&br._db);
+    s.lidarr_url = "http://lidarr:8686".into();
+    crate::settings::save(&br._db, &s).unwrap();
+    r.a.lidarr.catch_up().await.unwrap();
+    super::shared::tests::sync(&r.a.shared, &br.shared);
+    assert!(!br.lidarr.has_shared_modes(), "another address is another Lidarr");
+    br.lidarr.set_server_key(Some(super::url_key("http://10.20.30.40:8686")));
+    assert!(br.lidarr.has_shared_modes());
+    assert_eq!(br.lidarr.catch_up_status().last_device.as_deref(), Some("aaa"), "the desktop's cursor");
+}

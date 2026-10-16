@@ -139,6 +139,13 @@ opt-level = 3
 panic = "abort"
 strip = true
 
+# The Bridge's container image: release, with a lighter link-time pass so
+# the image builds in a reasonable time on CI.
+[profile.bridge]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
 [dev-dependencies]
 dotenvy = "0.15.7"
 hound = "3.5.1"

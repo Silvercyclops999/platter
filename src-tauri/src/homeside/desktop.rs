@@ -107,6 +107,8 @@ pub struct Desktop {
     welcomes: Mutex<HashMap<String, (String, String, String)>>,
     links_changed: Notify,
     notify: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// The settings last sent, per link (this run only), so a change goes out.
+    sent_config: Mutex<HashMap<String, String>>,
 }
 
 impl Desktop {
@@ -125,6 +127,7 @@ impl Desktop {
             welcomes: Mutex::default(),
             links_changed: Notify::new(),
             notify: RwLock::default(),
+            sent_config: Mutex::default(),
         });
         // Lidarr's last route: through a Bridge that's answering.
         let weak = Arc::downgrade(&me);
@@ -299,9 +302,20 @@ impl Desktop {
 
     /// Send every Bridge the settings again (after a Lidarr or Plex change).
     pub async fn send_config(&self) {
-        let cfg = self.config().await;
         for link in self.wire.links.links() {
-            let _ = self.wire.send(&link, &Msg::Config(Box::new(cfg.clone()))).await;
+            self.send_config_to(&link, true).await;
+        }
+    }
+
+    /// Send the settings when they changed since the last time (or `always`).
+    async fn send_config_to(&self, link: &Link, always: bool) {
+        let cfg = self.config().await;
+        let Ok(json) = serde_json::to_string(&cfg) else { return };
+        if !always && self.sent_config.lock().get(&link.id) == Some(&json) {
+            return;
+        }
+        if self.wire.send(link, &Msg::Config(Box::new(cfg))).await.is_ok() {
+            self.sent_config.lock().insert(link.id.clone(), json);
         }
     }
 
@@ -329,8 +343,7 @@ impl Desktop {
                     p.version = version.chars().take(20).collect();
                 });
                 self.set_seen(&link.id, |s| s.music = music);
-                let cfg = self.config().await;
-                let _ = self.wire.send(link, &Msg::Config(Box::new(cfg))).await;
+                self.send_config_to(link, true).await;
                 self.flush_entries().await;
                 self.changed();
             }
@@ -363,6 +376,9 @@ impl Desktop {
         let Some(mut rx) = self.rx.lock().take() else { return };
         let mut changes = self.d.store.subscribe();
         let mut dirty: Option<tokio::time::Instant> = None;
+        // Lidarr and Plex settings changed here reach the Bridges within minutes.
+        let mut settings = tokio::time::interval(Duration::from_secs(5 * 60));
+        settings.tick().await;
         loop {
             for link in self.wire.links.links() {
                 let mut l = self.listeners.lock();
@@ -391,6 +407,11 @@ impl Desktop {
                     }
                 },
                 _ = self.links_changed.notified() => {}
+                _ = settings.tick() => {
+                    for link in self.wire.links.links() {
+                        self.send_config_to(&link, false).await;
+                    }
+                }
                 c = changes.recv() => {
                     if c.is_ok_and(|c| c.namespaces.iter().any(|n| n == LIDARR.name())) && !self.wire.links.all().is_empty() {
                         dirty.get_or_insert_with(tokio::time::Instant::now);

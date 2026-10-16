@@ -33,6 +33,9 @@ pub type RouteFn = Arc<dyn Fn() -> Option<Arc<dyn LidarrRoute>> + Send + Sync>;
 pub struct Hooks {
     bridge: AtomicBool,
     route: RwLock<Option<RouteFn>>,
+    /// On the Bridge: the desktops' name for this Lidarr in the shared
+    /// store, whatever address the Bridge itself uses.
+    server: RwLock<Option<String>>,
 }
 
 /// A Lidarr settings change the Bridge didn't make, waiting for a person
@@ -182,6 +185,17 @@ impl Lidarr {
 
     pub fn bridge_mode(&self) -> bool {
         self.home.bridge.load(Ordering::SeqCst)
+    }
+
+    /// Name this Lidarr in the shared store as the desktops do (from the
+    /// address they use), so cursors, claims and modes line up even when
+    /// the Bridge reaches Lidarr at another address.
+    pub fn set_server_key(&self, key: Option<String>) {
+        *self.home.server.write() = key.filter(|k| !k.trim().is_empty());
+    }
+
+    pub(super) fn server_key_override(&self) -> Option<String> {
+        self.home.server.read().clone()
     }
 
     /// On a desktop: how to reach Lidarr through a paired Bridge.

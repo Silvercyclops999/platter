@@ -215,8 +215,9 @@ pub struct Lidarr {
     home: Arc<homeside::Hooks>,
 }
 
-/// The address as a key for stored confirmations.
-fn url_key(url: &str) -> String {
+/// The address as a key for stored confirmations (and, from the home
+/// address, for the shared store).
+pub fn url_key(url: &str) -> String {
     url.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
