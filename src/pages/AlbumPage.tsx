@@ -237,6 +237,7 @@ function LibraryAlbumView({ id }: { id: string }) {
             albumId={album.id}
             title={album.title}
             quality={upgrade.info?.quality ?? null}
+            confirmed={upgrade.info?.confirmed ?? null}
             onClose={() => setLookingForBetter(false)}
             onDone={() => {
               setLookingForBetter(false);

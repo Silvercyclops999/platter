@@ -3335,6 +3335,23 @@ export class MockBackend implements Backend {
   lidarrUpgradeClear(id: string) {
     return this.delay(() => this.upgrades.clear(id));
   }
+  lidarrUpgradeCandidates(albumId: string) {
+    return this.delay(() => this.upgrades.candidates(albumId));
+  }
+  lidarrUpgradeConfirm(albumId: string, releaseGroupId: string | null) {
+    return this.delay(() => this.upgrades.confirm(albumId, releaseGroupId));
+  }
+  lidarrAllowlist(artist: string, _artistId: string | null) {
+    return this.delay(() => [...(this.upgrades.allowlists.get(artist.toLowerCase()) ?? [])]);
+  }
+  lidarrAllowlistSet(artist: string, _artistId: string | null, releaseGroupIds: string[]) {
+    return this.delay(() => {
+      const ids = [...new Set(releaseGroupIds.map((r) => r.trim().toLowerCase()).filter(Boolean))].sort();
+      if (ids.length) this.upgrades.allowlists.set(artist.toLowerCase(), ids);
+      else this.upgrades.allowlists.delete(artist.toLowerCase());
+      return ids;
+    });
+  }
   musicShareGet() {
     return this.delay(() => structuredClone(this.upgrades.share));
   }

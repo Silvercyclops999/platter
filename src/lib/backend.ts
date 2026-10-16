@@ -144,6 +144,8 @@ import type {
   ShareMap,
   SwapResult,
   UpgradeBulkResult,
+  UpgradeCandidates,
+  UpgradeConfirmed,
   UpgradeOffer,
   UpgradeRecord,
   UpgradeUnder,
@@ -749,6 +751,13 @@ export interface Backend {
   lidarrUpgradeUndo(id: string): Promise<UpgradeRecord>;
   /** Clear an upgrade from the list. */
   lidarrUpgradeClear(id: string): Promise<UpgradeRecord[]>;
+  /** The album's songs and the MusicBrainz releases it could be, each with its tracklist. */
+  lidarrUpgradeCandidates(albumId: string): Promise<UpgradeCandidates>;
+  /** Confirm (or with null forget) which release group an album is. Upgrades need it. */
+  lidarrUpgradeConfirm(albumId: string, releaseGroupId: string | null): Promise<UpgradeConfirmed | null>;
+  /** The release groups an artist is limited to (empty: no limit). */
+  lidarrAllowlist(artist: string, artistId: string | null): Promise<string[]>;
+  lidarrAllowlistSet(artist: string, artistId: string | null, releaseGroupIds: string[]): Promise<string[]>;
   /** Where this computer reaches the music share. */
   musicShareGet(): Promise<ShareMap>;
   musicShareSet(map: ShareMap): Promise<ShareMap>;
@@ -1228,6 +1237,10 @@ export function createTauriBackend(): Backend {
     lidarrUpgradeSwap: (id, trackIds) => call("lidarr_upgrade_swap", { id, trackIds }),
     lidarrUpgradeUndo: (id) => call("lidarr_upgrade_undo", { id }),
     lidarrUpgradeClear: (id) => call("lidarr_upgrade_clear", { id }),
+    lidarrUpgradeCandidates: (albumId) => call("lidarr_upgrade_candidates", { albumId }),
+    lidarrUpgradeConfirm: (albumId, releaseGroupId) => call("lidarr_upgrade_confirm", { albumId, releaseGroupId }),
+    lidarrAllowlist: (artist, artistId) => call("lidarr_allowlist", { artist, artistId }),
+    lidarrAllowlistSet: (artist, artistId, releaseGroupIds) => call("lidarr_allowlist_set", { artist, artistId, releaseGroupIds }),
     musicShareGet: () => call("music_share_get"),
     musicShareSet: (map) => call("music_share_set", { map }),
     musicSharePlexFolders: () => call("music_share_plex_folders"),

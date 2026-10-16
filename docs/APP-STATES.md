@@ -194,6 +194,24 @@ The setup check only reads from Lidarr. Nothing is ever sent to Lidarr while any
 | Lidarr monitors more than asked | `lidarr/request.rs`: read back after adding the artist | Other albums are turned off before searching, and the request says so | `lidarr::request_tests::read_back_turns_off_anything_else_lidarr_monitored_and_says_so` | Done |
 | Bootleg, promo, someone else's release, or a title already in the library | `lidarr/mbpick.rs` | Why it can't be requested; Lidarr isn't contacted | `lidarr::mbpick::tests::*`, `lidarr::request_tests::unofficial_or_clashing_albums_are_refused_before_lidarr_is_asked` | Done |
 | MusicBrainz busy or unreachable | `lidarr/mbpick.rs`: 503, 429 or no answer | A cached answer when there is one, else "MusicBrainz isn't answering right now." | `lidarr::mbpick::tests::musicbrainz_answers_are_cached_and_paced` | Done |
+## Lidarr upgrades
+
+Swaps change files in the library, so every failure leaves the old file where it was, and each has a test that fakes it.
+
+| State | Detected | Shown | Test | Status |
+| --- | --- | --- | --- | --- |
+| No staging folder | `lidarrStagingFolder` empty | Upgrade rows and the album menu item stay hidden | `lidarr::upgrade_tests::unreleased_albums_and_a_missing_staging_root_are_refused`; UI `lidarr-upgrades` hides the rows | Done |
+| Staging isn't a Lidarr root, or Plex scans it | `lidarr/check.rs` | Red `stagingNotRoot` or `stagingScanned` with what to change; blocks every request | `lidarr::tests::a_staging_folder_lidarr_doesnt_have_is_red`, `a_staging_folder_plex_scans_is_red_by_path_and_by_content` | Done |
+| Release not confirmed | `lidarr/upgrade.rs` | The dialog asks which release it is, with the tracklist beside the album's songs | `lidarr::upgrade_tests::upgrades_wait_for_the_user_to_confirm_the_release`; UI confirms the release | Done |
+| No quality profile aims higher | `lidarr/quality.rs` | "None of Lidarr's quality profiles aims higher than MP3 320..." Nothing sent | `lidarr::upgrade_tests::no_profile_aiming_higher_means_nothing_is_sent` | Done |
+| No share mapping | `musicshare` empty | Card: "Set where this computer reaches your music share" with Open Settings; nothing is written | `lidarr::upgrade_tests::nothing_is_written_without_the_share_mapping`; UI points to Settings | Done |
+| Share unreachable | the album's folder doesn't answer | "Platter can't reach <folder>... Nothing was changed." | `lidarr::upgrade_tests::every_failure_leaves_the_old_files_in_place` | Done |
+| File in use | the old file can't be locked | "<file> is in use by another program... Nothing was changed." | same; `a_locked_file_or_failed_tag_copy_is_recorded_and_changes_nothing`; UI shows it in the dialog | Done |
+| Tag copy failed | `lidarr/tagcarry.rs` reads the copy back, or the note didn't take | "The tags couldn't be copied: ... every file is back as it was." | same, plus `tags_only_mp3_can_hold_stop_the_copy_before_anything_is_written` | Done |
+| Backup folder not writable, or inside the music folder | test file in the backup folder; the chosen folder's path | "Platter can't write to the backup folder..." / "...is inside your music folder..." Nothing changed | `every_failure_leaves_the_old_files_in_place`, `a_chosen_backup_folder_must_be_outside_the_music_folder` | Done |
+| Plex rescan failed | Plex refuses the folder scan after the swap | The swap is undone: "Plex didn't take the request to rescan the folder, so Platter put the old files back." Plex unreachable before the swap: nothing changes | `lidarr::upgrade_tests::a_failed_rescan_puts_the_old_files_back` | Done |
+| A mixed folder | anything kept for a reason other than "not better" | The swap asks song by song, whatever the setting | `swapping_asks_per_song_rescans_the_folder_notes_the_source_and_undoes_exactly`; UI asks song by song | Done |
+
 ## Checking by hand against a real server
 
 Each of these is covered by a test that fakes it, and should also be tried
@@ -217,3 +235,9 @@ once for real:
    playing cached music.
 6. Scan: add a few albums to the music folder and scan the library in Plex.
    "Adding new music… N of M" shows while it runs and new albums appear.
+7. Upgrades: with a real Lidarr, a staging root Plex doesn't scan and the
+   music share mapped, look for a better copy of one MP3 album, swap two
+   songs, open them in a tag editor (every tag, ARCHIVE_* and cover there,
+   the source note extended), check Plex shows them after its folder scan,
+   check `.plexignore` holds `_to_delete/*` and Plex doesn't list the
+   backups, then Undo and compare the old files' checksums.

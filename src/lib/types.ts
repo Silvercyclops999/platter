@@ -1118,6 +1118,8 @@ export interface Settings {
   lidarrStagingFolder: string;
   /** Upgrades ask before each swap (off swaps on their own, under the same rules). */
   upgradesAsk: boolean;
+  /** A provenance note starting with this marks an official source (upgrades without ISRCs need it). */
+  upgradeOfficialPrefix: string;
   /** The miniplayer window stays above other windows (this device only). */
   miniplayerOnTop: boolean;
   /** The miniplayer's card takes a colour from the cover (this device only). */
@@ -1449,6 +1451,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showMissingReleases: true,
   lidarrStagingFolder: "",
   upgradesAsk: true,
+  upgradeOfficialPrefix: "Official",
   miniplayerOnTop: true,
   miniplayerTint: true,
   miniplayerQueue: false,
@@ -2155,7 +2158,8 @@ export type UpgradeFailure =
   | { kind: "moveFailed"; name: string }
   | { kind: "rescanFailed" }
   | { kind: "plexUnreachable" }
-  | { kind: "backupMissing"; name: string };
+  | { kind: "backupMissing"; name: string }
+  | { kind: "backupInLibrary"; path: string };
 
 /** One file a swap replaced. */
 export interface SwappedFile {
@@ -2195,9 +2199,46 @@ export interface AlbumUpgrade {
   record: UpgradeRecord | null;
   /** The album now, "MP3 320". */
   quality: string | null;
+  /** The MusicBrainz release the user confirmed this album is. */
+  confirmed: UpgradeConfirmed | null;
 }
 
-export type UpgradeKeep = "unreleased" | "archiveTags" | "extraDisc" | "notInAlbum" | "noId" | "noMatch" | "ambiguous" | "notBetter";
+/** The user's word that a library album is this release group. */
+export interface UpgradeConfirmed {
+  releaseGroupId: string;
+  title: string;
+  at: number;
+}
+
+/** One track of a release's official tracklist. */
+export interface ListedTrack {
+  disc: number;
+  position: number;
+  title: string;
+  lengthMs: number | null;
+}
+
+/** `lidarr_upgrade_candidates`: the album's songs and the releases it could be. */
+export interface UpgradeCandidates {
+  title: string;
+  artist: string;
+  songs: { disc: number; track: number; title: string; durationMs: number }[];
+  confirmed: UpgradeConfirmed | null;
+  candidates: { group: LidarrGroup; tracks: ListedTrack[] }[];
+}
+
+export type UpgradeKeep =
+  | "unreleased"
+  | "notInAlbum"
+  | "notOnRelease"
+  | "notInNewCopy"
+  | "noReleasedTag"
+  | "noOfficialNote"
+  | "lengthDiffers"
+  | "differentVersion"
+  | "soundDiffers"
+  | "ambiguous"
+  | "notBetter";
 
 export interface OfferSong {
   /** Empty for a file Plex doesn't list on the album. */
@@ -2210,8 +2251,8 @@ export interface OfferSong {
   /** Why it's kept as it is. */
   reason: string | null;
   keep: UpgradeKeep | null;
-  /** How it was matched. */
-  by: "isrc" | "recordingId" | null;
+  /** How it was matched: the same ISRC, or released + official note + length + sound. */
+  by: "isrc" | "sound" | null;
 }
 
 export type OfferStatus = "waiting" | "needsMapping" | "unreachable" | "ready" | "nothing" | "swapped";

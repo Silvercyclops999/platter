@@ -78,7 +78,7 @@ import {
   useLidarr,
 } from "./LidarrSettings";
 import { LidarrRequestsList } from "./LidarrRequest";
-import { ShareMapEditor, StagingFolderField, UpgradesList } from "./LidarrUpgrade";
+import { OfficialPrefixField, ShareMapEditor, StagingFolderField, UpgradesList } from "./LidarrUpgrade";
 import { AUTO_CAP_OPTIONS, AutoArtistsList } from "./AutoRequestDialog";
 
 /** Minutes between Subsonic change checks the setting offers. */
@@ -2070,13 +2070,22 @@ export function SettingsPage() {
                   control: (ids) => toggle(s, "upgradesAsk", ids),
                 },
                 {
+                  key: "upgradeOfficialPrefix",
+                  section: "Integrations",
+                  group: "Lidarr",
+                  title: "Official source note starts with",
+                  description:
+                    "A song without an ISRC only swaps when a tag says it's the released recording, its source note starts with this, it's on the confirmed release, the lengths match and it sounds the same as the new copy.",
+                  control: (ids) => <OfficialPrefixField ids={ids} />,
+                },
+                {
                   key: "musicShare",
                   section: "Integrations",
                   cap: "realFilePaths",
                   group: "Lidarr",
                   title: "Where this computer reaches your music",
                   description:
-                    "Swaps run on this computer, on the files themselves, so Platter needs your music share and the staging folder as this computer sees them. Nothing is written without this. Replaced files go to the backup folder, never deleted. This device only.",
+                    "Swaps run on this computer, on the files themselves, so Platter needs your music share and the staging folder as this computer sees them. Nothing is written without this. Replaced files go to a _to_delete folder Plex is told to ignore, or a folder you pick outside your music, never deleted. This device only.",
                   control: () => null,
                   block: () => <ShareMapEditor />,
                 },

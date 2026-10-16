@@ -1946,6 +1946,35 @@ The home address is tried first (for 4 seconds when an away address is set), the
 `LidarrRequest = { id, releaseGroupId, title, artist, artistId, state, destination, lidarrAlbumId, addedArtist, alreadyInLidarr, createdAt, updatedAt, message, notes, auto }`, with `state` one of `queued`, `requested`, `searching`, `downloading`, `imported`, `failed`. `auto` is true for a request auto-request made; one it refused stays as `failed` with why in `message`.
 Requests are kept on this device. Waiting ones are retried every 5 minutes in the background, full check first.
 
+Requests take official studio release groups only (no live, compilation or other secondary type), never an artist on Lidarr's import list exclusions (matched by MusicBrainz id) and, when the user limited an artist to chosen releases, only those. After adding an artist Platter reads it back: its folder must not be inside a Plex music folder, and the whole check runs again before anything is searched.
+
+### Upgrades
+
+Better copies of albums already in the library. Off until `lidarrStagingFolder` (Lidarr's path for a root folder Plex doesn't scan) is set. An album is upgraded only after the user confirms which MusicBrainz release group it is. The request is a normal request with the same three writes, into the staging root only, with an existing quality profile whose cutoff is above the album's lowest-quality released song (Platter never creates or edits profiles). Swaps run on this computer through the music share mapping, never through Lidarr: the new copy takes the old file's name (new extension), folder and every tag, the source note gets `Upgraded to <quality> from Lidarr, <date>`, the old file moves to the backup place, then Plex rescans just that folder. Any failure puts every file back.
+
+A file swaps when it and the new file carry the same ISRC, or when all of these hold: a tag says it's the released recording, its source note starts with `upgradeOfficialPrefix`, it's on the confirmed release's tracklist, the lengths are within a second, and the decoded audio correlates at 0.99 or more. A length more than a second off the release's track is another version and never swaps. Everything else is kept, with the reason. Release status and the source note come from `lidarr::provenance::StatusReader` (a stub over `ARCHIVE_VERSION` and `ARCHIVE_SOURCE` for now).
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `lidarr_upgrade_album` | `{ albumId }` | `AlbumUpgrade = { available, record: UpgradeRecord\|null, quality: string\|null, confirmed: UpgradeConfirmed\|null }`; `available` when the staging folder is set, the last check passed and the album is released and below 24-bit |
+| `lidarr_upgrade_candidates` | `{ albumId }` | `{ title, artist, songs: { disc, track, title, durationMs }[], confirmed, candidates: { group, tracks: { disc, position, title, lengthMs }[] }[] }`: official studio release groups with the album's title, each with its first official release's tracklist |
+| `lidarr_upgrade_confirm` | `{ albumId, releaseGroupId: string \| null }` | `UpgradeConfirmed = { releaseGroupId, title, at }`, or null after forgetting; `invalid` for a group the request rules refuse |
+| `lidarr_upgrade_request` | `{ albumId }` | `UpgradeRecord`; `invalid` without a staging folder, before the release is confirmed, for an unreleased album, a red check, an artist Lidarr keeps outside staging, an excluded artist, or when no quality profile aims higher (said plainly). Kept waiting when Lidarr can't be reached |
+| `lidarr_upgrade_bulk` | `{ under: "lossy" \| "belowCd" }` | `{ requested: UpgradeRecord[], skipped: { title, reason }[], more }`: confirmed albums below the quality, up to 25 a run |
+| `lidarr_upgrades` | `{ refresh: boolean }` | `UpgradeRecord[]`, newest first |
+| `lidarr_upgrade_offer` | `{ id }` | `UpgradeOffer` (below). Reads Lidarr (GET only) and the files |
+| `lidarr_upgrade_swap` | `{ id, trackIds: string[] \| null }` | `{ record, swapped, backupDir, summary }`. `null` swaps every song that upgrades and is refused when the album needs asking per song. `invalid` with the failure's words otherwise; the record keeps `failure` |
+| `lidarr_upgrade_undo` | `{ id }` | `UpgradeRecord`; the old files back byte for byte, the new copies moved to the backup's `Replaced` folder |
+| `lidarr_upgrade_clear` | `{ id }` | `UpgradeRecord[]`; not while a swap can be undone |
+| `lidarr_allowlist` / `lidarr_allowlist_set` | `{ artist, artistId? }` / `{ artist, artistId?, releaseGroupIds }` | `string[]`: the release groups an artist is limited to (empty: no limit) |
+| `music_share_get` / `music_share_set` | – / `{ map: ShareMap }` | `ShareMap = { music: { server, local }[], staging, backup }`, this device only. `backup` empty means a `_to_delete` folder in the library root, with `_to_delete/*` added to its `.plexignore` when missing; a chosen folder must be outside every music folder |
+| `music_share_plex_folders` | – | Plex's music folders as Plex sees them |
+
+`UpgradeRecord` is a `LidarrRequest` plus `{ albumId, fromQuality, swaps: SwapRun[], failure: UpgradeFailure|null }`; `SwapRun = { id, at, backupDir, files, undone, summary }`.
+`UpgradeOffer = { upgradeId, albumId, title, artist, status, message, summary, from, to, upgrade: OfferSong[], kept: OfferSong[], askEach, askReason, ask, backupDir, lastSwap, failure, failureMessage }` with `status` one of `waiting`, `needsMapping`, `unreachable`, `ready`, `nothing`, `swapped`, and `OfferSong = { trackId, title, disc, track, from, to, reason, keep, by: "isrc"|"sound"|null }`. `askEach` is true when anything in the album's folders is kept for a reason other than "the new copy isn't better"; the swap then asks per song whatever `upgradesAsk` says.
+`UpgradeFailure` is `{ kind }` with `noMapping`, `shareUnreachable { path }`, `changed { name }`, `stagingMissing { name }`, `fileLocked { name }`, `nameTaken { name }`, `tagCopyFailed { name, why }`, `backupNotWritable { path }`, `backupInLibrary { path }`, `moveFailed { name }`, `rescanFailed`, `plexUnreachable` or `backupMissing { name }`. Each leaves the old files in place.
+With `upgradesAsk` off, the background loop swaps imported upgrades on its own when the album doesn't need asking per song.
+
 ## Release radar
 
 New official albums, EPs and singles from followed artists and the ten artists played most in the last 90 days. About once a day, when MusicBrainz is on, Platter asks MusicBrainz's release group search for a few artists at a time (by MusicBrainz id, first released in the last 90 days or later), through the shared one-a-second limiter, with answers cached for 18 hours. Only release groups that pass the same rules as a request are kept: at least one official release, album, EP or single, credited to the artist alone, no secondary type. What was found is kept on this device. An artist's first look announces nothing.

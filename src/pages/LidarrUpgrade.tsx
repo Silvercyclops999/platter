@@ -11,7 +11,7 @@ import { Dialog } from "../components/Dialog";
 import { Select } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
-import type { AlbumUpgrade, AppError, OfferSong, ShareMap, UpgradeOffer, UpgradeRecord, UpgradeUnder } from "../lib/types";
+import type { AlbumUpgrade, AppError, OfferSong, ShareMap, UpgradeCandidates, UpgradeConfirmed, UpgradeOffer, UpgradeRecord, UpgradeUnder } from "../lib/types";
 import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast, useToasts } from "../stores/toasts";
@@ -71,12 +71,23 @@ export function upgradeMenuItems(info: AlbumUpgrade | null, open: () => void) {
   return [{ label: "Look for a better copy", onSelect: open }];
 }
 
-/** Confirm asking Lidarr for a better copy into the staging folder. */
+const fmtLen = (ms: number | null | undefined) => {
+  if (!ms) return "";
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/**
+ * Look for a better copy: first the user confirms which MusicBrainz release
+ * the album is (its official tracklist beside the album's songs), then
+ * Platter asks Lidarr for it, into the staging folder.
+ */
 export function LookForBetterDialog({
   open,
   albumId,
   title,
   quality,
+  confirmed,
   onClose,
   onDone,
 }: {
@@ -84,17 +95,56 @@ export function LookForBetterDialog({
   albumId: string;
   title: string;
   quality: string | null;
+  confirmed: UpgradeConfirmed | null;
   onClose: () => void;
   onDone: () => void;
 }) {
   const staging = useSettings((s) => s.settings?.lidarrStagingFolder ?? "");
   const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [mine, setMine] = useState<UpgradeConfirmed | null>(confirmed);
+  const [changing, setChanging] = useState(false);
+  const [cands, setCands] = useState<UpgradeCandidates | null>(null);
+  const [pick, setPick] = useState<string | null>(null);
   useEffect(() => {
-    if (open) setError(null);
-  }, [open]);
+    if (!open) return;
+    setError(null);
+    setMine(confirmed);
+    setChanging(!confirmed);
+  }, [open, confirmed]);
+  const choosing = open && (changing || !mine);
+  useEffect(() => {
+    if (!choosing) return;
+    let alive = true;
+    setCands(null);
+    backend.lidarrUpgradeCandidates(albumId).then(
+      (c) => {
+        if (!alive) return;
+        setCands(c);
+        setPick(c.confirmed?.releaseGroupId ?? c.candidates[0]?.group.id ?? null);
+      },
+      (e) => alive && setError(errText(e) || "MusicBrainz didn't answer. Try again in a minute."),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [choosing, albumId]);
+
+  const confirm = async () => {
+    if (!pick) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setMine(await backend.lidarrUpgradeConfirm(albumId, pick));
+      setChanging(false);
+    } catch (e) {
+      setError(errText(e) || "That couldn't be confirmed.");
+    } finally {
+      setBusy(false);
+    }
+  };
   const send = async () => {
-    setSending(true);
+    setBusy(true);
     setError(null);
     try {
       const r = await backend.lidarrUpgradeRequest(albumId);
@@ -103,17 +153,79 @@ export function LookForBetterDialog({
     } catch (e) {
       setError(errText(e) || "That didn't go through. Try again.");
     } finally {
-      setSending(false);
+      setBusy(false);
     }
   };
+  const chosen = cands?.candidates.find((c) => c.group.id === pick);
   return (
-    <Dialog open={open} onClose={onClose} label={`Look for a better copy of ${title}`} className="confirm lidarr-request">
-      <h2 className="confirm__title">Look for a better copy of {title}?</h2>
-      {quality && <p className="confirm__body">It's {quality} now. Platter asks Lidarr for the official release in better quality, downloaded into the staging folder:</p>}
-      <p className="lidarr-request__path">{staging}</p>
-      <p className="confirm__body lidarr-request__note">
-        Nothing in your library changes until you swap. Then each song is checked first, and anything unreleased, archive-tagged or unproven stays as it is.
-      </p>
+    <Dialog open={open} onClose={onClose} label={`Look for a better copy of ${title}`} className="confirm lidarr-request upgrade-dialog upgrade-dialog--wide">
+      <h2 className="confirm__title">{choosing ? `Which release is ${title}?` : `Look for a better copy of ${title}?`}</h2>
+      {choosing ? (
+        <>
+          <p className="confirm__body">
+            Pick the official release this album is. Platter only ever swaps in songs from it, and checks each one first.
+          </p>
+          {!cands && !error && <Skeleton height={120} radius="card" />}
+          {cands && !cands.candidates.length && (
+            <p className="lidarr-request__error" role="alert">
+              <CircleAlert size={16} aria-hidden="true" />
+              <span>MusicBrainz has no official studio release by {cands.artist} with this title, so there's nothing to look for.</span>
+            </p>
+          )}
+          {cands && cands.candidates.length > 0 && (
+            <>
+              <div className="upgrade-releases" role="radiogroup" aria-label="Releases">
+                {cands.candidates.map((c) => (
+                  <label key={c.group.id} className={`upgrade-release ${pick === c.group.id ? "is-picked" : ""}`}>
+                    <input type="radio" name="upgrade-release" checked={pick === c.group.id} onChange={() => setPick(c.group.id)} />
+                    <span className="upgrade-release__title">{c.group.title}</span>
+                    <span className="upgrade-release__meta">
+                      {[c.group.firstRelease.slice(0, 4), `${c.tracks.length} ${c.tracks.length === 1 ? "track" : "tracks"}`].filter(Boolean).join(" · ")}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="upgrade-compare">
+                <div>
+                  <h3 className="upgrade-card__list-title">Your album</h3>
+                  <ol className="upgrade-compare__list">
+                    {cands.songs.map((s, i) => (
+                      <li key={i}>
+                        <span className="truncate">{s.title}</span>
+                        <span className="upgrade-compare__len">{fmtLen(s.durationMs)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+                <div>
+                  <h3 className="upgrade-card__list-title">Official tracklist</h3>
+                  <ol className="upgrade-compare__list">
+                    {chosen?.tracks.map((t, i) => (
+                      <li key={i}>
+                        <span className="truncate">{t.title}</span>
+                        <span className="upgrade-compare__len">{fmtLen(t.lengthMs)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="confirm__body">
+            {quality ? `It's ${quality} now. ` : ""}Platter asks Lidarr for {mine?.title ?? title} in better quality, downloaded into the staging folder:
+          </p>
+          <p className="lidarr-request__path">{staging}</p>
+          <p className="confirm__body lidarr-request__note">
+            Nothing in your library changes until you swap. Then each song is checked first, and anything unreleased or unproven stays as it is.{" "}
+            <button type="button" className="link" onClick={() => setChanging(true)}>
+              Change the release
+            </button>
+          </p>
+        </>
+      )}
       {error && (
         <p className="lidarr-request__error" role="alert">
           <CircleAlert size={16} aria-hidden="true" />
@@ -124,9 +236,15 @@ export function LookForBetterDialog({
         <Button variant="ghost" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="primary" disabled={sending} onClick={() => void send()}>
-          {sending ? "Asking…" : "Look for it"}
-        </Button>
+        {choosing ? (
+          <Button variant="primary" disabled={busy || !pick} onClick={() => void confirm()}>
+            {busy ? "Saving…" : "This is the album"}
+          </Button>
+        ) : (
+          <Button variant="primary" disabled={busy} onClick={() => void send()}>
+            {busy ? "Asking…" : "Look for it"}
+          </Button>
+        )}
       </div>
     </Dialog>
   );
@@ -413,7 +531,8 @@ export function StagingFolderField({ ids }: { ids: Ids }) {
   }, [saved]);
   if (saved === undefined) return <Skeleton width={220} height={32} />;
   const save = () => {
-    const next = value.trim();
+    const next = value.trim().replace(/(.)[\\/]+$/, "$1");
+    setValue(next);
     if (next !== saved) void updateSettings({ lidarrStagingFolder: next });
   };
   return (
@@ -422,6 +541,40 @@ export function StagingFolderField({ ids }: { ids: Ids }) {
       value={value}
       maxLength={400}
       placeholder="/downloads/upgrades"
+      spellCheck={false}
+      autoComplete="off"
+      aria-labelledby={ids.title}
+      aria-describedby={ids.desc}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          save();
+        }
+      }}
+    />
+  );
+}
+
+/** The prefix a provenance note starts with when it names an official source. */
+export function OfficialPrefixField({ ids }: { ids: Ids }) {
+  const saved = useSettings((s) => s.settings?.upgradeOfficialPrefix);
+  const [value, setValue] = useState(saved ?? "");
+  useEffect(() => {
+    if (saved !== undefined) setValue(saved);
+  }, [saved]);
+  if (saved === undefined) return <Skeleton width={160} height={32} />;
+  const save = () => {
+    const next = value.trim();
+    if (next !== saved) void updateSettings({ upgradeOfficialPrefix: next });
+  };
+  return (
+    <input
+      className="setting-text"
+      value={value}
+      maxLength={60}
+      placeholder="Official"
       spellCheck={false}
       autoComplete="off"
       aria-labelledby={ids.title}
@@ -519,7 +672,7 @@ export function ShareMapEditor() {
           <input
             className="setting-text"
             value={map.backup}
-            placeholder="Platter's own folder"
+            placeholder="Empty: _to_delete in your music folder"
             spellCheck={false}
             onChange={(e) => edit({ backup: e.target.value })}
           />
