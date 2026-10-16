@@ -218,7 +218,7 @@ describe("cards", () => {
     expect(screen.getByRole("button", { name: `Pause ${album.title}` })).toBeInTheDocument();
     fireEvent.contextMenu(screen.getByRole("button", { name: album.title }), { clientX: 5, clientY: 5 });
     const menu = await screen.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Pause", "Add to queue", "Add to playlist", "Go to artist", "Go to artist radio", "Move to section…", "Share", "I own this", "Pin to sidebar"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Pause", "Add to queue", "Add to playlist", "Go to artist", "Go to artist radio", "Move to section…", "Share", "I own this", "Pin to sidebar", "Edit tags…", "Check tags…"]);
     await user.click(within(menu).getByRole("menuitem", { name: "Add to queue" }));
     await waitFor(() => expect(add).toHaveBeenCalledWith(mock.fx.tracksByAlbum.get(album.id)!.map((t) => t.id), "end"));
   });

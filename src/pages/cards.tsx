@@ -5,6 +5,7 @@ import { openContextMenu } from "../components/ContextMenu";
 import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { shareItem } from "../components/ShareMenu";
 import { plexEditItem } from "../components/PlexEditMenu";
+import { tagAlbumItems, tagArtistItem } from "../components/TagEditMenu";
 import { ShelfMark, physicalItem } from "../components/PhysicalDialog";
 import { isCreditId } from "../lib/credits";
 import { ExplicitBadge } from "../components/FileTagBadges";
@@ -68,6 +69,7 @@ export function useAlbumActions(album: Album): ItemActions & { openMenu: (at: { 
             usePins.getState().toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
         },
         plexEditItem({ id: album.id, kind: "album", title: album.title, thumb: album.thumb, artistTitle: album.artistTitle }),
+        ...tagAlbumItems(album),
       ],
       at,
     );
@@ -95,6 +97,7 @@ export function useArtistActions(artist: Artist): ItemActions {
             onSelect: () => usePins.getState().toggle({ kind: "artist", id: artist.id, title: artist.title, subtitle: "Artist", thumb: artist.thumb }),
           },
           ...(isCreditId(artist.id) ? [] : [plexEditItem({ id: artist.id, kind: "artist", title: artist.title, thumb: artist.thumb })]),
+          ...(isCreditId(artist.id) ? [] : tagArtistItem(artist)),
         ],
         e,
       );

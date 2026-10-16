@@ -1,9 +1,11 @@
-import { Pause, Play, Shuffle } from "lucide-react";
+import { Ellipsis, Pause, Play, Shuffle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Art } from "../components/Art";
 import { Badge } from "../components/Badge";
 import { IconButton } from "../components/Button";
+import { openContextMenu } from "../components/ContextMenu";
 import { Skeleton } from "../components/Skeleton";
+import { tagEraItems } from "../components/TagEditMenu";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { plural, releaseTypeLabel } from "../lib/format";
@@ -98,6 +100,12 @@ export function EraPage({ artistId, name }: { artistId: string; name: string }) 
             onClick={play}
           />
           <IconButton label={`Shuffle ${name}`} size="lg" disabled={!data} icon={<Shuffle size={22} />} onClick={() => void player.playTracks(shuffled(ids))} />
+          <IconButton
+            label={`More options for ${name}`}
+            size="lg"
+            icon={<Ellipsis size={22} />}
+            onClick={(e) => openContextMenu(`Options for ${name}`, tagEraItems(artistId, name), e.currentTarget)}
+          />
           <button type="button" className="link era-page__all" onClick={() => nav.go({ name: "artist", id: artistId, era: name })}>
             Show on the artist page
           </button>

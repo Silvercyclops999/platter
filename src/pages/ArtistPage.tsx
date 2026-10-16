@@ -7,6 +7,7 @@ import { Card, CardSkeleton } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { shareItem } from "../components/ShareMenu";
 import { plexEditItem } from "../components/PlexEditMenu";
+import { tagArtistItem } from "../components/TagEditMenu";
 import { bookmarkPageItem, dontPlayArtistItem } from "../stores/curate";
 import { yourStatsItem } from "../stores/stats";
 import { StatsStrip } from "../components/StatsStrip";
@@ -353,6 +354,7 @@ function ActionRow({
               ...(credited ? [] : [shareItem("artist", artist.id, artist.thumb)]),
               { label: pinned ? "Unpin from sidebar" : "Pin to sidebar", onSelect: togglePin },
               ...(credited ? [] : [plexEditItem({ id: artist.id, kind: "artist", title: artist.title, thumb: artist.thumb })]),
+              ...(credited ? [] : tagArtistItem(artist)),
             ],
             e.currentTarget,
           )

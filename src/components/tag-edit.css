@@ -1,0 +1,77 @@
+/* The tag editor, the tag check and the fixes. */
+
+.dialog.pe.te { width: min(1080px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.te-legend { padding: 0; margin-bottom: var(--space-2); font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); color: var(--color-text-secondary); }
+.te-album { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-4) 0 0; padding: 0; border: 0; min-width: 0; }
+.te-album .pe-form__row:has(> :nth-child(3)) { grid-template-columns: 1fr 1fr 1fr; }
+.te-banner {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 4px;
+  font-size: var(--font-size-sm);
+  background: var(--color-state-hover);
+  color: var(--color-text-secondary);
+}
+.te-banner--block { color: var(--color-text-primary); }
+.te-confirm { margin: var(--space-3) 0 0; font-size: var(--font-size-sm); color: var(--color-text-primary); }
+.te-dim { color: var(--color-text-muted); }
+.te-style { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+/* The song grid and the change preview. */
+.te-grid-wrap { margin-top: var(--space-4); max-height: min(420px, 48vh); overflow: auto; border-radius: 4px; }
+.te-grid { width: 100%; border-collapse: collapse; font-size: var(--font-size-xs); }
+.te-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-1) var(--space-1);
+  text-align: left;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  background: var(--color-bg-overlay);
+  white-space: nowrap;
+}
+.te-grid td { padding: 2px var(--space-1); vertical-align: middle; }
+.te-preview td { padding: var(--space-1); color: var(--color-text-secondary); }
+.te-cell {
+  width: 100%;
+  min-width: 72px;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+.te-cell:focus { outline: none; border-color: color-mix(in srgb, var(--color-ink) 28%, transparent); }
+.te-cell:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+.te-cell:disabled { opacity: 0.6; }
+.te-num .te-cell { min-width: 40px; width: 44px; }
+.te-mid .te-cell { min-width: 108px; }
+.te-wide { min-width: 160px; }
+.te-row--error td { opacity: 0.55; }
+
+.te-fixes { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+.te-kept { margin-top: var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.te-kept summary { cursor: pointer; }
+.te-kept ul { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
+.te-releases { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--font-size-sm); }
+.te-releases label { display: flex; gap: var(--space-2); align-items: baseline; cursor: pointer; }
+
+/* The check's findings. */
+.te-findings { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.te-finding { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-2) 0; border-top: 1px solid var(--color-state-hover); }
+.te-finding__icon { flex: none; margin-top: 2px; color: var(--color-text-muted); }
+.te-finding--error .te-finding__icon { color: var(--color-text-primary); }
+.te-finding__text { flex: 1; min-width: 0; }
+.te-finding__what { font-size: var(--font-size-sm); color: var(--color-text-primary); }
+.te-finding__why { margin-top: 2px; font-size: var(--font-size-xs); line-height: 1.45; color: var(--color-text-muted); }
+.te-finding__actions { flex: none; display: flex; gap: var(--space-1); }
+
+/* Settings: the Plex library settings check. */
+.te-prefs { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--font-size-sm); }
+.te-prefs li { display: flex; gap: var(--space-2); align-items: flex-start; }
+.te-prefs__help { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.te-folder { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.te-folder .pe-input { flex: 1; min-width: 220px; height: 36px; }

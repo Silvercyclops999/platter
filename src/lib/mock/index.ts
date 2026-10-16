@@ -32,6 +32,10 @@
 import type { Backend, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
 import type {
+  IsrcRelease,
+  TagCheckScope,
+  TagFixKind,
+  TagSaveRequest,
   SetOwned,
   PlayHistorySource,
   WantedAlbum,
@@ -168,6 +172,7 @@ import { MockMixes } from "./mixes";
 import { MockSocial } from "./social";
 import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
+import { MockTagEdit } from "./tagEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
 import { MockPlayHistory } from "./playhistory";
 import { MockLidarrWork } from "./lidarrModes";
@@ -318,6 +323,7 @@ export class MockBackend implements Backend {
   readonly downloads: MockDownloads;
   /** Edit in Plex (test hooks: shared, failNext). */
   readonly plexEdit: MockPlexEdit;
+  readonly tagEdit: MockTagEdit;
   /** The library doctor's findings (test hooks: ignored, fixed, running, reset). */
   readonly doctor: MockDoctor;
   /** Mixes and radio, made from the fixtures. */
@@ -469,6 +475,15 @@ export class MockBackend implements Backend {
       this.fx,
       () => this.settings,
       () => this.later(0, () => this.emit("library://changed", null)),
+    );
+    this.tagEdit = new MockTagEdit(
+      this.fx,
+      () => this.settings,
+      (patch) => {
+        this.settings = { ...this.settings, ...patch };
+        this.emit("settings://changed", { ...this.settings, volume: this.volume });
+      },
+      () => this.later(0, () => this.emit("tags://changed", null)),
     );
     this.doctor = new MockDoctor(this.fx, () => this.settings);
     this.physical = new MockPhysical(this.fx, () => this.settings, () => this.later(0, () => this.emit("physical://changed", {})));
@@ -1292,6 +1307,54 @@ export class MockBackend implements Backend {
 
   // ---------------------------------------------------------------- edit in Plex
 
+  tagEditPickMusicFolder() {
+    return this.delay(() => this.tagEdit.setFolder("/Volumes/Music"));
+  }
+  tagEditSetMusicFolder(path: string) {
+    return this.delay(() => this.tagEdit.setFolder(path));
+  }
+  tagEditClearMusicFolder() {
+    return this.delay(() => {
+      this.settings = { ...this.settings, musicFolder: "", musicFolderServer: "" };
+      this.emit("settings://changed", { ...this.settings, volume: this.volume });
+    });
+  }
+  tagEditMusicFolderStatus() {
+    return this.delay(() => this.tagEdit.status());
+  }
+  tagEditOpen(albumId: string | null, trackIds: string[]) {
+    return this.delay(() => this.tagEdit.open(albumId, trackIds));
+  }
+  tagEditSave(request: TagSaveRequest) {
+    return this.delay(() => this.tagEdit.save(request));
+  }
+  tagEditUndo(id: string) {
+    return this.delay(() => this.tagEdit.undo(id));
+  }
+  tagEditHistory() {
+    return this.delay(() => this.tagEdit.history());
+  }
+  tagEditCheck(scope: TagCheckScope) {
+    return this.delay(() => this.tagEdit.check(scope));
+  }
+  tagEditCheckFine(id: string, fine: boolean) {
+    return this.delay(() => this.tagEdit.checkFine(id, fine));
+  }
+  tagEditFixPreview(kind: TagFixKind, albumId: string) {
+    return this.delay(() => this.tagEdit.fixPreview(kind, albumId));
+  }
+  tagEditIsrcReleases(albumId: string) {
+    return this.delay(() => this.tagEdit.isrcReleases(albumId));
+  }
+  tagEditIsrcPreview(albumId: string, release: IsrcRelease) {
+    return this.delay(() => this.tagEdit.isrcPreview(albumId, release));
+  }
+  tagEditExplicitPreview(albumIds: string[], explicit: boolean, era?: { artistId: string; era: string } | null) {
+    return this.delay(() => this.tagEdit.explicitPreview(albumIds, explicit, era));
+  }
+  tagEditLibrarySettings() {
+    return this.delay(() => this.tagEdit.librarySettings());
+  }
   plexEditAccess() {
     return this.delay(() => this.plexEdit.access());
   }

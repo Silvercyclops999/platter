@@ -190,6 +190,18 @@ import type {
   EditChange,
   EditFields,
   EditInfo,
+  IsrcRelease,
+  IsrcReleases,
+  MusicFolderCheck,
+  PlexLibraryCheck,
+  TagCheckReport,
+  TagCheckScope,
+  TagEditorData,
+  TagFixKind,
+  TagFixPreview,
+  TagSaveRequest,
+  TagSaveResult,
+  TagUndoInfo,
   EditKind,
   ImageChoice,
   ImageKind,
@@ -341,6 +353,31 @@ export interface Backend {
   plexEditUndo(changeId: string): Promise<EditChange>;
   /** The item's recent changes, newest first. */
   plexEditHistory(id: string): Promise<EditChange[]>;
+
+  // Tag editor (docs/IPC.md "Tag editor")
+  /** Pick the music folder with the system dialog; null when cancelled. Saved when files are found in it. */
+  tagEditPickMusicFolder(): Promise<MusicFolderCheck | null>;
+  /** A typed music folder path (a UNC path); saved when files are found in it. */
+  tagEditSetMusicFolder(path: string): Promise<MusicFolderCheck>;
+  tagEditClearMusicFolder(): Promise<void>;
+  /** The music folder checked now; null when it isn't set. */
+  tagEditMusicFolderStatus(): Promise<MusicFolderCheck | null>;
+  /** An album's files, or some songs', for the editor. */
+  tagEditOpen(albumId: string | null, trackIds: string[]): Promise<TagEditorData>;
+  tagEditSave(request: TagSaveRequest): Promise<TagSaveResult>;
+  tagEditUndo(id: string): Promise<TagSaveResult>;
+  /** The last 20 edits, newest first. */
+  tagEditHistory(): Promise<TagUndoInfo[]>;
+  tagEditCheck(scope: TagCheckScope): Promise<TagCheckReport>;
+  /** "This is fine" on a finding (false brings it back). */
+  tagEditCheckFine(id: string, fine: boolean): Promise<void>;
+  tagEditFixPreview(kind: TagFixKind, albumId: string): Promise<TagFixPreview>;
+  tagEditIsrcReleases(albumId: string): Promise<IsrcReleases>;
+  tagEditIsrcPreview(albumId: string, release: IsrcRelease): Promise<TagFixPreview>;
+  /** Mark albums (or an artist's era) explicit or clean: the changes to confirm. */
+  tagEditExplicitPreview(albumIds: string[], explicit: boolean, era?: { artistId: string; era: string } | null): Promise<TagFixPreview>;
+  /** The music library's settings in Plex, read only. */
+  tagEditLibrarySettings(): Promise<PlexLibraryCheck[]>;
 
   // Likes (docs/IPC.md "Likes")
   /** Like (five stars) or unlike (clear the rating); resolves to the ids that changed. */
@@ -1017,6 +1054,22 @@ export function createTauriBackend(): Backend {
     plexEditRefresh: (id, kind) => call("plex_edit_refresh", { id, kind }),
     plexEditUndo: (changeId) => call("plex_edit_undo", { changeId }),
     plexEditHistory: (id) => call("plex_edit_history", { id }),
+    tagEditPickMusicFolder: () => call("tagedit_pick_music_folder"),
+    tagEditSetMusicFolder: (path) => call("tagedit_set_music_folder", { path }),
+    tagEditClearMusicFolder: () => call("tagedit_clear_music_folder"),
+    tagEditMusicFolderStatus: () => call("tagedit_music_folder_status"),
+    tagEditOpen: (albumId, trackIds) => call("tagedit_open", { albumId, trackIds }),
+    tagEditSave: (request) => call("tagedit_save", { request }),
+    tagEditUndo: (id) => call("tagedit_undo", { id }),
+    tagEditHistory: () => call("tagedit_history"),
+    tagEditCheck: (scope) => call("tagedit_check", { scope }),
+    tagEditCheckFine: (id, fine) => call("tagedit_check_fine", { id, fine }),
+    tagEditFixPreview: (kind, albumId) => call("tagedit_fix_preview", { kind, albumId }),
+    tagEditIsrcReleases: (albumId) => call("tagedit_isrc_releases", { albumId }),
+    tagEditIsrcPreview: (albumId, release) => call("tagedit_isrc_preview", { albumId, release }),
+    tagEditExplicitPreview: (albumIds, explicit, era) =>
+      call("tagedit_explicit_preview", { albumIds, explicit, artistId: era?.artistId ?? null, era: era?.era ?? null }),
+    tagEditLibrarySettings: () => call("tagedit_library_settings"),
     likesSet: (trackIds, liked) => call("likes_set", { trackIds, liked }),
     likedIds: () => call("liked_ids"),
     likedPage: () => call("liked_page"),

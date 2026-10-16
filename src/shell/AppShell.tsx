@@ -45,7 +45,8 @@ import { afterFirstPaint } from "../lib/idle";
 import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
 import { DeckPairPrompt } from "./DeckPairPrompt";
-import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost } from "./lazyHosts";
+import { backend } from "../lib/backend";
+import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost, LazyTagEditDialogs } from "./lazyHosts";
 import { LazyWrongLyricsHost } from "./lazyHosts";
 import { LookDrop } from "./LookDrop";
 import { QueuePanel } from "./QueuePanel";
@@ -95,6 +96,14 @@ export function AppShell() {
   useEffect(() => afterFirstPaint(() => void startTranscribe()), []);
   useEffect(() => afterFirstPaint(() => void startLyricsTrust()), []);
   useEffect(() => void startDownloads(), []);
+  // Once, on first connect: Plex's library settings, if they'd fight the tags.
+  useEffect(
+    () =>
+      afterFirstPaint(() => {
+        if (backend.kind === "tauri") void import("../pages/TagEditorSettings").then((m) => m.firstConnectLibraryCheck());
+      }),
+    [],
+  );
   useEffect(() => afterFirstPaint(() => void startSocial()), []);
   useEffect(() => void startCurate(), []);
   const queueOpen = useUi((s) => s.queueOpen);
@@ -240,6 +249,7 @@ export function AppShell() {
       <ArchiveDialogs />
       <PhysicalDialogHost />
       <LazyPlexEditDialogs />
+      <LazyTagEditDialogs />
       <LazySmartEditorHost />
       <FolderDialogs />
       <DownloadDialogs />

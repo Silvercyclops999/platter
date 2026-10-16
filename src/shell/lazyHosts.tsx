@@ -9,6 +9,7 @@ import { useLyricsEditor } from "../stores/lyricsEditor";
 import { useWrongLyrics } from "../stores/wrongLyrics";
 import { ensureLoaded, usePlexEdit } from "../stores/plexEdit";
 import { useShareCard } from "../stores/shareCard";
+import { useTagEdit } from "../stores/tagEdit";
 import { useStatsDialog } from "../stores/stats";
 import { useLooks } from "../stores/looks";
 
@@ -19,6 +20,7 @@ const ShareCard = lazy(() => import("../components/ShareCardDialog").then((m) =>
 const StatsDialog = lazy(() => import("../components/StatsDialog").then((m) => ({ default: m.StatsDialogHost })));
 const LookBuilder = lazy(() => import("../pages/looks/LookBuilder").then((m) => ({ default: m.LookBuilderHost })));
 const PickLook = lazy(() => import("../pages/looks/LookCards").then((m) => ({ default: m.PickLookDialog })));
+const TagEdit = lazy(() => import("../components/TagEditDialogs").then((m) => ({ default: m.TagEditDialogs })));
 const PlexEdit = lazy(() => import("../components/PlexEditDialogs").then((m) => ({ default: m.PlexEditDialogs })));
 
 /** True from the first time `open` is true onwards. */
@@ -62,6 +64,15 @@ export function LazyPlexEditDialogs() {
   return show ? (
     <Suspense fallback={null}>
       <PlexEdit />
+    </Suspense>
+  ) : null;
+}
+
+export function LazyTagEditDialogs() {
+  const show = useOnceOpen(useTagEdit((s) => !!(s.editor || s.check || s.fix || s.explicit)));
+  return show ? (
+    <Suspense fallback={null}>
+      <TagEdit />
     </Suspense>
   ) : null;
 }

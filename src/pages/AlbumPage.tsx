@@ -11,6 +11,7 @@ import { StatsStrip } from "../components/StatsStrip";
 import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem } from "../components/PlaylistPicker";
 import { plexEditItem } from "../components/PlexEditMenu";
+import { tagAlbumItems } from "../components/TagEditMenu";
 import { CoverPopup } from "../components/CoverPopup";
 import { ShelfBadge, physicalItem } from "../components/PhysicalDialog";
 import { DownloadButton } from "../components/DownloadButton";
@@ -214,6 +215,7 @@ function LibraryAlbumView({ id }: { id: string }) {
                     : []),
                   plexEditItem({ id: album.id, kind: "album", title: album.title, thumb: album.thumb, artistTitle: album.artistTitle }),
                   ...upgradeMenuItems(upgrade.info, () => setLookingForBetter(true)),
+                  ...tagAlbumItems(album),
                 ],
                 e.currentTarget,
               )

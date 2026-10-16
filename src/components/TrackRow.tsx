@@ -33,6 +33,7 @@ import { QualityBadge } from "./Badge";
 import { ArchiveQualityBadge, archiveQualityLabel, badgeVersion, ExplicitBadge, VersionBadge, versionLabel } from "./FileTagBadges";
 import { useTrackBadges } from "../stores/fileTags";
 import { openContextMenu } from "./ContextMenu";
+import { tagTrackItem } from "./TagEditMenu";
 import { addToPlaylistItem } from "./PlaylistPicker";
 import { isTypeAheadKey, linkStep, rowStep, typeAhead } from "./listKeys";
 import { SaveButton } from "./SaveButton";
@@ -124,6 +125,7 @@ export function trackMenuItems(
         );
       },
     },
+    tagTrackItem(track),
     ...(extra.after ?? []),
   ];
 }

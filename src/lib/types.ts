@@ -958,6 +958,14 @@ export interface Settings {
   fullWindowHideControls: boolean;
   /** Read explicit, version and edition tags from the files (this device only). */
   readFileTags: boolean;
+  /** Where this computer sees the server's music files. "" until set. This device only. */
+  musicFolder: string;
+  /** The start of Plex's file paths that stands for the music folder. This device only. */
+  musicFolderServer: string;
+  /** Ask Plex to rescan a folder after its tags are saved. */
+  rescanAfterTagEdit: boolean;
+  /** Ask before saving tags to more than 50 files. */
+  askBeforeManyFiles: boolean;
   /** Explicit songs play, or are left out of what plays. */
   explicitContent: ExplicitContent;
   /** Show fan and AI edits. */
@@ -1386,6 +1394,10 @@ export const DEFAULT_SETTINGS: Settings = {
   lyricsLiveTiming: false,
   fullWindowHideControls: true,
   readFileTags: true,
+  musicFolder: "",
+  musicFolderServer: "",
+  rescanAfterTagEdit: true,
+  askBeforeManyFiles: true,
   explicitContent: "allowed",
   showFanEdits: false,
   countUnmatchedUnreleased: true,
@@ -3670,4 +3682,216 @@ export interface DiscogsStatus {
   username: string | null;
   importing: boolean;
   report: DiscogsReport | null;
+}
+
+// ---------------------------------------------------------------- Tag editor (docs/IPC.md "Tag editor")
+
+/** A field the tag editor reads and writes (docs/TAGGING.md). */
+export type TagField =
+  | "albumArtist"
+  | "album"
+  | "year"
+  | "genre"
+  | "releaseType"
+  | "edition"
+  | "group"
+  | "era"
+  | "quality"
+  | "explicit"
+  | "trackNumber"
+  | "trackTotal"
+  | "discNumber"
+  | "discTotal"
+  | "title"
+  | "artist"
+  | "archiveVersion"
+  | "status"
+  | "picardStatus"
+  | "customStatus"
+  | "versionNote"
+  | "archiveDate"
+  | "source"
+  | "flags"
+  | "isrc";
+
+/** A file's fields that have a value. */
+export type TagValues = Partial<Record<TagField, string>>;
+
+/** Where an album keeps its release status. */
+export type TagScheme = "archive" | "plain" | "picard" | "custom";
+
+export interface TagEditFile {
+  trackId: string;
+  albumId: string;
+  serverPath: string | null;
+  localPath: string | null;
+  fileName: string;
+  format: "flac" | "oggVorbis" | "opus" | "mp3" | "mp4" | null;
+  id3Version: "2.3" | "2.4" | null;
+  values: TagValues;
+  keys: string[];
+  /** Present when the file was read for editing. */
+  stamp: string | null;
+  /** Why it couldn't be read. */
+  error: string | null;
+  durationMs: number;
+}
+
+export interface TagEditorData {
+  title: string;
+  files: TagEditFile[];
+  scheme: TagScheme;
+  statusField: TagField;
+  statusChoices: string[];
+  customKey: string | null;
+  writable: boolean;
+  reason: string | null;
+  /** No music folder: Save becomes "Set up music folder". */
+  needsMusicFolder: boolean;
+}
+
+export interface TagSaveFile {
+  trackId: string;
+  stamp: string;
+  /** New values; "" removes the tag. */
+  edits: TagValues;
+}
+
+export interface TagSaveRequest {
+  label: string;
+  files: TagSaveFile[];
+}
+
+export type TagRefusal = "changed" | "busy" | "readOnly" | "locked" | "gone" | "failed";
+
+export interface TagFileProblem {
+  trackId: string;
+  fileName: string;
+  why: TagRefusal;
+  message: string;
+}
+
+export interface TagSaveResult {
+  saved: number;
+  unchanged: number;
+  problems: TagFileProblem[];
+  /** "Saved 12 files", or why nothing was saved. */
+  message: string;
+  undoId: string | null;
+  rescanned: string[];
+  rescanError: string | null;
+}
+
+export interface TagUndoInfo {
+  id: string;
+  at: number;
+  label: string;
+  files: number;
+}
+
+export interface MusicFolderMapping {
+  server: string;
+  local: string;
+}
+
+export interface MusicFolderCheck {
+  ok: boolean;
+  found: number;
+  checked: number;
+  /** "Connected, 5 of 5 files found" or what's wrong. */
+  message: string;
+  mapping: MusicFolderMapping | null;
+  probes: { serverPath: string; localPath: string | null; found: boolean; sizeDiffers: boolean }[];
+}
+
+export type TagCheckScope = { kind: "album"; id: string } | { kind: "artist"; id: string } | { kind: "library" };
+
+export type TagRule =
+  | "missingAlbumArtist"
+  | "albumTagsDiffer"
+  | "releaseTypeHalf"
+  | "lonelyGroup"
+  | "splitAlbum"
+  | "unknownArchiveValue"
+  | "discTags"
+  | "statusMissing"
+  | "noteMissing"
+  | "artistStyle"
+  | "featPlacement"
+  | "numberGaps"
+  | "duplicateTitle"
+  | "filenamePattern"
+  | "numberVsFilename"
+  | "titleVsFilename"
+  | "strayTags"
+  | "shortTrack"
+  | "lowBitrate"
+  | "missingIsrc";
+
+export interface TagFinding {
+  id: string;
+  rule: TagRule;
+  severity: "error" | "warning" | "info";
+  albumId: string;
+  albumTitle: string;
+  trackIds: string[];
+  what: string;
+  why: string;
+  /** Opens the editor on these songs; null without a music folder. */
+  fix: { albumId: string; trackIds: string[]; field: TagField | null } | null;
+}
+
+export interface TagCheckReport {
+  findings: TagFinding[];
+  styles: { albumId: string; text: string }[];
+  albums: number;
+  files: number;
+  ignored: number;
+  fromFiles: boolean;
+}
+
+export type TagFixKind = "discTags" | "releaseStatus" | "isrc" | "explicit";
+
+export interface TagFixChange {
+  trackId: string;
+  fileName: string;
+  stamp: string;
+  field: TagField;
+  before: string | null;
+  after: string;
+  note: string | null;
+}
+
+export interface TagFixPreview {
+  kind: TagFixKind;
+  label: string;
+  changes: TagFixChange[];
+  kept: { trackId: string; fileName: string; reason: string }[];
+  /** Changes start unticked: the user picks each one. */
+  pickEach: boolean;
+  message: string;
+}
+
+export interface IsrcRelease {
+  source: "musicbrainz" | "deezer";
+  id: string;
+  title: string;
+  artist: string;
+  date: string | null;
+  country: string | null;
+  tracks: number;
+}
+
+export interface IsrcReleases {
+  candidates: IsrcRelease[];
+  wanted: number;
+  message: string;
+}
+
+export interface PlexLibraryCheck {
+  id: string;
+  title: string;
+  agent: string;
+  items: { label: string; ok: boolean | null; help: string }[];
+  ok: boolean;
 }

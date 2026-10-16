@@ -53,6 +53,7 @@ import { CrossfadeControl, EqEditor, PreampControl } from "./AudioSettings";
 import { hifiRows } from "./HifiSettings";
 import { coversNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
+import { CheckTagsButton, MusicFolderControl, MusicFolderNote, MusicFolderPath, PlexLibrarySettings } from "./TagEditorSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
 import { BatchControl, BatchNote, ModelControl, PROCESSOR_OPTIONS, TranscribeNote } from "./TranscribeSettings";
 import { ChangeSyncFolder, KeyCopyButton, SyncNowControl, SyncSwitch, syncNote, useSyncFile } from "./SyncSettings";
@@ -2411,6 +2412,52 @@ export function SettingsPage() {
       title: "Show the queue in the miniplayer",
       description: "Lists the next few songs under the art when the miniplayer is tall enough, or beside it when it is wide. Bigger windows list more. This device only.",
       control: (ids) => toggle(s, "miniplayerQueue", ids),
+    },
+    // Library: the tag editor (the only part that writes to files)
+    {
+      key: "musicFolder",
+      section: "Library",
+      group: "Tag editor",
+      title: "Music folder",
+      description:
+        "The folder that holds your server's music, as this computer sees it: a mapped drive or network path on Windows, a mounted share on a Mac. Platter edits tags there, in place, and checks that 5 songs are where Plex says. This device only.",
+      note: <MusicFolderNote />,
+      control: () => <MusicFolderControl />,
+      block: () => <MusicFolderPath />,
+    },
+    {
+      key: "rescanAfterTagEdit",
+      section: "Library",
+      group: "Tag editor",
+      title: "Rescan in Plex after saving",
+      description: "After tags are saved, Plex rescans just that folder so it shows the changes.",
+      control: (ids) => toggle(s, "rescanAfterTagEdit", ids),
+    },
+    {
+      key: "askBeforeManyFiles",
+      section: "Library",
+      group: "Tag editor",
+      title: "Ask before saving more than 50 files",
+      description: "A save that changes more than 50 files asks first.",
+      control: (ids) => toggle(s, "askBeforeManyFiles", ids),
+    },
+    {
+      key: "checkTags",
+      section: "Library",
+      group: "Tag editor",
+      title: "Check tags",
+      description:
+        "Looks for tags worth fixing: missing album artists, album details that differ between songs, release types missing a part, disc numbers, release status gaps and more. Each one says why it matters, with a fix when the music folder is set.",
+      control: () => <CheckTagsButton />,
+    },
+    {
+      key: "plexLibrarySettings",
+      section: "Library",
+      group: "Tag editor",
+      title: "Plex library settings",
+      description: "How Plex treats your tags: local metadata preferred, embedded tags read, and the Personal Media agent for albums MusicBrainz doesn't know. Read only: change them in Plex.",
+      control: () => null,
+      block: () => <PlexLibrarySettings />,
     },
     // Library: tags read from the files
     {
