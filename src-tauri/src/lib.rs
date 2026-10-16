@@ -717,9 +717,10 @@ pub fn run() {
             let upgrades = lidarr::upgrade::Upgrades::new(lidarr::upgrade::UpgradeDeps {
                 lidarr: lidarr_service.clone(),
                 db: db.clone(),
-                hosts: Arc::new(lidarr::upgrade::DesktopHosts { db: db.clone(), fallback: data_dir.join("upgrade-backups") }),
+                hosts: Arc::new(lidarr::upgrade::DesktopHosts { db: db.clone() }),
                 plex: Arc::new(lidarr::upgrade::PlexRescan(plex.clone())),
                 clock: Arc::new(db::queries::now_s),
+                status: Arc::new(lidarr::provenance::ArchiveStatus),
             });
             tauri::async_runtime::spawn(lidarr::upgrade::watch(upgrades.clone()));
             app.manage(upgrades);
@@ -1483,6 +1484,10 @@ pub fn run() {
             lidarr::commands::lidarr_upgrade_swap,
             lidarr::commands::lidarr_upgrade_undo,
             lidarr::commands::lidarr_upgrade_clear,
+            lidarr::commands::lidarr_upgrade_candidates,
+            lidarr::commands::lidarr_upgrade_confirm,
+            lidarr::commands::lidarr_allowlist,
+            lidarr::commands::lidarr_allowlist_set,
             lidarr::commands::music_share_get,
             lidarr::commands::music_share_set,
             lidarr::commands::music_share_plex_folders,

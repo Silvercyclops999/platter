@@ -32,12 +32,19 @@ use super::quality::{CD, Rank};
 use super::request::{Dest, QUEUED_NOTE, RequestInput, RequestRecord};
 use super::status::{RequestState, map_status};
 use super::swap::{self, Done, Failure, Planned, SwapHost};
-use super::upmatch::{self, Keep, NewSong, OldSong, Outcome};
+use super::provenance::{NoteTag, StatusReader};
+use super::swap::NoteEdit;
+use super::upmatch::{self, Keep, NewSong, OfficialTrack, OldSong, Outcome};
 use crate::db::DbHandle;
 use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
 
 const KEY: &str = "lidarr.upgrades";
+/// Albums the user confirmed a release group for.
+const CONFIRM_KEY: &str = "lidarr.upgradeConfirmed";
+const NOT_CONFIRMED: &str = "Confirm which MusicBrainz release this album is first.";
+/// How the default backup place is described.
+pub const BACKUP_DEFAULT: &str = "a _to_delete folder in your music folder, which Plex ignores";
 const MAX_KEPT: usize = 200;
 /// Most albums one "look for better copies" run asks for.
 pub const BULK_MAX: usize = 25;
@@ -61,8 +68,6 @@ pub trait Hosts: Send + Sync {
 /// This computer, when the music share mapping is set.
 pub struct DesktopHosts {
     pub db: DbHandle,
-    /// Platter's own folder, for backups when none is set.
-    pub fallback: PathBuf,
 }
 
 impl Hosts for DesktopHosts {
@@ -74,7 +79,6 @@ impl Hosts for DesktopHosts {
         Some(Arc::new(swap::DesktopHost {
             map,
             lidarr_staging: crate::settings::load(&self.db).lidarr_staging_folder,
-            fallback_backup: self.fallback.clone(),
             fs: Box::new(swap::LocalFs),
             tags: Box::new(swap::LoftyTags),
         }))
@@ -122,6 +126,8 @@ pub struct UpgradeDeps {
     pub hosts: Arc<dyn Hosts>,
     pub plex: Arc<dyn PlexFolders>,
     pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// Each file's release status and provenance note.
+    pub status: Arc<dyn StatusReader>,
 }
 
 #[derive(Clone)]
@@ -177,6 +183,38 @@ pub struct AlbumUpgrade {
     pub record: Option<UpgradeRecord>,
     /// The album now, "MP3 320".
     pub quality: Option<String>,
+    /// The MusicBrainz release the user confirmed this album is.
+    pub confirmed: Option<Confirmed>,
+}
+
+/// The user's word that a library album is this MusicBrainz release group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Confirmed {
+    pub release_group_id: String,
+    pub title: String,
+    pub at: i64,
+}
+
+/// One song of the library album, beside a candidate's tracklist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderSong {
+    pub disc: u32,
+    pub track: u32,
+    pub title: String,
+    pub duration_ms: u64,
+}
+
+/// What confirming needs: the album's songs and the releases it could be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Candidates {
+    pub title: String,
+    pub artist: String,
+    pub songs: Vec<FolderSong>,
+    pub confirmed: Option<Confirmed>,
+    pub candidates: Vec<super::mbpick::Candidate>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -286,6 +324,7 @@ struct Song {
     codec: Option<String>,
     file: Option<String>,
     unreleased: bool,
+    duration_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -331,7 +370,7 @@ fn album_files(c: &Connection, album_id: &str) -> AppResult<Option<AlbumFiles>> 
     let subs: Vec<String> = subs.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let unreleased = album_unreleased(album_id, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb);
     let mut st = c.prepare_cached(
-        "SELECT t.id, t.title, t.disc_number, t.track_number, t.codec, t.bitrate, t.bit_depth, t.file, ft.version
+        "SELECT t.id, t.title, t.disc_number, t.track_number, t.codec, t.bitrate, t.bit_depth, t.file, ft.version, t.duration_ms
          FROM tracks t LEFT JOIN file_tags ft ON ft.part_key = t.part_key
          WHERE t.album_id = ?1 ORDER BY t.disc_number, t.track_number, t.title",
     )?;
@@ -347,17 +386,34 @@ fn album_files(c: &Connection, album_id: &str) -> AppResult<Option<AlbumFiles>> 
                 r.get::<_, Option<u32>>(6)?,
                 r.get::<_, Option<String>>(7)?,
                 r.get::<_, Option<String>>(8)?,
+                r.get::<_, i64>(9)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
-        .map(|(id, title, disc, track, codec, kbps, bits, file, fv)| {
+        .map(|(id, title, disc, track, codec, kbps, bits, file, fv, duration_ms)| {
             let v = fv.as_deref().filter(|v| !v.trim().is_empty()).or(version.as_deref());
             let unreleased = unreleased || track_unreleased(&id, album_id, format.as_deref(), &subs, matched, studio.as_deref(), v, mb);
-            Song { rank: Rank::of_file(codec.as_deref(), kbps, bits), id, title, disc, track, codec, file, unreleased }
+            Song { rank: Rank::of_file(codec.as_deref(), kbps, bits), id, title, disc, track, codec, file, unreleased, duration_ms: duration_ms.max(0) as u64 }
         })
         .collect();
     Ok(Some(AlbumFiles { title, artist, artist_id, unreleased, songs }))
+}
+
+/// "YYYY-MM-DD" for unix seconds (UTC).
+pub fn ymd(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    // Civil from days (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 /// A server path's folder, in its own style.
@@ -385,8 +441,8 @@ fn summary_words(n: usize, of: Option<usize>, from: &str, to: &str, done: bool) 
 /// What the offer worked out, with the paths the swap needs.
 struct Worked {
     offer: Offer,
-    /// Track id → (Plex path, Lidarr path) for each song that upgrades.
-    paths: HashMap<String, (String, String)>,
+    /// Track id → (Plex path, Lidarr path, the note to add) for each song that upgrades.
+    paths: HashMap<String, (String, String, Option<NoteEdit>)>,
 }
 
 impl Upgrades {
@@ -455,7 +511,53 @@ impl Upgrades {
         let a = if on { self.album(album_id).await.ok() } else { None };
         let quality = a.as_ref().and_then(|a| a.current()).map(|(_, l)| l);
         let available = a.as_ref().is_some_and(|a| !a.unreleased && a.current().is_some_and(|(r, _)| r < Rank::lossless(Some(24))));
-        Ok(AlbumUpgrade { available, record, quality })
+        let confirmed = self.confirmations().get(album_id).cloned();
+        Ok(AlbumUpgrade { available, record, quality, confirmed })
+    }
+
+    fn confirmations(&self) -> HashMap<String, Confirmed> {
+        self.inner.db.read(|c| kv_get(c, CONFIRM_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    }
+
+    /// The album's songs and the official studio releases it could be, each
+    /// with its tracklist, for the user to confirm one.
+    pub async fn candidates(&self, album_id: &str) -> AppResult<Candidates> {
+        let a = self.album(album_id).await?;
+        let l = self.lidarr();
+        let want = l.want(&a.artist, Some(&a.artist_id), None).await;
+        let mut candidates = l.picker().upgrade_candidates(&want, &a.title).await?;
+        candidates.retain(|c| l.allowed(&want, &c.group.id));
+        let songs = a.songs.iter().map(|s| FolderSong { disc: s.disc, track: s.track, title: s.title.clone(), duration_ms: s.duration_ms }).collect();
+        Ok(Candidates { title: a.title, artist: a.artist, songs, confirmed: self.confirmations().get(album_id).cloned(), candidates })
+    }
+
+    /// Confirm (or with None forget) which release group a library album is.
+    /// The group must pass every request rule but the title clash.
+    pub async fn confirm(&self, album_id: &str, rgid: Option<&str>) -> AppResult<Option<Confirmed>> {
+        let _one = self.lock.lock().await;
+        let mut all = self.confirmations();
+        let out = match rgid {
+            None => {
+                all.remove(album_id);
+                None
+            }
+            Some(id) => {
+                let a = self.album(album_id).await?;
+                let l = self.lidarr();
+                let want = l.want(&a.artist, Some(&a.artist_id), None).await;
+                let library = l.library(&want).await?;
+                let g = l.picker().vet_upgrade_group(id, &want, &library, album_id).await?;
+                if !l.allowed(&want, &g.id) {
+                    return Err(AppError::Invalid(super::mbpick::Refusal::NotAllowed.message()));
+                }
+                let c = Confirmed { release_group_id: g.id, title: g.title, at: self.now() };
+                all.insert(album_id.to_string(), c.clone());
+                Some(c)
+            }
+        };
+        let json = serde_json::to_string(&all).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.inner.db.write(|c| kv_set(c, CONFIRM_KEY, &json))?;
+        Ok(out)
     }
 
     /// Ask Lidarr for a better copy of a library album, into the staging folder.
@@ -484,10 +586,10 @@ impl Upgrades {
         let l = self.lidarr();
         let want = l.want(&a.artist, Some(&a.artist_id), None).await;
         let library = l.library(&want).await?;
-        let picked = l.picker().pick_upgrade(&want, &a.title, &library, album_id).await?;
-        let Some(group) = picked.group else {
-            return Err(AppError::Invalid(picked.reason.unwrap_or_else(|| super::mbpick::Refusal::NotFound.message())));
+        let Some(confirmed) = self.confirmations().get(album_id).cloned() else {
+            return Err(AppError::Invalid(NOT_CONFIRMED.into()));
         };
+        let group = l.picker().vet_upgrade_group(&confirmed.release_group_id, &want, &library, album_id).await?;
         let input = RequestInput {
             release_group_id: group.id.clone(),
             title: group.title.clone(),
@@ -520,6 +622,9 @@ impl Upgrades {
         })
         .await?;
         let have: BTreeSet<String> = self.records().into_iter().map(|r| r.album_id).collect();
+        // Only albums the user has confirmed a release for.
+        let confirmed = self.confirmations();
+        let ids: Vec<String> = ids.into_iter().filter(|i| confirmed.contains_key(i)).collect();
         let limit = match under {
             Under::Lossy => Rank(1000),
             Under::BelowCd => CD,
@@ -607,11 +712,8 @@ impl Upgrades {
     // ------------------------------------------------------------ the offer
 
     fn base_offer(&self, r: &UpgradeRecord, a: Option<&AlbumFiles>) -> Offer {
-        let host = self.inner.hosts.host();
-        let backup = host
-            .as_ref()
-            .map(|h| h.backup_root().to_string_lossy().into_owned())
-            .unwrap_or_else(|| crate::musicshare::load(&self.inner.db).backup);
+        let chosen = crate::musicshare::load(&self.inner.db).backup;
+        let backup = if chosen.trim().is_empty() { BACKUP_DEFAULT.to_string() } else { chosen };
         Offer {
             upgrade_id: r.request.id.clone(),
             album_id: r.album_id.clone(),
@@ -687,7 +789,9 @@ impl Upgrades {
             Err(e) => return lidarr_unreachable(offer, e),
         };
         let h = host.clone();
-        tokio::task::spawn_blocking(move || compare(h.as_ref(), offer, &a, &tracks, &files))
+        let s = crate::settings::load(&self.inner.db);
+        let cx = CompareCtx { prefix: s.upgrade_official_prefix, today: ymd(self.now()), status: self.inner.status.clone() };
+        tokio::task::spawn_blocking(move || compare(h.as_ref(), offer, &a, &tracks, &files, &cx))
             .await
             .map_err(|e| AppError::Internal(e.to_string()))
     }
@@ -726,7 +830,9 @@ impl Upgrades {
         }
         let items: Vec<Planned> = chosen
             .iter()
-            .filter_map(|s| worked.paths.get(&s.track_id).map(|(p, l)| Planned { track_id: s.track_id.clone(), plex_path: p.clone(), lidarr_path: l.clone() }))
+            .filter_map(|s| {
+                worked.paths.get(&s.track_id).map(|(p, l, note)| Planned { track_id: s.track_id.clone(), plex_path: p.clone(), lidarr_path: l.clone(), note: note.clone() })
+            })
             .collect();
         let mut folders: Vec<String> = items.iter().map(|i| folder_of(&i.plex_path)).collect();
         folders.sort();
@@ -736,13 +842,17 @@ impl Upgrades {
         }
         let Some(host) = self.inner.hosts.host() else { return Err(self.fail(r, Failure::NoMapping)) };
         let swap_id = uuid::Uuid::new_v4().to_string();
-        let backup_dir = swap::backup_folder(&host.backup_root(), &offer.artist, &offer.title, &swap_id);
-        let (h, b, it) = (host.clone(), backup_dir.clone(), items.clone());
+        let folder = swap::backup_folder(&offer.artist, &offer.title, &swap_id);
+        let (h, b, it) = (host.clone(), folder.clone(), items.clone());
         let ran = tokio::task::spawn_blocking(move || swap::run(h.as_ref(), &b, &it)).await.map_err(|e| AppError::Internal(e.to_string()))?;
-        let done = match ran {
-            Ok(d) => d,
+        let (done, ignored) = match ran {
+            Ok(x) => (x.done, x.ignored),
             Err(f) => return Err(self.fail(r, f)),
         };
+        let backup_dir = done
+            .first()
+            .and_then(|d| Path::new(&d.backup).parent().and_then(Path::parent).map(|p| p.to_string_lossy().into_owned()))
+            .unwrap_or_default();
         for f in &folders {
             if self.inner.plex.scan(f).await.is_err() {
                 let (h, d) = (host.clone(), done.clone());
@@ -755,10 +865,13 @@ impl Upgrades {
         let summary = summary_words(done.len(), None, &from, &to, true);
         let mut r = r;
         let n = done.len();
+        for root in ignored {
+            r.request.notes.push(format!("Added {} to .plexignore in {}, so Plex never shows the old files.", swap::IGNORE_RULE, root.to_string_lossy()));
+        }
         r.swaps.push(SwapRun {
             id: swap_id,
             at: self.now(),
-            backup_dir: backup_dir.to_string_lossy().into_owned(),
+            backup_dir: backup_dir.clone(),
             files: done,
             undone: false,
             summary: summary.clone(),
@@ -766,7 +879,7 @@ impl Upgrades {
         r.failure = None;
         r.request.updated_at = self.now();
         self.upsert(&r)?;
-        Ok(SwapResult { swapped: n, backup_dir: backup_dir.to_string_lossy().into_owned(), summary, record: r })
+        Ok(SwapResult { swapped: n, backup_dir, summary, record: r })
     }
 
     /// Put the old files of the last swap back exactly.
@@ -818,8 +931,29 @@ impl Upgrades {
     }
 }
 
+/// The provenance note a swap leaves on the new file: the old note with
+/// where the better copy came from and when, in the tag the file uses.
+fn note_edit(o: &OldSong, to: &str, today: &str) -> Option<NoteEdit> {
+    let add = format!("Upgraded to {to} from Lidarr, {today}");
+    let key = if o.tags.source.is_some() { NoteTag::ArchiveSource } else { o.status.note_tag };
+    let value = match o.status.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => format!("{n}; {add}"),
+        None => add,
+    };
+    Some(NoteEdit { key: key.key().to_string(), value })
+}
+
 /// Compare the old files with the better copy (blocking: reads files).
-fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[super::api::LidarrTrack], files: &[super::api::TrackFile]) -> Worked {
+/// What [`compare`] needs besides the files.
+struct CompareCtx {
+    /// A provenance note starting with this says official.
+    prefix: String,
+    /// "2026-10-16", for the note a swap adds.
+    today: String,
+    status: Arc<dyn StatusReader>,
+}
+
+fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[super::api::LidarrTrack], files: &[super::api::TrackFile], cx: &CompareCtx) -> Worked {
     let fs = host.fs();
     let unreachable = |mut offer: Offer, path: &Path| {
         offer.status = OfferStatus::Unreachable;
@@ -844,6 +978,7 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
             return unreachable(offer, &folder);
         }
         let tags = host.tags().read(&local).unwrap_or_default();
+        let status = cx.status.file_status(&tags);
         if !folders.contains(&folder) {
             folders.push(folder);
         }
@@ -853,11 +988,13 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
             title: s.title.clone(),
             disc: s.disc,
             track: s.track,
+            duration_ms: s.duration_ms,
             plex_path: file.to_string(),
             rank: s.rank,
             codec: s.codec.clone(),
             unreleased: s.unreleased,
             tags,
+            status,
         });
     }
     let known: BTreeSet<String> = locals.iter().map(|p| NormPath::parse(&p.to_string_lossy()).key()).collect();
@@ -869,25 +1006,41 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
                 title: swap::name(&p),
                 disc: 0,
                 track: 0,
+                duration_ms: 0,
                 plex_path: p.to_string_lossy().into_owned(),
                 rank: Rank(0),
                 codec: None,
                 unreleased: false,
                 tags: Default::default(),
+                status: cx.status.file_status(&Default::default()),
             });
         }
     }
 
-    // The better copy.
+    // The better copy, and the confirmed release's tracklist as Lidarr has it.
     let by_id: HashMap<i64, &super::api::TrackFile> = files.iter().map(|f| (f.id, f)).collect();
     let mut news: Vec<NewSong> = Vec::new();
-    for t in tracks.iter().filter(|t| t.track_file_id > 0) {
-        let Some(f) = by_id.get(&t.track_file_id) else { continue };
+    let mut new_locals: Vec<PathBuf> = Vec::new();
+    let mut official: Vec<OfficialTrack> = Vec::new();
+    for t in tracks {
+        let mut entry = OfficialTrack {
+            title: t.title.clone(),
+            recording: t.foreign_recording_id.clone(),
+            medium: t.medium_number.max(1),
+            duration_ms: t.duration.max(0) as u64,
+            new: None,
+        };
+        let file = by_id.get(&t.track_file_id).filter(|_| t.track_file_id > 0);
+        let Some(f) = file else {
+            official.push(entry);
+            continue;
+        };
         let Some(local) = host.staging_path(&f.path) else { return needs_mapping(offer, "the staging folder") };
         if !fs.exists(&local) {
             if !fs.is_dir(local.parent().unwrap_or(Path::new(""))) {
                 return unreachable(offer, local.parent().unwrap_or(Path::new("")));
             }
+            official.push(entry);
             continue;
         }
         let tags = host.tags().read(&local).unwrap_or_default();
@@ -896,11 +1049,19 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
             Some(x) => (x.codec.clone(), Rank::of_file(Some(&x.codec), x.kbps, x.bit_depth)),
             None => (String::new(), Rank(0)),
         };
-        news.push(NewSong { lidarr_path: f.path.clone(), medium: t.medium_number.max(1), lidarr_recording: t.foreign_recording_id.clone(), rank, codec, tags });
+        let duration_ms = audio.as_ref().and_then(|x| x.duration_ms).unwrap_or(entry.duration_ms);
+        entry.new = Some(news.len());
+        official.push(entry);
+        news.push(NewSong { lidarr_path: f.path.clone(), duration_ms, rank, codec, tags });
+        new_locals.push(local);
     }
-    let mediums: BTreeSet<i64> = tracks.iter().map(|t| t.medium_number.max(1)).collect();
 
-    let decisions = upmatch::decide(&olds, &news, &mediums);
+    let old_locals: Vec<Option<PathBuf>> = olds.iter().map(|o| if o.track_id.is_empty() { None } else { host.music_path(&o.plex_path) }).collect();
+    let mut corr = |o: usize, n: usize| -> Option<f64> {
+        let a = old_locals.get(o).cloned().flatten()?;
+        host.tags().correlate(&a, &new_locals[n]).ok()
+    };
+    let decisions = upmatch::decide(&olds, &official, &news, &cx.prefix, &mut corr);
     let mut paths = HashMap::new();
     for d in decisions {
         let o = &olds[d.old];
@@ -911,7 +1072,8 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
                 let n = &news[new];
                 song.to = Some(n.rank.label(Some(&n.codec)));
                 song.by = Some(by.to_string());
-                paths.insert(o.track_id.clone(), (o.plex_path.clone(), n.lidarr_path.clone()));
+                let note = note_edit(o, &n.rank.label(Some(&n.codec)), &cx.today);
+                paths.insert(o.track_id.clone(), (o.plex_path.clone(), n.lidarr_path.clone(), note));
                 offer.upgrade.push(song);
             }
             Outcome::Keep(k) => {
@@ -924,7 +1086,7 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
     offer.ask_each = offer.kept.iter().any(|s| s.keep.is_some_and(Keep::asks_each));
     if offer.ask_each {
         offer.ask_reason = Some(
-            "Some files in this album's folders are kept as they are (unreleased, archive tags, an extra disc or no proof of a match), so Platter asks about each song."
+            "Some files in this album's folders are kept as they are (unreleased, not on the confirmed release, or no proof of a match), so Platter asks about each song."
                 .into(),
         );
     }

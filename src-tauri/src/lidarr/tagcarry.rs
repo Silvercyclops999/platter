@@ -76,6 +76,7 @@ pub struct AudioInfo {
     pub codec: String,
     pub kbps: Option<u32>,
     pub bit_depth: Option<u32>,
+    pub duration_ms: Option<u64>,
 }
 
 fn copy_err(why: impl std::fmt::Display) -> AppError {
@@ -239,7 +240,8 @@ pub fn audio(path: &Path) -> AppResult<AudioInfo> {
         FileType::Aiff => "aiff",
         _ => "",
     };
-    Ok(AudioInfo { codec: codec.into(), kbps: p.audio_bitrate().filter(|k| *k > 0), bit_depth })
+    let ms = p.duration().as_millis() as u64;
+    Ok(AudioInfo { codec: codec.into(), kbps: p.audio_bitrate().filter(|k| *k > 0), bit_depth, duration_ms: (ms > 0).then_some(ms) })
 }
 
 /// Pairs grouped by name, in first-seen order.
@@ -430,6 +432,38 @@ pub fn carry(old: &Path, new: &Path) -> AppResult<()> {
     }
     if same && old_bag.uncarried.len() != after.uncarried.len() {
         return Err(copy_err("some of its tags came out different on the new copy"));
+    }
+    Ok(())
+}
+
+/// Set one custom text tag (the provenance note) on a file, keeping every
+/// other tag and picture, then read it back.
+pub fn set_text(path: &Path, key: &str, value: &str) -> AppResult<()> {
+    let key = key.trim().to_ascii_uppercase();
+    let (kind, bag, raw) = read_raw(path)?;
+    let mut pairs: Vec<(String, String)> = bag.pairs.into_iter().filter(|(k, _)| *k != key).collect();
+    pairs.push((key.clone(), value.to_string()));
+    let same = match (kind, raw) {
+        (Kind::Id3, Raw::Id3(mut t)) => {
+            t.remove_user_text(&key);
+            t.insert_user_text(key.clone(), value.to_string());
+            save(&*t, path)?;
+            None
+        }
+        (Kind::Mp4, Raw::Mp4(mut t)) => {
+            t.retain(|a| !matches!(a.ident(), AtomIdent::Freeform { name, .. } if name.eq_ignore_ascii_case(&key)));
+            add_freeform(&mut t, &key, vec![value.to_string()]);
+            save(&*t, path)?;
+            None
+        }
+        (k, r) => Some((k, r)),
+    };
+    if let Some((k, _)) = same {
+        write(path, k, &pairs, &bag.pictures, None)?;
+    }
+    let after = read(path)?;
+    if !after.pairs.iter().any(|(k, v)| *k == key && v == value) {
+        return Err(copy_err(format!("{key} didn't take on {}", show(path))));
     }
     Ok(())
 }

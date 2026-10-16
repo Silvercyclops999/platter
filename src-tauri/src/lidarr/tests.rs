@@ -74,6 +74,8 @@ fn lidarr(roots: Vec<RootFolder>) -> LidarrSnapshot {
         profiles: vec![QualityProfile { id: 1, name: "Lossless".into(), upgrade_allowed: false, ..Default::default() }],
         lists: vec![],
         listings: HashMap::new(),
+        exclusions: vec![],
+        unmapped: vec![],
     }
 }
 
@@ -89,7 +91,7 @@ fn listing(dirs: &[&str], files: &[(&str, i64)]) -> Option<Listing> {
 }
 
 fn ctx() -> CheckContext {
-    CheckContext { confirmed_roots: vec![], unencrypted: vec![], route: Some(api::Route::Home), now: 1_800_000_000, staging: None }
+    CheckContext { confirmed_roots: vec![], unencrypted: vec![], route: Some(api::Route::Home), now: 1_800_000_000, staging: None, library_has_unreleased: false }
 }
 
 /// Run the check like the service does: keep answering the folders it
@@ -329,11 +331,8 @@ fn safe_settings_give_no_amber() {
 #[test]
 fn each_amber_setting_is_found_and_explained() {
     type Tweak = fn(&mut LidarrSnapshot);
-    let cases: [(&str, Tweak); 9] = [
+    let cases: [(&str, Tweak); 6] = [
         ("renameTracks", |l| l.naming.rename_tracks = true),
-        ("writeAudioTags", |l| l.metadata.write_audio_tags = "newFiles".into()),
-        ("writeAudioTags", |l| l.metadata.write_audio_tags = "allFiles".into()),
-        ("writeAudioTags", |l| l.metadata.write_audio_tags = "sync".into()),
         ("scrubAudioTags", |l| l.metadata.scrub_audio_tags = true),
         ("deleteEmptyFolders", |l| l.media.delete_empty_folders = true),
         ("recycleBin", |l| l.media.recycle_bin = " ".into()),
@@ -350,13 +349,71 @@ fn each_amber_setting_is_found_and_explained() {
         assert!(f.fix.as_deref().is_some_and(|x| x.starts_with("In Lidarr")), "{id}");
         assert_eq!(r.findings[0].level, Level::Amber, "amber comes before OK");
     }
-    // Writing tags into new downloads is worth changing too, with its own words.
+    // Default monitoring of everything on a root folder.
     let (p, mut l, disk) = separate();
-    l.metadata.write_audio_tags = "newFiles".into();
+    l.roots[0].default_new_item_monitor_option = Some("all".into());
     let r = run(&p, l, &ctx(), &disk);
-    let f = r.findings.iter().find(|f| f.id == "writeAudioTags").unwrap();
-    assert_eq!(f.level, Level::Amber);
-    assert!(f.title.contains("files it downloads"), "{}", f.title);
+    assert_eq!(ids(&r, Level::Amber), vec!["rootMonitorAll"]);
+    assert!(r.passed);
+}
+
+#[test]
+fn any_tag_writing_is_red() {
+    for v in ["newFiles", "allFiles", "sync", ""] {
+        let (p, mut l, disk) = separate();
+        l.metadata.write_audio_tags = v.into();
+        let r = run(&p, l, &ctx(), &disk);
+        assert_eq!(ids(&r, Level::Red), vec!["writeAudioTags"], "{v:?}");
+        assert!(!r.passed);
+    }
+}
+
+#[test]
+fn no_recycle_bin_is_red_only_when_the_library_has_unreleased_music() {
+    let (p, mut l, disk) = separate();
+    l.media.recycle_bin = String::new();
+    let r = run(&p, l.clone(), &ctx(), &disk);
+    assert_eq!(ids(&r, Level::Amber), vec!["recycleBin"]);
+    let c = CheckContext { library_has_unreleased: true, ..ctx() };
+    let r = run(&p, l, &c, &disk);
+    assert_eq!(ids(&r, Level::Red), vec!["recycleBin"]);
+    assert!(!r.passed);
+}
+
+#[test]
+fn unmatched_lidarr_files_from_the_plex_folder_are_red() {
+    // By path, and by the same name and size somewhere else.
+    for f in [
+        super::api::TrackFile { id: 1, path: "/data/music/Glasshouse/Panes/01 Pane.m4a".into(), size: None },
+        super::api::TrackFile { id: 2, path: "/elsewhere/01 Pane.m4a".into(), size: Some(7_700_555) },
+    ] {
+        let (p, mut l, disk) = separate();
+        l.unmapped = vec![f];
+        let r = run(&p, l, &ctx(), &disk);
+        assert_eq!(ids(&r, Level::Red), vec!["unmappedInLibrary"]);
+    }
+    let (p, mut l, disk) = separate();
+    l.unmapped = vec![super::api::TrackFile { id: 3, path: "/downloads/Someone/x.flac".into(), size: Some(5) }];
+    assert!(run(&p, l, &ctx(), &disk).passed);
+}
+
+#[test]
+fn library_unreleased_comes_from_the_tags() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("x.db")).unwrap();
+    assert!(!db.read(library_has_unreleased).unwrap());
+    db.write(|c| {
+        c.execute_batch("INSERT INTO album_tags (album_id, version) VALUES ('a', 'released');")?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(!db.read(library_has_unreleased).unwrap());
+    db.write(|c| {
+        c.execute_batch("INSERT INTO album_tags (album_id, version) VALUES ('b', 'leak');")?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(db.read(library_has_unreleased).unwrap());
 }
 
 // ------------------------------------------------------------------ the staging folder
@@ -413,14 +470,14 @@ fn a_staging_folder_plex_scans_is_red_by_path_and_by_content() {
 }
 
 #[test]
-fn a_staging_folder_next_to_the_music_folder_is_red() {
+fn a_staging_folder_next_to_the_music_folder_is_fine() {
+    // Only being inside a Plex folder counts; a neighbour under the same parent is the usual setup.
     let (p, mut l, disk) = separate();
     l.roots.push(RootFolder { id: 2, ..root("/data/upgrades", &[]) });
     let mut c = with_staging("/data/upgrades");
     c.confirmed_roots = vec!["data/upgrades".into()];
     let r = run(&p, l, &c, &disk);
-    assert_eq!(ids(&r, Level::Red), vec!["stagingBeside"], "{r:?}");
-    assert!(r.findings[0].fix.as_deref().unwrap().contains("separate path"));
+    assert!(r.passed, "{r:?}");
 }
 
 
@@ -578,8 +635,8 @@ async fn a_whole_check_sends_nothing_but_gets_with_the_key_in_a_header() {
     r.lidarr.set_key(Some("abc123")).unwrap();
     let report = r.lidarr.check().await.unwrap();
     // Docker remap: same files under /music, so it's red, plus its ambers (writing tags into new downloads among them).
-    assert_eq!(ids(&report, Level::Red), vec!["rootOverlap"]);
-    assert_eq!(ids(&report, Level::Amber), vec!["renameTracks", "writeAudioTags", "deleteEmptyFolders", "recycleBin"]);
+    assert_eq!(ids(&report, Level::Red), vec!["rootOverlap", "writeAudioTags"]);
+    assert_eq!(ids(&report, Level::Amber), vec!["renameTracks", "deleteEmptyFolders", "recycleBin"]);
     assert!(report.findings[0].detail.contains("same sizes"), "listings were followed: {:?}", report.findings[0]);
     assert_eq!(report.version, "2.8.2.4493");
     let log = r.web.log.lock().clone();
@@ -668,7 +725,7 @@ async fn away_from_home_the_away_address_answers_with_its_headers() {
     r.web.down.lock().push("10.20.30.40".into());
     let report = r.lidarr.check().await.unwrap();
     assert_eq!(report.route, Some(api::Route::Away));
-    assert_eq!(ids(&report, Level::Red), vec!["rootOverlap"], "the same check on every route");
+    assert_eq!(ids(&report, Level::Red), vec!["rootOverlap", "writeAudioTags"], "the same check on every route");
     assert!(ids(&report, Level::Amber).iter().all(|i| i != "plainHttp"), "a public https address is fine");
     let log = r.web.log.lock().clone();
     assert!(log.iter().all(|(m, _, _)| *m == Method::Get));

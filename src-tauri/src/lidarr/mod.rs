@@ -5,14 +5,17 @@
 //! the whole check has passed again.
 
 pub mod api;
+pub mod audiomatch;
 pub mod check;
 pub mod commands;
 pub mod mbpick;
 pub mod paths;
+pub mod provenance;
 pub mod quality;
 pub mod request;
 pub mod status;
 pub mod swap;
+pub mod tagcarry;
 pub mod upgrade;
 pub mod upmatch;
 pub mod write;
@@ -121,6 +124,16 @@ pub struct Checked {
     pub client: LidarrClient,
     pub writer: write::LidarrWriter,
     pub snap: LidarrSnapshot,
+    /// Plex's music folders at the check.
+    pub plex_locations: Vec<String>,
+}
+
+/// Whether any file's tags (as the scan cached them) mark it unreleased:
+/// an `ARCHIVE_VERSION` other than released, on a file or an album.
+pub fn library_has_unreleased(c: &rusqlite::Connection) -> AppResult<bool> {
+    let q = "SELECT EXISTS (SELECT 1 FROM file_tags WHERE trim(coalesce(version, '')) NOT IN ('', 'released'))
+             OR EXISTS (SELECT 1 FROM album_tags WHERE trim(coalesce(version, '')) NOT IN ('', 'released'))";
+    Ok(c.query_row(q, [], |r| r.get::<_, bool>(0))?)
 }
 
 /// The last check's outcome, kept on this device.
@@ -375,7 +388,11 @@ impl Lidarr {
             client.quality_profiles(),
             client.import_lists(),
         )?;
+        // Newer reads: an older Lidarr without them counts as having none.
+        let (exclusions, unmapped) = futures::join!(client.exclusions(), client.unmapped_files());
         Ok(LidarrSnapshot {
+            exclusions: exclusions.unwrap_or_default(),
+            unmapped: unmapped.unwrap_or_default(),
             version: status.version.trim().to_string(),
             roots,
             artists,
@@ -439,6 +456,7 @@ impl Lidarr {
             route: Some(client.route()),
             now: (self.inner.clock)(),
             staging: Some(crate::settings::load(&self.inner.db).lidarr_staging_folder).filter(|s| !s.trim().is_empty()),
+            library_has_unreleased: self.inner.db.read(library_has_unreleased).unwrap_or(false),
         };
         let mut budget = MAX_LISTINGS;
         for _ in 0..MAX_ROUNDS {
@@ -463,6 +481,7 @@ impl Lidarr {
             "lidarr setup check"
         );
         self.remember_check(&report, &snap);
-        Ok(Checked { report, client, writer: write::LidarrWriter::new(route as Arc<dyn write::LidarrWrite>), snap })
+        let plex_locations = plex.locations.clone();
+        Ok(Checked { report, client, writer: write::LidarrWriter::new(route as Arc<dyn write::LidarrWrite>), snap, plex_locations })
     }
 }

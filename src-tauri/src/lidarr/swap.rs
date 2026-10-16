@@ -4,9 +4,14 @@
 //! For each file:
 //!
 //! 1. the new copy is copied next to the old file under a hidden name
-//! 2. the old file's tags are carried onto it and read back (`tags::carry`)
-//! 3. the old file moves to the backup folder, checked byte for byte
-//! 4. the new copy takes the old file's name (its extension may change)
+//! 2. the old file's tags are carried onto it and read back (`tagcarry`)
+//! 3. the provenance note gets where the copy came from and when
+//! 4. the old file moves to the backup folder, checked byte for byte
+//! 5. the new copy takes the old file's name (its extension may change)
+//!
+//! The backup folder is one Plex never reads: `_to_delete` in the library
+//! root, with a rule for it in the root's `.plexignore` (added when
+//! missing), or a folder the user picked outside every music folder.
 //!
 //! Everything is checked before the first change: the share mapping covers
 //! every file, the share answers, no file is in use, the backup folder
@@ -28,7 +33,7 @@ use sha2::{Digest, Sha256};
 use crate::error::AppResult;
 use crate::musicshare::ShareMap;
 use crate::tags::FileTags;
-use crate::tags::carry::AudioInfo;
+use super::tagcarry::AudioInfo;
 
 /// File operations, so tests can fake a share that fails.
 pub trait ShareFs: Send + Sync {
@@ -44,6 +49,9 @@ pub trait ShareFs: Send + Sync {
     fn check_unlocked(&self, p: &Path) -> io::Result<()>;
     /// Writes and removes a small file in `dir`.
     fn probe_writable(&self, dir: &Path) -> io::Result<()>;
+    /// A small text file, or None when it isn't there.
+    fn read_text(&self, p: &Path) -> io::Result<Option<String>>;
+    fn write_text(&self, p: &Path, text: &str) -> io::Result<()>;
 }
 
 /// Reading and carrying tags.
@@ -53,6 +61,10 @@ pub trait TagIo: Send + Sync {
     fn audio(&self, p: &Path) -> AppResult<AudioInfo>;
     /// Put `old`'s tags on `new` and prove nothing was lost.
     fn carry(&self, old: &Path, new: &Path) -> AppResult<()>;
+    /// Set one text tag (the provenance note) and read it back.
+    fn set_text(&self, p: &Path, key: &str, value: &str) -> AppResult<()>;
+    /// How alike two files' decoded audio is, -1 to 1.
+    fn correlate(&self, a: &Path, b: &Path) -> AppResult<f64>;
 }
 
 /// Where the swap runs and how it reaches the files.
@@ -63,8 +75,8 @@ pub trait SwapHost: Send + Sync {
     fn music_path(&self, plex_path: &str) -> Option<PathBuf>;
     /// A staging file (Lidarr's path) on this host.
     fn staging_path(&self, lidarr_path: &str) -> Option<PathBuf>;
-    /// The folder replaced files go in.
-    fn backup_root(&self) -> PathBuf;
+    /// Where an old file's backup goes: a folder Plex never reads.
+    fn backup_place(&self, old: &Path) -> Result<BackupPlace, Failure>;
     fn fs(&self) -> &dyn ShareFs;
     fn tags(&self) -> &dyn TagIo;
 }
@@ -130,22 +142,98 @@ impl ShareFs for LocalFs {
         std::fs::write(&p, b"ok")?;
         std::fs::remove_file(&p)
     }
+
+    fn read_text(&self, p: &Path) -> io::Result<Option<String>> {
+        match std::fs::read_to_string(p) {
+            Ok(t) => Ok(Some(t)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn write_text(&self, p: &Path, text: &str) -> io::Result<()> {
+        std::fs::write(p, text)
+    }
 }
 
 pub struct LoftyTags;
 
 impl TagIo for LoftyTags {
     fn read(&self, p: &Path) -> AppResult<FileTags> {
-        crate::tags::read_local(p).map_err(|e| crate::error::AppError::Invalid(format!("Platter couldn't read the tags of {} ({e}).", name(p))))
+        super::provenance::read_local(p).map_err(|e| crate::error::AppError::Invalid(format!("Platter couldn't read the tags of {} ({e}).", name(p))))
     }
 
     fn audio(&self, p: &Path) -> AppResult<AudioInfo> {
-        crate::tags::carry::audio(p)
+        super::tagcarry::audio(p)
     }
 
     fn carry(&self, old: &Path, new: &Path) -> AppResult<()> {
-        crate::tags::carry::carry(old, new)
+        super::tagcarry::carry(old, new)
     }
+
+    fn set_text(&self, p: &Path, key: &str, value: &str) -> AppResult<()> {
+        super::tagcarry::set_text(p, key, value)
+    }
+
+    fn correlate(&self, a: &Path, b: &Path) -> AppResult<f64> {
+        super::audiomatch::correlation(a, b)
+    }
+}
+
+/// The folder Plex is told to ignore in the library root.
+pub const TO_DELETE: &str = "_to_delete";
+/// The `.plexignore` line for it.
+pub const IGNORE_RULE: &str = "_to_delete/*";
+
+/// Where backups go for one old file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupPlace {
+    /// The folder swaps make their own folders in.
+    pub root: PathBuf,
+    /// The library root whose `.plexignore` must hold [`IGNORE_RULE`].
+    pub ignore_in: Option<PathBuf>,
+}
+
+/// The backup place for `old` under `map`: the chosen folder (never inside
+/// a music folder), else `_to_delete` in the music folder holding `old`.
+pub fn backup_place(map: &ShareMap, old: &Path) -> Result<BackupPlace, Failure> {
+    use super::paths::NormPath;
+    let roots: Vec<NormPath> = map.music.iter().map(|p| NormPath::parse(&p.local)).collect();
+    if !map.backup.trim().is_empty() {
+        let b = NormPath::parse(&map.backup);
+        if roots.iter().any(|r| b.starts_with(r) || r.starts_with(&b)) {
+            return Err(Failure::BackupInLibrary { path: map.backup.clone() });
+        }
+        return Ok(BackupPlace { root: PathBuf::from(&map.backup), ignore_in: None });
+    }
+    let o = NormPath::parse(&old.to_string_lossy());
+    let pair = map
+        .music
+        .iter()
+        .filter(|p| o.starts_with(&NormPath::parse(&p.local)))
+        .max_by_key(|p| NormPath::parse(&p.local).len())
+        .ok_or(Failure::NoMapping)?;
+    let root = PathBuf::from(pair.local.trim());
+    Ok(BackupPlace { root: root.join(TO_DELETE), ignore_in: Some(root) })
+}
+
+/// Make sure the library root's `.plexignore` keeps Plex out of the backup
+/// folder. True when the rule was added now.
+pub fn ensure_ignored(fs: &dyn ShareFs, root: &Path) -> io::Result<bool> {
+    let p = root.join(".plexignore");
+    let text = fs.read_text(&p)?.unwrap_or_default();
+    if text.lines().any(|l| l.trim().trim_start_matches('/') == IGNORE_RULE || l.trim().trim_start_matches('/') == format!("{TO_DELETE}/*").as_str()) {
+        return Ok(false);
+    }
+    let mut out = text.clone();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("# Platter keeps replaced files here until you delete them.\n");
+    out.push_str(IGNORE_RULE);
+    out.push('\n');
+    fs.write_text(&p, &out)?;
+    Ok(true)
 }
 
 /// This computer, through the music share mapping.
@@ -153,8 +241,6 @@ pub struct DesktopHost {
     pub map: ShareMap,
     /// Lidarr's path for the staging folder (the setting).
     pub lidarr_staging: String,
-    /// Platter's own folder, for backups when none is set.
-    pub fallback_backup: PathBuf,
     pub fs: Box<dyn ShareFs>,
     pub tags: Box<dyn TagIo>,
 }
@@ -172,8 +258,8 @@ impl SwapHost for DesktopHost {
         self.map.staging_path(&self.lidarr_staging, lidarr_path)
     }
 
-    fn backup_root(&self) -> PathBuf {
-        crate::musicshare::backup_dir(&self.map, &self.fallback_backup)
+    fn backup_place(&self, old: &Path) -> Result<BackupPlace, Failure> {
+        backup_place(&self.map, old)
     }
 
     fn fs(&self) -> &dyn ShareFs {
@@ -210,6 +296,8 @@ pub enum Failure {
     PlexUnreachable,
     /// Undo: the kept file is gone from the backup folder.
     BackupMissing { name: String },
+    /// The chosen backup folder is inside (or holds) a music folder.
+    BackupInLibrary { path: String },
 }
 
 impl Failure {
@@ -228,6 +316,9 @@ impl Failure {
             Failure::MoveFailed { name } => format!("Platter couldn't put the new copy of {name} in place, so every file is back as it was."),
             Failure::RescanFailed => "Plex didn't take the request to rescan the folder, so Platter put the old files back. Try again when Plex is reachable.".into(),
             Failure::PlexUnreachable => "Platter can't reach Plex to rescan the folder afterwards, so it changed nothing. Try again when Plex is reachable.".into(),
+            Failure::BackupInLibrary { path } => format!(
+                "The backup folder {path} is inside your music folder, where Plex would show the old files. Pick a folder outside it, or leave it empty to use an ignored _to_delete folder. Nothing was changed."
+            ),
             Failure::BackupMissing { name } => format!("The kept copy of {name} isn't in the backup folder any more, so Platter can't put it back."),
         }
     }
@@ -241,6 +332,23 @@ pub struct Planned {
     pub plex_path: String,
     /// The new copy as Lidarr sees it.
     pub lidarr_path: String,
+    /// The provenance note to leave on the new file.
+    pub note: Option<NoteEdit>,
+}
+
+/// One text tag to set on the new file after the carry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteEdit {
+    pub key: String,
+    pub value: String,
+}
+
+/// What a swap did, and the notes worth telling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ran {
+    pub done: Vec<Done>,
+    /// Library roots whose `.plexignore` got the backup rule now.
+    pub ignored: Vec<PathBuf>,
 }
 
 /// One file swapped: enough to undo it exactly.
@@ -309,12 +417,12 @@ enum MoveErr {
 }
 
 /// A folder name for one swap's backups.
-pub fn backup_folder(root: &Path, artist: &str, album: &str, swap_id: &str) -> PathBuf {
+pub fn backup_folder(artist: &str, album: &str, swap_id: &str) -> String {
     let safe = |s: &str| -> String {
         s.chars().map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect::<String>().trim().trim_matches('.').chars().take(80).collect()
     };
     let short: String = swap_id.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
-    root.join(format!("{} - {} ({short})", safe(artist), safe(album)))
+    format!("{} - {} ({short})", safe(artist), safe(album))
 }
 
 /// Put back what a swap did so far, newest first.
@@ -328,8 +436,9 @@ fn roll_back(fs: &dyn ShareFs, done: &[Done]) {
     }
 }
 
-/// Swap `items` in. All of them, or none.
-pub fn run(host: &dyn SwapHost, backup_dir: &Path, items: &[Planned]) -> Result<Vec<Done>, Failure> {
+/// Swap `items` in. All of them, or none. Each swap's backups go in a
+/// folder named `folder` in the backup place.
+pub fn run(host: &dyn SwapHost, folder: &str, items: &[Planned]) -> Result<Ran, Failure> {
     let fs = host.fs();
     // Where everything is.
     let mut resolved = Vec::new();
@@ -358,12 +467,35 @@ pub fn run(host: &dyn SwapHost, backup_dir: &Path, items: &[Planned]) -> Result<
             return Err(Failure::NameTaken { name: name(&final_) });
         }
     }
-    let backup_bad = || Failure::BackupNotWritable { path: shown(backup_dir) };
-    fs.create_dir_all(backup_dir).map_err(|_| backup_bad())?;
-    fs.probe_writable(backup_dir).map_err(|_| backup_bad())?;
+    // The backup folders, each checked before anything changes.
+    let mut places: Vec<PathBuf> = Vec::new();
+    let mut ignore: Vec<PathBuf> = Vec::new();
+    for (_, old, _) in &resolved {
+        let place = host.backup_place(old)?;
+        let dir = place.root.join(folder);
+        if let Some(r) = place.ignore_in
+            && !ignore.contains(&r)
+        {
+            ignore.push(r);
+        }
+        if !places.contains(&dir) {
+            fs.create_dir_all(&dir).map_err(|_| Failure::BackupNotWritable { path: shown(&dir) })?;
+            fs.probe_writable(&dir).map_err(|_| Failure::BackupNotWritable { path: shown(&dir) })?;
+        }
+        places.push(dir);
+    }
+    let mut ignored = Vec::new();
+    for r in &ignore {
+        match ensure_ignored(fs, r) {
+            Ok(true) => ignored.push(r.clone()),
+            Ok(false) => {}
+            Err(_) => return Err(Failure::BackupNotWritable { path: shown(&r.join(".plexignore")) }),
+        }
+    }
 
     let mut done: Vec<Done> = Vec::new();
-    for (it, old, new_src) in &resolved {
+    for ((it, old, new_src), backup_dir) in resolved.iter().zip(&places) {
+        let backup_bad = || Failure::BackupNotWritable { path: shown(backup_dir) };
         let final_ = final_path(old, new_src);
         let tmp = temp_path(&final_);
         let fail = |f: Failure, done: &[Done]| {
@@ -375,6 +507,11 @@ pub fn run(host: &dyn SwapHost, backup_dir: &Path, items: &[Planned]) -> Result<
             return fail(Failure::MoveFailed { name: name(old) }, &done);
         }
         if let Err(e) = host.tags().carry(old, &tmp) {
+            return fail(Failure::TagCopyFailed { name: name(old), why: e.to_string() }, &done);
+        }
+        if let Some(n) = &it.note
+            && let Err(e) = host.tags().set_text(&tmp, &n.key, &n.value)
+        {
             return fail(Failure::TagCopyFailed { name: name(old), why: e.to_string() }, &done);
         }
         let Ok(old_hash) = fs.hash(old) else { return fail(Failure::ShareUnreachable { path: shown(old) }, &done) };
@@ -404,7 +541,7 @@ pub fn run(host: &dyn SwapHost, backup_dir: &Path, items: &[Planned]) -> Result<
         let new_hash = fs.hash(&final_).unwrap_or_default();
         done.push(record(new_hash));
     }
-    Ok(done)
+    Ok(Ran { done, ignored })
 }
 
 /// Put the old files back, byte for byte. The new copies move to the

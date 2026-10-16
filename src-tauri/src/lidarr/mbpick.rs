@@ -120,10 +120,8 @@ pub enum Refusal {
     TitleClash { title: String, unreleased: bool },
     /// Upgrades: the album counts as unreleased.
     UnreleasedAlbum,
-    /// Upgrades: the album has ARCHIVE_* tags tying it to builds or editions.
-    ArchiveAlbum,
-    /// Upgrades: MusicBrainz's release has another title than the album.
-    OtherTitle,
+    /// The user limited the artist to chosen releases, and this isn't one.
+    NotAllowed,
 }
 
 impl Refusal {
@@ -139,8 +137,7 @@ impl Refusal {
                 "It has the same title as \"{title}\", an unreleased album already in your library. The two could get mixed together, so it can't be requested."
             ),
             Refusal::UnreleasedAlbum => "This album counts as unreleased, so Platter won't look for another copy of it.".into(),
-            Refusal::ArchiveAlbum => "This album has archive tags tying it to other builds or editions, so Platter won't look for another copy of it.".into(),
-            Refusal::OtherTitle => "MusicBrainz's official release has another title than this album, so Platter can't be sure it's the same one.".into(),
+            Refusal::NotAllowed => "You've limited this artist to chosen releases in Platter, and this isn't one of them.".into(),
             Refusal::TitleClash { title, unreleased: false } => {
                 format!("It has the same title as \"{title}\", already in your library. The two could get mixed together, so it can't be requested.")
             }
@@ -330,25 +327,17 @@ pub fn vet(g: &Group, want: &Want, library: &[LibraryAlbum], allow_secondary: bo
     Ok(())
 }
 
-/// Whether a group is the official release of library album `album_id`,
-/// for an upgrade: the album itself is released and carries no ARCHIVE_*
-/// group, the group has the album's title, and passes every request rule
-/// against the rest of the library (so it can't share a title with any
-/// other album there, unreleased builds and editions included).
+/// Whether a group may be asked for as the better copy of library album
+/// `album_id`, which the user has confirmed is that release group. The
+/// title-clash guard doesn't apply (the user said which release it is, and
+/// each file is proven before a swap); everything else does, secondary
+/// types included. The album must have released songs.
 pub fn vet_upgrade(g: &Group, want: &Want, library: &[LibraryAlbum], album_id: &str) -> Result<(), Refusal> {
     let target = library.iter().find(|a| a.id == album_id).ok_or(Refusal::NotFound)?;
     if target.unreleased {
         return Err(Refusal::UnreleasedAlbum);
     }
-    if !target.also.is_empty() {
-        return Err(Refusal::ArchiveAlbum);
-    }
-    let me = std::slice::from_ref(target);
-    if clash(&g.title, me).is_none() {
-        return Err(Refusal::OtherTitle);
-    }
-    let others: Vec<LibraryAlbum> = library.iter().filter(|a| a.id != album_id).cloned().collect();
-    vet(g, want, &others, true)
+    vet(g, want, &[], false)
 }
 
 /// The best group that passes, else why the best-ranked one doesn't.
@@ -675,8 +664,9 @@ impl Picker {
             return Ok(Picked::from(Err(Refusal::NotFound), &want.name));
         };
         let groups = self.lookup_all(groups_of_search(&v, title)).await?;
-        // Naming an album asks for it, live or compilation as it may be.
-        Ok(Picked::from(pick(groups, want, library, true), &want.name))
+        // Only studio releases: Lidarr grabs one release of the group, and a
+        // live or compilation group's releases vary too much to trust.
+        Ok(Picked::from(pick(groups, want, library, false), &want.name))
     }
 
     /// The album a song should come from.
@@ -685,18 +675,27 @@ impl Picker {
         let by_isrc = url.contains("isrc%3A");
         let Some(v) = self.mb.get(&url).await? else { return Ok(Picked::from(Err(Refusal::NotFound), &want.name)) };
         let groups = self.lookup_all(groups_of_recordings(&v, want, title, by_isrc)).await?;
-        // A live recording may come from a live album.
-        let live = fold_title(title).version.contains("live");
-        Ok(Picked::from(pick(groups, want, library, live), &want.name))
+        Ok(Picked::from(pick(groups, want, library, false), &want.name))
     }
 
-    /// The official release of a library album, for an upgrade.
-    pub async fn pick_upgrade(&self, want: &Want, title: &str, library: &[LibraryAlbum], album_id: &str) -> AppResult<Picked> {
-        let Some(v) = self.mb.get(&group_search_url(&want.name, title)).await? else {
-            return Ok(Picked::from(Err(Refusal::NotFound), &want.name));
-        };
+    /// Release groups a library album could be, for the user to confirm one:
+    /// every official studio group by the artist with the album's title, each
+    /// with its official tracklist.
+    pub async fn upgrade_candidates(&self, want: &Want, title: &str) -> AppResult<Vec<Candidate>> {
+        let Some(v) = self.mb.get(&group_search_url(&want.name, title)).await? else { return Ok(Vec::new()) };
         let groups = self.lookup_all(groups_of_search(&v, title)).await?;
-        Ok(Picked::from(pick_with(groups, |g| vet_upgrade(g, want, library, album_id)), &want.name))
+        let mut out = Vec::new();
+        for g in groups.into_iter().filter(|g| vet(g, want, &[], false).is_ok()) {
+            let tracks = self.tracklist(&g.id).await?;
+            out.push(Candidate { group: g, tracks });
+        }
+        out.sort_by_key(|c| rank(&c.group));
+        Ok(out)
+    }
+
+    /// The tracklist of a group's first official release (not withdrawn or cancelled).
+    pub async fn tracklist(&self, rgid: &str) -> AppResult<Vec<ListedTrack>> {
+        Ok(self.mb.get(&tracklist_url(rgid)).await?.map(|v| parse_tracklist(&v)).unwrap_or_default())
     }
 
     /// [`Self::vet_group`] for an upgrade of `album_id`.
@@ -709,9 +708,54 @@ impl Picker {
     /// Check a release group again right before a request.
     pub async fn vet_group(&self, rgid: &str, want: &Want, library: &[LibraryAlbum]) -> AppResult<Group> {
         let g = self.group(rgid).await?.ok_or_else(|| Refusal::NotFound.into_error())?;
-        vet(&g, want, library, true).map_err(Refusal::into_error)?;
+        vet(&g, want, library, false).map_err(Refusal::into_error)?;
         Ok(g)
     }
+}
+
+/// A release group a library album could be, with its tracklist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Candidate {
+    pub group: Group,
+    pub tracks: Vec<ListedTrack>,
+}
+
+/// One track of a release's tracklist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListedTrack {
+    pub disc: u32,
+    pub position: u32,
+    pub title: String,
+    pub length_ms: Option<u64>,
+}
+
+pub fn tracklist_url(rgid: &str) -> String {
+    format!("{WS}/release?release-group={}&status=official&inc=recordings&limit=25&fmt=json", rgid.to_ascii_lowercase())
+}
+
+/// The earliest official release's tracks (`/release?release-group=&inc=recordings`).
+pub fn parse_tracklist(v: &Value) -> Vec<ListedTrack> {
+    let releases = v.get("releases").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
+    let release = releases
+        .iter()
+        .filter(|r| s(r, "status").eq_ignore_ascii_case("official"))
+        .min_by_key(|r| date_key(&s(r, "date")));
+    let Some(r) = release else { return Vec::new() };
+    let mut out = Vec::new();
+    for (d, m) in r.get("media").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]).iter().enumerate() {
+        let disc = m.get("position").and_then(Value::as_u64).unwrap_or(d as u64 + 1) as u32;
+        for t in m.get("tracks").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
+            out.push(ListedTrack {
+                disc,
+                position: t.get("position").and_then(Value::as_u64).unwrap_or(0) as u32,
+                title: s(t, "title"),
+                length_ms: t.get("length").and_then(Value::as_u64),
+            });
+        }
+    }
+    out
 }
 
 #[cfg(test)]

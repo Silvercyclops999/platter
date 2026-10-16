@@ -26,6 +26,8 @@ use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
 
 const REQUESTS_KEY: &str = "lidarr.requests";
+/// Per-artist "only these release groups" lists.
+const ALLOW_KEY: &str = "lidarr.allowlists";
 /// Set once the user has typed an album's name for their first request.
 const TYPED_KEY: &str = "lidarr.typedConfirmed";
 pub const QUEUED_NOTE: &str = "Sends when Platter can reach Lidarr.";
@@ -202,6 +204,49 @@ impl Lidarr {
             None => list.push(r.clone()),
         }
         self.save_records(&list)
+    }
+
+    fn allowlists(&self) -> std::collections::HashMap<String, Vec<String>> {
+        self.inner.db.read(|c| kv_get(c, ALLOW_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    }
+
+    /// The key an artist's allowlist is kept under: its MusicBrainz id, else its folded name.
+    fn allow_key(want: &Want) -> String {
+        match &want.mbid {
+            Some(m) => m.to_ascii_lowercase(),
+            None => format!("name:{}", want.fold()),
+        }
+    }
+
+    /// Whether the artist's allowlist (when the user set one) has this group.
+    pub(super) fn allowed(&self, want: &Want, rgid: &str) -> bool {
+        match self.allowlists().get(&Self::allow_key(want)) {
+            Some(l) if !l.is_empty() => l.iter().any(|x| x.eq_ignore_ascii_case(rgid)),
+            _ => true,
+        }
+    }
+
+    /// The release groups an artist is limited to (empty: no limit).
+    pub async fn allowlist(&self, artist: &str, artist_id: Option<&str>) -> Vec<String> {
+        let want = self.want(artist, artist_id, None).await;
+        self.allowlists().get(&Self::allow_key(&want)).cloned().unwrap_or_default()
+    }
+
+    /// Limit an artist to these release groups (empty removes the limit).
+    pub async fn set_allowlist(&self, artist: &str, artist_id: Option<&str>, rgids: Vec<String>) -> AppResult<Vec<String>> {
+        let want = self.want(artist, artist_id, None).await;
+        let mut ids: Vec<String> = rgids.into_iter().map(|r| r.trim().to_ascii_lowercase()).filter(|r| crate::artistinfo::is_mbid(r)).collect();
+        ids.sort();
+        ids.dedup();
+        let mut all = self.allowlists();
+        if ids.is_empty() {
+            all.remove(&Self::allow_key(&want));
+        } else {
+            all.insert(Self::allow_key(&want), ids.clone());
+        }
+        let json = serde_json::to_string(&all).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.inner.db.write(|c| kv_set(c, ALLOW_KEY, &json))?;
+        Ok(ids)
     }
 
     /// The staging folder setting, folded; None when upgrades are off.
@@ -438,11 +483,21 @@ impl Lidarr {
             Dest::Library => self.picker().vet_group(&rec.release_group_id, &want, &library).await?,
             Dest::Staging { album_id, .. } => self.picker().vet_upgrade_group(&rec.release_group_id, &want, &library, album_id).await?,
         };
+        if !self.allowed(&want, &group.id) {
+            return Err(AppError::Invalid(super::mbpick::Refusal::NotAllowed.message()));
+        }
         let c = self.check_full().await?;
         if !c.report.passed {
             return Err(red_error(&c.report));
         }
         let plan = self.plan(&c, group, dest).await?;
+        let foreign = plan.artist.foreign_artist_id.trim().to_ascii_lowercase();
+        if !foreign.is_empty() && c.snap.exclusions.iter().any(|e| e.foreign_id.trim().eq_ignore_ascii_case(&foreign)) {
+            return Err(AppError::Invalid(format!(
+                "Lidarr's import list exclusions include {}, so Platter won't request or add them. Nothing was sent.",
+                plan.artist.artist_name
+            )));
+        }
         let staging = self.staging_norm();
         let in_staging = |path: &str| staging.as_ref().is_some_and(|s| NormPath::parse(path).starts_with(s));
         let mut quality_choice: Option<i64> = None;
@@ -542,9 +597,19 @@ impl Lidarr {
             return Ok(rec);
         };
 
-        // Read back: only this album may be monitored on an artist Platter added.
+        // Read back: only this album may be monitored on an artist Platter
+        // added, and the artist's folder must not be in a Plex music folder.
         if rec.added_artist {
             let a = c.client.artist(artist_id).await?;
+            let ap = NormPath::parse(&a.path);
+            if let Some(l) = c.plex_locations.iter().find(|l| !ap.is_empty() && ap.starts_with(&NormPath::parse(l))) {
+                rec.state = RequestState::Failed;
+                rec.message = Some(format!(
+                    "Lidarr put {} in {}, inside your Plex music folder ({l}). Platter stopped before marking anything for download. Remove the artist in Lidarr (leave its files) and check the root folder.",
+                    a.artist_name, a.path
+                ));
+                return Ok(rec);
+            }
             if a.monitor_new_items.as_deref().is_some_and(|m| !m.eq_ignore_ascii_case("none")) {
                 rec.notes.push(format!(
                     "Lidarr set {} to download new albums too. Turn that off in Lidarr (Edit artist > Monitor new albums: None).",
@@ -577,6 +642,13 @@ impl Lidarr {
             } else {
                 "Lidarr kept other albums by this artist marked for download, so Platter stopped before searching. Check the artist in Lidarr.".into()
             });
+            return Ok(rec);
+        }
+        // The whole check again after the writes, before anything is searched.
+        let after = self.check_full().await?;
+        if !after.report.passed {
+            rec.state = RequestState::Failed;
+            rec.message = Some(format!("{} Platter stopped before searching.", red_error(&after.report)));
             return Ok(rec);
         }
         c.writer.search(vec![album.id]).await?;
@@ -683,6 +755,7 @@ impl Lidarr {
         let records = self.records();
         let items = missing(groups, &want, &library)
             .into_iter()
+            .filter(|g| self.allowed(&want, &g.id))
             .map(|g| MissingItem {
                 request: records.iter().find(|r| r.release_group_id == g.id).map(|r| r.state),
                 year: g.first_release.get(..4).and_then(|y| y.parse().ok()),

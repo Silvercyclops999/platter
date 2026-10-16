@@ -63,6 +63,23 @@ pub struct RootFolder {
     pub default_quality_profile_id: Option<i64>,
     #[serde(default)]
     pub default_metadata_profile_id: Option<i64>,
+    /// What a new artist in this folder monitors by default (`all`, `none`...).
+    #[serde(default)]
+    pub default_monitor_option: Option<String>,
+    /// Whether new albums get monitored by default (`all`, `none`, `new`).
+    #[serde(default)]
+    pub default_new_item_monitor_option: Option<String>,
+}
+
+/// An artist Lidarr's import lists must never add (`GET /importlistexclusion`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Exclusion {
+    /// The artist's MusicBrainz id.
+    #[serde(default)]
+    pub foreign_id: String,
+    #[serde(default)]
+    pub artist_name: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -546,6 +563,16 @@ impl LidarrClient {
     /// An album's imported files.
     pub async fn track_files(&self, album_id: i64) -> AppResult<Vec<TrackFile>> {
         self.get("/trackfile", &[("albumId", album_id.to_string().as_str())]).await
+    }
+
+    /// Artists Lidarr's import lists exclude.
+    pub async fn exclusions(&self) -> AppResult<Vec<Exclusion>> {
+        self.get("/importlistexclusion", &[]).await
+    }
+
+    /// Files Lidarr found in its root folders and couldn't match to an album.
+    pub async fn unmapped_files(&self) -> AppResult<Vec<TrackFile>> {
+        self.get("/trackfile", &[("unmapped", "true")]).await
     }
 
     /// One folder's contents, with file sizes.

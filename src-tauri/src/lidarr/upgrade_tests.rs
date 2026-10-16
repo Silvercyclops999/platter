@@ -19,12 +19,13 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 
 use super::check::{PlexFile, PlexFiles};
-use super::mbpick::tests::{ARTIST, FakeMb, RG_FIRST};
+use super::mbpick::tests::{ARTIST, FakeMb, RG_EP, RG_FIRST, RG_LIVE};
 use super::request::RequestInput;
 use super::request_tests::{NoMbid, Mbid};
 use super::status::RequestState;
-use super::swap::{self, Failure, LocalFs, LoftyTags, Planned, ShareFs, SwapHost, TagIo};
+use super::swap::{self, BackupPlace, Failure, LocalFs, LoftyTags, NoteEdit, Planned, ShareFs, SwapHost, TagIo};
 use super::upgrade::{Hosts, OfferStatus, PlexFolders, UpgradeDeps, Upgrades};
+use super::provenance::ArchiveStatus;
 use super::{Lidarr, LidarrDeps, PlexMusic};
 use crate::artistinfo::http::HttpResponse;
 use crate::db::DbHandle;
@@ -32,7 +33,7 @@ use crate::error::{AppError, AppResult};
 use crate::musicshare::{FolderPair, ShareMap};
 use crate::plex::keychain::MemoryStore;
 use crate::tags::FileTags;
-use crate::tags::carry::AudioInfo;
+use super::tagcarry::AudioInfo;
 use crate::web::{Body, Method, Web, WebRequest};
 
 const R1: &str = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -43,13 +44,14 @@ const ALBUM_DIR: &str = "/data/music/Northlight/First Light";
 
 // ---------------------------------------------------------------- audio files
 
-/// A FLAC file with no audio frames: the stream header says 44.1 kHz stereo at `bits`.
-fn flac_bytes(bits: u64) -> Vec<u8> {
+/// A FLAC file with no audio frames: the stream header says 44.1 kHz
+/// stereo at `bits`, `ms` long.
+fn flac_bytes(bits: u64, ms: u64) -> Vec<u8> {
     let mut v = b"fLaC".to_vec();
     v.extend([0x80, 0, 0, 34]); // last block, STREAMINFO, 34 bytes
     v.extend([0x10, 0x00, 0x10, 0x00]); // block sizes 4096
     v.extend([0, 0, 0, 0, 0, 0]); // frame sizes unknown
-    let packed: u64 = (44_100u64 << 44) | (1 << 41) | ((bits - 1) << 36) | 441_000;
+    let packed: u64 = (44_100u64 << 44) | (1 << 41) | ((bits - 1) << 36) | (44_100 * ms / 1000);
     v.extend(packed.to_be_bytes());
     v.extend([0u8; 16]); // MD5
     v.extend(vec![0u8; 4096]);
@@ -88,8 +90,12 @@ fn write_mp3(path: &Path, kbps: u32, f: impl FnOnce(&mut Id3v2Tag)) {
 
 /// A FLAC with these Vorbis comments.
 fn write_flac(path: &Path, bits: u64, pairs: &[(&str, &str)], picture: Option<Picture>) {
+    write_flac_ms(path, bits, 200_000, pairs, picture)
+}
+
+fn write_flac_ms(path: &Path, bits: u64, ms: u64, pairs: &[(&str, &str)], picture: Option<Picture>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, flac_bytes(bits)).unwrap();
+    std::fs::write(path, flac_bytes(bits, ms)).unwrap();
     let mut vc = VorbisComments::new();
     for (k, v) in pairs {
         vc.push(k.to_string(), v.to_string());
@@ -102,7 +108,17 @@ fn write_flac(path: &Path, bits: u64, pairs: &[(&str, &str)], picture: Option<Pi
 
 /// A tagged old MP3 as Picard and the archive would leave it.
 fn old_mp3(path: &Path, title: &str, recording: &str, archive: Option<&str>) {
+    old_mp3_with(path, title, recording, archive, None, None)
+}
+
+fn old_mp3_with(path: &Path, title: &str, recording: &str, archive: Option<&str>, isrc: Option<&str>, source: Option<&str>) {
     write_mp3(path, 320, |t| {
+        if let Some(i) = isrc {
+            t.insert_user_text("ISRC".into(), i.into());
+        }
+        if let Some(s) = source {
+            t.insert_user_text("ARCHIVE_SOURCE".into(), s.into());
+        }
         t.set_title(title.into());
         t.set_artist("Northlight".into());
         t.set_album("First Light".into());
@@ -120,12 +136,16 @@ fn old_mp3(path: &Path, title: &str, recording: &str, archive: Option<&str>) {
 
 /// The better copy as Lidarr imported it: its own tags, its own ReplayGain.
 fn new_flac(path: &Path, title: &str, recording: &str) {
-    write_flac(
-        path,
-        16,
-        &[("TITLE", &format!("{title} (Remastered)")), ("MUSICBRAINZ_TRACKID", recording), ("REPLAYGAIN_TRACK_GAIN", "-6.20 dB"), ("COMMENT", "lidarr")],
-        Some(cover(9)),
-    );
+    new_flac_with(path, title, recording, None, 200_000)
+}
+
+fn new_flac_with(path: &Path, title: &str, recording: &str, isrc: Option<&str>, ms: u64) {
+    let t = format!("{title} (Remastered)");
+    let mut pairs = vec![("TITLE", t.as_str()), ("MUSICBRAINZ_TRACKID", recording), ("REPLAYGAIN_TRACK_GAIN", "-6.20 dB"), ("COMMENT", "lidarr")];
+    if let Some(i) = isrc {
+        pairs.push(("ISRC", i));
+    }
+    write_flac_ms(path, 16, ms, &pairs, Some(cover(9)));
 }
 
 fn hash(p: &Path) -> String {
@@ -151,9 +171,9 @@ fn mp3_tags_carry_onto_flac_with_archive_tags_and_the_new_copy_keeps_its_technic
         t.insert_picture(cover(7));
     });
     new_flac(&new, "Dawn", R1);
-    crate::tags::carry::carry(&old, &new).unwrap();
+    super::tagcarry::carry(&old, &new).unwrap();
 
-    let got = crate::tags::carry::read(&new).unwrap();
+    let got = super::tagcarry::read(&new).unwrap();
     let get = |k: &str| got.pairs.iter().filter(|(n, _)| n == k).map(|(_, v)| v.as_str()).collect::<Vec<_>>();
     assert_eq!(get("TITLE"), vec!["Dawn"], "the old title, not Lidarr's");
     assert_eq!(get("ALBUM"), vec!["First Light"]);
@@ -166,11 +186,11 @@ fn mp3_tags_carry_onto_flac_with_archive_tags_and_the_new_copy_keeps_its_technic
     assert_eq!(got.pictures.len(), 1);
     assert_eq!(got.pictures[0].data(), cover(7).data(), "the old cover");
     // The library's own reader sees the same archive tags and ids.
-    let (a, b) = (crate::tags::read_local(&old).unwrap(), crate::tags::read_local(&new).unwrap());
+    let (a, b) = (super::provenance::read_local(&old).unwrap(), super::provenance::read_local(&new).unwrap());
     assert_eq!((a.version.as_deref(), a.era.as_deref(), a.group.as_deref()), (Some("alternate"), Some("First Light era"), Some("first-light")));
     assert_eq!((a.version, a.era, a.group, a.recording_mbid, a.album), (b.version, b.era, b.group, b.recording_mbid, b.album));
     // Still the new audio.
-    let audio = crate::tags::carry::audio(&new).unwrap();
+    let audio = super::tagcarry::audio(&new).unwrap();
     assert_eq!((audio.codec.as_str(), audio.bit_depth), ("flac", Some(16)));
 }
 
@@ -181,8 +201,8 @@ fn flac_to_flac_carries_everything_exactly() {
     let pairs = [("TITLE", "Noon"), ("ARTIST", "Northlight"), ("ARCHIVE_EDITION", "Deluxe"), ("ARCHIVE_FLAGS", "fanedit"), ("GENRE", "Rock"), ("GENRE", "Folk")];
     write_flac(&old, 16, &pairs, Some(cover(3)));
     write_flac(&new, 24, &[("TITLE", "x"), ("ENCODER", "new encoder")], None);
-    crate::tags::carry::carry(&old, &new).unwrap();
-    let got = crate::tags::carry::read(&new).unwrap();
+    super::tagcarry::carry(&old, &new).unwrap();
+    let got = super::tagcarry::read(&new).unwrap();
     for (k, v) in pairs {
         assert!(got.pairs.contains(&(k.to_string(), v.to_string())), "{k}={v}");
     }
@@ -201,9 +221,25 @@ fn tags_only_mp3_can_hold_stop_the_copy_before_anything_is_written() {
     });
     new_flac(&new, "Dawn", R1);
     let before = hash(&new);
-    let e = crate::tags::carry::carry(&old, &new).unwrap_err().to_string();
+    let e = super::tagcarry::carry(&old, &new).unwrap_err().to_string();
     assert!(e.contains("PRIV") && e.contains("can't move to FLAC"), "{e}");
     assert_eq!(hash(&new), before, "nothing written");
+}
+
+#[test]
+fn the_provenance_note_can_be_set_on_any_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let (flac, mp3) = (dir.path().join("a.flac"), dir.path().join("a.mp3"));
+    write_flac(&flac, 16, &[("TITLE", "Dawn"), ("ARCHIVE_SOURCE", "Official CD")], Some(cover(1)));
+    old_mp3_with(&mp3, "Dawn", R1, Some("released"), None, Some("Official CD"));
+    for p in [&flac, &mp3] {
+        super::tagcarry::set_text(p, "ARCHIVE_SOURCE", "Official CD; Upgraded to FLAC from Lidarr, 2026-10-16").unwrap();
+        let t = super::provenance::read_local(p).unwrap();
+        assert_eq!(t.source.as_deref(), Some("Official CD; Upgraded to FLAC from Lidarr, 2026-10-16"));
+        let bag = super::tagcarry::read(p).unwrap();
+        assert!(bag.pairs.iter().any(|(k, v)| k == "TITLE" && v == "Dawn"), "everything else stays");
+        assert_eq!(bag.pictures.len(), 1);
+    }
 }
 
 // ---------------------------------------------------------------- the swap, with faults
@@ -216,19 +252,24 @@ struct Faults {
     locked: HashSet<String>,
     backup_unwritable: bool,
     carry_fails: bool,
+    note_fails: bool,
     /// Renames onto these names fail.
     rename_fails: HashSet<String>,
+    /// What the audio comparison says (None: it fails).
+    correlation: Option<f64>,
 }
 
 struct FaultFs {
     share: PathBuf,
-    backup: PathBuf,
     faults: Arc<Mutex<Faults>>,
 }
 
 impl FaultFs {
     fn on_share(&self, p: &Path) -> bool {
         p.starts_with(&self.share)
+    }
+    fn backup(&self, p: &Path) -> bool {
+        p.components().any(|c| c.as_os_str() == swap::TO_DELETE)
     }
 }
 
@@ -243,14 +284,14 @@ impl ShareFs for FaultFs {
         LocalFs.list(dir)
     }
     fn copy(&self, from: &Path, to: &Path) -> io::Result<()> {
-        if self.faults.lock().backup_unwritable && to.starts_with(&self.backup) {
+        if self.faults.lock().backup_unwritable && self.backup(to) {
             return Err(io::Error::other("read only"));
         }
         LocalFs.copy(from, to)
     }
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         let f = self.faults.lock();
-        if f.backup_unwritable && to.starts_with(&self.backup) {
+        if f.backup_unwritable && self.backup(to) {
             return Err(io::Error::other("read only"));
         }
         if f.rename_fails.contains(&swap::name(to)) {
@@ -280,6 +321,12 @@ impl ShareFs for FaultFs {
         }
         LocalFs.probe_writable(dir)
     }
+    fn read_text(&self, p: &Path) -> io::Result<Option<String>> {
+        LocalFs.read_text(p)
+    }
+    fn write_text(&self, p: &Path, text: &str) -> io::Result<()> {
+        LocalFs.write_text(p, text)
+    }
 }
 
 struct FaultTags(Arc<Mutex<Faults>>);
@@ -297,9 +344,18 @@ impl TagIo for FaultTags {
         }
         LoftyTags.carry(old, new)
     }
+    fn set_text(&self, p: &Path, key: &str, value: &str) -> AppResult<()> {
+        if self.0.lock().note_fails {
+            return Err(AppError::Invalid("The tags couldn't be copied: the note didn't take.".into()));
+        }
+        LoftyTags.set_text(p, key, value)
+    }
+    fn correlate(&self, _a: &Path, _b: &Path) -> AppResult<f64> {
+        self.0.lock().correlation.ok_or_else(|| AppError::Invalid("no".into()))
+    }
 }
 
-/// A share, a staging folder and a backup folder in one temporary folder.
+/// A share, a staging folder and an outside folder in one temporary folder.
 struct TestHost {
     map: Mutex<ShareMap>,
     root: PathBuf,
@@ -317,8 +373,8 @@ impl SwapHost for TestHost {
     fn staging_path(&self, lidarr_path: &str) -> Option<PathBuf> {
         self.map.lock().staging_path(STAGING, lidarr_path)
     }
-    fn backup_root(&self) -> PathBuf {
-        self.root.join("backup")
+    fn backup_place(&self, old: &Path) -> Result<BackupPlace, Failure> {
+        swap::backup_place(&self.map.lock(), old)
     }
     fn fs(&self) -> &dyn ShareFs {
         &self.fs
@@ -343,12 +399,15 @@ impl Box_ {
     }
 }
 
-/// The album on the share: "01 Dawn.mp3" (released, recording R1) and
-/// "02 Noon.mp3" (ARCHIVE_VERSION), with the better copies in staging.
+const ISRC_DAWN: &str = "USRC17607839";
+
+/// The album on the share: "01 Dawn.mp3" (an ISRC it shares with the new
+/// copy), "02 Noon.mp3" (released by tag, an official source note, no ISRC)
+/// and "03 Sketch.mp3" (a demo), with the better copies in staging.
 fn share_box() -> Box_ {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
-    let faults = Arc::new(Mutex::new(Faults::default()));
+    let faults = Arc::new(Mutex::new(Faults { correlation: Some(0.998), ..Default::default() }));
     let map = ShareMap {
         music: vec![FolderPair { server: "/data/music".into(), local: root.join("share").to_string_lossy().into_owned() }],
         staging: root.join("staging").to_string_lossy().into_owned(),
@@ -356,15 +415,16 @@ fn share_box() -> Box_ {
     };
     let host = Arc::new(TestHost {
         map: Mutex::new(map),
-        fs: FaultFs { share: root.join("share"), backup: root.join("backup"), faults: faults.clone() },
+        fs: FaultFs { share: root.join("share"), faults: faults.clone() },
         tags: FaultTags(faults.clone()),
         root,
     });
     let b = Box_ { _dir: dir, host, faults };
-    old_mp3(&b.share("Northlight/First Light/01 Dawn.mp3"), "Dawn", R1, None);
-    old_mp3(&b.share("Northlight/First Light/02 Noon.mp3"), "Noon", R2, Some("released"));
-    new_flac(&b.staging("Northlight/First Light (2015)/01 - Dawn.flac"), "Dawn", R1);
-    new_flac(&b.staging("Northlight/First Light (2015)/02 - Noon.flac"), "Noon", R2);
+    old_mp3_with(&b.share("Northlight/First Light/01 Dawn.mp3"), "Dawn", R1, None, Some(ISRC_DAWN), None);
+    old_mp3_with(&b.share("Northlight/First Light/02 Noon.mp3"), "Noon", R2, Some("released"), None, Some("Official CD, 2015"));
+    old_mp3_with(&b.share("Northlight/First Light/03 Sketch.mp3"), "Sketch", R2, Some("demo"), None, Some("Leak"));
+    new_flac_with(&b.staging("Northlight/First Light (2015)/01 - Dawn.flac"), "Dawn", R1, Some(ISRC_DAWN), 200_000);
+    new_flac_with(&b.staging("Northlight/First Light (2015)/02 - Noon.flac"), "Noon", R2, None, 180_300);
     b
 }
 
@@ -373,6 +433,7 @@ fn dawn() -> Planned {
         track_id: "t1".into(),
         plex_path: format!("{ALBUM_DIR}/01 Dawn.mp3"),
         lidarr_path: format!("{STAGING}/Northlight/First Light (2015)/01 - Dawn.flac"),
+        note: None,
     }
 }
 
@@ -381,10 +442,11 @@ fn noon() -> Planned {
         track_id: "t2".into(),
         plex_path: format!("{ALBUM_DIR}/02 Noon.mp3"),
         lidarr_path: format!("{STAGING}/Northlight/First Light (2015)/02 - Noon.flac"),
+        note: Some(NoteEdit { key: "ARCHIVE_SOURCE".into(), value: "Official CD, 2015; Upgraded to FLAC from Lidarr, 2026-10-16".into() }),
     }
 }
 
-/// Every file of the album and of staging, by hash, plus no leftovers.
+/// Every file of the album and of staging, by hash.
 fn snapshot(b: &Box_) -> Vec<(String, String)> {
     let mut v = Vec::new();
     for d in [b.share("Northlight/First Light"), b.staging("Northlight/First Light (2015)")] {
@@ -398,20 +460,28 @@ fn snapshot(b: &Box_) -> Vec<(String, String)> {
 }
 
 #[test]
-fn a_swap_backs_up_the_old_file_and_undo_puts_it_back_byte_for_byte() {
+fn a_swap_backs_up_into_an_ignored_folder_and_undo_puts_it_back_byte_for_byte() {
     let b = share_box();
-    let old = b.share("Northlight/First Light/01 Dawn.mp3");
+    let old = b.share("Northlight/First Light/02 Noon.mp3");
     let before = std::fs::read(&old).unwrap();
-    let staged = hash(&b.staging("Northlight/First Light (2015)/01 - Dawn.flac"));
-    let backup = swap::backup_folder(&b.host.backup_root(), "Northlight", "First Light", "abcd1234-x");
-    let done = swap::run(b.host.as_ref(), &backup, &[dawn()]).unwrap();
+    let staged = hash(&b.staging("Northlight/First Light (2015)/02 - Noon.flac"));
+    let ran = swap::run(b.host.as_ref(), &swap::backup_folder("Northlight", "First Light", "abcd1234-x"), &[noon()]).unwrap();
+    let done = ran.done;
     assert_eq!(done.len(), 1);
-    let placed = b.share("Northlight/First Light/01 Dawn.flac");
+    let placed = b.share("Northlight/First Light/02 Noon.flac");
     assert!(placed.exists() && !old.exists(), "the new copy takes the old name, with its own extension");
     assert_eq!(std::fs::read(&done[0].backup).unwrap(), before, "the old file is in the backup folder, untouched");
-    assert!(done[0].backup.contains("Northlight - First Light (abcd1234)"));
-    assert_eq!(crate::tags::read_local(&placed).unwrap().recording_mbid.as_deref(), Some(R1));
-    assert_eq!(hash(&b.staging("Northlight/First Light (2015)/01 - Dawn.flac")), staged, "staging is only read");
+    let backup = PathBuf::from(&done[0].backup);
+    assert!(backup.starts_with(b.share("_to_delete/Northlight - First Light (abcd1234)")), "{}", backup.display());
+    // Plex is told to ignore it, once.
+    assert_eq!(ran.ignored, vec![b.share("")]);
+    let rule = std::fs::read_to_string(b.share(".plexignore")).unwrap();
+    assert!(rule.lines().any(|l| l == swap::IGNORE_RULE), "{rule}");
+    // The note says where the copy came from; every other tag carried over.
+    let t = super::provenance::read_local(&placed).unwrap();
+    assert_eq!(t.source.as_deref(), Some("Official CD, 2015; Upgraded to FLAC from Lidarr, 2026-10-16"));
+    assert_eq!((t.version.as_deref(), t.recording_mbid.as_deref()), (Some("released"), Some(R2)));
+    assert_eq!(hash(&b.staging("Northlight/First Light (2015)/02 - Noon.flac")), staged, "staging is only read");
     let leftovers: Vec<String> =
         std::fs::read_dir(b.share("Northlight/First Light")).unwrap().map(|e| swap::name(&e.unwrap().path())).filter(|n| n.starts_with('.')).collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
@@ -419,8 +489,36 @@ fn a_swap_backs_up_the_old_file_and_undo_puts_it_back_byte_for_byte() {
     swap::undo(b.host.as_ref(), &done).unwrap();
     assert_eq!(std::fs::read(&old).unwrap(), before, "byte for byte");
     assert!(!placed.exists());
-    let replaced = backup.join("Replaced").join("01 Dawn.flac");
-    assert!(replaced.exists(), "the new copy is kept, not deleted");
+    assert!(b.share("_to_delete/Northlight - First Light (abcd1234)/Replaced/02 Noon.flac").exists(), "the new copy is kept, not deleted");
+
+    // A second swap finds the rule already there.
+    let ran = swap::run(b.host.as_ref(), "again", &[dawn()]).unwrap();
+    assert!(ran.ignored.is_empty());
+    assert_eq!(std::fs::read_to_string(b.share(".plexignore")).unwrap(), rule);
+}
+
+#[test]
+fn an_existing_plexignore_keeps_its_rules() {
+    let b = share_box();
+    std::fs::write(b.share(".plexignore"), "Scans/*").unwrap();
+    swap::run(b.host.as_ref(), "x", &[dawn()]).unwrap();
+    let rule = std::fs::read_to_string(b.share(".plexignore")).unwrap();
+    assert!(rule.starts_with("Scans/*\n") && rule.contains(swap::IGNORE_RULE), "{rule}");
+}
+
+#[test]
+fn a_chosen_backup_folder_must_be_outside_the_music_folder() {
+    let b = share_box();
+    let before = snapshot(&b);
+    b.host.map.lock().backup = b.share("Old files").to_string_lossy().into_owned();
+    assert!(matches!(swap::run(b.host.as_ref(), "x", &[dawn()]).unwrap_err(), Failure::BackupInLibrary { .. }));
+    assert_eq!(snapshot(&b), before);
+    // Outside it: used as is, with no .plexignore needed.
+    let outside = b.host.root.join("backups");
+    b.host.map.lock().backup = outside.to_string_lossy().into_owned();
+    let ran = swap::run(b.host.as_ref(), "x", &[dawn()]).unwrap();
+    assert!(PathBuf::from(&ran.done[0].backup).starts_with(&outside));
+    assert!(ran.ignored.is_empty() && !b.share(".plexignore").exists());
 }
 
 /// Run the swap with a fault and check that nothing changed.
@@ -428,8 +526,7 @@ fn fails_cleanly(set: impl FnOnce(&mut Faults), items: &[Planned]) -> Failure {
     let b = share_box();
     set(&mut b.faults.lock());
     let before = snapshot(&b);
-    let backup = b.host.backup_root().join("x");
-    let f = swap::run(b.host.as_ref(), &backup, items).unwrap_err();
+    let f = swap::run(b.host.as_ref(), "x", items).unwrap_err();
     b.faults.lock().unreachable = false;
     assert_eq!(snapshot(&b), before, "{f:?} left every file as it was");
     f
@@ -440,6 +537,7 @@ fn every_failure_leaves_the_old_files_in_place() {
     assert!(matches!(fails_cleanly(|f| f.unreachable = true, &[dawn()]), Failure::ShareUnreachable { .. }));
     assert_eq!(fails_cleanly(|f| { f.locked.insert("01 Dawn.mp3".into()); }, &[dawn()]), Failure::FileLocked { name: "01 Dawn.mp3".into() });
     assert!(matches!(fails_cleanly(|f| f.carry_fails = true, &[dawn()]), Failure::TagCopyFailed { .. }));
+    assert!(matches!(fails_cleanly(|f| f.note_fails = true, &[noon()]), Failure::TagCopyFailed { .. }));
     assert!(matches!(fails_cleanly(|f| f.backup_unwritable = true, &[dawn()]), Failure::BackupNotWritable { .. }));
     // The second file fails after the first was swapped: the first goes back too.
     assert!(matches!(fails_cleanly(|f| { f.rename_fails.insert("02 Noon.flac".into()); }, &[dawn(), noon()]), Failure::MoveFailed { .. }));
@@ -455,8 +553,9 @@ fn nothing_is_written_without_the_share_mapping() {
     let b = share_box();
     b.host.map.lock().music.clear();
     let before = snapshot(&b);
-    assert_eq!(swap::run(b.host.as_ref(), &b.host.backup_root(), &[dawn()]).unwrap_err(), Failure::NoMapping);
+    assert_eq!(swap::run(b.host.as_ref(), "x", &[dawn()]).unwrap_err(), Failure::NoMapping);
     assert_eq!(snapshot(&b), before);
+    assert!(!b.share(".plexignore").exists());
 }
 
 #[test]
@@ -464,7 +563,7 @@ fn a_new_name_that_is_taken_stops_the_swap() {
     let b = share_box();
     std::fs::write(b.share("Northlight/First Light/01 Dawn.flac"), b"someone else's").unwrap();
     let before = snapshot(&b);
-    let f = swap::run(b.host.as_ref(), &b.host.backup_root(), &[dawn()]).unwrap_err();
+    let f = swap::run(b.host.as_ref(), "x", &[dawn()]).unwrap_err();
     assert_eq!(f, Failure::NameTaken { name: "01 Dawn.flac".into() });
     assert_eq!(snapshot(&b), before);
 }
@@ -472,7 +571,7 @@ fn a_new_name_that_is_taken_stops_the_swap() {
 #[test]
 fn undo_refuses_when_the_kept_copy_is_gone() {
     let b = share_box();
-    let done = swap::run(b.host.as_ref(), &b.host.backup_root().join("u"), &[dawn()]).unwrap();
+    let done = swap::run(b.host.as_ref(), "u", &[dawn()]).unwrap().done;
     std::fs::remove_file(&done[0].backup).unwrap();
     assert!(matches!(swap::undo(b.host.as_ref(), &done).unwrap_err(), Failure::BackupMissing { .. }));
     assert!(b.share("Northlight/First Light/01 Dawn.flac").exists(), "the new copy stays put");
@@ -488,8 +587,10 @@ struct State {
     profiles: Value,
     /// The staging folder is one of Lidarr's root folders.
     staging_root: bool,
-    /// An artist Lidarr already has, at this path.
-    existing_artist: Option<String>,
+    /// Lidarr's import lists exclude these artist ids.
+    exclusions: Vec<String>,
+    /// Lidarr puts added artists here instead of the root asked for.
+    misplace_artists: Option<String>,
 }
 
 struct FakeLidarr {
@@ -547,15 +648,15 @@ impl FakeLidarr {
             (Method::Get, "/config/mediamanagement") => (200, json!({"deleteEmptyFolders": false, "recycleBin": "/recycle"})),
             (Method::Get, "/qualityprofile") => (200, st.profiles.clone()),
             (Method::Get, "/importlist") => (200, json!([])),
+            (Method::Get, "/importlistexclusion") => {
+                (200, Value::Array(st.exclusions.iter().map(|id| json!({"foreignId": id, "artistName": "Northlight"})).collect()))
+            }
             (Method::Get, "/metadataprofile") => (200, json!([{"id": 3, "name": "Standard"}])),
             (Method::Get, "/filesystem") => (200, json!({"directories": [], "files": []})),
             (Method::Get, "/album/lookup") => {
                 let rgid = q("term").unwrap_or_default().trim_start_matches("lidarr:").to_string();
-                let artist = match &st.existing_artist {
-                    Some(p) => json!({"artistName": "Northlight", "foreignArtistId": ARTIST, "folder": "Northlight", "path": p}),
-                    None => json!({"artistName": "Northlight", "foreignArtistId": ARTIST, "folder": "Northlight"}),
-                };
-                (200, json!([{"id": 0, "title": "First Light", "foreignAlbumId": rgid, "artist": artist}]))
+                (200, json!([{"id": 0, "title": "First Light", "foreignAlbumId": rgid,
+                    "artist": {"artistName": "Northlight", "foreignArtistId": ARTIST, "folder": "Northlight"}}]))
             }
             (Method::Get, "/album") => {
                 if let Some(f) = q("foreignAlbumId") {
@@ -577,6 +678,7 @@ impl FakeLidarr {
                     {"id": 2, "title": "Noon", "foreignRecordingId": R2, "mediumNumber": 1, "absoluteTrackNumber": 2, "duration": 180000, "trackFileId": 12}
                 ]),
             ),
+            (Method::Get, "/trackfile") if q("unmapped").is_some() => (200, json!([])),
             (Method::Get, "/trackfile") => (
                 200,
                 json!([
@@ -588,8 +690,9 @@ impl FakeLidarr {
                 let b: Value = serde_json::from_str(body).unwrap();
                 st.next_id += 1;
                 let id = st.next_id;
+                let folder = st.misplace_artists.clone().unwrap_or_else(|| b["rootFolderPath"].as_str().unwrap().to_string());
                 let artist = json!({"id": id, "artistName": b["artistName"], "foreignArtistId": b["foreignArtistId"],
-                    "path": format!("{}/Northlight", b["rootFolderPath"].as_str().unwrap()), "qualityProfileId": b["qualityProfileId"],
+                    "path": format!("{folder}/Northlight"), "qualityProfileId": b["qualityProfileId"],
                     "monitored": true, "monitorNewItems": b["monitorNewItems"]});
                 st.artists.push(artist.clone());
                 for (rg, title) in [(RG_FIRST, "First Light"), ("10000000-0000-0000-0000-000000000002", "Second Wind")] {
@@ -671,13 +774,23 @@ struct Rig {
     b: Box_,
     db: DbHandle,
     web: Arc<FakeLidarr>,
+    mb: Arc<FakeMb>,
     plex: Arc<FakeRescan>,
     hosts: Arc<TestHosts>,
     up: Upgrades,
     lidarr: Lidarr,
 }
 
-fn rig_with(mb: Arc<FakeMb>) -> Rig {
+/// The official release's tracklist on the faked MusicBrainz.
+fn first_light_releases() -> Value {
+    json!({"releases": [
+        {"id": "rel-w", "status": "Withdrawn", "date": "2014-01-01", "media": [{"position": 1, "tracks": [{"position": 1, "title": "Wrong", "length": 1}]}]},
+        {"id": "rel-1", "status": "Official", "date": "2015-03-01", "media": [{"position": 1, "tracks": [
+            {"position": 1, "title": "Dawn", "length": 200000}, {"position": 2, "title": "Noon", "length": 180000}]}]}
+    ]})
+}
+
+fn rig() -> Rig {
     let b = share_box();
     let db = DbHandle::open(b.host.root.join("u.db")).unwrap();
     let s = crate::settings::Settings { lidarr_url: "http://10.20.30.40:8686".into(), lidarr_staging_folder: STAGING.into(), ..Default::default() };
@@ -686,19 +799,26 @@ fn rig_with(mb: Arc<FakeMb>) -> Rig {
         c.execute_batch(&format!(
             "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, format, subformats, matched) VALUES
                ('a1', 'First Light', 'First Light', 'ar1', 'Northlight', 'Album', '[]', 1),
-               ('a2', 'Quiet Sketches (Build 2)', 'Quiet Sketches', 'ar1', 'Northlight', NULL, '[]', 0);
+               ('a2', 'Quiet Sketches (Build 2)', 'Quiet Sketches', 'ar1', 'Northlight', NULL, '[]', 0),
+               ('a3', 'First Light [Leak]', 'First Light', 'ar1', 'Northlight', NULL, '[]', 0);
              INSERT INTO album_tags (album_id, version) VALUES ('a2', 'build');
              INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_number, disc_number, duration_ms, part_key, codec, bitrate, file) VALUES
                ('t1', 'Dawn', 'a1', 'First Light', 'ar1', 'Northlight', 1, 1, 200000, '/p/1', 'mp3', 320, '{ALBUM_DIR}/01 Dawn.mp3'),
-               ('t2', 'Noon', 'a1', 'First Light', 'ar1', 'Northlight', 2, 1, 180000, '/p/2', 'mp3', 320, '{ALBUM_DIR}/02 Noon.mp3');"
+               ('t2', 'Noon', 'a1', 'First Light', 'ar1', 'Northlight', 2, 1, 180000, '/p/2', 'mp3', 320, '{ALBUM_DIR}/02 Noon.mp3'),
+               ('t3', 'Sketch', 'a1', 'First Light', 'ar1', 'Northlight', 3, 1, 150000, '/p/3', 'mp3', 320, '{ALBUM_DIR}/03 Sketch.mp3');"
         ))?;
         Ok(())
     })
     .unwrap();
+    let mb = FakeMb::northlight();
     mb.route(
         "/release-group?query=releasegroup%3A%22first+light%22",
-        Some(json!({"release-groups": [{"id": RG_FIRST, "title": "First Light", "primary-type": "Album", "first-release-date": "2015-03-01"}]})),
+        Some(json!({"release-groups": [
+            {"id": RG_FIRST, "title": "First Light", "primary-type": "Album", "first-release-date": "2015-03-01"},
+            {"id": RG_LIVE, "title": "First Light", "primary-type": "Album", "first-release-date": "2022"}
+        ]})),
     );
+    mb.route(&format!("/release?release-group={RG_FIRST}"), Some(first_light_releases()));
     let web = FakeLidarr::new();
     let lidarr = Lidarr::new(LidarrDeps {
         web: web.clone(),
@@ -706,19 +826,22 @@ fn rig_with(mb: Arc<FakeMb>) -> Rig {
         db: db.clone(),
         plex: Arc::new(Plex),
         clock: Arc::new(|| 1_800_000_000),
-        mb,
+        mb: mb.clone(),
         artist_mbid: Arc::new(Mbid),
         album_wait: std::time::Duration::ZERO,
     });
     lidarr.set_key(Some("abc123")).unwrap();
     let plex = Arc::new(FakeRescan::default());
     let hosts = Arc::new(TestHosts(b.host.clone(), Mutex::new(true)));
-    let up = Upgrades::new(UpgradeDeps { lidarr: lidarr.clone(), db: db.clone(), hosts: hosts.clone(), plex: plex.clone(), clock: Arc::new(|| 1_800_000_000) });
-    Rig { b, db, web, plex, hosts, up, lidarr }
-}
-
-fn rig() -> Rig {
-    rig_with(FakeMb::northlight())
+    let up = Upgrades::new(UpgradeDeps {
+        lidarr: lidarr.clone(),
+        db: db.clone(),
+        hosts: hosts.clone(),
+        plex: plex.clone(),
+        clock: Arc::new(|| 1_800_000_000),
+        status: Arc::new(ArchiveStatus),
+    });
+    Rig { b, db, web, mb, plex, hosts, up, lidarr }
 }
 
 fn assert_only_allowed_writes(web: &FakeLidarr) {
@@ -732,9 +855,41 @@ fn assert_only_allowed_writes(web: &FakeLidarr) {
     }
 }
 
+/// The user confirms First Light is RG_FIRST.
+async fn confirmed(r: &Rig) {
+    r.up.confirm("a1", Some(RG_FIRST)).await.unwrap();
+}
+
+#[tokio::test]
+async fn upgrades_wait_for_the_user_to_confirm_the_release() {
+    let r = rig();
+    let e = r.up.request("a1").await.unwrap_err().to_string();
+    assert!(e.contains("Confirm which MusicBrainz release"), "{e}");
+    assert!(r.web.writes().is_empty());
+    // The candidates: the studio album with its official tracklist (not the
+    // withdrawn release), never the live one; the folder's songs beside it.
+    let c = r.up.candidates("a1").await.unwrap();
+    assert_eq!(c.candidates.len(), 1);
+    assert_eq!(c.candidates[0].group.id, RG_FIRST);
+    assert_eq!(c.candidates[0].tracks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), vec!["Dawn", "Noon"]);
+    assert_eq!(c.songs.len(), 3);
+    assert!(c.confirmed.is_none());
+    // A live group can't be confirmed.
+    assert!(r.up.confirm("a1", Some(RG_LIVE)).await.is_err());
+    confirmed(&r).await;
+    assert_eq!(r.up.for_album("a1").await.unwrap().confirmed.unwrap().release_group_id, RG_FIRST);
+    // The leaked build with the same base title doesn't block it any more:
+    // the user said which release this is, and every file is proven first.
+    assert!(r.up.request("a1").await.is_ok());
+    // Forgetting it.
+    r.up.confirm("a1", None).await.unwrap();
+    assert!(r.up.for_album("a1").await.unwrap().confirmed.is_none());
+}
+
 #[tokio::test]
 async fn an_upgrade_goes_only_to_staging_with_monitoring_limited_and_a_profile_aiming_higher() {
     let r = rig();
+    confirmed(&r).await;
     let rec = r.up.request("a1").await.unwrap();
     assert_eq!(rec.request.state, RequestState::Searching, "{rec:?}");
     assert_eq!(rec.request.release_group_id, RG_FIRST);
@@ -752,10 +907,12 @@ async fn an_upgrade_goes_only_to_staging_with_monitoring_limited_and_a_profile_a
     assert_eq!(on, vec!["First Light"]);
     assert!(rec.request.notes.iter().any(|n| n.contains("FLAC or better with its Lossless profile")), "{:?}", rec.request.notes);
     assert_only_allowed_writes(&r.web);
-    // The setup check ran before the first write.
+    // The setup check ran before the first write, and again before the search.
     let log = r.web.log.lock().clone();
     let first = log.iter().position(|(m, _, _)| *m != Method::Get).unwrap();
+    let search = log.iter().position(|(_, p, _)| p == "/api/v1/command").unwrap();
     assert!(log[..first].iter().any(|(_, p, _)| p == "/api/v1/rootfolder"));
+    assert!(log[first..search].iter().any(|(_, p, _)| p == "/api/v1/rootfolder"), "checked again after the writes");
     // Asking again sends nothing.
     let n = r.web.writes().len();
     r.up.request("a1").await.unwrap();
@@ -765,6 +922,7 @@ async fn an_upgrade_goes_only_to_staging_with_monitoring_limited_and_a_profile_a
 #[tokio::test]
 async fn no_profile_aiming_higher_means_nothing_is_sent() {
     let r = rig();
+    confirmed(&r).await;
     r.web.st.lock().profiles = json!([profiles()[0].clone()]);
     let e = r.up.request("a1").await.unwrap_err().to_string();
     assert!(e.contains("None of Lidarr's quality profiles aims higher than MP3 320"), "{e}");
@@ -774,10 +932,45 @@ async fn no_profile_aiming_higher_means_nothing_is_sent() {
 #[tokio::test]
 async fn an_artist_lidarr_keeps_outside_staging_is_refused() {
     let r = rig();
+    confirmed(&r).await;
     r.web.st.lock().artists.push(json!({"id": 7, "artistName": "Northlight", "foreignArtistId": ARTIST, "path": format!("{LIB_ROOT}/Northlight"), "qualityProfileId": 2}));
     let e = r.up.request("a1").await.unwrap_err().to_string();
     assert!(e.contains("outside the staging folder"), "{e}");
     assert!(r.web.writes().is_empty());
+}
+
+#[tokio::test]
+async fn excluded_artists_are_never_requested_or_added() {
+    let r = rig();
+    confirmed(&r).await;
+    r.web.st.lock().exclusions = vec![ARTIST.to_string()];
+    let e = r.up.request("a1").await.unwrap_err().to_string();
+    assert!(e.contains("import list exclusions include Northlight"), "{e}");
+    let input = RequestInput {
+        release_group_id: "10000000-0000-0000-0000-000000000002".into(),
+        title: "Second Wind".into(),
+        artist: "Northlight".into(),
+        artist_id: Some("ar1".into()),
+        typed: Some("Second Wind".into()),
+        ..Default::default()
+    };
+    assert!(r.lidarr.request(input).await.unwrap_err().to_string().contains("exclusions"));
+    assert!(r.web.writes().is_empty());
+    // The setup check says so.
+    let report = r.lidarr.check().await.unwrap();
+    assert!(report.findings.iter().any(|f| f.id == "importExclusions" && f.detail.contains("Northlight")));
+}
+
+#[tokio::test]
+async fn an_added_artist_that_lands_in_the_plex_folder_stops_everything() {
+    let r = rig();
+    confirmed(&r).await;
+    r.web.st.lock().misplace_artists = Some("/data/music".into());
+    let rec = r.up.request("a1").await.unwrap();
+    assert_eq!(rec.request.state, RequestState::Failed);
+    assert!(rec.request.message.as_deref().unwrap().contains("inside your Plex music folder"), "{:?}", rec.request.message);
+    let shape: Vec<String> = r.web.writes().iter().map(|(_, p, _)| p.clone()).collect();
+    assert_eq!(shape, vec!["/api/v1/artist"], "nothing marked for download, nothing searched");
 }
 
 #[tokio::test]
@@ -798,10 +991,34 @@ async fn plain_requests_never_land_in_staging() {
 }
 
 #[tokio::test]
+async fn an_allowlist_limits_what_an_artist_can_get() {
+    let r = rig();
+    r.lidarr.set_allowlist("Northlight", Some("ar1"), vec![RG_EP.into()]).await.unwrap();
+    assert_eq!(r.lidarr.allowlist("Northlight", Some("ar1")).await, vec![RG_EP.to_string()]);
+    let input = |rg: &str, t: &str| RequestInput {
+        release_group_id: rg.into(),
+        title: t.into(),
+        artist: "Northlight".into(),
+        artist_id: Some("ar1".into()),
+        typed: Some(t.into()),
+        ..Default::default()
+    };
+    let e = r.lidarr.request(input("10000000-0000-0000-0000-000000000002", "Second Wind")).await.unwrap_err().to_string();
+    assert!(e.contains("limited this artist"), "{e}");
+    assert!(r.web.writes().is_empty());
+    assert!(r.lidarr.request(input(RG_EP, "Small Hours")).await.is_ok());
+    // Upgrades too: First Light isn't on the list.
+    assert!(r.up.confirm("a1", Some(RG_FIRST)).await.unwrap_err().to_string().contains("limited this artist"));
+    r.lidarr.set_allowlist("Northlight", Some("ar1"), vec![]).await.unwrap();
+    assert!(r.lidarr.allowlist("Northlight", Some("ar1")).await.is_empty());
+}
+
+#[tokio::test]
 async fn unreleased_albums_and_a_missing_staging_root_are_refused() {
     let r = rig();
     let e = r.up.request("a2").await.unwrap_err().to_string();
     assert!(e.contains("counts as unreleased"), "{e}");
+    confirmed(&r).await;
     // Staging isn't one of Lidarr's root folders: the setup check is red.
     r.web.st.lock().staging_root = false;
     let e = r.up.request("a1").await.unwrap_err().to_string();
@@ -814,24 +1031,9 @@ async fn unreleased_albums_and_a_missing_staging_root_are_refused() {
     assert!(!r.up.for_album("a1").await.unwrap().available);
 }
 
-#[tokio::test]
-async fn a_title_clash_with_another_album_refuses_the_upgrade() {
-    let r = rig();
-    r.db.write(|c| {
-        c.execute_batch(
-            "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, format, subformats, matched) VALUES
-               ('a3', 'First Light [Leak]', 'First Light', 'ar1', 'Northlight', NULL, '[]', 0);",
-        )?;
-        Ok(())
-    })
-    .unwrap();
-    let e = r.up.request("a1").await.unwrap_err().to_string();
-    assert!(e.contains("same title as \"First Light [Leak]\""), "{e}");
-    assert!(r.web.writes().is_empty());
-}
-
-/// Requested, imported by Lidarr, and offered.
+/// Confirmed, requested, imported by Lidarr, and offered.
 async fn imported(r: &Rig) -> String {
+    confirmed(r).await;
     let rec = r.up.request("a1").await.unwrap();
     r.web.import();
     let list = r.up.refresh().await.unwrap();
@@ -845,48 +1047,64 @@ async fn the_offer_says_what_upgrades_and_what_is_kept_and_why() {
     let id = imported(&r).await;
     let o = r.up.offer(&id).await.unwrap();
     assert_eq!(o.status, OfferStatus::Ready, "{o:?}");
-    assert_eq!(o.summary.as_deref(), Some("Upgrade 1 of 2 songs (MP3 320 to FLAC)"));
-    assert_eq!(o.upgrade.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(), vec!["Dawn"]);
-    assert_eq!(o.upgrade[0].by.as_deref(), Some("recordingId"));
-    assert_eq!(o.kept.iter().map(|s| (s.title.as_str(), s.reason.as_deref())).collect::<Vec<_>>(), vec![("Noon", Some("Has archive tags"))]);
-    assert!(o.ask_each, "a kept archive file makes the album ask per song");
-    assert!(o.ask_reason.as_deref().unwrap().contains("asks about each song"));
-    // The folder's other files are listed too.
-    std::fs::write(r.b.share("Northlight/First Light/03 Leak.mp3"), mp3_bytes(128)).unwrap();
+    assert_eq!(o.summary.as_deref(), Some("Upgrade 2 of 3 songs (MP3 320 to FLAC)"));
+    let up: Vec<(&str, Option<&str>)> = o.upgrade.iter().map(|s| (s.title.as_str(), s.by.as_deref())).collect();
+    assert_eq!(up, vec![("Dawn", Some("isrc")), ("Noon", Some("sound"))]);
+    assert_eq!(o.kept.iter().map(|s| (s.title.as_str(), s.reason.as_deref())).collect::<Vec<_>>(), vec![("Sketch", Some("Unreleased"))]);
+    assert!(o.ask_each, "a kept unreleased file makes the album ask per song");
+    assert!(o.backup_dir.contains("_to_delete"));
+    // Without the ISRC, the sound has to match too.
+    r.b.faults.lock().correlation = Some(0.97);
     let o = r.up.offer(&id).await.unwrap();
-    assert!(o.kept.iter().any(|s| s.title == "03 Leak.mp3" && s.reason.as_deref() == Some("Not one of this album's songs in Plex")));
+    assert!(o.kept.iter().any(|s| s.title == "Noon" && s.reason.as_deref().unwrap().contains("doesn't sound the same")));
+    assert!(o.upgrade.iter().any(|s| s.title == "Dawn"), "the ISRC match doesn't need the sound");
+    r.b.faults.lock().correlation = Some(0.998);
+    // A different official prefix: the note no longer counts.
+    let s = crate::settings::Settings { upgrade_official_prefix: "Retail".into(), ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
+    let o = r.up.offer(&id).await.unwrap();
+    assert!(o.kept.iter().any(|s| s.title == "Noon" && s.reason.as_deref().unwrap().contains("source note")));
+    // The folder's other files are listed too.
+    std::fs::write(r.b.share("Northlight/First Light/04 Leak.mp3"), mp3_bytes(128)).unwrap();
+    let o = r.up.offer(&id).await.unwrap();
+    assert!(o.kept.iter().any(|s| s.title == "04 Leak.mp3" && s.reason.as_deref() == Some("Not one of this album's songs in Plex")));
     // Without the mapping there's nothing to show yet.
     *r.hosts.1.lock() = false;
     assert_eq!(r.up.offer(&id).await.unwrap().status, OfferStatus::NeedsMapping);
 }
 
 #[tokio::test]
-async fn swapping_asks_per_song_rescans_the_folder_and_undoes_exactly() {
+async fn swapping_asks_per_song_rescans_the_folder_notes_the_source_and_undoes_exactly() {
     let r = rig();
     let id = imported(&r).await;
-    let old = r.b.share("Northlight/First Light/01 Dawn.mp3");
+    let old = r.b.share("Northlight/First Light/02 Noon.mp3");
     let before = std::fs::read(&old).unwrap();
-    // The album holds a kept archive file: no swapping everything at once.
+    // The album holds a kept unreleased file: no swapping everything at once.
     let e = r.up.swap(&id, None).await.unwrap_err().to_string();
     assert!(e.contains("asks about each song"), "{e}");
     // A kept song can't be picked.
-    assert!(r.up.swap(&id, Some(vec!["t2".into()])).await.unwrap_err().to_string().contains("Pick at least one"));
+    assert!(r.up.swap(&id, Some(vec!["t3".into()])).await.unwrap_err().to_string().contains("Pick at least one"));
     let writes_before = r.web.writes().len();
-    let res = r.up.swap(&id, Some(vec!["t1".into()])).await.unwrap();
+    let res = r.up.swap(&id, Some(vec!["t2".into()])).await.unwrap();
     assert_eq!(res.swapped, 1);
     assert_eq!(res.summary, "Upgraded 1 song (MP3 320 to FLAC)");
-    assert!(r.b.share("Northlight/First Light/01 Dawn.flac").exists() && !old.exists());
-    assert!(r.b.share("Northlight/First Light/02 Noon.mp3").exists(), "the kept file is untouched");
+    let placed = r.b.share("Northlight/First Light/02 Noon.flac");
+    assert!(placed.exists() && !old.exists());
+    let note = super::provenance::read_local(&placed).unwrap().source.unwrap();
+    assert_eq!(note, "Official CD, 2015; Upgraded to FLAC from Lidarr, 2027-01-15");
+    assert!(r.b.share("Northlight/First Light/03 Sketch.mp3").exists(), "the kept file is untouched");
     assert_eq!(*r.plex.scanned.lock(), vec![ALBUM_DIR.to_string()], "just that folder");
     assert_eq!(r.web.writes().len(), writes_before, "never through Lidarr");
+    let rec = r.up.records().into_iter().next().unwrap();
+    assert!(rec.request.notes.iter().any(|n| n.contains(".plexignore")), "{:?}", rec.request.notes);
     let o = r.up.offer(&id).await.unwrap();
     assert_eq!(o.status, OfferStatus::Swapped);
-    assert!(o.last_swap.as_ref().unwrap().backup_dir.contains("Northlight - First Light"));
+    assert!(o.last_swap.as_ref().unwrap().backup_dir.contains("_to_delete"));
 
     let rec = r.up.undo(&id).await.unwrap();
     assert!(rec.swaps[0].undone);
     assert_eq!(std::fs::read(&old).unwrap(), before, "byte for byte");
-    assert!(!r.b.share("Northlight/First Light/01 Dawn.flac").exists());
+    assert!(!placed.exists());
     assert_eq!(r.plex.scanned.lock().len(), 2, "rescanned after the undo too");
     assert!(r.up.undo(&id).await.is_err(), "nothing left to undo");
 }
@@ -930,33 +1148,33 @@ async fn a_locked_file_or_failed_tag_copy_is_recorded_and_changes_nothing() {
     assert_eq!(snapshot(&r.b), before);
 }
 
+/// Take the demo out of the album (file and song).
+fn drop_sketch(r: &Rig) {
+    std::fs::remove_file(r.b.share("Northlight/First Light/03 Sketch.mp3")).unwrap();
+    r.db.write(|c| {
+        c.execute("DELETE FROM tracks WHERE id = 't3'", [])?;
+        Ok(())
+    })
+    .unwrap();
+}
+
 #[tokio::test]
 async fn with_asking_off_a_clean_album_swaps_on_its_own_and_a_mixed_one_waits() {
     let r = rig();
     let s = crate::settings::Settings { upgrades_ask: false, ..crate::settings::load(&r.db) };
     crate::settings::save(&r.db, &s).unwrap();
     let id = imported(&r).await;
-    assert_eq!(r.up.auto_swap().await, 0, "the archive-tagged file makes it wait for a person");
+    assert_eq!(r.up.auto_swap().await, 0, "the unreleased file makes it wait for a person");
     assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
-    // Without the archive file, the same rules let it swap on its own.
-    std::fs::remove_file(r.b.share("Northlight/First Light/02 Noon.mp3")).unwrap();
-    r.db.write(|c| {
-        c.execute("DELETE FROM tracks WHERE id = 't2'", [])?;
-        Ok(())
-    })
-    .unwrap();
+    drop_sketch(&r);
     assert_eq!(r.up.auto_swap().await, 1);
     assert!(r.b.share("Northlight/First Light/01 Dawn.flac").exists());
+    assert!(r.b.share("Northlight/First Light/02 Noon.flac").exists());
     assert!(r.up.offer(&id).await.unwrap().last_swap.is_some());
     // Asking on: nothing swaps on its own.
     let r2 = rig();
     imported(&r2).await;
-    std::fs::remove_file(r2.b.share("Northlight/First Light/02 Noon.mp3")).unwrap();
-    r2.db.write(|c| {
-        c.execute("DELETE FROM tracks WHERE id = 't2'", [])?;
-        Ok(())
-    })
-    .unwrap();
+    drop_sketch(&r2);
     assert_eq!(r2.up.auto_swap().await, 0);
 }
 
@@ -970,5 +1188,6 @@ async fn the_album_menu_shows_the_action_only_when_it_can_run() {
     assert!(a.available, "{a:?}");
     assert_eq!(a.quality.as_deref(), Some("MP3 320"));
     assert!(!r.up.for_album("a2").await.unwrap().available, "never for an unreleased album");
-    let _ = NoMbid;
+    assert_eq!(super::upgrade::ymd(1_800_000_000), "2027-01-15");
+    let _ = (&r.mb, NoMbid);
 }

@@ -547,6 +547,9 @@ pub struct Settings {
     /// Upgrades ask before each swap (off swaps on their own, under the
     /// same rules).
     pub upgrades_ask: bool,
+    /// A provenance note starting with this marks an official source
+    /// (upgrades without ISRCs need it).
+    pub upgrade_official_prefix: String,
     /// The miniplayer window stays above other windows (this device only).
     pub miniplayer_on_top: bool,
     /// The miniplayer's card takes a colour from the cover (this device only).
@@ -868,6 +871,7 @@ impl Default for Settings {
             show_missing_releases: true,
             lidarr_staging_folder: String::new(),
             upgrades_ask: true,
+            upgrade_official_prefix: "Official".into(),
             miniplayer_on_top: true,
             miniplayer_tint: true,
             miniplayer_queue: false,
@@ -1012,6 +1016,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showMissingReleases",
     "lidarrStagingFolder",
     "upgradesAsk",
+    "upgradeOfficialPrefix",
     "powerKeys",
     "hintKey",
     "importSources",
@@ -1290,6 +1295,7 @@ pub struct SettingsPatch {
     pub show_missing_releases: Option<bool>,
     pub lidarr_staging_folder: Option<String>,
     pub upgrades_ask: Option<bool>,
+    pub upgrade_official_prefix: Option<String>,
     pub miniplayer_on_top: Option<bool>,
     pub miniplayer_tint: Option<bool>,
     pub miniplayer_queue: Option<bool>,
@@ -1694,6 +1700,13 @@ impl Settings {
             self.lidarr_staging_folder = staging_folder(f)?;
         }
         set(&mut self.upgrades_ask, p.upgrades_ask);
+        if let Some(prefix) = &p.upgrade_official_prefix {
+            let prefix = prefix.trim();
+            if prefix.chars().count() > 60 || prefix.chars().any(char::is_control) {
+                return Err(AppError::Invalid("Keep the official note prefix short, on one line.".into()));
+            }
+            self.upgrade_official_prefix = if prefix.is_empty() { "Official".into() } else { prefix.to_string() };
+        }
         if let Some(name) = &p.computer_name {
             let name = name.trim();
             if name.chars().count() > COMPUTER_NAME_MAX {
@@ -2858,7 +2871,8 @@ mod tests {
         let mut s = Settings::default();
         assert!(s.lidarr_staging_folder.is_empty(), "upgrades are off until a staging folder is set");
         assert!(s.upgrades_ask, "asking before each swap is on by default");
-        for k in ["lidarrStagingFolder", "upgradesAsk"] {
+        assert_eq!(s.upgrade_official_prefix, "Official");
+        for k in ["lidarrStagingFolder", "upgradesAsk", "upgradeOfficialPrefix"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
         }
         let p: SettingsPatch = serde_json::from_str(r#"{"lidarrStagingFolder":" /downloads/upgrades/ ","upgradesAsk":false}"#).unwrap();

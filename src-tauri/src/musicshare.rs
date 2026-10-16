@@ -10,7 +10,7 @@
 //!
 //! Nothing writes to the share unless a mapping covers the file.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +42,8 @@ pub struct ShareMap {
     /// The staging folder for upgrades on this computer (Lidarr's own path
     /// for it is the `lidarrStagingFolder` setting).
     pub staging: String,
-    /// Where replaced files are kept. Empty: Platter's own folder on this computer.
+    /// Where replaced files are kept, outside every music folder. Empty: a
+    /// `_to_delete` folder in the library root that Plex is told to ignore.
     pub backup: String,
 }
 
@@ -87,6 +88,14 @@ impl ShareMap {
         }
         check(&out.staging, "the staging folder on this computer")?;
         check(&out.backup, "the backup folder")?;
+        if !out.backup.is_empty() {
+            let b = NormPath::parse(&out.backup);
+            if out.music.iter().map(|p| NormPath::parse(&p.local)).any(|m| b.starts_with(&m) || m.starts_with(&b)) {
+                return Err(AppError::Invalid(
+                    "Pick a backup folder outside your music folder, or leave it empty to use an ignored _to_delete folder.".into(),
+                ));
+            }
+        }
         Ok(out)
     }
 
@@ -141,11 +150,6 @@ pub fn save(db: &DbHandle, map: &ShareMap) -> AppResult<ShareMap> {
     Ok(map)
 }
 
-/// The backup folder in use: the one set, else `fallback` (Platter's own).
-pub fn backup_dir(map: &ShareMap, fallback: &Path) -> PathBuf {
-    if map.backup.is_empty() { fallback.to_path_buf() } else { PathBuf::from(&map.backup) }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +190,8 @@ mod tests {
         assert!(save(&db, &half).is_err());
         let relative = ShareMap { backup: "backups".into(), ..Default::default() };
         assert!(save(&db, &relative).is_err());
+        let inside = ShareMap { backup: "/mnt/music/old".into(), ..map() };
+        assert!(save(&db, &inside).unwrap_err().to_string().contains("outside your music folder"));
+        assert!(save(&db, &ShareMap { backup: "/mnt/backups".into(), ..map() }).is_ok());
     }
 }

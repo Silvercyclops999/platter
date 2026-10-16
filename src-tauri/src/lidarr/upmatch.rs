@@ -1,24 +1,29 @@
 //! Which old files a better copy may replace. A pure function over what
-//! the old files and the new copy say about themselves.
+//! the old files, the new copy and the confirmed release say.
 //!
-//! A file is replaced only when all of these hold:
+//! A file is replaced only when it's released (no unreleased status from
+//! its tags or the archive's marks), it's on the confirmed release's
+//! tracklist, the new file is better, and either:
 //!
-//! - it's released: not unreleased by the archive's rules, and no
-//!   `ARCHIVE_*` tag in the file itself
-//! - it's on a disc the official release has
-//! - it and exactly one new file carry the same ISRC or the same
-//!   MusicBrainz recording id, in their own tags (names and lengths are
-//!   never enough: an alternate mix often runs the same length)
-//! - the new file is better
+//! - it and the new file carry the same ISRC, or
+//! - all of: a tag says it's the released recording, its provenance note
+//!   says it came from an official source, the lengths are within a
+//!   second, and the decoded audio correlates at [`MIN_CORRELATION`] or
+//!   more (a censored edit can score above that, so it's never enough alone).
 //!
 //! Everything else is kept as it is, with the reason.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use serde::Serialize;
 
+use super::provenance::{FileStatus, ReleaseStatus, note_is_official};
 use super::quality::Rank;
+use crate::identity::fold::fold_title;
 use crate::tags::FileTags;
+
+pub const MIN_CORRELATION: f64 = 0.99;
+pub const MAX_LENGTH_DIFF_MS: u64 = 1_000;
 
 /// One old file in the album's folders.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,22 +33,33 @@ pub struct OldSong {
     pub title: String,
     pub disc: u32,
     pub track: u32,
+    pub duration_ms: u64,
     pub plex_path: String,
     pub rank: Rank,
     pub codec: Option<String>,
-    /// By the archive's rules (`db::release`).
+    /// By the archive's marks (`db::release`).
     pub unreleased: bool,
     /// Read from the file itself.
     pub tags: FileTags,
+    pub status: FileStatus,
+}
+
+/// One track of the confirmed release, as Lidarr has it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OfficialTrack {
+    pub title: String,
+    pub recording: String,
+    pub medium: i64,
+    pub duration_ms: u64,
+    /// Its file in the new copy.
+    pub new: Option<usize>,
 }
 
 /// One file of the better copy.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSong {
     pub lidarr_path: String,
-    pub medium: i64,
-    /// Lidarr's recording id for the track it matched the file to.
-    pub lidarr_recording: String,
+    pub duration_ms: u64,
     pub rank: Rank,
     pub codec: String,
     pub tags: FileTags,
@@ -53,15 +69,19 @@ pub struct NewSong {
 #[serde(rename_all = "camelCase")]
 pub enum Keep {
     Unreleased,
-    ArchiveTags,
-    ExtraDisc,
     /// A file in the album's folder that isn't one of the album's songs in Plex.
     NotInAlbum,
-    /// No ISRC or recording id on one of the two files.
-    NoId,
-    /// Ids, but no new file has the same.
-    NoMatch,
-    /// More than one new file, or another old file, has the same id.
+    /// Not on the confirmed release's tracklist (a bonus track, an extra disc).
+    NotOnRelease,
+    /// The release has the song but the new copy has no file for it.
+    NotInNewCopy,
+    /// No ISRC match, and no tag says it's the released recording.
+    NoReleasedTag,
+    /// No ISRC match, and its provenance note doesn't say official.
+    NoOfficialNote,
+    LengthDiffers,
+    SoundDiffers,
+    /// More than one file could be the same song.
     Ambiguous,
     NotBetter,
 }
@@ -70,11 +90,13 @@ impl Keep {
     pub fn reason(self) -> &'static str {
         match self {
             Keep::Unreleased => "Unreleased",
-            Keep::ArchiveTags => "Has archive tags",
-            Keep::ExtraDisc => "On a disc the official release doesn't have",
             Keep::NotInAlbum => "Not one of this album's songs in Plex",
-            Keep::NoId => "Can't prove it's the same recording",
-            Keep::NoMatch => "Not in the new copy",
+            Keep::NotOnRelease => "Not on the confirmed release",
+            Keep::NotInNewCopy => "Not in the new copy",
+            Keep::NoReleasedTag => "Can't prove it's the same recording: no tag says it's the released one",
+            Keep::NoOfficialNote => "Can't prove it's the same recording: its source note doesn't say official",
+            Keep::LengthDiffers => "Can't prove it's the same recording: the lengths differ",
+            Keep::SoundDiffers => "Can't prove it's the same recording: it doesn't sound the same",
             Keep::Ambiguous => "More than one possible match",
             Keep::NotBetter => "The new copy isn't better",
         }
@@ -98,203 +120,213 @@ pub struct Decision {
     pub outcome: Outcome,
 }
 
-fn ids(t: &FileTags) -> (Option<String>, Option<String>) {
-    (t.isrc.as_deref().and_then(crate::tags::clean_isrc), t.recording_mbid.as_deref().and_then(crate::tags::clean_mbid))
+fn isrc(t: &FileTags) -> Option<String> {
+    t.isrc.as_deref().and_then(crate::tags::clean_isrc)
 }
 
-/// Whether two files carry the same recording by their own tags.
-fn same(a: &FileTags, b: &FileTags) -> Option<&'static str> {
-    let ((ai, am), (bi, bm)) = (ids(a), ids(b));
-    if let (Some(x), Some(y)) = (&am, &bm) {
-        // Two different recording ids are never the same recording.
-        return (x == y).then_some("recordingId");
+fn mbid(t: &FileTags) -> Option<String> {
+    t.recording_mbid.as_deref().and_then(crate::tags::clean_mbid)
+}
+
+fn title_key(t: &str) -> String {
+    let f = fold_title(t);
+    format!("{}\u{1f}{}", f.title, f.version)
+}
+
+/// The tracklist entry an old file is, by recording id, else by its title
+/// when exactly one track has it.
+fn on_release(o: &OldSong, tracks: &[OfficialTrack]) -> Option<usize> {
+    if let Some(m) = mbid(&o.tags)
+        && let Some(i) = tracks.iter().position(|t| crate::tags::clean_mbid(&t.recording).as_deref() == Some(m.as_str()))
+    {
+        return Some(i);
     }
-    match (ai, bi) {
-        (Some(x), Some(y)) if x == y => Some("isrc"),
+    let key = title_key(&o.title);
+    let hits: Vec<usize> = tracks.iter().enumerate().filter(|(_, t)| title_key(&t.title) == key).map(|(i, _)| i).collect();
+    match hits.as_slice() {
+        [one] => Some(*one),
         _ => None,
     }
 }
 
-/// A new file whose own recording id disagrees with the track Lidarr
-/// matched it to can't be trusted.
-fn trusted(n: &NewSong) -> bool {
-    let lidarr = crate::tags::clean_mbid(&n.lidarr_recording);
-    match (lidarr, ids(&n.tags).1) {
-        (Some(l), Some(t)) => l == t,
-        _ => true,
+/// What one old file would match, before checking others.
+fn candidate(o: &OldSong, tracks: &[OfficialTrack], new: &[NewSong], prefix: &str, corr: &mut dyn FnMut(usize) -> Option<f64>) -> Result<(usize, &'static str), Keep> {
+    if o.track_id.is_empty() {
+        return Err(Keep::NotInAlbum);
+    }
+    if o.unreleased || o.status.status == ReleaseStatus::Unreleased {
+        return Err(Keep::Unreleased);
+    }
+    // ISRC on both files decides.
+    if let Some(i) = isrc(&o.tags) {
+        let same: Vec<usize> = new.iter().enumerate().filter(|(_, n)| isrc(&n.tags).as_deref() == Some(i.as_str())).map(|(k, _)| k).collect();
+        match same.as_slice() {
+            [one] => {
+                let on = tracks.iter().any(|t| t.new == Some(*one));
+                return if on { Ok((*one, "isrc")) } else { Err(Keep::NotOnRelease) };
+            }
+            [] => {}
+            _ => return Err(Keep::Ambiguous),
+        }
+    }
+    let Some(t) = on_release(o, tracks) else { return Err(Keep::NotOnRelease) };
+    let Some(n) = tracks[t].new else { return Err(Keep::NotInNewCopy) };
+    if o.status.status != ReleaseStatus::Released {
+        return Err(Keep::NoReleasedTag);
+    }
+    if !note_is_official(o.status.note.as_deref(), prefix) {
+        return Err(Keep::NoOfficialNote);
+    }
+    let (a, b) = (o.duration_ms, new[n].duration_ms);
+    if a == 0 || b == 0 || a.abs_diff(b) > MAX_LENGTH_DIFF_MS {
+        return Err(Keep::LengthDiffers);
+    }
+    match corr(n) {
+        Some(c) if c >= MIN_CORRELATION => Ok((n, "sound")),
+        _ => Err(Keep::SoundDiffers),
     }
 }
 
-/// One decision per old file, in order. `mediums` are the official
-/// release's disc numbers.
-pub fn decide(old: &[OldSong], new: &[NewSong], mediums: &BTreeSet<i64>) -> Vec<Decision> {
-    // Candidate new files per old file.
-    let mut cands: Vec<Vec<(usize, &'static str)>> = Vec::with_capacity(old.len());
-    for o in old {
-        let c: Vec<(usize, &'static str)> =
-            new.iter().enumerate().filter(|(_, n)| trusted(n)).filter_map(|(i, n)| same(&o.tags, &n.tags).map(|by| (i, by))).collect();
-        cands.push(c);
-    }
-    // How many eligible old files point at each new file.
+/// One decision per old file, in order. `corr(old, new)` decodes and
+/// correlates the two files; it's only asked when every other key holds.
+pub fn decide(old: &[OldSong], tracks: &[OfficialTrack], new: &[NewSong], prefix: &str, corr: &mut dyn FnMut(usize, usize) -> Option<f64>) -> Vec<Decision> {
+    let cands: Vec<Result<(usize, &'static str), Keep>> =
+        old.iter().enumerate().map(|(i, o)| candidate(o, tracks, new, prefix, &mut |n| corr(i, n))).collect();
     let mut claims: HashMap<usize, usize> = HashMap::new();
-    for (o, c) in old.iter().zip(&cands) {
-        if pre_keep(o, mediums).is_none()
-            && let [(n, _)] = c.as_slice()
-        {
-            *claims.entry(*n).or_insert(0) += 1;
-        }
+    for (n, _) in cands.iter().flatten() {
+        *claims.entry(*n).or_insert(0) += 1;
     }
-    old.iter()
+    cands
+        .into_iter()
         .enumerate()
-        .map(|(i, o)| {
-            let outcome = match pre_keep(o, mediums) {
-                Some(k) => Outcome::Keep(k),
-                None => {
-                    let (oi, om) = ids(&o.tags);
-                    match cands[i].as_slice() {
-                        [] if oi.is_none() && om.is_none() => Outcome::Keep(Keep::NoId),
-                        [] if new.iter().any(|n| trusted(n) && {
-                            let (ni, nm) = ids(&n.tags);
-                            (oi.is_some() && ni.is_some()) || (om.is_some() && nm.is_some())
-                        }) => Outcome::Keep(Keep::NoMatch),
-                        [] => Outcome::Keep(Keep::NoId),
-                        [(n, by)] if claims.get(n).copied().unwrap_or(0) == 1 => {
-                            if new[*n].rank > o.rank { Outcome::Upgrade { new: *n, by } } else { Outcome::Keep(Keep::NotBetter) }
-                        }
-                        _ => Outcome::Keep(Keep::Ambiguous),
-                    }
-                }
+        .map(|(i, c)| {
+            let outcome = match c {
+                Err(k) => Outcome::Keep(k),
+                Ok((n, _)) if claims.get(&n).copied().unwrap_or(0) > 1 => Outcome::Keep(Keep::Ambiguous),
+                Ok((n, _)) if new[n].rank <= old[i].rank => Outcome::Keep(Keep::NotBetter),
+                Ok((n, by)) => Outcome::Upgrade { new: n, by },
             };
             Decision { old: i, outcome }
         })
         .collect()
 }
 
-fn pre_keep(o: &OldSong, mediums: &BTreeSet<i64>) -> Option<Keep> {
-    if o.track_id.is_empty() {
-        return Some(Keep::NotInAlbum);
-    }
-    if o.unreleased {
-        return Some(Keep::Unreleased);
-    }
-    if o.tags.has_archive() {
-        return Some(Keep::ArchiveTags);
-    }
-    if !mediums.contains(&i64::from(o.disc.max(1))) {
-        return Some(Keep::ExtraDisc);
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::provenance::NoteTag;
+    use super::super::quality::CD;
     use super::*;
 
     const R1: &str = "aaaaaaaa-0000-0000-0000-000000000001";
     const R2: &str = "aaaaaaaa-0000-0000-0000-000000000002";
-    const R3: &str = "aaaaaaaa-0000-0000-0000-000000000003";
 
-    fn tags(isrc: Option<&str>, mbid: Option<&str>) -> FileTags {
-        FileTags { isrc: isrc.map(str::to_string), recording_mbid: mbid.map(str::to_string), ..Default::default() }
+    fn status(s: ReleaseStatus, note: Option<&str>) -> FileStatus {
+        FileStatus { status: s, note: note.map(str::to_string), note_tag: NoteTag::ArchiveSource }
     }
 
-    fn old(id: &str, disc: u32, t: FileTags) -> OldSong {
+    fn released() -> FileStatus {
+        status(ReleaseStatus::Released, Some("Official CD"))
+    }
+
+    fn old(id: &str, title: &str, isrc: Option<&str>, st: FileStatus) -> OldSong {
         OldSong {
             track_id: id.into(),
-            title: id.into(),
-            disc,
+            title: title.into(),
+            disc: 1,
             track: 1,
-            plex_path: format!("/music/A/{id}.mp3"),
+            duration_ms: 200_000,
+            plex_path: format!("/music/A/{title}.mp3"),
             rank: Rank(320),
             codec: Some("mp3".into()),
             unreleased: false,
-            tags: t,
+            tags: FileTags { isrc: isrc.map(str::to_string), ..Default::default() },
+            status: st,
         }
     }
 
-    fn new(medium: i64, rec: &str, t: FileTags) -> NewSong {
-        NewSong { lidarr_path: format!("/up/A/{rec}.flac"), medium, lidarr_recording: rec.into(), rank: super::super::quality::CD, codec: "flac".into(), tags: t }
+    fn new(isrc: Option<&str>) -> NewSong {
+        NewSong { lidarr_path: "/up/x.flac".into(), duration_ms: 200_400, rank: CD, codec: "flac".into(), tags: FileTags { isrc: isrc.map(str::to_string), ..Default::default() } }
     }
 
-    fn one() -> BTreeSet<i64> {
-        BTreeSet::from([1])
+    fn track(title: &str, rec: &str, new: Option<usize>) -> OfficialTrack {
+        OfficialTrack { title: title.into(), recording: rec.into(), medium: 1, duration_ms: 200_000, new }
     }
 
-    fn outcome(o: &[OldSong], n: &[NewSong]) -> Vec<Outcome> {
-        decide(o, n, &one()).into_iter().map(|d| d.outcome).collect()
-    }
-
-    #[test]
-    fn isrc_or_recording_id_on_both_files_matches() {
-        let n = [new(1, R1, tags(Some("USRC17607839"), Some(R1))), new(1, R2, tags(Some("GBAYE0601498"), None))];
-        let o = [old("t1", 1, tags(None, Some(R1))), old("t2", 1, tags(Some("gb-aye-06-01498"), None))];
-        assert_eq!(outcome(&o, &n), vec![Outcome::Upgrade { new: 0, by: "recordingId" }, Outcome::Upgrade { new: 1, by: "isrc" }]);
+    fn run(o: &[OldSong], t: &[OfficialTrack], n: &[NewSong], c: f64) -> Vec<Outcome> {
+        decide(o, t, n, "Official", &mut |_, _| Some(c)).into_iter().map(|d| d.outcome).collect()
     }
 
     #[test]
-    fn names_and_lengths_are_never_enough() {
-        // Same title, same length, no ids: kept.
-        let n = [new(1, R1, tags(None, None))];
-        let o = [old("t1", 1, tags(None, None))];
-        assert_eq!(outcome(&o, &n), vec![Outcome::Keep(Keep::NoId)]);
-        // The old file has an id, the new one doesn't (only Lidarr's own match): kept.
-        let n = [new(1, R1, tags(None, None))];
-        let o = [old("t1", 1, tags(None, Some(R1)))];
-        assert_eq!(outcome(&o, &n), vec![Outcome::Keep(Keep::NoId)]);
-        assert_eq!(Keep::NoId.reason(), "Can't prove it's the same recording");
+    fn an_isrc_on_both_files_is_enough() {
+        let t = [track("Dawn", R1, Some(0))];
+        let o = [old("t1", "Dawn", Some("US-RC1-76-07839"), status(ReleaseStatus::Unknown, None))];
+        assert_eq!(run(&o, &t, &[new(Some("USRC17607839"))], 0.0), vec![Outcome::Upgrade { new: 0, by: "isrc" }]);
     }
 
     #[test]
-    fn different_recording_ids_never_match_even_with_one_isrc() {
-        let n = [new(1, R2, tags(Some("USRC17607839"), Some(R2)))];
-        let o = [old("t1", 1, tags(Some("USRC17607839"), Some(R1)))];
-        assert_eq!(outcome(&o, &n), vec![Outcome::Keep(Keep::NoMatch)]);
+    fn without_an_isrc_every_key_must_hold() {
+        let t = [track("Dawn", R1, Some(0))];
+        let n = [new(None)];
+        let ok = old("t1", "Dawn", None, released());
+        assert_eq!(run(std::slice::from_ref(&ok), &t, &n, 0.995), vec![Outcome::Upgrade { new: 0, by: "sound" }]);
+        // A censored edit scores 0.9907: it passes the sound key, but the other keys still have to hold.
+        assert_eq!(run(&[old("t1", "Dawn", None, status(ReleaseStatus::Unknown, Some("Official CD")))], &t, &n, 0.9907), vec![Outcome::Keep(Keep::NoReleasedTag)]);
+        assert_eq!(run(&[old("t1", "Dawn", None, status(ReleaseStatus::Released, Some("Web rip")))], &t, &n, 0.995), vec![Outcome::Keep(Keep::NoOfficialNote)]);
+        assert_eq!(run(std::slice::from_ref(&ok), &t, &n, 0.98), vec![Outcome::Keep(Keep::SoundDiffers)]);
+        let mut long = ok.clone();
+        long.duration_ms = 201_500;
+        assert_eq!(run(&[long], &t, &n, 0.999), vec![Outcome::Keep(Keep::LengthDiffers)]);
+        // The release has the song, the new copy doesn't.
+        assert_eq!(run(std::slice::from_ref(&ok), &[track("Dawn", R1, None)], &n, 0.999), vec![Outcome::Keep(Keep::NotInNewCopy)]);
     }
 
     #[test]
-    fn a_new_file_that_disagrees_with_lidarr_is_not_trusted() {
-        let mut n = new(1, R1, tags(None, Some(R3)));
-        n.lidarr_recording = R1.into();
-        let o = [old("t1", 1, tags(None, Some(R3)))];
-        assert_eq!(outcome(&o, &[n]), vec![Outcome::Keep(Keep::NoId)]);
+    fn the_confirmed_tracklist_decides_what_is_extra_not_the_disc_number() {
+        let t = [track("Dawn", R1, Some(0))];
+        let mut bonus = old("t2", "Dawn (Demo)", None, released());
+        bonus.disc = 1;
+        assert_eq!(run(&[bonus], &t, &[new(None)], 0.999), vec![Outcome::Keep(Keep::NotOnRelease)]);
+        // Disc 2 in the folder, but on the release: fine.
+        let mut d2 = old("t3", "Dawn", None, released());
+        d2.disc = 2;
+        assert_eq!(run(&[d2], &t, &[new(None)], 0.999), vec![Outcome::Upgrade { new: 0, by: "sound" }]);
+        // An ISRC that points at a file outside the release.
+        let o = [old("t1", "Dawn", Some("USRC17607839"), released())];
+        assert_eq!(run(&o, &[track("Dawn", R1, None)], &[new(Some("USRC17607839"))], 0.0), vec![Outcome::Keep(Keep::NotOnRelease)]);
     }
 
     #[test]
-    fn unreleased_archive_tagged_extra_disc_and_stray_files_are_kept() {
-        let n = [new(1, R1, tags(None, Some(R1)))];
-        let mut unreleased = old("t1", 1, tags(None, Some(R1)));
-        unreleased.unreleased = true;
-        let mut archived = old("t2", 1, tags(None, Some(R1)));
-        archived.tags.version = Some("released".into());
-        let extra = old("t3", 2, tags(None, Some(R1)));
-        let mut stray = old("", 1, tags(None, Some(R1)));
-        stray.title = "leak.mp3".into();
-        let got = outcome(&[unreleased, archived, extra, stray], &n);
+    fn unreleased_stray_ambiguous_and_worse_files_are_kept() {
+        let t = [track("Dawn", R1, Some(0)), track("Noon", R2, Some(1))];
+        let n = [new(None), new(None)];
+        let mut by_mark = old("t1", "Dawn", None, released());
+        by_mark.unreleased = true;
+        let by_tag = old("t2", "Noon", None, status(ReleaseStatus::Unreleased, Some("Official CD")));
+        let stray = old("", "leak.mp3", None, released());
         assert_eq!(
-            got,
-            vec![Outcome::Keep(Keep::Unreleased), Outcome::Keep(Keep::ArchiveTags), Outcome::Keep(Keep::ExtraDisc), Outcome::Keep(Keep::NotInAlbum)]
+            run(&[by_mark, by_tag, stray], &t, &n, 0.999),
+            vec![Outcome::Keep(Keep::Unreleased), Outcome::Keep(Keep::Unreleased), Outcome::Keep(Keep::NotInAlbum)]
         );
-        // Any ARCHIVE_* tag counts, even one that says released.
-        assert!(FileTags { era: Some("2019".into()), ..Default::default() }.has_archive());
-        assert!(!FileTags::default().has_archive());
-        assert!(Keep::ExtraDisc.asks_each() && !Keep::NotBetter.asks_each());
+        // Two files claim one track.
+        let two = [old("t1", "Dawn", None, released()), old("t9", "Dawn", None, released())];
+        assert_eq!(run(&two, &t, &n, 0.999), vec![Outcome::Keep(Keep::Ambiguous), Outcome::Keep(Keep::Ambiguous)]);
+        // A new copy that isn't better.
+        let mut worse = new(Some("USRC17607839"));
+        worse.rank = Rank(256);
+        let o = [old("t1", "Dawn", Some("USRC17607839"), released())];
+        assert_eq!(run(&o, &[track("Dawn", R1, Some(0))], &[worse], 0.0), vec![Outcome::Keep(Keep::NotBetter)]);
+        assert!(Keep::NotOnRelease.asks_each() && !Keep::NotBetter.asks_each());
     }
 
     #[test]
-    fn two_claims_on_one_file_or_two_files_for_one_are_ambiguous() {
-        let n = [new(1, R1, tags(None, Some(R1)))];
-        let o = [old("t1", 1, tags(None, Some(R1))), old("t2", 1, tags(None, Some(R1)))];
-        assert_eq!(outcome(&o, &n), vec![Outcome::Keep(Keep::Ambiguous), Outcome::Keep(Keep::Ambiguous)]);
-        let n = [new(1, R1, tags(Some("USRC17607839"), None)), new(1, R2, tags(Some("USRC17607839"), None))];
-        let o = [old("t1", 1, tags(Some("USRC17607839"), None))];
-        assert_eq!(outcome(&o, &n), vec![Outcome::Keep(Keep::Ambiguous)]);
-    }
-
-    #[test]
-    fn only_a_better_file_replaces() {
-        let mut n = new(1, R1, tags(None, Some(R1)));
-        n.rank = Rank(256);
-        let o = [old("t1", 1, tags(None, Some(R1)))];
-        assert_eq!(outcome(&o, &[n]), vec![Outcome::Keep(Keep::NotBetter)]);
+    fn the_sound_is_only_compared_when_everything_else_holds() {
+        let t = [track("Dawn", R1, Some(0))];
+        let mut asked = 0;
+        let o = [old("t1", "Dawn", None, status(ReleaseStatus::Unknown, None))];
+        decide(&o, &t, &[new(None)], "Official", &mut |_, _| {
+            asked += 1;
+            Some(1.0)
+        });
+        assert_eq!(asked, 0);
     }
 }

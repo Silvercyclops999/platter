@@ -15,7 +15,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use serde::Serialize;
 
 use super::api::{
-    Route, Artist, ImportList, Listing, MediaManagementConfig, MetadataProviderConfig, NamingConfig, QualityProfile, RootFolder,
+    Route, Artist, Exclusion, ImportList, Listing, MediaManagementConfig, MetadataProviderConfig, NamingConfig, QualityProfile, RootFolder,
+    TrackFile,
 };
 use super::paths::{NormPath, Relation, as_dir, fold, join_dir, relation};
 
@@ -115,6 +116,10 @@ pub struct LidarrSnapshot {
     pub profiles: Vec<QualityProfile>,
     pub lists: Vec<ImportList>,
     pub listings: HashMap<String, Option<Listing>>,
+    /// Artists Lidarr's import lists exclude (Platter never requests or adds them).
+    pub exclusions: Vec<Exclusion>,
+    /// Files in Lidarr's root folders it couldn't match to an album.
+    pub unmapped: Vec<TrackFile>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -177,6 +182,8 @@ pub struct CheckContext {
     pub now: i64,
     /// The staging folder for upgrades (Lidarr's path), when set.
     pub staging: Option<String>,
+    /// The library has files a tag marks unreleased.
+    pub library_has_unreleased: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,33 +496,16 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
     }
 
     // ---- The staging folder for upgrades.
-    if let (Some(staging), Some(sn)) = (staging, staging_norm.as_ref()) {
-        if !lidarr.roots.iter().any(is_staging) {
-            red.push(Finding::new(
+    if let Some(staging) = staging
+        && !lidarr.roots.iter().any(is_staging)
+    {
+        red.push(Finding::new(
                 "stagingNotRoot",
                 Level::Red,
                 format!("The staging folder {staging} isn't one of Lidarr's root folders"),
                 "Better copies download into the staging folder, so Lidarr has to have it as a root folder. Until then upgrades can't be requested.",
                 Some("In Lidarr, add it in Settings > Media Management > Root Folders, or change the staging folder in Platter's settings. Platter never adds root folders itself.".into()),
             ));
-        }
-        let beside: Vec<&String> = plex
-            .locations
-            .iter()
-            .filter(|(_, l)| relation(sn, l).is_none() && sn.parent().is_some() && sn.parent() == l.parent())
-            .map(|(raw, _)| raw)
-            .collect();
-        if let Some(music) = beside.first() {
-            red.push(Finding::new(
-                "stagingBeside",
-                Level::Red,
-                format!("The staging folder {staging} sits next to your Plex music folder"),
-                format!(
-                    "It's in the same parent folder as {music}. A folder that close to your library is easy to add to Plex, or to mix up with it, by mistake."
-                ),
-                Some(STAGING_FIX.into()),
-            ));
-        }
     }
 
     // ---- Lidarr artists whose folders are in the Plex music folders.
@@ -593,25 +583,6 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         "Track renaming is off",
     );
     let tags = lidarr.metadata.write_audio_tags.trim().to_ascii_lowercase();
-    if tags == "allfiles" || tags == "sync" {
-        setting(
-            true,
-            "writeAudioTags",
-            "Lidarr rewrites tags in files it already has",
-            "With this setting Lidarr goes back and retags files it manages, not just new downloads.",
-            "In Lidarr, set Settings > Metadata > Write Audio Tags to Never.",
-            "",
-        );
-    } else {
-        setting(
-            !tags.is_empty() && tags != "no",
-            "writeAudioTags",
-            "Lidarr writes its own tags into the files it downloads",
-            "Downloads get Lidarr's tags instead of keeping their own.",
-            "In Lidarr, set Settings > Metadata > Write Audio Tags to Never.",
-            "Lidarr doesn't write tags into files",
-        );
-    }
     setting(
         lidarr.metadata.scrub_audio_tags,
         "scrubAudioTags",
@@ -628,13 +599,32 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         "In Lidarr, turn off Settings > Media Management > Delete empty folders.",
         "Lidarr leaves empty folders alone",
     );
+    let no_bin = lidarr.media.recycle_bin.trim().is_empty();
+    if !(no_bin && ctx.library_has_unreleased) {
+        setting(
+            no_bin,
+            "recycleBin",
+            "Lidarr deletes files for good",
+            "Without a recycling bin, files Lidarr replaces or removes can't be brought back.",
+            "In Lidarr, set a folder in Settings > Media Management > Recycling Bin.",
+            "Lidarr keeps removed files in a recycling bin",
+        );
+    }
+    let monitor_all: Vec<String> = lidarr
+        .roots
+        .iter()
+        .filter(|r| {
+            [&r.default_monitor_option, &r.default_new_item_monitor_option].iter().any(|o| o.as_deref().is_some_and(|v| v.trim().eq_ignore_ascii_case("all")))
+        })
+        .map(root_name)
+        .collect();
     setting(
-        lidarr.media.recycle_bin.trim().is_empty(),
-        "recycleBin",
-        "Lidarr deletes files for good",
-        "Without a recycling bin, files Lidarr replaces or removes can't be brought back.",
-        "In Lidarr, set a folder in Settings > Media Management > Recycling Bin.",
-        "Lidarr keeps removed files in a recycling bin",
+        !monitor_all.is_empty(),
+        "rootMonitorAll",
+        "Lidarr monitors everything by default",
+        &format!("New artists in {} start with all their albums, and new ones, marked for download.", list_names(&monitor_all, 3)),
+        "In Lidarr, edit the root folder (Settings > Media Management > Root Folders) and set its default monitoring to None.",
+        "Root folders don't monitor everything by default",
     );
     let upgrades: Vec<String> = lidarr.profiles.iter().filter(|p| p.upgrade_allowed).map(|p| p.name.clone()).collect();
     if upgrades.is_empty() {
@@ -670,6 +660,68 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
                 list_names(&ctx.unencrypted, 2)
             ),
             Some("Reach Lidarr from away through https (your reverse proxy or tunnel can add it), then use the https address here.".into()),
+        ));
+    }
+
+    // ---- Writing tags, and a recycling bin when the library holds unreleased music.
+    if tags != "no" {
+        red.push(Finding::new(
+            "writeAudioTags",
+            Level::Red,
+            "Lidarr writes tags into files",
+            "With Write Audio Tags on, Lidarr changes the tags of the files it manages. Your library's tags carry its release status and sources, so Platter won't use a Lidarr that writes tags.",
+            Some("In Lidarr, set Settings > Metadata > Write Audio Tags to Never.".into()),
+        ));
+    } else {
+        ok.push(Finding::new("writeAudioTags", Level::Ok, "Lidarr doesn't write tags into files", "", None));
+    }
+    if no_bin && ctx.library_has_unreleased {
+        red.push(Finding::new(
+            "recycleBin",
+            Level::Red,
+            "Lidarr deletes files for good, and your library has unreleased music",
+            "Unreleased files often can't be found again. Without a recycling bin, anything Lidarr removes is gone.",
+            Some("In Lidarr, set a folder in Settings > Media Management > Recycling Bin.".into()),
+        ));
+    }
+
+    // ---- Files Lidarr couldn't match, sitting in Plex's music folders.
+    if plex_known {
+        let plex_files: HashSet<(String, i64)> =
+            plex.dirs.values().flat_map(|d| d.files.iter().filter_map(|(n, s)| s.map(|s| (n.clone(), s)))).collect();
+        let inside: Vec<String> = lidarr
+            .unmapped
+            .iter()
+            .filter(|f| {
+                let p = NormPath::parse(&f.path);
+                plex.locations.iter().any(|(_, l)| p.starts_with(l))
+                    || f.size.is_some_and(|s| p.name().is_some_and(|n| plex_files.contains(&(n.to_string(), s))))
+            })
+            .map(|f| f.path.clone())
+            .collect();
+        if !inside.is_empty() {
+            red.push(Finding::new(
+                "unmappedInLibrary",
+                Level::Red,
+                "Lidarr sees files from your Plex music folder",
+                format!(
+                    "Lidarr lists {} as files it couldn't match, and they're in (or the same as files in) your Plex music folder. A Lidarr that can see your library can change it.",
+                    list_names(&inside, 2)
+                ),
+                Some(ROOT_FIX.into()),
+            ));
+        }
+    }
+
+    // ---- Import list exclusions are respected.
+    if !lidarr.exclusions.is_empty() {
+        let names: Vec<String> = lidarr.exclusions.iter().map(|e| if e.artist_name.trim().is_empty() { e.foreign_id.clone() } else { e.artist_name.clone() }).collect();
+        ok.push(Finding::new(
+            "importExclusions",
+            Level::Ok,
+            "Platter respects Lidarr's import list exclusions",
+            format!("It never requests or adds {}.", list_names(&names, 3)),
+            None,
         ));
     }
 

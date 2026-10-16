@@ -249,25 +249,39 @@ fn titles_clash_by_their_base_whatever_the_edition_or_version_suffix() {
 }
 
 #[test]
-fn an_upgrade_is_for_the_album_itself_and_clashes_with_anything_else() {
-    let mine = LibraryAlbum { id: "a1".into(), title: "First Light".into(), also: vec![], unreleased: false };
-    // Its own title is no clash.
-    assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), std::slice::from_ref(&mine), "a1"), Ok(()));
-    // Another album with the same base title is, released or not.
-    for other in [lib("First Light (Deluxe)", false), lib("First Light [Leak]", true)] {
-        let lib2 = vec![mine.clone(), other.clone()];
-        assert!(matches!(vet_upgrade(&group(RG_FIRST), &want(), &lib2, "a1"), Err(Refusal::TitleClash { .. })), "{}", other.title);
-    }
-    // The album itself unreleased, or tied to builds by ARCHIVE_GROUP: refused.
+fn an_upgrade_skips_the_title_clash_but_keeps_every_other_rule() {
+    let mine = LibraryAlbum { id: "a1".into(), title: "First Light".into(), also: vec!["first-light".into()], unreleased: false };
+    // Same-titled builds and leaks don't block it: the user confirmed which release it is.
+    let lib2 = vec![mine.clone(), lib("First Light [Leak]", true), lib("First Light (Deluxe)", false)];
+    assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), &lib2, "a1"), Ok(()));
+    // The album itself unreleased: refused.
     let unreleased = LibraryAlbum { unreleased: true, ..mine.clone() };
     assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), &[unreleased], "a1"), Err(Refusal::UnreleasedAlbum));
-    let grouped = LibraryAlbum { also: vec!["first-light".into()], ..mine.clone() };
-    assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), &[grouped], "a1"), Err(Refusal::ArchiveAlbum));
-    // Another release group's title: not this album.
-    assert_eq!(vet_upgrade(&group(RG_SECOND), &want(), std::slice::from_ref(&mine), "a1"), Err(Refusal::OtherTitle));
-    // Bootlegs never, even with the same title.
-    let boot = LibraryAlbum { title: "Basement Tapes".into(), ..mine.clone() };
-    assert_eq!(vet_upgrade(&group(RG_BOOT), &want(), &[boot], "a1"), Err(Refusal::NotOfficial));
+    // Bootlegs, live albums and other artists' releases: never.
+    assert_eq!(vet_upgrade(&group(RG_BOOT), &want(), std::slice::from_ref(&mine), "a1"), Err(Refusal::NotOfficial));
+    assert!(matches!(vet_upgrade(&group(RG_LIVE), &want(), std::slice::from_ref(&mine), "a1"), Err(Refusal::Secondary { .. })));
+    assert_eq!(vet_upgrade(&group(RG_DUET), &want(), std::slice::from_ref(&mine), "a1"), Err(Refusal::OtherArtist));
+    assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), &[], "a1"), Err(Refusal::NotFound), "not an album in the library");
+}
+
+#[test]
+fn a_tracklist_comes_from_the_first_official_release_never_a_withdrawn_one() {
+    let v = json!({"releases": [
+        {"status": "Withdrawn", "date": "2001", "media": [{"position": 1, "tracks": [{"position": 1, "title": "Gone"}]}]},
+        {"status": "Official", "date": "2016", "media": [{"position": 1, "tracks": [{"position": 1, "title": "Late"}]}]},
+        {"status": "Official", "date": "2015-03-01", "media": [
+            {"position": 1, "tracks": [{"position": 1, "title": "Dawn", "length": 200000}]},
+            {"position": 2, "tracks": [{"position": 1, "title": "Dusk"}]}]}
+    ]});
+    let t = parse_tracklist(&v);
+    assert_eq!(t.iter().map(|x| (x.disc, x.position, x.title.as_str())).collect::<Vec<_>>(), vec![(1, 1, "Dawn"), (2, 1, "Dusk")]);
+    assert_eq!(t[0].length_ms, Some(200_000));
+    assert!(parse_tracklist(&json!({"releases": [{"status": "Cancelled", "media": []}]})).is_empty());
+}
+
+#[test]
+fn requests_never_take_live_or_compilation_groups() {
+    assert!(matches!(vet(&group(RG_LIVE), &want(), &[], false), Err(Refusal::Secondary { .. })));
 }
 
 #[test]
