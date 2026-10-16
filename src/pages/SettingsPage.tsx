@@ -78,6 +78,7 @@ import {
   useLidarr,
 } from "./LidarrSettings";
 import { LidarrRequestsList } from "./LidarrRequest";
+import { ShareMapEditor, StagingFolderField, UpgradesList } from "./LidarrUpgrade";
 import { AUTO_CAP_OPTIONS, AutoArtistsList } from "./AutoRequestDialog";
 
 /** Minutes between Subsonic change checks the setting offers. */
@@ -1982,6 +1983,19 @@ export function SettingsPage() {
       note: lidarr.status?.hasKey ? "Saved." : undefined,
       control: (ids) => <LidarrKeyControl lidarr={lidarr} ids={ids} />,
     },
+    ...(lidarr.status?.urlSet || lidarr.status?.awaySet
+      ? ([
+          {
+            key: "lidarrStagingFolder",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Lidarr staging folder for upgrades",
+            description:
+              "Optional. A Lidarr root folder, as Lidarr sees it, that Plex does not scan. Better copies of albums you have download here and wait until you swap them in. Empty keeps upgrades off. The setup check makes sure Plex can't see it.",
+            control: (ids) => <StagingFolderField ids={ids} />,
+          },
+        ] satisfies RowDef[])
+      : []),
     ...(lidarr.status?.awaySet
       ? ([
           {
@@ -2044,6 +2058,39 @@ export function SettingsPage() {
             control: () => null,
             block: () => <AutoArtistsList />,
           },
+          ...(s?.lidarrStagingFolder
+            ? ([
+                {
+                  key: "upgradesAsk",
+                  section: "Integrations",
+                  group: "Lidarr",
+                  title: "Upgrades: ask before each swap",
+                  description:
+                    "On shows what would change and waits for you. Off swaps a better copy in on its own once it arrives, under the same rules. An album folder with anything kept as it is always asks, song by song.",
+                  control: (ids) => toggle(s, "upgradesAsk", ids),
+                },
+                {
+                  key: "musicShare",
+                  section: "Integrations",
+                  cap: "realFilePaths",
+                  group: "Lidarr",
+                  title: "Where this computer reaches your music",
+                  description:
+                    "Swaps run on this computer, on the files themselves, so Platter needs your music share and the staging folder as this computer sees them. Nothing is written without this. Replaced files go to the backup folder, never deleted. This device only.",
+                  control: () => null,
+                  block: () => <ShareMapEditor />,
+                },
+                {
+                  key: "lidarrUpgrades",
+                  section: "Integrations",
+                  group: "Lidarr",
+                  title: "Upgrades",
+                  description: "Better copies asked for from this computer, and the swaps made. Undo is on each album's page.",
+                  control: () => null,
+                  block: () => <UpgradesList />,
+                },
+              ] satisfies RowDef[])
+            : []),
           {
             key: "lidarrRequests",
             section: "Integrations",

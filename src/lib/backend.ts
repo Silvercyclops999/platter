@@ -140,6 +140,13 @@ import type {
   ListenOp,
   AiStatus,
   LidarrMissing,
+  AlbumUpgrade,
+  ShareMap,
+  SwapResult,
+  UpgradeBulkResult,
+  UpgradeOffer,
+  UpgradeRecord,
+  UpgradeUnder,
   LidarrPickInput,
   LidarrPicked,
   LidarrPreview,
@@ -726,6 +733,27 @@ export interface Backend {
   lidarrRequestCancel(id: string): Promise<LidarrRequest[]>;
   /** An artist's official releases the library lacks, for the artist page. */
   lidarrMissingReleases(artistId: string, artist: string): Promise<LidarrMissing>;
+  /** Upgrades: whether the album menu offers "Look for a better copy", and the album's upgrade. */
+  lidarrUpgradeAlbum(albumId: string): Promise<AlbumUpgrade>;
+  /** Ask Lidarr for a better copy of an album, into the staging folder (full setup check first). */
+  lidarrUpgradeRequest(albumId: string): Promise<UpgradeRecord>;
+  /** Ask for better copies of every released album under a quality. */
+  lidarrUpgradeBulk(under: UpgradeUnder): Promise<UpgradeBulkResult>;
+  /** Upgrades on this computer, newest first; refresh follows them in Lidarr. */
+  lidarrUpgrades(refresh: boolean): Promise<UpgradeRecord[]>;
+  /** What swapping would do now: songs that upgrade and songs kept, with why. */
+  lidarrUpgradeOffer(id: string): Promise<UpgradeOffer>;
+  /** Swap the better copies in (null: every song that upgrades). */
+  lidarrUpgradeSwap(id: string, trackIds: string[] | null): Promise<SwapResult>;
+  /** Put the old files of the last swap back exactly. */
+  lidarrUpgradeUndo(id: string): Promise<UpgradeRecord>;
+  /** Clear an upgrade from the list. */
+  lidarrUpgradeClear(id: string): Promise<UpgradeRecord[]>;
+  /** Where this computer reaches the music share. */
+  musicShareGet(): Promise<ShareMap>;
+  musicShareSet(map: ShareMap): Promise<ShareMap>;
+  /** Plex's music folders as Plex sees them. */
+  musicSharePlexFolders(): Promise<string[]>;
 
   // Release radar (MusicBrainz, about once a day; `radar://changed` when it changes)
   /** New releases from followed and most played artists. */
@@ -1192,6 +1220,17 @@ export function createTauriBackend(): Backend {
     lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),
     lidarrRequestCancel: (id) => call("lidarr_request_cancel", { id }),
     lidarrMissingReleases: (artistId, artist) => call("lidarr_missing_releases", { artistId, artist }),
+    lidarrUpgradeAlbum: (albumId) => call("lidarr_upgrade_album", { albumId }),
+    lidarrUpgradeRequest: (albumId) => call("lidarr_upgrade_request", { albumId }),
+    lidarrUpgradeBulk: (under) => call("lidarr_upgrade_bulk", { under }),
+    lidarrUpgrades: (refresh) => call("lidarr_upgrades", { refresh }),
+    lidarrUpgradeOffer: (id) => call("lidarr_upgrade_offer", { id }),
+    lidarrUpgradeSwap: (id, trackIds) => call("lidarr_upgrade_swap", { id, trackIds }),
+    lidarrUpgradeUndo: (id) => call("lidarr_upgrade_undo", { id }),
+    lidarrUpgradeClear: (id) => call("lidarr_upgrade_clear", { id }),
+    musicShareGet: () => call("music_share_get"),
+    musicShareSet: (map) => call("music_share_set", { map }),
+    musicSharePlexFolders: () => call("music_share_plex_folders"),
     releaseRadar: () => call("release_radar"),
     releaseRadarCheck: () => call("release_radar_check"),
     radarAutoArtists: () => call("radar_auto_artists"),

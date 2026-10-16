@@ -88,7 +88,7 @@ const ok = (id: string, title: string, detail = ""): LidarrFinding => ({ id, lev
 
 const OK_SETTINGS: LidarrFinding[] = [
   ok("renameTracks", "Track renaming is off"),
-  ok("writeAudioTags", "Lidarr doesn't rewrite tags in existing files"),
+  ok("writeAudioTags", "Lidarr doesn't write tags into files"),
   ok("scrubAudioTags", "Lidarr keeps tags it doesn't know"),
   ok("deleteEmptyFolders", "Lidarr leaves empty folders alone"),
   ok("recycleBin", "Lidarr keeps removed files in a recycling bin"),

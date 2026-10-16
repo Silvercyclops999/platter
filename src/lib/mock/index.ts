@@ -40,6 +40,8 @@ import type {
   CompareSide,
   LidarrPickInput,
   LidarrRequestInput,
+  ShareMap,
+  UpgradeUnder,
   CachedLibrary,
   ListenOp,
   DownloadKind,
@@ -164,6 +166,7 @@ import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
 import { MockPlayHistory } from "./playhistory";
+import { MOCK_STAGING, MockUpgrades, isUpgradeDemo, type UpgradeDemo } from "./upgrades";
 import { MockRadar } from "./radar";
 import { MockCatalogue } from "./catalogue";
 import { MockStats, mockFriendSummary, seedStatsHistory } from "./stats";
@@ -206,6 +209,8 @@ export interface MockOptions {
   theme?: Settings["theme"];
   /** What the faked Lidarr looks like (?lidarr=clear). */
   lidarr?: LidarrDemo;
+  /** Start with a Lidarr upgrade offered on the first album (?upgrades=ready); sets Lidarr up too. */
+  upgrades?: UpgradeDemo;
   /** The release radar has found nothing yet (?radar=empty). */
   radarEmpty?: boolean;
   /** Start with two import sources on and imported (?import=demo). */
@@ -252,7 +257,8 @@ export function optionsFromUrl(search: string): MockOptions {
     feedPortInUse: Number(p.get("feedPortInUse")) || undefined,
     platterUnreachable: p.get("platter") === "unreachable",
     downloads: p.get("downloads") === "demo" || p.get("downloads") === "full" ? (p.get("downloads") as "demo" | "full") : undefined,
-    lidarr: isLidarrDemo(p.get("lidarr")) ? (p.get("lidarr") as LidarrDemo) : undefined,
+    lidarr: isLidarrDemo(p.get("lidarr")) ? (p.get("lidarr") as LidarrDemo) : isUpgradeDemo(p.get("upgrades")) ? "ready" : undefined,
+    upgrades: isUpgradeDemo(p.get("upgrades")) ? (p.get("upgrades") as UpgradeDemo) : undefined,
     radarEmpty: p.get("radar") === "empty",
     theme: (["dark", "light", "system", "midnight", "forest", "sand"] as const).find((t) => t === p.get("theme")),
     importDemo: p.get("import") === "demo",
@@ -329,6 +335,8 @@ export class MockBackend implements Backend {
   readonly playHistory: MockPlayHistory;
   /** Lidarr's setup check (test hook: setDemo). */
   readonly lidarr: MockLidarr;
+  /** Lidarr upgrades and the music share mapping (test hook: reset). */
+  readonly upgrades: MockUpgrades;
   /** The release radar (test hooks: setEmpty, reset). */
   readonly radar: MockRadar;
   /** Music that isn't in the library (faked MusicBrainz and ListenBrainz). */
@@ -588,6 +596,18 @@ export class MockBackend implements Backend {
       album: (id) => this.fx.albums.find((a) => a.id === id),
     });
     this.lidarr = new MockLidarr(this.opts.lidarr);
+    this.upgrades = new MockUpgrades({
+      album: (id) => this.fx.albums.find((a) => a.id === id),
+      albums: () => this.fx.albums,
+      tracks: (id) => this.fx.tracksByAlbum.get(id) ?? [],
+      settings: () => this.settings,
+      lidarrReady: () => this.lidarr.status(this.settings).ready,
+      now: () => Math.floor(Date.now() / 1000),
+    });
+    if (this.opts.upgrades) {
+      this.settings = { ...this.settings, lidarrStagingFolder: MOCK_STAGING };
+      this.upgrades.reset(this.opts.upgrades);
+    }
     this.radar = new MockRadar(
       this.fx,
       {
@@ -2541,6 +2561,11 @@ export class MockBackend implements Backend {
         if (u && !/^https?:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(u)) throw { kind: "invalid", message: "Tautulli's address is a web address like http://192.168.x.x:8181." };
         next.tautulliUrl = u;
       }
+      if (patch.lidarrStagingFolder !== undefined) {
+        const f = patch.lidarrStagingFolder.trim().replace(/(.)[\\/]+$/, "$1");
+        if (f && !/^(\/|\\\\|[A-Za-z]:[\\/])./.test(f)) throw { kind: "invalid", message: "Write the folder's full path as Lidarr sees it, like /downloads/upgrades." };
+        next.lidarrStagingFolder = f;
+      }
       for (const k of ["lidarrUrl", "lidarrAwayUrl"] as const) {
         if (patch[k] === undefined) continue;
         const u = patch[k].trim().replace(/\/+$/, "");
@@ -3285,6 +3310,39 @@ export class MockBackend implements Backend {
   }
   lidarrPick(input: LidarrPickInput) {
     return this.delay(() => this.lidarr.pick(this.settings, input));
+  }
+  lidarrUpgradeAlbum(albumId: string) {
+    return this.delay(() => this.upgrades.forAlbum(albumId));
+  }
+  lidarrUpgradeRequest(albumId: string) {
+    return this.delay(() => this.upgrades.request(albumId));
+  }
+  lidarrUpgradeBulk(under: UpgradeUnder) {
+    return this.delay(() => this.upgrades.bulk(under));
+  }
+  lidarrUpgrades(refresh: boolean) {
+    return this.delay(() => this.upgrades.list(refresh));
+  }
+  lidarrUpgradeOffer(id: string) {
+    return this.delay(() => this.upgrades.offer(id));
+  }
+  lidarrUpgradeSwap(id: string, trackIds: string[] | null) {
+    return this.delay(() => this.upgrades.swap(id, trackIds));
+  }
+  lidarrUpgradeUndo(id: string) {
+    return this.delay(() => this.upgrades.undo(id));
+  }
+  lidarrUpgradeClear(id: string) {
+    return this.delay(() => this.upgrades.clear(id));
+  }
+  musicShareGet() {
+    return this.delay(() => structuredClone(this.upgrades.share));
+  }
+  musicShareSet(map: ShareMap) {
+    return this.delay(() => this.upgrades.setShare(map));
+  }
+  musicSharePlexFolders() {
+    return this.delay(() => ["/data/media/music"]);
   }
   lidarrMissingReleases(artistId: string, _artist: string) {
     return this.delay(() => this.lidarr.missing(this.settings, artistId));

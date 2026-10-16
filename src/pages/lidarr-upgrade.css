@@ -1,0 +1,95 @@
+/* Lidarr upgrades: the album page's card, the swap dialog, the share mapping and the upgrades list. */
+
+.upgrade-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-6);
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+}
+.upgrade-card__head { display: flex; align-items: flex-start; gap: var(--space-3); flex-wrap: wrap; }
+.upgrade-card__text { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 220px; }
+.upgrade-card__title { margin: 0; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.upgrade-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+.upgrade-card__meta svg { flex: none; }
+.upgrade-card__actions { display: flex; align-items: center; gap: var(--space-2); flex: none; }
+.upgrade-card__failure { margin: 0; }
+.upgrade-card__lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-4); }
+.upgrade-card__list-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.upgrade-songs { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.upgrade-song {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+.upgrade-song__num { color: var(--color-text-muted); font-variant-numeric: tabular-nums; text-align: right; }
+.upgrade-song__title { min-width: 0; }
+.upgrade-song__quality,
+.upgrade-song__reason { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-text-secondary); white-space: nowrap; }
+.upgrade-song__reason { color: var(--color-text-muted); white-space: normal; text-align: right; }
+
+/* The swap dialog. */
+.upgrade-dialog { width: min(560px, calc(100vw - 32px)); }
+.upgrade-note {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--color-state-pressed);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+.upgrade-note svg { flex: none; margin-top: 2px; }
+.upgrade-picks { display: flex; flex-direction: column; max-height: 280px; margin: 0 0 var(--space-3); padding: 0; overflow-y: auto; list-style: none; }
+.upgrade-pick {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-row);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.upgrade-pick:hover { background: var(--color-state-hover); }
+.upgrade-pick input { width: 16px; height: 16px; margin: 0; accent-color: var(--color-accent); }
+
+/* Settings: the share mapping. */
+.share-map { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
+.share-map__row { display: flex; align-items: flex-end; gap: var(--space-3); flex-wrap: wrap; }
+.share-map__field { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 200px; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.share-map__field .setting-text { width: 100%; }
+.share-map__arrow { flex: none; margin-bottom: 8px; color: var(--color-text-muted); }
+.share-map__actions { display: flex; align-items: center; gap: var(--space-3); }
+.share-map__saved { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+
+/* Settings: the upgrades list. */
+.upgrades { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
+.upgrades__bulk { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }

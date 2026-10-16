@@ -1114,6 +1114,10 @@ export interface Settings {
   lidarrAwayUrl: string;
   /** Artist pages list official releases the library lacks, with Request (when Lidarr is set up and its check passed). */
   showMissingReleases: boolean;
+  /** Lidarr's staging folder for upgrades, as Lidarr sees it (empty: upgrades are off). */
+  lidarrStagingFolder: string;
+  /** Upgrades ask before each swap (off swaps on their own, under the same rules). */
+  upgradesAsk: boolean;
   /** The miniplayer window stays above other windows (this device only). */
   miniplayerOnTop: boolean;
   /** The miniplayer's card takes a colour from the cover (this device only). */
@@ -1443,6 +1447,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lidarrUrl: "",
   lidarrAwayUrl: "",
   showMissingReleases: true,
+  lidarrStagingFolder: "",
+  upgradesAsk: true,
   miniplayerOnTop: true,
   miniplayerTint: true,
   miniplayerQueue: false,
@@ -2134,6 +2140,132 @@ export interface LidarrRequest {
   notes: string[];
   /** Made by auto-request for a new release. */
   auto: boolean;
+}
+
+/** Why a swap or its undo stopped. Every one leaves the old files in place. */
+export type UpgradeFailure =
+  | { kind: "noMapping" }
+  | { kind: "shareUnreachable"; path: string }
+  | { kind: "changed"; name: string }
+  | { kind: "stagingMissing"; name: string }
+  | { kind: "fileLocked"; name: string }
+  | { kind: "nameTaken"; name: string }
+  | { kind: "tagCopyFailed"; name: string; why: string }
+  | { kind: "backupNotWritable"; path: string }
+  | { kind: "moveFailed"; name: string }
+  | { kind: "rescanFailed" }
+  | { kind: "plexUnreachable" }
+  | { kind: "backupMissing"; name: string };
+
+/** One file a swap replaced. */
+export interface SwappedFile {
+  trackId: string;
+  plexPath: string;
+  original: string;
+  placed: string;
+  backup: string;
+  oldHash: string;
+  newHash: string;
+}
+
+/** One swap that happened. */
+export interface SwapRun {
+  id: string;
+  at: number;
+  /** Where the old files are now. */
+  backupDir: string;
+  files: SwappedFile[];
+  undone: boolean;
+  /** "Upgraded 12 songs (MP3 320 to FLAC)". */
+  summary: string;
+}
+
+/** A better copy of a library album: its Lidarr request and any swaps. */
+export interface UpgradeRecord extends LidarrRequest {
+  albumId: string;
+  /** What the album was when the upgrade was asked for ("MP3 320"). */
+  fromQuality: string;
+  swaps: SwapRun[];
+  failure: UpgradeFailure | null;
+}
+
+/** `lidarr_upgrade_album`: whether the album menu offers "Look for a better copy". */
+export interface AlbumUpgrade {
+  available: boolean;
+  record: UpgradeRecord | null;
+  /** The album now, "MP3 320". */
+  quality: string | null;
+}
+
+export type UpgradeKeep = "unreleased" | "archiveTags" | "extraDisc" | "notInAlbum" | "noId" | "noMatch" | "ambiguous" | "notBetter";
+
+export interface OfferSong {
+  /** Empty for a file Plex doesn't list on the album. */
+  trackId: string;
+  title: string;
+  disc: number;
+  track: number;
+  from: string;
+  to: string | null;
+  /** Why it's kept as it is. */
+  reason: string | null;
+  keep: UpgradeKeep | null;
+  /** How it was matched. */
+  by: "isrc" | "recordingId" | null;
+}
+
+export type OfferStatus = "waiting" | "needsMapping" | "unreachable" | "ready" | "nothing" | "swapped";
+
+/** `lidarr_upgrade_offer`: what a swap would do now. */
+export interface UpgradeOffer {
+  upgradeId: string;
+  albumId: string;
+  title: string;
+  artist: string;
+  status: OfferStatus;
+  message: string | null;
+  /** "Upgrade 12 of 14 songs (MP3 320 to FLAC)". */
+  summary: string | null;
+  from: string;
+  to: string;
+  upgrade: OfferSong[];
+  kept: OfferSong[];
+  /** Ask about each song, whatever the setting says. */
+  askEach: boolean;
+  askReason: string | null;
+  /** "Upgrades: ask before each swap". */
+  ask: boolean;
+  /** Where old files go. */
+  backupDir: string;
+  lastSwap: SwapRun | null;
+  failure: UpgradeFailure | null;
+  failureMessage: string | null;
+}
+
+export interface SwapResult {
+  record: UpgradeRecord;
+  swapped: number;
+  backupDir: string;
+  summary: string;
+}
+
+/** Which albums "look for better copies" covers. */
+export type UpgradeUnder = "lossy" | "belowCd";
+
+export interface UpgradeBulkResult {
+  requested: UpgradeRecord[];
+  skipped: { title: string; reason: string }[];
+  /** Albums left for another run. */
+  more: number;
+}
+
+/** Where this computer reaches the music share (this device only). */
+export interface ShareMap {
+  music: { server: string; local: string }[];
+  /** The staging folder on this computer. */
+  staging: string;
+  /** Where replaced files go (empty: Platter's own folder). */
+  backup: string;
 }
 
 /** One release on the release radar. */

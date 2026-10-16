@@ -47,6 +47,7 @@ import {
 import "./album.css";
 import { CatalogueAction, MissingButton, NOT_IN_LIBRARY, RequestDialog, StoreLinks, catalogueKind, requestInput } from "./catalogue";
 import { useLidarrReady } from "./lidarrShared";
+import { LookForBetterDialog, UpgradeCard, upgradeMenuItems, useAlbumUpgrade } from "./LidarrUpgrade";
 import { useRouter } from "../stores/router";
 import type { CatTrack } from "../lib/types";
 
@@ -72,6 +73,8 @@ function LibraryAlbumView({ id }: { id: string }) {
   const { header, column, step, compact } = useTitleStep(album?.title);
   const [coverOpen, setCoverOpen] = useState(false);
   const coverBtn = useRef<HTMLButtonElement>(null);
+  const upgrade = useAlbumUpgrade(album ? id : null);
+  const [lookingForBetter, setLookingForBetter] = useState(false);
   const [view, setView] = useState<AlbumView>(loadAlbumView);
   const chooseView = (v: AlbumView) => {
     setView(v);
@@ -209,6 +212,7 @@ function LibraryAlbumView({ id }: { id: string }) {
                     ? [{ label: "Transcribe songs without lyrics", onSelect: () => void transcribe.album(album.id) }]
                     : []),
                   plexEditItem({ id: album.id, kind: "album", title: album.title, thumb: album.thumb, artistTitle: album.artistTitle }),
+                  ...upgradeMenuItems(upgrade.info, () => setLookingForBetter(true)),
                 ],
                 e.currentTarget,
               )
@@ -226,6 +230,20 @@ function LibraryAlbumView({ id }: { id: string }) {
           </button>
         </div>
 
+        <UpgradeCard upgrade={upgrade} onChanged={upgrade.reload} />
+        {album && (
+          <LookForBetterDialog
+            open={lookingForBetter}
+            albumId={album.id}
+            title={album.title}
+            quality={upgrade.info?.quality ?? null}
+            onClose={() => setLookingForBetter(false)}
+            onDone={() => {
+              setLookingForBetter(false);
+              upgrade.reload();
+            }}
+          />
+        )}
         <StatsStrip kind="album" id={id} />
         <div className={`album-tracks album-tracks--${view}`}>
           <TrackList label={album ? `${album.title} tracks` : "Tracks"} showAlbum={false} showPlays>
