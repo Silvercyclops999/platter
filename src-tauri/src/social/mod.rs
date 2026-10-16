@@ -6,6 +6,7 @@
 //! - [`follows`]: the follow list (behind a store a sync file can replace),
 //!   What's New, and the new-release announcement.
 //! - [`listen`]: listening sessions through a relay, end to end sealed.
+//! - [`sharing`]: sharing your music through Plex, and invites to you.
 //! - [`commands`]: Tauri commands and the Plex, player and notification glue.
 
 pub mod activity;
@@ -13,6 +14,7 @@ pub mod circle;
 pub mod commands;
 pub mod follows;
 pub mod listen;
+pub mod sharing;
 
 #[cfg(test)]
 mod tests;
@@ -45,6 +47,8 @@ pub struct SocialSwitches {
     pub notify_releases: Arc<AtomicBool>,
     /// Listen along settings.
     pub listen: listen::ListenSettings,
+    /// Sharing settings.
+    pub sharing: sharing::ShareSettings,
     /// A private session: no announcements.
     pub private_session: Arc<AtomicBool>,
     /// Collaborative playlists and Blends (sharing listen along's relay,
@@ -67,6 +71,7 @@ impl Default for SocialSwitches {
             whats_new: Arc::new(AtomicBool::new(true)),
             notify_releases: Arc::new(AtomicBool::new(false)),
             listen,
+            sharing: sharing::ShareSettings::default(),
             private_session,
             circle,
         }

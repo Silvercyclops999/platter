@@ -845,6 +845,21 @@ pub fn run() {
                 let id = plex.identity();
                 remote::commands::spawn_peers(&remote, id.platform.clone(), id.version.clone());
             }
+            // Sharing music through Plex (Settings, Sharing, and in listening sessions).
+            let sharing = Arc::new(social::sharing::Sharing::new(
+                Arc::new(social::sharing::PlexHost { plex: plex.clone(), db: db.clone(), settings: app_settings.clone() }),
+                db.clone(),
+                live.social.sharing.clone(),
+                Arc::new(plex::state::TauriSink(app.handle().clone())),
+                Arc::new(social::commands::OsNotifier(app.handle().clone())),
+                social::sharing::links::LinkDeps {
+                    relays: Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
+                    relay: live.social.listen.relay.clone(),
+                    default_relay: social::listen::DEFAULT_RELAY.into(),
+                    answer_timeout: std::time::Duration::from_secs(90),
+                    retry: std::time::Duration::from_secs(2),
+                },
+            ));
             // Listen along goes through a relay (ntfy), never computer to computer.
             let listen_name = social::commands::ListenName::default();
             let listen = social::listen::ListenAlong::new(social::listen::ListenDeps {
@@ -853,6 +868,7 @@ pub fn run() {
                 events: Arc::new(plex::state::TauriSink(app.handle().clone())),
                 server: Arc::new(backend::routed::RoutedServerId(backends.clone())),
                 library: Arc::new(social::commands::DbListenLibrary(db.clone())),
+                offer: sharing.clone(),
                 name: {
                     let plex_name = listen_name.0.clone();
                     let chosen = live.social.listen.name.clone();
@@ -933,6 +949,8 @@ pub fn run() {
                 });
             }
             app.manage(circle);
+            social::commands::spawn_sharing((*sharing).clone(), plex.clone(), listen.clone(), db.clone());
+            app.manage((*sharing).clone());
             app.manage(listen);
             app.manage(listen_name);
             remote.set_lan(remote::LanEnv {
@@ -1590,6 +1608,15 @@ pub fn run() {
             social::circle::commands::blend_hide,
             social::circle::commands::blend_refresh,
             social::circle::commands::blend_leave,
+            social::commands::listen_offer_server,
+            social::commands::sharing_overview,
+            social::commands::sharing_share,
+            social::commands::sharing_people,
+            social::commands::sharing_remove,
+            social::commands::sharing_link,
+            social::commands::sharing_open_link,
+            social::commands::sharing_invites,
+            social::commands::sharing_accept,
             sync::commands::sync_file_status,
             sync::commands::sync_file_now,
             sync::commands::sync_file_folders,

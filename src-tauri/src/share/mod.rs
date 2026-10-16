@@ -112,11 +112,14 @@ pub struct DeepLinkOpen {
     /// `platter://blend/...`), to join.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub circle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// A share link (`platter://share/...`): ask that person for their music.
+    pub share_ask: Option<String>,
 }
 
 impl DeepLinkOpen {
     fn failed(status: DeepLinkStatus) -> Self {
-        Self { status, kind: None, id: None, album_id: None, at_seconds: None, join: None, circle: None }
+        Self { status, kind: None, id: None, album_id: None, at_seconds: None, join: None, circle: None, share_ask: None }
     }
 }
 
@@ -350,6 +353,9 @@ impl ShareService {
         if crate::social::circle::is_invite(raw) {
             return DeepLinkOpen { circle: Some(raw.trim().to_string()), ..DeepLinkOpen::failed(DeepLinkStatus::Open) };
         }
+        if crate::social::listen::invite::parse_as(raw, "share").is_some() {
+            return DeepLinkOpen { share_ask: Some(raw.trim().to_string()), ..DeepLinkOpen::failed(DeepLinkStatus::Open) };
+        }
         let Some(l) = link::parse(raw) else {
             return DeepLinkOpen::failed(DeepLinkStatus::Invalid);
         };
@@ -392,7 +398,7 @@ impl ShareService {
             Item::Track { album_id, .. } => Some(album_id),
             _ => None,
         };
-        DeepLinkOpen { status: DeepLinkStatus::Open, kind: Some(l.kind), id: Some(id), album_id, at_seconds: l.t, join: None, circle: None }
+        DeepLinkOpen { status: DeepLinkStatus::Open, kind: Some(l.kind), id: Some(id), album_id, at_seconds: l.t, join: None, circle: None, share_ask: None }
     }
 
     /// A link was opened: keep it for the UI and tell it.

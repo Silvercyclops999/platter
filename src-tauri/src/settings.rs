@@ -516,6 +516,20 @@ pub struct Settings {
     /// "Include unreleased songs in what I share" (shared playlists and
     /// Blend taste summaries).
     pub share_unreleased: bool,
+    /// Offer "Let them listen from my server" in a session you host, to
+    /// someone who can't hear the song.
+    pub share_offer_server: bool,
+    /// "Libraries I share by default": section ids on your server, music
+    /// libraries only. None chosen at first.
+    pub share_default_libraries: Vec<String>,
+    /// "Hide my unreleased music from people I share with": unreleased
+    /// albums get a Plex label the share leaves out (needs Plex Pass).
+    pub share_hide_unreleased: bool,
+    /// "Allow downloads for people I share with".
+    pub share_allow_downloads: bool,
+    /// "Accept invites inside Platter": a friend's server invite shows here
+    /// and is accepted with one click.
+    pub share_accept_invites: bool,
     /// Discord shows a listening session you host.
     pub discord_listen_along: bool,
     /// Keep app-only state in a sync file in a folder (this device only).
@@ -904,6 +918,11 @@ impl Default for Settings {
             collab_playlists: true,
             blends: true,
             share_unreleased: false,
+            share_offer_server: true,
+            share_default_libraries: Vec::new(),
+            share_hide_unreleased: true,
+            share_allow_downloads: false,
+            share_accept_invites: true,
             discord_listen_along: true,
             sync_enabled: false,
             sync_folder: String::new(),
@@ -1070,6 +1089,11 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "collabPlaylists",
     "blends",
     "shareUnreleased",
+    "shareOfferServer",
+    "shareDefaultLibraries",
+    "shareHideUnreleased",
+    "shareAllowDownloads",
+    "shareAcceptInvites",
     "bookmarksInLibrary",
     "statsPage",
     "statsStrip",
@@ -1359,6 +1383,11 @@ pub struct SettingsPatch {
     pub collab_playlists: Option<bool>,
     pub blends: Option<bool>,
     pub share_unreleased: Option<bool>,
+    pub share_offer_server: Option<bool>,
+    pub share_default_libraries: Option<Vec<String>>,
+    pub share_hide_unreleased: Option<bool>,
+    pub share_allow_downloads: Option<bool>,
+    pub share_accept_invites: Option<bool>,
     pub discord_listen_along: Option<bool>,
     pub sync_enabled: Option<bool>,
     pub sync_settings: Option<bool>,
@@ -1751,6 +1780,26 @@ impl Settings {
         set(&mut self.collab_playlists, p.collab_playlists);
         set(&mut self.blends, p.blends);
         set(&mut self.share_unreleased, p.share_unreleased);
+        set(&mut self.share_offer_server, p.share_offer_server);
+        set(&mut self.share_hide_unreleased, p.share_hide_unreleased);
+        set(&mut self.share_allow_downloads, p.share_allow_downloads);
+        set(&mut self.share_accept_invites, p.share_accept_invites);
+        if let Some(v) = &p.share_default_libraries {
+            let mut out: Vec<String> = Vec::new();
+            for id in v {
+                let id = id.trim();
+                if id.is_empty() || id.len() > 10 || !id.bytes().all(|b| b.is_ascii_digit()) {
+                    return Err(AppError::Invalid("That isn't a music library on your server.".into()));
+                }
+                if !out.iter().any(|x| x == id) {
+                    out.push(id.to_string());
+                }
+            }
+            if out.len() > crate::libraries::MAX_LIBRARIES {
+                return Err(AppError::Invalid("Too many libraries.".into()));
+            }
+            self.share_default_libraries = out;
+        }
         if let Some(r) = &p.listen_relay {
             self.listen_relay = if r.trim().is_empty() {
                 String::new()
@@ -2121,6 +2170,11 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         so.listen.invite_hours.store(s.listen_invite_hours, Ordering::Relaxed);
         *so.listen.name.write() = s.listen_name.clone();
         so.listen.hide_unreleased.store(s.listen_hide_unreleased, Ordering::Relaxed);
+        so.sharing.offer.store(s.share_offer_server, Ordering::Relaxed);
+        *so.sharing.default_libraries.write() = s.share_default_libraries.clone();
+        so.sharing.hide_unreleased.store(s.share_hide_unreleased, Ordering::Relaxed);
+        so.sharing.allow_downloads.store(s.share_allow_downloads, Ordering::Relaxed);
+        so.sharing.accept_in_app.store(s.share_accept_invites, Ordering::Relaxed);
         so.private_session.store(s.private_session, Ordering::Relaxed);
         so.circle.playlists.store(s.collab_playlists, Ordering::Relaxed);
         so.circle.blends.store(s.blends, Ordering::Relaxed);
@@ -3019,6 +3073,15 @@ mod tests {
         assert!(s.listen_guests_control && s.discord_listen_along);
         // Unreleased titles go to guests unless the host hides them.
         assert!(!s.listen_hide_unreleased);
+        // Sharing: offered, unreleased hidden, no downloads, invites taken
+        // here, and no library shared until one is chosen.
+        assert!(s.share_offer_server && s.share_hide_unreleased && !s.share_allow_downloads && s.share_accept_invites);
+        assert!(s.share_default_libraries.is_empty());
+        for k in ["shareOfferServer", "shareDefaultLibraries", "shareHideUnreleased", "shareAllowDownloads", "shareAcceptInvites"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let mut t = s.clone();
+        assert!(t.apply(&SettingsPatch { share_default_libraries: Some(vec!["../4".into()]), ..Default::default() }).is_err());
         // Listen along: ntfy.sh, invites good for a day, the Plex name.
         assert!(s.listen_relay.is_empty() && s.listen_name.is_empty());
         assert_eq!(s.listen_invite_hours, 24);
@@ -3519,6 +3582,11 @@ mod tests {
             listen_invite_hours: Some(1),
             listen_name: Some(" DJ Sam ".into()),
             listen_hide_unreleased: Some(true),
+            share_offer_server: Some(false),
+            share_default_libraries: Some(vec![" 3".into(), "7".into(), "3".into()]),
+            share_hide_unreleased: Some(false),
+            share_allow_downloads: Some(true),
+            share_accept_invites: Some(false),
             discord_listen_along: Some(false),
             bookmarks_in_library: Some(false),
             scrobble_lastfm: Some(true),
@@ -3542,6 +3610,11 @@ mod tests {
         assert_eq!(live.social.listen.invite_hours.load(Ordering::Relaxed), 1);
         assert_eq!(*live.social.listen.name.read(), "DJ Sam");
         assert!(live.social.listen.hide_unreleased.load(Ordering::Relaxed));
+        // Sharing sees its switches and the default libraries, tidied.
+        let sh = &live.social.sharing;
+        assert!(!sh.offer.load(Ordering::Relaxed) && !sh.hide_unreleased.load(Ordering::Relaxed) && !sh.accept_in_app.load(Ordering::Relaxed));
+        assert!(sh.allow_downloads.load(Ordering::Relaxed));
+        assert_eq!(*sh.default_libraries.read(), ["3", "7"]);
         assert!(live.social.private_session.load(Ordering::Relaxed));
         assert!(!live.tracking.share_activity.load(Ordering::Relaxed));
         assert!(!live.discord.get().listen_along);

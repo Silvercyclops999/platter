@@ -290,3 +290,100 @@ pub async fn listen_control(listen: State<'_, ListenAlong>, op: Op) -> AppResult
 pub async fn listen_remove(listen: State<'_, ListenAlong>, person_id: String) -> AppResult<ListenView> {
     listen.remove(&person_id).await
 }
+
+/// "Let them listen from my server" for someone in the session you host.
+#[tauri::command]
+pub async fn listen_offer_server(listen: State<'_, ListenAlong>, person_id: String) -> AppResult<ListenView> {
+    listen.offer_server(&person_id).await
+}
+
+// ---- sharing ----------------------------------------------------------------------
+
+use super::sharing::links::{LinkResult, LinkView};
+use super::sharing::{Accepted, PersonWithAccess, ShareOptions, ShareStatus, Sharing, SharingOverview};
+use crate::plex::sharing::ReceivedInvite;
+
+/// Settings, Sharing: my server's music libraries, their unreleased albums,
+/// and Plex Pass.
+#[tauri::command]
+pub async fn sharing_overview(sharing: State<'_, Sharing>) -> AppResult<SharingOverview> {
+    sharing.overview().await
+}
+
+/// Share my music with a Plex username or email.
+#[tauri::command]
+pub async fn sharing_share(sharing: State<'_, Sharing>, invitee: String, options: ShareOptions) -> AppResult<ShareStatus> {
+    sharing.share(&invitee, &options).await
+}
+
+#[tauri::command]
+pub async fn sharing_people(sharing: State<'_, Sharing>) -> AppResult<Vec<PersonWithAccess>> {
+    sharing.people().await
+}
+
+#[tauri::command]
+pub async fn sharing_remove(sharing: State<'_, Sharing>, id: String) -> AppResult<()> {
+    sharing.remove(&id).await
+}
+
+/// A link or QR code that lets someone ask for my music.
+#[tauri::command]
+pub async fn sharing_link(sharing: State<'_, Sharing>, settings: State<'_, crate::settings::SettingsState>, options: ShareOptions) -> AppResult<LinkView> {
+    let hours = settings.get().await?.listen_invite_hours;
+    sharing.make_link(options, hours).await
+}
+
+/// Open a share link someone gave me.
+#[tauri::command]
+pub async fn sharing_open_link(sharing: State<'_, Sharing>, listen_name: State<'_, ListenName>, plex: State<'_, PlexState>, link: String) -> AppResult<LinkResult> {
+    listen_name.refresh(&plex).await;
+    let name = listen_name.0.lock().clone();
+    sharing.open_link(&link, &name).await
+}
+
+/// Server invites I received (`fresh` asks plex.tv).
+#[tauri::command]
+pub async fn sharing_invites(sharing: State<'_, Sharing>, fresh: Option<bool>) -> AppResult<Vec<ReceivedInvite>> {
+    sharing.invites(fresh.unwrap_or(true)).await
+}
+
+#[tauri::command]
+pub async fn sharing_accept(sharing: State<'_, Sharing>, id: String) -> AppResult<Accepted> {
+    sharing.accept(&id).await
+}
+
+/// Look for invites now and then (and tell listen along about shared
+/// libraries once they're read).
+pub fn spawn_sharing(sharing: Sharing, plex: PlexState, listen: ListenAlong, db: DbHandle) {
+    let l = listen.clone();
+    sharing.set_on_accepted(Arc::new(move |entries: Vec<String>| {
+        let (l, db) = (l.clone(), db.clone());
+        tauri::async_runtime::spawn(async move {
+            // Wait (up to 20 min) for the new libraries' first sync.
+            let srcs: Vec<String> = entries
+                .iter()
+                .filter_map(|e| crate::libraries::parse_entry(e))
+                .map(|(m, s)| crate::db::store::src_of(&crate::sid::tag(m), s))
+                .collect();
+            for _ in 0..240 {
+                let s2 = srcs.clone();
+                let read = db.read_async(move |c| Ok(s2.iter().any(|s| crate::db::store::sync_state_in(c, s).ok().flatten().is_some_and(|st| st.last_sync_at.is_some())))).await.unwrap_or(false);
+                if read {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+            l.library_changed().await;
+        });
+    }));
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        loop {
+            if plex.account_token().await.is_some() && !plex.offline_by_choice() {
+                let _ = sharing.invites(true).await;
+            }
+            listen.settings_changed().await;
+            tokio::time::sleep(Duration::from_secs(15 * 60)).await;
+        }
+    });
+}
