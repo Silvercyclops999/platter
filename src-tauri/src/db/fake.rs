@@ -232,6 +232,7 @@ pub fn track(id: &str, title: &str, album: &Album, disc: u32, n: u32) -> Track {
         file: None,
         other_versions: None,
         song_status: None,
+        file_release: None,
         rated_at: None,
         genres: Vec::new(),
     }

@@ -279,8 +279,8 @@ pub fn song_facts(c: &Connection, track_id: &str) -> AppResult<Option<SongFacts>
     let row = c
         .query_row(
             "SELECT t.title, t.album_title, t.album_id, t.duration_ms, al.format, al.subformats, al.matched, al.studio,
-                    coalesce((SELECT ft.version FROM file_tags ft WHERE ft.part_key = t.part_key),
-                             (SELECT at.version FROM album_tags at WHERE at.album_id = t.album_id)),
+                    coalesce((SELECT coalesce(ft.version, ft.release) FROM file_tags ft WHERE ft.part_key = t.part_key),
+                             (SELECT coalesce(at.version, at.release) FROM album_tags at WHERE at.album_id = t.album_id)),
                     (SELECT mc.found FROM album_mb_check mc WHERE mc.album_id = t.album_id)
              FROM tracks t LEFT JOIN albums al ON al.id = t.album_id WHERE t.id = ?1",
             params![track_id],

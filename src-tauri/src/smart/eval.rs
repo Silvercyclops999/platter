@@ -94,10 +94,11 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
                 al.year, coalesce(al.added_at, 0), t.view_count, t.last_viewed_at, t.user_rating, t.duration_ms,
                 coalesce(al.section, 'albums'), coalesce(al.genres, '[]'), coalesce(al.styles, '[]'),
                 coalesce(al.moods, '[]'), t.genres, f.explicit, f.version, al.format, coalesce(al.subformats, '[]'), t.title, al.studio, al.matched, mc.found, t.album_id,
-                f.era, t.codec
+                f.era, t.codec, coalesce(f.version, f.release, CASE WHEN at.version IS NULL THEN at.release END)
          FROM tracks t
          LEFT JOIN albums al ON al.id = t.album_id
          LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
+         LEFT JOIN album_tags at ON at.album_id = t.album_id
          LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'",
     )?;
     let mut rows = st.query([])?;
@@ -117,6 +118,8 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
         let matched: Option<bool> = r.get(24)?;
         let mb: Option<bool> = r.get(25)?;
         let album_id: String = r.get(26)?;
+        // The rule reads the file's status tags too; the Version field stays ARCHIVE_VERSION.
+        let status_version: Option<String> = r.get(29)?;
         let unreleased = crate::db::release::track_unreleased(
             &id,
             &album_id,
@@ -124,7 +127,7 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
             &subformats,
             matched,
             studio.as_deref(),
-            version.as_deref(),
+            status_version.as_deref(),
             mb,
         );
         let era: Option<String> = r.get(27)?;

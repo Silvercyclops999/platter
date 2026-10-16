@@ -16,6 +16,7 @@ use crate::db::release::is_unreleased;
 use crate::error::AppResult;
 use crate::model::Track;
 
+use super::provenance::{self, FileRelease};
 use super::{CACHE_VERSION, FileTags, TagView, is_edit};
 
 /// How a read ended.
@@ -47,11 +48,14 @@ pub struct Pending {
 }
 
 pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i64) -> AppResult<()> {
+    let p = provenance::resolve(t, &provenance::config());
     c.execute(
         "INSERT OR REPLACE INTO file_tags
              (part_key, status, explicit, version, era, quality, date, edition, grp, source, flags, scanned_at,
-              isrc, recording_mbid, ver, album, album_artist, year)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+              isrc, recording_mbid, ver, album, album_artist, year,
+              tag_status, version_note, mb_status, mb_type, custom_status, custom_key, release, provenance)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+                 ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         params![
             part_key,
             status.key(),
@@ -70,17 +74,97 @@ pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i
             CACHE_VERSION,
             t.album,
             t.album_artist,
-            t.year
+            t.year,
+            t.status_tag,
+            t.version_note,
+            t.mb_status,
+            t.mb_type,
+            t.custom_status,
+            t.custom_key.as_deref().unwrap_or(""),
+            p.status.map(FileRelease::key),
+            p.note
         ],
     )?;
     Ok(())
+}
+
+/// The file tags kept for working out a file's status again.
+const RAW: &str = "version, source, tag_status, version_note, mb_status, mb_type, custom_status, custom_key";
+
+fn raw_tags(r: &rusqlite::Row, at: usize) -> rusqlite::Result<FileTags> {
+    let key: String = r.get(at + 7)?;
+    Ok(FileTags {
+        version: r.get(at)?,
+        source: r.get(at + 1)?,
+        status_tag: r.get(at + 2)?,
+        version_note: r.get(at + 3)?,
+        mb_status: r.get(at + 4)?,
+        mb_type: r.get(at + 5)?,
+        custom_status: r.get(at + 6)?,
+        custom_key: (!key.is_empty()).then_some(key),
+        ..Default::default()
+    })
+}
+
+/// Works out every file's status and note again from the tags already
+/// read, after the status settings change. Returns the files whose status
+/// or note changed.
+pub fn recompute(c: &Connection) -> AppResult<usize> {
+    let cfg = provenance::config();
+    let mut changed: Vec<(String, Option<&'static str>, Option<String>)> = Vec::new();
+    {
+        let mut st = c.prepare(&format!("SELECT part_key, release, provenance, {RAW} FROM file_tags WHERE status = 'ok'"))?;
+        let mut rows = st.query([])?;
+        while let Some(r) = rows.next()? {
+            let p = provenance::resolve(&raw_tags(r, 3)?, &cfg);
+            let key = p.status.map(FileRelease::key);
+            let (was, note): (Option<String>, Option<String>) = (r.get(1)?, r.get(2)?);
+            if was.as_deref() != key || note != p.note {
+                changed.push((r.get(0)?, key, p.note));
+            }
+        }
+    }
+    let mut up = c.prepare_cached("UPDATE file_tags SET release = ?2, provenance = ?3 WHERE part_key = ?1")?;
+    for (k, rel, note) in &changed {
+        up.execute(params![k, rel, note])?;
+    }
+    Ok(changed.len())
+}
+
+/// After the status settings change: every file's status again, then what's
+/// derived from it (album tags, the song index, the archive). Returns
+/// whether any file's status or note changed.
+pub fn restatus(c: &Connection) -> AppResult<bool> {
+    if recompute(c)? == 0 {
+        return Ok(false);
+    }
+    refresh_albums(c)?;
+    crate::identity::index::rebuild(c)?;
+    crate::archive::refresh_all(c)?;
+    Ok(true)
+}
+
+/// [`restatus`] on its own thread (no tag scan running).
+pub fn restatus_soon(db: &crate::db::DbHandle) {
+    let db = db.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = db.write(|c| crate::archive::in_tx(c, |c| restatus(c).map(|_| ()))) {
+            tracing::warn!("file status refresh failed: {e}");
+        }
+    });
+}
+
+/// The custom tag name rows are compared with ('' for Auto).
+fn custom_key_now() -> String {
+    provenance::custom_key().unwrap_or_default()
 }
 
 /// Read tags for one part key (tests and diagnostics).
 pub fn get(c: &Connection, part_key: &str) -> AppResult<Option<(String, FileTags)>> {
     Ok(c.query_row(
         "SELECT status, explicit, version, era, quality, date, edition, grp, source, flags, isrc, recording_mbid,
-                album, album_artist, year
+                album, album_artist, year, version, source, tag_status, version_note, mb_status, mb_type,
+                custom_status, custom_key
          FROM file_tags WHERE part_key = ?1",
         [part_key],
         |r| {
@@ -101,6 +185,7 @@ pub fn get(c: &Connection, part_key: &str) -> AppResult<Option<(String, FileTags
                     album: r.get(12)?,
                     album_artist: r.get(13)?,
                     year: r.get(14)?,
+                    ..raw_tags(r, 15)?
                 },
             ))
         },
@@ -109,16 +194,16 @@ pub fn get(c: &Connection, part_key: &str) -> AppResult<Option<(String, FileTags
 }
 
 /// Tracks still to read, album by album: files never read first, then files
-/// an older build read (see [`CACHE_VERSION`]). Their old row stays in use
-/// until the new read replaces it.
+/// an older build read (see [`CACHE_VERSION`]) or read for another custom
+/// status tag. Their old row stays in use until the new read replaces it.
 pub fn pending(c: &Connection, limit: usize) -> AppResult<Vec<Pending>> {
     let mut st = c.prepare_cached(
         "SELECT t.id, t.part_key, t.container FROM tracks t
          LEFT JOIN file_tags f ON f.part_key = t.part_key
-         WHERE (f.part_key IS NULL OR f.ver < ?2) AND t.part_key <> ''
+         WHERE (f.part_key IS NULL OR f.ver < ?2 OR f.custom_key <> ?3) AND t.part_key <> ''
          ORDER BY f.part_key IS NOT NULL, t.album_id, t.disc_number, t.track_number LIMIT ?1",
     )?;
-    let rows = st.query_map(params![limit as i64, CACHE_VERSION], |r| {
+    let rows = st.query_map(params![limit as i64, CACHE_VERSION, custom_key_now()], |r| {
         Ok(Pending { track_id: r.get(0)?, part_key: r.get(1)?, container: r.get(2)? })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -141,8 +226,8 @@ pub fn counts(c: &Connection) -> AppResult<Counts> {
     let total: i64 = c.query_row("SELECT count(*) FROM tracks", [], |r| r.get(0))?;
     let (done, failed): (i64, i64) = c.query_row(
         "SELECT count(*), COALESCE(sum(f.status <> 'ok'), 0)
-         FROM tracks t JOIN file_tags f ON f.part_key = t.part_key AND f.ver >= ?1",
-        [CACHE_VERSION],
+         FROM tracks t JOIN file_tags f ON f.part_key = t.part_key AND f.ver >= ?1 AND f.custom_key = ?2",
+        params![CACHE_VERSION, custom_key_now()],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     Ok(Counts { done: done as u64, total: total as u64, failed: failed as u64 })
@@ -168,6 +253,8 @@ struct AlbumAcc {
     groups: Vec<String>,
     read: usize,
     edits: usize,
+    /// (disc, status) of each file read.
+    releases: Vec<(u32, Option<FileRelease>)>,
 }
 
 /// One album of a group, for choosing the face.
@@ -200,7 +287,7 @@ pub fn refresh_albums(c: &Connection) -> AppResult<()> {
     let mut acc: HashMap<String, AlbumAcc> = HashMap::new();
     {
         let mut st = c.prepare_cached(
-            "SELECT t.album_id, f.explicit, f.version, f.edition, f.grp, f.flags
+            "SELECT t.album_id, f.explicit, f.version, f.edition, f.grp, f.flags, t.disc_number, f.release
              FROM tracks t JOIN file_tags f ON f.part_key = t.part_key WHERE f.status = 'ok'",
         )?;
         let mut rows = st.query([])?;
@@ -222,6 +309,8 @@ pub fn refresh_albums(c: &Connection) -> AppResult<()> {
             if is_edit(r.get::<_, Option<String>>(5)?.as_deref()) {
                 a.edits += 1;
             }
+            let disc = r.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u32;
+            a.releases.push((disc, r.get::<_, Option<String>>(7)?.as_deref().and_then(FileRelease::from_key)));
         }
     }
     // Album facts for choosing each group's face.
@@ -250,7 +339,8 @@ pub fn refresh_albums(c: &Connection) -> AppResult<()> {
             groups.entry(g).or_default().push(Member {
                 album_id: id.clone(),
                 edition: most_common(&a.editions),
-                version: most_common(&a.versions),
+                version: most_common(&a.versions)
+                    .or_else(|| provenance::album_release(&a.releases).status.map(|r| r.key().to_string())),
                 unreleased_type: is_unreleased(format.as_deref(), &subs, matched, studio.as_deref(), None, mb),
                 year,
                 added_at,
@@ -263,14 +353,15 @@ pub fn refresh_albums(c: &Connection) -> AppResult<()> {
         .collect();
     c.execute("DELETE FROM album_tags", [])?;
     let mut ins = c.prepare_cached(
-        "INSERT INTO album_tags (album_id, explicit, version, edition, grp, flagged, face_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO album_tags (album_id, explicit, version, edition, grp, flagged, face_id, release, mixed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?;
     for (id, a) in acc {
         let grp = most_common(&a.groups);
         let face_id = grp.as_ref().and_then(|g| faces.get(g)).cloned();
         let flagged = a.read > 0 && a.edits == a.read;
-        if !a.explicit && a.versions.is_empty() && a.editions.is_empty() && grp.is_none() && !flagged {
+        let rel = provenance::album_release(&a.releases);
+        if !a.explicit && a.versions.is_empty() && a.editions.is_empty() && grp.is_none() && !flagged && rel.status.is_none() {
             continue;
         }
         ins.execute(params![
@@ -280,7 +371,9 @@ pub fn refresh_albums(c: &Connection) -> AppResult<()> {
             most_common(&a.editions),
             grp,
             flagged as i64,
-            face_id
+            face_id,
+            rel.status.map(FileRelease::key),
+            rel.mixed as i64
         ])?;
     }
     Ok(())
@@ -377,6 +470,54 @@ pub fn album_version(c: &Connection, album_id: &str) -> AppResult<Option<String>
         .flatten())
 }
 
+// What the release rule (`db::release`) reads as a "version" in SQL: for a
+// file `coalesce(f.version, f.release)` (its ARCHIVE_VERSION, else its
+// status from whichever tags it has), for an album `coalesce(at.version,
+// at.release)`, and for a song `coalesce(f.version, f.release, at.version,
+// at.release)`. Where a check read only the file before, the album's status
+// joins only when the album has no ARCHIVE_VERSION, so Platter's own tags
+// keep the same answers.
+
+/// One file's status and provenance note, if read.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackRelease {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<FileRelease>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+}
+
+impl TrackRelease {
+    pub fn is_empty(&self) -> bool {
+        self.status.is_none() && self.provenance.is_none()
+    }
+}
+
+/// A track's own status by its file's tags (unknown when not read).
+pub fn track_release(c: &Connection, track_id: &str) -> AppResult<TrackRelease> {
+    let row: Option<(Option<String>, Option<String>)> = c
+        .prepare_cached(
+            "SELECT f.release, f.provenance FROM tracks t JOIN file_tags f ON f.part_key = t.part_key
+             WHERE t.id = ?1 AND f.status = 'ok'",
+        )?
+        .query_row([track_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let (s, p) = row.unwrap_or_default();
+    Ok(TrackRelease { status: s.as_deref().and_then(FileRelease::from_key), provenance: p })
+}
+
+/// An album's status by its files' tags, and whether it's mixed.
+pub fn album_release(c: &Connection, album_id: &str) -> AppResult<provenance::AlbumRelease> {
+    let row: Option<(Option<String>, i64)> = c
+        .prepare_cached("SELECT release, mixed FROM album_tags WHERE album_id = ?1")?
+        .query_row([album_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    Ok(row
+        .map(|(s, m)| provenance::AlbumRelease { status: s.as_deref().and_then(FileRelease::from_key), mixed: m != 0 })
+        .unwrap_or_default())
+}
+
 // ------------------------------------------------------------------ UI index
 
 /// Badges for one song (only songs with something to show are listed).
@@ -392,6 +533,12 @@ pub struct TrackBadges {
     /// A fan or AI edit.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub edit: bool,
+    /// The file's release status from whichever tags it has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release: Option<FileRelease>,
+    /// Where the file came from, as tagged (VERSION, else ARCHIVE_SOURCE).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
 }
 
 /// What the tags say about one album.
@@ -406,6 +553,12 @@ pub struct AlbumBadges {
     pub group: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edition: Option<String>,
+    /// The album's status by its files' tags.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release: Option<FileRelease>,
+    /// Some files are released and some aren't.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mixed: bool,
 }
 
 /// One edition in a group, for the album page's picker.
@@ -434,9 +587,10 @@ pub fn index(c: &Connection) -> AppResult<TagIndex> {
     let mut out = TagIndex::default();
     {
         let mut st = c.prepare_cached(
-            "SELECT t.id, f.explicit, f.version, f.quality, f.flags
+            "SELECT t.id, f.explicit, f.version, f.quality, f.flags, f.release, f.provenance
              FROM tracks t JOIN file_tags f ON f.part_key = t.part_key
-             WHERE f.status = 'ok' AND (f.explicit = 1 OR f.version IS NOT NULL OR f.quality IS NOT NULL OR f.flags IS NOT NULL)",
+             WHERE f.status = 'ok' AND (f.explicit = 1 OR f.version IS NOT NULL OR f.quality IS NOT NULL OR f.flags IS NOT NULL
+                   OR f.release IS NOT NULL OR f.provenance IS NOT NULL)",
         )?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
@@ -448,6 +602,8 @@ pub fn index(c: &Connection) -> AppResult<TagIndex> {
                     version: r.get(2)?,
                     quality: r.get(3)?,
                     edit: is_edit(flags.as_deref()),
+                    release: r.get::<_, Option<String>>(5)?.as_deref().and_then(FileRelease::from_key),
+                    provenance: r.get(6)?,
                 },
             );
         }
@@ -455,7 +611,8 @@ pub fn index(c: &Connection) -> AppResult<TagIndex> {
     let mut faces: HashMap<String, String> = HashMap::new();
     {
         let mut st = c.prepare_cached(
-            "SELECT a.album_id, a.explicit, a.version, a.grp, a.edition, a.face_id, al.title, al.year, al.added_at
+            "SELECT a.album_id, a.explicit, a.version, a.grp, a.edition, a.face_id, al.title, al.year, al.added_at,
+                    a.release, a.mixed
              FROM album_tags a JOIN albums al ON al.id = a.album_id",
         )?;
         let mut rows = st.query([])?;
@@ -475,7 +632,14 @@ pub fn index(c: &Connection) -> AppResult<TagIndex> {
             }
             out.albums.insert(
                 id,
-                AlbumBadges { explicit: r.get::<_, i64>(1)? != 0, version: r.get(2)?, group, edition },
+                AlbumBadges {
+                    explicit: r.get::<_, i64>(1)? != 0,
+                    version: r.get(2)?,
+                    group,
+                    edition,
+                    release: r.get::<_, Option<String>>(9)?.as_deref().and_then(FileRelease::from_key),
+                    mixed: r.get::<_, i64>(10)? != 0,
+                },
             );
         }
         for (g, mut m) in members {

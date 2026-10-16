@@ -45,6 +45,8 @@ pub struct Song {
     pub track_artist: Option<String>,
     /// ARCHIVE_VERSION of the song's file.
     pub version: Option<String>,
+    /// The file's status by its release status tags (`tags::provenance`).
+    pub release: Option<String>,
     /// ARCHIVE_GROUP of the file, else of the album.
     pub group: Option<String>,
     pub recording_mbid: Option<String>,
@@ -136,8 +138,13 @@ pub fn song_statuses(songs: &[Song], groups: &[String], facts: &HashMap<String, 
         .iter()
         .map(|s| {
             let mut f = facts.get(&s.album_id).cloned().unwrap_or_default();
+            // The song's own file tags come before its album's.
             if let Some(v) = s.version.as_deref().filter(|v| !v.trim().is_empty()) {
                 f.version = Some(v.to_string());
+            } else if let Some(r) = s.release.as_deref() {
+                f.version = None;
+                f.release = Some(r.to_string());
+                f.mixed = false;
             }
             f.mark = release::mark_for(&s.album_id, Some(&s.id));
             release::status_of(&f)
@@ -167,7 +174,7 @@ pub fn song_statuses(songs: &[Song], groups: &[String], facts: &HashMap<String, 
 }
 
 const SONGS: &str = "SELECT t.id, t.artist_id, t.album_id, t.title, t.album_title, t.artist_title, t.track_artist,
-            f.version, coalesce(nullif(trim(f.grp), ''), at.grp), f.recording_mbid, t.mbid
+            f.version, coalesce(nullif(trim(f.grp), ''), at.grp), f.recording_mbid, t.mbid, f.release
      FROM tracks t
      LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'
      LEFT JOIN album_tags at ON at.album_id = t.album_id";
@@ -187,6 +194,7 @@ fn load_songs(c: &Connection, filter: &str, args: &[&dyn ToSql]) -> AppResult<Ve
             group: r.get(8)?,
             recording_mbid: r.get(9)?,
             plex_mbid: r.get(10)?,
+            release: r.get(11)?,
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -284,9 +292,12 @@ pub fn song_status(c: &Connection, track_id: &str) -> AppResult<Option<(SongStat
         .optional()?)
 }
 
-/// Fill in each song's status and how many other versions it has.
+/// Fill in each song's status, what its file's tags say about where it came
+/// from, and how many other versions it has.
 pub fn annotate(c: &Connection, tracks: &mut [Track], show_edits: bool) -> AppResult<()> {
     for t in tracks.iter_mut() {
+        let file = crate::tags::store::track_release(c, &t.id)?;
+        t.file_release = (!file.is_empty()).then_some(file);
         if let Some((s, _)) = song_status(c, &t.id)? {
             t.song_status = Some(s);
             let n = other_ids(c, &t.id, show_edits)?.len() as u32;

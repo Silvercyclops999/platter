@@ -637,7 +637,7 @@ impl EditHooks for AppEditHooks {
                 use rusqlite::OptionalExtension;
                 let row = c
                     .query_row(
-                        "SELECT al.format, al.subformats, at.version, al.studio, al.matched, mc.found FROM albums al
+                        "SELECT al.format, al.subformats, coalesce(at.version, at.release), al.studio, al.matched, mc.found FROM albums al
                          LEFT JOIN album_tags at ON at.album_id = al.id
                          LEFT JOIN album_mb_check mc ON mc.album_id = al.id WHERE al.id = ?1",
                         [&id],

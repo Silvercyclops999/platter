@@ -194,7 +194,7 @@ impl Unreleased for CacheUnreleased {
         let part = track.part_key.clone();
         let row = self.0.read(move |c| {
             Ok(c.query_row(
-                "SELECT al.format, al.subformats, coalesce(f.version, at.version), al.studio, al.matched, mc.found FROM albums al
+                "SELECT al.format, al.subformats, coalesce(f.version, f.release, at.version, at.release), al.studio, al.matched, mc.found FROM albums al
                  LEFT JOIN album_tags at ON at.album_id = al.id
                  LEFT JOIN album_mb_check mc ON mc.album_id = al.id
                  LEFT JOIN file_tags f ON f.part_key = ?2 AND f.status = 'ok'

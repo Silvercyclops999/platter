@@ -67,9 +67,11 @@ pub fn release_section<S: AsRef<str>>(format: Option<&str>, subformats: &[S]) ->
 /// Whether an album counts as unreleased, so it never gets a public link.
 ///
 /// The one place that decides it: a demo release type (format or any
-/// subformat), or an ARCHIVE_VERSION read from the files that isn't a
-/// released one (see [`version_is_unreleased`]). For an album, pass the
-/// version most of its files carry.
+/// subformat), or a version read from the files that isn't a released one
+/// (see [`version_is_unreleased`]). The version is ARCHIVE_VERSION, else the
+/// file's status from whichever tags it carries (`tags::provenance`; the
+/// SQL forms are noted in `tags::store`). For an album, pass the version
+/// most of its files carry, else its status from its files.
 ///
 /// With [`count_unmatched`] on (the default), an album Plex couldn't match
 /// counts as probably unreleased too, until it's tagged. `matched` comes
@@ -261,6 +263,12 @@ pub struct AlbumFacts {
     pub matched: Option<bool>,
     pub studio: Option<String>,
     pub version: Option<String>,
+    /// The album's status by its files' release status tags (STATUS,
+    /// RELEASESTATUS or a custom tag, `tags::provenance::album_release`).
+    /// ARCHIVE_VERSION in `version` comes first.
+    pub release: Option<String>,
+    /// Its files mix released and other material.
+    pub mixed: bool,
     pub mb_found: Option<bool>,
     pub mark: Option<Mark>,
     /// Folder keywords found on the songs' paths ([`folder_hits`]).
@@ -308,8 +316,10 @@ pub fn release_status<S: AsRef<str>>(
 
 /// The status and every piece of evidence, strongest rule first:
 ///
-/// 1. File tags: a demo release type, or an ARCHIVE_VERSION. Final; a mark
-///    that disagrees is listed as overridden.
+/// 1. File tags: a demo release type, an ARCHIVE_VERSION, or else the
+///    status the files' release status tags give the album (disc 1
+///    decides, so an official album with a disc of extras stays official).
+///    Final; a mark that disagrees is listed as overridden.
 /// 2. The user's mark. Final otherwise.
 /// 3. Any other release type: released.
 /// 4. Plex matched it: released.
@@ -351,6 +361,22 @@ fn decide(f: &AlbumFacts, explain: bool) -> (ReleaseStatus, Vec<Evidence>) {
         let unreleased = version_is_unreleased(v);
         let w = if unreleased { W_TAG } else { -W_TAG };
         note(&mut ev, explain, EvidenceKind::Tag, || format!("Its files are tagged as version \"{v}\"."), w, true);
+        if overridden(unreleased) {
+            note(&mut ev, explain, EvidenceKind::MarkOverridden, || OVERRIDDEN.into(), 0, false);
+        }
+        if unreleased { ReleaseStatus::TaggedUnreleased } else { ReleaseStatus::Released }
+    } else if let Some(r) = f.release.as_deref().and_then(crate::tags::provenance::FileRelease::from_key) {
+        let unreleased = !r.is_released();
+        let text = || {
+            if unreleased {
+                format!("Its files are tagged as {}.", r.label())
+            } else if f.mixed {
+                "Most songs on its first disc are tagged as released.".to_string()
+            } else {
+                "Its files are tagged as released.".to_string()
+            }
+        };
+        note(&mut ev, explain, EvidenceKind::Tag, text, if unreleased { W_TAG } else { -W_TAG }, true);
         if overridden(unreleased) {
             note(&mut ev, explain, EvidenceKind::MarkOverridden, || OVERRIDDEN.into(), 0, false);
         }
@@ -407,6 +433,14 @@ fn decide(f: &AlbumFacts, explain: bool) -> (ReleaseStatus, Vec<Evidence>) {
         }
     };
     if explain {
+        if f.mixed {
+            ev.push(Evidence {
+                kind: EvidenceKind::Tag,
+                text: "Some of its songs are tagged as released and some as unreleased, leaked or alternate.".into(),
+                weight: 0,
+                decides: false,
+            });
+        }
         for k in &f.folders {
             ev.push(Evidence { kind: EvidenceKind::Folder, text: format!("Folder name: {k}"), weight: W_FOLDER, decides: false });
         }
@@ -569,12 +603,13 @@ pub fn set_use_musicbrainz(on: bool) {
     #[cfg(test)]
     USE_MUSICBRAINZ.with(|c| c.set(on));
 }
-/// ARCHIVE_VERSION values that mean the music was never released. Remix and
+/// ARCHIVE_VERSION values that mean the music was never released, and the
+/// file statuses `tags::provenance` gives ("leaked" among them). Remix and
 /// live versions can be released ones, so they don't count on their own.
 pub fn version_is_unreleased(v: &str) -> bool {
     matches!(
         v.trim().to_ascii_lowercase().as_str(),
-        "unreleased" | "leak" | "demo" | "snippet" | "session" | "build" | "alternate"
+        "unreleased" | "leak" | "leaked" | "demo" | "snippet" | "session" | "build" | "alternate"
     )
 }
 

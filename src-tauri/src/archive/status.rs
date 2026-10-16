@@ -14,7 +14,7 @@ use serde::Serialize;
 use crate::db::release::{self, AlbumFacts, Evidence, Mark, ReleaseStatus, SNIPPET_MS};
 use crate::error::AppResult;
 
-const ALBUMS: &str = "SELECT al.id, al.artist_id, al.format, al.subformats, al.matched, al.studio, mc.found, at.version
+const ALBUMS: &str = "SELECT al.id, al.artist_id, al.format, al.subformats, al.matched, al.studio, mc.found, at.version, at.release, at.mixed
      FROM albums al
      LEFT JOIN album_mb_check mc ON mc.album_id = al.id
      LEFT JOIN album_tags at ON at.album_id = al.id";
@@ -42,6 +42,8 @@ pub fn load_facts(
                 studio: r.get(5)?,
                 mb_found: r.get(6)?,
                 version: r.get(7)?,
+                release: r.get(8)?,
+                mixed: r.get::<_, Option<i64>>(9)?.unwrap_or(0) != 0,
                 mark: release::mark_for(&id, None),
                 ..Default::default()
             };
@@ -120,6 +122,9 @@ pub struct AlbumReleaseStatus {
     pub mark: Option<Mark>,
     /// The weights summed: how strongly it leans unreleased.
     pub score: i32,
+    /// Its files mix released songs with unreleased, leaked or alternate
+    /// ones (by their release status tags).
+    pub mixed: bool,
 }
 
 /// An album's status worked out now, with everything behind it.
@@ -131,6 +136,7 @@ pub fn album_status(c: &Connection, album_id: &str) -> AppResult<Option<AlbumRel
             reasons: evidence.iter().map(|e| e.text.clone()).collect(),
             score: release::score(&evidence),
             mark: f.mark,
+            mixed: f.mixed,
             id,
             artist_id,
             status,

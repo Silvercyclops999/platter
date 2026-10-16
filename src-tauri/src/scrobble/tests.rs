@@ -65,6 +65,7 @@ fn track(id: &str, ms: u64) -> Track {
         file: None,
         other_versions: None,
         song_status: None,
+        file_release: None,
         rated_at: None,
         genres: vec![],
     }

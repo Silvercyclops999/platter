@@ -1025,11 +1025,52 @@ CREATE TABLE IF NOT EXISTS lyrics_share (
     shared_at   INTEGER
 ) WITHOUT ROWID;
 "#,
+    // v35: release status from whichever tags a library uses
+    // (tags::provenance). file_tags keeps the raw STATUS, VERSION, Picard
+    // release status and type and the custom tag's value (with the tag name
+    // it was read for), plus the file's status and provenance note worked
+    // out from them. album_tags keeps the album's status from its files and
+    // whether it mixes released and other material.
+    r#"
+ALTER TABLE file_tags ADD COLUMN tag_status TEXT;
+ALTER TABLE file_tags ADD COLUMN version_note TEXT;
+ALTER TABLE file_tags ADD COLUMN mb_status TEXT;
+ALTER TABLE file_tags ADD COLUMN mb_type TEXT;
+ALTER TABLE file_tags ADD COLUMN custom_status TEXT;
+ALTER TABLE file_tags ADD COLUMN custom_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE file_tags ADD COLUMN release TEXT;
+ALTER TABLE file_tags ADD COLUMN provenance TEXT;
+ALTER TABLE album_tags ADD COLUMN release TEXT;
+ALTER TABLE album_tags ADD COLUMN mixed INTEGER NOT NULL DEFAULT 0;
+"#,
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v35_keeps_release_status_tags_and_old_rows_read_again() {
+        let mut c = Connection::open_in_memory().unwrap();
+        migrate_to(&mut c, 34).unwrap();
+        c.execute("INSERT INTO file_tags (part_key, status, scanned_at, ver) VALUES ('/p/1', 'ok', 1, 2)", []).unwrap();
+        c.execute("INSERT INTO album_tags (album_id, version) VALUES ('al', 'leak')", []).unwrap();
+        migrate(&mut c).unwrap();
+        let (key, release): (String, Option<String>) =
+            c.query_row("SELECT custom_key, release FROM file_tags WHERE part_key = '/p/1'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((key.as_str(), release), ("", None), "Auto, nothing worked out yet");
+        let (version, mixed): (String, i64) =
+            c.query_row("SELECT version, mixed FROM album_tags WHERE album_id = 'al'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((version.as_str(), mixed), ("leak", 0));
+        c.execute(
+            "UPDATE file_tags SET tag_status = 'Leaked', version_note = 'OG file', mb_status = 'bootleg', mb_type = 'album',
+                 custom_status = 'x', provenance = 'OG file', release = 'leaked' WHERE part_key = '/p/1'",
+            [],
+        )
+        .unwrap();
+        // Rows an older build read are read again for the new tags.
+        const { assert!(2 < crate::tags::CACHE_VERSION) };
+    }
 
     #[test]
     fn play_times_written_in_seconds_move_to_ms() {

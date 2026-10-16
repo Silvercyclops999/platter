@@ -164,7 +164,7 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
     {
         let mut st = c.prepare(
             "SELECT al.id, al.artist_id, al.thumb, al.added_at, al.genres, al.styles, al.moods, al.format, al.subformats, al.studio,
-                    at.version, al.matched, mc.found
+                    coalesce(at.version, at.release), al.matched, mc.found
              FROM albums al LEFT JOIN album_tags at ON at.album_id = al.id
              LEFT JOIN album_mb_check mc ON mc.album_id = al.id",
         )?;
@@ -208,7 +208,7 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
     {
         let mut st = c.prepare(
             "SELECT t.id, t.artist_id, t.album_id, t.track_number, t.duration_ms, t.genres, t.user_rating,
-                    t.view_count, t.last_viewed_at, f.explicit, f.flags, f.version
+                    t.view_count, t.last_viewed_at, f.explicit, f.flags, coalesce(f.version, f.release)
              FROM tracks t LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'",
         )?;
         let mut rows = st.query([])?;

@@ -303,14 +303,14 @@ pub struct CopyInfo {
     pub unreleased: bool,
 }
 
-/// A track's album info for picking a copy. The file's ARCHIVE_VERSION wins
-/// over the album's. Asked only for tracks that match a list entry.
+/// A track's album info for picking a copy. The file's ARCHIVE_VERSION (else
+/// its release status tags) wins over the album's. Asked only for tracks that match a list entry.
 pub fn copy_info(c: &Connection, t: &Track) -> AppResult<CopyInfo> {
     let row = c
         .prepare_cached(
             "SELECT al.year, al.format, al.subformats, al.section,
-                    coalesce((SELECT ft.version FROM file_tags ft WHERE ft.part_key = ?2),
-                             (SELECT at.version FROM album_tags at WHERE at.album_id = ?1)),
+                    coalesce((SELECT coalesce(ft.version, ft.release) FROM file_tags ft WHERE ft.part_key = ?2),
+                             (SELECT coalesce(at.version, at.release) FROM album_tags at WHERE at.album_id = ?1)),
                     al.studio, al.matched, mc.found
              FROM albums al LEFT JOIN album_mb_check mc ON mc.album_id = al.id WHERE al.id = ?1",
         )?

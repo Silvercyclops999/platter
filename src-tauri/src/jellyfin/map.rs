@@ -182,6 +182,7 @@ pub fn track(tag: &str, it: &Item, liked_at: impl Fn(&str) -> Option<i64>) -> Tr
         file: source.and_then(|s| s.path.clone()).or_else(|| it.path.clone()),
         other_versions: None,
         song_status: None,
+        file_release: None,
         id,
     }
 }

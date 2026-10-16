@@ -190,6 +190,6 @@ pub async fn read_tags(reader: &Reader, src: &StreamSource, container: Option<&s
     }
     match parse(&s, true) {
         Step::Done(t) => Ok(t),
-        Step::Need { .. } => Ok(FileTags::default()),
+        Step::Need { .. } => Ok(FileTags::for_read()),
     }
 }

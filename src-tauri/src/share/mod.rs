@@ -134,9 +134,12 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
         ShareKind::Track => c
             .query_row(
                 "SELECT t.title, t.album_id, t.album_title, t.artist_title, t.track_artist, t.duration_ms,
-                        al.format, al.subformats, ft.version, al.studio, al.matched, mc.found
+                        al.format, al.subformats,
+                        coalesce(ft.version, ft.release, CASE WHEN at.version IS NULL THEN at.release END),
+                        al.studio, al.matched, mc.found
                  FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                  LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
+                 LEFT JOIN album_tags at ON at.album_id = t.album_id
                  LEFT JOIN file_tags ft ON ft.part_key = t.part_key WHERE t.id = ?1",
                 params![id],
                 |r| {
@@ -166,7 +169,7 @@ fn load_item(c: &Connection, kind: ShareKind, id: &str) -> AppResult<Option<Item
             .optional()?,
         ShareKind::Album => c
             .query_row(
-                "SELECT al.title, al.artist_title, al.track_count, al.format, al.subformats, at.version, al.studio, al.matched, mc.found
+                "SELECT al.title, al.artist_title, al.track_count, al.format, al.subformats, coalesce(at.version, at.release), al.studio, al.matched, mc.found
                  FROM albums al LEFT JOIN album_tags at ON at.album_id = al.id
                  LEFT JOIN album_mb_check mc ON mc.album_id = al.id WHERE al.id = ?1",
                 params![id],

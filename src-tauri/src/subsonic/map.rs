@@ -184,6 +184,7 @@ pub fn track(tag: &str, s: &Song) -> Track {
         file: s.path.clone().filter(|p| !p.trim().is_empty()),
         other_versions: None,
         song_status: None,
+        file_release: None,
     }
 }
 

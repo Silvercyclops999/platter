@@ -196,7 +196,7 @@ pub struct LibAlbum {
 pub fn library(c: &Connection) -> AppResult<Vec<LibAlbum>> {
     use crate::db::release::album_unreleased;
     let mut st = c.prepare_cached(
-        "SELECT al.id, al.title, al.artist_title, al.thumb, al.view_count, al.format, al.subformats, al.matched, al.studio, at.version, mc.found
+        "SELECT al.id, al.title, al.artist_title, al.thumb, al.view_count, al.format, al.subformats, al.matched, al.studio, coalesce(at.version, at.release), mc.found
          FROM albums al
          LEFT JOIN album_tags at ON at.album_id = al.id
          LEFT JOIN album_mb_check mc ON mc.album_id = al.id

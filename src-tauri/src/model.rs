@@ -144,6 +144,10 @@ pub struct Track {
     /// The song's own release status, on pages that fill it in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub song_status: Option<SongStatus>,
+    /// What the song's file tags say about where it came from (status and
+    /// provenance note), on pages that fill it in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_release: Option<crate::tags::store::TrackRelease>,
 }
 
 /// One song's release status (`archive::songs`).

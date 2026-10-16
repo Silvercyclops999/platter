@@ -1152,7 +1152,7 @@ pub struct AlbumSubject {
 pub fn album_subject(c: &Connection, id: &str) -> AppResult<Option<AlbumSubject>> {
     let row = c
         .query_row(
-            "SELECT al.title, al.artist_title, al.format, al.subformats, at.version, al.matched, al.studio, mc.found FROM albums al
+            "SELECT al.title, al.artist_title, al.format, al.subformats, coalesce(at.version, at.release), al.matched, al.studio, mc.found FROM albums al
              LEFT JOIN album_tags at ON at.album_id = al.id LEFT JOIN album_mb_check mc ON mc.album_id = al.id WHERE al.id = ?1",
             [id],
             |r| {

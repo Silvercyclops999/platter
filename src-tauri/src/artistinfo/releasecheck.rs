@@ -5,12 +5,16 @@
 //! sync, in the background, each such album's artist and title are looked
 //! up on MusicBrainz (through the shared one-a-second limiter, a few albums
 //! a minute). A sure release group match with an official release of about
-//! the same length means Plex missed the match: the album counts as
+//! the same length (counting the songs tagged released, else disc 1, so a
+//! disc of extras doesn't hide the match) means Plex missed the match: the album counts as
 //! released and its ids give Discord a Cover Art Archive cover. No match
 //! makes "probably unreleased" stronger. Answers live in `album_mb_check`
 //! and feed the one unreleased rule (`db::release`).
 //!
-//! Albums tagged as demos or with any ARCHIVE_VERSION are never looked up.
+//! Albums tagged as demos or with any ARCHIVE_VERSION are never looked up,
+//! nor albums whose release status tags (`tags::provenance`) rate them
+//! unreleased, leaked or alternate. An album those tags rate official is
+//! still looked up, for its Cover Art Archive cover.
 
 use std::time::Duration;
 
@@ -95,6 +99,8 @@ pub struct Candidate {
     pub album_id: String,
     pub artist: String,
     pub title: String,
+    /// The songs compared with an official release's length
+    /// ([`crate::tags::provenance::compare_count`]).
     pub track_count: usize,
 }
 
@@ -111,7 +117,11 @@ pub fn candidates(c: &Connection, now: i64) -> AppResult<Vec<Candidate>> {
         "SELECT al.id, al.artist_title, al.title, al.track_count, al.format, al.subformats, at.version,
                 (SELECT count(*) FROM tracks t WHERE t.album_id = al.id),
                 EXISTS (SELECT 1 FROM tracks t JOIN file_tags ft ON ft.part_key = t.part_key
-                        WHERE t.album_id = al.id AND trim(coalesce(ft.version, '')) != '')
+                        WHERE t.album_id = al.id AND trim(coalesce(ft.version, '')) != ''),
+                (SELECT count(*) FROM tracks t JOIN file_tags ft ON ft.part_key = t.part_key AND ft.status = 'ok'
+                        WHERE t.album_id = al.id AND ft.release = 'released'),
+                (SELECT count(*) FROM tracks t WHERE t.album_id = al.id AND coalesce(t.disc_number, 0) <= 1),
+                at.release
          FROM albums al
          LEFT JOIN album_tags at ON at.album_id = al.id
          LEFT JOIN album_mb_check mc ON mc.album_id = al.id
@@ -129,21 +139,29 @@ pub fn candidates(c: &Connection, now: i64) -> AppResult<Vec<Candidate>> {
             r.get::<_, Option<String>>(6)?,
             r.get::<_, i64>(7)?,
             r.get::<_, bool>(8)?,
+            r.get::<_, i64>(9)?,
+            r.get::<_, i64>(10)?,
+            r.get::<_, Option<String>>(11)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (album_id, artist, title, count, format, subs, version, tracks, file_versions) = row?;
+        let (album_id, artist, title, count, format, subs, version, tracks, file_versions, released, disc_one, status) = row?;
         let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
         if !untagged(format.as_deref(), &subs, version.as_deref(), file_versions) {
+            continue;
+        }
+        if status.as_deref().is_some_and(|s| s != crate::tags::provenance::FileRelease::Released.key()) {
             continue;
         }
         let (Some(artist), Some(title)) = (artist.filter(|a| !a.trim().is_empty()), title.filter(|t| !t.trim().is_empty()))
         else {
             continue;
         };
-        let track_count = if tracks > 0 { tracks } else { count.unwrap_or(0) };
-        out.push(Candidate { album_id, artist, title, track_count: track_count.max(0) as usize });
+        let all = if tracks > 0 { tracks } else { count.unwrap_or(0) };
+        let n = |x: i64| x.max(0) as usize;
+        let track_count = crate::tags::provenance::compare_count(n(released), n(disc_one), n(all));
+        out.push(Candidate { album_id, artist, title, track_count });
     }
     Ok(out)
 }
@@ -162,7 +180,7 @@ pub struct AlbumReleaseStatus {
 pub fn album_status(c: &Connection, album_id: &str) -> AppResult<Option<AlbumReleaseStatus>> {
     let row = c
         .query_row(
-            "SELECT al.format, al.subformats, at.version, al.studio, al.matched, mc.found FROM albums al
+            "SELECT al.format, al.subformats, coalesce(at.version, at.release), al.studio, al.matched, mc.found FROM albums al
              LEFT JOIN album_tags at ON at.album_id = al.id
              LEFT JOIN album_mb_check mc ON mc.album_id = al.id WHERE al.id = ?1",
             params![album_id],

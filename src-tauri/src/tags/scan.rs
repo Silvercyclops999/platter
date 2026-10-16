@@ -92,9 +92,9 @@ fn outcome(r: Result<FileTags, FetchError>) -> Result<(Status, FileTags), String
         Ok(t) => Ok((Status::Ok, t)),
         Err(FetchError::File(e)) => {
             tracing::debug!("tag read failed: {e}");
-            Ok((Status::Failed, FileTags::default()))
+            Ok((Status::Failed, FileTags::for_read()))
         }
-        Err(FetchError::RangeRefused) => Ok((Status::Skipped, FileTags::default())),
+        Err(FetchError::RangeRefused) => Ok((Status::Skipped, FileTags::for_read())),
         Err(FetchError::Transient(e)) => Err(e),
     }
 }
@@ -126,6 +126,33 @@ impl TagScanner {
             self.emit_progress();
             self.0.wake.notify_one();
         }
+    }
+
+    /// The status tag or its values changed in Settings: work every file's
+    /// status out again from the tags already read (then tell the UI), and
+    /// look for files to read again for a new tag name.
+    pub fn restatus(&self) {
+        let me = self.clone();
+        std::thread::spawn(move || {
+            let r = me.0.db.write(|c| {
+                let mut changed = false;
+                crate::archive::in_tx(c, |c| {
+                    changed = store::restatus(c)?;
+                    Ok(())
+                })?;
+                Ok(changed)
+            });
+            match r {
+                Ok(true) => {
+                    if let Some(ev) = &me.0.events {
+                        ev.changed();
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => tracing::warn!("file status refresh failed: {e}"),
+            }
+            me.0.wake.notify_one();
+        });
     }
 
     /// Look for new or changed files now (after a library sync).

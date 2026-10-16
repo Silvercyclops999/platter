@@ -431,6 +431,7 @@ mod tests {
             file: None,
             other_versions: None,
             song_status: None,
+            file_release: None,
             rated_at: None,
             genres: Vec::new(),
         }

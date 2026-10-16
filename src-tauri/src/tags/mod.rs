@@ -9,11 +9,13 @@
 //! - [`store`]  the SQLite cache (keyed by part key) and what's derived from it
 //! - [`scan`]   the background scanner: lowest priority, yields to playback
 //! - [`view`]   shapes library pages by the tags (editions, fan edits)
+//! - [`provenance`] each file's release status, whichever tags carry it
 //! - [`commands`] Tauri commands and events (docs/IPC.md "File tags")
 
 pub mod commands;
 pub mod fetch;
 pub mod parse;
+pub mod provenance;
 pub mod scan;
 pub mod store;
 pub mod view;
@@ -22,6 +24,8 @@ pub mod view;
 mod live_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod provenance_tests;
 
 use serde::{Deserialize, Serialize};
 
@@ -52,15 +56,31 @@ pub struct FileTags {
     pub album_artist: Option<String>,
     /// The year its date starts with (DATE or YEAR, ID3 TDRC or TYER, MP4 "©day").
     pub year: Option<i32>,
+    /// A plain STATUS tag as written ("Released", "Leaked").
+    pub status_tag: Option<String>,
+    /// A plain VERSION tag as written: free text kept as the provenance
+    /// note ("OG file"), never read as ARCHIVE_VERSION.
+    pub version_note: Option<String>,
+    /// MusicBrainz Picard's release status (RELEASESTATUS, or "MusicBrainz
+    /// Album Status" in ID3 and MP4).
+    pub mb_status: Option<String>,
+    /// MusicBrainz Picard's release type (RELEASETYPE, or "MusicBrainz
+    /// Album Type").
+    pub mb_type: Option<String>,
+    /// The value of the custom release status tag (Settings), as written.
+    pub custom_status: Option<String>,
+    /// The custom tag name this read looked for (upper case); None for Auto.
+    pub custom_key: Option<String>,
 }
 
 /// Raised whenever the parsers start keeping something new, so files read
 /// by an older build are read again (at the scan's background priority).
 /// 1: ISRC and the MusicBrainz recording id.
 /// 2: album, album artist and year (the library doctor compares them).
-pub const CACHE_VERSION: i64 = 2;
+/// 3: STATUS, VERSION and Picard's release status and type.
+pub const CACHE_VERSION: i64 = 3;
 
-const KEYS: [&str; 20] = [
+const KEYS: &[&str] = &[
     "ARCHIVE_VERSION",
     "ARCHIVE_ERA",
     "ARCHIVE_QUALITY",
@@ -81,6 +101,14 @@ const KEYS: [&str; 20] = [
     "ALBUM_ARTIST",
     "DATE",
     "YEAR",
+    "STATUS",
+    "VERSION",
+    "RELEASESTATUS",
+    "MUSICBRAINZ ALBUM STATUS",
+    "MUSICBRAINZ_ALBUMSTATUS",
+    "RELEASETYPE",
+    "MUSICBRAINZ ALBUM TYPE",
+    "MUSICBRAINZ_ALBUMTYPE",
 ];
 
 impl FileTags {
@@ -88,6 +116,16 @@ impl FileTags {
     pub fn wants(key: &str) -> bool {
         let k = key.trim();
         KEYS.iter().any(|w| w.eq_ignore_ascii_case(k))
+    }
+
+    /// Empty tags for a read that looks for the custom status tag in effect.
+    pub fn for_read() -> Self {
+        Self { custom_key: provenance::custom_key(), ..Default::default() }
+    }
+
+    /// Whether this read keeps a tag: one of ours, or the custom status tag.
+    pub fn keeps(&self, key: &str) -> bool {
+        Self::wants(key) || self.custom_key.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(key.trim()))
     }
 
     pub fn set_explicit(&mut self, v: Option<bool>) {
@@ -108,6 +146,9 @@ impl FileTags {
                 *slot = Some(v);
             }
         };
+        if self.custom_key.as_deref() == Some(key.as_str()) {
+            first(&mut self.custom_status, v.to_string());
+        }
         match key.as_str() {
             "ARCHIVE_VERSION" => first(&mut self.version, v.to_lowercase()),
             "ARCHIVE_ERA" => first(&mut self.era, v.to_string()),
@@ -146,6 +187,10 @@ impl FileTags {
                 }
             }
             "ALBUM" => first(&mut self.album, v.to_string()),
+            "STATUS" => first(&mut self.status_tag, v.to_string()),
+            "VERSION" => first(&mut self.version_note, v.to_string()),
+            "RELEASESTATUS" | "MUSICBRAINZ ALBUM STATUS" | "MUSICBRAINZ_ALBUMSTATUS" => first(&mut self.mb_status, v.to_string()),
+            "RELEASETYPE" | "MUSICBRAINZ ALBUM TYPE" | "MUSICBRAINZ_ALBUMTYPE" => first(&mut self.mb_type, v.to_string()),
             "ALBUMARTIST" | "ALBUM ARTIST" | "ALBUM_ARTIST" => first(&mut self.album_artist, v.to_string()),
             "DATE" | "YEAR" => {
                 if self.year.is_none() {

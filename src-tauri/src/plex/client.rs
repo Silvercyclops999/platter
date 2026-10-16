@@ -738,6 +738,7 @@ impl PlexMetadata {
             file: part.and_then(|p| p.file.clone()).filter(|f| !f.is_empty()),
             other_versions: None,
             song_status: None,
+            file_release: None,
         }
     }
 

@@ -83,7 +83,7 @@ fn need(s: &Sparse, offset: u64, len: usize) -> R<&[u8]> {
 /// Parse whatever the pieces hold. With `last` set, missing bytes end the
 /// pass with what was found so far instead of asking for more.
 pub fn parse(s: &Sparse, last: bool) -> Step {
-    let mut tags = FileTags::default();
+    let mut tags = FileTags::for_read();
     let r = parse_into(s, &mut tags);
     match r {
         Err(Miss::Need(offset, len)) if !last => Step::Need { offset, len },
@@ -447,7 +447,7 @@ fn mp4(s: &Sparse, tags: &mut FileTags) -> R<()> {
                 if let (Some(n), Some(d)) = (name, data) {
                     let n = need(s, n.body, ((n.end - n.body) as usize).min(256))?;
                     let key = String::from_utf8_lossy(n.get(4..).unwrap_or(&[])).into_owned();
-                    if FileTags::wants(&key) {
+                    if tags.keeps(&key) {
                         let v = need(s, d.body, ((d.end - d.body) as usize).min(MAX_BLOCK))?;
                         let value = String::from_utf8_lossy(v.get(8..).unwrap_or(&[])).into_owned();
                         tags.set(&key, &value);

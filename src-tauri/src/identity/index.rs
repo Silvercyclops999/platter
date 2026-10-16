@@ -28,8 +28,8 @@ struct AlbumInfo {
 }
 
 const SOURCE: &str = "SELECT t.id, t.title, t.artist_id, t.artist_title, t.track_artist, t.album_title, t.duration_ms,
-            t.mbid, f.isrc, f.recording_mbid, f.version, t.album_id,
-            al.format, al.subformats, al.matched, al.studio, mc.found, at.version, al.id IS NOT NULL, si.recording_mbid
+            t.mbid, f.isrc, f.recording_mbid, coalesce(f.version, f.release), t.album_id,
+            al.format, al.subformats, al.matched, al.studio, mc.found, coalesce(at.version, at.release), al.id IS NOT NULL, si.recording_mbid
      FROM tracks t
      LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'
      LEFT JOIN albums al ON al.id = t.album_id

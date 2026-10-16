@@ -507,11 +507,18 @@ by title). Unreleased albums are never looked up (`none`). MusicBrainz is
 asked at most once a second with a user agent that names the app; a failed
 lookup waits ten minutes before it's tried again.
 
-`AlbumReleaseStatus = { id, artistId, status: "taggedUnreleased"|"confirmedUnreleased"|"probablyUnreleased"|"plexMissed"|"released", reasons: string[], evidence: Evidence[], mark: "unreleased"|"released"|null, score }`
+`AlbumReleaseStatus = { id, artistId, status: "taggedUnreleased"|"confirmedUnreleased"|"probablyUnreleased"|"plexMissed"|"released", reasons: string[], evidence: Evidence[], mark: "unreleased"|"released"|null, score, mixed }`
 with `Evidence = { kind: "tag"|"mark"|"markOverridden"|"unmatched"|"untyped"|"musicbrainz"|"notChecked"|"folder"|"duration", text, weight, decides }`.
 `reasons` are the evidence as plain sentences. Tags decide first: a demo
 release type or an unreleased `ARCHIVE_VERSION` is `taggedUnreleased`, and
-any other version tag is `released`. The user's mark comes next
+any other version tag is `released`. With no `ARCHIVE_VERSION`, the files'
+release status tags (see File tags) rate the album: when more than half of
+the disc 1 files with a known status are released it is `released`, whatever
+later discs hold, otherwise `taggedUnreleased`. `mixed` is true when its
+files hold both released songs and unreleased, leaked or alternate ones, so
+an official album with a disc of extras is `released` and `mixed`, and a
+build with a few released songs is `taggedUnreleased` and `mixed`. The
+user's mark comes next
 (`confirmedUnreleased` or `released`); a mark a tag disagrees with is listed
 as `markOverridden`. Then any other release type is `released`. An album
 Plex couldn't match with no tags is `probablyUnreleased` (while
@@ -524,11 +531,14 @@ each sync, tag scan, mark and change to the settings that feed it.
 
 The MusicBrainz check (`checkUnmatchedMusicbrainz`, needs MusicBrainz on)
 runs in the background after each library sync. For each album Plex couldn't
-match that has no release type and no version tag on the album or its files,
-it searches release groups by artist and title (edition notes like
-"(Deluxe)" left out) and takes a sure match only: score 100, the same folded
-title and the same artists, and an official release in the group whose track
-count is within 2 of the album's. Found answers are kept 30 days, misses 7
+match that has no release type and no version tag on the album or its files
+(and that its files' release status tags don't rate unreleased, leaked or
+alternate), it searches release groups by artist and title (edition notes
+like "(Deluxe)" left out) and takes a sure match only: score 100, the same
+folded title and the same artists, and an official release in the group
+whose track count is within 2 of the album's. The album's count is its songs
+tagged released, else its disc 1 songs, else all of them, so a disc of
+extras doesn't hide the match. Found answers are kept 30 days, misses 7
 days, in `album_mb_check`. It shares the one-a-second MusicBrainz pacing and
 pauses after each album so page lookups go first. A found album's release ids
 give Discord its Cover Art Archive cover, and a cover uploaded while it
@@ -611,7 +621,9 @@ released song has. That is still unreleased.
 
 Tracks on album, artist (Popular), playlist and search pages carry
 `otherVersions?` (other versions, leaving out fan and AI edits unless shown
-and copies on another server) and `songStatus?`.
+and copies on another server), `songStatus?` and `fileRelease?: { status?,
+provenance? }` (what the file's tags say, see File tags). A song whose file
+has a release status tag takes its own status from it before its album's.
 
 `VersionItem = { track, status, version?, quality?, date?, era?, edition?, year?, current }`,
 released versions first, then the newest by `ARCHIVE_DATE` or album year.
@@ -1094,9 +1106,34 @@ ISRC, then the recording id from file tags, else Plex's track id, then
 artist and title. The file's own album, album artist and year are kept too
 (Vorbis `ALBUM`, `ALBUMARTIST` or `ALBUM ARTIST`, `DATE` or `YEAR`; ID3
 `TALB`, `TPE2`, `TDRC` or `TYER`; MP4 `©alb`, `aART`, `©day`), for the
-library doctor. Each cached row carries the cache version it was read
-with; when a new version keeps more, older rows are read again after every
+library doctor. For each file's release status the core keeps `STATUS`,
+`VERSION` and MusicBrainz Picard's release status and type (Vorbis
+`RELEASESTATUS` and `RELEASETYPE`, ID3 `TXXX` and MP4 `----` items named
+`MusicBrainz Album Status` and `MusicBrainz Album Type`), plus the custom
+status tag when `releaseStatusTag` names one (Vorbis comment, ID3 `TXXX` or
+MP4 `----` item of that name). Each cached row carries the cache version it
+was read with and the custom tag name it was read for; when a new version
+keeps more, or the tag name changes, older rows are read again after every
 unread file, and they keep working until then.
+
+Each file gets one release status, `released`, `unreleased`, `leaked`,
+`alternate` or unknown, from the first of these with a known value:
+`ARCHIVE_VERSION` (leak is leaked, alternate is alternate, the other
+unreleased kinds are unreleased, any other version is released), then with
+`releaseStatusTag` on Auto `STATUS`, Picard's release status (official,
+promotion and withdrawn are released, bootleg and cancelled unreleased,
+pseudo-release unknown) and a Picard release type with a demo part
+(alternate), or else the custom tag. Values are compared in any case, with
+`_` and `-` as spaces and, failing that, without anything in brackets
+("Official release (web rip)" is released). `releaseStatusValues` come
+first, then the built-in values (released, official, retail, promo;
+unreleased, unofficial, bootleg, scrapped, vault; leak, leaked; alt,
+alternate, demo, og, og file, reference, snippet, session and a few more).
+A value none of them knows stays unknown and never counts as released. The
+provenance note is `VERSION` as written, else `ARCHIVE_SOURCE`. Changing
+`releaseStatusTag` or `releaseStatusValues` works every file's status out
+again from the tags already read (then `tags://changed`), and a new tag
+name reads the files again in the background.
 
 Reads go one at a time through the player's transfer gate at the lowest
 priority, below pre-caching, and only while playback has nothing left to
@@ -1108,15 +1145,24 @@ again and its old row dropped. A file that can't be read (404, bad data) is
 marked and left until it changes. Network or server trouble, or a relay-only
 connection, pauses the scan (`paused`) and it tries again a minute later.
 
-`tracks` maps track ids to `{ explicit?, version?, quality?, edit? }` (only
-songs with something to show). `albums` maps album ids to `{ explicit?,
-version?, group?, edition? }`: explicit when any song is, the most common
-version, edition and group. `groups` maps a group key to its editions
+`tracks` maps track ids to `{ explicit?, version?, quality?, edit?, release?,
+provenance? }` (only songs with something to show): `release` is the file's
+release status and `provenance` its note. `albums` maps album ids to `{
+explicit?, version?, group?, edition?, release?, mixed? }`: explicit when
+any song is, the most common version, edition and group, the album's status
+by its files' release status (disc 1 decides, see `AlbumReleaseStatus`) and
+whether its files mix released and other material. A song row's version
+badge shows `version`, else `release`. `groups` maps a group key to its editions
 `{ albumId, title, label, year }[]`, two or more, the face first. The face is
 the edition labelled Standard, else a released one, else the earliest.
 
 `ARCHIVE_VERSION` joins the unreleased check for sharing and Discord: any of
-unreleased, leak, demo, snippet, session, build or alternate counts. With
+unreleased, leak, leaked, demo, snippet, session, build or alternate counts.
+Without one, the file's release status does (unreleased, leaked and
+alternate count), and for an album the status its files give it. Every
+check that asks whether music is unreleased (sharing, Discord, scrobbling,
+mixes, smart playlists, Listen along, lyrics, the archive views and the
+song index) reads it this way. With
 `groupEditions` on, `albums`, `artist_page`, `home` and `home_shelf` leave out
 editions behind their face, and `album_page` leaves its own editions out of
 More by. Play contexts and album pages follow `explicitContent` and
@@ -2659,7 +2705,9 @@ The rest of the fields, with their defaults:
 | `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |
 | `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |
-| `countUnmatchedUnreleased` | bool, true | Albums Plex couldn't match (guid `local://`, or no release type and no label before the next sync) count as unreleased for sharing, Discord, scrobbling, mixes, smart playlists and lyrics transcription until a release type or `ARCHIVE_VERSION` says otherwise. Off: only demo release types and archive version tags count. |
+| `releaseStatusTag` | string, `""` | Where a file's release status is read from: `""` (Auto) reads `ARCHIVE_VERSION`, then `STATUS`, then Picard's release status and type; a tag name (up to 64 characters, no `=`; "auto" counts as Auto) reads that tag after `ARCHIVE_VERSION` instead. A new name reads the files again in the background. Synced. See File tags. |
+| `releaseStatusValues` | `{ value, status: "released"\|"unreleased"\|"leaked"\|"alternate" }[]`, `[]` | Custom values and what they mean, checked before the built-in ones. Up to 50, each up to 60 characters, trimmed; the same value (any case) again replaces the earlier one, and blank values are dropped. Synced. |
+| `countUnmatchedUnreleased` | bool, true | Albums Plex couldn't match (guid `local://`, or no release type and no label before the next sync) count as unreleased for sharing, Discord, scrobbling, mixes, smart playlists and lyrics transcription until a release type, `ARCHIVE_VERSION` or a release status tag (`releaseStatusTag`) says otherwise. Off: only demo release types, archive version tags and release status tags count. |
 | `checkUnmatchedMusicbrainz` | bool, true | Look albums Plex couldn't match up on MusicBrainz in the background (needs `infoMusicbrainz`). A sure match means Plex missed it and the album counts as released. Off, or with MusicBrainz off, stored answers stop counting. Synced. |
 | `groupEditions` | bool, true | Albums sharing `ARCHIVE_GROUP` list as one album (the face) in the library, artist pages and Home's album shelves. |
 | `plexEditShow` | bool, true | Edit in Plex on album and artist menus, for servers the account owns. Off refuses every edit. |

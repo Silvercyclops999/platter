@@ -24,7 +24,7 @@ use crate::model::{Album, ReleaseSection, Track};
 
 // ------------------------------------------------------------------ fixtures
 
-fn vorbis(entries: &[&str]) -> Vec<u8> {
+pub(super) fn vorbis(entries: &[&str]) -> Vec<u8> {
     let mut b = Vec::new();
     b.extend(4u32.to_le_bytes());
     b.extend(b"test");
@@ -36,7 +36,7 @@ fn vorbis(entries: &[&str]) -> Vec<u8> {
     b
 }
 
-fn flac(blocks: &[(u8, Vec<u8>)]) -> Vec<u8> {
+pub(super) fn flac(blocks: &[(u8, Vec<u8>)]) -> Vec<u8> {
     let mut b = b"fLaC".to_vec();
     for (i, (kind, body)) in blocks.iter().enumerate() {
         let last = if i + 1 == blocks.len() { 0x80 } else { 0 };
@@ -48,7 +48,7 @@ fn flac(blocks: &[(u8, Vec<u8>)]) -> Vec<u8> {
     b
 }
 
-fn streaminfo() -> (u8, Vec<u8>) {
+pub(super) fn streaminfo() -> (u8, Vec<u8>) {
     (0, vec![0; 34])
 }
 
@@ -56,7 +56,7 @@ fn synchsafe(n: u32) -> [u8; 4] {
     [(n >> 21) as u8 & 0x7f, (n >> 14) as u8 & 0x7f, (n >> 7) as u8 & 0x7f, n as u8 & 0x7f]
 }
 
-fn txxx(enc: u8, desc: &str, value: &str) -> Vec<u8> {
+pub(super) fn txxx(enc: u8, desc: &str, value: &str) -> Vec<u8> {
     let mut d = vec![enc];
     match enc {
         1 => {
@@ -79,7 +79,7 @@ fn txxx(enc: u8, desc: &str, value: &str) -> Vec<u8> {
     d
 }
 
-fn id3(ver: u8, frames: &[(&[u8], Vec<u8>)]) -> Vec<u8> {
+pub(super) fn id3(ver: u8, frames: &[(&[u8], Vec<u8>)]) -> Vec<u8> {
     let mut body = Vec::new();
     for (id, data) in frames {
         body.extend(*id);
@@ -101,28 +101,28 @@ fn id3(ver: u8, frames: &[(&[u8], Vec<u8>)]) -> Vec<u8> {
     b
 }
 
-fn atom(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+pub(super) fn atom(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
     let mut b = ((body.len() + 8) as u32).to_be_bytes().to_vec();
     b.extend(kind);
     b.extend(body);
     b
 }
 
-fn data_atom(kind: u32, value: &[u8]) -> Vec<u8> {
+pub(super) fn data_atom(kind: u32, value: &[u8]) -> Vec<u8> {
     let mut b = kind.to_be_bytes().to_vec();
     b.extend([0, 0, 0, 0]);
     b.extend(value);
     atom(b"data", &b)
 }
 
-fn freeform(name: &str, value: &str) -> Vec<u8> {
+pub(super) fn freeform(name: &str, value: &str) -> Vec<u8> {
     let mut body = atom(b"mean", &[&[0u8, 0, 0, 0][..], b"com.apple.iTunes"].concat());
     body.extend(atom(b"name", &[&[0u8, 0, 0, 0][..], name.as_bytes()].concat()));
     body.extend(data_atom(1, value.as_bytes()));
     atom(b"----", &body)
 }
 
-fn mp4(items: &[Vec<u8>], moov_at_end: bool, mdat_len: usize, full_meta: bool) -> Vec<u8> {
+pub(super) fn mp4(items: &[Vec<u8>], moov_at_end: bool, mdat_len: usize, full_meta: bool) -> Vec<u8> {
     let ilst = atom(b"ilst", &items.concat());
     let hdlr = atom(b"hdlr", &[0u8; 25]);
     let meta_body = if full_meta { [&[0u8, 0, 0, 0][..], &hdlr, &ilst].concat() } else { [hdlr, ilst].concat() };
@@ -150,12 +150,12 @@ fn ogg_page(seq: u32, packet: &[u8]) -> Vec<u8> {
     b
 }
 
-fn ogg(first: &[u8], comment: Vec<u8>) -> Vec<u8> {
+pub(super) fn ogg(first: &[u8], comment: Vec<u8>) -> Vec<u8> {
     [ogg_page(0, first), ogg_page(1, &comment), ogg_page(2, &[0u8; 300])].concat()
 }
 
 /// Runs the parser like the scan does: the first 64 KB, then what it asks for.
-fn run(file: &[u8], container: Option<&str>) -> (FileTags, usize) {
+pub(super) fn run(file: &[u8], container: Option<&str>) -> (FileTags, usize) {
     let first = file[..file.len().min(FIRST_READ)].to_vec();
     let mut s = Sparse::new(first, Some(file.len() as u64));
     s.container = container.map(str::to_string);
@@ -568,7 +568,7 @@ async fn reads_queue_behind_other_transfers_and_yield_to_playback() {
 
 // ------------------------------------------------------------------ cache and scan
 
-fn album(id: &str, artist: &str, year: Option<i32>, added: i64, subformats: &[&str]) -> Album {
+pub(super) fn album(id: &str, artist: &str, year: Option<i32>, added: i64, subformats: &[&str]) -> Album {
     Album { mbid: None,
         id: id.into(),
         title: format!("Album {id}"),
@@ -594,7 +594,7 @@ fn album(id: &str, artist: &str, year: Option<i32>, added: i64, subformats: &[&s
     }
 }
 
-fn track(id: &str, album_id: &str, n: u32, container: &str) -> Track {
+pub(super) fn track(id: &str, album_id: &str, n: u32, container: &str) -> Track {
     let mut t = crate::audio::testutil::track(id, "a", &format!("/library/parts/{id}/100/file.{container}"));
     t.album_id = album_id.into();
     t.artist_id = "ar".into();
@@ -603,7 +603,7 @@ fn track(id: &str, album_id: &str, n: u32, container: &str) -> Track {
     t
 }
 
-fn db_with(albums: &[Album], tracks: &[Track]) -> (DbHandle, tempfile::TempDir) {
+pub(super) fn db_with(albums: &[Album], tracks: &[Track]) -> (DbHandle, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("t.db")).unwrap();
     db.write(|c| {
@@ -624,7 +624,7 @@ fn tags(f: impl FnOnce(&mut FileTags)) -> FileTags {
     t
 }
 
-fn save(c: &Connection, part: &str, t: &FileTags) {
+pub(super) fn save(c: &Connection, part: &str, t: &FileTags) {
     store::save(c, part, Status::Ok, t, 1).unwrap();
 }
 
