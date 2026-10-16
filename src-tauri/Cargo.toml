@@ -19,6 +19,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "platter-bridge"
 path = "src/bin/platter-bridge.rs"
+# Built only for the container, so desktop bundles don't pick it up.
+required-features = ["bridge"]
 
 [[bin]]
 name = "platter"
@@ -28,6 +30,8 @@ path = "src/main.rs"
 # On-device lyrics transcription with whisper.cpp. Off in plain builds so they
 # don't need CMake; CI and release builds turn it on.
 transcribe = ["dep:whisper-rs"]
+# The headless Platter Bridge binary (docker/bridge).
+bridge = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

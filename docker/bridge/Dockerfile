@@ -18,7 +18,7 @@ ARG TARGETPLATFORM
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETPLATFORM} \
     --mount=type=cache,target=/src/src-tauri/target,id=bridge-target-${TARGETPLATFORM} \
     cd src-tauri \
- && cargo build --locked --profile bridge --bin platter-bridge \
+ && cargo build --locked --profile bridge --bin platter-bridge --features bridge \
  && cp target/bridge/platter-bridge /platter-bridge
 # Nothing of the desktop (webview, audio) may be linked in.
 RUN ldd /platter-bridge && ! ldd /platter-bridge | grep -Eiq 'webkit|gtk|asound|appindicator'
