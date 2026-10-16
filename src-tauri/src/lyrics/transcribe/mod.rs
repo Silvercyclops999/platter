@@ -43,7 +43,7 @@ use crate::db::DbHandle;
 use crate::db::queries::now_s;
 use crate::error::{AppError, AppResult};
 use audio::AudioError;
-use engine::{RecognizeError, Recognizer};
+use engine::{RecognizeError, Recognizer, Step, Stop};
 use model::{DownloadError, ModelFetch, ModelKind, ModelStore};
 
 /// Progress events at most this often (state changes go out at once).
@@ -109,6 +109,8 @@ pub enum Stage {
     /// Reading the file from the server.
     Reading,
     Decoding,
+    /// The speech helper is loading the model.
+    Loading,
     Transcribing,
 }
 
@@ -120,6 +122,10 @@ pub struct CurrentJob {
     /// Percent of the transcribing stage.
     pub percent: u8,
     pub background: bool,
+    /// Seconds since the stage or percent last moved, once that's been
+    /// long enough to say so (the computer may be busy).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet_secs: Option<u32>,
 }
 
 /// Progress through the songs asked for since the queue was last empty.
@@ -147,6 +153,9 @@ pub struct TranscribeStatus {
     pub current: Option<CurrentJob>,
     /// Songs waiting (not counting the current one).
     pub queued: usize,
+    /// The song that goes next.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub up_next: Option<String>,
     pub batch: BatchProgress,
     /// About how long each song of a long run takes, breather included.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -218,17 +227,29 @@ struct Download {
     cancel: Arc<AtomicBool>,
 }
 
+/// The song being worked on.
+struct Running {
+    job: CurrentJob,
+    cancel: Stop,
+    /// When the stage or percent last moved.
+    moved: Instant,
+}
+
 #[derive(Default)]
 struct State {
     enabled: bool,
     model: ModelKind,
     queue: VecDeque<Job>,
-    current: Option<(CurrentJob, Arc<AtomicBool>)>,
+    current: Option<Running>,
     batch: BatchProgress,
     paused: Option<PauseReason>,
     error: Option<Failure>,
     download: Option<Download>,
     last_emit: Option<Instant>,
+    /// A progress event was held back by the emit rate.
+    dirty: bool,
+    /// The quiet minutes the last event said.
+    quiet_said: Option<u32>,
     /// No background song starts before this (the breather).
     rest_until: Option<Instant>,
     /// Time taken by the background songs transcribed in this run, and how many.
@@ -329,8 +350,8 @@ impl Transcriber {
 
     fn stop_all(st: &mut State) {
         st.queue.clear();
-        if let Some((_, c)) = &st.current {
-            c.store(true, Ordering::Relaxed);
+        if let Some(r) = &st.current {
+            r.cancel.now();
         }
         st.batch = BatchProgress::default();
         st.paused = None;
@@ -359,8 +380,13 @@ impl Transcriber {
             unavailable_reason: reason,
             model: st.model,
             models,
-            current: st.current.as_ref().map(|c| c.0.clone()),
+            current: st.current.as_ref().map(|r| {
+                let quiet = r.moved.elapsed();
+                let said = quiet >= self.inner.deps.pacer.timing().stuck;
+                CurrentJob { quiet_secs: said.then_some(quiet.as_secs() as u32), ..r.job.clone() }
+            }),
             queued: st.queue.len(),
+            up_next: st.queue.front().map(|j| j.track_id.clone()),
             batch: st.batch,
             secs_per_song: (st.batch.total > 1 && st.pace.1 > 0).then(|| (st.pace.0.as_secs() / st.pace.1 as u64) as u32),
             paused: st.paused,
@@ -373,11 +399,34 @@ impl Transcriber {
             let mut st = self.inner.st.lock();
             let now = Instant::now();
             if !force && st.last_emit.is_some_and(|t| now.duration_since(t) < EMIT_GAP) {
+                // Sent by the next tick instead.
+                st.dirty = true;
                 return;
             }
             st.last_emit = Some(now);
+            st.dirty = false;
         }
-        self.inner.deps.events.status(&self.status());
+        let s = self.status();
+        self.inner.st.lock().quiet_said = s.current.as_ref().and_then(|c| c.quiet_secs).map(|q| q / 60);
+        self.inner.deps.events.status(&s);
+    }
+
+    /// While a song runs: sends progress the emit rate held back, and says
+    /// when it has gone quiet (then each minute it stays quiet).
+    fn tick(&self) {
+        let (dirty, quiet_changed) = {
+            let st = self.inner.st.lock();
+            let quiet = st.current.as_ref().and_then(|r| {
+                let q = r.moved.elapsed();
+                (q >= self.inner.deps.pacer.timing().stuck).then_some(q.as_secs() as u32 / 60)
+            });
+            (st.dirty, quiet != st.quiet_said)
+        };
+        if quiet_changed {
+            self.emit(true);
+        } else if dirty {
+            self.emit(false);
+        }
     }
 
     fn check_usable(&self) -> AppResult<()> {
@@ -443,7 +492,7 @@ impl Transcriber {
                 };
                 if st.error.is_some() {
                     // Songs waiting for this model can't go ahead.
-                    let waiting = st.current.as_ref().is_some_and(|c| c.0.stage == Stage::WaitingForModel);
+                    let waiting = st.current.as_ref().is_some_and(|r| r.job.stage == Stage::WaitingForModel);
                     if waiting {
                         Self::stop_all(&mut st);
                     }
@@ -519,7 +568,7 @@ impl Transcriber {
             let mut added = 0;
             let mut fronts = Vec::new();
             for id in ids {
-                if st.current.as_ref().is_some_and(|c| c.0.track_id == id) {
+                if st.current.as_ref().is_some_and(|r| r.job.track_id == id) {
                     continue;
                 }
                 if let Some(pos) = st.queue.iter().position(|j| j.track_id == id) {
@@ -612,10 +661,11 @@ impl Transcriber {
                     st.queue.retain(|j| j.track_id != id);
                     let removed = before - st.queue.len();
                     st.batch.total = st.batch.total.saturating_sub(removed);
-                    if let Some((c, flag)) = &st.current
-                        && c.track_id == id
+                    if let Some(r) = &st.current
+                        && r.job.track_id == id
                     {
-                        flag.store(true, Ordering::Relaxed);
+                        // The helper gets about a second to stop.
+                        r.cancel.now();
                     }
                 }
             }
@@ -698,11 +748,27 @@ impl Transcriber {
     }
 
     fn set_stage(&self, stage: Stage, percent: u8) {
-        if let Some((c, _)) = self.inner.st.lock().current.as_mut() {
-            c.stage = stage;
-            c.percent = percent;
+        let new_stage = {
+            let mut st = self.inner.st.lock();
+            let Some(r) = st.current.as_mut() else { return };
+            let new_stage = r.job.stage != stage;
+            if new_stage || r.job.percent != percent {
+                r.moved = Instant::now();
+            }
+            r.job.stage = stage;
+            r.job.percent = percent;
+            new_stage
+        };
+        // Stage changes go out at once, percents at the emit rate.
+        self.emit(new_stage);
+    }
+
+    /// The speech helper's progress, as the stage and percent.
+    fn helper_step(&self, step: Step) {
+        match step {
+            Step::Loading => self.set_stage(Stage::Loading, 0),
+            Step::Percent(p) => self.set_stage(Stage::Transcribing, p),
         }
-        self.emit(stage != Stage::Transcribing || percent == 0);
     }
 
     fn fail(&self, track_id: &str, message: &str) {
@@ -711,11 +777,17 @@ impl Transcriber {
     }
 
     async fn process(&self, job: Job) {
-        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel = Stop::new();
         {
             let mut st = self.inner.st.lock();
-            let current = CurrentJob { track_id: job.track_id.clone(), stage: Stage::Reading, percent: 0, background: job.background };
-            st.current = Some((current, cancel.clone()));
+            let current = CurrentJob {
+                track_id: job.track_id.clone(),
+                stage: Stage::Reading,
+                percent: 0,
+                background: job.background,
+                quiet_secs: None,
+            };
+            st.current = Some(Running { job: current, cancel: cancel.clone(), moved: Instant::now() });
         }
         self.emit(true);
         let started = Instant::now();
@@ -738,7 +810,12 @@ impl Transcriber {
                     let at = st.queue.iter().position(|j| !j.now).unwrap_or(st.queue.len());
                     st.queue.insert(at, job.clone());
                 }
-                Outcome::Cancelled => {}
+                Outcome::Cancelled => {
+                    // Its audio isn't needed again.
+                    if st.held.as_ref().is_some_and(|h| h.0 == job.track_id) {
+                        st.held = None;
+                    }
+                }
                 Outcome::Done | Outcome::Skipped | Outcome::Failed => {
                     st.batch.done = (st.batch.done + 1).min(st.batch.total);
                 }
@@ -758,10 +835,10 @@ impl Transcriber {
     /// Waits out the pause conditions for work nobody is waiting on: the
     /// computer being busy, and battery power for the background batch.
     /// Gives way to a song someone asks for meanwhile.
-    async fn wait_conditions(&self, cancel: &AtomicBool, battery: bool) -> Waited {
+    async fn wait_conditions(&self, cancel: &Stop, battery: bool) -> Waited {
         let pacer = &self.inner.deps.pacer;
         loop {
-            if cancel.load(Ordering::Relaxed) {
+            if cancel.is_set() {
                 return Waited::Cancelled;
             }
             let asked_for = self.inner.st.lock().queue.front().is_some_and(|j| j.now);
@@ -796,11 +873,14 @@ impl Transcriber {
         }
     }
 
-    /// One song. A background song stops (and goes back in the queue) when
-    /// someone asks for a song, or when someone is back at the computer
-    /// while it runs with the extra threads.
-    async fn work(&self, job: &Job, cancel: &Arc<AtomicBool>) -> Outcome {
-        let stop = Arc::new(AtomicBool::new(false));
+    /// One song. A background song stops (and goes back at the front of the
+    /// background songs, its audio kept) when someone asks for a song or a
+    /// lyrics check needs the speech helper, or when someone is back at the
+    /// computer while it runs with the extra threads. It stops at the speech
+    /// library's next abort check and the helper, model loaded, goes on with
+    /// what came first.
+    async fn work(&self, job: &Job, cancel: &Stop) -> Outcome {
+        let stop = Stop::new();
         let again = Arc::new(AtomicBool::new(false));
         let boosted = Arc::new(AtomicBool::new(false));
         let watch = {
@@ -808,18 +888,24 @@ impl Transcriber {
                 (self.clone(), cancel.clone(), stop.clone(), again.clone(), boosted.clone(), job.now);
             tokio::spawn(async move {
                 loop {
-                    if cancel.load(Ordering::Relaxed) {
-                        stop.store(true, Ordering::Relaxed);
+                    if cancel.is_now() {
+                        stop.now();
+                    } else if cancel.is_set() {
+                        stop.give_way();
                     }
-                    let asked_for = !now && me.inner.st.lock().queue.front().is_some_and(|j| j.now);
+                    let asked_for = !now
+                        && (me.inner.st.lock().queue.front().is_some_and(|j| j.now) || me.inner.deps.recognizer.wanted());
                     let back = boosted.load(Ordering::Relaxed) && !me.inner.deps.pacer.away();
-                    if asked_for || back {
+                    if (asked_for || back) && !stop.is_set() {
                         if back {
                             tracing::info!("someone is back at the computer: starting the song again with fewer threads");
+                        } else {
+                            tracing::debug!("a background song gives way");
                         }
                         again.store(true, Ordering::Relaxed);
-                        stop.store(true, Ordering::Relaxed);
+                        stop.give_way();
                     }
+                    me.tick();
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
             })
@@ -827,12 +913,12 @@ impl Transcriber {
         let out = self.run_job(job, &stop, &boosted).await;
         watch.abort();
         match out {
-            Outcome::Cancelled if again.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) => Outcome::Again,
+            Outcome::Cancelled if again.load(Ordering::Relaxed) && !cancel.is_set() => Outcome::Again,
             o => o,
         }
     }
 
-    async fn run_job(&self, job: &Job, cancel: &Arc<AtomicBool>, boosted: &AtomicBool) -> Outcome {
+    async fn run_job(&self, job: &Job, cancel: &Stop, boosted: &AtomicBool) -> Outcome {
         let d = &self.inner.deps;
         let id = job.track_id.clone();
         // Already done (an earlier run or another trigger).
@@ -852,7 +938,7 @@ impl Transcriber {
         }
         // The model: wait for a download in progress.
         let path = loop {
-            if cancel.load(Ordering::Relaxed) {
+            if cancel.is_set() {
                 return Outcome::Cancelled;
             }
             let (kind, downloading) = {
@@ -909,7 +995,7 @@ impl Transcriber {
             let rec = d.recognizer.clone();
             let (cancel, pcm) = (cancel.clone(), pcm.clone());
             let me = self.clone();
-            let progress: engine::Progress = Arc::new(move |p| me.set_stage(Stage::Transcribing, p));
+            let progress: engine::Progress = Arc::new(move |step| me.helper_step(step));
             tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, engine::LANGUAGE, cancel, progress))
                 .await
         };
@@ -941,11 +1027,11 @@ impl Transcriber {
     }
 
     /// Reads and decodes a song.
-    async fn read_song(&self, job: &Job, cancel: &Arc<AtomicBool>) -> Result<Vec<f32>, Outcome> {
+    async fn read_song(&self, job: &Job, cancel: &Stop) -> Result<Vec<f32>, Outcome> {
         let d = &self.inner.deps;
         let id = job.track_id.clone();
         self.set_stage(Stage::Reading, 0);
-        let song = match d.songs.read(&id, cancel).await {
+        let song = match d.songs.read(&id, cancel.flag()).await {
             Ok(s) => s,
             Err(AudioError::Cancelled) => return Err(Outcome::Cancelled),
             Err(AudioError::Unreachable(m)) => {
@@ -955,10 +1041,10 @@ impl Transcriber {
                     self.emit(true);
                     tokio::select! {
                         _ = tokio::time::sleep(OFFLINE_RETRY) => {}
-                        _ = wait_flag(cancel) => {}
+                        _ = wait_flag(cancel.flag()) => {}
                     }
                     self.inner.st.lock().paused = None;
-                    return Err(if cancel.load(Ordering::Relaxed) { Outcome::Cancelled } else { Outcome::Retry });
+                    return Err(if cancel.is_set() { Outcome::Cancelled } else { Outcome::Retry });
                 }
                 self.fail(&id, "Couldn't read this song from your server. Try again when it's connected.");
                 return Err(Outcome::Failed);
@@ -971,7 +1057,7 @@ impl Transcriber {
         };
         self.set_stage(Stage::Decoding, 0);
         let pcm = {
-            let cancel = cancel.clone();
+            let cancel = cancel.flag().clone();
             let SongAudio { bytes, hint, .. } = song;
             tokio::task::spawn_blocking(move || audio::to_16k_mono(bytes, hint.as_deref(), &cancel)).await
         };
@@ -1001,11 +1087,11 @@ impl Transcriber {
         seconds: usize,
         started: Instant,
         threads: usize,
-        cancel: &AtomicBool,
+        cancel: &Stop,
     ) -> Outcome {
         let d = &self.inner.deps;
         let id = job.track_id.clone();
-        if cancel.load(Ordering::Relaxed) {
+        if cancel.is_set() {
             return Outcome::Cancelled;
         }
         let found_lines = lines::to_lines(&segments);

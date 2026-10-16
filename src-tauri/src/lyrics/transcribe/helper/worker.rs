@@ -6,16 +6,15 @@
 
 use std::io::{self, Read, Write};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use parking_lot::Mutex;
 
-use super::super::engine::{self, RecognizeError, Recognizer};
+use super::super::engine::{self, RecognizeError, Recognizer, Step, Stop};
 use super::proto::{self, Reply, Request};
 
 enum Work {
-    Run { req: Request, pcm: Vec<f32> },
+    Run { req: Request, pcm: Vec<f32>, stop: Stop },
     Unload,
 }
 
@@ -26,7 +25,9 @@ fn send(out: &Out, reply: &Reply) -> io::Result<()> {
 }
 
 /// Serves requests until `input` ends. Runs happen one at a time on this
-/// thread; requests are read on another so a cancel arrives mid-run.
+/// thread (the speech library's own threads are the run's thread budget,
+/// this one included); requests are read on one more thread, which only
+/// waits on the pipe, so a cancel arrives mid-run.
 /// `lower` is called before each run with whether to go lowest.
 pub fn serve(
     mut input: Box<dyn Read + Send>,
@@ -36,10 +37,11 @@ pub fn serve(
 ) -> io::Result<()> {
     let out: Out = Arc::new(Mutex::new(output));
     send(&out, &Reply::Hello { version: proto::VERSION })?;
-    let cancel = Arc::new(AtomicBool::new(false));
+    // Each run gets its own, so a cancel meant for one never reaches the next.
+    let current: Arc<Mutex<Stop>> = Arc::new(Mutex::new(Stop::new()));
     let (tx, rx) = mpsc::channel::<Work>();
     let reader = {
-        let cancel = cancel.clone();
+        let current = current.clone();
         std::thread::spawn(move || {
             loop {
                 let req = match proto::read_msg::<_, Request>(&mut input) {
@@ -52,7 +54,7 @@ pub fn serve(
                 };
                 let work = match req {
                     Request::Cancel => {
-                        cancel.store(true, Ordering::Relaxed);
+                        current.lock().give_way();
                         continue;
                     }
                     Request::Unload => Work::Unload,
@@ -64,8 +66,11 @@ pub fn serve(
                                 break;
                             }
                         };
-                        cancel.store(false, Ordering::Relaxed);
-                        Work::Run { req, pcm }
+                        // A cancel read from here on is this run's (the app
+                        // sends a request only after the last one's reply).
+                        let stop = Stop::new();
+                        *current.lock() = stop.clone();
+                        Work::Run { req, pcm, stop }
                     }
                 };
                 if tx.send(work).is_err() {
@@ -73,34 +78,34 @@ pub fn serve(
                 }
             }
             // The app is gone or stopped us: stop whatever runs.
-            cancel.store(true, Ordering::Relaxed);
+            current.lock().give_way();
         })
     };
     let mut result = Ok(());
     for work in rx {
-        let (model, kind, threads, language, lowest, pcm) = match work {
+        let (model, kind, threads, language, lowest, pcm, stop) = match work {
             Work::Unload => {
                 rec.unload();
                 continue;
             }
-            Work::Run { req: Request::Transcribe { model, kind, threads, language, lowest, .. }, pcm } => {
-                (model, kind, threads, language, lowest, pcm)
+            Work::Run { req: Request::Transcribe { model, kind, threads, language, lowest, .. }, pcm, stop } => {
+                (model, kind, threads, language, lowest, pcm, stop)
             }
             Work::Run { .. } => continue,
         };
         lower(lowest);
         let progress: engine::Progress = {
             let out = out.clone();
-            let last = Arc::new(Mutex::new(None::<u8>));
-            Arc::new(move |percent| {
+            let last = Arc::new(Mutex::new(None::<Step>));
+            Arc::new(move |step| {
                 let mut l = last.lock();
-                if *l != Some(percent) {
-                    *l = Some(percent);
-                    let _ = send(&out, &Reply::Progress { percent });
+                if *l != Some(step) {
+                    *l = Some(step);
+                    let _ = send(&out, &Reply::Progress { step });
                 }
             })
         };
-        let reply = match rec.transcribe(&model, kind, &pcm, threads, &language, cancel.clone(), progress) {
+        let reply = match rec.transcribe(&model, kind, &pcm, threads, &language, stop, progress) {
             Ok(segments) => Reply::Done { segments },
             Err(RecognizeError::Cancelled) => Reply::Cancelled,
             Err(RecognizeError::Failed(message)) => Reply::Failed { message },

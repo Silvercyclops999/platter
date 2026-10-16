@@ -9,12 +9,13 @@ use std::path::PathBuf;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use super::super::engine::Step;
 use super::super::lines::Segment;
 use super::super::model::ModelKind;
 
 /// Bumped when the messages change; the app and its helper are always the
 /// same binary, so a mismatch means something else answered.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 const MARK: u8 = 0xA7;
 const JSON: u8 = b'J';
@@ -41,7 +42,8 @@ pub enum Request {
 pub enum Reply {
     /// First, once the helper has started.
     Hello { version: u32 },
-    Progress { percent: u8 },
+    /// The run moved on: loading the model, or the percent listened to.
+    Progress { step: Step },
     Done { segments: Vec<Segment> },
     Failed { message: String },
     Cancelled,
@@ -120,10 +122,14 @@ mod tests {
         write_samples(&mut buf, &[0.5, -1.0, 0.25]).unwrap();
         let seg = Segment { words: vec![Word { start_ms: 10, end_ms: 20, text: " hi".into() }] };
         write_msg(&mut buf, &Reply::Done { segments: vec![seg.clone()] }).unwrap();
+        write_msg(&mut buf, &Reply::Progress { step: Step::Loading }).unwrap();
+        write_msg(&mut buf, &Reply::Progress { step: Step::Percent(40) }).unwrap();
         let mut r = &buf[..];
         assert_eq!(read_msg::<_, Request>(&mut r).unwrap(), Some(req));
         assert_eq!(read_samples(&mut r, 3).unwrap(), vec![0.5, -1.0, 0.25]);
         assert_eq!(read_msg::<_, Reply>(&mut r).unwrap(), Some(Reply::Done { segments: vec![seg] }));
+        assert_eq!(read_msg::<_, Reply>(&mut r).unwrap(), Some(Reply::Progress { step: Step::Loading }));
+        assert_eq!(read_msg::<_, Reply>(&mut r).unwrap(), Some(Reply::Progress { step: Step::Percent(40) }));
         assert_eq!(read_msg::<_, Reply>(&mut r).unwrap(), None, "a clean end");
     }
 

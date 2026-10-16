@@ -1322,8 +1322,10 @@ build that judged lyrics on one window drops those no-match results, so the
 songs are checked again and the lyrics found show meanwhile; transcriptions
 they led to are kept and listed by `lyrics_candidates`.
 
-The check has a helper process of its own (see Lyrics transcription), uses the
-smallest installed model and two threads, and takes the newest song first (the
+The check uses the smallest installed model and two threads. With the small
+model it has a short-lived helper process of its own (see Lyrics
+transcription); with only the medium model it uses transcription's helper,
+ahead of background songs, and takes the newest song first (the
 one playing); older requests wait, and beyond three the oldest are dropped.
 `lyrics://check-status` → `CheckStatus = { trackId, state, reason? }` says where
 a song's check is, and `lyrics_check_status { trackId }` returns the latest one
@@ -1402,12 +1404,16 @@ Free space is checked first (the model plus 256 MB). Models never ship in the
 installer.
 
 `TranscribeStatus = { enabled, available, unavailableReason?, model, models,
-current?, queued, batch, secsPerSong?, paused?, error? }`. `available` is false in a build
+current?, queued, upNext?, batch, secsPerSong?, paused?, error? }`. `available` is false in a build
 without the recognizer, or on an x86 processor without AVX2. `models` lists
 `{ kind, sizeBytes, installed, downloading, doneBytes }` for each model, so
 the size shows before downloading. `current = { trackId, stage, percent,
-background }`, stage one of `waitingForModel`, `reading`, `decoding`,
-`transcribing` (percent counts the last). `batch = { done, total }` counts
+background, quietSecs? }`, stage one of `waitingForModel`, `reading`,
+`decoding`, `loading` (the helper is loading the model), `transcribing`
+(percent counts the last; the speech library reports it once per 30 s
+stretch of the song). `quietSecs` appears once the stage and percent haven't
+moved for two minutes, and the lyrics view says so ("No progress for 2
+minutes…") instead of looking stuck. `upNext` is the song that goes next. `batch = { done, total }` counts
 songs since the queue was last empty. `secsPerSong` is about how long each
 song of a run of more than one takes, the rest between songs included, once
 one is done. `paused` is `battery`, `offline` or `busy` (songs nobody is
@@ -1416,11 +1422,17 @@ message, trackId? }` with kind `download`, `checksum`, `disk` or
 `transcribe`; it clears when something new starts.
 
 `transcribe_track` puts the song first and runs it now, battery or busy or
-not. A background song in progress stops at once (the model checks for a stop
-between steps), goes back in the queue after it with its decoded audio kept,
-and goes on once the asked-for song is done; a background song waiting for a
-pause to end gives way the same way. While the model loads and takes in its
-first stretch the song shows "Starting…", not 0%.
+not. A background song in progress is paused, not run beside it: it stops at
+the speech library's next abort check (the end of the step it's on), goes
+back at the front of the background songs with its decoded audio kept, and
+goes on once the asked-for song is done. The asked-for song runs in the same
+helper with the model already loaded. A background song waiting for a pause
+to end gives way the same way, and so does one in progress when a lyrics
+check needs the medium model. While it waits its turn the lyrics view says
+"Pausing the background song first…" with Cancel. `transcribe_cancel` on the
+song in progress asks the helper to stop; one that hasn't within about a
+second is ended (it would have ended a minute later with nothing to do). A
+song still queued is just taken out; the one running is left alone.
 `transcribe_album` queues the album's songs that have no lyrics in the app,
 and `transcribe_unreleased` every unreleased song (the same rule as sharing:
 demo release types or an unreleased `ARCHIVE_VERSION`) without them, in the
@@ -1439,14 +1451,15 @@ on battery. A slow connection never pauses anything: a song playback just
 fetched is read from disk, and before reading a song from the server it waits
 for playback's own download to end.
 
-The speech model runs in helper processes: transcription has one and the
-lyrics check another, so a check never waits behind a batch song. Each is the
-same Platter binary started
+The speech model runs in helper processes: one for transcription, and for
+the lyrics check only with the small model a second that ends 10 s after its
+last run. The medium model is only ever loaded by the transcription helper,
+so it is never in memory twice. Each is the same Platter binary started
 with `--speech-worker`, which exits before any of the app starts (no window,
 tray, single-instance lock or link handling). The app sends it a request
 (model file, model kind, threads, language) and the song's 16 kHz samples on
-its stdin; it answers on stdout with a hello, progress, then the segments, a
-failure or cancelled. Each frame is a marker byte, a kind byte (`J` JSON, `S`
+its stdin; it answers on stdout with a hello, progress (`loading` the model,
+then the percent), then the segments, a failure or cancelled. Each frame is a marker byte, a kind byte (`J` JSON, `S`
 samples), a 32-bit little-endian length and the body. A cancel is a message of
 its own. The helper starts when work arrives, stays while there is work, and
 ends a minute after the last run, which frees the model's memory; it also ends
@@ -1465,7 +1478,10 @@ and the one song asked for four, and a background song that starts while a
 lyrics check runs gets one (a song already running keeps its count for the
 check's few seconds); `balanced` four for both;
 `fast` half the logical cores, at most eight. Never more than half the
-logical cores. A lyrics check gets two. With `transcribeFasterAway`, while there has been no keyboard
+logical cores. A lyrics check gets two. The count is whisper.cpp's
+`n_threads`, which includes the helper's thread that runs it; the helper has
+one more thread of its own that only waits on its stdin for a cancel, so the
+operating system shows one thread more than the count. With `transcribeFasterAway`, while there has been no keyboard
 or mouse input for 5 minutes and the computer isn't on battery, background
 work gets at least the `balanced` count; when input comes back, a song
 running with the extra threads starts again with the usual count. Background

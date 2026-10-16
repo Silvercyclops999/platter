@@ -1,6 +1,10 @@
 //! The audio check's worker: one song at a time, newest first (the song
-//! playing), with its own speech helper so it never waits behind a
-//! transcription batch, two threads, waiting while the computer is busy.
+//! playing), two threads, waiting while the computer is busy. With the
+//! small model it has a speech helper of its own, so it never waits behind
+//! a transcription batch (the helper ends soon after its last run); with
+//! only the medium model installed it uses transcription's helper, and a
+//! background song there gives way to it, so the medium model is never
+//! loaded twice.
 //! Each song's progress goes out as a check status, and a check that makes
 //! no progress for about two minutes says it couldn't check yet. It reads the song the way transcription does (the
 //! pre-cache first, else the server behind playback's transfer, giving way
@@ -25,7 +29,7 @@ use tokio::sync::Notify;
 use super::check::{self, HeardWord, Judged, Point, Verdict};
 use super::candidates::Stored;
 use super::transcribe::audio::{self, AudioError};
-use super::transcribe::engine::{self, Recognizer};
+use super::transcribe::engine::{self, Recognizer, Stop};
 use super::transcribe::model::{ModelKind, ModelStore};
 use super::transcribe::pace::{Load, PaceGuard, Pacer};
 use super::transcribe::{SongAudio, SongReader};
@@ -153,7 +157,11 @@ pub type NoneMatched = Arc<dyn Fn(&str) + Send + Sync>;
 pub struct CheckerDeps {
     pub db: DbHandle,
     pub models: ModelStore,
+    /// The check's own lane (the small model).
     pub recognizer: Arc<dyn Recognizer>,
+    /// Transcription's helper, for checks with the medium model (none:
+    /// `recognizer` runs those too).
+    pub shared: Option<Arc<dyn Recognizer>>,
     pub audio: Arc<dyn SongPcm>,
     pub events: Arc<dyn CheckEvents>,
     /// "Check lyrics against the song".
@@ -552,7 +560,10 @@ impl Checker {
             Vec::new()
         } else {
             self.set(&job.track_id, CheckState::Listening, None);
-            let rec = d.recognizer.clone();
+            let rec = match (&d.shared, kind) {
+                (Some(shared), ModelKind::Medium) => shared.clone(),
+                _ => d.recognizer.clone(),
+            };
             let model = model.to_path_buf();
             let threads = d.pacer.check_threads();
             let _running = d.pacer.checking();
@@ -561,7 +572,7 @@ impl Checker {
                 Arc::new(move |_| me.touch(&id))
             };
             let res = tokio::task::spawn_blocking(move || {
-                rec.transcribe(&model, kind, &slice, threads, engine::LANGUAGE, Arc::new(AtomicBool::new(false)), progress)
+                rec.transcribe(&model, kind, &slice, threads, engine::LANGUAGE, Stop::new(), progress)
             })
             .await;
             match res {

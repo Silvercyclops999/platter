@@ -15,7 +15,7 @@ use futures::stream::BoxStream;
 use parking_lot::Mutex;
 
 use super::audio::{AudioError, RATE};
-use super::engine::{Progress, RecognizeError, Recognizer};
+use super::engine::{Progress, RecognizeError, Recognizer, Step, Stop};
 use super::lines::{Segment, Word};
 use super::model::{DownloadError, ModelFetch, ModelKind, ModelSpec, ModelStore, sha256_hex};
 use super::pace::fake::FakeLoad;
@@ -112,7 +112,7 @@ impl Recognizer for FakeRecognizer {
         pcm: &[f32],
         threads: usize,
         language: &str,
-        cancel: Arc<AtomicBool>,
+        cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
         assert!(model.is_file(), "the model is on disk");
@@ -123,13 +123,13 @@ impl Recognizer for FakeRecognizer {
         }
         self.last_len.store(pcm.len(), Ordering::SeqCst);
         self.last_threads.store(threads, Ordering::SeqCst);
-        progress(50);
+        progress(Step::Percent(50));
         let behaviour = self.behaviour.lock().clone();
         match behaviour {
             Behaviour::Words(s) => Ok(s),
             Behaviour::Fail => Err(RecognizeError::Failed("boom".into())),
             Behaviour::Block => {
-                while !cancel.load(Ordering::Relaxed) {
+                while !cancel.is_set() {
                     std::thread::sleep(Duration::from_millis(5));
                 }
                 Err(RecognizeError::Cancelled)
@@ -139,7 +139,7 @@ impl Recognizer for FakeRecognizer {
                 if threads >= n {
                     return Ok(s);
                 }
-                while !cancel.load(Ordering::Relaxed) {
+                while !cancel.is_set() {
                     std::thread::sleep(Duration::from_millis(5));
                 }
                 Err(RecognizeError::Cancelled)
@@ -268,6 +268,15 @@ fn words(text: &str, at: u32) -> Segment {
 }
 
 fn fx_with(fetch: Arc<FakeFetch>) -> Fx {
+    fx_build(fetch, None)
+}
+
+/// With another recognizer (a fake helper process).
+fn fx_rec(rec: Arc<dyn Recognizer>) -> Fx {
+    fx_build(FakeFetch::new(model_body()), Some(rec))
+}
+
+fn fx_build(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>) -> Fx {
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("t.db")).unwrap();
     db.write(|c| {
@@ -303,7 +312,7 @@ fn fx_with(fetch: Arc<FakeFetch>) -> Fx {
         db: db.clone(),
         models: models.clone(),
         fetch: fetch.clone(),
-        recognizer: rec.clone(),
+        recognizer: over.unwrap_or_else(|| rec.clone()),
         songs: songs.clone(),
         other: other.clone(),
         conditions: cond.clone(),
@@ -901,6 +910,337 @@ mod read_whole {
     }
 }
 
+// ---------------------------------------------------------------- through a helper
+
+/// What runs in the fake helper "process": background songs (fewer than
+/// four threads) send 10% and run until cancelled, the first `blocks` of
+/// them; songs asked for send 40% and wait for `gate` (or a cancel, unless
+/// `deaf`, when only ending the helper stops them).
+#[derive(Default)]
+struct Script {
+    blocks: AtomicUsize,
+    gate: AtomicBool,
+    deaf: AtomicBool,
+    killed: Arc<AtomicBool>,
+    loaded: Mutex<Option<std::path::PathBuf>>,
+    loads: AtomicUsize,
+    threads: Mutex<Vec<usize>>,
+    busy: AtomicUsize,
+    most_busy: AtomicUsize,
+}
+
+impl Recognizer for Script {
+    fn unavailable(&self) -> Option<String> {
+        None
+    }
+    fn transcribe(
+        &self,
+        model: &Path,
+        _kind: ModelKind,
+        _pcm: &[f32],
+        threads: usize,
+        _language: &str,
+        cancel: Stop,
+        progress: Progress,
+    ) -> Result<Vec<Segment>, RecognizeError> {
+        if self.loaded.lock().as_deref() != Some(model) {
+            progress(Step::Loading);
+            std::thread::sleep(Duration::from_millis(20));
+            *self.loaded.lock() = Some(model.to_path_buf());
+            self.loads.fetch_add(1, Ordering::SeqCst);
+        }
+        self.threads.lock().push(threads);
+        let n = self.busy.fetch_add(1, Ordering::SeqCst) + 1;
+        self.most_busy.fetch_max(n, Ordering::SeqCst);
+        let res = self.run(threads, &cancel, &progress);
+        self.busy.fetch_sub(1, Ordering::SeqCst);
+        res
+    }
+    fn unload(&self) {
+        *self.loaded.lock() = None;
+    }
+}
+
+impl Script {
+    fn run(&self, threads: usize, cancel: &Stop, progress: &Progress) -> Result<Vec<Segment>, RecognizeError> {
+        progress(Step::Percent(0));
+        if threads < 4 {
+            if self.blocks.load(Ordering::SeqCst) > 0 {
+                self.blocks.fetch_sub(1, Ordering::SeqCst);
+                progress(Step::Percent(10));
+                let started = std::time::Instant::now();
+                while !cancel.is_set() && started.elapsed() < Duration::from_secs(20) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                return Err(RecognizeError::Cancelled);
+            }
+            return Ok(vec![words("in the background", 1000)]);
+        }
+        progress(Step::Percent(40));
+        // A failed test mustn't leave this running (the runtime waits for it).
+        let started = std::time::Instant::now();
+        loop {
+            if started.elapsed() > Duration::from_secs(20) {
+                return Err(RecognizeError::Failed("the test gave up".into()));
+            }
+            if self.deaf.load(Ordering::SeqCst) {
+                if self.killed.load(Ordering::SeqCst) {
+                    panic!("ended by force");
+                }
+            } else if cancel.is_set() {
+                return Err(RecognizeError::Cancelled);
+            }
+            if self.gate.load(Ordering::SeqCst) {
+                return Ok(vec![words("asked for", 1000)]);
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
+#[derive(Default)]
+struct Processes {
+    started: AtomicUsize,
+    ended: Arc<AtomicUsize>,
+    most_alive: AtomicUsize,
+}
+
+struct ScriptLaunch {
+    script: Arc<Script>,
+    n: Arc<Processes>,
+}
+
+struct ScriptProcess(Arc<AtomicUsize>, Arc<AtomicBool>);
+
+impl helper::WorkerProcess for ScriptProcess {
+    fn kill(&mut self) {
+        self.1.store(true, Ordering::SeqCst);
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+impl helper::Launch for ScriptLaunch {
+    fn launch(&self, _lowest: bool) -> std::io::Result<helper::Worker> {
+        let started = self.n.started.fetch_add(1, Ordering::SeqCst) + 1;
+        self.n.most_alive.fetch_max(started - self.n.ended.load(Ordering::SeqCst), Ordering::SeqCst);
+        self.script.killed.store(false, Ordering::SeqCst);
+        *self.script.loaded.lock() = None;
+        let (req_r, req_w) = std::io::pipe()?;
+        let (rep_r, rep_w) = std::io::pipe()?;
+        let rec: Arc<dyn Recognizer> = self.script.clone();
+        std::thread::spawn(move || {
+            let _ = helper::worker::serve(Box::new(req_r), Box::new(rep_w), rec, &|_| {});
+        });
+        Ok(helper::Worker {
+            input: Box::new(req_w),
+            output: Box::new(rep_r),
+            process: Box::new(ScriptProcess(self.n.ended.clone(), self.script.killed.clone())),
+        })
+    }
+}
+
+/// The real helper, available in builds without the speech library too.
+struct Available(Arc<helper::Helper>);
+
+impl Recognizer for Available {
+    fn unavailable(&self) -> Option<String> {
+        None
+    }
+    fn transcribe(
+        &self,
+        model: &Path,
+        kind: ModelKind,
+        pcm: &[f32],
+        threads: usize,
+        language: &str,
+        cancel: Stop,
+        progress: Progress,
+    ) -> Result<Vec<Segment>, RecognizeError> {
+        self.0.transcribe(model, kind, pcm, threads, language, cancel, progress)
+    }
+    fn unload(&self) {
+        self.0.unload()
+    }
+    fn wanted(&self) -> bool {
+        self.0.wanted()
+    }
+    fn crashed_too_often(&self) -> bool {
+        self.0.crashed_too_often()
+    }
+}
+
+struct Hx {
+    f: Fx,
+    script: Arc<Script>,
+    n: Arc<Processes>,
+    helper: Arc<helper::Helper>,
+}
+
+async fn hx(idle: Duration) -> Hx {
+    let script = Arc::new(Script::default());
+    let n = Arc::new(Processes::default());
+    let helper =
+        Arc::new(helper::Helper::new(Arc::new(ScriptLaunch { script: script.clone(), n: n.clone() }), Arc::new(|| false), idle));
+    let f = fx_rec(Arc::new(Available(helper.clone())));
+    install(&f).await;
+    Hx { f, script, n, helper }
+}
+
+fn is(s: &TranscribeStatus, id: &str, stage: Stage, percent: u8) -> bool {
+    s.current.as_ref().is_some_and(|c| c.track_id == id && c.stage == stage && c.percent == percent)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn progress_from_the_helper_reaches_the_status_and_events() {
+    let h = hx(IDLE_EXIT_TEST).await;
+    let f = &h.f;
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "40%", |s| is(s, "501", Stage::Transcribing, 40)).await;
+    let seen: Vec<(Stage, u8)> = f
+        .events
+        .statuses
+        .lock()
+        .iter()
+        .filter_map(|s| s.current.as_ref().filter(|c| c.track_id == "501").map(|c| (c.stage, c.percent)))
+        .collect();
+    assert!(seen.contains(&(Stage::Loading, 0)), "loading the model was said: {seen:?}");
+    // The 40% came right after the 0%, inside the emit gap: the next tick sends it.
+    for _ in 0..100 {
+        if f.events.statuses.lock().iter().any(|s| is(s, "501", Stage::Transcribing, 40)) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(f.events.statuses.lock().iter().any(|s| is(s, "501", Stage::Transcribing, 40)), "an event says 40%");
+    let moved = f.events.statuses.lock().iter().filter(|s| is(s, "501", Stage::Transcribing, 40)).all(|s| s.current.as_ref().unwrap().quiet_secs.is_none());
+    assert!(moved, "not quiet right after it moved");
+    // Nothing moves for a while (the test's "long time" is 300 ms): the status says so.
+    let s = until(&f.t, "quiet", |s| s.current.as_ref().is_some_and(|c| c.quiet_secs.is_some())).await;
+    assert_eq!(s.current.unwrap().percent, 40);
+    // The next tick (every 50 ms) sends it.
+    let said = || f.events.statuses.lock().iter().any(|s| s.current.as_ref().is_some_and(|c| c.quiet_secs.is_some()));
+    for _ in 0..100 {
+        if said() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(said(), "and an event went out");
+    h.script.gate.store(true, Ordering::SeqCst);
+    until(&f.t, "done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
+    assert_eq!(*h.script.threads.lock(), vec![4], "the thread budget reaches the speech library as is");
+}
+
+/// Short, so a test can watch the helper end.
+const IDLE_EXIT_TEST: Duration = Duration::from_millis(150);
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_asked_for_pauses_the_batch_in_the_same_helper() {
+    let h = hx(IDLE_EXIT_TEST).await;
+    let f = &h.f;
+    h.script.blocks.store(1, Ordering::SeqCst);
+    h.script.gate.store(true, Ordering::SeqCst);
+    f.t.transcribe_album("80").await.unwrap();
+    until(&f.t, "801 at 10%", |s| is(s, "801", Stage::Transcribing, 10)).await;
+    let asked = std::time::Instant::now();
+    f.t.transcribe_track("501").unwrap();
+    // The batch song is stopped within a moment and the asked-for song runs.
+    until(&f.t, "501 running", |s| s.current.as_ref().is_some_and(|c| c.track_id == "501")).await;
+    assert!(asked.elapsed() < Duration::from_secs(1), "the batch gave way in {:?}", asked.elapsed());
+    until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
+    // Then the batch song goes on, first.
+    until(&f.t, "801 done", |_| f.events.done.lock().iter().any(|d| d.0 == "801")).await;
+    until(&f.t, "all done", idle).await;
+    let done: Vec<String> = f.events.done.lock().iter().map(|d| d.0.clone()).collect();
+    assert_eq!(done, vec!["501", "801", "802", "803"]);
+    assert_eq!(h.n.started.load(Ordering::SeqCst), 1, "one helper all along");
+    assert_eq!(h.n.most_alive.load(Ordering::SeqCst), 1);
+    assert_eq!(h.script.loads.load(Ordering::SeqCst), 1, "the model was loaded once");
+    assert_eq!(h.script.most_busy.load(Ordering::SeqCst), 1, "never two songs at once");
+    let threads = h.script.threads.lock().clone();
+    assert_eq!(threads[1], 4, "the asked-for song got its four threads: {threads:?}");
+    assert!(threads[0] < 4 && threads[2] < 4, "{threads:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lyrics_check_waiting_for_the_helper_pauses_the_batch() {
+    let h = hx(IDLE_EXIT_TEST).await;
+    let f = &h.f;
+    h.script.blocks.store(1, Ordering::SeqCst);
+    f.t.transcribe_album("80").await.unwrap();
+    until(&f.t, "801 at 10%", |s| is(s, "801", Stage::Transcribing, 10)).await;
+    let check = h.helper.priority();
+    let model = f.models.installed(ModelKind::Small).unwrap();
+    let asked = std::time::Instant::now();
+    let res = tokio::task::spawn_blocking(move || {
+        // A check's song is "asked for" by the script (four threads), and finishes.
+        check.transcribe(&model, ModelKind::Small, &[0.0; 16], 4, "en", Stop::new(), Arc::new(|_| {}))
+    });
+    h.script.gate.store(true, Ordering::SeqCst);
+    res.await.unwrap().unwrap();
+    assert!(asked.elapsed() < Duration::from_secs(2), "{:?}", asked.elapsed());
+    until(&f.t, "801 done", |_| f.events.done.lock().iter().any(|d| d.0 == "801")).await;
+    assert_eq!(h.n.started.load(Ordering::SeqCst), 1);
+    assert_eq!(h.script.loads.load(Ordering::SeqCst), 1);
+    f.t.cancel(None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_reaches_the_helper_and_resets_the_song() {
+    let h = hx(IDLE_EXIT_TEST).await;
+    let f = &h.f;
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "40%", |s| is(s, "501", Stage::Transcribing, 40)).await;
+    let cancelled = std::time::Instant::now();
+    f.t.cancel(Some("501"));
+    let s = until(&f.t, "reset", idle).await;
+    assert!(cancelled.elapsed() < Duration::from_secs(1), "{:?}", cancelled.elapsed());
+    assert!(s.error.is_none() && s.up_next.is_none());
+    assert!(f.events.done.lock().is_empty());
+    assert_eq!(h.n.ended.load(Ordering::SeqCst), 0, "it stopped when asked: the helper stays a moment");
+    // Nothing else to do: it ends on its idle timer.
+    for _ in 0..200 {
+        if !h.helper.running() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(!h.helper.running());
+    // A helper that doesn't stop when asked is ended within about a second.
+    h.script.deaf.store(true, Ordering::SeqCst);
+    f.t.transcribe_track("502").unwrap();
+    until(&f.t, "40%", |s| is(s, "502", Stage::Transcribing, 40)).await;
+    let cancelled = std::time::Instant::now();
+    f.t.cancel(Some("502"));
+    let s = until(&f.t, "reset", idle).await;
+    assert!(cancelled.elapsed() < Duration::from_secs(3), "{:?}", cancelled.elapsed());
+    assert!(s.error.is_none(), "{s:?}");
+    assert!(!h.helper.running() && !h.helper.crashed_too_often());
+    assert_eq!(h.n.most_alive.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_of_a_queued_song_leaves_the_running_one() {
+    let h = hx(IDLE_EXIT_TEST).await;
+    let f = &h.f;
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "40%", |s| is(s, "501", Stage::Transcribing, 40)).await;
+    f.t.transcribe_track("502").unwrap();
+    f.t.transcribe_track("801").unwrap();
+    let s = f.t.status();
+    assert_eq!((s.queued, s.up_next.as_deref()), (2, Some("801")));
+    f.t.cancel(Some("502"));
+    let s = f.t.status();
+    assert_eq!(s.queued, 1);
+    assert!(is(&s, "501", Stage::Transcribing, 40), "the running song is untouched: {s:?}");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(is(&f.t.status(), "501", Stage::Transcribing, 40));
+    h.script.gate.store(true, Ordering::SeqCst);
+    until(&f.t, "all done", idle).await;
+    let done: Vec<String> = f.events.done.lock().iter().map(|d| d.0.clone()).collect();
+    assert_eq!(done, vec!["501", "801"]);
+}
+
 // ---------------------------------------------------------------- real model
 
 /// A real run, for timing. Needs the `transcribe` feature, a model file and
@@ -921,7 +1261,7 @@ fn real_model_speed() {
     assert_eq!(rec.unavailable(), None);
     let started = std::time::Instant::now();
     let segs = rec
-        .transcribe(Path::new(&model), kind, &pcm, threads, engine::LANGUAGE, Arc::new(AtomicBool::new(false)), Arc::new(|_| {}))
+        .transcribe(Path::new(&model), kind, &pcm, threads, engine::LANGUAGE, Stop::new(), Arc::new(|_| {}))
         .unwrap();
     let took = started.elapsed();
     let lines = lines::to_lines(&segs);

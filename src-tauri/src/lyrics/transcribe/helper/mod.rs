@@ -9,6 +9,15 @@
 //! there's work, and stops after about a minute without any, which frees
 //! the model's memory. A crash fails that one run; after a few in one
 //! session, background work stops until Platter restarts.
+//!
+//! There is one transcription helper. A song someone asks for stops the
+//! background song in it (the speech library's abort check) and runs in the
+//! same helper with the model already loaded. The lyrics check has a short
+//! lane of its own only for the small model ([`Helper::only`], ending soon
+//! after its last run); with only the medium model installed it goes
+//! through the transcription helper ([`Helper::priority`]), and a
+//! background song gives way to it, so the medium model is never loaded
+//! twice.
 
 pub mod proto;
 pub mod worker;
@@ -25,7 +34,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
-use super::engine::{self, Progress, RecognizeError, Recognizer};
+use super::engine::{self, Progress, RecognizeError, Recognizer, Stop};
 use super::lines::Segment;
 use super::model::ModelKind;
 use proto::{Reply, Request};
@@ -34,10 +43,17 @@ use proto::{Reply, Request};
 pub const WORKER_FLAG: &str = "--speech-worker";
 /// The helper stops after this long without work.
 pub const IDLE_EXIT: Duration = Duration::from_secs(60);
+/// The lyrics check's lane stops sooner: its runs are short and far apart.
+pub const CHECK_IDLE_EXIT: Duration = Duration::from_secs(10);
 /// Crashes in one session before background work stops.
 pub const CRASH_LIMIT: usize = 3;
-/// A cancelled run that hasn't stopped after this long is ended by force.
-const CANCEL_GRACE: Duration = Duration::from_secs(10);
+/// A run asked to give way stops at the speech library's next abort check,
+/// the end of the step it's on (for the medium model on a slow processor a
+/// 30 s stretch can take that long). One that hasn't stopped after this
+/// long is ended, which loses the loaded model.
+const CANCEL_GRACE: Duration = Duration::from_secs(30);
+/// A run the user cancelled gets this long before its helper is ended.
+const STOP_NOW_GRACE: Duration = Duration::from_secs(1);
 
 /// A running helper's process.
 pub trait WorkerProcess: Send {
@@ -93,11 +109,35 @@ pub struct Helper {
     idle_exit: Duration,
     slot: Arc<Mutex<Slot>>,
     crashes: AtomicUsize,
+    /// The one model this helper may load (the check's lane: small).
+    only: Option<ModelKind>,
+    /// Priority runs waiting for the helper.
+    wanted: AtomicUsize,
 }
 
 impl Helper {
     pub fn new(launch: Arc<dyn Launch>, lowest: Arc<dyn Fn() -> bool + Send + Sync>, idle_exit: Duration) -> Self {
-        Self { launch, lowest, idle_exit, slot: Arc::new(Mutex::new(Slot::default())), crashes: AtomicUsize::new(0) }
+        Self {
+            launch,
+            lowest,
+            idle_exit,
+            slot: Arc::new(Mutex::new(Slot::default())),
+            crashes: AtomicUsize::new(0),
+            only: None,
+            wanted: AtomicUsize::new(0),
+        }
+    }
+
+    /// This helper only ever loads `kind`; other runs fail before starting it.
+    pub fn only(mut self, kind: ModelKind) -> Self {
+        self.only = Some(kind);
+        self
+    }
+
+    /// The same helper for short runs that a background run gives way to
+    /// (see [`Recognizer::wanted`]). It never unloads the model.
+    pub fn priority(self: &Arc<Self>) -> Arc<dyn Recognizer> {
+        Arc::new(Priority(self.clone()))
     }
 
     /// The helper is running.
@@ -177,26 +217,33 @@ impl Drop for Helper {
     }
 }
 
-impl Recognizer for Helper {
-    fn unavailable(&self) -> Option<String> {
-        engine::unavailable_here()
-    }
-
-    fn transcribe(
+impl Helper {
+    #[allow(clippy::too_many_arguments)]
+    fn run_one(
         &self,
         model: &Path,
         kind: ModelKind,
         pcm: &[f32],
         threads: usize,
         language: &str,
-        cancel: Arc<AtomicBool>,
+        cancel: Stop,
         progress: Progress,
+        priority: bool,
     ) -> Result<Vec<Segment>, RecognizeError> {
-        if cancel.load(Ordering::Relaxed) {
+        if cancel.is_set() {
             return Err(RecognizeError::Cancelled);
         }
-        // One run at a time (transcription and the lyrics check have one each).
+        if self.only.is_some_and(|k| k != kind) {
+            return Err(RecognizeError::Failed(format!("this helper runs only the {:?} model", self.only)));
+        }
+        // One run at a time. A priority run says it's waiting meanwhile.
+        if priority {
+            self.wanted.fetch_add(1, Ordering::SeqCst);
+        }
         let mut guard = self.slot.lock();
+        if priority {
+            self.wanted.fetch_sub(1, Ordering::SeqCst);
+        }
         let slot = &mut *guard;
         let lowest = (self.lowest)();
         self.start(slot, lowest)?;
@@ -233,13 +280,32 @@ impl Recognizer for Helper {
                 Err(RecognizeError::Cancelled)
             }
             Ok(Ended::Lost(what)) => {
-                if cancel.load(Ordering::Relaxed) {
+                if cancel.is_set() {
                     slot.live = None;
                     return Err(RecognizeError::Cancelled);
                 }
                 Err(self.crashed(slot, &what))
             }
         }
+    }
+}
+
+impl Recognizer for Helper {
+    fn unavailable(&self) -> Option<String> {
+        engine::unavailable_here()
+    }
+
+    fn transcribe(
+        &self,
+        model: &Path,
+        kind: ModelKind,
+        pcm: &[f32],
+        threads: usize,
+        language: &str,
+        cancel: Stop,
+        progress: Progress,
+    ) -> Result<Vec<Segment>, RecognizeError> {
+        self.run_one(model, kind, pcm, threads, language, cancel, progress, false)
     }
 
     fn unload(&self) {
@@ -253,6 +319,36 @@ impl Recognizer for Helper {
     fn crashed_too_often(&self) -> bool {
         self.crashes.load(Ordering::SeqCst) >= CRASH_LIMIT
     }
+
+    fn wanted(&self) -> bool {
+        self.wanted.load(Ordering::SeqCst) > 0
+    }
+}
+
+/// [`Helper::priority`].
+struct Priority(Arc<Helper>);
+
+impl Recognizer for Priority {
+    fn unavailable(&self) -> Option<String> {
+        self.0.unavailable()
+    }
+
+    fn transcribe(
+        &self,
+        model: &Path,
+        kind: ModelKind,
+        pcm: &[f32],
+        threads: usize,
+        language: &str,
+        cancel: Stop,
+        progress: Progress,
+    ) -> Result<Vec<Segment>, RecognizeError> {
+        self.0.run_one(model, kind, pcm, threads, language, cancel, progress, true)
+    }
+
+    fn crashed_too_often(&self) -> bool {
+        self.0.crashed_too_often()
+    }
 }
 
 enum Ended {
@@ -265,7 +361,7 @@ enum Ended {
 }
 
 /// Reads replies until the run ends, passing a cancel on meanwhile.
-fn run(live: &mut Live, cancel: &AtomicBool, progress: &Progress) -> Ended {
+fn run(live: &mut Live, cancel: &Stop, progress: &Progress) -> Ended {
     let finished = AtomicBool::new(false);
     let killed = AtomicBool::new(false);
     let Live { input, output, process } = live;
@@ -274,23 +370,24 @@ fn run(live: &mut Live, cancel: &AtomicBool, progress: &Progress) -> Ended {
             let mut asked: Option<Instant> = None;
             while !finished.load(Ordering::Relaxed) {
                 match asked {
-                    None if cancel.load(Ordering::Relaxed) => {
+                    None if cancel.is_set() => {
                         let _ = proto::write_msg(&mut *input.lock(), &Request::Cancel);
                         asked = Some(Instant::now());
                     }
-                    Some(t) if t.elapsed() >= CANCEL_GRACE => {
+                    Some(t) if t.elapsed() >= if cancel.is_now() { STOP_NOW_GRACE } else { CANCEL_GRACE } => {
+                        tracing::info!("speech helper didn't stop when asked: ending it");
                         killed.store(true, Ordering::Relaxed);
                         process.lock().kill();
                         return;
                     }
                     _ => {}
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(Duration::from_millis(20));
             }
         });
         let end = loop {
             match proto::read_msg::<_, Reply>(output) {
-                Ok(Some(Reply::Progress { percent })) => progress(percent),
+                Ok(Some(Reply::Progress { step })) => progress(step),
                 Ok(Some(r @ (Reply::Done { .. } | Reply::Failed { .. } | Reply::Cancelled))) => break Ended::Reply(r),
                 Ok(Some(Reply::Hello { .. })) => break Ended::Lost("a second hello".into()),
                 Ok(None) => break Ended::Lost("its output ended".into()),
@@ -325,13 +422,13 @@ impl WorkerProcess for ChildProcess {
     fn kill(&mut self) {
         let _ = self.0.kill();
         let _ = self.0.wait();
-        crate::platform::cpu::set_helper(None);
+        crate::platform::cpu::helper_ended(self.0.id());
     }
     fn finish(&mut self) {
         let until = Instant::now() + Duration::from_secs(3);
         while Instant::now() < until {
             if let Ok(Some(_)) = self.0.try_wait() {
-                crate::platform::cpu::set_helper(None);
+                crate::platform::cpu::helper_ended(self.0.id());
                 return;
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -358,7 +455,7 @@ impl Launch for ProcessLaunch {
             });
         }
         tracing::debug!(pid = child.id(), "speech helper started");
-        crate::platform::cpu::set_helper(Some(child.id()));
+        crate::platform::cpu::helper_started(child.id());
         Ok(Worker { input: Box::new(input), output: Box::new(output), process: Box::new(ChildProcess(child)) })
     }
 }

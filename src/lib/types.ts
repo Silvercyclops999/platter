@@ -1699,7 +1699,7 @@ export interface TranscribeModelInfo {
   doneBytes: number;
 }
 
-export type TranscribeStage = "waitingForModel" | "reading" | "decoding" | "transcribing";
+export type TranscribeStage = "waitingForModel" | "reading" | "decoding" | "loading" | "transcribing";
 
 export interface TranscribeStatus {
   enabled: boolean;
@@ -1708,8 +1708,17 @@ export interface TranscribeStatus {
   unavailableReason?: string;
   model: TranscribeModel;
   models: TranscribeModelInfo[];
-  current?: { trackId: string; stage: TranscribeStage; percent: number; background: boolean };
+  current?: {
+    trackId: string;
+    stage: TranscribeStage;
+    percent: number;
+    background: boolean;
+    /** Seconds since the stage or percent last moved, once that has been a while. */
+    quietSecs?: number;
+  };
   queued: number;
+  /** The song that goes next. */
+  upNext?: string;
   batch: { done: number; total: number };
   /** About how long each song of a long run takes, breather included. */
   secsPerSong?: number;

@@ -11,12 +11,21 @@ use std::time::Duration;
 use parking_lot::Mutex;
 
 use super::*;
+use crate::lyrics::transcribe::engine::Step;
 use crate::lyrics::transcribe::lines::Word;
 
-/// Echoes what it was given; blocks on 7 samples, panics on 13.
+/// Echoes what it was given; blocks on 7 samples, panics on 13, and on 17
+/// ignores the cancel until its "process" is ended.
 #[derive(Default)]
 struct Fake {
     unloads: AtomicUsize,
+    /// Set when the helper is ended by force.
+    killed: Arc<AtomicBool>,
+    /// The models loaded, in order (a new one each time it changes).
+    loads: Mutex<Vec<ModelKind>>,
+    /// Runs going on in every helper at once, and the most seen.
+    busy: Arc<AtomicUsize>,
+    most_busy: Arc<AtomicUsize>,
 }
 
 impl Recognizer for Fake {
@@ -30,12 +39,35 @@ impl Recognizer for Fake {
         pcm: &[f32],
         threads: usize,
         language: &str,
-        cancel: Arc<AtomicBool>,
+        cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
+        if self.loads.lock().last() != Some(&_kind) {
+            progress(engine::Step::Loading);
+            self.loads.lock().push(_kind);
+        }
+        let n = self.busy.fetch_add(1, Ordering::SeqCst) + 1;
+        self.most_busy.fetch_max(n, Ordering::SeqCst);
+        let res = self.run(model, pcm, threads, language, cancel, progress);
+        self.busy.fetch_sub(1, Ordering::SeqCst);
+        res
+    }
+    fn unload(&self) {
+        self.unloads.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+impl Fake {
+    fn run(&self, model: &Path, pcm: &[f32], threads: usize, language: &str, cancel: Stop, progress: Progress) -> Result<Vec<Segment>, RecognizeError> {
         match pcm.len() {
+            17 => {
+                while !self.killed.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                panic!("ended by force");
+            }
             7 => {
-                while !cancel.load(Ordering::Relaxed) {
+                while !cancel.is_set() {
                     std::thread::sleep(Duration::from_millis(2));
                 }
                 return Err(RecognizeError::Cancelled);
@@ -46,14 +78,11 @@ impl Recognizer for Fake {
         if model.ends_with("missing.bin") {
             return Err(RecognizeError::Failed("model didn't load".into()));
         }
-        progress(10);
-        progress(10);
-        progress(50);
+        progress(engine::Step::Percent(10));
+        progress(engine::Step::Percent(10));
+        progress(engine::Step::Percent(50));
         let text = format!("{} {} {threads} {language}", model.display(), pcm.iter().sum::<f32>());
         Ok(vec![Segment { words: vec![Word { start_ms: 0, end_ms: 10, text }] }])
-    }
-    fn unload(&self) {
-        self.unloads.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -61,6 +90,8 @@ impl Recognizer for Fake {
 struct Launches {
     started: AtomicUsize,
     ended: Arc<AtomicUsize>,
+    /// The most helpers alive at once.
+    most_alive: AtomicUsize,
     lowest: Arc<Mutex<Vec<bool>>>,
     /// Answer with something that isn't the protocol.
     garbage: AtomicBool,
@@ -71,17 +102,21 @@ struct ThreadLaunch {
     n: Arc<Launches>,
 }
 
-struct ThreadProcess(Arc<AtomicUsize>);
+struct ThreadProcess(Arc<AtomicUsize>, Arc<AtomicBool>);
 
 impl WorkerProcess for ThreadProcess {
     fn kill(&mut self) {
+        self.1.store(true, Ordering::SeqCst);
         self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 
 impl Launch for ThreadLaunch {
     fn launch(&self, _lowest: bool) -> io::Result<Worker> {
-        self.n.started.fetch_add(1, Ordering::SeqCst);
+        let started = self.n.started.fetch_add(1, Ordering::SeqCst) + 1;
+        let alive = started - self.n.ended.load(Ordering::SeqCst);
+        self.n.most_alive.fetch_max(alive, Ordering::SeqCst);
+        self.rec.killed.store(false, Ordering::SeqCst);
         let (req_r, req_w) = io::pipe()?;
         let (rep_r, mut rep_w) = io::pipe()?;
         if self.n.garbage.load(Ordering::SeqCst) {
@@ -94,7 +129,7 @@ impl Launch for ThreadLaunch {
                 let _ = worker::serve(Box::new(req_r), Box::new(rep_w), rec, &|l| lowest.lock().push(l));
             });
         }
-        Ok(Worker { input: Box::new(req_w), output: Box::new(rep_r), process: Box::new(ThreadProcess(self.n.ended.clone())) })
+        Ok(Worker { input: Box::new(req_w), output: Box::new(rep_r), process: Box::new(ThreadProcess(self.n.ended.clone(), self.rec.killed.clone())) })
     }
 }
 
@@ -105,29 +140,47 @@ struct Fx {
     light: Arc<AtomicBool>,
 }
 
-fn fx(idle: Duration) -> Fx {
+fn fx_only(idle: Duration, only: Option<ModelKind>) -> Fx {
     let rec = Arc::new(Fake::default());
     let n = Arc::new(Launches::default());
     let light = Arc::new(AtomicBool::new(true));
     let l = light.clone();
-    let helper = Arc::new(Helper::new(
-        Arc::new(ThreadLaunch { rec: rec.clone(), n: n.clone() }),
-        Arc::new(move || l.load(Ordering::SeqCst)),
-        idle,
-    ));
-    Fx { helper, rec, n, light }
+    let mut helper =
+        Helper::new(Arc::new(ThreadLaunch { rec: rec.clone(), n: n.clone() }), Arc::new(move || l.load(Ordering::SeqCst)), idle);
+    if let Some(k) = only {
+        helper = helper.only(k);
+    }
+    Fx { helper: Arc::new(helper), rec, n, light }
 }
 
-fn run(h: &Helper, pcm: &[f32], cancel: Arc<AtomicBool>) -> (Result<Vec<Segment>, RecognizeError>, Vec<u8>) {
+fn fx(idle: Duration) -> Fx {
+    fx_only(idle, None)
+}
+
+fn run_kind(h: &dyn Recognizer, kind: ModelKind, pcm: &[f32], cancel: Stop) -> (Result<Vec<Segment>, RecognizeError>, Vec<Step>) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let s = seen.clone();
-    let res = h.transcribe(Path::new("m/small.bin"), ModelKind::Small, pcm, 2, "en", cancel, Arc::new(move |p| s.lock().push(p)));
+    let res = h.transcribe(Path::new("m/small.bin"), kind, pcm, 2, "en", cancel, Arc::new(move |p| s.lock().push(p)));
     let seen = seen.lock().clone();
     (res, seen)
 }
 
-fn never() -> Arc<AtomicBool> {
-    Arc::new(AtomicBool::new(false))
+fn run(h: &Helper, pcm: &[f32], cancel: Stop) -> (Result<Vec<Segment>, RecognizeError>, Vec<Step>) {
+    run_kind(h, ModelKind::Small, pcm, cancel)
+}
+
+fn never() -> Stop {
+    Stop::new()
+}
+
+fn wait_for(what: &str, f: impl Fn() -> bool) {
+    for _ in 0..500 {
+        if f() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("timed out waiting for {what}");
 }
 
 fn text(r: Result<Vec<Segment>, RecognizeError>) -> String {
@@ -140,7 +193,7 @@ fn a_run_goes_through_the_helper_and_back() {
     assert!(!f.helper.running(), "nothing starts before work arrives");
     let (res, progress) = run(&f.helper, &[0.25, 0.5, 1.0], never());
     assert_eq!(text(res), "m/small.bin 1.75 2 en");
-    assert_eq!(progress, vec![10, 50], "each step once");
+    assert_eq!(progress, vec![Step::Loading, Step::Percent(10), Step::Percent(50)], "each step once, loading first");
     // The second run uses the same helper.
     f.light.store(false, Ordering::SeqCst);
     let (res, _) = run(&f.helper, &[1.0], never());
@@ -154,23 +207,67 @@ fn a_run_goes_through_the_helper_and_back() {
 }
 
 #[test]
-fn a_second_helper_answers_while_the_first_is_busy() {
-    // Transcription and the lyrics check each have one: a check never waits
-    // behind a long batch song.
-    let batch = fx(IDLE_EXIT);
-    let check = fx(IDLE_EXIT);
-    let stop = never();
+fn the_check_lane_runs_only_the_small_model() {
+    let lane = fx_only(IDLE_EXIT, Some(ModelKind::Small));
+    assert_eq!(text(run(&lane.helper, &[1.0], never()).0), "m/small.bin 1 2 en");
+    let res = run_kind(&*lane.helper, ModelKind::Medium, &[1.0], never()).0;
+    assert!(matches!(res, Err(RecognizeError::Failed(_))), "{res:?}");
+    assert_eq!(*lane.rec.loads.lock(), vec![ModelKind::Small], "the medium model was never loaded");
+    assert!(!lane.helper.crashed_too_often());
+}
+
+#[test]
+fn the_check_lane_ends_when_idle() {
+    let lane = fx_only(Duration::from_millis(40), Some(ModelKind::Small));
+    run(&lane.helper, &[1.0], never()).0.unwrap();
+    assert!(lane.helper.running());
+    wait_for("the lane to end", || !lane.helper.running());
+    assert_eq!(lane.n.ended.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_priority_run_is_wanted_while_it_waits_and_uses_the_same_helper() {
+    let f = fx(IDLE_EXIT);
+    let check = f.helper.priority();
+    let batch = never();
     let long = {
-        let (h, stop) = (batch.helper.clone(), stop.clone());
-        std::thread::spawn(move || run(&h, &[0.0; 7], stop).0)
+        let (h, stop) = (f.helper.clone(), batch.clone());
+        std::thread::spawn(move || run_kind(&*h, ModelKind::Medium, &[0.0; 7], stop).0)
     };
-    std::thread::sleep(Duration::from_millis(30));
-    let started = std::time::Instant::now();
-    assert_eq!(text(run(&check.helper, &[1.0], never()).0), "m/small.bin 1 2 en");
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert!(!long.is_finished(), "the batch song is still going");
-    stop.store(true, Ordering::SeqCst);
+    wait_for("the batch song", || f.rec.busy.load(Ordering::SeqCst) == 1);
+    assert!(!f.helper.wanted());
+    let waiting = std::thread::spawn(move || text(run_kind(&*check, ModelKind::Medium, &[1.0], never()).0));
+    wait_for("the check to be waiting", || f.helper.wanted());
+    // What the queue does when a check is wanted: the batch song gives way.
+    batch.give_way();
     assert_eq!(long.join().unwrap().unwrap_err(), RecognizeError::Cancelled);
+    assert_eq!(waiting.join().unwrap(), "m/small.bin 1 2 en");
+    assert!(!f.helper.wanted());
+    assert_eq!(f.n.started.load(Ordering::SeqCst), 1, "one helper");
+    assert_eq!(*f.rec.loads.lock(), vec![ModelKind::Medium], "loaded once");
+    assert_eq!(f.rec.most_busy.load(Ordering::SeqCst), 1, "never two runs at once");
+}
+
+#[test]
+fn a_run_stopped_now_ends_a_helper_that_doesnt_stop() {
+    let f = fx(IDLE_EXIT);
+    let stop = never();
+    let s = stop.clone();
+    let started = std::time::Instant::now();
+    let stopper = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        s.now();
+    });
+    let (res, _) = run(&f.helper, &[0.0; 17], stop);
+    stopper.join().unwrap();
+    assert_eq!(res.unwrap_err(), RecognizeError::Cancelled);
+    assert!(started.elapsed() < Duration::from_secs(3), "within about a second: {:?}", started.elapsed());
+    assert!(!f.helper.running(), "ended");
+    assert!(!f.helper.crashed_too_often());
+    assert_eq!(f.n.ended.load(Ordering::SeqCst), 1);
+    // The next run starts a new one; never two at once.
+    assert_eq!(text(run(&f.helper, &[1.0], never()).0), "m/small.bin 1 2 en");
+    assert_eq!(f.n.most_alive.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -189,14 +286,15 @@ fn cancel_stops_the_run_and_keeps_the_helper() {
     let c = cancel.clone();
     let stopper = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(60));
-        c.store(true, Ordering::SeqCst);
+        c.give_way();
     });
     let (res, _) = run(&f.helper, &[0.0; 7], cancel);
     stopper.join().unwrap();
     assert_eq!(res.unwrap_err(), RecognizeError::Cancelled);
     assert!(f.helper.running());
     // Already cancelled: nothing is sent.
-    let gone = Arc::new(AtomicBool::new(true));
+    let gone = never();
+    gone.give_way();
     assert_eq!(run(&f.helper, &[1.0], gone).0.unwrap_err(), RecognizeError::Cancelled);
     // A cancel that came late doesn't stop the next run.
     assert_eq!(text(run(&f.helper, &[1.0], never()).0), "m/small.bin 1 2 en");

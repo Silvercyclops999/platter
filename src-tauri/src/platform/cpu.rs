@@ -17,12 +17,19 @@ pub struct Reading {
     pub total: f64,
     /// Time no program was running.
     pub idle: f64,
-    /// Time Platter itself used (the app and its speech helper).
+    /// Time Platter itself used (the app and its speech helpers).
     pub own: f64,
-    /// The speech helper's process id when it was counted in `own`.
-    pub helper: Option<u32>,
-    /// The speech helper's share of `own`.
-    pub helper_own: f64,
+    /// Each speech helper counted in `own`: its process id and its share.
+    pub helpers: [Option<(u32, f64)>; MAX_HELPERS],
+}
+
+/// Speech helpers at once: transcription's, and the lyrics check's lane.
+pub const MAX_HELPERS: usize = 2;
+
+impl Reading {
+    fn helpers_own(&self) -> f64 {
+        self.helpers.iter().flatten().map(|h| h.1).sum()
+    }
 }
 
 /// Percent of the whole processor that other programs used between two
@@ -34,21 +41,32 @@ pub fn others_percent(before: Reading, after: Reading) -> Option<f32> {
     }
     let busy = total - (after.idle - before.idle);
     // A helper that started or stopped in between: count only what's known.
-    let mut own = (after.own - after.helper_own) - (before.own - before.helper_own);
-    own += match (before.helper, after.helper) {
-        (Some(a), Some(b)) if a == b => after.helper_own - before.helper_own,
-        (_, Some(_)) => after.helper_own,
-        _ => 0.0,
-    };
+    let mut own = (after.own - after.helpers_own()) - (before.own - before.helpers_own());
+    for (pid, t) in after.helpers.iter().flatten() {
+        own += match before.helpers.iter().flatten().find(|h| h.0 == *pid) {
+            Some(b) => t - b.1,
+            None => *t,
+        };
+    }
     Some((((busy - own) / total) * 100.0).clamp(0.0, 100.0) as f32)
 }
 
-/// The running speech helper, so its work counts as Platter's own.
-static HELPER: Mutex<Option<u32>> = Mutex::new(None);
+/// The running speech helpers, so their work counts as Platter's own.
+static HELPERS: Mutex<[Option<u32>; MAX_HELPERS]> = Mutex::new([None; MAX_HELPERS]);
 
-/// The speech helper started (Some) or ended (None).
-pub fn set_helper(pid: Option<u32>) {
-    *HELPER.lock() = pid;
+/// A speech helper started.
+pub fn helper_started(pid: u32) {
+    let mut all = HELPERS.lock();
+    if let Some(free) = all.iter_mut().find(|p| p.is_none()) {
+        *free = Some(pid);
+    }
+}
+
+/// A speech helper ended.
+pub fn helper_ended(pid: u32) {
+    for p in HELPERS.lock().iter_mut().filter(|p| **p == Some(pid)) {
+        *p = None;
+    }
 }
 
 /// System-wide readings, each compared with the one before.
@@ -61,14 +79,15 @@ impl SystemLoad {
     /// Other programs' share since the last call. None on the first call or
     /// where the counters can't be read.
     pub fn others_percent(&self) -> Option<f32> {
-        let helper = *HELPER.lock();
+        let helpers = *HELPERS.lock();
         let mut now = imp::read()?;
-        if let Some(pid) = helper
-            && let Some(t) = imp::process_secs(pid)
-        {
-            now.helper = Some(pid);
-            now.helper_own = t;
-            now.own += t;
+        for (slot, pid) in now.helpers.iter_mut().zip(helpers) {
+            if let Some(pid) = pid
+                && let Some(t) = imp::process_secs(pid)
+            {
+                *slot = Some((pid, t));
+                now.own += t;
+            }
         }
         let before = self.last.lock().replace(now)?;
         others_percent(before, now)
@@ -133,7 +152,7 @@ mod imp {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
     use windows::Win32::UI::Shell::{QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
 
-    use super::Reading;
+    use super::{MAX_HELPERS, Reading};
 
     fn secs(f: FILETIME) -> f64 {
         // 100 ns units.
@@ -154,7 +173,7 @@ mod imp {
         // SAFETY: the pseudo handle for this process.
         let own = times(unsafe { GetCurrentProcess() })?;
         // Kernel time includes idle time.
-        Some(Reading { total: secs(kernel) + secs(user), idle: secs(idle), own, helper: None, helper_own: 0.0 })
+        Some(Reading { total: secs(kernel) + secs(user), idle: secs(idle), own, helpers: [None; MAX_HELPERS] })
     }
 
     pub fn process_secs(pid: u32) -> Option<f64> {
@@ -230,7 +249,7 @@ mod imp {
     use std::sync::OnceLock;
     use std::time::Duration;
 
-    use super::Reading;
+    use super::{MAX_HELPERS, Reading};
 
     #[repr(C)]
     struct Timespec {
@@ -297,7 +316,7 @@ mod imp {
             return None;
         }
         let own = ts.sec as f64 + ts.nsec as f64 / 1e9;
-        Some(Reading { total: t.iter().sum(), idle: t[2], own, helper: None, helper_own: 0.0 })
+        Some(Reading { total: t.iter().sum(), idle: t[2], own, helpers: [None; MAX_HELPERS] })
     }
 
     pub fn process_secs(pid: u32) -> Option<f64> {
@@ -351,7 +370,7 @@ mod imp {
     use std::process::{Child, Command};
     use std::time::Duration;
 
-    use super::Reading;
+    use super::{MAX_HELPERS, Reading};
 
     /// Clock ticks per second in /proc (USER_HZ, 100 on every common build).
     const HZ: f64 = 100.0;
@@ -379,7 +398,7 @@ mod imp {
         let total: f64 = cpu.iter().take(8).sum::<f64>() / HZ;
         let idle = (cpu[3] + cpu[4]) / HZ;
         let own = stat_secs(&std::fs::read_to_string("/proc/self/stat").ok()?)?;
-        Some(Reading { total, idle, own, helper: None, helper_own: 0.0 })
+        Some(Reading { total, idle, own, helpers: [None; MAX_HELPERS] })
     }
 
     pub fn process_secs(pid: u32) -> Option<f64> {
@@ -422,7 +441,7 @@ mod tests {
     use super::*;
 
     fn r(total: f64, idle: f64, own: f64) -> Reading {
-        Reading { total, idle, own, helper: None, helper_own: 0.0 }
+        Reading { total, idle, own, helpers: [None; MAX_HELPERS] }
     }
 
     #[test]
@@ -437,19 +456,48 @@ mod tests {
         assert_eq!(others_percent(a, c), Some(0.0));
     }
 
+    fn with(base: Reading, helpers: &[(u32, f64)]) -> Reading {
+        let mut r = base;
+        for (slot, h) in r.helpers.iter_mut().zip(helpers) {
+            *slot = Some(*h);
+        }
+        r
+    }
+
     #[test]
     fn the_speech_helper_counts_as_platter() {
         // The helper (pid 9) used 20 of the 30 busy seconds; others used 10.
-        let a = Reading { helper: Some(9), helper_own: 5.0, ..r(100.0, 50.0, 15.0) };
-        let b = Reading { helper: Some(9), helper_own: 25.0, ..r(140.0, 60.0, 35.0) };
+        let a = with(r(100.0, 50.0, 15.0), &[(9, 5.0)]);
+        let b = with(r(140.0, 60.0, 35.0), &[(9, 25.0)]);
         assert_eq!(others_percent(a, b), Some(25.0));
         // A new helper since the last reading: all its time is in this span.
-        let c = Reading { helper: Some(10), helper_own: 20.0, ..r(140.0, 60.0, 30.0) };
+        let c = with(r(140.0, 60.0, 30.0), &[(10, 20.0)]);
         assert_eq!(others_percent(r(100.0, 50.0, 10.0), c), Some(25.0));
         // The helper ended: its earlier time isn't taken off again.
         let d = r(140.0, 60.0, 30.0);
-        let e = Reading { helper: Some(9), helper_own: 5.0, ..r(100.0, 50.0, 15.0) };
+        let e = with(r(100.0, 50.0, 15.0), &[(9, 5.0)]);
         assert_eq!(others_percent(e, d), Some(25.0));
+    }
+
+    #[test]
+    fn two_helpers_both_count_as_platter() {
+        // Transcription (9) used 12 s, the check's lane (11) 8 s; others 10.
+        let a = with(r(100.0, 50.0, 20.0), &[(9, 5.0), (11, 5.0)]);
+        let b = with(r(140.0, 60.0, 40.0), &[(9, 17.0), (11, 13.0)]);
+        assert_eq!(others_percent(a, b), Some(25.0));
+        // One ended in between: the other still counts.
+        let c = with(r(140.0, 60.0, 35.0), &[(9, 17.0)]);
+        assert_eq!(others_percent(a, c), Some(25.0));
+    }
+
+    #[test]
+    fn helpers_come_and_go() {
+        helper_started(4001);
+        helper_started(4002);
+        assert!(HELPERS.lock().contains(&Some(4001)) && HELPERS.lock().contains(&Some(4002)));
+        helper_ended(4001);
+        assert!(!HELPERS.lock().contains(&Some(4001)) && HELPERS.lock().contains(&Some(4002)));
+        helper_ended(4002);
     }
 
     #[test]

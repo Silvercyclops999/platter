@@ -5,10 +5,9 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use platter_lib::lyrics::transcribe::engine::{LANGUAGE, RecognizeError, Recognizer};
+use platter_lib::lyrics::transcribe::engine::{LANGUAGE, RecognizeError, Recognizer, Stop};
 use platter_lib::lyrics::transcribe::helper::{Helper, ProcessLaunch};
 use platter_lib::lyrics::transcribe::model::ModelKind;
 
@@ -17,7 +16,7 @@ use platter_lib::lyrics::transcribe::model::ModelKind;
 fn the_real_helper_starts_answers_and_stops() {
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_platter"));
     let helper = Helper::new(Arc::new(ProcessLaunch { exe }), Arc::new(|| true), Duration::from_millis(500));
-    let never = || Arc::new(AtomicBool::new(false));
+    let never = Stop::new;
     let res = helper.transcribe(Path::new("/nowhere/missing.bin"), ModelKind::Small, &[0.0; 16_000], 2, LANGUAGE, never(), Arc::new(|_| {}));
     assert!(matches!(res, Err(RecognizeError::Failed(_))), "{res:?}");
     assert!(helper.running(), "a failed run keeps the helper");

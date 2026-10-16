@@ -14,6 +14,7 @@ import { mockLyricsKind } from "../lib/mock/details";
 import { mockMatched, mockPlexMissed } from "../lib/mock/fixtures";
 import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { LyricsPane } from "../shell/LyricsView";
+import { stageText } from "../shell/TranscribeOffer";
 import { SettingsPage } from "../pages/SettingsPage";
 import { batchNote, transcribeNote } from "../pages/TranscribeSettings";
 import { clearLyricsCache, lyricsSourceLabel } from "../shell/lyrics";
@@ -231,7 +232,7 @@ describe("Lyrics view", () => {
     page();
     await screen.findByText(/Downloads the 181 MB speech model first/);
     await userEvent.click(screen.getByRole("button", { name: "Transcribe this song" }));
-    await screen.findByText(/Downloading the speech model|Transcribing…|Starting…|Reading the song…/);
+    await screen.findByText(/Downloading the speech model|Transcribing…|Reading the song…/);
     await screen.findByText("Auto-transcribed, may be wrong.", undefined, { timeout: 3000 });
     expect(screen.getByText("I walk the long way back to you")).toBeInTheDocument();
     // Edit opens the editor on the transcription.
@@ -247,6 +248,47 @@ describe("Lyrics view", () => {
     page();
     await screen.findByText("No lyrics for this song");
     expect(lyricsSourceLabel({ synced: true, lines: [], source: "auto" })).toBe("Auto-transcribed, may be wrong.");
+  });
+
+  it("says what the speech helper is doing, and when nothing moves for a while", () => {
+    const s = useTranscribe.getState().status!;
+    const c = { trackId: "1", stage: "transcribing" as const, percent: 40, background: false };
+    expect(stageText(c, s)).toBe("Transcribing… 40%");
+    expect(stageText({ ...c, percent: 0 }, s)).toBe("Transcribing…");
+    expect(stageText({ ...c, stage: "loading", percent: 0 }, s)).toBe("Loading the speech model…");
+    expect(stageText({ ...c, quietSecs: 150 }, s)).toBe("Transcribing… 40%. No progress for 2 minutes. Your computer may be busy; it keeps going.");
+    expect(stageText({ ...c, quietSecs: 70 }, s)).toMatch(/No progress for a minute\./);
+    for (const t of [stageText(c, s), stageText({ ...c, quietSecs: 400 }, s)]) {
+      expect(t).not.toMatch(/Starting|\u2014/);
+    }
+  });
+
+  it("cancels the song being transcribed and offers it again", async () => {
+    await turnOn();
+    mock.transcribe.stepMs = 5000;
+    playing(other);
+    page();
+    await userEvent.click(await screen.findByRole("button", { name: "Transcribe this song" }));
+    const note = await screen.findByRole("status");
+    await userEvent.click(within(note).getByRole("button", { name: "Cancel" }));
+    await screen.findByRole("button", { name: "Transcribe this song" });
+    expect(useTranscribe.getState().status?.current).toBeUndefined();
+  });
+
+  it("says a song asked for waits for the background song to pause", async () => {
+    await turnOn();
+    playing(other);
+    page();
+    await screen.findByRole("button", { name: "Transcribe this song" });
+    const s = useTranscribe.getState().status!;
+    act(() =>
+      useTranscribe.setState({
+        status: { ...s, current: { trackId: "elsewhere", stage: "transcribing", percent: 10, background: true }, queued: 1, upNext: other.id },
+      }),
+    );
+    const note = await screen.findByRole("status");
+    expect(note).toHaveTextContent("Pausing the background song first…");
+    expect(within(note).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
   it("says when transcription failed and offers to try again", async () => {

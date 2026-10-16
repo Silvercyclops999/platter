@@ -19,7 +19,7 @@ use super::choice::{self, Choice};
 use super::*;
 use crate::artistinfo::http::fake::FakeHttp;
 use crate::lyrics::transcribe::audio::{AudioError, RATE};
-use crate::lyrics::transcribe::engine::{Progress, RecognizeError, Recognizer};
+use crate::lyrics::transcribe::engine::{Progress, RecognizeError, Recognizer, Stop};
 use crate::lyrics::transcribe::lines::{Segment, Word};
 use crate::lyrics::transcribe::model::{ModelKind, ModelSpec, ModelStore};
 use crate::lyrics::transcribe::pace::{Pacer, fake::{self, FakeLoad}};
@@ -338,7 +338,7 @@ impl Recognizer for FakeRecognizer {
     fn unavailable(&self) -> Option<String> {
         None
     }
-    fn transcribe(&self, _: &Path, _: ModelKind, pcm: &[f32], threads: usize, _: &str, _: Arc<AtomicBool>, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
+    fn transcribe(&self, _: &Path, _: ModelKind, pcm: &[f32], threads: usize, _: &str, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.threads.store(threads, Ordering::SeqCst);
         let start = window_start(pcm);
@@ -458,6 +458,7 @@ fn fx() -> Fx {
         db: db.clone(),
         models: ModelStore::new(models.clone(), specs, Arc::new(|_: &Path| Some(u64::MAX))),
         recognizer: rec.clone(),
+        shared: None,
         audio: pcm.clone(),
         events: events.clone(),
         enabled: check_on.clone(),

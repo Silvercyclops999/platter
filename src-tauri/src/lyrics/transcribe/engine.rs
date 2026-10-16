@@ -6,16 +6,96 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::lines::Segment;
+use super::lines::{Segment, Word};
 use super::model::ModelKind;
 
 /// The language songs are transcribed in.
 pub const LANGUAGE: &str = "en";
 
-/// Called with the percent done (0 to 100).
-pub type Progress = Arc<dyn Fn(u8) + Send + Sync>;
+/// How a run is getting on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "step", content = "percent", rename_all = "camelCase")]
+pub enum Step {
+    /// Loading the model from disk (before the first percent).
+    Loading,
+    /// Listening: the percent done (0 to 100). The speech library reports
+    /// it once per 30 s stretch of the song.
+    Percent(u8),
+}
+
+/// Called as a run moves on.
+pub type Progress = Arc<dyn Fn(Step) + Send + Sync>;
+
+/// Stops a run early. Asked to give way, a run stops at the speech
+/// library's next check (the end of the step it's on), keeping its helper
+/// and the loaded model; stopped now, a helper that doesn't stop within
+/// about a second is ended.
+#[derive(Debug, Clone, Default)]
+pub struct Stop {
+    flag: Arc<AtomicBool>,
+    now: Arc<AtomicBool>,
+}
+
+impl Stop {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Stop at the next check (another song comes first).
+    pub fn give_way(&self) {
+        self.flag.store(true, Ordering::Relaxed);
+    }
+    /// Stop as soon as possible (the user cancelled).
+    pub fn now(&self) {
+        self.now.store(true, Ordering::Relaxed);
+        self.flag.store(true, Ordering::Relaxed);
+    }
+    pub fn is_set(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
+    }
+    pub fn is_now(&self) -> bool {
+        self.now.load(Ordering::Relaxed)
+    }
+    /// The flag the speech library's abort check reads.
+    pub fn flag(&self) -> &Arc<AtomicBool> {
+        &self.flag
+    }
+}
+
+/// One token as the recognizer gave it: its raw text bytes (a token can
+/// end partway through a character, such as the three bytes of "♪"), its
+/// times in milliseconds and the attention-based start when known.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawToken {
+    pub bytes: Vec<u8>,
+    pub start_ms: u32,
+    pub end_ms: u32,
+    pub dtw_ms: Option<u32>,
+}
+
+/// A segment's tokens to words. A word starts at a token beginning with a
+/// space; its bytes are joined first and decoded once, so a character
+/// split across tokens comes out whole.
+pub fn words_from_tokens(tokens: &[RawToken]) -> Vec<Word> {
+    let mut raw: Vec<(u32, u32, Vec<u8>)> = Vec::new();
+    for t in tokens {
+        let new_word = raw.is_empty() || t.bytes.first() == Some(&b' ');
+        match raw.last_mut() {
+            Some(w) if !new_word => {
+                w.2.extend_from_slice(&t.bytes);
+                w.1 = w.1.max(t.end_ms);
+            }
+            _ => {
+                let start = t.dtw_ms.unwrap_or(t.start_ms);
+                raw.push((start, t.end_ms.max(start), t.bytes.clone()));
+            }
+        }
+    }
+    raw.into_iter()
+        .map(|(start_ms, end_ms, bytes)| Word { start_ms, end_ms, text: String::from_utf8_lossy(&bytes).into_owned() })
+        .collect()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecognizeError {
@@ -38,11 +118,16 @@ pub trait Recognizer: Send + Sync {
         pcm: &[f32],
         threads: usize,
         language: &str,
-        cancel: Arc<AtomicBool>,
+        cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError>;
     /// Free the loaded model (the queue is empty).
     fn unload(&self) {}
+    /// Another caller is waiting for this recognizer (a lyrics check): a
+    /// background song in progress gives way to it.
+    fn wanted(&self) -> bool {
+        false
+    }
     /// The recognizer crashed often enough this session that background
     /// work should stop.
     fn crashed_too_often(&self) -> bool {
@@ -97,7 +182,7 @@ impl Recognizer for Missing {
     fn unavailable(&self) -> Option<String> {
         unavailable_here()
     }
-    fn transcribe(&self, _: &Path, _: ModelKind, _: &[f32], _: usize, _: &str, _: Arc<AtomicBool>, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
+    fn transcribe(&self, _: &Path, _: ModelKind, _: &[f32], _: usize, _: &str, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
         Err(RecognizeError::Failed("not in this build".into()))
     }
 }
@@ -113,9 +198,9 @@ pub mod whisper {
         DtwMode, DtwModelPreset, DtwParameters, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
     };
 
-    use super::super::lines::{Segment, Word};
+    use super::super::lines::Segment;
     use super::super::model::ModelKind;
-    use super::{Progress, RecognizeError, Recognizer, unavailable_here};
+    use super::{Progress, RawToken, RecognizeError, Recognizer, Step, Stop, unavailable_here, words_from_tokens};
 
     /// whisper.cpp, keeping the last model loaded between songs.
     #[derive(Default)]
@@ -193,16 +278,19 @@ pub mod whisper {
             pcm: &[f32],
             threads: usize,
             language: &str,
-            cancel: Arc<AtomicBool>,
+            stop: Stop,
             progress: Progress,
         ) -> Result<Vec<Segment>, RecognizeError> {
+            let cancel = stop.flag().clone();
             let mut slot = self.ctx.lock();
             if slot.as_ref().is_none_or(|(p, _)| p != model) {
                 *slot = None;
+                progress(Step::Loading);
                 *slot = Some((model.to_path_buf(), load(model, kind)?));
             }
             let (_, ctx) = slot.as_ref().expect("just loaded");
             let mut state = ctx.create_state().map_err(|e| RecognizeError::Failed(e.to_string()))?;
+            progress(Step::Percent(0));
 
             let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
             p.set_n_threads(threads as i32);
@@ -228,7 +316,7 @@ pub mod whisper {
                 p.set_abort_callback(Some(should_abort));
                 p.set_abort_callback_user_data(Arc::as_ptr(&cancel) as *mut std::ffi::c_void);
             }
-            p.set_progress_callback_safe(move |pct: i32| progress(pct.clamp(0, 100) as u8));
+            p.set_progress_callback_safe(move |pct: i32| progress(Step::Percent(pct.clamp(0, 100) as u8)));
 
             let res = state.full(p, pcm);
             if cancel.load(Ordering::Relaxed) {
@@ -239,26 +327,24 @@ pub mod whisper {
             let eot = ctx.token_eot();
             let mut out = Vec::new();
             for seg in state.as_iter() {
-                let mut words: Vec<Word> = Vec::new();
+                let mut tokens = Vec::new();
                 for i in 0..seg.n_tokens() {
                     let Some(tok) = seg.get_token(i) else { continue };
                     // Special and timestamp tokens come after end-of-text.
                     if tok.token_id() >= eot {
                         continue;
                     }
-                    let Ok(text) = tok.to_str_lossy() else { continue };
+                    // Raw bytes: a token can hold part of a character.
+                    let Ok(bytes) = tok.to_bytes() else { continue };
                     let d = tok.token_data();
-                    let (t0, t1) = ((d.t0.max(0) * 10) as u32, (d.t1.max(0) * 10) as u32);
-                    let start = if d.t_dtw >= 0 { (d.t_dtw * 10) as u32 } else { t0 };
-                    let new_word = words.is_empty() || text.starts_with(' ');
-                    match words.last_mut() {
-                        Some(w) if !new_word => {
-                            w.text.push_str(&text);
-                            w.end_ms = w.end_ms.max(t1);
-                        }
-                        _ => words.push(Word { start_ms: start, end_ms: t1.max(start), text: text.into_owned() }),
-                    }
+                    tokens.push(RawToken {
+                        bytes: bytes.to_vec(),
+                        start_ms: (d.t0.max(0) * 10) as u32,
+                        end_ms: (d.t1.max(0) * 10) as u32,
+                        dtw_ms: (d.t_dtw >= 0).then(|| (d.t_dtw * 10) as u32),
+                    });
                 }
+                let words = words_from_tokens(&tokens);
                 if !words.is_empty() {
                     out.push(Segment { words });
                 }
@@ -269,5 +355,42 @@ pub mod whisper {
         fn unload(&self) {
             *self.ctx.lock() = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tok(bytes: &[u8], at: u32) -> RawToken {
+        RawToken { bytes: bytes.to_vec(), start_ms: at, end_ms: at + 100, dtw_ms: None }
+    }
+
+    #[test]
+    fn a_character_split_across_tokens_comes_out_whole() {
+        let note = "♪".as_bytes();
+        let tokens = [tok(b" ", 0), tok(&note[..2], 0), tok(&note[2..], 100), tok(b" I'm", 200), tok(b" fine", 300), tok(&note[..1], 400), tok(&note[1..], 450)];
+        let words = words_from_tokens(&tokens);
+        let text: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(text, vec![" ♪", " I'm", " fine♪"]);
+        assert!(words.iter().all(|w| !w.text.contains('\u{fffd}')));
+        assert_eq!((words[0].start_ms, words[0].end_ms), (0, 200), "a word spans its tokens");
+    }
+
+    #[test]
+    fn the_attention_time_starts_a_word_when_known() {
+        let words = words_from_tokens(&[RawToken { bytes: b" hey".to_vec(), start_ms: 500, end_ms: 900, dtw_ms: Some(620) }]);
+        assert_eq!((words[0].start_ms, words[0].end_ms), (620, 900));
+    }
+
+    #[test]
+    fn give_way_and_now() {
+        let s = Stop::new();
+        assert!(!s.is_set());
+        s.give_way();
+        assert!(s.is_set() && !s.is_now());
+        let s = Stop::new();
+        s.clone().now();
+        assert!(s.is_set() && s.is_now(), "clones share the flags");
     }
 }

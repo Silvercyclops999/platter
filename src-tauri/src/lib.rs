@@ -991,18 +991,19 @@ pub fn run() {
                 let models = tr::model::ModelStore::new(data_dir.join("models"), tr::model::catalogue(), tr::model::os_free_space());
                 // Threads, the busy check and the breather, shared by both.
                 let pacer = tr::pace::Pacer::new(Arc::new(tr::pace::SystemSignals::default()), tr::pace::Timing::default());
-                // A helper process each, so a check never waits behind a
-                // batch song (each ends a minute after its last run).
-                let helper = || -> Arc<dyn tr::engine::Recognizer> {
+                // One transcription helper (ends a minute after its last run).
+                // The check has a short lane of its own for the small model,
+                // and uses this one, ahead of background songs, for the
+                // medium model, which is never loaded twice.
+                let helper = |idle| {
                     let p = pacer.clone();
-                    Arc::new(tr::helper::Helper::new(
-                        Arc::new(tr::helper::ProcessLaunch::current()),
-                        Arc::new(move || p.light()),
-                        tr::helper::IDLE_EXIT,
-                    ))
+                    tr::helper::Helper::new(Arc::new(tr::helper::ProcessLaunch::current()), Arc::new(move || p.light()), idle)
                 };
-                let recognizer = helper();
-                let check_recognizer = helper();
+                let transcription = Arc::new(helper(tr::helper::IDLE_EXIT));
+                let recognizer: Arc<dyn tr::engine::Recognizer> = transcription.clone();
+                let check_shared = transcription.priority();
+                let check_recognizer: Arc<dyn tr::engine::Recognizer> =
+                    Arc::new(helper(tr::helper::CHECK_IDLE_EXIT).only(tr::model::ModelKind::Small));
                 let songs: Arc<dyn tr::SongReader> = Arc::new(trc::AppSongs {
                     player: player.clone(),
                     audio_dir: audio_dir.clone(),
@@ -1035,6 +1036,7 @@ pub fn run() {
                     db: db.clone(),
                     models,
                     recognizer: check_recognizer,
+                    shared: Some(check_shared),
                     audio: Arc::new(lyrics::checker::DecodedSongs(songs)),
                     events: Arc::new(app.handle().clone()),
                     enabled: live.lyrics_check_audio.clone(),

@@ -91,6 +91,7 @@ export class MockTranscribe {
       })),
       current: this.current ? { ...this.current } : undefined,
       queued: this.queue.length,
+      upNext: this.queue[0]?.trackId,
       batch: { ...this.batch },
       secsPerSong: this.batch.total > 1 ? this.secsPerSong : undefined,
       paused: this.busy && this.batch.total > 0 ? "busy" : undefined,
