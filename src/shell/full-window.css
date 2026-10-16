@@ -160,7 +160,10 @@ html:root[data-look-now-playing="left"] .app.fw-beside .resize-handle--right { r
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10%, #000 85%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 10%, #000 85%, transparent 100%);
 }
-.fw__lyrics .lyrics-page__empty-wrap { padding-top: 12vh; }
+/* Nothing to show: the message sits in the middle of the lyrics area,
+   lifted a little so it reads as centred under the song row. */
+.fw__lyrics:has(> .lyrics-page__empty-wrap) { display: flex; flex-direction: column; justify-content: center; }
+.fw__lyrics .lyrics-page__empty-wrap { padding-bottom: var(--space-16); }
 .fw__lyrics .lyrics-page__empty { padding: 0; }
 .fw__lyrics .lyrics-page__loading { padding: var(--space-8) 0 0; max-width: none; }
 
