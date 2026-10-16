@@ -1,11 +1,11 @@
 /**
  * Stats: your listening for a range of days. Range chips (4 weeks, 6
  * months, this year, a picked year or month, all time, custom dates), then
- * the range at a glance (minutes over its covers, top artist, headline
- * facts), top songs, artists, albums and genres with Play these and Save as
- * playlist, charts (listening days, minutes per day or month, your day by
- * hour), moments, monthly recaps you can share as a card, and comparing
- * with a friend when that's on. Everything is counted on this computer.
+ * the range in a sentence (time, days, top artist) with headline facts,
+ * top songs, artists, albums and genres with Play these and Save as
+ * playlist, when you listened (listening days, minutes per day or month,
+ * your day by hour, each led by a sentence), moments, monthly recaps you
+ * can share as a card, and comparing with a friend when that's on. Everything is counted on this computer.
  */
 import { RotateCw } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -21,7 +21,7 @@ import type { StatsMoments, StatsOverview, StatsSpan } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
-import { BarChart, HourClock, ListeningCalendar } from "./StatsCharts";
+import { WhenYouListened } from "./StatsCharts";
 import { CompareSection } from "./StatsCompare";
 import { StatsHero, StatsHeroSkeleton } from "./StatsHero";
 import { MomentsSection } from "./StatsMoments";
@@ -112,27 +112,6 @@ function StatsState({ title, text, action, tone = "plain" }: { title: string; te
   );
 }
 
-function Charts({ o, title }: { o: StatsOverview; title: string }) {
-  return (
-    <section className="stats-section" aria-labelledby="stats-charts" data-shot="charts">
-      <h2 id="stats-charts" className="stats-section__title">
-        When you listened
-      </h2>
-      <div className="stats-charts">
-        <div className="stats-card stats-card--wide">
-          <ListeningCalendar from={o.from} to={o.to} />
-        </div>
-        <div className="stats-card stats-card--bars">
-          <BarChart points={o.series} bucket={o.bucket} label={`Minutes listened per ${o.bucket}, ${title}`} />
-        </div>
-        <div className="stats-card stats-card--clock">
-          <HourClock hours={o.hours} busiest={o.busiestHour} weekdays={o.weekdays} busiestWeekday={o.busiestWeekday} />
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function LoadingBody() {
   return (
     <div aria-hidden="true" className="stats-loading" data-testid="stats-loading">
@@ -217,7 +196,7 @@ export function StatsPage() {
             <>
               <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
               <TopLists key={`${range.from}:${range.to}`} o={o} range={range} title={title} />
-              <Charts o={o} title={title} />
+              <WhenYouListened o={o} title={title} today={span?.today ?? o.to} />
               <MomentsSection moments={moments.data} rangeTitle={title} isYear={isYear} year={o.to.slice(0, 4)} error={!!moments.error} />
             </>
           )}

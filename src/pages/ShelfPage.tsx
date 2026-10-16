@@ -127,7 +127,7 @@ export function ShelfStatsSection() {
             <dt className="stats-tile__label">{FORMAT_LABEL[f.format]}</dt>
             <dd className="stats-tile__value">
               {f.copies}
-              <span className="stats-tile__sub">{f.copies === f.albums ? plural(f.copies, "copy", "copies") : `${plural(f.copies, "copy", "copies")} of ${plural(f.albums, "album")}`}</span>
+              <span className="stats-tile__sub">{f.copies === 1 ? "copy" : "copies"}{f.copies !== f.albums && ` of ${plural(f.albums, "album")}`}</span>
             </dd>
           </div>
         ))}

@@ -11,7 +11,8 @@ import { Button } from "../components/Button";
 import { Tabs } from "../components/Tabs";
 import { TrackList, TrackRow } from "../components/TrackRow";
 import { backend } from "../lib/backend";
-import { formatMinutes, formatPlays, type toRange } from "../lib/stats";
+import { formatPlays, type toRange } from "../lib/stats";
+import { duration } from "../lib/statsStory";
 import { shareOfTop } from "../lib/statsCharts";
 import type { StatsOverview, StatsTopKind, TopSong } from "../lib/statsTypes";
 import { player } from "../stores/player";
@@ -87,7 +88,7 @@ function rowsFor(o: StatsOverview, kind: StatsTopKind): Row[] {
   }
 }
 
-const countLine = (plays: number, ms: number) => `${formatPlays(plays)} · ${formatMinutes(ms)}`;
+const countLine = (plays: number, ms: number) => `${formatPlays(plays)} · ${duration(ms)}`;
 
 /** The slim bar for a row's plays against the #1's. */
 function ShareBar({ share }: { share: number }) {

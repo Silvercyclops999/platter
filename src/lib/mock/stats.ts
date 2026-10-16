@@ -53,8 +53,24 @@ function rng(seed: number) {
   };
 }
 
-/** About eighteen months of listening: favourite artists, evening-heavy, a few quiet days. */
-export function seedStatsHistory(fx: Fixtures, now = Date.now()): MockPlay[] {
+/** How likely a day `back` days ago had listening: quiet early history, a busy spell, a busy last month. */
+function activeChance(back: number): number {
+  if (back <= 28) return 0.82;
+  if (back <= 120) return 0.4;
+  if (back >= 170 && back <= 205) return 0.75;
+  if (back <= 300) return 0.28;
+  return 0.12;
+}
+
+/** The days back with listening for the sparse demo: a few scattered, most in the last four weeks. */
+const SPARSE_DAYS = new Set([340, 290, 212, 150, 61, 27, 25, 24, 22, 20, 19, 17, 15, 14, 12, 11, 9, 8, 7, 6, 5, 3, 2, 1]);
+
+/**
+ * About eighteen months of listening, uneven like a real library: quiet
+ * stretches and busy ones, favourite artists, mostly late at night, more
+ * midweek. `sparse` keeps only 24 days of the last year.
+ */
+export function seedStatsHistory(fx: Fixtures, now = Date.now(), sparse = false): MockPlay[] {
   const rand = rng(20261015);
   const out: MockPlay[] = [];
   const artists = fx.artists.filter((a) => fx.tracks.some((t) => t.artistId === a.id));
@@ -62,12 +78,16 @@ export function seedStatsHistory(fx: Fixtures, now = Date.now()): MockPlay[] {
   const byArtist = new Map(artists.map((a) => [a.id, fx.tracks.filter((t) => t.artistId === a.id)]));
   const today = parseDay(localDay(new Date(now)));
   for (let back = HISTORY_DAYS; back >= 1; back--) {
-    if (rand() < 0.18) continue;
+    const r = rand();
+    if (sparse ? !SPARSE_DAYS.has(back) : r >= activeChance(back)) continue;
     const day = new Date(today);
     day.setDate(day.getDate() - back);
-    const n = 4 + Math.floor(rand() * 18);
-    // Evenings mostly, mornings sometimes.
-    let at = day.getTime() + (rand() < 0.7 ? 18 + Math.floor(rand() * 4) : 7 + Math.floor(rand() * 4)) * 3_600_000;
+    const midweek = day.getDay() === 3 ? 1.6 : day.getDay() === 5 ? 1.25 : 1;
+    const n = Math.round((3 + Math.floor(rand() * 16)) * midweek);
+    // Late at night mostly, evenings often, daytime now and then.
+    const pick = rand();
+    const startHour = pick < 0.55 ? 22 + Math.floor(rand() * 2) : pick < 0.82 ? 19 + Math.floor(rand() * 3) : 9 + Math.floor(rand() * 6);
+    let at = day.getTime() + startHour * 3_600_000 + Math.floor(rand() * 40) * 60_000;
     // A favourite for the day: the first few artists come up most.
     const fav = artists[Math.floor(Math.pow(rand(), 2.2) * artists.length)];
     for (let i = 0; i < n; i++) {
@@ -81,7 +101,7 @@ export function seedStatsHistory(fx: Fixtures, now = Date.now()): MockPlay[] {
       at += ms + 2_000;
     }
   }
-  return out.filter((p) => p.ms > 0);
+  return out.filter((p) => p.ms > 0 && p.at < now);
 }
 
 const dayNum = (ms: number) => {

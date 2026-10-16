@@ -222,6 +222,8 @@ export interface MockOptions {
   importDemo?: boolean;
   /** No demo listening history for stats (?stats=empty). */
   statsEmpty?: boolean;
+  /** Only 24 days of listening in the last year, most in the last four weeks (?stats=sparse). */
+  statsSparse?: boolean;
   /** Start with Compare stats with friends on (?compare=1). */
   statsCompare?: boolean;
 }
@@ -268,6 +270,7 @@ export function optionsFromUrl(search: string): MockOptions {
     theme: (["dark", "light", "system", "midnight", "forest", "sand"] as const).find((t) => t === p.get("theme")),
     importDemo: p.get("import") === "demo",
     statsEmpty: p.get("stats") === "empty",
+    statsSparse: p.get("stats") === "sparse",
     statsCompare: p.get("compare") === "1",
   };
 }
@@ -453,7 +456,7 @@ export class MockBackend implements Backend {
     );
     this.contextPlays = this.seedContextPlays();
     this.listens = seedListens(this.fx, this.likes.ids());
-    this.stats = new MockStats(this.fx, this.opts.statsEmpty ? [] : seedStatsHistory(this.fx), () => this.listens, () => this.settings);
+    this.stats = new MockStats(this.fx, this.opts.statsEmpty ? [] : seedStatsHistory(this.fx, Date.now(), this.opts.statsSparse), () => this.listens, () => this.settings);
     this.friends = this.opts.statsEmpty ? [] : [mockFriendSummary(this.fx, new Set(this.stats.plays().map((p) => p.trackId)))];
     this.share = new MockShare(
       this.fx,

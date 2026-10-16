@@ -44,7 +44,7 @@ export function momentCards(m: StatsMoments, rangeTitle: string, isYear: boolean
     const f = m.firstSong;
     out.push({
       id: "first",
-      eyebrow: isYear ? `First song of ${rangeTitle}` : "First song of the range",
+      eyebrow: isYear ? `First song of ${rangeTitle === "This year" ? "this year" : rangeTitle}` : "First song of the range",
       title: f.song.title,
       sub: f.song.artist,
       detail: `${date(f.day)}${f.at != null ? ` at ${timeFmt.format(new Date(f.at))}` : ""}`,

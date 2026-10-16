@@ -1,85 +1,64 @@
 /**
- * The top of the Stats page: the range's minutes listened, large, over a
- * soft mosaic of its most played album covers, the top artist's photo, and
- * three headline facts (top song, longest streak, new artists found).
+ * The top of the Stats page: one sentence for the range (how long, on how
+ * many days, and the artist who took the most of it), the totals as a
+ * quiet line under it, the top artist's photo, and three facts in a row
+ * (top song, longest streak, new artists found).
  */
-import { Flame, Music2, Sparkles } from "lucide-react";
 import { Art } from "../components/Art";
 import { TextLink } from "../components/ArtistLinks";
 import { Skeleton } from "../components/Skeleton";
-import { formatPlays, minutes, shortDate } from "../lib/stats";
+import { formatPlays, shortDate } from "../lib/stats";
 import type { StatsMoments, StatsOverview } from "../lib/statsTypes";
+import { dayLabel, heroSentence } from "../lib/statsStory";
 import { player } from "../stores/player";
 import { nav } from "../stores/router";
 
-/** Covers for the mosaic: the range's top albums with art, repeated to fill. */
-export function mosaicCovers(o: StatsOverview, n = 36): string[] {
-  const own = [...o.topAlbums.map((a) => a.thumb), ...o.topSongs.map((s) => s.track?.thumb ?? null)].filter((t): t is string => !!t);
-  const unique = [...new Set(own)];
-  if (!unique.length) return [];
-  return Array.from({ length: n }, (_, i) => unique[i % unique.length]);
-}
-
-function Fact({ label, icon, children }: { label: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <li className="stats-fact">
-      <span className="stats-fact__icon" aria-hidden="true">
-        {icon}
-      </span>
-      <span className="stats-fact__body">
-        <span className="stats-fact__label">{label}</span>
-        {children}
-      </span>
+      <span className="stats-fact__label">{label}</span>
+      {children}
     </li>
   );
 }
 
 export function StatsHero({ o, moments, title, isAll }: { o: StatsOverview; moments: StatsMoments | undefined; title: string; isAll: boolean }) {
   const t = o.totals;
-  const covers = mosaicCovers(o);
   const artist = o.topArtists[0];
   const song = o.topSongs[0];
+  const s = heroSentence(o);
   const dates = o.from === o.to ? shortDate(o.from) : `${shortDate(o.from)} to ${shortDate(o.to)}`;
+  const openArtist = artist?.artistId ? () => nav.go({ name: "artist", id: artist.artistId! }) : null;
   const playTop = () => {
-    const ids = o.topSongs.map((s) => s.track?.id).filter((x): x is string => !!x);
+    const ids = o.topSongs.map((x) => x.track?.id).filter((x): x is string => !!x);
     if (song?.track) void player.playTracks(ids, song.track.id);
   };
+  const totals = (
+    [
+      ["plays", t.plays],
+      ["songs", t.songs],
+      ["artists", t.artists],
+      ["albums", t.albums],
+    ] as const
+  ).map(([k, v]) => `${v.toLocaleString()} ${v === 1 ? k.slice(0, -1) : k}`);
   return (
     <section className="stats-hero" aria-label={`${title} at a glance`} data-shot="hero" data-testid="stats-hero">
-      <div className="stats-hero__mosaic" aria-hidden="true">
-        {covers.map((c, i) => (
-          <span key={i} className="stats-hero__tile">
-            <Art path={c} fluid requestSize={140} />
-          </span>
-        ))}
-      </div>
-      <div className="stats-hero__scrim" aria-hidden="true" />
       <div className="stats-hero__top">
         <div className="stats-hero__main">
           <p className="stats-hero__eyebrow">
             {title}
             <span className="stats-hero__dates">{dates}</span>
           </p>
-          <p className="stats-hero__minutes" data-testid="hero-minutes">
-            <span className="stats-hero__number">{minutes(t.ms).toLocaleString()}</span>
-            <span className="stats-hero__unit">minutes listened</span>
+          <p className="stats-hero__sentence" data-testid="hero-sentence">
+            You listened for <strong>{s.time}</strong> on <strong>{s.days}</strong>.
+            {s.artist && (
+              <>
+                {" "}
+                <strong>{s.artist}</strong> took {s.share}.
+              </>
+            )}
           </p>
-          <dl className="stats-hero__totals">
-            {(
-              [
-                ["Plays", t.plays],
-                ["Songs", t.songs],
-                ["Artists", t.artists],
-                ["Albums", t.albums],
-                ["Days", t.days],
-              ] as const
-            ).map(([k, v]) => (
-              <div key={k}>
-                <dt>{k}</dt>
-                <dd>{v.toLocaleString()}</dd>
-              </div>
-            ))}
-          </dl>
+          <p className="stats-hero__totals">{totals.join(" · ")}</p>
         </div>
         {artist && (
           <figure className="stats-hero__artist">
@@ -88,8 +67,8 @@ export function StatsHero({ o, moments, title, isAll }: { o: StatsOverview; mome
             </span>
             <figcaption>
               <span className="stats-hero__artist-label">Top artist</span>
-              {artist.artistId ? (
-                <TextLink className="stats-hero__artist-name" onActivate={() => nav.go({ name: "artist", id: artist.artistId! })}>
+              {openArtist ? (
+                <TextLink className="stats-hero__artist-name" onActivate={openArtist}>
                   {artist.name}
                 </TextLink>
               ) : (
@@ -101,7 +80,7 @@ export function StatsHero({ o, moments, title, isAll }: { o: StatsOverview; mome
         )}
       </div>
       <ul className="stats-hero__facts">
-        <Fact label="Top song" icon={<Music2 size={16} />}>
+        <Fact label="Top song">
           {song ? (
             <span className="stats-fact__song">
               <span className="stats-fact__art">
@@ -124,15 +103,15 @@ export function StatsHero({ o, moments, title, isAll }: { o: StatsOverview; mome
             <span className="stats-fact__value">None yet</span>
           )}
         </Fact>
-        <Fact label="Longest streak" icon={<Flame size={16} />}>
+        <Fact label="Longest streak">
           <span className="stats-fact__value">{o.streak ? `${o.streak.days.toLocaleString()} ${o.streak.days === 1 ? "day" : "days"} in a row` : "None yet"}</span>
           {o.streak && o.streak.days > 1 && (
             <span className="stats-fact__sub">
-              {shortDate(o.streak.from)} to {shortDate(o.streak.to)}
+              {dayLabel(o.streak.from, o.to.slice(0, 4))} to {dayLabel(o.streak.to, o.to.slice(0, 4))}
             </span>
           )}
         </Fact>
-        <Fact label={isAll ? "Artists you've played" : "New artists found"} icon={<Sparkles size={16} />}>
+        <Fact label={isAll ? "Artists you've played" : "New artists found"}>
           {isAll ? (
             <span className="stats-fact__value">{t.artists.toLocaleString()}</span>
           ) : !moments ? (
@@ -156,15 +135,11 @@ export function StatsHeroSkeleton() {
       <div className="stats-hero__top">
         <div className="stats-hero__main">
           <Skeleton width={180} height={14} />
-          <Skeleton width={320} height={72} style={{ marginTop: 16 }} />
-          <Skeleton width={360} height={32} style={{ marginTop: 20 }} />
+          <Skeleton width="90%" height={36} style={{ marginTop: 16 }} />
+          <Skeleton width="60%" height={36} style={{ marginTop: 8 }} />
+          <Skeleton width={300} height={14} style={{ marginTop: 20 }} />
         </div>
-        <Skeleton width={168} height={168} radius="circle" />
-      </div>
-      <div className="stats-hero__facts">
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} height={76} width="100%" radius="card" />
-        ))}
+        <Skeleton width={152} height={152} radius="circle" />
       </div>
     </div>
   );

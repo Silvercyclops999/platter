@@ -16,10 +16,11 @@ import type { MockBackend } from "../lib/mock";
 import { layoutRecapCard, recapContent } from "../lib/recapCard";
 import type { Measure } from "../lib/shareCard";
 import { addDays, addMonths, barFractions, change, formatMinutes, hourLabel, localDay, parseDay, playedFromLabel, rangeLabel, sparkPath, toRange } from "../lib/stats";
-import { calendarGrid, calendarMonths, calendarSummary, calendarWindow, clockSummary, level, shareOfTop } from "../lib/statsCharts";
-import type { MonthRecap, TopSong } from "../lib/statsTypes";
+import { shareOfTop } from "../lib/statsCharts";
+import { activeSlice, activeWeeks, axisTicks, bestPoint, calendarMonths, daySentence, daysSentence, duration, heroSentence, hourOrder, isMostlyEmpty, minuteScale, minutesSentence, peakHours, standoutWeekday } from "../lib/statsStory";
+import type { MonthRecap, StatsOverview, StatsPoint, TopSong } from "../lib/statsTypes";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { BarChart, HourClock, ListeningCalendar } from "../pages/StatsCharts";
+import { BarChart, DayCharts, ListeningCalendar } from "../pages/StatsCharts";
 import { momentCards, momentDate } from "../pages/StatsMoments";
 import { StatsPage } from "../pages/StatsPage";
 import { AppMenu } from "../shell/TopBar";
@@ -165,13 +166,17 @@ describe("Stats page", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Stats" })).toBeInTheDocument();
     const hero = await screen.findByTestId("stats-hero");
     const o = await backend.statsOverview(toRange({ kind: "4w" }, (await backend.statsSpan()).today));
-    expect(within(hero).getByTestId("hero-minutes")).toHaveTextContent(`${Math.round(o.totals.ms / 60_000).toLocaleString()}minutes listened`);
+    expect(within(hero).getByTestId("hero-sentence")).toHaveTextContent(`You listened for ${duration(o.totals.ms)} on ${o.totals.days} days. ${o.topArtists[0].name} took`);
     expect(within(hero).getByText("Top artist")).toBeInTheDocument();
-    expect(within(hero).getByText(o.topArtists[0].name)).toBeInTheDocument();
+    expect(within(hero).getAllByText(o.topArtists[0].name)).toHaveLength(2);
     expect(within(hero).getByText("Longest streak")).toBeInTheDocument();
     expect(within(hero).getByText("New artists found")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Last 4 weeks/ })).toBeInTheDocument();
     expect(screen.getByRole("figure", { name: /Minutes listened per day/ })).toBeInTheDocument();
+    // When you listened: every story opens with its sentence.
+    expect(within(screen.getByTestId("story-days")).getByText(/^You listened on \d+ of these 28 days/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("story-minutes")).getByText(/^Your biggest day was \w+day, /)).toBeInTheDocument();
+    expect(within(screen.getByTestId("story-day")).getByText(/^You're an? \w+ listener: /)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Your top songs" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "All time" }));
     expect(await screen.findByRole("heading", { name: /All time/ })).toBeInTheDocument();
@@ -362,92 +367,204 @@ describe("stats charts", () => {
     await user.tab();
     expect(bars).toHaveFocus();
     // Focus starts on the last day with listening (Sep 9), then arrows move.
-    expect(screen.getByTestId("bars-readout")).toHaveTextContent("Sep 9, 2026 20 minutes · 2 plays");
+    expect(screen.getByTestId("bars-readout")).toHaveTextContent("Sep 9, 2026 20 min · 2 plays");
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByTestId("bars-readout")).toHaveTextContent("Sep 10, 2026 0 minutes · 0 plays");
+    expect(screen.getByTestId("bars-readout")).toHaveTextContent("Sep 10, 2026 0 min · 0 plays");
     await user.keyboard("{Home}");
     expect(screen.getByTestId("bars-readout")).toHaveTextContent("Sep 1, 2026");
     expect(bars).toHaveAttribute("aria-activedescendant", expect.stringMatching(/b0$/));
   });
 
-  it("the 24-hour clock says the busiest hour and how the day splits", async () => {
+  it("the best bar takes the accent and is labelled with its value and cover", () => {
+    const points = days(10);
+    const { container } = render(<BarChart points={points} bucket="day" label="Minutes, test" best={{ thumb: "/cover.jpg" }} footnote="15 min on an average day you listened." />);
+    const peaks = container.querySelectorAll(".bars__bar.is-peak");
+    expect(peaks).toHaveLength(1);
+    // Sep 3, 6 and 9 tie on 20 minutes; the latest wins.
+    expect(peaks[0]).toHaveAccessibleName("Sep 9, 2026: 20 minutes, 2 plays");
+    expect(container.querySelector(".bars__note")).toHaveTextContent("20 min");
+    expect(container.querySelector(".bars__note .art")).not.toBeNull();
+    expect(screen.getByTestId("bars-readout")).toHaveTextContent("15 min on an average day you listened.");
+    // A light scale in real units.
+    expect([...container.querySelectorAll(".bars__tick")].map((t) => t.textContent)).toEqual(["0", "5 min", "10 min", "15 min", "20 min"]);
+  });
+
+  it("your day marks the peak hours and the standout weekday, with a table and keyboard", async () => {
     const user = userEvent.setup();
-    const hours = Array.from({ length: 24 }, (_, h) => (h >= 18 && h < 24 ? 60_000 * (h - 10) : h === 8 ? 120_000 : 0));
-    render(<HourClock hours={hours} busiest={23} weekdays={[1, 2, 3, 4, 5, 6, 7]} busiestWeekday={6} />);
-    expect(clockSummary(hours, 23)).toBe(
-      "Listening by hour of the day. Busiest hour: 11 PM. night (12 AM to 6 AM) 0%, morning (6 AM to 12 PM) 3%, afternoon (12 PM to 6 PM) 0%, evening (6 PM to 12 AM) 97%.",
-    );
-    expect(screen.getByRole("figure", { name: "Listening by hour of the day" })).toHaveAccessibleDescription(clockSummary(hours, 23));
-    expect(screen.getAllByRole("img", { name: /^\d+ (AM|PM): \d+ minutes$/ })).toHaveLength(24);
-    expect(screen.getByRole("img", { name: "Busiest weekday: Saturday" })).toBeInTheDocument();
-    screen.getByRole("group", { name: /Arrow keys move through the hours/ }).focus();
+    const hours = Array.from({ length: 24 }, (_, h) => (h === 23 ? 50 : h === 0 ? 40 : h === 1 ? 30 : h === 9 ? 10 : 0) * 60_000);
+    const weekdays = [10, 10, 10, 30, 10, 10, 10].map((m) => m * 60_000);
+    const { container } = render(<DayCharts hours={hours} weekdays={weekdays} />);
+    const hourFig = screen.getByRole("figure", { name: "Listening by hour of the day" });
+    expect(within(hourFig).getAllByRole("img", { name: /^\d+ (AM|PM): \d+ minutes$/ })).toHaveLength(24);
+    // Drawn from 6 AM, so the late-night peak sits together at the right.
+    const peaks = [...hourFig.querySelectorAll(".bars__bar.is-peak")].map((b) => b.getAttribute("aria-label"));
+    expect(peaks).toEqual(["11 PM: 50 minutes", "12 AM: 40 minutes", "1 AM: 30 minutes"]);
+    expect(within(hourFig).getByRole("table", { name: "Minutes listened by hour of the day" })).toBeInTheDocument();
+    const weekFig = screen.getByRole("figure", { name: "Listening by day of the week" });
+    expect([...weekFig.querySelectorAll(".bars__bar.is-peak")].map((b) => b.getAttribute("aria-label"))).toEqual(["Wednesday: 30 minutes"]);
+    expect(screen.getByTestId("day-readout")).toHaveTextContent("92% of your listening falls between 11 PM and 2 AM.");
+    act(() => screen.getByRole("group", { name: /Arrow keys move through the hours/ }).focus());
+    expect(screen.getByTestId("day-readout")).toHaveTextContent("11 PM to 12 AM 50 min");
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByRole("group", { name: /hours/ })).toHaveAttribute("aria-activedescendant", expect.stringMatching(/h0$/));
-    expect(clockSummary(Array(24).fill(0), null)).toBe("Listening by hour of the day: nothing yet.");
+    expect(screen.getByTestId("day-readout")).toHaveTextContent("12 AM to 1 AM 40 min");
+    expect(hourFig.querySelectorAll(".bars__xlabel")).toHaveLength(4);
+    expect(container.querySelectorAll(".chart--week .bars__xlabel")).toHaveLength(7);
   });
 
-  it("the calendar shows the whole year for a year, and 53 weeks otherwise", () => {
-    const y = calendarWindow("2025-01-01", "2025-12-31");
-    expect(y).toEqual({ from: "2024-12-29", to: "2026-01-03", title: "2025" });
-    expect(calendarWindow("2026-01-01", "2026-10-15").title).toBe("2026");
-    const w = calendarWindow("2026-09-18", "2026-10-15");
-    expect(w.to).toBe("2026-10-17");
-    expect(w.from).toBe("2025-10-12");
-    expect(parseDay(w.from).getDay()).toBe(0);
-    const grid = calendarGrid(w, [], { from: "2026-09-18", to: "2026-10-15" });
-    expect(grid.weeks).toHaveLength(53);
-    expect(grid.weeks.every((wk) => wk.length === 7)).toBe(true);
-  });
-
-  it("calendar cells scale to the range's busiest day, dim outside it, and skip a year's padding", () => {
-    const w = calendarWindow("2025-01-01", "2025-12-31");
-    const pts = [
-      { key: "2024-12-30", plays: 9, ms: 9_000_000 },
-      { key: "2025-03-01", plays: 1, ms: 100_000 },
-      { key: "2025-03-02", plays: 4, ms: 3_600_000 },
-      { key: "2025-06-10", plays: 2, ms: 900_000 },
-    ];
-    const g = calendarGrid(w, pts, { from: "2025-03-01", to: "2025-03-31" });
-    const cell = (d: string) => g.weeks.flat().find((c) => c.day === d)!;
-    expect(cell("2024-12-30")).toMatchObject({ inWindow: false, level: 0 });
-    expect(cell("2025-03-02")).toMatchObject({ level: 4, inRange: true });
-    expect(cell("2025-03-01").level).toBe(1);
-    expect(cell("2025-06-10")).toMatchObject({ inRange: false, after: true });
-    expect(cell("2025-06-10").level).toBeGreaterThan(0);
-    expect(g.daysListened).toBe(2);
-    expect(g.busiest?.day).toBe("2025-03-02");
-    expect(g.months.map((m) => m.label)).toEqual(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]);
-    expect(calendarMonths(g)).toEqual([{ month: "March 2025", days: 2, minutes: 62 }]);
-    expect(calendarSummary(w, g)).toBe("Listening calendar, 2025. 2 days with listening in this range. Busiest day: Mar 2, 2025, 60 minutes.");
-    expect([0, 1, 50, 250, 1000].map((ms) => level(ms, 1000))).toEqual([0, 1, 1, 2, 4]);
-  });
-
-  it("the calendar loads its days, has a text table, and moves by day and week", async () => {
+  it("the calendar shows months from the first play, with the best day marked and a text table", async () => {
     const user = userEvent.setup();
-    const spy = vi.spyOn(backend, "statsDays").mockResolvedValue([
+    const points = [
       { key: "2026-10-01", plays: 3, ms: 600_000 },
       { key: "2026-10-08", plays: 6, ms: 1_200_000 },
-    ]);
-    render(<ListeningCalendar from="2026-09-18" to="2026-10-15" />);
-    const fig = await screen.findByTestId("stats-calendar");
-    expect(spy).toHaveBeenCalledWith("2025-10-12", "2026-10-17");
-    await waitFor(() => expect(fig).toHaveAccessibleDescription("Listening calendar, Oct 12, 2025 to Oct 17, 2026. 2 days with listening in this range. Busiest day: Oct 8, 2026, 20 minutes."));
+    ];
+    render(<ListeningCalendar points={points} from="2026-09-18" to="2026-10-15" footnote="2 days with listening." />);
+    const fig = screen.getByTestId("stats-calendar");
+    // September had nothing, so only October is drawn.
+    expect(within(fig).getAllByText("October")).toHaveLength(1);
+    expect(within(fig).queryByText("September")).toBeNull();
     const table = within(fig).getByRole("table", { name: "Listening by month" });
     expect(within(table).getByRole("row", { name: "October 2026 2 30" })).toBeInTheDocument();
+    expect(fig.querySelector(".cal__day.is-best")).toHaveAccessibleName("Thu, Oct 8, 2026: 20 min, 6 plays");
+    expect(within(fig).getByRole("img", { name: "Fri, Oct 16, 2026: outside this range" })).toBeInTheDocument();
     const grid = within(fig).getByRole("group", { name: /Arrow keys move by day and week/ });
     act(() => grid.focus());
-    expect(within(fig).getByText("Thu, Oct 8, 2026: 20 minutes, 6 plays")).toBeInTheDocument();
-    await user.keyboard("{ArrowLeft}");
-    expect(within(fig).getByText("Thu, Oct 1, 2026: 10 minutes, 3 plays")).toBeInTheDocument();
+    expect(screen.getByTestId("cal-readout")).toHaveTextContent("Thu, Oct 8, 2026: 20 min, 6 plays");
     await user.keyboard("{ArrowUp}");
-    expect(within(fig).getByText("Wed, Sep 30, 2026: no listening")).toBeInTheDocument();
-    await user.keyboard("{ArrowLeft}{ArrowLeft}{ArrowLeft}");
-    expect(within(fig).getByText("Wed, Sep 9, 2026: no listening (outside this range)")).toBeInTheDocument();
+    expect(screen.getByTestId("cal-readout")).toHaveTextContent("Thu, Oct 1, 2026: 10 min, 3 plays");
+    // Oct 1 is the first day drawn, so left stays there; right moves on.
+    await user.keyboard("{ArrowLeft}{ArrowRight}");
+    expect(screen.getByTestId("cal-readout")).toHaveTextContent("Fri, Oct 2, 2026: no listening");
+  });
+
+  it("a mostly empty range shows only the weeks with listening and counts the quiet ones", () => {
+    const points = ["2026-03-18", "2026-08-16", "2026-10-01", "2026-10-02", "2026-10-08"].map((key, i) => ({ key, plays: 2, ms: (i + 1) * 600_000 }));
+    render(<ListeningCalendar points={points} from="2026-01-01" to="2026-10-15" footnote="5 days with listening." />);
+    const fig = screen.getByTestId("stats-calendar");
+    expect(within(fig).getByRole("table", { name: "Weeks with listening" })).toBeInTheDocument();
+    expect(within(fig).getByText("21 quiet weeks")).toBeInTheDocument();
+    expect(within(fig).getByText("5 quiet weeks")).toBeInTheDocument();
+    expect(screen.getByTestId("cal-readout")).toHaveTextContent("Only the weeks you listened in. 5 days with listening.");
+    expect(fig.querySelector(".cal__day.is-best")).toHaveAccessibleName("Thu, Oct 8, 2026: 50 min, 2 plays");
   });
 
   it("each top row's bar is its share of the #1", () => {
     expect(shareOfTop([10, 5, 2, 0])).toEqual([1, 0.5, 0.2, 0]);
     expect(shareOfTop([])).toEqual([]);
+  });
+});
+
+describe("stats stories", () => {
+  const pt = (key: string, min: number, plays = 1): StatsPoint => ({ key, plays: min ? plays : 0, ms: min * 60_000 });
+  /** Daily points from `from` for `n` days, with minutes where `on` says. */
+  const run = (from: string, n: number, on: (i: number) => number) => Array.from({ length: n }, (_, i) => pt(addDays(from, i), on(i)));
+  const hoursWith = (m: Record<number, number>) => Array.from({ length: 24 }, (_, h) => (m[h] ?? 0) * 60_000);
+
+  it("words time in real units", () => {
+    expect([0, 45, 60, 130, 600, 2280].map((m) => duration(m * 60_000))).toEqual(["0 min", "45 min", "1 hr", "2 hrs 10 min", "10 hrs", "38 hrs"]);
+  });
+
+  it("listening days: empty, every day, a short range with a run, sparse and recent, sparse in months, and steady", () => {
+    expect(daysSentence({ from: "2026-09-18", to: "2026-10-15", days: 0, points: [] })).toBe("Nothing played in this range yet.");
+    expect(daysSentence({ from: "2026-10-09", to: "2026-10-15", days: 7, points: run("2026-10-09", 7, () => 10) })).toBe("You listened every one of these 7 days.");
+    // 28 days, quiet on the 1st and every fifth day, then every day from Oct 8.
+    const four = run("2026-09-18", 28, (i) => (i % 5 === 0 && i < 20 ? 0 : 10));
+    const d4 = four.filter((p) => p.ms > 0).length;
+    expect(daysSentence({ from: "2026-09-18", to: "2026-10-15", days: d4, points: four })).toBe(`You listened on ${d4} of these 28 days, and every day since Oct 4.`);
+    const late = run("2026-09-18", 28, (i) => (i === 23 || i === 25 || i === 27 ? 10 : 0));
+    expect(daysSentence({ from: "2026-09-18", to: "2026-10-15", days: 3, points: late })).toBe("You listened on 3 of these 28 days, all of them since Oct 11.");
+    const stopped = run("2026-09-18", 28, (i) => (i === 2 || i === 9 ? 10 : 0));
+    expect(daysSentence({ from: "2026-09-18", to: "2026-10-15", days: 2, points: stopped })).toBe("You listened on 2 of these 28 days, the last time on Sep 27.");
+    // 24 days in a year, 19 of them in the last four weeks.
+    const year = run("2025-10-16", 365, (i) => ([40, 120, 200, 260].includes(i) || (i > 340 && i % 5 !== 0) ? 20 : 0));
+    const dy = year.filter((p) => p.ms > 0).length;
+    expect(dy).toBe(24);
+    expect(daysSentence({ from: "2025-10-16", to: "2026-10-15", days: dy, points: year })).toBe("You listened on 24 days, most of them in the last four weeks.");
+    const spring = run("2025-10-16", 365, (i) => (i >= 150 && i < 200 && i % 3 === 0 ? 20 : i === 300 ? 5 : 0));
+    const ds = spring.filter((p) => p.ms > 0).length;
+    expect(daysSentence({ from: "2025-10-16", to: "2026-10-15", days: ds, points: spring })).toBe(`You listened on ${ds} days, most of them in April.`);
+    const split = run("2025-10-16", 365, (i) => ((i >= 140 && i < 156 && i % 2 === 0) || (i >= 290 && i < 306 && i % 2 === 0) || i === 60 ? 20 : 0));
+    expect(daysSentence({ from: "2025-10-16", to: "2026-10-15", days: 17, points: split })).toBe("You listened on 17 days, mostly in March and August.");
+    const steady = run("2026-04-17", 182, (i) => (i % 7 < 5 ? 30 : 0));
+    const dd = steady.filter((p) => p.ms > 0).length;
+    expect(daysSentence({ from: "2026-04-17", to: "2026-10-15", days: dd, points: steady })).toBe(`You listened on ${dd} of 182 days, about 5 days a week.`);
+  });
+
+  it("minutes: the biggest day with its album, one day, months, and nothing", () => {
+    const pts = [pt("2026-10-12", 0), pt("2026-10-13", 30), pt("2026-10-14", 130), pt("2026-10-15", 40)];
+    expect(minutesSentence(pts, "day", "2026", { title: "Glass Season", share: 0.7 })).toBe("Your biggest day was Wednesday, Oct 14: 2 hrs 10 min, most of it Glass Season.");
+    expect(minutesSentence(pts, "day", "2026", { title: "Glass Season", share: 0.3 })).toBe("Your biggest day was Wednesday, Oct 14: 2 hrs 10 min, more Glass Season than anything else.");
+    expect(minutesSentence([pt("2025-12-30", 45)], "day", "2026")).toBe("You listened on one day, Tuesday, Dec 30, 2025, for 45 min.");
+    expect(minutesSentence([pt("2026-03", 600), pt("2026-04", 900)], "month", "2026")).toBe("Your biggest month was April, with 15 hrs.");
+    expect(minutesSentence([pt("2026-10-14", 0)], "day", "2026")).toBe("No minutes to show for this range yet.");
+  });
+
+  it("your day: a night listener, a spread day, a short history, and nothing", () => {
+    const night = hoursWith({ 23: 50, 0: 40, 1: 30, 9: 10 });
+    const wed = [10, 10, 10, 30, 10, 10, 10].map((m) => m * 60_000);
+    expect(daySentence(night, wed, 20)).toBe("You're a night listener: most of your music happens between 11 PM and 2 AM, and Wednesday is your biggest day.");
+    // No weekday stands out: no weekday clause.
+    expect(daySentence(night, Array(7).fill(600_000), 20)).toBe("You're a night listener: most of your music happens between 11 PM and 2 AM.");
+    const evening = hoursWith({ 18: 20, 19: 25, 20: 20, 9: 20, 10: 15, 13: 20, 23: 20 });
+    expect(daySentence(evening, wed, 20)).toBe("You're an evening listener: your music peaks between 6 PM and 9 PM, and Wednesday is your biggest day.");
+    const flat = hoursWith(Object.fromEntries(Array.from({ length: 24 }, (_, h) => [h, 10])));
+    expect(daySentence(flat, wed, 20)).toMatch(/^Your listening is spread across the day, with a small peak between /);
+    expect(daySentence(night, wed, 2)).toBe("You've only listened on two days here, mostly between 11 PM and 2 AM.");
+    expect(daySentence(Array(24).fill(0), Array(7).fill(0), 0)).toBe("Nothing played in this range yet, so there's no day to show.");
+  });
+
+  it("the hero sentence says how long, how many days and whose share", () => {
+    const o = { totals: { ms: 911 * 60_000, plays: 259, songs: 189, artists: 12, albums: 52, days: 23 }, topArtists: [{ name: "Copperline Choir", ms: 300 * 60_000 }] } as unknown as StatsOverview;
+    expect(heroSentence(o)).toEqual({ time: "15 hrs", days: "23 days", artist: "Copperline Choir", share: "about a third of it" });
+    expect(heroSentence({ ...o, topArtists: [{ ...o.topArtists[0], ms: 100 * 60_000 }] } as StatsOverview).share).toBe("11% of it, more than anyone else");
+    expect(heroSentence({ ...o, topArtists: [] }).artist).toBeNull();
+  });
+
+  it("charts start at the first play, not the empty days before it", () => {
+    const pts = run("2026-09-18", 28, (i) => (i >= 21 ? 10 : 0));
+    const s = activeSlice(pts);
+    expect(s.points).toHaveLength(7);
+    expect(s.points[0].key).toBe("2026-10-09");
+    expect(s.croppedFrom).toBe("2026-10-09");
+    expect(s.croppedShare).toBeCloseTo(0.75);
+    expect(activeSlice(run("2026-09-18", 5, () => 10))).toMatchObject({ croppedFrom: null, croppedShare: 0 });
+    expect(activeSlice(run("2026-09-18", 5, () => 0)).points).toEqual([]);
+    // Calendars: months from the first play's month only, capped to the latest twelve.
+    const cal = calendarMonths(pts, "2026-09-18", "2026-10-15");
+    expect(cal.months.map((m) => m.label)).toEqual(["October"]);
+    expect(cal.best?.day).toBe("2026-10-15");
+    const long = calendarMonths(run("2024-01-01", 600, () => 5), "2024-01-01", addDays("2024-01-01", 599));
+    expect(long.months).toHaveLength(12);
+    expect(long.capped).toBe(true);
+    // A mostly empty year switches to weeks with listening.
+    const sparse = run("2025-10-16", 365, (i) => (i === 10 || i === 200 || i > 360 ? 10 : 0));
+    expect(isMostlyEmpty(sparse, "2026-10-15")).toBe(true);
+    expect(isMostlyEmpty(pts, "2026-10-15")).toBe(false);
+    const weeks = activeWeeks(sparse, "2025-10-16", "2026-10-15");
+    expect(weeks.weeks.length).toBeGreaterThanOrEqual(3);
+    expect(weeks.weeks[0].quietBefore).toBe(0);
+    expect(weeks.weeks[1].quietBefore).toBeGreaterThan(20);
+  });
+
+  it("the peak: the best hours round the clock, the latest best point, the standout weekday", () => {
+    expect(peakHours(hoursWith({ 23: 50, 0: 40, 1: 30, 9: 10 }))).toEqual({ start: 23, hours: [23, 0, 1], share: 120 / 130 });
+    expect(peakHours(Array(24).fill(0))).toBeNull();
+    expect(hourOrder(peakHours(hoursWith({ 23: 50, 0: 40, 1: 30 })))[0]).toBe(6);
+    expect(hourOrder(peakHours(hoursWith({ 5: 50, 6: 40, 7: 30 })))[0]).toBe(0);
+    expect(bestPoint([pt("a", 10), pt("b", 30), pt("c", 30), pt("d", 5)])?.key).toBe("c");
+    expect(bestPoint([pt("a", 0)])).toBeNull();
+    expect(standoutWeekday([10, 10, 10, 30, 10, 10, 10])).toBe(3);
+    expect(standoutWeekday([10, 10, 10, 11, 10, 10, 10])).toBeNull();
+  });
+
+  it("the minutes scale steps on round numbers and the dates never crowd", () => {
+    expect(minuteScale(130 * 60_000)).toEqual({ ticks: [0, 60, 120, 180], top: 180 });
+    expect(minuteScale(18 * 60_000)).toEqual({ ticks: [0, 5, 10, 15, 20], top: 20 });
+    expect(minuteScale(0).top).toBeGreaterThan(0);
+    const days28 = run("2026-09-18", 28, () => 10);
+    // Sundays only.
+    expect(axisTicks(days28, "day").map((i) => parseDay(days28[i].key).getDay())).toEqual([0, 0, 0, 0]);
+    expect(axisTicks(run("2026-10-10", 6, () => 1), "day")).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(axisTicks(Array.from({ length: 18 }, (_, i) => pt(`m${i}`, 1)), "month")).toHaveLength(6);
   });
 });
 
