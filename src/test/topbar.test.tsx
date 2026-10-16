@@ -108,7 +108,7 @@ describe("app menu", () => {
     expect(avatar).toHaveAttribute("aria-expanded", "true");
     // The library doctor's count (when it has loaded) is a badge after its name.
     const items = [...menu.querySelectorAll('[role^="menuitem"]')].map((i) => i.textContent?.replace(/^(Library doctor)\d+$/, "$1"));
-    expect(items).toEqual(["Create playlist", "Recents", "Stats", "Library doctor", "Miniplayer", `Settings${"Ctrl+,"}`, `Keyboard shortcuts${"Ctrl+/"}`, "Help", "Private session", "Go offline", "Check for updates", "Sign out"]);
+    expect(items).toEqual(["Create playlist", "Recents", "Stats", `${new Date().getFullYear()} Wrapped`, "Library doctor", "Miniplayer", `Settings${"Ctrl+,"}`, `Keyboard shortcuts${"Ctrl+/"}`, "Help", "Private session", "Go offline", "Check for updates", "Sign out"]);
   });
 
   it("Escape closes it and returns focus to the avatar", async () => {
@@ -146,6 +146,8 @@ describe("app menu", () => {
     expect(screen.getByRole("menuitem", { name: "Recents" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Stats" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: `${new Date().getFullYear()} Wrapped` })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: /^Library doctor/ })).toHaveFocus();
     await user.keyboard("{ArrowDown}");

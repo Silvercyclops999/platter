@@ -1110,6 +1110,10 @@ export interface Settings {
   monthlyStatsOnProfile: boolean;
   /** Compare stats with friends: a summary only, never the history. */
   statsCompare: boolean;
+  /** Wrapped and the yearly Top Songs lists. */
+  wrappedTopSongs: boolean;
+  /** "N plays" under titles on yearly Top Songs lists (All-Time always shows them). */
+  topSongsShowPlays: boolean;
   /** Song lineage: "Lineage" in song menus, the versions panel and Your stats. */
   showLineage: boolean;
   /** "Describe a playlist" in the create menu and the smart playlist editor. */
@@ -1499,6 +1503,8 @@ export const DEFAULT_SETTINGS: Settings = {
   statsStrip: true,
   monthlyStatsOnProfile: true,
   statsCompare: false,
+  wrappedTopSongs: true,
+  topSongsShowPlays: false,
   showLineage: true,
   showDescribePlaylist: true,
   compareLevelMatch: true,

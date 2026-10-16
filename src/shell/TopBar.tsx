@@ -24,6 +24,7 @@ import { SearchBox } from "./SearchBox";
 import { HomePinDialog, HomeUserItems, switchHomeUser, useHomeUsers } from "./HomeUsers";
 import type { HomeUser } from "../lib/types";
 import { StatsGlyph } from "../components/StatsGlyph";
+import { wrapped } from "../stores/wrapped";
 import "./topbar.css";
 
 /** Below this window width the search pill becomes a round button beside Home. */
@@ -150,6 +151,7 @@ export function AppMenu() {
   const privateSession = useSettings((s) => !!s.settings?.privateSession);
   const goOffline = useSettings((s) => !!s.settings?.goOffline);
   const statsPage = useSettings((s) => s.settings?.statsPage !== false);
+  const wrappedOn = useSettings((s) => s.settings?.wrappedTopSongs !== false);
   const doctorOn = useSettings((s) => s.settings?.libraryDoctor !== false);
   const doctorCount = useDoctorCount();
   const miniOpen = useMiniplayer((s) => s.open);
@@ -254,6 +256,11 @@ export function AppMenu() {
             <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "stats" }))}>
               <span>Stats</span>
               <StatsGlyph size={18} className="appmenu__glyph" />
+            </button>
+          )}
+          {wrappedOn && (
+            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => wrapped.open(new Date().getFullYear()))}>
+              <span>{new Date().getFullYear()} Wrapped</span>
             </button>
           )}
           {doctorOn && (

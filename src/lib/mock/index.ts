@@ -233,6 +233,8 @@ export interface MockOptions {
   statsSparse?: boolean;
   /** Start with Compare stats with friends on (?compare=1). */
   statsCompare?: boolean;
+  /** The day Top Songs and Wrapped take as today, "YYYY-MM-DD" (?today=2026-12-05). */
+  today?: string;
 }
 
 const isTestEnv = (() => {
@@ -279,6 +281,7 @@ export function optionsFromUrl(search: string): MockOptions {
     statsEmpty: p.get("stats") === "empty",
     statsSparse: p.get("stats") === "sparse",
     statsCompare: p.get("compare") === "1",
+    today: /^\d{4}-\d{2}-\d{2}$/.test(p.get("today") ?? "") ? (p.get("today") as string) : undefined,
   };
 }
 
@@ -3542,6 +3545,15 @@ export class MockBackend implements Backend {
   }
   statsPlayIds(range: StatsRange, kind: StatsTopKind, limit?: number) {
     return this.delay(() => this.stats.playIds(range, kind, limit));
+  }
+  topSongsIndex() {
+    return this.delay(() => this.stats.topSongsIndex(this.opts.today));
+  }
+  topSongsList(year: number | null) {
+    return this.delay(() => this.stats.topSongsList(year, this.opts.today));
+  }
+  statsWrapped(year: number) {
+    return this.delay(() => this.stats.wrapped(year));
   }
   statsCompareSummary(unreleasedOk: boolean, theirUnreleasedOk: boolean) {
     return this.delay(() => this.stats.compareSummary(unreleasedOk, theirUnreleasedOk));

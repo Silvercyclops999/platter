@@ -279,6 +279,8 @@ export interface TrackRowProps {
   subBadge?: ReactNode;
   /** Added to the row's accessible name, after a comma. */
   labelNote?: string;
+  /** Small labels under the title and artist ("12 plays", "First play of the year"). */
+  notes?: string[];
   compact?: boolean;
   /** With `showArt`: play sits on the cover art instead of the number (search's songs table). */
   artPlay?: boolean;
@@ -330,6 +332,7 @@ export function TrackRow({
   trailing,
   subBadge,
   labelNote,
+  notes,
   compact,
   artPlay = false,
   selected,
@@ -473,7 +476,7 @@ export function TrackRow({
       ref={(el) => {
         if (el) tracksIn.set(el, track);
       }}
-      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${entering ? "is-entering" : ""} ${dimmed ? "is-dimmed" : ""} ${added !== undefined ? "track-row--added" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${playOnArt && !compact ? "track-row--art-play" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
+      className={`track-row ${active ? "is-active" : ""} ${playing ? "is-playing" : ""} ${unavailable ? "is-unavailable" : ""} ${entering ? "is-entering" : ""} ${dimmed ? "is-dimmed" : ""} ${added !== undefined ? "track-row--added" : ""} ${showAlbum ? "" : "track-row--no-album"} ${showPlays && !compact ? "track-row--plays" : ""} ${compact ? "track-row--compact" : ""} ${playOnArt && !compact ? "track-row--art-play" : ""} ${notes?.length && !compact ? "track-row--notes" : ""} ${selected ? "is-selected" : ""} ${picked ? "is-picked" : ""} ${dropEdge ? `is-drop-${dropEdge}` : ""}`}
       onClick={onClick}
       onMouseDown={dbl.onMouseDown}
       onDoubleClick={(e) => {
@@ -574,6 +577,15 @@ export function TrackRow({
             ) : (
               <ArtistLinks track={track} className="track-row__artist truncate" linkTabIndex={-1} />
             ))}
+          {notes && notes.length > 0 && (
+            <div className="track-row__notes truncate">
+              {notes.map((n) => (
+                <span key={n} className="track-row__note">
+                  {n}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       {showAlbum && !compact && (

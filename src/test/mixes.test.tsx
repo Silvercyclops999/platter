@@ -36,7 +36,8 @@ describe("home mix shelves", () => {
     expect(cards.getByRole("button", { name: "Daily Mix 1" })).toBeInTheDocument();
     expect(cards.getByRole("button", { name: "daylist" })).toBeInTheDocument();
     expect(cards.getByText("Your day in a playlist.")).toBeInTheDocument();
-    expect(cards.getByRole("button", { name: "All-Time Top Songs" })).toBeInTheDocument();
+    // Top Songs lists stay off Made for you (search and the profile have them).
+    expect(cards.queryByRole("button", { name: "All-Time Top Songs" })).not.toBeInTheDocument();
     // "A, B, C and more" under a Daily Mix.
     expect(within(screen.getByTestId("mix-card-daily:1")).getByText(/ and more$/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Your mixes by mood" })).toBeInTheDocument();

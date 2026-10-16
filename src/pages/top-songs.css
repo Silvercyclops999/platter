@@ -1,0 +1,161 @@
+/* Top Songs lists: the year's banner (its record pattern, the year in big
+   numerals) and the list under it. The year's colour arrives as
+   --year-deep (the banner) and --year-light (the numerals: the one accent). */
+
+.year-art { display: block; width: 100%; height: 100%; background: var(--year-deep); }
+.year-art__disc { fill: rgba(14, 13, 12, 0.38); }
+.year-art__groove { fill: none; stroke: var(--color-ink); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.year-art__label { fill: var(--year-light); }
+.year-art__hole { fill: var(--color-bg-base); }
+.year-art__ring { fill: none; stroke: var(--year-deep); stroke-opacity: 0.35; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+
+.top-songs__banner {
+  position: relative;
+  height: clamp(300px, 34vw, 380px);
+  overflow: hidden;
+  background: var(--year-deep);
+}
+.top-songs__banner .year-art { position: absolute; inset: 0; }
+/* Keeps the type readable where it crosses the grooves. */
+.top-songs__banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(14, 13, 12, 0.5) 0%, rgba(14, 13, 12, 0.12) 55%, transparent 80%);
+  pointer-events: none;
+}
+.top-songs__title {
+  position: absolute;
+  z-index: 1;
+  left: var(--page-x);
+  right: var(--page-x);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  color: var(--year-light);
+}
+.top-songs__kicker {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.01em;
+  color: #F4EFE8;
+  margin-bottom: var(--space-2);
+}
+.top-songs__numerals {
+  font-size: clamp(132px, 17vw, 228px);
+  font-weight: var(--font-weight-display);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.055em;
+  line-height: 0.74;
+  /* The numerals sit on the banner's lower edge, cut by it like a label by the platter. */
+  margin-bottom: -0.06em;
+  margin-left: -0.05em;
+}
+.top-songs__numerals--words { font-size: clamp(88px, 11vw, 150px); letter-spacing: -0.045em; line-height: 0.8; }
+
+.top-songs__about { padding: var(--space-6) var(--page-x) 0; }
+.top-songs__lede { margin: 0 0 var(--space-2); font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.top-songs__made { font-weight: var(--font-weight-bold); }
+
+.top-songs .detail-body { background: none; }
+.top-songs__wrapped {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 22%, transparent);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background var(--motion-quick) var(--motion-easing), border-color var(--motion-quick) var(--motion-easing);
+}
+.top-songs__wrapped:hover { background: var(--color-state-hover); border-color: color-mix(in srgb, var(--color-ink) 40%, transparent); }
+.top-songs__wrapped:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.top-songs__find { margin-left: auto; position: relative; }
+
+/* A Top Songs tile (search, the profile, Home in December). */
+.ts-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+  background: var(--year-deep);
+  color: var(--year-light);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.ts-tile .year-art { position: absolute; inset: 0; }
+.ts-tile__kicker { position: relative; font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); color: #F4EFE8; }
+.ts-tile__year {
+  position: relative;
+  font-size: clamp(44px, 5vw, 64px);
+  font-weight: var(--font-weight-display);
+  letter-spacing: -0.05em;
+  line-height: 0.82;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.ts-tile__year--words { font-size: clamp(30px, 3.4vw, 40px); letter-spacing: -0.03em; }
+.ts-tile:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.ts-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, rgba(14, 13, 12, 0.45), transparent 60%);
+}
+.ts-tile > span { z-index: 1; }
+.ts-card { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.ts-card__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.ts-card__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+/* The profile's Wrapped and Top Songs. */
+.wrapped-section__years { list-style: none; margin: 0 0 var(--space-6); padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
+.wrapped-section__lists { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--space-4); }
+.wrapped-tile {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  overflow: hidden;
+  padding: var(--space-4);
+  border: none;
+  border-radius: var(--radius-card);
+  background: var(--year-deep);
+  color: var(--year-light);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wrapped-tile .year-art { position: absolute; inset: 0; transition: transform var(--motion-slow) var(--motion-easing); }
+.wrapped-tile:hover .year-art { transform: scale(calc(1 + 0.03 * var(--motion-move))); }
+.wrapped-tile::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(14, 13, 12, 0.5), transparent 70%); }
+.wrapped-tile:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.wrapped-tile__text { position: relative; z-index: 1; display: flex; flex-direction: column; gap: var(--space-1); }
+.wrapped-tile__year { font-size: 64px; font-weight: var(--font-weight-display); letter-spacing: -0.055em; line-height: 0.82; font-variant-numeric: tabular-nums lining-nums; }
+.wrapped-tile__name { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: #F4EFE8; }
+.sr-top-songs { margin: var(--space-2) 0 var(--space-8); }
+.sr-top-songs .section-title { margin-bottom: var(--space-4); }
+
+/* Home, early December to mid January. */
+.ts-promo { position: relative; overflow: hidden; margin: var(--space-6) 0 var(--space-8); border-radius: var(--radius-card); background: var(--year-deep); min-height: 200px; display: flex; align-items: flex-end; }
+/* The record keeps to the right half; the year and words have the left. */
+.ts-promo .year-art { position: absolute; top: 0; right: 0; bottom: 0; width: 52%; }
+.ts-promo::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(14, 13, 12, 0.4) 0%, transparent 60%); }
+.ts-promo__text { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: var(--space-6); padding: var(--space-6); color: #F4EFE8; }
+.ts-promo__year { font-size: 132px; font-weight: var(--font-weight-display); letter-spacing: -0.06em; line-height: 0.76; margin-bottom: -0.04em; color: var(--year-light); font-variant-numeric: tabular-nums lining-nums; }
+.ts-promo__title { margin: 0 0 var(--space-1); font-size: var(--font-size-2xl); font-weight: var(--font-weight-display); letter-spacing: -0.02em; }
+.ts-promo__sub { margin: 0 0 var(--space-4); font-size: var(--font-size-md); color: #D8D0C4; }
+.ts-promo__actions { display: flex; gap: var(--space-2); }

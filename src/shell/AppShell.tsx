@@ -47,7 +47,7 @@ import { DeckActions } from "./DeckActions";
 import { DeckPairPrompt } from "./DeckPairPrompt";
 import { backend } from "../lib/backend";
 import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost, LazyTagEditDialogs } from "./lazyHosts";
-import { LazyGuideHost, LazyHelpPanel, LazyWrongLyricsHost } from "./lazyHosts";
+import { LazyGuideHost, LazyHelpPanel, LazyWrappedHost, LazyWrongLyricsHost } from "./lazyHosts";
 import { LookDrop } from "./LookDrop";
 import { QueuePanel } from "./QueuePanel";
 import { WhatsNewDialog } from "../help/WhatsNewDialog";
@@ -265,6 +265,7 @@ export function AppShell() {
       <DeckActions />
       <DeckPairPrompt />
       <LazyStatsDialogHost />
+      <LazyWrappedHost />
       <LazyLookBuilderHost />
       <LazyPickLookHost />
       <LookDrop />

@@ -1561,6 +1561,23 @@ export function SettingsPage() {
       description: "See your taste overlap with a Platter friend who shares theirs. Only a summary is shared, your top artists and songs, never your history. Unreleased songs stay out unless you both agree.",
       control: (ids) => toggle(s, "statsCompare", ids),
     },
+    {
+      key: "wrappedTopSongs",
+      section: "Library",
+      group: "Stats",
+      title: "Wrapped and Top Songs",
+      description:
+        "Your year in cards (from December 1, or any time from the app menu) and a Your Top Songs list for each year with 30 plays or more, plus All-Time. Find the lists on the Stats page or by searching for top songs. Counted on this computer.",
+      control: (ids) => toggle(s, "wrappedTopSongs", ids),
+    },
+    {
+      key: "topSongsShowPlays",
+      section: "Library",
+      group: "Stats",
+      title: "Show plays on yearly Top Songs lists",
+      description: "A small \u201cN plays\u201d under each title. All-Time Top Songs always shows them.",
+      control: (ids) => (s?.wrappedTopSongs === false ? null : toggle(s, "topSongsShowPlays", ids)),
+    },
     // Library: stats from your listening before Platter and in other apps
     ...historyRows("plexHistory", "Include my Plex listening history", "Stats, mixes, On Repeat and recaps also count what you played on your Plex server before Platter and in other Plex apps. Only your own plays, never other people's on the server, and a play from Platter counts once."),
     ...(history.source("tautulli")?.setUp

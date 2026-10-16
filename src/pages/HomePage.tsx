@@ -18,6 +18,7 @@ import { LikedTile, ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
 import { MixCard } from "./MixCard";
 import { RadarShelf } from "./ReleaseRadar";
 import { NewToYouShelf } from "./NewToYou";
+import { TopSongsPromo } from "./TopSongsPromo";
 import { useLikes } from "../stores/likes";
 import "./home.css";
 
@@ -235,6 +236,7 @@ export function HomePage() {
               </div>
             )
           )}
+          {filter === "all" && <TopSongsPromo />}
           {showOfflineShelf && (
             <Shelf title="On this computer" skeletonKind="album">
               {offlineAlbums.map((album) => (

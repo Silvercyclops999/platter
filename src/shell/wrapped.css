@@ -1,0 +1,284 @@
+/* Wrapped: full-window cards over everything but dialogs and toasts. Light
+   type on dark on every theme (the cards sit on artwork and the year's
+   colour). One accent per card: --year-light. Motion uses the tokens, so
+   reduced motion leaves every card still. */
+
+.wrapped {
+  --wr-text: #F4EFE8;
+  --wr-sub: #B8AFA4;
+  --wr-muted: #8A8178;
+  --wr-line: rgba(255, 240, 220, 0.14);
+  --wr-ground: color-mix(in srgb, var(--year-deep) 20%, #0E0D0C);
+  --color-text-primary: var(--wr-text);
+  --color-text-secondary: var(--wr-sub);
+  --color-text-muted: var(--wr-muted);
+  --color-ink: #FFF0DC;
+  --color-bg-base: #0E0D0C;
+  --color-state-hover: rgba(255, 240, 220, 0.06);
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-full-window);
+  overflow: hidden;
+  background: var(--wr-ground);
+  color: var(--wr-text);
+  outline: none;
+  animation: wrapped-in var(--motion-medium) var(--motion-easing) both;
+}
+@keyframes wrapped-in {
+  from { opacity: 0; }
+}
+
+/* ------------------------------------------------------------ bar */
+.wrapped__bar { position: absolute; z-index: 3; top: 0; left: 0; right: 0; padding: 18px 32px 0; pointer-events: none; }
+.wrapped__bar > * { pointer-events: auto; }
+.wrapped__progress { display: flex; gap: 6px; }
+.wrapped__seg { position: relative; flex: 1; height: 3px; border-radius: var(--radius-pill); background: rgba(255, 240, 220, 0.2); overflow: hidden; }
+.wrapped__seg i { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(255, 240, 220, 0.92); border-radius: inherit; }
+.wrapped__seg.is-done i { width: 100%; }
+.wrapped__seg.is-current i { animation: wrapped-fill var(--card-ms) linear forwards; }
+.wrapped[data-paused="true"] .wrapped__seg.is-current i { animation-play-state: paused; }
+:root[data-reduced-motion="true"] .wrapped__seg.is-current i { width: 100%; }
+@keyframes wrapped-fill {
+  from { width: 0; }
+  to { width: 100%; }
+}
+.wrapped__top { display: flex; align-items: center; gap: var(--space-3); margin-top: 12px; height: 32px; }
+.wrapped__title { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); }
+.wrapped__count { font-size: var(--font-size-sm); color: var(--wr-muted); font-variant-numeric: tabular-nums; }
+.wrapped__tools { margin-left: auto; display: flex; gap: var(--space-1); }
+
+/* Previous and next: quiet circles at the edges, there for keyboards and for anyone who looks. */
+.wrapped__nav {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-top: -20px;
+  border: 1px solid var(--wr-line);
+  border-radius: 50%;
+  background: rgba(14, 13, 12, 0.35);
+  color: var(--wr-text);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-easing), background var(--motion-quick) var(--motion-easing);
+}
+.wrapped:hover .wrapped__nav:not(:disabled),
+.wrapped__nav:focus-visible { opacity: 1; }
+.wrapped__nav:hover { background: rgba(14, 13, 12, 0.6); }
+.wrapped__nav:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.wrapped__nav:disabled { cursor: default; }
+.wrapped__nav--prev { left: 20px; }
+.wrapped__nav--next { right: 20px; }
+
+/* ------------------------------------------------------------ cards */
+.wrapped__stage { position: absolute; inset: 0; user-select: none; -webkit-user-select: none; }
+.wrapped__card { position: absolute; inset: 0; }
+.wcard {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 112px max(72px, 7.5vw) 80px;
+  background: var(--wr-ground);
+}
+.wcard__body { position: relative; z-index: 1; width: 100%; max-width: 1240px; margin: 0 auto; }
+.wcard__body--split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(40px, 6vw, 96px); align-items: center; }
+.wcard__words { min-width: 0; }
+
+.wcard__kicker {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wr-sub);
+}
+.wcard__lead {
+  margin: var(--space-4) 0 var(--space-4);
+  max-width: 17ch;
+  font-size: clamp(36px, 4.3vw, 66px);
+  font-weight: var(--font-weight-display);
+  letter-spacing: -0.03em;
+  line-height: 1.03;
+  text-wrap: balance;
+}
+.wcard__sub { margin: 0; max-width: 44ch; font-size: var(--font-size-xl); line-height: 1.4; color: var(--wr-sub); }
+.wcard__accent { color: var(--year-light); }
+.wcard__big {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 var(--space-4);
+  margin: var(--space-6) 0 var(--space-4);
+  font-size: clamp(120px, 16.5vw, 252px);
+  font-weight: var(--font-weight-display);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.06em;
+  line-height: 0.8;
+  margin-left: -0.05em;
+  /* Room for the comma's tail. */
+  margin-bottom: var(--space-12);
+}
+.wcard__unit { font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; color: var(--wr-text); }
+.wcard__mark {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 1px 6px;
+  border: 1px solid var(--wr-line);
+  border-radius: var(--radius-row);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  color: var(--wr-sub);
+}
+
+/* Art behind a card: the year's record (opening and personality cards). */
+.wcard__art { position: absolute; inset: 0; }
+.wcard__art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(14, 13, 12, 0.72) 0%, rgba(14, 13, 12, 0.3) 48%, rgba(14, 13, 12, 0) 75%);
+}
+.wcard__art--quiet .year-art { opacity: 0.5; }
+.wcard__art--quiet .year-art__label { fill: none; stroke: var(--year-light); stroke-opacity: 0.5; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.wcard__art--quiet .year-art__hole { fill: var(--year-light); fill-opacity: 0.5; }
+.wcard--minutes, .wcard--state { background: var(--year-deep); }
+.wcard--personality .wcard__art .year-art { background: transparent; }
+.wcard--personality .wcard__lead { max-width: 21ch; }
+
+/* 2: the top artist fills the card. */
+.wcard__photo { position: absolute; inset: 0; background: #0E0D0C; }
+.wcard__photo img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; }
+.wcard__photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(14, 13, 12, 0.94) 0%, rgba(14, 13, 12, 0.78) 34%, rgba(14, 13, 12, 0.18) 72%, rgba(14, 13, 12, 0.05) 100%),
+    linear-gradient(0deg, rgba(14, 13, 12, 0.55) 0%, transparent 40%);
+}
+.wcard--artists .wcard__body { max-width: 1240px; }
+.wcard--artists .wcard__lead, .wcard--artists .wcard__sub { max-width: 15ch; }
+.wcard--artists .wcard__sub { max-width: 34ch; }
+.wcard__ranks { list-style: none; margin: var(--space-8) 0 0; padding: 0; display: grid; gap: var(--space-2); }
+.wcard__ranks li { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: baseline; font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; }
+.wcard__ranks .wcard__name { font-size: inherit; }
+.wcard__ranks li.is-first { font-size: clamp(32px, 3vw, 44px); font-weight: var(--font-weight-display); letter-spacing: -0.025em; }
+.wcard__ranks li.is-first .wcard__name, .wcard__ranks li.is-first .wcard__rank { color: var(--year-light); }
+.wcard__rank { min-width: 1.2em; font-variant-numeric: tabular-nums; color: var(--wr-muted); }
+
+/* 3: the five songs, each plays. */
+.wcard__songs { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.wcard__row {
+  display: grid;
+  grid-template-columns: 36px 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-card);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.wcard__row { cursor: pointer; transition: background var(--motion-quick) var(--motion-easing); }
+button.wcard__row:hover, button.wcard__row:focus-visible { background: rgba(255, 240, 220, 0.07); }
+button.wcard__row:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 0; }
+.wcard__songs .wcard__rank { font-size: var(--font-size-2xl); font-weight: var(--font-weight-display); text-align: right; }
+.wcard__songs li.is-first .wcard__rank { color: var(--year-light); }
+.wcard__cover { position: relative; display: block; width: 64px; height: 64px; border-radius: var(--radius-row); overflow: hidden; }
+.wcard__cover--lg { width: 148px; height: 148px; flex: none; }
+.wcard__play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(14, 13, 12, 0.55);
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-easing);
+}
+button.wcard__row:hover .wcard__play, button.wcard__row:focus-visible .wcard__play { opacity: 1; }
+.wcard__song { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.wcard__name { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); }
+.wcard__by { font-size: var(--font-size-md); color: var(--wr-sub); }
+.wcard__plays { font-size: var(--font-size-md); color: var(--wr-sub); font-variant-numeric: tabular-nums; }
+
+/* 4: the album, big, with the next four and the genres. */
+.wcard__hero-cover { position: relative; justify-self: end; width: min(58vh, 100%, 540px); aspect-ratio: 1; border-radius: var(--radius-card); overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
+.wcard__hero-cover .wcard__mark { position: absolute; left: 12px; bottom: 12px; background: rgba(14, 13, 12, 0.7); }
+.wcard__albums { list-style: none; margin: var(--space-8) 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4) var(--space-6); }
+.wcard__albums li { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.wcard__albums li > :first-child { flex: none; border-radius: var(--radius-row); overflow: hidden; }
+.wcard__album-text { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-2); min-width: 0; }
+.wcard__album-text .wcard__name { font-size: var(--font-size-lg); }
+.wcard__album-text .wcard__by { grid-column: 2; font-size: var(--font-size-sm); }
+.wcard__rank-sm { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--wr-muted); font-variant-numeric: tabular-nums; }
+.wcard__genres { margin: var(--space-8) 0 0; padding-top: var(--space-4); border-top: 1px solid var(--wr-line); font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; }
+
+/* 5: the three traits. */
+.wcard__traits { list-style: none; margin: var(--space-12) 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-8); max-width: 1080px; }
+.wcard__traits li { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--wr-line); }
+.wcard__value { font-size: clamp(56px, 6vw, 88px); font-weight: var(--font-weight-display); letter-spacing: -0.05em; line-height: 0.9; font-variant-numeric: tabular-nums; }
+.wcard__trait { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); }
+.wcard__line { font-size: var(--font-size-md); line-height: 1.45; color: var(--wr-sub); max-width: 30ch; }
+
+/* 6: the day, and the song played most in one day with its cover. */
+.wcard--day .wcard__lead { max-width: 14ch; }
+.wcard__replay { justify-self: end; display: flex; flex-direction: column; gap: var(--space-4); width: min(48vh, 100%, 440px); margin: 0; }
+.wcard__replay-cover { display: block; aspect-ratio: 1; border-radius: var(--radius-card); overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
+.wcard__replay-line { margin: var(--space-2) 0 var(--space-4); font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; line-height: 1.3; }
+
+/* 7: the summary and its export. */
+.wcard--summary .wcard__body--split { grid-template-columns: minmax(0, 1fr) auto; }
+.wcard__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-8); }
+.wcard__option { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-6); font-size: var(--font-size-md); }
+.wcard__fine { margin: var(--space-4) 0 0; font-size: var(--font-size-sm); color: var(--wr-muted); }
+.wcard__preview { justify-self: end; }
+.wcard__canvas {
+  display: block;
+  height: calc(100vh - 200px);
+  max-height: 900px;
+  aspect-ratio: 9 / 16;
+  width: auto;
+  border-radius: 14px;
+  background: #0E0D0C;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--wr-line);
+}
+
+/* ------------------------------------------------------------ motion */
+.wrapped__card :is(.wcard__kicker, .wcard__lead, .wcard__big, .wcard__sub, .wcard__ranks, .wcard__songs, .wcard__albums, .wcard__genres, .wcard__traits, .wcard__replay, .wcard__actions, .wcard__option, .wcard__fine) {
+  animation: wcard-rise var(--motion-slow) var(--motion-easing) both;
+}
+.wrapped__card .wcard__lead { animation-delay: 60ms; }
+.wrapped__card :is(.wcard__big, .wcard__songs, .wcard__traits) { animation-delay: 160ms; }
+.wrapped__card :is(.wcard__sub, .wcard__ranks, .wcard__albums, .wcard__replay, .wcard__actions) { animation-delay: 260ms; }
+.wrapped__card :is(.wcard__genres, .wcard__option, .wcard__fine) { animation-delay: 340ms; }
+.wrapped__card :is(.wcard__photo, .wcard__art, .wcard__hero-cover, .wcard__preview) { animation: wcard-fade var(--motion-long) var(--motion-easing) both; }
+@keyframes wcard-rise {
+  from { opacity: 0; transform: translateY(calc(18px * var(--motion-move))); }
+}
+@keyframes wcard-fade {
+  from { opacity: 0; }
+}
+
+@media (max-width: 980px) {
+  .wcard { padding: 104px 40px 56px; align-items: flex-start; overflow-y: auto; }
+  .wcard__body--split, .wcard--summary .wcard__body--split { grid-template-columns: minmax(0, 1fr); }
+  .wcard__traits { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .wcard__hero-cover, .wcard__preview { justify-self: start; }
+  .wcard__canvas { height: 60vh; }
+}
+
+/* Reduced motion: the cards are static. No entrances, not even fades, and
+   the progress shows each card as a whole. */
+:root[data-reduced-motion="true"] .wrapped,
+:root[data-reduced-motion="true"] .wrapped * {
+  animation: none !important;
+}

@@ -231,6 +231,9 @@ import type {
   StatsPoint,
   StatsSpan,
   StatsTopKind,
+  TopSongsIndex,
+  TopSongsList,
+  Wrapped,
 } from "./statsTypes";
 
 export type Unlisten = () => void;
@@ -955,6 +958,12 @@ export interface Backend {
   statsMonthRecap(month: string): Promise<MonthRecap>;
   /** Songs for a top list's Play these and Save as playlist, most played first. */
   statsPlayIds(range: StatsRange, kind: StatsTopKind, limit?: number): Promise<string[]>;
+  /** Which Top Songs lists and Wrapped years there are (Wrapped and Top Songs must be on). */
+  topSongsIndex(): Promise<TopSongsIndex>;
+  /** A year's Top Songs list, or All-Time for null. */
+  topSongsList(year: number | null): Promise<TopSongsList>;
+  /** A year's Wrapped. */
+  statsWrapped(year: number): Promise<Wrapped>;
   /** Your summary to share with a friend (Compare must be on in Settings). */
   statsCompareSummary(unreleasedOk: boolean, theirUnreleasedOk: boolean): Promise<CompareSummary>;
   /** Compare a friend's summary with yours. */
@@ -1360,6 +1369,9 @@ export function createTauriBackend(): Backend {
     statsItem: (kind, id) => call("stats_item", { kind, id }),
     statsMonthRecap: (month) => call("stats_month_recap", { month }),
     statsPlayIds: (range, kind, limit) => call("stats_play_ids", { range, kind, limit: limit ?? null }),
+    topSongsIndex: () => call("top_songs_index"),
+    topSongsList: (year) => call("top_songs_list", { year }),
+    statsWrapped: (year) => call("stats_wrapped", { year }),
     statsCompareSummary: (unreleasedOk, theirUnreleasedOk) => call("stats_compare_summary", { unreleasedOk, theirUnreleasedOk }),
     statsCompare: (theirs, unreleasedOk) => call("stats_compare", { theirs, unreleasedOk }),
     statsFriends: () => call("stats_friends"),

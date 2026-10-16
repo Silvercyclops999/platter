@@ -201,3 +201,66 @@ export interface CompareResult {
   commonArtists: CommonArtist[];
   theirSongsNew: { artist: string; title: string; track: Track | null }[];
 }
+
+/** Which Top Songs lists and Wrapped years there are (`top_songs_index`). */
+export interface TopSongsIndex {
+  /** Years with a list, newest first. */
+  years: number[];
+  /** Any plays at all: the All-Time list. */
+  allTime: boolean;
+  /** The year Home shows (early December to mid January), or null. */
+  promoted: number | null;
+  /** Years with plays for Wrapped on the profile, newest first. */
+  wrappedYears: number[];
+  currentYear: number;
+}
+
+export interface TopSongsRow {
+  track: Track;
+  plays: number;
+  ms: number;
+  unreleased: boolean;
+  /** The year's first play (yearly lists only). */
+  firstOfYear: boolean;
+}
+
+export interface TopSongsList {
+  /** null: All-Time. */
+  year: number | null;
+  title: string;
+  /** Most played first; the position is the rank. */
+  rows: TopSongsRow[];
+  durationMs: number;
+}
+
+export type TimeOfDay = "morning" | "afternoon" | "evening" | "night";
+
+/** Shares are 0 to 1. */
+export interface Personality {
+  time: TimeOfDay;
+  timeShare: number;
+  /** Plays on songs played 5 times or more that year. */
+  repeatShare: number;
+  repeats: boolean;
+  /** Plays on songs first heard that year. */
+  newShare: number;
+  mostlyNew: boolean;
+}
+
+export interface Wrapped {
+  year: number;
+  totals: StatsTotals;
+  /** Listening time the year before. */
+  prevMs: number;
+  topArtists: TopArtist[];
+  topSongs: TopSong[];
+  topAlbums: TopAlbum[];
+  topGenres: TopGenre[];
+  personality: Personality | null;
+  hours: number[];
+  biggestDay: StatsPoint | null;
+  /** The song played most in one day; its plays are that day's. */
+  replayed: MomentSong | null;
+  firstSong: MomentSong | null;
+  newArtists: number;
+}

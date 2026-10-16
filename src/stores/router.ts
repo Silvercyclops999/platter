@@ -46,6 +46,8 @@ export type Route =
   | { name: "bookmarks" }
   /** Listening stats for a range of days. */
   | { name: "stats" }
+  /** A year's Top Songs list, or All-Time without a year. */
+  | { name: "topSongs"; year?: number }
   /** Library import: the reports and review queue, one imported list (`list:<id>`), or the Missing songs (`missing`). */
   | { name: "import"; view?: string }
   /** The library doctor: things worth fixing in the library. */

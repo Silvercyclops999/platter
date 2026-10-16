@@ -14,6 +14,8 @@ import { useStatsDialog } from "../stores/stats";
 import { useLooks } from "../stores/looks";
 import { useGuides } from "../stores/guides";
 
+import { useWrapped } from "../stores/wrapped";
+
 const SmartEditor = lazy(() => import("../components/SmartPlaylistEditor").then((m) => ({ default: m.SmartEditorHost })));
 const LyricsEditor = lazy(() => import("./LyricsEditor").then((m) => ({ default: m.LyricsEditorHost })));
 const WrongLyrics = lazy(() => import("./LyricsTrust").then((m) => ({ default: m.WrongLyricsDialog })));
@@ -24,6 +26,8 @@ const PickLook = lazy(() => import("../pages/looks/LookCards").then((m) => ({ de
 const TagEdit = lazy(() => import("../components/TagEditDialogs").then((m) => ({ default: m.TagEditDialogs })));
 const Guide = lazy(() => import("../guides/GuideDialog").then((m) => ({ default: m.GuideHost })));
 const Help = lazy(() => import("../help/HelpPanel").then((m) => ({ default: m.HelpPanel })));
+
+const Wrapped = lazy(() => import("./Wrapped").then((m) => ({ default: m.WrappedHost })));
 const PlexEdit = lazy(() => import("../components/PlexEditDialogs").then((m) => ({ default: m.PlexEditDialogs })));
 
 /** True from the first time `open` is true onwards. */
@@ -132,4 +136,13 @@ export function LazyHelpPanel() {
       <Help />
     </Suspense>
   );
+}
+
+export function LazyWrappedHost() {
+  const show = useOnceOpen(useWrapped((s) => s.year != null));
+  return show ? (
+    <Suspense fallback={null}>
+      <Wrapped />
+    </Suspense>
+  ) : null;
 }

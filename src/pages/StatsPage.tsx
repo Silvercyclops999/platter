@@ -23,6 +23,7 @@ import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { WhenYouListened } from "./StatsCharts";
 import { CompareSection } from "./StatsCompare";
+import { WrappedSection } from "./StatsWrapped";
 import { StatsHero, StatsHeroSkeleton } from "./StatsHero";
 import { MomentsSection } from "./StatsMoments";
 import { MonthlySection } from "./StatsRecaps";
@@ -202,6 +203,7 @@ export function StatsPage() {
           )}
           <ShelfStatsSection />
           {monthly && span && <MonthlySection span={span} />}
+          <WrappedSection />
           {compare && <CompareSection />}
         </>
       )}

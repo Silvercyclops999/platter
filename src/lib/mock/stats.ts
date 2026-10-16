@@ -24,6 +24,12 @@ import type {
   TopArtist,
   TopGenre,
   TopSong,
+  Personality,
+  TimeOfDay,
+  TopSongsIndex,
+  TopSongsList,
+  TopSongsRow,
+  Wrapped,
 } from "../statsTypes";
 import { addDays, localDay, monthBounds, parseDay } from "../stats";
 import { mockMatched, type Fixtures } from "./fixtures";
@@ -32,7 +38,8 @@ import type { MockListen } from "./recents";
 const MIN = 60_000;
 const DAY = 86_400_000;
 export const DAILY_SERIES_MAX_DAYS = 92;
-const HISTORY_DAYS = 540;
+/** About three years, so last year is a whole year for Wrapped and Top Songs. */
+const HISTORY_DAYS = 1100;
 
 export interface MockPlay {
   trackId: string;
@@ -53,20 +60,25 @@ function rng(seed: number) {
   };
 }
 
-/** How likely a day `back` days ago had listening: quiet early history, a busy spell, a busy last month. */
-function activeChance(back: number): number {
+/**
+ * How likely a day `back` days ago (in `year`, this year being `thisYear`)
+ * had listening: a busy last month and spell this year, a busy last year,
+ * quieter before that.
+ */
+function activeChance(back: number, year: number, thisYear: number): number {
   if (back <= 28) return 0.82;
   if (back <= 120) return 0.4;
   if (back >= 170 && back <= 205) return 0.75;
-  if (back <= 300) return 0.28;
-  return 0.12;
+  if (year === thisYear) return 0.28;
+  if (year === thisYear - 1) return 0.7;
+  return 0.3;
 }
 
 /** The days back with listening for the sparse demo: a few scattered, most in the last four weeks. */
 const SPARSE_DAYS = new Set([340, 290, 212, 150, 61, 27, 25, 24, 22, 20, 19, 17, 15, 14, 12, 11, 9, 8, 7, 6, 5, 3, 2, 1]);
 
 /**
- * About eighteen months of listening, uneven like a real library: quiet
+ * About three years of listening, uneven like a real library: quiet
  * stretches and busy ones, favourite artists, mostly late at night, more
  * midweek. `sparse` keeps only 24 days of the last year.
  */
@@ -79,9 +91,9 @@ export function seedStatsHistory(fx: Fixtures, now = Date.now(), sparse = false)
   const today = parseDay(localDay(new Date(now)));
   for (let back = HISTORY_DAYS; back >= 1; back--) {
     const r = rand();
-    if (sparse ? !SPARSE_DAYS.has(back) : r >= activeChance(back)) continue;
     const day = new Date(today);
     day.setDate(day.getDate() - back);
+    if (sparse ? !SPARSE_DAYS.has(back) : r >= activeChance(back, day.getFullYear(), today.getFullYear())) continue;
     const midweek = day.getDay() === 3 ? 1.6 : day.getDay() === 5 ? 1.25 : 1;
     const n = Math.round((3 + Math.floor(rand() * 16)) * midweek);
     // Late at night mostly, evenings often, daytime now and then.
@@ -442,6 +454,82 @@ export class MockStats {
     return pick.slice(0, limit).map((s) => s.id);
   }
 
+  private requireWrapped() {
+    if (this.settings().wrappedTopSongs === false) throw { kind: "invalid", message: "Wrapped and Top Songs are off in Settings." };
+  }
+
+  /** Plays per local year, oldest first. */
+  private years(): Map<number, number> {
+    const out = new Map<number, number>();
+    for (const p of this.plays()) {
+      const y = new Date(p.at).getFullYear();
+      out.set(y, (out.get(y) ?? 0) + 1);
+    }
+    return out;
+  }
+
+  /** The core's rules: lists from 30 plays, this year from December 1, Home from December to January 15. */
+  topSongsIndex(today = localDay(new Date())): TopSongsIndex {
+    this.requireWrapped();
+    const ys = [...this.years().entries()].sort((a, b) => b[0] - a[0]);
+    const [ty, tm, td] = today.split("-").map(Number);
+    const open = (y: number) => y < ty || (y === ty && tm === 12);
+    const years = ys.filter(([y, n]) => n >= TOP_SONGS_MIN_PLAYS && open(y)).map(([y]) => y);
+    const promoted = tm === 12 ? ty : tm === 1 && td <= 15 ? ty - 1 : null;
+    return {
+      years,
+      allTime: ys.length > 0,
+      promoted: promoted != null && years.includes(promoted) ? promoted : null,
+      wrappedYears: ys.filter(([y, n]) => n > 0 && open(y)).map(([y]) => y),
+      currentYear: ty,
+    };
+  }
+
+  topSongsList(year: number | null, today = localDay(new Date())): TopSongsList {
+    const ix = this.topSongsIndex(today);
+    if (year != null && !ix.years.includes(year)) throw { kind: "notFound", message: `Top Songs ${year}` };
+    const r: StatsRange = year == null ? { from: null, to: null } : { from: `${year}-01-01`, to: `${year}-12-31` };
+    const { plays } = this.inRange(r);
+    const first = year == null ? null : plays[0]?.trackId;
+    const rows = this.tops(plays)
+      .songs.slice(0, 100)
+      .map(([id, t]): TopSongsRow => {
+        const tr = this.track(id)!;
+        return { track: tr, plays: t.plays, ms: t.ms, unreleased: this.unreleased(tr), firstOfYear: id === first };
+      });
+    return { year, title: year == null ? "All-Time Top Songs" : `Your Top Songs ${year}`, rows, durationMs: rows.reduce((n, r) => n + r.track.durationMs, 0) };
+  }
+
+  wrapped(year: number): Wrapped {
+    this.requireWrapped();
+    const r = { from: `${year}-01-01`, to: `${year}-12-31` };
+    const o = this.overview(r, 5);
+    const m = this.moments(r);
+    const { plays } = this.inRange(r);
+    const prev = this.inRange({ from: `${year - 1}-01-01`, to: `${year - 1}-12-31` }).plays;
+    const before = new Set(this.plays().filter((p) => p.at < parseDay(r.from).getTime()).map((p) => p.trackId));
+    const perSong = new Map<string, number>();
+    for (const p of plays) perSong.set(p.trackId, (perSong.get(p.trackId) ?? 0) + 1);
+    const repeatPlays = [...perSong.values()].filter((n) => n >= 5).reduce((a, n) => a + n, 0);
+    const newPlays = plays.filter((p) => !before.has(p.trackId)).length;
+    const biggest = this.days(r.from, r.to).sort((a, z) => z.ms - a.ms || a.key.localeCompare(z.key))[0] ?? null;
+    return {
+      year,
+      totals: o.totals,
+      prevMs: prev.reduce((n, p) => n + p.ms, 0),
+      topArtists: o.topArtists,
+      topSongs: o.topSongs,
+      topAlbums: o.topAlbums,
+      topGenres: o.topGenres.slice(0, 5),
+      personality: mockPersonality(o.hours, plays.length, repeatPlays, newPlays),
+      hours: o.hours,
+      biggestDay: biggest,
+      replayed: m.replayed,
+      firstSong: m.firstSong,
+      newArtists: m.newArtists ?? 0,
+    };
+  }
+
   private requireCompare() {
     if (!this.settings().statsCompare) throw { kind: "invalid", message: "Comparing stats with friends is off in Settings." };
   }
@@ -498,6 +586,31 @@ export class MockStats {
       .map(({ s, t }) => ({ artist: s.artist, title: s.title, track: t }));
     return { friend: theirs.name, overlap: Math.round(Math.min(1, shared) * 100), commonArtists: common.slice(0, 20), theirSongsNew: newSongs };
   }
+}
+
+export const TOP_SONGS_MIN_PLAYS = 30;
+
+/** The core's personality rules (stats::wrapped::personality). */
+export function mockPersonality(hours: number[], plays: number, repeatPlays: number, newPlays: number): Personality | null {
+  const total = hours.reduce((a, n) => a + n, 0);
+  if (total <= 0 || plays <= 0) return null;
+  const part = (h: number): TimeOfDay => (h >= 5 && h <= 11 ? "morning" : h >= 12 && h <= 16 ? "afternoon" : h >= 17 && h <= 21 ? "evening" : "night");
+  const order: TimeOfDay[] = ["morning", "afternoon", "evening", "night"];
+  const parts = [0, 0, 0, 0];
+  hours.forEach((ms, h) => (parts[order.indexOf(part(h))] += ms));
+  let best = 0;
+  parts.forEach((ms, i) => {
+    if (ms > parts[best]) best = i;
+  });
+  const share = (n: number) => Math.min(Math.max(n, 0), plays) / plays;
+  return {
+    time: order[best],
+    timeShare: parts[best] / total,
+    repeatShare: share(repeatPlays),
+    repeats: share(repeatPlays) >= 0.5,
+    newShare: share(newPlays),
+    mostlyNew: share(newPlays) >= 0.5,
+  };
 }
 
 /** A friend's summary for the Compare view's demo: some artists in common, some songs you've never played. */

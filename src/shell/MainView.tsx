@@ -29,6 +29,7 @@ const ImportPage = lazy(() => import("../pages/ImportPage").then((m) => ({ defau
 const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((m) => ({ default: m.SmartPlaylistPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
+const TopSongsPage = lazy(() => import("../pages/TopSongsPage").then((m) => ({ default: m.TopSongsPage })));
 const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
 const ReleaseRadarPage = lazy(() => import("../pages/ReleaseRadar").then((m) => ({ default: m.ReleaseRadarPage })));
 const LineagePage = lazy(() => import("../pages/LineagePage").then((m) => ({ default: m.LineagePage })));
@@ -176,6 +177,8 @@ function Page({ route }: { route: Route }) {
       return <BookmarksPage />;
     case "stats":
       return <StatsPage />;
+    case "topSongs":
+      return <TopSongsPage key={route.year ?? "all"} year={route.year ?? null} />;
     case "doctor":
       return <DoctorPage />;
     case "import":
@@ -195,6 +198,8 @@ function Page({ route }: { route: Route }) {
     case "artistShelf":
       return <ArtistShelfPage id={route.id} shelf={route.shelf} />;
     case "mix":
+      // Saved links to the old All-Time mix open the All-Time list.
+      if (route.id === "topSongs") return <TopSongsPage key="all" year={null} />;
       return <MixPage key={`mix-${route.id}`} id={route.id} />;
     case "radio":
       return <MixPage key={`radio-${route.seed}`} seed={route.seed} />;

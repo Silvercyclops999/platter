@@ -194,7 +194,8 @@ export class MockMixes {
 
   shelves(): MixShelves {
     const all = [...this.mixes().values()].map((m) => m.mix);
-    const order: MixKind[] = ["daily", "daylist", "discover", "newInLibrary", "onRepeat", "rediscover", "topSongs"];
+    // Top Songs lists live in search and on the profile, not on Home.
+    const order: MixKind[] = ["daily", "daylist", "discover", "newInLibrary", "onRepeat", "rediscover"];
     return {
       madeForYou: all.filter((m) => order.includes(m.kind)).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind)),
       moods: all.filter((m) => m.kind === "mood"),

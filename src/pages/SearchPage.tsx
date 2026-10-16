@@ -18,6 +18,7 @@ import { QueueButton } from "../shell/SearchActions";
 import { hitInfo, hitMenuItems, hitOf, mixedHits, openHit, playHit, rememberHit, type HitInfo } from "../shell/searchModel";
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
 import { otherVersionsText } from "./era";
+import { TopSongsResults, useTopSongsFound } from "./TopSongsResults";
 import { SearchCatalogue } from "./SearchCatalogue";
 import type { HelpHit } from "../help/pages";
 import { help } from "../stores/help";
@@ -258,6 +259,7 @@ export function SearchPage({ query }: { query: string }) {
   const q = query.trim().slice(0, MAX_QUERY);
   const offline = useApp((s) => isOffline(s.health));
   const helpHits = useHelpHits(q);
+  const topSongs = useTopSongsFound(q);
 
   // Each request gets a sequence number and only the newest one may update
   // the screen, so a slow answer to an older query never replaces a newer one.
@@ -351,6 +353,7 @@ export function SearchPage({ query }: { query: string }) {
     <div className="page-pad sr" aria-busy={!res && !failed}>
       <h1 className="sr-only">Results for “{q}”</h1>
       <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="sr-chips" scroll />
+      {(filter === "all" || filter === "playlists") && <TopSongsResults found={topSongs} />}
       {offline && (failed || res?.source === "server" || empty) ? (
         // Only the server could answer this: say why, and that it comes back.
         <div className="sr-empty" role="status">
@@ -366,7 +369,7 @@ export function SearchPage({ query }: { query: string }) {
         ) : (
           <ResultsSkeleton filter={filter} />
         )
-      ) : empty ? (
+      ) : empty && topSongs.length && (filter === "all" || filter === "playlists") ? null : empty ? (
         <>
           <div className="sr-empty">
             <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>

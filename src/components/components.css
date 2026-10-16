@@ -736,6 +736,10 @@
   font-size: var(--font-size-md);
 }
 .track-row:hover { background: var(--color-state-hover); }
+/* Rows with small labels under the title (Top Songs lists) grow to fit them. */
+.track-row--notes { height: 68px; }
+.track-row__notes { display: flex; gap: var(--space-2); margin-top: 2px; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.track-row__note + .track-row__note::before { content: "·"; margin-right: var(--space-2); }
 .track-row.is-unavailable { opacity: 0.4; }
 .track-row:focus-visible { background: var(--color-state-selected); outline-offset: -2px; }
 .track-row.is-active .track-row__title { color: var(--color-playing); }
