@@ -617,6 +617,8 @@ export interface Backend {
   deckStatus(): Promise<DeckStatus>;
   /** Forget the paired Stream Deck and make a new code. */
   deckRevoke(): Promise<DeckStatus>;
+  /** Tell the Stream Deck keys what the window shows (the lyrics). */
+  deckUiReport(report: { lyrics: boolean }): Promise<void>;
   /** Forget the paired script or command line and show a new automation code. */
   automationRevoke(): Promise<DeckStatus>;
   /** The "Allow Stream Deck to control Platter?" prompt showing now (its id), if any. */
@@ -1193,6 +1195,7 @@ export function createTauriBackend(): Backend {
     feedStatus: () => call("feed_status"),
     deckStatus: () => call("deck_status"),
     deckRevoke: () => call("deck_revoke"),
+    deckUiReport: (report) => call("deck_ui_report", { report }),
     automationRevoke: () => call("automation_revoke"),
     deckPairPrompt: () => call("deck_pair_prompt"),
     deckPairAnswer: (id, allow) => call("deck_pair_answer", { id, allow }),

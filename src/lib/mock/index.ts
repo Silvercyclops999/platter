@@ -3691,6 +3691,13 @@ export class MockBackend implements Backend {
   deckStatus() {
     return this.delay(() => this.deck());
   }
+  /** What the window last told the Stream Deck keys. */
+  deckUi: { lyrics: boolean } = { lyrics: false };
+  deckUiReport(report: { lyrics: boolean }) {
+    return this.delay(() => {
+      this.deckUi = report;
+    });
+  }
   deckRevoke() {
     return this.delay(() => {
       this.deckPaired = false;

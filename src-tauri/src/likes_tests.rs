@@ -340,3 +340,43 @@ async fn the_retry_loop_sleeps_until_a_like_is_queued() {
     let _ = parked(r.likes.clone()).await;
     assert!(parked(r.likes.clone()).await, "kept polling after the queue emptied");
 }
+
+#[tokio::test]
+async fn star_ratings_reach_plex_as_stars_and_clear() {
+    let r = rig();
+    assert_eq!(r.likes.stars("4").await.unwrap(), 3);
+    assert_eq!(r.likes.stars("1").await.unwrap(), 0);
+    r.likes.rate("1", Some(2)).await.unwrap();
+    assert_eq!(r.rating("1").0, Some(4.0));
+    assert_eq!(r.likes.stars("1").await.unwrap(), 2);
+    assert_eq!(r.events.changed.lock().clone(), vec![s(&["1"])]);
+    r.likes.rate("4", None).await.unwrap();
+    assert_eq!(r.rating("4").0, None);
+    r.likes.replay().await;
+    assert_eq!(r.plex.calls(), s(&["rate 1 4", "rate 4 -1"]));
+    // Five stars is a like.
+    r.likes.rate("2", Some(5)).await.unwrap();
+    assert!(r.likes.is_liked("2").await.unwrap());
+    // Out of range or unknown.
+    assert!(r.likes.rate("1", Some(6)).await.is_err());
+    assert!(r.likes.rate("99", Some(3)).await.is_err());
+}
+
+#[tokio::test]
+async fn a_server_without_stars_takes_a_rating_as_a_like() {
+    struct Plain(Mutex<Vec<String>>);
+    #[async_trait]
+    impl LikeRemote for Plain {
+        async fn online(&self) -> bool {
+            true
+        }
+        async fn set_liked(&self, id: &str, liked: bool) -> AppResult<()> {
+            self.0.lock().push(format!("{id} {liked}"));
+            Ok(())
+        }
+    }
+    let p = Plain(Mutex::new(Vec::new()));
+    p.set_rating("1", Some(6.0)).await.unwrap();
+    p.set_rating("1", None).await.unwrap();
+    assert_eq!(*p.0.lock(), s(&["1 true", "1 false"]));
+}

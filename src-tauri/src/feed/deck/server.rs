@@ -15,9 +15,11 @@ use tokio::sync::watch;
 use super::ask::{AskError, AskState, Asks};
 use super::pairing::{PairError, Pairing, hex};
 use super::{
-    API_VERSION, BURST, COVER_SIZE, Command, DeckConfig, DeckHost, DeckState, DeckStatus, Listening, PAIR_BURST, PAIR_RATE, RATE,
-    READ_TIMEOUT, RateLimit,
+    API_VERSION, BURST, COVER_SIZE, COVER_SIZE_MAX, Command, ContextRef, DeckConfig, DeckHost, DeckLink, DeckState, DeckStatus,
+    LibraryKind, Listening, NextUp, PAIR_BURST, PAIR_RATE, QUEUE_MAX, RATE, READ_TIMEOUT, RateLimit, SleepView, UiReport,
 };
+use crate::audio::queue::Repeat;
+use crate::audio::source::{ContextKind, PlayContext};
 use crate::error::AppError;
 use crate::feed::artist_line;
 use crate::feed::server::host_allowed;
@@ -88,6 +90,31 @@ struct Inner {
     limit: Mutex<RateLimit>,
     pair_limit: Mutex<RateLimit>,
     asks: Mutex<Asks>,
+    /// Art paths behind the cover keys handed out, for `/v1/cover`.
+    covers: Mutex<std::collections::HashMap<String, String>>,
+    ui: Mutex<UiReport>,
+    sleep: Mutex<Option<Sleep>>,
+}
+
+/// Most cover keys remembered for `/v1/cover` (forgotten all at once past it).
+const COVERS_MAX: usize = 4096;
+/// How often an end-of-song sleep timer looks at the player, and how often
+/// near the end.
+const SLEEP_POLL: Duration = Duration::from_millis(1000);
+const SLEEP_POLL_NEAR: Duration = Duration::from_millis(100);
+/// The longest sleep timer, in minutes.
+const SLEEP_MAX_MINUTES: f64 = 24.0 * 60.0;
+/// Songs a search key plays.
+const SEARCH_SONGS: usize = 50;
+
+/// A running sleep timer.
+#[derive(Debug, Clone)]
+struct Sleep {
+    /// Tells a stale timer task it was replaced or cancelled.
+    id: u64,
+    until: Option<tokio::time::Instant>,
+    /// The song to finish, for an end-of-song timer.
+    song: Option<String>,
 }
 
 /// The control API server. Cheap to clone.
@@ -114,6 +141,9 @@ impl DeckServer {
                 limit: Mutex::new(RateLimit::new(RATE, BURST)),
                 pair_limit: Mutex::new(RateLimit::new(PAIR_RATE, PAIR_BURST)),
                 asks: Mutex::new(Asks::default()),
+                covers: Mutex::new(Default::default()),
+                ui: Mutex::new(UiReport::default()),
+                sleep: Mutex::new(None),
             }),
         }
     }
@@ -218,17 +248,81 @@ impl DeckServer {
         self.inner.automation.code()
     }
 
-    /// `/v1/state`; `have` names the cover the client already shows.
-    pub async fn state(&self, have: Option<&str>) -> DeckState {
+    /// What the window says about itself (`deck_ui_report`).
+    pub fn set_ui(&self, r: UiReport) {
+        *self.inner.ui.lock() = r;
+    }
+
+    /// A cover key for an art path, remembered for `/v1/cover`.
+    fn key_for(&self, thumb: &str) -> String {
+        let key = cover_key(thumb);
+        let mut m = self.inner.covers.lock();
+        if m.len() >= COVERS_MAX && !m.contains_key(&key) {
+            m.clear();
+        }
+        m.insert(key.clone(), thumb.to_owned());
+        key
+    }
+
+    async fn cover_data(&self, thumb: &str, size: u32) -> Option<String> {
+        let a = self.inner.host.cover(thumb, size).await.ok()?;
+        Some(format!("data:{};base64,{}", a.content_type, base64::engine::general_purpose::STANDARD.encode(&a.bytes)))
+    }
+
+    /// `/v1/cover`: a cover named by a key handed out before.
+    pub async fn cover(&self, key: &str, size: u32) -> Reply {
+        let thumb = self.inner.covers.lock().get(key).cloned();
+        let Some(thumb) = thumb else { return Reply::error(404, "No such cover.") };
+        match self.cover_data(&thumb, size).await {
+            Some(cover) => Reply::ok(serde_json::json!({ "key": key, "cover": cover })),
+            None => Reply::error(409, "Platter couldn't get that cover."),
+        }
+    }
+
+    /// The sleep timer as the state shows it.
+    fn sleep_view(&self) -> Option<SleepView> {
+        let s = self.inner.sleep.lock().clone()?;
+        Some(SleepView {
+            remaining_ms: s.until.map(|u| u.saturating_duration_since(tokio::time::Instant::now()).as_millis() as u64),
+            end_of_song: s.song.is_some(),
+        })
+    }
+
+    /// `/v1/state`; `have` names the cover the client already shows, `size`
+    /// is the cover's size in pixels.
+    pub async fn state(&self, have: Option<&str>, size: u32) -> DeckState {
         let host = &self.inner.host;
         let private = self.inner.config.lock().private_session;
-        let mut out = DeckState { api: API_VERSION, private, can_request: host.can_request(), ..Default::default() };
-        let Some(now) = host.now().await else { return out };
+        let ui = *self.inner.ui.lock();
+        let mut out = DeckState {
+            api: API_VERSION,
+            private,
+            can_request: host.can_request(),
+            lyrics: ui.lyrics,
+            sleep: self.sleep_view(),
+            ..Default::default()
+        };
+        let now = host.now().await;
+        let extras = host.extras(now.as_ref().and_then(|n| n.track.as_ref())).await;
+        out.crossfade = extras.crossfade;
+        out.miniplayer = extras.miniplayer;
+        out.window = extras.window;
+        out.device = extras.device;
+        let Some(now) = now else { return out };
         out.playing = now.playing;
         out.volume = (now.volume.clamp(0.0, 1.0) * 100.0).round() as u8;
         out.muted = now.muted;
+        out.shuffle = now.shuffle;
+        out.smart_shuffle = now.smart_shuffle;
+        out.repeat = now.repeat;
+        out.position_ms = now.position_ms;
+        out.duration_ms = now.duration_ms;
+        out.context = now.context.map(|(kind, id)| ContextRef { kind, id });
         let Some(t) = now.track else { return out };
         out.liked = host.liked(&t.id).await;
+        out.stars = extras.stars;
+        out.can_rate = extras.can_rate;
+        out.playlists = extras.playlists;
         if private {
             return out;
         }
@@ -236,17 +330,116 @@ impl DeckServer {
         out.artist = Some(artist_line(&t));
         out.album = Some(t.album_title.clone()).filter(|a| !a.is_empty());
         out.track_id = Some(t.id.clone());
+        out.next = now.next.map(|n| NextUp {
+            title: n.title.clone(),
+            artist: artist_line(&n),
+            cover_key: n.thumb.as_deref().map(|th| self.key_for(th)),
+        });
         if let Some(thumb) = t.thumb.as_deref() {
-            let key = cover_key(thumb);
-            if have != Some(key.as_str())
-                && have != Some("none")
-                && let Ok(a) = host.cover(thumb, COVER_SIZE).await
-            {
-                out.cover = Some(format!("data:{};base64,{}", a.content_type, base64::engine::general_purpose::STANDARD.encode(&a.bytes)));
+            let key = self.key_for(thumb);
+            if have != Some(key.as_str()) && have != Some("none") {
+                out.cover = self.cover_data(thumb, size).await;
             }
             out.cover_key = Some(key);
         }
         out
+    }
+
+    /// `/v1/library`.
+    pub async fn library(&self, kind: LibraryKind) -> Reply {
+        match self.inner.host.library(kind).await {
+            Ok(mut items) => {
+                items.truncate(super::LIBRARY_MAX);
+                for i in &mut items {
+                    i.cover_key = i.thumb.as_deref().map(|t| self.key_for(t));
+                }
+                Reply::ok(serde_json::json!({ "kind": kind, "items": items }))
+            }
+            Err(e) => Reply::error(409, &message(&e)),
+        }
+    }
+
+    /// `/v1/queue`: the songs coming up (left out in a private session).
+    pub async fn queue(&self) -> Reply {
+        if self.inner.config.lock().private_session {
+            return Reply::ok(serde_json::json!({ "items": [] }));
+        }
+        let items: Vec<serde_json::Value> = self
+            .inner
+            .host
+            .queue()
+            .await
+            .into_iter()
+            .take(QUEUE_MAX)
+            .map(|q| {
+                serde_json::json!({
+                    "itemId": q.item_id,
+                    "title": q.track.title,
+                    "artist": artist_line(&q.track),
+                    "coverKey": q.track.thumb.as_deref().map(|t| self.key_for(t)),
+                })
+            })
+            .collect();
+        Reply::ok(serde_json::json!({ "items": items }))
+    }
+
+    /// Start (or replace) the sleep timer.
+    async fn start_sleep(&self, minutes: Option<f64>, end_of_song: bool) -> crate::error::AppResult<()> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sleep = if end_of_song {
+            let song = self.inner.host.now().await.and_then(|n| n.track).map(|t| t.id);
+            let Some(song) = song else { return Err(nothing()) };
+            Sleep { id, until: None, song: Some(song) }
+        } else {
+            let m = minutes.filter(|m| m.is_finite() && *m > 0.0).ok_or_else(|| AppError::Invalid("Say how many minutes.".into()))?;
+            let d = Duration::from_secs_f64(m.min(SLEEP_MAX_MINUTES) * 60.0);
+            Sleep { id, until: Some(tokio::time::Instant::now() + d), song: None }
+        };
+        *self.inner.sleep.lock() = Some(sleep.clone());
+        let me = self.clone();
+        tokio::spawn(async move { me.run_sleep(sleep).await });
+        Ok(())
+    }
+
+    /// Whether this timer is still the one set.
+    fn sleep_current(&self, id: u64) -> bool {
+        self.inner.sleep.lock().as_ref().is_some_and(|s| s.id == id)
+    }
+
+    async fn run_sleep(&self, s: Sleep) {
+        if let Some(until) = s.until {
+            tokio::time::sleep_until(until).await;
+        } else if let Some(song) = &s.song {
+            loop {
+                if !self.sleep_current(s.id) {
+                    return;
+                }
+                let now = self.inner.host.now().await;
+                let on = now.as_ref().and_then(|n| n.track.as_ref()).map(|t| t.id.as_str());
+                if on != Some(song.as_str()) {
+                    // The song ended: stop what follows at its start.
+                    if self.sleep_current(s.id) && now.as_ref().is_some_and(|n| n.playing) {
+                        let _ = self.inner.host.pause().await;
+                        let _ = self.inner.host.seek(0).await;
+                    }
+                    break;
+                }
+                let left = now.as_ref().map(|n| n.duration_ms.saturating_sub(n.position_ms)).unwrap_or(u64::MAX);
+                tokio::time::sleep(if left < 2000 { SLEEP_POLL_NEAR } else { SLEEP_POLL }).await;
+            }
+        }
+        let ours = {
+            let mut cur = self.inner.sleep.lock();
+            let ours = cur.as_ref().is_some_and(|c| c.id == s.id);
+            if ours {
+                *cur = None;
+            }
+            ours
+        };
+        if ours && s.until.is_some() {
+            let _ = self.inner.host.pause().await;
+        }
     }
 
     async fn command(&self, cmd: Command) -> Reply {
@@ -262,7 +455,7 @@ impl DeckServer {
                     let liked = host.liked(&t.id).await;
                     host.set_liked(&t.id, !liked).await
                 }
-                None => Err(AppError::Invalid("Nothing is playing.".into())),
+                None => Err(nothing()),
             },
             Command::VolumeSet { value } => host.set_volume(percent(value)).await,
             Command::VolumeStep { value } => {
@@ -272,7 +465,7 @@ impl DeckServer {
             Command::RequestAlbum => match &track {
                 Some(_) if !host.can_request() => Err(AppError::Invalid("Set up Lidarr in Platter's Settings first.".into())),
                 Some(t) => host.request_album(t).await,
-                None => Err(AppError::Invalid("Nothing is playing.".into())),
+                None => Err(nothing()),
             },
             Command::ListenAlong => host.listen_along().await,
             Command::Play => host.resume().await,
@@ -285,6 +478,146 @@ impl DeckServer {
             Command::Open { page } => match super::automation::page_route(&page) {
                 Some(route) => host.show(route).await,
                 None => Err(AppError::Invalid(format!("Platter has no page called {}.", page.trim()))),
+            },
+            Command::SeekBy { value } => match &now {
+                Some(n) if n.track.is_some() && value.is_finite() => {
+                    let to = (n.position_ms as f64 + value * 1000.0).max(0.0) as u64;
+                    let to = if n.duration_ms > 0 { to.min(n.duration_ms.saturating_sub(500)) } else { to };
+                    host.seek(to).await
+                }
+                _ => Err(nothing()),
+            },
+            Command::Shuffle { smart: false } => host.set_shuffle(!now.as_ref().is_some_and(|n| n.shuffle)).await,
+            Command::Shuffle { smart: true } => host.set_smart_shuffle(!now.as_ref().is_some_and(|n| n.smart_shuffle)).await,
+            Command::Repeat => host.set_repeat(next_repeat(now.as_ref().map(|n| n.repeat).unwrap_or_default())).await,
+            Command::Mute => host.set_muted(!now.as_ref().is_some_and(|n| n.muted)).await,
+            Command::Crossfade => {
+                let on = host.extras(None).await.crossfade;
+                host.set_settings(serde_json::json!({ "crossfade": if on { "off" } else { "smart" } })).await
+            }
+            Command::PrivateSession => {
+                let on = self.inner.config.lock().private_session;
+                host.set_settings(serde_json::json!({ "privateSession": !on })).await
+            }
+            Command::AddToPlaylist { playlist } => match (&track, playlist.as_deref().map(str::trim)) {
+                (None, _) => Err(nothing()),
+                (Some(t), None | Some("")) => {
+                    host.window_action(serde_json::json!({ "kind": "addToPlaylist", "trackIds": [t.id] }), true);
+                    Ok(())
+                }
+                (Some(t), Some(p)) => {
+                    if host.extras(Some(t)).await.playlists.iter().any(|id| id == p) {
+                        Err(AppError::Invalid("The song is in that playlist already.".into()))
+                    } else {
+                        host.playlist_add(p, &t.id).await
+                    }
+                }
+            },
+            Command::RemoveFromPlaylist { playlist } => match &track {
+                None => Err(nothing()),
+                Some(t) if !host.extras(Some(t)).await.playlists.contains(&playlist) => {
+                    Err(AppError::Invalid("The song isn't in that playlist.".into()))
+                }
+                Some(t) => host.playlist_remove(&playlist, &t.id).await,
+            },
+            Command::Rate { stars } => match &track {
+                None => Err(nothing()),
+                Some(_) if !(1..=5).contains(&stars) => Err(AppError::Invalid("A rating is 1 to 5 stars.".into())),
+                Some(t) => {
+                    let x = host.extras(Some(t)).await;
+                    if !x.can_rate {
+                        Err(AppError::Invalid("This song's server has no star ratings.".into()))
+                    } else {
+                        host.rate(&t.id, (x.stars != stars).then_some(stars)).await
+                    }
+                }
+            },
+            Command::PlayItem { kind, id, shuffle, queue, start } => match id.trim() {
+                "" => Err(AppError::Invalid("Pick something to play.".into())),
+                id => {
+                    let ctx = PlayContext { kind: kind.context(), id: Some(id.to_owned()), track_ids: None };
+                    if queue {
+                        host.queue_context(ctx).await
+                    } else {
+                        let at = start.filter(|s| s.is_finite() && *s > 0.0).map_or(0, |s| (s * 1000.0) as u64);
+                        host.play(ctx, None, at, shuffle).await
+                    }
+                }
+            },
+            Command::PlayLink { link } => match host.resolve_link(&link).await {
+                None => Err(AppError::Invalid("That link isn't to something in your library.".into())),
+                Some(l) => {
+                    let (kind, id, start, at) = match l {
+                        DeckLink::Album(id) => (ContextKind::Album, id, None, 0),
+                        DeckLink::Artist(id) => (ContextKind::Artist, id, None, 0),
+                        DeckLink::Playlist(id) => (ContextKind::Playlist, id, None, 0),
+                        DeckLink::Track { id, album_id, at_seconds } => {
+                            (ContextKind::Album, album_id, Some(id), u64::from(at_seconds.unwrap_or(0)) * 1000)
+                        }
+                    };
+                    host.play(PlayContext { kind, id: Some(id), track_ids: None }, start, at, false).await
+                }
+            },
+            Command::PlaySearch { query } => match query.trim() {
+                "" => Err(AppError::Invalid("Type what to search for.".into())),
+                q => match host.search_tracks(q, SEARCH_SONGS).await {
+                    Ok(ids) if ids.is_empty() => Err(AppError::NotFound(format!("No songs found for {q}."))),
+                    Ok(ids) => host.play(PlayContext { kind: ContextKind::Search, id: Some(q.to_owned()), track_ids: Some(ids) }, None, 0, false).await,
+                    Err(e) => Err(e),
+                },
+            },
+            Command::Radio => match &track {
+                Some(t) => host.play(PlayContext { kind: ContextKind::Radio, id: Some(format!("track:{}", t.id)), track_ids: None }, None, 0, false).await,
+                None => Err(nothing()),
+            },
+            Command::PlayShortcut { name } => match name.as_str() {
+                "liked" => host.play(PlayContext { kind: ContextKind::Liked, id: Some("liked".into()), track_ids: None }, None, 0, false).await,
+                "daylist" | "discover" => match host.mix_of_kind(&name).await {
+                    Ok(Some(id)) => host.play(PlayContext { kind: ContextKind::Mix, id: Some(id), track_ids: None }, None, 0, false).await,
+                    Ok(None) => Err(AppError::NotFound(format!("There's no {name} yet. Platter makes it after the library has been played a while."))),
+                    Err(e) => Err(e),
+                },
+                _ => Err(AppError::Invalid(format!("Platter has no shortcut called {name}."))),
+            },
+            Command::QueueJump { item_id } => host.queue_jump(&item_id).await,
+            Command::ListenOn { device } => match device.as_deref().map(str::trim) {
+                None | Some("") => {
+                    host.window_action(serde_json::json!({ "kind": "listenOn" }), true);
+                    Ok(())
+                }
+                Some(d) => match host.devices().await.into_iter().find(|x| x.id == d) {
+                    None => Err(AppError::NotFound("That device isn't around right now.".into())),
+                    Some(x) if x.active => Ok(()),
+                    Some(x) if x.needs_window => {
+                        host.window_action(serde_json::json!({ "kind": "listenOn", "device": x.id }), true);
+                        Ok(())
+                    }
+                    Some(x) => host.listen_on(&x.id).await,
+                },
+            },
+            Command::Lyrics => {
+                let open = self.inner.ui.lock().lyrics;
+                host.window_action(serde_json::json!({ "kind": "lyrics", "open": !open }), !open);
+                Ok(())
+            }
+            Command::Miniplayer => host.set_miniplayer(!host.extras(None).await.miniplayer).await,
+            Command::Window => host.set_window(!host.extras(None).await.window).await,
+            Command::NowPlaying => {
+                host.window_action(serde_json::json!({ "kind": "nowPlaying" }), true);
+                Ok(())
+            }
+            Command::Queue => {
+                host.window_action(serde_json::json!({ "kind": "queue" }), true);
+                Ok(())
+            }
+            Command::Sleep { minutes, end_of_song } => self.start_sleep(minutes, end_of_song).await,
+            Command::SleepCancel => {
+                *self.inner.sleep.lock() = None;
+                Ok(())
+            }
+            Command::Bookmark => match now.as_ref().and_then(|n| n.track.as_ref().map(|t| (t, n.position_ms))) {
+                Some((t, at)) => host.bookmark(t, at).await,
+                None => Err(nothing()),
             },
         };
         match r {
@@ -368,16 +701,34 @@ impl DeckServer {
                     AskState::Gone => Reply::ok(serde_json::json!({ "state": "gone" })),
                 }
             }
-            (_, "/v1/state" | "/v1/command") if !authed => Reply::error(401, "Pair with Platter first."),
-            ("GET", "/v1/state") => {
-                let have = query.and_then(|q| url::form_urlencoded::parse(q.as_bytes()).find(|(k, _)| k == "cover").map(|(_, v)| v.into_owned()));
-                Reply::ok(serde_json::to_value(self.state(have.as_deref()).await).unwrap_or_default())
+            (_, "/v1/state" | "/v1/command" | "/v1/cover" | "/v1/library" | "/v1/queue" | "/v1/devices") if !authed => {
+                Reply::error(401, "Pair with Platter first.")
             }
+            ("GET", "/v1/state") => {
+                let have = param(query, "cover");
+                Reply::ok(serde_json::to_value(self.state(have.as_deref(), cover_size(query)).await).unwrap_or_default())
+            }
+            ("GET", "/v1/cover") => match param(query, "key") {
+                Some(key) => self.cover(&key, cover_size(query)).await,
+                None => Reply::error(400, "Name a cover."),
+            },
+            ("GET", "/v1/library") => match param(query, "kind").as_deref().and_then(LibraryKind::parse) {
+                Some(kind) => self.library(kind).await,
+                None => Reply::error(400, "Ask for playlists, albums, artists or mixes."),
+            },
+            ("GET", "/v1/queue") => self.queue().await,
+            ("GET", "/v1/devices") => Reply::ok(serde_json::json!({ "items": self.inner.host.devices().await })),
             ("POST", "/v1/command") => match serde_json::from_slice::<Command>(&req.body) {
                 Ok(cmd) => self.command(cmd).await,
                 Err(_) => Reply::error(400, "Unknown command."),
             },
-            (_, "/v1/hello" | "/v1/pair" | "/v1/pair/request" | "/v1/pair/status" | "/v1/state" | "/v1/command") => Reply::error(405, "Wrong method."),
+            (
+                _,
+                "/v1/hello" | "/v1/pair" | "/v1/pair/request" | "/v1/pair/status" | "/v1/state" | "/v1/command" | "/v1/cover" | "/v1/library"
+                | "/v1/queue" | "/v1/devices",
+            ) => {
+                Reply::error(405, "Wrong method.")
+            }
             _ => Reply::error(404, "Not found."),
         }
     }
@@ -465,6 +816,29 @@ impl DeckServer {
             drop(listener);
         }
     }
+}
+
+/// One query parameter.
+fn param(query: Option<&str>, name: &str) -> Option<String> {
+    query.and_then(|q| url::form_urlencoded::parse(q.as_bytes()).find(|(k, _)| k == name).map(|(_, v)| v.into_owned()))
+}
+
+/// The cover size asked for: 144 px unless `size` asks for more (up to 288).
+pub fn cover_size(query: Option<&str>) -> u32 {
+    param(query, "size").and_then(|v| v.parse::<u32>().ok()).map_or(COVER_SIZE, |s| s.clamp(COVER_SIZE, COVER_SIZE_MAX))
+}
+
+/// Off, all, one, then off again.
+pub fn next_repeat(r: Repeat) -> Repeat {
+    match r {
+        Repeat::Off => Repeat::All,
+        Repeat::All => Repeat::One,
+        Repeat::One => Repeat::Off,
+    }
+}
+
+fn nothing() -> AppError {
+    AppError::Invalid("Nothing is playing.".into())
 }
 
 /// 0..100 percent to the player's 0..1.

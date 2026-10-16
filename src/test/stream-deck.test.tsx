@@ -8,7 +8,9 @@ import { DeckPairing, streamDeckMatches } from "../pages/StreamDeckSettings";
 import { SettingsPage } from "../pages/SettingsPage";
 import { DeckActions } from "../shell/DeckActions";
 import { DeckPairPrompt } from "../shell/DeckPairPrompt";
+import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { loadSettings, useSettings } from "../stores/settings";
+import { useUi } from "../stores/ui";
 import { NO_SESSION, useSocial } from "../stores/social";
 import { useToasts } from "../stores/toasts";
 
@@ -103,6 +105,55 @@ describe("Stream Deck actions in the window", () => {
       mock.emit("deck://action", { kind: "requestAlbum", input: { releaseGroupId: "rg-1", title: "Late", artist: "Rue Ellis", artistId: null } });
     });
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("Add to playlist opens a playlist picker", async () => {
+    render(<DeckActions />);
+    await act(async () => {
+      mock.emit("deck://action", { kind: "addToPlaylist", trackIds: ["t1"] });
+    });
+    const d = await screen.findByRole("dialog", { name: "Add to playlist" });
+    expect(within(d).getByRole("searchbox", { name: "Find a playlist" })).toBeInTheDocument();
+    await userEvent.setup().keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add to playlist" })).toBeNull());
+  });
+
+  it("Lyrics, now playing and queue open their views, and the window reports the lyrics", async () => {
+    await act(async () => {
+      await fullWindow.close();
+    });
+    useUi.getState().setQueueOpen(false);
+    render(<DeckActions />);
+    await act(async () => {
+      mock.emit("deck://action", { kind: "lyrics", open: true });
+    });
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "lyrics" });
+    await waitFor(() => expect(mock.deckUi.lyrics).toBe(true));
+    await act(async () => {
+      mock.emit("deck://action", { kind: "lyrics", open: false });
+    });
+    expect(useFullWindow.getState().open).toBe(false);
+    await waitFor(() => expect(mock.deckUi.lyrics).toBe(false));
+    await act(async () => {
+      mock.emit("deck://action", { kind: "queue" });
+    });
+    expect(useUi.getState().queueOpen).toBe(true);
+    await act(async () => {
+      mock.emit("deck://action", { kind: "nowPlaying" });
+    });
+    expect(useFullWindow.getState().open).toBe(true);
+    await act(async () => {
+      await fullWindow.close();
+    });
+  });
+
+  it("Listen on opens the device list", async () => {
+    useUi.getState().setOutputOpen(false);
+    render(<DeckActions />);
+    await act(async () => {
+      mock.emit("deck://action", { kind: "listenOn" });
+    });
+    expect(useUi.getState().outputOpen).toBe(true);
   });
 });
 

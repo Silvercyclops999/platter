@@ -1013,19 +1013,83 @@ a second (429 past that). Bodies are at most 4 KB.
   as with the code), `{ state: "denied" }` or `{ state: "gone" }`
   (expired, collected or unknown).
 - Everything else needs `Authorization: Bearer <token>` (401 without it).
-- `GET /v1/state?cover=<coverKey>` → `{ api, playing, private, title, artist,
-  album, trackId, liked, volume, muted, coverKey, cover, canRequest }`.
-  `volume` is 0 to 100. `cover` is a 144 px `data:image/...;base64,` image,
-  left out when `cover` in the query already names it (or is `none`). A private session
-  leaves out the song and cover.
+- `GET /v1/state?cover=<coverKey>&size=<px>` → `{ api, playing, private,
+  title, artist, album, trackId, liked, volume, muted, coverKey, cover,
+  canRequest, positionMs, durationMs, shuffle, smartShuffle, repeat,
+  crossfade, lyrics, miniplayer, window, device, stars, canRate, playlists,
+  next, context, sleep }`.
+  `volume` is 0 to 100. `cover` is a `data:image/...;base64,` image, 144 px
+  unless `size` asks for more (up to 288, for XL and high-DPI keys), left out
+  when `cover` in the query already names it (or is `none`). A private
+  session leaves out the song, the cover and `next`. `repeat` is `off`,
+  `all` or `one`. `crossfade` is on unless Settings has it off. `lyrics` is
+  the expanded view showing lyrics (the window reports it with
+  `deck_ui_report`), `miniplayer` the miniplayer being open and `window` the
+  main window showing. `device` is the Listen on device playing now (null
+  here). `stars` is the song's rating, 0 to 5, and `canRate` whether its
+  server has star ratings (Plex). `playlists` lists the ids of the playlists
+  holding the song. `next` is `{ title, artist, coverKey }` for the song
+  after this one, `context` `{ kind, id }` for what's playing from (as in
+  `play_context`), and `sleep` `{ remainingMs, endOfSong }` while the sleep
+  timer runs.
+- `GET /v1/cover?key=<coverKey>&size=<px>` → `{ key, cover }` for any cover
+  key the API has handed out (the state, `next`, a list); 404 for one it
+  doesn't know.
+- `GET /v1/library?kind=playlists|albums|artists|mixes` → `{ kind, items: [{
+  id, title, subtitle, coverKey }] }`, at most 500: playlists by name, albums
+  newest added first, artists most played first, mixes as Home has them.
+- `GET /v1/queue` → `{ items: [{ itemId, title, artist, coverKey }] }`, the
+  user queue then what follows, at most 30 (none in a private session).
+- `GET /v1/devices` → `{ items: [{ id, name, active, needsWindow }] }`, the
+  Listen on list with this computer first (id `local`). `needsWindow` marks a
+  device that needs a password or can't be played on.
 - `POST /v1/command` with `{ command }`: `playPause`, `next`, `previous`,
   `like` (toggles), `volumeSet` and `volumeStep` (with `value` in percent),
   `requestAlbum`, `listenAlong`, `play`, `pause`, `playPlaylist` (with
   `playlist`, an id or a name, and optional `shuffle`), `search` (with
-  `query`) and `open` (with `page`) → `{ ok: true }`, or 409 with `{ error }`
-  saying why (nothing playing, Lidarr not set up, no album to request, no
-  such playlist or page). A Stream Deck token works while Allow Stream Deck
-  is on, an automation token while Allow automation is on.
+  `query`) and `open` (with `page`), and for the Stream Deck keys:
+  - `seekBy` with `value` in seconds (negative goes back);
+  - `shuffle` (toggles; with `smart: true` toggles smart shuffle), `repeat`
+    (off, all, one, off), `mute` (toggles, keeping the volume),
+    `crossfade` (Settings' crossfade between off and smart) and
+    `privateSession` (toggles the setting);
+  - `addToPlaylist` with `playlist` (409 when the song is in it already), or
+    without one to bring the window up with the playlist picker
+    (`deck://action` `{ kind: "addToPlaylist", trackIds }`);
+    `removeFromPlaylist` with `playlist`;
+  - `rate` with `stars` 1 to 5 (the rating the song has clears it; only on a
+    server with star ratings);
+  - `playItem` with `kind` (`playlist`, `album`, `artist`, `mix`), `id`,
+    optional `shuffle`, `queue` (add it to the end of the queue instead) and
+    `start` (seconds into its first song);
+  - `playLink` with `link` (a `platter://` sharing link; a song plays its
+    album from that song, at its time), `playSearch` with `query` (the top 50
+    songs), `radio` (radio from the playing song) and `playShortcut` with
+    `name` `daylist`, `discover` or `liked`;
+  - `queueJump` with `itemId`;
+  - `listenOn` with `device` from `/v1/devices`, or without one (or for a
+    device that needs the window) to bring the window up with the Listen on
+    picker (`deck://action` `{ kind: "listenOn", device? }`);
+  - `lyrics` (`deck://action` `{ kind: "lyrics", open }`; the window comes up
+    to open them), `miniplayer`, `window` (shows or hides the main window),
+    `nowPlaying` and `queue` (bring the window up on the expanded view or the
+    queue: `{ kind: "nowPlaying" }`, `{ kind: "queue" }`);
+  - `sleep` with `minutes` (up to a day) or `endOfSong: true`: one timer for
+    every client, replaced by the next; minutes pause playback, end of song
+    stops the next song as it starts. `sleepCancel` stops it.
+  - `bookmark` (the playing song at this moment, as in Bookmarks).
+
+  → `{ ok: true }`, or 409 with `{ error }` saying why (nothing playing,
+  Lidarr not set up, no album to request, no such playlist or page, already
+  in the playlist). A Stream Deck token works while Allow Stream Deck is on,
+  an automation token while Allow automation is on.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `deck_ui_report` | `{ report: { lyrics } }` | – |
+
+The window calls `deck_ui_report` when the expanded view opens or closes
+lyrics, for the Lyrics key.
 
 ## Discord
 | Command | Args | Returns |

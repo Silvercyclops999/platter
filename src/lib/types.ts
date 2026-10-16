@@ -1258,7 +1258,16 @@ export type DeckAction =
   /** A command link or script asked for a page. */
   | { kind: "open"; route: import("../stores/router").Route }
   /** A command link didn't run (automation off, no such playlist...). */
-  | { kind: "notice"; message: string };
+  | { kind: "notice"; message: string }
+  /** A Stream Deck key: pick a playlist for these songs. */
+  | { kind: "addToPlaylist"; trackIds: string[] }
+  /** A Stream Deck key: show Listen on, or move to this device (it needs the window). */
+  | { kind: "listenOn"; device?: string }
+  /** A Stream Deck key: open or close the lyrics. */
+  | { kind: "lyrics"; open: boolean }
+  /** A Stream Deck key: the expanded now playing view, or the queue. */
+  | { kind: "nowPlaying" }
+  | { kind: "queue" };
 
 /** The feed's default port. */
 export const FEED_DEFAULT_PORT = 32540;

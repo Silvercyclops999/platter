@@ -21,6 +21,10 @@
 //!   when the client already has the one named by `cover`
 //! - `POST /v1/command` `{"command": "playPause"}` and the others in
 //!   [`Command`]
+//! - `GET  /v1/cover?key=<key>&size=<px>` a cover named by a state or a list
+//! - `GET  /v1/library?kind=playlists|albums|artists|mixes` what a key can play
+//! - `GET  /v1/queue` the songs coming up
+//! - `GET  /v1/devices` the Listen on list
 //!
 //! Automation (scripts, launchers, `platter://` command links and the
 //! `platter --next` command line) uses the same API with its own pairing
@@ -56,6 +60,8 @@ use tokio::sync::watch;
 
 use crate::db::source::ArtBytes;
 use crate::error::AppResult;
+use crate::audio::queue::Repeat;
+use crate::audio::source::{ContextKind, PlayContext};
 use crate::model::Track;
 
 /// The control API's port on 127.0.0.1 (the feed's port plus one).
@@ -64,6 +70,12 @@ pub const DECK_PORT: u16 = 32541;
 pub const API_VERSION: u32 = 1;
 /// Cover size on the key, in pixels (a key is 72 points, 144 pixels on high DPI).
 pub const COVER_SIZE: u32 = 144;
+/// The largest cover a client may ask for (an XL or high-DPI key).
+pub const COVER_SIZE_MAX: u32 = 288;
+/// Songs `/v1/queue` lists.
+pub const QUEUE_MAX: usize = 30;
+/// Items `/v1/library` lists for one kind.
+pub const LIBRARY_MAX: usize = 500;
 
 /// What the control API should be doing (from Settings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -137,13 +149,158 @@ pub struct DeckStatus {
 }
 
 /// What's playing, as the control API needs it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct DeckNow {
     pub track: Option<Track>,
     pub playing: bool,
     /// 0..1, the player's slider value.
     pub volume: f32,
     pub muted: bool,
+    pub position_ms: u64,
+    pub duration_ms: u64,
+    pub shuffle: bool,
+    pub smart_shuffle: bool,
+    pub repeat: Repeat,
+    /// The song after this one (the queue first, then the context).
+    pub next: Option<Track>,
+    /// What's playing from: a playlist, an album...
+    pub context: Option<(ContextKind, Option<String>)>,
+}
+
+/// The rest of the state, outside the player.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DeckExtras {
+    /// Crossfade is on in Settings (smart or fixed).
+    pub crossfade: bool,
+    /// The miniplayer window is open.
+    pub miniplayer: bool,
+    /// The main window is showing.
+    pub window: bool,
+    /// Playback is on another device (its name).
+    pub device: Option<String>,
+    /// The playing song's star rating, 0 to 5 (0 unrated).
+    pub stars: u8,
+    /// The playing song's server has star ratings (Plex).
+    pub can_rate: bool,
+    /// Ids of the playlists holding the playing song.
+    pub playlists: Vec<String>,
+}
+
+/// What the window says about itself (`deck_ui_report`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiReport {
+    /// The expanded view shows lyrics.
+    #[serde(default)]
+    pub lyrics: bool,
+}
+
+/// One thing a key can play (`/v1/library`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeckItem {
+    pub id: String,
+    pub title: String,
+    /// The artist, a song count or what the mix is.
+    pub subtitle: Option<String>,
+    /// The picture, as an art path (sent to clients as a cover key).
+    #[serde(skip)]
+    pub thumb: Option<String>,
+    pub cover_key: Option<String>,
+}
+
+/// Which list `/v1/library` gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LibraryKind {
+    #[serde(alias = "playlist")]
+    Playlists,
+    #[serde(alias = "album")]
+    Albums,
+    #[serde(alias = "artist")]
+    Artists,
+    #[serde(alias = "mix")]
+    Mixes,
+}
+
+impl LibraryKind {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "playlists" | "playlist" => Self::Playlists,
+            "albums" | "album" => Self::Albums,
+            "artists" | "artist" => Self::Artists,
+            "mixes" | "mix" => Self::Mixes,
+            _ => return None,
+        })
+    }
+
+    pub fn context(self) -> ContextKind {
+        match self {
+            Self::Playlists => ContextKind::Playlist,
+            Self::Albums => ContextKind::Album,
+            Self::Artists => ContextKind::Artist,
+            Self::Mixes => ContextKind::Mix,
+        }
+    }
+}
+
+/// One song coming up (`/v1/queue`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeckQueued {
+    pub item_id: String,
+    pub track: Track,
+}
+
+/// A device playback can move to (`/v1/devices`). `local` is this computer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeckDevice {
+    pub id: String,
+    pub name: String,
+    /// Playing there now.
+    pub active: bool,
+    /// Moving there needs Platter's window (a password, or it can't be used).
+    pub needs_window: bool,
+}
+
+/// The id `/v1/devices` gives this computer.
+pub const LOCAL_DEVICE: &str = "local";
+
+/// A link from sharing (`platter://album/...`), found in the library.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeckLink {
+    Album(String),
+    Artist(String),
+    Playlist(String),
+    /// A song: its album, and where to start.
+    Track { id: String, album_id: String, at_seconds: Option<u32> },
+}
+
+/// The sleep timer, as `/v1/state` shows it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SleepView {
+    /// Time left, for a timer in minutes.
+    pub remaining_ms: Option<u64>,
+    /// Pauses when the playing song ends.
+    pub end_of_song: bool,
+}
+
+/// The playing song after the one on now (`/v1/state`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextUp {
+    pub title: String,
+    pub artist: String,
+    pub cover_key: Option<String>,
+}
+
+/// What's playing from (`/v1/state`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextRef {
+    pub kind: ContextKind,
+    pub id: Option<String>,
 }
 
 /// `/v1/state`.
@@ -169,11 +326,35 @@ pub struct DeckState {
     pub cover: Option<String>,
     /// Lidarr is set up, so Request album can work.
     pub can_request: bool,
+    /// Where the song is and how long it is.
+    pub position_ms: u64,
+    pub duration_ms: u64,
+    pub shuffle: bool,
+    pub smart_shuffle: bool,
+    /// `off`, `all` or `one`.
+    pub repeat: Repeat,
+    pub crossfade: bool,
+    /// The expanded view shows lyrics.
+    pub lyrics: bool,
+    pub miniplayer: bool,
+    /// The main window is showing.
+    pub window: bool,
+    /// Playback is on another device (its name).
+    pub device: Option<String>,
+    /// 0 to 5; `canRate` says whether the song's server has star ratings.
+    pub stars: u8,
+    pub can_rate: bool,
+    /// Ids of the playlists holding the playing song.
+    pub playlists: Vec<String>,
+    /// The song after this one (left out in a private session).
+    pub next: Option<NextUp>,
+    pub context: Option<ContextRef>,
+    pub sleep: Option<SleepView>,
 }
 
 /// `/v1/command`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "command")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "command")]
 pub enum Command {
     PlayPause,
     Next,
@@ -201,6 +382,70 @@ pub enum Command {
     Search { query: String },
     /// Open a page in the window (see [`automation::page_route`]).
     Open { page: String },
+    /// Seek by `value` seconds (back when negative).
+    SeekBy { value: f64 },
+    /// Shuffle on or off; `smart` turns smart shuffle on or off.
+    Shuffle {
+        #[serde(default)]
+        smart: bool,
+    },
+    /// Repeat: off, all, one, off...
+    Repeat,
+    Mute,
+    /// Crossfade on (smart) or off in Settings.
+    Crossfade,
+    PrivateSession,
+    /// Add the playing song to a playlist; without one, Platter asks which.
+    AddToPlaylist {
+        #[serde(default)]
+        playlist: Option<String>,
+    },
+    RemoveFromPlaylist { playlist: String },
+    /// Star rating 1 to 5; the rating the song has already clears it.
+    Rate { stars: u8 },
+    /// Play a playlist, album, artist or mix by id, or add it to the
+    /// queue; `start` seconds into its first song.
+    PlayItem {
+        kind: LibraryKind,
+        id: String,
+        #[serde(default)]
+        shuffle: bool,
+        #[serde(default)]
+        queue: bool,
+        #[serde(default)]
+        start: Option<f64>,
+    },
+    /// Play what a `platter://` sharing link points at.
+    PlayLink { link: String },
+    /// Play the top songs a search finds.
+    PlaySearch { query: String },
+    /// Radio from the playing song.
+    Radio,
+    /// `daylist`, `discover` or `liked`.
+    PlayShortcut { name: String },
+    QueueJump { item_id: String },
+    /// Play on a device from `/v1/devices`; without one, Platter asks.
+    ListenOn {
+        #[serde(default)]
+        device: Option<String>,
+    },
+    /// Open or close the lyrics, the miniplayer, the window.
+    Lyrics,
+    Miniplayer,
+    Window,
+    /// Bring the window up on the now playing view, or the queue.
+    NowPlaying,
+    Queue,
+    /// Pause after `minutes`, or when the song ends.
+    Sleep {
+        #[serde(default)]
+        minutes: Option<f64>,
+        #[serde(default)]
+        end_of_song: bool,
+    },
+    SleepCancel,
+    /// Bookmark the playing song at this moment.
+    Bookmark,
 }
 
 /// The player, likes, art, Lidarr and Listen along (faked in tests).
@@ -228,6 +473,41 @@ pub trait DeckHost: Send + Sync {
     fn notice(&self, message: &str);
     /// Bring the window up (to ask about pairing).
     fn raise(&self);
+    /// Crossfade, the windows, the device and the song's rating and playlists.
+    async fn extras(&self, track: Option<&Track>) -> DeckExtras;
+    async fn seek(&self, position_ms: u64) -> AppResult<()>;
+    async fn set_shuffle(&self, on: bool) -> AppResult<()>;
+    async fn set_smart_shuffle(&self, on: bool) -> AppResult<()>;
+    async fn set_repeat(&self, repeat: Repeat) -> AppResult<()>;
+    async fn set_muted(&self, muted: bool) -> AppResult<()>;
+    /// Change Settings (a `settings_set` patch) and tell the window.
+    async fn set_settings(&self, patch: serde_json::Value) -> AppResult<()>;
+    /// `None` clears the rating.
+    async fn rate(&self, track_id: &str, stars: Option<u8>) -> AppResult<()>;
+    async fn playlist_add(&self, playlist_id: &str, track_id: &str) -> AppResult<()>;
+    async fn playlist_remove(&self, playlist_id: &str, track_id: &str) -> AppResult<()>;
+    /// Start a context (shuffled or not), at a song and time when given.
+    async fn play(&self, ctx: PlayContext, start: Option<String>, start_ms: u64, shuffle: bool) -> AppResult<()>;
+    /// Add a context's songs to the end of the queue.
+    async fn queue_context(&self, ctx: PlayContext) -> AppResult<()>;
+    /// What a sharing link points at, when it's in the library.
+    async fn resolve_link(&self, link: &str) -> Option<DeckLink>;
+    /// Ids of the top songs for a search.
+    async fn search_tracks(&self, query: &str, limit: usize) -> AppResult<Vec<String>>;
+    /// The made-for-you mix of a kind (`daylist`, `discover`).
+    async fn mix_of_kind(&self, kind: &str) -> AppResult<Option<String>>;
+    async fn library(&self, kind: LibraryKind) -> AppResult<Vec<DeckItem>>;
+    /// The user queue, then what follows.
+    async fn queue(&self) -> Vec<DeckQueued>;
+    async fn queue_jump(&self, item_id: &str) -> AppResult<()>;
+    async fn devices(&self) -> Vec<DeckDevice>;
+    /// Move playback to a device ([`LOCAL_DEVICE`] brings it back here).
+    async fn listen_on(&self, device: &str) -> AppResult<()>;
+    async fn set_miniplayer(&self, open: bool) -> AppResult<()>;
+    async fn set_window(&self, visible: bool) -> AppResult<()>;
+    /// Ask the window to do something (`deck://action`); `bring_up` shows it first.
+    fn window_action(&self, payload: serde_json::Value, bring_up: bool);
+    async fn bookmark(&self, track: &Track, position_ms: u64) -> AppResult<()>;
 }
 
 /// A token bucket: `rate` requests a second, up to `burst` at once.

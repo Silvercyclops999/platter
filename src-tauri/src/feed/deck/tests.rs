@@ -11,6 +11,8 @@ use tokio::net::TcpStream;
 use super::pairing::{MAX_WRONG, PairError, Pairing, TOKEN_ACCOUNT};
 use super::server::{DeckServer, Request, cover_key};
 use super::*;
+use crate::audio::queue::Repeat;
+use crate::audio::source::{ContextKind, PlayContext};
 use crate::audio::testutil::track;
 use crate::error::AppError;
 use crate::plex::keychain::{MemoryStore, TokenStore};
@@ -22,6 +24,15 @@ struct Fake {
     lidarr: Mutex<bool>,
     calls: Mutex<Vec<String>>,
     fail_next: Mutex<bool>,
+    extras: Mutex<DeckExtras>,
+    devices: Mutex<Vec<DeckDevice>>,
+}
+
+impl Fake {
+    fn call(&self, c: String) -> AppResult<()> {
+        self.calls.lock().push(c);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -96,6 +107,92 @@ impl DeckHost for Fake {
     fn raise(&self) {
         self.calls.lock().push("raise".into());
     }
+    async fn extras(&self, _: Option<&Track>) -> DeckExtras {
+        self.extras.lock().clone()
+    }
+    async fn seek(&self, ms: u64) -> AppResult<()> {
+        self.call(format!("seek {ms}"))
+    }
+    async fn set_shuffle(&self, on: bool) -> AppResult<()> {
+        self.call(format!("shuffle {on}"))
+    }
+    async fn set_smart_shuffle(&self, on: bool) -> AppResult<()> {
+        self.call(format!("smart {on}"))
+    }
+    async fn set_repeat(&self, r: Repeat) -> AppResult<()> {
+        self.call(format!("repeat {r:?}"))
+    }
+    async fn set_muted(&self, m: bool) -> AppResult<()> {
+        self.call(format!("mute {m}"))
+    }
+    async fn set_settings(&self, patch: serde_json::Value) -> AppResult<()> {
+        self.call(format!("settings {patch}"))
+    }
+    async fn rate(&self, id: &str, stars: Option<u8>) -> AppResult<()> {
+        self.call(format!("rate {id} {stars:?}"))
+    }
+    async fn playlist_add(&self, p: &str, t: &str) -> AppResult<()> {
+        self.call(format!("add {p} {t}"))
+    }
+    async fn playlist_remove(&self, p: &str, t: &str) -> AppResult<()> {
+        self.call(format!("remove {p} {t}"))
+    }
+    async fn play(&self, ctx: PlayContext, start: Option<String>, start_ms: u64, shuffle: bool) -> AppResult<()> {
+        self.call(format!("play {:?} {:?} {:?} {start:?} {start_ms} {shuffle}", ctx.kind, ctx.id, ctx.track_ids))
+    }
+    async fn queue_context(&self, ctx: PlayContext) -> AppResult<()> {
+        self.call(format!("queue {:?} {:?}", ctx.kind, ctx.id))
+    }
+    async fn resolve_link(&self, link: &str) -> Option<DeckLink> {
+        match link {
+            "platter://album/5" => Some(DeckLink::Album("5".into())),
+            "platter://track/7?t=30" => Some(DeckLink::Track { id: "7".into(), album_id: "5".into(), at_seconds: Some(30) }),
+            _ => None,
+        }
+    }
+    async fn search_tracks(&self, q: &str, limit: usize) -> AppResult<Vec<String>> {
+        assert_eq!(limit, 50);
+        Ok(if q == "nothing" { vec![] } else { vec!["s1".into(), "s2".into()] })
+    }
+    async fn mix_of_kind(&self, kind: &str) -> AppResult<Option<String>> {
+        Ok((kind == "daylist").then(|| "mix-day".into()))
+    }
+    async fn library(&self, kind: LibraryKind) -> AppResult<Vec<DeckItem>> {
+        Ok(vec![DeckItem {
+            id: "p1".into(),
+            title: format!("{kind:?}"),
+            subtitle: Some("3 songs".into()),
+            thumb: Some("/library/metadata/77/thumb/1".into()),
+            cover_key: None,
+        }])
+    }
+    async fn queue(&self) -> Vec<DeckQueued> {
+        let mut t = track("q1", "Ana Vale", "/p");
+        t.title = "Shoreline".into();
+        t.thumb = Some("/library/metadata/8/thumb/1".into());
+        vec![DeckQueued { item_id: "i1".into(), track: t }]
+    }
+    async fn queue_jump(&self, id: &str) -> AppResult<()> {
+        self.call(format!("jump {id}"))
+    }
+    async fn devices(&self) -> Vec<DeckDevice> {
+        self.devices.lock().clone()
+    }
+    async fn listen_on(&self, d: &str) -> AppResult<()> {
+        self.call(format!("listen on {d}"))
+    }
+    async fn set_miniplayer(&self, open: bool) -> AppResult<()> {
+        self.call(format!("miniplayer {open}"))
+    }
+    async fn set_window(&self, v: bool) -> AppResult<()> {
+        self.call(format!("window {v}"))
+    }
+    fn window_action(&self, payload: serde_json::Value, bring_up: bool) {
+        self.calls.lock().push(format!("action {payload} {bring_up}"));
+    }
+    async fn bookmark(&self, t: &Track, at: u64) -> AppResult<()> {
+        self.call(format!("bookmark {} {at}", t.id))
+    }
 }
 
 #[derive(Default)]
@@ -111,7 +208,19 @@ fn playing() -> DeckNow {
     t.title = "Night Drive".into();
     t.album_title = "Late".into();
     t.thumb = Some("/library/metadata/9/thumb/1".into());
-    DeckNow { track: Some(t), playing: true, volume: 0.5, muted: false }
+    let mut next = track("t2", "Ana Vale", "/p");
+    next.title = "Shoreline".into();
+    next.thumb = Some("/library/metadata/8/thumb/1".into());
+    DeckNow {
+        track: Some(t),
+        playing: true,
+        volume: 0.5,
+        muted: false,
+        position_ms: 61_000,
+        duration_ms: 200_000,
+        next: Some(next),
+        ..Default::default()
+    }
 }
 
 struct Rig {
@@ -915,4 +1024,325 @@ async fn command_line_pairs_and_controls_the_running_app() {
     switch.set(DeckConfig { enabled: false, private_session: false, automation: false });
     wait_for(&r.server, |l| *l == Listening::Off).await;
     assert_eq!(run(Action::Command(serde_json::json!({ "command": "next" }))).0, cli::NOT_RUNNING);
+}
+
+// ---------------------------------------------------------------- more keys
+
+/// Send a command and expect it to work.
+async fn ok(r: &Rig, t: &str, body: &str) {
+    let reply = r.command(t, body).await;
+    assert_eq!(reply.status, 200, "{body}: {:?}", reply.body);
+}
+
+#[tokio::test]
+async fn state_has_position_modes_next_and_extras() {
+    let r = rig();
+    {
+        let mut n = r.host.now.lock();
+        let n = n.as_mut().unwrap();
+        n.shuffle = true;
+        n.repeat = Repeat::One;
+        n.context = Some((ContextKind::Playlist, Some("p1".into())));
+    }
+    *r.host.extras.lock() = DeckExtras {
+        crossfade: true,
+        miniplayer: true,
+        window: false,
+        device: Some("Kitchen".into()),
+        stars: 4,
+        can_rate: true,
+        playlists: vec!["p1".into()],
+    };
+    r.server.set_ui(UiReport { lyrics: true });
+    let t = r.paired().await;
+    let b = r.send(&req("GET", "/v1/state", Some(&t), "")).await.body;
+    assert_eq!(b["positionMs"], 61_000);
+    assert_eq!(b["durationMs"], 200_000);
+    assert_eq!(b["shuffle"], true);
+    assert_eq!(b["smartShuffle"], false);
+    assert_eq!(b["repeat"], "one");
+    assert_eq!(b["crossfade"], true);
+    assert_eq!(b["lyrics"], true);
+    assert_eq!(b["miniplayer"], true);
+    assert_eq!(b["window"], false);
+    assert_eq!(b["device"], "Kitchen");
+    assert_eq!(b["stars"], 4);
+    assert_eq!(b["canRate"], true);
+    assert_eq!(b["playlists"], serde_json::json!(["p1"]));
+    assert_eq!(b["context"], serde_json::json!({ "kind": "playlist", "id": "p1" }));
+    assert_eq!(b["next"]["title"], "Shoreline");
+    assert_eq!(b["next"]["artist"], "Ana Vale");
+    assert_eq!(b["next"]["coverKey"], cover_key("/library/metadata/8/thumb/1").as_str());
+    assert!(b["sleep"].is_null());
+}
+
+#[tokio::test]
+async fn a_private_session_hides_what_comes_next() {
+    let r = rig();
+    r.server.set_config(DeckConfig { enabled: true, private_session: true, automation: false });
+    let t = r.paired().await;
+    let b = r.send(&req("GET", "/v1/state", Some(&t), "")).await.body;
+    assert!(b["next"].is_null());
+    assert_eq!(r.send(&req("GET", "/v1/queue", Some(&t), "")).await.body["items"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn covers_come_by_key_at_the_size_asked() {
+    let r = rig();
+    let t = r.paired().await;
+    // Unknown keys and the size range.
+    assert_eq!(r.send(&req("GET", "/v1/cover?key=abc", Some(&t), "")).await.status, 404);
+    assert_eq!(r.send(&req("GET", "/v1/cover", Some(&t), "")).await.status, 400);
+    let s = r.send(&req("GET", "/v1/state?size=288", Some(&t), "")).await.body;
+    assert!(r.host.calls.lock().contains(&"cover /library/metadata/9/thumb/1 288".to_owned()));
+    let next = s["next"]["coverKey"].as_str().unwrap().to_owned();
+    let c = r.send(&req("GET", &format!("/v1/cover?key={next}&size=9999"), Some(&t), "")).await;
+    assert_eq!(c.status, 200);
+    assert_eq!(c.body["key"], next.as_str());
+    assert!(c.body["cover"].as_str().unwrap().starts_with("data:image/jpeg;base64,"));
+    assert!(r.host.calls.lock().contains(&"cover /library/metadata/8/thumb/1 288".to_owned()), "clamped to 288");
+    assert_eq!(server::cover_size(Some("size=10")), COVER_SIZE);
+    assert_eq!(server::cover_size(None), COVER_SIZE);
+    // Needs the token.
+    assert_eq!(r.send(&req("GET", &format!("/v1/cover?key={next}"), None, "")).await.status, 401);
+}
+
+#[tokio::test]
+async fn library_queue_and_devices_list() {
+    let r = rig();
+    let t = r.paired().await;
+    let b = r.send(&req("GET", "/v1/library?kind=playlists", Some(&t), "")).await.body;
+    assert_eq!(b["kind"], "playlists");
+    assert_eq!(b["items"][0]["id"], "p1");
+    assert_eq!(b["items"][0]["title"], "Playlists");
+    assert_eq!(b["items"][0]["subtitle"], "3 songs");
+    let key = b["items"][0]["coverKey"].as_str().unwrap().to_owned();
+    assert!(b["items"][0].get("thumb").is_none(), "art paths stay inside");
+    assert_eq!(r.send(&req("GET", &format!("/v1/cover?key={key}"), Some(&t), "")).await.status, 200);
+    assert_eq!(r.send(&req("GET", "/v1/library?kind=songs", Some(&t), "")).await.status, 400);
+    for k in ["albums", "artists", "mixes"] {
+        assert_eq!(r.send(&req("GET", &format!("/v1/library?kind={k}"), Some(&t), "")).await.status, 200, "{k}");
+    }
+    let q = r.send(&req("GET", "/v1/queue", Some(&t), "")).await.body;
+    assert_eq!(q["items"][0], serde_json::json!({ "itemId": "i1", "title": "Shoreline", "artist": "Ana Vale", "coverKey": cover_key("/library/metadata/8/thumb/1") }));
+    *r.host.devices.lock() = vec![DeckDevice { id: LOCAL_DEVICE.into(), name: "This computer".into(), active: true, needs_window: false }];
+    let d = r.send(&req("GET", "/v1/devices", Some(&t), "")).await.body;
+    assert_eq!(d["items"][0], serde_json::json!({ "id": "local", "name": "This computer", "active": true, "needsWindow": false }));
+    assert_eq!(r.send(&req("POST", "/v1/queue", Some(&t), "")).await.status, 405);
+    assert_eq!(r.send(&req("GET", "/v1/devices", None, "")).await.status, 401);
+}
+
+#[tokio::test]
+async fn seek_shuffle_repeat_and_mute() {
+    let r = rig();
+    let t = r.paired().await;
+    ok(&r, &t, r#"{"command":"seekBy","value":-10}"#).await;
+    ok(&r, &t, r#"{"command":"seekBy","value":-100}"#).await;
+    ok(&r, &t, r#"{"command":"seekBy","value":1000}"#).await;
+    ok(&r, &t, r#"{"command":"shuffle"}"#).await;
+    ok(&r, &t, r#"{"command":"shuffle","smart":true}"#).await;
+    ok(&r, &t, r#"{"command":"repeat"}"#).await;
+    ok(&r, &t, r#"{"command":"mute"}"#).await;
+    r.host.now.lock().as_mut().unwrap().repeat = Repeat::One;
+    ok(&r, &t, r#"{"command":"repeat"}"#).await;
+    assert_eq!(
+        *r.host.calls.lock(),
+        vec!["seek 51000", "seek 0", "seek 199500", "shuffle true", "smart true", "repeat All", "mute true", "repeat Off"]
+    );
+    assert_eq!(server::next_repeat(Repeat::All), Repeat::One);
+    *r.host.now.lock() = None;
+    assert_eq!(r.command(&t, r#"{"command":"seekBy","value":10}"#).await.status, 409);
+}
+
+#[tokio::test]
+async fn crossfade_and_private_session_change_settings() {
+    let r = rig();
+    let t = r.paired().await;
+    ok(&r, &t, r#"{"command":"crossfade"}"#).await;
+    r.host.extras.lock().crossfade = true;
+    ok(&r, &t, r#"{"command":"crossfade"}"#).await;
+    ok(&r, &t, r#"{"command":"privateSession"}"#).await;
+    assert_eq!(
+        *r.host.calls.lock(),
+        vec![r#"settings {"crossfade":"smart"}"#, r#"settings {"crossfade":"off"}"#, r#"settings {"privateSession":true}"#]
+    );
+}
+
+#[tokio::test]
+async fn playlists_add_ask_and_remove() {
+    let r = rig();
+    let t = r.paired().await;
+    ok(&r, &t, r#"{"command":"addToPlaylist","playlist":"p2"}"#).await;
+    ok(&r, &t, r#"{"command":"addToPlaylist"}"#).await;
+    r.host.extras.lock().playlists = vec!["p2".into()];
+    let dup = r.command(&t, r#"{"command":"addToPlaylist","playlist":"p2"}"#).await;
+    assert_eq!(dup.status, 409);
+    assert!(dup.body["error"].as_str().unwrap().contains("already"));
+    ok(&r, &t, r#"{"command":"removeFromPlaylist","playlist":"p2"}"#).await;
+    assert_eq!(r.command(&t, r#"{"command":"removeFromPlaylist","playlist":"p9"}"#).await.status, 409);
+    assert_eq!(
+        *r.host.calls.lock(),
+        vec!["add p2 t1", r#"action {"kind":"addToPlaylist","trackIds":["t1"]} true"#, "remove p2 t1"]
+    );
+}
+
+#[tokio::test]
+async fn rating_needs_star_ratings_and_the_same_rating_clears() {
+    let r = rig();
+    let t = r.paired().await;
+    let no = r.command(&t, r#"{"command":"rate","stars":3}"#).await;
+    assert_eq!(no.status, 409);
+    r.host.extras.lock().can_rate = true;
+    ok(&r, &t, r#"{"command":"rate","stars":3}"#).await;
+    r.host.extras.lock().stars = 3;
+    ok(&r, &t, r#"{"command":"rate","stars":3}"#).await;
+    assert_eq!(r.command(&t, r#"{"command":"rate","stars":6}"#).await.status, 409);
+    assert_eq!(*r.host.calls.lock(), vec!["rate t1 Some(3)", "rate t1 None"]);
+}
+
+#[tokio::test]
+async fn play_things() {
+    let r = rig();
+    let t = r.paired().await;
+    ok(&r, &t, r#"{"command":"playItem","kind":"album","id":"5","shuffle":true}"#).await;
+    ok(&r, &t, r#"{"command":"playItem","kind":"mix","id":"m1"}"#).await;
+    ok(&r, &t, r#"{"command":"playItem","kind":"playlist","id":"p1","queue":true}"#).await;
+    ok(&r, &t, r#"{"command":"playItem","kind":"album","id":"5","start":12.5}"#).await;
+    ok(&r, &t, r#"{"command":"playLink","link":"platter://album/5"}"#).await;
+    ok(&r, &t, r#"{"command":"playLink","link":"platter://track/7?t=30"}"#).await;
+    ok(&r, &t, r#"{"command":"playSearch","query":" night "}"#).await;
+    ok(&r, &t, r#"{"command":"radio"}"#).await;
+    ok(&r, &t, r#"{"command":"playShortcut","name":"liked"}"#).await;
+    ok(&r, &t, r#"{"command":"playShortcut","name":"daylist"}"#).await;
+    assert_eq!(
+        *r.host.calls.lock(),
+        vec![
+            r#"play Album Some("5") None None 0 true"#,
+            r#"play Mix Some("m1") None None 0 false"#,
+            r#"queue Playlist Some("p1")"#,
+            r#"play Album Some("5") None None 12500 false"#,
+            r#"play Album Some("5") None None 0 false"#,
+            r#"play Album Some("5") None Some("7") 30000 false"#,
+            r#"play Search Some("night") Some(["s1", "s2"]) None 0 false"#,
+            r#"play Radio Some("track:t1") None None 0 false"#,
+            r#"play Liked Some("liked") None None 0 false"#,
+            r#"play Mix Some("mix-day") None None 0 false"#,
+        ]
+    );
+    for bad in [
+        r#"{"command":"playItem","kind":"album","id":" "}"#,
+        r#"{"command":"playLink","link":"platter://album/404"}"#,
+        r#"{"command":"playSearch","query":"nothing"}"#,
+        r#"{"command":"playShortcut","name":"discover"}"#,
+        r#"{"command":"playShortcut","name":"weekly"}"#,
+    ] {
+        assert_eq!(r.command(&t, bad).await.status, 409, "{bad}");
+    }
+    assert_eq!(r.command(&t, r#"{"command":"playItem","kind":"song","id":"1"}"#).await.status, 400);
+}
+
+#[tokio::test]
+async fn queue_devices_and_the_window() {
+    let r = rig();
+    let t = r.paired().await;
+    *r.host.devices.lock() = vec![
+        DeckDevice { id: LOCAL_DEVICE.into(), name: "This computer".into(), active: true, needs_window: false },
+        DeckDevice { id: "d1".into(), name: "Kitchen".into(), active: false, needs_window: false },
+        DeckDevice { id: "d2".into(), name: "Den".into(), active: false, needs_window: true },
+    ];
+    ok(&r, &t, r#"{"command":"queueJump","itemId":"i1"}"#).await;
+    ok(&r, &t, r#"{"command":"listenOn","device":"d1"}"#).await;
+    ok(&r, &t, r#"{"command":"listenOn","device":"local"}"#).await;
+    ok(&r, &t, r#"{"command":"listenOn","device":"d2"}"#).await;
+    ok(&r, &t, r#"{"command":"listenOn"}"#).await;
+    assert_eq!(r.command(&t, r#"{"command":"listenOn","device":"gone"}"#).await.status, 409);
+    ok(&r, &t, r#"{"command":"lyrics"}"#).await;
+    r.server.set_ui(UiReport { lyrics: true });
+    ok(&r, &t, r#"{"command":"lyrics"}"#).await;
+    ok(&r, &t, r#"{"command":"miniplayer"}"#).await;
+    ok(&r, &t, r#"{"command":"window"}"#).await;
+    ok(&r, &t, r#"{"command":"nowPlaying"}"#).await;
+    ok(&r, &t, r#"{"command":"queue"}"#).await;
+    ok(&r, &t, r#"{"command":"bookmark"}"#).await;
+    assert_eq!(
+        *r.host.calls.lock(),
+        vec![
+            "jump i1",
+            "listen on d1",
+            r#"action {"device":"d2","kind":"listenOn"} true"#,
+            r#"action {"kind":"listenOn"} true"#,
+            r#"action {"kind":"lyrics","open":true} true"#,
+            r#"action {"kind":"lyrics","open":false} false"#,
+            "miniplayer true",
+            "window true",
+            r#"action {"kind":"nowPlaying"} true"#,
+            r#"action {"kind":"queue"} true"#,
+            "bookmark t1 61000",
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_sleep_timer_pauses_after_its_minutes() {
+    let r = rig();
+    let t = r.paired().await;
+    ok(&r, &t, r#"{"command":"sleep","minutes":5}"#).await;
+    let s = r.send(&req("GET", "/v1/state", Some(&t), "")).await.body;
+    assert_eq!(s["sleep"], serde_json::json!({ "remainingMs": 300_000, "endOfSong": false }));
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    let s = r.send(&req("GET", "/v1/state", Some(&t), "")).await.body;
+    assert_eq!(s["sleep"]["remainingMs"], 240_000);
+    assert!(!r.host.calls.lock().iter().any(|c| c == "pause"));
+    tokio::time::sleep(Duration::from_secs(241)).await;
+    assert!(r.host.calls.lock().iter().any(|c| c == "pause"));
+    assert!(r.send(&req("GET", "/v1/state", Some(&t), "")).await.body["sleep"].is_null());
+    // Bad minutes.
+    assert_eq!(r.command(&t, r#"{"command":"sleep","minutes":0}"#).await.status, 409);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_or_replaced_sleep_timer_does_nothing() {
+    let r = rig();
+    let t = r.paired().await;
+    ok(&r, &t, r#"{"command":"sleep","minutes":1}"#).await;
+    ok(&r, &t, r#"{"command":"sleepCancel"}"#).await;
+    ok(&r, &t, r#"{"command":"sleep","minutes":10}"#).await;
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    assert!(!r.host.calls.lock().iter().any(|c| c == "pause"), "the first timer was cancelled");
+    ok(&r, &t, r#"{"command":"sleepCancel"}"#).await;
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert!(!r.host.calls.lock().iter().any(|c| c == "pause"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_end_of_song_timer_stops_the_next_song() {
+    let r = rig();
+    let t = r.paired().await;
+    ok(&r, &t, r#"{"command":"sleep","endOfSong":true}"#).await;
+    let s = r.send(&req("GET", "/v1/state", Some(&t), "")).await.body;
+    assert_eq!(s["sleep"], serde_json::json!({ "remainingMs": null, "endOfSong": true }));
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert!(r.host.calls.lock().is_empty() || !r.host.calls.lock().iter().any(|c| c == "pause"));
+    // The next song starts.
+    {
+        let mut n = r.host.now.lock();
+        let n = n.as_mut().unwrap();
+        n.track = n.next.take();
+        n.position_ms = 50;
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let calls = r.host.calls.lock().clone();
+    assert!(calls.ends_with(&["pause".to_owned(), "seek 0".to_owned()]), "{calls:?}");
+    assert!(r.send(&req("GET", "/v1/state", Some(&t), "")).await.body["sleep"].is_null());
+    // Nothing playing: nothing to finish.
+    *r.host.now.lock() = None;
+    assert_eq!(r.command(&t, r#"{"command":"sleep","endOfSong":true}"#).await.status, 409);
+}
+
+#[test]
+fn library_kinds_read_singular_and_plural() {
+    assert_eq!(LibraryKind::parse("album"), Some(LibraryKind::Albums));
+    assert_eq!(LibraryKind::parse("mixes"), Some(LibraryKind::Mixes));
+    assert_eq!(LibraryKind::parse("songs"), None);
+    assert_eq!(LibraryKind::Artists.context(), ContextKind::Artist);
 }

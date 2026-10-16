@@ -38,6 +38,11 @@ pub trait LikeRemote: Send + Sync {
     async fn online(&self) -> bool;
     /// Like or unlike a track.
     async fn set_liked(&self, track_id: &str, liked: bool) -> AppResult<()>;
+    /// Set (Some, 0 to 10) or clear (None) a star rating. A server without
+    /// star ratings takes any rating as a like.
+    async fn set_rating(&self, track_id: &str, rating: Option<f64>) -> AppResult<()> {
+        self.set_liked(track_id, rating.is_some()).await
+    }
 }
 
 /// A server with star ratings (Plex).
@@ -58,6 +63,9 @@ impl<T: RatingRemote + ?Sized> LikeRemote for T {
     }
     async fn set_liked(&self, track_id: &str, liked: bool) -> AppResult<()> {
         self.rate(track_id, liked.then_some(LIKED_RATING)).await
+    }
+    async fn set_rating(&self, track_id: &str, rating: Option<f64>) -> AppResult<()> {
+        self.rate(track_id, rating).await
     }
 }
 
@@ -201,6 +209,52 @@ impl Likes {
         Ok(changed)
     }
 
+    /// Give a song 1 to 5 stars, or clear its rating (None). Only for
+    /// servers with star ratings (the caller checks). Liked follows the
+    /// rating (four or five stars may count as liked).
+    pub async fn rate(&self, track_id: &str, stars: Option<u8>) -> AppResult<()> {
+        if stars.is_some_and(|s| !(1..=5).contains(&s)) {
+            return Err(AppError::Invalid("A rating is 1 to 5 stars.".into()));
+        }
+        let id = track_id.to_owned();
+        let changed = self
+            .db()
+            .write_async(move |c| {
+                let tx = c.transaction()?;
+                let exists: Option<String> = tx.query_row("SELECT id FROM tracks WHERE id = ?1", [&id], |r| r.get(0)).optional()?;
+                if exists.is_none() {
+                    return Err(AppError::NotFound(format!("track {id}")));
+                }
+                let changed = local::set_rating(&tx, &id, stars.map(|s| f64::from(s) * 2.0))?;
+                tx.commit()?;
+                Ok(changed.then_some(id))
+            })
+            .await?;
+        if let Some(id) = changed {
+            self.inner.events.changed(&[id]);
+            self.inner.queued.notify_one();
+            if self.inner.auto_replay
+                && let Ok(rt) = tokio::runtime::Handle::try_current()
+            {
+                let me = self.clone();
+                rt.spawn(async move { me.replay().await });
+            }
+        }
+        Ok(())
+    }
+
+    /// A song's star rating, 0 (unrated) to 5.
+    pub async fn stars(&self, track_id: &str) -> AppResult<u8> {
+        let id = track_id.to_owned();
+        self.db()
+            .read_async(move |c| {
+                let rating: Option<f64> =
+                    c.query_row("SELECT user_rating FROM tracks WHERE id = ?1", [&id], |r| r.get(0)).optional()?.flatten();
+                Ok(rating.map_or(0, |r| (r / 2.0).round().clamp(0.0, 5.0) as u8))
+            })
+            .await
+    }
+
     /// Whether one song is liked (false when it isn't in the cache).
     pub async fn is_liked(&self, track_id: &str) -> AppResult<bool> {
         let min = self.min_rating();
@@ -260,8 +314,9 @@ impl Likes {
         };
         let mut rolled_back: Vec<String> = Vec::new();
         for op in queue {
-            // A queued like is five stars, an unlike none (Likes::set).
-            match self.inner.remote.set_liked(&op.track_id, op.rating.is_some()).await {
+            // A queued like is five stars, an unlike none (Likes::set), a
+            // star rating its stars (Likes::rate).
+            match self.inner.remote.set_rating(&op.track_id, op.rating).await {
                 Ok(()) => {
                     let o = op.clone();
                     let _ = self.db().write_async(move |c| local::sent(c, &o)).await;

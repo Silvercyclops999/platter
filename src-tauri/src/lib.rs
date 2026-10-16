@@ -1407,6 +1407,7 @@ pub fn run() {
             feed::commands::feed_status,
             feed::deck::commands::deck_status,
             feed::deck::commands::deck_revoke,
+            feed::deck::commands::deck_ui_report,
             feed::deck::commands::automation_revoke,
             feed::deck::commands::deck_pair_prompt,
             feed::deck::commands::deck_pair_answer,

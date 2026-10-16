@@ -6,8 +6,8 @@ use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
-use super::DeckStatus;
 use super::install;
+use super::{DeckStatus, UiReport};
 use super::server::DeckServer;
 use crate::error::AppResult;
 
@@ -75,4 +75,11 @@ pub fn deck_app_download(app: AppHandle) -> AppResult<()> {
     app.opener()
         .open_url(install::DOWNLOAD_URL, None::<&str>)
         .map_err(|e| crate::error::AppError::Internal(format!("open browser: {e}")))
+}
+
+/// What the window shows that a Stream Deck key reflects (the lyrics view).
+#[tauri::command]
+pub async fn deck_ui_report(deck: State<'_, DeckServer>, report: UiReport) -> AppResult<()> {
+    deck.set_ui(report);
+    Ok(())
 }

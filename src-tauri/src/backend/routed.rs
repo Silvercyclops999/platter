@@ -180,6 +180,10 @@ impl LikeRemote for RoutedLikes {
     async fn set_liked(&self, track_id: &str, liked: bool) -> AppResult<()> {
         self.0.for_id(track_id)?.likes().set_liked(track_id, liked).await
     }
+
+    async fn set_rating(&self, track_id: &str, rating: Option<f64>) -> AppResult<()> {
+        self.0.for_id(track_id)?.likes().set_rating(track_id, rating).await
+    }
 }
 
 /// Playlist edits on the playlist's server (a new one: its songs' server).
