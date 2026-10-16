@@ -16,7 +16,7 @@ import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { LyricsPane } from "../shell/LyricsView";
 import { stageText } from "../shell/TranscribeOffer";
 import { SettingsPage } from "../pages/SettingsPage";
-import { batchNote, transcribeNote } from "../pages/TranscribeSettings";
+import { batchNote, gpuNote, speedNote, transcribeNote } from "../pages/TranscribeSettings";
 import { clearLyricsCache, lyricsSourceLabel } from "../shell/lyrics";
 import { LyricsEditorHost } from "../shell/LyricsEditor";
 import { useLyricsEditor } from "../stores/lyricsEditor";
@@ -59,7 +59,7 @@ beforeEach(async () => {
   mock.own.clear();
   mock.transcribe.reset();
   mock.transcribe.stepMs = 5;
-  await mock.settingsSet({ transcribeLyrics: false, transcribeModel: "small", showAutoLyrics: true, lyricsShowAdd: true });
+  await mock.settingsSet({ transcribeLyrics: false, transcribeModel: "small", transcribeGpu: "auto", showAutoLyrics: true, lyricsShowAdd: true });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useLyricsEditor.setState({ track: null, ownIds: new Set(), version: 0 });
   useToasts.setState({ toasts: [] });
@@ -154,11 +154,61 @@ describe("Settings", () => {
     for (const key of ["transcribeProcessor", "transcribePauseBusy", "transcribeFasterAway"]) {
       expect(settingRow(key)).toHaveTextContent("This device only.");
     }
-    // The model picker says Medium is slower and harder on the processor; Small stays the default.
-    expect(DEFAULT_SETTINGS.transcribeModel).toBe("small");
+    // The model picker says Medium is slower and harder on the processor; nothing is picked by default.
+    expect(DEFAULT_SETTINGS.transcribeModel).toBe(null);
     expect(settingRow("transcribeModel")).toHaveTextContent(/Medium is .*much slower and works the processor much harder/);
     expect(within(settingRow("transcribeModel")).getByRole("option", { name: /Medium \(slower, much harder on the processor\)/ })).toBeInTheDocument();
     await mock.settingsSet({ transcribeProcessor: "light", transcribePauseBusy: true });
+  });
+
+  it("defaults new users to Turbo on a graphics card and says which card it uses", async () => {
+    expect(DEFAULT_SETTINGS.transcribeGpu).toBe("auto");
+    mock.transcribe.gpuCard = "NVIDIA GeForce RTX 5090";
+    await turnOn({ transcribeModel: null });
+    render(<SettingsPage />);
+    const row = await waitFor(() => settingRow("transcribeGpu"));
+    const use = within(row).getByRole("combobox", { name: "Use the graphics card" });
+    expect(within(use).getAllByRole("option").map((o) => o.textContent)).toEqual(["Auto", "Off"]);
+    expect(use).toHaveValue("auto");
+    await within(row).findByText("Uses your graphics card (NVIDIA GeForce RTX 5090).");
+    expect(row).toHaveTextContent("This device only.");
+    const model = within(settingRow("transcribeModel")).getByRole("combobox", { name: "Transcription model" });
+    await waitFor(() => expect(model).toHaveValue("turbo"));
+    expect(within(model).getByRole("option", { name: /^Turbo .*a few seconds per song on your graphics card$/ })).toBeInTheDocument();
+    expect(within(settingRow("transcribeModel")).getByRole("button", { name: `Download ${modelSize(574_041_195)}` })).toBeInTheDocument();
+    // Off: the processor, Small by default, and the card named as unused.
+    await userEvent.selectOptions(use, "off");
+    await waitFor(async () => expect((await mock.settingsGet()).transcribeGpu).toBe("off"));
+    await within(row).findByText("Uses the processor. Your graphics card (NVIDIA GeForce RTX 5090) isn't used.");
+    await waitFor(() => expect(model).toHaveValue("small"));
+    expect(within(model).getByRole("option", { name: /^Small .*a few minutes per song on the processor$/ })).toBeInTheDocument();
+  });
+
+  it("keeps Small on a computer without a graphics card and a model someone picked", async () => {
+    await turnOn({ transcribeModel: null });
+    render(<SettingsPage />);
+    const model = await within(await waitFor(() => settingRow("transcribeModel"))).findByRole("combobox", { name: "Transcription model" });
+    await waitFor(() => expect(model).toHaveValue("small"));
+    expect(within(model).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["small", "medium", "turbo"]);
+    await within(settingRow("transcribeGpu")).findByText("Uses the processor: no graphics card that can help was found.");
+    // Picking one sticks, card or not.
+    await userEvent.selectOptions(model, "medium");
+    await waitFor(async () => expect((await mock.settingsGet()).transcribeModel).toBe("medium"));
+    mock.transcribe.gpuCard = "Radeon RX 7800 XT";
+    await mock.settingsSet({ transcribeGpu: "auto" });
+    await waitFor(() => expect(model).toHaveValue("medium"));
+  });
+
+  it("tells each model's speed from this computer's own runs when there are some", () => {
+    const base = useTranscribe.getState().status!;
+    const turbo = { kind: "turbo" as const, sizeBytes: 1, installed: true, downloading: false, doneBytes: 0 };
+    const onCard = { ...base, gpu: "RTX 5090" };
+    expect(speedNote(turbo, onCard)).toBe("a few seconds per song on your graphics card");
+    expect(speedNote({ ...turbo, secsPerSong: 9 }, onCard)).toBe("about 9 seconds per song on your graphics card");
+    expect(speedNote({ ...turbo, kind: "small", secsPerSong: 200 }, { ...base, gpu: undefined })).toBe("about 3 minutes per song on the processor");
+    expect(speedNote({ ...turbo, secsPerSong: 1 }, onCard)).toBe("about 1 second per song on your graphics card");
+    expect(gpuNote(null, "auto")).toBeUndefined();
+    expect(gpuNote({ ...base, available: false }, "auto")).toBeUndefined();
   });
 
   it("shows a busy pause and the pace of a long run", async () => {

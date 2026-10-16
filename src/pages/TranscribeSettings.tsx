@@ -1,11 +1,55 @@
-/** Settings bits for lyrics transcription: the status line, the model picker with download and delete, processor use, and the batch button. */
+/** Settings bits for lyrics transcription: the status line, the model picker with download and delete, the graphics card, processor use, and the batch button. */
 import { Button } from "../components/Button";
 import { Select } from "../components/Select";
-import type { Settings, TranscribeModel, TranscribeProcessor, TranscribeStatus } from "../lib/types";
+import type { Settings, TranscribeGpu, TranscribeModel, TranscribeModelInfo, TranscribeProcessor, TranscribeStatus } from "../lib/types";
 import { updateSettings } from "../stores/settings";
 import { modelSize, transcribe, useTranscribe } from "../stores/transcribe";
 
-const MODEL_LABEL: Record<TranscribeModel, string> = { small: "Small (faster)", medium: "Medium (slower, much harder on the processor)" };
+const MODEL_LABEL: Record<TranscribeModel, string> = {
+  small: "Small (faster)",
+  medium: "Medium (slower, much harder on the processor)",
+  turbo: "Turbo (best, for the graphics card)",
+};
+
+export const GPU_OPTIONS: { value: TranscribeGpu; label: string }[] = [
+  { value: "auto", label: "Auto" },
+  { value: "off", label: "Off" },
+];
+
+/** "about 8 seconds" or "about 3 minutes". */
+function aboutTime(secs: number): string {
+  if (secs < 90) {
+    const s = Math.max(1, Math.round(secs));
+    return `about ${s} ${s === 1 ? "second" : "seconds"}`;
+  }
+  const min = Math.round(secs / 60);
+  return `about ${min} minutes`;
+}
+
+/** How long a song takes with this model on the device in use: measured here when it has run, else a rough guide. */
+export function speedNote(m: TranscribeModelInfo, s: TranscribeStatus): string {
+  const where = s.gpu ? "on your graphics card" : "on the processor";
+  if (m.secsPerSong !== undefined) return `${aboutTime(m.secsPerSong)} per song ${where}`;
+  return s.gpu ? `a few seconds per song ${where}` : `a few minutes per song ${where}`;
+}
+
+/** The note under "Use the graphics card". */
+export function gpuNote(s: TranscribeStatus | null, setting: TranscribeGpu | undefined): string | undefined {
+  if (!s || !s.available) return undefined;
+  if (s.gpu) return `Uses your graphics card (${s.gpu}).`;
+  if (setting === "off" && s.gpuFound) return `Uses the processor. Your graphics card (${s.gpuFound}) isn't used.`;
+  if (setting !== "off" && s.enabled && !s.gpuFound) return "Uses the processor: no graphics card that can help was found.";
+  return undefined;
+}
+
+export function GpuNote({ setting }: { setting: TranscribeGpu | undefined }) {
+  const text = gpuNote(useTranscribe((st) => st.status), setting);
+  return text ? (
+    <span role="status" aria-live="polite">
+      {text}
+    </span>
+  ) : null;
+}
 
 export const PROCESSOR_OPTIONS: { value: TranscribeProcessor; label: string }[] = [
   { value: "light", label: "Light" },
@@ -58,13 +102,14 @@ export function TranscribeNote() {
 export function ModelControl({ s, ids }: { s: Settings | null; ids: { title: string; desc: string } }) {
   const status = useTranscribe((st) => st.status);
   if (!s || !status) return null;
-  const options = status.models.map((m) => ({ value: m.kind, label: `${MODEL_LABEL[m.kind]}, ${modelSize(m.sizeBytes)}` }));
-  const m = status.models.find((x) => x.kind === s.transcribeModel);
+  const options = status.models.map((m) => ({ value: m.kind, label: `${MODEL_LABEL[m.kind]}, ${modelSize(m.sizeBytes)}, ${speedNote(m, status)}` }));
+  // The model in use: the one picked, else this computer's default.
+  const m = status.models.find((x) => x.kind === status.model);
   const busy = status.current !== undefined && m?.installed;
   return (
     <div className="transcribe-model">
       <Select
-        value={s.transcribeModel}
+        value={status.model}
         options={options}
         onChange={(v) => void updateSettings({ transcribeModel: v })}
         labelledBy={ids.title}
@@ -79,7 +124,7 @@ export function ModelControl({ s, ids }: { s: Settings | null; ids: { title: str
           Delete model
         </Button>
       ) : (
-        <Button size="sm" disabled={!status.available || status.models.some((x) => x.downloading)} onClick={() => void transcribe.download(s.transcribeModel)}>
+        <Button size="sm" disabled={!status.available || status.models.some((x) => x.downloading)} onClick={() => void transcribe.download(status.model)}>
           Download {m ? modelSize(m.sizeBytes) : ""}
         </Button>
       )}

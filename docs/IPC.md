@@ -1465,8 +1465,9 @@ they led to are kept and listed by `lyrics_candidates`.
 
 The check uses the smallest installed model and two threads. With the small
 model it has a short-lived helper process of its own (see Lyrics
-transcription); with only the medium model it uses transcription's helper,
-ahead of background songs, and takes the newest song first (the
+transcription); with a bigger model, or while a graphics card is in use,
+it uses transcription's helper, ahead of background songs (so only one model
+sits on the card), and takes the newest song first (the
 one playing); older requests wait, and beyond three the oldest are dropped.
 `lyrics://check-status` → `CheckStatus = { trackId, state, reason? }` says where
 a song's check is, and `lyrics_check_status { trackId }` returns the latest one
@@ -1539,16 +1540,24 @@ whisper.cpp; nothing about the song is sent anywhere. The only network use is
 the model download, from the whisper.cpp model repository on Hugging Face,
 pinned to one commit: `small` is `ggml-small.en-q5_1.bin` (190,098,681 bytes)
 and `medium` is `ggml-medium.en-q5_0.bin` (539,225,533 bytes), both
-English-only. The file goes to `<app data>/models/` as a `.part` file, is
+English-only, and `turbo` is `ggml-large-v3-turbo-q5_0.bin` (574,041,195
+bytes), multilingual and made for the graphics card. The file goes to `<app data>/models/` as a `.part` file, is
 checked against its SHA-256, and is renamed into place only when it matches.
 Free space is checked first (the model plus 256 MB). Models never ship in the
 installer.
 
-`TranscribeStatus = { enabled, available, unavailableReason?, model, models,
-current?, queued, upNext?, batch, secsPerSong?, paused?, error? }`. `available` is false in a build
-without the recognizer, or on an x86 processor without AVX2. `models` lists
-`{ kind, sizeBytes, installed, downloading, doneBytes }` for each model, so
-the size shows before downloading. `current = { trackId, stage, percent,
+`TranscribeStatus = { enabled, available, unavailableReason?, model,
+modelPicked, gpu?, gpuFound?, models, current?, queued, upNext?, batch,
+secsPerSong?, paused?, error? }`. `available` is false in a build
+without the recognizer, or on an x86 processor without AVX2. `model` is the
+model used: `transcribeModel` when one is picked (`modelPicked`), else
+`turbo` while a graphics card is in use and `small` without. `gpu` names the
+graphics card in use, `gpuFound` a usable one whether used or not. `models`
+lists `{ kind, sizeBytes, installed, downloading, doneBytes, secsPerSong? }`
+for each model, so the size shows before downloading; `secsPerSong` is how
+long a 3.5 minute song took lately with that model on the device used now
+(the graphics card or the processor), from songs of 30 seconds or more
+transcribed here (kept in `<app data>/models/speeds.json`). `current = { trackId, stage, percent,
 background, quietSecs? }`, stage one of `waitingForModel`, `reading`,
 `decoding`, `loading` (the helper is loading the model), `transcribing`
 (percent counts the last; the speech library reports it once per 30 s
@@ -1593,9 +1602,12 @@ fetched is read from disk, and before reading a song from the server it waits
 for playback's own download to end.
 
 The speech model runs in helper processes: one for transcription, and for
-the lyrics check only with the small model a second that ends 10 s after its
-last run. The medium model is only ever loaded by the transcription helper,
-so it is never in memory twice. Each is the same Platter binary started
+the lyrics check only with the small model on the processor a second that
+ends 10 s after its last run. The bigger models are only ever loaded by the
+transcription helper, so they are never in memory twice. The transcription
+helper uses the graphics card while one is in use (it is started with
+`PLATTER_SPEECH_GPU=1`); a crash while on the card moves transcription to the
+processor for the rest of the session. Each is the same Platter binary started
 with `--speech-worker`, which exits before any of the app starts (no window,
 tray, single-instance lock or link handling). The app sends it a request
 (model file, model kind, threads, language) and the song's 16 kHz samples on
@@ -1635,6 +1647,27 @@ fullscreen Direct3D game or presentation mode is in front (Windows), or while
 macOS reports a thermal state of Fair or worse; it goes on after 30 s without
 any of them. The computer is read every 3 s, and only while background speech
 work is queued; nothing is read while the queue is empty.
+
+On Windows and Linux the model runs on the graphics card with Vulkan (any
+vendor), and on macOS with Metal, while `transcribeGpu` is `auto` and a usable card is found. The app
+never touches the card itself: once transcription is on (or a lyrics check
+runs), it starts the same binary with `--speech-probe`, which lists the cards
+the speech library sees as one JSON line and exits; a probe that fails,
+crashes or takes more than 20 s means no card. A discrete card is picked over
+an integrated one, then the one with the most memory; cards reporting less
+than 1 GB are left out. The helper is started with `PLATTER_SPEECH_GPU=1`
+when it may use the card, logs one line saying which card or the processor
+it loaded the model on, and loads it on the processor when loading on the
+card fails. A helper that crashes while on the card moves transcription to the
+processor until Platter restarts. Vulkan comes with the graphics driver: the
+binary doesn't link the Vulkan loader, the helper opens it (`vulkan-1.dll`
+from System32, or `libvulkan.so.1`) only when allowed, and without it Platter
+starts and transcribes on the processor. On the card the processor only feeds
+it: one thread on `light`, two otherwise, at the same low priority, and the
+busy pause (fullscreen games included) still applies. The lyrics check uses
+the transcription helper while on the card, so only one model is ever loaded
+on it and runs take turns. macOS works the same way with Metal (the card
+there is the Mac's own GPU).
 
 Words found are saved as enhanced LRC (a time per line and per word) in the
 song's own lyrics (`lyrics_own_*`) with `auto` set to the model, so the
@@ -2979,7 +3012,8 @@ The rest of the fields, with their defaults:
 | `lyricsLiveTiming` | bool, false | Live versions keep the timing of lyrics found by artist and title (still marked `borrowedTiming`). Off shows them unsynced. |
 | `lyricsShowAdd` | bool, true | The expanded view's lyrics mode offers Add lyrics for a song with none. The track menu keeps Add lyrics either way. |
 | `transcribeLyrics` | bool, false | Transcribe songs without lyrics on this computer (Transcribe this song, the album menu, the unreleased batch). See Lyrics transcription. This device only. |
-| `transcribeModel` | `"small"` or `"medium"`, `"small"` | The speech model. Medium is a little more accurate, much slower, and works the processor much harder. This device only. |
+| `transcribeModel` | `"small"`, `"medium"`, `"turbo"` or null, null | The speech model; null is Turbo while a graphics card is used and Small without. Medium is a little more accurate than Small, much slower, and works the processor much harder. Turbo is the most accurate and is made for the graphics card. This device only. |
+| `transcribeGpu` | `"auto"` or `"off"`, `"auto"` | Transcription and the lyrics check run on the graphics card when there's a usable one (see Lyrics transcription). This device only. |
 | `transcribeProcessor` | `"light"`, `"balanced"` or `"fast"`, `"light"` | Processor threads for transcription and the lyrics check (see Lyrics transcription). This device only. |
 | `transcribePauseBusy` | bool, true | Albums, the batch and the lyrics check wait while the computer is busy (`paused: busy`). This device only. |
 | `transcribeFasterAway` | bool, true | Background speech work may use the `balanced` thread count while nobody is at the computer and it's plugged in. This device only. |

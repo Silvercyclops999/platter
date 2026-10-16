@@ -2686,7 +2686,7 @@ export class MockBackend implements Backend {
           this.emitState();
         });
       }
-      if (patch.transcribeLyrics !== undefined || patch.transcribeModel !== undefined) this.transcribe.settingsChanged();
+      if (patch.transcribeLyrics !== undefined || patch.transcribeModel !== undefined || patch.transcribeGpu !== undefined) this.transcribe.settingsChanged();
       if (patch.downloadLiked !== undefined && patch.downloadLiked !== this.downloads.isOn("liked", ""))
         this.downloads.set("liked", "", patch.downloadLiked, "Liked Songs");
       next.downloadLimitGb = Math.min(4096, Math.max(1, Math.round(next.downloadLimitGb)));

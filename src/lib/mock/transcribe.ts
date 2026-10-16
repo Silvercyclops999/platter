@@ -19,7 +19,8 @@ export interface MockTranscribeHooks {
   unreleasedTracks: () => string[];
 }
 
-const SIZES: Record<TranscribeModel, number> = { small: 190_098_681, medium: 539_225_533 };
+const SIZES: Record<TranscribeModel, number> = { small: 190_098_681, medium: 539_225_533, turbo: 574_041_195 };
+const MODELS: readonly TranscribeModel[] = ["small", "medium", "turbo"];
 
 /** Invented words, the same for every song. */
 export const CANNED_LRC = [
@@ -45,6 +46,10 @@ export class MockTranscribe {
   busy = false;
   /** Seconds per song the status reports for a long run. */
   secsPerSong: number | undefined = undefined;
+  /** The graphics card found on this computer (none by default). */
+  gpuCard: string | undefined = undefined;
+  /** Seconds per song measured here, by model and device. */
+  speeds: Partial<Record<`${TranscribeModel}/${"gpu" | "cpu"}`, number>> = {};
 
   private installed = new Set<TranscribeModel>();
   private download: { kind: TranscribeModel; done: number; cancelled: boolean } | null = null;
@@ -74,6 +79,18 @@ export class MockTranscribe {
     this.empty.clear();
     this.busy = false;
     this.secsPerSong = undefined;
+    this.gpuCard = undefined;
+    this.speeds = {};
+  }
+
+  /** The card in use: one was found and the setting is Auto. */
+  private gpu(): string | undefined {
+    return this.hooks.settings().transcribeGpu === "off" ? undefined : this.gpuCard;
+  }
+
+  /** The model used: the one picked, else Turbo on a graphics card and Small without. */
+  model(): TranscribeModel {
+    return this.hooks.settings().transcribeModel ?? (this.gpu() ? "turbo" : "small");
   }
 
   status(): TranscribeStatus {
@@ -81,13 +98,17 @@ export class MockTranscribe {
     return {
       enabled: s.transcribeLyrics,
       available: true,
-      model: s.transcribeModel,
-      models: (["small", "medium"] as const).map((kind) => ({
+      model: this.model(),
+      modelPicked: s.transcribeModel !== null,
+      gpu: this.gpu(),
+      gpuFound: this.gpuCard,
+      models: MODELS.map((kind) => ({
         kind,
         sizeBytes: SIZES[kind],
         installed: this.installed.has(kind),
         downloading: this.download?.kind === kind,
         doneBytes: this.download?.kind === kind ? this.download.done : 0,
+        secsPerSong: this.speeds[`${kind}/${this.gpu() ? "gpu" : "cpu"}`],
       })),
       current: this.current ? { ...this.current } : undefined,
       queued: this.queue.length,
@@ -182,7 +203,7 @@ export class MockTranscribe {
 
   private enqueue(ids: string[], background: boolean, front: boolean): number {
     this.usable();
-    const model = this.hooks.settings().transcribeModel;
+    const model = this.model();
     if (!this.installed.has(model) && !this.download) this.downloadModel(model);
     const fresh = ids.filter((id) => this.current?.trackId !== id && !this.queue.some((j) => j.trackId === id));
     const jobs = fresh.map((trackId) => ({ trackId, background }));
@@ -226,7 +247,7 @@ export class MockTranscribe {
 
   private pump() {
     if (this.running) return;
-    const model = this.hooks.settings().transcribeModel;
+    const model = this.model();
     let job: { trackId: string; background: boolean } | undefined;
     if (this.current?.stage === "waitingForModel") {
       if (!this.installed.has(model)) return;
@@ -274,7 +295,7 @@ export class MockTranscribe {
       this.error = { kind: "transcribe", message: "Transcription failed for this song.", trackId };
     } else if (!skip) {
       const found = !this.silent.has(trackId);
-      if (found) this.hooks.save(trackId, CANNED_LRC, this.hooks.settings().transcribeModel);
+      if (found) this.hooks.save(trackId, CANNED_LRC, this.model());
       else this.empty.add(trackId);
       this.hooks.emitDone(trackId, found);
     }

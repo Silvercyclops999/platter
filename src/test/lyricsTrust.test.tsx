@@ -74,6 +74,7 @@ function status(installed: boolean): TranscribeStatus {
     enabled: false,
     available: true,
     model: "small",
+    modelPicked: false,
     models: [{ kind: "small", sizeBytes: 190 * 1024 * 1024, installed, downloading: false, doneBytes: 0 }],
     queued: 0,
     batch: { done: 0, total: 0 },

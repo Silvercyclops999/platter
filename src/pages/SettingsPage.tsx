@@ -55,7 +55,7 @@ import { coversNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus }
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { CheckTagsButton, MusicFolderControl, MusicFolderNote, MusicFolderPath, PlexLibrarySettings } from "./TagEditorSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
-import { BatchControl, BatchNote, ModelControl, PROCESSOR_OPTIONS, TranscribeNote } from "./TranscribeSettings";
+import { BatchControl, BatchNote, GPU_OPTIONS, GpuNote, ModelControl, PROCESSOR_OPTIONS, TranscribeNote } from "./TranscribeSettings";
 import { ChangeSyncFolder, KeyCopyButton, SyncNowControl, SyncSwitch, syncNote, useSyncFile } from "./SyncSettings";
 import {
   AiKeyControl,
@@ -271,6 +271,7 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "Tauri clipboard plugin and arboard (copying images)", licence: "MIT or Apache-2.0" },
   { name: "whisper.cpp and ggml (transcription)", licence: "MIT" },
   { name: "whisper-rs", licence: "Unlicense" },
+  { name: "Vulkan headers and Vulkan-Hpp (transcription on the graphics card)", licence: "Apache-2.0 or MIT" },
   { name: "Whisper speech models (downloaded when asked)", licence: "MIT" },
   { name: "rusty-chromaprint (audio fingerprints, a port of Chromaprint)", licence: "MIT" },
 ];
@@ -2690,8 +2691,18 @@ export function SettingsPage() {
       group: "Lyrics transcription",
       title: "Transcription model",
       description:
-        "Small is faster and right for most songs. Medium is a little more accurate, but much slower and works the processor much harder. The size is the download. This device only.",
+        "Small is faster and right for most songs on the processor. Medium is a little more accurate, but much slower and works the processor much harder. Turbo is the most accurate and is made for the graphics card, where a song takes seconds; it's the default when one is used. The size is the download. This device only.",
       control: (ids) => <ModelControl s={s} ids={ids} />,
+    },
+    {
+      key: "transcribeGpu",
+      section: "Appearance",
+      group: "Lyrics transcription",
+      title: "Use the graphics card",
+      description:
+        "Auto transcribes on the graphics card when there's one that can help, which is much faster and keeps the processor cool. The lyrics check uses it too. Off uses the processor only. Processor use and the busy pause still apply. This device only.",
+      note: <GpuNote setting={s?.transcribeGpu} />,
+      control: (ids) => select(s, (x) => x.transcribeGpu ?? "auto", GPU_OPTIONS, ids, (v) => void updateSettings({ transcribeGpu: v })),
     },
     {
       key: "transcribeProcessor",

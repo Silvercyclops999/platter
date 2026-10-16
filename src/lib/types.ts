@@ -990,8 +990,10 @@ export interface Settings {
   dragAndDrop: boolean;
   /** Transcribe songs without lyrics on this computer (this device only). */
   transcribeLyrics: boolean;
-  /** The speech model transcription uses (this device only). */
-  transcribeModel: TranscribeModel;
+  /** The speech model transcription uses (this device only). Null: the default for this computer (Turbo on a graphics card, else Small). */
+  transcribeModel: TranscribeModel | null;
+  /** Speech-model work on the graphics card when there's a usable one (this device only). */
+  transcribeGpu: TranscribeGpu;
   /** How hard speech-model work may use the processor (this device only). */
   transcribeProcessor: TranscribeProcessor;
   /** Background speech work waits while the computer is busy (this device only). */
@@ -1422,7 +1424,8 @@ export const DEFAULT_SETTINGS: Settings = {
   plexEditMatchUnreleased: true,
   dragAndDrop: true,
   transcribeLyrics: false,
-  transcribeModel: "small",
+  transcribeModel: null,
+  transcribeGpu: "auto",
   transcribeProcessor: "light",
   transcribePauseBusy: true,
   transcribeFasterAway: true,
@@ -1712,7 +1715,10 @@ export interface MixPage {
 // ---------------------------------------------------------------- transcription
 
 /** Speech models for lyrics transcription (docs/IPC.md "Lyrics transcription"). */
-export type TranscribeModel = "small" | "medium";
+export type TranscribeModel = "small" | "medium" | "turbo";
+
+/** "Use the graphics card" for transcription and the lyrics check. */
+export type TranscribeGpu = "auto" | "off";
 
 /** "Processor use": threads for transcription and the lyrics check. */
 export type TranscribeProcessor = "light" | "balanced" | "fast";
@@ -1723,6 +1729,8 @@ export interface TranscribeModelInfo {
   installed: boolean;
   downloading: boolean;
   doneBytes: number;
+  /** About how long a song took here lately, on the device used now. */
+  secsPerSong?: number;
 }
 
 export type TranscribeStage = "waitingForModel" | "reading" | "decoding" | "loading" | "transcribing";
@@ -1732,7 +1740,14 @@ export interface TranscribeStatus {
   /** This build and this computer can transcribe. */
   available: boolean;
   unavailableReason?: string;
+  /** The model used: the one picked, else the default for this computer. */
   model: TranscribeModel;
+  /** A model was picked in Settings. */
+  modelPicked: boolean;
+  /** The graphics card transcription uses (absent: the processor). */
+  gpu?: string;
+  /** A usable graphics card on this computer, used or not. */
+  gpuFound?: string;
   models: TranscribeModelInfo[];
   current?: {
     trackId: string;
