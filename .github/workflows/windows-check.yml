@@ -1,0 +1,77 @@
+name: windows-check
+
+# Compiles the Rust core on Windows when platform or transcription code
+# changes (Windows otherwise builds only on release tags), and checks that the
+# app doesn't need Vulkan to start: whisper.cpp's Vulkan backend is built with
+# the LunarG SDK, but people using Platter have only their graphics driver.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/src/platform/**"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/.cargo/**"
+      - "src-tauri/src/lyrics/transcribe/**"
+      - ".github/workflows/windows-check.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in step with release.yml.
+  VULKAN_VERSION: 1.4.313.2
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - id: vulkan-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\VulkanSDK
+          key: vulkan-sdk-${{ env.VULKAN_VERSION }}-windows
+      - if: steps.vulkan-cache.outputs.cache-hit != 'true'
+        name: Install the Vulkan SDK
+        shell: pwsh
+        run: |
+          curl.exe -fsSL -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --root "C:\VulkanSDK\$env:VULKAN_VERSION" --accept-licenses --default-answer --confirm-command install
+      - shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_VERSION"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\$env:VULKAN_VERSION\Bin"
+      - run: npm ci
+      - run: npm run build
+      - name: cargo clippy (transcribe)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --features transcribe -- -D warnings
+      - name: cargo build (link, transcribe)
+        working-directory: src-tauri
+        run: cargo build --features transcribe
+      # vulkan-1.dll comes with graphics drivers, so platter.exe may not
+      # import it; the probe (no graphics card on the runner) finds none.
+      - name: no Vulkan needed to start
+        working-directory: src-tauri
+        shell: pwsh
+        run: |
+          $dlls = & "C:\Program Files\LLVM\bin\llvm-objdump.exe" -p target\debug\platter.exe | Select-String "DLL Name"
+          $dlls
+          if ($dlls -match "vulkan") { throw "platter.exe imports the Vulkan loader" }
+          $env:PLATTER_SPEECH_GPU = "1"
+          $out = (& target\debug\platter.exe --speech-probe | Out-String).Trim()
+          "probe: $out"
+          if ($LASTEXITCODE -ne 0) { throw "the probe failed" }

@@ -93,6 +93,8 @@ struct Launches {
     /// The most helpers alive at once.
     most_alive: AtomicUsize,
     lowest: Arc<Mutex<Vec<bool>>>,
+    /// Whether each helper was allowed the graphics card.
+    gpu: Mutex<Vec<bool>>,
     /// Answer with something that isn't the protocol.
     garbage: AtomicBool,
 }
@@ -112,6 +114,11 @@ impl WorkerProcess for ThreadProcess {
 }
 
 impl Launch for ThreadLaunch {
+    fn launch_with(&self, lowest: bool, gpu: bool) -> io::Result<Worker> {
+        self.n.gpu.lock().push(gpu);
+        self.launch(lowest)
+    }
+
     fn launch(&self, _lowest: bool) -> io::Result<Worker> {
         let started = self.n.started.fetch_add(1, Ordering::SeqCst) + 1;
         let alive = started - self.n.ended.load(Ordering::SeqCst);
@@ -352,4 +359,52 @@ fn unload_without_a_helper_starts_nothing() {
     let f = fx(IDLE_EXIT);
     f.helper.unload();
     assert_eq!(f.n.started.load(Ordering::SeqCst), 0);
+}
+
+// ---------------------------------------------------------------- graphics card
+
+fn gpu_with_card() -> Arc<crate::lyrics::transcribe::gpu::Gpu> {
+    use crate::lyrics::transcribe::gpu::{Device, DeviceKind, Gpu};
+    let g = Gpu::new(Arc::new(|| vec![Device { index: 0, name: "Test GPU".into(), kind: DeviceKind::Discrete, memory: 8 << 30 }]));
+    g.wait(Duration::from_secs(5));
+    g
+}
+
+#[test]
+fn the_helper_gets_the_graphics_card_and_moves_to_the_processor_after_a_crash_on_it() {
+    let rec = Arc::new(Fake::default());
+    let n = Arc::new(Launches::default());
+    let gpu = gpu_with_card();
+    let helper = Helper::new(Arc::new(ThreadLaunch { rec, n: n.clone() }), Arc::new(|| false), Duration::from_secs(60)).with_gpu(gpu.clone());
+    assert!(run(&helper, &[1.0], never()).0.is_ok());
+    assert_eq!(*n.gpu.lock(), vec![true]);
+    // The speech library falls over on the card: that run fails...
+    assert_eq!(run(&helper, &[0.0; 13], never()).0, Err(RecognizeError::Crashed));
+    assert!(gpu.active().is_none(), "the card isn't used again this session");
+    // ...and the next helper runs on the processor.
+    assert!(run(&helper, &[1.0], never()).0.is_ok());
+    assert_eq!(*n.gpu.lock(), vec![true, false]);
+}
+
+#[test]
+fn turning_the_graphics_card_off_starts_a_fresh_helper_on_the_processor() {
+    use crate::lyrics::transcribe::gpu::GpuMode;
+    let rec = Arc::new(Fake::default());
+    let n = Arc::new(Launches::default());
+    let gpu = gpu_with_card();
+    let helper = Helper::new(Arc::new(ThreadLaunch { rec, n: n.clone() }), Arc::new(|| false), Duration::from_secs(60)).with_gpu(gpu.clone());
+    assert!(run(&helper, &[1.0], never()).0.is_ok());
+    assert!(run(&helper, &[1.0], never()).0.is_ok());
+    assert_eq!(*n.gpu.lock(), vec![true], "one helper while nothing changes");
+    gpu.set_mode(GpuMode::Off);
+    assert!(run(&helper, &[1.0], never()).0.is_ok());
+    assert_eq!(*n.gpu.lock(), vec![true, false]);
+    assert_eq!(n.ended.load(Ordering::SeqCst), 1, "the one on the card was stopped");
+}
+
+#[test]
+fn without_a_card_helpers_never_get_the_graphics_card() {
+    let f = fx(Duration::from_secs(60));
+    assert!(run(&f.helper, &[1.0], never()).0.is_ok());
+    assert_eq!(*f.n.gpu.lock(), vec![false]);
 }

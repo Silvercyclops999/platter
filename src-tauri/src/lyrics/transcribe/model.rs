@@ -26,10 +26,25 @@ pub enum ModelKind {
     Small,
     /// Better, about three times slower and bigger.
     Medium,
+    /// Large v3 turbo: the best of the three, made for the graphics card
+    /// (seconds per song there, far too slow on the processor).
+    Turbo,
 }
 
 impl ModelKind {
-    pub const ALL: [ModelKind; 2] = [ModelKind::Small, ModelKind::Medium];
+    /// Smallest first (the lyrics check takes the first one installed).
+    pub const ALL: [ModelKind; 3] = [ModelKind::Small, ModelKind::Medium, ModelKind::Turbo];
+
+    /// The model for someone who hasn't picked one: Turbo with a graphics
+    /// card in use, else Small.
+    pub fn default_for(gpu: bool) -> ModelKind {
+        if gpu { ModelKind::Turbo } else { ModelKind::Small }
+    }
+
+    /// The model used: the one picked in Settings, else the default.
+    pub fn chosen(picked: Option<ModelKind>, gpu: bool) -> ModelKind {
+        picked.unwrap_or_else(|| Self::default_for(gpu))
+    }
 }
 
 /// One downloadable model file.
@@ -46,7 +61,8 @@ pub struct ModelSpec {
 /// The model repository commit the files are pinned to.
 const REPO: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1";
 
-/// English-only Whisper models, quantized (whisper.cpp's ggml format, MIT).
+/// Whisper models, quantized (whisper.cpp's ggml format, MIT): English-only
+/// Small and Medium, and the multilingual Large v3 turbo.
 pub fn catalogue() -> Vec<ModelSpec> {
     let spec = |kind, file: &str, size, sha: &str| ModelSpec {
         kind,
@@ -67,6 +83,12 @@ pub fn catalogue() -> Vec<ModelSpec> {
             "ggml-medium.en-q5_0.bin",
             539_225_533,
             "76733e26ad8fe1c7a5bf7531a9d41917b2adc0f20f2e4f5531688a8c6cd88eb0",
+        ),
+        spec(
+            ModelKind::Turbo,
+            "ggml-large-v3-turbo-q5_0.bin",
+            574_041_195,
+            "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
         ),
     ]
 }

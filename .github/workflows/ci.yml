@@ -18,10 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Linux deps (webview, audio)
+      # Vulkan headers and glslc build transcription on the graphics card.
+      - name: Linux deps (webview, audio, Vulkan)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libssl-dev libvulkan-dev glslc
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -38,19 +39,24 @@ jobs:
       - name: cargo clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
-      # With transcription (whisper.cpp, built with the runner's CMake). The
-      # bindings shipped with whisper-rs are generated on Linux, so they fit
-      # here and libclang isn't needed.
+      # With transcription (whisper.cpp with Vulkan, built with the runner's
+      # CMake). Its bindings are generated with the runner's libclang: the
+      # ones shipped with whisper-rs leave out the Vulkan functions.
       - name: cargo clippy (transcribe)
         working-directory: src-tauri
-        env:
-          WHISPER_DONT_GENERATE_BINDINGS: 1
         run: cargo clippy --all-targets --features transcribe -- -D warnings
       - name: cargo test
         working-directory: src-tauri
-        env:
-          WHISPER_DONT_GENERATE_BINDINGS: 1
         run: cargo test --features transcribe
+      # The app must start without a Vulkan driver: the binary may not need
+      # the loader, and the probe (no graphics card here) finds no card.
+      - name: no Vulkan needed to start
+        working-directory: src-tauri
+        run: |
+          cargo build --features transcribe
+          if readelf -d target/debug/platter | grep -i vulkan; then echo "the binary needs the Vulkan loader"; exit 1; fi
+          PLATTER_SPEECH_GPU=1 target/debug/platter --speech-probe | tee probe.txt
+          grep -qx '\[\]' probe.txt
 
   # The Stream Deck plugin: types, tests, and that it builds and packs.
   streamdeck:

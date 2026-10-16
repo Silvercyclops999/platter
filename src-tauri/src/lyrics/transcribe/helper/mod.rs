@@ -18,6 +18,11 @@
 //! through the transcription helper ([`Helper::priority`]), and a
 //! background song gives way to it, so the medium model is never loaded
 //! twice.
+//!
+//! The transcription helper uses the graphics card while one is in use
+//! ([`Helper::with_gpu`]); the lyrics check then always goes through it, so
+//! only one model sits on the card. A crash while on the card moves
+//! transcription to the processor for the rest of the session.
 
 pub mod proto;
 pub mod worker;
@@ -35,6 +40,7 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 
 use super::engine::{self, Progress, RecognizeError, Recognizer, Stop};
+use super::gpu::Gpu;
 use super::lines::Segment;
 use super::model::ModelKind;
 use proto::{Reply, Request};
@@ -78,9 +84,15 @@ pub struct Worker {
 /// Starts helpers (the real one starts this binary; tests start a thread).
 pub trait Launch: Send + Sync {
     fn launch(&self, lowest: bool) -> io::Result<Worker>;
+    /// `gpu`: the helper may use the graphics card.
+    fn launch_with(&self, lowest: bool, _gpu: bool) -> io::Result<Worker> {
+        self.launch(lowest)
+    }
 }
 
 struct Live {
+    /// Started allowed to use the graphics card.
+    gpu: bool,
     input: Mutex<Box<dyn Write + Send>>,
     output: Box<dyn Read + Send>,
     process: Mutex<Box<dyn WorkerProcess>>,
@@ -113,6 +125,8 @@ pub struct Helper {
     only: Option<ModelKind>,
     /// Priority runs waiting for the helper.
     wanted: AtomicUsize,
+    /// The graphics card, while one is in use.
+    gpu: Arc<Gpu>,
 }
 
 impl Helper {
@@ -125,12 +139,20 @@ impl Helper {
             crashes: AtomicUsize::new(0),
             only: None,
             wanted: AtomicUsize::new(0),
+            gpu: Gpu::none(),
         }
     }
 
     /// This helper only ever loads `kind`; other runs fail before starting it.
     pub fn only(mut self, kind: ModelKind) -> Self {
         self.only = Some(kind);
+        self
+    }
+
+    /// Uses the graphics card while `gpu` has one in use. A crash while on
+    /// it moves transcription to the processor for the session.
+    pub fn with_gpu(mut self, gpu: Arc<Gpu>) -> Self {
+        self.gpu = gpu;
         self
     }
 
@@ -149,6 +171,9 @@ impl Helper {
         let n = self.crashes.fetch_add(1, Ordering::SeqCst) + 1;
         tracing::warn!(crashes = n, "speech helper stopped unexpectedly: {what}");
         if let Some(live) = slot.live.take() {
+            if live.gpu {
+                self.gpu.fail();
+            }
             live.process.lock().kill();
         }
         RecognizeError::Crashed
@@ -188,14 +213,22 @@ impl Helper {
     }
 
     fn start(&self, slot: &mut Slot, lowest: bool) -> Result<(), RecognizeError> {
-        if slot.live.is_some() {
-            return Ok(());
+        let gpu = self.gpu.active().is_some();
+        match &slot.live {
+            Some(l) if l.gpu == gpu => return Ok(()),
+            // The setting changed, or the card failed: a fresh helper.
+            Some(_) => {
+                if let Some(l) = slot.live.take() {
+                    l.stop();
+                }
+            }
+            None => {}
         }
-        let w = self.launch.launch(lowest).map_err(|e| {
+        let w = self.launch.launch_with(lowest, gpu).map_err(|e| {
             tracing::warn!("speech helper didn't start: {e}");
             RecognizeError::Failed(format!("the speech helper didn't start: {e}"))
         })?;
-        let mut live = Live { input: Mutex::new(w.input), output: w.output, process: Mutex::new(w.process) };
+        let mut live = Live { gpu, input: Mutex::new(w.input), output: w.output, process: Mutex::new(w.process) };
         match proto::read_msg::<_, Reply>(&mut live.output) {
             Ok(Some(Reply::Hello { version })) if version == proto::VERSION => {}
             other => {
@@ -364,7 +397,7 @@ enum Ended {
 fn run(live: &mut Live, cancel: &Stop, progress: &Progress) -> Ended {
     let finished = AtomicBool::new(false);
     let killed = AtomicBool::new(false);
-    let Live { input, output, process } = live;
+    let Live { input, output, process, .. } = live;
     std::thread::scope(|s| {
         s.spawn(|| {
             let mut asked: Option<Instant> = None;
@@ -439,8 +472,12 @@ impl WorkerProcess for ChildProcess {
 
 impl Launch for ProcessLaunch {
     fn launch(&self, lowest: bool) -> io::Result<Worker> {
+        self.launch_with(lowest, false)
+    }
+
+    fn launch_with(&self, lowest: bool, gpu: bool) -> io::Result<Worker> {
         let mut cmd = Command::new(&self.exe);
-        cmd.arg(WORKER_FLAG).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.arg(WORKER_FLAG).env(super::gpu::GPU_ENV, if gpu { "1" } else { "0" }).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         crate::platform::cpu::lower_command(&mut cmd, lowest);
         let mut child = cmd.spawn()?;
         crate::platform::cpu::lower_child(&child, lowest);

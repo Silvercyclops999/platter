@@ -339,11 +339,16 @@ fn follow_sync_store(store: &sync::SyncStore, hidden: hidden::Hidden, bookmarks:
 }
 
 /// `platter --speech-worker`: the helper process speech-model work runs in
-/// (lyrics transcription and the lyrics check). Checked first thing in
+/// (lyrics transcription and the lyrics check), and `--speech-probe`, which
+/// lists the graphics cards for it. Checked first thing in
 /// `main`, before anything of the app starts. Returns the exit code.
 pub fn speech_worker(args: &[String]) -> Option<i32> {
-    (args.get(1).map(String::as_str) == Some(lyrics::transcribe::helper::WORKER_FLAG))
-        .then(lyrics::transcribe::helper::worker::main)
+    match args.get(1).map(String::as_str) {
+        Some(lyrics::transcribe::helper::WORKER_FLAG) => Some(lyrics::transcribe::helper::worker::main()),
+        // `platter --speech-probe`: lists the graphics cards and exits.
+        Some(lyrics::transcribe::gpu::PROBE_FLAG) => Some(lyrics::transcribe::gpu::probe_main()),
+        _ => None,
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -992,19 +997,26 @@ pub fn run() {
                 let models = tr::model::ModelStore::new(data_dir.join("models"), tr::model::catalogue(), tr::model::os_free_space());
                 // Threads, the busy check and the breather, shared by both.
                 let pacer = tr::pace::Pacer::new(Arc::new(tr::pace::SystemSignals::default()), tr::pace::Timing::default());
-                // One transcription helper (ends a minute after its last run).
-                // The check has a short lane of its own for the small model,
-                // and uses this one, ahead of background songs, for the
-                // medium model, which is never loaded twice.
+                // The graphics card, looked for once transcription is on.
+                let gpu = tr::gpu::Gpu::for_this_build();
+                gpu.set_mode(initial.transcribe_gpu);
+                // One transcription helper (ends a minute after its last run),
+                // on the graphics card while one is in use.
                 let helper = |idle| {
                     let p = pacer.clone();
                     tr::helper::Helper::new(Arc::new(tr::helper::ProcessLaunch::current()), Arc::new(move || p.light()), idle)
                 };
-                let transcription = Arc::new(helper(tr::helper::IDLE_EXIT));
+                let transcription = Arc::new(helper(tr::helper::IDLE_EXIT).with_gpu(gpu.clone()));
                 let recognizer: Arc<dyn tr::engine::Recognizer> = transcription.clone();
-                let check_shared = transcription.priority();
-                let check_recognizer: Arc<dyn tr::engine::Recognizer> =
-                    Arc::new(helper(tr::helper::CHECK_IDLE_EXIT).only(tr::model::ModelKind::Small));
+                // The check runs ahead of background songs in this helper for
+                // a bigger model (never loaded twice) and for anything on the
+                // graphics card (one model on the card). The small model on
+                // the processor has a short lane of its own.
+                let check_recognizer: Arc<dyn tr::engine::Recognizer> = Arc::new(tr::gpu::CheckRoute {
+                    gpu: gpu.clone(),
+                    own: Arc::new(helper(tr::helper::CHECK_IDLE_EXIT).only(tr::model::ModelKind::Small)),
+                    shared: transcription.priority(),
+                });
                 let songs: Arc<dyn tr::SongReader> = Arc::new(trc::AppSongs {
                     player: player.clone(),
                     audio_dir: audio_dir.clone(),
@@ -1025,6 +1037,8 @@ pub fn run() {
                     conditions: Arc::new(trc::AppConditions),
                     events: Arc::new(app.handle().clone()),
                     pacer: pacer.clone(),
+                    gpu,
+                    speeds: Arc::new(tr::speed::Speeds::load(Some(data_dir.join("models").join("speeds.json")))),
                 });
                 transcriber.set_options(initial.transcribe_lyrics, initial.transcribe_model);
                 transcriber.set_pace(initial.transcribe_processor, initial.transcribe_pause_busy, initial.transcribe_faster_away);
@@ -1037,7 +1051,6 @@ pub fn run() {
                     db: db.clone(),
                     models,
                     recognizer: check_recognizer,
-                    shared: Some(check_shared),
                     audio: Arc::new(lyrics::checker::DecodedSongs(songs)),
                     events: Arc::new(app.handle().clone()),
                     enabled: live.lyrics_check_audio.clone(),

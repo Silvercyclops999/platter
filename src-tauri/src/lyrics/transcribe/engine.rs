@@ -190,14 +190,15 @@ impl Recognizer for Missing {
 #[cfg(feature = "transcribe")]
 pub mod whisper {
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, OnceLock};
 
     use parking_lot::Mutex;
     use whisper_rs::{
         DtwMode, DtwModelPreset, DtwParameters, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
     };
 
+    use super::super::gpu;
     use super::super::lines::Segment;
     use super::super::model::ModelKind;
     use super::{Progress, RawToken, RecognizeError, Recognizer, Step, Stop, unavailable_here, words_from_tokens};
@@ -212,44 +213,38 @@ pub mod whisper {
         match kind {
             ModelKind::Small => DtwModelPreset::SmallEn,
             ModelKind::Medium => DtwModelPreset::MediumEn,
+            ModelKind::Turbo => DtwModelPreset::LargeV3Turbo,
         }
     }
 
-    /// The GPU whisper.cpp picks when asked for one, if this build has one.
-    fn gpu_name() -> Option<String> {
-        use whisper_rs::whisper_rs_sys as sys;
-        // SAFETY: the device registry is static; names are C strings it owns.
-        unsafe {
-            (0..sys::ggml_backend_dev_count()).map(|i| sys::ggml_backend_dev_get(i)).find_map(|dev| {
-                let kind = sys::ggml_backend_dev_type(dev);
-                let gpu = kind == sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU
-                    || kind == sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU;
-                let name = sys::ggml_backend_dev_description(dev);
-                (gpu && !name.is_null()).then(|| std::ffi::CStr::from_ptr(name).to_string_lossy().into_owned())
-            })
-        }
+    /// The graphics card this process may use (Metal on macOS, Vulkan on
+    /// Windows and Linux), looked up once.
+    fn card() -> Option<&'static gpu::Device> {
+        static CARD: OnceLock<Option<gpu::Device>> = OnceLock::new();
+        CARD.get_or_init(|| if gpu::allowed() { gpu::pick(&gpu::list_devices()).cloned() } else { None }).as_ref()
     }
 
     fn load(path: &Path, kind: ModelKind) -> Result<WhisperContext, RecognizeError> {
-        // Metal on macOS (much cooler than the processor); the processor elsewhere.
-        let gpu = if cfg!(target_os = "macos") { gpu_name() } else { None };
-        if let Some(name) = &gpu {
-            match load_on(path, kind, true) {
+        // Much faster and cooler than the processor.
+        if let Some(card) = card() {
+            let api = if cfg!(target_os = "macos") { "Metal" } else { "Vulkan" };
+            match load_on(path, kind, Some(card.index)) {
                 Ok(ctx) => {
-                    tracing::info!("speech model on the GPU ({name})");
+                    tracing::info!("speech model on the graphics card: {} ({api})", card.name);
                     return Ok(ctx);
                 }
-                Err(e) => tracing::warn!("speech model didn't load on the GPU ({name}), using the processor: {e:?}"),
+                Err(e) => tracing::warn!("speech model didn't load on the graphics card ({}), using the processor: {e:?}", card.name),
             }
-        } else if cfg!(target_os = "macos") {
-            tracing::info!("no GPU for speech, using the processor");
         }
-        load_on(path, kind, false)
+        tracing::info!("speech model on the processor");
+        load_on(path, kind, None)
     }
 
-    fn load_on(path: &Path, kind: ModelKind, use_gpu: bool) -> Result<WhisperContext, RecognizeError> {
+    /// `card`: the graphics card's index, or None for the processor.
+    fn load_on(path: &Path, kind: ModelKind, card: Option<usize>) -> Result<WhisperContext, RecognizeError> {
         let p = WhisperContextParameters {
-            use_gpu,
+            use_gpu: card.is_some(),
+            gpu_device: card.unwrap_or(0) as i32,
             // Word times from the attention heads, steadier than token guesses.
             dtw_parameters: DtwParameters { mode: DtwMode::ModelPreset { model_preset: preset(kind) }, ..Default::default() },
             ..Default::default()

@@ -123,6 +123,8 @@ pub fn serve(
 /// The helper process's whole life. Returns the exit code.
 pub fn main() -> i32 {
     let _ = tracing_subscriber::fmt().with_writer(io::stderr).with_ansi(false).with_target(false).try_init();
+    // Before the speech library starts: whether it may use the graphics card.
+    super::super::gpu::allow_from_env();
     let output = protocol_stdout();
     match serve(Box::new(io::stdin()), output, engine::in_process(), &crate::platform::cpu::lower_this_process) {
         Ok(()) => 0,

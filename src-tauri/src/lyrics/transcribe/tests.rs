@@ -239,7 +239,7 @@ fn specs() -> Vec<ModelSpec> {
         size: body.len() as u64,
         sha256: sha256_hex(&body),
     };
-    vec![spec(ModelKind::Small, "small.bin"), spec(ModelKind::Medium, "medium.bin")]
+    vec![spec(ModelKind::Small, "small.bin"), spec(ModelKind::Medium, "medium.bin"), spec(ModelKind::Turbo, "turbo.bin")]
 }
 
 struct Fx {
@@ -254,6 +254,7 @@ struct Fx {
     events: Arc<FakeEvents>,
     load: Arc<FakeLoad>,
     free: Arc<Mutex<Option<u64>>>,
+    gpu: Arc<gpu::Gpu>,
     dir: tempfile::TempDir,
 }
 
@@ -268,15 +269,31 @@ fn words(text: &str, at: u32) -> Segment {
 }
 
 fn fx_with(fetch: Arc<FakeFetch>) -> Fx {
-    fx_build(fetch, None)
+    fx_build(fetch, None, gpu::Gpu::none())
 }
 
 /// With another recognizer (a fake helper process).
 fn fx_rec(rec: Arc<dyn Recognizer>) -> Fx {
-    fx_build(FakeFetch::new(model_body()), Some(rec))
+    fx_build(FakeFetch::new(model_body()), Some(rec), gpu::Gpu::none())
 }
 
-fn fx_build(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>) -> Fx {
+/// A computer with these graphics cards.
+fn fx_gpu(cards: Vec<gpu::Device>) -> Fx {
+    fx_build(FakeFetch::new(model_body()), None, gpu_with(cards))
+}
+
+fn gpu_with(cards: Vec<gpu::Device>) -> Arc<gpu::Gpu> {
+    let g = gpu::Gpu::new(Arc::new(move || cards.clone()));
+    g.wait(Duration::from_secs(5));
+    g
+}
+
+fn card(name: &str, kind: gpu::DeviceKind) -> gpu::Device {
+    gpu::Device { index: 0, name: name.into(), kind, memory: 8 << 30 }
+}
+
+/// `over`: another recognizer; `gpu`: the graphics cards found.
+fn fx_build(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<gpu::Gpu>) -> Fx {
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("t.db")).unwrap();
     db.write(|c| {
@@ -319,10 +336,12 @@ fn fx_build(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>) -> Fx {
         events: events.clone(),
         // A 16-thread computer: Light is 2 threads in the background, 4 for a song asked for.
         pacer: pace::Pacer::with_cores(load.clone(), pace::fake::timing(), 16),
+        gpu: gpu.clone(),
+        speeds: Arc::new(speed::Speeds::load(Some(dir.path().join("speeds.json")))),
     });
-    t.set_options(true, ModelKind::Small);
+    t.set_options(true, Some(ModelKind::Small));
     t.spawn();
-    Fx { t, db, models, fetch, rec, songs, other, cond, events, load, free, dir }
+    Fx { t, db, models, fetch, rec, songs, other, cond, events, load, free, gpu, dir }
 }
 
 fn fx() -> Fx {
@@ -356,7 +375,7 @@ async fn install(f: &Fx) {
 async fn model_downloads_with_progress_and_is_verified() {
     let f = fx();
     let s = f.t.status();
-    assert_eq!(s.models.len(), 2);
+    assert_eq!(s.models.len(), 3);
     assert_eq!(s.models[0].size_bytes, MODEL_BYTES as u64, "the size is known before downloading");
     assert!(!s.models[0].installed);
     install(&f).await;
@@ -821,7 +840,7 @@ async fn cancel_stops_the_running_song_and_turning_off_clears_the_queue() {
     f.t.cancel(Some("801"));
     let s = until(&f.t, "next song", |s| s.current.as_ref().is_some_and(|c| c.track_id == "802" && c.stage == Stage::Transcribing)).await;
     assert_eq!(s.queued, 1);
-    f.t.set_options(false, ModelKind::Small);
+    f.t.set_options(false, Some(ModelKind::Small));
     let s = until(&f.t, "stopped", idle).await;
     assert!(!s.enabled);
     assert!(f.events.done.lock().is_empty());
@@ -1241,6 +1260,114 @@ async fn cancel_of_a_queued_song_leaves_the_running_one() {
     assert_eq!(done, vec!["501", "801"]);
 }
 
+// ---------------------------------------------------------------- graphics card
+
+async fn install_kind(f: &Fx, kind: ModelKind) {
+    f.t.download_model(kind).unwrap();
+    until(&f.t, "model", |s| s.models.iter().any(|m| m.kind == kind && m.installed && !m.downloading)).await;
+}
+
+#[tokio::test]
+async fn with_a_graphics_card_new_users_get_turbo_and_settings_name_the_card() {
+    let f = fx_gpu(vec![card("RTX 5090", gpu::DeviceKind::Discrete)]);
+    f.t.set_options(true, None);
+    let s = f.t.status();
+    assert_eq!((s.model, s.model_picked), (ModelKind::Turbo, false));
+    assert_eq!(s.gpu.as_deref(), Some("RTX 5090"));
+    // A model someone picked stays.
+    f.t.set_options(true, Some(ModelKind::Small));
+    let s = f.t.status();
+    assert_eq!((s.model, s.model_picked), (ModelKind::Small, true));
+    // "Use the graphics card" Off: the processor, and Small by default.
+    f.t.set_options(true, None);
+    f.t.set_gpu(gpu::GpuMode::Off);
+    let s = f.t.status();
+    assert_eq!((s.model, s.gpu.as_deref(), s.gpu_found.as_deref()), (ModelKind::Small, None, Some("RTX 5090")));
+    // A failure on the card this session: the processor too.
+    f.t.set_gpu(gpu::GpuMode::Auto);
+    assert_eq!(f.t.status().model, ModelKind::Turbo);
+    f.gpu.fail();
+    assert_eq!((f.t.status().model, f.t.status().gpu), (ModelKind::Small, None));
+}
+
+#[tokio::test]
+async fn without_a_graphics_card_small_stays_the_default_and_every_model_is_offered() {
+    let f = fx();
+    f.t.set_options(true, None);
+    let s = f.t.status();
+    assert_eq!((s.model, s.gpu, s.gpu_found), (ModelKind::Small, None, None));
+    assert_eq!(s.models.iter().map(|m| m.kind).collect::<Vec<_>>(), ModelKind::ALL.to_vec());
+    assert_eq!(ModelKind::ALL[0], ModelKind::Small, "the lyrics check takes the smallest first");
+}
+
+#[tokio::test]
+async fn on_the_graphics_card_a_song_uses_one_or_two_processor_threads() {
+    let f = fx_gpu(vec![card("Radeon Graphics", gpu::DeviceKind::Integrated)]);
+    f.t.set_options(true, None);
+    install_kind(&f, ModelKind::Turbo).await;
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 1, "Light");
+    f.t.set_pace(pace::ProcessorUse::Fast, true, true);
+    f.t.transcribe_track("502").unwrap();
+    until(&f.t, "502 done", |_| f.events.done.lock().iter().any(|d| d.0 == "502")).await;
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 2, "Fast, still only feeding the card");
+    let own = f.db.read(|c| user::get(c, "502")).unwrap().unwrap();
+    assert_eq!(own.auto.as_deref(), Some("turbo"));
+}
+
+#[tokio::test]
+async fn work_on_the_graphics_card_still_pauses_for_a_fullscreen_game() {
+    let f = fx_gpu(vec![card("RTX 5090", gpu::DeviceKind::Discrete)]);
+    f.t.set_options(true, None);
+    install_kind(&f, ModelKind::Turbo).await;
+    f.load.in_front.store(true, Ordering::SeqCst);
+    f.t.transcribe_album("80").await.unwrap();
+    until(&f.t, "paused", |s| s.paused == Some(PauseReason::Busy)).await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0);
+    f.load.in_front.store(false, Ordering::SeqCst);
+    until(&f.t, "album done", |s| idle(s) && f.events.done.lock().len() == 3).await;
+}
+
+#[tokio::test]
+async fn the_model_picker_shows_the_speed_measured_on_the_device_in_use() {
+    let f = fx_gpu(vec![card("RTX 5090", gpu::DeviceKind::Discrete)]);
+    let speeds = &f.t.inner.deps.speeds;
+    // Ten seconds for a 210 s song on the card; four minutes for Small on the processor.
+    speeds.record(ModelKind::Turbo, true, 210.0, Duration::from_secs(10));
+    speeds.record(ModelKind::Small, false, 210.0, Duration::from_secs(240));
+    let by_kind = |s: &TranscribeStatus, k| s.models.iter().find(|m| m.kind == k).unwrap().secs_per_song;
+    let s = f.t.status();
+    assert_eq!((by_kind(&s, ModelKind::Turbo), by_kind(&s, ModelKind::Small)), (Some(10), None));
+    f.t.set_gpu(gpu::GpuMode::Off);
+    let s = f.t.status();
+    assert_eq!((by_kind(&s, ModelKind::Turbo), by_kind(&s, ModelKind::Small)), (None, Some(240)));
+    // Kept on disk for next time.
+    let again = speed::Speeds::load(Some(f.dir.path().join("speeds.json")));
+    assert_eq!(again.secs_per_song(ModelKind::Turbo, true), Some(10));
+}
+
+#[test]
+fn speeds_follow_the_latest_runs_and_skip_short_ones() {
+    let s = speed::Speeds::load(None);
+    s.record(ModelKind::Small, false, 10.0, Duration::from_secs(60));
+    assert_eq!(s.secs_per_song(ModelKind::Small, false), None, "a check's short window doesn't count");
+    s.record(ModelKind::Small, false, 210.0, Duration::from_secs(100));
+    assert_eq!(s.secs_per_song(ModelKind::Small, false), Some(100));
+    s.record(ModelKind::Small, false, 210.0, Duration::from_secs(200));
+    assert_eq!(s.secs_per_song(ModelKind::Small, false), Some(130), "leaning on the newest run");
+}
+
+#[test]
+fn the_default_model_follows_the_graphics_card() {
+    assert_eq!(ModelKind::chosen(None, true), ModelKind::Turbo);
+    assert_eq!(ModelKind::chosen(None, false), ModelKind::Small);
+    assert_eq!(ModelKind::chosen(Some(ModelKind::Medium), true), ModelKind::Medium);
+    assert_eq!(pace::gpu_thread_budget(16, pace::ProcessorUse::Light), 1);
+    assert_eq!(pace::gpu_thread_budget(16, pace::ProcessorUse::Balanced), 2);
+    assert_eq!(pace::gpu_thread_budget(2, pace::ProcessorUse::Fast), 1, "never more than half the cores");
+}
+
 // ---------------------------------------------------------------- real model
 
 /// A real run, for timing. Needs the `transcribe` feature, a model file and
@@ -1253,7 +1380,15 @@ async fn cancel_of_a_queued_song_leaves_the_running_one() {
 fn real_model_speed() {
     let model = std::env::var("PLATTER_WHISPER_MODEL").expect("PLATTER_WHISPER_MODEL");
     let clip = std::env::var("PLATTER_TEST_AUDIO").expect("PLATTER_TEST_AUDIO");
-    let kind = if model.contains("medium") { ModelKind::Medium } else { ModelKind::Small };
+    // PLATTER_SPEECH_GPU=1 runs it on the graphics card.
+    gpu::allow_from_env();
+    let kind = if model.contains("turbo") {
+        ModelKind::Turbo
+    } else if model.contains("medium") {
+        ModelKind::Medium
+    } else {
+        ModelKind::Small
+    };
     let threads: usize = std::env::var("PLATTER_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(4);
     let never = AtomicBool::new(false);
     let pcm = audio::to_16k_mono(std::fs::read(&clip).unwrap(), None, &never).unwrap();

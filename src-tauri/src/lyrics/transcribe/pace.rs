@@ -47,6 +47,13 @@ pub fn thread_budget(cores: usize, usage: ProcessorUse, now: bool) -> usize {
     want.clamp(1, half)
 }
 
+/// Threads for a run on the graphics card, where the processor only feeds
+/// it: one on Light, two otherwise (never more than half the cores).
+pub fn gpu_thread_budget(cores: usize, usage: ProcessorUse) -> usize {
+    let want = if usage == ProcessorUse::Light { 1 } else { 2 };
+    want.clamp(1, (cores / 2).max(1))
+}
+
 /// Logical cores on this computer.
 pub fn cores() -> usize {
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
@@ -312,6 +319,11 @@ impl Pacer {
         }
         let away = n.max(thread_budget(self.cores, ProcessorUse::Balanced, false));
         (away, away > n)
+    }
+
+    /// Threads for a run on the graphics card.
+    pub fn gpu_threads(&self) -> usize {
+        gpu_thread_budget(self.cores, self.opts.lock().usage)
     }
 
     /// Threads for a lyrics check (a 30 s window): two, within half the cores.

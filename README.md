@@ -179,7 +179,11 @@ build works the same, and Settings says Discord status isn't available.
 
 Lyrics transcription (whisper.cpp) is the `transcribe` Cargo feature, which
 release builds turn on: `npm run tauri build -- --features transcribe`. It
-needs CMake, and on Windows also LLVM (for libclang). On macOS and Linux,
+needs CMake and libclang (LLVM on Windows). On Windows and Linux it also runs
+on the graphics card with Vulkan, so building needs the Vulkan headers and
+`glslc`: the LunarG Vulkan SDK on Windows (with `VULKAN_SDK` set), and
+`libvulkan-dev` and `glslc` on Debian and Ubuntu. People using Platter need
+only their graphics driver; without one it uses the processor. On macOS,
 setting `WHISPER_DONT_GENERATE_BINDINGS=1` skips the libclang step. Without
 the feature everything else builds the same, and Settings says transcription
 isn't in this build.

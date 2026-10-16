@@ -127,6 +127,7 @@ pub async fn transcribe_track(t: State<'_, Transcriber>, track_id: String) -> Ap
     if !crate::lyrics::user::valid_track_id(&track_id) {
         return Err(AppError::Invalid("track id".into()));
     }
+    t.settle_gpu().await;
     t.transcribe_track(&track_id)
 }
 

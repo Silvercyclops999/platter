@@ -157,11 +157,9 @@ pub type NoneMatched = Arc<dyn Fn(&str) + Send + Sync>;
 pub struct CheckerDeps {
     pub db: DbHandle,
     pub models: ModelStore,
-    /// The check's own lane (the small model).
+    /// Runs the check's windows (the app picks the helper lane for the
+    /// model and device: [`crate::lyrics::transcribe::gpu::CheckRoute`]).
     pub recognizer: Arc<dyn Recognizer>,
-    /// Transcription's helper, for checks with the medium model (none:
-    /// `recognizer` runs those too).
-    pub shared: Option<Arc<dyn Recognizer>>,
     pub audio: Arc<dyn SongPcm>,
     pub events: Arc<dyn CheckEvents>,
     /// "Check lyrics against the song".
@@ -560,10 +558,7 @@ impl Checker {
             Vec::new()
         } else {
             self.set(&job.track_id, CheckState::Listening, None);
-            let rec = match (&d.shared, kind) {
-                (Some(shared), ModelKind::Medium) => shared.clone(),
-                _ => d.recognizer.clone(),
-            };
+            let rec = d.recognizer.clone();
             let model = model.to_path_buf();
             let threads = d.pacer.check_threads();
             let _running = d.pacer.checking();

@@ -12,6 +12,8 @@
 //! - [`audio`]  reading the whole file behind playback, decoding to 16 kHz mono
 //! - [`engine`] the recognizer (whisper.cpp in builds with `transcribe`)
 //! - [`helper`] the helper process the recognizer runs in
+//! - [`gpu`]    the graphics card: finding one, the setting, the check's route
+//! - [`speed`]  how fast each model has been here, per device
 //! - [`pace`]   threads, the busy pause and the breather between songs
 //! - [`lines`]  timed words to lyric lines and LRC
 //! - [`store`]  the `lyrics_auto` table
@@ -20,10 +22,12 @@
 pub mod audio;
 pub mod commands;
 pub mod engine;
+pub mod gpu;
 pub mod helper;
 pub mod lines;
 pub mod model;
 pub mod pace;
+pub mod speed;
 pub mod store;
 
 #[cfg(test)]
@@ -98,6 +102,9 @@ pub struct ModelInfo {
     pub downloading: bool,
     /// Bytes downloaded so far (while downloading).
     pub done_bytes: u64,
+    /// About how long a song took here lately, on the device used now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secs_per_song: Option<u32>,
 }
 
 /// Where the song being worked on is.
@@ -146,8 +153,16 @@ pub struct TranscribeStatus {
     pub available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unavailable_reason: Option<String>,
-    /// The chosen model.
+    /// The model used: the one picked, else the default for this computer.
     pub model: ModelKind,
+    /// A model was picked in Settings (else the default is used).
+    pub model_picked: bool,
+    /// The graphics card transcription uses, by name (None: the processor).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<String>,
+    /// A usable graphics card on this computer, used or not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_found: Option<String>,
     pub models: Vec<ModelInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current: Option<CurrentJob>,
@@ -238,7 +253,8 @@ struct Running {
 #[derive(Default)]
 struct State {
     enabled: bool,
-    model: ModelKind,
+    /// Picked in Settings (None: the default for this computer).
+    model: Option<ModelKind>,
     queue: VecDeque<Job>,
     current: Option<Running>,
     batch: BatchProgress,
@@ -271,6 +287,10 @@ pub struct Deps {
     pub events: Arc<dyn TranscribeEvents>,
     /// Threads, the busy check and the breather (shared with the lyrics check).
     pub pacer: Arc<pace::Pacer>,
+    /// The graphics card (shared with the lyrics check and the helper).
+    pub gpu: Arc<gpu::Gpu>,
+    /// How fast each model has been here.
+    pub speeds: Arc<speed::Speeds>,
 }
 
 struct Inner {
@@ -290,6 +310,7 @@ fn model_name(kind: ModelKind) -> &'static str {
     match kind {
         ModelKind::Small => "small",
         ModelKind::Medium => "medium",
+        ModelKind::Turbo => "turbo",
     }
 }
 
@@ -299,9 +320,45 @@ fn mb(bytes: u64) -> u64 {
 
 impl Transcriber {
     pub fn new(deps: Deps) -> Self {
-        Self {
+        let me = Self {
             inner: Arc::new(Inner { deps, st: Mutex::new(State::default()), wake: Notify::new(), shared: Default::default() }),
+        };
+        // Once the card is known (or fails), the default model and Settings follow.
+        let weak = Arc::downgrade(&me.inner);
+        me.inner.deps.gpu.on_found(Arc::new(move || {
+            if let Some(inner) = weak.upgrade() {
+                let t = Transcriber { inner };
+                t.inner.wake.notify_one();
+                t.emit(true);
+            }
+        }));
+        me
+    }
+
+    /// The model used now.
+    fn model(&self, st: &State) -> ModelKind {
+        ModelKind::chosen(st.model, self.inner.deps.gpu.active().is_some())
+    }
+
+    /// Settings: "Use the graphics card".
+    pub fn set_gpu(&self, mode: gpu::GpuMode) {
+        let d = &self.inner.deps;
+        if d.gpu.mode() == mode {
+            return;
         }
+        d.gpu.set_mode(mode);
+        self.inner.wake.notify_one();
+        self.emit(true);
+    }
+
+    /// Waits (a little) for the graphics card to be known, so the default
+    /// model fits this computer before a download starts.
+    pub async fn settle_gpu(&self) {
+        let g = self.inner.deps.gpu.clone();
+        if g.known() || g.mode() == gpu::GpuMode::Off {
+            return;
+        }
+        let _ = tokio::task::spawn_blocking(move || g.wait(Duration::from_secs(25))).await;
     }
 
     /// Connect results from the user's other devices.
@@ -321,7 +378,7 @@ impl Transcriber {
 
     /// Settings: the switch and the chosen model. Turning it off stops
     /// everything (queue, current song, a download).
-    pub fn set_options(&self, enabled: bool, model: ModelKind) {
+    pub fn set_options(&self, enabled: bool, model: Option<ModelKind>) {
         {
             let mut st = self.inner.st.lock();
             let changed = st.enabled != enabled || st.model != model;
@@ -359,7 +416,13 @@ impl Transcriber {
 
     pub fn status(&self) -> TranscribeStatus {
         let reason = self.inner.deps.recognizer.unavailable();
+        let d = &self.inner.deps;
         let st = self.inner.st.lock();
+        if st.enabled && reason.is_none() {
+            d.gpu.look();
+        }
+        let card = d.gpu.active();
+        let on_gpu = card.is_some();
         let models = ModelKind::ALL
             .iter()
             .filter_map(|k| self.inner.deps.models.spec(*k).map(|s| (k, s)))
@@ -371,6 +434,7 @@ impl Transcriber {
                     installed: self.inner.deps.models.installed(*k).is_some(),
                     downloading: dl.is_some(),
                     done_bytes: dl.map_or(0, |d| d.done),
+                    secs_per_song: d.speeds.secs_per_song(*k, on_gpu),
                 }
             })
             .collect();
@@ -378,7 +442,10 @@ impl Transcriber {
             enabled: st.enabled,
             available: reason.is_none(),
             unavailable_reason: reason,
-            model: st.model,
+            model: ModelKind::chosen(st.model, on_gpu),
+            model_picked: st.model.is_some(),
+            gpu: card.map(|c| c.name),
+            gpu_found: d.gpu.device().map(|c| c.name),
             models,
             current: st.current.as_ref().map(|r| {
                 let quiet = r.moved.elapsed();
@@ -539,7 +606,7 @@ impl Transcriber {
             if st.download.as_ref().is_some_and(|d| d.kind == kind) {
                 return Err(AppError::Invalid("Cancel the download first.".into()));
             }
-            if st.current.is_some() && st.model == kind {
+            if st.current.is_some() && self.model(&st) == kind {
                 return Err(AppError::Invalid("Cancel transcription first.".into()));
             }
         }
@@ -557,10 +624,10 @@ impl Transcriber {
         if front { self.check_usable()? } else { self.check_background()? }
         let start_download = {
             let st = self.inner.st.lock();
-            self.inner.deps.models.installed(st.model).is_none() && st.download.is_none()
+            self.inner.deps.models.installed(self.model(&st)).is_none() && st.download.is_none()
         };
         if start_download {
-            let model = self.inner.st.lock().model;
+            let model = self.model(&self.inner.st.lock());
             self.download_model(model)?;
         }
         let added = {
@@ -613,7 +680,7 @@ impl Transcriber {
     pub fn transcribe_quietly(&self, track_id: &str) {
         let ready = {
             let st = self.inner.st.lock();
-            st.enabled && self.inner.deps.models.installed(st.model).is_some()
+            st.enabled && self.inner.deps.models.installed(self.model(&st)).is_some()
         };
         let rec = &self.inner.deps.recognizer;
         if ready && rec.unavailable().is_none() && !rec.crashed_too_often() {
@@ -624,6 +691,7 @@ impl Transcriber {
     /// An album's songs without lyrics.
     pub async fn transcribe_album(&self, album_id: &str) -> AppResult<usize> {
         self.check_background()?;
+        self.settle_gpu().await;
         let id = album_id.to_owned();
         let ids = self
             .inner
@@ -646,6 +714,7 @@ impl Transcriber {
     /// Every unreleased song without lyrics, in the background.
     pub async fn transcribe_unreleased(&self) -> AppResult<usize> {
         self.check_background()?;
+        self.settle_gpu().await;
         let ids = self.inner.deps.db.read_async(store::unreleased_todo).await?;
         self.enqueue(ids, true, true, false)
     }
@@ -943,7 +1012,7 @@ impl Transcriber {
             }
             let (kind, downloading) = {
                 let st = self.inner.st.lock();
-                (st.model, st.download.is_some())
+                (self.model(&st), st.download.is_some())
             };
             if let Some(p) = d.models.installed(kind) {
                 break (p, kind);
@@ -986,8 +1055,10 @@ impl Transcriber {
         };
         self.set_stage(Stage::Transcribing, 0);
         // More threads because nobody's at the computer: back to fewer the
-        // moment someone is (the song starts again).
-        let (threads, boost) = d.pacer.threads_boosted(job.now);
+        // moment someone is (the song starts again). On the graphics card
+        // the processor only feeds it: one or two threads.
+        let on_gpu = d.gpu.active().is_some();
+        let (threads, boost) = if on_gpu { (d.pacer.gpu_threads(), false) } else { d.pacer.threads_boosted(job.now) };
         boosted.store(boost, Ordering::Relaxed);
         let started = Instant::now();
         let seconds = pcm.len() / audio::RATE as usize;
@@ -1000,7 +1071,10 @@ impl Transcriber {
                 .await
         };
         let segments = match res {
-            Ok(Ok(s)) => s,
+            Ok(Ok(s)) => {
+                d.speeds.record(kind, on_gpu, pcm.len() as f64 / audio::RATE as f64, started.elapsed());
+                s
+            }
             Ok(Err(RecognizeError::Cancelled)) => {
                 // Stopped for a song asked for: keep the audio for later.
                 if !job.now {
@@ -1102,6 +1176,7 @@ impl Transcriber {
             threads,
             lines = found_lines.len(),
             model = model_name(kind),
+            gpu = self.inner.deps.gpu.active().is_some(),
             "song transcribed"
         );
         let saved = {

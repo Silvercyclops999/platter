@@ -17,6 +17,10 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+env:
+  # The LunarG Vulkan SDK the Windows build compiles against.
+  VULKAN_VERSION: 1.4.313.2
+
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -24,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libssl-dev libvulkan-dev glslc
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - uses: dtolnay/rust-toolchain@stable
@@ -37,8 +41,6 @@ jobs:
         working-directory: streamdeck
         run: npm ci && npm run typecheck && npm test
       - working-directory: src-tauri
-        env:
-          WHISPER_DONT_GENERATE_BINDINGS: 1
         run: cargo clippy --all-targets --features transcribe -- -D warnings && cargo test --features transcribe
 
   build:
@@ -76,8 +78,27 @@ jobs:
         run: npm ci && npm run pack
       # Transcription builds whisper.cpp with the runner's CMake. On Windows
       # its bindings are generated with the runner's LLVM (the shipped ones
-      # are for 64-bit long, which Windows doesn't have); macOS can use the
-      # shipped ones.
+      # are for 64-bit long, which Windows doesn't have, and leave out
+      # Vulkan); macOS can use the shipped ones. Windows builds the Vulkan
+      # backend with the LunarG SDK (headers, glslc and the import library);
+      # the app itself doesn't need the SDK, only a graphics driver.
+      - if: matrix.platform == 'windows-latest'
+        id: vulkan-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\VulkanSDK
+          key: vulkan-sdk-${{ env.VULKAN_VERSION }}-windows
+      - if: matrix.platform == 'windows-latest' && steps.vulkan-cache.outputs.cache-hit != 'true'
+        name: Install the Vulkan SDK
+        shell: pwsh
+        run: |
+          curl.exe -fsSL -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --root "C:\VulkanSDK\$env:VULKAN_VERSION" --accept-licenses --default-answer --confirm-command install
+      - if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_VERSION"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\$env:VULKAN_VERSION\Bin"
       - if: matrix.platform == 'macos-latest'
         run: |
           echo "WHISPER_DONT_GENERATE_BINDINGS=1" >> "$GITHUB_ENV"

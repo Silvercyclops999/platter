@@ -458,7 +458,6 @@ fn fx() -> Fx {
         db: db.clone(),
         models: ModelStore::new(models.clone(), specs, Arc::new(|_: &Path| Some(u64::MAX))),
         recognizer: rec.clone(),
-        shared: None,
         audio: pcm.clone(),
         events: events.clone(),
         enabled: check_on.clone(),

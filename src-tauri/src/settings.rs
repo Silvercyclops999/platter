@@ -415,8 +415,12 @@ pub struct Settings {
     pub drag_and_drop: bool,
     /// Transcribe songs without lyrics on this computer (this device only).
     pub transcribe_lyrics: bool,
-    /// The speech model transcription uses (this device only).
-    pub transcribe_model: crate::lyrics::transcribe::model::ModelKind,
+    /// The speech model transcription uses (this device only). None: the
+    /// default for this computer (Turbo on a graphics card, else Small).
+    pub transcribe_model: Option<crate::lyrics::transcribe::model::ModelKind>,
+    /// Speech-model work on the graphics card when there's a usable one
+    /// (this device only).
+    pub transcribe_gpu: crate::lyrics::transcribe::gpu::GpuMode,
     /// How hard speech-model work may use the processor (this device only).
     pub transcribe_processor: crate::lyrics::transcribe::pace::ProcessorUse,
     /// Background speech work waits while other programs keep the processor
@@ -835,7 +839,8 @@ impl Default for Settings {
             plex_edit_match_unreleased: true,
             drag_and_drop: true,
             transcribe_lyrics: false,
-            transcribe_model: Default::default(),
+            transcribe_model: None,
+            transcribe_gpu: Default::default(),
             transcribe_processor: Default::default(),
             transcribe_pause_busy: true,
             transcribe_faster_away: true,
@@ -1129,6 +1134,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "readFileTags",
     "transcribeLyrics",
     "transcribeModel",
+    "transcribeGpu",
     "transcribeProcessor",
     "transcribePauseBusy",
     "transcribeFasterAway",
@@ -1273,6 +1279,7 @@ pub struct SettingsPatch {
     pub drag_and_drop: Option<bool>,
     pub transcribe_lyrics: Option<bool>,
     pub transcribe_model: Option<crate::lyrics::transcribe::model::ModelKind>,
+    pub transcribe_gpu: Option<crate::lyrics::transcribe::gpu::GpuMode>,
     pub transcribe_processor: Option<crate::lyrics::transcribe::pace::ProcessorUse>,
     pub transcribe_pause_busy: Option<bool>,
     pub transcribe_faster_away: Option<bool>,
@@ -1549,7 +1556,8 @@ impl Settings {
         set(&mut self.plex_edit_match_unreleased, p.plex_edit_match_unreleased);
         set(&mut self.drag_and_drop, p.drag_and_drop);
         set(&mut self.transcribe_lyrics, p.transcribe_lyrics);
-        set(&mut self.transcribe_model, p.transcribe_model);
+        set(&mut self.transcribe_model, p.transcribe_model.map(Some));
+        set(&mut self.transcribe_gpu, p.transcribe_gpu);
         set(&mut self.transcribe_processor, p.transcribe_processor);
         set(&mut self.transcribe_pause_busy, p.transcribe_pause_busy);
         set(&mut self.transcribe_faster_away, p.transcribe_faster_away);
@@ -2093,6 +2101,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.lyrics_fix_timing.store(s.lyrics_fix_timing, Ordering::Relaxed);
     live.lyrics_released_ok.store(s.lyrics_released_for_versions, Ordering::Relaxed);
     if let Some(t) = live.transcriber.lock().as_ref() {
+        t.set_gpu(s.transcribe_gpu);
         t.set_options(s.transcribe_lyrics, s.transcribe_model);
         t.set_pace(s.transcribe_processor, s.transcribe_pause_busy, s.transcribe_faster_away);
     }
@@ -2510,7 +2519,9 @@ mod tests {
         assert!(!s.transcribe_lyrics && s.show_auto_lyrics);
         // Transcriptions sync and the share offer is on (asking every time); unreleased songs aren't offered.
         assert!(s.sync_transcriptions && s.share_transcriptions && !s.share_transcriptions_unreleased);
-        assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Small);
+        // No model picked: the default follows the graphics card; Auto uses it.
+        assert_eq!(s.transcribe_model, None);
+        assert_eq!(s.transcribe_gpu, crate::lyrics::transcribe::gpu::GpuMode::Auto);
         assert_eq!(s.transcribe_processor, crate::lyrics::transcribe::pace::ProcessorUse::Light);
         assert!(s.transcribe_pause_busy && s.transcribe_faster_away);
         assert_eq!(s.explicit_content, ExplicitContent::Allowed);
@@ -3102,6 +3113,7 @@ mod tests {
             drag_and_drop: Some(false),
             transcribe_lyrics: Some(true),
             transcribe_model: Some(crate::lyrics::transcribe::model::ModelKind::Medium),
+            transcribe_gpu: Some(crate::lyrics::transcribe::gpu::GpuMode::Off),
             transcribe_processor: Some(crate::lyrics::transcribe::pace::ProcessorUse::Balanced),
             transcribe_pause_busy: Some(false),
             transcribe_faster_away: Some(false),
@@ -3207,7 +3219,8 @@ mod tests {
         assert!(s.private_session);
         assert!(s.report_plays);
         assert!(s.transcribe_lyrics && !s.show_auto_lyrics);
-        assert_eq!(s.transcribe_model, crate::lyrics::transcribe::model::ModelKind::Medium);
+        assert_eq!(s.transcribe_model, Some(crate::lyrics::transcribe::model::ModelKind::Medium));
+        assert_eq!(s.transcribe_gpu, crate::lyrics::transcribe::gpu::GpuMode::Off);
         assert_eq!(s.transcribe_processor, crate::lyrics::transcribe::pace::ProcessorUse::Balanced);
         assert!(!s.transcribe_pause_busy && !s.transcribe_faster_away);
         assert!(!s.sync_transcriptions && !s.share_transcriptions && s.share_transcriptions_unreleased);
