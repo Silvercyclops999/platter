@@ -9,12 +9,16 @@
 //! - [`editor`] opening and saving files, Plex rescans, the tag cache
 //! - [`plexside`] folder rescans and the Plex library settings check
 //! - [`check`]  the tag check rules, each with why it matters
+//! - [`fixes`]  one-click fixes: preview, apply through the editor, undo
+//! - [`lookup`] free catalogues for ISRCs (MusicBrainz, then Deezer)
 //! - [`undo`]   the last 20 edits with what they replaced
 
 pub mod check;
 pub mod doc;
 pub mod editor;
 pub mod fields;
+pub mod fixes;
+pub mod lookup;
 pub mod paths;
 pub mod plexside;
 pub mod undo;
@@ -24,6 +28,8 @@ pub mod write;
 mod check_tests;
 #[cfg(test)]
 mod editor_tests;
+#[cfg(test)]
+mod fixes_tests;
 #[cfg(test)]
 mod paths_tests;
 #[cfg(test)]

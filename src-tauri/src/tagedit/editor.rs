@@ -248,6 +248,7 @@ pub struct TagEditor {
     hooks: Arc<dyn Hooks>,
     log: Arc<Mutex<UndoLog>>,
     options: RwLock<Options>,
+    catalog: RwLock<Arc<dyn super::lookup::Catalog>>,
 }
 
 fn file_name(p: &str) -> String {
@@ -276,11 +277,23 @@ pub const NEEDS_FOLDER: &str = "Set up the music folder in Settings, Library to 
 
 impl TagEditor {
     pub fn new(db: DbHandle, plex: Arc<dyn PlexSide>, hooks: Arc<dyn Hooks>, log_path: Option<std::path::PathBuf>) -> Self {
-        Self { db, plex, hooks, log: Arc::new(Mutex::new(UndoLog::open(log_path))), options: RwLock::new(Options::default()) }
+        Self { db, plex, hooks, log: Arc::new(Mutex::new(UndoLog::open(log_path))),
+            options: RwLock::new(Options::default()),
+            catalog: RwLock::new(Arc::new(super::lookup::WebCatalog::new())),
+        }
     }
 
     pub fn set_options(&self, o: Options) {
         *self.options.write() = o;
+    }
+
+    /// Where ISRCs are looked up (tests use a fake).
+    pub fn set_catalog(&self, c: Arc<dyn super::lookup::Catalog>) {
+        *self.catalog.write() = c;
+    }
+
+    pub fn catalog(&self) -> Arc<dyn super::lookup::Catalog> {
+        self.catalog.read().clone()
     }
 
     pub fn options(&self) -> Options {
