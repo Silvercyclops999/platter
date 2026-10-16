@@ -19,7 +19,7 @@ writing tag code. The forum thread that originally documented it is gone.
 | Year | DATE | TDRC | Album-level in Plex, so keep it identical across the album |
 | Genre | GENRE | TCON | Album-level in Plex |
 | Release type | RELEASETYPE | MusicBrainz Album Type (Mp3tag RELEASETYPE) | `album`, `ep`, `single`, `album;live`, `album;compilation`, `album;soundtrack`, `album;remix`, `album;demo`. Secondary types need both parts |
-| MusicBrainz IDs | MUSICBRAINZ_ALBUMID, MUSICBRAINZ_TRACKID, … | MusicBrainz TXXX fields | Used for matching, Lidarr, Spotify import |
+| MusicBrainz IDs | MUSICBRAINZ_ALBUMID, MUSICBRAINZ_TRACKID, … | MusicBrainz TXXX fields | Used for matching, Lidarr, library import |
 | Cover art | Embedded or `cover.jpg` in album folder | Same | Artist photo: `artist-poster.jpg` in artist folder |
 | Lyrics | Sidecar `.lrc` (synced) or `.txt`, same filename as track | Same | |
 | Explicit | ITUNESADVISORY (1 explicit, 2 clean); EXPLICIT=1 also accepted | TXXX:ITUNESADVISORY (Mp3tag ITUNESADVISORY); M4A uses the `rtng` atom | Plex ignores it. Platter reads it from the file itself and shows an E badge |

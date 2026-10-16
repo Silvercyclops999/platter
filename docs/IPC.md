@@ -2121,7 +2121,7 @@ which device. The namespaces are `settings` (one entry per synced setting),
 `lyrics` (lyrics written in the editor, by track id), `transcripts`
 (transcriptions, keyed `<track id>|<model>`), `lyricsShared` (songs whose
 lyrics were shared to LRCLIB) and `smartPlaylists`
-(Platter smart playlists, synced with the library folders). Without a sync file this is simply where the state is kept.
+(Platter smart playlists, synced with the library folders). Without a sync file this is where the state is kept.
 
 Features use the typed store in `src-tauri/src/sync/store.rs`:
 `store.put(&FOLLOWS, id, &value)`, `store.get`, `store.list`, `store.remove`,
