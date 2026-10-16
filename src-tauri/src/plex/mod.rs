@@ -27,6 +27,7 @@ pub mod identity;
 pub mod keychain;
 pub mod keystore;
 pub mod notifications;
+pub mod sharing;
 pub mod state;
 pub mod token;
 pub mod types;

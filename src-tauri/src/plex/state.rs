@@ -465,6 +465,26 @@ impl PlexState {
         self.inner.session.read().await.servers.clone()
     }
 
+    /// Ask plex.tv for the account's servers again (someone just shared a
+    /// server with this account). A new server joins the list; the
+    /// connection race picks its address the first time it's used
+    /// ([`Self::client_for_tag`]). The connected server stays as it is.
+    pub async fn refresh_servers(&self) -> AppResult<Vec<DiscoveredServer>> {
+        if self.offline_by_choice() {
+            return Err(AppError::Network("You're offline.".into()));
+        }
+        let account = self.account_token().await.ok_or_else(|| AppError::Auth("Not signed in.".into()))?;
+        let servers = discovery::servers_from_resources(self.inner.tv.resources(&account).await?);
+        {
+            let mut s = self.inner.session.write().await;
+            s.servers = servers.clone();
+            s.cache.update_servers(&servers);
+            let _ = s.cache.save(&self.inner.data_dir);
+        }
+        self.emit_auth().await;
+        Ok(servers)
+    }
+
     /// The selected server's machine id (names library items in playlist
     /// writes).
     pub async fn machine_id(&self) -> Option<String> {
@@ -1439,6 +1459,38 @@ mod tests {
         // A plain client() this early fails; the startup-aware one waits.
         let c = st.client_when_ready(Duration::from_secs(10)).await;
         assert!(c.is_ok(), "{:?}", c.err());
+    }
+
+    #[tokio::test]
+    async fn a_server_shared_with_this_account_appears_and_joins_the_connection_race() {
+        let mine = pms("m1", true).await;
+        let theirs = pms("m2", true).await;
+        let tv = plex_tv(serde_json::json!([resource("m1", &mine.uri())])).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new());
+        store.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+        let (st, _rec) = state(dir.path(), &tv.uri(), store);
+        st.restore().await.unwrap();
+        let tag2 = crate::sid::tag("m2");
+        assert!(st.client_for_tag(&tag2).await.is_err(), "not shared yet");
+        // The friend's invite was accepted: plex.tv lists their server now.
+        let mut shared = resource("m2", &theirs.uri());
+        shared["owned"] = serde_json::json!(false);
+        shared["name"] = serde_json::json!("Friend's Music");
+        Mock::given(method("GET"))
+            .and(path("/api/v2/resources"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([resource("m1", &mine.uri()), shared])))
+            .with_priority(1)
+            .mount(&tv)
+            .await;
+        let servers = st.refresh_servers().await.unwrap();
+        assert_eq!(servers.len(), 2);
+        let c = st.client_for_tag(&tag2).await.unwrap();
+        assert_eq!(c.base_url().as_str().trim_end_matches('/'), theirs.uri());
+        assert_eq!(st.machine_id().await.as_deref(), Some("m1"), "the connected server stays");
+        // The list is kept for when plex.tv is down.
+        let cache = DiscoveryCache::load(dir.path());
+        assert!(cache.servers.iter().any(|s| s.machine_id == "m2"));
     }
 
     #[tokio::test]

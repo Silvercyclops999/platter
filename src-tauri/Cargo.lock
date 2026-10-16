@@ -4119,6 +4119,7 @@ dependencies = [
  "percent-encoding",
  "pinyin",
  "qrcode",
+ "quick-xml 0.42.0",
  "rand 0.10.3",
  "rcgen",
  "reqwest",
