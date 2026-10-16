@@ -106,6 +106,43 @@ pub fn as_dir(path: &str) -> String {
     out
 }
 
+/// A path as this computer reaches it (a mapped share like `M:\Music\x`)
+/// turned into the server's path (`/data/media/Music/x`) when one of the
+/// `(server, local)` pairs covers it; otherwise the path as given. Every
+/// location test compares server paths.
+pub fn to_server(path: &str, pairs: &[(String, String)]) -> String {
+    let full = NormPath::parse(path);
+    let best = pairs
+        .iter()
+        .filter(|(_, local)| {
+            let l = NormPath::parse(local);
+            !l.is_empty() && full.starts_with(&l)
+        })
+        .max_by_key(|(_, local)| NormPath::parse(local).len());
+    let Some((server, local)) = best else { return path.trim().to_string() };
+    let skip = NormPath::parse(local).len();
+    let rest: Vec<&str> = path.split(['/', '\\']).filter(|s| !s.trim().is_empty() && *s != ".").skip(skip).collect();
+    let sep = if server.contains('\\') && !server.contains('/') { '\\' } else { '/' };
+    let mut out = server.trim().trim_end_matches(['/', '\\']).to_string();
+    for r in rest {
+        out.push(sep);
+        out.push_str(r);
+    }
+    out
+}
+
+/// `path` is inside (or is) any of `folders`, compared by whole names.
+pub fn inside_any<'a>(path: &str, folders: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    let p = NormPath::parse(path);
+    if p.is_empty() {
+        return None;
+    }
+    folders.into_iter().find(|f| {
+        let f = NormPath::parse(f);
+        !f.is_empty() && p.starts_with(&f)
+    })
+}
+
 /// The address is on this computer or the home network: a private, loopback
 /// or link-local IP, `localhost`, or a name with no dots or a home suffix.
 pub fn is_private_host(host: &str) -> bool {
@@ -171,6 +208,16 @@ mod tests {
         assert_eq!(relation(&NormPath::parse("/data/media/Music-archive"), &media), None);
         assert!(!NormPath::parse("/data/media/Music-archive/X").starts_with(&media));
         assert!(NormPath::parse(r"\data\media\music\X").starts_with(&media), "either separator, any case");
+    }
+
+    #[test]
+    fn a_mapped_share_path_becomes_the_server_path_first() {
+        let pairs = vec![("/data/media/Music".to_string(), r"M:\Music".to_string())];
+        assert_eq!(to_server(r"M:\Music\Archive\Quiet Hours", &pairs), "/data/media/Music/Archive/Quiet Hours");
+        assert_eq!(to_server("/data/staging/music", &pairs), "/data/staging/music", "server paths stay");
+        assert_eq!(inside_any(&to_server(r"m:\music\x", &pairs), ["/data/media/Music"]), Some("/data/media/Music"));
+        assert_eq!(inside_any("/data/media/Music-archive/x", ["/data/media/Music"]), None);
+        assert_eq!(inside_any(r"\data\media\music\x", ["/data/media/Music"]), Some("/data/media/Music"));
     }
 
     #[test]

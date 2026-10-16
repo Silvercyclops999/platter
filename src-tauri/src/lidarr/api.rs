@@ -324,6 +324,19 @@ pub struct HistoryItem {
     pub date: String,
 }
 
+/// One of Lidarr's Connect entries (`GET /notification`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Notification {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub name: String,
+    /// `PlexServer` for Plex Media Server.
+    #[serde(default)]
+    pub implementation: String,
+}
+
 /// A list Lidarr pages (`records`) or returns whole.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -520,6 +533,11 @@ impl LidarrClient {
         self.get("/album", &[("artistId", &artist_id.to_string())]).await
     }
 
+    /// Every album Lidarr has, for every artist.
+    pub async fn all_albums(&self) -> AppResult<Vec<Album>> {
+        self.get("/album", &[]).await
+    }
+
     /// The album with this MusicBrainz release group id, when Lidarr has it.
     pub async fn album_by_release_group(&self, rgid: &str) -> AppResult<Option<Album>> {
         let all: Vec<Album> = self.get("/album", &[("foreignAlbumId", rgid)]).await?;
@@ -573,6 +591,11 @@ impl LidarrClient {
     /// Files Lidarr found in its root folders and couldn't match to an album.
     pub async fn unmapped_files(&self) -> AppResult<Vec<TrackFile>> {
         self.get("/trackfile", &[("unmapped", "true")]).await
+    }
+
+    /// Lidarr's Connect entries.
+    pub async fn notifications(&self) -> AppResult<Vec<Notification>> {
+        self.get("/notification", &[]).await
     }
 
     /// One folder's contents, with file sizes.

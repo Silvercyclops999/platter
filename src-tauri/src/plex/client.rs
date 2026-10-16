@@ -474,6 +474,17 @@ pub struct SectionPrefs {
     pub all: Vec<(String, serde_json::Value)>,
 }
 
+/// The server settings Lidarr work reads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ServerPrefs {
+    /// "Scan my library automatically".
+    pub auto_scan: Option<bool>,
+    /// "Scan my library periodically".
+    pub periodic_scan: Option<bool>,
+    /// "Empty trash automatically after every scan".
+    pub empty_trash: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagValue {
     /// Filter key to pass as `?format=` / `?subformat=`.
@@ -1119,6 +1130,17 @@ impl PlexClient {
                 .iter()
                 .map(|s| (s.id.clone(), s.value.clone()))
                 .collect(),
+        })
+    }
+
+    /// `GET /:/prefs`: the server's own settings, by id.
+    pub async fn server_prefs(&self) -> AppResult<ServerPrefs> {
+        let c = self.container("/:/prefs", &[], None).await?;
+        let find = |id: &str| c.setting.iter().find(|s| s.id == id).and_then(|s| prefs_bool(&s.value));
+        Ok(ServerPrefs {
+            auto_scan: find("FSEventLibraryUpdatesEnabled"),
+            periodic_scan: find("ScheduledLibraryUpdatesEnabled"),
+            empty_trash: find("autoEmptyTrash"),
         })
     }
 

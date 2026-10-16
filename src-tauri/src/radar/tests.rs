@@ -129,6 +129,7 @@ impl RadarLidarr for FakeLidarr {
             message: refused.then(|| "MusicBrainz lists this only as a bootleg or promo.".to_string()),
             notes: vec![],
             auto: true,
+            protected: false,
         };
         self.list.lock().push(r.clone());
         Ok(r)
@@ -509,6 +510,7 @@ fn summary_texts() {
         message: None,
         notes: vec![],
         auto: true,
+        protected: false,
     };
     assert_eq!(summary(&[], 0, 3), None);
     assert_eq!(summary(&[], 2, 3).unwrap().1, "2 more wait for tomorrow (up to 3 a day).");

@@ -61,6 +61,7 @@ impl PlexMusic for Plex {
 }
 
 const ROOT: &str = "/downloads/lidarr";
+const STAGING: &str = "/data/staging/music";
 
 #[derive(Default)]
 struct State {
@@ -81,6 +82,10 @@ struct State {
     down: bool,
     /// Album list reads that come back empty after an add.
     albums_delay: usize,
+    /// Lidarr also has the staging root.
+    staging: bool,
+    /// Artists on the import list exclusions (MusicBrainz ids).
+    exclusions: Vec<String>,
 }
 
 /// A faked Lidarr that keeps artists and albums. Logs method, path and body.
@@ -112,9 +117,17 @@ impl FakeLidarr {
         match (method, path) {
             (Method::Get, "/system/status") => (200, json!({"appName": "Lidarr", "version": "2.8.2.4493"})),
             (Method::Get, "/rootfolder") => {
-                let p = if st.red { "/data/media/music" } else { ROOT };
-                (200, json!([{"id": 1, "path": p, "accessible": true, "unmappedFolders": [{"name": "Elsewhere", "path": format!("{p}/Elsewhere")}],
-                              "defaultQualityProfileId": 2, "defaultMetadataProfileId": 3}]))
+                // Red for everyone: Lidarr has no root folder to download into.
+                if st.red {
+                    return (200, json!([]));
+                }
+                let p = ROOT;
+                let mut roots = vec![json!({"id": 1, "path": p, "accessible": true, "unmappedFolders": [{"name": "Elsewhere", "path": format!("{p}/Elsewhere")}],
+                              "defaultQualityProfileId": 2, "defaultMetadataProfileId": 3})];
+                if st.staging {
+                    roots.push(json!({"id": 2, "path": STAGING, "accessible": true, "defaultQualityProfileId": 2, "defaultMetadataProfileId": 3}));
+                }
+                (200, Value::Array(roots))
             }
             (Method::Get, "/artist") => (200, Value::Array(st.artists.clone())),
             (Method::Get, "/config/naming") => (200, json!({"renameTracks": false})),
@@ -184,6 +197,9 @@ impl FakeLidarr {
                 (202, json!([]))
             }
             (Method::Post, "/command") => (201, json!({"id": 1, "name": "AlbumSearch"})),
+            (Method::Get, "/importlistexclusion") => {
+                (200, Value::Array(st.exclusions.iter().map(|id| json!({"foreignId": id, "artistName": "Northlight"})).collect()))
+            }
             _ => (405, json!({})),
         }
     }
@@ -243,6 +259,8 @@ fn rig() -> Rig {
         mb: mb.clone(),
         artist_mbid: Arc::new(Mbid),
         album_wait: std::time::Duration::ZERO,
+        shared: super::shared::tests::on(&db),
+        plex_server: Arc::new(super::plexside::fake::FakePlex::default()),
     });
     lidarr.set_key(Some("abc123")).unwrap();
     Rig { _dir: dir, db, web, mb, lidarr }
@@ -619,4 +637,84 @@ async fn picking_for_a_song_uses_musicbrainz_only() {
     let p = r.lidarr.pick("Northlight", Some("ar1"), "Breathe In", true, None).await.unwrap();
     assert_eq!(p.group.unwrap().id, RG_SECOND);
     assert!(r.web.log.lock().is_empty());
+}
+
+// ------------------------------------------------------------------ modes
+
+fn protect(r: &Rig) {
+    use super::modes::{ArtistPrefs, ModeSetting};
+    r.lidarr.save_prefs(ARTIST, &ArtistPrefs { mode: ModeSetting::Protected, ..Default::default() }).unwrap();
+    let s = crate::settings::Settings { lidarr_staging_folder: STAGING.into(), ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
+}
+
+#[tokio::test]
+async fn a_protected_artist_is_added_unmonitored_into_staging_only() {
+    let r = rig();
+    r.web.st.lock().staging = true;
+    protect(&r);
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    assert_eq!(rec.state, RequestState::Searching, "{:?}", rec.message);
+    assert!(rec.protected);
+    assert_eq!(rec.destination.as_deref(), Some("/data/staging/music/Northlight"));
+    let writes = r.web.writes();
+    let add: Value = serde_json::from_str(&writes[0].2).unwrap();
+    assert_eq!(add["monitored"], false);
+    assert_eq!(add["rootFolderPath"], STAGING);
+    assert_eq!(add["addOptions"], json!({"monitor": "none", "searchForMissingAlbums": false}));
+    // Then only the requested album is monitored, and only it is searched.
+    let shape: Vec<(Method, &str)> = writes.iter().map(|(m, p, _)| (*m, p.as_str())).collect();
+    assert_eq!(shape, vec![(Method::Post, "/api/v1/artist"), (Method::Put, "/api/v1/album/monitor"), (Method::Post, "/api/v1/command")]);
+    // Lidarr's path was read back after the add.
+    assert!(r.web.log.lock().iter().any(|(m, p, _)| *m == Method::Get && p.starts_with("/api/v1/artist/")));
+    assert_only_allowed_writes(&r.web);
+}
+
+#[tokio::test]
+async fn protected_requests_wait_for_a_staging_folder_while_managed_ones_go_ahead() {
+    let r = rig();
+    use super::modes::{ArtistPrefs, ModeSetting};
+    r.lidarr.save_prefs(ARTIST, &ArtistPrefs { mode: ModeSetting::Protected, ..Default::default() }).unwrap();
+    let e = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap_err().to_string();
+    assert!(e.contains("No staging folder for protected artists"), "{e}");
+    assert!(r.web.writes().is_empty());
+    // The same Lidarr, the artist Managed: sent to the library root.
+    r.lidarr.save_prefs(ARTIST, &ArtistPrefs { mode: ModeSetting::Managed, ..Default::default() }).unwrap();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    assert_eq!(rec.state, RequestState::Searching);
+    assert!(!rec.protected);
+    assert_eq!(rec.destination.as_deref(), Some("/downloads/lidarr/Northlight"));
+}
+
+#[tokio::test]
+async fn the_exclusion_check_blocks_every_add() {
+    for protected in [false, true] {
+        let r = rig();
+        r.web.st.lock().staging = true;
+        protect(&r);
+        if !protected {
+            use super::modes::{ArtistPrefs, ModeSetting};
+            r.lidarr.save_prefs(ARTIST, &ArtistPrefs { mode: ModeSetting::Managed, ..Default::default() }).unwrap();
+        }
+        r.web.st.lock().exclusions = vec![ARTIST.to_uppercase()];
+        let e = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap_err().to_string();
+        assert!(e.contains("import list exclusions"), "{e}");
+        assert!(r.web.writes().is_empty(), "nothing sent (protected: {protected})");
+        let auto = r.lidarr.request_auto(input(RG_EP, "Small Hours", None)).await.unwrap();
+        assert_eq!(auto.state, RequestState::Failed);
+        assert!(r.web.writes().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn an_album_plex_matched_to_the_release_group_is_never_requested() {
+    let r = rig();
+    r.db.write(|c| {
+        c.execute("UPDATE albums SET mbid = ?1 WHERE id = 'a1'", [RG_SECOND])?;
+        Ok(())
+    })
+    .unwrap();
+    let e = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap_err().to_string();
+    assert!(e.contains("already in your library"), "{e}");
+    assert!(r.web.writes().is_empty());
 }

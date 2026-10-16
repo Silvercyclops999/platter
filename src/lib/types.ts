@@ -2074,15 +2074,32 @@ export interface LidarrFinding {
   fix: string | null;
   /** Set on an empty root folder the user can vouch for. */
   emptyRoot: { path: string; confirmed: boolean } | null;
+  /** A red finding that only stops work for protected artists. */
+  protectedOnly: boolean;
+  /** A fix Platter can make; it shows the exact change and asks first. */
+  action: LidarrFixAction | null;
 }
+
+/** A one-click fix (a Lidarr write that asks first). */
+export type LidarrFixAction =
+  | { kind: "addExclusions"; artists: { name: string; mbid: string }[] }
+  | { kind: "setRecycleBin" }
+  | { kind: "writeTagsOff" }
+  | { kind: "renameOff" }
+  | { kind: "addStagingRoot"; path: string }
+  | { kind: "rematch"; folders: string[] };
 
 /** `lidarr_check`: the read-only setup check. */
 export interface LidarrReport {
   version: string;
   /** Red first, then amber, then OK. */
   findings: LidarrFinding[];
-  /** No red findings. */
+  /** No red findings: work for protected artists may go ahead. */
   passed: boolean;
+  /** No red finding that stops Managed artists. */
+  managedOk: boolean;
+  /** Protected artists the check was run for. */
+  protectedCount: number;
   checkedAt: number;
   /** Which address answered. */
   route: "home" | "away" | null;
@@ -2121,6 +2138,8 @@ export interface LidarrPreview {
   route: "home" | "away" | null;
   /** The artist is new to Lidarr and will be added with only this album. */
   addsArtist: boolean;
+  /** A protected artist: it downloads into the staging folder and waits there. */
+  protected: boolean;
 }
 
 /** One request, kept on this device. */
@@ -2143,6 +2162,8 @@ export interface LidarrRequest {
   notes: string[];
   /** Made by auto-request for a new release. */
   auto: boolean;
+  /** For a protected artist: lands in the staging folder and waits there. */
+  protected: boolean;
 }
 
 /** Why a swap or its undo stopped. Every one leaves the old files in place. */

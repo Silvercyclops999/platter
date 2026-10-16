@@ -9,10 +9,13 @@ pub mod audiomatch;
 pub mod check;
 pub mod commands;
 pub mod mbpick;
+pub mod modes;
 pub mod paths;
+pub mod plexside;
 pub mod provenance;
 pub mod quality;
 pub mod request;
+pub mod shared;
 pub mod status;
 pub mod swap;
 pub mod tagcarry;
@@ -20,6 +23,8 @@ pub mod upgrade;
 pub mod upmatch;
 pub mod write;
 
+#[cfg(test)]
+mod modes_tests;
 #[cfg(test)]
 mod request_tests;
 #[cfg(test)]
@@ -116,6 +121,10 @@ pub struct LidarrDeps {
     pub artist_mbid: Arc<dyn ArtistMbid>,
     /// How long to wait between looks for a newly added artist's albums.
     pub album_wait: Duration,
+    /// State shared with the user's other devices.
+    pub shared: shared::Shared,
+    /// Plex's scan settings, partial scans and what it shows.
+    pub plex_server: Arc<dyn plexside::PlexServer>,
 }
 
 /// A check that passed or not, with the connection it used.
@@ -126,6 +135,8 @@ pub struct Checked {
     pub snap: LidarrSnapshot,
     /// Plex's music folders at the check.
     pub plex_locations: Vec<String>,
+    /// Every artist's mode at the check.
+    pub modes: Vec<modes::ArtistMode>,
 }
 
 /// Whether any file's tags (as the scan cached them) mark it as not
@@ -144,6 +155,9 @@ const LAST_CHECK_KEY: &str = "lidarr.lastCheck";
 #[serde(rename_all = "camelCase")]
 pub struct LastCheck {
     pub passed: bool,
+    /// Nothing stops Managed artists (older checks: same as `passed`).
+    #[serde(default)]
+    pub managed_ok: Option<bool>,
     pub checked_at: i64,
     /// The address it was for (a changed address needs a new check).
     pub url: String,
@@ -170,11 +184,16 @@ pub struct LidarrStatus {
     pub ready: bool,
 }
 
+/// Worked-out modes and when (unix seconds).
+type ModesAt = (i64, Vec<modes::ArtistMode>);
+
 #[derive(Clone)]
 pub struct Lidarr {
     inner: Arc<LidarrDeps>,
     /// One request (or retry) at a time.
     lock: Arc<tokio::sync::Mutex<()>>,
+    /// The last modes worked out, with when (unix seconds).
+    modes_cache: Arc<parking_lot::Mutex<Option<ModesAt>>>,
 }
 
 /// The address as a key for stored confirmations.
@@ -225,7 +244,7 @@ pub fn parse_headers(text: &str) -> AppResult<Vec<(String, String)>> {
 
 impl Lidarr {
     pub fn new(deps: LidarrDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())) }
+        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default() }
     }
 
     /// (home, away) addresses from Settings; empty when not set.
@@ -252,7 +271,7 @@ impl Lidarr {
             url_set: !home.trim().is_empty(),
             away_set: !away.trim().is_empty(),
             has_key,
-            ready: set && has_key && self.last_check().is_some_and(|l| l.passed),
+            ready: set && has_key && self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)),
             header_names: self.headers().into_iter().map(|(n, _)| n).collect(),
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
         }
@@ -390,8 +409,9 @@ impl Lidarr {
             client.import_lists(),
         )?;
         // Newer reads: an older Lidarr without them counts as having none.
-        let (exclusions, unmapped) = futures::join!(client.exclusions(), client.unmapped_files());
+        let (exclusions, unmapped, notifications) = futures::join!(client.exclusions(), client.unmapped_files(), client.notifications());
         Ok(LidarrSnapshot {
+            notifications: notifications.unwrap_or_default(),
             exclusions: exclusions.unwrap_or_default(),
             unmapped: unmapped.unwrap_or_default(),
             version: status.version.trim().to_string(),
@@ -431,6 +451,7 @@ impl Lidarr {
         let (home, away) = self.urls();
         let last = LastCheck {
             passed: report.passed,
+            managed_ok: Some(report.managed_ok),
             checked_at: report.checked_at,
             url: url_key(if home.trim().is_empty() { &away } else { &home }),
             roots: snap.roots.iter().map(|r| r.path.clone()).collect(),
@@ -451,7 +472,17 @@ impl Lidarr {
         };
         let ((client, mut snap, route), plex) = futures::try_join!(connect, self.inner.plex.music_files())?;
         let index = PlexIndex::new(&plex);
+        let modes = self.modes_with(&client, &snap).await?;
+        let share = crate::musicshare::load(&self.inner.db);
+        let prefs = self.inner.plex_server.prefs().await.ok();
         let ctx = CheckContext {
+            protected: modes.iter().filter(|m| m.protected()).map(check::ProtectedRef::from).collect(),
+            share: share.music.iter().map(|p| (p.server.clone(), p.local.clone())).collect(),
+            plex_auto_scan: prefs.and_then(|p| match (p.auto_scan, p.periodic_scan) {
+                (Some(true), _) | (_, Some(true)) => Some(true),
+                (None, None) => None,
+                _ => Some(false),
+            }),
             confirmed_roots: self.confirmations().remove(&url_key(if home.trim().is_empty() { &away } else { &home })).unwrap_or_default(),
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
             route: Some(client.route()),
@@ -483,6 +514,6 @@ impl Lidarr {
         );
         self.remember_check(&report, &snap);
         let plex_locations = plex.locations.clone();
-        Ok(Checked { report, client, writer: write::LidarrWriter::new(route as Arc<dyn write::LidarrWrite>), snap, plex_locations })
+        Ok(Checked { report, client, writer: write::LidarrWriter::new(route as Arc<dyn write::LidarrWrite>), snap, plex_locations, modes })
     }
 }

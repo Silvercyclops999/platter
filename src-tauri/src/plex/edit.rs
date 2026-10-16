@@ -593,6 +593,14 @@ impl PlexClient {
         self.edit_send(rb).await.map(|_| ())
     }
 
+    /// `PUT /:/prefs?autoEmptyTrash=`: Plex's "Empty trash automatically
+    /// after every scan". The only server setting Platter ever changes, and
+    /// only for the length of a move it asked about first.
+    pub async fn set_empty_trash(&self, on: bool) -> AppResult<()> {
+        let rb = self.request(Method::PUT, "/:/prefs")?.query(&[("autoEmptyTrash", if on { "1" } else { "0" })]);
+        self.edit_send(rb).await.map(|_| ())
+    }
+
     /// `PUT /library/metadata/{id}/refresh`: read the agent and files again.
     pub async fn refresh_item(&self, id: &str) -> AppResult<()> {
         let k = rating_key(self.raw(id)?)?;

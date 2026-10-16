@@ -289,8 +289,10 @@ export function LidarrFindings({ lidarr }: { lidarr: LidarrState }) {
     <div className="lidarr-check" aria-live="polite">
       <p className={`lidarr-check__summary ${report.passed ? "is-passed" : "is-blocked"}`}>
         {report.passed
-          ? "Lidarr can't reach your existing music. Platter checks this again before every request."
-          : "Platter won't send Lidarr anything until the red items are fixed."}
+          ? "Lidarr can't reach your curated music. Platter checks this again before every request."
+          : report.managedOk
+            ? "Managed artists keep working. Platter won't do anything for protected artists until the red items are fixed."
+            : "Platter won't send Lidarr anything until the red items are fixed."}
       </p>
       <p className="lidarr-check__meta">
         Lidarr {report.version} answered on {where}. Platter only read from it.
@@ -299,7 +301,7 @@ export function LidarrFindings({ lidarr }: { lidarr: LidarrState }) {
       {amber.length > 0 && (
         <>
           <p className="lidarr-check__note">
-            These only affect albums Lidarr downloads itself. They can't reach your existing music once nothing above is red.
+            Worth changing. They don't stop anything on their own.
           </p>
           <ul className="lidarr-findings">{amber.map(row)}</ul>
         </>

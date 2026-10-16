@@ -711,6 +711,14 @@ pub fn run() {
                 }),
                 artist_mbid: Arc::new(lidarr::InfoMbid(artist_info.clone())),
                 album_wait: std::time::Duration::from_secs(2),
+                shared: lidarr::shared::Shared::new(sync_store.clone(), {
+                    let db = db.clone();
+                    Arc::new(move || {
+                        let n = settings::load(&db).computer_name;
+                        if n.trim().is_empty() { remote::peer::os_computer_name() } else { n }
+                    })
+                }),
+                plex_server: Arc::new(lidarr::plexside::PlexLive(plex.clone())),
             });
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
             // Upgrades: better copies through the staging folder, swapped on this computer.

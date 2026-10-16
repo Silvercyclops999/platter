@@ -131,6 +131,26 @@ pub fn cutoff_rank(p: &QualityProfile) -> Option<Rank> {
     find(&p.items, cutoff).and_then(|i| ranks_of(i).into_iter().min())
 }
 
+/// Whether a profile's cutoff is set and is a quality (or group) the
+/// profile allows, so Lidarr can ever stop upgrading.
+pub fn cutoff_reachable(p: &QualityProfile) -> bool {
+    let Some(cutoff) = p.cutoff else { return false };
+    fn walk(items: &[ProfileItem], id: i64, parent_on: bool) -> Option<bool> {
+        for i in items {
+            let on = i.allowed || parent_on;
+            let hit = if i.quality.is_some() && i.items.is_empty() { i.quality.as_ref().is_some_and(|q| q.id == id) } else { i.id == Some(id) };
+            if hit {
+                return Some(on || i.items.iter().any(|c| c.allowed));
+            }
+            if let Some(f) = walk(&i.items, id, on && i.quality.is_none()) {
+                return Some(f);
+            }
+        }
+        None
+    }
+    walk(&p.items, cutoff, false).unwrap_or(false)
+}
+
 /// The profile an upgrade uses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

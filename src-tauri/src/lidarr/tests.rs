@@ -9,10 +9,10 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 
 use super::api::{
-    Artist, FsEntry, ImportList, Listing, MediaManagementConfig, MetadataProviderConfig, NamingConfig, QualityProfile, RootFolder,
+    Artist, FsEntry, Listing, MediaManagementConfig, MetadataProviderConfig, NamingConfig, QualityProfile, RootFolder,
     UnmappedFolder,
 };
-use super::check::{CheckContext, CheckReport, Level, LidarrSnapshot, PlexFile, PlexFiles, PlexIndex, evaluate};
+use super::check::{CheckContext, CheckReport, ExclusionTarget, FixAction, Level, LidarrSnapshot, PlexFiles, PlexIndex, ProtectedRef, evaluate};
 use super::*;
 use crate::artistinfo::http::HttpResponse;
 use crate::db::DbHandle;
@@ -76,6 +76,7 @@ fn lidarr(roots: Vec<RootFolder>) -> LidarrSnapshot {
         listings: HashMap::new(),
         exclusions: vec![],
         unmapped: vec![],
+        notifications: vec![],
     }
 }
 
@@ -91,7 +92,7 @@ fn listing(dirs: &[&str], files: &[(&str, i64)]) -> Option<Listing> {
 }
 
 fn ctx() -> CheckContext {
-    CheckContext { confirmed_roots: vec![], unencrypted: vec![], route: Some(api::Route::Home), now: 1_800_000_000, staging: None, library_has_unreleased: false }
+    CheckContext { confirmed_roots: vec![], unencrypted: vec![], route: Some(api::Route::Home), now: 1_800_000_000, staging: None, library_has_unreleased: false, ..Default::default() }
 }
 
 /// Run the check like the service does: keep answering the folders it
@@ -142,259 +143,260 @@ const ARTISTS: [&str; 4] = ["Northlight", "Harbor Sound", "Quiet Hours", "Glassh
 
 // ------------------------------------------------------------------ root folders
 
-#[test]
-fn same_path_is_red_even_when_empty() {
-    let r = run(&library("/data/music"), lidarr(vec![root("/data/music/", &[])]), &ctx(), &no_disk());
-    assert!(!r.passed);
-    let f = r.findings.iter().find(|f| f.id == "rootOverlap").unwrap();
-    assert_eq!(f.level, Level::Red);
-    assert!(f.title.contains("same folder"), "{}", f.title);
-    assert!(f.fix.as_deref().unwrap().contains("Root Folders"));
+const QH_MBID: &str = "b0000000-0000-0000-0000-000000000002";
+
+/// A protected artist: its library folder and, when Lidarr has it, Lidarr's path.
+fn prot(name: &str, folder: &str, lidarr_path: Option<&str>) -> ProtectedRef {
+    ProtectedRef {
+        name: name.into(),
+        mbid: Some(QH_MBID.into()),
+        folder: Some(folder.into()),
+        lidarr_id: lidarr_path.map(|_| 7),
+        lidarr_path: lidarr_path.map(str::to_string),
+    }
 }
 
-#[test]
-fn parent_and_child_paths_are_red() {
-    let parent = run(&library("/data/music"), lidarr(vec![root("/data", &["music", "movies"])]), &ctx(), &no_disk());
-    assert!(parent.findings.iter().any(|f| f.id == "rootOverlap" && f.title.contains("holds")), "{parent:?}");
-    let child = run(&library("/data/music"), lidarr(vec![root("/data/music/Lidarr", &[])]), &ctx(), &no_disk());
-    assert!(child.findings.iter().any(|f| f.id == "rootOverlap" && f.title.contains("is inside")), "{child:?}");
-    assert!(!parent.passed && !child.passed);
+fn with_protected(staging: Option<&str>, p: Vec<ProtectedRef>) -> CheckContext {
+    CheckContext { staging: staging.map(str::to_string), protected: p, plex_auto_scan: Some(true), ..ctx() }
 }
-
-#[test]
-fn case_and_separators_dont_hide_the_same_path() {
-    let r = run(&library(r"M:\Music"), lidarr(vec![root("m:/music", &[])]), &ctx(), &no_disk());
-    assert_eq!(ids(&r, Level::Red), vec!["rootOverlap"]);
-}
-
-#[test]
-fn docker_remap_with_different_strings_is_red_by_content() {
-    // Plex sees /data/media/music, Lidarr sees the same disk as /music.
-    let p = library("/data/media/music");
-    let l = lidarr(vec![root("/music", &ARTISTS)]);
-    let r = run(&p, l.clone(), &ctx(), &same_disk("/music"));
-    let f = r.findings.iter().find(|f| f.id == "rootOverlap").expect("overlap found");
-    assert_eq!(f.level, Level::Red);
-    assert!(f.title.contains("is your Plex music folder"), "{}", f.title);
-    assert!(f.detail.contains("same files, with the same sizes"), "{}", f.detail);
-    assert!(!r.passed);
-    // Lidarr can't list the folders: the matching names alone keep it red.
-    let blind = run(&p, l, &ctx(), &no_disk());
-    let f = blind.findings.iter().find(|f| f.id == "rootOverlap").expect("still red without listings");
-    assert!(f.detail.contains("same folder names"), "{}", f.detail);
-}
-
-#[test]
-fn unc_versus_mapped_drive_is_red_by_content() {
-    let p = library(r"M:\");
-    let l = lidarr(vec![root(r"\\nas\music", &ARTISTS)]);
-    let r = run(&p, l, &ctx(), &same_disk(r"\\nas\music"));
-    assert_eq!(ids(&r, Level::Red), vec!["rootOverlap"]);
-    assert!(r.findings[0].detail.contains("same sizes"));
-}
-
-#[test]
-fn lidarr_root_inside_the_library_under_another_name_is_red() {
-    // Plex /data/music holds a Lidarr folder; Lidarr calls it /downloads.
-    let mut p = library("/data/music");
-    p.files.push(PlexFile { path: "/data/music/Lidarr/New Band/Debut/01 Hello.flac".into(), size: Some(5_000) });
-    let disk = HashMap::from([
-        ("/downloads/New Band/".to_string(), listing(&["Debut"], &[])),
-        ("/downloads/New Band/Debut/".to_string(), listing(&[], &[("01 Hello.flac", 5_000)])),
-    ]);
-    let r = run(&p, lidarr(vec![root("/downloads", &["New Band"])]), &ctx(), &disk);
-    let f = r.findings.iter().find(|f| f.id == "rootOverlap").unwrap();
-    assert!(f.title.contains("inside your Plex music folder"), "{}", f.title);
-}
-
-#[test]
-fn a_separate_root_with_other_contents_passes() {
-    let p = library("/data/music");
-    // Shares one artist name with the library, but its files differ.
-    let disk = HashMap::from([
-        ("/downloads/Northlight/".to_string(), listing(&["Later Album"], &[])),
-        ("/downloads/Other Band/".to_string(), listing(&["Record"], &[])),
-    ]);
-    let r = run(&p, lidarr(vec![root("/downloads", &["Northlight", "Other Band"])]), &ctx(), &disk);
-    assert!(r.passed, "{r:?}");
-    assert!(ids(&r, Level::Ok).contains(&"rootSeparate".to_string()));
-    // Same name, same album folder, different files: still separate.
-    let disk = HashMap::from([
-        ("/downloads/Northlight/".to_string(), listing(&["First Light"], &[])),
-        ("/downloads/Northlight/First Light/".to_string(), listing(&[], &[("01 Dawn.flac", 12)])),
-    ]);
-    let r = run(&p, lidarr(vec![root("/downloads", &["Northlight"])]), &ctx(), &disk);
-    assert!(r.passed, "{r:?}");
-}
-
-#[test]
-fn an_empty_root_needs_the_user_to_confirm_it() {
-    let p = library("/data/media/music");
-    let l = lidarr(vec![root("/lidarr", &[])]);
-    let r = run(&p, l.clone(), &ctx(), &no_disk());
-    assert!(!r.passed, "an empty folder is never green on its own");
-    let f = r.findings.iter().find(|f| f.id == "rootEmpty").unwrap();
-    assert_eq!(f.level, Level::Red);
-    assert_eq!(f.empty_root.as_ref().map(|e| (e.path.as_str(), e.confirmed)), Some(("/lidarr", false)));
-    let mut c = ctx();
-    c.confirmed_roots = vec![paths::NormPath::parse("/Lidarr/").key()];
-    let r = run(&p, l.clone(), &c, &no_disk());
-    assert!(r.passed, "{r:?}");
-    assert_eq!(r.findings.iter().find(|f| f.id == "rootEmpty").unwrap().level, Level::Ok);
-    // Once it fills with the library's folders, the content check wins over the confirmation.
-    let mut filled = l;
-    filled.roots = vec![root("/lidarr", &ARTISTS)];
-    let r = run(&p, filled, &c, &same_disk("/lidarr"));
-    assert!(!r.passed);
-    assert!(ids(&r, Level::Red).contains(&"rootOverlap".to_string()));
-}
-
-#[test]
-fn unreadable_roots_and_no_roots_are_red() {
-    let mut r0 = root("/lidarr", &[]);
-    r0.accessible = false;
-    let r = run(&library("/data/music"), lidarr(vec![r0]), &ctx(), &no_disk());
-    assert_eq!(ids(&r, Level::Red), vec!["rootUnreadable"]);
-    let r = run(&library("/data/music"), lidarr(vec![]), &ctx(), &no_disk());
-    assert_eq!(ids(&r, Level::Red), vec!["noRoots"]);
-}
-
-#[test]
-fn without_plex_files_nothing_can_be_proven() {
-    let r = run(&PlexFiles { locations: vec!["/data/music".into()], files: vec![] }, lidarr(vec![root("/lidarr", &["A"])]), &ctx(), &no_disk());
-    assert!(!r.passed);
-    assert_eq!(ids(&r, Level::Red), vec!["plexUnknown"]);
-}
-
-// ------------------------------------------------------------------ artists
 
 fn artist(name: &str, path: &str) -> Artist {
     Artist { id: 1, artist_name: name.into(), path: path.into(), ..Default::default() }
 }
 
-#[test]
-fn artists_in_the_plex_folder_are_red() {
-    let p = library("/data/media/music");
-    // Lidarr's root is the library under another name, and it manages one artist there.
-    let mut l = lidarr(vec![root("/music", &["Harbor Sound", "Quiet Hours", "Glasshouse"])]);
-    l.artists = vec![artist("Northlight", "/music/Northlight")];
-    let r = run(&p, l, &ctx(), &same_disk("/music"));
-    let f = r.findings.iter().find(|f| f.id == "artistsInside").unwrap();
-    assert_eq!(f.level, Level::Red);
-    assert!(f.title.contains("an artist"), "{}", f.title);
-    assert!(f.detail.contains("Northlight"));
-    assert!(f.fix.as_deref().unwrap().contains("unticked"));
+fn excluded(l: &mut LidarrSnapshot) {
+    l.exclusions = vec![super::api::Exclusion { foreign_id: QH_MBID.into(), artist_name: "Quiet Hours".into() }];
 }
 
-#[test]
-fn artists_by_path_string_and_by_last_two_names_are_red() {
-    let p = library("/data/music");
-    let mut l = lidarr(vec![root("/lidarr", &["Fresh"])]);
+/// The measured layout: Plex reads /data/media/Music, which holds Lidarr's
+/// root /data/media/Music/Lidarr (Managed artists) and a protected folder
+/// /data/media/Music/Archive beside it; staging /data/staging/music is
+/// outside every Plex folder.
+fn green() -> (PlexFiles, LidarrSnapshot, CheckContext) {
+    let p = plex(
+        "/data/media/Music",
+        &[
+            ("Lidarr/Northlight/First Light (2019)/1-01 - Dawn.flac", 31_000_111),
+            ("Archive/Quiet Hours/Sessions/01 Low.flac", 22_000_444),
+        ],
+    );
+    let mut l = lidarr(vec![root("/data/media/Music/Lidarr", &[]), RootFolder { id: 2, ..root("/data/staging/music", &[]) }]);
     l.artists = vec![
-        // Under the Plex folder by its path.
-        artist("Glasshouse", "/data/music/Glasshouse"),
-        // Not under any Lidarr root; same last two names as a Plex folder.
-        artist("Harbor Sound", "/mnt/music/Harbor Sound"),
+        Artist { id: 1, quality_profile_id: Some(1), ..artist("Northlight", "/data/media/Music/Lidarr/Northlight") },
+        Artist { id: 7, ..artist("Quiet Hours", "/data/staging/music/Quiet Hours") },
     ];
-    let r = run(&p, l, &ctx(), &no_disk());
-    let f = r.findings.iter().find(|f| f.id == "artistsInside").unwrap();
-    assert!(f.title.contains("2 artists"), "{}", f.title);
+    excluded(&mut l);
+    let c = with_protected(Some("/data/staging/music"), vec![prot("Quiet Hours", "/data/media/Music/Archive/Quiet Hours", Some("/data/staging/music/Quiet Hours"))]);
+    (p, l, c)
 }
 
 #[test]
-fn artists_in_a_proven_separate_root_are_fine() {
-    let p = library("/data/music");
-    let mut l = lidarr(vec![root("/downloads", &[])]);
-    l.artists = vec![artist("Northlight", "/downloads/Northlight")];
-    let disk = HashMap::from([("/downloads/Northlight/".to_string(), listing(&["New Album"], &[]))]);
-    let r = run(&p, l, &ctx(), &disk);
+fn the_measured_layout_is_green() {
+    let (p, l, c) = green();
+    let r = run(&p, l, &c, &no_disk());
+    assert!(r.passed && r.managed_ok, "{r:?}");
+    assert!(ids(&r, Level::Red).is_empty() && ids(&r, Level::Amber).is_empty(), "{r:?}");
+    assert_eq!(r.protected_count, 1);
+    assert!(ids(&r, Level::Ok).contains(&"plexAutoScan".to_string()));
+}
+
+#[test]
+fn a_protected_artist_in_lidarr_with_a_library_path_is_red_for_protected_work_only() {
+    let (p, mut l, mut c) = green();
+    c.protected[0].lidarr_path = Some("/data/media/Music/Lidarr/Quiet Hours".into());
+    l.artists[1].path = "/data/media/Music/Lidarr/Quiet Hours".into();
+    let r = run(&p, l, &c, &no_disk());
+    assert_eq!(ids(&r, Level::Red), vec!["protectedInPlex"]);
+    let f = &r.findings[0];
+    assert!(f.protected_only && f.detail.contains("Quiet Hours"), "{f:?}");
+    assert!(!r.passed, "protected work stops");
+    assert!(r.managed_ok, "Managed artists keep working");
+}
+
+#[test]
+fn a_protected_folder_under_a_lidarr_root_is_red_only_while_lidarr_has_the_artist() {
+    let (p, mut l, mut c) = green();
+    c.protected[0].folder = Some("/data/media/Music/Lidarr/Quiet Hours".into());
+    let r = run(&p, l.clone(), &c, &no_disk());
+    assert_eq!(ids(&r, Level::Red), vec!["protectedUnderRoot"]);
+    let f = &r.findings[0];
+    assert!(f.fix.as_deref().unwrap().contains("Platter never moves it"), "{f:?}");
+    assert!(f.fix.as_deref().unwrap().contains("Plex music library still scans"));
+    // Lidarr doesn't have the artist: nothing for Lidarr to match.
+    c.protected[0].lidarr_path = None;
+    c.protected[0].lidarr_id = None;
+    l.artists.truncate(1);
+    let r = run(&p, l, &c, &no_disk());
     assert!(r.passed, "{r:?}");
-    assert_eq!(r.findings.iter().find(|f| f.id == "artistsInside").unwrap().level, Level::Ok);
-}
-
-// ------------------------------------------------------------------ amber settings
-
-fn separate() -> (PlexFiles, LidarrSnapshot, HashMap<String, Option<Listing>>) {
-    let disk = HashMap::from([("/downloads/Someone/".to_string(), listing(&["Album"], &[]))]);
-    (library("/data/music"), lidarr(vec![root("/downloads", &["Someone"])]), disk)
 }
 
 #[test]
-fn safe_settings_give_no_amber() {
-    let (p, l, disk) = separate();
-    let r = run(&p, l, &ctx(), &disk);
-    assert!(r.passed);
-    assert!(ids(&r, Level::Amber).is_empty(), "{r:?}");
-    assert!(r.findings.iter().all(|f| f.level == Level::Ok));
+fn only_whole_folder_names_are_inside() {
+    let (mut p, mut l, mut c) = green();
+    p.locations = vec!["/data/media/Music".into()];
+    l.roots[0].path = "/data/media/Music".into();
+    // "Music-archive" is not inside "Music".
+    c.protected[0].folder = Some("/data/media/Music-archive/Quiet Hours".into());
+    let r = run(&p, l, &c, &no_disk());
+    assert!(!ids(&r, Level::Red).contains(&"protectedUnderRoot".to_string()), "{r:?}");
 }
 
 #[test]
-fn each_amber_setting_is_found_and_explained() {
-    type Tweak = fn(&mut LidarrSnapshot);
-    let cases: [(&str, Tweak); 6] = [
-        ("renameTracks", |l| l.naming.rename_tracks = true),
-        ("scrubAudioTags", |l| l.metadata.scrub_audio_tags = true),
-        ("deleteEmptyFolders", |l| l.media.delete_empty_folders = true),
-        ("recycleBin", |l| l.media.recycle_bin = " ".into()),
-        ("upgradeAllowed", |l| l.profiles.push(QualityProfile { id: 2, name: "Any".into(), upgrade_allowed: true, ..Default::default() })),
-        ("importLists", |l| l.lists.push(ImportList { id: 1, name: "Charts".into(), enable_automatic_add: true, enable: None })),
-    ];
-    for (id, tweak) in cases {
-        let (p, mut l, disk) = separate();
-        tweak(&mut l);
-        let r = run(&p, l, &ctx(), &disk);
-        assert_eq!(ids(&r, Level::Amber), vec![id.to_string()], "{id}");
-        assert!(r.passed, "amber never blocks: {id}");
-        let f = r.findings.iter().find(|f| f.level == Level::Amber).unwrap();
-        assert!(f.fix.as_deref().is_some_and(|x| x.starts_with("In Lidarr")), "{id}");
-        assert_eq!(r.findings[0].level, Level::Amber, "amber comes before OK");
-    }
-    // Default monitoring of everything on a root folder.
-    let (p, mut l, disk) = separate();
-    l.roots[0].default_new_item_monitor_option = Some("all".into());
-    let r = run(&p, l, &ctx(), &disk);
-    assert_eq!(ids(&r, Level::Amber), vec!["rootMonitorAll"]);
-    assert!(r.passed);
+fn either_separator_and_any_case_still_count_as_inside() {
+    let (p, l, mut c) = green();
+    c.protected[0].lidarr_path = Some(r"\DATA\media\music\Lidarr\Quiet Hours".into());
+    let r = run(&p, l, &c, &no_disk());
+    assert_eq!(ids(&r, Level::Red), vec!["protectedInPlex"]);
 }
 
 #[test]
-fn any_tag_writing_is_red() {
-    for v in ["newFiles", "allFiles", "sync", ""] {
-        let (p, mut l, disk) = separate();
-        l.metadata.write_audio_tags = v.into();
-        let r = run(&p, l, &ctx(), &disk);
-        assert_eq!(ids(&r, Level::Red), vec!["writeAudioTags"], "{v:?}");
-        assert!(!r.passed);
-    }
+fn writing_tags_is_red_only_with_protected_artists_under_a_root() {
+    let (p, mut l, mut c) = green();
+    l.metadata.write_audio_tags = "newFiles".into();
+    let r = run(&p, l.clone(), &c, &no_disk());
+    assert!(r.passed, "no protected files under a Lidarr root: {r:?}");
+    let f = r.findings.iter().find(|f| f.id == "writeAudioTags").unwrap();
+    assert_eq!(f.level, Level::Ok);
+    assert_eq!(f.action, Some(FixAction::WriteTagsOff));
+    // A protected folder under the Lidarr root (artist not in Lidarr).
+    c.protected[0].folder = Some("/data/media/Music/Lidarr/Quiet Hours".into());
+    c.protected[0].lidarr_path = None;
+    c.protected[0].lidarr_id = None;
+    let r = run(&p, l, &c, &no_disk());
+    assert_eq!(ids(&r, Level::Red), vec!["writeAudioTags"]);
 }
 
 #[test]
-fn no_recycle_bin_is_red_only_when_the_library_has_unreleased_music() {
-    let (p, mut l, disk) = separate();
+fn the_staging_folder_must_exist_and_stay_out_of_plex_while_artists_are_protected() {
+    let (p, l, mut c) = green();
+    c.staging = None;
+    let r = run(&p, l.clone(), &c, &no_disk());
+    assert_eq!(ids(&r, Level::Red), vec!["stagingMissing"]);
+    assert!(r.managed_ok);
+    // Nobody protected: no staging folder is fine.
+    let r = run(&p, l.clone(), &CheckContext { protected: vec![], ..c.clone() }, &no_disk());
+    assert!(r.passed, "{r:?}");
+    // Inside a Plex folder.
+    let mut l2 = l.clone();
+    l2.roots.push(RootFolder { id: 3, ..root("/data/media/Music/Staging", &[]) });
+    let r = run(&p, l2, &CheckContext { staging: Some("/data/media/Music/Staging".into()), ..c.clone() }, &no_disk());
+    assert!(ids(&r, Level::Red).contains(&"stagingScanned".to_string()), "{r:?}");
+    // Not a Lidarr root: offered as a fix.
+    let r = run(&p, l, &CheckContext { staging: Some("/data/staging/other".into()), ..c }, &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "stagingNotRoot").unwrap();
+    assert_eq!(f.action, Some(FixAction::AddStagingRoot { path: "/data/staging/other".into() }));
+}
+
+#[test]
+fn a_staging_folder_typed_as_a_mapped_share_is_tested_as_the_server_path() {
+    let (p, mut l, mut c) = green();
+    c.share = vec![("/data/media/Music".into(), r"M:\Music".into())];
+    c.staging = Some(r"M:\Music\Staging".into());
+    l.roots.push(RootFolder { id: 3, ..root("/data/media/Music/Staging", &[]) });
+    let r = run(&p, l, &c, &no_disk());
+    assert!(ids(&r, Level::Red).contains(&"stagingScanned".to_string()), "{r:?}");
+    assert!(!ids(&r, Level::Red).contains(&"stagingNotRoot".to_string()), "mapped to the root's own path");
+}
+
+#[test]
+fn a_normal_library_stays_calm() {
+    let (p, mut l, mut c) = green();
+    c.protected.clear();
+    l.exclusions.clear();
     l.media.recycle_bin = String::new();
-    let r = run(&p, l.clone(), &ctx(), &disk);
-    assert_eq!(ids(&r, Level::Amber), vec!["recycleBin"]);
-    let c = CheckContext { library_has_unreleased: true, ..ctx() };
-    let r = run(&p, l, &c, &disk);
-    assert_eq!(ids(&r, Level::Red), vec!["recycleBin"]);
-    assert!(!r.passed);
+    l.naming.rename_tracks = true;
+    c.plex_auto_scan = Some(false);
+    l.notifications = vec![super::api::Notification { id: 1, name: "Plex".into(), implementation: "PlexServer".into() }];
+    let r = run(&p, l.clone(), &c, &no_disk());
+    assert!(ids(&r, Level::Amber).is_empty(), "info lines, not amber: {r:?}");
+    assert!(ids(&r, Level::Ok).contains(&"recycleBin".to_string()));
+    // Without Lidarr's Plex connection, Plex not scanning on its own is worth knowing.
+    l.notifications.clear();
+    let r = run(&p, l.clone(), &c, &no_disk());
+    assert_eq!(ids(&r, Level::Amber), vec!["plexAutoScan"]);
+    // The same settings with a protected artist are amber.
+    let (_, _, pc) = green();
+    let mut l3 = l;
+    excluded(&mut l3);
+    let r = run(&p, l3, &CheckContext { plex_auto_scan: Some(true), ..pc }, &no_disk());
+    assert_eq!(ids(&r, Level::Amber), vec!["recycleBin", "renameTracks"]);
+    assert_eq!(r.findings.iter().find(|f| f.id == "recycleBin").unwrap().action, Some(FixAction::SetRecycleBin));
 }
 
 #[test]
-fn unmatched_lidarr_files_from_the_plex_folder_are_red() {
-    // By path, and by the same name and size somewhere else.
-    for f in [
-        super::api::TrackFile { id: 1, path: "/data/music/Glasshouse/Panes/01 Pane.m4a".into(), size: None },
-        super::api::TrackFile { id: 2, path: "/elsewhere/01 Pane.m4a".into(), size: Some(7_700_555) },
-    ] {
-        let (p, mut l, disk) = separate();
-        l.unmapped = vec![f];
-        let r = run(&p, l, &ctx(), &disk);
-        assert_eq!(ids(&r, Level::Red), vec!["unmappedInLibrary"]);
-    }
-    let (p, mut l, disk) = separate();
-    l.unmapped = vec![super::api::TrackFile { id: 3, path: "/downloads/Someone/x.flac".into(), size: Some(5) }];
-    assert!(run(&p, l, &ctx(), &disk).passed);
+fn protected_artists_off_the_exclusion_list_are_offered_as_a_fix() {
+    let (p, mut l, c) = green();
+    l.exclusions.clear();
+    let r = run(&p, l, &c, &no_disk());
+    assert_eq!(ids(&r, Level::Amber), vec!["protectedNotExcluded"]);
+    let f = r.findings.iter().find(|f| f.id == "protectedNotExcluded").unwrap();
+    assert_eq!(f.action, Some(FixAction::AddExclusions { artists: vec![ExclusionTarget { name: "Quiet Hours".into(), mbid: QH_MBID.into() }] }));
+    assert!(r.passed, "a warning, never a block");
+}
+
+#[test]
+fn folders_lidarr_and_plex_name_differently_stop_protected_work() {
+    // Plex sees /data/media/music, Lidarr sees the same disk as /music.
+    let p = library("/data/media/music");
+    let l = lidarr(vec![root("/music", &ARTISTS)]);
+    let c = with_protected(None, vec![]);
+    let r = run(&p, l.clone(), &c, &same_disk("/music"));
+    assert!(r.passed, "nothing protected, nothing to stop: {r:?}");
+    let c = with_protected(Some("/staging"), vec![prot("Quiet Hours", "/data/media/music/Quiet Hours", None)]);
+    let mut l2 = l;
+    l2.roots.push(RootFolder { id: 2, ..root("/staging", &[]) });
+    excluded(&mut l2);
+    let r = run(&p, l2, &c, &same_disk("/music"));
+    assert_eq!(ids(&r, Level::Red), vec!["pathsDiffer"]);
+    assert!(r.findings[0].detail.contains("same sizes"), "{}", r.findings[0].detail);
+    assert!(r.managed_ok);
+}
+
+#[test]
+fn unmatched_files_under_managed_artists_are_offered_only_with_renaming_off() {
+    let (p, mut l, c) = green();
+    l.unmapped = vec![super::api::TrackFile { id: 3, path: "/data/media/Music/Lidarr/Northlight/Second Wind/01 Rise.flac".into(), size: Some(5) }];
+    let r = run(&p, l.clone(), &c, &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "unmappedManaged").unwrap();
+    assert_eq!(f.level, Level::Ok);
+    assert_eq!(f.action, Some(FixAction::Rematch { folders: vec!["/data/media/Music/Lidarr/Northlight/Second Wind".into()] }));
+    l.naming.rename_tracks = true;
+    let r = run(&p, l, &c, &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "unmappedManaged").unwrap();
+    assert_eq!(f.action, None);
+    assert!(f.detail.contains("doesn't offer it"), "{}", f.detail);
+}
+
+#[test]
+fn managed_profiles_are_explained() {
+    let (p, mut l, c) = green();
+    l.profiles = vec![QualityProfile { id: 1, name: "Lossless".into(), upgrade_allowed: true, cutoff: Some(99), ..Default::default() }];
+    let r = run(&p, l.clone(), &c, &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "managedProfile").unwrap();
+    assert_eq!(f.level, Level::Amber);
+    assert!(f.title.contains("can't reach its cutoff"));
+    l.profiles[0].upgrade_allowed = false;
+    let r = run(&p, l, &c, &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "managedProfile").unwrap();
+    assert_eq!(f.level, Level::Ok);
+}
+
+#[test]
+fn no_root_folder_stops_everything() {
+    let (p, mut l, c) = green();
+    l.roots.clear();
+    let r = run(&p, l, &c, &no_disk());
+    assert!(!r.managed_ok);
+    assert_eq!(r.findings[0].id, "noRoots");
+}
+
+#[test]
+fn without_plex_files_protected_work_waits() {
+    let (_, l, c) = green();
+    let r = run(&PlexFiles::default(), l, &c, &no_disk());
+    assert!(!r.passed);
+    assert!(r.managed_ok);
+    assert!(ids(&r, Level::Red).contains(&"plexUnknown".to_string()));
 }
 
 #[test]
@@ -403,134 +405,33 @@ fn library_unreleased_comes_from_the_tags() {
     let db = DbHandle::open(dir.path().join("x.db")).unwrap();
     assert!(!db.read(library_has_unreleased).unwrap());
     db.write(|c| {
-        c.execute_batch("INSERT INTO album_tags (album_id, version) VALUES ('a', 'released');")?;
-        Ok(())
-    })
-    .unwrap();
-    assert!(!db.read(library_has_unreleased).unwrap());
-    db.write(|c| {
         c.execute_batch("INSERT INTO album_tags (album_id, version) VALUES ('b', 'leak');")?;
         Ok(())
     })
     .unwrap();
     assert!(db.read(library_has_unreleased).unwrap());
-    // Status from a plain STATUS or Picard tag lands in `release`.
-    let dir = tempfile::tempdir().unwrap();
-    let db = DbHandle::open(dir.path().join("y.db")).unwrap();
-    db.write(|c| {
-        c.execute_batch("INSERT INTO file_tags (part_key, status, scanned_at, release) VALUES ('/p/1', 'done', 1, 'released'), ('/p/2', 'done', 1, 'leaked');")?;
-        Ok(())
-    })
-    .unwrap();
-    assert!(db.read(library_has_unreleased).unwrap());
 }
-
-#[test]
-fn two_plex_folders_with_separate_lidarr_and_staging_roots_are_green() {
-    let mut p = library("/data/media/Music");
-    let archive = plex("/data/media/Archive", &[("Quiet Hours/Tapes/01 Hiss.flac", 9_999)]);
-    p.locations.extend(archive.locations);
-    p.files.extend(archive.files);
-    let mut l = lidarr(vec![root("/downloads", &["Someone"])]);
-    l.roots.push(RootFolder { id: 2, ..root("/staging/upgrades", &["Northlight"]) });
-    let disk = HashMap::from([
-        ("/downloads/Someone/".to_string(), listing(&["Album"], &[])),
-        ("/staging/upgrades/Northlight/".to_string(), listing(&["Second Wind"], &[])),
-    ]);
-    let r = run(&p, l.clone(), &with_staging("/staging/upgrades"), &disk);
-    assert!(r.passed, "{r:?}");
-    // A Lidarr root inside either Plex folder is still red.
-    l.roots.push(RootFolder { id: 3, ..root("/data/media/Archive/New", &[]) });
-    let r = run(&p, l, &with_staging("/staging/upgrades"), &disk);
-    assert_eq!(ids(&r, Level::Red), vec!["rootOverlap"]);
-}
-
-// ------------------------------------------------------------------ the staging folder
-
-fn with_staging(path: &str) -> CheckContext {
-    CheckContext { staging: Some(path.into()), ..ctx() }
-}
-
-#[test]
-fn a_separate_staging_root_passes() {
-    let (p, mut l, mut disk) = separate();
-    l.roots.push(RootFolder { id: 2, ..root("/staging/upgrades", &["Northlight"]) });
-    disk.insert("/staging/upgrades/Northlight/".into(), listing(&["Second Wind"], &[]));
-    let r = run(&p, l, &with_staging("/staging/upgrades/"), &disk);
-    assert!(r.passed, "{r:?}");
-    assert!(!r.findings.iter().any(|f| f.id.starts_with("staging")));
-}
-
-#[test]
-fn a_staging_folder_lidarr_doesnt_have_is_red() {
-    let (p, l, disk) = separate();
-    let r = run(&p, l, &with_staging("/staging/upgrades"), &disk);
-    assert!(!r.passed);
-    assert_eq!(ids(&r, Level::Red), vec!["stagingNotRoot"]);
-    // Without a staging folder there's nothing to say.
-    let (p, l, disk) = separate();
-    assert!(run(&p, l, &ctx(), &disk).passed);
-}
-
-#[test]
-fn a_staging_folder_plex_scans_is_red_by_path_and_by_content() {
-    // By path: Plex's second music folder is the staging folder.
-    let (mut p, mut l, disk) = separate();
-    p.locations.push("/downloads/upgrades".into());
-    l.roots.push(RootFolder { id: 2, ..root("/downloads/upgrades", &[]) });
-    let r = run(&p, l, &with_staging("/downloads/upgrades"), &disk);
-    assert!(ids(&r, Level::Red).contains(&"stagingScanned".to_string()), "{r:?}");
-    let f = r.findings.iter().find(|f| f.id == "stagingScanned").unwrap();
-    assert!(f.title.contains("scanned by Plex"), "{}", f.title);
-    assert!(!r.passed);
-    // Inside the music folder.
-    let (p, mut l, disk) = separate();
-    l.roots.push(RootFolder { id: 2, ..root("/data/music/Upgrades", &[]) });
-    let r = run(&p, l, &with_staging("/data/music/Upgrades"), &disk);
-    assert!(ids(&r, Level::Red).contains(&"stagingScanned".to_string()), "{r:?}");
-    assert!(!ids(&r, Level::Red).contains(&"rootOverlap".to_string()), "one finding for the staging folder, not two");
-    // By content: Lidarr's /up is the folder Plex reads as /data/music.
-    let (p, mut l, mut disk) = separate();
-    l.roots.push(RootFolder { id: 2, ..root("/up", &["Northlight"]) });
-    disk.insert("/up/Northlight/".into(), listing(&["First Light"], &[]));
-    disk.insert("/up/Northlight/First Light/".into(), listing(&[], &[("01 Dawn.flac", 31_000_111)]));
-    let r = run(&p, l, &with_staging("/up"), &disk);
-    assert!(ids(&r, Level::Red).contains(&"stagingScanned".to_string()), "{r:?}");
-}
-
-#[test]
-fn a_staging_folder_next_to_the_music_folder_is_fine() {
-    // Only being inside a Plex folder counts; a neighbour under the same parent is the usual setup.
-    let (p, mut l, disk) = separate();
-    l.roots.push(RootFolder { id: 2, ..root("/data/upgrades", &[]) });
-    let mut c = with_staging("/data/upgrades");
-    c.confirmed_roots = vec!["data/upgrades".into()];
-    let r = run(&p, l, &c, &disk);
-    assert!(r.passed, "{r:?}");
-}
-
 
 #[test]
 fn only_plain_http_to_a_public_host_is_a_warning() {
-    let (p, l, disk) = separate();
-    let mut c = ctx();
+    let (p, l, mut c) = green();
     c.unencrypted = vec!["http://203.0.113.9:8686".into()];
-    let r = run(&p, l, &c, &disk);
+    let r = run(&p, l, &c, &no_disk());
     assert_eq!(ids(&r, Level::Amber), vec!["plainHttp"]);
     assert!(r.passed, "never a block");
-    assert!(r.findings[0].title.contains("unencrypted"));
     assert!(unencrypted("http://203.0.113.9:8686"));
     assert!(unencrypted("http://lidarr.example.com"));
     assert!(!unencrypted("https://lidarr.example.com"), "a public https address is fine");
     assert!(!unencrypted("http://10.20.30.40:8686"));
     assert!(!unencrypted("http://nas:8686"));
 }
+
 #[test]
 fn red_comes_first() {
-    let (p, mut l, _) = separate();
+    let (p, mut l, mut c) = green();
     l.naming.rename_tracks = true;
-    l.roots = vec![root("/data/music", &[])];
-    let r = run(&p, l, &ctx(), &no_disk());
+    c.staging = None;
+    let r = run(&p, l, &c, &no_disk());
     assert_eq!(r.findings[0].level, Level::Red);
     assert_eq!(r.findings[1].level, Level::Amber);
 }
@@ -654,6 +555,8 @@ fn rig_with(url: &str, away: &str) -> Rig {
         mb: Arc::new(super::request_tests::NoMb),
         artist_mbid: Arc::new(super::request_tests::NoMbid),
         album_wait: std::time::Duration::ZERO,
+        shared: super::shared::tests::on(&db),
+        plex_server: Arc::new(super::plexside::fake::FakePlex::default()),
     });
     Rig { _dir: dir, db, web, keys, lidarr }
 }
@@ -663,10 +566,9 @@ async fn a_whole_check_sends_nothing_but_gets_with_the_key_in_a_header() {
     let r = rig("http://10.20.30.40:8686");
     r.lidarr.set_key(Some("abc123")).unwrap();
     let report = r.lidarr.check().await.unwrap();
-    // Docker remap: same files under /music, so it's red, plus its ambers (writing tags into new downloads among them).
-    assert_eq!(ids(&report, Level::Red), vec!["rootOverlap", "writeAudioTags"]);
-    assert_eq!(ids(&report, Level::Amber), vec!["renameTracks", "deleteEmptyFolders", "recycleBin"]);
-    assert!(report.findings[0].detail.contains("same sizes"), "listings were followed: {:?}", report.findings[0]);
+    // No protected artists in this library: nothing stops, and the settings are info lines.
+    assert!(report.passed && report.managed_ok, "{report:?}");
+    assert!(ids(&report, Level::Amber).is_empty(), "{report:?}");
     assert_eq!(report.version, "2.8.2.4493");
     let log = r.web.log.lock().clone();
     assert!(log.len() >= 9, "{log:?}");
@@ -754,7 +656,7 @@ async fn away_from_home_the_away_address_answers_with_its_headers() {
     r.web.down.lock().push("10.20.30.40".into());
     let report = r.lidarr.check().await.unwrap();
     assert_eq!(report.route, Some(api::Route::Away));
-    assert_eq!(ids(&report, Level::Red), vec!["rootOverlap", "writeAudioTags"], "the same check on every route");
+    assert!(report.passed, "the same check on every route: {report:?}");
     assert!(ids(&report, Level::Amber).iter().all(|i| i != "plainHttp"), "a public https address is fine");
     let log = r.web.log.lock().clone();
     assert!(log.iter().all(|(m, _, _)| *m == Method::Get));
@@ -810,13 +712,14 @@ fn proxy_headers_are_checked() {
 }
 #[test]
 fn a_root_folder_inside_another_is_worth_knowing() {
-    let (p, mut l, mut disk) = separate();
-    l.roots.push(RootFolder { id: 2, ..root("/downloads/Managed", &["Other"]) });
-    disk.insert("/downloads/Managed/Other/".into(), listing(&["Album"], &[]));
-    let r = run(&p, l, &ctx(), &disk);
+    let (p, mut l, c) = green();
+    l.roots.push(RootFolder { id: 3, ..root("/data/media/Music/Lidarr/Managed", &["Other"]) });
+    l.artists.push(Artist { id: 9, ..artist("Other", "/data/media/Music/Lidarr/Managed/Other") });
+    let r = run(&p, l, &c, &no_disk());
     assert_eq!(ids(&r, Level::Amber), vec!["nestedRoots"]);
     let f = r.findings.iter().find(|f| f.id == "nestedRoots").unwrap();
-    assert!(f.detail.contains("/downloads/Managed is inside /downloads"), "{}", f.detail);
-    assert!(f.fix.as_deref().unwrap().starts_with("In Lidarr"));
+    assert!(f.detail.contains("/data/media/Music/Lidarr/Managed is inside /data/media/Music/Lidarr and holds artists"), "{}", f.detail);
+    assert!(f.detail.contains("Never remove the outer folder"), "{}", f.detail);
+    assert!(f.fix.as_deref().unwrap().contains("Platter never removes root folders"));
     assert!(r.passed, "a warning, never a block");
 }

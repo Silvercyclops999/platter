@@ -19,7 +19,7 @@ use super::api::{Album, Artist, Route};
 use super::check::{CheckReport, Level};
 use super::mbpick::{Group, LibraryAlbum, Picked, Picker, Want, library_albums, missing};
 use super::status::{RequestState, map_status};
-use super::write::AddArtist;
+use super::write::{AddArtist, clear_exclusion};
 use super::paths::NormPath;
 use super::{Checked, Lidarr};
 use crate::db::store::{kv_get, kv_set};
@@ -74,6 +74,10 @@ pub struct RequestRecord {
     /// Made by auto-request for a new release, not by hand.
     #[serde(default)]
     pub auto: bool,
+    /// For a protected artist: it lands in the staging folder and waits
+    /// there until Platter adds it to the library.
+    #[serde(default)]
+    pub protected: bool,
 }
 
 /// What the UI sends to request (or preview) an album.
@@ -113,6 +117,9 @@ pub struct Preview {
     pub route: Option<Route>,
     /// The artist is new to Lidarr and will be added with only this album.
     pub adds_artist: bool,
+    /// A protected artist: the album downloads into the staging folder and
+    /// waits there until Platter adds it to the library.
+    pub protected: bool,
 }
 
 /// An artist's missing official releases, for the artist page.
@@ -151,12 +158,34 @@ fn typed_matches(typed: &str, title: &str) -> bool {
     !typed.trim().is_empty() && f(typed) == f(title)
 }
 
-fn red_error(r: &CheckReport) -> AppError {
-    let titles: Vec<&str> = r.findings.iter().filter(|f| f.level == Level::Red).map(|f| f.title.as_str()).collect();
+/// Whether the check lets work go ahead: Managed artists need no red
+/// finding that stops everyone; protected artists need no red at all.
+pub(super) fn gate(r: &CheckReport, protected: bool) -> AppResult<()> {
+    let ok = if protected { r.passed } else { r.managed_ok };
+    if ok { Ok(()) } else { Err(red_error(r, protected)) }
+}
+
+fn red_error(r: &CheckReport, protected: bool) -> AppError {
+    let titles: Vec<&str> =
+        r.findings.iter().filter(|f| f.level == Level::Red && (protected || !f.protected_only)).map(|f| f.title.as_str()).collect();
     AppError::Invalid(format!(
         "Platter won't send Lidarr anything while its setup check has red items: {}. Fix them in Lidarr, then check again in Settings.",
         titles.join("; ")
     ))
+}
+
+/// Whether a request is for a protected artist: the artist (by MusicBrainz
+/// id, the library artist, or the artist Lidarr credits) or the release
+/// group is protected.
+pub(super) fn is_protected(modes: &[super::modes::ArtistMode], want: &Want, rgid: &str, foreign: Option<&str>) -> bool {
+    let rg = rgid.trim().to_ascii_lowercase();
+    modes.iter().filter(|m| m.protected()).any(|m| {
+        let by_id = |id: Option<&str>| id.is_some_and(|x| m.mbid.as_deref().is_some_and(|y| y.eq_ignore_ascii_case(x.trim())));
+        by_id(want.mbid.as_deref())
+            || by_id(foreign)
+            || (want.artist_id.is_some() && m.artist_id == want.artist_id)
+            || m.release_groups.contains(&rg)
+    })
 }
 
 fn join_folder(root: &str, name: &str) -> String {
@@ -255,6 +284,15 @@ impl Lidarr {
         Some(NormPath::parse(&s)).filter(|n| !n.is_empty())
     }
 
+    /// Plex matched an album in the library to this release group.
+    pub(super) fn library_has_group(&self, rgid: &str) -> bool {
+        let rg = rgid.trim().to_ascii_lowercase();
+        self.inner
+            .db
+            .read(|c| Ok(c.query_row("SELECT EXISTS (SELECT 1 FROM albums WHERE lower(mbid) = ?1)", [&rg], |r| r.get::<_, bool>(0))?))
+            .unwrap_or(false)
+    }
+
     pub fn typed_confirmed(&self) -> bool {
         self.inner.db.read(|c| kv_get(c, TYPED_KEY)).ok().flatten().is_some()
     }
@@ -293,18 +331,21 @@ impl Lidarr {
     }
 
     /// Read what a request needs from Lidarr.
-    async fn plan(&self, c: &Checked, group: Group, dest: &Dest) -> AppResult<Plan> {
+    async fn plan(&self, c: &Checked, group: Group, dest: &Dest, protected: bool) -> AppResult<Plan> {
         let client = &c.client;
         let rgid = group.id.clone();
         let existing = client.album_by_release_group(&rgid).await?;
         let staging = self.staging_norm();
         let is_staging = |r: &super::api::RootFolder| staging.as_ref().is_some_and(|s| NormPath::parse(&r.path) == *s);
-        let root = match dest {
-            // Requests never land in the staging folder.
-            Dest::Library => c.snap.roots.iter().filter(|r| r.accessible && !is_staging(r)).min_by_key(|r| r.id).cloned(),
-            Dest::Staging { .. } => c.snap.roots.iter().find(|r| r.accessible && is_staging(r)).cloned(),
+        // Managed artists download into a library root, never the staging
+        // folder; protected artists only ever into the staging folder.
+        let to_staging = protected || matches!(dest, Dest::Staging { .. });
+        let root = if to_staging {
+            c.snap.roots.iter().find(|r| r.accessible && is_staging(r)).cloned()
+        } else {
+            c.snap.roots.iter().filter(|r| r.accessible && !is_staging(r)).min_by_key(|r| r.id).cloned()
         };
-        if matches!(dest, Dest::Staging { .. }) && root.is_none() {
+        if to_staging && root.is_none() {
             return Err(AppError::Invalid("Lidarr doesn't have the staging folder as a root folder it can open. Check it in Lidarr, then run the setup check again.".into()));
         }
         if let Some(a) = &existing {
@@ -368,6 +409,7 @@ impl Lidarr {
             reachable: false,
             route: None,
             adds_artist: false,
+            protected: false,
         };
         let c = match self.check_full().await {
             Ok(c) => c,
@@ -378,10 +420,16 @@ impl Lidarr {
             }
             Err(e) => return Err(e),
         };
-        if !c.report.passed {
-            return Err(red_error(&c.report));
+        gate(&c.report, false)?;
+        let mut protected = is_protected(&c.modes, &want, &group.id, None);
+        gate(&c.report, protected)?;
+        let mut plan = self.plan(&c, group.clone(), &Dest::Library, protected).await?;
+        if !protected && is_protected(&c.modes, &want, &group.id, Some(&plan.artist.foreign_artist_id)) {
+            protected = true;
+            gate(&c.report, true)?;
+            plan = self.plan(&c, group, &Dest::Library, true).await?;
         }
-        let plan = self.plan(&c, group, &Dest::Library).await?;
+        p.protected = protected;
         p.reachable = true;
         p.route = c.report.route;
         p.destination = Some(plan.destination.clone());
@@ -438,6 +486,7 @@ impl Lidarr {
             message: Some(QUEUED_NOTE.into()),
             notes: Vec::new(),
             auto,
+            protected: false,
         }
     }
 
@@ -486,22 +535,33 @@ impl Lidarr {
         if !self.allowed(&want, &group.id) {
             return Err(AppError::Invalid(super::mbpick::Refusal::NotAllowed.message()));
         }
+        if !matches!(dest, Dest::Staging { .. }) && self.library_has_group(&group.id) {
+            return Err(AppError::Invalid(format!("{} is already in your library, so Platter didn't ask Lidarr for it.", group.title)));
+        }
         let c = self.check_full().await?;
-        if !c.report.passed {
-            return Err(red_error(&c.report));
+        gate(&c.report, false)?;
+        let upgrade = matches!(dest, Dest::Staging { .. });
+        let mut protected = upgrade || is_protected(&c.modes, &want, &group.id, None);
+        gate(&c.report, protected)?;
+        let mut plan = self.plan(&c, group.clone(), dest, protected).await?;
+        if !protected && is_protected(&c.modes, &want, &group.id, Some(&plan.artist.foreign_artist_id)) {
+            protected = true;
+            gate(&c.report, true)?;
+            plan = self.plan(&c, group, dest, true).await?;
         }
-        let plan = self.plan(&c, group, dest).await?;
-        let foreign = plan.artist.foreign_artist_id.trim().to_ascii_lowercase();
-        if !foreign.is_empty() && c.snap.exclusions.iter().any(|e| e.foreign_id.trim().eq_ignore_ascii_case(&foreign)) {
-            return Err(AppError::Invalid(format!(
-                "Lidarr's import list exclusions include {}, so Platter won't request or add them. Nothing was sent.",
-                plan.artist.artist_name
-            )));
-        }
+        rec.protected = protected && !upgrade;
         let staging = self.staging_norm();
         let in_staging = |path: &str| staging.as_ref().is_some_and(|s| NormPath::parse(path).starts_with(s));
         let mut quality_choice: Option<i64> = None;
         match dest {
+            Dest::Library if protected => {
+                if plan.in_lidarr && !in_staging(&plan.artist.path) {
+                    return Err(AppError::Invalid(format!(
+                        "{} is protected, but Lidarr keeps it in {}, outside the staging folder. Platter didn't send anything. In Lidarr, set the artist's path inside the staging folder.",
+                        plan.artist.artist_name, plan.artist.path
+                    )));
+                }
+            }
             Dest::Library => {
                 if plan.in_lidarr && in_staging(&plan.artist.path) {
                     return Err(AppError::Invalid(format!(
@@ -570,7 +630,14 @@ impl Lidarr {
                         .map(|p| p.id)
                         .ok_or_else(|| AppError::Invalid("Lidarr has no metadata profile.".into()))?,
                 };
-                let payload = AddArtist::new(&plan.artist.artist_name, &plan.artist.foreign_artist_id, quality, metadata, &root.path);
+                // Lidarr's exclusions as they are right now, checked by id.
+                let exclusions = c.client.exclusions().await?;
+                let cleared = clear_exclusion(&exclusions, &plan.artist.foreign_artist_id, &plan.artist.artist_name)?;
+                let payload = if protected {
+                    AddArtist::protected(cleared, &plan.artist.artist_name, quality, metadata, &root.path)
+                } else {
+                    AddArtist::managed(cleared, &plan.artist.artist_name, quality, metadata, &root.path)
+                };
                 let id = c.writer.add_artist(payload).await?;
                 rec.added_artist = true;
                 rec.notes.push(format!("Added {} to Lidarr with only this album to download.", plan.artist.artist_name));
@@ -602,7 +669,15 @@ impl Lidarr {
         if rec.added_artist {
             let a = c.client.artist(artist_id).await?;
             let ap = NormPath::parse(&a.path);
-            if let Some(l) = c.plex_locations.iter().find(|l| !ap.is_empty() && ap.starts_with(&NormPath::parse(l))) {
+            if protected && !in_staging(&a.path) {
+                rec.state = RequestState::Failed;
+                rec.message = Some(format!(
+                    "Lidarr put protected {} in {}, outside the staging folder. Platter stopped before marking anything for download. In Lidarr, set the artist's path inside the staging folder.",
+                    a.artist_name, a.path
+                ));
+                return Ok(rec);
+            }
+            if let Some(l) = c.plex_locations.iter().find(|l| protected && !ap.is_empty() && ap.starts_with(&NormPath::parse(l))) {
                 rec.state = RequestState::Failed;
                 rec.message = Some(format!(
                     "Lidarr put {} in {}, inside your Plex music folder ({l}). Platter stopped before marking anything for download. Remove the artist in Lidarr (leave its files) and check the root folder.",
@@ -646,9 +721,9 @@ impl Lidarr {
         }
         // The whole check again after the writes, before anything is searched.
         let after = self.check_full().await?;
-        if !after.report.passed {
+        if let Err(e) = gate(&after.report, protected) {
             rec.state = RequestState::Failed;
-            rec.message = Some(format!("{} Platter stopped before searching.", red_error(&after.report)));
+            rec.message = Some(format!("{e} Platter stopped before searching."));
             return Ok(rec);
         }
         c.writer.search(vec![album.id]).await?;
@@ -745,7 +820,7 @@ impl Lidarr {
             return Ok(hidden);
         }
         let st = self.status();
-        if !(st.url_set || st.away_set) || !st.has_key || !self.last_check().is_some_and(|l| l.passed) {
+        if !(st.url_set || st.away_set) || !st.has_key || !self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)) {
             return Ok(hidden);
         }
         let want = self.want(artist, Some(artist_id), None).await;

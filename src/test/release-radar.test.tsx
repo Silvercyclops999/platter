@@ -281,6 +281,7 @@ describe("settings", () => {
         message: "MusicBrainz lists this only as a bootleg or promo, not an official release.",
         notes: [],
         auto: true,
+        protected: false,
       },
     ];
     render(<LidarrRequestsList />);

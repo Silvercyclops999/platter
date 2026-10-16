@@ -61,15 +61,15 @@ describe("Lidarr settings", () => {
     await setUp();
     render(<SettingsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Check setup" }));
-    await screen.findByText("Platter won't send Lidarr anything until the red items are fixed.");
+    await screen.findByText("Managed artists keep working. Platter won't do anything for protected artists until the red items are fixed.");
     const items = within(row("lidarrCheck")!).getAllByRole("listitem");
     const levels = items.map((li) => li.className.match(/lidarr-finding--(\w+)/)?.[1]);
     expect(levels.filter((l) => l === "red")).toHaveLength(1);
     expect(levels.filter((l) => l === "amber")).toHaveLength(2);
     expect(levels.indexOf("amber")).toBeGreaterThan(levels.indexOf("red"));
     expect(levels.lastIndexOf("amber")).toBeLessThan(levels.indexOf("ok"));
-    expect(screen.getByText(/is your Plex music folder/)).toBeTruthy();
-    expect(screen.getByText(/only affect albums Lidarr downloads itself/)).toBeTruthy();
+    expect(screen.getByText(/a protected artist in your Plex music/)).toBeTruthy();
+    expect(screen.getByText(/They don't stop anything on their own/)).toBeTruthy();
     expect(screen.getByText(/answered on its home address/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
   });
@@ -79,7 +79,7 @@ describe("Lidarr settings", () => {
     await setUp();
     render(<SettingsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Check setup" }));
-    await screen.findByText(/Lidarr can't reach your existing music/);
+    await screen.findByText(/Lidarr can't reach your curated music/);
     expect(document.querySelector(".lidarr-finding--red, .lidarr-finding--amber")).toBeNull();
   });
 
@@ -94,7 +94,7 @@ describe("Lidarr settings", () => {
     expect(within(dialog).getByText(/even under another name/)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "It's a different folder" }));
     await screen.findByText("You said /lidarr is a separate folder");
-    expect(screen.getByText(/Lidarr can't reach your existing music/)).toBeTruthy();
+    expect(screen.getByText(/Lidarr can't reach your curated music/)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Undo" }));
     await screen.findByText("Lidarr's folder /lidarr is empty");
   });
@@ -128,7 +128,7 @@ describe("Lidarr settings", () => {
     await loadSettings();
     await userEvent.click(await screen.findByRole("button", { name: "Check setup" }));
     await screen.findByText("Your API key would travel unencrypted");
-    expect(screen.getByText(/Lidarr can't reach your existing music/)).toBeTruthy(), "a warning, never a block";
+    expect(screen.getByText(/Lidarr can't reach your curated music/)).toBeTruthy(), "a warning, never a block";
   });
 
   it("refuses a bad address and bad headers", async () => {

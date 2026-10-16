@@ -829,6 +829,8 @@ fn rig() -> Rig {
         mb: mb.clone(),
         artist_mbid: Arc::new(Mbid),
         album_wait: std::time::Duration::ZERO,
+        shared: super::shared::tests::on(&db),
+        plex_server: Arc::new(super::plexside::fake::FakePlex::default()),
     });
     lidarr.set_key(Some("abc123")).unwrap();
     let plex = Arc::new(FakeRescan::default());
@@ -945,7 +947,7 @@ async fn excluded_artists_are_never_requested_or_added() {
     confirmed(&r).await;
     r.web.st.lock().exclusions = vec![ARTIST.to_string()];
     let e = r.up.request("a1").await.unwrap_err().to_string();
-    assert!(e.contains("import list exclusions include Northlight"), "{e}");
+    assert!(e.contains("Northlight is on Lidarr's import list exclusions"), "{e}");
     let input = RequestInput {
         release_group_id: "10000000-0000-0000-0000-000000000002".into(),
         title: "Second Wind".into(),
@@ -968,7 +970,7 @@ async fn an_added_artist_that_lands_in_the_plex_folder_stops_everything() {
     r.web.st.lock().misplace_artists = Some("/data/music".into());
     let rec = r.up.request("a1").await.unwrap();
     assert_eq!(rec.request.state, RequestState::Failed);
-    assert!(rec.request.message.as_deref().unwrap().contains("inside your Plex music folder"), "{:?}", rec.request.message);
+    assert!(rec.request.message.as_deref().unwrap().contains("outside the staging folder"), "{:?}", rec.request.message);
     let shape: Vec<String> = r.web.writes().iter().map(|(_, p, _)| p.clone()).collect();
     assert_eq!(shape, vec!["/api/v1/artist"], "nothing marked for download, nothing searched");
 }

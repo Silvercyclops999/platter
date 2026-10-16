@@ -101,12 +101,16 @@ pub const ALBUM_SECTIONS: Ns<crate::archive::CustomSection> = Ns::new("albumSect
 pub const DOCTOR_IGNORED: Ns<crate::doctor::Ignored> = Ns::new("doctorIgnored");
 /// Albums owned on vinyl, CD, cassette or another format, keyed by album id.
 pub const PHYSICAL: Ns<crate::physical::Owned> = Ns::new("physical");
+/// Lidarr state every device shares: per-artist modes and choices, the
+/// catch-up cursor and claims, the changes log (`crate::lidarr::shared`).
+pub const LIDARR: Ns<Value> = Ns::new("lidarr");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 16] = [
+pub const NAMESPACES: [&str; 17] = [
     TRANSCRIPTS.name(),
     LYRICS_SHARED.name(),
+    LIDARR.name(),
     PHYSICAL.name(),
     DOCTOR_IGNORED.name(),
     RELEASE_MARKS.name(),

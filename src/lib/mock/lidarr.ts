@@ -84,7 +84,7 @@ export function parseHeaders(text: string): [string, string][] {
   return out;
 }
 
-const ok = (id: string, title: string, detail = ""): LidarrFinding => ({ id, level: "ok", title, detail, fix: null, emptyRoot: null });
+const ok = (id: string, title: string, detail = ""): LidarrFinding => ({ id, level: "ok", title, detail, fix: null, emptyRoot: null, protectedOnly: false, action: null });
 
 const OK_SETTINGS: LidarrFinding[] = [
   ok("renameTracks", "Track renaming is off"),
@@ -184,7 +184,7 @@ export class MockLidarr {
     if (!this.setUp(s)) throw invalid("Set up Lidarr in Settings first.");
     const reachable = this.reachable(s);
     if (reachable && this.demo === "demo") {
-      throw invalid("Platter won't send Lidarr anything while its setup check has red items: Lidarr's folder /music is your Plex music folder. Fix them in Lidarr, then check again in Settings.");
+      throw invalid("Platter won't send Lidarr anything while its setup check has red items: Lidarr has a protected artist in your Plex music. Fix them in Lidarr, then check again in Settings.");
     }
     return {
       releaseGroupId: input.releaseGroupId,
@@ -197,6 +197,7 @@ export class MockLidarr {
       reachable,
       route: reachable ? "home" : null,
       addsArtist: !this.requests.some((r) => r.artist === input.artist && r.state !== "queued"),
+      protected: false,
     };
   }
 
@@ -225,6 +226,7 @@ export class MockLidarr {
       message: p.reachable ? null : "Sends when Platter can reach Lidarr.",
       notes: p.reachable && p.addsArtist ? [`Added ${input.artist} to Lidarr with only this album to download.`] : [],
       auto: false,
+      protected: false,
     };
     this.requests = [r, ...this.requests];
     this.typedOnce = true;
@@ -289,13 +291,15 @@ export class MockLidarr {
     let good: LidarrFinding[] = [...OK_SETTINGS];
     if (this.demo === "demo") {
       red.push({
-        id: "rootOverlap",
+        id: "protectedInPlex",
         level: "red",
-        title: "Lidarr's folder /music is your Plex music folder",
+        title: "Lidarr has a protected artist in your Plex music",
         detail:
-          "Lidarr sees the same files, with the same sizes, as Plex does (Northlight, Harbor Sound, Glasshouse and 9 more), so this looks like your Plex music folder (/data/media/music) seen from Lidarr's side under another name. Lidarr renames, retags, upgrades and cleans up the files in its root folders, so it could change your existing library.",
+          "Quiet Hours (/data/media/Music/Lidarr/Quiet Hours, inside /data/media/Music). Lidarr imports, renames and upgrades in that folder, so curated files could change. Protected artists only ever live in Lidarr's staging folder.",
         fix: ROOT_FIX,
         emptyRoot: null,
+        protectedOnly: true,
+        action: null,
       });
       amber.push(
         {
@@ -305,6 +309,8 @@ export class MockLidarr {
           detail: "Downloads get Lidarr's own file names instead of keeping theirs.",
           fix: "In Lidarr, turn off Settings > Media Management > Rename Tracks if you'd rather keep the original names.",
           emptyRoot: null,
+          protectedOnly: false,
+          action: null,
         },
         {
           id: "recycleBin",
@@ -313,6 +319,8 @@ export class MockLidarr {
           detail: "Without a recycling bin, files Lidarr replaces or removes can't be brought back.",
           fix: "In Lidarr, set a folder in Settings > Media Management > Recycling Bin.",
           emptyRoot: null,
+          protectedOnly: false,
+          action: null,
         },
       );
       good = good.filter((f) => f.id !== "renameTracks" && f.id !== "recycleBin");
@@ -328,6 +336,8 @@ export class MockLidarr {
               "It's empty, so Platter goes by what you said. Once Lidarr puts music in it, Platter compares its contents with your library before every request.",
             fix: null,
             emptyRoot: { path: "/lidarr", confirmed: true },
+            protectedOnly: false,
+            action: null,
           }
         : {
             id: "rootEmpty",
@@ -337,6 +347,8 @@ export class MockLidarr {
               "An empty folder has nothing to compare, so Platter can't tell whether it's separate from your Plex music folder. If it's a different folder (not your music folder, and not inside it), say so below. Platter checks it again before every request.",
             fix: null,
             emptyRoot: { path: "/lidarr", confirmed: false },
+            protectedOnly: false,
+            action: null,
           };
       (confirmed ? good : red).unshift(f);
       good.unshift(ok("artistsInside", "No Lidarr artists in your Plex music folder", "Lidarr doesn't manage any of the folders your library uses."));
@@ -355,10 +367,21 @@ export class MockLidarr {
         detail: `${plain.join(", ")} starts with http:// and isn't on your home network, so the key and everything Lidarr answers cross the internet in plain text.`,
         fix: "Reach Lidarr from away through https (your reverse proxy or tunnel can add it), then use the https address here.",
         emptyRoot: null,
+        protectedOnly: false,
+        action: null,
       });
     }
     const route = this.demo === "away" || !s.lidarrUrl.trim() ? "away" : "home";
     this.lastPassed = red.length === 0;
-    return { version: "2.8.2.4493", findings: [...red, ...amber, ...good], passed: red.length === 0, checkedAt: now, route };
+    const managedOk = !red.some((f) => !f.protectedOnly);
+    return {
+      version: "2.8.2.4493",
+      findings: [...red, ...amber, ...good],
+      passed: red.length === 0,
+      managedOk,
+      protectedCount: this.demo === "demo" ? 1 : 0,
+      checkedAt: now,
+      route,
+    };
   }
 }

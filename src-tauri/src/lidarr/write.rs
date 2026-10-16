@@ -30,8 +30,38 @@ pub struct AddOptions {
     pub search_for_missing_albums: bool,
 }
 
-/// The artist to add. Built only by [`AddArtist::new`], so monitoring is
-/// always limited.
+/// Proof that an artist's MusicBrainz id was checked against Lidarr's
+/// import list exclusions just before adding it. Only [`clear_exclusion`]
+/// makes one, and [`AddArtist`] can't be built without one, so no add path
+/// can skip the check. (Lidarr itself doesn't stop a manual add of an
+/// excluded artist.) Artists are matched by id, never by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cleared {
+    mbid: String,
+}
+
+impl Cleared {
+    pub fn mbid(&self) -> &str {
+        &self.mbid
+    }
+}
+
+/// Check `mbid` against the exclusions Lidarr has right now.
+pub fn clear_exclusion(exclusions: &[super::api::Exclusion], mbid: &str, name: &str) -> AppResult<Cleared> {
+    let m = mbid.trim().to_ascii_lowercase();
+    if !crate::artistinfo::is_mbid(&m) {
+        return Err(AppError::Invalid(format!("Platter doesn't know {name}'s MusicBrainz id, so it can't check Lidarr's exclusions. Nothing was sent.")));
+    }
+    if exclusions.iter().any(|e| e.foreign_id.trim().eq_ignore_ascii_case(&m)) {
+        return Err(AppError::Invalid(format!(
+            "{name} is on Lidarr's import list exclusions, so Platter won't add it to Lidarr. Nothing was sent. If you want albums for it, add it in Lidarr yourself (for a protected artist, with a path inside the staging folder) or take it off the list."
+        )));
+    }
+    Ok(Cleared { mbid: m })
+}
+
+/// The artist to add. Built only by [`AddArtist::managed`] or
+/// [`AddArtist::protected`], so monitoring is always limited.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddArtist {
@@ -46,10 +76,12 @@ pub struct AddArtist {
 }
 
 impl AddArtist {
-    pub fn new(name: &str, foreign_artist_id: &str, quality_profile_id: i64, metadata_profile_id: i64, root: &str) -> Self {
+    /// A Managed artist into one of Lidarr's library roots: the artist is
+    /// monitored, but no album is until Platter asks for one.
+    pub fn managed(cleared: Cleared, name: &str, quality_profile_id: i64, metadata_profile_id: i64, root: &str) -> Self {
         Self {
             artist_name: name.to_string(),
-            foreign_artist_id: foreign_artist_id.to_string(),
+            foreign_artist_id: cleared.mbid,
             quality_profile_id,
             metadata_profile_id,
             root_folder_path: root.to_string(),
@@ -57,6 +89,14 @@ impl AddArtist {
             monitor_new_items: MONITOR_NONE,
             add_options: AddOptions { monitor: MONITOR_NONE, search_for_missing_albums: false },
         }
+    }
+
+    /// A protected artist, only ever into the staging root and unmonitored
+    /// (measured: Lidarr then only refreshes the artist and rescans its own
+    /// folder; nothing is searched or queued). Platter monitors just the
+    /// albums it requests.
+    pub fn protected(cleared: Cleared, name: &str, quality_profile_id: i64, metadata_profile_id: i64, staging_root: &str) -> Self {
+        Self { monitored: false, ..Self::managed(cleared, name, quality_profile_id, metadata_profile_id, staging_root) }
     }
 }
 
@@ -192,14 +232,23 @@ mod tests {
 
     #[test]
     fn payloads_limit_monitoring() {
-        let call = WriteCall::AddArtist(AddArtist::new("Northlight", "aaaa", 2, 3, "/downloads/music"));
+        let ex = vec![super::super::api::Exclusion { foreign_id: "B0000000-0000-0000-0000-000000000002".into(), artist_name: "Quiet Hours".into() }];
+        assert!(clear_exclusion(&ex, "b0000000-0000-0000-0000-000000000002", "Quiet Hours").is_err(), "matched by id, any case");
+        assert!(clear_exclusion(&ex, "not an id", "Someone").is_err(), "no id, no add");
+        let ok = clear_exclusion(&ex, "a0000000-0000-0000-0000-000000000001", "Northlight").unwrap();
+        let prot = AddArtist::protected(ok.clone(), "Northlight", 2, 3, "/data/staging/music");
+        let v: Value = serde_json::from_str(&WriteCall::AddArtist(prot).body()).unwrap();
+        assert_eq!(v["monitored"], false);
+        assert_eq!(v["rootFolderPath"], "/data/staging/music");
+        assert_eq!(v["addOptions"], json!({"monitor": "none", "searchForMissingAlbums": false}));
+        let call = WriteCall::AddArtist(AddArtist::managed(ok, "Northlight", 2, 3, "/downloads/music"));
         assert_eq!(call.method(), WriteMethod::Post);
         assert_eq!(call.path(), "/artist");
         let v: Value = serde_json::from_str(&call.body()).unwrap();
         assert_eq!(
             v,
             json!({
-                "artistName": "Northlight", "foreignArtistId": "aaaa", "qualityProfileId": 2, "metadataProfileId": 3,
+                "artistName": "Northlight", "foreignArtistId": "a0000000-0000-0000-0000-000000000001", "qualityProfileId": 2, "metadataProfileId": 3,
                 "rootFolderPath": "/downloads/music", "monitored": true, "monitorNewItems": "none",
                 "addOptions": {"monitor": "none", "searchForMissingAlbums": false}
             })

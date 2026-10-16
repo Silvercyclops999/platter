@@ -167,6 +167,7 @@ export class MockUpgrades {
       message: null,
       notes: [`Asked Lidarr for ${this.target(a.id)} or better with its Lossless profile.`],
       auto: false,
+      protected: false,
       albumId: a.id,
       fromQuality: this.current(a.id)?.label ?? "",
       swaps: [],
