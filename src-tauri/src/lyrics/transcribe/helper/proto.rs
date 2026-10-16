@@ -97,7 +97,7 @@ pub fn read_samples<R: Read>(r: &mut R, n: usize) -> io::Result<Vec<f32>> {
     if body.len() != n * 4 {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "wrong number of samples"));
     }
-    Ok(body.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+    Ok(body.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
 }
 
 #[cfg(test)]
