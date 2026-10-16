@@ -220,6 +220,9 @@ struct State {
     rest_until: Option<Instant>,
     /// Time taken by the background songs transcribed in this run, and how many.
     pace: (Duration, u32),
+    /// A background song's decoded audio, kept when a song someone asked
+    /// for stopped it, so it needn't be read again.
+    held: Option<(String, Arc<Vec<f32>>)>,
 }
 
 /// The parts the service works with.
@@ -654,6 +657,7 @@ impl Transcriber {
                             st.paused = None;
                             st.rest_until = None;
                             st.pace = (Duration::ZERO, 0);
+                            st.held = None;
                         }
                     }
                     self.inner.deps.recognizer.unload();
@@ -763,7 +767,43 @@ impl Transcriber {
         }
     }
 
+    /// One song. A background song stops (and goes back in the queue) when
+    /// someone asks for a song, or when someone is back at the computer
+    /// while it runs with the extra threads.
     async fn work(&self, job: &Job, cancel: &Arc<AtomicBool>) -> Outcome {
+        let stop = Arc::new(AtomicBool::new(false));
+        let again = Arc::new(AtomicBool::new(false));
+        let boosted = Arc::new(AtomicBool::new(false));
+        let watch = {
+            let (me, cancel, stop, again, boosted, now) =
+                (self.clone(), cancel.clone(), stop.clone(), again.clone(), boosted.clone(), job.now);
+            tokio::spawn(async move {
+                loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        stop.store(true, Ordering::Relaxed);
+                    }
+                    let asked_for = !now && me.inner.st.lock().queue.front().is_some_and(|j| j.now);
+                    let back = boosted.load(Ordering::Relaxed) && !me.inner.deps.pacer.away();
+                    if asked_for || back {
+                        if back {
+                            tracing::info!("someone is back at the computer: starting the song again with fewer threads");
+                        }
+                        again.store(true, Ordering::Relaxed);
+                        stop.store(true, Ordering::Relaxed);
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+        };
+        let out = self.run_job(job, &stop, &boosted).await;
+        watch.abort();
+        match out {
+            Outcome::Cancelled if again.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) => Outcome::Again,
+            o => o,
+        }
+    }
+
+    async fn run_job(&self, job: &Job, cancel: &Arc<AtomicBool>, boosted: &AtomicBool) -> Outcome {
         let d = &self.inner.deps;
         let id = job.track_id.clone();
         // Already done (an earlier run or another trigger).
@@ -811,90 +851,41 @@ impl Transcriber {
         if job.check_other && d.other.has_lyrics(&id).await {
             return Outcome::Skipped;
         }
-        self.set_stage(Stage::Reading, 0);
-        let song = match d.songs.read(&id, cancel).await {
-            Ok(s) => s,
-            Err(AudioError::Cancelled) => return Outcome::Cancelled,
-            Err(AudioError::Unreachable(m)) => {
-                tracing::info!("transcription can't read the song now: {m}");
-                if job.background {
-                    self.inner.st.lock().paused = Some(PauseReason::Offline);
-                    self.emit(true);
-                    tokio::select! {
-                        _ = tokio::time::sleep(OFFLINE_RETRY) => {}
-                        _ = wait_flag(cancel) => {}
-                    }
-                    self.inner.st.lock().paused = None;
-                    return if cancel.load(Ordering::Relaxed) { Outcome::Cancelled } else { Outcome::Retry };
-                }
-                self.fail(&id, "Couldn't read this song from your server. Try again when it's connected.");
-                return Outcome::Failed;
-            }
-            Err(AudioError::Unreadable(m)) => {
-                tracing::info!("transcription can't use this file: {m}");
-                self.fail(&id, "This song's file couldn't be read for transcription.");
-                return Outcome::Failed;
-            }
+        let held = {
+            let mut st = self.inner.st.lock();
+            if st.held.as_ref().is_some_and(|h| h.0 == id) { st.held.take().map(|h| h.1) } else { None }
         };
-        self.set_stage(Stage::Decoding, 0);
-        let pcm = {
-            let cancel = cancel.clone();
-            let SongAudio { bytes, hint, .. } = song;
-            tokio::task::spawn_blocking(move || audio::to_16k_mono(bytes, hint.as_deref(), &cancel)).await
-        };
-        let pcm = match pcm {
-            Ok(Ok(p)) => p,
-            Ok(Err(AudioError::Cancelled)) => return Outcome::Cancelled,
-            Ok(Err(e)) => {
-                tracing::info!("transcription decode failed: {e:?}");
-                self.fail(&id, "This song's file couldn't be decoded for transcription.");
-                return Outcome::Failed;
-            }
-            Err(e) => {
-                tracing::warn!("decode task failed: {e}");
-                self.fail(&id, "Transcription failed.");
-                return Outcome::Failed;
-            }
+        let pcm = match held {
+            Some(p) => p,
+            None => match self.read_song(job, cancel).await {
+                Ok(p) => Arc::new(p),
+                Err(o) => return o,
+            },
         };
         self.set_stage(Stage::Transcribing, 0);
         // More threads because nobody's at the computer: back to fewer the
         // moment someone is (the song starts again).
-        let (threads, boosted) = d.pacer.threads_boosted(job.now);
+        let (threads, boost) = d.pacer.threads_boosted(job.now);
+        boosted.store(boost, Ordering::Relaxed);
         let started = Instant::now();
         let seconds = pcm.len() / audio::RATE as usize;
-        let run_cancel = Arc::new(AtomicBool::new(false));
-        let downshift = Arc::new(AtomicBool::new(false));
-        let watch = {
-            let (job_cancel, run_cancel, downshift, pacer) = (cancel.clone(), run_cancel.clone(), downshift.clone(), d.pacer.clone());
-            tokio::spawn(async move {
-                loop {
-                    if job_cancel.load(Ordering::Relaxed) {
-                        run_cancel.store(true, Ordering::Relaxed);
-                    }
-                    if boosted && !pacer.away() {
-                        downshift.store(true, Ordering::Relaxed);
-                        run_cancel.store(true, Ordering::Relaxed);
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            })
-        };
         let res = {
             let rec = d.recognizer.clone();
-            let run_cancel = run_cancel.clone();
+            let (cancel, pcm) = (cancel.clone(), pcm.clone());
             let me = self.clone();
             let progress: engine::Progress = Arc::new(move |p| me.set_stage(Stage::Transcribing, p));
-            tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, engine::LANGUAGE, run_cancel, progress))
+            tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, engine::LANGUAGE, cancel, progress))
                 .await
         };
-        watch.abort();
         let segments = match res {
             Ok(Ok(s)) => s,
-            Ok(Err(RecognizeError::Cancelled)) if downshift.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) => {
-                tracing::info!("someone is back at the computer: starting the song again with fewer threads");
-                return Outcome::Again;
+            Ok(Err(RecognizeError::Cancelled)) => {
+                // Stopped for a song asked for: keep the audio for later.
+                if !job.now {
+                    self.inner.st.lock().held = Some((id.clone(), pcm));
+                }
+                return Outcome::Cancelled;
             }
-            Ok(Err(RecognizeError::Cancelled)) => return Outcome::Cancelled,
             Ok(Err(RecognizeError::Crashed)) => {
                 self.fail(&id, "The speech model stopped unexpectedly on this song.");
                 return Outcome::Failed;
@@ -910,6 +901,74 @@ impl Transcriber {
                 return Outcome::Failed;
             }
         };
+        self.finish_song(job, kind, segments, seconds, started, threads, cancel).await
+    }
+
+    /// Reads and decodes a song.
+    async fn read_song(&self, job: &Job, cancel: &Arc<AtomicBool>) -> Result<Vec<f32>, Outcome> {
+        let d = &self.inner.deps;
+        let id = job.track_id.clone();
+        self.set_stage(Stage::Reading, 0);
+        let song = match d.songs.read(&id, cancel).await {
+            Ok(s) => s,
+            Err(AudioError::Cancelled) => return Err(Outcome::Cancelled),
+            Err(AudioError::Unreachable(m)) => {
+                tracing::info!("transcription can't read the song now: {m}");
+                if job.background {
+                    self.inner.st.lock().paused = Some(PauseReason::Offline);
+                    self.emit(true);
+                    tokio::select! {
+                        _ = tokio::time::sleep(OFFLINE_RETRY) => {}
+                        _ = wait_flag(cancel) => {}
+                    }
+                    self.inner.st.lock().paused = None;
+                    return Err(if cancel.load(Ordering::Relaxed) { Outcome::Cancelled } else { Outcome::Retry });
+                }
+                self.fail(&id, "Couldn't read this song from your server. Try again when it's connected.");
+                return Err(Outcome::Failed);
+            }
+            Err(AudioError::Unreadable(m)) => {
+                tracing::info!("transcription can't use this file: {m}");
+                self.fail(&id, "This song's file couldn't be read for transcription.");
+                return Err(Outcome::Failed);
+            }
+        };
+        self.set_stage(Stage::Decoding, 0);
+        let pcm = {
+            let cancel = cancel.clone();
+            let SongAudio { bytes, hint, .. } = song;
+            tokio::task::spawn_blocking(move || audio::to_16k_mono(bytes, hint.as_deref(), &cancel)).await
+        };
+        match pcm {
+            Ok(Ok(p)) => Ok(p),
+            Ok(Err(AudioError::Cancelled)) => Err(Outcome::Cancelled),
+            Ok(Err(e)) => {
+                tracing::info!("transcription decode failed: {e:?}");
+                self.fail(&id, "This song's file couldn't be decoded for transcription.");
+                Err(Outcome::Failed)
+            }
+            Err(e) => {
+                tracing::warn!("decode task failed: {e}");
+                self.fail(&id, "Transcription failed.");
+                Err(Outcome::Failed)
+            }
+        }
+    }
+
+    /// Lines from the words, saved.
+    #[allow(clippy::too_many_arguments)]
+    async fn finish_song(
+        &self,
+        job: &Job,
+        kind: ModelKind,
+        segments: Vec<lines::Segment>,
+        seconds: usize,
+        started: Instant,
+        threads: usize,
+        cancel: &AtomicBool,
+    ) -> Outcome {
+        let d = &self.inner.deps;
+        let id = job.track_id.clone();
         if cancel.load(Ordering::Relaxed) {
             return Outcome::Cancelled;
         }

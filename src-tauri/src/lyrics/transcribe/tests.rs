@@ -72,6 +72,9 @@ enum Behaviour {
     Block,
     /// The helper process stopped.
     Crash,
+    /// Runs with fewer threads than this block until cancelled (a long
+    /// background song); runs with more give these words.
+    BlockBelow(usize, Vec<Segment>),
 }
 
 struct FakeRecognizer {
@@ -132,6 +135,15 @@ impl Recognizer for FakeRecognizer {
                 Err(RecognizeError::Cancelled)
             }
             Behaviour::Crash => Err(RecognizeError::Crashed),
+            Behaviour::BlockBelow(n, s) => {
+                if threads >= n {
+                    return Ok(s);
+                }
+                while !cancel.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(RecognizeError::Cancelled)
+            }
         }
     }
     fn crashed_too_often(&self) -> bool {
@@ -608,6 +620,37 @@ async fn songs_asked_for_go_before_the_batch() {
     assert_eq!(s.current.unwrap().track_id, waiting);
     assert_eq!((s.batch.total, s.queued), (4, 2));
     f.t.cancel(None);
+}
+
+#[tokio::test]
+async fn a_song_asked_for_stops_the_batch_song_in_progress_which_resumes_after() {
+    let f = fx();
+    install(&f).await;
+    // Background songs (two threads) take forever; the song asked for (four) doesn't.
+    *f.rec.behaviour.lock() = Behaviour::BlockBelow(4, vec![words("hello there", 1000)]);
+    f.t.transcribe_album("80").await.unwrap();
+    until(&f.t, "801 transcribing", |s| s.current.as_ref().is_some_and(|c| c.track_id == "801" && c.stage == Stage::Transcribing)).await;
+    let reads = f.songs.reads.load(Ordering::SeqCst);
+    f.t.transcribe_track("501").unwrap();
+    // Within a moment the asked-for song is the one running, and it finishes.
+    for _ in 0..100 {
+        if f.t.status().current.is_some_and(|c| c.track_id == "501") || f.events.done.lock().iter().any(|d| d.0 == "501") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        f.t.status().current.is_some_and(|c| c.track_id == "501") || f.events.done.lock().iter().any(|d| d.0 == "501"),
+        "the song asked for started within a second"
+    );
+    until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
+    // Then the batch song goes on, from the audio already read.
+    let s = until(&f.t, "801 again", |s| s.current.as_ref().is_some_and(|c| c.track_id == "801" && c.stage == Stage::Transcribing)).await;
+    assert_eq!(f.songs.reads.load(Ordering::SeqCst), reads + 1, "only the asked-for song was read");
+    assert_eq!(s.queued, 2);
+    assert!(s.error.is_none());
+    f.t.cancel(None);
+    until(&f.t, "stopped", idle).await;
 }
 
 #[tokio::test]

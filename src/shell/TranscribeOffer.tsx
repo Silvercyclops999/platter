@@ -17,7 +17,8 @@ export function stageText(c: NonNullable<TranscribeStatus["current"]>, s: Transc
     case "decoding":
       return "Getting the audio ready…";
     case "transcribing":
-      return `Transcribing… ${c.percent}%`;
+      // The model loads and takes in the first stretch before any percent comes.
+      return c.percent === 0 ? "Starting…" : `Transcribing… ${c.percent}%`;
   }
 }
 
