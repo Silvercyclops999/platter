@@ -61,8 +61,23 @@ const SOUND_WORDS: [&str; 12] = [
     "beat", "humming",
 ];
 
+/// Music notes the recognizer writes over singing or music, and the
+/// replacement character older builds left where a note was split between
+/// tokens.
 fn is_music_symbol(c: char) -> bool {
-    matches!(c, '♪' | '♫' | '♬' | '♩' | '🎵' | '🎶')
+    matches!(c, '♪' | '♫' | '♬' | '♩' | '🎵' | '🎶' | '\u{fffd}')
+}
+
+/// Stored transcription text without music symbols (saved before they were
+/// dropped as the lines were made).
+pub fn strip_music_symbols(text: &str) -> String {
+    text.lines()
+        .map(|l| {
+            let t: String = l.chars().filter(|c| !is_music_symbol(*c)).collect();
+            if t.len() == l.len() { t } else { t.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ") }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn fold(s: &str) -> String {
@@ -230,6 +245,26 @@ mod tests {
         let texts: Vec<String> = lines.iter().map(Line::text).collect();
         assert_eq!(texts, vec!["The river runs", "Under bridges", "I count"]);
         assert_eq!(lines[1].start_ms, 3000);
+    }
+
+    #[test]
+    fn music_notes_and_broken_characters_are_dropped() {
+        let s = vec![
+            seg(vec![w(0, 300, " ♪"), w(300, 600, " I'm"), w(600, 900, " fine♪"), w(900, 1000, " ♫")]),
+            // Only notes (music playing): no line at all.
+            seg(vec![w(5000, 5300, " ♪"), w(5300, 5600, " \u{fffd}\u{fffd}"), w(5600, 5900, " ♬")]),
+            seg(vec![w(9000, 9300, " \u{fffd}\u{fffd}"), w(9300, 9600, " still"), w(9600, 9900, " here")]),
+        ];
+        let texts: Vec<String> = to_lines(&s).iter().map(Line::text).collect();
+        assert_eq!(texts, vec!["I'm fine", "Still here"]);
+    }
+
+    #[test]
+    fn stored_text_from_older_builds_loses_its_notes() {
+        let old = "[00:01.00]\u{fffd}\u{fffd} I'm fine \u{fffd}\u{fffd}\n[00:04.00]<00:04.00> ♪ <00:05.00> \n[00:07.00]Plain";
+        assert_eq!(strip_music_symbols(old), "[00:01.00] I'm fine\n[00:04.00]<00:04.00> <00:05.00>\n[00:07.00]Plain");
+        let l = parse_lyrics_text(&strip_music_symbols(old));
+        assert!(l.lines.iter().all(|t| !t.contains('\u{fffd}') && !t.contains('♪')), "{:?}", l.lines);
     }
 
     #[test]
