@@ -82,6 +82,17 @@ jobs:
       # Vulkan); macOS can use the shipped ones. Windows builds the Vulkan
       # backend with the LunarG SDK (headers, glslc and the import library);
       # the app itself doesn't need the SDK, only a graphics driver.
+      # whisper.cpp's Vulkan shader build nests deep enough under
+      # src-tauri\target that MSBuild's file tracking passes the 260
+      # character path limit; build through a short junction to the same
+      # folder (the cache and the bundles stay where they were).
+      - if: matrix.platform == 'windows-latest'
+        name: Short build path
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri\target | Out-Null
+          New-Item -ItemType Junction -Path C:\t -Target "$PWD\src-tauri\target" | Out-Null
+          Add-Content $env:GITHUB_ENV "CARGO_TARGET_DIR=C:\t"
       - if: matrix.platform == 'windows-latest'
         id: vulkan-cache
         uses: actions/cache@v4

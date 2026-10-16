@@ -183,7 +183,9 @@ needs CMake and libclang (LLVM on Windows). On Windows and Linux it also runs
 on the graphics card with Vulkan, so building needs the Vulkan headers and
 `glslc`: the LunarG Vulkan SDK on Windows (with `VULKAN_SDK` set), and
 `libvulkan-dev` and `glslc` on Debian and Ubuntu. People using Platter need
-only their graphics driver; without one it uses the processor. On macOS,
+only their graphics driver; without one it uses the processor. On Windows the
+Vulkan shader build can pass the 260 character path limit; build with a
+short `CARGO_TARGET_DIR` (for example `C:\t`) if it fails with `FTK1011`. On macOS,
 setting `WHISPER_DONT_GENERATE_BINDINGS=1` skips the libclang step. Without
 the feature everything else builds the same, and Settings says transcription
 isn't in this build.
