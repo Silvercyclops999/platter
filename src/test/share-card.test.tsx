@@ -279,7 +279,7 @@ describe("lyric cards", () => {
     playing(words, 40_000);
     render(<LyricsPane />);
     fireEvent.click(await screen.findByRole("button", { name: "Share lyrics" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(useLyricPick.getState().picking).toBe(false);
     expect(screen.getByRole("button", { name: "Share lyrics" })).toBeInTheDocument();
   });
