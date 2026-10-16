@@ -77,6 +77,7 @@ import {
   LidarrUrlField,
   useLidarr,
 } from "./LidarrSettings";
+import { LidarrArtistsList, LidarrChangesList, LidarrWaitingList, LidarrWorkStatus } from "./LidarrModes";
 import { LidarrRequestsList } from "./LidarrRequest";
 import { OfficialPrefixField, ShareMapEditor, StagingFolderField, UpgradesList } from "./LidarrUpgrade";
 import { AUTO_CAP_OPTIONS, AutoArtistsList } from "./AutoRequestDialog";
@@ -1989,9 +1990,9 @@ export function SettingsPage() {
             key: "lidarrStagingFolder",
             section: "Integrations",
             group: "Lidarr",
-            title: "Lidarr staging folder for upgrades",
+            title: "Lidarr staging folder",
             description:
-              "Optional. A Lidarr root folder, as Lidarr sees it, that Plex does not scan. Better copies of albums you have download here and wait until you swap them in. Empty keeps upgrades off. The setup check makes sure Plex can't see it.",
+              "A Lidarr root folder, as Lidarr sees it, that no Plex library scans. Lidarr only ever downloads protected artists here, and better copies wait here until they're swapped in. The setup check makes sure Plex can't see it.",
             control: (ids) => <StagingFolderField ids={ids} />,
           },
         ] satisfies RowDef[])
@@ -2022,6 +2023,62 @@ export function SettingsPage() {
               "Reads Lidarr's folders and settings and compares them with your Plex music, by contents as well as paths, to make sure Lidarr can never touch your existing library. Only reads; nothing in Lidarr changes.",
             control: () => <LidarrCheckButton lidarr={lidarr} />,
             block: () => <LidarrFindings lidarr={lidarr} />,
+          },
+          {
+            key: "lidarrWork",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Practice mode and catching up",
+            description:
+              "Platter catches up with what Lidarr did while it was closed, on start and every few minutes. For the first week after setup it only writes down what it would add or swap.",
+            control: () => null,
+            block: () => <LidarrWorkStatus />,
+          },
+          {
+            key: "lidarrArtists",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Managed and protected artists",
+            description:
+              "Managed: Lidarr owns the artist's folder and imports, renames and upgrades there. Protected: curated files; Lidarr only downloads into the staging folder and Platter adds albums to your library itself. Picked for each artist from its files' tags, album types and Lidarr's exclusions.",
+            control: () => null,
+            block: () => <LidarrArtistsList />,
+          },
+          {
+            key: "lidarrWaiting",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Waiting for you",
+            description:
+              "Protected albums Lidarr brought into the staging folder. Complete official albums can be added with the names and tags the artist's other albums use; anything else says why it waits.",
+            control: () => null,
+            block: () => <LidarrWaitingList />,
+          },
+          {
+            key: "lidarrScanAfterImport",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Ask Plex to scan after Lidarr imports",
+            description: "When a Managed album doesn't show up in Plex within about two minutes, Platter asks Plex to scan just its folder.",
+            control: (ids) => toggle(s, "lidarrScanAfterImport", ids),
+          },
+          {
+            key: "lidarrFreeStaging",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Free up staging space after adding",
+            description:
+              "Once a protected album is in your library and Lidarr has stopped looking for it, its copy in the staging folder is freed (into Lidarr's recycling bin when it has one).",
+            control: (ids) => toggle(s, "lidarrFreeStaging", ids),
+          },
+          {
+            key: "lidarrChanges",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Changes",
+            description: "Everything Platter changed in Lidarr, when and from which device, with Put it back where it can.",
+            control: () => null,
+            block: () => <LidarrChangesList />,
           },
           {
             key: "showMissingReleases",

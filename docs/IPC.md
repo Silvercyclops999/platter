@@ -1921,7 +1921,7 @@ for an imported play, `id` naming the source (`plex_history`, `tautulli`,
 
 ## Lidarr
 
-Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` settings. The API key and any extra proxy headers are in the OS keychain and never cross back to the UI. The check only reads from Lidarr. Requests send exactly three kinds of write: `POST /api/v1/artist` (monitored, but with `monitorNewItems` and `addOptions.monitor` set to `none` and no search), `PUT /api/v1/album/monitor` and `POST /api/v1/command` with `AlbumSearch`. Before any of them the release group is checked on MusicBrainz again and the whole setup check runs again; a red finding stops the request.
+Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` settings. The API key and any extra proxy headers are in the OS keychain and never cross back to the UI. The check only reads from Lidarr. Every write is one of a fixed set (`lidarr/write.rs`): adding an artist (only with a fresh check of Lidarr's import list exclusions by MusicBrainz id; Managed artists into a library root, monitored with `monitorNewItems` and `addOptions.monitor` set to `none` and no search; protected artists into the staging root, unmonitored), monitoring albums and `AlbumSearch`; and, only after the user said yes to the exact change, adding or removing exclusions, one value on a settings page, the staging root folder and the "Platter Hi-Res" profile; freeing a promoted album's files inside the staging folder; and a manual import onto an album's current release. Nothing triggers a global rescan. Before a request the release group is checked on MusicBrainz again and the whole setup check runs again: a red finding that stops everyone (no root folder) stops it, and any red finding stops a request for a protected artist.
 
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -1937,16 +1937,48 @@ Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` setting
 | `lidarr_request_cancel` | `{ id }` | `LidarrRequest[]`; only waiting or finished requests, else `invalid` |
 | `lidarr_missing_releases` | `{ artistId, artist }` | `{ shown, items: { releaseGroupId, title, kind: "album"\|"ep", year, request, thumb }[] }`; `thumb` is the small front cover as an art path (`/ext/https://coverartarchive.org/release-group/<id>/front-250`), which fails to load when the archive has none; `shown` is false unless the setting is on, Lidarr is set up and its last check passed |
 
-`LidarrReport = { version, findings: { id, level: "red"|"amber"|"ok", title, detail, fix: string|null, emptyRoot: { path, confirmed }|null }[], passed, checkedAt, route: "home"|"away"|null }`.
-Findings come red first, then amber, then OK. `passed` is false while any finding is red.
+`LidarrReport = { version, findings: LidarrFinding[], passed, managedOk, protectedCount, checkedAt, route: "home"|"away"|null }` and `LidarrFinding = { id, level: "red"|"amber"|"ok", title, detail, fix: string|null, emptyRoot: { path, confirmed }|null, protectedOnly, action: LidarrFixAction|null }`.
+Findings come red first, then amber, then OK. `passed` is false while any finding is red (protected work waits); `managedOk` is false only for a red finding with `protectedOnly` false. `LidarrFixAction` is `{ kind }` with `addExclusions { artists: { name, mbid }[] }`, `setRecycleBin` (needs a folder), `writeTagsOff`, `renameOff`, `addStagingRoot { path }` or `rematch { folders }`.
 The home address is tried first (for 4 seconds when an away address is set), then the away address.
 
 `LidarrRequestInput = { releaseGroupId, title, artist, artistId?, typed? }`.
-`LidarrPreview = { releaseGroupId, title, artist, destination, destinationIsGuess, needsTyped, existing, reachable, route, addsArtist }`.
-`LidarrRequest = { id, releaseGroupId, title, artist, artistId, state, destination, lidarrAlbumId, addedArtist, alreadyInLidarr, createdAt, updatedAt, message, notes, auto }`, with `state` one of `queued`, `requested`, `searching`, `downloading`, `imported`, `failed`. `auto` is true for a request auto-request made; one it refused stays as `failed` with why in `message`.
+`LidarrPreview = { releaseGroupId, title, artist, destination, destinationIsGuess, needsTyped, existing, reachable, route, addsArtist, protected }`; `protected` means it lands in the staging folder and waits there until Platter adds it to the library.
+`LidarrRequest = { id, releaseGroupId, title, artist, artistId, state, destination, lidarrAlbumId, addedArtist, alreadyInLidarr, createdAt, updatedAt, message, notes, auto, protected }`, with `state` one of `queued`, `requested`, `searching`, `downloading`, `imported`, `failed`. `auto` is true for a request auto-request made; one it refused stays as `failed` with why in `message`.
 Requests are kept on this device. Waiting ones are retried every 5 minutes in the background, full check first.
 
-Requests take official studio release groups only (no live, compilation or other secondary type), never an artist on Lidarr's import list exclusions (matched by MusicBrainz id) and, when the user limited an artist to chosen releases, only those. After adding an artist Platter reads it back: its folder must not be inside a Plex music folder, and the whole check runs again before anything is searched.
+Requests take official studio release groups only (no live, compilation or other secondary type), never an artist on Lidarr's import list exclusions (matched by MusicBrainz id) and, when the user limited an artist to chosen releases, only those. A release group Plex already matched in the library (`mbid`) is never requested. After adding an artist Platter reads its path back: a protected artist's must be inside the staging folder and outside every Plex music folder; then the whole check runs again before anything is searched.
+
+### Managed and protected artists
+
+Each artist is Managed (Lidarr owns its folder, imports, renames and upgrades in place) or Protected (curated: Lidarr only downloads into the staging folder and Platter adds albums to the library itself). Auto picks Protected when any file's release status isn't released (`tags::provenance`), an album is typed demo, unreleased, leak or bootleg, the artist is in the library and on Lidarr's import list exclusions, or its albums sit inside a protected artist's folder or share a release group found there (Lidarr artists credited on those release groups too). Choices, the catch-up cursor and claims, the changes log, staged albums and better-copy memory are shared through the sync store (`lidarr` namespace, in the Library group).
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `lidarr_modes` | – | `LidarrArtistMode[]`, protected first |
+| `lidarr_mode_set` | `{ key, name, mode: "auto"\|"managed"\|"protected", confirmations }` | `LidarrArtistPrefs`; `invalid` for `managed` with fewer than 2 confirmations (the UI asks twice) |
+| `lidarr_artist_choices` | – | `Record<key, LidarrArtistPrefs>` |
+| `lidarr_artist_choices_set` | `{ key, name, autoAdd: boolean\|null, hunt, target: "lossless"\|"hiRes" }` | `LidarrArtistPrefs` |
+| `lidarr_change_preview` | `{ action: LidarrFixAction, input: string\|null }` | `LidarrProposal = { id, what, before, after, canPutBack }`; reads only. `input` is the folder for `setRecycleBin` (refused inside a Plex music folder or a root folder) |
+| `lidarr_hires_preview` | – | `LidarrProposal` for the "Platter Hi-Res" profile (24-bit lossless only, cutoff FLAC 24bit) |
+| `lidarr_change_apply` | `{ id }` | `LidarrChange`; refused when the proposal is older than 15 minutes or Lidarr's value changed since it was shown |
+| `lidarr_changes` | – | `LidarrChange[]`, newest first (up to 300) |
+| `lidarr_change_put_back` | `{ id }` | `LidarrChange` with `putBackAt`; a root folder holding artists or another root, or a profile in use, is never removed |
+| `lidarr_rematch_preview` / `lidarr_rematch_apply` | `{ folder }` | `LidarrRematchPlan = { folder, albumId, album, release, files, kept: { path, why }[], otherEdition, linkedNow, editionNote }`. Only with Rename Tracks off. Imports only onto the album's current release with explicit track ids (matched by disc and track number, tracks without a file), never switching the edition; afterwards the album must have exactly that many more files and every file it had, else `server` |
+| `lidarr_work` | – | `LidarrWork = { catchUp: { lastDevice, lastAt, gap, paused }, practiceUntil, practice, staged: LidarrStaged[] }` |
+| `lidarr_catch_up` | – | `LidarrCatchUpReport = { handled, elsewhere, settling, acted, gap, scanned, announced, staged, healed, paused }` |
+| `lidarr_resume_protected` | – | – (keeps Lidarr's settings as they are now) |
+| `lidarr_staged_add` | `{ id, always }` | `LidarrStaged`; `always` adds the artist's later albums on their own |
+| `lidarr_staged_undo` | `{ id, trashOk }` | `LidarrStaged`; `invalid` asking about Plex's "Empty trash automatically after every scan" when it's on and `trashOk` is false |
+| `lidarr_hunt` | – | `LidarrHuntItem[] = { albumId, title, artist, now, state, note }[]`, `state` one of `atTarget`, `requested`, `waiting`, `partlyUpgraded`, `outOfScope`, `needsProfile`, `failed` |
+
+`LidarrArtistMode = { key, name, artistId, mbid, lidarrId, lidarrPath, folder, mode: "managed"|"protected", setting, auto, line, reasons, files, curatedFiles, excluded }`; `line` is one sentence like "Protected: 403 files tagged unreleased or leaked".
+`LidarrArtistPrefs = { mode, autoAdd: boolean|null, hunt, target, name }`.
+`LidarrChange = { id, at, device, what, before, after, asked, undo, putBackAt, practice }`; `asked` is false for writes to albums Platter requested itself (monitoring, freeing staging), which don't ask but are logged; `practice` marks what practice mode would have done.
+`LidarrStaged = { id, albumId, lidarrArtistId, artist, title, releaseGroup, partial, state: "waiting"|"ready"|"practice"|"added"|"undone", reason, plan: { folder, files: { src, name, edits: [tag, value|null][] }[] }|null, folder, confident, doubts, auto, at, updatedAt }`.
+
+The catch-up (`lidarr/catchup.rs`, no UI dependencies) runs on start, every 4 minutes and after the computer wakes: it reads `GET /api/v1/history/since?date=` from the last handled event (shared per Lidarr), claims each event in the shared store first (the earliest claim wins and must stand a minute before its device acts), and acts on `downloadImported` (Managed: a scan of just the album's folder when Plex doesn't show it within about two minutes, then an announcement; Protected: queued for adding) and `albumImportIncomplete` (never added). When Lidarr's oldest kept record is newer than the last one handled, it says some activity may be missed and scans Managed artists' folders Plex has nothing from. Each pass unmonitors protected albums Lidarr no longer needs and re-reads Rename Tracks, Write Audio Tags and the recycling bin; a change toward unsafe while artists are protected pauses protected work.
+
+Adding a protected album copies it into the artist's folder with the folder, file names and tags its official albums use (`lidarr/conventions.rs`), never touching existing files, then unmonitors it in Lidarr, then (with `lidarrFreeStaging` on and only once it's unmonitored) frees its staging copy, then scans that folder in Plex. The first album per artist and anything from low-confidence conventions always ask. Practice mode (`lidarrPracticeUntil`: -1 the first week after setup, 0 off) logs automatic adds and swaps instead of making them.
 
 ### Upgrades
 

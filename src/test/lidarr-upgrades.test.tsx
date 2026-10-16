@@ -196,7 +196,7 @@ describe("Settings > Lidarr upgrades", () => {
     const user = userEvent.setup();
     await setUp(undefined, { lidarrStagingFolder: "" });
     render(<SettingsPage />);
-    const field = await screen.findByRole("textbox", { name: "Lidarr staging folder for upgrades" });
+    const field = await screen.findByRole("textbox", { name: "Lidarr staging folder" });
     expect(document.querySelector('[data-setting="upgradesAsk"]')).toBeNull();
     expect(document.querySelector('[data-setting="musicShare"]')).toBeNull();
     await user.type(field, "/downloads/upgrades/{Enter}");

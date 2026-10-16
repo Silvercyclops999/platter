@@ -153,6 +153,18 @@ import type {
   LidarrPicked,
   LidarrPreview,
   LidarrReport,
+  LidarrArtistMode,
+  LidarrArtistPrefs,
+  LidarrCatchUpReport,
+  LidarrChange,
+  LidarrFixAction,
+  LidarrHuntItem,
+  LidarrModeSetting,
+  LidarrProposal,
+  LidarrRematchPlan,
+  LidarrStaged,
+  LidarrTarget,
+  LidarrWork,
   LidarrRequest,
   LidarrRequestInput,
   LidarrStatus,
@@ -758,6 +770,26 @@ export interface Backend {
   /** The release groups an artist is limited to (empty: no limit). */
   lidarrAllowlist(artist: string, artistId: string | null): Promise<string[]>;
   lidarrAllowlistSet(artist: string, artistId: string | null, releaseGroupIds: string[]): Promise<string[]>;
+  /** Every artist's mode, with why. */
+  lidarrModes(): Promise<LidarrArtistMode[]>;
+  /** Set an artist's mode; Managed needs confirmations = 2. */
+  lidarrModeSet(key: string, name: string, mode: LidarrModeSetting, confirmations: number): Promise<LidarrArtistPrefs>;
+  lidarrArtistChoices(): Promise<Record<string, LidarrArtistPrefs>>;
+  lidarrArtistChoicesSet(key: string, name: string, autoAdd: boolean | null, hunt: boolean, target: LidarrTarget): Promise<LidarrArtistPrefs>;
+  /** Show what a fix would change (reads only). */
+  lidarrChangePreview(action: LidarrFixAction, input: string | null): Promise<LidarrProposal>;
+  lidarrHiresPreview(): Promise<LidarrProposal>;
+  lidarrChangeApply(id: string): Promise<LidarrChange>;
+  lidarrChanges(): Promise<LidarrChange[]>;
+  lidarrChangePutBack(id: string): Promise<LidarrChange>;
+  lidarrRematchPreview(folder: string): Promise<LidarrRematchPlan>;
+  lidarrRematchApply(folder: string): Promise<LidarrRematchPlan>;
+  lidarrWork(): Promise<LidarrWork>;
+  lidarrCatchUp(): Promise<LidarrCatchUpReport>;
+  lidarrResumeProtected(): Promise<void>;
+  lidarrStagedAdd(id: string, always: boolean): Promise<LidarrStaged>;
+  lidarrStagedUndo(id: string, trashOk: boolean): Promise<LidarrStaged>;
+  lidarrHunt(): Promise<LidarrHuntItem[]>;
   /** Where this computer reaches the music share. */
   musicShareGet(): Promise<ShareMap>;
   musicShareSet(map: ShareMap): Promise<ShareMap>;
@@ -1241,6 +1273,23 @@ export function createTauriBackend(): Backend {
     lidarrUpgradeConfirm: (albumId, releaseGroupId) => call("lidarr_upgrade_confirm", { albumId, releaseGroupId }),
     lidarrAllowlist: (artist, artistId) => call("lidarr_allowlist", { artist, artistId }),
     lidarrAllowlistSet: (artist, artistId, releaseGroupIds) => call("lidarr_allowlist_set", { artist, artistId, releaseGroupIds }),
+    lidarrModes: () => call("lidarr_modes"),
+    lidarrModeSet: (key, name, mode, confirmations) => call("lidarr_mode_set", { key, name, mode, confirmations }),
+    lidarrArtistChoices: () => call("lidarr_artist_choices"),
+    lidarrArtistChoicesSet: (key, name, autoAdd, hunt, target) => call("lidarr_artist_choices_set", { key, name, autoAdd, hunt, target }),
+    lidarrChangePreview: (action, input) => call("lidarr_change_preview", { action, input }),
+    lidarrHiresPreview: () => call("lidarr_hires_preview"),
+    lidarrChangeApply: (id) => call("lidarr_change_apply", { id }),
+    lidarrChanges: () => call("lidarr_changes"),
+    lidarrChangePutBack: (id) => call("lidarr_change_put_back", { id }),
+    lidarrRematchPreview: (folder) => call("lidarr_rematch_preview", { folder }),
+    lidarrRematchApply: (folder) => call("lidarr_rematch_apply", { folder }),
+    lidarrWork: () => call("lidarr_work"),
+    lidarrCatchUp: () => call("lidarr_catch_up"),
+    lidarrResumeProtected: () => call("lidarr_resume_protected"),
+    lidarrStagedAdd: (id, always) => call("lidarr_staged_add", { id, always }),
+    lidarrStagedUndo: (id, trashOk) => call("lidarr_staged_undo", { id, trashOk }),
+    lidarrHunt: () => call("lidarr_hunt"),
     musicShareGet: () => call("music_share_get"),
     musicShareSet: (map) => call("music_share_set", { map }),
     musicSharePlexFolders: () => call("music_share_plex_folders"),

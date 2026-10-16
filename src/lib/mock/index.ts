@@ -40,6 +40,9 @@ import type {
   CompareSide,
   LidarrPickInput,
   LidarrRequestInput,
+  LidarrFixAction,
+  LidarrModeSetting,
+  LidarrTarget,
   ShareMap,
   UpgradeUnder,
   CachedLibrary,
@@ -166,6 +169,7 @@ import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
 import { MockPlayHistory } from "./playhistory";
+import { MockLidarrWork } from "./lidarrModes";
 import { MOCK_STAGING, MockUpgrades, isUpgradeDemo, type UpgradeDemo } from "./upgrades";
 import { MockRadar } from "./radar";
 import { MockCatalogue } from "./catalogue";
@@ -335,6 +339,7 @@ export class MockBackend implements Backend {
   readonly playHistory: MockPlayHistory;
   /** Lidarr's setup check (test hook: setDemo). */
   readonly lidarr: MockLidarr;
+  readonly lidarrMock: MockLidarrWork;
   /** Lidarr upgrades and the music share mapping (test hook: reset). */
   readonly upgrades: MockUpgrades;
   /** The release radar (test hooks: setEmpty, reset). */
@@ -596,6 +601,10 @@ export class MockBackend implements Backend {
       album: (id) => this.fx.albums.find((a) => a.id === id),
     });
     this.lidarr = new MockLidarr(this.opts.lidarr);
+    this.lidarrMock = new MockLidarrWork(
+      () => Math.floor(Date.now() / 1000),
+      () => this.settings.lidarrPracticeUntil,
+    );
     this.upgrades = new MockUpgrades({
       album: (id) => this.fx.albums.find((a) => a.id === id),
       albums: () => this.fx.albums,
@@ -3363,6 +3372,57 @@ export class MockBackend implements Backend {
   }
   lidarrMissingReleases(artistId: string, _artist: string) {
     return this.delay(() => this.lidarr.missing(this.settings, artistId));
+  }
+  lidarrModes() {
+    return this.delay(() => this.lidarrMock.modes());
+  }
+  lidarrModeSet(key: string, name: string, mode: LidarrModeSetting, confirmations: number) {
+    return this.delay(() => this.lidarrMock.setMode(key, name, mode, confirmations));
+  }
+  lidarrArtistChoices() {
+    return this.delay(() => ({ ...this.lidarrMock.prefs }));
+  }
+  lidarrArtistChoicesSet(key: string, name: string, autoAdd: boolean | null, hunt: boolean, target: LidarrTarget) {
+    return this.delay(() => this.lidarrMock.setChoices(key, name, autoAdd, hunt, target));
+  }
+  lidarrChangePreview(action: LidarrFixAction, input: string | null) {
+    return this.delay(() => this.lidarrMock.propose(action, input));
+  }
+  lidarrHiresPreview() {
+    return this.delay(() => this.lidarrMock.hiresPreview());
+  }
+  lidarrChangeApply(id: string) {
+    return this.delay(() => this.lidarrMock.apply(id));
+  }
+  lidarrChanges() {
+    return this.delay(() => this.lidarrMock.changes.map((c) => ({ ...c })));
+  }
+  lidarrChangePutBack(id: string) {
+    return this.delay(() => this.lidarrMock.putBack(id));
+  }
+  lidarrRematchPreview(folder: string) {
+    return this.delay(() => this.lidarrMock.rematch(folder));
+  }
+  lidarrRematchApply(folder: string) {
+    return this.delay(() => this.lidarrMock.rematch(folder));
+  }
+  lidarrWork() {
+    return this.delay(() => this.lidarrMock.work());
+  }
+  lidarrCatchUp() {
+    return this.delay(() => this.lidarrMock.catchUp());
+  }
+  lidarrResumeProtected() {
+    return this.delay(() => this.lidarrMock.resume());
+  }
+  lidarrStagedAdd(id: string, always: boolean) {
+    return this.delay(() => this.lidarrMock.stagedAdd(id, always));
+  }
+  lidarrStagedUndo(id: string, trashOk: boolean) {
+    return this.delay(() => this.lidarrMock.stagedUndo(id, trashOk));
+  }
+  lidarrHunt() {
+    return this.delay(() => this.lidarrMock.hunt());
   }
 
   // ---------------------------------------------------------------- listening stats

@@ -307,10 +307,10 @@ export class MockLidarr {
           level: "amber",
           title: "Lidarr renames the files it downloads",
           detail: "Downloads get Lidarr's own file names instead of keeping theirs.",
-          fix: "In Lidarr, turn off Settings > Media Management > Rename Tracks if you'd rather keep the original names.",
+          fix: "In Lidarr, turn off Settings > Media Management > Rename Tracks, or let Platter do it.",
           emptyRoot: null,
           protectedOnly: false,
-          action: null,
+          action: { kind: "renameOff" },
         },
         {
           id: "recycleBin",

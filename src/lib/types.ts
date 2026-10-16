@@ -2114,6 +2114,151 @@ export interface LidarrReport {
   route: "home" | "away" | null;
 }
 
+/** Managed: Lidarr owns the artist's folder. Protected: curated files Platter changes itself. */
+export type LidarrMode = "managed" | "protected";
+export type LidarrModeSetting = "auto" | "managed" | "protected";
+/** What better copies aim for. */
+export type LidarrTarget = "lossless" | "hiRes";
+
+/** `lidarr_modes`: one artist's mode, with why. */
+export interface LidarrArtistMode {
+  /** The key choices are kept under (MusicBrainz id, else name:<folded>). */
+  key: string;
+  name: string;
+  artistId: string | null;
+  mbid: string | null;
+  lidarrId: number | null;
+  lidarrPath: string | null;
+  folder: string | null;
+  mode: LidarrMode;
+  setting: LidarrModeSetting;
+  /** What Auto would pick. */
+  auto: LidarrMode;
+  /** "Protected: 403 files tagged unreleased or leaked". */
+  line: string;
+  reasons: string[];
+  files: number;
+  curatedFiles: number;
+  excluded: boolean;
+}
+
+/** An artist's choices (shared across devices). */
+export interface LidarrArtistPrefs {
+  mode: LidarrModeSetting;
+  /** Add new official albums on their own; null asks the first time. */
+  autoAdd: boolean | null;
+  hunt: boolean;
+  target: LidarrTarget;
+  name: string;
+}
+
+/** A change to Lidarr waiting for a yes. */
+export interface LidarrProposal {
+  id: string;
+  what: string;
+  before: string;
+  after: string;
+  canPutBack: boolean;
+}
+
+/** One entry in the changes log. */
+export interface LidarrChange {
+  id: string;
+  at: number;
+  device: string;
+  what: string;
+  before: string;
+  after: string;
+  /** The user said yes to it (false: part of a request they made). */
+  asked: boolean;
+  /** Can be put back. */
+  undo: unknown | null;
+  putBackAt: number | null;
+  /** Practice mode: what Platter would have done. */
+  practice: boolean;
+}
+
+export interface LidarrRematchPlan {
+  folder: string;
+  albumId: number | null;
+  album: string;
+  release: string;
+  files: string[];
+  kept: { path: string; why: string }[];
+  otherEdition: number;
+  linkedNow: number;
+  editionNote: string | null;
+}
+
+export interface LidarrPlannedFile {
+  src: string;
+  name: string;
+  /** Tag name and the value set (null: removed). */
+  edits: [string, string | null][];
+}
+
+export type LidarrStagedState = "waiting" | "ready" | "practice" | "added" | "undone";
+
+/** A protected album that landed in the staging folder. */
+export interface LidarrStaged {
+  id: string;
+  albumId: number;
+  lidarrArtistId: number;
+  artist: string;
+  title: string;
+  releaseGroup: string;
+  partial: boolean;
+  state: LidarrStagedState;
+  reason: string | null;
+  plan: { folder: string; files: LidarrPlannedFile[] } | null;
+  folder: string | null;
+  confident: boolean;
+  doubts: string[];
+  auto: boolean;
+  at: number;
+  updatedAt: number;
+}
+
+export interface LidarrCatchUpStatus {
+  /** The device that last did the Lidarr work, and when (unix seconds). */
+  lastDevice: string | null;
+  lastAt: number | null;
+  gap: string | null;
+  paused: string | null;
+}
+
+/** `lidarr_work`: catching up, practice mode and albums in staging. */
+export interface LidarrWork {
+  catchUp: LidarrCatchUpStatus;
+  practiceUntil: number | null;
+  practice: boolean;
+  staged: LidarrStaged[];
+}
+
+export interface LidarrCatchUpReport {
+  handled: number;
+  elsewhere: number;
+  settling: number;
+  acted: number;
+  gap: string | null;
+  scanned: string[];
+  announced: string[];
+  staged: number[];
+  healed: string[];
+  paused: string | null;
+}
+
+export type LidarrHuntState = "atTarget" | "requested" | "waiting" | "partlyUpgraded" | "outOfScope" | "needsProfile" | "failed";
+
+export interface LidarrHuntItem {
+  albumId: string;
+  title: string;
+  artist: string;
+  now: string;
+  state: LidarrHuntState;
+  note: string | null;
+}
+
 /** Where a Lidarr request stands. */
 export type LidarrRequestState = "queued" | "requested" | "searching" | "downloading" | "imported" | "failed";
 

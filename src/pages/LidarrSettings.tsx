@@ -8,6 +8,7 @@ import type { AppError, LidarrFinding, LidarrReport, LidarrStatus } from "../lib
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./artist-info-settings.css";
+import { FixButton } from "./LidarrModes";
 import "./lidarr-settings.css";
 
 type Ids = { title: string; desc: string };
@@ -227,7 +228,17 @@ const ICON = {
 };
 const LEVEL_LABEL = { red: "Must fix", amber: "Worth changing", ok: "OK" };
 
-function FindingRow({ f, onConfirm, onUndo }: { f: LidarrFinding; onConfirm: (path: string) => void; onUndo: (path: string) => void }) {
+function FindingRow({
+  f,
+  onConfirm,
+  onUndo,
+  onFixed,
+}: {
+  f: LidarrFinding;
+  onConfirm: (path: string) => void;
+  onUndo: (path: string) => void;
+  onFixed: () => void;
+}) {
   return (
     <li className={`lidarr-finding lidarr-finding--${f.level}`}>
       <span className="lidarr-finding__icon">{ICON[f.level]}</span>
@@ -238,6 +249,7 @@ function FindingRow({ f, onConfirm, onUndo }: { f: LidarrFinding; onConfirm: (pa
         </p>
         {f.detail && <p className="lidarr-finding__detail">{f.detail}</p>}
         {f.fix && <p className="lidarr-finding__fix">{f.fix}</p>}
+        {f.action && <FixButton action={f.action} onDone={onFixed} />}
         {f.emptyRoot && (
           <div className="lidarr-finding__actions">
             {f.emptyRoot.confirmed ? (
@@ -283,7 +295,13 @@ export function LidarrFindings({ lidarr }: { lidarr: LidarrState }) {
   const ok = report.findings.filter((f) => f.level === "ok");
   const where = report.route === "away" ? "its away address" : "its home address";
   const row = (f: LidarrFinding) => (
-    <FindingRow key={`${f.id}:${f.emptyRoot?.path ?? f.title}`} f={f} onConfirm={setConfirming} onUndo={(p) => void lidarr.confirmRoot(p, false)} />
+    <FindingRow
+      key={`${f.id}:${f.emptyRoot?.path ?? f.title}`}
+      f={f}
+      onConfirm={setConfirming}
+      onUndo={(p) => void lidarr.confirmRoot(p, false)}
+      onFixed={() => void lidarr.check()}
+    />
   );
   return (
     <div className="lidarr-check" aria-live="polite">
