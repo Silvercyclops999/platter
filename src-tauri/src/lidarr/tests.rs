@@ -808,3 +808,15 @@ fn proxy_headers_are_checked() {
     assert!(parse_headers("A:1\nB:1\nC:1\nD:1\nE:1\nF:1").is_err());
     assert!(parse_headers("").unwrap().is_empty());
 }
+#[test]
+fn a_root_folder_inside_another_is_worth_knowing() {
+    let (p, mut l, mut disk) = separate();
+    l.roots.push(RootFolder { id: 2, ..root("/downloads/Managed", &["Other"]) });
+    disk.insert("/downloads/Managed/Other/".into(), listing(&["Album"], &[]));
+    let r = run(&p, l, &ctx(), &disk);
+    assert_eq!(ids(&r, Level::Amber), vec!["nestedRoots"]);
+    let f = r.findings.iter().find(|f| f.id == "nestedRoots").unwrap();
+    assert!(f.detail.contains("/downloads/Managed is inside /downloads"), "{}", f.detail);
+    assert!(f.fix.as_deref().unwrap().starts_with("In Lidarr"));
+    assert!(r.passed, "a warning, never a block");
+}

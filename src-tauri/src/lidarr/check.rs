@@ -713,6 +713,30 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         }
     }
 
+    // ---- A root folder inside another: removing the outer one in Lidarr
+    // detaches every file under the inner one.
+    let mut nested: Vec<String> = Vec::new();
+    for a in &lidarr.roots {
+        for b in &lidarr.roots {
+            let (pa, pb) = (NormPath::parse(&a.path), NormPath::parse(&b.path));
+            if a.id != b.id && pa != pb && pa.starts_with(&pb) {
+                nested.push(format!("{} is inside {}", root_name(a), root_name(b)));
+            }
+        }
+    }
+    if !nested.is_empty() {
+        amber.push(Finding::new(
+            "nestedRoots",
+            Level::Amber,
+            "One of Lidarr's root folders is inside another",
+            format!(
+                "{}. If the outer folder is ever removed from Lidarr, Lidarr lets go of every file under the inner one and may match them to other releases when it scans again.",
+                list_names(&nested, 2)
+            ),
+            Some("In Lidarr, keep both root folders, or move the inner one somewhere else first. Platter never removes root folders.".into()),
+        ));
+    }
+
     // ---- Import list exclusions are respected.
     if !lidarr.exclusions.is_empty() {
         let names: Vec<String> = lidarr.exclusions.iter().map(|e| if e.artist_name.trim().is_empty() { e.foreign_id.clone() } else { e.artist_name.clone() }).collect();
