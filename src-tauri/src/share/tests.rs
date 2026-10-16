@@ -376,12 +376,20 @@ async fn opening_links_resolves_against_the_library() {
             album_id: Some("50".into()),
             at_seconds: Some(83),
             join: None,
+            circle: None,
         }
     );
     // A listening session invite is handed over to join.
     let invite = crate::social::listen::invite::Token { session: [1; 16], secret: [2; 16], expires: u32::MAX, relay: None }.link();
     let j = f.share.resolve(&invite).await;
     assert_eq!((j.status, j.kind, j.join.as_deref()), (DeepLinkStatus::Open, None, Some(invite.as_str())));
+    // So are shared playlist and Blend invites.
+    let t = crate::social::listen::invite::Token { session: [1; 16], secret: [2; 16], expires: u32::MAX, relay: None };
+    for word in ["collab", "blend"] {
+        let l = t.link_as(word);
+        let o = f.share.resolve(&l).await;
+        assert_eq!((o.status, o.join.as_deref(), o.circle.as_deref()), (DeepLinkStatus::Open, None, Some(l.as_str())));
+    }
     let a = f.share.resolve("platter://artist/7").await;
     assert_eq!((a.status, a.album_id, a.at_seconds), (DeepLinkStatus::Open, None, None));
     assert_eq!(f.share.resolve("platter://album/999").await.status, DeepLinkStatus::NotInLibrary);

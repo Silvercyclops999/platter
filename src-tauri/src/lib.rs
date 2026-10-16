@@ -807,6 +807,7 @@ pub fn run() {
                 Arc::new(playlists::AppEvents { plex: plex.clone(), db: db.clone() }),
             );
             playlists::spawn(playlists.clone());
+            let circle_playlists = playlists.clone();
             app.manage(playlists);
 
             let likes = likes::Likes::new(
@@ -876,6 +877,62 @@ pub fn run() {
                     }
                 });
             }
+            // Collaborative playlists and Blends: the same relay, sealed the same way.
+            let circle_avatar: Arc<parking_lot::Mutex<Option<String>>> = Arc::default();
+            let circle = social::circle::Circle::new(social::circle::CircleDeps {
+                relays: Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
+                events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                store: Arc::new(social::circle::commands::KvStore(db.clone())),
+                library: Arc::new(social::circle::commands::DbLibrary {
+                    db: db.clone(),
+                    liked_min: {
+                        let db = db.clone();
+                        Arc::new(move || settings::load(&db).liked_min_rating())
+                    },
+                }),
+                playlists: Arc::new(social::circle::commands::AppPlaylists { db: db.clone(), playlists: circle_playlists }),
+                people: Arc::new(social::circle::commands::PlexPeople {
+                    plex: plex.clone(),
+                    home: app.state::<plex::home::Home>().inner().clone(),
+                    activity: Arc::new(backend::routed::RoutedActivity(backends.clone())),
+                }),
+                name: {
+                    let plex_name = listen_name.0.clone();
+                    let chosen = live.social.listen.name.clone();
+                    Arc::new(move || {
+                        let c = chosen.read().trim().to_string();
+                        if c.is_empty() { plex_name.lock().clone() } else { c }
+                    })
+                },
+                avatar: {
+                    let a = circle_avatar.clone();
+                    Arc::new(move || a.lock().clone())
+                },
+                settings: live.social.circle.clone(),
+                default_relay: social::listen::DEFAULT_RELAY.into(),
+                cfg: Default::default(),
+                clock: Arc::new(remote::peer::auth::now_ms),
+                tap: None,
+            });
+            {
+                let circle = circle.clone();
+                let plex = plex.clone();
+                let name = listen_name.0.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Who you are to others, then start (it listens only once
+                    // there's an invite or someone on your server).
+                    loop {
+                        let a = plex.auth_status().await;
+                        if let Some(n) = a.username.filter(|n| !n.trim().is_empty()) {
+                            *name.lock() = n;
+                        }
+                        *circle_avatar.lock() = a.avatar;
+                        circle.start().await;
+                        tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+                    }
+                });
+            }
+            app.manage(circle);
             app.manage(listen);
             app.manage(listen_name);
             remote.set_lan(remote::LanEnv {
@@ -1510,6 +1567,29 @@ pub fn run() {
             social::commands::listen_add,
             social::commands::listen_control,
             social::commands::listen_remove,
+            social::circle::commands::circle_state,
+            social::circle::commands::circle_people,
+            social::circle::commands::circle_join,
+            social::circle::commands::circle_accept,
+            social::circle::commands::circle_dismiss,
+            social::circle::commands::collab_info,
+            social::circle::commands::collab_invite_link,
+            social::circle::commands::collab_invite_person,
+            social::circle::commands::collab_page,
+            social::circle::commands::collab_add,
+            social::circle::commands::collab_remove,
+            social::circle::commands::collab_leave,
+            social::circle::commands::collab_set_in_library,
+            social::circle::commands::collab_set_role,
+            social::circle::commands::collab_remove_person,
+            social::circle::commands::collab_set_public,
+            social::circle::commands::blend_create,
+            social::circle::commands::blend_invite_link,
+            social::circle::commands::blend_invite_person,
+            social::circle::commands::blend_page,
+            social::circle::commands::blend_hide,
+            social::circle::commands::blend_refresh,
+            social::circle::commands::blend_leave,
             sync::commands::sync_file_status,
             sync::commands::sync_file_now,
             sync::commands::sync_file_folders,

@@ -49,6 +49,12 @@ impl Token {
     }
 
     pub fn link(&self) -> String {
+        self.link_as("join")
+    }
+
+    /// The same token under another link word (`platter://<word>/<token>`):
+    /// collaborative playlists and Blends use their own.
+    pub fn link_as(&self, word: &str) -> String {
         let mut b = Vec::with_capacity(FIXED + RELAY_MAX);
         b.push(VERSION);
         b.extend_from_slice(&self.session);
@@ -57,7 +63,7 @@ impl Token {
         if let Some(r) = &self.relay {
             b.extend_from_slice(r.as_bytes());
         }
-        format!("platter://join/{}", B64.encode(b))
+        format!("platter://{word}/{}", B64.encode(b))
     }
 }
 
@@ -80,6 +86,11 @@ pub fn relay_url(raw: &str) -> Option<String> {
 
 /// Read an invite link. None when it isn't one.
 pub fn parse(raw: &str) -> Option<Token> {
+    parse_as(raw, "join")
+}
+
+/// Read an invite link made with [`Token::link_as`] and this word.
+pub fn parse_as(raw: &str, want: &str) -> Option<Token> {
     let u = url::Url::parse(raw.trim()).ok()?;
     if !u.scheme().eq_ignore_ascii_case("platter") {
         return None;
@@ -90,7 +101,7 @@ pub fn parse(raw: &str) -> Option<Token> {
     }
     segs.extend(u.path().split('/').filter(|s| !s.is_empty()).map(str::to_string));
     let [word, token] = segs.as_slice() else { return None };
-    if word != "join" || token.len() > 400 || u.query().is_some() {
+    if word != want || token.len() > 400 || u.query().is_some() {
         return None;
     }
     let b = B64.decode(token).ok()?;

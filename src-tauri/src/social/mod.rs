@@ -9,6 +9,7 @@
 //! - [`commands`]: Tauri commands and the Plex, player and notification glue.
 
 pub mod activity;
+pub mod circle;
 pub mod commands;
 pub mod follows;
 pub mod listen;
@@ -46,16 +47,28 @@ pub struct SocialSwitches {
     pub listen: listen::ListenSettings,
     /// A private session: no announcements.
     pub private_session: Arc<AtomicBool>,
+    /// Collaborative playlists and Blends (sharing listen along's relay,
+    /// invite lifetime and the private session).
+    pub circle: circle::CircleSettings,
 }
 
 impl Default for SocialSwitches {
     fn default() -> Self {
+        let listen = listen::ListenSettings::default();
+        let private_session = Arc::new(AtomicBool::new(false));
+        let circle = circle::CircleSettings {
+            private_session: private_session.clone(),
+            relay: listen.relay.clone(),
+            invite_hours: listen.invite_hours.clone(),
+            ..Default::default()
+        };
         Self {
             show_activity: Arc::new(AtomicBool::new(true)),
             whats_new: Arc::new(AtomicBool::new(true)),
             notify_releases: Arc::new(AtomicBool::new(false)),
-            listen: listen::ListenSettings::default(),
-            private_session: Arc::new(AtomicBool::new(false)),
+            listen,
+            private_session,
+            circle,
         }
     }
 }

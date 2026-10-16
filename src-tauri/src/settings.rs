@@ -507,6 +507,15 @@ pub struct Settings {
     /// "Hide unreleased titles from guests": in a session you host, an
     /// unreleased song goes to guests without its title and artist.
     pub listen_hide_unreleased: bool,
+    /// "Collaborative playlists": invite people to your playlists and join
+    /// theirs (nothing happens without an invite).
+    pub collab_playlists: bool,
+    /// "Blends": playlists made from friends' tastes (nothing happens
+    /// without an invite).
+    pub blends: bool,
+    /// "Include unreleased songs in what I share" (shared playlists and
+    /// Blend taste summaries).
+    pub share_unreleased: bool,
     /// Discord shows a listening session you host.
     pub discord_listen_along: bool,
     /// Keep app-only state in a sync file in a folder (this device only).
@@ -892,6 +901,9 @@ impl Default for Settings {
             listen_invite_hours: 24,
             listen_name: String::new(),
             listen_hide_unreleased: false,
+            collab_playlists: true,
+            blends: true,
+            share_unreleased: false,
             discord_listen_along: true,
             sync_enabled: false,
             sync_folder: String::new(),
@@ -1055,6 +1067,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "listenInviteHours",
     "listenName",
     "listenHideUnreleased",
+    "collabPlaylists",
+    "blends",
+    "shareUnreleased",
     "bookmarksInLibrary",
     "statsPage",
     "statsStrip",
@@ -1341,6 +1356,9 @@ pub struct SettingsPatch {
     pub listen_invite_hours: Option<u32>,
     pub listen_name: Option<String>,
     pub listen_hide_unreleased: Option<bool>,
+    pub collab_playlists: Option<bool>,
+    pub blends: Option<bool>,
+    pub share_unreleased: Option<bool>,
     pub discord_listen_along: Option<bool>,
     pub sync_enabled: Option<bool>,
     pub sync_settings: Option<bool>,
@@ -1730,6 +1748,9 @@ impl Settings {
         set(&mut self.notify_new_releases, p.notify_new_releases);
         set(&mut self.listen_guests_control, p.listen_guests_control);
         set(&mut self.listen_hide_unreleased, p.listen_hide_unreleased);
+        set(&mut self.collab_playlists, p.collab_playlists);
+        set(&mut self.blends, p.blends);
+        set(&mut self.share_unreleased, p.share_unreleased);
         if let Some(r) = &p.listen_relay {
             self.listen_relay = if r.trim().is_empty() {
                 String::new()
@@ -2101,6 +2122,9 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         *so.listen.name.write() = s.listen_name.clone();
         so.listen.hide_unreleased.store(s.listen_hide_unreleased, Ordering::Relaxed);
         so.private_session.store(s.private_session, Ordering::Relaxed);
+        so.circle.playlists.store(s.collab_playlists, Ordering::Relaxed);
+        so.circle.blends.store(s.blends, Ordering::Relaxed);
+        so.circle.share_unreleased.store(s.share_unreleased, Ordering::Relaxed);
     }
     {
         let sc = &live.scrobble;
