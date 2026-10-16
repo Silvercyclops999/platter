@@ -14,7 +14,8 @@
 //!   required (names write them many ways or leave them out).
 //! - Fallbacks, ranked below everything found before them:
 //!   1. typos, when the words as typed find fewer than [`FUZZY_BELOW`]
-//!      results: each word of 5+ letters also matches library words one
+//!      results and a word is nowhere in the library (or nothing was
+//!      found): each word of 5+ letters also matches library words one
 //!      edit away (wrong, missing, extra or swapped letter);
 //!   2. when nothing matches every word: words the library has nowhere
 //!      are left out, else one word at a time.
@@ -45,7 +46,7 @@ use crate::model::{Album, Artist, Playlist, Track};
 use super::DbHandle;
 use super::popular;
 use super::queries::now_s;
-use super::searchtext::{self, canon, canonical, edits_within, match_forms, max_typos, words};
+use super::searchtext::{self, canon, canonical, canonical_of, edits_within, forms_of, max_typos, words};
 use super::store::{ALBUM_COLS, ARTIST_COLS, PLAYLIST_COLS, TRACK_COLS, row_album, row_artist, row_playlist, row_track};
 use super::source::RemoteHits;
 use super::types::*;
@@ -57,9 +58,11 @@ const MAX_TOKENS: usize = 8;
 const MAX_TOKEN_CHARS: usize = 40;
 /// The typo pass runs when the words as typed find fewer results than this.
 pub const FUZZY_BELOW: usize = 5;
-const MAX_FUZZY_ALTS: usize = 8;
+const MAX_FUZZY_ALTS: usize = 4;
 const MAX_SPLITS: usize = 3;
 const TRACK_CANDIDATES: i64 = 300;
+/// Distinct artist lines split into credited names per search.
+const CREDITED_LINES: i64 = 40;
 const OTHER_CANDIDATES: i64 = 120;
 const ALL_SONGS: usize = 4;
 const ALL_SHELF: usize = 10;
@@ -108,8 +111,9 @@ struct Vocab {
     sorted: Vec<String>,
     /// Items per term, parallel to `sorted`.
     docs: Vec<u32>,
-    /// Terms as chars with their index in `sorted`, bucketed by char length.
-    by_len: Vec<Vec<(Vec<char>, u32)>>,
+    /// Each term reversed with its index in `sorted`, sorted: finds terms by
+    /// how they end.
+    reversed: Vec<(String, u32)>,
 }
 
 impl Vocab {
@@ -134,15 +138,10 @@ impl Vocab {
                 docs.push(d);
             }
         }
-        let mut by_len: Vec<Vec<(Vec<char>, u32)>> = Vec::new();
-        for (i, t) in sorted.iter().enumerate() {
-            let chars: Vec<char> = t.chars().collect();
-            if by_len.len() <= chars.len() {
-                by_len.resize_with(chars.len() + 1, Vec::new);
-            }
-            by_len[chars.len()].push((chars, i as u32));
-        }
-        Ok(Self { generation, loaded_at: Instant::now(), sorted, docs, by_len })
+        let mut reversed: Vec<(String, u32)> =
+            sorted.iter().enumerate().map(|(i, t)| (t.chars().rev().collect(), i as u32)).collect();
+        reversed.sort_unstable();
+        Ok(Self { generation, loaded_at: Instant::now(), sorted, docs, reversed })
     }
 
     fn contains(&self, term: &str) -> bool {
@@ -184,33 +183,44 @@ impl Vocab {
         out
     }
 
-    /// Library words within `max` edits of `token`, closest and most used
-    /// first.
-    fn fuzzy(&self, token: &str, max: usize) -> Vec<String> {
-        if max == 0 {
+    /// Library words one edit from `token` (wrong, missing, extra or
+    /// swapped letter), most used first. A word one edit away keeps either
+    /// the token's first half or its last half as typed, so the candidates
+    /// are the terms starting with the one or ending with the other: two
+    /// binary searches, not a pass over every word.
+    fn fuzzy(&self, token: &str) -> Vec<String> {
+        let q: Vec<char> = token.chars().collect();
+        let l = q.len();
+        if max_typos(l) == 0 {
             return Vec::new();
         }
-        let q: Vec<char> = token.chars().collect();
-        let mut found: Vec<(usize, u32, u32)> = Vec::new();
-        for len in q.len().saturating_sub(max)..=q.len() + max {
-            let Some(bucket) = self.by_len.get(len) else { continue };
-            for (cand, i) in bucket {
-                if *cand == q {
-                    continue;
-                }
-                let d = if max == 1 {
-                    within_one_edit(&q, cand).then_some(1)
-                } else {
-                    edits_within(&q, cand, max)
-                };
-                if let Some(d) = d {
-                    found.push((d, self.docs[*i as usize], *i));
-                }
+        let a = (l - 1) / 2;
+        let head: String = q[..a].iter().collect();
+        let tail: String = q[a + 1..].iter().rev().collect();
+        let mut cands: Vec<u32> = Vec::new();
+        let from = self.sorted.partition_point(|t| t.as_str() < head.as_str());
+        cands.extend(
+            self.sorted[from..].iter().take_while(|t| t.starts_with(head.as_str())).enumerate().map(|(k, _)| (from + k) as u32),
+        );
+        let from = self.reversed.partition_point(|(t, _)| t.as_str() < tail.as_str());
+        cands.extend(self.reversed[from..].iter().take_while(|(t, _)| t.starts_with(tail.as_str())).map(|(_, i)| *i));
+        cands.sort_unstable();
+        cands.dedup();
+        let mut found: Vec<(u32, u32)> = Vec::new();
+        for i in cands {
+            let term = &self.sorted[i as usize];
+            let n = term.chars().count();
+            if n + 1 < l || n > l + 1 || term == token {
+                continue;
+            }
+            let c: Vec<char> = term.chars().collect();
+            if within_one_edit(&q, &c) {
+                found.push((self.docs[i as usize], i));
             }
         }
-        found.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+        found.sort_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
         found.truncate(MAX_FUZZY_ALTS);
-        found.into_iter().map(|(_, _, i)| self.sorted[i as usize].clone()).collect()
+        found.into_iter().map(|(_, i)| self.sorted[i as usize].clone()).collect()
     }
 }
 
@@ -470,39 +480,49 @@ fn word_hits(q: &ParsedQuery, forms: &[String], typos: bool) -> Vec<Hit> {
 /// Match tier of a result given its title and other searchable fields, and
 /// whether the title alone holds the match.
 pub fn tier(q: &ParsedQuery, title: &str, others: &[Option<&str>]) -> (Tier, bool) {
-    let t = canonical(title);
+    let (t, in_title, _) = rate(q, title, others);
+    (t, in_title)
+}
+
+/// True when a title may have parts ("A / B", "A - Live").
+fn may_have_parts(title: &str) -> bool {
+    title.contains(['/', '-', '\u{2013}', '\u{2014}', '+', '|', ';'])
+}
+
+fn judge(q: &ParsedQuery, title: &str, tw: &[searchtext::Word], others: &[Vec<searchtext::Word>]) -> (Tier, bool) {
+    let t = canonical_of(tw);
     if t == q.norm {
         return (Tier::Exact, true);
     }
     if !q.norm.is_empty() && t.starts_with(&q.norm) {
         return (Tier::TitlePrefix, true);
     }
-    let parts = title_parts(title);
-    if parts.len() > 1 && parts.iter().any(|p| canonical(p).starts_with(&q.norm)) {
-        return (Tier::TitlePrefix, true);
+    if may_have_parts(title) {
+        let parts = title_parts(title);
+        if parts.len() > 1 && parts.iter().any(|p| canonical(p).starts_with(&q.norm)) {
+            return (Tier::TitlePrefix, true);
+        }
     }
     let t_words: Vec<&str> = t.split(' ').collect();
     let q_words: Vec<&str> = q.norm.split(' ').collect();
     if q_words.len() > 1 && has_phrase(&t_words, &q_words) {
         return (Tier::Phrase, true);
     }
-    let title_forms = match_forms(title);
-    let in_title = word_hits(q, &title_forms, false);
-    if in_title.iter().all(|h| *h == Hit::Word) {
+    let title_forms = forms_of(tw);
+    if word_hits(q, &title_forms, false).iter().all(|h| *h == Hit::Word) {
         return (Tier::WordPrefix, true);
     }
-    let mut all_forms = title_forms;
-    for o in others.iter().flatten() {
-        all_forms.extend(match_forms(o));
+    let mut all_forms = title_forms.clone();
+    for o in others {
+        all_forms.extend(forms_of(o));
     }
     let hits = word_hits(q, &all_forms, true);
-    let worst = hits.iter().copied().min().unwrap_or(Hit::Word);
-    let tier = match worst {
-        Hit::Word => Tier::WordPrefix,
+    let tier = match hits.iter().copied().min().unwrap_or(Hit::Word) {
+        Hit::Word => return (Tier::WordPrefix, false),
         Hit::Typo => Tier::Fuzzy,
         Hit::Missing => Tier::Partial,
     };
-    let title_holds = tier != Tier::WordPrefix && word_hits(q, &match_forms(title), true).iter().all(|h| *h != Hit::Missing);
+    let title_holds = word_hits(q, &title_forms, true).iter().all(|h| *h != Hit::Missing);
     (tier, title_holds)
 }
 
@@ -546,18 +566,20 @@ fn rating_boost(r: Option<f32>) -> f64 {
     f64::from(r.unwrap_or(0.0).clamp(0.0, 10.0)) / 2.0
 }
 
-/// Tier, whether the title holds the match, and the spelling bonus.
+/// Tier, whether the title holds the match, and the spelling bonus. Each
+/// name is split into words once.
 fn rate(q: &ParsedQuery, title: &str, others: &[Option<&str>]) -> (Tier, bool, f64) {
-    let (t, in_title) = tier(q, title, others);
+    let tw = words(title);
+    let ow: Vec<Vec<searchtext::Word>> = others.iter().flatten().map(|o| words(o)).collect();
+    let (t, in_title) = judge(q, title, &tw, &ow);
     if t < Tier::WordPrefix {
         return (t, in_title, 0.0);
     }
-    let mut forms: Vec<String> = Vec::new();
-    for w in words(title).into_iter().chain(others.iter().flatten().flat_map(|o| words(o))) {
-        forms.extend(w.pieces);
-        forms.push(w.text);
-    }
-    let spelled = q.toks.iter().filter(|t| !t.optional).all(|t| forms.iter().any(|f| f.starts_with(t.text.as_str())));
+    let spelled = q.toks.iter().filter(|t| !t.optional).all(|t| {
+        tw.iter().chain(ow.iter().flatten()).any(|w| {
+            w.text.starts_with(t.text.as_str()) || w.pieces.iter().any(|p| p.starts_with(t.text.as_str()))
+        })
+    });
     (t, in_title, if spelled { SPELLED_BONUS } else { 0.0 })
 }
 
@@ -602,10 +624,10 @@ fn candidates_sql(cols: &str, table: &str, alias: &str, bm25: &str, popular: &st
     }
 }
 
-fn search_artists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize) -> AppResult<Vec<Scored<Artist>>> {
+fn search_artists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize, div: i64) -> AppResult<Vec<Scored<Artist>>> {
     let sql = candidates_sql(ARTIST_COLS, "artists", "ar", "rank", "ar.view_count DESC", q.short);
     let mut st = c.prepare_cached(&sql)?;
-    let rows = st.query_map(params![fts, OTHER_CANDIDATES], row_artist)?;
+    let rows = st.query_map(params![fts, OTHER_CANDIDATES / div], row_artist)?;
     let mut v = Vec::new();
     for a in rows {
         let a = a?;
@@ -618,16 +640,25 @@ fn search_artists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize
 
 /// Credited artists (names in track artist lines with no library artist)
 /// whose name matches the query, with the plays of the tracks crediting them.
-fn search_credited(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize) -> AppResult<Vec<Scored<Artist>>> {
+fn search_credited(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize, div: i64) -> AppResult<Vec<Scored<Artist>>> {
     if q.short || n == 0 {
         return Ok(Vec::new());
     }
+    // Splitting a line into names checks it against every artist, so only
+    // the most played distinct lines are split, in library order (a name is
+    // written as on the first track that credits it).
     let mut st = c.prepare_cached(
-        "SELECT t.track_artist, t.view_count FROM tracks_fts JOIN tracks t ON t.pk = tracks_fts.rowid
-         WHERE tracks_fts MATCH ?1 LIMIT ?2",
+        "SELECT line, plays FROM (
+            SELECT t.track_artist AS line, sum(t.view_count) AS plays, min(t.pk) AS first FROM (
+                SELECT rowid AS r FROM tracks_fts WHERE tracks_fts MATCH ?1 ORDER BY rank LIMIT ?2
+            ) f JOIN tracks t ON t.pk = f.r WHERE t.track_artist IS NOT NULL
+            GROUP BY t.track_artist ORDER BY plays DESC LIMIT ?3
+         ) ORDER BY first",
     )?;
     let rows: Vec<(Option<String>, u32)> = st
-        .query_map(params![format!("track_artist : ({fts})"), TRACK_CANDIDATES], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .query_map(params![format!("track_artist : ({fts})"), TRACK_CANDIDATES / div, CREDITED_LINES / div], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?
         .collect::<Result<_, _>>()?;
     let mut in_library = c.prepare_cached("SELECT 1 FROM artists WHERE title = ?1 COLLATE NOCASE LIMIT 1")?;
     let mut found: Vec<(String, String, u32, Tier)> = Vec::new();
@@ -665,7 +696,7 @@ fn search_credited(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usiz
     Ok(rank(v, n))
 }
 
-fn search_albums(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize) -> AppResult<Vec<Scored<Album>>> {
+fn search_albums(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize, div: i64) -> AppResult<Vec<Scored<Album>>> {
     let sql = candidates_sql(
         ALBUM_COLS,
         "albums",
@@ -675,7 +706,7 @@ fn search_albums(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize)
         q.short,
     );
     let mut st = c.prepare_cached(&sql)?;
-    let rows = st.query_map(params![fts, OTHER_CANDIDATES], row_album)?;
+    let rows = st.query_map(params![fts, OTHER_CANDIDATES / div], row_album)?;
     let mut v = Vec::new();
     for a in rows {
         let a = a?;
@@ -686,7 +717,7 @@ fn search_albums(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize)
     Ok(rank(v, n))
 }
 
-fn search_tracks(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize) -> AppResult<Vec<Scored<Track>>> {
+fn search_tracks(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize, div: i64) -> AppResult<Vec<Scored<Track>>> {
     let sql = candidates_sql(
         TRACK_COLS,
         "tracks",
@@ -696,7 +727,7 @@ fn search_tracks(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize)
         q.short,
     );
     let mut st = c.prepare_cached(&sql)?;
-    let rows = st.query_map(params![fts, TRACK_CANDIDATES], row_track)?;
+    let rows = st.query_map(params![fts, TRACK_CANDIDATES / div], row_track)?;
     let mut v = Vec::new();
     for tr in rows {
         let tr = tr?;
@@ -711,10 +742,10 @@ fn search_tracks(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize)
     Ok(rank(v, n))
 }
 
-fn search_playlists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize) -> AppResult<Vec<Scored<Playlist>>> {
+fn search_playlists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize, div: i64) -> AppResult<Vec<Scored<Playlist>>> {
     let sql = candidates_sql(PLAYLIST_COLS, "playlists", "p", "rank", "p.title COLLATE NOCASE", q.short);
     let mut st = c.prepare_cached(&sql)?;
-    let rows = st.query_map(params![fts, OTHER_CANDIDATES], row_playlist)?;
+    let rows = st.query_map(params![fts, OTHER_CANDIDATES / div], row_playlist)?;
     let mut v = Vec::new();
     for p in rows {
         let p = p?;
@@ -760,26 +791,36 @@ struct Limits {
     songs: usize,
     playlists: usize,
     credited: bool,
+    /// Candidates read per kind, as a share of the usual pool (1 or 3).
+    pool_div: i64,
+}
+
+impl Limits {
+    /// The fallback passes rank below everything before them, so they read
+    /// a third of the candidates.
+    fn fallback(self) -> Self {
+        Self { pool_div: 3, ..self }
+    }
 }
 
 fn run(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, l: Limits) -> AppResult<Found> {
     let mut f = Found::default();
     if l.artists > 0 {
-        let mut v = search_artists(c, q, fts, now, l.artists)?;
+        let mut v = search_artists(c, q, fts, now, l.artists, l.pool_div)?;
         if l.credited {
-            v.extend(search_credited(c, q, fts, now, l.artists)?);
+            v.extend(search_credited(c, q, fts, now, l.artists, l.pool_div)?);
             v = rank(v, l.artists);
         }
         f.artists = v;
     }
     if l.albums > 0 {
-        f.albums = search_albums(c, q, fts, now, l.albums)?;
+        f.albums = search_albums(c, q, fts, now, l.albums, l.pool_div)?;
     }
     if l.songs > 0 {
-        f.songs = search_tracks(c, q, fts, now, l.songs)?;
+        f.songs = search_tracks(c, q, fts, now, l.songs, l.pool_div)?;
     }
     if l.playlists > 0 {
-        f.playlists = search_playlists(c, q, fts, now, l.playlists)?;
+        f.playlists = search_playlists(c, q, fts, now, l.playlists, l.pool_div)?;
     }
     Ok(f)
 }
@@ -850,6 +891,7 @@ pub(crate) fn search_conn(
         songs: kind_limit(filter, limit, SearchFilter::Songs, ALL_SONGS),
         playlists: kind_limit(filter, limit, SearchFilter::Playlists, ALL_SHELF),
         credited,
+        pool_div: 1,
     };
 
     let vocab = if q.short {
@@ -867,12 +909,18 @@ pub(crate) fn search_conn(
     let fts = if q.short { typed } else { build_fts(&q, &extra).unwrap_or(typed) };
     let mut found = run(c, &q, &fts, now, l)?;
 
-    // Pass 2: typos, only when the words as typed found little.
-    if let (true, Some(v)) = (typos && found.count() < FUZZY_BELOW, &vocab) {
+    // Pass 2: typos, only when the words as typed found little and one of
+    // them is nowhere in the library (or nothing at all was found). A query
+    // of real library words is not "corrected", and it keeps typing fast.
+    let unknown_word = |v: &Vocab| (0..q.toks.len()).any(|i| !q.toks[i].optional && !in_library(&q, i, v, &extra));
+    let want_typos = |v: &Vocab| found.count() == 0 || unknown_word(v);
+    if let (true, Some(v)) = (typos && found.count() < FUZZY_BELOW && !q.short, &vocab)
+        && want_typos(v)
+    {
         let fuzzy: Vec<Vec<String>> = q
             .toks
             .iter()
-            .map(|t| if t.optional { Vec::new() } else { v.fuzzy(&t.text, max_typos(t.text.chars().count())) })
+            .map(|t| if t.optional { Vec::new() } else { v.fuzzy(&t.text) })
             .collect();
         if fuzzy.iter().any(|f| !f.is_empty()) {
             let mut wide = extra.clone();
@@ -883,7 +931,7 @@ pub(crate) fn search_conn(
             }
             let before = found.count();
             if let Some(e) = build_fts(&q, &wide) {
-                let more = run(c, &q, &e, now, l)?;
+                let more = run(c, &q, &e, now, l.fallback())?;
                 merge_found(&mut found, more, l);
             }
             if found.count() > before {
@@ -907,7 +955,7 @@ pub(crate) fn search_conn(
             drop_one_fts(&q, &extra)
         };
         if let Some(e) = e {
-            let more = run(c, &q, &e, now, l)?;
+            let more = run(c, &q, &e, now, l.fallback())?;
             merge_found(&mut found, more, l);
         }
     }

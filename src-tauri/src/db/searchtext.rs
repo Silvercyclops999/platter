@@ -70,6 +70,9 @@ pub fn variants(word: &str) -> impl Iterator<Item = &'static str> + '_ {
 
 /// Lower-case, accent-free form.
 pub fn normalize(s: &str) -> String {
+    if s.is_ascii() {
+        return s.to_ascii_lowercase();
+    }
     s.nfd().filter(|c| !is_combining_mark(*c)).flat_map(char::to_lowercase).collect()
 }
 
@@ -135,7 +138,11 @@ pub fn words(s: &str) -> Vec<Word> {
 /// (and its canonical spelling), its parts, and each pair of neighbours run together
 /// ("Kay Q" also reads as "kayq").
 pub fn match_forms(s: &str) -> Vec<String> {
-    let ws = words(s);
+    forms_of(&words(s))
+}
+
+/// [`match_forms`] of words already split.
+pub fn forms_of(ws: &[Word]) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(ws.len() * 2);
     for (i, w) in ws.iter().enumerate() {
         out.push(w.text.clone());
@@ -154,7 +161,12 @@ pub fn match_forms(s: &str) -> Vec<String> {
 
 /// Canonical words of a name joined by spaces (exact and prefix checks).
 pub fn canonical(s: &str) -> String {
-    words(s).iter().map(|w| canon(&w.text)).collect::<Vec<_>>().join(" ")
+    canonical_of(&words(s))
+}
+
+/// [`canonical`] of words already split.
+pub fn canonical_of(ws: &[Word]) -> String {
+    ws.iter().map(|w| canon(&w.text)).collect::<Vec<_>>().join(" ")
 }
 
 /// Typos a word of `len` chars may have and still match: one wrong,

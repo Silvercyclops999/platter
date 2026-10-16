@@ -1472,9 +1472,10 @@ async fn search_forgives_typos_below_exact_matches() {
     assert_eq!(r.corrected.as_deref(), Some("wanderlust"));
     // One typo only.
     assert!(search::search(&t.db, "wnaderlsut", SearchFilter::Songs, None).unwrap().songs.is_empty());
-    // An exact match ranks above a typo match with more plays, and is no correction.
+    // Words that are in the library as typed are not corrected, even with
+    // few results ("Wanderlast" is a real title one letter from another).
     let r = search::search(&t.db, "wanderlast", SearchFilter::Songs, None).unwrap();
-    assert_eq!(song_titles(&r), vec!["Wanderlast", "Wanderlust"]);
+    assert_eq!(song_titles(&r), vec!["Wanderlast"]);
     assert_eq!(r.corrected, None);
     // The setting turns the typo fallback off.
     t.db.set_search_typos(false);
@@ -1489,9 +1490,9 @@ async fn search_adds_no_typo_matches_when_exact_ones_are_plenty() {
     assert!(titles.len() >= search::FUZZY_BELOW, "{titles:?}");
     assert!(!titles.contains(&"Lamb Chop"), "{titles:?}");
     assert_eq!(r.corrected, None);
-    // With few exact matches, the typo match comes too, after them.
+    // A real library word is not corrected to another one.
     let r = search::search(&t.db, "lamb", SearchFilter::Songs, Some(20)).unwrap();
-    assert_eq!(song_titles(&r)[0], "Lamb Chop");
+    assert_eq!(song_titles(&r), vec!["Lamb Chop"]);
 }
 
 #[tokio::test]
