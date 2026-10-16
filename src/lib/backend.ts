@@ -113,6 +113,8 @@ import type {
   FeedStatus,
   DeckPluginStatus,
   DeckStatus,
+  BridgeOverview,
+  BridgePairStart,
   DownloadKind,
   DownloadStatus,
   ShareInfo,
@@ -631,6 +633,20 @@ export interface Backend {
   deckPluginInstall(): Promise<void>;
   /** Open Elgato's download page for the Stream Deck app. */
   deckAppDownload(): Promise<void>;
+
+  // Platter Bridge (docs/IPC.md "Platter Bridge")
+  /** Paired Bridges, a pair code waiting to be used, queued Lidarr changes. */
+  bridgeOverview(): Promise<BridgeOverview>;
+  /** "Pair a Bridge": a new code, good for an hour. */
+  bridgePairStart(): Promise<BridgePairStart>;
+  bridgePairCancel(): Promise<void>;
+  /** Forget a Bridge (and tell it to forget this computer). */
+  bridgeUnpair(id: string): Promise<BridgeOverview>;
+  /** Say yes to a Lidarr settings change a Bridge queued. */
+  bridgeQueuedApply(id: string): Promise<BridgeOverview>;
+  bridgeQueuedDismiss(id: string): Promise<BridgeOverview>;
+  /** Send the Bridges the current Lidarr and Plex settings. */
+  bridgeSendSettings(): Promise<void>;
   /** Save the Imgur client ID in the keychain (null removes it); answers whether Imgur refused it. */
   discordImgurKeySet(key: string | null): Promise<InfoKeyState>;
 
@@ -1201,6 +1217,13 @@ export function createTauriBackend(): Backend {
     deckPairAnswer: (id, allow) => call("deck_pair_answer", { id, allow }),
     deckPluginStatus: () => call("deck_plugin_status"),
     deckPluginInstall: () => call("deck_plugin_install"),
+    bridgeOverview: () => call("bridge_overview"),
+    bridgePairStart: () => call("bridge_pair_start"),
+    bridgePairCancel: () => call("bridge_pair_cancel"),
+    bridgeUnpair: (id) => call("bridge_unpair", { id }),
+    bridgeQueuedApply: (id) => call("bridge_queued_apply", { id }),
+    bridgeQueuedDismiss: (id) => call("bridge_queued_dismiss", { id }),
+    bridgeSendSettings: () => call("bridge_send_settings"),
     deckAppDownload: () => call("deck_app_download"),
     discordImgurKeySet: (key) => call("discord_imgur_key_set", { key }),
     tagsIndex: () => call("tags_index"),

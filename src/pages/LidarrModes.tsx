@@ -4,6 +4,7 @@ import { Dialog } from "../components/Dialog";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
 import type {
+  BridgeInfo,
   AppError,
   LidarrArtistMode,
   LidarrArtistPrefs,
@@ -188,8 +189,13 @@ function RematchDialog({ plan, onClose, onDone }: { plan: LidarrRematchPlan | nu
 /** Practice mode, who did the Lidarr work last, and a pause if there is one. */
 export function LidarrWorkStatus() {
   const [work, setWork] = useState<LidarrWork | null>(null);
+  const [bridges, setBridges] = useState<BridgeInfo[]>([]);
   const load = useCallback(() => {
     backend.lidarrWork().then(setWork, () => setWork(null));
+    backend.bridgeOverview().then(
+      (o) => setBridges(o.bridges),
+      () => setBridges([]),
+    );
   }, []);
   useReload(load);
   if (!work) return null;
@@ -224,6 +230,13 @@ export function LidarrWorkStatus() {
       <p className="lidarr-work__note">
         {c.lastDevice && c.lastAt ? `Lidarr work last done by ${c.lastDevice}, ${when(c.lastAt)}.` : "Platter hasn't caught up with Lidarr yet."}
       </p>
+      {bridges.length > 0 && (
+        <p className="lidarr-work__note" data-testid="lidarr-bridge-line">
+          {bridges[0].online
+            ? `${bridges[0].name} does this work while no computer has Platter open.`
+            : `${bridges[0].name} is paired but hasn't been heard from lately, so this work waits for a computer with Platter open.`}
+        </p>
+      )}
     </div>
   );
 }

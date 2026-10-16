@@ -293,7 +293,7 @@ export function LidarrFindings({ lidarr }: { lidarr: LidarrState }) {
   const red = report.findings.filter((f) => f.level === "red");
   const amber = report.findings.filter((f) => f.level === "amber");
   const ok = report.findings.filter((f) => f.level === "ok");
-  const where = report.route === "away" ? "its away address" : "its home address";
+  const where = report.route === "away" ? "its away address" : report.route === "bridge" ? "your Platter Bridge" : "its home address";
   const row = (f: LidarrFinding) => (
     <FindingRow
       key={`${f.id}:${f.emptyRoot?.path ?? f.title}`}

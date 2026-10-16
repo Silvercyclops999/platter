@@ -2179,7 +2179,7 @@ export interface LidarrReport {
   protectedCount: number;
   checkedAt: number;
   /** Which address answered. */
-  route: "home" | "away" | null;
+  route: "home" | "away" | "bridge" | null;
 }
 
 /** Managed: Lidarr owns the artist's folder. Protected: curated files Platter changes itself. */
@@ -2357,7 +2357,7 @@ export interface LidarrPreview {
   existing: LidarrRequestState | null;
   /** False: the request will wait until Platter can reach Lidarr. */
   reachable: boolean;
-  route: "home" | "away" | null;
+  route: "home" | "away" | "bridge" | null;
   /** The artist is new to Lidarr and will be added with only this album. */
   addsArtist: boolean;
   /** A protected artist: it downloads into the staging folder and waits there. */
@@ -3314,6 +3314,8 @@ export interface EventMap {
   "feed://status": FeedStatus;
   /** The Stream Deck control API started, stopped, was paired or revoked. */
   "deck://status": DeckStatus;
+  /** A Bridge paired, unpaired or sent news: read bridgeOverview again. */
+  "bridge://changed": null;
   /** A Stream Deck key asked for Request album or Listen along. */
   "deck://action": DeckAction;
   /** The Stream Deck asked to pair (an id), or the prompt closed (null). */
@@ -3923,4 +3925,75 @@ export interface PlexLibraryCheck {
   agent: string;
   items: { label: string; ok: boolean | null; help: string }[];
   ok: boolean;
+}
+
+// ---------------------------------------------------------------- Platter Bridge
+
+/** How a Bridge reaches the music folder. */
+export type BridgeMusicAccess = "none" | "readOnly" | "readWrite";
+
+/** A Bridge's last catch-up with Lidarr, in short. */
+export interface BridgeCatchUp {
+  /** Unix seconds. */
+  at: number;
+  handled: number;
+  acted: number;
+  scanned: number;
+  announced: string[];
+  healed: number;
+  paused: string | null;
+  error: string | null;
+}
+
+/** What a Bridge last said about itself. */
+export interface BridgeStatus {
+  name: string;
+  version: string;
+  /** Unix seconds. */
+  at: number;
+  /** One plain line: what it's doing now. */
+  doing: string;
+  lastCatchUp: BridgeCatchUp | null;
+  music: BridgeMusicAccess;
+  plex: boolean;
+  lidarr: boolean;
+  problem: string | null;
+}
+
+/** A paired Bridge. */
+export interface BridgeInfo {
+  id: string;
+  name: string;
+  version: string;
+  pairedAt: number;
+  lastSeen: number | null;
+  /** Heard from in the last hour or so. */
+  online: boolean;
+  status: BridgeStatus | null;
+  music: BridgeMusicAccess;
+}
+
+/** A pair code waiting for its Bridge. */
+export interface BridgePairStart {
+  code: string;
+  /** Unix seconds. */
+  expiresAt: number;
+}
+
+/** A Lidarr settings change a Bridge didn't make and queued for a yes. */
+export interface BridgeQueuedWrite {
+  id: string;
+  what: string;
+  method: string;
+  path: string;
+  body: string;
+  at: number;
+  device: string;
+}
+
+/** Settings > Bridge. */
+export interface BridgeOverview {
+  bridges: BridgeInfo[];
+  pairing: BridgePairStart | null;
+  queued: BridgeQueuedWrite[];
 }

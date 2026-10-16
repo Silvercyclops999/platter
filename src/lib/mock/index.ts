@@ -104,6 +104,7 @@ import type {
   FeedStatus,
   DeckPluginStatus,
   DeckStatus,
+  BridgeOverview,
   EditFields,
   EditKind,
   ImageKind,
@@ -3664,6 +3665,79 @@ export class MockBackend implements Backend {
   }
   feedStatus() {
     return this.delay(() => this.feed());
+  }
+
+  // ---------------------------------------------------------------- platter bridge
+
+  /** Settings > Bridge: a pair code is answered by a Bridge after a moment. */
+  bridgeState: BridgeOverview = { bridges: [], pairing: null, queued: [] };
+  /** How long the demo Bridge takes to answer a pair code (ms). */
+  bridgePairAfterMs = 2500;
+  bridgeOverview() {
+    return this.delay(() => this.bridgeState);
+  }
+  bridgePairStart() {
+    return this.delay(() => {
+      const now = Math.floor(Date.now() / 1000);
+      const pairing = { code: "PB1-q3Vx8bN2kLm9TzR4wYc7HdE1fGj5sAo6pUi0eWn3vXb8yZaQk", expiresAt: now + 3600 };
+      this.bridgeState = { ...this.bridgeState, pairing };
+      this.later(this.bridgePairAfterMs, () => {
+        if (this.bridgeState.pairing?.code !== pairing.code) return;
+        const at = Math.floor(Date.now() / 1000);
+        this.bridgeState = {
+          ...this.bridgeState,
+          pairing: null,
+          bridges: [
+            ...this.bridgeState.bridges,
+            {
+              id: `b${this.bridgeState.bridges.length + 1}`,
+              name: "Platter Bridge",
+              version: "0.2.20",
+              pairedAt: at,
+              lastSeen: at,
+              online: true,
+              music: "readWrite",
+              status: {
+                name: "Platter Bridge",
+                version: "0.2.20",
+                at,
+                doing: "Waiting for the next catch-up",
+                lastCatchUp: { at, handled: 3, acted: 1, scanned: 1, announced: ["Second Wind"], healed: 0, paused: null, error: null },
+                music: "readWrite",
+                plex: true,
+                lidarr: true,
+                problem: null,
+              },
+            },
+          ],
+        };
+        this.emit("bridge://changed", null);
+      });
+      return pairing;
+    });
+  }
+  bridgePairCancel() {
+    return this.delay(() => {
+      this.bridgeState = { ...this.bridgeState, pairing: null };
+    });
+  }
+  bridgeUnpair(id: string) {
+    return this.delay(() => {
+      this.bridgeState = { ...this.bridgeState, bridges: this.bridgeState.bridges.filter((b) => b.id !== id) };
+      return this.bridgeState;
+    });
+  }
+  bridgeQueuedApply(id: string) {
+    return this.delay(() => {
+      this.bridgeState = { ...this.bridgeState, queued: this.bridgeState.queued.filter((q) => q.id !== id) };
+      return this.bridgeState;
+    });
+  }
+  bridgeQueuedDismiss(id: string) {
+    return this.bridgeQueuedApply(id);
+  }
+  bridgeSendSettings() {
+    return this.delay(() => undefined);
   }
 
   // ---------------------------------------------------------------- stream deck

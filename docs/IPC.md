@@ -2233,6 +2233,30 @@ A file swaps when it and the new file carry the same ISRC, or when all of these 
 `UpgradeFailure` is `{ kind }` with `noMapping`, `shareUnreachable { path }`, `changed { name }`, `stagingMissing { name }`, `fileLocked { name }`, `nameTaken { name }`, `tagCopyFailed { name, why }`, `backupNotWritable { path }`, `backupInLibrary { path }`, `moveFailed { name }`, `rescanFailed`, `plexUnreachable` or `backupMissing { name }`. Each leaves the old files in place.
 With `upgradesAsk` off, the background loop swaps imported upgrades on its own when the album doesn't need asking per song.
 
+### Platter Bridge
+Optional: the home side on a server (docs/BRIDGE.md). Settings > Bridge.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `bridge_overview` | – | `BridgeOverview` |
+| `bridge_pair_start` | – | `BridgePairStart` |
+| `bridge_pair_cancel` | – | – |
+| `bridge_unpair` | `{ id: string }` | `BridgeOverview` |
+| `bridge_queued_apply` | `{ id: string }` | `BridgeOverview` |
+| `bridge_queued_dismiss` | `{ id: string }` | `BridgeOverview` |
+| `bridge_send_settings` | – | – |
+
+`BridgeOverview` is `{ bridges, pairing, queued }`: each paired Bridge
+(`id`, `name`, `version`, `pairedAt`, `lastSeen`, `online`, `music`:
+`none | readOnly | readWrite`, and `status`, what it last said: `doing`,
+`lastCatchUp`, `problem`), the pair code waiting to be used (`code`,
+`expiresAt`), and Lidarr settings changes a Bridge queued instead of making
+(`what`, and the exact `method`, `path` and `body`). `bridge_queued_apply`
+makes one from this computer after the yes, through the same checks;
+`bridge_unpair` tells the Bridge too. Event `bridge://changed` (no payload):
+read the overview again. Lidarr routes now include `bridge` (the setup
+check's and a request preview's `route`).
+
 ## Release radar
 
 New official albums, EPs and singles from followed artists and the ten artists played most in the last 90 days. About once a day, when MusicBrainz is on, Platter asks MusicBrainz's release group search for a few artists at a time (by MusicBrainz id, first released in the last 90 days or later), through the shared one-a-second limiter, with answers cached for 18 hours. Only release groups that pass the same rules as a request are kept: at least one official release, album, EP or single, credited to the artist alone, no secondary type. What was found is kept on this device. An artist's first look announces nothing.
