@@ -195,7 +195,7 @@ impl Recognizer for Helper {
         if cancel.load(Ordering::Relaxed) {
             return Err(RecognizeError::Cancelled);
         }
-        // One run at a time (transcription and the lyrics check share it).
+        // One run at a time (transcription and the lyrics check have one each).
         let mut guard = self.slot.lock();
         let slot = &mut *guard;
         let lowest = (self.lowest)();

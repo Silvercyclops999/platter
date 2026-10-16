@@ -14,7 +14,7 @@ use parking_lot::Mutex;
 
 use super::candidates::{self, Candidate, Decision, Origin};
 use super::check::{self, HeardWord, Point, Verdict};
-use super::checker::{self, AudioCheck, CheckEvents, CheckJob, Checker, CheckerDeps, JobCand, SongPcm};
+use super::checker::{self, AudioCheck, CheckEvents, CheckJob, CheckReason, CheckState, CheckStatus, Checker, CheckerDeps, JobCand, SongPcm};
 use super::choice::{self, Choice};
 use super::*;
 use crate::artistinfo::http::fake::FakeHttp;
@@ -354,21 +354,28 @@ impl Recognizer for FakeRecognizer {
     }
 }
 
-struct FakePcm(Mutex<Result<Vec<f32>, AudioError>>);
+/// The song's audio; never arrives while the flag is set.
+struct FakePcm(Mutex<Result<Vec<f32>, AudioError>>, AtomicBool);
 
 #[async_trait]
 impl SongPcm for FakePcm {
     async fn pcm(&self, _: &str) -> Result<Vec<f32>, AudioError> {
+        while self.1.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         self.0.lock().clone()
     }
 }
 
 #[derive(Default)]
-struct Events(Mutex<Vec<String>>);
+struct Events(Mutex<Vec<String>>, Mutex<Vec<CheckStatus>>);
 
 impl CheckEvents for Events {
     fn checked(&self, track_id: &str) {
         self.0.lock().push(track_id.into());
+    }
+    fn status(&self, s: &CheckStatus) {
+        self.1.lock().push(s.clone());
     }
 }
 
@@ -444,7 +451,7 @@ fn fx() -> Fx {
     }];
     let rec = Arc::new(FakeRecognizer { heard: Mutex::new(Vec::new()), calls: AtomicUsize::new(0), threads: AtomicUsize::new(0) });
     let load = FakeLoad::new(5.0);
-    let pcm = Arc::new(FakePcm(Mutex::new(Ok(song_pcm(205_000)))));
+    let pcm = Arc::new(FakePcm(Mutex::new(Ok(song_pcm(205_000))), AtomicBool::new(false)));
     let events = Arc::new(Events::default());
     let none_matched = Arc::new(Mutex::new(Vec::new()));
     let checker = Checker::new(CheckerDeps {
@@ -549,6 +556,66 @@ async fn same_title_collision_never_shows_the_wrong_song() {
     );
     assert!(list.items[1].shown && !list.items[0].shown);
     assert!(list.can_check);
+}
+
+#[tokio::test]
+async fn a_check_says_where_it_is_and_a_stuck_one_says_it_couldnt_check_yet() {
+    let f = fx();
+    f.lrclib_search(serde_json::json!([hit("Crown Season", 205.0, &lrc(KING_A))]));
+    f.hears(timeline(KING_A, |t| t));
+    f.checker.spawn();
+    f.svc.shown("701").await.unwrap();
+    for _ in 0..300 {
+        if f.events.0.lock().len() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let states: Vec<CheckState> = f.events.1.lock().iter().filter(|s| s.track_id == "701").map(|s| s.state).collect();
+    assert_eq!(states, vec![CheckState::Queued, CheckState::Reading, CheckState::Listening, CheckState::Done]);
+    assert_eq!(f.checker.status("701").unwrap().state, CheckState::Done);
+    // The song's audio never comes: after the stuck time it couldn't check yet.
+    let f = fx();
+    f.lrclib_search(serde_json::json!([hit("Crown Season", 205.0, &lrc(KING_A))]));
+    f.hears(timeline(KING_A, |t| t));
+    f.pcm.1.store(true, Ordering::SeqCst);
+    f.checker.spawn();
+    f.svc.shown("701").await.unwrap();
+    for _ in 0..300 {
+        if f.checker.status("701").is_some_and(|s| s.state == CheckState::Failed) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let s = f.checker.status("701").unwrap();
+    assert_eq!((s.state, s.reason), (CheckState::Failed, Some(CheckReason::Stuck)));
+    assert!(f.events.1.lock().iter().any(|s| s.state == CheckState::Reading), "it said what it was doing first");
+    // The audio arrives after all: the check finishes and says so.
+    f.pcm.1.store(false, Ordering::SeqCst);
+    for _ in 0..300 {
+        if f.checker.status("701").is_some_and(|s| s.state == CheckState::Done) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(f.checker.status("701").unwrap().state, CheckState::Done);
+}
+
+#[tokio::test]
+async fn a_check_waiting_on_a_busy_computer_says_so() {
+    let f = fx();
+    f.lrclib_search(serde_json::json!([hit("Crown Season", 205.0, &lrc(KING_A))]));
+    f.hears(timeline(KING_A, |t| t));
+    f.load.set(90.0);
+    f.checker.spawn();
+    f.svc.shown("701").await.unwrap();
+    for _ in 0..300 {
+        if f.checker.status("701").is_some_and(|s| s.state == CheckState::Waiting) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(f.checker.status("701").unwrap().reason, Some(CheckReason::Busy));
 }
 
 #[tokio::test]

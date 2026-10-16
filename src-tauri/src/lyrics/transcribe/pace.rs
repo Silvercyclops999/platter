@@ -10,7 +10,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -113,6 +113,9 @@ pub struct Timing {
     pub rest: Duration,
     /// No input for this long (on mains power) counts as away.
     pub away: Duration,
+    /// A lyrics check with no progress for this long is reported as
+    /// couldn't check yet.
+    pub stuck: Duration,
 }
 
 impl Default for Timing {
@@ -124,6 +127,7 @@ impl Default for Timing {
             poll: Duration::from_secs(5),
             rest: Duration::from_secs(5),
             away: Duration::from_secs(5 * 60),
+            stuck: Duration::from_secs(120),
         }
     }
 }
@@ -238,6 +242,8 @@ pub struct Pacer {
     gate: Mutex<BusyGate>,
     /// Nobody has used the computer for a while and it's on mains power.
     away: AtomicBool,
+    /// Lyrics checks running now.
+    checks: AtomicUsize,
     run: Mutex<Run>,
 }
 
@@ -254,6 +260,7 @@ impl Pacer {
             opts: Mutex::new(Options { usage: ProcessorUse::default(), pause_when_busy: true, faster_away: true }),
             gate: Mutex::new(BusyGate::default()),
             away: AtomicBool::new(false),
+            checks: AtomicUsize::new(0),
             run: Mutex::new(Run::default()),
         })
     }
@@ -291,14 +298,31 @@ impl Pacer {
     }
 
     /// Threads, and whether they're more than usual because nobody's there.
+    /// On Light, a background song that starts while a lyrics check runs
+    /// gets one, so the two together stay within the budget.
     pub fn threads_boosted(&self, now: bool) -> (usize, bool) {
         let usage = self.opts.lock().usage;
         let n = thread_budget(self.cores, usage, now);
-        if now || !self.away() {
+        if now {
             return (n, false);
+        }
+        if !self.away() {
+            let checking = self.checks.load(Ordering::SeqCst) > 0;
+            return (if checking && usage == ProcessorUse::Light { 1 } else { n }, false);
         }
         let away = n.max(thread_budget(self.cores, ProcessorUse::Balanced, false));
         (away, away > n)
+    }
+
+    /// Threads for a lyrics check (a 30 s window): two, within half the cores.
+    pub fn check_threads(&self) -> usize {
+        2.min((self.cores / 2).max(1))
+    }
+
+    /// A lyrics check is running until the guard drops.
+    pub fn checking(self: &Arc<Self>) -> CheckGuard {
+        self.checks.fetch_add(1, Ordering::SeqCst);
+        CheckGuard(self.clone())
     }
 
     /// Nobody's at the computer and it's on mains power (with the setting on).
@@ -376,6 +400,15 @@ impl Pacer {
     }
 }
 
+/// Held while a lyrics check runs.
+pub struct CheckGuard(Arc<Pacer>);
+
+impl Drop for CheckGuard {
+    fn drop(&mut self) {
+        self.0.checks.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Held while background speech work is waiting or running.
 pub struct PaceGuard(Arc<Pacer>);
 
@@ -445,7 +478,7 @@ pub mod fake {
 
     pub fn timing() -> Timing {
         let ms = Duration::from_millis;
-        Timing { sample: ms(5), window: ms(15), resume: ms(20), poll: ms(5), rest: ms(0), away: ms(1000) }
+        Timing { sample: ms(5), window: ms(15), resume: ms(20), poll: ms(5), rest: ms(0), away: ms(1000), stuck: ms(300) }
     }
 }
 
@@ -569,6 +602,20 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(40)).await;
         assert_eq!(load.reads(), n);
         assert_eq!(p.load(), Load::Calm);
+    }
+
+    #[test]
+    fn a_check_gets_two_threads_and_light_drops_the_batch_to_one_meanwhile() {
+        let p = Pacer::with_cores(FakeLoad::new(0.0), fake::timing(), 32);
+        assert_eq!(p.check_threads(), 2);
+        let g = p.checking();
+        assert_eq!((p.threads(false), p.threads(true)), (1, 4), "the song asked for keeps its four");
+        p.opts.lock().usage = ProcessorUse::Balanced;
+        assert_eq!(p.threads(false), 4);
+        p.opts.lock().usage = ProcessorUse::Light;
+        drop(g);
+        assert_eq!(p.threads(false), 2);
+        assert_eq!(Pacer::with_cores(FakeLoad::new(0.0), fake::timing(), 2).check_threads(), 1);
     }
 
     #[test]

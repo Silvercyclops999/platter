@@ -1,15 +1,19 @@
-//! The audio check's worker: one song at a time, newest first, with the
-//! background thread budget, waiting while the computer is busy. It reads the song the way transcription does (the
+//! The audio check's worker: one song at a time, newest first (the song
+//! playing), with its own speech helper so it never waits behind a
+//! transcription batch, two threads, waiting while the computer is busy.
+//! Each song's progress goes out as a check status, and a check that makes
+//! no progress for about two minutes says it couldn't check yet. It reads the song the way transcription does (the
 //! pre-cache first, else the server behind playback's transfer, giving way
 //! to it), decodes it, transcribes a 30 s window with the speech model on
 //! this computer, and judges the candidates in order until one matches.
 //! A synced match is checked again near the end for drift. Verdicts and the
 //! words heard are kept in SQLite. Nothing leaves the computer.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -20,7 +24,7 @@ use super::candidates::Stored;
 use super::transcribe::audio::{self, AudioError};
 use super::transcribe::engine::{self, Recognizer};
 use super::transcribe::model::{ModelKind, ModelStore};
-use super::transcribe::pace::{PaceGuard, Pacer};
+use super::transcribe::pace::{Load, PaceGuard, Pacer};
 use super::transcribe::{SongAudio, SongReader};
 use crate::db::DbHandle;
 use crate::db::queries::now_s;
@@ -83,7 +87,60 @@ impl SongPcm for DecodedSongs {
 pub trait CheckEvents: Send + Sync {
     /// A song's candidates were judged.
     fn checked(&self, track_id: &str);
+    /// A song's check moved on (`lyrics://check-status`).
+    fn status(&self, _s: &CheckStatus) {}
 }
+
+/// Where a song's check is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckState {
+    /// Waiting its turn.
+    Queued,
+    /// Can't start yet (see the reason).
+    Waiting,
+    /// Reading and decoding the song.
+    Reading,
+    /// The speech model is listening to a window of it.
+    Listening,
+    Done,
+    /// Couldn't check (see the reason); asking for the lyrics again retries.
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckReason {
+    /// The computer is busy (waiting).
+    Busy,
+    /// No speech model is installed.
+    NoModel,
+    /// The song's file can't be read or decoded.
+    Unreadable,
+    /// The song couldn't be read or listened to now; tried again later.
+    Later,
+    /// No progress for about two minutes.
+    Stuck,
+}
+
+/// `lyrics_check_status` and the `lyrics://check-status` event.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckStatus {
+    pub track_id: String,
+    pub state: CheckState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<CheckReason>,
+}
+
+impl CheckState {
+    fn ongoing(self) -> bool {
+        !matches!(self, CheckState::Done | CheckState::Failed)
+    }
+}
+
+/// Finished statuses are forgotten after this long.
+const KEEP_FINISHED: Duration = Duration::from_secs(600);
 
 /// Called when every candidate disagreed with the recording (the app
 /// queues a full transcription when transcription is on).
@@ -106,6 +163,8 @@ struct Inner {
     deps: CheckerDeps,
     queue: Mutex<VecDeque<CheckJob>>,
     wake: Notify,
+    /// Each song's status and when it last moved on.
+    statuses: Mutex<HashMap<String, (CheckStatus, Instant)>>,
 }
 
 /// Cheap to clone.
@@ -214,12 +273,66 @@ enum Fail {
 
 impl Checker {
     pub fn new(deps: CheckerDeps) -> Self {
-        Self { inner: Arc::new(Inner { deps, queue: Mutex::new(VecDeque::new()), wake: Notify::new() }) }
+        Self {
+            inner: Arc::new(Inner {
+                deps,
+                queue: Mutex::new(VecDeque::new()),
+                wake: Notify::new(),
+                statuses: Mutex::new(HashMap::new()),
+            }),
+        }
     }
 
     pub fn spawn(&self) {
         let me = self.clone();
         tokio::spawn(async move { me.run().await });
+        let me = self.clone();
+        tokio::spawn(async move { me.watch_stuck().await });
+    }
+
+    /// A song's check status, while there is one.
+    pub fn status(&self, track_id: &str) -> Option<CheckStatus> {
+        self.inner.statuses.lock().get(track_id).map(|s| s.0.clone())
+    }
+
+    fn set(&self, track_id: &str, state: CheckState, reason: Option<CheckReason>) {
+        let s = CheckStatus { track_id: track_id.to_owned(), state, reason };
+        {
+            let mut all = self.inner.statuses.lock();
+            if all.get(track_id).is_some_and(|(old, _)| *old == s) {
+                return;
+            }
+            all.insert(track_id.to_owned(), (s.clone(), Instant::now()));
+        }
+        self.inner.deps.events.status(&s);
+    }
+
+    /// Progress without a new state (the model is partway through).
+    fn touch(&self, track_id: &str) {
+        if let Some(e) = self.inner.statuses.lock().get_mut(track_id) {
+            e.1 = Instant::now();
+        }
+    }
+
+    /// A check with no progress for a while says it couldn't check yet.
+    async fn watch_stuck(self) {
+        let stuck = self.inner.deps.pacer.timing().stuck;
+        let tick = (stuck / 6).max(Duration::from_millis(5));
+        loop {
+            tokio::time::sleep(tick).await;
+            let late: Vec<String> = {
+                let mut all = self.inner.statuses.lock();
+                all.retain(|_, (s, at)| s.state.ongoing() || at.elapsed() < KEEP_FINISHED);
+                all.iter()
+                    .filter(|(_, (s, at))| s.state.ongoing() && at.elapsed() >= stuck)
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            };
+            for id in late {
+                tracing::info!("lyrics check made no progress for a while");
+                self.set(&id, CheckState::Failed, Some(CheckReason::Stuck));
+            }
+        }
     }
 
     /// The smallest installed model (the check needs little).
@@ -250,8 +363,19 @@ impl Checker {
                 if pace.is_none() {
                     pace = Some(self.inner.deps.pacer.want());
                 }
-                // Wait while other programs keep the processor busy.
-                self.inner.deps.pacer.wait_calm().await;
+                // Wait while other programs keep the processor busy, and say so.
+                let pacer = &self.inner.deps.pacer;
+                loop {
+                    let load = pacer.load();
+                    if load == Load::Calm {
+                        break;
+                    }
+                    let front = self.inner.queue.lock().front().map(|j| j.track_id.clone());
+                    if let (Load::Busy, Some(id)) = (load, front) {
+                        self.set(&id, CheckState::Waiting, Some(CheckReason::Busy));
+                    }
+                    tokio::time::sleep(pacer.timing().poll).await;
+                }
             }
             if self.inner.deps.recognizer.crashed_too_often() {
                 // Off for the session after repeated crashes.
@@ -278,7 +402,10 @@ impl Checker {
     /// Judge a song's candidates (the worker's step; tests call it directly).
     pub async fn check(&self, job: &CheckJob) -> AppResult<()> {
         let d = &self.inner.deps;
-        let Some((model, kind)) = self.model() else { return Ok(()) };
+        let Some((model, kind)) = self.model() else {
+            self.set(&job.track_id, CheckState::Failed, Some(CheckReason::NoModel));
+            return Ok(());
+        };
         let first = job.cands.iter().find_map(|c| check::sung_span(&c.lyrics).map(|s| s.0));
         let w1 = check::first_window(first, job.duration_ms);
         let mut pcm: Option<Vec<f32>> = None;
@@ -286,6 +413,11 @@ impl Checker {
             Ok(h) => h,
             Err(f) => {
                 // Not checked: shown as such, asked again later (or never, for a bad file).
+                let reason = match f {
+                    Fail::Later => CheckReason::Later,
+                    Fail::Never => CheckReason::Unreadable,
+                };
+                self.set(&job.track_id, CheckState::Failed, Some(reason));
                 let now = now_s();
                 let expires = match f {
                     Fail::Later => now + RETRY_S,
@@ -326,6 +458,7 @@ impl Checker {
         if all_no && let Some(f) = &d.none_matched {
             f(&job.track_id);
         }
+        self.set(&job.track_id, CheckState::Done, None);
         d.events.checked(&job.track_id);
         Ok(())
     }
@@ -370,6 +503,7 @@ impl Checker {
             return Ok(h);
         }
         if pcm.is_none() {
+            self.set(&job.track_id, CheckState::Reading, None);
             *pcm = Some(self.decode(&job.track_id).await?);
         }
         let all = pcm.as_ref().expect("just decoded");
@@ -379,11 +513,17 @@ impl Checker {
         let words = if slice.len() < rate * 3 || check::rms(&slice) < check::QUIET_RMS {
             Vec::new()
         } else {
+            self.set(&job.track_id, CheckState::Listening, None);
             let rec = d.recognizer.clone();
             let model = model.to_path_buf();
-            let threads = d.pacer.threads(false);
+            let threads = d.pacer.check_threads();
+            let _running = d.pacer.checking();
+            let progress: engine::Progress = {
+                let (me, id) = (self.clone(), job.track_id.clone());
+                Arc::new(move |_| me.touch(&id))
+            };
             let res = tokio::task::spawn_blocking(move || {
-                rec.transcribe(&model, kind, &slice, threads, engine::LANGUAGE, Arc::new(AtomicBool::new(false)), Arc::new(|_| {}))
+                rec.transcribe(&model, kind, &slice, threads, engine::LANGUAGE, Arc::new(AtomicBool::new(false)), progress)
             })
             .await;
             match res {
@@ -431,8 +571,18 @@ impl AudioCheck for Checker {
         {
             let mut q = self.inner.queue.lock();
             q.retain(|j| j.track_id != job.track_id);
+            let id = job.track_id.clone();
             q.push_front(job);
-            q.truncate(QUEUE_MAX);
+            // The oldest requests go: the user moved on.
+            let mut dropped = Vec::new();
+            while q.len() > QUEUE_MAX {
+                dropped.extend(q.pop_back().map(|j| j.track_id));
+            }
+            drop(q);
+            for old in dropped {
+                self.set(&old, CheckState::Failed, Some(CheckReason::Later));
+            }
+            self.set(&id, CheckState::Queued, None);
         }
         self.inner.wake.notify_one();
     }

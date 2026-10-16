@@ -30,6 +30,8 @@ pub async fn lyrics_get(lyrics: State<'_, LyricsService>, track_id: String) -> A
 pub const EV_CHECKED: &str = "lyrics://checked";
 /// Lyrics choices changed (from the sync file).
 pub const EV_CHOICES: &str = "lyrics://choices";
+/// A song's check moved on: `CheckStatus`.
+pub const EV_CHECK_STATUS: &str = "lyrics://check-status";
 
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +44,19 @@ impl<R: tauri::Runtime> super::checker::CheckEvents for AppHandle<R> {
         use tauri::Emitter;
         let _ = self.emit(EV_CHECKED, Checked { track_id });
     }
+    fn status(&self, s: &super::checker::CheckStatus) {
+        use tauri::Emitter;
+        let _ = self.emit(EV_CHECK_STATUS, s);
+    }
+}
+
+/// Where a song's lyrics check is, while there is one.
+#[tauri::command]
+pub async fn lyrics_check_status(
+    checker: State<'_, super::checker::Checker>,
+    track_id: String,
+) -> AppResult<Option<super::checker::CheckStatus>> {
+    Ok(checker.status(&track_id))
 }
 
 /// Every set of lyrics found for the song, for "Wrong lyrics?".

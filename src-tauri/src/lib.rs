@@ -945,8 +945,9 @@ pub fn run() {
                 let models = tr::model::ModelStore::new(data_dir.join("models"), tr::model::catalogue(), tr::model::os_free_space());
                 // Threads, the busy check and the breather, shared by both.
                 let pacer = tr::pace::Pacer::new(Arc::new(tr::pace::SystemSignals::default()), tr::pace::Timing::default());
-                // One recognizer (one helper process, one loaded model) for both.
-                let recognizer: Arc<dyn tr::engine::Recognizer> = {
+                // A helper process each, so a check never waits behind a
+                // batch song (each ends a minute after its last run).
+                let helper = || -> Arc<dyn tr::engine::Recognizer> {
                     let p = pacer.clone();
                     Arc::new(tr::helper::Helper::new(
                         Arc::new(tr::helper::ProcessLaunch::current()),
@@ -954,6 +955,8 @@ pub fn run() {
                         tr::helper::IDLE_EXIT,
                     ))
                 };
+                let recognizer = helper();
+                let check_recognizer = helper();
                 let songs: Arc<dyn tr::SongReader> = Arc::new(trc::AppSongs {
                     player: player.clone(),
                     audio_dir: audio_dir.clone(),
@@ -985,7 +988,7 @@ pub fn run() {
                 let checker = lyrics::checker::Checker::new(lyrics::checker::CheckerDeps {
                     db: db.clone(),
                     models,
-                    recognizer,
+                    recognizer: check_recognizer,
                     audio: Arc::new(lyrics::checker::DecodedSongs(songs)),
                     events: Arc::new(app.handle().clone()),
                     enabled: live.lyrics_check_audio.clone(),
@@ -1000,7 +1003,8 @@ pub fn run() {
                     let c = checker.clone();
                     async move { c.spawn() }
                 });
-                lyrics_service.set_checker(Arc::new(checker));
+                lyrics_service.set_checker(Arc::new(checker.clone()));
+                app.manage(checker);
                 app.manage(transcriber);
             }
             app.manage(lyrics_service);
@@ -1174,6 +1178,7 @@ pub fn run() {
             lyrics::commands::lyrics_own_ids,
             lyrics::commands::lyrics_export,
             lyrics::commands::lyrics_candidates,
+            lyrics::commands::lyrics_check_status,
             lyrics::commands::lyrics_choose,
             lyrics::commands::lyrics_offset,
             lyrics::commands::lyrics_choices_count,

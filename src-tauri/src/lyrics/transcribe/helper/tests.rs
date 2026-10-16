@@ -154,6 +154,26 @@ fn a_run_goes_through_the_helper_and_back() {
 }
 
 #[test]
+fn a_second_helper_answers_while_the_first_is_busy() {
+    // Transcription and the lyrics check each have one: a check never waits
+    // behind a long batch song.
+    let batch = fx(IDLE_EXIT);
+    let check = fx(IDLE_EXIT);
+    let stop = never();
+    let long = {
+        let (h, stop) = (batch.helper.clone(), stop.clone());
+        std::thread::spawn(move || run(&h, &[0.0; 7], stop).0)
+    };
+    std::thread::sleep(Duration::from_millis(30));
+    let started = std::time::Instant::now();
+    assert_eq!(text(run(&check.helper, &[1.0], never()).0), "m/small.bin 1 2 en");
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(!long.is_finished(), "the batch song is still going");
+    stop.store(true, Ordering::SeqCst);
+    assert_eq!(long.join().unwrap().unwrap_err(), RecognizeError::Cancelled);
+}
+
+#[test]
 fn a_long_song_round_trips() {
     let f = fx(IDLE_EXIT);
     // Four minutes of audio.
