@@ -791,7 +791,8 @@ pub enum ItemKind {
 #[serde(rename_all = "camelCase")]
 pub struct PlayedFrom {
     /// album | playlist | artist | mix | radio | search | tracks | liked |
-    /// imported (another app's history).
+    /// imported (another app's history; `id` then names where from:
+    /// plex_history, tautulli, lastfm or file).
     pub kind: String,
     pub id: Option<String>,
     pub title: Option<String>,
@@ -822,16 +823,22 @@ pub struct ItemStats {
     pub series: Vec<Point>,
 }
 
+/// A play brought in from elsewhere, named by its source.
+fn imported_from(source: String) -> PlayedFrom {
+    PlayedFrom { kind: "imported".into(), id: Some(source), title: None }
+}
+
 fn played_from(c: &Connection, rating_key: &str, at: i64) -> AppResult<Option<PlayedFrom>> {
     let local: Option<(Option<String>, Option<String>)> = c
         .prepare_cached("SELECT context_kind, context_id FROM listen_log WHERE rating_key = ?1 AND started_at = ?2 LIMIT 1")?
         .query_row(params![rating_key, at], |r| Ok((r.get(0)?, r.get(1)?)))
         .optional()?;
     let Some((kind, id)) = local else {
-        let imported: bool = c
-            .prepare_cached("SELECT EXISTS (SELECT 1 FROM imported_plays WHERE rating_key = ?1 AND played_at = ?2)")?
-            .query_row(params![rating_key, at], |r| r.get(0))?;
-        return Ok(imported.then(|| PlayedFrom { kind: "imported".into(), id: None, title: None }));
+        let source: Option<String> = c
+            .prepare_cached("SELECT source FROM imported_plays WHERE rating_key = ?1 AND played_at = ?2 ORDER BY id LIMIT 1")?
+            .query_row(params![rating_key, at], |r| r.get(0))
+            .optional()?;
+        return Ok(source.map(imported_from));
     };
     let Some(kind) = kind else { return Ok(None) };
     let table = match kind.as_str() {
@@ -858,7 +865,13 @@ fn first_listen(c: &Connection, song_key: &str) -> AppResult<Option<FirstListen>
     let Some((rk, song, Some(at))) = row else { return Ok(None) };
     let from = match &rk {
         Some(k) => played_from(c, k, at)?,
-        None => Some(PlayedFrom { kind: "imported".into(), id: None, title: None }),
+        None => {
+            let source: Option<String> = c
+                .prepare_cached("SELECT source FROM imported_plays WHERE rating_key IS NULL AND played_at = ?1 ORDER BY id LIMIT 1")?
+                .query_row([at], |r| r.get(0))
+                .optional()?;
+            Some(imported_from(source.unwrap_or_else(|| "file".into())))
+        }
     };
     let track_id = match &rk {
         Some(k) => queries::tracks_by_ids(c, std::slice::from_ref(k))?.pop().map(|t| t.id),

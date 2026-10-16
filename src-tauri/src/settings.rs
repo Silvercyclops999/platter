@@ -622,6 +622,16 @@ pub struct Settings {
     pub show_pronunciation: bool,
     /// Pins sit at the top of the library sidebar.
     pub pins_in_library: bool,
+    /// Stats, mixes and recaps include the signed-in user's play history from
+    /// their Plex server (playhistory::).
+    pub include_plex_history: bool,
+    /// The same for Tautulli's history, once Tautulli is set up.
+    pub include_tautulli_history: bool,
+    /// The same for Last.fm scrobbles, once Last.fm is connected.
+    pub include_lastfm_history: bool,
+    /// Tautulli's address (empty: Tautulli isn't set up). Its API key is in
+    /// the keychain.
+    pub tautulli_url: String,
 }
 
 /// Minutes between Subsonic change checks the setting offers.
@@ -651,6 +661,11 @@ pub fn lidarr_url(u: &str) -> AppResult<String> {
         && parsed.fragment().is_none()
         && u.len() <= 300;
     if ok { Ok(u.to_string()) } else { Err(bad()) }
+}
+
+/// Tautulli's address as stored, checked like Lidarr's; blank clears it.
+pub fn tautulli_url(u: &str) -> AppResult<String> {
+    lidarr_url(u).map_err(|_| AppError::Invalid("Tautulli's address is a web address like http://192.168.x.x:8181.".into()))
 }
 
 impl Default for Settings {
@@ -849,6 +864,10 @@ impl Default for Settings {
             translation_service: String::new(),
             show_pronunciation: false,
             pins_in_library: true,
+            include_plex_history: true,
+            include_tautulli_history: true,
+            include_lastfm_history: true,
+            tautulli_url: String::new(),
         }
     }
 }
@@ -971,6 +990,10 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "translateTo",
     "showPronunciation",
     "pinsInLibrary",
+    "includePlexHistory",
+    "includeTautulliHistory",
+    "includeLastfmHistory",
+    "tautulliUrl",
 ];
 
 /// Settings kept on this device only.
@@ -1254,6 +1277,10 @@ pub struct SettingsPatch {
     pub translation_service: Option<String>,
     pub show_pronunciation: Option<bool>,
     pub pins_in_library: Option<bool>,
+    pub include_plex_history: Option<bool>,
+    pub include_tautulli_history: Option<bool>,
+    pub include_lastfm_history: Option<bool>,
+    pub tautulli_url: Option<String>,
 }
 
 impl SettingsPatch {
@@ -1519,6 +1546,12 @@ impl Settings {
         if let Some(u) = &p.translation_service { self.translation_service = if u.trim().is_empty() { String::new() } else { crate::lyrics::translate::service_url(u).ok_or_else(|| AppError::Invalid("The translation service is a web address like https://translate.example.com.".into()))? }; }
         set(&mut self.show_pronunciation, p.show_pronunciation);
         set(&mut self.pins_in_library, p.pins_in_library);
+        set(&mut self.include_plex_history, p.include_plex_history);
+        set(&mut self.include_tautulli_history, p.include_tautulli_history);
+        set(&mut self.include_lastfm_history, p.include_lastfm_history);
+        if let Some(u) = &p.tautulli_url {
+            self.tautulli_url = tautulli_url(u)?;
+        }
         if let Some(list) = &p.dismissed_artists {
             self.dismissed_artists = crate::discover::tidy_dismissed(list);
         }
@@ -1946,6 +1979,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
         crate::archive::refresh_soon(db);
     }
     crate::doctor::set_options(s.doctor_options());
+    crate::playhistory::follow_settings(db, s);
     crate::soundid::set_options(s.sound_id_options());
     if let Some(scan) = live.tag_scanner.lock().as_ref() {
         scan.set_enabled(s.read_file_tags);
@@ -3378,6 +3412,30 @@ mod tests {
         assert!(!s.show_physical_collection && s.shelf_missing_list);
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(old.show_physical_collection && !old.shelf_missing_list);
+    }
+
+    #[test]
+    fn play_history_settings_are_on_synced_and_round_trip() {
+        let mut s = Settings::default();
+        assert!(s.include_plex_history && s.include_tautulli_history && s.include_lastfm_history);
+        assert!(s.tautulli_url.is_empty(), "Tautulli is off until set up");
+        for k in ["includePlexHistory", "includeTautulliHistory", "includeLastfmHistory", "tautulliUrl"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        s.apply(
+            &serde_json::from_str(
+                r#"{"includePlexHistory":false,"includeTautulliHistory":false,"includeLastfmHistory":false,"tautulliUrl":" http://10.20.30.40:8181/ "}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!s.include_plex_history && !s.include_tautulli_history && !s.include_lastfm_history);
+        assert_eq!(s.tautulli_url, "http://10.20.30.40:8181");
+        assert!(s.apply(&serde_json::from_str(r#"{"tautulliUrl":"tautulli"}"#).unwrap()).is_err());
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s, "saved and read back");
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.include_plex_history && old.include_tautulli_history && old.include_lastfm_history, "older settings read as on");
     }
 
     #[test]

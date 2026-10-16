@@ -507,7 +507,9 @@ fn calendar_days_genre_covers_and_recap_covers() {
     assert_eq!(r.top_album.unwrap().title, "First");
 }
 
-/// 100k plays over three years: the first count and every range query stay fast.
+/// 100k plays over three years, plus 30k imported from before them (and
+/// imported copies of plays already counted): the first count and every
+/// range query stay fast.
 #[test]
 fn fast_at_100k_plays() {
     let mut c = db();
@@ -552,14 +554,43 @@ fn fast_at_100k_plays() {
             )
             .unwrap();
         let mut x: u64 = 7;
-        for i in 0..100_000i64 {
+        let mut pick = || {
             // A skewed pick, so some songs are favourites.
             x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             let r = (x >> 33) % (songs as u64);
-            let s = (r * r) / songs as u64;
+            (r * r) / songs as u64
+        };
+        let mut picked = Vec::with_capacity(100_000);
+        for i in 0..100_000i64 {
+            let s = pick();
+            picked.push(s);
             st.execute(params![format!("s{s}"), start + i * 945_000]).unwrap();
         }
         drop(st);
+        // Imported plays: 30k from the server's history before the listen
+        // log starts, each third one scrobbled to Last.fm too, and every
+        // tenth local play as the server and Last.fm saw it. Only the 30k
+        // count.
+        let mut imp = tx
+            .prepare(
+                "INSERT INTO imported_plays (source, source_id, played_at, title, artist, album, rating_key)
+                 SELECT ?1, ?2, ?3, title, artist_title, album_title, id FROM tracks WHERE id = ?4",
+            )
+            .unwrap();
+        for i in 0..30_000i64 {
+            let s = format!("s{}", pick());
+            let at = start - (i + 1) * 945_000;
+            imp.execute(params!["plex_history", format!("h{i}"), at + 120_000, s]).unwrap();
+            if i % 3 == 0 {
+                imp.execute(params!["lastfm", format!("l{i}"), at, s]).unwrap();
+            }
+        }
+        for (i, s) in picked.iter().enumerate().step_by(10) {
+            let at = start + i as i64 * 945_000;
+            imp.execute(params!["plex_history", format!("own{i}"), at + 170_000, format!("s{s}")]).unwrap();
+            imp.execute(params!["lastfm", format!("own{i}"), at, format!("s{s}")]).unwrap();
+        }
+        drop(imp);
         tx.commit().unwrap();
     }
     let t = Instant::now();
@@ -579,6 +610,8 @@ fn fast_at_100k_plays() {
         StatsRange { from: Some("2024-01-01".into()), to: Some("2024-12-31".into()) },
         StatsRange::default(),
     ];
+    let all = resolve(&c, &StatsRange::default()).unwrap();
+    assert_eq!(overview(&c, all, 10).unwrap().totals.plays, 130_000, "an imported copy of a play never counts twice");
     for r in &ranges {
         let d = resolve(&c, r).unwrap();
         let took = fastest(|| assert!(overview(&c, d, 50).unwrap().totals.plays > 0));

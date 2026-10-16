@@ -14,7 +14,7 @@ use crate::db::DbHandle;
 use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
 
-const KEY_LASTFM_USER: &str = "scrobble.lastfm.user";
+pub const KEY_LASTFM_USER: &str = "scrobble.lastfm.user";
 const KEY_LB_USER: &str = "scrobble.listenbrainz.user";
 
 /// Managed state behind the commands.

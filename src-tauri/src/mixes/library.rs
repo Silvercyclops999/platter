@@ -3,8 +3,9 @@
 //! memory (indices instead of ids, so scoring 100k tracks stays cheap).
 //!
 //! Signals per track:
-//! - plays: the larger of Plex's play count and the plays in the listen log
-//!   and Plex history (a skip is never a play);
+//! - plays: the larger of Plex's play count and every play in
+//!   `db::listens::ALL_PLAYS` (the listen log and plays brought in from the
+//!   server's history and other apps; a skip is never a play);
 //! - skips: plays stopped inside 30 s, which count against the track;
 //! - liked: rated at or above the liked rating;
 //! - tags: Plex genres, styles and moods of the track and its album.
@@ -105,7 +106,8 @@ pub struct Raw {
     pub tracks: Vec<RawTrack>,
     /// Local plays: track id, started ms, skipped.
     pub listens: Vec<(String, i64, bool)>,
-    /// Plex history: track id, viewed ms.
+    /// Plays from elsewhere (the server's history, Tautulli, Last.fm, a
+    /// history file): track id, played ms.
     pub history: Vec<(String, i64)>,
 }
 
@@ -239,15 +241,34 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
         }
     }
     {
-        let mut st = c.prepare("SELECT rating_key, started_at, skipped FROM listen_log ORDER BY started_at, id")?;
-        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        // Every play from the one combined view: local plays, and plays
+        // brought in from the server's history, Tautulli, Last.fm or a file
+        // (already without the ones that are a local play reported there).
+        let mut st = c.prepare(&format!(
+            "WITH plays AS ({}) SELECT source, rating_key, played_at, skipped FROM plays
+             WHERE rating_key IS NOT NULL ORDER BY played_at, source, source_id",
+            crate::db::listens::ALL_PLAYS
+        ))?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, bool>(3)?)))?;
         for row in rows {
-            raw.listens.push(row?);
+            let (source, id, at, skipped) = row?;
+            if source == "local" {
+                raw.listens.push((id, at, skipped));
+            } else if !skipped {
+                raw.history.push((id, at));
+            }
         }
     }
     {
-        let mut st = c.prepare("SELECT rating_key, viewed_at FROM play_history ORDER BY viewed_at")?;
-        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? * 1000)))?;
+        // The recent server history kept by the sync stands in until the
+        // full history has been brought in (and not while it's turned off).
+        let mut st = c.prepare(
+            "SELECT rating_key, viewed_at FROM play_history
+             WHERE NOT EXISTS (SELECT 1 FROM imported_plays WHERE source = 'plex_history')
+               AND NOT EXISTS (SELECT 1 FROM kv WHERE key = ?1 AND value LIKE '%\"plex_history\"%')
+             ORDER BY viewed_at",
+        )?;
+        let rows = st.query_map([crate::db::listens::EXCLUDED_KEY], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? * 1000)))?;
         for row in rows {
             raw.history.push(row?);
         }

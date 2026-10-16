@@ -24,6 +24,7 @@ pub mod monitor;
 pub mod notify;
 pub mod physical;
 pub mod platform;
+pub mod playhistory;
 pub mod playlists;
 pub mod plex;
 pub mod plexedit;
@@ -672,6 +673,26 @@ pub fn run() {
                 });
                 scrobble::spawn(scrobbler.clone(), player.subscribe_tracking());
                 app.manage(scrobble::commands::ScrobbleState::new(scrobbler, lastfm, listenbrainz, db.clone()));
+            }
+            // Play history from before Platter and other apps: the Plex
+            // server's, Tautulli's and Last.fm's.
+            {
+                let server: Arc<dyn playhistory::plex::PlexServer> = Arc::new(playhistory::plex::LivePlex { plex: plex.clone(), db: db.clone() });
+                let tautulli = Arc::new(playhistory::tautulli::Tautulli { web: web_out.clone(), keys: keychain.clone(), db: db.clone(), plex: server.clone() });
+                let history = playhistory::PlayHistory::new(playhistory::Deps {
+                    db: db.clone(),
+                    feeds: vec![
+                        Arc::new(playhistory::plex::PlexFeed::new(server)),
+                        tautulli.clone(),
+                        Arc::new(playhistory::lastfm::LastfmFeed { web: web_out.clone(), keys: keychain.clone(), db: db.clone() }),
+                    ],
+                    events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                    clock: Arc::new(|| db::queries::now_s() * 1000),
+                    pause: playhistory::PAGE_PAUSE,
+                    page_size: playhistory::PAGE_SIZE,
+                });
+                tauri::async_runtime::spawn(playhistory::watch(history.clone()));
+                app.manage(playhistory::commands::PlayHistoryState { history, tautulli });
             }
             // Lidarr: the setup check, requests and their background retry.
             let lidarr_service = lidarr::Lidarr::new(lidarr::LidarrDeps {
@@ -1456,6 +1477,12 @@ pub fn run() {
             physical::commands::discogs_status,
             physical::commands::discogs_token_set,
             physical::commands::discogs_import,
+            playhistory::commands::play_history_status,
+            playhistory::commands::play_history_update,
+            playhistory::commands::play_history_cancel,
+            playhistory::commands::play_history_remove,
+            playhistory::commands::tautulli_status,
+            playhistory::commands::tautulli_key_set,
             radar::commands::release_radar_check,
             radar::commands::radar_auto_artists,
             radar::commands::radar_auto_set,

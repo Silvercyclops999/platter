@@ -46,6 +46,7 @@ struct SnapKey {
     generation: u64,
     listens: i64,
     history: i64,
+    imported: String,
     likes: String,
     tracks: i64,
     options: String,
@@ -192,17 +193,28 @@ impl MixService {
 
     fn snap_key(&self, opts: &MixOptions) -> AppResult<SnapKey> {
         let db = &self.inner.db;
-        let (listens, history, likes, tracks) = db.read(|c| {
+        let (listens, history, imported, likes, tracks) = db.read(|c| {
             Ok(c.query_row(
                 "SELECT (SELECT coalesce(max(id), 0) FROM listen_log),
                         (SELECT count(*) FROM play_history),
+                        (SELECT count(*) || ':' || coalesce(max(id), 0) || ':' || count(rating_key) FROM imported_plays)
+                          || ':' || coalesce((SELECT value FROM kv WHERE key = ?1), ''),
                         (SELECT count(*) || ':' || coalesce(max(rated_at), 0) FROM tracks WHERE user_rating IS NOT NULL),
                         (SELECT count(*) FROM tracks)",
-                [],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)),
+                [crate::db::listens::EXCLUDED_KEY],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, i64>(4)?)),
             )?)
         })?;
-        Ok(SnapKey { generation: db.generation(), listens, history, likes, tracks, options: opts.fingerprint(), hidden: opts.hidden.version })
+        Ok(SnapKey {
+            generation: db.generation(),
+            listens,
+            history,
+            imported,
+            likes,
+            tracks,
+            options: opts.fingerprint(),
+            hidden: opts.hidden.version,
+        })
     }
 
     /// The library snapshot (blocking).

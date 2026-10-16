@@ -274,23 +274,32 @@ pub fn get_play(c: &Connection, id: i64) -> AppResult<Option<ListenRow>> {
 // ---------------------------------------------------------------- imported plays
 
 /// Where an imported play came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImportSource {
     /// The server's own play history.
     PlexHistory,
     Tautulli,
+    /// Last.fm scrobbles.
+    Lastfm,
     /// A listening history file the user picked.
     File,
 }
 
 impl ImportSource {
+    pub const ALL: [ImportSource; 4] = [ImportSource::PlexHistory, ImportSource::Tautulli, ImportSource::Lastfm, ImportSource::File];
+
     pub fn as_str(self) -> &'static str {
         match self {
             ImportSource::PlexHistory => "plex_history",
             ImportSource::Tautulli => "tautulli",
+            ImportSource::Lastfm => "lastfm",
             ImportSource::File => "file",
         }
+    }
+
+    pub fn parse(s: &str) -> Option<ImportSource> {
+        ImportSource::ALL.into_iter().find(|x| x.as_str() == s)
     }
 }
 
@@ -355,14 +364,36 @@ pub fn set_imported_match(
 
 // ---------------------------------------------------------------- all plays
 
-/// Every play, local and imported, as one table for stats. Columns:
-/// `source` ('local' or the import source), `source_id`, `played_at` (unix
-/// ms), `ms_played`, `duration_ms`, `rating_key`, `title`, `artist`,
-/// `album`, `album_artist`, `skipped`. Text comes from the snapshot, else the
-/// track cache, else NULL. An imported play of the same song as a local
-/// (non-skip) play, timed during it or within a minute either side, is that
-/// same play reported elsewhere (other sources log the moment the play
-/// counted, not when it started), so it is left out and nothing counts twice.
+/// How far apart (ms) an imported play and a local play of the same song
+/// can be and still be one play. Other apps log a play when it started, when
+/// it counted or when it ended, so the window runs from this long before the
+/// local play started to this long after it ended.
+pub const SAME_PLAY_MS: i64 = 180_000;
+
+/// Where the import sources left out of every play are kept (`kv`, a JSON
+/// list of source names). Settings turn a source off here; its rows stay.
+pub const EXCLUDED_KEY: &str = "plays.excludedSources";
+
+/// Every play, local and imported, as one table: the one place stats, mixes,
+/// recaps and smart playlists read play history from. Columns: `source`
+/// ('local' or the import source), `source_id`, `played_at` (unix ms),
+/// `ms_played`, `duration_ms`, `rating_key`, `title`, `artist`, `album`,
+/// `album_artist`, `skipped`. Text comes from the snapshot, else the track
+/// cache, else NULL.
+///
+/// Nothing counts twice:
+/// - an imported play of the same song as a local (non-skip) play, from
+///   [`SAME_PLAY_MS`] before it started to [`SAME_PLAY_MS`] after it ended,
+///   is that play reported elsewhere (Platter reports its plays to the
+///   server and scrobbles them), so it is left out;
+/// - the same play imported from two sources (the server's history,
+///   Tautulli and Last.fm all see a play from another app) counts once, from
+///   the first source in that order: same song, within [`SAME_PLAY_MS`] plus
+///   the song's length. Unmatched plays compare by title and artist.
+///
+/// Sources listed under [`EXCLUDED_KEY`] are left out entirely. The checks
+/// look plays up by time (the `started_at` and `played_at` indexes), so the
+/// view stays quick with long histories.
 /// Use as `WITH plays AS (ALL_PLAYS) SELECT ... FROM plays`.
 pub const ALL_PLAYS: &str = "
     SELECT 'local' AS source, CAST(l.id AS TEXT) AS source_id, l.started_at AS played_at,
@@ -379,11 +410,63 @@ pub const ALL_PLAYS: &str = "
     SELECT i.source, i.source_id, i.played_at, i.ms_played, t.duration_ms, i.rating_key,
            i.title, i.artist, i.album, t.artist_title, 0
     FROM imported_plays i LEFT JOIN tracks t ON t.id = i.rating_key
-    WHERE i.rating_key IS NULL OR NOT EXISTS (
+    WHERE i.source NOT IN (SELECT value FROM json_each(coalesce(
+            (SELECT value FROM kv WHERE key = 'plays.excludedSources' AND json_valid(value)), '[]')))
+      AND (i.rating_key IS NULL OR NOT EXISTS (
         SELECT 1 FROM listen_log l
-        WHERE l.rating_key = i.rating_key AND l.skipped = 0
-          AND l.started_at <= i.played_at + 60000
-          AND coalesce(l.ended_at, l.started_at + l.duration_ms) + 60000 >= i.played_at)";
+        WHERE l.started_at BETWEEN i.played_at - 14400000 AND i.played_at + 180000
+          AND +l.rating_key = i.rating_key AND l.skipped = 0
+          AND coalesce(l.ended_at, l.started_at + l.duration_ms) + 180000 >= i.played_at))
+      AND NOT EXISTS (
+        SELECT 1 FROM imported_plays j
+        WHERE j.played_at BETWEEN i.played_at - 180000 - coalesce(t.duration_ms, 0)
+                              AND i.played_at + 180000 + coalesce(t.duration_ms, 0)
+          AND (CASE j.source WHEN 'plex_history' THEN 1 WHEN 'tautulli' THEN 2 WHEN 'lastfm' THEN 3 ELSE 4 END)
+            < (CASE i.source WHEN 'plex_history' THEN 1 WHEN 'tautulli' THEN 2 WHEN 'lastfm' THEN 3 ELSE 4 END)
+          AND (+j.rating_key = i.rating_key
+               OR (i.rating_key IS NULL AND +j.rating_key IS NULL
+                   AND lower(j.title) = lower(i.title) AND lower(coalesce(j.artist, '')) = lower(coalesce(i.artist, ''))))
+          AND j.source NOT IN (SELECT value FROM json_each(coalesce(
+                (SELECT value FROM kv WHERE key = 'plays.excludedSources' AND json_valid(value)), '[]'))))";
+
+/// The import sources left out of every play.
+pub fn excluded_sources(c: &Connection) -> AppResult<Vec<ImportSource>> {
+    let raw: Option<String> = c.query_row("SELECT value FROM kv WHERE key = ?1", [EXCLUDED_KEY], |r| r.get(0)).optional()?;
+    let names: Vec<String> = raw.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default();
+    Ok(ImportSource::ALL.into_iter().filter(|s| names.iter().any(|n| n == s.as_str())).collect())
+}
+
+/// Leave these import sources out of every play (an empty list includes
+/// them all). The days with plays from a source that changed are counted
+/// again. Returns whether anything changed.
+pub fn set_excluded_sources(c: &mut Connection, sources: &[ImportSource]) -> AppResult<bool> {
+    let before = excluded_sources(c)?;
+    let after: Vec<ImportSource> = ImportSource::ALL.into_iter().filter(|s| sources.contains(s)).collect();
+    if before == after {
+        return Ok(false);
+    }
+    let names: Vec<&str> = after.iter().map(|s| s.as_str()).collect();
+    let json = serde_json::to_string(&names).map_err(|e| AppError::Internal(e.to_string()))?;
+    let tx = c.transaction()?;
+    tx.execute(
+        "INSERT INTO kv (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        params![EXCLUDED_KEY, json],
+    )?;
+    {
+        let mut mark = tx.prepare_cached(
+            "INSERT OR IGNORE INTO stats_dirty
+             SELECT DISTINCT CAST(julianday(date(played_at / 1000, 'unixepoch', 'localtime')) - 2440587.5 AS INTEGER)
+             FROM imported_plays WHERE source = ?1",
+        )?;
+        for s in ImportSource::ALL {
+            if before.contains(&s) != after.contains(&s) {
+                mark.execute([s.as_str()])?;
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(true)
+}
 
 /// One row of [`ALL_PLAYS`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
