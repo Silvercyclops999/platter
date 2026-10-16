@@ -1,3 +1,4 @@
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,7 +41,7 @@ beforeEach(async () => {
   clip = [];
   fakeClipboard();
   useToasts.setState({ toasts: [] });
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
 });
 
 afterEach(() => {

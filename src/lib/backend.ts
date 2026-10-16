@@ -108,6 +108,7 @@ import type {
   SearchResults,
   ServerInfo,
   Settings,
+  SettingsImportReport,
   DeepLinkOpen,
   DiscordStatus,
   FeedStatus,
@@ -500,6 +501,14 @@ export interface Backend {
   // Settings
   settingsGet(): Promise<Settings>;
   settingsSet(patch: Partial<Settings>): Promise<void>;
+  /** The settings a new install starts with (Reset this section). */
+  settingsDefaults(): Promise<Settings>;
+  /** Save every setting (never keys, they stay in the keychain) to a file the user picks. The path, or null when cancelled. */
+  settingsExport(): Promise<string | null>;
+  /** Read settings from a file the user picks and apply them. Null when cancelled. */
+  settingsImport(): Promise<SettingsImportReport | null>;
+  /** Opens a link from a help page (project pages only) in the browser. */
+  helpOpenLink(url: string): Promise<void>;
   /** The theme files in the themes folder, and the ones that can't be used with the reason. */
   themesList(): Promise<ThemeFolder>;
   /** Pick a theme file and copy it into the themes folder. Null when the picker was cancelled. */
@@ -1156,6 +1165,10 @@ export function createTauriBackend(): Backend {
     openLocalNetworkSettings: () => call("open_local_network_settings"),
     settingsGet: () => call("settings_get"),
     settingsSet: (patch) => call("settings_set", { patch }),
+    settingsDefaults: () => call("settings_defaults"),
+    settingsExport: () => call("settings_export"),
+    settingsImport: () => call("settings_import"),
+    helpOpenLink: (url) => call("help_open_link", { url }),
     themesList: () => call("themes_list"),
     themesImport: () => call("themes_import"),
     themesOpenFolder: () => call("themes_open_folder"),

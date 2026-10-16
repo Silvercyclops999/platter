@@ -1,4 +1,5 @@
 import { Copy, Link, RefreshCw, UserMinus, UsersRound, X } from "lucide-react";
+import { HelpButton } from "../help/HelpButton";
 import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -196,7 +197,10 @@ export function InviteDialog() {
   }, [inv?.link, open]);
   return (
     <Dialog open={open} onClose={closeInvite} label="Invite people to listen along" className="confirm invite-dialog" initialFocus={copyBtn}>
-      <h2 className="confirm__title">Invite people to listen along</h2>
+      <div className="help-heading">
+        <h2 className="confirm__title">Invite people to listen along</h2>
+        <HelpButton page="listening-together" anchor="invite-links-and-qr-codes" label="How invites work" inline />
+      </div>
       {inv ? (
         <>
           <p className="confirm__body">

@@ -250,7 +250,7 @@ describe("settings", () => {
   it("has the file tag rows under Library with their defaults and progress", async () => {
     render(<SettingsPage />);
     const lib = await screen.findByRole("region", { name: "Library" });
-    expect(within(lib).getByRole("heading", { level: 3, name: "File tags" })).toBeInTheDocument();
+    expect(within(lib).getAllByRole("heading", { level: 3, name: "File tags" })[0]).toBeInTheDocument();
     expect(within(lib).getByRole("switch", { name: "Read extra tags from files" })).toBeChecked();
     expect(within(lib).getByRole("combobox", { name: "Explicit content" })).toHaveValue("allowed");
     expect(within(lib).getByRole("switch", { name: "Show fan and AI edits" })).not.toBeChecked();

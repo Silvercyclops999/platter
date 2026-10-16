@@ -221,7 +221,7 @@ export function AiKeyControl({ ids }: { ids: Ids }) {
         placeholder="API key"
         autoComplete="off"
         spellCheck={false}
-        aria-label="Anthropic API key"
+        aria-label="Anthropic key"
         aria-describedby={ids.desc}
         onChange={(e) => setText(e.target.value)}
       />

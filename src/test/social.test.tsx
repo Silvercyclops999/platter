@@ -6,6 +6,7 @@
  * trouble), the one-time invite with its QR code, joining from an
  * invite link, the session card, and the Settings rows.
  */
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -42,7 +43,7 @@ const route = () => useRouter.getState().entries[useRouter.getState().index].rou
 
 beforeEach(async () => {
   mock.social.reset();
-  await mock.settingsSet({ ...DEFAULT_SETTINGS });
+  await mock.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   useSettings.setState({ settings: null });
   await loadSettings();
   useApp.setState({ auth: { state: "signedIn", username: "listener", needsServerPick: false } });
@@ -451,7 +452,7 @@ describe("settings", () => {
     await waitFor(async () => expect((await mock.settingsGet()).listenGuestsControl).toBe(false));
     expect(within(social).getByText("Invites expire after")).toBeInTheDocument();
     expect(social).toHaveTextContent("24 hours");
-    const relay = within(social).getByRole("textbox", { name: "Listen along relay" });
+    const relay = within(social).getByRole("textbox", { name: "Relay for listening sessions" });
     expect(relay).toHaveAttribute("placeholder", "https://ntfy.sh");
     await userEvent.type(relay, "not a relay{Enter}");
     await waitFor(() => expect(toasts().some((m) => m.includes("The relay is a web address"))).toBe(true));

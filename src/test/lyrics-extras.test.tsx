@@ -130,7 +130,7 @@ describe("settings", () => {
     expect(sw).not.toBeChecked();
     await user.click(sw);
     await waitFor(() => expect(useSettings.getState().settings?.showPronunciation).toBe(true));
-    const field = screen.getByRole("textbox", { name: "Translation service" });
+    const field = screen.getByRole("textbox", { name: "Translation service address" });
     expect(field).toHaveValue("");
     await user.type(field, "https://tr.example.com{Enter}");
     await waitFor(() => expect(useSettings.getState().settings?.translationService).toBe("https://tr.example.com"));

@@ -3,6 +3,7 @@
  * and back, the one-time firewall note when one can't be reached, and the
  * settings that announce this computer and name it.
  */
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
@@ -41,7 +42,7 @@ beforeEach(async () => {
   mock.remote.setPlayers(mockPlayers(mock.fx.tracks[7]));
   mock.remote.setPlatterDevices(mockPlatterDevices());
   mock.remote.resetLan();
-  await mock.settingsSet({ ...DEFAULT_SETTINGS });
+  await mock.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useRemote.setState({ players: null, busy: undefined, password: null });
   useUi.setState({ queueOpen: false, nowPlayingOpen: false, outputOpen: true, outputReturn: null, menu: null });
@@ -122,7 +123,8 @@ describe("settings", () => {
     for (const title of ["Show this computer to my other devices", "This computer's name", "Show AirPlay devices that need a password"]) {
       expect(await screen.findByText(title)).toBeInTheDocument();
     }
-    expect(DEFAULT_SETTINGS.showToMyDevices).toBe(true);
+    // It opens a network port, so it starts off.
+    expect(DEFAULT_SETTINGS.showToMyDevices).toBe(false);
     expect(DEFAULT_SETTINGS.computerName).toBe("");
     expect(DEFAULT_SETTINGS.showAirplayLocked).toBe(false);
   });
@@ -136,10 +138,11 @@ describe("settings", () => {
     expect((await mock.settingsGet()).computerName).toBe("Den PC");
   });
 
-  it("turning off showing this computer saves it", async () => {
+  it("turning showing this computer on and off saves it", async () => {
     render(<SettingsPage />);
     const toggle = await screen.findByRole("switch", { name: "Show this computer to my other devices" });
+    const before = !!useSettings.getState().settings?.showToMyDevices;
     fireEvent.click(toggle);
-    await waitFor(() => expect(useSettings.getState().settings?.showToMyDevices).toBe(false));
+    await waitFor(() => expect(useSettings.getState().settings?.showToMyDevices).toBe(!before));
   });
 });

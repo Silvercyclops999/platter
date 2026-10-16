@@ -1,3 +1,4 @@
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +15,7 @@ import { loadSettings } from "../stores/settings";
 const mock = backend as MockBackend;
 
 beforeEach(async () => {
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   await loadSettings();
 });
 

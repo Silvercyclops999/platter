@@ -7,6 +7,7 @@
  * and the four settings. MusicBrainz, ListenBrainz and Lidarr are the
  * browser mock's fakes.
  */
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,7 +35,7 @@ const SLOW = { timeout: 4000 };
 
 async function setUp(patch: Record<string, unknown> = {}, lidarr: "ready" | "demo" | null = null) {
   if (lidarr) mock.lidarr.reset(lidarr);
-  await mock.settingsSet({ ...DEFAULT_SETTINGS, lidarrUrl: lidarr ? "http://10.0.0.5:8686" : "", ...patch });
+  await mock.settingsSet({ ...DEFAULT_SETTINGS, lidarrUrl: lidarr ? "http://10.0.0.5:8686" : "", ...ONLINE_EXTRAS, ...patch });
   useSettings.setState({ settings: null });
   await loadSettings();
 }
@@ -214,8 +215,8 @@ describe("settings", () => {
     expect(screen.getByText(/None yet/)).toBeInTheDocument();
   });
 
-  it("New to you and Fans also like start on and are synced", () => {
-    expect(DEFAULT_SETTINGS.catalogueSearch && DEFAULT_SETTINGS.fansAlsoLikeCatalogue && DEFAULT_SETTINGS.homeNewToYou).toBe(true);
+  it("New to you, Fans also like and catalogue search start off, since they ask other services", () => {
+    expect(DEFAULT_SETTINGS.catalogueSearch || DEFAULT_SETTINGS.fansAlsoLikeCatalogue || DEFAULT_SETTINGS.homeNewToYou).toBe(false);
     expect(DEFAULT_SETTINGS.dismissedArtists).toEqual([]);
   });
 });

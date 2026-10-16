@@ -19,6 +19,8 @@ import { hitInfo, hitMenuItems, hitOf, mixedHits, openHit, playHit, rememberHit,
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
 import { otherVersionsText } from "./era";
 import { SearchCatalogue } from "./SearchCatalogue";
+import type { HelpHit } from "../help/pages";
+import { help } from "../stores/help";
 import "./search.css";
 
 export { MAX_QUERY };
@@ -26,13 +28,50 @@ export { MAX_QUERY };
 /** Results asked for per kind. */
 const LIMIT = 30;
 
-export const FILTERS: { id: SearchFilter; label: string }[] = [
+/** The chips: what the library search returns, and Help (the bundled help pages, searched here). */
+export type SearchChip = SearchFilter | "help";
+
+export const FILTERS: { id: SearchChip; label: string }[] = [
   { id: "all", label: "All" },
   { id: "songs", label: "Songs" },
   { id: "albums", label: "Albums" },
   { id: "artists", label: "Artists" },
   { id: "playlists", label: "Playlists" },
+  { id: "help", label: "Help" },
 ];
+
+/** Help pages and sections matching a search. The pages load on first use, not at startup. */
+function useHelpHits(query: string, limit?: number): HelpHit[] | null {
+  const [search, setSearch] = useState<((q: string, n?: number) => HelpHit[]) | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void import("../help/pages").then((m) => alive && setSearch(() => m.searchHelp));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return useMemo(() => (search ? search(query, limit) : null), [search, query, limit]);
+}
+
+/** Help pages and sections matching the search; opening one shows it in the side panel. */
+function HelpResults({ hits }: { hits: HelpHit[] | null }) {
+  if (!hits?.length) return null;
+  return (
+    <section className="sr-help" aria-label="Help">
+      <h2 className="section-title">Help</h2>
+      <ul className="sr-help__list">
+        {hits.map((h) => (
+          <li key={`${h.slug}#${h.anchor ?? ""}`}>
+            <button type="button" className="sr-help__item" onClick={() => help.open(h.slug, h.anchor)}>
+              <span className="sr-help__title">{h.page ? `${h.page}: ${h.title}` : h.title}</span>
+              {h.snippet && <span className="sr-help__snippet">{h.snippet}</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 // ---------------------------------------------------------------- rows
 
@@ -204,13 +243,13 @@ function ResultsSkeleton({ filter }: { filter: SearchFilter }) {
 
 interface Shown {
   query: string;
-  filter: SearchFilter;
+  filter: SearchChip;
   res: SearchResults;
 }
 
 /** The full results page for a query: type chips, then the results for that type. */
 export function SearchPage({ query }: { query: string }) {
-  const [filter, setFilter] = useState<SearchFilter>("all");
+  const [filter, setFilter] = useState<SearchChip>("all");
   const [shown, setShown] = useState<Shown | null>(null);
   const [failed, setFailed] = useState(false);
   const seq = useRef(0);
@@ -218,12 +257,13 @@ export function SearchPage({ query }: { query: string }) {
   const status = usePlayer((s) => s.state?.status);
   const q = query.trim().slice(0, MAX_QUERY);
   const offline = useApp((s) => isOffline(s.health));
+  const helpHits = useHelpHits(q);
 
   // Each request gets a sequence number and only the newest one may update
   // the screen, so a slow answer to an older query never replaces a newer one.
   useEffect(() => {
     const mine = ++seq.current;
-    if (!q) {
+    if (!q || filter === "help") {
       setShown(null);
       setFailed(false);
       return;
@@ -263,6 +303,22 @@ export function SearchPage({ query }: { query: string }) {
           <h1 className="section-title">Search your library</h1>
           <p>Find artists, albums, songs and playlists on your server. Use the search box at the top, or press {modKey}+L.</p>
         </div>
+      </div>
+    );
+
+  if (filter === "help")
+    return (
+      <div className="page-pad sr">
+        <h1 className="sr-only">Help for “{q}”</h1>
+        <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="sr-chips" scroll />
+        {!helpHits || helpHits.length ? (
+          <HelpResults hits={helpHits} />
+        ) : (
+          <div className="sr-empty" role="status">
+            <h2 className="section-title">No help for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
+            <p>Try another word, or open Help from the app menu to see every page.</p>
+          </div>
+        )}
       </div>
     );
 
@@ -317,6 +373,7 @@ export function SearchPage({ query }: { query: string }) {
             <p>Check the spelling or try fewer words.</p>
           </div>
           <SearchCatalogue query={q} filter={filter} localCount={0} />
+          {filter === "all" && <HelpResults hits={helpHits?.slice(0, 3) ?? null} />}
         </>
       ) : (
         <>
@@ -446,6 +503,7 @@ export function SearchPage({ query }: { query: string }) {
             {res.source === "local" ? "From your library" : "From your server while your library finishes syncing"} · {Math.round(res.tookMs)} ms
           </p>
           <SearchCatalogue query={q} filter={filter} localCount={localCount} />
+          {filter === "all" && <HelpResults hits={helpHits?.slice(0, 3) ?? null} />}
         </>
       )}
     </div>

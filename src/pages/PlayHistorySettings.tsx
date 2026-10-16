@@ -247,7 +247,7 @@ export function TautulliKeyControl({ history, ids }: { history: PlayHistoryState
         placeholder="API key"
         autoComplete="off"
         spellCheck={false}
-        aria-label="Tautulli API key"
+        aria-label="Tautulli key"
         aria-describedby={ids.desc}
       />
       <Button size="sm" type="submit" disabled={busy || !text.trim()}>

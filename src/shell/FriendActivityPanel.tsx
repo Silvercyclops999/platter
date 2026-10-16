@@ -1,4 +1,5 @@
 import { Music, Play, X } from "lucide-react";
+import { GuideButton } from "../guides/GuideButton";
 import { useEffect, useState } from "react";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
@@ -132,9 +133,11 @@ export function FriendActivityPanel() {
     );
   } else if (panel.friends.length === 0) {
     body = (
-      <p className="friend-empty" role="status">
-        No one else on your server has listened in the last week.
-      </p>
+      <div className="friend-empty">
+        <p role="status">No one else on your server has listened in the last week.</p>
+        <p>Listen together instead: start a session and invite a friend.</p>
+        <GuideButton id="sharing" label="Invite a friend" />
+      </div>
     );
   } else {
     body = (

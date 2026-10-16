@@ -1,4 +1,4 @@
-import { Server } from "lucide-react";
+import { ChevronRight, Server } from "lucide-react";
 import { Fragment, useEffect, useId, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -32,7 +32,7 @@ import { PlexEditSettings, plexEditMatches } from "./PlexEditSettings";
 import { useHomeUsers } from "../shell/HomeUsers";
 import { OutputDeviceSelect } from "../shell/OutputSetting";
 import { reloadLikes } from "../stores/likes";
-import { updateSettings, useSettings } from "../stores/settings";
+import { loadSettings, updateSettings, useSettings } from "../stores/settings";
 import { nav } from "../stores/router";
 import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
@@ -110,6 +110,10 @@ import {
 import { ensureCaps, useCaps, useServerName } from "../stores/caps";
 import "./playlist.css";
 import { toast } from "../stores/toasts";
+import { HelpButton, LearnMore } from "../help/HelpButton";
+import { ADVANCED, GROUP_HELP, advancedView, helpFor, resetPatch, settingsOfRows } from "./settingsMeta";
+import { GUIDES } from "../guides/guides";
+import { GuideButton } from "../guides/GuideButton";
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
@@ -337,6 +341,7 @@ interface RowDef {
 
 function Row({ row }: { row: RowDef }) {
   const id = useId();
+  const learn = helpFor(row.key);
   const ids = { title: `${id}-t`, desc: `${id}-d` };
   return (
     <div className="setting-row" data-setting={row.key}>
@@ -350,6 +355,12 @@ function Row({ row }: { row: RowDef }) {
             <>
               {" "}
               <span className="setting-row__note">{row.note}</span>
+            </>
+          )}
+          {learn && (
+            <>
+              {" "}
+              <LearnMore page={learn[0]} anchor={learn[1]} about={row.title} />
             </>
           )}
         </p>
@@ -540,6 +551,28 @@ function NoticesDialog({ open, onClose }: { open: boolean; onClose: () => void }
   );
 }
 
+/** Rows with a small heading wherever their group starts. */
+function RowList({ rows }: { rows: RowDef[] }) {
+  return rows.map((r, i, list) => {
+    const starts = r.group && r.group !== list[i - 1]?.group;
+    const more = r.group ? GROUP_HELP[r.group] : undefined;
+    return (
+      <Fragment key={r.key}>
+        {starts &&
+          (more ? (
+            <div className="help-heading">
+              <h3 className="settings__subheading">{r.group}</h3>
+              <HelpButton page={more[0]} anchor={more[1]} label={`Help with ${r.group}`} />
+            </div>
+          ) : (
+            <h3 className="settings__subheading">{r.group}</h3>
+          ))}
+        <Row row={r} />
+      </Fragment>
+    );
+  });
+}
+
 // ------------------------------------------------------------------ page
 
 type UpdateState = { kind: "idle" } | { kind: "checking" } | { kind: "done"; info: UpdateInfo } | { kind: "error"; message: string };
@@ -572,6 +605,10 @@ export function SettingsPage() {
   const healthConn = useApp((x) => x.health?.connection);
   const syncing = useApp((x) => !!x.sync && x.sync.phase !== "idle");
   const [query, setQuery] = useState("");
+  const searching = query.trim() !== "";
+  const [openAdvanced, setOpenAdvanced] = useState<ReadonlySet<string>>(() => new Set());
+  const allOpen = advancedView.startOpen;
+  const [resetSection, setResetSection] = useState<string | null>(null);
   const [art, setArt] = useState<ArtCacheInfo | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<UpdateState>({ kind: "idle" });
@@ -636,6 +673,23 @@ export function SettingsPage() {
     backend.searchRecentsClear().then(
       () => toast.info("Recent searches cleared"),
       (e) => toast.error(`Couldn't clear recent searches${errText(e) ? `: ${errText(e)}` : ""}`),
+    );
+  const exportSettings = () =>
+    backend.settingsExport().then(
+      (path) => path && toast.info("Settings exported"),
+      (e) => toast.error(`Couldn't export settings${errText(e) ? `: ${errText(e)}` : ""}`),
+    );
+  const importSettings = () =>
+    backend.settingsImport().then(
+      async (report) => {
+        if (!report) return;
+        await loadSettings();
+        const skipped = report.skipped.length;
+        toast.info(
+          `Imported ${report.applied} ${report.applied === 1 ? "setting" : "settings"}${skipped ? `. ${skipped} this version can't use ${skipped === 1 ? "was" : "were"} left out` : ""}`,
+        );
+      },
+      (e) => toast.error(`Couldn't import settings${errText(e) ? `: ${errText(e)}` : ""}`),
     );
   const signOut = () => backend.authSignOut().catch((e) => toast.error(`Couldn't sign out${errText(e) ? `: ${errText(e)}` : ""}`));
 
@@ -734,6 +788,16 @@ export function SettingsPage() {
         ] satisfies RowDef[])
       : []),
     // Audio quality
+    // Setup guides: each opens where it was left.
+    ...GUIDES.map(
+      (g): RowDef => ({
+        key: `guide-${g.id}`,
+        section: "Setup guides",
+        title: g.title,
+        description: g.summary,
+        control: () => <GuideButton id={g.id} />,
+      }),
+    ),
     {
       key: "qualityHome",
       section: "Audio quality",
@@ -802,7 +866,7 @@ export function SettingsPage() {
     {
       key: "precacheCount",
       section: "Playback",
-      title: "Pre-cache ahead",
+      title: "Songs to load ahead",
       description: "How many upcoming songs to save on this computer so they start instantly and survive a dropped connection. 1 to 50.",
       control: (ids) => (s ? <PrecacheField value={s.precacheCount} ids={ids} /> : loading),
     },
@@ -830,7 +894,7 @@ export function SettingsPage() {
     {
       key: "abLoopHandles",
       section: "Playback",
-      title: "A-B loop on the seek bar",
+      title: "Loop part of a song from the seek bar",
       description: "Right-click or Alt+click the seek bar to mark a start, then an end. The part between them repeats until you clear it with Esc or the A-B chip.",
       control: (ids) => toggle(s, "abLoopHandles", ids),
     },
@@ -878,7 +942,7 @@ export function SettingsPage() {
     {
       key: "popularSource",
       section: "Library",
-      title: "Artist page Popular",
+      title: "Popular songs on artist pages",
       description: "Rank an artist's popular songs by how many people play them (from ListenBrainz, or Last.fm top tracks), or by your own plays. With neither source on, your plays are used.",
       control: (ids) => select(s, (x) => x.popularSource, POPULAR, ids, (v) => updateSettings({ popularSource: v })),
     },
@@ -1367,7 +1431,7 @@ export function SettingsPage() {
     {
       key: "hintKey",
       section: "App",
-      title: "Keyboard power mode hint key",
+      title: "Key that shows jump hints",
       description: "The key that shows the jump hints while keyboard power mode is on.",
       control: (ids) => select(s, (x) => x.hintKey, HINT_KEYS, ids, (v) => updateSettings({ hintKey: v })),
     },
@@ -1377,6 +1441,37 @@ export function SettingsPage() {
       title: "Notify on track change",
       description: "Shows a desktop notification when a new song starts, unless Platter is in front, a private session is on, or you're skipping through songs. This device only.",
       control: (ids) => toggle(s, "notifyTrackChange", ids),
+    },
+    {
+      key: "showSetupGuides",
+      section: "App",
+      title: "Show setup guides for new features",
+      description: "Offers a short guide the first time you start Platter and when a feature has one. Settings, Setup guides always has them.",
+      control: (ids) => toggle(s, "showSetupGuides", ids),
+    },
+    {
+      key: "showHelpButtons",
+      section: "App",
+      title: "Show \"?\" help buttons",
+      description: "Small \"?\" buttons next to busier screens open their help page beside them. Help is also in the app menu and in search.",
+      control: (ids) => toggle(s, "showHelpButtons", ids),
+    },
+    {
+      key: "settingsFile",
+      section: "App",
+      title: "Export or import settings",
+      description:
+        "Saves all your settings in one file to keep or to open on another computer. Keys and passwords are never in it; they stay in this computer's keychain. Folders and devices stay as they are on each computer.",
+      control: () => (
+        <>
+          <Button size="sm" onClick={() => void exportSettings()}>
+            Export
+          </Button>
+          <Button size="sm" onClick={() => void importSettings()}>
+            Import
+          </Button>
+        </>
+      ),
     },
     // About
     {
@@ -1617,7 +1712,7 @@ export function SettingsPage() {
       key: "nowPlayingFeed",
       section: "Integrations",
       group: "Widgets",
-      title: "Now-playing feed for widgets",
+      title: "What's playing, for desktop widgets",
       description:
         "Serves what's playing to OBS, Rainmeter and other widgets on this computer, as data and as an overlay page. Only this computer can reach it, never your network. A private session blanks it. This device only.",
       note: s?.nowPlayingFeed ? <FeedNote status={feed} /> : undefined,
@@ -1627,7 +1722,7 @@ export function SettingsPage() {
       key: "nowPlayingFeedPort",
       section: "Integrations",
       group: "Widgets",
-      title: "Feed port",
+      title: "Feed port number",
       description: "The port on 127.0.0.1 the feed uses, from 1024 to 65535. Change it if another program has it. This device only.",
       control: (ids) => (s ? <FeedPortField value={s.nowPlayingFeedPort} ids={ids} /> : loading),
     },
@@ -1665,7 +1760,7 @@ export function SettingsPage() {
     {
       key: "showDlnaDevices",
       section: "Playback",
-      title: "Show DLNA and UPnP devices",
+      title: "Show other network speakers and TVs (DLNA)",
       description:
         "Lists receivers, smart speakers and TVs that play over DLNA or UPnP under Listen on. They play straight from your server: the original file when the device takes its format, otherwise a version your server converts. Off stops Platter looking for them.",
       control: (ids) => toggle(s, "showDlnaDevices", ids),
@@ -1719,14 +1814,14 @@ export function SettingsPage() {
     {
       key: "preampDb",
       section: "Loudness",
-      title: "Preamp",
+      title: "Volume before the equalizer",
       description: "Raises or lowers every song, from -12 to +12 dB. Songs Plex hasn't analysed get only this. This device only.",
       control: (ids) => <PreampControl ids={ids} />,
     },
     {
       key: "limiter",
       section: "Loudness",
-      title: "Limiter",
+      title: "Keep loud parts from distorting",
       description: "Gently holds back peaks so the preamp and EQ boosts never distort. This device only.",
       control: (ids) => toggle(s, "limiter", ids),
     },
@@ -1874,7 +1969,7 @@ export function SettingsPage() {
       key: "listenRelay",
       section: "Social",
       group: "Listening sessions",
-      title: "Listen along relay",
+      title: "Relay for listening sessions",
       description:
         "Everyone in a session connects only to this relay, never to each other, so nobody learns anyone else's address. Messages are sealed end to end; the relay sees only scrambled text and each person's connection. Leave it empty for ntfy.sh (free, about 250 messages a day per connection), or enter your own ntfy server. Your own server's address goes in your invites.",
       control: (ids) => <ListenTextSetting field="listenRelay" placeholder="https://ntfy.sh" maxLength={200} ids={ids} />,
@@ -1893,7 +1988,7 @@ export function SettingsPage() {
       key: "scrobbleLastfm",
       section: "Integrations",
       group: "Scrobbling",
-      title: "Scrobble to Last.fm",
+      title: "Send plays to Last.fm",
       description:
         "Sends each song you play for more than half its length (or 4 minutes) to your Last.fm profile, and what's playing now. Uses your Last.fm API key and its shared secret, and you sign in on Last.fm's site. Not during a private session.",
       note: rowNote(lastfmNote(scrobble)),
@@ -1903,7 +1998,7 @@ export function SettingsPage() {
       key: "scrobbleListenbrainz",
       section: "Integrations",
       group: "Scrobbling",
-      title: "Scrobble to ListenBrainz",
+      title: "Send plays to ListenBrainz",
       description: "Sends the same plays to ListenBrainz with your user token. Not during a private session. Plays made offline wait and go out later.",
       note: rowNote(listenbrainzNote(scrobble)),
       control: (ids) => <ListenBrainzControl ids={ids} />,
@@ -1912,7 +2007,7 @@ export function SettingsPage() {
       key: "scrobbleUnreleased",
       section: "Integrations",
       group: "Scrobbling",
-      title: "Scrobble unreleased music",
+      title: "Send plays of unreleased music",
       description: "Demos and other unreleased versions go to your scrobbling profiles too. Off keeps them on this computer.",
       control: (ids) => toggle(s, "scrobbleUnreleased", ids),
     },
@@ -1932,7 +2027,7 @@ export function SettingsPage() {
             key: "aiKey",
             section: "Integrations",
             group: "AI provider",
-            title: "Anthropic API key",
+            title: "Anthropic key",
             description: "Your own key from the Anthropic Console, kept in this computer's keychain.",
             note: ai?.hasKey ? "Saved." : undefined,
             control: (ids) => <AiKeyControl ids={ids} />,
@@ -1941,7 +2036,7 @@ export function SettingsPage() {
             key: "aiModel",
             section: "Integrations",
             group: "AI provider",
-            title: "Model",
+            title: "AI model",
             description: "The Claude model prompted playlists use.",
             control: (ids) => <AiModelField ids={ids} />,
           },
@@ -1961,26 +2056,38 @@ export function SettingsPage() {
       key: "tautulliKey",
       section: "Integrations",
       group: "Tautulli",
-      title: "Tautulli API key",
+      title: "Tautulli key",
       description: "From Tautulli's Settings > Web Interface. Kept in this computer's keychain, never in settings or logs. Platter only reads your history.",
       note: history.tautulli?.hasKey ? "Saved." : undefined,
       control: (ids) => <TautulliKeyControl history={history} ids={ids} />,
     },
     // Integrations: Lidarr (only its address and key fields until both are set)
+    ...(lidarr.ready
+      ? []
+      : ([
+          {
+            key: "lidarrGuide",
+            section: "Integrations",
+            group: "Lidarr",
+            title: "Set up Lidarr step by step",
+            description: "A short guide through the address, the key and the safety check, and what Managed and Protected artists and the staging folder mean.",
+            control: () => <GuideButton id="lidarr" />,
+          },
+        ] satisfies RowDef[])),
     {
       key: "lidarrUrl",
       section: "Integrations",
       group: "Lidarr",
-      title: "Lidarr home address",
+      title: "Lidarr address at home",
       description:
-        "Lidarr's address on your home network, with its port and any URL base, like http://192.168.x.x:8686. Platter tries it first. Empty keeps Lidarr off.",
+        "Lidarr's address on your home network, with its port and any extra path, like http://192.168.x.x:8686. Platter tries it first. Empty keeps Lidarr off.",
       control: (ids) => <LidarrUrlField field="lidarrUrl" placeholder="http://192.168.x.x:8686" ids={ids} />,
     },
     {
       key: "lidarrAwayUrl",
       section: "Integrations",
       group: "Lidarr",
-      title: "Lidarr away address",
+      title: "Lidarr address away from home",
       description:
         "Optional. How Lidarr is reached away from home, through a reverse proxy, a tunnel or a VPN you set up. Tried when the home address doesn't answer. Use https so the key travels encrypted.",
       control: (ids) => <LidarrUrlField field="lidarrAwayUrl" placeholder="https://lidarr.example.com" ids={ids} />,
@@ -1989,7 +2096,7 @@ export function SettingsPage() {
       key: "lidarrKey",
       section: "Integrations",
       group: "Lidarr",
-      title: "Lidarr API key",
+      title: "Lidarr key",
       description: "From Lidarr's Settings > General. Kept in this computer's keychain, never in settings or logs.",
       note: lidarr.status?.hasKey ? "Saved." : undefined,
       control: (ids) => <LidarrKeyControl lidarr={lidarr} ids={ids} />,
@@ -2013,7 +2120,7 @@ export function SettingsPage() {
             key: "lidarrHeaders",
             section: "Integrations",
             group: "Lidarr",
-            title: "Extra headers for the away address",
+            title: "Extra sign-in details for the away address",
             description:
               "Optional. Headers your proxy needs, one per line as Name: value (for example a Cloudflare Access service token). Sent only to the away address and kept in this computer's keychain.",
             note: lidarr.status.headerNames.length ? `Saved: ${lidarr.status.headerNames.join(", ")}.` : undefined,
@@ -2269,7 +2376,7 @@ export function SettingsPage() {
             key: "discordStatusLine",
             section: "Integrations",
             group: "Discord",
-            title: "Status line shows",
+            title: "Discord status shows",
             description: "What the member list shows after \"Listening to\": Platter, the artist, or the song.",
             control: (ids) =>
               select(s, (x) => x.discordStatusLine, DISCORD_STATUS_LINE, ids, (v) => updateSettings({ discordStatusLine: v })),
@@ -2367,7 +2474,7 @@ export function SettingsPage() {
     {
       key: "translationService",
       section: "Appearance",
-      title: "Translation service",
+      title: "Translation service address",
       description:
         "The address of a LibreTranslate-compatible service, like one you run yourself. With one set, lyrics have a Translate button that sends their lines there. Not set: lyrics are never sent for translation.",
       control: (ids) => <ListenTextSetting field="translationService" placeholder="https://translate.example.com" maxLength={200} ids={ids} />,
@@ -2594,7 +2701,7 @@ export function SettingsPage() {
       key: "compareLevelMatch",
       section: "Library",
       group: "Archive",
-      title: "Compare level matching",
+      title: "Compare versions at the same loudness",
       description:
         "Compare plays both versions at the same loudness when your server has loudness data for them, so the louder one doesn't sound better just for being louder. Your own sound settings come back when Compare closes.",
       control: (ids) => toggle(s, "compareLevelMatch", ids),
@@ -2690,7 +2797,7 @@ export function SettingsPage() {
       key: "transcribeModel",
       section: "Appearance",
       group: "Lyrics transcription",
-      title: "Transcription model",
+      title: "Speech model",
       description:
         "Small is faster and right for most songs on the processor. Medium is a little more accurate, but much slower and works the processor much harder. Turbo is the most accurate and is made for the graphics card, where a song takes seconds; it's the default when one is used. The size is the download. This device only.",
       control: (ids) => <ModelControl s={s} ids={ids} />,
@@ -2779,7 +2886,25 @@ export function SettingsPage() {
     },
   ];
 
-  const shown = rows.filter((r) => (!r.cap || caps[r.cap]) && matches(r, query.trim()));
+  const usable = rows.filter((r) => !r.cap || caps[r.cap]);
+  const shown = usable.filter((r) => matches(r, query.trim()));
+  /** The settings a section's rows control (Reset this section puts them back). */
+  const sectionSettings = (section: string) =>
+    s
+      ? settingsOfRows(
+          usable.filter((r) => r.section === section).map((r) => r.key),
+          s,
+        )
+      : [];
+  const reset = async (section: string) => {
+    try {
+      const defaults = await backend.settingsDefaults();
+      await updateSettings(resetPatch(sectionSettings(section), defaults));
+      toast.info(`${section} settings are back to how they start`);
+    } catch (e) {
+      toast.error(`Couldn't reset ${section}${errText(e) ? `: ${errText(e)}` : ""}`);
+    }
+  };
   // About stays last; later sections (Integrations) go in before it.
   const sections = [...new Set(shown.map((r) => r.section))].sort((a, b) => Number(a === "About") - Number(b === "About"));
 
@@ -2791,19 +2916,51 @@ export function SettingsPage() {
       </div>
       {sections.map((section) => {
         const id = `settings-${section.toLowerCase().replace(/\s+/g, "-")}`;
+        const list = shown.filter((r) => r.section === section);
+        const everyday = list.filter((r) => !ADVANCED.has(r.key));
+        const advanced = list.filter((r) => ADVANCED.has(r.key));
+        // A search shows matching Advanced rows without a click.
+        const open = searching || allOpen !== openAdvanced.has(section);
+        const resettable = !!s && sectionSettings(section).length > 0;
         return (
           <section key={section} className="settings__group" aria-labelledby={id}>
-            <h2 id={id} className="settings__heading">
-              {section}
-            </h2>
-            {shown
-              .filter((r) => r.section === section)
-              .map((r, i, list) => (
-                <Fragment key={r.key}>
-                  {r.group && r.group !== list[i - 1]?.group && <h3 className="settings__subheading">{r.group}</h3>}
-                  <Row row={r} />
-                </Fragment>
-              ))}
+            <div className="settings__head">
+              <h2 id={id} className="settings__heading">
+                {section}
+              </h2>
+              {resettable && (
+                <Button size="sm" variant="ghost" className="settings__reset" onClick={() => setResetSection(section)} aria-label={`Reset ${section} settings`}>
+                  Reset this section
+                </Button>
+              )}
+            </div>
+            <RowList rows={everyday} />
+            {advanced.length > 0 && (
+              <div className="settings__advanced">
+                <button
+                  type="button"
+                  className="settings__advanced-toggle"
+                  aria-expanded={open}
+                  aria-controls={`${id}-advanced`}
+                  disabled={searching}
+                  onClick={() =>
+                    setOpenAdvanced((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(section)) next.delete(section);
+                      else next.add(section);
+                      return next;
+                    })
+                  }
+                >
+                  <ChevronRight size={16} aria-hidden="true" className="settings__advanced-chevron" />
+                  Advanced
+                  <span className="settings__advanced-count">{advanced.length}</span>
+                </button>
+                <div id={`${id}-advanced`} hidden={!open}>
+                  {open && <RowList rows={advanced} />}
+                </div>
+              </div>
+            )}
           </section>
         );
       })}
@@ -2835,6 +2992,14 @@ export function SettingsPage() {
         confirm="Remove plays"
         onConfirm={() => removeHistory && void history.remove(removeHistory)}
         onClose={() => setRemoveHistory(null)}
+      />
+      <ConfirmDialog
+        open={resetSection !== null}
+        title={`Reset ${resetSection ?? ""} settings?`}
+        body={`The ${resetSection ?? ""} settings go back to how they are on a new install. Addresses, folders and keys you set up stay as they are.`}
+        confirm="Reset"
+        onConfirm={() => resetSection && void reset(resetSection)}
+        onClose={() => setResetSection(null)}
       />
       <ServerDialog open={dialog === "server"} onClose={() => setDialog(null)} current={auth?.server?.machineId} />
       <NoticesDialog open={dialog === "notices"} onClose={() => setDialog(null)} />

@@ -150,13 +150,18 @@ Nothing gets installed on your server. No container, no companion service.
 It's also one person's project, built around how I listen. There will be bugs
 I haven't run into yet.
 
+## Help
+
+Help is built into the app (it works offline) and published from the same
+pages in [docs/help](docs/help) as a small site with GitHub Pages.
+
 ## Privacy
 
 Platter talks to your own servers, to plex.tv (to sign in and find your
 server) and to GitHub (for updates). Everything else is a service with its
-own switch in Settings. A few, like artist bios from Wikipedia, are on by
-default. The rest, like LRCLIB, scrobbling and Lidarr, stay off until you
-turn them on. There's no analytics or crash reporting that leaves your
+own switch in Settings, and anything that sends data elsewhere, writes to
+your server or opens a port stays off until you turn it on (the first-run
+guide offers the common ones). There's no analytics or crash reporting that leaves your
 machine. The full list is in [PRIVACY.md](PRIVACY.md).
 
 ## Building it

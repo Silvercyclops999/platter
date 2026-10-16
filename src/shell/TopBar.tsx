@@ -9,6 +9,7 @@ import { useApp } from "../stores/app";
 import { miniplayer, useMiniplayer } from "../stores/miniplayer";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
+import { help } from "../stores/help";
 import { createPlaylist } from "../stores/playlists";
 import { badgeText, useDoctorCount } from "../stores/doctor";
 import { toast, useToasts } from "../stores/toasts";
@@ -289,6 +290,9 @@ export function AppMenu() {
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => useUi.getState().setShortcutsOpen(true))}>
             <span>Keyboard shortcuts</span>
             <kbd className="appmenu__hint">{shortcutLabel("help")}</kbd>
+          </button>
+          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => help.open(""))}>
+            <span>Help</span>
           </button>
           <button
             type="button"

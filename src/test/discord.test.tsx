@@ -1,3 +1,4 @@
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -12,7 +13,7 @@ import { useToasts } from "../stores/toasts";
 const mock = backend as MockBackend;
 
 beforeEach(async () => {
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   await backend.discordImgurKeySet(null);
   mock.discord.setAvailable(true);
   mock.discord.setConnected(true);
@@ -53,7 +54,7 @@ describe("Discord settings", () => {
   it("has its rows under Integrations with the defaults", async () => {
     render(<SettingsPage />);
     const group = await screen.findByRole("region", { name: "Integrations" });
-    expect(within(group).getByRole("heading", { level: 3, name: "Discord" })).toBeInTheDocument();
+    expect(within(group).getAllByRole("heading", { level: 3, name: "Discord" })[0]).toBeInTheDocument();
     expect(within(group).getByRole("switch", { name: "Show what you're playing on Discord" })).toBeChecked();
     expect(within(group).getByRole("switch", { name: "Clear status when paused" })).toBeChecked();
     expect(within(group).getByRole("switch", { name: "Show unreleased songs" })).toBeChecked();
@@ -66,7 +67,7 @@ describe("Discord settings", () => {
     expect(within(row("discordUploadCovers")).getByText(/Where covers come from/)).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Where covers are uploaded" })).toHaveValue("auto");
     expect(within(row("discordCoverHost")).getByText(/Litterbox keeps a cover 3 days/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Status line shows" })).toHaveValue("app");
+    expect(screen.getByRole("combobox", { name: "Discord status shows" })).toHaveValue("app");
   });
 
   it("the cover upload switch, its host and the status line save their settings", async () => {
@@ -76,7 +77,7 @@ describe("Discord settings", () => {
     expect(useSettings.getState().settings?.discordUploadCovers).toBe(true);
     await user.selectOptions(screen.getByRole("combobox", { name: "Where covers are uploaded" }), "x0");
     expect(useSettings.getState().settings?.discordCoverHost).toBe("x0");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Status line shows" }), "artist");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Discord status shows" }), "artist");
     expect(useSettings.getState().settings?.discordStatusLine).toBe("artist");
   });
 

@@ -5,6 +5,8 @@
  * and "Like matched songs", each after a confirm.
  */
 import { Heart, ListMusic } from "lucide-react";
+import { HelpButton } from "../help/HelpButton";
+import { GuideButton } from "../guides/GuideButton";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { Skeleton, SkeletonLines } from "../components/Skeleton";
@@ -222,7 +224,8 @@ export function ImportPage({ view }: { view?: string }) {
           <h1 className="page-title">Library import</h1>
           <div className="import-empty" role="status">
             <p>Library import is off.</p>
-            <p>Turn on a service in Settings, under Library import.</p>
+            <p>Turn on a service in Settings, under Library import, or let the guide walk you through it.</p>
+            <GuideButton id="import" variant="primary" />
             <Button className="import-empty__go" onClick={() => nav.go({ name: "settings" })}>
               Open Settings
             </Button>
@@ -232,7 +235,10 @@ export function ImportPage({ view }: { view?: string }) {
         <ListView id={view.slice(5)} />
       ) : (
         <>
-          <h1 className="page-title">Library import</h1>
+          <div className="help-heading">
+            <h1 className="page-title">Library import</h1>
+            <HelpButton page="library-import" anchor="the-import-report" label="How to read the import report" />
+          </div>
           <p className="import-page__sub">How much of what you imported is in your library.</p>
           <Home />
         </>

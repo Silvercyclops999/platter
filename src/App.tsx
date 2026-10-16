@@ -14,7 +14,7 @@ import { connectShare } from "./stores/share";
 import { loadSettings, useSettings } from "./stores/settings";
 import { backend } from "./lib/backend";
 import { useUi } from "./stores/ui";
-import { offerLookStep } from "./stores/looks";
+import { offerFirstRun } from "./guides/offer";
 import { connectSwitching } from "./stores/switching";
 import { SwitchingScreen } from "./shell/SwitchingScreen";
 import { READY_WAIT_FOR_AUTH_MS, signalReady } from "./lib/firstPaint";
@@ -84,14 +84,14 @@ function MainApp() {
   const signInOpen = useUi((s) => s.signInOpen);
   // A Jellyfin server is enough to use the app without a Plex account.
   const otherServer = !!servers?.some((s) => s.kind !== "plex");
-  // First run: right after signing in for the first time, offer "Pick a look".
+  // First run: right after signing in for the first time, offer the Get started guide (or "Pick a look").
   const sawSignIn = useRef(false);
   if (auth && auth.state !== "signedIn" && !auth.reauthRequired) sawSignIn.current = true;
   useEffect(() => {
     if (auth?.state === "signedIn") useUi.getState().setSignInOpen(false);
     if (auth?.state === "signedIn" && sawSignIn.current) {
       sawSignIn.current = false;
-      offerLookStep();
+      offerFirstRun();
     }
   }, [auth?.state]);
 

@@ -159,3 +159,24 @@
 .sr-list--top-versions > .sr-versions { padding-left: var(--space-4); }
 /* Search groups versions itself, so rows don't repeat +N versions. */
 .sr .versions-link { display: none; }
+
+/* Help pages matching the search (the Help chip, and a few under All). */
+.sr-help { margin-top: var(--space-6); }
+.sr-help__list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-1); max-width: 720px; }
+.sr-help__item {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sr-help__item:hover { background: var(--color-state-hover); }
+.sr-help__item:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.sr-help__title { font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.sr-help__snippet { color: var(--color-text-secondary); font-size: var(--font-size-sm); }

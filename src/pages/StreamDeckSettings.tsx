@@ -5,6 +5,7 @@
  * device only.
  */
 import { useEffect, useId, useState } from "react";
+import { GuideButton } from "../guides/GuideButton";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
@@ -196,9 +197,12 @@ export function StreamDeckSettings() {
     );
   return (
     <section className="settings__group" aria-labelledby="settings-stream-deck" data-testid="stream-deck-settings">
-      <h2 id="settings-stream-deck" className="settings__heading">
-        Stream Deck
-      </h2>
+      <div className="settings__head">
+        <h2 id="settings-stream-deck" className="settings__heading">
+          Stream Deck
+        </h2>
+        {!on && <GuideButton id="streamDeck" />}
+      </div>
       <DeckPluginRow status={plugin} onChanged={refreshPlugin} />
       <div className="setting-row" data-setting="allowStreamDeck">
         <div className="setting-row__text">

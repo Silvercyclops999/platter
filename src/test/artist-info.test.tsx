@@ -1,3 +1,4 @@
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +17,7 @@ const mock = backend as MockBackend;
 const artistAt = (i: number) => mock.fx.artists[i];
 
 beforeEach(async () => {
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   for (const s of ["lastfm", "fanart", "audiodb"] as const) await backend.artistInfoKeySet(s, null);
   await loadSettings();
   useToasts.setState({ toasts: [] });
@@ -332,7 +333,7 @@ describe("Artist info settings", () => {
   it("has the rows under Integrations with Wikipedia on and the keyed sources waiting for keys", async () => {
     render(<SettingsPage />);
     const group = await screen.findByRole("region", { name: "Integrations" });
-    expect(within(group).getByRole("heading", { level: 3, name: "Artist info" })).toBeInTheDocument();
+    expect(within(group).getAllByRole("heading", { level: 3, name: "Artist info" })[0]).toBeInTheDocument();
     expect(within(group).getByRole("switch", { name: "Wikipedia and Wikidata" })).toBeChecked();
     expect(await within(group).findByLabelText("Last.fm API key")).toBeInTheDocument();
     expect(within(group).getByLabelText("Fanart.tv API key")).toBeInTheDocument();

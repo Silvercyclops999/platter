@@ -170,7 +170,7 @@ describe("settings", () => {
 
   it("has the DLNA row, on by default", async () => {
     render(<SettingsPage />);
-    expect(await screen.findByRole("switch", { name: "Show DLNA and UPnP devices" })).toBeChecked();
+    expect(await screen.findByRole("switch", { name: "Show other network speakers and TVs (DLNA)" })).toBeChecked();
     expect(DEFAULT_SETTINGS.showDlnaDevices).toBe(true);
   });
 });

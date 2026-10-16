@@ -324,13 +324,13 @@ describe("settings rows", () => {
     const save = vi.spyOn(backend, "settingsSet");
     render(<SettingsPage />);
     const sw = (name: string) => screen.getByRole("switch", { name });
-    expect(sw("A-B loop on the seek bar")).toBeChecked();
+    expect(sw("Loop part of a song from the seek bar")).toBeChecked();
     expect(sw("Show what's next in the player bar")).toBeChecked();
     expect(sw("Show volume percentage")).toBeChecked();
     expect(sw("Notify on track change")).not.toBeChecked();
     await user.click(sw("Notify on track change"));
     expect(save).toHaveBeenCalledWith({ notifyTrackChange: true });
-    await user.click(sw("A-B loop on the seek bar"));
+    await user.click(sw("Loop part of a song from the seek bar"));
     expect(save).toHaveBeenCalledWith({ abLoopHandles: false });
     await user.click(sw("Show what's next in the player bar"));
     expect(save).toHaveBeenCalledWith({ upNextLine: false });
@@ -338,7 +338,7 @@ describe("settings rows", () => {
     expect(save).toHaveBeenCalledWith({ volumePercent: false });
     // Sections: loop under Playback, the two looks under Appearance, notify under App.
     const section = (name: string) => screen.getByRole("switch", { name }).closest("section")!.querySelector("h2")!.textContent;
-    expect(section("A-B loop on the seek bar")).toBe("Playback");
+    expect(section("Loop part of a song from the seek bar")).toBe("Playback");
     expect(section("Show volume percentage")).toBe("Appearance");
     expect(section("Notify on track change")).toBe("App");
     await mock.settingsSet({ ...DEFAULT_SETTINGS });

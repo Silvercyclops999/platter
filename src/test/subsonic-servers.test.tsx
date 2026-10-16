@@ -4,6 +4,7 @@
  * change-check setting, and picking up a queue another app saved. Each
  * failure state is faked through the mock backend.
  */
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +23,7 @@ const mock = backend as MockBackend;
 
 beforeEach(() => {
   mock.resetServers();
-  useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
+  useSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS } });
 });
 
 function flow(props: Partial<Parameters<typeof AddServerFlow>[0]> = {}) {

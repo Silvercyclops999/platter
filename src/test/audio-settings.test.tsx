@@ -42,8 +42,8 @@ describe("transitions and loudness", () => {
     expect(screen.getByRole("combobox", { name: "Crossfade" })).toHaveValue("smart");
     expect(screen.getByRole("switch", { name: "Never crossfade within an album" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("combobox", { name: "Loudness leveling" })).toHaveValue("smart");
-    expect(screen.getByRole("slider", { name: "Preamp" })).toHaveAttribute("aria-valuenow", "0");
-    expect(screen.getByRole("switch", { name: "Limiter" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("slider", { name: "Volume before the equalizer" })).toHaveAttribute("aria-valuenow", "0");
+    expect(screen.getByRole("switch", { name: "Keep loud parts from distorting" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Equalizer" })).toHaveAttribute("aria-checked", "false");
     // Fixed length only shows for a fixed crossfade.
     expect(screen.queryByRole("slider", { name: "Crossfade length" })).toBeNull();
@@ -63,13 +63,13 @@ describe("transitions and loudness", () => {
 
   it("preamp moves in half steps and leveling and limiter save", async () => {
     render(<SettingsPage />);
-    const pre = screen.getByRole("slider", { name: "Preamp" });
+    const pre = screen.getByRole("slider", { name: "Volume before the equalizer" });
     act(() => pre.focus());
     await userEvent.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
     await waitFor(async () => expect((await core()).preampDb).toBe(1.5));
     expect(screen.getByText("+1.5 dB")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Loudness leveling" }), "album");
-    await userEvent.click(screen.getByRole("switch", { name: "Limiter" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Keep loud parts from distorting" }));
     await waitFor(async () => {
       const s = await core();
       expect([s.leveling, s.limiter]).toEqual(["album", false]);

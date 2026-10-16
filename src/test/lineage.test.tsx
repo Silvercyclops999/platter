@@ -286,7 +286,7 @@ describe("settings", () => {
   it("Show lineage and Compare level matching are on by default and switch", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
-    for (const name of ["Show lineage", "Compare level matching"]) {
+    for (const name of ["Show lineage", "Compare versions at the same loudness"]) {
       const sw = await screen.findByRole("switch", { name });
       expect(sw).toBeChecked();
       await user.click(sw);

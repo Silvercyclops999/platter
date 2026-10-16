@@ -37,19 +37,19 @@ async function setUp(home = "http://192.168.x.x:8686", away = "") {
 describe("Lidarr settings", () => {
   it("shows only the address and key fields until both are set", async () => {
     render(<SettingsPage />);
-    await screen.findByRole("textbox", { name: "Lidarr home address" });
+    await screen.findByRole("textbox", { name: "Lidarr address at home" });
     expect(row("lidarrAwayUrl")).not.toBeNull();
     expect(row("lidarrKey")).not.toBeNull();
     expect(row("lidarrCheck")).toBeNull();
     expect(row("lidarrHeaders")).toBeNull();
     expect(screen.queryByRole("button", { name: /request/i })).toBeNull();
 
-    const url = screen.getByRole("textbox", { name: "Lidarr home address" });
+    const url = screen.getByRole("textbox", { name: "Lidarr address at home" });
     await userEvent.type(url, "http://192.168.x.x:8686/{Enter}");
     await waitFor(() => expect(useSettings.getState().settings?.lidarrUrl).toBe("http://192.168.x.x:8686"));
     expect(row("lidarrCheck")).toBeNull();
 
-    await userEvent.type(screen.getByLabelText("Lidarr API key"), "abc123");
+    await userEvent.type(screen.getByLabelText("Lidarr key"), "abc123");
     await userEvent.click(within(row("lidarrKey")!).getByRole("button", { name: "Save key" }));
     await screen.findByRole("button", { name: "Check setup" });
     expect(within(row("lidarrKey")!).getByRole("button", { name: "Remove key" })).toBeTruthy();
@@ -115,7 +115,7 @@ describe("Lidarr settings", () => {
     mock.lidarr.setDemo("away");
     await setUp("http://192.168.x.x:8686", "https://lidarr.example.com");
     render(<SettingsPage />);
-    const field = await screen.findByLabelText("Extra headers for the away address");
+    const field = await screen.findByLabelText("Extra sign-in details for the away address");
     fireEvent.change(field, { target: { value: "CF-Access-Client-Id: id\nCF-Access-Client-Secret: s3cret" } });
     await userEvent.click(screen.getByRole("button", { name: "Save headers" }));
     await screen.findByText("Saved: CF-Access-Client-Id, CF-Access-Client-Secret.");

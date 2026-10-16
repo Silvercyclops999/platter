@@ -4,6 +4,7 @@
  * link, unreleased music never getting a song.link line, and picking lyric
  * lines for a lyric card.
  */
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -72,7 +73,7 @@ function playing(track: Track, positionMs: number) {
 
 beforeEach(async () => {
   useToasts.setState({ toasts: [] });
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   mock.cardsCopied = [];
   mock.cardsSaved = [];

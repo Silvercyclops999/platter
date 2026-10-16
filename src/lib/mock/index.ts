@@ -117,6 +117,7 @@ import type {
   ThemeFile,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
+import { exportSettings, importSettings, type SettingsFile } from "../settingsFile";
 
 /** More lyrics found for a mock song (an LRCLIB hit), for tests and screenshots. */
 export interface MockLyricsCandidate {
@@ -3227,6 +3228,32 @@ export class MockBackend implements Backend {
   }
   themesSave(look: ThemeFile, replace: boolean) {
     return this.delay(() => this.themes.save(look, replace));
+  }
+  /** The last settings file "saved", and the file the next import "opens" (tests set it; null cancels). */
+  settingsFileSaved: SettingsFile | null = null;
+  settingsFileToOpen: unknown = null;
+  /** Links help pages opened, newest last (tests read them). */
+  helpLinksOpened: string[] = [];
+  helpOpenLink(url: string) {
+    return this.delay(() => {
+      this.helpLinksOpened.push(url);
+    });
+  }
+  settingsDefaults() {
+    return this.delay(() => ({ ...DEFAULT_SETTINGS }));
+  }
+  settingsExport() {
+    // Stands in for the save dialog.
+    return this.delay(() => {
+      this.settingsFileSaved = exportSettings({ ...this.settings, volume: this.volume });
+      return "Platter settings.json";
+    });
+  }
+  async settingsImport() {
+    if (this.settingsFileToOpen === null) return this.delay(() => null);
+    const { patch, report } = importSettings(this.settingsFileToOpen);
+    await this.settingsSet(patch);
+    return report;
   }
   themesExport(look: ThemeFile) {
     // Stands in for the save dialog.

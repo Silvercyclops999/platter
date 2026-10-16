@@ -2938,6 +2938,17 @@ nothing left out.
 | `settings_set` | `{ patch: Partial<Settings> }` |
 | `art_cache_info` | – → `{ usedBytes, capBytes }` |
 | `art_cache_clear` | – → bytes freed (number) |
+| `settings_defaults` | – → `Settings` as a new install has them (Reset this section) |
+| `settings_export` | – → path written, or null when the save dialog was cancelled |
+| `settings_import` | – → `{ applied, skipped: string[] }`, or null when cancelled |
+| `help_open_link` | `{ url }`: opens a help page's link in the browser (project pages only) |
+
+`settings_export` writes `{ kind: "platter-settings", version: 1, settings }`
+with every setting a patch can set, except folders, devices and window
+places (`NOT_EXPORTED` in settings.rs). No setting holds a key or token, so
+the file never does. `settings_import` applies a file as one patch and skips
+values this version can't read. `showSetupGuides` and `showHelpButtons`
+(both default true, synced) offer setup guides and show the "?" help buttons.
 
 `privateSession` (default false) stops plays being written to the local
 listen log. `reportPlays` (default true) controls now-playing and finished
@@ -2984,13 +2995,13 @@ The rest of the fields, with their defaults:
 | `notifyTrackChange` | bool, false | Desktop notification when a new track starts. Not shown while the window has focus, in a private session, or when the previous track change was under 5 s ago. Clicking it brings the window forward. This device only. |
 | `playlistAskDuplicates` | bool, true | Ask before adding a song that's already in the playlist. |
 | `playlistNewName` | text, `"My playlist #N"` | Name for new playlists; `#N` becomes the next free number. Up to 100 characters. |
-| `infoWikipedia` | bool, true | Artist info from Wikipedia and Wikidata. |
+| `infoWikipedia` | bool, false | Artist info from Wikipedia and Wikidata. |
 | `infoLastfm` | bool, false | Artist info from Last.fm. Only used while a key is saved and wasn't refused. |
 | `infoFanart` | bool, false | Artist images from Fanart.tv. Same key rule. |
 | `infoAudiodb` | bool, false | Artist photo and bio from TheAudioDB. Same key rule. |
-| `infoListenbrainz` | bool, true | Popular's global list from ListenBrainz (Last.fm top tracks fill in when it has none and Last.fm is on). With this and `infoLastfm` both off, Popular ranks by your plays. The optional token is kept in the keychain. |
-| `infoMusicbrainz` | bool, true | MusicBrainz: album release dates and credits, artist members with their years, related artists. Synced. |
-| `infoListenbrainzStats` | bool, true | ListenBrainz listener numbers when Last.fm has none. Synced. |
+| `infoListenbrainz` | bool, false | Popular's global list from ListenBrainz (Last.fm top tracks fill in when it has none and Last.fm is on). With this and `infoLastfm` both off, Popular ranks by your plays. The optional token is kept in the keychain. |
+| `infoMusicbrainz` | bool, false | MusicBrainz: album release dates and credits, artist members with their years, related artists. Synced. |
+| `infoListenbrainzStats` | bool, false | ListenBrainz listener numbers when Last.fm has none. Synced. |
 | `linkFeatured` | bool, true | Every name in a track's artist line links to a page, featured artists without a library entry included, and search lists them. Off leaves those names as plain text. |
 | `likedMeans` | `"five"` or `"fourUp"`, `"five"` | Which Plex ratings count as liked: five stars (10), or four stars and up (8 or more). Liking always writes five stars. |
 | `likeControlRows` | `"hover"`, `"always"` or `"off"`, `"hover"` | When song rows show the like control. Liked songs always show their tick unless it's `"off"`; the player bar and now playing always show it. |
@@ -3016,8 +3027,8 @@ The rest of the fields, with their defaults:
 | `bitPerfectOutputs` | `{ deviceId, deviceName }[]`, empty | Read only here. Output devices that play bit-perfect. Set with `bit_perfect_set`. This device only. |
 | `shareCardQr` | bool, true | Share cards include a QR code that opens the item in Platter (the `platter://` link only). |
 | `shareCardSongLink` | bool, true | Share cards for released songs and albums include the song.link line. Also needs `sharePublicLinks`. |
-| `sharePublicLinks` | bool, true | Share menus find public links for released songs and albums (iTunes Search and song.link). Off leaves only Platter links and sends nothing. |
-| `discordStatus` | bool, true | Show what's playing on Discord. This device only. See Discord above. |
+| `sharePublicLinks` | bool, false | Share menus find public links for released songs and albums (iTunes Search and song.link). Off leaves only Platter links and sends nothing. |
+| `discordStatus` | bool, false | Show what's playing on Discord. This device only. See Discord above. |
 | `discordClearOnPause` | bool, true | Pausing clears the status. Off shows the song as paused, without a progress bar. |
 | `discordShowUnreleased` | bool, true | Off shows nothing while an unreleased song plays. |
 | `discordUnreleasedArt` | bool, true | Off shows the app icon for unreleased songs; their cover is never looked up or uploaded. |
@@ -3056,13 +3067,13 @@ The rest of the fields, with their defaults:
 | `releaseStatusTag` | string, `""` | Where a file's release status is read from: `""` (Auto) reads `ARCHIVE_VERSION`, then `STATUS`, then Picard's release status and type; a tag name (up to 64 characters, no `=`; "auto" counts as Auto) reads that tag after `ARCHIVE_VERSION` instead. A new name reads the files again in the background. Synced. See File tags. |
 | `releaseStatusValues` | `{ value, status: "released"\|"unreleased"\|"leaked"\|"alternate" }[]`, `[]` | Custom values and what they mean, checked before the built-in ones. Up to 50, each up to 60 characters, trimmed; the same value (any case) again replaces the earlier one, and blank values are dropped. Synced. |
 | `countUnmatchedUnreleased` | bool, true | Albums Plex couldn't match (guid `local://`, or no release type and no label before the next sync) count as unreleased for sharing, Discord, scrobbling, mixes, smart playlists and lyrics transcription until a release type, `ARCHIVE_VERSION` or a release status tag (`releaseStatusTag`) says otherwise. Off: only demo release types, archive version tags and release status tags count. |
-| `checkUnmatchedMusicbrainz` | bool, true | Look albums Plex couldn't match up on MusicBrainz in the background (needs `infoMusicbrainz`). A sure match means Plex missed it and the album counts as released. Off, or with MusicBrainz off, stored answers stop counting. Synced. |
+| `checkUnmatchedMusicbrainz` | bool, false | Look albums Plex couldn't match up on MusicBrainz in the background (needs `infoMusicbrainz`). A sure match means Plex missed it and the album counts as released. Off, or with MusicBrainz off, stored answers stop counting. Synced. |
 | `groupEditions` | bool, true | Albums sharing `ARCHIVE_GROUP` list as one album (the face) in the library, artist pages and Home's album shelves. |
 | `plexEditShow` | bool, true | Edit in Plex on album and artist menus, for servers the account owns. Off refuses every edit. |
 | `plexEditLock` | bool, true | Fields changed with `plex_edit_details` are locked in Plex so a refresh keeps them. |
 | `plexEditMatchUnreleased` | bool, true | Fix match is offered on unreleased albums (always with a warning). Off refuses it there. |
 | `dragAndDrop` | bool, true | Songs, albums and playlists can be dragged onto playlists, Liked Songs and the queue. Off stops those drags; reordering inside a playlist or the queue still works. |
-| `showToMyDevices` | bool, true | Announce this computer to the user's other Platter computers, open the control port and publish its addresses to plex.tv. Off withdraws the announcement and closes the port. Independent of `actAsPlexPlayer`. This device only. |
+| `showToMyDevices` | bool, false | Announce this computer to the user's other Platter computers, open the control port and publish its addresses to plex.tv. Off withdraws the announcement and closes the port. Independent of `actAsPlexPlayer`. This device only. |
 | `computerName` | string, `""` | The name other devices see, up to 60 characters, trimmed. Empty uses the OS computer name. This device only. |
 | `showAirplayLocked` | bool, false | List AirPlay receivers that need a password or a pairing code. Computers' own receivers are never listed. This device only. |
 | `downloadQuality` | `"original"`, `"320"`, `"192"` or `"128"`, `"original"` | Original keeps the file as it is; the others are MP3s from the server's transcoder. Applies to new downloads. This device only. |
@@ -3081,7 +3092,7 @@ The rest of the fields, with their defaults:
 | `smartShuffle` | bool, true | On playlists and Liked Songs the shuffle button has a third state, smart shuffle. Off ends smart shuffle that's on. |
 | `goOffline` | bool, false | No network use: no requests to the server or plex.tv, no artist info, LRCLIB, share link lookups, Discord status, Listen on discovery or update checks. Health shows `offline` with the `goneOffline` banner and `cachedOnly`, so only music on this computer plays. Off reconnects as at startup. This device only. |
 | `showFriendActivity` | bool, true | The top bar's friend activity button and panel. |
-| `shareActivity` | bool, true | Send Plex now-playing timelines, so friends on the server see you live. Off (and in a private session) none go out; finished plays still reach Plex's history. |
+| `shareActivity` | bool, false | Send Plex now-playing timelines, so friends on the server see you live. Off (and in a private session) none go out; finished plays still reach Plex's history. |
 | `whatsNewAnnouncements` | bool, true | The bell's dot for unseen What's New items. |
 | `notifyNewReleases` | bool, false | A desktop notification when a followed artist gets new music in the library. This device only. |
 | `listenGuestsControl` | bool, true | "Let others change what's playing": guests in a session you host can play, pause, skip, seek and reorder. Off, they can only add songs. |
@@ -3104,14 +3115,14 @@ The rest of the fields, with their defaults:
 | `libraryDoctor` | bool, true | The library doctor checks the library in the background and shows a count in the app menu. |
 | `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched, soundsLike }`, all true | Which library doctor checks run. |
 | `doctorCoverPx` | 300, 500, 600 (default), 800, 1000 or 1400 | Covers smaller than this on their longest side count as small. |
-| `releaseRadar` | bool, true | The release radar looks for new releases about once a day and shows them on Home and its page. Synced. |
+| `releaseRadar` | bool, false | The release radar looks for new releases about once a day and shows them on Home and its page. Synced. |
 | `radarNotify` | bool, true | A notification when the release radar finds something new (not in a private session). Synced. |
 | `autoRequest` | bool, false | Auto-request new albums for the artists it's on for. Turning it on for an artist turns this on. This device only. |
 | `autoRequestCap` | 1, 2, 3 (default), 5 or 10 | Most automatic requests a day. This device only. |
 | `identifyBySound` | bool, false | Fingerprint songs on this computer and look them up on AcoustID (only the fingerprint and length are sent). This device only. |
 | `soundIdScope` | `"untagged"` (default) or `"all"` | Which songs: files with no recording id or ISRC, or every song. This device only. |
 | `subsonicCheckMinutes` | 1, 5 (default), 15, 30 or 60 | Minutes between asking each Subsonic server whether its music changed. This device only. |
-| `saveQueueOnServer` | bool, true | Keep the queue on servers that hold one, so another app can pick it up. Synced. |
+| `saveQueueOnServer` | bool, false | Keep the queue on servers that hold one, so another app can pick it up. Synced. |
 | `scrobbleLastfm` | bool, false | Scrobble to Last.fm once signed in. This device only. |
 | `scrobbleListenbrainz` | bool, false | Scrobble to ListenBrainz with the user token. This device only. |
 | `scrobbleUnreleased` | bool, false | Unreleased music scrobbles too. |

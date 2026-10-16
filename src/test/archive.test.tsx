@@ -1,3 +1,4 @@
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -26,7 +27,7 @@ const trackNamed = (title: string) => mock.fx.tracks.find((t) => t.title === tit
 beforeEach(async () => {
   mock.archive.marks.clear();
   mock.archive.custom.clear();
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   await loadSettings();
   useRouter.getState().reset();
 });

@@ -4,6 +4,7 @@
  * now), auto-request from the artist page's menu, and the settings.
  * MusicBrainz and Lidarr are the browser mock's.
  */
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
@@ -28,7 +29,7 @@ const mock = backend as MockBackend;
 async function setUp(lidarr: "ready" | "demo" | "none", patch: Record<string, unknown> = {}) {
   mock.lidarr.reset(lidarr === "none" ? "demo" : lidarr);
   mock.radar.reset();
-  await mock.settingsSet({ ...DEFAULT_SETTINGS, lidarrUrl: lidarr === "none" ? "" : "http://192.168.x.x:8686", ...patch });
+  await mock.settingsSet({ ...DEFAULT_SETTINGS, lidarrUrl: lidarr === "none" ? "" : "http://192.168.x.x:8686", ...ONLINE_EXTRAS, ...patch });
   useSettings.setState({ settings: null });
   await loadSettings();
   useAutoRequest.setState({ artists: [], loaded: false });

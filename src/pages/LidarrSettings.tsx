@@ -1,4 +1,5 @@
 import { CircleCheck, OctagonX, TriangleAlert } from "lucide-react";
+import { HelpButton } from "../help/HelpButton";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -164,7 +165,7 @@ export function LidarrKeyControl({ lidarr, ids }: { lidarr: LidarrState; ids: Id
         placeholder="API key"
         autoComplete="off"
         spellCheck={false}
-        aria-label="Lidarr API key"
+        aria-label="Lidarr key"
         aria-describedby={ids.desc}
       />
       <Button size="sm" type="submit" disabled={busy || !text.trim()}>
@@ -202,7 +203,7 @@ export function LidarrHeadersControl({ lidarr, ids }: { lidarr: LidarrState; ids
         placeholder={"Name: value\nName: value"}
         autoComplete="off"
         spellCheck={false}
-        aria-label="Extra headers for the away address"
+        aria-label="Extra sign-in details for the away address"
         aria-describedby={ids.desc}
       />
       <Button size="sm" type="submit" disabled={!text.trim()}>
@@ -305,13 +306,16 @@ export function LidarrFindings({ lidarr }: { lidarr: LidarrState }) {
   );
   return (
     <div className="lidarr-check" aria-live="polite">
-      <p className={`lidarr-check__summary ${report.passed ? "is-passed" : "is-blocked"}`}>
-        {report.passed
-          ? "Lidarr can't reach your curated music. Platter checks this again before every request."
-          : report.managedOk
-            ? "Managed artists keep working. Platter won't do anything for protected artists until the red items are fixed."
-            : "Platter won't send Lidarr anything until the red items are fixed."}
-      </p>
+      <div className="help-heading">
+        <p className={`lidarr-check__summary ${report.passed ? "is-passed" : "is-blocked"}`}>
+          {report.passed
+            ? "Lidarr can't reach your curated music. Platter checks this again before every request."
+            : report.managedOk
+              ? "Managed artists keep working. Platter won't do anything for protected artists until the red items are fixed."
+              : "Platter won't send Lidarr anything until the red items are fixed."}
+        </p>
+        <HelpButton page="lidarr" anchor="the-safety-check" label="What the check's findings mean" />
+      </div>
       <p className="lidarr-check__meta">
         Lidarr {report.version} answered on {where}. Platter only read from it.
       </p>

@@ -77,7 +77,7 @@ describe("results page", () => {
     expect(screen.getByRole("list", { name: "Results" })).toBeInTheDocument();
     expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ query: "Odessa", filter: "all" }));
     const chips = within(screen.getByRole("group", { name: "Filter results" })).getAllByRole("button").map((b) => b.textContent);
-    expect(chips).toEqual(["All", "Songs", "Albums", "Artists", "Playlists"]);
+    expect(chips).toEqual(["All", "Songs", "Albums", "Artists", "Playlists", "Help"]);
 
     await user.click(screen.getByRole("button", { name: "Songs" }));
     expect(screen.getByRole("button", { name: "Songs" })).toHaveAttribute("aria-pressed", "true");

@@ -674,6 +674,10 @@ pub struct Settings {
     /// Tautulli's address (empty: Tautulli isn't set up). Its API key is in
     /// the keychain.
     pub tautulli_url: String,
+    /// Offer a setup guide when a feature that has one is first used.
+    pub show_setup_guides: bool,
+    /// Show the "?" buttons that open help next to complex screens.
+    pub show_help_buttons: bool,
 }
 
 /// Minutes between Subsonic change checks the setting offers.
@@ -735,6 +739,12 @@ pub fn tautulli_url(u: &str) -> AppResult<String> {
     lidarr_url(u).map_err(|_| AppError::Invalid("Tautulli's address is a web address like http://192.168.x.x:8181.".into()))
 }
 
+/// Safe defaults: anything that sends data off this computer, writes to the
+/// server or opens a network port starts off, and Settings or a setup guide
+/// turns it on (`risky_features_start_off` checks the list). Kept on on
+/// purpose: reporting plays to your own Plex server (it's what a Plex player
+/// does; Private session stops it), looking for speakers on your own network
+/// (nothing about you is sent), and offers that ask before each send.
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -773,13 +783,13 @@ impl Default for Settings {
             notify_track_change: false,
             playlist_ask_duplicates: true,
             playlist_new_name: crate::db::playlists::DEFAULT_NAME.to_string(),
-            info_wikipedia: true,
+            info_wikipedia: false,
             info_lastfm: false,
             info_fanart: false,
             info_audiodb: false,
-            info_listenbrainz: true,
-            info_musicbrainz: true,
-            info_listenbrainz_stats: true,
+            info_listenbrainz: false,
+            info_musicbrainz: false,
+            info_listenbrainz_stats: false,
             link_featured: true,
             liked_means: LikedMeans::Five,
             like_control_rows: LikeControlRows::Hover,
@@ -801,11 +811,11 @@ impl Default for Settings {
             eq_last_output: None,
             headphone_correction: Vec::new(),
             bit_perfect_outputs: Vec::new(),
-            share_public_links: true,
+            share_public_links: false,
             share_card_qr: true,
             share_card_song_link: true,
             show_cast_devices: true,
-            discord_status: true,
+            discord_status: false,
             discord_show_unreleased: true,
             discord_unreleased_art: true,
             discord_clear_on_pause: true,
@@ -832,7 +842,7 @@ impl Default for Settings {
             explicit_content: ExplicitContent::Allowed,
             show_fan_edits: false,
             count_unmatched_unreleased: true,
-            check_unmatched_musicbrainz: true,
+            check_unmatched_musicbrainz: false,
             group_editions: true,
             plex_edit_show: true,
             plex_edit_lock: true,
@@ -851,7 +861,7 @@ impl Default for Settings {
             lyrics_check_audio: true,
             lyrics_fix_timing: true,
             lyrics_released_for_versions: false,
-            show_to_my_devices: true,
+            show_to_my_devices: false,
             computer_name: String::new(),
             show_airplay_locked: false,
             download_quality: DownloadQuality::Original,
@@ -870,7 +880,7 @@ impl Default for Settings {
             queue_end: QueueEnd::KeepPlaying,
             smart_shuffle: true,
             show_friend_activity: true,
-            share_activity: true,
+            share_activity: false,
             whats_new_announcements: true,
             notify_new_releases: false,
             listen_guests_control: true,
@@ -925,17 +935,17 @@ impl Default for Settings {
             library_doctor: true,
             doctor_checks: crate::doctor::Checks::default(),
             doctor_cover_px: crate::doctor::DEFAULT_COVER_PX,
-            release_radar: true,
+            release_radar: false,
             radar_notify: true,
             auto_request: false,
             auto_request_cap: crate::radar::DEFAULT_CAP,
             identify_by_sound: false,
             sound_id_scope: crate::soundid::Scope::Untagged,
             subsonic_check_minutes: crate::subsonic::manager::DEFAULT_POLL_MINUTES,
-            save_queue_on_server: true,
-            catalogue_search: true,
-            fans_also_like_catalogue: true,
-            home_new_to_you: true,
+            save_queue_on_server: false,
+            catalogue_search: false,
+            fans_also_like_catalogue: false,
+            home_new_to_you: false,
             dismissed_artists: Vec::new(),
             show_physical_collection: true,
             shelf_missing_list: false,
@@ -949,6 +959,8 @@ impl Default for Settings {
             include_tautulli_history: true,
             include_lastfm_history: true,
             tautulli_url: String::new(),
+            show_setup_guides: true,
+            show_help_buttons: true,
         }
     }
 }
@@ -1086,6 +1098,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "includeTautulliHistory",
     "includeLastfmHistory",
     "tautulliUrl",
+    "showSetupGuides",
+    "showHelpButtons",
 ];
 
 /// Settings kept on this device only.
@@ -1388,6 +1402,8 @@ pub struct SettingsPatch {
     pub include_tautulli_history: Option<bool>,
     pub include_lastfm_history: Option<bool>,
     pub tautulli_url: Option<String>,
+    pub show_setup_guides: Option<bool>,
+    pub show_help_buttons: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -1688,6 +1704,8 @@ impl Settings {
         set(&mut self.include_plex_history, p.include_plex_history);
         set(&mut self.include_tautulli_history, p.include_tautulli_history);
         set(&mut self.include_lastfm_history, p.include_lastfm_history);
+        set(&mut self.show_setup_guides, p.show_setup_guides);
+        set(&mut self.show_help_buttons, p.show_help_buttons);
         if let Some(u) = &p.tautulli_url {
             self.tautulli_url = tautulli_url(u)?;
         }
@@ -2455,6 +2473,165 @@ pub async fn open_project_page(app: AppHandle) -> AppResult<()> {
         .map_err(|e| AppError::Internal(format!("open browser: {e}")))
 }
 
+/// Whether a help page may open this link: only pages of the project
+/// itself (the help pages link nowhere else; a test checks).
+pub fn help_link_allowed(url: &str) -> bool {
+    url.strip_prefix(REPO_URL).is_some_and(|rest| rest.starts_with('/') && !rest.contains(char::is_whitespace))
+}
+
+/// Open a link from a help page in the browser.
+#[tauri::command]
+pub async fn help_open_link(app: AppHandle, url: String) -> AppResult<()> {
+    if !help_link_allowed(&url) {
+        return Err(AppError::Invalid("link not allowed".into()));
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| AppError::Internal(format!("open browser: {e}")))
+}
+
+// ------------------------------------------------------------------ export and import
+
+/// Settings left out of an exported file: folders and devices that belong to
+/// this computer, window positions, and which server's libraries are in use.
+/// No setting holds a secret (keys and passwords live in the keychain), so
+/// nothing secret can reach the file either (a test checks the names).
+pub const NOT_EXPORTED: &[&str] = &[
+    "musicFolder",
+    "musicFolderServer",
+    "downloadFolder",
+    "syncFolder",
+    "miniplayerBounds",
+    "outputDevice",
+    "eqLastOutput",
+    "lookStepDone",
+    "libraries",
+    "serverView",
+];
+
+/// What an exported settings file says it is.
+const EXPORT_KIND: &str = "platter-settings";
+const EXPORT_VERSION: u32 = 1;
+
+/// Every setting worth carrying to another computer, as one JSON document.
+pub fn export_value(s: &Settings) -> serde_json::Value {
+    let mut v = serde_json::to_value(s).unwrap_or_default();
+    if let Some(o) = v.as_object_mut() {
+        // Only what a patch can set (EQ profiles and the like have their own
+        // commands and stay here).
+        o.retain(|k, val| {
+            let mut one = serde_json::Map::new();
+            one.insert(k.clone(), val.clone());
+            !NOT_EXPORTED.contains(&k.as_str())
+                && serde_json::from_value::<SettingsPatch>(serde_json::Value::Object(one)).is_ok_and(|p| p != SettingsPatch::default())
+        });
+    }
+    serde_json::json!({ "kind": EXPORT_KIND, "version": EXPORT_VERSION, "settings": v })
+}
+
+/// What an import changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportReport {
+    /// How many settings the file set.
+    pub applied: u32,
+    /// Settings the file had that this version can't use (unknown or out of range).
+    pub skipped: Vec<String>,
+}
+
+/// Read an exported file into a patch. Values this version can't read are
+/// skipped one by one rather than failing the whole file.
+pub fn import_patch(doc: &serde_json::Value) -> AppResult<(SettingsPatch, ImportReport)> {
+    let bad = || AppError::Invalid("That file isn't a Platter settings file.".into());
+    if doc.get("kind").and_then(|k| k.as_str()) != Some(EXPORT_KIND) {
+        return Err(bad());
+    }
+    let src = doc.get("settings").and_then(|v| v.as_object()).ok_or_else(bad)?;
+    let mut keep = serde_json::Map::new();
+    let mut report = ImportReport::default();
+    for (k, v) in src {
+        if NOT_EXPORTED.contains(&k.as_str()) {
+            continue;
+        }
+        let mut one = serde_json::Map::new();
+        one.insert(k.clone(), v.clone());
+        let ok = serde_json::from_value::<SettingsPatch>(serde_json::Value::Object(one))
+            .ok()
+            .filter(|p| *p != SettingsPatch::default() && Settings::default().apply(p).is_ok());
+        if ok.is_some() {
+            keep.insert(k.clone(), v.clone());
+            report.applied += 1;
+        } else {
+            report.skipped.push(k.clone());
+        }
+    }
+    let patch = serde_json::from_value(serde_json::Value::Object(keep)).map_err(|_| bad())?;
+    Ok((patch, report))
+}
+
+/// The settings a new install starts with (for Reset this section).
+#[tauri::command]
+pub async fn settings_defaults() -> AppResult<Settings> {
+    Ok(Settings::default())
+}
+
+/// Save every setting to a file the user picks. None when they cancel.
+#[tauri::command]
+pub async fn settings_export(app: AppHandle, settings: State<'_, SettingsState>) -> AppResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let s = settings.get().await?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Export settings")
+        .set_file_name("Platter settings.json")
+        .add_filter("Platter settings", &["json"])
+        .save_file(move |p| {
+            let _ = tx.send(p);
+        });
+    let Some(picked) = rx.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| AppError::Io(format!("file: {e}")))?;
+    let text = serde_json::to_string_pretty(&export_value(&s)).map_err(|e| AppError::Internal(e.to_string()))?;
+    std::fs::write(&path, text).map_err(|e| AppError::Io(e.to_string()))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Read settings from a file the user picks and apply them. None when they cancel.
+#[tauri::command]
+pub async fn settings_import(
+    app: AppHandle,
+    settings: State<'_, SettingsState>,
+    player: State<'_, PlayerHandle>,
+    downloads: State<'_, downloads::Downloads>,
+    mixes: State<'_, crate::mixes::MixService>,
+) -> AppResult<Option<ImportReport>> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Import settings")
+        .add_filter("Platter settings", &["json"])
+        .pick_file(move |p| {
+            let _ = tx.send(p);
+        });
+    let Some(picked) = rx.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| AppError::Io(format!("file: {e}")))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| AppError::Io(e.to_string()))?;
+    let doc: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| AppError::Invalid("That file isn't a Platter settings file.".into()))?;
+    let (patch, report) = import_patch(&doc)?;
+    let mini = patch.touches_miniplayer();
+    apply_patch(&settings, &player, &downloads, &mixes, patch).await?;
+    if mini {
+        let s = settings.get().await?;
+        crate::platform::miniplayer::settings_changed(&app, &s);
+    }
+    Ok(Some(report))
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2500,15 +2677,15 @@ mod tests {
         assert!(s.media_keys && s.media_session && !s.close_to_tray && !s.launch_at_login);
         assert!(s.ab_loop_handles && s.up_next_line && s.volume_percent);
         assert!(!s.notify_track_change);
-        assert!(s.info_wikipedia && !s.info_lastfm && !s.info_fanart && !s.info_audiodb);
-        assert!(s.info_listenbrainz && s.link_featured);
-        assert!(s.info_musicbrainz && s.info_listenbrainz_stats);
+        assert!(!s.info_wikipedia && !s.info_lastfm && !s.info_fanart && !s.info_audiodb);
+        assert!(!s.info_listenbrainz && s.link_featured);
+        assert!(!s.info_musicbrainz && !s.info_listenbrainz_stats);
         assert!(s.playlist_ask_duplicates);
         assert_eq!(s.playlist_new_name, "My playlist #N");
         assert_eq!((s.liked_means, s.like_control_rows), (LikedMeans::Five, LikeControlRows::Hover));
         assert_eq!(s.liked_min_rating(), 10.0);
-        assert!(s.share_public_links);
-        assert!(s.discord_status && s.discord_show_unreleased && s.discord_unreleased_art && s.discord_clear_on_pause);
+        assert!(!s.share_public_links);
+        assert!(!s.discord_status && s.discord_show_unreleased && s.discord_unreleased_art && s.discord_clear_on_pause);
         assert!(s.discord_find_song && s.discord_cover_archive && !s.discord_upload_art);
         assert_eq!(s.discord_status_line, StatusLine::App);
         assert!(!s.discord_upload_covers);
@@ -2537,6 +2714,148 @@ mod tests {
         assert!(!s.now_playing_feed, "the widget feed is opt-in");
         assert_eq!(s.now_playing_feed_port, 32540);
         assert_eq!(s.hint_key, HintKey::F);
+    }
+
+    /// Features that send data off this computer, write to the server or open
+    /// a port start off; a guide or Settings turns them on.
+    #[test]
+    fn help_opens_only_the_project_pages() {
+        assert!(help_link_allowed("https://github.com/Silvercyclops999/platter/blob/main/PRIVACY.md"));
+        assert!(!help_link_allowed("https://github.com/Silvercyclops999/platter.evil.example/x"));
+        assert!(!help_link_allowed("https://example.com/"));
+        assert!(!help_link_allowed("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn risky_features_start_off() {
+        let s = Settings::default();
+        let v = serde_json::to_value(&s).unwrap();
+        for k in [
+            // Open a port on this computer.
+            "nowPlayingFeed",
+            "allowStreamDeck",
+            "allowAutomation",
+            "showToMyDevices",
+            "actAsPlexPlayer",
+            // Write to the server.
+            "saveQueueOnServer",
+            "autoRequest",
+            // Send something to another service or other people.
+            "discordStatus",
+            "discordUploadArt",
+            "discordUploadCovers",
+            "shareActivity",
+            "sharePublicLinks",
+            "catalogueSearch",
+            "fansAlsoLikeCatalogue",
+            "homeNewToYou",
+            "releaseRadar",
+            "checkUnmatchedMusicbrainz",
+            "infoWikipedia",
+            "infoLastfm",
+            "infoFanart",
+            "infoAudiodb",
+            "infoListenbrainz",
+            "infoMusicbrainz",
+            "infoListenbrainzStats",
+            "lyricsLrclib",
+            "identifyBySound",
+            "scrobbleLastfm",
+            "scrobbleListenbrainz",
+            "statsCompare",
+            "shareTranscriptionsUnreleased",
+            "syncEnabled",
+            "transcribeLyrics",
+            "notifyNewReleases",
+        ] {
+            assert_eq!(v[k], serde_json::json!(false), "{k} must start off");
+        }
+        for k in ["translationService", "lidarrUrl", "tautulliUrl", "listenRelay"] {
+            assert_eq!(v[k], serde_json::json!(""), "{k} must start empty");
+        }
+        assert_eq!(s.ai_provider, crate::smart::prompt::AiProvider::None);
+    }
+
+    #[test]
+    fn help_and_guides_start_on_and_sync() {
+        let s = Settings::default();
+        assert!(s.show_setup_guides && s.show_help_buttons);
+        assert!(SYNCED_SETTINGS.contains(&"showSetupGuides") && SYNCED_SETTINGS.contains(&"showHelpButtons"));
+        let mut s = s;
+        s.apply(&serde_json::from_value(serde_json::json!({ "showSetupGuides": false, "showHelpButtons": false })).unwrap()).unwrap();
+        assert!(!s.show_setup_guides && !s.show_help_buttons);
+    }
+
+    #[test]
+    fn exported_settings_round_trip() {
+        let mut s = Settings::default();
+        s.apply(
+            &serde_json::from_value(serde_json::json!({
+                "theme": "light",
+                "crossfadeSeconds": 9,
+                "mixExcludeGenres": ["Polka"],
+                "lidarrUrl": "http://10.0.0.5:8686",
+                "showHelpButtons": false,
+                "goOffline": true,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        s.music_folder = "/Volumes/Music".into();
+        s.download_folder = "/Users/me/Platter downloads".into();
+        let doc = export_value(&s);
+        let text = serde_json::to_string(&doc).unwrap();
+        assert!(!text.contains("/Volumes/Music") && !text.contains("Platter downloads"), "folders stay on this computer");
+        let (patch, report) = import_patch(&serde_json::from_str(&text).unwrap()).unwrap();
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+        let mut fresh = Settings::default();
+        fresh.apply(&patch).unwrap();
+        // Everything exported came back, apart from the values only the core keeps.
+        let (a, b) = (serde_json::to_value(&fresh).unwrap(), serde_json::to_value(&s).unwrap());
+        for (k, v) in doc["settings"].as_object().unwrap() {
+            if ["volume"].contains(&k.as_str()) {
+                continue;
+            }
+            let patched = {
+                let mut one = serde_json::Map::new();
+                one.insert(k.clone(), v.clone());
+                serde_json::from_value::<SettingsPatch>(serde_json::Value::Object(one)).unwrap() != SettingsPatch::default()
+            };
+            if patched {
+                assert_eq!(a[k], b[k], "{k} didn't round-trip");
+            }
+        }
+        assert!(fresh.music_folder.is_empty());
+    }
+
+    #[test]
+    fn imports_skip_what_they_cant_read_and_refuse_other_files() {
+        let doc = serde_json::json!({
+            "kind": "platter-settings",
+            "version": 1,
+            "settings": { "theme": "light", "shuffleStyle": "sideways", "noSuchSetting": 1, "musicFolder": "/x" },
+        });
+        let (p, report) = import_patch(&doc).unwrap();
+        assert_eq!(report.applied, 1);
+        assert_eq!(report.skipped, vec!["noSuchSetting".to_string(), "shuffleStyle".to_string()]);
+        let mut s = Settings::default();
+        s.apply(&p).unwrap();
+        assert_eq!(s.theme, ThemeMode::Light);
+        assert!(import_patch(&serde_json::json!({ "settings": {} })).is_err());
+        assert!(import_patch(&serde_json::json!({ "kind": "platter-settings" })).is_err());
+    }
+
+    /// Keys, tokens and passwords live in the keychain, never in settings, so
+    /// an exported file can't carry one.
+    #[test]
+    fn no_setting_holds_a_secret() {
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        for k in v.as_object().unwrap().keys() {
+            let l = k.to_lowercase();
+            let secret = ["token", "password", "secret", "apikey", "clientid"].iter().any(|w| l.contains(w))
+                || (l.ends_with("key") && k != "hintKey");
+            assert!(!secret, "{k} looks like a secret; keep it in the keychain");
+        }
     }
 
     #[test]
@@ -2657,9 +2976,9 @@ mod tests {
         assert!(s.apply(&SettingsPatch { daylist_hours: Some(2), ..Default::default() }).is_err());
         assert!(SettingsPatch { mix_unreleased: Some(true), ..Default::default() }.touches_mixes());
         assert!(!SettingsPatch { home_mixes: Some(false), ..Default::default() }.touches_mixes());
-        // Friend activity, sharing, What's New, guests adding and the Discord
-        // session are on; new release notifications are off.
-        assert!(s.show_friend_activity && s.share_activity && s.whats_new_announcements);
+        // Friend activity, What's New, guests adding and the Discord session
+        // are on; sharing your activity and new release notifications are off.
+        assert!(s.show_friend_activity && !s.share_activity && s.whats_new_announcements);
         assert!(!s.notify_new_releases);
         assert!(s.listen_guests_control && s.discord_listen_along);
         // Unreleased titles go to guests unless the host hides them.
@@ -2843,8 +3162,11 @@ mod tests {
         let (db, _d) = db();
         let live = Live::default();
         let mut s = Settings::default();
-        assert!(s.check_unmatched_musicbrainz, "on by default");
+        assert!(!s.check_unmatched_musicbrainz, "it asks MusicBrainz, so it starts off");
         assert!(SYNCED_SETTINGS.contains(&"checkUnmatchedMusicbrainz"));
+        publish(&s, &live, &db);
+        assert!(!use_musicbrainz());
+        s.apply(&SettingsPatch { check_unmatched_musicbrainz: Some(true), info_musicbrainz: Some(true), ..Default::default() }).unwrap();
         publish(&s, &live, &db);
         assert!(use_musicbrainz());
         let found = || release_status(None, &[] as &[&str], Some(false), None, None, Some(true)).0;
@@ -3321,9 +3643,9 @@ mod tests {
         assert_eq!(v["upNextLine"], true);
         assert_eq!(v["volumePercent"], true);
         assert_eq!(v["notifyTrackChange"], false);
-        assert_eq!(v["infoWikipedia"], true);
+        assert_eq!(v["infoWikipedia"], false);
         assert_eq!(v["infoLastfm"], false);
-        assert_eq!(v["sharePublicLinks"], true);
+        assert_eq!(v["sharePublicLinks"], false);
         let p: SettingsPatch = serde_json::from_str(r#"{"shuffleStyle":"standard"}"#).unwrap();
         assert_eq!(p.shuffle_style, Some(ShuffleStyle::Standard));
         let p: SettingsPatch =
@@ -3412,7 +3734,9 @@ mod tests {
     #[test]
     fn platter_device_settings_default_and_reach_the_switches() {
         let s = Settings::default();
-        assert!(s.show_to_my_devices && s.computer_name.is_empty() && !s.show_airplay_locked);
+        assert!(!s.show_to_my_devices && s.computer_name.is_empty() && !s.show_airplay_locked, "it opens a port, so it starts off");
+        let mut s = s;
+        s.show_to_my_devices = true;
         let (db, _d) = db();
         let live = Live::default();
         publish(&s, &live, &db);
@@ -3632,7 +3956,7 @@ mod tests {
     #[test]
     fn release_radar_settings_defaults_choices_and_where_they_live() {
         let s = Settings::default();
-        assert!(s.release_radar && s.radar_notify, "the radar and its notifications start on");
+        assert!(!s.release_radar && s.radar_notify, "the radar asks MusicBrainz, so it starts off; its notifications follow it");
         assert!(!s.auto_request, "auto-request starts off");
         assert_eq!(s.auto_request_cap, 3);
         assert!(SYNCED_SETTINGS.contains(&"releaseRadar") && SYNCED_SETTINGS.contains(&"radarNotify"));
@@ -3677,7 +4001,7 @@ mod tests {
     #[test]
     fn discover_settings_defaults_and_where_they_live() {
         let s = Settings::default();
-        assert!(s.catalogue_search && s.fans_also_like_catalogue && s.home_new_to_you);
+        assert!(!s.catalogue_search && !s.fans_also_like_catalogue && !s.home_new_to_you, "they ask other services");
         assert!(s.dismissed_artists.is_empty());
         for k in ["catalogueSearch", "fansAlsoLikeCatalogue", "homeNewToYou", "dismissedArtists"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");

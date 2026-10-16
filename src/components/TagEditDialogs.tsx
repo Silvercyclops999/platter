@@ -4,6 +4,7 @@
  * change first and can be undone.
  */
 import { Check, CircleAlert, Info, TriangleAlert } from "lucide-react";
+import { HelpButton } from "../help/HelpButton";
 import { useEffect, useId, useMemo, useState } from "react";
 import { backend } from "../lib/backend";
 import {
@@ -607,7 +608,10 @@ function CheckDialog({ scope, title, onClose }: { scope: Parameters<typeof backe
   const rows = data?.findings.filter((f) => !hidden.has(f.id)) ?? [];
   return (
     <Dialog open onClose={onClose} label="Check tags" className="pe pe--wide te">
-      <h2 className="pe__title">Check tags: {title}</h2>
+      <div className="help-heading">
+        <h2 className="pe__title">Check tags: {title}</h2>
+        <HelpButton page="tag-editor" anchor="check-tags" label="What Check tags looks for" inline />
+      </div>
       {error ? (
         <Problem text={error} onClose={onClose} />
       ) : !data ? (

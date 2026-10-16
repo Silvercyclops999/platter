@@ -36,6 +36,15 @@ To test against a real server while developing, copy `.env.example` to `.env`
 and add your token. That's only for development; the app itself signs in
 through Plex.
 
+## Help pages
+
+The help in the app and the docs site both come from the Markdown in
+`docs/help/` (one file per page; the order is in `src/help/order.ts`).
+Write plainly and briefly, link pages as `[text](page.md#section)`, and use
+screenshots from the demo library only. `npm test` checks the links and the
+house style; `node --experimental-strip-types scripts/build-help-site.ts`
+builds the site into `site/`.
+
 ## Pull requests
 
 Keep them small and focused, and include tests. If you add a failure state

@@ -12,6 +12,7 @@ import { useShareCard } from "../stores/shareCard";
 import { useTagEdit } from "../stores/tagEdit";
 import { useStatsDialog } from "../stores/stats";
 import { useLooks } from "../stores/looks";
+import { useGuides } from "../stores/guides";
 
 const SmartEditor = lazy(() => import("../components/SmartPlaylistEditor").then((m) => ({ default: m.SmartEditorHost })));
 const LyricsEditor = lazy(() => import("./LyricsEditor").then((m) => ({ default: m.LyricsEditorHost })));
@@ -21,6 +22,8 @@ const StatsDialog = lazy(() => import("../components/StatsDialog").then((m) => (
 const LookBuilder = lazy(() => import("../pages/looks/LookBuilder").then((m) => ({ default: m.LookBuilderHost })));
 const PickLook = lazy(() => import("../pages/looks/LookCards").then((m) => ({ default: m.PickLookDialog })));
 const TagEdit = lazy(() => import("../components/TagEditDialogs").then((m) => ({ default: m.TagEditDialogs })));
+const Guide = lazy(() => import("../guides/GuideDialog").then((m) => ({ default: m.GuideHost })));
+const Help = lazy(() => import("../help/HelpPanel").then((m) => ({ default: m.HelpPanel })));
 const PlexEdit = lazy(() => import("../components/PlexEditDialogs").then((m) => ({ default: m.PlexEditDialogs })));
 
 /** True from the first time `open` is true onwards. */
@@ -111,4 +114,22 @@ export function LazyPickLookHost() {
       <PickLook />
     </Suspense>
   ) : null;
+}
+
+export function LazyGuideHost() {
+  const show = useOnceOpen(useGuides((s) => !!s.active));
+  return show ? (
+    <Suspense fallback={null}>
+      <Guide />
+    </Suspense>
+  ) : null;
+}
+
+/** The help panel, in the right slot while it's open. */
+export function LazyHelpPanel() {
+  return (
+    <Suspense fallback={null}>
+      <Help />
+    </Suspense>
+  );
 }

@@ -1,3 +1,4 @@
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -17,7 +18,7 @@ const demo = fx.albums.find((a) => a.subformats.includes("demo"))!;
 const released = fx.albums.find((a) => mockMatched(a) && !a.subformats.includes("demo"))!;
 
 beforeEach(async () => {
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   await loadSettings();
 });
 

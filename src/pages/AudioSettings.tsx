@@ -109,7 +109,7 @@ export function PreampControl({ ids }: { ids: Ids }) {
   return (
     <div className="audio-slider" aria-describedby={ids.desc}>
       <Slider
-        label="Preamp"
+        label="Volume before the equalizer"
         className="audio-slider__track audio-slider__track--wide"
         value={v}
         min={-12}

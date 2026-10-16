@@ -47,9 +47,10 @@ import { DeckActions } from "./DeckActions";
 import { DeckPairPrompt } from "./DeckPairPrompt";
 import { backend } from "../lib/backend";
 import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost, LazyTagEditDialogs } from "./lazyHosts";
-import { LazyWrongLyricsHost } from "./lazyHosts";
+import { LazyGuideHost, LazyHelpPanel, LazyWrongLyricsHost } from "./lazyHosts";
 import { LookDrop } from "./LookDrop";
 import { QueuePanel } from "./QueuePanel";
+import { WhatsNewDialog } from "../help/WhatsNewDialog";
 import { ArchiveDialogs } from "../components/ArchiveDialogs";
 import { PhysicalDialogHost } from "../components/PhysicalDialog";
 import { ResizeHandle } from "./ResizeHandle";
@@ -110,10 +111,11 @@ export function AppShell() {
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
   const activityOpen = useUi((s) => s.activityOpen);
+  const helpOpen = useUi((s) => s.helpOpen);
   // The queue, the now-playing panel, the output picker and friend activity share the right slot, one at a time.
-  const rightView = slotView({ queueOpen, nowPlayingOpen, outputOpen, activityOpen });
+  const rightView = slotView({ queueOpen, nowPlayingOpen, outputOpen, activityOpen, helpOpen });
   // Any of them but the now-playing panel sits beside the expanded view.
-  const beside = besideView({ queueOpen, nowPlayingOpen, outputOpen, activityOpen }, useFullWindow((s) => s.open)) !== null;
+  const beside = besideView({ queueOpen, nowPlayingOpen, outputOpen, activityOpen, helpOpen }, useFullWindow((s) => s.open)) !== null;
   const rightOpen = rightView !== null;
   // One panel replacing the other rises in place of sliding in from the edge.
   const [slot, setSlot] = useState<{ view: typeof rightView; swap: boolean }>({ view: rightView, swap: false });
@@ -211,7 +213,7 @@ export function AppShell() {
           <>
             <ResizeHandle
               className="resize-handle--right"
-              label={outputOpen ? "Resize device picker" : activityOpen ? "Resize listening activity" : queueOpen ? "Resize queue" : "Resize now playing view"}
+              label={helpOpen ? "Resize help" : outputOpen ? "Resize device picker" : activityOpen ? "Resize listening activity" : queueOpen ? "Resize queue" : "Resize now playing view"}
               value={layout.right}
               min={RIGHT_MIN}
               max={RIGHT_MAX}
@@ -224,7 +226,7 @@ export function AppShell() {
                 return true;
               }}
             />
-            {outputOpen ? <OutputPanel /> : activityOpen ? <FriendActivityPanel /> : queueOpen ? <QueuePanel /> : <NowPlayingPanel />}
+            {helpOpen ? <LazyHelpPanel /> : outputOpen ? <OutputPanel /> : activityOpen ? <FriendActivityPanel /> : queueOpen ? <QueuePanel /> : <NowPlayingPanel />}
           </>
         ) : (
           <div className="right-strip">
@@ -240,6 +242,8 @@ export function AppShell() {
       <ListenStrip />
       <PlayerBar />
       <CommandPalette />
+      <LazyGuideHost />
+      <WhatsNewDialog />
       <ShortcutsHelp />
       <PowerHints />
       <ContextMenuHost />

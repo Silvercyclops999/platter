@@ -127,23 +127,31 @@ export interface ContextMenuState {
 }
 
 /** What the right slot can show. */
-export type RightView = "queue" | "nowPlaying" | "output" | "activity";
+export type RightView = "queue" | "nowPlaying" | "output" | "activity" | "help";
+
+type SlotFlags = Pick<UiState, "queueOpen" | "nowPlayingOpen" | "outputOpen" | "activityOpen"> & { helpOpen?: boolean };
 
 /** What the right slot shows, if anything. */
-export function rightView(s: Pick<UiState, "queueOpen" | "nowPlayingOpen" | "outputOpen" | "activityOpen">): RightView | null {
-  return s.outputOpen ? "output" : s.activityOpen ? "activity" : s.queueOpen ? "queue" : s.nowPlayingOpen ? "nowPlaying" : null;
+export function rightView(s: SlotFlags): RightView | null {
+  return s.helpOpen ? "help" : s.outputOpen ? "output" : s.activityOpen ? "activity" : s.queueOpen ? "queue" : s.nowPlayingOpen ? "nowPlaying" : null;
 }
 
 /**
  * The panel open beside the expanded view, if any. Every view but the
  * now-playing panel opens beside it; that one is the view's alternative.
  */
-export function besideView(s: Pick<UiState, "queueOpen" | "nowPlayingOpen" | "outputOpen" | "activityOpen">, expanded: boolean): RightView | null {
+export function besideView(s: SlotFlags, expanded: boolean): RightView | null {
   const v = rightView(s);
   return expanded && v !== "nowPlaying" ? v : null;
 }
 
-const showing = (v: RightView | null) => ({ queueOpen: v === "queue", nowPlayingOpen: v === "nowPlaying", outputOpen: v === "output", activityOpen: v === "activity" });
+const showing = (v: RightView | null) => ({
+  queueOpen: v === "queue",
+  nowPlayingOpen: v === "nowPlaying",
+  outputOpen: v === "output",
+  activityOpen: v === "activity",
+  helpOpen: v === "help",
+});
 
 interface UiState extends PanelWidths {
   /** The right slot shows the queue. At most one of queueOpen / nowPlayingOpen is true. */
@@ -158,6 +166,9 @@ interface UiState extends PanelWidths {
   setOutputOpen: (v: boolean) => void;
   /** The right slot shows friend activity. */
   activityOpen: boolean;
+  /** The right slot shows a help page (stores/help.ts says which). */
+  helpOpen: boolean;
+  setHelpOpen: (v: boolean) => void;
   toggleActivity: () => void;
   setActivityOpen: (v: boolean) => void;
   nowPlayingPrefs: NowPlayingPrefs;
@@ -234,6 +245,8 @@ export const useUi = create<UiState>()((set, get) => ({
   outputOpen: false,
   outputReturn: null,
   activityOpen: false,
+  helpOpen: false,
+  setHelpOpen: (v) => setRight("help", v),
   toggleActivity: () => get().setActivityOpen(!get().activityOpen),
   setActivityOpen: (v) => setRight("activity", v),
   toggleOutput: () => get().setOutputOpen(!get().outputOpen),

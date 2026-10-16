@@ -5,6 +5,7 @@
  * (model download failed, checksum mismatch, out of disk, transcription
  * failed) shown in plain words.
  */
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -59,8 +60,8 @@ beforeEach(async () => {
   mock.own.clear();
   mock.transcribe.reset();
   mock.transcribe.stepMs = 5;
-  await mock.settingsSet({ transcribeLyrics: false, transcribeModel: "small", transcribeGpu: "auto", showAutoLyrics: true, lyricsShowAdd: true });
-  useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
+  await mock.settingsSet({ transcribeLyrics: false, transcribeModel: "small", transcribeGpu: "auto", showAutoLyrics: true, lyricsShowAdd: true, ...ONLINE_EXTRAS });
+  useSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS } });
   useLyricsEditor.setState({ track: null, ownIds: new Set(), version: 0 });
   useToasts.setState({ toasts: [] });
   resetTranscribe();

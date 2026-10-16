@@ -16,8 +16,8 @@ and your own Plex server.
   Plex Home users, to read your account's device list, and to publish this
   computer's local addresses for your other Platter computers (see below).
 - GitHub, to check for and download app updates.
-- Wikipedia and Wikidata, for artist bios and facts (on by default, can be
-  turned off in Settings). The request carries the artist's name or
+- Wikipedia and Wikidata, for artist bios and facts (off until you turn it
+  on in Settings or the Get started guide). The request carries the artist's name or
   MusicBrainz id, nothing else. The artist's website and profile links shown
   in the About dialog come from the same answer and only open, in your
   browser, when you click one.
@@ -25,15 +25,15 @@ and your own Plex server.
   them in Settings. They get the artist's name or MusicBrainz id and your key.
   Their images are fetched from their own image servers.
 - ListenBrainz, for an artist's most played songs worldwide (the Popular
-  list; on by default, can be turned off in Settings). The request carries
+  list; off until you turn it on in Settings or the Get started guide). The request carries
   the artist's MusicBrainz id, and your ListenBrainz user token if you choose
   to enter one.
-- ListenBrainz listener numbers for an artist, when Last.fm has none (on by
-  default, can be turned off in Settings). The request carries the artist's
+- ListenBrainz listener numbers for an artist, when Last.fm has none (off
+  until you turn it on in Settings or the Get started guide). The request carries the artist's
   MusicBrainz id.
 - MusicBrainz, to find the MusicBrainz id of a featured artist who has no
   albums in your library, when you open their page. The request carries the
-  artist's name, nothing else. With MusicBrainz on in Settings (the default),
+  artist's name, nothing else. With MusicBrainz on in Settings (it's off until you turn it on),
   it also gives an artist's members and related artists (the request carries
   their MusicBrainz id) and an album's release date and credits (the album's
   MusicBrainz release id, or its artist and title when Plex has no id).
@@ -47,7 +47,7 @@ and your own Plex server.
 - ntfy.sh (or your own ntfy server), only during a listening session. It
   carries the session's sealed messages; see Listening sessions below.
 - Apple's iTunes Search, only when you copy a public link for a song or album
-  from a Share menu (on by default, can be turned off in Settings). The search
+  from a Share menu (off until you turn on public links in Settings). The search
   carries the artist and the song or album title, nothing else. Unreleased
   music is never looked up.
 - song.link: the public links Platter copies point to song.link pages. The app
@@ -65,7 +65,7 @@ and your own Plex server.
   short-lived token, along with each song's title, artist, album and cover
   link so it can show them.
 - Your other computers running Platter. While "Show this computer to my
-  other devices" is on (it is by default), the app announces itself on your
+  other devices" is on (it's off until you turn it on), the app announces itself on your
   local network with multicast DNS. The announcement holds an id for this
   install, the name you give the computer (its own computer name until you
   change it), whether it's Windows or macOS, the app version, and a short
@@ -81,7 +81,7 @@ and your own Plex server.
   The app tells plex.tv those local addresses, the way Plex players
   do, so your other computers can find this one through Plex. Turning the
   setting off stops the announcement and closes the port.
-- Discord, when Discord status is on (it is by default) and the Discord app
+- Discord, when Discord status is on (it's off until you turn it on) and the Discord app
   is open on your computer. Platter talks only to that local app, which shows
   the song title, artist, album, how far into the song you are, a cover image
   link and, for released songs, a song.link button on your Discord profile.
@@ -167,10 +167,11 @@ while the panel is open. It goes nowhere else.
 
 What others see of you is what Plex records. While a song plays, Platter tells
 your server about it, and that's what makes you show up live for the server's
-owner. Turn off "Share my activity with Platter friends", or start a private
-session, and Platter stops doing that. Songs you finish still go into Plex's
-play history unless you're in a private session or "Report plays to Plex" is
-off, and other Plex apps the owner uses can see that history.
+owner. "Share my activity with Platter friends" is off until you turn it on,
+and a private session stops it too. Songs you finish still go into Plex's
+play history unless "Report plays to your server" is off (a private session
+only keeps them out of Platter's own listen log), and other Plex apps the
+owner uses can see that history.
 
 The artists you follow are kept in the app's data folder on this computer,
 and in the sync file if you turn that on (see below).

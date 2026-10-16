@@ -1,3 +1,4 @@
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,7 +41,7 @@ const SIGNED_IN = {
 };
 
 beforeEach(async () => {
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS });
   useSettings.setState({ settings: null });
   useApp.setState({ auth: SIGNED_IN, health: null, sync: { phase: "idle", done: 0, total: 0 } });
   useToasts.setState({ toasts: [] });
@@ -58,17 +59,17 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Audio quality", "Playback", "Library", "Storage", "Downloads and offline", "Sync", "Search", "Appearance", "Home", "Mixes", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "Social", "About", "Now playing", "Library import", "Editing", "Stream Deck", "Automation", "Bridge"]);
+    expect(headings).toEqual(["Account", "Setup guides", "Audio quality", "Playback", "Library", "Storage", "Downloads and offline", "Sync", "Search", "Appearance", "Home", "Mixes", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "Social", "About", "Now playing", "Library import", "Editing", "Stream Deck", "Automation", "Bridge"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
     expect(screen.getByRole("switch", { name: "Show format badge" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("combobox", { name: "Shuffle style" })).toHaveValue("spread");
     expect(screen.getByRole("switch", { name: "Albums and playlists resume where you left off" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("spinbutton", { name: "Pre-cache ahead" })).toHaveValue(5);
+    expect(screen.getByRole("spinbutton", { name: "Songs to load ahead" })).toHaveValue(5);
     expect(screen.getByRole("switch", { name: "Report plays to your server" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Private session" })).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("combobox", { name: "Artist page Popular" })).toHaveValue("global");
+    expect(screen.getByRole("combobox", { name: "Popular songs on artist pages" })).toHaveValue("global");
     expect(screen.getByRole("combobox", { name: "Artwork and cache size" })).toHaveValue("2048");
     expect(screen.getByRole("switch", { name: "Artwork colours" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Show suggestions as you type" })).toHaveAttribute("aria-checked", "true");
@@ -226,14 +227,14 @@ describe("settings page", () => {
     expect(set).toHaveBeenCalledWith({ qualityAway: "original" });
     await user.selectOptions(screen.getByRole("combobox", { name: "Shuffle style" }), "standard");
     expect(set).toHaveBeenCalledWith({ shuffleStyle: "standard" });
-    await user.selectOptions(screen.getByRole("combobox", { name: "Artist page Popular" }), "myPlays");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Popular songs on artist pages" }), "myPlays");
     expect(set).toHaveBeenCalledWith({ popularSource: "myPlays" });
     await user.selectOptions(screen.getByRole("combobox", { name: "Artwork and cache size" }), "5120");
     expect(set).toHaveBeenCalledWith({ artCacheMb: 5120 });
     await user.selectOptions(screen.getByRole("combobox", { name: "Reduce motion" }), "on");
     expect(set).toHaveBeenCalledWith({ reduceMotion: "on" });
 
-    const pre = screen.getByRole("spinbutton", { name: "Pre-cache ahead" });
+    const pre = screen.getByRole("spinbutton", { name: "Songs to load ahead" });
     fireEvent.change(pre, { target: { value: "12" } });
     expect(set).toHaveBeenCalledWith({ precacheCount: 12 });
     set.mockClear();

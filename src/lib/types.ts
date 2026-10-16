@@ -1098,6 +1098,10 @@ export interface Settings {
   includeLastfmHistory: boolean;
   /** Tautulli's address (empty: not set up). Its API key is in the keychain. */
   tautulliUrl: string;
+  /** Offer a setup guide when a feature that has one is first used. */
+  showSetupGuides: boolean;
+  /** Show the "?" buttons that open help next to complex screens. */
+  showHelpButtons: boolean;
   /** The Stats page (profile menu and library row). */
   statsPage: boolean;
   /** The stats strip on song, artist and album pages (and "Your stats" in menus). */
@@ -1328,6 +1332,14 @@ export const EQ_PRESETS: { id: string; name: string; bands: number[] }[] = [
   { id: "lateNight", name: "Late night", bands: [-5, -4, -2, -0.5, 0, 1, 1.5, 1, 0, -1] },
 ];
 
+/** What importing a settings file changed. */
+export interface SettingsImportReport {
+  /** How many settings the file set. */
+  applied: number;
+  /** Settings in the file this version can't use. */
+  skipped: string[];
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   privateSession: false,
   reportPlays: true,
@@ -1358,13 +1370,13 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyTrackChange: false,
   playlistAskDuplicates: true,
   playlistNewName: "My playlist #N",
-  infoWikipedia: true,
+  infoWikipedia: false,
   infoLastfm: false,
   infoFanart: false,
   infoAudiodb: false,
-  infoListenbrainz: true,
-  infoMusicbrainz: true,
-  infoListenbrainzStats: true,
+  infoListenbrainz: false,
+  infoMusicbrainz: false,
+  infoListenbrainzStats: false,
   linkFeatured: true,
   likedMeans: "five",
   likeControlRows: "hover",
@@ -1386,11 +1398,11 @@ export const DEFAULT_SETTINGS: Settings = {
   eqLastOutput: null,
   headphoneCorrection: [],
   bitPerfectOutputs: [],
-  sharePublicLinks: true,
+  sharePublicLinks: false,
   shareCardQr: true,
   shareCardSongLink: true,
   showCastDevices: true,
-  discordStatus: true,
+  discordStatus: false,
   discordShowUnreleased: true,
   discordUnreleasedArt: true,
   discordClearOnPause: true,
@@ -1417,7 +1429,7 @@ export const DEFAULT_SETTINGS: Settings = {
   explicitContent: "allowed",
   showFanEdits: false,
   countUnmatchedUnreleased: true,
-  checkUnmatchedMusicbrainz: true,
+  checkUnmatchedMusicbrainz: false,
   groupEditions: true,
   plexEditShow: true,
   plexEditLock: true,
@@ -1436,7 +1448,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lyricsCheckAudio: true,
   lyricsFixTiming: true,
   lyricsReleasedForVersions: false,
-  showToMyDevices: true,
+  showToMyDevices: false,
   computerName: "",
   showAirplayLocked: false,
   downloadQuality: "original",
@@ -1455,7 +1467,7 @@ export const DEFAULT_SETTINGS: Settings = {
   queueEnd: "keepPlaying",
   smartShuffle: true,
   showFriendActivity: true,
-  shareActivity: true,
+  shareActivity: false,
   whatsNewAnnouncements: true,
   notifyNewReleases: false,
   listenGuestsControl: true,
@@ -1481,6 +1493,8 @@ export const DEFAULT_SETTINGS: Settings = {
   includeTautulliHistory: true,
   includeLastfmHistory: true,
   tautulliUrl: "",
+  showSetupGuides: true,
+  showHelpButtons: true,
   statsPage: true,
   statsStrip: true,
   monthlyStatsOnProfile: true,
@@ -1529,17 +1543,17 @@ export const DEFAULT_SETTINGS: Settings = {
     soundsLike: true,
   },
   doctorCoverPx: 600,
-  releaseRadar: true,
+  releaseRadar: false,
   radarNotify: true,
   autoRequest: false,
   autoRequestCap: 3,
   identifyBySound: false,
   soundIdScope: "untagged",
   subsonicCheckMinutes: 5,
-  saveQueueOnServer: true,
-  catalogueSearch: true,
-  fansAlsoLikeCatalogue: true,
-  homeNewToYou: true,
+  saveQueueOnServer: false,
+  catalogueSearch: false,
+  fansAlsoLikeCatalogue: false,
+  homeNewToYou: false,
   dismissedArtists: [],
   showPhysicalCollection: true,
   shelfMissingList: false,

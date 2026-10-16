@@ -1,4 +1,5 @@
-import { CornerDownLeft, Disc3, History, House, Keyboard, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, User, Volume1, Volume2 } from "lucide-react";
+import { CircleHelp, CornerDownLeft, Disc3, History, House, Keyboard, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, User, Volume1, Volume2 } from "lucide-react";
+import { help } from "../stores/help";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
@@ -32,6 +33,7 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "go-settings", label: "Open settings", hint: `${modKey}+,`, icon: <Settings size={16} />, group: "Navigation", run: () => nav.go({ name: "settings" }) },
   { id: "go-back", label: "Go back", hint: shortcutLabel("back"), icon: <CornerDownLeft size={16} />, group: "Navigation", run: () => nav.back() },
   { id: "shortcuts", label: "Keyboard shortcuts", hint: shortcutLabel("help"), icon: <Keyboard size={16} />, group: "Navigation", run: () => useUi.getState().setShortcutsOpen(true) },
+  { id: "help", label: "Help", icon: <CircleHelp size={16} />, group: "Navigation", run: () => help.open("") },
   { id: "toggle-queue", label: "Toggle queue", hint: shortcutLabel("queue"), icon: <ListMusic size={16} />, group: "Playback", run: () => useUi.getState().toggleQueue() },
   { id: "play-pause", label: "Play / pause", hint: "Space", icon: <Music size={16} />, group: "Playback", run: () => player.toggle() },
   { id: "next", label: "Next track", hint: `${modKey}+→`, icon: <Music size={16} />, group: "Playback", run: () => player.next() },

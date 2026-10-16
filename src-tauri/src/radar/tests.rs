@@ -208,7 +208,10 @@ fn rig() -> Rig {
         private_session: private.clone(),
         clock: Arc::new(move || *n.lock()),
     });
-    Rig { _dir: dir, db, mb, follows, top, lidarr, notes, events, online, private, now, radar }
+    let rig = Rig { _dir: dir, db, mb, follows, top, lidarr, notes, events, online, private, now, radar };
+    // The radar asks MusicBrainz, so a new install has it off; these tests turn it on.
+    rig.settings(|s| s.release_radar = true);
+    rig
 }
 
 impl Rig {

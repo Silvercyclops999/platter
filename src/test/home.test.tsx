@@ -1,3 +1,4 @@
+import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,8 +83,9 @@ function renderHome(d: HomeData) {
   );
 }
 
-beforeEach(() => {
-  useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
+beforeEach(async () => {
+  await mock.settingsSet(ONLINE_EXTRAS);
+  useSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS } });
   useRouter.getState().reset();
   Element.prototype.scrollTo = vi.fn();
   vi.spyOn(backend, "artUrl").mockImplementation((path) => `http://art.test${path}`);

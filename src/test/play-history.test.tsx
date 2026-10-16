@@ -62,7 +62,7 @@ describe("play history settings", () => {
     await userEvent.type(url, "http://192.168.x.x:8181/{Enter}");
     await waitFor(() => expect(useSettings.getState().settings?.tautulliUrl).toBe("http://192.168.x.x:8181"));
     expect(row("includeTautulliHistory")).toBeNull();
-    await userEvent.type(screen.getByLabelText("Tautulli API key"), "abc123");
+    await userEvent.type(screen.getByLabelText("Tautulli key"), "abc123");
     await userEvent.click(within(row("tautulliKey")!).getByRole("button", { name: "Save key" }));
     const t = await screen.findByRole("switch", { name: "Include Tautulli history" });
     expect(t.getAttribute("aria-checked")).toBe("true");

@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { toastExpiry, useToasts } from "../stores/toasts";
+import { advancedView } from "../pages/settingsMeta";
 
 afterEach(() => {
   // Vitest runs without globals, so Testing Library can't auto-register cleanup.
@@ -25,3 +26,7 @@ configure({ asyncUtilTimeout: 10_000 });
 // slow run outlasts between showing a toast and checking it (src/test/toasts.test.ts
 // covers the timing with fake timers).
 toastExpiry.on = false;
+
+// Settings rows under Advanced start open, so a test of one row needn't open
+// Advanced first (settings-easy.test.tsx turns this off to test collapsing).
+advancedView.startOpen = true;
