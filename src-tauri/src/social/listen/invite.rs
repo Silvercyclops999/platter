@@ -1,4 +1,6 @@
-//! Invite links: `platter://join/<token>`.
+//! Invite links: `platter://join/<token>`, and the same token as
+//! `platter://share/<token>` for asking someone to share their Plex music
+//! (`social::sharing::links`).
 //!
 //! The token is base64url of
 //!

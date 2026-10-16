@@ -202,6 +202,50 @@ pub trait ListenLibrary: Send + Sync {
     async fn find(&self, song: &Song) -> Option<Found>;
 }
 
+/// What sharing the host's Plex server did ("Let them listen from my
+/// server").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OfferOutcome {
+    /// plex.tv sent the invite.
+    Invited,
+    /// They can already reach the host's server.
+    AlreadyShared,
+    /// Why not, in words for the host.
+    Failed(String),
+}
+
+/// Plex sharing, as listen along needs it. The app shares through plex.tv
+/// with the host's chosen music libraries only (`social::sharing`); a guest
+/// finds the invite in Platter. [`NoOffer`] stands in when there's none.
+#[async_trait]
+pub trait ServerOffer: Send + Sync {
+    /// Host: "Let them listen from my server" is on (and this account owns
+    /// the server it plays from).
+    async fn offered(&self) -> bool;
+    /// Host: share my music with this Plex user.
+    async fn invite(&self, plex_user: &str) -> OfferOutcome;
+    /// Guest: my Plex username, when "Accept invites inside Platter" is on.
+    async fn me(&self) -> Option<String>;
+    /// Guest: the host says they shared; look for the invite.
+    async fn shared(&self, host: &str);
+}
+
+pub struct NoOffer;
+
+#[async_trait]
+impl ServerOffer for NoOffer {
+    async fn offered(&self) -> bool {
+        false
+    }
+    async fn invite(&self, _: &str) -> OfferOutcome {
+        OfferOutcome::Failed("Sharing isn't available here.".into())
+    }
+    async fn me(&self) -> Option<String> {
+        None
+    }
+    async fn shared(&self, _: &str) {}
+}
+
 /// One step a guest takes to match the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
@@ -302,6 +346,25 @@ pub struct PersonView {
     pub me: bool,
     /// The host's view: this guest has no copy of the song playing.
     pub cant_hear: bool,
+    /// The host's view: where "Let them listen from my server" is for them.
+    pub offer: Option<OfferState>,
+}
+
+/// "Let them listen from my server", for one guest (the host's view).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "state", content = "message")]
+pub enum OfferState {
+    /// Asked their Platter who they are on Plex.
+    Asking,
+    /// Sending the invite through Plex.
+    Inviting,
+    /// Invited; they accept in their Platter.
+    Invited,
+    /// They can already reach the server.
+    AlreadyShared,
+    /// Their Platter doesn't take invites; share from Settings instead.
+    NoInvites,
+    Failed(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -357,6 +420,8 @@ pub struct ListenView {
     pub missing: Option<MissingSong>,
     /// Guest: playing a copy of another length ("another version").
     pub another_version: bool,
+    /// Host: "Let them listen from my server" can be offered.
+    pub offer_server: bool,
 }
 
 impl ListenView {
@@ -376,6 +441,7 @@ impl ListenView {
             cant_hear: Vec::new(),
             missing: None,
             another_version: false,
+            offer_server: false,
         }
     }
 }
@@ -456,6 +522,7 @@ struct HostGuest {
     hello_at: Option<Instant>,
     /// The song (host id) they said they have no copy of.
     cant: Option<String>,
+    offer: Option<OfferState>,
 }
 
 /// The last state broadcast.
@@ -561,6 +628,8 @@ pub struct ListenDeps {
     pub server: Arc<dyn ServerId>,
     /// Who songs are, and finding them here.
     pub library: Arc<dyn ListenLibrary>,
+    /// Sharing the host's Plex server with a guest who can't hear a song.
+    pub offer: Arc<dyn ServerOffer>,
     /// The name others see.
     pub name: Arc<dyn Fn() -> String + Send + Sync>,
     pub settings: ListenSettings,
@@ -584,6 +653,9 @@ struct Inner {
     /// Look at the player now (a guest asked for something).
     poke: Notify,
     party: watch::Sender<Option<PartyInfo>>,
+    /// The host's "Let them listen from my server" (read when hosting starts
+    /// and on [`ListenAlong::settings_changed`]).
+    offered: AtomicBool,
 }
 
 /// Listen along on this computer. Cheap to clone.
@@ -611,6 +683,7 @@ impl ListenAlong {
                 follow_lock: tokio::sync::Mutex::new(()),
                 poke: Notify::new(),
                 party: watch::channel(None).0,
+                offered: AtomicBool::new(false),
             }),
         }
     }
@@ -657,7 +730,7 @@ impl ListenAlong {
             },
             Mode::Host(h) => {
                 let me = self.my_name();
-                let mut people = vec![PersonView { id: HOST_ID.into(), name: me.clone(), avatar: None, host: true, me: true, cant_hear: false }];
+                let mut people = vec![PersonView { id: HOST_ID.into(), name: me.clone(), avatar: None, host: true, me: true, cant_hear: false, offer: None }];
                 people.extend(h.guests.iter().map(|g| PersonView {
                     id: g.id.clone(),
                     name: g.name.clone(),
@@ -665,6 +738,7 @@ impl ListenAlong {
                     host: false,
                     me: false,
                     cant_hear: g.cant.is_some(),
+                    offer: g.offer.clone(),
                 }));
                 let invite = h.current_invite(now_ms()).map(|i| InviteView { link: i.link.clone(), qr: qr_for(&i.link), expires_at: i.expires_ms });
                 ListenView {
@@ -682,6 +756,7 @@ impl ListenAlong {
                     cant_hear: h.guests.iter().filter(|g| g.cant.is_some()).map(|g| g.name.clone()).collect(),
                     missing: None,
                     another_version: false,
+                    offer_server: self.inner.offered.load(Ordering::Relaxed),
                 }
             }
             Mode::Guest(f) => {
@@ -691,7 +766,7 @@ impl ListenAlong {
                 };
                 let people: Vec<PersonView> = ppl
                     .iter()
-                    .map(|p| PersonView { id: p.id.clone(), name: p.name.clone(), avatar: None, host: p.id == HOST_ID, me: p.id == f.me, cant_hear: false })
+                    .map(|p| PersonView { id: p.id.clone(), name: p.name.clone(), avatar: None, host: p.id == HOST_ID, me: p.id == f.me, cant_hear: false, offer: None })
                     .collect();
                 ListenView {
                     role: Role::Guest,
@@ -719,6 +794,7 @@ impl ListenAlong {
                     cant_hear: Vec::new(),
                     missing: if f.status == SessionStatus::Live { f.missing.clone() } else { None },
                     another_version: f.status == SessionStatus::Live && f.other_version,
+                    offer_server: false,
                 }
             }
         }
@@ -937,6 +1013,7 @@ impl ListenAlong {
         tokio::spawn(self.clone().pump(generation, relay, topics_rx));
         tokio::spawn(self.clone().host_watch(generation));
         tracing::info!("listening session started");
+        self.settings_changed().await;
         self.changed();
         Ok(self.view())
     }
@@ -1023,6 +1100,7 @@ impl ListenAlong {
                         seen: Instant::now(),
                         hello_at: None,
                         cant: None,
+                        offer: None,
                     });
                     h.refresh_topics();
                     Some((down, answer, true))
@@ -1048,6 +1126,7 @@ impl ListenAlong {
             State(Channel),
             Op(String, Op),
             Rekey(Vec<(Channel, Msg)>),
+            Invite(String, String),
         }
         let now = now_ms();
         let (then, relay, renamed) = {
@@ -1091,6 +1170,24 @@ impl ListenAlong {
                     }
                     Then::Nothing
                 }
+                Msg::PlexUser { u } => {
+                    let g = &mut h.guests[i];
+                    if g.offer != Some(OfferState::Asking) {
+                        Then::Nothing
+                    } else {
+                        renamed = true;
+                        match u.map(|u| u.trim().to_string()).filter(|u| !u.is_empty() && u.len() <= 200 && !u.chars().any(char::is_control)) {
+                            Some(u) => {
+                                g.offer = Some(OfferState::Inviting);
+                                Then::Invite(gid, u)
+                            }
+                            None => {
+                                g.offer = Some(OfferState::NoInvites);
+                                Then::Nothing
+                            }
+                        }
+                    }
+                }
                 Msg::Cmd(op) => Then::Op(gid, op),
                 Msg::Leave => {
                     h.guests.remove(i);
@@ -1132,6 +1229,81 @@ impl ListenAlong {
                     self.send_host(generation, &relay, &down, m, &[]).await;
                 }
             }
+            Then::Invite(gid, user) => {
+                let outcome = self.inner.deps.offer.invite(&user).await;
+                let state = match outcome {
+                    OfferOutcome::Invited => OfferState::Invited,
+                    OfferOutcome::AlreadyShared => OfferState::AlreadyShared,
+                    OfferOutcome::Failed(m) => OfferState::Failed(m),
+                };
+                let tell = matches!(state, OfferState::Invited | OfferState::AlreadyShared);
+                let down = match &mut *self.inner.mode.lock() {
+                    Mode::Host(h) if self.current(generation) => h.guests.iter_mut().find(|g| g.id == gid).map(|g| {
+                        g.offer = Some(state);
+                        g.down.clone()
+                    }),
+                    _ => None,
+                };
+                if let Some(down) = down {
+                    tracing::info!(invited = tell, "shared the server with someone in the session");
+                    if tell {
+                        self.send_host(generation, &relay, &down, Msg::Shared, &[]).await;
+                    }
+                    self.changed();
+                }
+            }
+        }
+    }
+
+    /// "Let them listen from my server" (host only): ask the guest's Platter
+    /// who they are on Plex; the invite follows its answer.
+    pub async fn offer_server(&self, person_id: &str) -> AppResult<ListenView> {
+        if !self.inner.deps.offer.offered().await {
+            return Err(AppError::Invalid("Sharing your server is turned off in Settings, Sharing.".into()));
+        }
+        let ask = {
+            let mut mode = self.inner.mode.lock();
+            let Mode::Host(h) = &mut *mode else {
+                return Err(AppError::Invalid("Only the host can share their server.".into()));
+            };
+            let Some(g) = h.guests.iter_mut().find(|g| g.id == person_id) else {
+                return Err(AppError::NotFound("They're not in the session anymore.".into()));
+            };
+            // Asked already and waiting: once is enough.
+            if matches!(g.offer, Some(OfferState::Asking | OfferState::Inviting)) {
+                None
+            } else {
+                g.offer = Some(OfferState::Asking);
+                Some((self.inner.generation.load(Ordering::SeqCst), h.relay.clone(), g.down.clone()))
+            }
+        };
+        let Some((generation, relay, down)) = ask else { return Ok(self.view()) };
+        self.send_host(generation, &relay, &down, Msg::Offer, &[]).await;
+        self.changed();
+        Ok(self.view())
+    }
+
+    /// Settings changed: whether the host offers its server.
+    pub async fn settings_changed(&self) {
+        let on = self.inner.deps.offer.offered().await;
+        if self.inner.offered.swap(on, Ordering::Relaxed) != on {
+            self.changed();
+        }
+    }
+
+    /// The library here changed (a server was shared with this account and
+    /// its music synced): look for the session's songs again, so a guest who
+    /// couldn't hear one plays the host's copy now.
+    pub async fn library_changed(&self) {
+        let (generation, last) = match &mut *self.inner.mode.lock() {
+            Mode::Guest(f) => {
+                f.found.clear();
+                (self.inner.generation.load(Ordering::SeqCst), f.last.clone())
+            }
+            _ => return,
+        };
+        if let Some(st) = last {
+            self.follow(generation, st).await;
         }
     }
 
@@ -1218,7 +1390,13 @@ impl ListenAlong {
     /// Watch the player and the guests; send the state when it changes.
     async fn host_watch(self, generation: u64) {
         let cfg = self.cfg();
+        let mut looked = Instant::now();
         loop {
+            // "Let them listen from my server" may have been switched in Settings.
+            if looked.elapsed() >= Duration::from_secs(5) {
+                looked = Instant::now();
+                self.settings_changed().await;
+            }
             tokio::select! {
                 _ = tokio::time::sleep(cfg.watch) => {}
                 _ = self.inner.poke.notified() => {}
@@ -1500,6 +1678,8 @@ impl ListenAlong {
         let mut follow = None;
         let mut stopped = false;
         let mut denied = None;
+        // The host offers its server (true) or says it shared it (false).
+        let mut offer = None;
         let changed = {
             let mut mode = self.inner.mode.lock();
             let Mode::Guest(f) = &mut *mode else { return };
@@ -1545,6 +1725,8 @@ impl ListenAlong {
                     }
                 }
                 Msg::Denied { msg } => denied = Some(msg),
+                Msg::Offer => offer = Some(true),
+                Msg::Shared => offer = Some(false),
                 _ => {}
             }
             before != (f.status, f.last.as_ref().map(|s| (s.ppl.clone(), s.ctl, s.q.clone(), s.tby.clone())))
@@ -1559,8 +1741,37 @@ impl ListenAlong {
         if let Some(msg) = denied {
             self.notice(&msg);
         }
+        match offer {
+            Some(true) => self.answer_offer(generation).await,
+            Some(false) => {
+                let host = match &*self.inner.mode.lock() {
+                    Mode::Guest(f) => f.host.name.clone(),
+                    _ => return,
+                };
+                // Looking for the invite can take a moment; the session goes on.
+                let me = self.clone();
+                tokio::spawn(async move { me.inner.deps.offer.shared(&host).await });
+            }
+            None => {}
+        }
         if let Some(st) = follow {
             self.follow(generation, st).await;
+        }
+    }
+
+    /// The host offers its server: tell it who we are on Plex, only when
+    /// this computer takes invites inside Platter (else None, and the host
+    /// is told to share from Settings).
+    async fn answer_offer(&self, generation: u64) {
+        let user = self.inner.deps.offer.me().await.map(|u| u.trim().chars().filter(|c| !c.is_control()).take(200).collect::<String>()).filter(|u| !u.is_empty());
+        let target = match &*self.inner.mode.lock() {
+            Mode::Guest(f) if self.current(generation) => Some((f.relay.clone(), f.up.clone(), f.me.clone())),
+            _ => None,
+        };
+        if let Some((relay, up, me)) = target
+            && let Err(e) = self.send(&relay, &up, Sender::Guest, &me, Msg::PlexUser { u: user }, &[]).await
+        {
+            self.set_health(generation, e.into());
         }
     }
 

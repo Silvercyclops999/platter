@@ -152,4 +152,17 @@ pub enum Msg {
         #[serde(default)]
         t: Option<String>,
     },
+
+    // ---- "Let them listen from my server" (a peer from before these drops them)
+    /// Host → one guest: may I share my Plex server's music with you?
+    Offer,
+    /// Guest → host: my Plex username for the invite. None: I don't take
+    /// invites inside Platter (the host shares from Settings instead).
+    PlexUser {
+        #[serde(default)]
+        u: Option<String>,
+    },
+    /// Host → one guest: the invite went out (or you already have access);
+    /// look for it.
+    Shared,
 }

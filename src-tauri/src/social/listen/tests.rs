@@ -183,6 +183,44 @@ impl ListenLibrary for FakeLib {
     }
 }
 
+/// Plex sharing: what the host's invites did, and the guest's answers.
+struct FakeOffer {
+    on: std::sync::atomic::AtomicBool,
+    me: Mutex<Option<String>>,
+    outcome: Mutex<OfferOutcome>,
+    invited: Mutex<Vec<String>>,
+    shared: Mutex<Vec<String>>,
+}
+
+impl Default for FakeOffer {
+    fn default() -> Self {
+        Self {
+            on: std::sync::atomic::AtomicBool::new(true),
+            me: Mutex::new(None),
+            outcome: Mutex::new(OfferOutcome::Invited),
+            invited: Mutex::default(),
+            shared: Mutex::default(),
+        }
+    }
+}
+
+#[async_trait]
+impl ServerOffer for FakeOffer {
+    async fn offered(&self) -> bool {
+        self.on.load(Ordering::Relaxed)
+    }
+    async fn invite(&self, plex_user: &str) -> OfferOutcome {
+        self.invited.lock().push(plex_user.to_string());
+        self.outcome.lock().clone()
+    }
+    async fn me(&self) -> Option<String> {
+        self.me.lock().clone()
+    }
+    async fn shared(&self, host: &str) {
+        self.shared.lock().push(host.to_string());
+    }
+}
+
 struct FakeServer(Mutex<Option<String>>);
 
 #[async_trait]
@@ -204,6 +242,7 @@ struct Peer {
     settings: ListenSettings,
     server: Arc<FakeServer>,
     lib: Arc<FakeLib>,
+    offer: Arc<FakeOffer>,
     plain: Arc<Mutex<Vec<String>>>,
 }
 
@@ -227,6 +266,7 @@ fn peer(name: &str, relay: &FakeNtfy) -> Peer {
     let settings = ListenSettings::default();
     let server = Arc::new(FakeServer(Mutex::new(Some(MACHINE_ID.into()))));
     let lib = Arc::new(FakeLib::default());
+    let offer = Arc::new(FakeOffer::default());
     let plain: Arc<Mutex<Vec<String>>> = Arc::default();
     let name = name.to_string();
     let tap = plain.clone();
@@ -236,13 +276,14 @@ fn peer(name: &str, relay: &FakeNtfy) -> Peer {
         events: events.clone(),
         server: server.clone(),
         library: lib.clone(),
+        offer: offer.clone(),
         name: Arc::new(move || name.clone()),
         settings: settings.clone(),
         default_relay: relay.url.clone(),
         cfg: cfg(),
         tap: Some(Arc::new(move |s: &str| tap.lock().push(s.to_string()))),
     });
-    Peer { listen, player, events, settings, server, lib, plain }
+    Peer { listen, player, events, settings, server, lib, offer, plain }
 }
 
 async fn eventually(what: &str, mut f: impl FnMut() -> bool) {
@@ -1057,4 +1098,76 @@ async fn one_session_at_a_time() {
     // Leaving tells the host.
     g.listen.stop().await.unwrap();
     eventually("host sees them go", || h.listen.view().people.len() == 1).await;
+}
+
+// ---- "Let them listen from my server" ---------------------------------------
+
+fn offer_of(h: &Peer, name: &str) -> Option<OfferState> {
+    h.listen.view().people.into_iter().find(|p| p.name == name).and_then(|p| p.offer)
+}
+
+#[tokio::test]
+async fn the_host_invites_a_guest_who_cant_hear_and_they_hear_the_hosts_copy_after_accepting() {
+    let relay = FakeNtfy::start().await;
+    let h = peer("Sam", &relay);
+    h.lib.song("a", song(None, "Only On Sam's Server", "The Band"));
+    h.player.set("a", 30_000, true, &[]);
+    let link = h.listen.start().await.unwrap().invite.unwrap().link;
+    assert!(h.listen.view().offer_server, "offered while the setting is on");
+    let g = elsewhere(&relay, "Alex", &link, |_| {}).await;
+    *g.offer.me.lock() = Some("alex_on_plex".into());
+    eventually("the host sees Alex can't hear it", || h.listen.view().cant_hear == ["Alex"]).await;
+    let alex = h.listen.view().people.into_iter().find(|p| p.name == "Alex").unwrap();
+    assert_eq!(alex.offer, None);
+    // One click: the guest's Platter answers with its Plex name, sealed; the
+    // host shares through Plex and tells the guest to look for the invite.
+    h.listen.offer_server(&alex.id).await.unwrap();
+    eventually("invited", || offer_of(&h, "Alex") == Some(OfferState::Invited)).await;
+    assert_eq!(*h.offer.invited.lock(), ["alex_on_plex"]);
+    eventually("the guest looks for the invite", || *g.offer.shared.lock() == ["Sam"]).await;
+    let plain = g.plain.lock().join("\n");
+    assert!(plain.contains("alex_on_plex"), "the name went only inside sealed messages");
+    assert!(!relay.published().iter().any(|m| m.body.contains("alex_on_plex")), "never in the clear");
+    // Accepted: the host's server syncs here and the host's own copy plays.
+    assert!(g.player.track().is_none());
+    g.lib.has_only(&["a"]);
+    g.listen.library_changed().await;
+    eventually("the guest plays the host's copy", || g.player.track().as_deref() == Some("a") && g.player.playing()).await;
+    assert!(g.listen.view().missing.is_none());
+    eventually("the host sees everyone hears it", || h.listen.view().cant_hear.is_empty()).await;
+    // Asking again for someone already invited asks again (they may have declined).
+    h.listen.offer_server(&alex.id).await.unwrap();
+    eventually("asked once more", || h.offer.invited.lock().len() == 2).await;
+}
+
+#[tokio::test]
+async fn a_guest_who_doesnt_take_invites_in_platter_says_so_and_failures_show() {
+    let relay = FakeNtfy::start().await;
+    let (h, link) = hosting(&relay).await;
+    let g = joined(&relay, "Alex", &link).await;
+    let id = h.listen.view().people[1].id.clone();
+    // "Accept invites inside Platter" off: no name goes to the host.
+    h.listen.offer_server(&id).await.unwrap();
+    eventually("no invites", || offer_of(&h, "Alex") == Some(OfferState::NoInvites)).await;
+    assert!(h.offer.invited.lock().is_empty());
+    assert!(!g.plain.lock().iter().any(|m| m.contains("plexUser") && m.contains("\"u\":\"")));
+    // Plex says they already have access: the guest is still told to look.
+    *g.offer.me.lock() = Some("alex_on_plex".into());
+    *h.offer.outcome.lock() = OfferOutcome::AlreadyShared;
+    h.listen.offer_server(&id).await.unwrap();
+    eventually("already shared", || offer_of(&h, "Alex") == Some(OfferState::AlreadyShared)).await;
+    eventually("told", || g.offer.shared.lock().len() == 1).await;
+    // Plex down: the reason shows and the guest isn't sent looking.
+    *h.offer.outcome.lock() = OfferOutcome::Failed("Plex isn't answering right now. Try again in a while.".into());
+    h.listen.offer_server(&id).await.unwrap();
+    eventually("failed", || matches!(offer_of(&h, "Alex"), Some(OfferState::Failed(_)))).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(g.offer.shared.lock().len(), 1);
+    // Turned off in Settings: not offered, and refused.
+    h.offer.on.store(false, Ordering::Relaxed);
+    h.listen.settings_changed().await;
+    assert!(!h.listen.view().offer_server);
+    assert_eq!(h.listen.offer_server(&id).await.unwrap_err().kind(), "invalid");
+    // Only the host offers.
+    assert_eq!(g.listen.offer_server("host").await.unwrap_err().kind(), "invalid");
 }
