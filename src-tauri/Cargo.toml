@@ -82,6 +82,9 @@ kakasi = "0.1.0"
 # Upgrades: carry a file's tags onto its better copy (any format to any format).
 lofty = "0.25.4"
 pinyin = { version = "0.11.0", default-features = false, features = ["with_tone"] }
+# Lyrics files in older encodings (Shift-JIS, Windows-1252 and others).
+encoding_rs = "0.8.35"
+chardetng = "0.1.17"
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.8.3", default-features = false }

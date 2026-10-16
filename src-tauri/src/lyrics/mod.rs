@@ -34,6 +34,7 @@ pub mod check;
 pub mod checker;
 pub mod choice;
 pub mod commands;
+pub mod encoding;
 pub mod live;
 pub mod lrclib;
 pub mod pronounce;

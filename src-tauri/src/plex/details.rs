@@ -532,7 +532,8 @@ fn lyrics_credit(l: &Value) -> Option<String> {
 /// A lyrics stream body: JSON when the server sends its structured form,
 /// otherwise LRC or plain text. None when there are no words in it.
 pub fn parse_lyrics(body: &[u8]) -> Option<Lyrics> {
-    let text = String::from_utf8_lossy(body);
+    // Sidecar files come in whatever encoding they were saved in.
+    let text = crate::lyrics::encoding::decode(body);
     let trimmed = text.trim_start_matches('\u{feff}').trim_start();
     let lyrics = if trimmed.starts_with('{') {
         serde_json::from_str::<Value>(trimmed)
@@ -828,6 +829,9 @@ mod tests {
 
     #[test]
     fn empty_or_xml_lyrics_are_none() {
+        // A Shift-JIS sidecar .lrc reads as Japanese, not replacement characters.
+        let (sjis, _, _) = encoding_rs::SHIFT_JIS.encode("[00:01.00]夜明けまで歌おう\n");
+        assert_eq!(parse_lyrics(&sjis).unwrap().lines, vec!["夜明けまで歌おう"]);
         assert_eq!(parse_lyrics(b"   \n\n"), None);
         assert_eq!(parse_lyrics(b"[ar:Someone]\n"), None);
         assert_eq!(parse_lyrics(b"<MediaContainer/>"), None);
