@@ -35,10 +35,15 @@ const songs = (n: number) => (n === 1 ? "1 song" : `${fmt(n)} songs`);
 
 /** Opens Settings at one row. */
 export function openSetting(key: string) {
+  openSettingsAt(`[data-setting="${key}"]`);
+}
+
+/** Opens Settings and scrolls to what `selector` finds (a row or a section), focusing its first control. */
+export function openSettingsAt(selector: string) {
   nav.go({ name: "settings" });
   let tries = 0;
   const look = () => {
-    const row = document.querySelector<HTMLElement>(`[data-setting="${key}"]`);
+    const row = document.querySelector<HTMLElement>(selector);
     if (row) {
       row.scrollIntoView?.({ block: "center" });
       row.querySelector<HTMLElement>("button, [role=switch], input")?.focus({ preventScroll: true });

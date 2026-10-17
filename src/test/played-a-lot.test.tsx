@@ -176,9 +176,33 @@ describe("Played a lot", () => {
   it("points to Library import when no history was imported", async () => {
     await settings();
     render(<ImportPage view="played" />);
-    expect(await screen.findByText("No listening history imported yet.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+    expect(await screen.findByText("No listening history yet")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Import history" }));
     expect(route()).toEqual({ name: "settings" });
+  });
+
+  it("a reload that answers late doesn't replace a newer one", async () => {
+    await withHistory();
+    render(<ImportPage view="played" />);
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    const real = mock.importPlayed.bind(mock);
+    const held: (() => void)[] = [];
+    const spy = vi.spyOn(mock, "importPlayed").mockImplementation((args) =>
+      real(args).then((p) => new Promise((r) => held.push(() => r(p)))),
+    );
+    const changed = () => act(() => (mock as unknown as { emit: (e: string, p: unknown) => void }).emit("library://changed", null));
+    // First reload: before the library gains a song. Second: after.
+    changed();
+    await waitFor(() => expect(held).toHaveLength(1));
+    mock.importMock.libraryGained("Osa Lind", "Field Notes");
+    changed();
+    await waitFor(() => expect(held).toHaveLength(2));
+    await act(async () => held[1]());
+    await waitFor(() => expect(rows()).toHaveLength(5));
+    await act(async () => held[0]());
+    expect(rows()).toHaveLength(5);
+    expect(titles()).not.toContain("Field Notes by Osa Lind");
+    spy.mockRestore();
   });
 
   it("has no tab when the setting is off", async () => {

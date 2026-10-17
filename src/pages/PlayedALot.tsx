@@ -17,7 +17,6 @@ import { backend } from "../lib/backend";
 import { STORE_LINKS } from "../lib/importStrings";
 import type { PlayedHidden, PlayedKind, PlayedPage, PlayedRow } from "../lib/importTypes";
 import type { LidarrPreview, LidarrRequestInput, LidarrRequestState, PlayedPeriod } from "../lib/types";
-import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import { upsertRequest } from "../stores/requests";
@@ -25,6 +24,7 @@ import { GET_UNDO_MS } from "./GetButton";
 import { BringInCard, BringInSettings } from "./BringIn";
 import { errText } from "./importShared";
 import { STATE_LABEL, useLidarrReady } from "./lidarrShared";
+import { openSettingsAt } from "./SoundMapPage";
 import "./lidarr-request.css";
 
 const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.LidarrRequestDialog })));
@@ -77,19 +77,23 @@ export function PlayedALot() {
   const ready = useLidarrReady();
   const ids = useId();
 
+  // Each load gets a number; only the newest one's answer (and a "Show
+  // more" started after it) lands, so reloads can't overwrite each other.
+  const seq = useRef(0);
   const load = useCallback(() => {
-    let alive = true;
+    const n = ++seq.current;
     backend.importPlayed({ kind, offset: 0, minPlays, period }).then(
       (p) => {
-        if (!alive) return;
+        if (n !== seq.current) return;
         setPage(p);
         setErr(null);
       },
-      (e) => alive && setErr(errText(e) || "Couldn't load what you played"),
+      (e) => n === seq.current && setErr(errText(e) || "Couldn't load what you played"),
     );
-    backend.importPlayedHidden().then((h) => alive && setHidden(h), () => {});
+    backend.importPlayedHidden().then((h) => n === seq.current && setHidden(h), () => {});
     return () => {
-      alive = false;
+      // Left the page or the filters changed: drop what's still on its way.
+      if (n === seq.current) seq.current++;
     };
   }, [kind, minPlays, period]);
 
@@ -105,12 +109,15 @@ export function PlayedALot() {
 
   const showMore = async () => {
     if (!page) return;
+    const n = seq.current;
     setMore(true);
     try {
       const next = await backend.importPlayed({ kind, offset: page.rows.length, minPlays, period });
-      setPage({ ...next, offset: 0, rows: [...page.rows, ...next.rows] });
+      // A reload since then: its page is current, and this one would be stale on top of it.
+      if (n !== seq.current) return;
+      setPage((cur) => (cur === page ? { ...next, offset: 0, rows: [...page.rows, ...next.rows] } : cur));
     } catch (e) {
-      toast.error(errText(e) || "Couldn't load more");
+      if (n === seq.current) toast.error(errText(e) || "Couldn't load more songs");
     } finally {
       setMore(false);
     }
@@ -200,10 +207,10 @@ export function PlayedALot() {
       {!page && <SkeletonLines lines={6} widths={["90%", "85%", "88%", "80%", "86%", "70%"]} gap={20} />}
       {page && !page.hasHistory && (
         <div className="import-empty" role="status">
-          <p>No listening history imported yet.</p>
-          <p>Import a history download in Settings, under Library import. What you played a lot that isn't in your library shows up here.</p>
-          <Button className="import-empty__go" onClick={() => nav.go({ name: "settings" })}>
-            Open Settings
+          <p>No listening history yet</p>
+          <p>Import a history download and what you played a lot that isn't in your library shows up here.</p>
+          <Button className="import-empty__go" onClick={() => openSettingsAt("#settings-library-import")}>
+            Import history
           </Button>
         </div>
       )}
