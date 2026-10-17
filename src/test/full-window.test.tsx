@@ -77,7 +77,8 @@ describe("opening and closing", () => {
       </>,
     );
     const extras = document.querySelector(".player-bar__extras")!;
-    const buttons = extras.querySelectorAll("button");
+    // The More button stands in for the last ones only on a narrow window.
+    const buttons = Array.from(extras.querySelectorAll("button")).filter((b) => !b.closest(".player-bar__more"));
     const expand = screen.getByRole("button", { name: "Expanded view" });
     expect(buttons[buttons.length - 1]).toBe(expand);
     fireEvent.click(expand);
