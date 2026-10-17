@@ -96,6 +96,48 @@ export function zoomAt(v: View, w: number, h: number, sx: number, sy: number, fa
   return { scale, cx: mx - (sx - w / 2) / scale, cy: my + (sy - h / 2) / scale };
 }
 
+/** The same zoom (relative to the fitted view) after the fitted view's scale moved from `from` to `to`. */
+export function rebase(v: View, from: number, to: number): View {
+  if (!(from > 0) || !(to > 0) || from === to) return v;
+  return { ...v, scale: v.scale * (to / from) };
+}
+
+/** Wheel distance in pixels, whatever unit the wheel reported (lines or pages too). */
+export function wheelPixels(delta: number, mode: number, page: number): number {
+  if (mode === 1) return delta * 16;
+  if (mode === 2) return delta * page;
+  return delta;
+}
+
+/**
+ * The nearest point from `from` in a direction (dx, dy in map units, y up):
+ * only points within 45 degrees of it count, and points off to the side
+ * count as further away. -1 when there's none.
+ */
+export function nearestToward(d: MapData, from: number, dx: number, dy: number): number {
+  const n = d.ids.length;
+  if (from < 0 || from >= n) return -1;
+  const x0 = d.x[from];
+  const y0 = d.y[from];
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < n; i++) {
+    if (i === from) continue;
+    const ex = d.x[i] - x0;
+    const ey = d.y[i] - y0;
+    const along = ex * dx + ey * dy;
+    if (along <= 0) continue;
+    const side = Math.abs(ex * dy - ey * dx);
+    if (side > along) continue;
+    const score = along * along + 4 * side * side;
+    if (score < bestD) {
+      bestD = score;
+      best = i;
+    }
+  }
+  return best;
+}
+
 /** Dot radius in pixels: a little bigger as you zoom in. */
 export function dotRadius(v: View, base: number): number {
   return Math.min(6, Math.max(1.6, 2.2 * Math.sqrt(v.scale / Math.max(base, 1e-6))));

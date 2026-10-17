@@ -79,7 +79,7 @@
   transition: background var(--motion-fast) var(--motion-easing), color var(--motion-fast) var(--motion-easing);
 }
 .soundmap__seg-btn:hover { color: var(--color-text-primary); }
-.soundmap__seg-btn[aria-checked="true"] { background: var(--color-accent); color: var(--color-text-on-accent); }
+.soundmap__seg-btn[aria-pressed="true"] { background: var(--color-accent); color: var(--color-text-on-accent); }
 .soundmap__seg-btn:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
 
 /* The map. */
@@ -159,22 +159,32 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   z-index: var(--z-popover);
 }
-.soundmap__results-none { padding: var(--space-2) var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.soundmap__results-list { margin: 0; padding: 0; list-style: none; }
+.soundmap__results-none { margin: 0; padding: var(--space-2) var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .soundmap__result {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border: 0;
   border-radius: var(--radius-row);
-  background: none;
-  font: inherit;
-  text-align: left;
   cursor: pointer;
 }
-.soundmap__result:hover, .soundmap__result:focus-visible { background: var(--color-state-hover); outline: none; }
+.soundmap__result:hover, .soundmap__result[aria-selected="true"] { background: var(--color-state-hover); }
+.soundmap__result-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.soundmap__result-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  cursor: pointer;
+}
+.soundmap__result-play:hover { filter: brightness(1.08); }
 .soundmap__result-title { font-size: var(--font-size-md); color: var(--color-text-primary); }
 .soundmap__result-sub { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
 

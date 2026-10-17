@@ -116,18 +116,43 @@ export function SoundMapPage() {
   const [focus, setFocus] = useState(-1);
   const [naming, setNaming] = useState(false);
   const [root, setRoot] = useState<HTMLElement | null>(null);
+  /** What the live region says (selection size, the song in focus). */
+  const [said, setSaid] = useState("");
   const api = useRef<MapApi | null>(null);
+  /** The points shown and what they were loaded for, so a reload with nothing new is skipped. */
+  const shown = useRef<{ data: MapData; placed: number; revision: number } | null>(null);
+  /** Each load's number: a slower, older one finishing late is ignored. */
+  const request = useRef(0);
 
   const refresh = useCallback(async () => {
+    const n = ++request.current;
     try {
       const i = await backend.soundmapInfo();
+      if (n !== request.current) return;
       setInfo(i);
       // The app menu's entry follows what the page knows.
       useSoundMap.setState({ info: i });
-      if (i.placed > 0) setData(await loadAll());
-      else setData(emptyData());
+      const was = shown.current;
+      if (was && was.placed === i.placed && was.revision === i.revision) {
+        setError(null);
+        return;
+      }
+      const d = i.placed > 0 ? await loadAll() : emptyData();
+      if (n !== request.current) return;
+      shown.current = { data: d, placed: i.placed, revision: i.revision };
+      setData(d);
+      // The selection and the song in focus follow their songs to the new points.
+      if (was) {
+        const move = (k: number) => {
+          const id = was.data.ids[k];
+          return id === undefined ? -1 : (d.index.get(id) ?? -1);
+        };
+        setPicked((p) => p.map(move).filter((k) => k >= 0));
+        setFocus((f) => (f < 0 ? -1 : move(f)));
+      }
       setError(null);
     } catch (e) {
+      if (n !== request.current) return;
       setError(e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Couldn't load the map.");
     }
   }, []);
@@ -144,16 +169,17 @@ export function SoundMapPage() {
     const b = backend.listen("analysis://changed", () => void backend.soundmapInfo().then(setInfo, () => {}));
     return () => {
       if (t) clearTimeout(t);
+      // Anything still loading is from before: ignored when it lands.
+      request.current++;
       void a.then((f) => f());
       void b.then((f) => f());
     };
   }, [on, refresh]);
 
-  // A new set of points drops a selection made on the old one.
+  // Say how many songs are selected as it changes.
   useEffect(() => {
-    setPicked([]);
-    setFocus(-1);
-  }, [data]);
+    if (picked.length > 0) setSaid(`${songs(picked.length)} selected`);
+  }, [picked.length]);
 
   const legend = useMemo(() => makeLegend(data ?? emptyData(), by), [data, by]);
   const { colours, ring, highlight } = useColours(root, by, legend.groups);
@@ -192,6 +218,9 @@ export function SoundMapPage() {
 
   return (
     <div className="page-pad soundmap" data-testid="soundmap-page" ref={setRoot}>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="soundmap-status">
+        {said}
+      </div>
       <header className="soundmap__head">
         <div className="soundmap__titles">
           <h1 className="page-title">Sound map</h1>
@@ -207,6 +236,7 @@ export function SoundMapPage() {
                 if (!data) return;
                 if (f.kind === "song") {
                   const i = data.index.get(f.id) ?? -1;
+                  setPicked([]);
                   setFocus(i);
                   api.current?.flyTo(f.x, f.y, 12);
                 } else {
@@ -214,19 +244,27 @@ export function SoundMapPage() {
                   api.current?.flyTo(f.x, f.y, 4);
                 }
               }}
+              onPlay={(f) => {
+                const i = data?.index.get(f.id) ?? -1;
+                if (i >= 0) {
+                  setFocus(i);
+                  api.current?.flyTo(f.x, f.y, 12);
+                }
+                void player.playTracks([f.id], f.id);
+              }}
             />
-            <div className="soundmap__seg" role="radiogroup" aria-label="Colour by">
+            <div className="soundmap__seg" role="group" aria-label="Colour by">
               {(["genre", "era"] as const).map((k) => (
-                <button key={k} type="button" role="radio" aria-checked={by === k} className="soundmap__seg-btn" onClick={() => setBy(k)}>
+                <button key={k} type="button" aria-pressed={by === k} className="soundmap__seg-btn" onClick={() => setBy(k)}>
                   {k === "genre" ? "Genre" : "Era"}
                 </button>
               ))}
             </div>
-            <div className="soundmap__seg" role="radiogroup" aria-label="Dragging">
-              <button type="button" role="radio" aria-checked={mode === "move"} className="soundmap__seg-btn" onClick={() => setMode("move")}>
+            <div className="soundmap__seg" role="group" aria-label="Dragging">
+              <button type="button" aria-pressed={mode === "move"} className="soundmap__seg-btn" onClick={() => setMode("move")}>
                 <Move size={14} aria-hidden="true" /> Move
               </button>
-              <button type="button" role="radio" aria-checked={mode === "lasso"} className="soundmap__seg-btn" onClick={() => setMode("lasso")}>
+              <button type="button" aria-pressed={mode === "lasso"} className="soundmap__seg-btn" onClick={() => setMode("lasso")}>
                 <Lasso size={14} aria-hidden="true" /> Lasso
               </button>
             </div>
@@ -267,12 +305,17 @@ export function SoundMapPage() {
               selected={selected}
               focus={focus}
               api={api}
-              label={`Sound map of ${songs(placed)}. Drag to move, scroll to zoom, arrow keys and plus or minus with the map focused.`}
+              label={`Sound map of ${songs(placed)}. Drag to move, scroll to zoom. With the map focused, arrow keys move it and plus or minus zoom; Enter picks the song in the middle, then arrow keys step to the nearest song that way and Enter plays it.`}
               onHover={hover.onHover}
               onPick={(i) => {
                 setFocus(i);
                 void player.playTracks([data.ids[i]], data.ids[i]);
               }}
+              onFocus={(i) => {
+                setPicked([]);
+                setFocus(i);
+              }}
+              onPlay={(i) => play([i])}
               onLasso={(ids) => {
                 setPicked(ids);
                 if (ids.length) setFocus(-1);
@@ -283,7 +326,7 @@ export function SoundMapPage() {
               }}
             />
             {hover.card && (
-              <div className="soundmap__card" style={{ left: hover.card.sx, top: hover.card.sy }} aria-hidden="true" data-testid="soundmap-card">
+              <div className="soundmap__card" ref={hover.cardRef} aria-hidden="true" data-testid="soundmap-card">
                 <Art path={hover.card.song.thumb} size={40} />
                 <div className="soundmap__card-text">
                   <span className="soundmap__card-title">{hover.card.song.title}</span>
@@ -292,12 +335,17 @@ export function SoundMapPage() {
                 </div>
               </div>
             )}
-            {focus >= 0 && picked.length === 0 && <FocusCard id={data.ids[focus]} onPlay={() => play([focus])} onClose={() => setFocus(-1)} />}
+            {focus >= 0 && picked.length === 0 && (
+              <FocusCard
+                id={data.ids[focus]}
+                onPlay={() => play([focus])}
+                onClose={() => setFocus(-1)}
+                onShown={(s) => setSaid(`${s.title} by ${s.artist}. Enter on the map plays it.`)}
+              />
+            )}
             {picked.length > 0 && (
               <div className="soundmap__selection" role="region" aria-label="Selection">
-                <span className="soundmap__selection-count" aria-live="polite">
-                  {songs(picked.length)} selected
-                </span>
+                <span className="soundmap__selection-count">{songs(picked.length)} selected</span>
                 <Button size="sm" variant="primary" icon={<Play size={14} />} onClick={() => play(picked)}>
                   Play
                 </Button>
@@ -380,16 +428,32 @@ function songOf(id: string): Promise<SoundMapSong | null> {
   return p;
 }
 
-/** The hover card: shows after a short hover, follows the dot. */
-function useHoverCard(data: MapData | null) {
-  const [card, setCard] = useState<{ song: SoundMapSong; sx: number; sy: number; unreleased: boolean } | null>(null);
+/**
+ * The hover card: shows after a short hover and follows the pointer. Its
+ * place is set on the element directly, so moving over a dot doesn't
+ * render the page again.
+ */
+export function useHoverCard(data: MapData | null) {
+  const [card, setCard] = useState<{ song: SoundMapSong; unreleased: boolean } | null>(null);
   const at = useRef(-1);
+  const pos = useRef<[number, number]>([0, 0]);
+  const el = useRef<HTMLElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  const place = (e: HTMLElement | null) => {
+    if (!e) return;
+    e.style.left = `${pos.current[0]}px`;
+    e.style.top = `${pos.current[1]}px`;
+  };
+  const cardRef = useCallback((e: HTMLElement | null) => {
+    el.current = e;
+    place(e);
+  }, []);
   const onHover = useCallback(
     (i: number, sx: number, sy: number) => {
+      pos.current = [sx, sy];
       if (i === at.current) {
-        if (i >= 0) setCard((c) => (c ? { ...c, sx, sy } : c));
+        if (i >= 0) place(el.current);
         return;
       }
       at.current = i;
@@ -400,21 +464,27 @@ function useHoverCard(data: MapData | null) {
       const unreleased = data.unreleased[i] === 1;
       timer.current = setTimeout(() => {
         void songOf(id).then((song) => {
-          if (song && at.current === i) setCard({ song, sx, sy, unreleased });
+          if (song && at.current === i) setCard({ song, unreleased });
         });
       }, CARD_DELAY_MS);
     },
     [data],
   );
-  return { card, onHover };
+  return { card, onHover, cardRef };
 }
 
 /** A song found by search or clicked: its card with Play. */
-function FocusCard({ id, onPlay, onClose }: { id: string; onPlay: () => void; onClose: () => void }) {
+function FocusCard({ id, onPlay, onClose, onShown }: { id: string; onPlay: () => void; onClose: () => void; onShown: (s: SoundMapSong) => void }) {
   const [song, setSong] = useState<SoundMapSong | null>(null);
+  const shown = useRef(onShown);
+  shown.current = onShown;
   useEffect(() => {
     let alive = true;
-    void songOf(id).then((s) => alive && setSong(s));
+    void songOf(id).then((s) => {
+      if (!alive) return;
+      setSong(s);
+      if (s) shown.current(s);
+    });
     return () => {
       alive = false;
     };
@@ -433,28 +503,78 @@ function FocusCard({ id, onPlay, onClose }: { id: string; onPlay: () => void; on
   );
 }
 
-/** Search to fly to a song or an artist. */
-function FindBox({ onFound }: { onFound: (f: SoundMapFound) => void }) {
+/**
+ * Search to fly to a song or an artist: a combobox. Arrow keys move through
+ * the results, Enter goes to one (Shift+Enter plays a song), Escape closes
+ * the list and then clears the search.
+ */
+export function FindBox({ onFound, onPlay }: { onFound: (f: SoundMapFound) => void; onPlay: (f: SoundMapFound) => void }) {
   const [q, setQ] = useState("");
   const [found, setFound] = useState<SoundMapFound[]>([]);
   const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
   const listId = useId();
+  const hintId = useId();
+  const optionId = (i: number) => `${listId}-o${i}`;
   useEffect(() => {
     const query = q.trim();
     if (!query) {
       setFound([]);
+      setActive(-1);
       return;
     }
     let alive = true;
-    const t = setTimeout(() => void backend.soundmapFind(query).then((f) => alive && setFound(f), () => {}), 150);
+    const t = setTimeout(
+      () =>
+        void backend.soundmapFind(query).then(
+          (f) => {
+            if (!alive) return;
+            setFound(f);
+            setActive(-1);
+          },
+          () => {},
+        ),
+      150,
+    );
     return () => {
       alive = false;
       clearTimeout(t);
     };
   }, [q]);
+  const showing = open && q.trim() !== "";
   const pick = (f: SoundMapFound) => {
     onFound(f);
     setOpen(false);
+  };
+  const play = (f: SoundMapFound) => {
+    onPlay(f);
+    setOpen(false);
+  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const n = found.length;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!showing) setOpen(true);
+      if (n === 0) return;
+      const down = e.key === "ArrowDown";
+      setActive((a) => (a < 0 ? (down ? 0 : n - 1) : (a + (down ? 1 : n - 1)) % n));
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const f = found[active] ?? found[0];
+      if (!f) return;
+      if (e.shiftKey && f.kind === "song") play(f);
+      else pick(f);
+      return;
+    }
+    if (e.key === "Escape" && showing) {
+      // First Escape closes the list; the next one clears the search.
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      setActive(-1);
+    }
   };
   return (
     <div className="soundmap__find" onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && setOpen(false)}>
@@ -464,25 +584,67 @@ function FindBox({ onFound }: { onFound: (f: SoundMapFound) => void }) {
           setQ(v);
           setOpen(true);
         }}
-        onSubmit={() => found[0] && pick(found[0])}
+        onKeyDown={onKeyDown}
         label="Find a song or artist on the map"
         placeholder="Find a song or artist"
-        inputProps={{ "aria-controls": listId, "aria-expanded": open && found.length > 0 }}
+        inputProps={{
+          role: "combobox",
+          "aria-autocomplete": "list",
+          "aria-controls": listId,
+          "aria-expanded": showing && found.length > 0,
+          "aria-activedescendant": showing && active >= 0 && active < found.length ? optionId(active) : undefined,
+          "aria-describedby": hintId,
+        }}
       />
-      {open && q.trim() !== "" && (
-        <ul id={listId} className="soundmap__results" aria-label="On the map">
-          {found.length === 0 && <li className="soundmap__results-none">Not on the map yet</li>}
-          {found.map((f) => (
-            <li key={`${f.kind}:${f.id}`}>
-              <button type="button" className="soundmap__result" onClick={() => pick(f)}>
-                <span className="soundmap__result-title">{f.title}</span>
-                <span className="soundmap__result-sub">
-                  {f.kind === "artist" ? "Artist" : "Song"} · {f.sub}
+      <span id={hintId} className="sr-only">
+        Enter goes to the song or artist, Shift and Enter plays a song.
+      </span>
+      {showing && (
+        <div className="soundmap__results">
+          {found.length === 0 ? (
+            <p className="soundmap__results-none" role="status">
+              Not on the map yet
+            </p>
+          ) : null}
+          <ul id={listId} role="listbox" aria-label="On the map" className="soundmap__results-list" hidden={found.length === 0}>
+            {found.map((f, i) => (
+              <li
+                key={`${f.kind}:${f.id}`}
+                id={optionId(i)}
+                role="option"
+                aria-selected={i === active}
+                className="soundmap__result"
+                // Keep focus in the search field.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(f)}
+              >
+                <span className="soundmap__result-text">
+                  <span className="soundmap__result-title">{f.title}</span>
+                  <span className="soundmap__result-sub">
+                    {f.kind === "artist" ? "Artist" : "Song"} · {f.sub}
+                  </span>
                 </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+                {f.kind === "song" && (
+                  // For the mouse; keyboards play with Shift and Enter.
+                  <button
+                    type="button"
+                    className="soundmap__result-play"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    title={`Play ${f.title}`}
+                    data-testid="soundmap-result-play"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      play(f);
+                    }}
+                  >
+                    <Play size={14} aria-hidden="true" />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
