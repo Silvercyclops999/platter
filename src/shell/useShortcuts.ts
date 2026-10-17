@@ -16,6 +16,21 @@ function isTyping(el: EventTarget | null): boolean {
   return el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
 }
 
+/**
+ * A modal dialog other than the command palette is open. Shortcuts stay out
+ * of its way, so nothing plays, skips or navigates behind it.
+ */
+export function modalOpen(): boolean {
+  return Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some((d) => !d.classList.contains("palette"));
+}
+
+/** A modal is open and has no track list of its own for power keys to move in. */
+function modalBlocksPowerKeys(): boolean {
+  return Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(
+    (d) => !d.classList.contains("palette") && !d.querySelector("[data-tracklist]"),
+  );
+}
+
 /** Volume change per Ctrl/⌘+↑/↓: 1/16 of the range. */
 export const VOLUME_KEY_STEP = 1 / 16;
 /** Seek per Shift+←/→. */
@@ -137,10 +152,16 @@ export function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const ui = useUi.getState();
       const key = e.key.toLowerCase();
-      if (isMod(e) && !e.altKey && (e.code === "Slash" || e.key === "/")) {
+      const blocked = modalOpen();
+      if (isMod(e) && !e.altKey && (e.code === "Slash" || e.key === "/") && (!blocked || ui.shortcutsOpen)) {
         e.preventDefault();
         ui.setPaletteOpen(false);
         ui.setShortcutsOpen(!ui.shortcutsOpen);
+        return;
+      }
+      if (blocked) {
+        // Ctrl/⌘+R would still reload the window behind the dialog.
+        if (isMod(e) && !e.shiftKey && !e.altKey && key === "r") e.preventDefault();
         return;
       }
       if (isMod(e) && !e.shiftKey && !e.altKey && key === "k") {
@@ -234,6 +255,7 @@ export function useShortcuts() {
       }
     };
     const onMouse = (e: MouseEvent) => {
+      if (modalOpen()) return;
       if (e.button === 3) {
         e.preventDefault();
         nav.back();
@@ -251,6 +273,7 @@ export function useShortcuts() {
       const used = powerKey(e, {
         hintKey: s.hintKey ?? "f",
         busy: ui.paletteOpen || !!ui.menu || ui.shortcutsOpen,
+        modal: modalOpen() ? (modalBlocksPowerKeys() ? "no-list" : "list") : null,
         focusSearch: () => ui.focusSearch(),
       });
       if (used) {

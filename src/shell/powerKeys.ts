@@ -226,6 +226,11 @@ export interface PowerContext {
   hintKey: string;
   /** A menu or the command palette is open: leave keys to it. */
   busy: boolean;
+  /**
+   * A modal dialog is open: hints still label its controls, and j / k move in
+   * its own track list ("list"), but nothing reaches the page behind it.
+   */
+  modal?: "list" | "no-list" | null;
   focusSearch: () => void;
   now?: number;
 }
@@ -252,6 +257,9 @@ export function powerKey(e: Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "
   }
   if (!plain || ctx.busy || isTyping(e.target)) return false;
   const now = ctx.now ?? Date.now();
+  const isHintKey = e.key === ctx.hintKey || e.key === ctx.hintKey.toUpperCase();
+  if (ctx.modal === "no-list" && !isHintKey) return false;
+  if (ctx.modal && (e.key === "/" || e.key === "Enter")) return false;
   switch (e.key) {
     case ctx.hintKey:
     case ctx.hintKey.toUpperCase():

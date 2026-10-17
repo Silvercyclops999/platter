@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Dialog } from "../components/Dialog";
 import { FilterChips } from "../components/Tabs";
 import { TrackList, TrackRow } from "../components/TrackRow";
 import { resetTypeAhead } from "../components/listKeys";
@@ -12,6 +13,7 @@ import { SHORTCUTS, shortcutKeys, shortcutLabel, shortcutsIn } from "../shell/sh
 import { ShortcutsHelp } from "../shell/ShortcutsHelp";
 import { useShortcuts } from "../shell/useShortcuts";
 import { SettingsPage } from "../pages/SettingsPage";
+import { player } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { body } from "./rows";
@@ -142,6 +144,45 @@ describe("navigation and layout shortcuts", () => {
     render(<AppShell />);
     fireEvent.keyDown(window, { key: "f", code: "KeyF", ctrlKey: true });
     await vi.waitFor(() => expect(document.activeElement).toHaveAttribute("type", "search"));
+  });
+});
+
+describe("shortcuts behind a modal dialog", () => {
+  it("do nothing while a dialog is open, and work again once it closes", () => {
+    const toggle = vi.spyOn(player, "toggle").mockImplementation(() => Promise.resolve());
+    const next = vi.spyOn(player, "next").mockImplementation(() => Promise.resolve());
+    const { rerender } = render(
+      <>
+        <Keys />
+        <Dialog open onClose={() => {}} label="Rename">
+          <p>Body</p>
+        </Dialog>
+      </>,
+    );
+    fireEvent.keyDown(document.body, { key: " " });
+    fireEvent.keyDown(window, { key: "ArrowRight", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "S", code: "KeyS", altKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
+    const reload = fireEvent.keyDown(window, { key: "r", ctrlKey: true });
+    expect(reload).toBe(false);
+    expect(toggle).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+    expect(route()).toEqual({ name: "home" });
+
+    rerender(
+      <>
+        <Keys />
+        <Dialog open={false} onClose={() => {}} label="Rename">
+          <p>Body</p>
+        </Dialog>
+      </>,
+    );
+    fireEvent.keyDown(document.body, { key: " " });
+    expect(toggle).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: "S", code: "KeyS", altKey: true, shiftKey: true });
+    expect(route()).toEqual({ name: "liked" });
+    vi.restoreAllMocks();
   });
 });
 

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Dialog } from "../components/Dialog";
 import { TrackList, TrackRow } from "../components/TrackRow";
 import { resetTypeAhead } from "../components/listKeys";
 import { backend } from "../lib/backend";
@@ -227,6 +228,24 @@ describe("list keys", () => {
     // No title starts with j in the fixtures' first three, so focus stays.
     const jTitle = [b, c].find((t) => t.title.toLowerCase().startsWith("j"));
     expect(document.activeElement).toBe(jTitle ? rows()[[a, b, c].indexOf(jTitle)] : rows()[0]);
+  });
+
+  it("leave the page behind a modal dialog alone", () => {
+    power(true);
+    const onPlay = vi.fn();
+    render(
+      <>
+        <List onPlay={onPlay} />
+        <Dialog open onClose={() => {}} label="Rename">
+          <input aria-label="Name" />
+        </Dialog>
+      </>,
+    );
+    const tick = useUi.getState().searchFocusTick;
+    fireEvent.keyDown(document.body, { key: "j" });
+    fireEvent.keyDown(document.body, { key: "/" });
+    expect(rows().some((r) => r.hasAttribute("data-selected"))).toBe(false);
+    expect(useUi.getState().searchFocusTick).toBe(tick);
   });
 
   it("/ focuses search", () => {
