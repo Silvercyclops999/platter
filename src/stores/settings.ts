@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
 import type { Settings } from "../lib/types";
+import { failText } from "../lib/errorText";
 import { toast } from "./toasts";
 
 interface SettingsStore {
@@ -31,8 +32,21 @@ export async function updateSettings(patch: Partial<Settings>, b: Backend = back
   try {
     await b.settingsSet(patch);
   } catch (e) {
-    if (before) useSettings.getState().setLocal(before);
-    const msg = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "";
-    toast.error(msg ? `Couldn't save that setting: ${msg}` : "Couldn't save that setting");
+    if (before) rollBack(patch, before);
+    toast.error(failText("Couldn't save that setting", e));
   }
+}
+
+/**
+ * Undo a failed change: only the keys it set, and only those nothing has
+ * changed since, so another setting changed meanwhile stays.
+ */
+function rollBack(patch: Partial<Settings>, before: Settings) {
+  const now = useSettings.getState().settings;
+  if (!now) return;
+  const keys = (Object.keys(patch) as (keyof Settings)[]).filter((k) => now[k] === patch[k]);
+  if (!keys.length) return;
+  const back: Partial<Settings> = {};
+  for (const k of keys) (back as Record<string, unknown>)[k] = before[k];
+  useSettings.getState().setLocal({ ...now, ...back });
 }

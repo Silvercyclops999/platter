@@ -394,6 +394,34 @@ describe("settings page", () => {
     expect(useSettings.getState().settings?.privateSession).toBe(false);
     expect(useToasts.getState().toasts.some((t) => t.message.includes("disk full"))).toBe(true);
   });
+
+  it("a failed save rolls back only its own keys, keeping a change made meanwhile", async () => {
+    let fail: (e: unknown) => void = () => {};
+    const set = vi.spyOn(backend, "settingsSet");
+    set.mockImplementationOnce(() => new Promise((_, rej) => (fail = rej)));
+    const start = useSettings.getState().settings!;
+    const saving = updateSettings({ privateSession: !start.privateSession });
+    // Another setting changes and saves while the first is still on its way.
+    await updateSettings({ showFormatBadge: !start.showFormatBadge });
+    fail({ kind: "io", message: "disk full" });
+    await saving;
+    const now = useSettings.getState().settings!;
+    expect(now.privateSession).toBe(start.privateSession);
+    expect(now.showFormatBadge).toBe(!start.showFormatBadge);
+    await updateSettings({ showFormatBadge: start.showFormatBadge });
+  });
+
+  it("a key changed again since the failed save keeps its newer value", async () => {
+    let fail: (e: unknown) => void = () => {};
+    vi.spyOn(backend, "settingsSet").mockImplementationOnce(() => new Promise((_, rej) => (fail = rej)));
+    const start = useSettings.getState().settings!;
+    const saving = updateSettings({ reduceMotion: "on" });
+    await updateSettings({ reduceMotion: "off" });
+    fail({ kind: "io", message: "disk full" });
+    await saving;
+    expect(useSettings.getState().settings!.reduceMotion).toBe("off");
+    await updateSettings({ reduceMotion: start.reduceMotion });
+  });
 });
 
 describe("settings effects", () => {
