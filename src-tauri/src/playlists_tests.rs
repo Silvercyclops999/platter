@@ -524,14 +524,17 @@ fn a_playlist_belongs_to_the_server_with_its_songs() {
     assert_eq!(owner_of(&[format!("{b}:1"), format!("{b}:2")]).unwrap(), Some(b.clone()));
     assert_eq!(owner_of(&["1".into(), "2".into()]).unwrap(), None, "plain ids: the connected server");
     assert!(owner_of(&[format!("{a}:1"), format!("{b}:2")]).is_err(), "a Plex playlist holds one server's songs");
-    // A server's playlists are replaced by its own list only.
+    // A server's playlists are replaced by its own list only (an empty list
+    // counts once it comes twice).
     let dir = tempfile::tempdir().unwrap();
     let db = crate::db::DbHandle::open(dir.path().join("p.db")).unwrap();
     db.write(|c| {
         c.execute_batch(&format!("INSERT INTO playlists (id, title) VALUES ('{a}:1', 'Mine'), ('{b}:1', 'Theirs');"))?;
-        let tx = c.transaction()?;
-        store::replace_playlists_in(&tx, &[], false, Some(&b))?;
-        tx.commit()?;
+        for _ in 0..2 {
+            let tx = c.transaction()?;
+            store::replace_playlists_in(&tx, &[], false, Some(&b))?;
+            tx.commit()?;
+        }
         Ok(())
     })
     .unwrap();
