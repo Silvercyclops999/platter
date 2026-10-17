@@ -75,19 +75,29 @@ export function isTypeAheadKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaK
  * cycles through the rows starting with it.
  */
 export function typeAhead(row: HTMLElement, char: string, titleOf: (el: HTMLElement) => string, now = Date.now()): HTMLElement | null {
-  typed = now - typedAt > TYPE_AHEAD_MS ? char : typed + char;
-  typedAt = now;
   const rows = listRows(row);
   const at = rows.indexOf(row);
   if (at < 0) return null;
+  const i = typeAheadIndex(rows.map(titleOf), at, char, now);
+  return i === null ? null : rows[i];
+}
+
+/**
+ * The same search over a whole list's titles (a long list that only has
+ * some rows on the page): the index to jump to, or null.
+ */
+export function typeAheadIndex(titles: readonly string[], at: number, char: string, now = Date.now()): number | null {
+  typed = now - typedAt > TYPE_AHEAD_MS ? char : typed + char;
+  typedAt = now;
+  if (at < 0 || !titles.length) return null;
   const needle = typed.toLocaleLowerCase();
   const cycling = needle.length > 1 && [...needle].every((c) => c === needle[0]);
   const prefix = cycling ? needle[0] : needle;
   // A new search starts after the current row; a longer one may still match it.
   const start = needle.length > 1 && !cycling ? at : at + 1;
-  for (let k = 0; k < rows.length; k++) {
-    const el = rows[(start + k) % rows.length];
-    if (titleOf(el).toLocaleLowerCase().startsWith(prefix)) return el;
+  for (let k = 0; k < titles.length; k++) {
+    const i = (start + k) % titles.length;
+    if (titles[i].toLocaleLowerCase().startsWith(prefix)) return i;
   }
   return null;
 }

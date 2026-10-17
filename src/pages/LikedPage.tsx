@@ -1,6 +1,6 @@
 import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import { ArrowDownUp, Heart, List, Pause, Play, Rows3, Search, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { ContextShuffleButton } from "../components/ShuffleButton";
 import { openContextMenu } from "../components/ContextMenu";
@@ -344,10 +344,19 @@ function LikedTable({
   useEffect(() => {
     v.measure();
   }, [rowH, v]);
+  // The whole list for select-all, ranges, Home / End and type-ahead.
+  const model = useMemo(() => ({ keys: rows.map((t) => t.id), tracks: rows }), [rows]);
+  const scrollToIndex = useCallback((i: number) => v.scrollToIndex(i, { align: "auto" }), [v]);
 
   return (
     <div ref={root} className={`liked__list liked__list--${view}`}>
-      <TrackList label="Liked Songs tracks" addedColumn rowCount={loading ? undefined : rows.length}>
+      <TrackList
+        label="Liked Songs"
+        addedColumn
+        rowCount={loading ? undefined : rows.length}
+        model={loading ? undefined : model}
+        scrollToIndex={scrollToIndex}
+      >
         {loading ? (
           Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showArt />)
         ) : (

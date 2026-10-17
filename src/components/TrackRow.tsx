@@ -36,7 +36,7 @@ import { useTrackBadges } from "../stores/fileTags";
 import { openContextMenu } from "./ContextMenu";
 import { tagTrackItem } from "./TagEditMenu";
 import { addToPlaylistItem } from "./PlaylistPicker";
-import { isTypeAheadKey, linkStep, rowStep, typeAhead } from "./listKeys";
+import { isTypeAheadKey, linkStep, rowStep, typeAhead, typeAheadIndex } from "./listKeys";
 import { SaveButton } from "./SaveButton";
 import { DownloadedMark } from "./DownloadButton";
 import { useIsDownloaded } from "../stores/downloads";
@@ -164,6 +164,16 @@ interface Selection {
   /** The list is one Tab stop: the row that has tabindex 0. */
   tabStop: string | null;
   setTabStop: (key: string) => void;
+  /** The whole list in order, when only some rows are on the page. */
+  model: ListModel | null;
+  /** Select and focus a row by key, scrolling it onto the page first if it isn't there. */
+  jumpTo: (key: string) => void;
+}
+
+/** A long list's rows in order (row keys and their songs), for lists that only mount some rows. */
+export interface ListModel {
+  keys: readonly string[];
+  tracks: readonly Track[];
 }
 
 const SelectionContext = createContext<Selection | null>(null);
@@ -174,13 +184,35 @@ function rowKeys(root: HTMLElement | null): HTMLElement[] {
 
 function useSelection(
   root: React.RefObject<HTMLDivElement | null>,
-  buildMulti: (keys: string[], trackIds: string[]) => MenuItem[],
+  buildMulti: (keys: string[], trackIds: string[], tracks?: Track[]) => MenuItem[],
+  model: ListModel | null,
+  scrollToIndex: ((index: number) => void) | undefined,
+  pending: React.RefObject<string | null>,
 ): Selection {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [tabStop, setTabStop] = useState<string | null>(null);
   const anchor = useRef<string | null>(null);
 
-  const ordered = useCallback(() => rowKeys(root.current).map((el) => el.dataset.rowKey!), [root]);
+  // With a model the whole list counts, not only the rows on the page.
+  const ordered = useCallback(() => (model ? [...model.keys] : rowKeys(root.current).map((el) => el.dataset.rowKey!)), [root, model]);
+
+  const jumpTo = useCallback(
+    (key: string) => {
+      const el = rowKeys(root.current).find((r) => r.dataset.rowKey === key);
+      if (el) {
+        el.focus();
+        el.scrollIntoView?.({ block: "nearest" });
+        return;
+      }
+      const i = model ? model.keys.indexOf(key) : -1;
+      if (i < 0 || !scrollToIndex) return;
+      // Focus it once the list has rendered it.
+      pending.current = key;
+      setTabStop(key);
+      scrollToIndex(i);
+    },
+    [root, model, scrollToIndex, pending],
+  );
 
   const click = useCallback(
     (key: string, mode: "one" | "toggle" | "range") => {
@@ -234,20 +266,36 @@ function useSelection(
       selectAll: () => setSelected(new Set(ordered())),
       multiMenu: (key) => {
         if (selected.size < 2 || !selected.has(key)) return null;
+        if (model) {
+          const at = model.keys.flatMap((k, i) => (selected.has(k) ? [i] : []));
+          const tracks = at.map((i) => model.tracks[i]);
+          return {
+            label: `Options for ${at.length} songs`,
+            items: buildMulti(
+              at.map((i) => model.keys[i]),
+              tracks.map((t) => t.id),
+              tracks,
+            ),
+          };
+        }
         const rows = rowKeys(root.current).filter((el) => selected.has(el.dataset.rowKey!));
         const keys = rows.map((el) => el.dataset.rowKey!);
         const ids = rows.map((el) => el.dataset.trackId!);
         return { label: `Options for ${rows.length} songs`, items: buildMulti(keys, ids) };
       },
       pickedTracks: () =>
-        rowKeys(root.current)
+        model
+          ? model.tracks.filter((_, i) => selected.has(model.keys[i]))
+          : rowKeys(root.current)
           .filter((el) => selected.has(el.dataset.rowKey!))
           .map((el) => tracksIn.get(el))
           .filter((t): t is Track => !!t),
       tabStop,
       setTabStop,
+      model,
+      jumpTo,
     }),
-    [selected, click, clear, ordered, root, buildMulti, tabStop],
+    [selected, click, clear, ordered, root, buildMulti, tabStop, model, jumpTo],
   );
 }
 
@@ -450,6 +498,16 @@ export function TrackRow({
     } else if (isMod(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a" && sel) {
       e.preventDefault();
       sel.selectAll();
+    } else if (rowMove && sel?.model) {
+      // A long list: move over the whole list, not only the rows on the page.
+      const keys = sel.model.keys;
+      const i = keys.indexOf(key);
+      const to = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : keys.length - 1;
+      if (i < 0 || to === i || to < 0 || to >= keys.length) return;
+      e.preventDefault();
+      if (e.shiftKey && !sel.selected.size) sel.click(key, "one");
+      sel.click(keys[to], e.shiftKey ? "range" : "one");
+      sel.jumpTo(keys[to]);
     } else if (rowMove) {
       const next = rowStep(row, e.key);
       if (!next) return;
@@ -460,6 +518,17 @@ export function TrackRow({
         if (!sel.selected.size) sel.click(key, "one");
         sel.click(next.dataset.rowKey!, "range");
       } else sel.click(next.dataset.rowKey!, "one");
+    } else if (sel?.model && isTypeAheadKey(e)) {
+      const { keys, tracks } = sel.model;
+      const to = typeAheadIndex(
+        tracks.map((t) => t.title),
+        keys.indexOf(key),
+        e.key,
+      );
+      if (to === null) return;
+      e.preventDefault();
+      sel.click(keys[to], "one");
+      if (keys[to] !== key) sel.jumpTo(keys[to]);
     } else if (sel && isTypeAheadKey(e)) {
       const next = typeAhead(row, e.key, (el) => tracksIn.get(el)?.title ?? "");
       if (!next) return;
@@ -677,6 +746,8 @@ export function TrackList({
   byColumn = false,
   rowCount,
   multiMenu = (_keys: string[], ids: string[], tracks: Track[]) => multiTrackMenuItems(ids, tracks),
+  model,
+  scrollToIndex,
 }: {
   children: ReactNode;
   label: string;
@@ -691,18 +762,39 @@ export function TrackList({
   multiMenu?: (keys: string[], trackIds: string[], tracks: Track[]) => MenuItem[];
   /** Total songs when only some rows are on the page (virtual lists; rows then pass `rowIndex`). */
   rowCount?: number;
+  /** A virtual list's rows in order, so select-all, ranges, Home / End and
+   *  type-ahead cover the whole list, not just the rows on the page. */
+  model?: ListModel;
+  /** Brings a row of a virtual list onto the page (with `model`). */
+  scrollToIndex?: (index: number) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const buildMulti = useRef(multiMenu);
   buildMulti.current = multiMenu;
-  const stableBuild = useCallback((k: string[], ids: string[]) => buildMulti.current(k, ids, tracksFor(root.current, ids)), []);
-  const selection = useSelection(root, stableBuild);
+  const stableBuild = useCallback(
+    (k: string[], ids: string[], tracks?: Track[]) => buildMulti.current(k, ids, tracks ?? tracksFor(root.current, ids)),
+    [],
+  );
+  const pending = useRef<string | null>(null);
+  const selection = useSelection(root, stableBuild, model ?? null, scrollToIndex, pending);
+  // A row jumped to off the page: focus it once it has rendered.
+  useLayoutEffect(() => {
+    const key = pending.current;
+    if (!key) return;
+    const el = rowKeys(root.current).find((r) => r.dataset.rowKey === key);
+    if (!el) return;
+    pending.current = null;
+    el.focus();
+    el.scrollIntoView?.({ block: "nearest" });
+  });
   // Keep exactly one row as the list's Tab stop: the last focused, else the first.
   const { tabStop, setTabStop } = selection;
   useLayoutEffect(() => {
     const rows = root.current?.querySelectorAll<HTMLElement>(".track-row[data-row-key]");
     if (!rows?.length) return;
     const keys = Array.from(rows, (el) => el.dataset.rowKey!);
+    // A row being scrolled to keeps the Tab stop while it renders.
+    if (pending.current && tabStop === pending.current) return;
     if (!tabStop || !keys.includes(tabStop)) setTabStop(keys[0]);
   });
   // Row and column counts for screen readers ("row 12 of 61").
