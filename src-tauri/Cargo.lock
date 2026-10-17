@@ -4090,7 +4090,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "platter"
-version = "0.2.23"
+version = "0.2.24"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
