@@ -187,13 +187,19 @@ impl SongReader for FakeSongs {
     }
 }
 
+/// Songs with lyrics elsewhere; what looking for official synced lyrics
+/// finds per song (none found when not listed); the songs it was asked about.
 #[derive(Default)]
-struct FakeOther(Mutex<Vec<String>>);
+struct FakeOther(Mutex<Vec<String>>, Mutex<Vec<(String, Official)>>, Mutex<Vec<String>>);
 
 #[async_trait]
 impl OtherLyrics for FakeOther {
     async fn has_lyrics(&self, track_id: &str) -> bool {
         self.0.lock().iter().any(|t| t == track_id)
+    }
+    async fn official_synced(&self, track_id: &str) -> Official {
+        self.2.lock().push(track_id.to_owned());
+        self.1.lock().iter().find(|(t, _)| t == track_id).map_or(Official::NoneMatched, |(_, o)| *o)
     }
 }
 
@@ -294,6 +300,11 @@ fn card(name: &str, kind: gpu::DeviceKind) -> gpu::Device {
 
 /// `over`: another recognizer; `gpu`: the graphics cards found.
 fn fx_build(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<gpu::Gpu>) -> Fx {
+    fx_timed(fetch, over, gpu, pace::fake::timing())
+}
+
+/// With these pacing times (upkeep waits an hour in the others).
+fn fx_timed(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<gpu::Gpu>, timing: pace::Timing) -> Fx {
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("t.db")).unwrap();
     db.write(|c| {
@@ -335,7 +346,7 @@ fn fx_build(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<g
         conditions: cond.clone(),
         events: events.clone(),
         // A 16-thread computer: Light is 2 threads in the background, 4 for a song asked for.
-        pacer: pace::Pacer::with_cores(load.clone(), pace::fake::timing(), 16),
+        pacer: pace::Pacer::with_cores(load.clone(), timing, 16),
         gpu: gpu.clone(),
         speeds: Arc::new(speed::Speeds::load(Some(dir.path().join("speeds.json")))),
     });
@@ -860,6 +871,123 @@ async fn a_transcription_never_replaces_lyrics_the_user_saved() {
     assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0, "a song with the user's lyrics is skipped");
     assert!(!f.db.write(|c| store::save(c, "801", "[00:01.00]x\n", "small", now)).unwrap());
     assert_eq!(f.db.read(|c| user::get(c, "801")).unwrap().unwrap().text, "Mine");
+}
+
+// ---------------------------------------------------------------- official lyrics first
+
+/// Waits (up to 5 s) for a condition outside the status.
+async fn until_true(what: &str, f: impl Fn() -> bool) {
+    for _ in 0..500 {
+        if f() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
+#[tokio::test]
+async fn matching_official_synced_lyrics_stop_a_transcription() {
+    let f = fx();
+    install(&f).await;
+    f.other.1.lock().push(("801".into(), Official::Matched));
+    // Asked for, and in the background batch: neither transcribes 801.
+    f.t.transcribe_track("801").unwrap();
+    until(&f.t, "idle", |s| idle(s) && f.other.2.lock().contains(&"801".to_string())).await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0, "official lyrics came first");
+    assert!(f.events.done.lock().is_empty());
+    assert!(f.db.read(|c| user::get(c, "801")).unwrap().is_none());
+    assert_eq!(f.t.transcribe_unreleased().await.unwrap(), 3);
+    until(&f.t, "batch", |s| idle(s) && f.events.done.lock().len() == 2).await;
+    let done: Vec<String> = f.events.done.lock().iter().map(|d| d.0.clone()).collect();
+    assert_eq!(done, vec!["802", "803"], "songs whose official lyrics don't match are transcribed");
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn without_a_match_the_song_is_transcribed() {
+    let f = fx();
+    install(&f).await;
+    // Couldn't look (the check is off): transcribed as before.
+    f.other.1.lock().push(("801".into(), Official::Unknown));
+    f.t.transcribe_track("801").unwrap();
+    until(&f.t, "done", |s| idle(s) && f.events.done.lock().len() == 1).await;
+    // None matched: transcribed too.
+    f.t.transcribe_track("802").unwrap();
+    until(&f.t, "done", |s| idle(s) && f.events.done.lock().len() == 2).await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 2);
+    assert_eq!(*f.other.2.lock(), vec!["801", "802"], "official lyrics are looked for first");
+    // Freshly transcribed songs aren't due another look for a week.
+    let due = f.db.read(|c| store::official_due(c, crate::db::queries::now_s() - OFFICIAL_RECHECK_S, 10)).unwrap();
+    assert!(due.is_empty(), "{due:?}");
+}
+
+#[tokio::test]
+async fn transcribed_songs_are_looked_at_again_weekly_and_a_users_choice_is_kept() {
+    let f = fx();
+    let now = crate::db::queries::now_s();
+    let week = OFFICIAL_RECHECK_S;
+    f.db.write(|c| {
+        for id in ["801", "802", "803"] {
+            store::save(c, id, "[00:01.00]<00:01.00>Hello\n", "small", now)?;
+        }
+        // 801: looked at eight days ago; 802: yesterday; 803: chosen by the user.
+        store::official_checked(c, "801", now - week - 86_400)?;
+        store::official_checked(c, "802", now - 86_400)?;
+        store::official_checked(c, "803", now - week - 86_400)?;
+        crate::lyrics::choice::put(c, "803", &crate::lyrics::choice::Choice { pick: Some("auto".into()), offset_ms: 0 }, now)?;
+        Ok(())
+    })
+    .unwrap();
+    f.other.1.lock().push(("801".into(), Official::Matched));
+    assert_eq!(f.t.recheck_official().await, Some(1));
+    assert_eq!(*f.other.2.lock(), vec!["801"], "only the song due, never the one the user chose");
+    // Swapped by the lyrics view (the match outranks a transcription); the
+    // transcription stays to pick.
+    assert!(f.db.read(|c| user::get(c, "801")).unwrap().unwrap().auto.is_some());
+    // Looked at: not due again this week.
+    assert_eq!(f.t.recheck_official().await, Some(0));
+    assert_eq!(f.other.2.lock().len(), 1);
+    // A look that can't run leaves the song due.
+    f.db.write(|c| store::official_checked(c, "802", now - week - 1)).unwrap();
+    f.other.1.lock().push(("802".into(), Official::Unknown));
+    assert_eq!(f.t.recheck_official().await, None);
+    let due = f.db.read(|c| store::official_due(c, now - week, 10)).unwrap();
+    assert_eq!(due, vec!["802"]);
+}
+
+#[tokio::test]
+async fn transcriptions_with_the_first_timing_are_moved_once_at_idle() {
+    let timing = pace::Timing { upkeep: Duration::from_millis(20), ..pace::fake::timing() };
+    let f = fx_timed(FakeFetch::new(model_body()), None, gpu::Gpu::none(), timing);
+    let now = crate::db::queries::now_s();
+    let old = "[00:12.34]<00:12.34>Hello <00:12.80>world\n";
+    f.db.write(|c| {
+        user::put_auto_timed(c, "801", old, "small", now, 1)?;
+        // Already current: left as it is.
+        user::put_auto(c, "802", old, "small", now)?;
+        // The user's own: never moved.
+        user::put(c, "803", old, false, now)?;
+        // Nothing official to look at, so only the timing is upkeep's work.
+        for id in ["801", "802"] {
+            store::official_checked(c, id, now)?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let timing = |id: &str| f.db.read(|c| user::auto_timing(c, id)).unwrap();
+    assert_eq!(timing("801"), Some(1));
+    // Upkeep finds it on its own once the computer is calm.
+    until_true("moved", || timing("801") == Some(engine::TIMING_VERSION)).await;
+    let text = |id: &str| f.db.read(|c| user::get(c, id)).unwrap().unwrap().text;
+    assert_eq!(text("801"), "[00:11.99]<00:11.99>Hello <00:12.61>world
+");
+    assert_eq!(text("802"), old);
+    assert_eq!(text("803"), old);
+    // Once: nothing is left to move.
+    assert_eq!(f.t.retime_old().await, 0);
+    assert_eq!(text("801"), "[00:11.99]<00:11.99>Hello <00:12.61>world
+");
 }
 
 // ---------------------------------------------------------------- audio

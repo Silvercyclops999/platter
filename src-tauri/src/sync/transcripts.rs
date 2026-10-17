@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use super::store::{LYRICS_SHARED, SyncStore, TRANSCRIPTS};
 use crate::db::DbHandle;
 use crate::error::AppResult;
+use crate::lyrics::transcribe::engine::TIMING_VERSION;
+use crate::lyrics::transcribe::lines;
 use crate::lyrics::transcribe::store as tstore;
 use crate::lyrics::user;
 
@@ -38,6 +40,14 @@ pub struct Transcript {
     /// When it was made, unix seconds.
     #[serde(default)]
     pub at: i64,
+    /// How its words were timed (engine::TIMING_VERSION); results from
+    /// before the field are the first timing.
+    #[serde(default = "first_timing")]
+    pub timing: i64,
+}
+
+fn first_timing() -> i64 {
+    1
 }
 
 /// A song whose lyrics the user shared to LRCLIB.
@@ -69,7 +79,7 @@ pub fn best<'a>(results: impl IntoIterator<Item = &'a Transcript>) -> Option<&'a
 /// After a result was saved here.
 pub fn saved(store: &SyncStore, db: &DbHandle, track_id: &str, body: &str, model: &str, at: i64) -> AppResult<()> {
     let Some(part) = db.read(|c| tstore::part_key(c, track_id))? else { return Ok(()) };
-    let t = Transcript { text: body.trim().to_owned(), model: model.to_owned(), part, at };
+    let t = Transcript { text: body.trim().to_owned(), model: model.to_owned(), part, at, timing: TIMING_VERSION };
     store.put(&TRANSCRIPTS, &key(track_id, model), &t)
 }
 
@@ -108,6 +118,15 @@ pub fn take(store: &SyncStore, db: &DbHandle, track_id: &str) -> AppResult<Optio
 /// user's own lyrics, or a result from a bigger model (or as big and newer).
 /// True when it changed anything.
 fn put_here(db: &DbHandle, track_id: &str, t: &Transcript) -> AppResult<bool> {
+    // Made with the first timing: moved into place before comparing, the
+    // way this device moved its own.
+    let moved;
+    let t = if t.timing < TIMING_VERSION && !t.text.is_empty() {
+        moved = Transcript { text: lines::retime_v1(&t.text).unwrap_or_else(|| t.text.clone()), timing: TIMING_VERSION, ..t.clone() };
+        &moved
+    } else {
+        t
+    };
     db.write(|c| {
         let cur = user::get(c, track_id)?;
         if cur.as_ref().is_some_and(|o| o.auto.is_none()) {
@@ -128,7 +147,7 @@ fn put_here(db: &DbHandle, track_id: &str, t: &Transcript) -> AppResult<bool> {
         if t.text.is_empty() {
             c.execute("DELETE FROM user_lyrics WHERE track_id = ?1 AND auto IS NOT NULL", [track_id])?;
         }
-        tstore::save(c, track_id, &t.text, &t.model, t.at)
+        tstore::save_timed(c, track_id, &t.text, &t.model, t.at, t.timing)
     })
 }
 
@@ -174,12 +193,13 @@ pub fn seed(store: &SyncStore, db: &DbHandle) -> AppResult<()> {
         let Some(own) = db.read(|c| user::get(c, &id))? else { continue };
         let Some(model) = own.auto else { continue };
         let Some(part) = db.read(|c| tstore::part_key(c, &id))? else { continue };
-        let t = Transcript { text: own.text, model: model.clone(), part, at: own.updated_at };
+        let timing = db.read(|c| user::auto_timing(c, &id))?.unwrap_or(1);
+        let t = Transcript { text: own.text, model: model.clone(), part, at: own.updated_at, timing };
         store.seed(&TRANSCRIPTS, &key(&id, &model), &t, (own.updated_at.max(1) as u64) * 1000)?;
     }
     for (id, model, at) in db.read(tstore::empties)? {
         let Some(part) = db.read(|c| tstore::part_key(c, &id))? else { continue };
-        let t = Transcript { text: String::new(), model: model.clone(), part, at };
+        let t = Transcript { text: String::new(), model: model.clone(), part, at, timing: TIMING_VERSION };
         store.seed(&TRANSCRIPTS, &key(&id, &model), &t, (at.max(1) as u64) * 1000)?;
     }
     Ok(())

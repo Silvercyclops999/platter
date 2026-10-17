@@ -48,6 +48,7 @@ use tokio::sync::Notify;
 use crate::db::DbHandle;
 use crate::db::queries::now_s;
 use crate::error::{AppError, AppResult};
+use crate::lyrics::user;
 use audio::AudioError;
 use engine::{RecognizeError, Recognizer, Step, Stop};
 use model::{DownloadError, ModelFetch, ModelKind, ModelStore};
@@ -208,7 +209,33 @@ pub trait SongReader: Send + Sync {
 #[async_trait]
 pub trait OtherLyrics: Send + Sync {
     async fn has_lyrics(&self, track_id: &str) -> bool;
+
+    /// Synced lyrics from the song's sources (its server, files next to it,
+    /// LRCLIB), checked against the recording now if they haven't been.
+    /// Asked before transcribing, and again each week for transcribed songs.
+    async fn official_synced(&self, _track_id: &str) -> Official {
+        Official::Unknown
+    }
 }
+
+/// What looking for official synced lyrics found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Official {
+    /// A synced set matches the recording: it's shown, no transcription needed.
+    Matched,
+    /// None found, or none matches.
+    NoneMatched,
+    /// Couldn't look (the setting or the check is off, or the user chose
+    /// the transcription for this song).
+    Unknown,
+}
+
+/// A transcribed song is looked at again for official synced lyrics this often.
+pub const OFFICIAL_RECHECK_S: i64 = 7 * 24 * 3600;
+/// Songs looked at per round of upkeep.
+const OFFICIAL_PER_ROUND: usize = 10;
+/// Stored transcriptions moved to the current timing per step.
+const RETIME_BATCH: usize = 50;
 
 /// What pauses the background batch.
 #[async_trait]
@@ -383,6 +410,134 @@ impl Transcriber {
     pub fn spawn(&self) {
         let me = self.clone();
         tokio::spawn(async move { me.run().await });
+        let me = self.clone();
+        tokio::spawn(async move { me.upkeep().await });
+    }
+
+    /// A song is being worked on or waits.
+    fn working(&self) -> bool {
+        let st = self.inner.st.lock();
+        st.current.is_some() || !st.queue.is_empty()
+    }
+
+    /// Idle upkeep, every little while once nothing is queued and the
+    /// computer is calm: transcriptions stored with an older timing are
+    /// moved into place, and transcribed songs not looked at for a week are
+    /// looked at for official synced lyrics again.
+    async fn upkeep(self) {
+        let pacer = self.inner.deps.pacer.clone();
+        // Rounds to skip the official look after it couldn't run.
+        let mut official_wait = 0u32;
+        loop {
+            tokio::time::sleep(pacer.timing().upkeep).await;
+            if self.working() {
+                continue;
+            }
+            official_wait = official_wait.saturating_sub(1);
+            let (retime, official) = self.upkeep_due(official_wait == 0).await;
+            if !retime && !official {
+                // Nothing to do: the processor isn't read.
+                continue;
+            }
+            let _readings = pacer.want();
+            pacer.wait_calm().await;
+            if self.working() {
+                continue;
+            }
+            if retime {
+                self.retime_old().await;
+            }
+            if official && self.recheck_official().await.is_none() {
+                official_wait = 6;
+            }
+        }
+    }
+
+    /// Whether upkeep has work: old timing to move, songs due a look.
+    async fn upkeep_due(&self, official: bool) -> (bool, bool) {
+        let before = now_s() - OFFICIAL_RECHECK_S;
+        self.inner
+            .deps
+            .db
+            .read_async(move |c| {
+                let retime = !user::auto_timed_before(c, engine::TIMING_VERSION, 1)?.is_empty();
+                let due = official && !store::official_due(c, before, 1)?.is_empty();
+                Ok((retime, due))
+            })
+            .await
+            .unwrap_or((false, false))
+    }
+
+    /// Moves transcriptions made with an older timing into place (from the
+    /// stored words, without hearing the songs again). Each is done once.
+    /// Returns how many changed.
+    pub async fn retime_old(&self) -> usize {
+        let db = &self.inner.deps.db;
+        let mut moved = 0;
+        // Bounded: a row that keeps changing underneath can't hold this up.
+        for _ in 0..10_000 {
+            let rows = match db.read_async(|c| user::auto_timed_before(c, engine::TIMING_VERSION, RETIME_BATCH)).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("old transcriptions couldn't be read: {e}");
+                    break;
+                }
+            };
+            if rows.is_empty() {
+                break;
+            }
+            let done = db
+                .write_async(move |c| {
+                    let mut n = 0;
+                    for (id, body) in rows {
+                        let new = lines::retime_v1(&body);
+                        if user::retimed(c, &id, &body, new.as_deref(), engine::TIMING_VERSION)? && new.is_some() {
+                            n += 1;
+                        }
+                    }
+                    Ok(n)
+                })
+                .await;
+            match done {
+                Ok(n) => moved += n,
+                Err(e) => {
+                    tracing::warn!("old transcriptions couldn't be moved: {e}");
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+        if moved > 0 {
+            tracing::info!(moved, "transcriptions moved to the current timing");
+        }
+        moved
+    }
+
+    /// Transcribed songs due a look for official synced lyrics, a few per
+    /// round, stopping as soon as a song is asked for. How many now show
+    /// official lyrics; None when the look couldn't run.
+    pub async fn recheck_official(&self) -> Option<usize> {
+        let d = &self.inner.deps;
+        let before = now_s() - OFFICIAL_RECHECK_S;
+        let due = d.db.read_async(move |c| store::official_due(c, before, OFFICIAL_PER_ROUND)).await.unwrap_or_default();
+        let mut matched = 0;
+        for id in due {
+            if self.working() {
+                break;
+            }
+            let found = d.other.official_synced(&id).await;
+            if found == Official::Unknown {
+                // The check can't run now: looked at again later.
+                return None;
+            }
+            if found == Official::Matched {
+                tracing::info!("official synced lyrics now shown in place of a transcription");
+                matched += 1;
+            }
+            let now = now_s();
+            let _ = d.db.write_async(move |c| store::official_checked(c, &id, now)).await;
+        }
+        Some(matched)
     }
 
     /// Settings: the switch and the chosen model. Turning it off stops
@@ -1051,6 +1206,16 @@ impl Transcriber {
         if job.check_other && d.other.has_lyrics(&id).await {
             return Outcome::Skipped;
         }
+        // Official synced lyrics that match the recording win: no transcription.
+        if d.other.official_synced(&id).await == Official::Matched {
+            tracing::info!("official synced lyrics match the song: not transcribed");
+            let (id, now) = (id.clone(), now_s());
+            let _ = d.db.write_async(move |c| store::official_checked(c, &id, now)).await;
+            return Outcome::Skipped;
+        }
+        if cancel.is_set() {
+            return Outcome::Cancelled;
+        }
         let held = {
             let mut st = self.inner.st.lock();
             if st.held.as_ref().is_some_and(|h| h.0 == id) { st.held.take().map(|h| h.1) } else { None }
@@ -1194,6 +1359,9 @@ impl Transcriber {
         };
         match saved {
             Ok(true) => {
+                // Official lyrics were looked for just before.
+                let (id2, now) = (id.clone(), now_s());
+                let _ = d.db.write_async(move |c| store::official_checked(c, &id2, now)).await;
                 if let Some(s) = self.shared() {
                     s.saved(&id, &body, model_name(kind)).await;
                 }

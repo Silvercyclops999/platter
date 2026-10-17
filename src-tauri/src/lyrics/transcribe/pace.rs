@@ -123,6 +123,9 @@ pub struct Timing {
     /// A lyrics check with no progress for this long is reported as
     /// couldn't check yet.
     pub stuck: Duration,
+    /// How often idle upkeep (moving old transcription timing, looking for
+    /// official lyrics again) looks for work.
+    pub upkeep: Duration,
 }
 
 impl Default for Timing {
@@ -135,6 +138,7 @@ impl Default for Timing {
             rest: Duration::from_secs(5),
             away: Duration::from_secs(5 * 60),
             stuck: Duration::from_secs(120),
+            upkeep: Duration::from_secs(10 * 60),
         }
     }
 }
@@ -490,7 +494,7 @@ pub mod fake {
 
     pub fn timing() -> Timing {
         let ms = Duration::from_millis;
-        Timing { sample: ms(5), window: ms(15), resume: ms(20), poll: ms(5), rest: ms(0), away: ms(1000), stuck: ms(300) }
+        Timing { sample: ms(5), window: ms(15), resume: ms(20), poll: ms(5), rest: ms(0), away: ms(1000), stuck: ms(300), upkeep: Duration::from_secs(3600) }
     }
 }
 

@@ -539,8 +539,9 @@ export function WrongLyricsDialog() {
   };
   const transcribeNow = async () => {
     if (!transcribeOn) await updateSettings({ transcribeLyrics: true });
-    await transcribe.track(track.id);
+    // Picked first, so the song is transcribed even when official lyrics match.
     await chooseLyrics(track.id, "auto");
+    await transcribe.track(track.id);
     closeWrongLyrics();
   };
   return (

@@ -400,6 +400,7 @@ struct Fx {
     check_on: Arc<AtomicBool>,
     fix_timing: Arc<AtomicBool>,
     released_ok: Arc<AtomicBool>,
+    official_first: Arc<AtomicBool>,
     none_matched: Arc<Mutex<Vec<String>>>,
     load: Arc<FakeLoad>,
     db: DbHandle,
@@ -434,10 +435,12 @@ fn fx() -> Fx {
     let check_on = Arc::new(AtomicBool::new(true));
     let fix_timing = Arc::new(AtomicBool::new(true));
     let released_ok = Arc::new(AtomicBool::new(false));
+    let official_first = Arc::new(AtomicBool::new(true));
     let switches = Switches {
         lrclib: Arc::new(AtomicBool::new(true)),
         fix_timing: fix_timing.clone(),
         released_ok: released_ok.clone(),
+        official_first: official_first.clone(),
         ..Default::default()
     };
     let svc = LyricsService::with_gap(db.clone(), http.clone(), plex.clone(), switches, Duration::from_millis(1));
@@ -479,6 +482,7 @@ fn fx() -> Fx {
         check_on,
         fix_timing,
         released_ok,
+        official_first,
         none_matched,
         load,
         db,
@@ -1091,4 +1095,93 @@ async fn after_the_upgrade_found_lyrics_show_again_over_a_transcription() {
     assert_eq!((s.pick.as_deref(), s.check), (Some(key.as_str()), Some(candidates::Note::Checked)));
     assert!(f.svc.candidates("702").await.unwrap().items.iter().any(|c| c.key == "auto"));
     assert_eq!(f.rows("SELECT count(*) FROM user_lyrics WHERE auto IS NOT NULL"), 1);
+}
+
+// ---------------------------------------------------------------- official lyrics first
+
+use crate::lyrics::transcribe::Official;
+
+#[tokio::test]
+async fn official_synced_lyrics_are_checked_before_transcribing() {
+    let f = fx();
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_A)).to_string());
+    f.hears(timeline(KING_A, |t| t + 800));
+    // Not judged yet: checked now, and they match.
+    assert_eq!(f.svc.official_synced("702").await, Official::Matched);
+    assert!(f.rec.calls.load(Ordering::SeqCst) >= 1);
+    // Asked again: the stored verdict answers, nothing is transcribed.
+    let calls = f.rec.calls.load(Ordering::SeqCst);
+    assert_eq!(f.svc.official_synced("702").await, Official::Matched);
+    assert_eq!(f.rec.calls.load(Ordering::SeqCst), calls);
+    // Shown, moved by the measured offset.
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.check, s.lyrics.timed[0].start_ms), (Some(candidates::Note::Checked), 12_800));
+}
+
+#[tokio::test]
+async fn official_lyrics_that_dont_match_leave_the_song_to_transcribe() {
+    let f = fx();
+    // The other song called KING, synced, while the recording is KING_A throughout.
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_B)).to_string());
+    f.hears(sung_throughout());
+    assert_eq!(f.svc.official_synced("702").await, Official::NoneMatched);
+    // Plain lyrics only: nothing synced to show in time.
+    let f = fx();
+    f.http.route("api/get", 200, &serde_json::json!({"id": 1, "trackName": "Opening", "artistName": "Test Artist",
+        "albumName": "Crown Season", "duration": 200.0, "instrumental": false, "syncedLyrics": null,
+        "plainLyrics": plain(KING_A)}).to_string());
+    f.hears(timeline(KING_A, |t| t));
+    assert_eq!(f.svc.official_synced("702").await, Official::NoneMatched);
+    assert_eq!(f.rec.calls.load(Ordering::SeqCst), 0, "nothing to check");
+}
+
+#[tokio::test]
+async fn official_first_can_be_turned_off_and_a_chosen_transcription_is_kept() {
+    let f = fx();
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_A)).to_string());
+    f.hears(timeline(KING_A, |t| t));
+    f.official_first.store(false, Ordering::SeqCst);
+    assert_eq!(f.svc.official_synced("702").await, Official::Unknown);
+    f.official_first.store(true, Ordering::SeqCst);
+    // "Transcribe this song" picks the transcription: it stays.
+    f.svc.choose("702", Some("auto".into())).await.unwrap();
+    assert_eq!(f.svc.official_synced("702").await, Official::Unknown);
+    assert_eq!(f.rec.calls.load(Ordering::SeqCst), 0);
+    // Without the check it can't look.
+    f.svc.choose("702", None).await.unwrap();
+    f.check_on.store(false, Ordering::SeqCst);
+    assert_eq!(f.svc.official_synced("702").await, Official::Unknown);
+}
+
+#[tokio::test]
+async fn a_transcriptions_steady_offset_is_measured_and_corrected() {
+    let f = fx();
+    // A transcription a second early against what the check hears.
+    f.db.write(|c| crate::lyrics::transcribe::store::save(c, "702", &lrc(KING_A), "medium", 1).map(|_| ())).unwrap();
+    f.hears(timeline(KING_A, |t| t + 1000));
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.pick.as_deref(), s.lyrics.timed[0].start_ms), (Some("auto"), 12_000));
+    assert_eq!(f.checker.queued(), vec!["702"], "its timing is measured");
+    f.checker.drain().await.unwrap();
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert_eq!((s.pick.as_deref(), s.lyrics.timed[0].start_ms, s.auto_offset_ms), (Some("auto"), 13_000, 1000));
+    assert_eq!(s.check, None, "a transcription isn't labelled checked");
+    assert!(f.none_matched.lock().is_empty());
+    // With "Fix lyrics timing automatically" off it keeps its own timing.
+    f.fix_timing.store(false, Ordering::SeqCst);
+    assert_eq!(f.svc.shown("702").await.unwrap().unwrap().lyrics.timed[0].start_ms, 12_000);
+}
+
+#[tokio::test]
+async fn a_chosen_transcription_is_measured_too() {
+    let f = fx();
+    f.http.route("api/get", 200, &exact("Crown Season", 200.0, &lrc(KING_A)).to_string());
+    f.db.write(|c| crate::lyrics::transcribe::store::save(c, "702", &lrc(KING_A), "medium", 1).map(|_| ())).unwrap();
+    f.svc.choose("702", Some("auto".into())).await.unwrap();
+    f.hears(timeline(KING_A, |t| t + 1000));
+    f.svc.shown("702").await.unwrap();
+    f.checker.drain().await.unwrap();
+    let s = f.svc.shown("702").await.unwrap().unwrap();
+    assert!(s.chosen);
+    assert_eq!((s.pick.as_deref(), s.lyrics.timed[0].start_ms), (Some("auto"), 13_000));
 }

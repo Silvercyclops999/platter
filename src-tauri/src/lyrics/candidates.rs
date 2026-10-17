@@ -81,6 +81,12 @@ impl Candidate {
         !matches!(self.origin, Origin::User | Origin::Auto)
     }
 
+    /// Sent to the audio check: the ones it judges, and a transcription,
+    /// whose timing it measures (a steady offset is then corrected).
+    pub fn measured(&self) -> bool {
+        self.checkable() || self.origin == Origin::Auto
+    }
+
     /// Shown while its check runs (not one found only by its title).
     fn safe_while_checking(&self) -> bool {
         matches!(self.origin, Origin::Server | Origin::LrclibExact)

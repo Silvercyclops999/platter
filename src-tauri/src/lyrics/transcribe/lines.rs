@@ -282,7 +282,7 @@ pub fn retime_v1(lrc: &str) -> Option<String> {
         }
         out.push('\n');
     }
-    (out.trim_end() != lrc.trim_end()).then(|| out)
+    (out.trim_end() != lrc.trim_end()).then_some(out)
 }
 
 #[cfg(test)]

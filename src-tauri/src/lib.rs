@@ -1141,6 +1141,7 @@ pub fn run() {
                     live_timing: live.lyrics_live_timing.clone(),
                     fix_timing: live.lyrics_fix_timing.clone(),
                     released_ok: live.lyrics_released_ok.clone(),
+                    official_first: live.lyrics_official_first.clone(),
                 },
             );
             // Lyrics transcribed on this computer (opt-in, model downloaded on

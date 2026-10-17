@@ -2628,6 +2628,14 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "lyricsReleasedForVersions", ids),
     },
     {
+      key: "lyricsOfficialFirst",
+      section: "Appearance",
+      title: "Look for official lyrics before transcribing",
+      description:
+        "Before a song is transcribed, synced lyrics from its server, files next to it and LRCLIB are checked against it, and a match is shown instead. Transcribed songs are looked at again each week. A song you set to show its transcription keeps it.",
+      control: (ids) => toggle(s, "lyricsOfficialFirst", ids),
+    },
+    {
       key: "lyricsChoices",
       section: "Appearance",
       title: "Lyrics choices and timing",

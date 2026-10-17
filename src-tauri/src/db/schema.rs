@@ -1173,6 +1173,25 @@ CREATE INDEX IF NOT EXISTS imported_plays_unmatched_album
     ON imported_plays (artist_fold, album_fold, title_fold, played_at, ms_played, source, rating_key) WHERE rating_key IS NULL;
 CREATE INDEX IF NOT EXISTS imported_plays_unfolded ON imported_plays (id) WHERE title_fold IS NULL;
 "#,
+    // v42: transcription timing (lyrics::transcribe::engine::TIMING_VERSION).
+    // Words used to start where their first token ends. lyrics_auto_timing
+    // keeps the timing a transcription was made with (none: the old one), so
+    // each is moved once. Words heard by the check had the same lean, so they go,
+    // and so do the offsets measured from them (judged again when next asked).
+    // lyrics_official_check: when a transcribed song was last looked at for
+    // official synced lyrics.
+    r#"
+CREATE TABLE IF NOT EXISTS lyrics_auto_timing (
+    track_id TEXT PRIMARY KEY,
+    timing   INTEGER NOT NULL
+) WITHOUT ROWID;
+DELETE FROM lyrics_heard;
+DELETE FROM lyrics_check WHERE verdict IN ('match', 'matchOffset') AND points != '[]';
+CREATE TABLE IF NOT EXISTS lyrics_official_check (
+    track_id   TEXT PRIMARY KEY,
+    checked_at INTEGER NOT NULL
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

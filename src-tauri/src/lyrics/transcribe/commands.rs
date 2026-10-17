@@ -101,6 +101,9 @@ impl OtherLyrics for AppOther {
     async fn has_lyrics(&self, track_id: &str) -> bool {
         self.0.has_other(track_id).await
     }
+    async fn official_synced(&self, track_id: &str) -> super::Official {
+        self.0.official_synced(track_id).await
+    }
 }
 
 /// Battery power. A slow connection doesn't pause the batch: its reads

@@ -105,13 +105,66 @@ pub fn put(c: &Connection, track_id: &str, text: &str, prefer: bool, now: i64) -
 /// Save a transcription. Never replaces lyrics the user wrote or edited;
 /// returns false when there were some.
 pub fn put_auto(c: &Connection, track_id: &str, text: &str, model: &str, now: i64) -> AppResult<bool> {
+    put_auto_timed(c, track_id, text, model, now, crate::lyrics::transcribe::engine::TIMING_VERSION)
+}
+
+/// [`put_auto`] for a transcription made with the given timing version
+/// (one from another device may be older).
+pub fn put_auto_timed(c: &Connection, track_id: &str, text: &str, model: &str, now: i64, timing: i64) -> AppResult<bool> {
     let n = c.execute(
         "INSERT INTO user_lyrics (track_id, body, prefer, updated_at, auto) VALUES (?1, ?2, 0, ?3, ?4)
          ON CONFLICT (track_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at,
            auto = excluded.auto WHERE user_lyrics.auto IS NOT NULL",
         params![track_id, text, now, model],
     )?;
+    if n > 0 {
+        set_timing(c, track_id, timing)?;
+    }
     Ok(n > 0)
+}
+
+fn set_timing(c: &Connection, track_id: &str, timing: i64) -> AppResult<()> {
+    c.execute(
+        "INSERT INTO lyrics_auto_timing (track_id, timing) VALUES (?1, ?2)
+         ON CONFLICT (track_id) DO UPDATE SET timing = excluded.timing",
+        params![track_id, timing],
+    )?;
+    Ok(())
+}
+
+/// Transcriptions made with an older timing than `timing`: (track, text), up to `limit`.
+pub fn auto_timed_before(c: &Connection, timing: i64, limit: usize) -> AppResult<Vec<(String, String)>> {
+    let mut st = c.prepare(
+        "SELECT u.track_id, u.body FROM user_lyrics u LEFT JOIN lyrics_auto_timing t ON t.track_id = u.track_id
+         WHERE u.auto IS NOT NULL AND COALESCE(t.timing, 1) < ?1 ORDER BY u.track_id LIMIT ?2",
+    )?;
+    let rows = st.query_map(params![timing, limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Put a transcription's re-timed text in place (`None`: nothing to move),
+/// unless it was edited or replaced meanwhile. True when it was.
+pub fn retimed(c: &Connection, track_id: &str, old: &str, text: Option<&str>, timing: i64) -> AppResult<bool> {
+    let n = c.execute(
+        "UPDATE user_lyrics SET body = COALESCE(?3, body) WHERE track_id = ?1 AND body = ?2 AND auto IS NOT NULL",
+        params![track_id, old, text],
+    )?;
+    if n > 0 {
+        set_timing(c, track_id, timing)?;
+    }
+    Ok(n > 0)
+}
+
+/// The timing version a song's transcription was made with.
+pub fn auto_timing(c: &Connection, track_id: &str) -> AppResult<Option<i64>> {
+    Ok(c
+        .query_row(
+            "SELECT COALESCE(t.timing, 1) FROM user_lyrics u LEFT JOIN lyrics_auto_timing t ON t.track_id = u.track_id
+             WHERE u.track_id = ?1 AND u.auto IS NOT NULL",
+            params![track_id],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 /// True when there was a row to remove.

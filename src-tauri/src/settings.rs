@@ -452,6 +452,9 @@ pub struct Settings {
     /// Other versions (unreleased, alternate, live, version tag) take lyrics
     /// found for the released version without asking.
     pub lyrics_released_for_versions: bool,
+    /// Before transcribing a song, look for official synced lyrics and
+    /// check them against the song; a match is shown instead.
+    pub lyrics_official_first: bool,
     /// Announce this computer to the user's other Platter devices on the
     /// network and through Plex, and let them play here (this device only).
     pub show_to_my_devices: bool,
@@ -923,6 +926,7 @@ impl Default for Settings {
             lyrics_check_audio: true,
             lyrics_fix_timing: true,
             lyrics_released_for_versions: false,
+            lyrics_official_first: true,
             show_to_my_devices: false,
             computer_name: String::new(),
             show_airplay_locked: false,
@@ -1106,6 +1110,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "lyricsShowAdd",
     "lyricsLiveTiming",
     "lyricsReleasedForVersions",
+    "lyricsOfficialFirst",
     "fullWindowHideControls",
     "explicitContent",
     "showFanEdits",
@@ -1414,6 +1419,7 @@ pub struct SettingsPatch {
     pub lyrics_check_audio: Option<bool>,
     pub lyrics_fix_timing: Option<bool>,
     pub lyrics_released_for_versions: Option<bool>,
+    pub lyrics_official_first: Option<bool>,
     pub show_to_my_devices: Option<bool>,
     /// Trimmed; empty goes back to the OS computer name.
     pub computer_name: Option<String>,
@@ -1728,6 +1734,7 @@ impl Settings {
         set(&mut self.lyrics_check_audio, p.lyrics_check_audio);
         set(&mut self.lyrics_fix_timing, p.lyrics_fix_timing);
         set(&mut self.lyrics_released_for_versions, p.lyrics_released_for_versions);
+        set(&mut self.lyrics_official_first, p.lyrics_official_first);
         set(&mut self.show_to_my_devices, p.show_to_my_devices);
         set(&mut self.show_airplay_locked, p.show_airplay_locked);
         set(&mut self.download_quality, p.download_quality);
@@ -2250,6 +2257,8 @@ pub struct Live {
     pub lyrics_fix_timing: Arc<AtomicBool>,
     /// Other versions take the released version's lyrics.
     pub lyrics_released_ok: Arc<AtomicBool>,
+    /// Look for official lyrics before transcribing.
+    pub lyrics_official_first: Arc<AtomicBool>,
     /// The file tag scan, once it exists (it starts after settings load).
     pub tag_scanner: Arc<parking_lot::Mutex<Option<crate::tags::scan::TagScanner>>>,
     /// Lyrics transcription, once it exists.
@@ -2341,6 +2350,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.lyrics_check_audio.store(s.lyrics_check_audio, Ordering::Relaxed);
     live.lyrics_fix_timing.store(s.lyrics_fix_timing, Ordering::Relaxed);
     live.lyrics_released_ok.store(s.lyrics_released_for_versions, Ordering::Relaxed);
+    live.lyrics_official_first.store(s.lyrics_official_first, Ordering::Relaxed);
     if let Some(t) = live.transcriber.lock().as_ref() {
         t.set_gpu(s.transcribe_gpu);
         t.set_options(s.transcribe_lyrics, s.transcribe_model);

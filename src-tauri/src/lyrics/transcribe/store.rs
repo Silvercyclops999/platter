@@ -12,6 +12,11 @@ use crate::lyrics::user;
 /// Save the result. An empty body records "no words found". Returns false
 /// when the user's own lyrics were there and were kept.
 pub fn save(c: &Connection, track_id: &str, body: &str, model: &str, now: i64) -> AppResult<bool> {
+    save_timed(c, track_id, body, model, now, super::engine::TIMING_VERSION)
+}
+
+/// [`save`] for a result made with the given timing version.
+pub fn save_timed(c: &Connection, track_id: &str, body: &str, model: &str, now: i64, timing: i64) -> AppResult<bool> {
     if body.trim().is_empty() {
         c.execute(
             "INSERT INTO lyrics_auto_empty (track_id, model, created_at) VALUES (?1, ?2, ?3)
@@ -21,7 +26,7 @@ pub fn save(c: &Connection, track_id: &str, body: &str, model: &str, now: i64) -
         return Ok(true);
     }
     c.execute("DELETE FROM lyrics_auto_empty WHERE track_id = ?1", params![track_id])?;
-    user::put_auto(c, track_id, body, model, now)
+    user::put_auto_timed(c, track_id, body, model, now, timing)
 }
 
 /// Whether the song needs no transcribing: it has lyrics in the app
@@ -144,4 +149,29 @@ pub fn is_unreleased(c: &Connection, track_id: &str) -> AppResult<bool> {
     let Some((format, subs, version, studio, matched, mb, album)) = row else { return Ok(false) };
     let subs: Vec<String> = serde_json::from_str(subs.as_deref().unwrap_or("[]")).unwrap_or_default();
     Ok(crate::db::release::track_unreleased(track_id, &album, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb))
+}
+
+/// A transcribed song was looked at for official synced lyrics now.
+pub fn official_checked(c: &Connection, track_id: &str, now: i64) -> AppResult<()> {
+    c.execute(
+        "INSERT INTO lyrics_official_check (track_id, checked_at) VALUES (?1, ?2)
+         ON CONFLICT (track_id) DO UPDATE SET checked_at = excluded.checked_at",
+        params![track_id, now],
+    )?;
+    Ok(())
+}
+
+/// Transcribed songs not looked at for official synced lyrics since
+/// `before` (unix seconds), oldest first, up to `limit`. Songs the user set
+/// to show their transcription are left alone.
+pub fn official_due(c: &Connection, before: i64, limit: usize) -> AppResult<Vec<String>> {
+    let mut st = c.prepare(
+        "SELECT u.track_id FROM user_lyrics u
+         LEFT JOIN lyrics_official_check o ON o.track_id = u.track_id
+         WHERE u.auto IS NOT NULL AND COALESCE(o.checked_at, 0) < ?1
+           AND NOT EXISTS (SELECT 1 FROM lyrics_choice ch WHERE ch.track_id = u.track_id AND ch.pick = 'auto')
+         ORDER BY COALESCE(o.checked_at, 0), u.track_id LIMIT ?2",
+    )?;
+    let rows = st.query_map(params![before, limit as i64], |r| r.get(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }

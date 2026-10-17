@@ -38,6 +38,8 @@ use crate::db::queries::now_s;
 use crate::error::AppResult;
 use crate::plex::details::Lyrics;
 
+/// The candidate key of a transcription made on this computer.
+const AUTO_KEY: &str = "auto";
 /// Songs waiting at most (older requests are dropped: the user moved on).
 const QUEUE_MAX: usize = 3;
 /// A check that couldn't read the song is retried after this long.
@@ -68,6 +70,12 @@ pub trait AudioCheck: Send + Sync {
     fn available(&self) -> bool;
     /// Check a song (a repeat request for a waiting song is merged).
     fn request(&self, job: CheckJob);
+    /// Check a song now and finish when its verdicts are stored (asked
+    /// before transcribing it).
+    fn check_now(&self, job: CheckJob) -> futures::future::BoxFuture<'static, ()> {
+        self.request(job);
+        Box::pin(async {})
+    }
 }
 
 /// A song's audio as 16 kHz mono samples.
@@ -448,18 +456,21 @@ impl Checker {
                 return Ok(());
             }
         };
-        let mut all_no = !job.cands.is_empty();
+        // A transcription is only measured: it never counts toward "none matched".
+        let mut all_no = job.cands.iter().any(|c| c.key != AUTO_KEY);
         for cand in &job.cands {
             let mut j = check::judge(&heard1, &cand.lyrics, w1);
             let mut drift = None;
             if j.verdict.matched() && job.fix_timing && cand.lyrics.synced {
                 drift = self.drift(job, cand, &j, w1, &mut pcm, &model, kind).await;
             }
-            if j.verdict == Verdict::NoMatch {
+            if j.verdict == Verdict::NoMatch && cand.key != AUTO_KEY {
                 j = self.make_sure(job, cand, (j, heard1.len()), w1, &mut pcm, &model, kind).await;
             }
             let s = to_stored(&j, drift);
-            all_no &= s.verdict == Verdict::NoMatch;
+            if cand.key != AUTO_KEY {
+                all_no &= s.verdict == Verdict::NoMatch;
+            }
             let matched = s.verdict.matched();
             let (id, key, hash, now) = (job.track_id.clone(), cand.key.clone(), cand.hash.clone(), now_s());
             d.db.write_async(move |c| save(c, &id, &key, &hash, &s, now, None)).await?;
@@ -629,5 +640,18 @@ impl AudioCheck for Checker {
             self.set(&id, CheckState::Queued, None);
         }
         self.inner.wake.notify_one();
+    }
+
+    fn check_now(&self, job: CheckJob) -> futures::future::BoxFuture<'static, ()> {
+        let me = self.clone();
+        Box::pin(async move {
+            if me.inner.deps.recognizer.crashed_too_often() {
+                return;
+            }
+            // The caller already waited for a calm computer where it should.
+            if let Err(e) = me.check(&job).await {
+                tracing::warn!(kind = e.kind(), "lyrics check failed");
+            }
+        })
     }
 }

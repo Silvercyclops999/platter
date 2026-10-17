@@ -85,6 +85,7 @@ fn fx() -> Fx {
         live_timing: live_timing.clone(),
         fix_timing: Arc::new(AtomicBool::new(true)),
         released_ok: released_ok.clone(),
+        ..Default::default()
     };
     let svc = LyricsService::with_gap(db.clone(), http.clone(), plex.clone(), switches, Duration::from_millis(1));
     Fx { svc, http, plex, on, prefer, show_auto, live_timing, released_ok, db, _dir: dir }

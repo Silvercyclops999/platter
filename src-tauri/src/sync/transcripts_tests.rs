@@ -106,7 +106,7 @@ fn lyrics_the_user_wrote_beat_a_transcription() {
 
 #[test]
 fn the_bigger_model_wins_then_the_newest() {
-    let t = |model: &str, at| Transcript { text: "x".into(), model: model.into(), part: "/p/1".into(), at };
+    let t = |model: &str, at| Transcript { text: "x".into(), model: model.into(), part: "/p/1".into(), at, timing: 2 };
     let (small_new, small_old, medium_old) = (t("small", 300), t("small", 100), t("medium", 50));
     assert_eq!(transcripts::best([&small_new, &medium_old]), Some(&medium_old));
     assert_eq!(transcripts::best([&small_old, &small_new]), Some(&small_new));

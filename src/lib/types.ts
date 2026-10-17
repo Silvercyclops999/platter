@@ -1024,6 +1024,8 @@ export interface Settings {
   lyricsFixTiming: boolean;
   /** Unreleased songs, alternate versions and live takes take the released version's lyrics without asking. */
   lyricsReleasedForVersions: boolean;
+  /** Before transcribing a song, look for official synced lyrics and check them against it; a match is shown instead. */
+  lyricsOfficialFirst: boolean;
   /** Announce this computer to your other Platter devices and let them play here. This device only. */
   showToMyDevices: boolean;
   /** The name your other devices see; empty uses the computer's name. This device only. */
@@ -1582,6 +1584,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lyricsCheckAudio: true,
   lyricsFixTiming: true,
   lyricsReleasedForVersions: false,
+  lyricsOfficialFirst: true,
   showToMyDevices: false,
   computerName: "",
   showAirplayLocked: false,

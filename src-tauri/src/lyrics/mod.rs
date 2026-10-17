@@ -251,6 +251,8 @@ pub struct Switches {
     pub fix_timing: Arc<AtomicBool>,
     /// "Use released lyrics for other versions".
     pub released_ok: Arc<AtomicBool>,
+    /// "Look for official lyrics before transcribing".
+    pub official_first: Arc<AtomicBool>,
 }
 
 impl Default for Switches {
@@ -262,6 +264,7 @@ impl Default for Switches {
             live_timing: Default::default(),
             fix_timing: Arc::new(AtomicBool::new(true)),
             released_ok: Default::default(),
+            official_first: Arc::new(AtomicBool::new(true)),
         }
     }
 }
@@ -489,7 +492,17 @@ impl LyricsService {
         if let Some(p) = r.choice.pick.as_deref()
             && let Some(idx) = r.cands.iter().position(|c| c.key == p)
         {
-            let note = verdict(&r.cands[idx]).filter(|v| v.verdict.matched()).map(|_| Note::Checked);
+            let c = &r.cands[idx];
+            let note = verdict(c).filter(|v| v.verdict.matched() && c.checkable()).map(|_| Note::Checked);
+            // A chosen transcription still has its timing measured.
+            if let Some(ch) = checker
+                && c.origin == Origin::Auto
+                && c.lyrics.synced
+                && verdict(c).is_none()
+            {
+                let job = JobCand { key: c.key.clone(), hash: c.hash.clone(), lyrics: c.lyrics.clone() };
+                self.send_check(r, ch, vec![job]);
+            }
             let mut s = self.build(r, idx, note, true);
             s.chosen = true;
             return Some(s);
@@ -520,9 +533,13 @@ impl LyricsService {
         let winner = candidates::winner(&r.cands, verdict);
         let todo: Vec<JobCand> = r.cands[..winner.unwrap_or(r.cands.len())]
             .iter()
-            .filter(|c| c.checkable() && verdict(c).is_none())
+            .filter(|c| c.measured() && verdict(c).is_none())
             .map(|c| JobCand { key: c.key.clone(), hash: c.hash.clone(), lyrics: c.lyrics.clone() })
             .collect();
+        self.send_check(r, ch, todo);
+    }
+
+    fn send_check(&self, r: &Resolved, ch: &dyn AudioCheck, todo: Vec<JobCand>) {
         if todo.is_empty() || r.facts.duration_ms <= 0 {
             return;
         }
@@ -590,6 +607,58 @@ impl LyricsService {
         }
         // No row of its own, so whatever get finds is the server's or LRCLIB's.
         matches!(self.get(track_id).await, Ok(Some(_)))
+    }
+
+    /// Official synced lyrics for a song about to be transcribed (or
+    /// transcribed already): every synced set its sources have (the server's
+    /// own, files next to the song, LRCLIB's lookup and search), checked
+    /// against the recording now when they haven't been. Unknown when
+    /// "Look for official lyrics before transcribing" or the check is off,
+    /// or the user chose the transcription for this song.
+    pub async fn official_synced(&self, track_id: &str) -> transcribe::Official {
+        use transcribe::Official;
+        if !on(&self.inner.sw.official_first) {
+            return Official::Unknown;
+        }
+        let Some(ch) = self.checker() else { return Official::Unknown };
+        let r = match self.resolve(track_id, true).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(kind = e.kind(), "official lyrics couldn't be gathered");
+                return Official::Unknown;
+            }
+        };
+        if r.choice.pick.as_deref() == Some("auto") {
+            return Official::Unknown;
+        }
+        let synced: Vec<&Candidate> = r.cands.iter().filter(|c| c.checkable() && c.lyrics.synced).collect();
+        let matched = |verdicts: &[(String, String, Stored)], c: &Candidate| verdict_in(verdicts, c).is_some_and(|v| v.verdict.matched());
+        if synced.iter().any(|c| matched(&r.verdicts, c)) {
+            return Official::Matched;
+        }
+        let todo: Vec<JobCand> = synced
+            .iter()
+            .filter(|c| verdict_in(&r.verdicts, c).is_none())
+            .map(|c| JobCand { key: c.key.clone(), hash: c.hash.clone(), lyrics: c.lyrics.clone() })
+            .collect();
+        if todo.is_empty() {
+            return Official::NoneMatched;
+        }
+        if r.facts.duration_ms <= 0 {
+            return Official::Unknown;
+        }
+        ch.check_now(CheckJob {
+            track_id: r.track_id.clone(),
+            duration_ms: r.facts.duration_ms.clamp(0, u32::MAX as i64) as u32,
+            cands: todo,
+            fix_timing: on(&self.inner.sw.fix_timing),
+        })
+        .await;
+        let id = track_id.to_owned();
+        let Ok(verdicts) = self.inner.db.read_async(move |c| checker::stored_all(c, &id, now_s())).await else {
+            return Official::Unknown;
+        };
+        if synced.iter().any(|c| matched(&verdicts, c)) { Official::Matched } else { Official::NoneMatched }
     }
 
     /// The track's own lyrics, as saved by the editor.
