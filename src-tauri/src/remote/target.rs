@@ -115,17 +115,56 @@ fn query_map(q: &str) -> HashMap<String, String> {
     url::form_urlencoded::parse(q.as_bytes()).into_owned().collect()
 }
 
-/// Answer one request: (status, body).
-pub async fn respond(handler: &dyn TargetHandler, info: &TargetInfo, method: &str, target: &str) -> (u16, String) {
-    if method == "OPTIONS" {
-        return (200, String::new());
+/// A `Host` header that names this computer by address (or `localhost`):
+/// anything else is a web page reaching it through a name it controls.
+fn host_ok(host: Option<&str>) -> bool {
+    let Some(h) = host.map(str::trim) else { return true };
+    let name = if let Some(rest) = h.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        h.rsplit_once(':').map_or(h, |(n, port)| if port.bytes().all(|b| b.is_ascii_digit()) { n } else { h })
+    };
+    name.eq_ignore_ascii_case("localhost") || name.parse::<std::net::IpAddr>().is_ok()
+}
+
+/// Why a request is refused before it's looked at, if it is: anything a
+/// web browser sends on a page's behalf (an `Origin`, a cross-site fetch, a
+/// CORS preflight) or that reaches this port under a borrowed name.
+pub fn refused(method: &str, headers: &HashMap<String, String>) -> Option<&'static str> {
+    if method == "OPTIONS" || headers.contains_key("origin") {
+        return Some("Web pages can't control Platter");
+    }
+    if headers.get("sec-fetch-site").is_some_and(|v| !v.eq_ignore_ascii_case("none")) {
+        return Some("Web pages can't control Platter");
+    }
+    if !host_ok(headers.get("host").map(String::as_str)) {
+        return Some("Unknown host");
+    }
+    None
+}
+
+/// The controller's id, as Plex apps send it with every command and poll.
+fn controller(headers: &HashMap<String, String>) -> Option<&str> {
+    headers.get("x-plex-client-identifier").map(|v| v.trim()).filter(|v| !v.is_empty() && v.len() <= 200)
+}
+
+/// Answer one request: (status, body). `headers` are named in lower case.
+pub async fn respond(handler: &dyn TargetHandler, info: &TargetInfo, method: &str, target: &str, headers: &HashMap<String, String>) -> (u16, String) {
+    if let Some(why) = refused(method, headers) {
+        return (403, err_xml(403, why));
     }
     if method != "GET" && method != "POST" && method != "PUT" {
         return (405, err_xml(405, "Method not allowed"));
     }
     let (path, q) = target.split_once('?').unwrap_or((target, ""));
     let params = query_map(q);
-    match path.trim_end_matches('/') {
+    let path = path.trim_end_matches('/');
+    // Only the player's own description is open; the timeline (which names
+    // the server) and commands need the controller to say who it is.
+    if path != "/resources" && controller(headers).is_none() {
+        return (403, err_xml(403, "Missing X-Plex-Client-Identifier"));
+    }
+    match path {
         "/resources" => (200, resources_xml(info)),
         "/player/timeline/poll" => {
             let t = handler.timeline().await;
@@ -162,17 +201,22 @@ async fn serve_conn(mut stream: TcpStream, handler: Arc<dyn TargetHandler>, info
     let Ok(Some(head)) = tokio::time::timeout(Duration::from_secs(5), read_head(&mut stream)).await else {
         return;
     };
-    let mut parts = head.lines().next().unwrap_or("").split_whitespace();
+    let mut lines = head.lines();
+    let mut parts = lines.next().unwrap_or("").split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
-    let (code, body) = respond(handler.as_ref(), &info, method, target).await;
+    let headers: HashMap<String, String> =
+        lines.take_while(|l| !l.is_empty()).filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).collect();
+    let (code, body) = respond(handler.as_ref(), &info, method, target, &headers).await;
     let reason = match code {
         200 => "OK",
         400 => "Bad Request",
+        403 => "Forbidden",
         404 => "Not Found",
         _ => "Method Not Allowed",
     };
+    // No CORS headers: no web page may read or drive this.
     let resp = format!(
-        "HTTP/1.1 {code} {reason}\r\nContent-Type: text/xml;charset=utf-8\r\nContent-Length: {}\r\nX-Plex-Client-Identifier: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Expose-Headers: X-Plex-Client-Identifier\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {code} {reason}\r\nContent-Type: text/xml;charset=utf-8\r\nContent-Length: {}\r\nX-Plex-Client-Identifier: {}\r\nConnection: close\r\n\r\n{body}",
         body.len(),
         info.client_id,
     );
@@ -185,9 +229,11 @@ pub async fn serve(listener: TcpListener, handler: Arc<dyn TargetHandler>, info:
     loop {
         tokio::select! {
             r = listener.accept() => match r {
-                Ok((s, _)) => {
+                // Only this computer and the home network.
+                Ok((s, peer)) if crate::lidarr::paths::is_private_host(&peer.ip().to_string()) => {
                     tokio::spawn(serve_conn(s, handler.clone(), info.clone()));
                 }
+                Ok(_) => {}
                 Err(e) => {
                     tracing::debug!("companion accept failed: {e}");
                     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -402,6 +448,51 @@ mod tests {
             platform: "Windows".into(),
             platform_version: "x86_64".into(),
         }
+    }
+
+    struct Counting(parking_lot::Mutex<Vec<String>>);
+
+    #[async_trait]
+    impl TargetHandler for Counting {
+        async fn timeline(&self) -> TargetTimeline {
+            TargetTimeline { state: "playing", server_machine_id: Some("server-id".into()), ..Default::default() }
+        }
+        async fn command(&self, path: &str, _: &HashMap<String, String>) -> AppResult<()> {
+            self.0.lock().push(path.to_string());
+            Ok(())
+        }
+    }
+
+    fn h(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[tokio::test]
+    async fn web_pages_and_unnamed_callers_cant_control_the_player() {
+        let c = Counting(Default::default());
+        let app = h(&[("host", "10.20.30.40:32500"), ("x-plex-client-identifier", "amp-1")]);
+        assert_eq!(respond(&c, &info(), "GET", "/player/playback/pause", &app).await.0, 200);
+        let (code, body) = respond(&c, &info(), "GET", "/player/timeline/poll?commandID=1", &app).await;
+        assert_eq!(code, 200);
+        assert!(body.contains("server-id"));
+        for bad in [
+            h(&[("host", "10.20.30.40:32500"), ("x-plex-client-identifier", "amp-1"), ("origin", "https://evil.example")]),
+            h(&[("host", "10.20.30.40:32500"), ("x-plex-client-identifier", "amp-1"), ("sec-fetch-site", "cross-site")]),
+            h(&[("host", "evil.example:32500"), ("x-plex-client-identifier", "amp-1")]),
+            h(&[("host", "10.20.30.40:32500")]),
+        ] {
+            let (code, body) = respond(&c, &info(), "GET", "/player/playback/play", &bad).await;
+            assert_eq!(code, 403, "{bad:?}");
+            assert!(!body.contains("server-id"));
+            let (code, body) = respond(&c, &info(), "GET", "/player/timeline/poll", &bad).await;
+            assert_eq!(code, 403, "{bad:?}");
+            assert!(!body.contains("server-id"), "the server's id isn't given to unnamed callers");
+        }
+        assert_eq!(respond(&c, &info(), "OPTIONS", "/player/playback/play", &app).await.0, 403);
+        assert_eq!(*c.0.lock(), ["/playback/pause"]);
+        // The player's own description stays open to discovery.
+        assert_eq!(respond(&c, &info(), "GET", "/resources", &h(&[("host", "[fe80::1]:32500")])).await.0, 200);
+        assert!(host_ok(Some("localhost:32500")) && host_ok(None) && !host_ok(Some("10.0.0.1.nip.io")));
     }
 
     #[test]

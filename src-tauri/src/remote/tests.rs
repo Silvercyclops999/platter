@@ -765,7 +765,18 @@ async fn target_rig() -> (std::net::SocketAddr, Arc<Local>, MockServer, tokio::s
 async fn platter_as_a_player_answers_play_media_and_timeline_poll() {
     let (addr, local, _server, stop) = target_rig().await;
     let base = format!("http://{addr}");
-    let http = reqwest::Client::new();
+    // Plex apps name themselves on every request.
+    let mut named = reqwest::header::HeaderMap::new();
+    named.insert("x-plex-client-identifier", "amp-1".parse().unwrap());
+    let http = reqwest::Client::builder().default_headers(named).build().unwrap();
+    // A web page (Origin) or an unnamed caller gets nothing.
+    let page = http.get(format!("{base}/player/playback/pause")).header("origin", "https://evil.example").send().await.unwrap();
+    assert_eq!(page.status(), 403);
+    assert!(page.headers().get("access-control-allow-origin").is_none());
+    let poll = reqwest::Client::new().get(format!("{base}/player/timeline/poll")).send().await.unwrap();
+    assert_eq!(poll.status(), 403);
+    assert!(!poll.text().await.unwrap().contains("srv"));
+    assert!(local.log().is_empty());
     let resp = http
         .get(format!("{base}/player/playback/playMedia"))
         .query(&[
@@ -779,7 +790,7 @@ async fn platter_as_a_player_answers_play_media_and_timeline_poll() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.headers()["access-control-allow-origin"], "*");
+    assert!(resp.headers().get("access-control-allow-origin").is_none());
     assert_eq!(local.log(), ["play a,b,c from b at 5000 true"]);
 
     let body = http.get(format!("{base}/player/timeline/poll?wait=0&commandID=2")).send().await.unwrap().text().await.unwrap();
