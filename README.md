@@ -41,7 +41,7 @@ side for the stuff that never got an official release.
 - Signs in with Plex in your browser, and the token lives in the OS keychain.
 - Connects to your server directly, on your home network first, then remote access, then the relay.
 - Keeps a local copy of the library, so search keeps up with typing and browsing works offline.
-- Search shows artists, albums and songs you don't have yet, on dimmed pages with the bio, covers and tracklist.
+- Search shows artists, albums and songs you don't have yet, with photos, and Get brings an album in through Lidarr in one click, following it until it's in your library.
 - Likes, editable playlists, smart playlists built from rules, library folders, pins and bookmarks.
 - Describe a playlist in plain words and get a smart playlist from your own library, worked out on your computer.
 - Mixes made from your own listening: Daily Mixes, Discover, On Repeat, a daylist that changes through the day, and song and artist radio.
