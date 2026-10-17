@@ -18,6 +18,7 @@ export type CircleDialog =
   | { kind: "invite"; playlistId: string; title: string }
   | { kind: "permissions"; playlistId: string }
   | { kind: "leave"; playlistId: string }
+  | { kind: "removePerson"; playlistId: string; person: CirclePerson }
   | { kind: "leaveBlend"; id: string; title: string };
 
 interface CircleState {

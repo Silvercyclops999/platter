@@ -17,12 +17,14 @@ import { backend } from "../lib/backend";
 import { formatDuration, formatLongDuration, plural } from "../lib/format";
 import type { SharedRow } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
-import { leavePlaylist, openCircleDialog, playShared, setInLibrary, useCircle, useShared } from "../stores/circle";
+import { openCircleDialog, playShared, setInLibrary, useCircle, useShared } from "../stores/circle";
 import { player, usePlayer } from "../stores/player";
 import { toast } from "../stores/toasts";
 import { usePageBar, useTitleStep } from "./detail";
 import { Byline, SORT_LABEL, sortRows, sortsFor, type PlaylistSort } from "./PlaylistPage";
 import "./playlist.css";
+import { leaveAction } from "../components/CircleDialogs";
+import { failText } from "../lib/errorText";
 
 /** Put a song you don't have on the Missing list (its album, as the list keeps albums). */
 export async function addSongToMissing(r: { album: string | null; artist: string; releaseGroupId: string | null; title: string }) {
@@ -34,7 +36,7 @@ export async function addSongToMissing(r: { album: string | null; artist: string
     await backend.importMissingAlbumAdd({ releaseGroupId: r.releaseGroupId, title: r.album ?? r.title, artist: r.artist });
     toast.info(`Added ${r.album ?? r.title} to your Missing list`);
   } catch (e) {
-    toast.error(`Couldn't add it to the Missing list: ${(e as { message?: string })?.message ?? "something went wrong"}`);
+    toast.error(failText(`Couldn't add ${r.album ?? r.title} to the Missing list`, e));
   }
 }
 
@@ -128,11 +130,8 @@ export function SharedPlaylistPage({ id }: { id: string }) {
         { label: "Add to queue", disabled: !playable.length, onSelect: () => void player.addToQueue(rows.filter((r) => r.track).map((r) => r.track)) },
         ...(s.gone ? [] : [{ label: "Playlist permissions", onSelect: () => openCircleDialog({ kind: "permissions", playlistId: id }) }]),
         s.inLibrary ? { label: "Remove from Your Library", onSelect: () => void setInLibrary(id, false) } : { label: "Add to Your Library", onSelect: () => void setInLibrary(id, true) },
-        s.gone
-          ? { label: "Remove", separator: true, onSelect: () => void leavePlaylist(id) }
-          : role === "follower"
-            ? { label: "Stop following", separator: true, onSelect: () => void leavePlaylist(id) }
-            : { label: "Leave playlist", separator: true, onSelect: () => openCircleDialog({ kind: "leave", playlistId: id }) },
+        // Each asks first: none of them can be undone from here.
+        { label: leaveAction(s), separator: true, onSelect: () => openCircleDialog({ kind: "leave", playlistId: id }) },
       ],
       el,
     );
@@ -145,9 +144,9 @@ export function SharedPlaylistPage({ id }: { id: string }) {
   const remove = async (key: string) => {
     try {
       await backend.collabRemove(id, [key]);
-      toast.info(s?.ownerUnreachable ? `Removed. It goes to ${s.owner.name} when they're back online.` : "Removed from this playlist");
+      toast.info(s?.ownerUnreachable ? `Removed. ${s.owner.name} gets this when they're back online` : "Removed from this playlist");
     } catch (e) {
-      toast.error(`Couldn't remove it: ${(e as { message?: string })?.message ?? "something went wrong"}`);
+      toast.error(failText("Couldn't remove the song from this playlist", e));
     }
   };
 

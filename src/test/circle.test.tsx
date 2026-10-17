@@ -12,7 +12,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CircleDialogs, leaveMessage } from "../components/CircleDialogs";
+import { CircleDialogs, leaveAction, leaveMessage } from "../components/CircleDialogs";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
 import { collaboratorPlaylists, editablePlaylists } from "../components/PlaylistPicker";
@@ -172,10 +172,21 @@ describe("a shared playlist you own", () => {
     await waitFor(() => expect(toasts()).toContain("Robin can listen only now"));
     await user.click(await within(dialog).findByRole("button", { name: "Jules: Listener" }));
     await user.click(await screen.findByRole("menuitem", { name: "Remove from playlist" }));
+    // It asks first, saying what removing means; Not now changes nothing.
+    let confirm = await screen.findByRole("dialog", { name: "Remove Jules?" });
+    expect(confirm).toHaveTextContent("Songs they added stay");
+    await user.click(within(confirm).getByRole("button", { name: "Not now" }));
+    let perms = await screen.findByRole("dialog", { name: "Playlist permissions" });
+    expect(within(perms).getByText("Jules")).toBeInTheDocument();
+    await user.click(within(perms).getByRole("button", { name: "Jules: Listener" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Remove from playlist" }));
+    confirm = await screen.findByRole("dialog", { name: "Remove Jules?" });
+    await user.click(within(confirm).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(toasts()).toContain("Removed Jules from the playlist"));
-    await waitFor(() => expect(within(dialog).queryByText("Jules")).toBeNull());
-    await user.click(within(dialog).getByRole("radio", { name: /Public/ }));
-    await waitFor(() => expect(within(dialog).getByRole("radio", { name: /Public/ })).toHaveAttribute("aria-checked", "true"));
+    perms = await screen.findByRole("dialog", { name: "Playlist permissions" });
+    await waitFor(() => expect(within(perms).queryByText("Jules")).toBeNull());
+    await user.click(within(perms).getByRole("radio", { name: /Public/ }));
+    await waitFor(() => expect(within(perms).getByRole("radio", { name: /Public/ })).toHaveAttribute("aria-checked", "true"));
   });
 
   it("shows a collaborator's song as theirs when it lands", async () => {
@@ -266,7 +277,7 @@ describe("a playlist shared with you", () => {
     page();
     await user.click(await screen.findByRole("button", { name: "More options for Road Trip" }));
     await user.click(await screen.findByRole("menuitem", { name: "Leave playlist" }));
-    const dialog = await screen.findByRole("dialog", { name: "Are you sure?" });
+    const dialog = await screen.findByRole("dialog", { name: "Leave Road Trip?" });
     expect(within(dialog).getByText(/You'll lose access to Road Trip/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Not now" }));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -287,7 +298,7 @@ describe("a playlist shared with you", () => {
     expect(within(dialog).getByRole("radio", { name: /Public/ })).toBeDisabled();
     await user.click(within(dialog).getByRole("button", { name: "Your role: Collaborator" }));
     await user.click(await screen.findByRole("menuitem", { name: "Leave playlist" }));
-    expect(await screen.findByRole("dialog", { name: "Are you sure?" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /^Leave .*\?$/ })).toBeInTheDocument();
   });
 
   it("removing it from your library keeps you on it", async () => {
@@ -466,5 +477,13 @@ describe("words", () => {
     expect(bylineText(base)).toBe("Morgan and Casey");
     expect(bylineText({ ...base, people: [p("Morgan"), p("Casey"), p("Avery"), p("listener", true)] })).toBe("Morgan and 3 others");
     expect(bylineText({ ...base, people: [p("listener", true), p("Casey")] })).toBe("You and Casey");
+  });
+});
+
+describe("leaving names what it does", () => {
+  it("Remove for a playlist that's gone, Stop following for one you follow, else Leave playlist", () => {
+    expect(leaveAction({ gone: true, role: "follower" })).toBe("Remove");
+    expect(leaveAction({ gone: false, role: "follower" })).toBe("Stop following");
+    expect(leaveAction({ gone: false, role: "collaborator" })).toBe("Leave playlist");
   });
 });

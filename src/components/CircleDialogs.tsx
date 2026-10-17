@@ -35,6 +35,7 @@ export function CircleDialogs() {
       {d?.kind === "invite" && <InviteDialog playlistId={d.playlistId} title={d.title} />}
       {d?.kind === "permissions" && <PermissionsDialog playlistId={d.playlistId} />}
       {d?.kind === "leave" && <LeaveDialog playlistId={d.playlistId} />}
+      {d?.kind === "removePerson" && <RemovePersonDialog playlistId={d.playlistId} person={d.person} />}
       {d?.kind === "leaveBlend" && <LeaveBlendDialog id={d.id} title={d.title} />}
       <IncomingInvites />
     </>
@@ -206,7 +207,7 @@ function PermissionsDialog({ playlistId }: { playlistId: string }) {
               [
                 { label: "Make collaborator", checked: p.role === "collaborator", onSelect: () => void setRole(playlistId, p, "collaborator") },
                 { label: "Make listener", checked: p.role === "listener", onSelect: () => void setRole(playlistId, p, "listener") },
-                { label: "Remove from playlist", separator: true, danger: true, onSelect: () => void removePerson(playlistId, p) },
+                { label: "Remove from playlist", separator: true, danger: true, onSelect: () => openCircleDialog({ kind: "removePerson", playlistId, person: p }) },
               ],
               e.currentTarget,
             )
@@ -283,14 +284,23 @@ export function leaveMessage(s: Pick<SharedSummary, "public" | "role" | "title">
   return `You'll still see ${s.title}, but you'd lose access if it's made private.`;
 }
 
+/** The leave action's name: a gone playlist is removed, a public one you follow is unfollowed. */
+export function leaveAction(s: Pick<SharedSummary, "gone" | "role">): string {
+  if (s.gone) return "Remove";
+  return s.role === "follower" ? "Stop following" : "Leave playlist";
+}
+
 function LeaveDialog({ playlistId }: { playlistId: string }) {
   const s = useShared(playlistId);
   const notNow = useRef<HTMLButtonElement>(null);
   if (!s) return null;
+  const action = leaveAction(s);
+  const title = s.gone ? `Remove ${s.title}?` : s.role === "follower" ? `Stop following ${s.title}?` : `Leave ${s.title}?`;
+  const body = s.gone ? `${s.title} isn't shared any more. Removing it takes it out of Your Library.` : leaveMessage(s);
   return (
-    <Dialog open onClose={close} label="Are you sure?" className="confirm" initialFocus={notNow}>
-      <h2 className="confirm__title">Are you sure?</h2>
-      <p className="confirm__body">{leaveMessage(s)}</p>
+    <Dialog open onClose={close} label={title} className="confirm" initialFocus={notNow}>
+      <h2 className="confirm__title">{title}</h2>
+      <p className="confirm__body">{body}</p>
       <div className="confirm__actions">
         <Button ref={notNow} variant="ghost" onClick={close}>
           Not now
@@ -303,7 +313,37 @@ function LeaveDialog({ playlistId }: { playlistId: string }) {
             void leavePlaylist(playlistId);
           }}
         >
-          Leave playlist
+          {action}
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
+/** Confirm before taking someone off a playlist you own; then back to permissions. */
+function RemovePersonDialog({ playlistId, person }: { playlistId: string; person: CirclePerson }) {
+  const s = useShared(playlistId);
+  const notNow = useRef<HTMLButtonElement>(null);
+  const back = () => openCircleDialog({ kind: "permissions", playlistId });
+  return (
+    <Dialog open onClose={back} label={`Remove ${person.name}?`} className="confirm" initialFocus={notNow}>
+      <h2 className="confirm__title">Remove {person.name}?</h2>
+      <p className="confirm__body">
+        {person.name} won't be able to see {s?.title ?? "this playlist"} or add to it. Songs they added stay.
+      </p>
+      <div className="confirm__actions">
+        <Button ref={notNow} variant="ghost" onClick={back}>
+          Not now
+        </Button>
+        <Button
+          variant="primary"
+          className="btn--danger"
+          onClick={() => {
+            back();
+            void removePerson(playlistId, person);
+          }}
+        >
+          Remove
         </Button>
       </div>
     </Dialog>
