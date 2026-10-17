@@ -14,6 +14,7 @@
 //! song's pitch classes correlate with best.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use realfft::RealFftPlanner;
 use realfft::num_complex::Complex;
@@ -184,7 +185,8 @@ fn chroma_map() -> Vec<Option<usize>> {
         .collect()
 }
 
-fn frames(x: &[f32]) -> Frames {
+/// None when `stop` is set part way.
+fn frames(x: &[f32], stop: &AtomicBool) -> Option<Frames> {
     let mut planner = RealFftPlanner::<f32>::new();
     let fft: Arc<dyn realfft::RealToComplex<f32>> = planner.plan_fft_forward(N);
     let win = hann(N);
@@ -206,6 +208,9 @@ fn frames(x: &[f32]) -> Frames {
     };
     let half = N / 2;
     for k in 0..count {
+        if k.is_multiple_of(1024) && stop.load(Ordering::Relaxed) {
+            return None;
+        }
         // Centred: frame k is about the sample at k * HOP.
         let centre = k * HOP;
         for (i, slot) in input.iter_mut().enumerate() {
@@ -249,7 +254,7 @@ fn frames(x: &[f32]) -> Frames {
         f.centroid.push(if msum > 1e-9 { wsum / msum } else { 0.0 });
         f.chroma.push(chroma);
     }
-    f
+    Some(f)
 }
 
 pub fn fps() -> f64 {
@@ -540,14 +545,24 @@ fn median(v: &mut [f32]) -> f32 {
     v[v.len() / 2]
 }
 
+/// Analysis was stopped part way (Automix turned off, or the computer got busy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stopped;
+
 /// Analyses mono audio at [`RATE`]. None when it's too short.
 pub fn analyse(x: &[f32]) -> Option<Analysis> {
+    analyse_until(x, &AtomicBool::new(false)).ok().flatten()
+}
+
+/// [`analyse`], giving up between stages once `stop` is set.
+pub fn analyse_until(x: &[f32], stop: &AtomicBool) -> Result<Option<Analysis>, Stopped> {
     let secs = x.len() as f64 / RATE as f64;
     if secs < MIN_SECONDS as f64 {
-        return None;
+        return Ok(None);
     }
+    let check = || if stop.load(Ordering::Relaxed) { Err(Stopped) } else { Ok(()) };
     let duration_ms = (secs * 1000.0).round() as u64;
-    let f = frames(x);
+    let f = frames(x, stop).ok_or(Stopped)?;
     let n = f.flux.len();
     let fps = fps();
 
@@ -599,6 +614,7 @@ pub fn analyse(x: &[f32]) -> Option<Analysis> {
     let ends_hot = n.saturating_sub(last + 1) <= edge && level(n.saturating_sub(edge)..n) > loudness_db - 8.0;
 
     // Tempo and beats.
+    check()?;
     let env = onset_env(&f.flux);
     let (mut bpm, mut beat_conf, mut intro, mut outro) = (None, 0.0f32, None, None);
     if let Some((period, clarity)) = tempo(&env) {
@@ -614,6 +630,7 @@ pub fn analyse(x: &[f32]) -> Option<Analysis> {
     }
 
     // Key, from pitch classes weighted by loudness.
+    check()?;
     let mut chroma = [0f32; 12];
     for (c, d) in f.chroma.iter().zip(&f.rms_db) {
         if *d <= gate {
@@ -660,7 +677,7 @@ pub fn analyse(x: &[f32]) -> Option<Analysis> {
     ];
     features.extend(chroma.iter().map(|c| c / total));
     let round = |v: f32| (v * 1000.0).round() / 1000.0;
-    Some(Analysis {
+    Ok(Some(Analysis {
         duration_ms,
         bpm: bpm.map(|b| (b * 10.0).round() / 10.0),
         beat_conf: round(beat_conf),
@@ -678,17 +695,34 @@ pub fn analyse(x: &[f32]) -> Option<Analysis> {
         ends_hot,
         sections,
         features: features.into_iter().map(round).collect(),
-    })
+    }))
 }
 
-/// Decodes a whole file to mono at [`RATE`]. Err when it can't be read;
-/// Ok(None) when it's longer than [`MAX_SECONDS`].
-pub fn decode_mono(bytes: Vec<u8>, hint: Option<&str>) -> Result<Option<Vec<f32>>, String> {
+/// What decoding a file gave.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Decoded {
+    /// Mono at [`RATE`].
+    Audio(Vec<f32>),
+    /// Longer than the limit asked for.
+    TooLong,
+    /// `stop` was set part way.
+    Stopped,
+}
+
+/// Decodes a whole file to mono at [`RATE`], up to `limit_s` seconds (never
+/// more than [`MAX_SECONDS`]). Err when it can't be decoded.
+pub fn decode_mono(bytes: Vec<u8>, hint: Option<&str>, limit_s: f64, stop: &AtomicBool) -> Result<Decoded, String> {
     use crate::audio::decode::{DecodeError, TrackDecoder};
+    let limit_s = limit_s.min(MAX_SECONDS as f64);
     let mut dec = TrackDecoder::open(Box::new(std::io::Cursor::new(bytes)), hint).map_err(|e| e.to_string())?;
     let mut mix = Downmix::new(dec.rate);
     let channels = dec.channels;
+    let mut blocks = 0u32;
     loop {
+        blocks = blocks.wrapping_add(1);
+        if blocks.is_multiple_of(64) && stop.load(Ordering::Relaxed) {
+            return Ok(Decoded::Stopped);
+        }
         match dec.next_block() {
             Ok(Some(b)) => mix.push(b, channels),
             Ok(None) => break,
@@ -696,11 +730,11 @@ pub fn decode_mono(bytes: Vec<u8>, hint: Option<&str>) -> Result<Option<Vec<f32>
             Err(DecodeError::Io(_) | DecodeError::Corrupt(_)) if mix.seconds() >= MIN_SECONDS as f64 => break,
             Err(e) => return Err(e.to_string()),
         }
-        if mix.seconds() > MAX_SECONDS as f64 {
-            return Ok(None);
+        if mix.seconds() > limit_s {
+            return Ok(Decoded::TooLong);
         }
     }
-    Ok(Some(mix.out))
+    Ok(Decoded::Audio(mix.out))
 }
 
 #[cfg(test)]
@@ -731,7 +765,7 @@ pub(crate) mod synth {
             if t >= secs - 0.1 {
                 break;
             }
-            let down = k % 4 == 0;
+            let down = k.is_multiple_of(4);
             let (amp, freq) = if down { (0.9, 60.0) } else { (0.45, 1800.0) };
             let start = (t * rate) as usize;
             let len = (0.06 * rate) as usize;
@@ -837,7 +871,7 @@ mod tests {
     #[test]
     fn downmix_averages_to_the_analysis_rate() {
         let mut d = Downmix::new(44_100);
-        let block: Vec<f32> = (0..44_100 * 2).map(|i| if i % 2 == 0 { 1.0 } else { 0.0 }).collect();
+        let block: Vec<f32> = (0..44_100usize * 2).map(|i| if i.is_multiple_of(2) { 1.0 } else { 0.0 }).collect();
         d.push(&block, 2);
         assert!((d.out.len() as i64 - RATE as i64).abs() <= 1, "{}", d.out.len());
         assert!(d.out.iter().all(|v| (*v - 0.5).abs() < 1e-6));

@@ -1,7 +1,8 @@
 //! Analysis results per song (`track_analysis`), keyed by track with the
 //! file they came from: a changed file, or a newer analysis version, is
-//! done again. Songs that couldn't be read are kept as failed so they
-//! aren't read again until their file changes.
+//! done again. Songs that couldn't be decoded are kept as failed so they
+//! aren't read again until their file changes (or the analysis improves);
+//! songs that couldn't be read at all are tried again a day later.
 
 use std::collections::HashMap;
 
@@ -12,7 +13,12 @@ use super::features::{Analysis, Grid, MAX_SECONDS, MIN_SECONDS, VERSION};
 use crate::error::AppResult;
 
 pub const OK: &str = "ok";
+/// The file couldn't be decoded (tried again with a new file or version).
 pub const FAILED: &str = "failed";
+/// The file couldn't be read (tried again after [`RETRY_UNREAD_S`]).
+pub const UNREAD: &str = "unread";
+/// How long before a song that couldn't be read is tried again.
+pub const RETRY_UNREAD_S: i64 = 24 * 60 * 60;
 /// Too long to analyse (a long mix, a concert).
 pub const LONG: &str = "long";
 
@@ -24,14 +30,23 @@ pub struct Todo {
     pub duration_ms: u64,
 }
 
-const PENDING: &str = "t.part_key <> '' AND t.duration_ms >= ?1
-     AND (a.track_id IS NULL OR a.part_key <> t.part_key OR (a.status = 'ok' AND a.version < ?2))";
+/// Never analysed, a new file, an older analysis version (failed ones get
+/// one more try per version), or unreadable a day ago.
+fn pending_where() -> String {
+    format!(
+        "t.part_key <> '' AND t.duration_ms >= ?1
+         AND (a.track_id IS NULL OR a.part_key <> t.part_key
+              OR (a.status <> '{UNREAD}' AND a.version < ?2)
+              OR (a.status = '{UNREAD}' AND a.analysed_at <= CAST(strftime('%s', 'now') AS INTEGER) - {RETRY_UNREAD_S}))"
+    )
+}
 
 /// Up to `limit` songs to analyse, newest first.
 pub fn pending(c: &Connection, limit: usize) -> AppResult<Vec<Todo>> {
     let sql = format!(
         "SELECT t.id, t.part_key, t.duration_ms FROM tracks t LEFT JOIN track_analysis a ON a.track_id = t.id
-         WHERE {PENDING} ORDER BY t.pk DESC LIMIT ?3"
+         WHERE {} ORDER BY t.pk DESC LIMIT ?3",
+        pending_where()
     );
     let mut st = c.prepare_cached(&sql)?;
     let min_ms = MIN_SECONDS as i64 * 1000;
@@ -45,7 +60,8 @@ pub fn pending(c: &Connection, limit: usize) -> AppResult<Vec<Todo>> {
 pub fn pending_of(c: &Connection, ids: &[String]) -> AppResult<Vec<Todo>> {
     let sql = format!(
         "SELECT t.id, t.part_key, t.duration_ms FROM tracks t LEFT JOIN track_analysis a ON a.track_id = t.id
-         WHERE t.id = ?3 AND {PENDING}"
+         WHERE t.id = ?3 AND {}",
+        pending_where()
     );
     let mut st = c.prepare_cached(&sql)?;
     let min_ms = MIN_SECONDS as i64 * 1000;
@@ -106,7 +122,7 @@ pub fn save(c: &Connection, t: &Todo, a: &Analysis, now: i64) -> AppResult<()> {
     Ok(())
 }
 
-/// A song that couldn't be analysed (`status`: failed or long).
+/// A song that couldn't be analysed (`status`: failed, unread or long).
 pub fn save_status(c: &Connection, t: &Todo, status: &str, now: i64) -> AppResult<()> {
     c.execute(
         "INSERT OR REPLACE INTO track_analysis (track_id, part_key, status, version, analysed_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -132,6 +148,17 @@ fn grid(r: &Row, at: usize) -> rusqlite::Result<Option<Grid>> {
     })
 }
 
+/// A stored JSON column; a damaged one is logged and read as empty.
+fn parse_json<T: serde::de::DeserializeOwned + Default>(v: Option<String>, what: &str) -> T {
+    match v {
+        None => T::default(),
+        Some(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+            tracing::warn!("song analysis: stored {what} unreadable: {e}");
+            T::default()
+        }),
+    }
+}
+
 fn row(r: &Row) -> rusqlite::Result<(String, Analysis)> {
     let u = |v: Option<i64>| v.unwrap_or(0).max(0) as u64;
     let sections: Option<String> = r.get(22)?;
@@ -154,8 +181,8 @@ fn row(r: &Row) -> rusqlite::Result<(String, Analysis)> {
             outro_start_ms: u(r.get(19)?),
             starts_hot: r.get(20)?,
             ends_hot: r.get(21)?,
-            sections: sections.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
-            features: features.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
+            sections: parse_json(sections, "sections"),
+            features: parse_json(features, "features"),
         },
     ))
 }
@@ -172,16 +199,25 @@ pub fn get_many(c: &Connection, ids: &[String]) -> AppResult<HashMap<String, Ana
         if out.contains_key(id) {
             continue;
         }
-        if let Some(Ok((k, a))) = st.query_map([id], row)?.next() {
-            out.insert(k, a);
+        match st.query_map([id], row)?.next() {
+            Some(Ok((k, a))) => {
+                out.insert(k, a);
+            }
+            Some(Err(e)) => tracing::warn!("song analysis: stored row for {id} unreadable: {e}"),
+            None => {}
         }
     }
     Ok(out)
 }
 
-/// Drop rows for songs no longer in the library.
+/// Drop rows for songs no longer in the library. Does nothing while the
+/// library is empty (not loaded yet, or being rebuilt).
 pub fn prune(c: &Connection) -> AppResult<usize> {
-    Ok(c.execute("DELETE FROM track_analysis WHERE track_id NOT IN (SELECT id FROM tracks)", [])?)
+    let any: bool = c.query_row("SELECT EXISTS (SELECT 1 FROM tracks)", [], |r| r.get(0))?;
+    if !any {
+        return Ok(0);
+    }
+    Ok(c.execute("DELETE FROM track_analysis WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = track_analysis.track_id)", [])?)
 }
 
 /// Progress for Settings.
@@ -189,15 +225,17 @@ pub fn prune(c: &Connection) -> AppResult<usize> {
 #[serde(rename_all = "camelCase")]
 pub struct Counts {
     pub total: u64,
-    /// Analysed, or couldn't be (current file, current version).
+    /// Analysed, or tried (current file, current version).
     pub done: u64,
 }
 
 pub fn counts(c: &Connection) -> AppResult<Counts> {
     Ok(c.query_row(
-        "SELECT count(*), COALESCE(sum(a.part_key = t.part_key AND (a.status <> 'ok' OR a.version >= ?2)), 0)
-         FROM tracks t LEFT JOIN track_analysis a ON a.track_id = t.id
-         WHERE t.part_key <> '' AND t.duration_ms >= ?1",
+        &format!(
+            "SELECT count(*), COALESCE(sum(a.part_key = t.part_key AND (a.status = '{UNREAD}' OR a.version >= ?2)), 0)
+             FROM tracks t LEFT JOIN track_analysis a ON a.track_id = t.id
+             WHERE t.part_key <> '' AND t.duration_ms >= ?1"
+        ),
         params![MIN_SECONDS as i64 * 1000, VERSION],
         |r| Ok(Counts { total: r.get::<_, i64>(0)? as u64, done: r.get::<_, i64>(1)? as u64 }),
     )?)

@@ -192,6 +192,13 @@ pub struct SongAudio {
 #[async_trait]
 pub trait SongReader: Send + Sync {
     async fn read(&self, track_id: &str, cancel: &AtomicBool) -> Result<SongAudio, AudioError>;
+
+    /// [`read`](Self::read), or Ok(None) when the file is bigger than
+    /// `max_bytes` (stopping as soon as that's known, where it can).
+    async fn read_up_to(&self, track_id: &str, cancel: &AtomicBool, max_bytes: u64) -> Result<Option<SongAudio>, AudioError> {
+        let a = self.read(track_id, cancel).await?;
+        Ok((a.bytes.len() as u64 <= max_bytes).then_some(a))
+    }
 }
 
 /// Whether a song already has lyrics from another source (Plex, LRCLIB when

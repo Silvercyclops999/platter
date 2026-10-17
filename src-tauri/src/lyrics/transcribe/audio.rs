@@ -33,11 +33,18 @@ pub enum AudioError {
 /// in 1 MB range reads. Each read waits while playback is downloading and
 /// gives way the moment playback wants the gate.
 pub async fn read_whole(reader: &Reader, src: &StreamSource, cancel: &AtomicBool) -> Result<Vec<u8>, AudioError> {
+    read_whole_up_to(reader, src, cancel, MAX_FILE).await?.ok_or_else(|| AudioError::Unreadable("file too big".into()))
+}
+
+/// [`read_whole`], or Ok(None) as soon as the file turns out bigger than
+/// `max` bytes.
+pub async fn read_whole_up_to(reader: &Reader, src: &StreamSource, cancel: &AtomicBool, max: u64) -> Result<Option<Vec<u8>>, AudioError> {
     let map = |e: FetchError| match e {
         FetchError::Transient(m) => AudioError::Unreachable(m),
         FetchError::File(m) => AudioError::Unreadable(m),
         FetchError::RangeRefused => AudioError::Unreadable("the server doesn't allow partial reads".into()),
     };
+    let max = max.min(MAX_FILE);
     let mut out: Vec<u8> = Vec::new();
     let mut total: Option<u64> = None;
     loop {
@@ -48,8 +55,8 @@ pub async fn read_whole(reader: &Reader, src: &StreamSource, cancel: &AtomicBool
         if total.is_none() {
             total = got.total;
             if let Some(t) = total {
-                if t > MAX_FILE {
-                    return Err(AudioError::Unreadable("file too big".into()));
+                if t > max {
+                    return Ok(None);
                 }
                 out.reserve(t as usize);
             }
@@ -57,11 +64,11 @@ pub async fn read_whole(reader: &Reader, src: &StreamSource, cancel: &AtomicBool
         let n = got.bytes.len();
         out.extend_from_slice(&got.bytes);
         let finished = got.whole || n == 0 || total.is_some_and(|t| out.len() as u64 >= t) || (total.is_none() && n < CHUNK);
-        if finished {
-            return Ok(out);
+        if out.len() as u64 > max {
+            return Ok(None);
         }
-        if out.len() as u64 > MAX_FILE {
-            return Err(AudioError::Unreadable("file too big".into()));
+        if finished {
+            return Ok(Some(out));
         }
     }
 }

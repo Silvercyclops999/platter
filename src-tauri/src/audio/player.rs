@@ -27,7 +27,7 @@ use super::output::{AudioOutput, OutputState};
 use super::persist::{self, Persisted};
 use super::queue::{AddAt, ContextInfo, ItemSource, Queue, QueueItem, Repeat, ShuffleStyle};
 use super::dsp::DspSettings;
-use super::automix::{self, AutomixOptions, MixInfoSource, MixStyle, Mixed, MixedPlaylist, PlanOptions, Reach};
+use super::automix::{self, AutomixOptions, MixInfoSource, MixMemory, MixStyle, Mixed, MixedPlaylist, PlanOptions, Reach};
 use super::source::{ContextKind, MoreRequest, PlayContext, TrackLookup, TrackResolver};
 use crate::analysis::features::Analysis;
 use crate::error::{AppError, AppResult};
@@ -214,6 +214,8 @@ enum Cmd {
     PeekBlend(oneshot::Sender<Option<automix::BlendPlan>>),
     /// Analyses found (`fit`: for ordering a shuffled mixed playlist).
     MixInfos { infos: HashMap<String, Analysis>, fit: bool },
+    /// Analyses couldn't be looked up: these may be asked about again.
+    MixInfosFailed(Vec<String>),
     /// These songs were analysed since they were asked about.
     Analysed(Vec<String>),
     /// Take over a queue from another device (see `Queue::adopt`).
@@ -353,8 +355,7 @@ impl PlayerHandle {
             automix: config.automix,
             mixed: Mixed::new(),
             mix_source: None,
-            mix_known: HashMap::new(),
-            mix_asked: HashSet::new(),
+            mix: MixMemory::default(),
             engine,
             queue,
             status,
@@ -840,9 +841,7 @@ struct Actor {
     automix: AutomixOptions,
     mixed: Mixed,
     mix_source: Option<Arc<dyn MixInfoSource>>,
-    mix_known: HashMap<String, Analysis>,
-    /// Songs already asked about (until they're analysed).
-    mix_asked: HashSet<String>,
+    mix: MixMemory,
     engine: Engine,
     queue: Queue,
     status: PlayerStatus,
@@ -1381,11 +1380,10 @@ impl Actor {
         }
         let style = self.mixed_playing().map_or(MixStyle::Auto, |m| m.style(&a.track.id, &b.track.id));
         let o = PlanOptions { feel: self.automix.feel, fade_ms: self.automix.fade_ms, style };
-        let (ai, bi) = (self.mix_known.get(&a.track.id), self.mix_known.get(&b.track.id));
+        let (ai, bi) = (self.mix.get(&a.track.id), self.mix.get(&b.track.id));
         let plan = automix::plan(&a.track, ai, &b.track, bi, &o);
         self.engine.set_blend(cur, nk, plan);
-        let ask: Vec<String> =
-            [a.track.id, b.track.id].into_iter().filter(|id| !self.mix_known.contains_key(id) && !self.mix_asked.contains(id)).collect();
+        let ask = self.mix.to_ask([a.track.id, b.track.id]);
         self.ask_infos(ask, false);
     }
 
@@ -1397,12 +1395,19 @@ impl Actor {
             return;
         }
         let Some(tx) = self.self_tx.upgrade() else { return };
-        self.mix_asked.extend(ids.iter().cloned());
+        self.mix.asking(&ids);
         tokio::spawn(async move {
-            let infos = src.infos(&ids).await;
-            let missing: Vec<String> = ids.into_iter().filter(|id| !infos.contains_key(id)).collect();
-            src.want(&missing);
-            let _ = tx.send(Cmd::MixInfos { infos, fit });
+            match src.infos(&ids).await {
+                Ok(infos) => {
+                    let missing: Vec<String> = ids.into_iter().filter(|id| !infos.contains_key(id)).collect();
+                    src.want(&missing);
+                    let _ = tx.send(Cmd::MixInfos { infos, fit });
+                }
+                Err(e) => {
+                    tracing::warn!("automix: song analyses couldn't be looked up: {e}");
+                    let _ = tx.send(Cmd::MixInfosFailed(ids));
+                }
+            }
         });
     }
 
@@ -1416,8 +1421,12 @@ impl Actor {
         let Some(src) = self.mix_source.clone() else { return };
         let Some(tx) = self.self_tx.upgrade() else { return };
         tokio::spawn(async move {
-            let infos = src.infos(&ids).await;
-            let _ = tx.send(Cmd::MixInfos { infos, fit: true });
+            match src.infos(&ids).await {
+                Ok(infos) => {
+                    let _ = tx.send(Cmd::MixInfos { infos, fit: true });
+                }
+                Err(e) => tracing::warn!("automix: song analyses couldn't be looked up: {e}"),
+            }
         });
     }
 
@@ -1446,11 +1455,17 @@ impl Actor {
 
     /// Reports the current track as skipped (if it was audible).
     fn end_current_as_skip(&mut self) {
+        let p = self.engine.position();
+        self.end_current_as_skip_at(p);
+    }
+
+    /// [`end_current_as_skip`](Self::end_current_as_skip) with the position
+    /// it was skipped at.
+    fn end_current_as_skip_at(&mut self, p: Option<super::engine::EnginePosition>) {
         if self.cur_started
             && !self.cur_ended
             && let Some(item) = self.queue.current().cloned()
         {
-            let p = self.engine.position();
             let (pos, listened) = p.map_or((0, 0), |p| (p.position_ms, p.listened_ms));
             self.track_event(TrackingEvent::TrackEnded {
                 track: item.track,
@@ -1608,11 +1623,16 @@ impl Actor {
             Cmd::Resume(reply) => {
                 let _ = reply.send(self.do_resume());
             }
-            // Mid-blend, before the next song took over: it takes over now.
-            Cmd::Next(reply) if self.cur_key.is_some_and(|k| self.engine.skip_blend(k)) => {
-                let _ = reply.send(Ok(()));
-            }
             Cmd::Next(reply) => {
+                // Mid-blend, before the next song took over: it takes over
+                // now. The outgoing song counts as skipped where it was; the
+                // engine's end for it is ignored (it has ended here).
+                let at = self.engine.position();
+                if self.cur_key.is_some_and(|k| self.engine.skip_blend(k)) {
+                    self.end_current_as_skip_at(at);
+                    let _ = reply.send(Ok(()));
+                    return;
+                }
                 self.end_current_as_skip();
                 self.failures_in_row = 0;
                 let r = match self.queue.next_manual() {
@@ -1721,7 +1741,7 @@ impl Actor {
             }
             Cmd::SetMixSource(src, reply) => {
                 self.mix_source = Some(src);
-                self.mix_asked.clear();
+                self.mix.reset_asked();
                 self.update_next();
                 let _ = reply.send(Ok(()));
                 return;
@@ -1732,24 +1752,24 @@ impl Actor {
                 return;
             }
             Cmd::MixInfos { infos, fit } => {
-                // A long radio session: forget what's far behind.
-                if self.mix_known.len() > 4000 {
-                    self.mix_known.clear();
-                }
-                self.mix_known.extend(infos);
+                self.mix.learn(infos);
                 if fit && self.queue.shuffle() && self.mixed_playing().is_some() {
-                    let known = &self.mix_known;
+                    let known = self.mix.known();
                     let score = |a: &Track, b: &Track| automix::fit(known.get(&a.id), known.get(&b.id));
                     self.queue.reorder_for_fit(&score, FIT_WINDOW);
                     self.mark_dirty();
                 }
                 self.update_next();
             }
+            Cmd::MixInfosFailed(ids) => {
+                // Asked again next time a blend is planned, not straight away.
+                self.mix.unask(&ids);
+                return;
+            }
             Cmd::Analysed(ids) => {
                 let mut again = Vec::new();
                 for id in ids {
-                    self.mix_asked.remove(&id);
-                    self.mix_known.remove(&id);
+                    self.mix.forget(&id);
                     again.push(id);
                 }
                 let near: Vec<String> = self.queue.current().into_iter().map(|c| c.track.id.clone()).chain(self.pick_next().map(|n| n.track.id)).collect();

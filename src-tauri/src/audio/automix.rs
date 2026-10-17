@@ -15,12 +15,13 @@
 //! The engine ([`super::engine`]) runs the plan: the next song takes over
 //! (title, art, the play report) at the blend's midpoint.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::features::{Analysis, Grid};
+use crate::error::AppResult;
 use crate::model::Track;
 
 /// The most a blend can take of the shorter song.
@@ -124,7 +125,9 @@ impl MixedPlaylist {
     }
 }
 
-/// The key of the gap between two songs.
+/// The key of the gap between two songs. Keyed by song, so when the same
+/// two songs follow each other more than once in a playlist, those gaps
+/// share one pick.
 pub fn gap_key(from: &str, to: &str) -> String {
     format!("{from}>{to}")
 }
@@ -136,9 +139,66 @@ pub type Mixed = HashMap<String, MixedPlaylist>;
 #[async_trait]
 pub trait MixInfoSource: Send + Sync {
     /// Analyses for these songs (missing: not analysed yet).
-    async fn infos(&self, ids: &[String]) -> HashMap<String, Analysis>;
+    async fn infos(&self, ids: &[String]) -> AppResult<HashMap<String, Analysis>>;
     /// These songs are about to be mixed: analyse them first.
     fn want(&self, _ids: &[String]) {}
+}
+
+/// What the player knows about songs for mixing, and which it has asked
+/// about (until they're analysed). Forgets everything at once past
+/// [`MixMemory::MAX`], asked included, so dropped songs are asked again.
+#[derive(Default)]
+pub struct MixMemory {
+    known: HashMap<String, Analysis>,
+    asked: HashSet<String>,
+}
+
+impl MixMemory {
+    pub const MAX: usize = 4000;
+
+    pub fn get(&self, id: &str) -> Option<&Analysis> {
+        self.known.get(id)
+    }
+
+    pub fn known(&self) -> &HashMap<String, Analysis> {
+        &self.known
+    }
+
+    /// Of these, the songs neither known nor asked about yet.
+    pub fn to_ask(&self, ids: impl IntoIterator<Item = String>) -> Vec<String> {
+        ids.into_iter().filter(|id| !self.known.contains_key(id) && !self.asked.contains(id)).collect()
+    }
+
+    pub fn asking(&mut self, ids: &[String]) {
+        self.asked.extend(ids.iter().cloned());
+    }
+
+    /// Asking failed: these may be asked again.
+    pub fn unask(&mut self, ids: &[String]) {
+        for id in ids {
+            self.asked.remove(id);
+        }
+    }
+
+    /// A new source: everything may be asked again.
+    pub fn reset_asked(&mut self) {
+        self.asked.clear();
+    }
+
+    pub fn learn(&mut self, infos: HashMap<String, Analysis>) {
+        // A long radio session: forget what's far behind.
+        if self.known.len() + infos.len() > Self::MAX {
+            self.known.clear();
+            self.asked.clear();
+        }
+        self.known.extend(infos);
+    }
+
+    /// Analysed since: ask again.
+    pub fn forget(&mut self, id: &str) {
+        self.asked.remove(id);
+        self.known.remove(id);
+    }
 }
 
 /// Why two songs can't be mixed.
@@ -529,6 +589,22 @@ fn beatmatch(ai: &Analysis, bi: &Analysis, energy: f32, clash: bool, cap: f64, o
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mix_memory_forgets_what_it_asked_when_it_forgets_what_it_knew() {
+        let mut m = MixMemory::default();
+        let ids = |r: std::ops::Range<usize>| r.map(|i| format!("s{i}")).collect::<Vec<_>>();
+        m.asking(&["far".to_string()]);
+        let first: HashMap<String, Analysis> = ids(0..MixMemory::MAX).into_iter().map(|id| (id, info(120.0, 200, None, 0.5))).collect();
+        m.learn(first);
+        assert!(m.to_ask(["far".to_string()]).is_empty(), "asked, not answered yet");
+        m.learn(HashMap::from([("new".to_string(), info(120.0, 200, None, 0.5))]));
+        assert!(m.get("s0").is_none() && m.get("new").is_some());
+        assert_eq!(m.to_ask(["far".to_string(), "s0".to_string()]), vec!["far".to_string(), "s0".to_string()], "both asked again");
+        m.asking(&["x".to_string()]);
+        m.unask(&["x".to_string()]);
+        assert_eq!(m.to_ask(["x".to_string()]), vec!["x".to_string()]);
+    }
 
     fn track(id: &str, album: &str, n: u32, secs: u64) -> Track {
         let mut t = crate::audio::testutil::track(id, "artist", "/p");

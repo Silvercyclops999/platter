@@ -321,9 +321,9 @@ mod player {
 
     #[async_trait]
     impl MixInfoSource for Infos {
-        async fn infos(&self, ids: &[String]) -> HashMap<String, Analysis> {
+        async fn infos(&self, ids: &[String]) -> crate::error::AppResult<HashMap<String, Analysis>> {
             let k = self.known.lock();
-            ids.iter().filter_map(|id| k.get(id).map(|a| (id.clone(), a.clone()))).collect()
+            Ok(ids.iter().filter_map(|id| k.get(id).map(|a| (id.clone(), a.clone()))).collect())
         }
         fn want(&self, ids: &[String]) {
             self.wanted.lock().extend(ids.iter().cloned());
@@ -518,5 +518,28 @@ mod player {
         assert_eq!(s.track.unwrap().id, "b");
         // b went on from where it was in the blend, not from its start.
         assert!(s.position_ms >= 150, "b at {} ms", s.position_ms);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn next_mid_blend_counts_the_outgoing_song_as_skipped() {
+        let mut r = blending_rig().await;
+        wait_for("the blend", || r.cap.len_frames(2) >= secs(2.2)).await;
+        r.player.next().await.unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let mut ends = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match tokio::time::timeout(left, r.tracking.recv()).await {
+                Ok(Ok(TrackingEvent::TrackEnded { track, completed, skipped_at_ms, .. })) => ends.push((track.id, completed, skipped_at_ms)),
+                Ok(Ok(TrackingEvent::TrackStarted { track, .. })) if track.id == "b" => break,
+                Ok(_) => {}
+                Err(_) => panic!("b never started"),
+            }
+        }
+        assert_eq!(ends.len(), 1, "{ends:?}");
+        let (id, completed, at) = &ends[0];
+        assert_eq!(id, "a");
+        assert!(!completed, "skipped, not finished");
+        assert!(at.is_some_and(|ms| ms >= 2_000), "{at:?}");
     }
 }

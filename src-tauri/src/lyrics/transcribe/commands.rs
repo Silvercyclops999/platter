@@ -50,6 +50,10 @@ pub struct AppSongs {
 #[async_trait]
 impl SongReader for AppSongs {
     async fn read(&self, track_id: &str, cancel: &AtomicBool) -> Result<SongAudio, AudioError> {
+        self.read_up_to(track_id, cancel, audio::MAX_FILE).await?.ok_or_else(|| AudioError::Unreadable("file too big".into()))
+    }
+
+    async fn read_up_to(&self, track_id: &str, cancel: &AtomicBool, max_bytes: u64) -> Result<Option<SongAudio>, AudioError> {
         let track = self
             .player
             .lookup_tracks(&[track_id.to_owned()])
@@ -60,8 +64,8 @@ impl SongReader for AppSongs {
             .ok_or_else(|| AudioError::Unreadable("not in the library".into()))?;
         let hint = extension_hint(track.codec.as_deref(), track.container.as_deref());
         let cached = self.audio_dir.join(format!("{}.audio", cache_key(&track)));
-        if let Ok(bytes) = tokio::fs::read(&cached).await {
-            return Ok(SongAudio { bytes, hint });
+        if let Some(got) = read_cached(&cached, max_bytes, &hint).await {
+            return Ok(got);
         }
         // Playback may be fetching this very song (it's playing or next).
         // Once it's done, a fully streamed song is on disk: look again before
@@ -69,13 +73,24 @@ impl SongReader for AppSongs {
         if !self.reader.wait_idle(cancel).await {
             return Err(AudioError::Cancelled);
         }
-        if let Ok(bytes) = tokio::fs::read(&cached).await {
-            return Ok(SongAudio { bytes, hint });
+        if let Some(got) = read_cached(&cached, max_bytes, &hint).await {
+            return Ok(got);
         }
         let src = self.parts.part(&track.id, &track.part_key).await.map_err(|e| AudioError::Unreachable(e.to_string()))?;
-        let bytes = audio::read_whole(&self.reader, &src, cancel).await?;
-        Ok(SongAudio { bytes, hint })
+        let bytes = audio::read_whole_up_to(&self.reader, &src, cancel, max_bytes).await?;
+        Ok(bytes.map(|bytes| SongAudio { bytes, hint }))
     }
+}
+
+/// A song from the pre-cache: None when it isn't there, Some(None) when
+/// it's bigger than `max_bytes` (looked up before reading it).
+async fn read_cached(path: &std::path::Path, max_bytes: u64, hint: &Option<String>) -> Option<Option<SongAudio>> {
+    let meta = tokio::fs::metadata(path).await.ok()?;
+    if meta.len() > max_bytes {
+        return Some(None);
+    }
+    let bytes = tokio::fs::read(path).await.ok()?;
+    Some((bytes.len() as u64 <= max_bytes).then(|| SongAudio { bytes, hint: hint.clone() }))
 }
 
 /// Plex, LRCLIB (when on) and the user's own lyrics.
