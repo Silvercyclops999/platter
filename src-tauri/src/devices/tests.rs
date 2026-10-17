@@ -40,21 +40,57 @@ struct FakeFiles {
     fetched: AtomicUsize,
     on_fetch: Box<dyn Fn(usize) + Send + Sync>,
     fail: Option<String>,
+    /// This song's fetch panics.
+    panic_on: Option<String>,
+    /// From this fetch on, each waits until it's told to stop.
+    hold_from: Option<usize>,
+    /// Fetches running now.
+    in_flight: Arc<AtomicUsize>,
+    /// Where each song was fetched to.
+    dests: Arc<parking_lot::Mutex<Vec<PathBuf>>>,
 }
 
 impl FakeFiles {
     fn new() -> Self {
-        Self { fetched: AtomicUsize::new(0), on_fetch: Box::new(|_| {}), fail: None }
+        Self {
+            fetched: AtomicUsize::new(0),
+            on_fetch: Box::new(|_| {}),
+            fail: None,
+            panic_on: None,
+            hold_from: None,
+            in_flight: Arc::default(),
+            dests: Arc::default(),
+        }
+    }
+}
+
+struct InFlight(Arc<AtomicUsize>);
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
 #[async_trait]
 impl TrackFiles for FakeFiles {
-    async fn fetch(&self, t: &Track, dest: &Path, _stop: &(dyn Fn() -> bool + Sync)) -> Result<(), String> {
+    async fn fetch(&self, t: &Track, dest: &Path, stop: &(dyn Fn() -> bool + Sync)) -> Result<(), String> {
         let n = self.fetched.fetch_add(1, Ordering::SeqCst);
+        self.in_flight.fetch_add(1, Ordering::SeqCst);
+        let _done = InFlight(self.in_flight.clone());
+        self.dests.lock().push(dest.to_path_buf());
         (self.on_fetch)(n);
+        if self.panic_on.as_deref() == Some(t.id.as_str()) {
+            panic!("the fake source fell over");
+        }
         if self.fail.as_deref() == Some(t.id.as_str()) {
             return Err("The file isn't on the server any more.".into());
+        }
+        if self.hold_from.is_some_and(|h| n >= h) {
+            let start = std::time::Instant::now();
+            while !stop() && start.elapsed() < std::time::Duration::from_secs(60) {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            return Err(encode::STOPPED.into());
         }
         let freq = 220.0 + 20.0 * (t.track_number as f32);
         wav(dest, freq, 0.3);
@@ -71,6 +107,12 @@ impl Pace for NoPace {
 
 struct FakeVolumes {
     root: PathBuf,
+    removable: bool,
+}
+impl FakeVolumes {
+    fn new(root: PathBuf) -> Self {
+        Self { root, removable: true }
+    }
 }
 impl Volumes for FakeVolumes {
     fn list(&self) -> Vec<Volume> {
@@ -81,7 +123,7 @@ impl Volumes for FakeVolumes {
             root: self.root.clone(),
             label: "PLAYER".into(),
             id: Some("ABCD-1234".into()),
-            removable: true,
+            removable: self.removable,
             free: Some(64 * 1024 * 1024 * 1024),
             total: Some(128 * 1024 * 1024 * 1024),
         }]
@@ -95,11 +137,14 @@ enum Fault {
     ReadOnly,
     /// Full once this many songs are on it.
     FullAfter(usize),
+    /// Pulled out (once) when this many songs are on it.
+    PulledAfter(usize),
 }
 
 struct FaultyIo {
     fault: Fault,
     copies: AtomicUsize,
+    tripped: AtomicBool,
     /// The drive's top: once it's gone nothing can be written (a pulled-out
     /// drive can't be made again by creating folders).
     root: PathBuf,
@@ -119,6 +164,10 @@ impl DeviceIo for FaultyIo {
         match self.fault {
             Fault::ReadOnly => return Err(io::Error::from(io::ErrorKind::ReadOnlyFilesystem)),
             Fault::FullAfter(n) if self.copies.load(Ordering::SeqCst) >= n => return Err(io::Error::from(io::ErrorKind::StorageFull)),
+            Fault::PulledAfter(n) if self.copies.load(Ordering::SeqCst) >= n && !self.tripped.swap(true, Ordering::SeqCst) => {
+                self.pulled.store(true, Ordering::SeqCst);
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
             _ => {}
         }
         let r = StdIo.copy_in(from, to, stop, progress);
@@ -133,6 +182,13 @@ impl DeviceIo for FaultyIo {
             return Err(io::Error::from(io::ErrorKind::ReadOnlyFilesystem));
         }
         StdIo.write_bytes(to, bytes)
+    }
+    fn append(&self, to: &Path, bytes: &[u8]) -> io::Result<()> {
+        self.gone()?;
+        if self.fault == Fault::ReadOnly {
+            return Err(io::Error::from(io::ErrorKind::ReadOnlyFilesystem));
+        }
+        StdIo.append(to, bytes)
     }
     fn read(&self, p: &Path) -> io::Result<Vec<u8>> {
         StdIo.read(p)
@@ -210,8 +266,8 @@ fn world_pulled(files: FakeFiles, fault: Fault, pulled: Arc<AtomicBool>) -> Worl
     let devices = Devices::new(Deps {
         db: db.clone(),
         files: Arc::new(files),
-        volumes: Arc::new(FakeVolumes { root: root.clone() }),
-        io: Arc::new(FaultyIo { fault, copies: AtomicUsize::new(0), root: root.clone(), pulled }),
+        volumes: Arc::new(FakeVolumes::new(root.clone())),
+        io: Arc::new(FaultyIo { fault, copies: AtomicUsize::new(0), tripped: AtomicBool::new(false), root: root.clone(), pulled }),
         pace: Arc::new(NoPace),
         scratch: dir.path().join("scratch"),
     });
@@ -480,7 +536,7 @@ async fn a_device_is_found_by_its_manifest_without_a_volume_id() {
     w.sync(opts(DeviceFormat::Original, false)).await;
     let mut d = w.current();
     d.volume_id = Some("other-serial".into());
-    let vols = FakeVolumes { root: w.root.clone() }.list();
+    let vols = FakeVolumes::new(w.root.clone()).list();
     let found = run::find_root(&d, &vols, &StdIo).unwrap();
     assert_eq!(found.root, w.root);
     d.id = "someone-else".into();
@@ -603,6 +659,187 @@ fn a_cancelled_flag_is_seen() {
     assert!(c.paused());
     c.cancel();
     assert!(c.cancelled());
+}
+
+/// Waits (up to a generous limit) for something to become true.
+async fn eventually(what: &str, f: impl Fn() -> bool) {
+    let start = std::time::Instant::now();
+    while !f() {
+        assert!(start.elapsed() < std::time::Duration::from_secs(20), "timed out waiting for {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+fn the_four_songs() -> Vec<&'static str> {
+    vec![
+        "The Band/First_ Album/01 Opening.wav",
+        "The Band/First_ Album/02 Middle_.wav",
+        "The Band/First_ Album/03 Closing.wav",
+        "The Band/Second/01 Later.wav",
+    ]
+}
+
+#[tokio::test]
+async fn a_damaged_manifest_is_kept_aside_and_the_songs_are_matched_again() {
+    let w = world();
+    w.sync(opts(DeviceFormat::Original, false)).await;
+    std::fs::write(w.music().join(MANIFEST), b"{\"version\":1,\"deviceId\":\"x\",\"fil").unwrap();
+
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!(s.phase, Phase::Done, "{:?}", s.error);
+    assert!(s.notice.as_deref().is_some_and(|n| n.contains(".bak")), "{:?}", s.notice);
+    assert_eq!(std::fs::read(w.music().join(".platter-sync.json.bak")).unwrap(), b"{\"version\":1,\"deviceId\":\"x\",\"fil");
+    // Nothing copied a second time under another name.
+    assert!(w.files().iter().all(|f| !f.contains(" (2)")), "{:?}", w.files());
+    let m = w.manifest();
+    assert_eq!(m.files.keys().map(String::as_str).collect::<Vec<_>>(), the_four_songs());
+    assert_eq!(m.playlists.keys().collect::<Vec<_>>(), vec!["Road Trip.m3u8"]);
+    // The next sync is an ordinary one.
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!((s.total, s.kept, s.notice), (0, 4, None));
+}
+
+#[tokio::test]
+async fn a_manifest_from_a_newer_platter_stops_the_sync_untouched() {
+    let w = world();
+    w.sync(opts(DeviceFormat::Original, false)).await;
+    let newer = br#"{"version":99,"deviceId":"x","files":{"a":"b"}}"#;
+    std::fs::write(w.music().join(MANIFEST), newer).unwrap();
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!(s.phase, Phase::Failed);
+    assert!(s.error.unwrap().message.contains("newer version of Platter"));
+    assert_eq!(std::fs::read(w.music().join(MANIFEST)).unwrap(), newer);
+    assert!(w.files().iter().all(|f| !f.contains(" (2)")));
+}
+
+#[tokio::test]
+async fn songs_written_before_the_drive_was_pulled_are_not_copied_twice() {
+    let pulled: Arc<AtomicBool> = Arc::default();
+    let w = world_pulled(FakeFiles::new(), Fault::PulledAfter(2), pulled.clone());
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!(s.error.unwrap().kind, "removed");
+    // The manifest was saved before any song; the journal has the two.
+    assert!(w.manifest().files.is_empty());
+    let journal = std::fs::read_to_string(w.music().join(manifest::JOURNAL)).unwrap();
+    assert_eq!(journal.lines().count(), 2);
+
+    pulled.store(false, Ordering::SeqCst);
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!(s.phase, Phase::Done, "{:?}", s.error);
+    assert_eq!((s.kept, s.total), (2, 2));
+    assert!(w.files().iter().all(|f| !f.contains(" (2)")), "{:?}", w.files());
+    assert_eq!(w.manifest().files.len(), 4);
+    assert!(!w.music().join(manifest::JOURNAL).exists(), "folded into the manifest");
+}
+
+#[tokio::test]
+async fn an_untracked_song_of_the_right_size_is_taken_back() {
+    let w = world();
+    w.sync(opts(DeviceFormat::Original, false)).await;
+    // The manifest and journal lost (say, deleted by hand): the files are
+    // at their places and the same size as what would be written.
+    std::fs::remove_file(w.music().join(MANIFEST)).unwrap();
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!(s.phase, Phase::Done);
+    assert_eq!(s.total, 4);
+    assert!(w.files().iter().all(|f| !f.contains(" (2)")), "{:?}", w.files());
+    assert_eq!(w.manifest().files.keys().map(String::as_str).collect::<Vec<_>>(), the_four_songs());
+}
+
+#[tokio::test]
+async fn a_failed_sync_stops_the_songs_still_being_made() {
+    let files = FakeFiles { hold_from: Some(2), ..FakeFiles::new() };
+    let in_flight = files.in_flight.clone();
+    let w = world_with(files, Fault::FullAfter(1));
+    let ctl = Arc::new(SyncControl::default());
+    w.devices.sync(w.current(), opts(DeviceFormat::Original, false), ctl.clone()).await;
+    let s = w.devices.status().unwrap();
+    assert_eq!(s.error.unwrap().kind, "full");
+    assert!(ctl.cancelled(), "the run's work was told to stop");
+    eventually("the held fetch to stop", || in_flight.load(Ordering::SeqCst) == 0).await;
+    let scratch = w._dir.path().join("scratch").join(&w.device.id);
+    eventually("the run's scratch folder to go", || std::fs::read_dir(&scratch).map(|r| r.count() == 0).unwrap_or(true)).await;
+}
+
+#[tokio::test]
+async fn each_run_has_its_own_scratch_folder() {
+    let files = FakeFiles::new();
+    let dests = files.dests.clone();
+    let w = world_with(files, Fault::None);
+    w.sync(opts(DeviceFormat::Original, false)).await;
+    std::fs::remove_dir_all(w.music()).unwrap();
+    w.sync(opts(DeviceFormat::Original, false)).await;
+    let dests = dests.lock().clone();
+    assert_eq!(dests.len(), 8);
+    let first = dests[0].parent().unwrap().to_path_buf();
+    let second = dests[4].parent().unwrap().to_path_buf();
+    assert_ne!(first, second);
+    assert_eq!(first.parent(), second.parent(), "both below the device's scratch folder");
+}
+
+#[tokio::test]
+async fn a_case_only_rename_keeps_the_song_just_written() {
+    let w = world();
+    w.sync(opts(DeviceFormat::Original, false)).await;
+    w.db.write(|c| {
+        c.execute("UPDATE tracks SET album_title = 'FIRST: Album' WHERE album_id = 'al1'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!(s.phase, Phase::Done, "{:?}", s.error);
+    assert_eq!(s.total, 3);
+    let m = w.manifest();
+    assert_eq!(m.files.len(), 4);
+    for rel in m.files.keys() {
+        assert!(w.music().join(rel).is_file(), "{rel} is listed but gone: {:?}", w.files());
+    }
+}
+
+#[tokio::test]
+async fn a_song_that_panics_while_being_made_is_a_failed_song() {
+    let files = FakeFiles { panic_on: Some("t3".into()), ..FakeFiles::new() };
+    let w = world_with(files, Fault::None);
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!(s.phase, Phase::Done, "not shown as cancelled");
+    assert_eq!(s.failed.len(), 1);
+    assert_eq!(s.failed[0].title, "Closing");
+    assert_eq!(w.manifest().files.len(), 3);
+}
+
+#[tokio::test]
+async fn partial_files_from_an_earlier_sync_are_swept() {
+    let w = world();
+    let part = w.music().join("The Band/Old/.01 x.wav.platter-part");
+    std::fs::create_dir_all(part.parent().unwrap()).unwrap();
+    std::fs::write(&part, b"half").unwrap();
+    let mine = w.music().join("The Band/Old/keep.platter-partial");
+    std::fs::write(&mine, b"mine").unwrap();
+    let s = w.sync(opts(DeviceFormat::Original, false)).await;
+    assert_eq!(s.phase, Phase::Done);
+    assert!(!part.exists());
+    assert!(mine.exists());
+}
+
+#[tokio::test]
+async fn a_fixed_drive_is_never_a_device_from_its_top() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("drive");
+    std::fs::create_dir_all(root.join("Music")).unwrap();
+    let devices = Devices::new(Deps {
+        db: DbHandle::open(dir.path().join("lib.db")).unwrap(),
+        files: Arc::new(FakeFiles::new()),
+        volumes: Arc::new(FakeVolumes { root: root.clone(), removable: false }),
+        io: Arc::new(StdIo),
+        pace: Arc::new(NoPace),
+        scratch: dir.path().join("scratch"),
+    });
+    assert!(devices.add(&root, "Disk", "").is_err());
+    // A path that climbs back to the top is the top.
+    assert!(devices.add(&root.join("Music").join(".."), "Disk", "/").is_err());
+    let d = devices.add(&root.join("Music").join(".."), "Disk", "Music").unwrap();
+    assert_eq!(d.folder, "Music");
+    assert!(devices.add(&dir.path().join("nowhere"), "Disk", "Music").is_err());
 }
 
 #[test]

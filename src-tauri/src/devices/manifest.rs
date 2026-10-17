@@ -46,15 +46,71 @@ impl Manifest {
 
     /// Reads a manifest from the device. The file comes from removable media,
     /// so any entry whose path could leave the music folder is dropped.
-    pub fn parse(bytes: &[u8]) -> Option<Self> {
-        let mut m: Self = serde_json::from_slice(bytes).ok()?;
-        if m.version > VERSION {
-            return None;
+    pub fn read(bytes: &[u8]) -> Result<Self, Unreadable> {
+        // The version first, so a newer layout isn't taken for damage.
+        #[derive(Deserialize)]
+        struct Head {
+            version: u32,
         }
+        if let Ok(h) = serde_json::from_slice::<Head>(bytes)
+            && h.version > VERSION
+        {
+            return Err(Unreadable::Newer);
+        }
+        let mut m: Self = serde_json::from_slice(bytes).map_err(|_| Unreadable::Damaged)?;
         m.files.retain(|k, _| safe_rel(k));
         m.playlists.retain(|k, _| safe_rel(k));
-        Some(m)
+        Ok(m)
     }
+
+    pub fn parse(bytes: &[u8]) -> Option<Self> {
+        Self::read(bytes).ok()
+    }
+
+    /// Folds in the journal of songs written since the manifest was last
+    /// saved. A torn last line (the drive pulled mid-write) is skipped.
+    /// Returns how many songs it added.
+    pub fn fold_journal(&mut self, bytes: &[u8]) -> usize {
+        let mut n = 0;
+        for line in bytes.split(|b| *b == b'\n') {
+            let Ok(j) = serde_json::from_slice::<JournalLine>(line) else { continue };
+            if safe_rel(&j.rel) {
+                self.files.insert(j.rel, j.entry);
+                n += 1;
+            }
+        }
+        n
+    }
+}
+
+/// Why a manifest on the device couldn't be used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unreadable {
+    /// Not a manifest any more (cut short, edited, garbled).
+    Damaged,
+    /// Written by a newer Platter.
+    Newer,
+}
+
+/// The journal next to the manifest: one line per song written since the
+/// manifest was last saved, so nothing written goes untracked if the drive
+/// is pulled out or the computer stops.
+pub const JOURNAL: &str = ".platter-sync.journal";
+
+#[derive(Serialize, Deserialize)]
+struct JournalLine {
+    rel: String,
+    entry: Entry,
+}
+
+/// One journal line for a song just written.
+pub fn journal_line(rel: &str, entry: &Entry) -> Vec<u8> {
+    let mut v = serde_json::to_vec(&JournalLine { rel: rel.to_string(), entry: entry.clone() }).unwrap_or_default();
+    v.push(b'\n');
+    v
+}
+
+impl Manifest {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec_pretty(self).unwrap_or_default()
@@ -123,6 +179,20 @@ mod tests {
         assert_eq!(back.bytes(), 10);
         assert!(Manifest::parse(b"not json").is_none());
         assert!(Manifest::parse(br#"{"version":99,"deviceId":"x"}"#).is_none());
+        assert_eq!(Manifest::read(b"{\"version\":1,\"devi").unwrap_err(), Unreadable::Damaged);
+        assert_eq!(Manifest::read(br#"{"version":99,"deviceId":"x","files":"new"}"#).unwrap_err(), Unreadable::Newer);
+    }
+
+    #[test]
+    fn journals_fold_in_and_skip_torn_lines() {
+        let mut m = Manifest::new("d1");
+        let e = Entry { track_id: "t1".into(), source: "s".into(), format: DeviceFormat::Flac, size: 5 };
+        let mut j = journal_line("A/B/01 C.flac", &e);
+        j.extend(journal_line("../escape.flac", &e));
+        j.extend_from_slice(br#"{"rel":"A/B/02 D.flac","entry":{"trackId":"t2","sou"#);
+        assert_eq!(m.fold_journal(&j), 1);
+        assert_eq!(m.files.get("A/B/01 C.flac"), Some(&e));
+        assert_eq!(m.files.len(), 1);
     }
 
     #[test]

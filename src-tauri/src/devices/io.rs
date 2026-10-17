@@ -2,22 +2,25 @@
 //! is renamed into place once it's whole and flushed, so pulling the device
 //! out mid-copy leaves no half song under a real name. Failures are sorted
 //! into the few a person can act on: the device is full, it's
-//! write-protected, or it was removed.
+//! write-protected, Platter isn't allowed to write there, or it was removed.
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
-/// How the device is written (a temp folder in tests, with faults).
 /// The most Platter reads back from a device (its manifest).
 const MAX_READ: u64 = 16 * 1024 * 1024;
 
+/// How the device is written (a temp folder in tests, with faults).
 pub trait DeviceIo: Send + Sync {
     /// Copies a local file onto the device at `to`. `stop` is checked
     /// between chunks (an Interrupted error when it says stop).
     fn copy_in(&self, from: &Path, to: &Path, stop: &dyn Fn() -> bool, progress: &mut dyn FnMut(u64)) -> io::Result<u64>;
     /// Writes small content (the manifest, playlists) the same safe way.
     fn write_bytes(&self, to: &Path, bytes: &[u8]) -> io::Result<()>;
+    /// Adds to the end of a small file (the manifest's journal) and flushes
+    /// it to the device.
+    fn append(&self, to: &Path, bytes: &[u8]) -> io::Result<()>;
     fn read(&self, p: &Path) -> io::Result<Vec<u8>>;
     fn size(&self, p: &Path) -> Option<u64>;
     fn remove(&self, p: &Path) -> io::Result<()>;
@@ -30,9 +33,12 @@ pub struct StdIo;
 
 const CHUNK: usize = 1 << 20;
 
+/// The ending of the hidden partial files.
+pub const PART_SUFFIX: &str = ".platter-part";
+
 fn part_of(to: &Path) -> PathBuf {
     let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    to.with_file_name(format!(".{name}.platter-part"))
+    to.with_file_name(format!(".{name}{PART_SUFFIX}"))
 }
 
 fn finish(part: &Path, to: &Path, f: File) -> io::Result<()> {
@@ -90,6 +96,12 @@ impl DeviceIo for StdIo {
         r
     }
 
+    fn append(&self, to: &Path, bytes: &[u8]) -> io::Result<()> {
+        let mut f = fs::OpenOptions::new().create(true).append(true).open(to)?;
+        f.write_all(bytes)?;
+        f.sync_all()
+    }
+
     fn read(&self, p: &Path) -> io::Result<Vec<u8>> {
         // Only small regular files (the manifest) are read back from a device.
         let m = fs::symlink_metadata(p)?;
@@ -128,11 +140,46 @@ impl DeviceIo for StdIo {
     }
 }
 
+/// Removes the partial files a pulled-out drive or a crash left below
+/// `top`. Only files with the partial ending go, and links and junctions
+/// are never followed. Returns how many went.
+pub fn sweep_parts(top: &Path) -> usize {
+    fn walk(dir: &Path, depth: usize, n: &mut usize) {
+        if depth > 8 {
+            return;
+        }
+        let Ok(rd) = fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            // file_type() doesn't follow links: a link is never a dir here.
+            let Ok(t) = e.file_type() else { continue };
+            let p = e.path();
+            if t.is_symlink() {
+                continue;
+            }
+            if t.is_dir() {
+                walk(&p, depth + 1, n);
+            } else if t.is_file() && e.file_name().to_string_lossy().ends_with(PART_SUFFIX) {
+                match fs::remove_file(&p) {
+                    Ok(()) => *n += 1,
+                    Err(err) => tracing::warn!(path = %p.display(), "device sync: couldn't remove a partial file ({err})"),
+                }
+            }
+        }
+    }
+    let mut n = 0;
+    if fs::symlink_metadata(top).is_ok_and(|m| m.is_dir()) {
+        walk(top, 0, &mut n);
+    }
+    n
+}
+
 /// Why writing to the device stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Failure {
     Full,
     WriteProtected,
+    /// The system refused: permissions, a read-only folder, a link.
+    AccessDenied,
     Removed,
     Other(String),
 }
@@ -142,6 +189,7 @@ impl Failure {
         match self {
             Self::Full => "full",
             Self::WriteProtected => "writeProtected",
+            Self::AccessDenied => "accessDenied",
             Self::Removed => "removed",
             Self::Other(_) => "other",
         }
@@ -152,6 +200,9 @@ impl Failure {
             Self::Full => "The device is full. Free some space on it, set a smaller size limit, or choose less, then sync again.".into(),
             Self::WriteProtected => {
                 "The device is write-protected. Slide its lock switch off, or make sure it isn't read-only, then sync again.".into()
+            }
+            Self::AccessDenied => {
+                "Platter isn't allowed to write to the music folder on the device. Check that the folder isn't read-only and that you can change it, then sync again.".into()
             }
             Self::Removed => "The device was removed before the sync finished. Plug it back in and sync again; the songs already copied stay.".into(),
             Self::Other(m) => format!("Couldn't write to the device: {m}"),
@@ -165,18 +216,17 @@ pub fn classify(e: &io::Error, root_present: bool) -> Failure {
     if !root_present {
         return Failure::Removed;
     }
-    match e.kind() {
-        io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded | io::ErrorKind::FileTooLarge => return Failure::Full,
-        io::ErrorKind::ReadOnlyFilesystem | io::ErrorKind::PermissionDenied => return Failure::WriteProtected,
-        _ => {}
-    }
+    // The system's own code first: Windows files a write-protected device
+    // and a refused folder under different codes but similar error kinds.
     if let Some(code) = e.raw_os_error() {
         #[cfg(windows)]
         match code {
             // ERROR_HANDLE_DISK_FULL, ERROR_DISK_FULL
             39 | 112 => return Failure::Full,
-            // ERROR_WRITE_PROTECT, ERROR_ACCESS_DENIED
-            19 | 5 => return Failure::WriteProtected,
+            // ERROR_WRITE_PROTECT
+            19 => return Failure::WriteProtected,
+            // ERROR_ACCESS_DENIED
+            5 => return Failure::AccessDenied,
             // ERROR_NOT_READY, ERROR_DEV_NOT_EXIST, ERROR_DEVICE_NOT_CONNECTED,
             // ERROR_DEVICE_REMOVED, ERROR_NO_MEDIA_IN_DRIVE
             21 | 55 | 1167 | 1617 | 1112 => return Failure::Removed,
@@ -188,13 +238,20 @@ pub fn classify(e: &io::Error, root_present: bool) -> Failure {
             28 | 122 | 69 => return Failure::Full,
             // EROFS
             30 => return Failure::WriteProtected,
+            // EPERM, EACCES
+            1 | 13 => return Failure::AccessDenied,
             // ENODEV, ENXIO, EIO
             19 | 6 | 5 => return Failure::Removed,
             _ => {}
         }
         let _ = code;
     }
-    Failure::Other(e.to_string())
+    match e.kind() {
+        io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded | io::ErrorKind::FileTooLarge => Failure::Full,
+        io::ErrorKind::ReadOnlyFilesystem => Failure::WriteProtected,
+        io::ErrorKind::PermissionDenied => Failure::AccessDenied,
+        _ => Failure::Other(e.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -205,7 +262,7 @@ mod tests {
     fn errors_sort_into_what_people_can_act_on() {
         assert_eq!(classify(&io::Error::from(io::ErrorKind::StorageFull), true), Failure::Full);
         assert_eq!(classify(&io::Error::from(io::ErrorKind::ReadOnlyFilesystem), true), Failure::WriteProtected);
-        assert_eq!(classify(&io::Error::from(io::ErrorKind::PermissionDenied), true), Failure::WriteProtected);
+        assert_eq!(classify(&io::Error::from(io::ErrorKind::PermissionDenied), true), Failure::AccessDenied);
         assert_eq!(classify(&io::Error::from(io::ErrorKind::NotFound), false), Failure::Removed);
         assert!(matches!(classify(&io::Error::other("odd"), true), Failure::Other(_)));
         #[cfg(windows)]
@@ -218,7 +275,18 @@ mod tests {
         {
             assert_eq!(classify(&io::Error::from_raw_os_error(28), true), Failure::Full);
             assert_eq!(classify(&io::Error::from_raw_os_error(30), true), Failure::WriteProtected);
+            assert_eq!(classify(&io::Error::from_raw_os_error(13), true), Failure::AccessDenied);
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn access_denied_is_not_called_write_protected() {
+        let f = classify(&io::Error::from_raw_os_error(5), true);
+        assert_eq!(f, Failure::AccessDenied);
+        assert_eq!(f.kind(), "accessDenied");
+        assert!(!f.message().contains("write-protected"), "{}", f.message());
+        assert_eq!(classify(&io::Error::from_raw_os_error(19), true).kind(), "writeProtected");
     }
 
     #[test]
@@ -238,6 +306,47 @@ mod tests {
         let e = StdIo.copy_in(&src, &to2, &|| true, &mut |_| {}).unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::Interrupted);
         assert!(!to2.exists() && !part_of(&to2).exists());
+    }
+
+    #[test]
+    fn appends_add_to_the_end() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("j");
+        StdIo.append(&p, b"a\n").unwrap();
+        StdIo.append(&p, b"b\n").unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"a\nb\n");
+    }
+
+    #[test]
+    fn leftover_partial_files_are_swept_and_nothing_else() {
+        let d = tempfile::tempdir().unwrap();
+        let top = d.path().join("Music");
+        fs::create_dir_all(top.join("A/B")).unwrap();
+        let part = top.join("A/B/.01 Song.flac.platter-part");
+        let manifest_part = top.join(".platter-sync.json.platter-part");
+        fs::write(&part, b"half").unwrap();
+        fs::write(&manifest_part, b"half").unwrap();
+        let other = top.join("A/B/notes.platter-partial");
+        let song = top.join("A/B/01 Song.flac");
+        fs::write(&other, b"x").unwrap();
+        fs::write(&song, b"x").unwrap();
+        // A partial file outside the music folder, reachable through a link.
+        let outside = d.path().join("Elsewhere");
+        fs::create_dir_all(&outside).unwrap();
+        let far = outside.join(".x.flac.platter-part");
+        fs::write(&far, b"x").unwrap();
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&outside, top.join("link")).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_dir(&outside, top.join("link")).is_ok();
+
+        assert_eq!(sweep_parts(&top), 2);
+        assert!(!part.exists() && !manifest_part.exists());
+        assert!(other.exists() && song.exists());
+        if linked {
+            assert!(far.exists(), "links are not followed");
+        }
+        assert_eq!(sweep_parts(&d.path().join("missing")), 0);
     }
 
     #[test]

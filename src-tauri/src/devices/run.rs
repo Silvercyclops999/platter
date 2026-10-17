@@ -135,6 +135,8 @@ pub struct SyncStatus {
     pub left_out: Vec<LeftOut>,
     pub left_out_songs: u32,
     pub error: Option<SyncError>,
+    /// Something the person should know that didn't stop the sync.
+    pub notice: Option<String>,
     /// Everything written is flushed to the device.
     pub safe_to_unplug: bool,
 }
@@ -155,6 +157,7 @@ impl SyncStatus {
             left_out: vec![],
             left_out_songs: 0,
             error: None,
+            notice: None,
             safe_to_unplug: false,
         }
     }
@@ -356,10 +359,62 @@ struct Ready {
 }
 
 enum Prepared {
-    Ready(Ready),
-    Failed(Placed, String),
+    Ready(Box<Ready>),
+    /// The song's title and what went wrong.
+    Failed(String, String),
     Stopped,
 }
+
+/// Ends one sync's background work however the sync returns: the songs
+/// still being fetched or converted are stopped, and the run's own scratch
+/// folder goes.
+struct RunGuard {
+    ctl: Arc<SyncControl>,
+    tasks: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
+    scratch: PathBuf,
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        self.ctl.cancel();
+        for t in self.tasks.lock().drain(..) {
+            t.abort();
+        }
+        if let Err(e) = std::fs::remove_dir_all(&self.scratch)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %self.scratch.display(), "device sync: couldn't remove the scratch folder ({e})");
+        }
+        if let Some(parent) = self.scratch.parent() {
+            // Only goes when empty.
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
+}
+
+/// A path as the system sees it, without Windows' `\\?\` prefix (so it
+/// still compares with drive roots like `E:\`).
+fn canonical(p: &Path) -> Option<PathBuf> {
+    let c = std::fs::canonicalize(p).ok()?;
+    #[cfg(windows)]
+    {
+        let s = c.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\")
+            && !rest.starts_with(r"UNC\")
+        {
+            return Some(PathBuf::from(rest));
+        }
+    }
+    Some(c)
+}
+
+const NEWER_MANIFEST: &str =
+    "This device was last synced by a newer version of Platter. Update Platter on this computer, then sync again.";
+const UNREADABLE_MANIFEST: &str =
+    "Platter's list of the songs it put on this device can't be read (.platter-sync.json in the music folder isn't a small file). Move it out of the music folder, then sync again.";
+const DAMAGED_MANIFEST: &str = "Platter's list of the songs it put on this device was damaged. A copy was kept as .platter-sync.json.bak, and songs already there were matched by name and size.";
+/// Where a damaged manifest is kept.
+const MANIFEST_BAK: &str = ".platter-sync.json.bak";
 
 /// Runs the encoder on its own thread, below normal priority.
 async fn encode_on_thread(
@@ -397,6 +452,11 @@ fn lower_priority() {
     unsafe {
         let tid = libc::gettid();
         libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, 15);
+    }
+    #[cfg(target_os = "macos")]
+    // SAFETY: sets the quality of service of the calling thread only.
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0);
     }
 }
 
@@ -461,9 +521,28 @@ impl Devices {
     pub fn add(&self, root: &Path, name: &str, folder: &str) -> AppResult<Device> {
         let name = store::clean_name(name)?;
         let folder = super::clean_folder(folder).map_err(AppError::Invalid)?;
-        let volumes = self.inner.deps.volumes.list();
-        let v = super::drives::volume_of(root, &volumes)
-            .ok_or_else(|| AppError::NotFound("That drive isn't plugged in any more.".into()))?;
+        let gone = || AppError::NotFound("That drive isn't plugged in any more.".into());
+        // `..` and links resolved, so the path is matched to the drive it's
+        // really on.
+        let at = canonical(root).ok_or_else(gone)?;
+        let volumes: Vec<Volume> = self
+            .inner
+            .deps
+            .volumes
+            .list()
+            .into_iter()
+            .map(|mut v| {
+                if let Some(c) = canonical(&v.root) {
+                    v.root = c;
+                }
+                v
+            })
+            .collect();
+        let v = super::drives::volume_of(&at, &volumes).ok_or_else(gone)?;
+        // A fixed drive (the system disk, say) is never synced from its top.
+        if !v.removable && folder.is_empty() {
+            return Err(AppError::Invalid("That drive isn't removable. Choose a music folder on it instead of the whole drive.".into()));
+        }
         let mut list = store::load(self.db());
         if let Some(id) = &v.id
             && let Some(d) = list.iter().find(|d| d.volume_id.as_deref() == Some(id) && d.folder.eq_ignore_ascii_case(&folder))
@@ -577,7 +656,7 @@ impl Devices {
 
     /// Runs one sync to the end (the background task; tests call it directly).
     pub async fn sync(&self, d: Device, opts: Opts, ctl: Arc<SyncControl>) {
-        if self.status().is_none_or(|s| s.device_id != d.id) {
+        if self.status().is_none_or(|s| s.device_id != d.id || !s.running()) {
             *self.inner.status.lock() = Some(SyncStatus::new(&d));
         }
         let outcome = self.sync_inner(&d, opts, &ctl).await;
@@ -605,14 +684,15 @@ impl Devices {
             true,
         );
         if finished {
-            let _ = store::update(self.db(), &d.id, |x| {
+            if let Err(e) = store::update(self.db(), &d.id, |x| {
                 x.last_sync = Some(super::now());
                 Ok(())
-            });
+            }) {
+                tracing::warn!("device sync: couldn't note when {} was last synced ({e})", d.name);
+            }
             self.changed();
         }
         *self.inner.control.lock() = None;
-        let _ = std::fs::remove_dir_all(self.inner.deps.scratch.join(&d.id));
     }
 
     async fn wait_turn(&self, ctl: &SyncControl) -> bool {
@@ -644,6 +724,10 @@ impl Devices {
 
     /// Ok(true): finished; Ok(false): cancelled.
     async fn sync_inner(&self, d: &Device, opts: Opts, ctl: &Arc<SyncControl>) -> Result<bool, SyncFail> {
+        // Each run has a scratch folder of its own, and whatever way this
+        // returns, the songs still being made for it stop.
+        let device_scratch = self.inner.deps.scratch.join(&d.id);
+        let run = RunGuard { ctl: ctl.clone(), tasks: Arc::default(), scratch: device_scratch.join(uuid::Uuid::new_v4().simple().to_string()) };
         let io = self.inner.deps.io.clone();
         let volumes = self.inner.deps.volumes.list();
         let vol = find_root(d, &volumes, &*io).ok_or(SyncFail::NotConnected(d.name.clone()))?;
@@ -656,13 +740,46 @@ impl Devices {
         };
         let dev_err = |e: std::io::Error| SyncFail::Device(classify(&e, present()));
 
-        // What Platter wrote before.
-        let mut man = io
-            .read(&music.join(MANIFEST))
-            .ok()
-            .and_then(|b| Manifest::parse(&b))
-            .unwrap_or_else(|| Manifest::new(&d.id));
+        // What Platter wrote before. A manifest that can't be used is never
+        // silently written over: that would make every song on the device
+        // someone else's.
+        let mut man = match io.read(&music.join(MANIFEST)) {
+            Ok(bytes) => match Manifest::read(&bytes) {
+                Ok(m) => m,
+                Err(manifest::Unreadable::Newer) => return Err(SyncFail::Other(NEWER_MANIFEST.into())),
+                Err(manifest::Unreadable::Damaged) => {
+                    let bak = music.join(MANIFEST_BAK);
+                    guard(&music, &bak).and_then(|()| io.write_bytes(&bak, &bytes)).map_err(dev_err)?;
+                    tracing::warn!("device sync: the manifest on {} was damaged; kept as {MANIFEST_BAK}", d.name);
+                    self.set_status(|s| s.notice = Some(DAMAGED_MANIFEST.into()), true);
+                    Manifest::new(&d.id)
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Manifest::new(&d.id),
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => return Err(SyncFail::Other(UNREADABLE_MANIFEST.into())),
+            Err(e) => return Err(dev_err(e)),
+        };
         man.device_id = d.id.clone();
+        // Songs written after the manifest was last saved.
+        let journal = music.join(manifest::JOURNAL);
+        match io.read(&journal) {
+            Ok(b) => {
+                let n = man.fold_journal(&b);
+                if n > 0 {
+                    tracing::info!(n, "device sync: took back songs written after the manifest was last saved");
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!("device sync: couldn't read the journal ({e})"),
+        }
+        // Half-written files from a drive pulled out or a crash.
+        {
+            let music = music.clone();
+            let n = tokio::task::spawn_blocking(move || super::io::sweep_parts(&music)).await.unwrap_or(0);
+            if n > 0 {
+                tracing::info!(n, "device sync: removed partial files left by an earlier sync");
+            }
+        }
 
         // What the device should hold.
         let sel = d.selection.clone();
@@ -710,11 +827,13 @@ impl Devices {
         );
 
         // Forget files that are gone; this first write also shows a
-        // write-protected device straight away.
+        // write-protected device straight away. The journal is in the
+        // manifest now.
         for rel in &p.stale {
             man.files.remove(rel);
         }
         save_manifest(&*io, &music, &man).map_err(dev_err)?;
+        drop_journal(&*io, &journal);
 
         // Platter's files for songs no longer chosen.
         let mut removed = 0u32;
@@ -737,23 +856,42 @@ impl Devices {
         }
 
         // Make and copy the new songs, two being made ahead at most.
-        let scratch = self.inner.deps.scratch.join(&d.id);
-        let _ = std::fs::create_dir_all(&scratch);
+        if let Ok(rd) = std::fs::read_dir(&device_scratch) {
+            // Earlier runs' folders (their work has stopped).
+            for e in rd.flatten() {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+        std::fs::create_dir_all(&run.scratch)
+            .map_err(|e| SyncFail::Other(format!("Couldn't make a working folder on this computer ({e}).")))?;
+        let scratch = run.scratch.clone();
         let mut on_device: HashMap<String, String> = p.keep.iter().map(|k| (k.want.track.id.clone(), k.rel.clone())).collect();
         let mut stopped = ctl.cancelled();
         let mut since_save = 0u32;
         let files = self.inner.deps.files.clone();
+        let tasks = run.tasks.clone();
         let jobs = p.writes.into_iter().enumerate().map(|(n, placed)| {
             let me = self.clone();
             let ctl = ctl.clone();
             let files = files.clone();
             let scratch = scratch.clone();
             let src_ext = src_exts.get(&placed.want.track.id).cloned().unwrap_or_else(|| "audio".into());
-            tokio::spawn(async move { me.prepare(n, placed, src_ext, &scratch, &*files, ctl).await })
+            let title = placed.want.track.title.clone();
+            let h = tokio::spawn(async move { me.prepare(n, placed, src_ext, &scratch, &*files, ctl).await });
+            tasks.lock().push(h.abort_handle());
+            async move {
+                match h.await {
+                    Ok(p) => p,
+                    Err(e) if e.is_panic() => {
+                        tracing::error!("device sync: making {title} failed unexpectedly");
+                        Prepared::Failed(title, "Something went wrong making this song. Sync again to retry it.".into())
+                    }
+                    Err(_) => Prepared::Stopped,
+                }
+            }
         });
         let mut ready = futures::stream::iter(jobs).buffered(AHEAD);
         while let Some(job) = ready.next().await {
-            let job = job.unwrap_or(Prepared::Stopped);
             if ctl.cancelled() {
                 if let Prepared::Ready(r) = &job {
                     clean(&r.cleanup);
@@ -766,11 +904,11 @@ impl Devices {
                     stopped = true;
                     break;
                 }
-                Prepared::Failed(placed, error) => {
+                Prepared::Failed(title, error) => {
                     self.set_status(
                         |s| {
                             s.done += 1;
-                            s.failed.push(FailedSong { title: placed.want.track.title.clone(), error });
+                            s.failed.push(FailedSong { title, error });
                         },
                         true,
                     );
@@ -785,16 +923,25 @@ impl Devices {
             }
             let title = r.placed.want.track.title.clone();
             self.set_status(|s| s.current = Some(title), false);
-            let dest = rel_path(&music, &r.placed.rel);
-            let copy = {
-                let io = io.clone();
-                let file = r.file.clone();
-                let dest = dest.clone();
-                let ctl = ctl.clone();
-                let music = music.clone();
-                tokio::task::spawn_blocking(move || guard(&music, &dest).and_then(|()| io.copy_in(&file, &dest, &|| ctl.cancelled(), &mut |_| {})))
-                    .await
-                    .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())))
+            let w = &r.placed.want;
+            // The song already at its own place, untracked (the computer
+            // stopped before it was noted, or the manifest was damaged), is
+            // taken back instead of copied again when it's the same size.
+            let adopted = adoptable(&*io, &music, &man, &r.placed, &r.file);
+            let (rel, copy) = match adopted {
+                Some(n) => (w.natural.clone(), Ok(n)),
+                None => {
+                    let dest = rel_path(&music, &r.placed.rel);
+                    let io = io.clone();
+                    let file = r.file.clone();
+                    let ctl = ctl.clone();
+                    let music = music.clone();
+                    let copy =
+                        tokio::task::spawn_blocking(move || guard(&music, &dest).and_then(|()| io.copy_in(&file, &dest, &|| ctl.cancelled(), &mut |_| {})))
+                            .await
+                            .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
+                    (r.placed.rel.clone(), copy)
+                }
             };
             clean(&r.cleanup);
             let size = match copy {
@@ -805,28 +952,44 @@ impl Devices {
                 }
                 Err(e) => {
                     let f = classify(&e, present());
-                    // Keep what got there.
+                    // Keep what got there (the journal has it too).
                     if !matches!(f, Failure::Removed) {
-                        let _ = save_manifest(&*io, &music, &man);
+                        match save_manifest(&*io, &music, &man) {
+                            Ok(()) => drop_journal(&*io, &journal),
+                            Err(e) => tracing::warn!("device sync: couldn't save the manifest after a failed copy ({e})"),
+                        }
                     }
                     return Err(SyncFail::Device(f));
                 }
             };
-            let w = &r.placed.want;
             // Older copies of this song go now that the new one is there.
-            let old: Vec<String> =
-                man.files.iter().filter(|(p, e)| e.track_id == w.track.id && **p != r.placed.rel).map(|(p, _)| p.clone()).collect();
-            for rel in old {
-                let path = rel_path(&music, &rel);
-                if guard(&music, &path).is_ok() && io.remove(&path).is_ok() {
-                    man.files.remove(&rel);
-                    if let Some(dir) = path.parent() {
-                        io.prune(dir, &music);
+            let new_key = names::key(&rel);
+            let old: Vec<String> = man.files.iter().filter(|(p, e)| e.track_id == w.track.id && **p != rel).map(|(p, _)| p.clone()).collect();
+            for old_rel in old {
+                if names::key(&old_rel) == new_key {
+                    // The same file under another spelling: just the entry goes.
+                    man.files.remove(&old_rel);
+                    continue;
+                }
+                let path = rel_path(&music, &old_rel);
+                match guard(&music, &path).and_then(|()| io.remove(&path)) {
+                    Ok(()) => {
+                        man.files.remove(&old_rel);
+                        if let Some(dir) = path.parent() {
+                            io.prune(dir, &music);
+                        }
                     }
+                    Err(e) => tracing::warn!("device sync: couldn't remove an older copy of {} ({e})", w.track.title),
                 }
             }
-            man.files.insert(r.placed.rel.clone(), Entry { track_id: w.track.id.clone(), source: w.source.clone(), format: w.format, size });
-            on_device.insert(w.track.id.clone(), r.placed.rel.clone());
+            let entry = Entry { track_id: w.track.id.clone(), source: w.source.clone(), format: w.format, size };
+            // Noted on the device straight away, so it's never untracked.
+            if let Err(e) = io.append(&journal, &manifest::journal_line(&rel, &entry)) {
+                tracing::warn!("device sync: couldn't add to the journal ({e})");
+                since_save = SAVE_EVERY;
+            }
+            man.files.insert(rel.clone(), entry);
+            on_device.insert(w.track.id.clone(), rel);
             self.set_status(
                 |s| {
                     s.done += 1;
@@ -838,6 +1001,7 @@ impl Devices {
             if since_save >= SAVE_EVERY {
                 since_save = 0;
                 save_manifest(&*io, &music, &man).map_err(dev_err)?;
+                drop_journal(&*io, &journal);
             }
         }
         drop(ready);
@@ -846,6 +1010,8 @@ impl Devices {
         self.write_playlists(d, &res.items, &res.tracks, &on_device, &music, &mut man, opts.delete_removed)
             .map_err(dev_err)?;
         save_manifest(&*io, &music, &man).map_err(dev_err)?;
+        drop_journal(&*io, &journal);
+        drop(run);
         Ok(!stopped)
     }
 
@@ -859,25 +1025,26 @@ impl Devices {
         let stop = || ctl.cancelled();
         if let Err(e) = files.fetch(&t, &src, &stop).await {
             let _ = std::fs::remove_file(&src);
-            return if ctl.cancelled() { Prepared::Stopped } else { Prepared::Failed(placed, e) };
+            return if ctl.cancelled() { Prepared::Stopped } else { Prepared::Failed(t.title, e) };
         }
         let format = placed.want.format;
         if encode::make_of(format, &t, &src_ext) == Make::AsIs {
-            return Prepared::Ready(Ready { placed, file: src.clone(), cleanup: vec![src] });
+            return Prepared::Ready(Box::new(Ready { placed, file: src.clone(), cleanup: vec![src] }));
         }
         let art = files.art(&t).await;
+        let title = t.title.clone();
         let out = scratch.join(format!("{n}-out.{}", format.ext().unwrap_or("bin")));
         let made = encode_on_thread(src.clone(), src_ext, out.clone(), format, t, art, ctl.clone()).await;
         let _ = std::fs::remove_file(&src);
         match made {
-            Ok(()) => Prepared::Ready(Ready { placed, file: out.clone(), cleanup: vec![out] }),
+            Ok(()) => Prepared::Ready(Box::new(Ready { placed, file: out.clone(), cleanup: vec![out] })),
             Err(_) if ctl.cancelled() => {
                 let _ = std::fs::remove_file(&out);
                 Prepared::Stopped
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&out);
-                Prepared::Failed(placed, e)
+                Prepared::Failed(title, e)
             }
         }
     }
@@ -917,19 +1084,21 @@ impl Devices {
                     })
                 })
                 .collect();
+            let text = m3u::write(&lines);
             let natural = names::playlist_path(&it.title);
             let mut n = 1;
             let rel = loop {
                 let rel = if n == 1 { natural.clone() } else { names::with_suffix(&natural, n) };
                 let k = names::key(&rel);
-                let foreign = !ours.contains(&k) && io.size(&rel_path(music, &rel)).is_some();
+                let p = rel_path(music, &rel);
+                // An untracked file that says exactly this is Platter's own.
+                let foreign = !ours.contains(&k) && io.size(&p).is_some() && io.read(&p).ok().as_deref() != Some(text.as_bytes());
                 if !written.contains(&k) && !foreign {
                     break rel;
                 }
                 n += 1;
             };
             written.insert(names::key(&rel));
-            let text = m3u::write(&lines);
             let hash = manifest::hash_text(&text);
             let path = rel_path(music, &rel);
             if man.playlists.get(&rel) != Some(&hash) || io.size(&path).is_none() {
@@ -962,6 +1131,33 @@ fn clean(paths: &[PathBuf]) {
 
 fn save_manifest(io: &dyn DeviceIo, music: &Path, m: &Manifest) -> std::io::Result<()> {
     io.write_bytes(&music.join(MANIFEST), &m.to_bytes())
+}
+
+/// The journal goes once the manifest holds everything in it.
+fn drop_journal(io: &dyn DeviceIo, journal: &Path) {
+    if let Err(e) = io.remove(journal) {
+        tracing::warn!("device sync: couldn't remove the journal ({e})");
+    }
+}
+
+/// The size of the file at a song's natural place when it's that song,
+/// untracked: Platter doesn't list anything there, it's a plain file, and
+/// it's exactly the size of what was just made.
+fn adoptable(io: &dyn DeviceIo, music: &Path, man: &Manifest, placed: &Placed, made: &Path) -> Option<u64> {
+    let natural = &placed.want.natural;
+    if placed.rel == *natural {
+        return None;
+    }
+    let size = std::fs::metadata(made).ok()?.len();
+    let path = rel_path(music, natural);
+    if io.size(&path) != Some(size) || guard(music, &path).is_err() {
+        return None;
+    }
+    let k = names::key(natural);
+    if man.files.keys().any(|p| names::key(p) == k) || man.playlists.keys().any(|p| names::key(p) == k) {
+        return None;
+    }
+    Some(size)
 }
 
 /// Why a sync stopped early.
