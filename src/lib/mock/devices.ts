@@ -20,7 +20,7 @@ export const MOCK_DRIVE: DriveVolume = {
   total: 29.7 * GB,
 };
 
-type Fail = "full" | "writeProtected" | "removed" | null;
+type Fail = "full" | "writeProtected" | "accessDenied" | "removed" | null;
 
 const invalid = (message: string) => ({ kind: "invalid", message });
 
@@ -29,6 +29,8 @@ export class MockDevices {
   /** Test hooks. */
   plugged = true;
   fail: Fail = null;
+  /** Shown with the next sync (say, a damaged manifest kept aside). */
+  notice: string | null = null;
   stepMs = 40;
   status: DeviceSyncStatus | null = null;
   private seq = 1;
@@ -46,6 +48,7 @@ export class MockDevices {
     this.devices = [];
     this.plugged = true;
     this.fail = null;
+    this.notice = null;
     this.stepMs = 40;
     this.status = null;
     this.paused = false;
@@ -175,6 +178,7 @@ export class MockDevices {
       leftOut: [],
       leftOutSongs: 0,
       error: null,
+      notice: null,
       safeToUnplug: false,
     };
     this.status = st;
@@ -193,6 +197,17 @@ export class MockDevices {
       if (this.fail === "writeProtected") {
         return put({ phase: "failed", error: { kind: "writeProtected", message: "The device is write-protected. Slide its lock switch off, or make sure it isn't read-only, then sync again." }, safeToUnplug: true });
       }
+      if (this.fail === "accessDenied") {
+        return put({
+          phase: "failed",
+          error: {
+            kind: "accessDenied",
+            message: "Platter isn't allowed to write to the music folder on the device. Check that the folder isn't read-only and that you can change it, then sync again.",
+          },
+          safeToUnplug: true,
+        });
+      }
+      if (this.notice && i === 0) put({ notice: this.notice });
       if (this.fail === "full" && i >= 2) {
         return put({ phase: "failed", current: null, error: { kind: "full", message: "The device is full. Free some space on it, set a smaller size limit, or choose less, then sync again." }, safeToUnplug: true });
       }

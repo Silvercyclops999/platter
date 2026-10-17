@@ -1875,7 +1875,9 @@ export interface DeviceSyncStatus {
   failed: { title: string; error: string }[];
   leftOut: { title: string; songs: number }[];
   leftOutSongs: number;
-  error: { kind: "full" | "writeProtected" | "removed" | "notConnected" | "other"; message: string } | null;
+  error: { kind: "full" | "writeProtected" | "accessDenied" | "removed" | "notConnected" | "other"; message: string } | null;
+  /** Something to know that didn't stop the sync. */
+  notice: string | null;
   safeToUnplug: boolean;
 }
 

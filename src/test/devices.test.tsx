@@ -148,6 +148,7 @@ describe("the Devices page", () => {
   it.each([
     ["full", /The device is full/],
     ["writeProtected", /write-protected/],
+    ["accessDenied", /isn't allowed to write/],
     ["removed", /removed before the sync finished/],
   ] as const)("says so when the device is %s", async (fail, text) => {
     const user = userEvent.setup();
@@ -159,6 +160,17 @@ describe("the Devices page", () => {
     const alert = await within(c).findByRole("alert");
     expect(alert).toHaveTextContent(text);
     expect(toasts().some((t) => text.test(t))).toBe(true);
+  });
+
+  it("shows what the sync wants known, such as a damaged list kept aside", async () => {
+    const user = userEvent.setup();
+    mock.devices.notice = "Platter's list of the songs it put on this device was damaged. A copy was kept as .platter-sync.json.bak.";
+    await addDevice();
+    render(<DevicesPage />);
+    const c = await screen.findByRole("region", { name: "Car stereo" });
+    await user.click(within(c).getByRole("button", { name: "Sync now" }));
+    expect(await within(c).findByText(/kept as \.platter-sync\.json\.bak/)).toBeInTheDocument();
+    expect(await within(c).findByText(/Safe to unplug/)).toBeInTheDocument();
   });
 
   it("can't sync a device that isn't plugged in", async () => {

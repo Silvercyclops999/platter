@@ -296,6 +296,7 @@ function SyncPanel({ s }: { s: DeviceSyncStatus }) {
           </Button>
         </div>
       )}
+      {s.notice && <p className="device-sync__note">{s.notice}</p>}
       {s.leftOutSongs > 0 && (
         <p className="device-sync__note">
           Didn't fit: {s.leftOut.map((l) => `${l.title} (${l.songs} ${l.songs === 1 ? "song" : "songs"})`).join(", ")}. Raise the size limit or choose less.

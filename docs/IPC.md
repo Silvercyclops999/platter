@@ -1842,7 +1842,7 @@ drive, an SD card or a music player.
 
 `Format = "original" | "flac" | "mp3-320" | "mp3-v0" | "opus"`
 
-`SyncStatus = { deviceId, deviceName, phase: "planning"|"copying"|"waiting"|"paused"|"done"|"cancelled"|"failed", total, done, kept, removed, current, bytes, failed: { title, error }[], leftOut: { title, songs }[], leftOutSongs, error: { kind: "full"|"writeProtected"|"removed"|"notConnected"|"other", message } | null, safeToUnplug }`
+`SyncStatus = { deviceId, deviceName, phase: "planning"|"copying"|"waiting"|"paused"|"done"|"cancelled"|"failed", total, done, kept, removed, current, bytes, failed: { title, error }[], leftOut: { title, songs }[], leftOutSongs, error: { kind: "full"|"writeProtected"|"accessDenied"|"removed"|"notConnected"|"other", message } | null, notice: string | null, safeToUnplug }`
 
 Events: `devices://progress` → `SyncStatus` (at most four times a second, and
 on every phase change), and `devices://changed` (no payload) when the device
@@ -1882,9 +1882,23 @@ game is in front, the computer runs hot or other programs keep the processor
 busy. Every file is written under a hidden partial name, flushed, and renamed
 into place, so `safeToUnplug` is true once a sync is done or cancelled. A
 song that can't be fetched or converted is listed in `failed` and the rest go
-on. Writing stops with `error.kind` `full`, `writeProtected` or `removed`
-(the drive went away mid-sync); what was copied by then stays and is in the
-manifest. `notConnected` means the device isn't plugged in.
+on. Writing stops with `error.kind` `full`, `writeProtected`,
+`accessDenied` (the system refused, say a read-only folder) or `removed`
+(the drive went away mid-sync); what was copied by then stays and is
+tracked. `notConnected` means the device isn't plugged in.
+
+Each song is noted in `.platter-sync.journal` next to the manifest as soon
+as it's in place, and the journal is folded into the manifest at the next
+save or sync, so a drive pulled out or a crash never leaves a song
+untracked. Partial files left behind are removed at the start of the next
+sync. A song already at its own place that Platter isn't tracking, the same
+size as what it would write, is taken back instead of copied again. A
+manifest from a newer Platter stops the sync with an error and is left as it
+is. A damaged one is kept as `.platter-sync.json.bak`, the songs already
+there are matched by name and size, and `notice` says so.
+
+A device can't be a fixed drive's top folder: `devices_add` on a drive that
+isn't removable needs a music folder.
 
 ## Sound map
 Every analysed song as a point on a flat map, placed so songs that sound
