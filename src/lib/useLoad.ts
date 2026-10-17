@@ -44,6 +44,23 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): Loaded<T> {
   return { ...state, retry };
 }
 
+/** A load still going after this long gets a note instead of a skeleton alone. */
+export const SLOW_LOAD_MS = 10_000;
+
+/** True once `waiting` has stayed true for `ms` (a skeleton that's been up too long). */
+export function useTakingLong(waiting: boolean, ms = SLOW_LOAD_MS): boolean {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!waiting) {
+      setSlow(false);
+      return;
+    }
+    const t = setTimeout(() => setSlow(true), ms);
+    return () => clearTimeout(t);
+  }, [waiting, ms]);
+  return waiting && slow;
+}
+
 /**
  * `useLoad`'s data plus reloads asked for in the background (an event said
  * the page changed). Only the newest answer counts: a reload that finishes

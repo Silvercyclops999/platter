@@ -103,6 +103,7 @@ export async function addToMissing(a: CatAlbum): Promise<boolean> {
 export async function removeFromMissing(a: CatAlbum): Promise<boolean> {
   try {
     await backend.importMissingAlbumRemove(a.releaseGroupId);
+    toast.info(`Took ${a.title} off Missing`);
     return true;
   } catch (e) {
     toast.error(errText(e) || "Couldn't take it off Missing");

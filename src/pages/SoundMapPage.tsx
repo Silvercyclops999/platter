@@ -22,6 +22,8 @@ import { useSoundMap, useSoundMapOn } from "../stores/soundmap";
 import { MapCanvas, type MapApi, type MapMode } from "./soundmap/MapCanvas";
 import { emptyData, joinChunks, legend as makeLegend, type ColourBy, type MapData } from "./soundmap/geometry";
 import "./soundmap.css";
+import { LoadError, TakingLong } from "../components/LoadError";
+import { useTakingLong } from "../lib/useLoad";
 
 /** Points per request. */
 export const CHUNK = 20_000;
@@ -158,7 +160,7 @@ export function SoundMapPage() {
       setError(null);
     } catch (e) {
       if (n !== request.current) return;
-      setError(e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Couldn't load the map.");
+      setError(e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "");
     }
   }, []);
 
@@ -213,6 +215,7 @@ export function SoundMapPage() {
 
   const placed = info?.placed ?? 0;
   const ready = !!data && !!info;
+  const slow = useTakingLong(!ready && !error);
   const partial = info && data && placed > 0 && info.analysing && info.analysed < info.total ? info : null;
 
   const play = (ids: number[]) => {
@@ -287,12 +290,9 @@ export function SoundMapPage() {
         </p>
       )}
 
-      {error && !data && (
-        <p className="soundmap__note" role="alert">
-          {error}
-        </p>
-      )}
+      {error && !data && <LoadError what="the sound map" error={error} onRetry={() => void refresh()} inline />}
       {!ready && !error && <SkeletonLines lines={3} widths={["60%", "80%", "40%"]} gap={20} />}
+      {slow && <TakingLong what="the sound map" onRetry={() => void refresh()} />}
 
       {info && data && placed === 0 && <EmptyState info={info} />}
 

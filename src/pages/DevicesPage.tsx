@@ -21,6 +21,8 @@ import { FORMAT_LABELS, FORMAT_ORDER, devices, loadDevices, progressLine, runnin
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./devices.css";
+import { LoadError, TakingLong } from "../components/LoadError";
+import { useTakingLong } from "../lib/useLoad";
 
 /** How often the page looks for drives plugged in or out while it's open. */
 export const DRIVE_POLL_MS = 5000;
@@ -39,6 +41,7 @@ export function DevicesPage() {
   const view = useDevices((s) => s.view);
   const error = useDevices((s) => s.error);
   const [adding, setAdding] = useState<DriveVolume | null>(null);
+  const slow = useTakingLong(!view && !error);
   useEffect(() => {
     void startDevices().then(() => loadDevices());
     const t = setInterval(() => void loadDevices(), DRIVE_POLL_MS);
@@ -56,12 +59,9 @@ export function DevicesPage() {
         </p>
       </header>
 
-      {error && !view && (
-        <p className="devices__empty" role="alert">
-          {error}
-        </p>
-      )}
+      {error && !view && <LoadError what="your devices" error={error} onRetry={() => void loadDevices()} inline />}
       {!view && !error && <SkeletonLines lines={4} widths={["70%", "90%", "80%", "60%"]} gap={24} />}
+      {slow && <TakingLong what="your devices" onRetry={() => void loadDevices()} />}
 
       {drives.length > 0 && (
         <section className="devices__drives" aria-label="Plugged in">

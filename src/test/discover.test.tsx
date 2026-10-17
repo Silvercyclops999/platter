@@ -183,7 +183,7 @@ describe("catalogue album page", () => {
     const open = vi.spyOn(mock, "importOpenLink");
     render(<AlbumPage id={LOW_TIDE} catalogue />);
     expect(await screen.findByRole("heading", { level: 1, name: "Low Tide Radio" })).toBeInTheDocument();
-    const tracks = screen.getByRole("list", { name: "Low Tide Radio tracks, not in your library" });
+    const tracks = screen.getByRole("list", { name: "Low Tide Radio songs, not in your library" });
     expect(within(tracks).getAllByRole("listitem")).toHaveLength(10);
     expect(screen.queryByRole("button", { name: /^Play/ })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Search Bandcamp for Low Tide Radio" }));
