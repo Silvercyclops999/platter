@@ -97,7 +97,7 @@ describe("Profile page", () => {
     await waitFor(() => expect(within(artists).getAllByRole("listitem")).toHaveLength(Math.min(6, o.topArtists.length)));
     expect(within(artists).getByText("Only visible to you")).toBeInTheDocument();
     expect(within(artists).getByText(o.topArtists[0].name)).toBeInTheDocument();
-    const tracks = screen.getByRole("region", { name: "Top tracks this month" });
+    const tracks = screen.getByRole("region", { name: "Top songs this month" });
     expect(within(tracks).getByText("Only visible to you")).toBeInTheDocument();
     await waitFor(() => expect(within(tracks).getByText(o.topSongs[0].title)).toBeInTheDocument());
     expect(within(tracks).getAllByText(formatPlays(o.topSongs[0].plays)).length).toBeGreaterThan(0);

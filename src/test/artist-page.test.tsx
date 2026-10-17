@@ -119,7 +119,7 @@ describe("artist page", () => {
     const user = userEvent.setup();
     render(<ArtistPage id={artistAt(0).id} />);
     await screen.findByRole("button", { name: "See more" });
-    const list = screen.getByRole("grid", { name: "Popular tracks" });
+    const list = screen.getByRole("grid", { name: "Popular songs" });
     expect(body(within(list).getAllByRole("row"))).toHaveLength(5);
     await user.click(screen.getByRole("button", { name: "See more" }));
     expect(body(within(list).getAllByRole("row"))).toHaveLength(10);
@@ -199,7 +199,7 @@ describe("artist page", () => {
     const a = artistAt(0);
     render(<ArtistPage id={a.id} />);
     await screen.findByRole("heading", { level: 1, name: a.title });
-    const list = screen.getByRole("grid", { name: "Popular tracks" });
+    const list = screen.getByRole("grid", { name: "Popular songs" });
     const real = mock.artistPage.bind(mock);
     const hit = mock.fx.tracks.find((t) => t.artistId !== a.id)!;
     const spy = vi.spyOn(mock, "artistPage").mockImplementation(async (id) => ({ ...(await real(id)), popular: [{ ...hit, title: "Global Number One" }] }));
@@ -291,7 +291,7 @@ describe("credited artist page", () => {
     );
     await screen.findByRole("heading", { level: 1, name: "Juno Ashby" });
     expect(headings()).toEqual(["Popular", "Appears on"]);
-    const list = screen.getByRole("grid", { name: "Popular tracks" });
+    const list = screen.getByRole("grid", { name: "Popular songs" });
     expect(within(list).getAllByRole("row", { name: new RegExp(track.title) }).length).toBeGreaterThan(0);
     const appears = screen.getByRole("heading", { name: "Appears on" }).closest("section")!;
     expect(within(appears).getAllByText(track.albumTitle).length).toBeGreaterThan(0);

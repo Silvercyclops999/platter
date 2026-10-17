@@ -237,7 +237,7 @@ const DISCORD_COVER_HOST = [
 const ART_SIZES_MB = [512, 1024, 2048, 5120, 10240, 20480];
 const LEVELING = [
   { value: "smart", label: "Smart" },
-  { value: "track", label: "Track" },
+  { value: "track", label: "Song" },
   { value: "album", label: "Album" },
   { value: "off", label: "Off" },
 ] as const satisfies SelectOption<Settings["leveling"]>[];
@@ -821,7 +821,7 @@ export function SettingsPage() {
       key: "qualityHome",
       section: "Audio quality",
       title: "Streaming quality at home",
-      description: "Used on your home network. Original plays the file as it is. Changes apply from the next track.",
+      description: "Used on your home network. Original plays the file as it is. Changes apply from the next song.",
       note: away ? "You're away from home right now." : undefined,
       control: (ids) => select(s, (x) => x.qualityHome, HOME_QUALITY, ids, (v) => updateSettings({ qualityHome: v })),
     },
@@ -1521,7 +1521,7 @@ export function SettingsPage() {
     {
       key: "notifyTrackChange",
       section: "App",
-      title: "Notify on track change",
+      title: "Notify on song change",
       description: "Shows a desktop notification when a new song starts, unless Platter is in front, a private session is on, or you're skipping through songs. This device only.",
       control: (ids) => toggle(s, "notifyTrackChange", ids),
     },
@@ -1594,13 +1594,13 @@ export function SettingsPage() {
       key: "likedMeans",
       section: "Library",
       title: "Liked means",
-      description: "Likes are Plex star ratings, so other Plex apps see them. Liking a song always gives it five stars; this picks which ratings count as liked.",
+      description: "Liked Songs are Plex star ratings, so other Plex apps see them. Liking a song always gives it five stars; this picks which ratings count as liked.",
       control: (ids) => select(s, (x) => x.likedMeans, LIKED_MEANS, ids, (v) => void updateSettings({ likedMeans: v }).then(reloadLikes)),
     },
     {
       key: "bookmarksInLibrary",
       section: "Library",
-      title: "Show Bookmarks in Your Library",
+      title: "Show bookmarks in Your Library",
       description: "A Bookmarks row under Liked Songs lists the songs and pages you bookmarked. Bookmark the playing song with Alt+Shift+M.",
       control: (ids) => toggle(s, "bookmarksInLibrary", ids),
     },
@@ -1704,7 +1704,7 @@ export function SettingsPage() {
       key: "likeControlRows",
       section: "Library",
       title: "Show the like control on song rows",
-      description: "On hover shows the plus when you point at a song (liked songs always show their tick). Always shows it on every row; Off hides it in rows.",
+      description: "On hover shows the plus when you point at a song (songs in Liked Songs always show their tick). Always shows it on every row; Off hides it in rows.",
       control: (ids) => select(s, (x) => x.likeControlRows, LIKE_ROWS, ids, (v) => updateSettings({ likeControlRows: v })),
     },
     // Integrations: artist info

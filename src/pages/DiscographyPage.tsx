@@ -214,7 +214,7 @@ function ReleaseBlock({ album }: { album: Album }) {
           </div>
         </div>
       </header>
-      <TrackList label={`${album.title} tracks`} showAlbum={false}>
+      <TrackList label={`${album.title} songs`} showAlbum={false}>
         {tracks
           ? tracks.map((t) => (
               <TrackRow

@@ -85,7 +85,7 @@ describe("discography page", () => {
     expect(first).toHaveAccessibleName(newest.title);
     expect(within(first).getByText(releaseLine(newest))).toBeInTheDocument();
     expect(within(first).getAllByRole("button", { name: `Play ${newest.title}` })[0]).toBeInTheDocument();
-    const list = await within(first).findByRole("grid", { name: `${newest.title} tracks` });
+    const list = await within(first).findByRole("grid", { name: `${newest.title} songs` });
     await within(list).findAllByRole("row").then(body);
     expect(body(within(list).getAllByRole("row"))).toHaveLength(mock.fx.tracksByAlbum.get(newest.id)!.length);
   });

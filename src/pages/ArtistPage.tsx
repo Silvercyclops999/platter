@@ -441,7 +441,7 @@ function PopularSkeleton() {
   return (
     <section className="detail-section" aria-busy="true">
       <h2 className="section-title">Popular</h2>
-      <TrackList label="Popular tracks" header={false}>
+      <TrackList label="Popular songs" header={false}>
         {Array.from({ length: POPULAR_FIRST }, (_, i) => (
           <TrackRowSkeleton key={i} showArt />
         ))}
@@ -461,7 +461,7 @@ function PopularSection({ id, data }: { id: string; data: ArtistPageData }) {
       <h2 id={headingId} className="section-title">
         Popular
       </h2>
-      <TrackList label="Popular tracks" header={false}>
+      <TrackList label="Popular songs" header={false}>
         {shown.map((t, i) => (
           <TrackRow
             key={t.id}

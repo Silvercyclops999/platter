@@ -432,7 +432,7 @@ export function PlaylistPage({ id }: { id: string }) {
           )
         ) : (
           <div ref={listRef} onKeyDownCapture={onListKeys} onDragLeave={(e) => dragLeft(e) && setInsertAt(null)}>
-            <TrackList label={pl ? `${pl.title} tracks` : "Tracks"} multiMenu={multiMenu} byColumn={!!shared}>
+            <TrackList label={pl ? `${pl.title} songs` : "Songs"} multiMenu={multiMenu} byColumn={!!shared}>
               {shown
                 ? view.flatMap((r, i) => {
                     const row = (

@@ -252,7 +252,7 @@ function LibraryAlbumView({ id }: { id: string }) {
         )}
         <StatsStrip kind="album" id={id} />
         <div className={`album-tracks album-tracks--${view}`}>
-          <TrackList label={album ? `${album.title} tracks` : "Tracks"} showAlbum={false} showPlays>
+          <TrackList label={album ? `${album.title} songs` : "Songs"} showAlbum={false} showPlays>
             {data
               ? discGroups(data.tracks).map((g) => (
                   <Fragment key={g.disc ?? "all"}>
@@ -399,7 +399,7 @@ function CatalogueAlbumView({ rgid }: { rgid: string }) {
         {data && <StoreLinks links={data.links} title={data.album.title} />}
         {data ? (
           data.tracks.length > 0 ? (
-            <ol className="cat-tracks" aria-label={`${data.album.title} tracks, ${NOT_IN_LIBRARY.toLowerCase()}`}>
+            <ol className="cat-tracks" aria-label={`${data.album.title} songs, ${NOT_IN_LIBRARY.toLowerCase()}`}>
               {data.tracks.map((t, i) => (
                 <Fragment key={`${t.disc ?? 1}-${t.number}-${i}`}>
                   {discs && (i === 0 || data.tracks[i - 1].disc !== t.disc) && (

@@ -101,7 +101,7 @@ describe("structure", () => {
     render(<AppShell />);
     go({ name: "album", id: album().id });
     const tracks = mock.fx.tracksByAlbum.get(album().id)!;
-    const grid = await screen.findByRole("grid", { name: `${album().title} tracks` });
+    const grid = await screen.findByRole("grid", { name: `${album().title} songs` });
     await waitFor(() => expect(grid.querySelectorAll(".track-row")).toHaveLength(tracks.length));
     const discRows = grid.querySelectorAll(".album-disc").length;
     expect(grid).toHaveAttribute("aria-rowcount", String(tracks.length + discRows + 1));

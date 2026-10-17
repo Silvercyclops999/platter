@@ -70,7 +70,7 @@ function TopTracks({ o }: { o: StatsOverview }) {
   const songs = o.topSongs.slice(0, 5);
   const playable = songs.map((s) => s.track?.id).filter((x): x is string => !!x);
   return (
-    <TrackList label="Top tracks this month" header={false}>
+    <TrackList label="Top songs this month" header={false}>
       {songs.map((s, i) =>
         s.track ? (
           <TrackRow key={s.key} track={s.track} index={i + 1} showArt showAlbum={false} compact onPlay={() => void player.playTracks(playable, s.track!.id)} trailing={<span className="profile-plays">{formatPlays(s.plays)}</span>} />
@@ -194,7 +194,7 @@ export function ProfilePage() {
       statsOn && hasHistory ? (
         <Section
           id="tracks"
-          title="Top tracks this month"
+          title="Top songs this month"
           note="Only visible to you"
           action={wrappedOn ? <ShowAll label="Your Top Songs" onClick={() => nav.go({ name: "topSongs", year })} /> : undefined}
         >

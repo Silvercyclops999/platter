@@ -215,7 +215,7 @@ export function SharedPlaylistPage({ id }: { id: string }) {
             <p className="empty-state__text">{role === "collaborator" ? "Add songs from any song's menu: Add to playlist." : `Songs ${s?.owner.name ?? "the owner"} adds show up here.`}</p>
           </div>
         ) : (
-          <TrackList label={s ? `${s.title} tracks` : "Tracks"} byColumn>
+          <TrackList label={s ? `${s.title} songs` : "Songs"} byColumn>
             {data
               ? view.map((r, i) =>
                   r.track ? (
