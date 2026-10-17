@@ -73,7 +73,6 @@ function Hosts() {
   );
 }
 
-const ownedTitle = () => mock.fx.playlists.find((p) => p.id === MOCK_OWNED_SHARED)!.title;
 const unsharedId = "500";
 
 describe("inviting to your playlist", () => {
