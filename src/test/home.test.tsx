@@ -215,7 +215,10 @@ describe("home page", () => {
     );
     unmount();
     renderHome({ shortcuts: [], recentlyPlayed: [], jumpBackIn: [], playlists: [], recentlyAdded: [], topArtists: [] });
-    expect(await screen.findByText("Nothing here yet")).toBeInTheDocument();
+    expect(await screen.findByText("No music yet")).toBeInTheDocument();
+    expect(screen.getByText(/empty or still syncing/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check the server" })).toBeInTheDocument();
   });
 
   it("the shortcut grid setting hides the grid", async () => {

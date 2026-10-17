@@ -156,6 +156,7 @@
 .empty-state__title { margin-top: var(--space-2); font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; line-height: 1.2; color: var(--color-text-primary); }
 .empty-state__text { max-width: 420px; font-size: var(--font-size-lg); color: var(--color-text-secondary); }
 .empty-state .btn { margin-top: var(--space-2); }
+.empty-state__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); }
 .see-more {
   margin: var(--space-2) var(--space-4) 0;
   font-size: var(--font-size-sm);

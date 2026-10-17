@@ -22,6 +22,7 @@ import { TopSongsPromo } from "./TopSongsPromo";
 import { useLikes } from "../stores/likes";
 import "./home.css";
 import { LoadError } from "../components/LoadError";
+import { openSetting } from "./SoundMapPage";
 
 /**
  * Colour for the wash at the top of Home: the artwork's most vivid tone
@@ -212,11 +213,16 @@ export function HomePage() {
       ) : libraryEmpty ? (
         <div className="empty-state" role="status">
           <Disc3 size={40} strokeWidth={1.5} aria-hidden="true" />
-          <h2 className="empty-state__title">Nothing here yet</h2>
-          <p className="empty-state__text">Once your library has synced, albums you add and play show up here.</p>
-          <Button variant="secondary" size="sm" onClick={() => nav.go({ name: "library", tab: "albums" })}>
-            Browse your library
-          </Button>
+          <h2 className="empty-state__title">No music yet</h2>
+          <p className="empty-state__text">Your library is empty or still syncing. Albums you add and play show up here.</p>
+          <div className="empty-state__actions">
+            <Button variant="secondary" size="sm" onClick={retry}>
+              Try again
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => openSetting("servers")}>
+              Check the server
+            </Button>
+          </div>
         </div>
       ) : (
         <>
