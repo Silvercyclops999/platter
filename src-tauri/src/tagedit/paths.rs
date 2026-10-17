@@ -81,7 +81,14 @@ impl Mapping {
             return None;
         }
         let rest: Vec<&str> = theirs[mine.len()..].iter().map(|(_, s)| *s).collect();
-        Some(join(&self.local, &rest))
+        // Every name below the mapped folder must stay below it (no "..",
+        // drive, stream, device name or end space), so the file is inside
+        // the music folder on this computer.
+        if !rest.iter().all(|s| crate::musicshare::plain_segment(s)) {
+            return None;
+        }
+        let out = join(&self.local, &rest);
+        out.starts_with(self.local.trim_end_matches(is_sep)).then_some(out)
     }
 }
 
