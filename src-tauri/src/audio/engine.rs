@@ -523,6 +523,9 @@ struct Mix {
     tail: VecDeque<f32>,
     fade_in: usize,
     underrun: bool,
+    /// Level while the stream runs dry: it fades out over the last few ms
+    /// before an underrun and back in after, instead of cutting.
+    starve_gain: f32,
     drained_sent: bool,
     handoff: Option<Handoff>,
     /// Crossfade, leveling, EQ and limiter settings.
@@ -1230,6 +1233,7 @@ impl Renderer for Core {
         let frames = out.len() / ch;
         let ramp_step = 1.0 / m.ms_to_frames(self.cfg.ramp_ms).max(1) as f32;
         let fade_len = m.declick_frames(&self.cfg).max(1);
+        let declick = self.cfg.declick_ms > 0;
         let quiet = !m.can_clip();
         let mut filled = 0;
         let mut consumed_any = false;
@@ -1263,7 +1267,26 @@ impl Renderer for Core {
                     m.start_crossfade(&mut events);
                 }
                 consumed_any = true;
+                // About to run dry mid-song (not at its end): fade out.
+                let starving = declick
+                    && m.segments.front().is_some_and(|s| {
+                        !s.done && s.replay.is_none() && s.samples.len() / ch <= fade_len
+                    });
                 match m.next_frame(o, &mut events) {
+                    Fetch::Got if declick && !m.bit_perfect => {
+                        let step = 1.0 / fade_len as f32;
+                        m.starve_gain = if starving {
+                            (m.starve_gain - step).max(0.0)
+                        } else {
+                            (m.starve_gain + step).min(1.0)
+                        };
+                        if m.starve_gain < 1.0 {
+                            let g = m.starve_gain;
+                            for s in o.iter_mut() {
+                                *s *= g;
+                            }
+                        }
+                    }
                     Fetch::Got => {}
                     Fetch::Underrun => {
                         underrun = true;
@@ -1420,6 +1443,7 @@ impl Engine {
                 tail: VecDeque::new(),
                 fade_in: 0,
                 underrun: false,
+                starve_gain: 1.0,
                 drained_sent: true,
                 handoff: None,
                 dsp: DspSettings::default(),
@@ -1715,6 +1739,7 @@ impl Engine {
             }
             m.drained_sent = false;
             m.underrun = false;
+            m.starve_gain = 1.0;
         }
         self.core().cv.notify_all();
         spawn_loader(self.env.clone(), key, track, start_ms, ctl);

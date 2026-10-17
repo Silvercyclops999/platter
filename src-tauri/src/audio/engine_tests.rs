@@ -867,6 +867,34 @@ async fn the_next_song_opens_well_before_the_playing_one_is_decoded() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn running_dry_fades_out_and_back_in_instead_of_clicking() {
+    let mut config = cfg();
+    config.declick_ms = 5;
+    let mut r = rig_with(RATE, config, None).await;
+    // A steady level, so any cut would be a jump.
+    let spec = hound::WavSpec { channels: 2, sample_rate: RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+    let mut cur = std::io::Cursor::new(Vec::new());
+    {
+        let mut w = hound::WavWriter::new(&mut cur, spec).unwrap();
+        for _ in 0..RATE * 2 {
+            w.write_sample(i16::MAX / 2).unwrap();
+        }
+        w.finalize().unwrap();
+    }
+    // Slower than playback: the output keeps running dry.
+    r.server.add(
+        "/t/a",
+        Route { body: cur.into_inner(), chunk_delay: Some(Duration::from_millis(150)), ..Default::default() },
+    );
+    r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    collect_until(&mut r.events, is_drained, Duration::from_secs(30)).await;
+    let got: Vec<f32> = r.cap.samples().into_iter().step_by(2).collect();
+    assert!(got.iter().any(|s| *s < 0.25), "never faded at a dry spell");
+    let step = got.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+    assert!(step < 0.01, "a jump of {step}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_song_opened_ahead_still_joins_gaplessly() {
     // 30 s and 1 s at full speed: b opens ahead, waits for a, and the join
     // stays sample exact.
