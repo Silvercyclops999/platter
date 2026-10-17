@@ -91,7 +91,7 @@ export function SmartPlaylistPage({ id }: { id: string }) {
     <div className="page-pad" data-testid="smart-page">
       <header className="smart-head">
         <p className="detail-header__type">
-          Smart playlist <span className="platter-mark" title="Kept by Platter and filled on this computer">Platter</span>
+          Smart playlist <span className="platter-mark" title="A Platter smart playlist, filled on this computer">Platter</span>
         </p>
         {pl ? <h1 className="page-title">{pl.title}</h1> : <Skeleton width="40%" height={40} />}
         {data && <p className="smart-rules-line">{data.prompt ? `"${data.prompt}". ` : ""}{rulesLine(data.rules)}</p>}

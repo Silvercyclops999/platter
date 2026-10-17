@@ -261,7 +261,7 @@ export function ShelfPage() {
         {!list ? (
           <Skeleton width="100%" height={56} />
         ) : list.length === 0 ? (
-          <p className="shelf-empty">Nothing yet. Pick "I own this" from an album's menu, or import your Discogs collection.</p>
+          <p className="shelf-empty">No records on your shelf yet. Pick "I own this" from an album's menu, or import your Discogs collection.</p>
         ) : (
           <ol className="shelf-rows shelf-rows--grid" aria-label="Owned albums">
             {list.map((o) => (
