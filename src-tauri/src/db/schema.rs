@@ -1088,6 +1088,45 @@ CREATE TABLE IF NOT EXISTS track_analysis (
     analysed_at    INTEGER NOT NULL
 ) WITHOUT ROWID;
 "#,
+    // v38: track_analysis as an ordinary rowid table. Its rows carry a few
+    // kilobytes of JSON (loudness over time), which a WITHOUT ROWID table
+    // stores poorly.
+    r#"
+CREATE TABLE track_analysis_new (
+    track_id       TEXT PRIMARY KEY,
+    part_key       TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    version        INTEGER NOT NULL,
+    source         TEXT NOT NULL DEFAULT 'local',
+    duration_ms    INTEGER,
+    bpm            REAL,
+    beat_conf      REAL,
+    in_downbeat_ms REAL,
+    in_beat_ms     REAL,
+    in_conf        REAL,
+    in_down_conf   REAL,
+    out_downbeat_ms REAL,
+    out_beat_ms    REAL,
+    out_conf       REAL,
+    out_down_conf  REAL,
+    musical_key    INTEGER,
+    key_conf       REAL,
+    energy         REAL,
+    loudness_db    REAL,
+    cue_in_ms      INTEGER,
+    cue_out_ms     INTEGER,
+    intro_end_ms   INTEGER,
+    outro_start_ms INTEGER,
+    starts_hot     INTEGER NOT NULL DEFAULT 0,
+    ends_hot       INTEGER NOT NULL DEFAULT 0,
+    sections       TEXT,
+    features       TEXT,
+    analysed_at    INTEGER NOT NULL
+);
+INSERT INTO track_analysis_new (track_id, part_key, status, version, source, duration_ms, bpm, beat_conf, in_downbeat_ms, in_beat_ms, in_conf, in_down_conf, out_downbeat_ms, out_beat_ms, out_conf, out_down_conf, musical_key, key_conf, energy, loudness_db, cue_in_ms, cue_out_ms, intro_end_ms, outro_start_ms, starts_hot, ends_hot, sections, features, analysed_at) SELECT track_id, part_key, status, version, source, duration_ms, bpm, beat_conf, in_downbeat_ms, in_beat_ms, in_conf, in_down_conf, out_downbeat_ms, out_beat_ms, out_conf, out_down_conf, musical_key, key_conf, energy, loudness_db, cue_in_ms, cue_out_ms, intro_end_ms, outro_start_ms, starts_hot, ends_hot, sections, features, analysed_at FROM track_analysis;
+DROP TABLE track_analysis;
+ALTER TABLE track_analysis_new RENAME TO track_analysis;
+"#,
 ];
 
 #[cfg(test)]
@@ -1444,5 +1483,22 @@ mod tests {
             .query_row("SELECT count(*) FROM pragma_table_info('tracks') WHERE name = 'rating_count'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn v38_keeps_song_analyses_in_a_rowid_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        migrate_to(&mut c, 37).unwrap();
+        c.execute(
+            "INSERT INTO track_analysis (track_id, part_key, status, version, sections, analysed_at) VALUES ('a', '/p/a', 'ok', 1, '[-12]', 5)",
+            [],
+        )
+        .unwrap();
+        migrate(&mut c).unwrap();
+        let (part, sections, rowid): (String, String, i64) =
+            c.query_row("SELECT part_key, sections, rowid FROM track_analysis WHERE track_id = 'a'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((part.as_str(), sections.as_str()), ("/p/a", "[-12]"));
+        assert!(rowid > 0);
     }
 }
