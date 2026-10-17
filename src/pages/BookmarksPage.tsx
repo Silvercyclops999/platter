@@ -35,7 +35,7 @@ function Row({ b }: { b: Bookmark }) {
         </span>
         <span className="bookmark-row__at">{song ? `at ${formatDuration(b.positionMs ?? 0)}` : when(b.createdAt)}</span>
       </button>
-      <IconButton label={`Remove the bookmark for ${b.title}`} size="sm" icon={<X size={16} />} onClick={() => void removeBookmark(b.id)} />
+      <IconButton label={`Remove ${b.title}`} size="sm" icon={<X size={16} />} onClick={() => void removeBookmark(b.id)} />
     </li>
   );
 }

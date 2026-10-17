@@ -13,16 +13,19 @@ import type {
   BookmarkPage,
   HiddenItem,
   HideRequest,
+  NewBookmark,
   ScrobbleStatus,
+  SmartPage,
   SmartRules,
   SmartSummary,
   Track,
 } from "../lib/types";
-import { nav, type Route } from "./router";
+import { nav, useRouter, type Route } from "./router";
 import { usePlayer } from "./player";
 import { useSettings } from "./settings";
 import { toast, useToasts } from "./toasts";
 import type { MenuItem } from "./ui";
+import { failText } from "../lib/errorText";
 
 /** The smart playlist editor, while it's open. */
 export interface SmartEditorState {
@@ -234,10 +237,23 @@ export async function openBookmark(bm: Bookmark, b: Backend = backend): Promise<
 }
 
 export async function removeBookmark(id: string, b: Backend = backend): Promise<void> {
+  const was = useCurate.getState().bookmarks?.find((x) => x.id === id);
   try {
     useCurate.setState({ bookmarks: await b.bookmarkRemove(id) });
+    if (!was) return;
+    const { id: _id, createdAt: _at, ...again } = was;
+    toast.undo(`Removed the bookmark for ${was.title}`, () => void restoreBookmark(again, b));
   } catch (e) {
-    toast.error(errText(e) || "Couldn't remove the bookmark");
+    toast.error(failText(was ? `Couldn't remove the bookmark for ${was.title}` : "Couldn't remove the bookmark", e));
+  }
+}
+
+async function restoreBookmark(bm: NewBookmark, b: Backend): Promise<void> {
+  try {
+    await b.bookmarkAdd(bm);
+    useCurate.setState({ bookmarks: await b.bookmarksList() });
+  } catch (e) {
+    toast.error(failText(`Couldn't put back the bookmark for ${bm.title}`, e));
   }
 }
 
@@ -286,12 +302,30 @@ export function closeSmartEditor() {
 }
 
 export async function deleteSmartPlaylist(id: string, b: Backend = backend): Promise<void> {
+  // Kept so Undo can make it again from its rules.
+  const page = await b.smartPage(id).catch(() => null);
+  const name = page?.playlist.title ?? "the smart playlist";
   try {
     await b.smartDelete(id);
-    toast.info("Smart playlist deleted");
-    nav.back();
+    const r = useRouter.getState().entries[useRouter.getState().index]?.route;
+    if (r?.name === "playlist" && r.id === id) nav.back();
+    if (!page) {
+      toast.info(`Deleted ${name}`);
+      return;
+    }
+    toast.undo(`Deleted ${name}`, () => void restoreSmart(page, isPlatterSmart(id), b));
   } catch (e) {
-    toast.error(errText(e) || "Couldn't delete it");
+    toast.error(failText(`Couldn't delete ${name}`, e));
+  }
+}
+
+async function restoreSmart(page: SmartPage, platter: boolean, b: Backend): Promise<void> {
+  try {
+    const saved = await b.smartSave({ title: page.playlist.title, summary: page.playlist.summary, rules: page.rules, picks: page.picks, prompt: page.prompt, platter });
+    toast.info(`${page.playlist.title} is back`);
+    nav.go({ name: "playlist", id: saved.id });
+  } catch (e) {
+    toast.error(failText(`Couldn't bring back ${page.playlist.title}`, e));
   }
 }
 

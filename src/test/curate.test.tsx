@@ -18,7 +18,7 @@ import { SettingsPage } from "../pages/SettingsPage";
 import { SmartPlaylistPage, rulesLine } from "../pages/SmartPlaylistPage";
 import { Sidebar } from "../shell/Sidebar";
 import { useApp } from "../stores/app";
-import { bookmarkNowPlaying, newSmartPlaylist, resetCurate, startCurate, useCurate } from "../stores/curate";
+import { bookmarkNowPlaying, deleteSmartPlaylist, newSmartPlaylist, resetCurate, startCurate, useCurate } from "../stores/curate";
 import { useLibraryView } from "../stores/library";
 import { usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
@@ -242,6 +242,19 @@ describe("hide", () => {
   });
 });
 
+describe("deleting a smart playlist", () => {
+  it("says which one and can bring it back with Undo", async () => {
+    const rules = { matchAll: true, rules: [{ field: "duration", op: "gt", value: "3" }], sort: "none", update: "live" } as never;
+    const made = await backend.smartSave({ title: "Long ones", rules, platter: true });
+    await deleteSmartPlaylist(made.id);
+    expect((await backend.smartList()).some((x) => x.title === "Long ones")).toBe(false);
+    const undo = useToasts.getState().toasts.find((t) => t.message === "Deleted Long ones");
+    expect(undo?.action?.label).toBe("Undo");
+    act(() => undo!.action!.run());
+    await waitFor(async () => expect((await backend.smartList()).some((x) => x.title === "Long ones")).toBe(true));
+  });
+});
+
 describe("bookmarks", () => {
   it("the shortcut bookmarks the playing song at its time; the page plays it from there", async () => {
     const user = userEvent.setup();
@@ -265,8 +278,13 @@ describe("bookmarks", () => {
     const page = useCurate.getState().bookmarks.find((b) => b.kind === "page")!;
     await user.click(screen.getByRole("button", { name: `Open ${page.title}` }));
     expect(route()).toEqual({ name: "album", id: page.target });
-    await user.click(screen.getByRole("button", { name: `Remove the bookmark for ${page.title}` }));
+    await user.click(screen.getByRole("button", { name: `Remove ${page.title}` }));
     await waitFor(() => expect(useCurate.getState().bookmarks.some((b) => b.id === page.id)).toBe(false));
+    // The toast names it and can undo it.
+    const undo = useToasts.getState().toasts.find((t) => t.message === `Removed the bookmark for ${page.title}`);
+    expect(undo?.action?.label).toBe("Undo");
+    act(() => undo!.action!.run());
+    await waitFor(() => expect(useCurate.getState().bookmarks.some((b) => b.kind === "page" && b.target === page.target)).toBe(true));
   });
 
   it("Bookmarks has a row in the library while its setting is on", async () => {

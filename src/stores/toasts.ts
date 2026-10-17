@@ -59,7 +59,12 @@ export const useToasts = create<ToastState>()((set, get) => ({
 export const toast = {
   info: (message: string, art?: ToastArt) => useToasts.getState().push({ kind: "info", message, ...(art?.path ? { art } : {}) }),
   error: (message: string) => useToasts.getState().push({ kind: "error", message }, 6000),
+  /** Something was removed: says what, with an Undo button for a few seconds. */
+  undo: (message: string, run: () => void) => useToasts.getState().push({ kind: "info", message, action: { label: "Undo", run } }, UNDO_MS),
 };
+
+/** How long an Undo toast stays. */
+export const UNDO_MS = 6000;
 
 /** Copy text to the clipboard and say whether it worked. */
 export function copyText(text: string): void {
