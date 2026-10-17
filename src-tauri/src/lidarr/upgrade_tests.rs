@@ -913,7 +913,7 @@ async fn an_upgrade_goes_only_to_staging_with_monitoring_limited_and_a_profile_a
     // The setup check ran before the first write, and again before the search.
     let log = r.web.log.lock().clone();
     let first = log.iter().position(|(m, _, _)| *m != Method::Get).unwrap();
-    let search = log.iter().position(|(_, p, _)| p == "/api/v1/command").unwrap();
+    let search = log.iter().position(|(m, p, _)| *m == Method::Post && p == "/api/v1/command").unwrap();
     assert!(log[..first].iter().any(|(_, p, _)| p == "/api/v1/rootfolder"));
     assert!(log[first..search].iter().any(|(_, p, _)| p == "/api/v1/rootfolder"), "checked again after the writes");
     // Asking again sends nothing.
