@@ -1389,6 +1389,15 @@ impl Transcriber {
             }
         };
         let (model_path, kind) = path;
+        // A file from before checks were noted is checked once, off the
+        // async threads; a bad one is removed and downloaded again.
+        if d.models.needs_verify(kind) {
+            let m = d.models.clone();
+            if !tokio::task::spawn_blocking(move || m.verify(kind)).await.unwrap_or(false) {
+                self.fail(&id, "The transcription model was damaged, so Platter removed it. Download it again in Settings.");
+                return Outcome::Failed;
+            }
+        }
         if let Some(r) = self.inner.st.lock().current.as_mut() {
             r.job.model = kind;
         }

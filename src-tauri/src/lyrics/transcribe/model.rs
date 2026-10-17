@@ -120,6 +120,25 @@ pub trait ModelFetch: Send + Sync {
 /// Downloads with reqwest.
 pub struct HttpFetch(pub reqwest::Client);
 
+impl HttpFetch {
+    /// A client that gives up on a stalled connection instead of waiting
+    /// for ever (no overall limit: the files are large).
+    pub fn new() -> Self {
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .read_timeout(std::time::Duration::from_secs(60))
+            .build()
+            .unwrap_or_default();
+        Self(client)
+    }
+}
+
+impl Default for HttpFetch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl ModelFetch for HttpFetch {
     async fn open(&self, url: &str) -> Result<BoxStream<'static, Result<Bytes, String>>, String> {
@@ -169,18 +188,59 @@ impl ModelStore {
         self.dir.join(format!("{}.part", spec.file))
     }
 
-    /// The model's file when it's fully there (its size is checked; the
-    /// checksum was checked when it arrived).
+    /// Where the note of a checked file is kept: its checksum, size and
+    /// modified time when it was checked.
+    fn marker_path(&self, spec: &ModelSpec) -> PathBuf {
+        self.dir.join(format!("{}.verified", spec.file))
+    }
+
+    /// The model's file when it's fully there: as it was when its checksum
+    /// was checked (same size and modified time), or, for a file downloaded
+    /// before those notes were kept, the right size until [`Self::verify`]
+    /// checks it once.
     pub fn installed(&self, kind: ModelKind) -> Option<PathBuf> {
         let spec = self.spec(kind)?;
         let p = self.dir.join(&spec.file);
-        std::fs::metadata(&p).ok().filter(|m| m.is_file() && m.len() == spec.size).map(|_| p)
+        std::fs::metadata(&p).ok().filter(|m| m.is_file() && m.len() == spec.size)?;
+        match std::fs::read_to_string(self.marker_path(spec)) {
+            Ok(note) => (Some(note.trim()) == stamp(&p, &spec.sha256).as_deref()).then_some(p),
+            Err(_) => Some(p),
+        }
+    }
+
+    /// The file is there but was never checked here (downloaded before
+    /// checks were noted).
+    pub fn needs_verify(&self, kind: ModelKind) -> bool {
+        self.spec(kind).is_some_and(|s| self.installed(kind).is_some() && !self.marker_path(s).exists())
+    }
+
+    /// Check the file's checksum now (slow: reads the whole file; call off
+    /// the async threads). A good file is noted; a bad one is deleted.
+    pub fn verify(&self, kind: ModelKind) -> bool {
+        let Some(spec) = self.spec(kind) else { return false };
+        let p = self.dir.join(&spec.file);
+        let ok = (|| -> std::io::Result<bool> {
+            let mut f = std::fs::File::open(&p)?;
+            let mut h = Sha256::new();
+            std::io::copy(&mut f, &mut h)?;
+            Ok(hex(&h.finalize()) == spec.sha256)
+        })()
+        .unwrap_or(false);
+        if ok {
+            if let Some(s) = stamp(&p, &spec.sha256) {
+                let _ = std::fs::write(self.marker_path(spec), s);
+            }
+        } else {
+            tracing::warn!(model = %spec.file, "model file failed its checksum; removed");
+            let _ = self.delete(kind);
+        }
+        ok
     }
 
     /// Delete the model (and any half-finished download of it).
     pub fn delete(&self, kind: ModelKind) -> std::io::Result<()> {
         let Some(spec) = self.spec(kind) else { return Ok(()) };
-        for p in [self.dir.join(&spec.file), self.part_path(spec)] {
+        for p in [self.dir.join(&spec.file), self.part_path(spec), self.marker_path(spec)] {
             match std::fs::remove_file(&p) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -212,6 +272,10 @@ impl ModelStore {
             Ok(()) => {
                 let dest = self.dir.join(&spec.file);
                 tokio::fs::rename(&part, &dest).await.map_err(|e| DownloadError::Io(e.to_string()))?;
+                // The checksum was checked on the way in: note the file as it is now.
+                if let Some(s) = stamp(&dest, &spec.sha256) {
+                    tokio::fs::write(self.marker_path(&spec), s).await.map_err(|e| DownloadError::Io(e.to_string()))?;
+                }
                 Ok(dest)
             }
             Err(e) => {
@@ -268,6 +332,13 @@ impl ModelStore {
         }
         Ok(())
     }
+}
+
+/// A checked file's note: checksum, size and modified time.
+fn stamp(p: &Path, sha: &str) -> Option<String> {
+    let m = std::fs::metadata(p).ok()?;
+    let t = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    Some(format!("{sha} {} {t}", m.len()))
 }
 
 fn hex(bytes: &[u8]) -> String {

@@ -487,6 +487,31 @@ async fn store_download_maps_disk_and_checksum_directly() {
     assert_eq!(r, Err(DownloadError::Checksum), "more bytes than expected");
 }
 
+#[tokio::test]
+async fn a_model_changed_after_its_check_isnt_used_and_an_old_one_is_checked_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ModelStore::new(dir.path().to_path_buf(), specs(), Arc::new(|_: &Path| None));
+    let never = AtomicBool::new(false);
+    let p = store.download(ModelKind::Small, FakeFetch::new(model_body()).as_ref(), &never, &|_, _| {}).await.unwrap();
+    assert!(store.installed(ModelKind::Small).is_some() && !store.needs_verify(ModelKind::Small));
+    // Swapped for other bytes of the same size: no longer the checked file.
+    let mut other = model_body();
+    other[0] ^= 0xff;
+    let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+    std::io::Write::write_all(&mut &f, &other).unwrap();
+    f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5)).unwrap();
+    drop(f);
+    assert!(store.installed(ModelKind::Small).is_none());
+    // A file from before checks were noted: checked once, then noted.
+    std::fs::remove_file(dir.path().join("small.bin.verified")).unwrap();
+    assert!(store.needs_verify(ModelKind::Small));
+    assert!(!store.verify(ModelKind::Small), "the swapped bytes fail");
+    assert!(!p.exists(), "and are removed");
+    std::fs::write(&p, model_body()).unwrap();
+    assert!(store.verify(ModelKind::Small));
+    assert!(store.installed(ModelKind::Small).is_some() && !store.needs_verify(ModelKind::Small));
+}
+
 #[test]
 fn the_catalogue_is_pinned_and_checksummed() {
     for s in model::catalogue() {

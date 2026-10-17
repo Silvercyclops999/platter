@@ -1195,7 +1195,7 @@ pub fn run() {
                 let transcriber = tr::Transcriber::new(tr::Deps {
                     db: db.clone(),
                     models: models.clone(),
-                    fetch: Arc::new(tr::model::HttpFetch(reqwest::Client::new())),
+                    fetch: Arc::new(tr::model::HttpFetch::new()),
                     recognizer: recognizer.clone(),
                     songs: songs.clone(),
                     other: Arc::new(trc::AppOther(lyrics_service.clone())),
