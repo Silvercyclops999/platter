@@ -39,6 +39,7 @@ pub mod settings;
 pub mod share;
 pub mod sid;
 pub mod smart;
+pub mod soundmap;
 pub mod social;
 pub mod soundid;
 pub mod subsonic;
@@ -656,6 +657,17 @@ pub fn run() {
             });
             devices.set_events(Arc::new(app.handle().clone()));
             app.manage(devices);
+            // The sound map, kept up to date as songs are analysed.
+            let sound_map = soundmap::SoundMap::new(db.clone());
+            {
+                let h = app.handle().clone();
+                sound_map.set_on_changed(Arc::new(move || {
+                    use tauri::Emitter;
+                    let _ = h.emit(soundmap::EV_CHANGED, ());
+                }));
+            }
+            sound_map.spawn();
+            app.manage(sound_map.clone());
             // File tags (explicit, versions, editions), read behind playback.
             let tag_scanner = tags::scan::TagScanner::new(
                 db.clone(),
@@ -1170,10 +1182,11 @@ pub fn run() {
                 // Song analysis for Automix: at idle, with the same busy check.
                 {
                     let analyzer = analysis::Analyzer::new(db.clone(), songs.clone(), Some(pacer.clone()));
-                    let (handle, p) = (app.handle().clone(), player.clone());
+                    let (handle, p, map) = (app.handle().clone(), player.clone(), sound_map.clone());
                     analyzer.set_on_done(Arc::new(move |ids: Vec<String>| {
                         use tauri::Emitter;
                         let _ = handle.emit(analysis::EV_CHANGED, &ids);
+                        map.kick();
                         p.analysed(ids);
                     }));
                     analyzer.spawn();
@@ -1613,6 +1626,10 @@ pub fn run() {
             devices::commands::devices_pause,
             devices::commands::devices_cancel,
             devices::commands::devices_status,
+            soundmap::commands::soundmap_info,
+            soundmap::commands::soundmap_points,
+            soundmap::commands::soundmap_find,
+            soundmap::commands::soundmap_song,
             updates::update_check,
             updates::update_install_on_restart,
             share::commands::share_info,

@@ -575,6 +575,8 @@ pub struct Settings {
     pub show_lineage: bool,
     /// "Describe a playlist" in the create menu and the smart playlist editor.
     pub show_describe_playlist: bool,
+    /// The sound map page and its entries (shown once songs are analysed).
+    pub show_sound_map: bool,
     /// Compare plays both versions at matched loudness when the server has it.
     pub compare_level_match: bool,
     /// Scrobble to Last.fm (once signed in).
@@ -956,6 +958,7 @@ impl Default for Settings {
             top_songs_show_plays: false,
             show_lineage: true,
             show_describe_playlist: true,
+            show_sound_map: true,
             compare_level_match: true,
             scrobble_lastfm: false,
             scrobble_listenbrainz: false,
@@ -1125,6 +1128,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "topSongsShowPlays",
     "showLineage",
     "showDescribePlaylist",
+    "showSoundMap",
     "compareLevelMatch",
     "scrobbleUnreleased",
     "aiModel",
@@ -1430,6 +1434,7 @@ pub struct SettingsPatch {
     pub top_songs_show_plays: Option<bool>,
     pub show_lineage: Option<bool>,
     pub show_describe_playlist: Option<bool>,
+    pub show_sound_map: Option<bool>,
     pub compare_level_match: Option<bool>,
     pub scrobble_lastfm: Option<bool>,
     pub scrobble_listenbrainz: Option<bool>,
@@ -1872,6 +1877,7 @@ impl Settings {
         set(&mut self.top_songs_show_plays, p.top_songs_show_plays);
         set(&mut self.show_lineage, p.show_lineage);
         set(&mut self.show_describe_playlist, p.show_describe_playlist);
+        set(&mut self.show_sound_map, p.show_sound_map);
         set(&mut self.compare_level_match, p.compare_level_match);
         set(&mut self.scrobble_lastfm, p.scrobble_lastfm);
         set(&mut self.scrobble_listenbrainz, p.scrobble_listenbrainz);
@@ -3473,6 +3479,16 @@ mod tests {
         let p: SettingsPatch = serde_json::from_str(r#"{"showDescribePlaylist":false}"#).unwrap();
         s.apply(&p).unwrap();
         assert!(!s.show_describe_playlist);
+    }
+
+    #[test]
+    fn sound_map_setting_defaults_on_syncs_and_applies() {
+        let mut s = Settings::default();
+        assert!(s.show_sound_map);
+        assert!(SYNCED_SETTINGS.contains(&"showSoundMap"));
+        let p: SettingsPatch = serde_json::from_str(r#"{"showSoundMap":false}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.show_sound_map);
     }
 
     #[test]

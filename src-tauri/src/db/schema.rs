@@ -1127,6 +1127,22 @@ INSERT INTO track_analysis_new (track_id, part_key, status, version, source, dur
 DROP TABLE track_analysis;
 ALTER TABLE track_analysis_new RENAME TO track_analysis;
 "#,
+    // v39: the sound map (soundmap::store): a point per analysed song, with
+    // the file it came from, and the projection that placed them.
+    r#"
+CREATE TABLE IF NOT EXISTS sound_map (
+    track_id TEXT PRIMARY KEY,
+    part_key TEXT NOT NULL,
+    x        REAL NOT NULL,
+    y        REAL NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS sound_map_layout (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    version  INTEGER NOT NULL,
+    basis    TEXT NOT NULL,
+    built_at INTEGER NOT NULL
+);
+"#,
 ];
 
 #[cfg(test)]
