@@ -10,6 +10,7 @@
 //! 4. Subscribe to [`player::PlayerHandle::subscribe_tracking`] for play tracking.
 
 pub mod autoeq;
+pub mod automix;
 pub mod cache;
 pub mod commands;
 pub mod compare;
@@ -37,6 +38,8 @@ pub use source::{PlayContext, StreamSource, TrackLookup, TrackResolver};
 
 #[cfg(test)]
 mod engine_tests;
+#[cfg(test)]
+mod automix_tests;
 #[cfg(test)]
 mod dsp_tests;
 #[cfg(test)]

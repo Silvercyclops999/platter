@@ -300,6 +300,12 @@ pub struct Settings {
     pub crossfade_seconds: u32,
     /// Songs of one album played in order never crossfade.
     pub crossfade_skip_albums: bool,
+    /// Automix: DJ-style transitions where they fit.
+    pub automix: bool,
+    /// Where Automix plays transitions.
+    pub automix_where: crate::audio::automix::Reach,
+    /// Smooth (longer) or energetic (shorter, on the bar) transitions.
+    pub automix_style: crate::audio::automix::Feel,
     /// Loudness leveling (synced once settings sync arrives).
     pub leveling: Leveling,
     /// dB added to every track, -12 to +12. This device only.
@@ -826,6 +832,9 @@ impl Default for Settings {
             crossfade: CrossfadeMode::Smart,
             crossfade_seconds: 6,
             crossfade_skip_albums: true,
+            automix: true,
+            automix_where: crate::audio::automix::Reach::PlaylistsAndMixes,
+            automix_style: crate::audio::automix::Feel::Smooth,
             leveling: Leveling::Smart,
             preamp_db: 0.0,
             limiter: true,
@@ -1044,6 +1053,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "crossfade",
     "crossfadeSeconds",
     "crossfadeSkipAlbums",
+    "automix",
+    "automixWhere",
+    "automixStyle",
     "leveling",
     "sharePublicLinks",
     "shareCardQr",
@@ -1293,6 +1305,9 @@ pub struct SettingsPatch {
     pub crossfade: Option<CrossfadeMode>,
     pub crossfade_seconds: Option<u32>,
     pub crossfade_skip_albums: Option<bool>,
+    pub automix: Option<bool>,
+    pub automix_where: Option<crate::audio::automix::Reach>,
+    pub automix_style: Option<crate::audio::automix::Feel>,
     pub leveling: Option<Leveling>,
     pub preamp_db: Option<f32>,
     pub limiter: Option<bool>,
@@ -1486,6 +1501,15 @@ impl SettingsPatch {
             || self.liked_means.is_some()
     }
 
+    /// Whether the patch touches Automix (its fades follow the crossfade length).
+    pub fn touches_automix(&self) -> bool {
+        self.automix.is_some()
+            || self.automix_where.is_some()
+            || self.automix_style.is_some()
+            || self.crossfade.is_some()
+            || self.crossfade_seconds.is_some()
+    }
+
     /// Whether the patch touches the player's sound stage.
     pub fn touches_dsp(&self) -> bool {
         self.crossfade.is_some()
@@ -1516,6 +1540,9 @@ impl Settings {
         }
         set(&mut self.private_session, p.private_session);
         set(&mut self.report_plays, p.report_plays);
+        set(&mut self.automix, p.automix);
+        set(&mut self.automix_where, p.automix_where);
+        set(&mut self.automix_style, p.automix_style);
         set(&mut self.shuffle_style, p.shuffle_style);
         set(&mut self.quality_home, p.quality_home);
         set(&mut self.quality_away, p.quality_away);
@@ -1924,6 +1951,24 @@ impl Settings {
         eqprofile::dsp(self)
     }
 
+    /// The crossfade length Automix's plain fades use (0: its own default).
+    pub fn automix_fade_ms(&self) -> u64 {
+        match self.crossfade {
+            crate::audio::dsp::CrossfadeMode::Fixed => self.crossfade_seconds as u64 * 1000,
+            _ => 0,
+        }
+    }
+
+    /// What the player needs for Automix.
+    pub fn automix_options(&self) -> crate::audio::automix::AutomixOptions {
+        crate::audio::automix::AutomixOptions {
+            on: self.automix,
+            reach: self.automix_where,
+            feel: self.automix_style,
+            fade_ms: self.automix_fade_ms(),
+        }
+    }
+
     /// The lowest Plex rating that counts as liked.
     pub fn liked_min_rating(&self) -> f64 {
         self.liked_means.min_rating()
@@ -2259,6 +2304,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     crate::doctor::set_options(s.doctor_options());
     crate::playhistory::follow_settings(db, s);
     crate::soundid::set_options(s.sound_id_options());
+    crate::analysis::set_enabled(s.automix);
     crate::tagedit::publish(s.tag_edit_options());
     // File statuses follow the status tag and values; a new tag name means
     // reading the files again.
@@ -2420,6 +2466,9 @@ async fn apply_to_player(player: &PlayerHandle, s: &Settings, patch: &SettingsPa
     // Turning the loop handles off clears a loop that's set.
     if patch.touches_dsp() {
         player.set_dsp(s.dsp()).await?;
+    }
+    if patch.touches_automix() {
+        player.set_automix(s.automix_options()).await?;
     }
     if patch.ab_loop_handles == Some(false) {
         player.set_ab_loop(None).await?;
@@ -3019,6 +3068,30 @@ mod tests {
         for n in ["syncFolder", "syncEnabled", "downloadFolder", "computerName", "outputDevice", "eqProfiles"] {
             assert!(DEVICE_SETTINGS.contains(&n));
         }
+    }
+
+    #[test]
+    fn automix_settings_default_apply_and_follow_the_crossfade_length() {
+        use crate::audio::automix::{Feel, Reach};
+        let mut s = Settings::default();
+        assert!(s.automix, "on by default");
+        assert_eq!((s.automix_where, s.automix_style), (Reach::PlaylistsAndMixes, Feel::Smooth));
+        assert_eq!(s.automix_fade_ms(), 0, "smart crossfade: Automix's own fade length");
+        let p: SettingsPatch = serde_json::from_value(serde_json::json!({
+            "automix": false, "automixWhere": "allButAlbums", "automixStyle": "energetic",
+            "crossfade": "fixed", "crossfadeSeconds": 9
+        }))
+        .unwrap();
+        assert!(p.touches_automix());
+        s.apply(&p).unwrap();
+        let o = s.automix_options();
+        assert!(!o.on);
+        assert_eq!((o.reach, o.feel, o.fade_ms), (Reach::AllButAlbums, Feel::Energetic, 9_000));
+        for n in ["automix", "automixWhere", "automixStyle"] {
+            assert!(SYNCED_SETTINGS.contains(&n), "{n} is synced");
+        }
+        let only: SettingsPatch = serde_json::from_value(serde_json::json!({ "leveling": "off" })).unwrap();
+        assert!(!only.touches_automix());
     }
 
     #[test]

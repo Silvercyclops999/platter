@@ -1051,6 +1051,43 @@ ALTER TABLE album_tags ADD COLUMN mixed INTEGER NOT NULL DEFAULT 0;
     r#"
 DELETE FROM lyrics_check WHERE verdict = 'noMatch';
 "#,
+    // v37: the sound of each song (analysis::store), worked out on this
+    // computer for mixing: the beat grid at its start and end, key, energy,
+    // loudness over time, cue points and a feature vector. Keyed by track
+    // with the file it came from; a changed file is done again.
+    r#"
+CREATE TABLE IF NOT EXISTS track_analysis (
+    track_id       TEXT PRIMARY KEY,
+    part_key       TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    version        INTEGER NOT NULL,
+    source         TEXT NOT NULL DEFAULT 'local',
+    duration_ms    INTEGER,
+    bpm            REAL,
+    beat_conf      REAL,
+    in_downbeat_ms REAL,
+    in_beat_ms     REAL,
+    in_conf        REAL,
+    in_down_conf   REAL,
+    out_downbeat_ms REAL,
+    out_beat_ms    REAL,
+    out_conf       REAL,
+    out_down_conf  REAL,
+    musical_key    INTEGER,
+    key_conf       REAL,
+    energy         REAL,
+    loudness_db    REAL,
+    cue_in_ms      INTEGER,
+    cue_out_ms     INTEGER,
+    intro_end_ms   INTEGER,
+    outro_start_ms INTEGER,
+    starts_hot     INTEGER NOT NULL DEFAULT 0,
+    ends_hot       INTEGER NOT NULL DEFAULT 0,
+    sections       TEXT,
+    features       TEXT,
+    analysed_at    INTEGER NOT NULL
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

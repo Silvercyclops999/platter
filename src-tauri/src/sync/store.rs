@@ -70,6 +70,8 @@ impl<T> Ns<T> {
 pub const SETTINGS: Ns<Value> = Ns::new("settings");
 /// Library pins, keyed `kind:id`.
 pub const PINS: Ns<super::pins::Pin> = Ns::new("pins");
+/// Playlists with Mix on and their transition picks, keyed by playlist id.
+pub const MIXED: Ns<crate::audio::automix::MixedPlaylist> = Ns::new("mixedPlaylists");
 /// Library folders, keyed by folder id.
 pub const FOLDERS: Ns<super::folders::Folder> = Ns::new("folders");
 /// Which folder a playlist is in, keyed by playlist id.
@@ -107,7 +109,8 @@ pub const LIDARR: Ns<Value> = Ns::new("lidarr");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 17] = [
+pub const NAMESPACES: [&str; 18] = [
+    MIXED.name(),
     TRANSCRIPTS.name(),
     LYRICS_SHARED.name(),
     LIDARR.name(),

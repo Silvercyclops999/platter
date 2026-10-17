@@ -994,6 +994,52 @@ impl Queue {
         }
     }
 
+    /// Shuffled, what's left of the context is put in an order whose
+    /// neighbours fit (Automix on a mixed playlist): each next song is the
+    /// best fit of the next `window` in the shuffled order, so the order
+    /// stays random. Does nothing unshuffled.
+    pub fn reorder_for_fit(&mut self, score: &dyn Fn(&Track, &Track) -> f32, window: usize) {
+        if !self.shuffle {
+            return;
+        }
+        let start = (self.pos + 1).max(0) as usize;
+        if start + 1 >= self.order.len() {
+            return;
+        }
+        let mut rest: Vec<usize> = self.order[start..].to_vec();
+        let mut prev: Option<Track> = self.current.as_ref().map(|c| c.track.clone());
+        let mut out = Vec::with_capacity(rest.len());
+        while !rest.is_empty() {
+            let pick = match &prev {
+                Some(p) => (0..rest.len().min(window.max(1)))
+                    .max_by(|&i, &j| {
+                        score(p, &self.items[rest[i]].track)
+                            .total_cmp(&score(p, &self.items[rest[j]].track))
+                            .then(j.cmp(&i))
+                    })
+                    .unwrap_or(0),
+                None => 0,
+            };
+            let idx = rest.remove(pick);
+            prev = Some(self.items[idx].track.clone());
+            out.push(idx);
+        }
+        self.order.truncate(start);
+        self.order.extend(out);
+        self.dedupe_adjacent_from(start);
+    }
+
+    fn dedupe_adjacent_from(&mut self, start: usize) {
+        let mut order = std::mem::take(&mut self.order);
+        self.dedupe_adjacent(&mut order, start);
+        self.order = order;
+    }
+
+    /// The context's songs (for Automix's look at a whole playlist).
+    pub fn context_tracks(&self, n: usize) -> Vec<Track> {
+        self.items.iter().take(n).map(|i| i.track.clone()).collect()
+    }
+
     /// Adds songs at the end of the context's play order (a radio refill,
     /// or similar music once the context runs out).
     pub fn extend_context(&mut self, tracks: Vec<Track>, source: ItemSource) {
@@ -2152,5 +2198,34 @@ mod tests {
         let o = full_order(&q);
         assert_eq!(o[0].track.id, "t3");
         assert_eq!(o.len(), 10);
+    }
+
+    #[test]
+    fn a_mixed_shuffle_puts_fitting_songs_next_to_each_other() {
+        // Songs t0..t9 "fit" when their numbers are one apart.
+        let num = |t: &Track| t.id[1..].parse::<i32>().unwrap();
+        let score = |a: &Track, b: &Track| if (num(a) - num(b)).abs() == 1 { 1.0 } else { 0.0 };
+        let mut q = Queue::with_seed(7);
+        q.set_context(ctx(), tracks(10), None, Some(true));
+        let before: Vec<String> = ids(&q.view().next_up);
+        let fits = |q: &Queue| {
+            let mut all = vec![cur(q)];
+            all.extend(ids(&q.view().next_up));
+            all.windows(2).filter(|w| (w[0][1..].parse::<i32>().unwrap() - w[1][1..].parse::<i32>().unwrap()).abs() == 1).count()
+        };
+        let was = fits(&q);
+        q.reorder_for_fit(&score, 10);
+        let after: Vec<String> = ids(&q.view().next_up);
+        let mut a = before.clone();
+        let mut b = after.clone();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b, "same songs");
+        assert!(fits(&q) > was, "{before:?} -> {after:?}");
+        // Unshuffled, the order is the playlist's.
+        let mut q = Queue::with_seed(7);
+        q.set_context(ctx(), tracks(5), Some(0), Some(false));
+        q.reorder_for_fit(&|_, _| 0.0, 10);
+        assert_eq!(ids(&q.view().next_up), vec!["t1", "t2", "t3", "t4"]);
     }
 }

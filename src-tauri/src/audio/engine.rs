@@ -15,6 +15,12 @@
 //! a track the next one can fade in over it (the outgoing segment moves to
 //! `Mix::fading` and the next becomes the front). The mixed audio then runs
 //! through the EQ and limiter ([`super::dsp`]).
+//!
+//! Automix blends ([`super::automix`]) run the same way, with a plan per
+//! pair of segments: the outgoing song can change speed to match the
+//! incoming one's tempo, the volumes follow the plan's curve, and the
+//! incoming song only becomes the audible track (Started / Ended) at the
+//! blend's midpoint. Until then the position is the outgoing song's.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -25,6 +31,7 @@ use parking_lot::{Condvar, Mutex};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
+use super::automix::{self, BlendPlan, Curve, Echo};
 use super::cache::{DiskCache, PrecacheHost, cache_key};
 use super::convert::Converter;
 use super::decode::{DecodeError, TrackDecoder, extension_hint};
@@ -147,6 +154,10 @@ struct Segment {
     peak: f32,
     /// Whether to crossfade into the next track has been decided.
     xf_decided: bool,
+    /// The Automix blend into the next segment (by its key).
+    blend: Option<(u64, BlendPlan)>,
+    /// Whether that blend was started or given up (a seek resets it).
+    bl_decided: bool,
 }
 
 /// Most samples an A-B loop keeps for gapless replay (about a minute of
@@ -220,6 +231,8 @@ impl Segment {
             lg_step: 0.0,
             peak: dsp::UNKNOWN_PEAK,
             xf_decided: false,
+            blend: None,
+            bl_decided: false,
         }
     }
 
@@ -359,9 +372,49 @@ struct Fading {
     /// overlap; the incoming one over its first `b_fade`.
     a_fade: usize,
     b_fade: usize,
+    /// An Automix blend (the fades above are unused then).
+    blend: Option<Blend>,
 }
 
+/// A running Automix blend.
+struct Blend {
+    plan: BlendPlan,
+    /// Output frames per ms.
+    per_ms: f64,
+    /// How far into the outgoing segment's next frame playback is (its
+    /// speed can differ from 1).
+    frac: f64,
+    /// Frame of the blend where the incoming song takes over; None once it has.
+    handover: Option<usize>,
+    /// The incoming segment.
+    b_key: u64,
+    b_tag: String,
+    echo: Option<Echo>,
+    /// A skip mid-blend: from these gains to (0, 1) over `n` frames from `at`.
+    hurry: Option<(usize, usize, f32, f32)>,
+    /// One frame of the outgoing song.
+    frame: Vec<f32>,
+}
+
+/// How long a skip during a blend takes to clear the outgoing song.
+const HURRY_MS: f64 = 40.0;
+
 impl Fading {
+    /// Volumes now (outgoing, incoming).
+    fn gains(&self) -> (f32, f32) {
+        match &self.blend {
+            Some(b) => {
+                if let Some((at, n, ga, gb)) = b.hurry {
+                    let x = ((self.pos.saturating_sub(at)) as f32 / n.max(1) as f32).min(1.0);
+                    return (ga * (1.0 - x), gb + (1.0 - gb) * x);
+                }
+                let t = self.pos as f64 / b.per_ms;
+                let len = self.len as f64 / b.per_ms;
+                automix::gains(b.plan.curve, t, len, b.plan.beat_ms)
+            }
+            None => (self.a_gain(), self.b_gain()),
+        }
+    }
     fn a_gain(&self) -> f32 {
         let start = self.len - self.a_fade;
         if self.pos < start {
@@ -377,15 +430,14 @@ impl Fading {
             1.0
         }
     }
+    /// A blend whose incoming song hasn't taken over yet: the outgoing one
+    /// is still the playing track.
+    fn handing_over(&self) -> bool {
+        self.blend.as_ref().is_some_and(|b| b.handover.is_some())
+    }
 }
 
-/// Same album, and `b` is the track right after `a` in album order.
-fn album_in_order(a: &Track, b: &Track) -> bool {
-    !a.album_id.is_empty()
-        && a.album_id == b.album_id
-        && ((b.disc_number == a.disc_number && b.track_number == a.track_number + 1)
-            || (b.disc_number == a.disc_number + 1 && b.track_number <= 1))
-}
+use automix::album_in_order;
 
 /// What fetching the next frame from the segments found.
 enum Fetch {
@@ -471,7 +523,8 @@ impl Mix {
         let (ga, gb, lga) = match &self.fading {
             Some(fd) => {
                 avail = avail.min(fd.seg.samples.len() / ch);
-                (fd.a_gain(), fd.b_gain(), fd.seg.lg)
+                let (ga, gb) = fd.gains();
+                (ga, gb, fd.seg.lg)
             }
             None => (0.0, 1.0, 0.0),
         };
@@ -621,6 +674,10 @@ impl Mix {
         if !a.done || !a.started || a.xf_decided || a.replay.is_some() || a.ab.is_some() {
             return false;
         }
+        // An Automix blend that's still to come goes first.
+        if !a.bl_decided && a.blend.as_ref().is_some_and(|(k, _)| *k == b.key) {
+            return false;
+        }
         let rem = (a.samples.len() / ch) as u64;
         if rem == 0 || rem > self.overlap_frames(a, b) {
             return false;
@@ -628,6 +685,164 @@ impl Mix {
         let ready = (b.samples.len() / ch) as u64 >= rem && b.replay.is_none();
         self.segments[0].xf_decided = true;
         ready
+    }
+
+    /// The decoded audio a blend needs, beyond the usual buffer (ms).
+    fn blend_reserve_ms(&self) -> u64 {
+        self.segments
+            .iter()
+            .filter_map(|s| s.blend.as_ref())
+            .map(|(_, p)| (p.len_ms * p.rate.max(1.0) + p.b_start_ms) as u64 + 1_000)
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn ms_to_frames_f(&self, ms: f64) -> u64 {
+        (ms.max(0.0) * self.format.sample_rate as f64 / 1000.0).round() as u64
+    }
+
+    /// Whether the Automix blend into the next segment starts at this frame.
+    /// Decided once: when the outgoing song reaches the plan's start with
+    /// itself decoded to the end and the incoming one decoded far enough.
+    /// Otherwise (late, not decoded yet, a loop on) no blend this time, and
+    /// the crossfade setting applies.
+    fn blend_due(&mut self) -> Option<BlendPlan> {
+        if self.bit_perfect || self.fading.is_some() || self.segments.len() < 2 {
+            return None;
+        }
+        let ch = self.ch();
+        let (a, b) = (&self.segments[0], &self.segments[1]);
+        let (k, plan) = a.blend.as_ref()?;
+        if *k != b.key || a.bl_decided || !a.started || a.replay.is_some() || b.replay.is_some() {
+            return None;
+        }
+        if a.ab.is_some() {
+            self.segments[0].bl_decided = true;
+            return None;
+        }
+        let plan = *plan;
+        let len = self.ms_to_frames_f(plan.len_ms);
+        let pos = a.pos();
+        let start = match plan.a_start_ms {
+            Some(ms) => self.ms_to_frames_f(ms),
+            None => {
+                let rem = (a.samples.len() / ch) as u64;
+                if !a.done || rem == 0 || rem > len {
+                    return None;
+                }
+                pos
+            }
+        };
+        if pos < start {
+            return None;
+        }
+        // From here it's now or never.
+        self.segments[0].bl_decided = true;
+        let a = &self.segments[0];
+        let b = &self.segments[1];
+        // A beat-matched blend that starts late would miss the bar.
+        let late = pos - start > if plan.beatmatched { 2 } else { self.ms_to_frames(500) };
+        let need_b = self.ms_to_frames_f(plan.b_start_ms) + len;
+        let ready = a.done && a.samples.len() / ch > 1 && ((b.samples.len() / ch) as u64 >= need_b || b.done);
+        if late || !ready {
+            return None;
+        }
+        Some(plan)
+    }
+
+    /// Starts an Automix blend: the front segment moves to `fading`, the
+    /// next one starts (past its lead-in) underneath it.
+    fn start_blend(&mut self, plan: BlendPlan) {
+        let ch = self.ch();
+        let rate = self.format.sample_rate as f64;
+        let per_ms = rate / 1000.0;
+        let skip = self.ms_to_frames_f(plan.b_start_ms) as usize;
+        let Some(a) = self.segments.pop_front() else { return };
+        let Some(b) = self.segments.front_mut() else {
+            self.segments.push_front(a);
+            return;
+        };
+        let skip = skip.min((b.samples.len() / ch).saturating_sub(1));
+        b.samples.drain(..skip * ch);
+        b.consumed += skip as u64;
+        b.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
+        // Audible now, but it only becomes the playing track at the midpoint.
+        b.started = true;
+        let (b_key, b_tag) = (b.key, b.tag.clone());
+        // As long as planned, if the outgoing song has the audio for it.
+        let have = (a.samples.len() / ch).saturating_sub(1) as f64 / per_ms;
+        let mut len_ms = plan.len_ms;
+        if plan.a_advance(len_ms) > have {
+            let (mut lo, mut hi) = (0.0, len_ms);
+            for _ in 0..40 {
+                let mid = (lo + hi) / 2.0;
+                if plan.a_advance(mid) > have { hi = mid } else { lo = mid }
+            }
+            len_ms = lo;
+        }
+        let len = ((len_ms * per_ms) as usize).max(1);
+        let echo = (plan.curve == Curve::Echo).then(|| Echo::new((0.75 * plan.beat_ms * per_ms) as usize, ch));
+        self.fading = Some(Fading {
+            seg: a,
+            len,
+            pos: 0,
+            a_fade: 0,
+            b_fade: 0,
+            blend: Some(Blend {
+                plan,
+                per_ms,
+                frac: 0.0,
+                handover: Some(len / 2),
+                b_key,
+                b_tag,
+                echo,
+                hurry: None,
+                frame: vec![0.0; ch],
+            }),
+        });
+    }
+
+    /// The incoming song of a blend takes over: the outgoing one has ended.
+    fn hand_over(fd: &mut Fading, frame_ms: impl Fn(u64) -> u64, events: &mut Vec<EngineEvent>) {
+        let Some(b) = fd.blend.as_mut() else { return };
+        if b.handover.take().is_none() {
+            return;
+        }
+        events.push(EngineEvent::Ended {
+            key: fd.seg.key,
+            tag: fd.seg.tag.clone(),
+            listened_ms: frame_ms(fd.seg.listened),
+        });
+        events.push(EngineEvent::Started {
+            key: b.b_key,
+            tag: b.b_tag.clone(),
+        });
+    }
+
+    /// A blend that hasn't reached its midpoint goes back to the outgoing
+    /// song alone (a seek in it, or a different next song): the incoming
+    /// one waits to be loaded again from its start. Returns a loader to
+    /// start when the outgoing song is already decoded to its end.
+    fn unblend(&mut self) -> Option<(u64, Track, Arc<LoaderCtl>)> {
+        if !self.fading.as_ref().is_some_and(Fading::handing_over) {
+            return None;
+        }
+        let fd = self.fading.take().expect("checked");
+        let mut a = fd.seg;
+        a.bl_decided = true;
+        let mut rechain: Option<Pending> = None;
+        while let Some(s) = self.segments.pop_back() {
+            s.ctl.cancel.store(true, Ordering::SeqCst);
+            rechain = Some(Pending { key: s.key, tag: s.tag, track: s.track });
+        }
+        if self.next.is_none() {
+            self.next = rechain;
+        }
+        self.handoff = None;
+        a.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
+        let done = a.done;
+        self.segments.push_front(a);
+        if done { take_pending(self) } else { None }
     }
 
     /// Moves the front segment to `fading` and makes the next one audible.
@@ -665,13 +880,72 @@ impl Mix {
             pos: 0,
             a_fade,
             b_fade,
+            blend: None,
         });
+    }
+
+    /// Mixes the outgoing track's next frame of a blend under `o`.
+    fn mix_blend(&mut self, o: &mut [f32], events: &mut Vec<EngineEvent>) {
+        let ch = o.len();
+        let rate = self.format.sample_rate.max(1) as u64;
+        let frame_ms = |f: u64| (f * 1000 + rate / 2) / rate;
+        let Some(fd) = self.fading.as_mut() else { return };
+        let (ga, gb) = fd.gains();
+        let pos = fd.pos;
+        let len = fd.len;
+        let short = fd.seg.samples.len() < ch || fd.blend.as_ref().is_none_or(|b| b.frame.len() != ch);
+        if short {
+            Self::hand_over(fd, frame_ms, events);
+            self.drop_fading();
+            return;
+        }
+        let Some(bl) = fd.blend.as_mut() else { return };
+        let s = &fd.seg.samples;
+        // Between two decoded frames when the speed isn't 1.
+        let frac = bl.frac as f32;
+        let lga = fd.seg.lg;
+        for c in 0..ch {
+            let x0 = s[c];
+            let x1 = if s.len() >= 2 * ch { s[ch + c] } else { x0 };
+            bl.frame[c] = (x0 + (x1 - x0) * frac) * lga;
+        }
+        for (v, a) in o.iter_mut().zip(&bl.frame) {
+            *v = *v * gb + a * ga;
+        }
+        let t = pos as f64 / bl.per_ms;
+        if let Some(e) = bl.echo.as_mut() {
+            let (feed, mut wet) = Echo::levels(t, len as f64 / bl.per_ms, bl.plan.beat_ms);
+            if bl.hurry.is_some() {
+                wet *= ga;
+            }
+            e.frame(&bl.frame, feed, wet, o);
+        }
+        bl.frac += bl.plan.rate_at(t);
+        while bl.frac >= 1.0 && fd.seg.samples.len() >= ch {
+            fd.seg.samples.drain(..ch);
+            fd.seg.consumed += 1;
+            fd.seg.listened += 1;
+            bl.frac -= 1.0;
+        }
+        fd.pos += 1;
+        let hurried = bl.hurry.is_some_and(|(at, n, _, _)| fd.pos >= at + n);
+        if bl.handover.is_some_and(|h| fd.pos >= h) {
+            Self::hand_over(fd, frame_ms, events);
+        }
+        if fd.pos >= fd.len || fd.seg.samples.len() < ch || hurried {
+            Self::hand_over(fd, frame_ms, events);
+            self.drop_fading();
+        }
     }
 
     /// Mixes the outgoing track's next frame under `o` (the front's frame).
     #[inline]
-    fn mix_fading(&mut self, o: &mut [f32]) {
+    fn mix_fading(&mut self, o: &mut [f32], events: &mut Vec<EngineEvent>) {
         let ch = o.len();
+        if self.fading.as_ref().is_some_and(|f| f.blend.is_some()) {
+            self.mix_blend(o, events);
+            return;
+        }
         let Some(fd) = self.fading.as_mut() else { return };
         let (ga, gb) = (fd.a_gain(), fd.b_gain());
         let lga = fd.seg.lg;
@@ -782,6 +1056,7 @@ impl Mix {
         let Some(front) = self.segments.front_mut() else { return };
         front.replay = None;
         front.samples.clear();
+        front.bl_decided = false;
         front.generation += 1;
         front.start_frame = target;
         front.consumed = 0;
@@ -906,7 +1181,9 @@ impl Renderer for Core {
                         continue;
                     }
                 }
-                if m.crossfade_due() {
+                if let Some(plan) = m.blend_due() {
+                    m.start_blend(plan);
+                } else if m.crossfade_due() {
                     m.start_crossfade(&mut events);
                 }
                 consumed_any = true;
@@ -927,7 +1204,7 @@ impl Renderer for Core {
                     }
                 }
                 if !flush {
-                    m.mix_fading(o);
+                    m.mix_fading(o, &mut events);
                     // Post-seek fade-in.
                     if m.fade_in > 0 {
                         let g = 1.0 - m.fade_in as f32 / (fade_len + 1) as f32;
@@ -1353,7 +1630,24 @@ impl Engine {
         let result;
         {
             let mut m = self.core().mix.lock();
+            // Mid-blend, before the handover, the outgoing song is still the
+            // current one. The same next song carries on; another one ends
+            // the blend.
+            if m.fading.as_ref().is_some_and(|f| f.handing_over() && f.seg.key == current_key) {
+                let same = match (&next, m.segments.front()) {
+                    (Some((t, tag)), Some(b)) => &b.tag == tag && b.track.id == t.id,
+                    _ => false,
+                };
+                if same {
+                    return m.segments.front().map(|b| b.key);
+                }
+                spawn = m.unblend();
+            }
             if m.segments.front().map(|s| s.key) != Some(current_key) {
+                drop(m);
+                if let Some((key, track, ctl)) = spawn {
+                    spawn_loader(self.env.clone(), key, track, 0, ctl);
+                }
                 return None;
             }
             // Bit-perfect: a song at another rate can't join gaplessly; it
@@ -1368,6 +1662,7 @@ impl Engine {
                     }
                     m.next = None;
                     m.flush_handoff();
+                    spawn = None;
                     result = None;
                 }
                 Some((track, tag)) => {
@@ -1388,11 +1683,12 @@ impl Engine {
                         let s = m.segments.pop_back().expect("len > 1");
                         s.ctl.cancel.store(true, Ordering::SeqCst);
                     }
+                    spawn = None;
                     let key = self.alloc_key();
                     m.next = Some(Pending { key, tag, track });
                     m.drained_sent = false;
                     result = Some(key);
-                    if m.segments.front().is_some_and(|s| s.done) {
+                    if spawn.is_none() && m.segments.front().is_some_and(|s| s.done) {
                         spawn = take_pending(&mut m);
                     }
                 }
@@ -1474,8 +1770,21 @@ impl Engine {
     }
 
     fn seek_inner(&self, ms: u64, force_reload: bool) -> bool {
+        let mut respawn = None;
+        let r = self.seek_locked(ms, force_reload, &mut respawn);
+        // A reload chains the next song again by itself.
+        if let Some((key, track, ctl)) = respawn.filter(|r| !r.2.cancel.load(Ordering::SeqCst)) {
+            spawn_loader(self.env.clone(), key, track, 0, ctl);
+        }
+        r
+    }
+
+    fn seek_locked(&self, ms: u64, force_reload: bool, respawn: &mut Option<(u64, Track, Arc<LoaderCtl>)>) -> bool {
         {
             let mut m = self.core().mix.lock();
+            // Seeking cancels a blend. Before its midpoint the seek is in the
+            // outgoing song, which plays on alone.
+            *respawn = m.unblend();
             let cfg = self.core().cfg.clone();
             let ch = m.ch();
             let target = m.ms_to_frames(ms);
@@ -1505,7 +1814,10 @@ impl Engine {
     pub fn position(&self) -> Option<EnginePosition> {
         let m = self.core().mix.lock();
         let ch = m.ch();
-        let front = m.segments.front()?;
+        let front = match &m.fading {
+            Some(f) if f.handing_over() => &f.seg,
+            _ => m.segments.front()?,
+        };
         let pos = front.pos();
         let decoded_end = front.samples_start() + (front.samples.len() / ch) as u64;
         let mut buffered_ms = if front.done {
@@ -1554,10 +1866,60 @@ impl Engine {
     /// Key of the preloaded next segment (if it exists yet).
     pub fn next_key(&self) -> Option<u64> {
         let m = self.core().mix.lock();
+        if m.fading.as_ref().is_some_and(Fading::handing_over) {
+            return m.segments.front().map(|s| s.key);
+        }
         m.segments
             .get(1)
             .map(|s| s.key)
             .or_else(|| m.next.as_ref().map(|p| p.key))
+    }
+
+    /// Plans the Automix blend from segment `key` into `next` (None: no
+    /// blend, the crossfade setting applies). Ignored once that blend began.
+    pub fn set_blend(&self, key: u64, next: u64, plan: Option<BlendPlan>) {
+        let mut m = self.core().mix.lock();
+        if let Some(s) = m.seg_mut(key) {
+            s.blend = plan.map(|p| (next, p));
+        }
+    }
+
+    /// The blend planned out of segment `key`, if any (tests and the UI).
+    pub fn blend_of(&self, key: u64) -> Option<(u64, BlendPlan)> {
+        let m = self.core().mix.lock();
+        m.segments.iter().find(|s| s.key == key).and_then(|s| s.blend)
+    }
+
+    /// A blend is running (before or after its midpoint).
+    pub fn blending(&self) -> bool {
+        self.core().mix.lock().fading.as_ref().is_some_and(|f| f.blend.is_some())
+    }
+
+    /// Next during a blend from segment `key`, before its midpoint: the
+    /// incoming song takes over now at full volume, the outgoing one clears
+    /// within a few ms. False when no such blend is running.
+    pub fn skip_blend(&self, key: u64) -> bool {
+        let mut events = Vec::new();
+        {
+            let mut m = self.core().mix.lock();
+            let rate = m.format.sample_rate.max(1) as u64;
+            let frame_ms = |f: u64| (f * 1000 + rate / 2) / rate;
+            let Some(fd) = m.fading.as_mut() else { return false };
+            if !fd.handing_over() || fd.seg.key != key {
+                return false;
+            }
+            let (ga, gb) = fd.gains();
+            let pos = fd.pos;
+            if let Some(b) = fd.blend.as_mut() {
+                let n = (HURRY_MS * b.per_ms) as usize;
+                b.hurry = Some((pos, n.max(1), ga, gb));
+            }
+            Mix::hand_over(fd, frame_ms, &mut events);
+        }
+        for e in events {
+            let _ = self.core().events.send(e);
+        }
+        true
     }
 
     /// Where the audible track's audio comes from (cache, stream, transcode).
@@ -1741,7 +2103,8 @@ fn push_samples(core: &Core, key: u64, generation: u64, ctl: &LoaderCtl, data: &
         }
         // Crossfades need the next track's head decoded while the overlap
         // of the current one is still buffered.
-        let cap = m.ms_to_frames(core.cfg.buffer_ahead_ms + 2 * m.dsp.max_overlap_ms()) as usize;
+        let overlap = m.dsp.max_overlap_ms().max(m.blend_reserve_ms());
+        let cap = m.ms_to_frames(core.cfg.buffer_ahead_ms + 2 * overlap) as usize;
         let buffered = m.buffered_frames();
         let Some(seg) = m.seg_mut(key) else { return Push::Cancelled };
         if seg.generation != generation {

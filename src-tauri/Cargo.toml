@@ -91,6 +91,8 @@ flate2 = "1.1.10"
 # which GPU it will use.
 whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend", "raw-api"] }
 tauri-plugin-clipboard-manager = "2.5.0"
+# Song analysis for Automix: real FFTs (MIT or Apache-2.0; rubato uses it already).
+realfft = "3.5"
 # Identify by sound: a pure Rust port of Chromaprint (MIT).
 rusty-chromaprint = "0.3.0"
 # Library import: account data downloads come as zip files.

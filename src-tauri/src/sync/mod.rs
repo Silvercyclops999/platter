@@ -46,6 +46,7 @@ pub mod folders;
 pub mod follows;
 pub mod keycopy;
 pub mod lyrics;
+pub mod mixed;
 pub mod pins;
 pub mod settings;
 pub mod store;

@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod archive;
 pub mod artistinfo;
 pub mod audio;
@@ -609,6 +610,7 @@ pub fn run() {
                     local_files: Some(local_files.clone()),
                     autoplay: initial.queue_end == settings::QueueEnd::KeepPlaying,
                     smart_shuffle: initial.smart_shuffle,
+                    automix: initial.automix_options(),
                     ..Default::default()
                 },
             );
@@ -1142,6 +1144,24 @@ pub fn run() {
                     gpu,
                     speeds: Arc::new(tr::speed::Speeds::load(Some(data_dir.join("models").join("speeds.json")))),
                 });
+                // Song analysis for Automix: at idle, with the same busy check.
+                {
+                    let analyzer = analysis::Analyzer::new(db.clone(), songs.clone(), Some(pacer.clone()));
+                    let (handle, p) = (app.handle().clone(), player.clone());
+                    analyzer.set_on_done(Arc::new(move |ids: Vec<String>| {
+                        use tauri::Emitter;
+                        let _ = handle.emit(analysis::EV_CHANGED, &ids);
+                        p.analysed(ids);
+                    }));
+                    analyzer.spawn();
+                    let (p, a) = (player.clone(), analyzer.clone());
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = p.set_mix_source(Arc::new(a)).await {
+                            tracing::warn!("automix has no analyses: {e}");
+                        }
+                    });
+                    app.manage(analyzer);
+                }
                 transcriber.set_options(initial.transcribe_lyrics, initial.transcribe_model);
                 transcriber.set_pace(initial.transcribe_processor, initial.transcribe_pause_busy, initial.transcribe_faster_away);
                 *live.transcriber.lock() = Some(transcriber.clone());
@@ -1230,10 +1250,20 @@ pub fn run() {
                 }
                 {
                     let (store, settings, db, engine) = (store.clone(), app_settings.clone(), db.clone(), engine.clone());
+                    let mix_player = player.clone();
                     let transcripts = live.sync_transcriptions.clone();
                     tauri::async_runtime::spawn(async move {
                         if let Err(e) = settings.attach_sync(store.clone()).await {
                             tracing::warn!("synced settings not set up: {e}");
+                        }
+                        // Playlists with Mix on reach the player.
+                        match store.run(sync::mixed::list).await {
+                            Ok(m) => {
+                                if let Err(e) = mix_player.set_mixed(m).await {
+                                    tracing::warn!("mixed playlists not set: {e}");
+                                }
+                            }
+                            Err(e) => tracing::warn!("mixed playlists not read: {e}"),
                         }
                         let db2 = db.clone();
                         if let Err(e) = store.run(move |s| sync::lyrics::seed(s, &db2)).await {
@@ -1520,6 +1550,11 @@ pub fn run() {
             doctor::commands::doctor_ignore,
             doctor::commands::doctor_run,
             soundid::commands::sound_id_status,
+            analysis::commands::analysis_status,
+            analysis::commands::automix_mixed_get,
+            analysis::commands::automix_mix_set,
+            analysis::commands::automix_style_set,
+            analysis::commands::automix_view,
             soundid::commands::sound_id_key_set,
             soundid::commands::track_sounds_like,
             plexedit::commands::plex_edit_merge_albums,

@@ -203,6 +203,16 @@ pub fn spawn_listener(store: SyncStore, a: Appliers) {
                     Err(e) => tracing::warn!("synced settings not read: {e}"),
                 }
             }
+            if has(super::store::MIXED.name()) {
+                match store.run(super::mixed::list).await {
+                    Ok(m) => {
+                        if let Err(e) = a.player.set_mixed(m).await {
+                            tracing::warn!("synced mixed playlists not applied: {e}");
+                        }
+                    }
+                    Err(e) => tracing::warn!("synced mixed playlists not read: {e}"),
+                }
+            }
             if has(super::store::FOLLOWS.name()) {
                 use crate::social::follows::FollowStore;
                 let f = super::follows::SyncFollows { store: store.clone() };

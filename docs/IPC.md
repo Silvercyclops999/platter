@@ -768,6 +768,39 @@ the files' tags, and unreleased songs never match anything, so for them
 `track_sounds_like` is only a hint. `inLibrary` is a released copy of that
 recording in the library. `soundid://changed` fires as songs are done.
 
+## Automix and song analysis
+| Command | Args | Returns |
+| --- | --- | --- |
+| `analysis_status` | – | `{ on, running, total, done }` |
+| `automix_mixed_get` | – | `{ [playlistId]: MixedPlaylist }` |
+| `automix_mix_set` | `{ id, on }` | `{ [playlistId]: MixedPlaylist }` |
+| `automix_style_set` | `{ id, fromId, toId, style }` | `{ [playlistId]: MixedPlaylist }` |
+| `automix_view` | `{ playlistId?, trackIds }` | `AutomixView` |
+
+`MixedPlaylist = { styles: { ["<fromId>><toId>"]: MixStyle } }`; a playlist
+is mixed when it's in the map. `MixStyle = "auto" | "none" | "blend" | "lift" | "drop" | "echo"`;
+`"auto"` removes a pick. Kept in the sync store (`mixedPlaylists`, keyed by
+playlist id) with the library group.
+
+`AutomixView = { songs: [{ id, bpm?, key? }], gaps: [{ fromId, toId, reason?, style, beatmatched }] }`
+for songs in the order shown. `bpm` is rounded and only given for a steady
+beat; `reason` says why a gap can't be mixed. On a mixed playlist, songs not
+analysed yet are analysed first.
+
+While `automix` is on, each song is analysed once per file on this computer:
+the whole file is read (from the pre-cache when it's there, otherwise at the
+lowest priority on the transfer gate), decoded to mono at 11 kHz, and
+measured with a short-time Fourier transform: an onset curve gives the tempo
+(autocorrelation) and the beats (dynamic programming), straight lines fitted
+through the beats of the first and last minute give beat grids, bars start
+where the low end and the harmony change most, the key comes from
+Krumhansl-Kessler key profiles, plus energy, loudness every 2 s, where the
+music starts and stops, and a 20-number feature vector. Work runs on one
+thread at idle priority, one song at a time with a pause between songs, and
+waits while the computer is busy (the transcription busy check). Songs over
+20 minutes aren't analysed. `analysis://changed` fires with the ids of songs
+analysed.
+
 ## Sharing
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -3197,6 +3230,9 @@ The rest of the fields, with their defaults:
 | `crossfade` | `"smart"`, `"fixed"`, `"off"`, `"smart"` | How one song moves into the next. See Sound below. |
 | `crossfadeSeconds` | 1 to 12, 6 | Length of a fixed crossfade. |
 | `crossfadeSkipAlbums` | bool, true | Songs of one album played in album order never crossfade. |
+| `automix` | bool, true | DJ-style transitions where Automix applies. See Automix below. |
+| `automixWhere` | `"playlistsAndMixes"` or `"allButAlbums"`, `"playlistsAndMixes"` | Playlists with Mix on, mixes, radio and what plays after a list ends; or everything but albums. |
+| `automixStyle` | `"smooth"` or `"energetic"`, `"smooth"` | Longer, gentler blends, or shorter ones that swap on the bar. |
 | `leveling` | `"smart"`, `"track"`, `"album"`, `"off"`, `"smart"` | Loudness leveling with Plex's gain values. |
 | `preampDb` | -12 to 12, 0 | dB added to every track. This device only. |
 | `limiter` | bool, true | Soft limiter so boosts never clip. This device only. |
@@ -3382,6 +3418,26 @@ before), on an A-B loop wrap, between album tracks in order while
 `crossfadeSkipAlbums` is on, or when the next song isn't decoded far enough
 yet (the change is gapless then). The outgoing song's `Ended` and the next
 song's start happen when the fade begins.
+
+Automix. Where it applies (`automix`, `automixWhere`, and per playlist
+`automix_mix_set`), each transition is planned from both songs' analyses.
+When both have a steady beat found with confidence and their tempos are
+within 6% (allowing for half and double time), the outgoing song is played
+up to 6% faster or slower to the incoming one's tempo and the two meet on a
+bar line (on a beat when the bars aren't clear). Otherwise it's an
+equal-power fade as long as a fixed crossfade, or 6 s. Calmer songs and the
+smooth style blend for longer; a blend never takes more than 30% of the
+shorter song or more than 24 s, and clashing keys get a shorter, plain
+blend. The incoming song skips its lead-in. There is no blend between songs
+of one album in album order, between songs of one album that run into each
+other, for spoken word, for songs under 30 s, while repeating one song, on
+albums, or when the transition picked is "No transition". The incoming song
+takes over (`Ended`, then the next song's start) at the blend's midpoint;
+until then the position is the outgoing song's. Next during a blend before
+its midpoint goes straight to the incoming song where it is, at full
+volume. A seek cancels the blend. On a shuffled mixed playlist the upcoming
+order is rearranged so neighbouring songs fit (tempo, key, energy), picking
+each next song from the next few in the shuffled order.
 
 Leveling. Plex's `gain` and `albumGain` (dB) and `peak` and `albumPeak` are
 read from track detail the first time a track plays and kept in the library

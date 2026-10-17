@@ -6,7 +6,7 @@
 //! `player://error` through an [`EventSink`], plus [`TrackingEvent`]s on a
 //! broadcast channel for play tracking.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -27,7 +27,9 @@ use super::output::{AudioOutput, OutputState};
 use super::persist::{self, Persisted};
 use super::queue::{AddAt, ContextInfo, ItemSource, Queue, QueueItem, Repeat, ShuffleStyle};
 use super::dsp::DspSettings;
+use super::automix::{self, AutomixOptions, MixInfoSource, MixStyle, Mixed, MixedPlaylist, PlanOptions, Reach};
 use super::source::{ContextKind, MoreRequest, PlayContext, TrackLookup, TrackResolver};
+use crate::analysis::features::Analysis;
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
 
@@ -69,6 +71,8 @@ const SMART_SEEDS: usize = 30;
 /// Songs at the end of a context that "similar music" is like.
 const SIMILAR_SEEDS: usize = 10;
 const PROBLEMS_CAP: usize = 200;
+/// A shuffled mixed playlist picks each next song from this many.
+const FIT_WINDOW: usize = 5;
 
 #[derive(Debug, Clone)]
 pub struct PlayerConfig {
@@ -98,6 +102,8 @@ pub struct PlayerConfig {
     pub autoplay: bool,
     /// Smart shuffle is in the shuffle cycle (from settings).
     pub smart_shuffle: bool,
+    /// Automix (from settings).
+    pub automix: AutomixOptions,
 }
 
 impl Default for PlayerConfig {
@@ -118,6 +124,7 @@ impl Default for PlayerConfig {
             local_files: None,
             autoplay: true,
             smart_shuffle: true,
+            automix: AutomixOptions::default(),
         }
     }
 }
@@ -196,6 +203,19 @@ enum Cmd {
         tracks: Vec<Track>,
         source: ItemSource,
     },
+    /// Automix settings.
+    SetAutomix(AutomixOptions, Reply<()>),
+    /// Playlists with Mix on.
+    SetMixed(Mixed, Reply<()>),
+    /// Where song analyses come from.
+    SetMixSource(Arc<dyn MixInfoSource>, Reply<()>),
+    /// The blend planned out of the playing song (tests).
+    #[cfg(test)]
+    PeekBlend(oneshot::Sender<Option<automix::BlendPlan>>),
+    /// Analyses found (`fit`: for ordering a shuffled mixed playlist).
+    MixInfos { infos: HashMap<String, Analysis>, fit: bool },
+    /// These songs were analysed since they were asked about.
+    Analysed(Vec<String>),
     /// Take over a queue from another device (see `Queue::adopt`).
     Adopt {
         info: ContextInfo,
@@ -330,6 +350,11 @@ impl PlayerHandle {
             smart_gen: 0,
             dsp: config.dsp,
             transitions_for: None,
+            automix: config.automix,
+            mixed: Mixed::new(),
+            mix_source: None,
+            mix_known: HashMap::new(),
+            mix_asked: HashSet::new(),
             engine,
             queue,
             status,
@@ -562,6 +587,34 @@ impl PlayerHandle {
     }
 
     /// Crossfade for the playing context only (off again when it changes).
+    /// Automix settings.
+    pub async fn set_automix(&self, o: AutomixOptions) -> AppResult<()> {
+        self.call(|r| Cmd::SetAutomix(o, r)).await
+    }
+
+    /// Playlists with Mix on (and their transition picks).
+    pub async fn set_mixed(&self, m: Mixed) -> AppResult<()> {
+        self.call(|r| Cmd::SetMixed(m, r)).await
+    }
+
+    /// Where song analyses come from.
+    pub async fn set_mix_source(&self, src: Arc<dyn MixInfoSource>) -> AppResult<()> {
+        self.call(|r| Cmd::SetMixSource(src, r)).await
+    }
+
+    /// The blend planned out of the playing song (tests).
+    #[cfg(test)]
+    pub async fn peek_blend(&self) -> Option<automix::BlendPlan> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.tx.send(Cmd::PeekBlend(tx));
+        rx.await.ok().flatten()
+    }
+
+    /// Songs analysed since: blends involving them are planned again.
+    pub fn analysed(&self, ids: Vec<String>) {
+        let _ = self.tx.send(Cmd::Analysed(ids));
+    }
+
     pub async fn set_smooth_transitions(&self, on: bool) -> AppResult<()> {
         self.call(|r| Cmd::SetSmoothTransitions(on, r)).await
     }
@@ -783,6 +836,13 @@ struct Actor {
     dsp: DspSettings,
     /// The context smooth transitions are on for.
     transitions_for: Option<String>,
+    /// Automix settings, playlists with Mix on, and what's known about songs.
+    automix: AutomixOptions,
+    mixed: Mixed,
+    mix_source: Option<Arc<dyn MixInfoSource>>,
+    mix_known: HashMap<String, Analysis>,
+    /// Songs already asked about (until they're analysed).
+    mix_asked: HashSet<String>,
     engine: Engine,
     queue: Queue,
     status: PlayerStatus,
@@ -1276,7 +1336,89 @@ impl Actor {
             let next = self.pick_next().map(|i| (i.track, i.item_id));
             self.next_key = self.engine.set_next(next, cur);
         }
+        self.plan_blend();
         self.refresh_precache();
+    }
+
+    // ------------------------------------------------------------ automix
+
+    /// The mixed playlist playing, if any.
+    fn mixed_playing(&self) -> Option<&MixedPlaylist> {
+        let c = self.queue.context().filter(|c| c.kind == ContextKind::Playlist)?;
+        self.mixed.get(c.id.as_deref()?)
+    }
+
+    /// Whether Automix plays the transition into `next`: the setting is
+    /// on, not repeating one song, and the playing context is one it
+    /// covers (a playlist with Mix on, a mix or radio, what plays after a
+    /// list ends; with "everywhere" anything but an album).
+    fn automix_for(&self, next: &QueueItem) -> bool {
+        if !self.automix.on || self.queue.repeat() == Repeat::One || self.held.is_some() {
+            return false;
+        }
+        if next.source == ItemSource::Autoplay {
+            return true;
+        }
+        let Some(ctx) = self.queue.context() else { return false };
+        match ctx.kind {
+            ContextKind::Album => false,
+            ContextKind::Mix | ContextKind::Radio => true,
+            ContextKind::Playlist if self.mixed_playing().is_some() => true,
+            _ => self.automix.reach == Reach::AllButAlbums,
+        }
+    }
+
+    /// Plans the blend from the playing song into the next one (or none).
+    fn plan_blend(&mut self) {
+        let (Some(cur), Some(nk)) = (self.cur_key, self.next_key) else { return };
+        let (Some(a), Some(b)) = (self.queue.current().cloned(), self.pick_next()) else {
+            self.engine.set_blend(cur, nk, None);
+            return;
+        };
+        if !self.automix_for(&b) {
+            self.engine.set_blend(cur, nk, None);
+            return;
+        }
+        let style = self.mixed_playing().map_or(MixStyle::Auto, |m| m.style(&a.track.id, &b.track.id));
+        let o = PlanOptions { feel: self.automix.feel, fade_ms: self.automix.fade_ms, style };
+        let (ai, bi) = (self.mix_known.get(&a.track.id), self.mix_known.get(&b.track.id));
+        let plan = automix::plan(&a.track, ai, &b.track, bi, &o);
+        self.engine.set_blend(cur, nk, plan);
+        let ask: Vec<String> =
+            [a.track.id, b.track.id].into_iter().filter(|id| !self.mix_known.contains_key(id) && !self.mix_asked.contains(id)).collect();
+        self.ask_infos(ask, false);
+    }
+
+    /// Looks up analyses in the background; songs not analysed yet are
+    /// asked for first.
+    fn ask_infos(&mut self, ids: Vec<String>, fit: bool) {
+        let Some(src) = self.mix_source.clone() else { return };
+        if ids.is_empty() {
+            return;
+        }
+        let Some(tx) = self.self_tx.upgrade() else { return };
+        self.mix_asked.extend(ids.iter().cloned());
+        tokio::spawn(async move {
+            let infos = src.infos(&ids).await;
+            let missing: Vec<String> = ids.into_iter().filter(|id| !infos.contains_key(id)).collect();
+            src.want(&missing);
+            let _ = tx.send(Cmd::MixInfos { infos, fit });
+        });
+    }
+
+    /// A shuffled mixed playlist: look at all its songs to order them so
+    /// neighbours fit.
+    fn fit_shuffle(&mut self) {
+        if !self.automix.on || !self.queue.shuffle() || self.mixed_playing().is_none() {
+            return;
+        }
+        let ids: Vec<String> = self.queue.context_tracks(1000).into_iter().map(|t| t.id).collect();
+        let Some(src) = self.mix_source.clone() else { return };
+        let Some(tx) = self.self_tx.upgrade() else { return };
+        tokio::spawn(async move {
+            let infos = src.infos(&ids).await;
+            let _ = tx.send(Cmd::MixInfos { infos, fit: true });
+        });
     }
 
     fn refresh_precache(&self) {
@@ -1449,6 +1591,7 @@ impl Actor {
                 // A new start builds new suggestions.
                 self.smart_built = false;
                 let r = self.start_current(true, at);
+                self.fit_shuffle();
                 let _ = reply.send(r);
             }
             Cmd::Toggle(reply) => {
@@ -1464,6 +1607,10 @@ impl Actor {
             }
             Cmd::Resume(reply) => {
                 let _ = reply.send(self.do_resume());
+            }
+            // Mid-blend, before the next song took over: it takes over now.
+            Cmd::Next(reply) if self.cur_key.is_some_and(|k| self.engine.skip_blend(k)) => {
+                let _ = reply.send(Ok(()));
             }
             Cmd::Next(reply) => {
                 self.end_current_as_skip();
@@ -1560,6 +1707,57 @@ impl Actor {
                 self.update_next();
                 self.mark_dirty();
             }
+            Cmd::SetAutomix(o, reply) => {
+                self.automix = o;
+                self.update_next();
+                let _ = reply.send(Ok(()));
+                return;
+            }
+            Cmd::SetMixed(m, reply) => {
+                self.mixed = m;
+                self.update_next();
+                let _ = reply.send(Ok(()));
+                return;
+            }
+            Cmd::SetMixSource(src, reply) => {
+                self.mix_source = Some(src);
+                self.mix_asked.clear();
+                self.update_next();
+                let _ = reply.send(Ok(()));
+                return;
+            }
+            #[cfg(test)]
+            Cmd::PeekBlend(tx) => {
+                let _ = tx.send(self.cur_key.and_then(|k| self.engine.blend_of(k)).map(|b| b.1));
+                return;
+            }
+            Cmd::MixInfos { infos, fit } => {
+                // A long radio session: forget what's far behind.
+                if self.mix_known.len() > 4000 {
+                    self.mix_known.clear();
+                }
+                self.mix_known.extend(infos);
+                if fit && self.queue.shuffle() && self.mixed_playing().is_some() {
+                    let known = &self.mix_known;
+                    let score = |a: &Track, b: &Track| automix::fit(known.get(&a.id), known.get(&b.id));
+                    self.queue.reorder_for_fit(&score, FIT_WINDOW);
+                    self.mark_dirty();
+                }
+                self.update_next();
+            }
+            Cmd::Analysed(ids) => {
+                let mut again = Vec::new();
+                for id in ids {
+                    self.mix_asked.remove(&id);
+                    self.mix_known.remove(&id);
+                    again.push(id);
+                }
+                let near: Vec<String> = self.queue.current().into_iter().map(|c| c.track.id.clone()).chain(self.pick_next().map(|n| n.track.id)).collect();
+                if again.iter().any(|id| near.contains(id)) {
+                    self.plan_blend();
+                }
+                return;
+            }
             Cmd::SetSmoothTransitions(on, reply) => {
                 self.transitions_for = if on { self.context_key() } else { None };
                 self.apply_dsp();
@@ -1571,6 +1769,7 @@ impl Actor {
                 }
                 self.queue.set_shuffle(s);
                 self.update_next();
+                self.fit_shuffle();
                 self.mark_dirty();
                 let _ = reply.send(Ok(()));
             }
@@ -1580,6 +1779,7 @@ impl Actor {
                 }
                 self.queue.set_context_shuffle(&id, s);
                 self.update_next();
+                self.fit_shuffle();
                 self.mark_dirty();
                 let _ = reply.send(Ok(()));
             }

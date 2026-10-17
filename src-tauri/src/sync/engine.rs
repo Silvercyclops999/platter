@@ -27,7 +27,7 @@ use crate::error::{AppError, AppResult};
 pub struct Groups {
     /// Settings marked Synced.
     pub settings: bool,
-    /// Library folders and pins, release status marks, artist page
+    /// Library folders and pins, mixed playlists, release status marks, artist page
     /// sections, ignored library doctor findings, the physical collection and
     /// Lidarr's shared state.
     pub library: bool,
@@ -54,6 +54,7 @@ impl Groups {
         if self.library {
             out.extend([
                 store::PINS.name(),
+                store::MIXED.name(),
                 store::FOLDERS.name(),
                 store::FOLDER_ITEMS.name(),
                 store::SMART.name(),
