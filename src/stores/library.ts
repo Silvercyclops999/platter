@@ -97,6 +97,8 @@ interface LibraryViewState extends Saved {
   /** Every playlist, album and artist; null until first loaded. */
   items: LibraryItem[] | null;
   loadItems: () => Promise<void>;
+  /** The last load failed with nothing loaded before it (the list shows why, with Try again). */
+  loadFailed: unknown;
   setFilter: (f: LibFilter, sub?: LibSub | null) => void;
   setSub: (s: LibSub | null) => void;
   setSort: (s: LibSort) => void;
@@ -123,6 +125,7 @@ export const useLibraryView = create<LibraryViewState>()((set, get) => {
   return {
     ...load(),
     items: null,
+    loadFailed: null,
     loadItems: async () => {
       const seq = ++loadSeq;
       try {
@@ -136,9 +139,9 @@ export const useLibraryView = create<LibraryViewState>()((set, get) => {
             .map((p) => ({ kind: "playlist" as const, id: p.id, title: p.title, sortTitle: p.title, smart: false, addedAt: null, playedAt: null, shared: { owner: p.owner.name, role: p.role, gone: p.gone } })),
           ...(circle?.blends ?? []).map((b) => ({ kind: "playlist" as const, id: b.id, title: b.title, sortTitle: b.title, smart: false, addedAt: null, playedAt: null, blend: true })),
         ];
-        if (seq === loadSeq) set({ items });
-      } catch {
-        if (seq === loadSeq && get().items === null) set({ items: [] });
+        if (seq === loadSeq) set({ items, loadFailed: null });
+      } catch (e) {
+        if (seq === loadSeq && (get().items === null || get().loadFailed)) set({ items: [], loadFailed: e ?? true });
       }
     },
     setFilter: (filter, sub = null) => update({ filter, sub: filter === "all" ? null : sub }),

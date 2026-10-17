@@ -450,6 +450,20 @@ describe("library sidebar", () => {
     }
   });
 
+  it("says when the library couldn't load, and Try again loads it", async () => {
+    const user = userEvent.setup();
+    act(() => useLibraryView.setState({ items: null, loadFailed: null }));
+    const real = backend.libraryItems.bind(backend);
+    const ask = vi.spyOn(backend, "libraryItems").mockRejectedValue({ kind: "network", message: "The server didn't answer" });
+    await renderSidebar();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't load Your Library");
+    ask.mockImplementation(real);
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("collapses to the rail and opens again", async () => {
     const user = userEvent.setup();
     const { unmount } = await renderSidebar();

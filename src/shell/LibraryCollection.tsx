@@ -10,12 +10,13 @@ import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type Keyb
 import { Art, FluidArtSize } from "../components/Art";
 import { LikedCover } from "../components/LikedCover";
 import { openContextMenu } from "../components/ContextMenu";
+import { LoadError } from "../components/LoadError";
 import { Skeleton } from "../components/Skeleton";
 import { Tooltip } from "../components/Tooltip";
 import { DownloadedGlyph } from "../components/DownloadButton";
 import { addedLabel, playedLabel } from "../lib/relativeTime";
 import { albumDrag, dropOnLiked, dropOnPlaylist, endSongDrag, libraryDropRule, playlistDrag, startSongDrag, useSongDrop } from "../stores/drag";
-import { KIND_LABEL, subtitle, typeLabel, type LibEntry, type LibView } from "../stores/library";
+import { KIND_LABEL, subtitle, typeLabel, useLibraryView, type LibEntry, type LibView } from "../stores/library";
 import { usePlayer } from "../stores/player";
 import { sameRoute, useCurrentEntry } from "../stores/router";
 import { useSettings } from "../stores/settings";
@@ -433,6 +434,7 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   const [offset, setOffset] = useState(0);
   const route = useCurrentEntry().route;
   const ctx = useContextKey();
+  const loadFailed = useLibraryView((s) => s.loadFailed);
   const entries = model.shown;
   const n = entries.length;
   const filtered = model.filter !== "all";
@@ -567,6 +569,20 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
 
   let body: ReactNode;
   if (model.loading) body = <Skeletons mode={mode} view={view} />;
+  else if (loadFailed && mode !== "rail")
+    // The library couldn't load: say so above what's there (Liked Songs, pins).
+    body = (
+      <>
+        <div className="lib-empty">
+          <LoadError what="Your Library" error={loadFailed} onRetry={() => void useLibraryView.getState().loadItems()} inline />
+        </div>
+        {n > 0 && (
+          <div role="list" aria-label={label} className={`lib-items lib-items--${mode} lib-items--${view}`} onKeyDown={onKeyDown}>
+            {entries.map((e, i) => item(e, i))}
+          </div>
+        )}
+      </>
+    );
   else if (n === 0) body = <Empty model={model} query={query} mode={mode} />;
   else
     body = (
