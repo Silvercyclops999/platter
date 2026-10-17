@@ -14,9 +14,29 @@ pub fn reports_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("crash-reports")
 }
 
+/// Web addresses lose their query (`?...`), where keys and ids ride.
+fn strip_queries(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("://") {
+        let end_of_url = rest[i..].find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ')' | '>')).map_or(rest.len(), |e| i + e);
+        let url = &rest[..end_of_url];
+        out.push_str(url.split_once('?').map_or(url, |(a, _)| a));
+        rest = &rest[end_of_url..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The report text. No tokens or library data: only the panic message,
-/// where it happened, the version and a backtrace.
+/// where it happened, the version and a backtrace, passed through the log
+/// file's redaction (tokens, server names, addresses, home folders) with
+/// web addresses cut at their query.
 pub fn report_text(message: &str, location: Option<&str>, backtrace: &str) -> String {
+    crate::platform::logs::redact(&strip_queries(&report_raw(message, location, backtrace)))
+}
+
+fn report_raw(message: &str, location: Option<&str>, backtrace: &str) -> String {
     format!(
         "Platter {} crashed\nos: {} {}\nwhere: {}\nmessage: {}\n\nbacktrace:\n{}\n",
         env!("CARGO_PKG_VERSION"),
@@ -75,6 +95,19 @@ pub fn install(data_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_carry_no_keys_addresses_or_names() {
+        let text = report_text(
+            "request to http://10.20.30.40:32400/library/parts/1?X-Plex-Token=abc123&download=1 failed",
+            Some(r"C:\Users\listener\src\x.rs:1"),
+            "frames",
+        );
+        for leak in ["abc123", "10.20.30.40", "download=1", "listener"] {
+            assert!(!text.contains(leak), "{leak} in {text}");
+        }
+        assert!(text.contains("/library/parts/1 failed"), "{text}");
+    }
 
     #[test]
     fn writes_report_and_keeps_the_last_few() {
