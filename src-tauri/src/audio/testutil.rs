@@ -148,6 +148,8 @@ pub struct Route {
     /// Once the `drops` are used up, answer every open-ended request with
     /// this status (a server that went away part way through a song).
     pub then_status: Option<u16>,
+    /// Answer without a length and ignore ranges (a live transcode).
+    pub no_length: bool,
 }
 
 #[derive(Default)]
@@ -248,6 +250,16 @@ impl TestServer {
                                     .as_bytes(),
                             )
                             .await;
+                        return;
+                    }
+                    if route.no_length {
+                        let _ = sock.write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n").await;
+                        for chunk in route.body.chunks(16 * 1024) {
+                            if sock.write_all(chunk).await.is_err() {
+                                return;
+                            }
+                        }
+                        let _ = sock.flush().await;
                         return;
                     }
                     let total = route.body.len();

@@ -655,27 +655,51 @@ async fn transfer(
                 }
                 *failing_since = None;
                 *backoff = cfg.min_backoff;
-                let mut st = shared.st.lock();
-                if st.closed {
-                    return Stop::Exit;
-                }
-                if st.generation != generation {
-                    return Stop::Again;
-                }
-                st.data.extend_from_slice(&bytes);
-                // Trim far-behind bytes so the window can't grow without bound.
-                let behind = st.read_pos.saturating_sub(st.base) as usize;
-                if behind > cfg.keep_behind * 2 {
-                    let drop_n = behind - cfg.keep_behind;
-                    st.data.drain(..drop_n);
-                    st.base += drop_n as u64;
-                }
-                shared.cv.notify_all();
-                let ahead = st.end().saturating_sub(st.read_pos) as usize;
-                if ahead >= cfg.max_ahead {
-                    // Window full: drop the connection (and the gate),
-                    // resume by range later.
-                    return Stop::Again;
+                let full = {
+                    let mut st = shared.st.lock();
+                    if st.closed {
+                        return Stop::Exit;
+                    }
+                    if st.generation != generation {
+                        return Stop::Again;
+                    }
+                    st.data.extend_from_slice(&bytes);
+                    // Trim far-behind bytes so the window can't grow without bound.
+                    let behind = st.read_pos.saturating_sub(st.base) as usize;
+                    if behind > cfg.keep_behind * 2 {
+                        let drop_n = behind - cfg.keep_behind;
+                        st.data.drain(..drop_n);
+                        st.base += drop_n as u64;
+                    }
+                    shared.cv.notify_all();
+                    let ahead = st.end().saturating_sub(st.read_pos) as usize;
+                    if ahead >= cfg.max_ahead && st.total.is_some() {
+                        // Window full: drop the connection (and the gate),
+                        // resume by range later.
+                        return Stop::Again;
+                    }
+                    ahead >= cfg.max_ahead
+                };
+                if full {
+                    // Length unknown (a transcode): a new request would
+                    // start it over, so the connection waits for the reader.
+                    let resume_below = cfg.max_ahead - cfg.max_ahead / 4;
+                    loop {
+                        let notified = shared.wake.notified();
+                        {
+                            let st = shared.st.lock();
+                            if st.closed {
+                                return Stop::Exit;
+                            }
+                            if st.generation != generation {
+                                return Stop::Again;
+                            }
+                            if (st.end().saturating_sub(st.read_pos) as usize) < resume_below {
+                                break;
+                            }
+                        }
+                        notified.await;
+                    }
                 }
             }
             Ok(None) => {

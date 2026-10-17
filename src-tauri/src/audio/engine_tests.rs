@@ -298,6 +298,37 @@ async fn http_source_resumes_byte_exact() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stream_of_unknown_length_keeps_its_connection_when_the_window_fills() {
+    let server = TestServer::start().await;
+    let body: Vec<u8> = (0..700_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    server.add("/f", Route { body: body.clone(), no_length: true, ..Default::default() });
+    let src = StreamSource { url: server.url("/f"), ..Default::default() };
+    let rt = tokio::runtime::Handle::current();
+    let got = tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        let cfg = HttpConfig { max_ahead: 64 * 1024, keep_behind: 16 * 1024, ..Default::default() };
+        let mut s = HttpSource::open(rt, http_client(), src, cfg, TransferGate::new(), Priority::Current.cell()).unwrap();
+        // Read slower than it arrives, so the window fills again and again.
+        let mut all = Vec::new();
+        let mut buf = [0u8; 8 * 1024];
+        loop {
+            let n = s.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            all.extend_from_slice(&buf[..n]);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        all
+    })
+    .await
+    .unwrap();
+    assert_eq!(got, body);
+    // One request: starting over would make a transcoder start over too.
+    assert_eq!(server.state.requests.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_gone_for_good_fails_after_retry_window() {
     let server = TestServer::start().await;
     let body = vec![7u8; 300_000];
