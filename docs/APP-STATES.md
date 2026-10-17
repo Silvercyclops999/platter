@@ -243,6 +243,21 @@ Swaps change files in the library, so every failure leaves the old file where it
 | Plex rescan failed | Plex refuses the folder scan after the swap | The swap is undone: "Plex didn't take the request to rescan the folder, so Platter put the old files back." Plex unreachable before the swap: nothing changes | `lidarr::upgrade_tests::a_failed_rescan_puts_the_old_files_back` | Done |
 | A mixed folder | anything kept for a reason other than "not better" | The swap asks song by song, whatever the setting | `swapping_asks_per_song_rescans_the_folder_notes_the_source_and_undoes_exactly`; UI asks song by song | Done |
 
+## Shared playlists and Blends
+
+| Situation | Detected in | User sees | Tests | Status |
+| --- | --- | --- | --- | --- |
+| The relay is down or unreachable | `social/circle` publish or subscribe fails | Joining says "Couldn't reach the relay to join. Try again in a while."; edits and taste summaries wait in the outbox and go out when it's back; `CircleView.relay` says so | `circle::tests::joining_with_the_relay_down_says_so`; UI `circle` failure states | Done |
+| The owner is offline | A member's outbox gets no ack after three sends | The playlist page says "Robin's Platter hasn't answered. Your changes go out when it's back online."; songs added show "On the way to Robin"; they're applied once, when the owner is back | `circle::tests::edits_wait_while_the_owner_is_offline_and_go_when_they_re_back`; UI `circle` keeps your edits while the owner is unreachable | Done |
+| Joining while the owner is offline | No answer to the invite within 20 s | "Asked to join. You're in once the owner is online."; the request is sent again until the invite runs out | `circle::tests::joining_while_the_owner_is_offline_waits_and_finishes_later`; UI `circle` waits for an owner who's offline | Done |
+| An invite expired | The joiner's clock, or the owner's answer `refused: expired` | "That invite has expired. Ask for a new one." | `circle::tests::invites_are_good_once_and_expire`; UI `circle` failure states | Done |
+| An invite was already used | The owner's answer `refused: used` | "That invite was already used. Ask for a new one." | `circle::tests::invites_are_good_once_and_expire`; UI `circle` failure states | Done |
+| A collaborator adds a song the owner doesn't have | The owner's library has no copy | Toast "Robin doesn't have Elsewhere on their server."; nothing changes | `circle::tests::the_owner_s_own_changes_and_a_song_not_on_their_server` | Done |
+| The owner deletes the playlist, or takes you off | `gone` or `removed` from the owner | "This playlist isn't available any more."; a toast; Remove takes it out | `circle::tests::leaving_a_private_playlist_and_the_owner_deleting_one`, `roles_change_people_are_removed_and_leaving_depends_on_privacy`; UI `circle` says when the owner deleted it | Done |
+| A Blend is full | The inviter has ten people | "That Blend is full. A Blend takes up to 10 people." | `circle::tests::a_blend_takes_ten_people_at_most`; UI `circle` Create a Blend | Done |
+| Everyone else left a Blend | The last other member's `left` | Toast "Everyone else left ..., so it's gone."; the Blend is removed | `circle::tests::hidden_songs_stay_hidden_and_leaving_ends_a_blend_of_two` | Done |
+| The features are off | Settings | "Collaborative playlists are off in Settings." / "Blends are off in Settings."; no doorbell is listened to | `circle::tests::people_on_the_server_are_invited_without_a_link`; UI `circle` needs the setting on | Done |
+
 ## Checking by hand against a real server
 
 Each of these is covered by a test that fakes it, and should also be tried

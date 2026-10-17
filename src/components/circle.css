@@ -205,6 +205,7 @@
 .blend-cover--3, .blend-cover--4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .blend-cover--3 > :first-child { grid-row: span 2; }
 .blend-cover > .face { width: 100% !important; height: 100% !important; border-radius: 0; font-size: 40px !important; }
+.blend-cover .avatar-img { border-radius: 0; }
 .blend-cover > .face:nth-child(2n) { background: color-mix(in srgb, var(--color-accent) 18%, var(--color-bg-overlay)); }
 .blend-cover__mark {
   position: absolute;

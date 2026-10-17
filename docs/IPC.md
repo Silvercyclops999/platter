@@ -2036,6 +2036,122 @@ Events: `hidden://changed` → `HiddenItem[]`, `bookmarks://changed` →
 or a sign-in changes. Changes another device made through the sync file send
 the same events.
 
+## Shared playlists and Blends
+
+Collaborative playlists and Blends between people who each play from the
+Plex servers they already reach. There is no Platter server: everything goes
+through the listen along relay (`listenRelay`, ntfy.sh by default), sealed
+the same way (`src-tauri/src/social/circle`). Only metadata travels: song
+identities (title, artist, album, length, MusicBrainz recording and release
+group ids, the song's server-qualified id `<tag>:<rating key>`, the tag being
+the hash share links carry), names, roles, Plex profile pictures as `/ext/`
+art paths, and small taste summaries. Never audio, a file path, a part key, a
+Plex token, a machine id or a server address. Unreleased songs stay out of
+everything sent, and out of Blends, unless `shareUnreleased` is on. Both
+features are on (`collabPlaylists`, `blends`, synced) but nothing happens
+without an invite.
+
+Commands:
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `circle_state` | | `CircleView` |
+| `circle_people` | | `CircleAccount[]`: people on your server (owner only) and in your Plex Home |
+| `circle_join` | `link` | `JoinResult` |
+| `circle_accept` | `id` (an invite that came straight to you) | `JoinResult` |
+| `circle_dismiss` | `id` | |
+| `collab_info` | `playlistId` | `SharedInfo \| null` (your playlist; null when not shared) |
+| `collab_invite_link` | `playlistId, role` | `InviteLink` |
+| `collab_invite_person` | `playlistId, key, role` | |
+| `collab_page` | `id` (`shared:<group>`) | `SharedPage` |
+| `collab_add` | `id, trackIds` | |
+| `collab_remove` | `id, keys` | |
+| `collab_leave` | `id` | |
+| `collab_set_in_library` | `id, on` | |
+| `collab_set_role` | `playlistId, personId, role` | |
+| `collab_remove_person` | `playlistId, personId` | |
+| `collab_set_public` | `playlistId, public` | |
+| `blend_create` | `keys` (people picked directly, at most 9) | `BlendCreated` |
+| `blend_invite_link` | `id` | `InviteLink` |
+| `blend_invite_person` | `id, key` | |
+| `blend_page` | `id` (`blend:<group>`) | `BlendPage` |
+| `blend_hide` | `id, trackId` | |
+| `blend_refresh` | `id` | `BlendPage` |
+| `blend_leave` | `id` | |
+
+`role` is `"collaborator"` or `"listener"`. Types are in `src/lib/types.ts`
+("shared playlists and Blends"). `CircleView = { relay, playlists:
+SharedSummary[], blends: BlendSummary[], incoming, joining }`. A
+`SharedSummary` carries `role` (`owner`, `collaborator`, `listener`, or
+`follower` for someone who left a public playlist and still sees it),
+`people` (the owner first, each with `added`, the songs they added),
+`public`, `gone` (deleted, or you were taken off), `inLibrary`, `waiting`
+(your edits the owner hasn't confirmed) and `ownerUnreachable` (sent three
+times without an answer).
+
+Events: `circle://changed` → `CircleView` whenever anything changes (a
+member's edit landing, a role, the relay); `circle://notice` → `{ message }`
+for toasts (an edit the owner couldn't make, a deleted playlist, someone
+joining, an invite that came straight to you).
+
+Invites are listen along's tokens (version, random 16-byte id, random
+16-byte secret, expiry, a non-default relay) under their own words:
+`platter://collab/<token>` and `platter://blend/<token>`. They work once and
+run out after `listenInviteHours`. The person who answers first agrees a key
+with whoever made the invite (SPAKE2 over the invite's secret) and gets,
+sealed with it, the playlist's or Blend's id, their own id, their link's
+secret, the owner and their role (a Blend also gets the secret its members
+share). Anyone else who answers is refused (`used`); an expired one is
+refused (`expired`) for a day after. While the owner is offline the answer
+waits: the request is sent again until the invite runs out and the person is
+in once the owner comes back (`JoinResult.state: "waiting"`).
+
+People on the same server or Home are invited without a link: the invite
+goes to their doorbell, a channel from the server's machine id (which only
+people who reach that server know) and their Plex Home uuid or user name.
+A doorbell is listened to only while one of the features is on and there's
+someone else on the server or Home. It carries an ordinary invite link, so
+it still has to be answered like any other.
+
+Each pair (owner and member) has a link: a secret, two channels (`circle
+up`, `circle down`), and an outbox. A packet is `{ f, c, fl, m }` (sender,
+counter, the lowest counter still unacknowledged, message), as JSON,
+deflated, cut into pieces of 2000 bytes, each sealed like a listen along
+message (`1.<base64url(nonce, ciphertext)>`, topic as associated data). The
+receiver applies each counter once in any order and answers `ack { upto,
+also }`. Everything but an ack stays in the outbox and is sent again (after
+1 minute, doubling to 30) until acknowledged, since the relay keeps messages
+for hours only. Subscriptions start from the last message seen (`since`).
+
+A shared playlist is a normal Plex playlist owned by its creator. Only the
+owner's Platter changes it. A collaborator's `edit { n, op: add { songs } |
+remove { keys } }` goes to the owner, who checks the role (collaborators
+remove only songs they added), finds each song in its own library (the same
+id, else by MusicBrainz id or artist, title and length), applies it through
+playlist editing (so it queues for Plex like any other edit) and answers
+`applied { n, ok, why? }`. Edits apply in the order the owner gets them; the
+owner's playlist is what everyone ends up with. Every change to the
+playlist (the owner's own included) goes to every member as a `delta { from,
+v, add, del, order? }`; a member out of step asks for a `snapshot`. Members
+see the songs they can play here; the rest show "Not in your library" and
+can go to the Missing list by album. Deleting the playlist sends `gone`;
+taking someone off sends `removed`.
+
+A Blend's members share one channel. Each sends a taste summary on it: up
+to 15 top artists and 30 top songs over the last 8 weeks with weights (a
+play counts in full for a week, then half as much every two weeks older),
+and 10 recent likes, from this computer's own listen log (a private session
+writes nothing there, so its plays never count; none is sent during one).
+It's sent when someone joins and about daily. Each person's Platter makes the
+Blend from the summaries and the songs it can play: about 50 songs, members
+taking turns from a day's own starting point so each gets about an equal
+share, made again each day or when someone new joins. Hidden songs never
+come back. Leaving deletes the Blend here and sends `left`; the others drop
+the leaver at their next day's Blend, and a Blend left with one person is
+removed. Ten people at most, you included.
+
+State is kept in the library cache's `kv` table (`circle.state`).
+
 ## Listening stats
 
 | Command | Args | Returns |
