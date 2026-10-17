@@ -10,6 +10,7 @@ import { useApp } from "../stores/app";
 import { nav, useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
+import topbarCss from "../shell/topbar.css?raw";
 
 const route = () => useRouter.getState().entries[useRouter.getState().index].route;
 const startWidth = window.innerWidth;
@@ -278,5 +279,14 @@ describe("profile picture", () => {
     const who = document.querySelector(".appmenu__who") as HTMLElement;
     expect(who).toHaveTextContent("listener");
     expect(who.querySelector("img")).toHaveAttribute("src", artUrl(AVATAR, 28));
+  });
+});
+
+describe("app menu on a short window", () => {
+  it("caps its height and scrolls, so the last items stay reachable", () => {
+    const at = topbarCss.lastIndexOf(".appmenu__panel {");
+    const rule = topbarCss.slice(at, topbarCss.indexOf("}", at));
+    expect(rule).toMatch(/max-height:\s*calc\(100vh - 80px\)/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
   });
 });

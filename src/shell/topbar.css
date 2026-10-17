@@ -120,6 +120,10 @@
   right: 0;
   z-index: var(--z-popover);
   min-width: 240px;
+  /* Short windows: the menu scrolls instead of running off the bottom. */
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-1);
   border-radius: var(--radius-row);
   background: var(--color-bg-overlay);
