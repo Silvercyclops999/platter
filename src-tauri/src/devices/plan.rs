@@ -151,6 +151,9 @@ pub fn plan(wanted: Vec<Want>, dev: &Device<'_>, budget: Option<u64>, delete_rem
         taken.insert(names::key(p));
     }
     let ours: HashSet<String> = m.files.keys().map(|p| names::key(p)).collect();
+    // An old copy being replaced is removed once its song's new file is
+    // written, so only that song may be written over it.
+    let replaced_by: HashMap<String, &str> = out.replaced.iter().map(|p| (names::key(p), m.files[p].track_id.as_str())).collect();
 
     // New files: the natural path, or the next free ` (n)` one. A file
     // Platter didn't write is never written over.
@@ -160,7 +163,8 @@ pub fn plan(wanted: Vec<Want>, dev: &Device<'_>, budget: Option<u64>, delete_rem
             let rel = if n == 1 { w.natural.clone() } else { names::with_suffix(&w.natural, n) };
             let k = names::key(&rel);
             let foreign = !ours.contains(&k) && (dev.on_disk)(&rel).is_some();
-            if !taken.contains(&k) && !foreign {
+            let others_old = replaced_by.get(&k).is_some_and(|t| *t != w.track.id);
+            if !taken.contains(&k) && !foreign && !others_old {
                 break rel;
             }
             n += 1;
@@ -192,4 +196,52 @@ pub fn estimate(t: &Track, format: DeviceFormat, copies: bool) -> u64 {
     };
     // Plus the cover and tags.
     kbps * 1000 / 8 * secs + 64 * 1024
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::fake;
+
+    fn want(id: &str, natural: &str, source: &str) -> Want {
+        let ar = fake::artist("ar", "Artist");
+        let al = fake::album("al", "Album", &ar, 2000, None, &[]);
+        Want {
+            track: fake::track(id, id, &al, 1, 1),
+            item: 0,
+            format: DeviceFormat::Original,
+            natural: natural.into(),
+            source: source.into(),
+            est: 10,
+        }
+    }
+
+    fn entry(track: &str, source: &str) -> Entry {
+        Entry { track_id: track.into(), source: source.into(), format: DeviceFormat::Original, size: 10 }
+    }
+
+    #[test]
+    fn another_songs_old_copy_is_never_a_new_files_place() {
+        // Song a is made again (its source changed); its old copy sits where
+        // song b would naturally go, apart from case.
+        let mut m = Manifest::new("d");
+        m.files.insert("X/01 Same.flac".into(), entry("a", "old"));
+        let on_disk = |p: &str| (p == "X/01 Same.flac").then_some(10);
+        let dev = Device { manifest: &m, on_disk: &on_disk, free: None };
+        let p = plan(vec![want("a", "Y/01 A.flac", "new"), want("b", "x/01 same.flac", "s")], &dev, None, false);
+        let b = p.writes.iter().find(|w| w.want.track.id == "b").unwrap();
+        assert_ne!(names::key(&b.rel), names::key("X/01 Same.flac"), "b must not land on a's old copy");
+        assert_eq!(p.replaced, vec!["X/01 Same.flac".to_string()]);
+    }
+
+    #[test]
+    fn a_song_may_be_written_over_its_own_old_copy_in_new_case() {
+        let mut m = Manifest::new("d");
+        m.files.insert("X/01 Song.flac".into(), entry("a", "old"));
+        let on_disk = |p: &str| (p == "X/01 Song.flac").then_some(10);
+        let dev = Device { manifest: &m, on_disk: &on_disk, free: None };
+        let p = plan(vec![want("a", "x/01 song.flac", "new")], &dev, None, false);
+        assert_eq!(p.writes[0].rel, "x/01 song.flac");
+        assert!(p.replaced.is_empty(), "written over, nothing to remove");
+    }
 }
