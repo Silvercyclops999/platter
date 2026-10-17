@@ -47,7 +47,7 @@ fn clusters(n: usize) -> Vec<(usize, Vec<f32>)> {
 fn near_songs_stay_near_on_the_map() {
     let data = clusters(60);
     let vectors: Vec<&[f32]> = data.iter().map(|(_, v)| v.as_slice()).collect();
-    let b = project::fit(&vectors).unwrap();
+    let b = project::fit(&vectors, None).unwrap();
     let pts: Vec<(f32, f32)> = data.iter().map(|(_, v)| project::place(&b, v)).collect();
     // Each point's nearest neighbour on the map is from its own cluster.
     let mut same = 0;
@@ -92,14 +92,14 @@ fn near_songs_stay_near_on_the_map() {
 fn the_same_songs_give_the_same_map() {
     let data = clusters(20);
     let vectors: Vec<&[f32]> = data.iter().map(|(_, v)| v.as_slice()).collect();
-    assert_eq!(project::fit(&vectors), project::fit(&vectors));
+    assert_eq!(project::fit(&vectors, None), project::fit(&vectors, None));
 }
 
 #[test]
 fn odd_input_doesnt_break_the_projection() {
-    assert!(project::fit(&[]).is_none());
+    assert!(project::fit(&[], None).is_none());
     let one = vec![0.5f32; DIMS];
-    let b = project::fit(&[one.as_slice()]).unwrap();
+    let b = project::fit(&[one.as_slice()], None).unwrap();
     let (x, y) = project::place(&b, &one);
     assert!(x.is_finite() && y.is_finite());
     assert!(!project::usable(&[0.1; 3]));
@@ -294,4 +294,211 @@ fn songs_and_artists_are_found_on_the_map() {
     assert!(db.read(|c| store::find(c, "%")).unwrap().is_empty(), "wildcards are plain text");
     let s = db.read(|c| store::song(c, "t3")).unwrap().unwrap();
     assert_eq!((s.title.as_str(), s.artist.as_str()), ("Song t3", "Artist"));
+}
+
+// ------------------------------------------------------------ review fixes
+
+fn close(a: &[f64], b: &[f64]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
+}
+
+#[test]
+fn working_the_projection_out_again_keeps_the_maps_way_round() {
+    let data = clusters(30);
+    let vectors: Vec<&[f32]> = data.iter().map(|(_, v)| v.as_slice()).collect();
+    let first = project::fit(&vectors, None).unwrap();
+    let neg = |v: &[f64]| v.iter().map(|x| -x).collect::<Vec<_>>();
+    // The map in use is mirrored on its first axis: a refit follows it.
+    let mut mirrored = first.clone();
+    mirrored.axes[0] = neg(&first.axes[0]);
+    let b = project::fit(&vectors, Some(&mirrored)).unwrap();
+    assert!(close(&b.axes[0], &mirrored.axes[0]) && close(&b.axes[1], &first.axes[1]));
+    // Turned a quarter: the axes swap to match as well as flip.
+    let mut turned = first.clone();
+    turned.axes = [neg(&first.axes[1]), first.axes[0].clone()];
+    let b = project::fit(&vectors, Some(&turned)).unwrap();
+    assert!(close(&b.axes[0], &turned.axes[0]) && close(&b.axes[1], &turned.axes[1]));
+    // Already the same way round: nothing changes.
+    assert_eq!(project::fit(&vectors, Some(&first)).unwrap(), first);
+}
+
+#[test]
+fn a_stored_map_that_was_mirrored_stays_mirrored_after_a_refit() {
+    let (_d, db) = db();
+    for (i, (_, v)) in clusters(4).iter().enumerate() {
+        analysed(&db, &format!("t{i:02}"), "al", v);
+    }
+    update(&db).unwrap();
+    let before = all_points(&db);
+    // Store the projection mirrored on both axes, from an older version so it's redone.
+    db.write(|c| {
+        let (mut b, _) = store::basis(c)?.unwrap();
+        for a in b.axes.iter_mut() {
+            a.iter_mut().for_each(|x| *x = -*x);
+        }
+        c.execute(
+            "UPDATE sound_map_layout SET basis = ?1, version = ?2",
+            params![serde_json::to_string(&b).unwrap(), project::LAYOUT_VERSION - 1],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(update(&db).unwrap().refit);
+    let after = all_points(&db);
+    assert_eq!(before.len(), after.len());
+    for (p, q) in before.iter().zip(&after) {
+        assert_eq!(p.0, q.0);
+        assert!((p.1 + q.1).abs() < 1e-4 && (p.2 + q.2).abs() < 1e-4, "{p:?} then {q:?}");
+    }
+}
+
+#[test]
+fn the_fit_one_vector_at_a_time_matches_the_spread_worked_out_directly() {
+    let data = clusters(10);
+    let vectors: Vec<&[f32]> = data.iter().map(|(_, v)| v.as_slice()).collect();
+    let b = project::fit(&vectors, None).unwrap();
+    let n = vectors.len() as f64;
+    for i in 0..DIMS {
+        let mean = vectors.iter().map(|v| v[i] as f64).sum::<f64>() / n;
+        let sd = (vectors.iter().map(|v| (v[i] as f64 - mean).powi(2)).sum::<f64>() / n).sqrt().max(0.02);
+        assert!((b.mean[i] - mean).abs() < 1e-9 && (b.scale[i] - sd).abs() < 1e-9, "feature {i}");
+    }
+}
+
+#[test]
+fn a_feature_far_outside_what_the_map_was_made_from_cant_throw_a_point_away() {
+    let data = clusters(20);
+    let vectors: Vec<&[f32]> = data.iter().map(|(_, v)| v.as_slice()).collect();
+    let b = project::fit(&vectors, None).unwrap();
+    let mut odd = data[0].1.clone();
+    odd[2] = 50.0;
+    let far = project::place(&b, &odd);
+    odd[2] = 5000.0;
+    assert_eq!(project::place(&b, &odd), far, "both are held at the limit");
+    let bound = (project::CLAMP * 1.4 * (DIMS as f64).sqrt() / (3.0 * b.spread)) as f32;
+    assert!(far.0.abs() <= bound && far.1.abs() <= bound);
+}
+
+#[test]
+fn unusable_analyses_are_marked_so_the_map_settles() {
+    let (_d, db) = db();
+    for (i, (_, v)) in clusters(1).iter().enumerate() {
+        analysed(&db, &format!("t{i}"), "al", v);
+    }
+    analysed(&db, "short", "al", &[0.5; 4]);
+    analysed(&db, "corrupt", "al", &[0.5; DIMS]);
+    db.write(|c| {
+        c.execute("UPDATE track_analysis SET features = 'not json' WHERE track_id = 'corrupt'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let u = update(&db).unwrap();
+    assert_eq!((u.placed, u.skipped), (3, 2));
+    let counts = db.read(store::counts).unwrap();
+    assert_eq!((counts.placed, counts.analysed), (3, 3), "nothing left looking unplaced");
+    assert!(!update(&db).unwrap().changed(), "settled");
+
+    // Analysed again (readable this time): tried again and placed.
+    let good = serde_json::to_string(&[0.4f32; DIMS]).unwrap();
+    db.write(move |c| {
+        c.execute("UPDATE track_analysis SET features = ?1, analysed_at = 2 WHERE track_id = 'corrupt'", [good])?;
+        Ok(())
+    })
+    .unwrap();
+    let u = update(&db).unwrap();
+    assert_eq!((u.placed, u.skipped), (1, 0));
+    assert!(all_points(&db).iter().any(|p| p.0 == "corrupt"));
+    let counts = db.read(store::counts).unwrap();
+    assert_eq!((counts.placed, counts.analysed), (4, 4));
+}
+
+#[test]
+fn a_corrupt_stored_projection_is_worked_out_again() {
+    let (_d, db) = db();
+    for (i, (_, v)) in clusters(2).iter().enumerate() {
+        analysed(&db, &format!("t{i}"), "al", v);
+    }
+    update(&db).unwrap();
+    db.write(|c| {
+        c.execute("UPDATE sound_map_layout SET basis = '{oops'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(db.read(store::basis).unwrap().is_none());
+    assert!(update(&db).unwrap().refit);
+    assert!(db.read(store::basis).unwrap().is_some());
+    // The wrong shape counts as corrupt too (placing with it would go out of bounds).
+    db.write(|c| {
+        c.execute(r#"UPDATE sound_map_layout SET basis = '{"mean":[],"scale":[],"axes":[[],[]],"spread":1.0,"count":6}'"#, [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(db.read(store::basis).unwrap().is_none());
+}
+
+#[test]
+fn a_big_layout_is_written_in_chunks_and_all_of_it_lands() {
+    let (_d, db) = db();
+    let n = store::WRITE_CHUNK + 7;
+    let mut rng = Rng(42);
+    db.write(|c| {
+        let tx = c.transaction()?;
+        for i in 0..n {
+            let id = format!("t{i:05}");
+            let v: Vec<f32> = (0..DIMS).map(|_| rng.next()).collect();
+            tx.execute(
+                "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, duration_ms, part_key)
+                 VALUES (?1, ?1, 'al', 'Album', 'ar', 'Artist', 200000, ?1)",
+                [&id],
+            )?;
+            tx.execute(
+                "INSERT INTO track_analysis (track_id, part_key, status, version, features, analysed_at) VALUES (?1, ?1, 'ok', 1, ?2, 1)",
+                params![id, serde_json::to_string(&v).unwrap()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    })
+    .unwrap();
+    let u = update(&db).unwrap();
+    assert!(u.refit);
+    assert_eq!(u.placed, n);
+    assert_eq!(db.read(store::counts).unwrap().placed as usize, n);
+}
+
+#[tokio::test]
+async fn a_panicking_job_doesnt_stop_the_worker() {
+    let w = super::Worker::start();
+    let r: crate::error::AppResult<()> = w.run(|| panic!("boom")).await;
+    assert!(r.unwrap_err().to_string().contains("boom"));
+    assert_eq!(w.run(|| 7).await.unwrap(), 7);
+}
+
+#[test]
+fn building_is_counted_so_overlapping_updates_dont_clear_each_other() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let n = AtomicUsize::new(0);
+    let a = super::Building::start(&n);
+    let b = super::Building::start(&n);
+    drop(a);
+    assert_eq!(n.load(Ordering::Acquire), 1, "the other update is still running");
+    drop(b);
+    assert_eq!(n.load(Ordering::Acquire), 0);
+    // Let go even when the update panics.
+    let r = std::panic::catch_unwind(|| {
+        let _g = super::Building::start(&n);
+        panic!("mid update");
+    });
+    assert!(r.is_err());
+    assert_eq!(n.load(Ordering::Acquire), 0);
+}
+
+#[tokio::test]
+async fn refresh_says_its_done_building_afterwards() {
+    let (_d, db) = db();
+    analysed(&db, "t0", "al", &[0.5; DIMS]);
+    let map = super::SoundMap::new(db);
+    assert!(!map.building());
+    assert_eq!(map.refresh().await.unwrap().placed, 1);
+    assert!(!map.building());
 }

@@ -1143,6 +1143,17 @@ CREATE TABLE IF NOT EXISTS sound_map_layout (
     built_at INTEGER NOT NULL
 );
 "#,
+    // v40: songs whose analysis the sound map can't use, marked by the
+    // analysis they had (so a new analysis is tried again), and an index for
+    // loading one area of the map.
+    r#"
+CREATE TABLE IF NOT EXISTS sound_map_skip (
+    track_id    TEXT PRIMARY KEY,
+    part_key    TEXT NOT NULL,
+    analysed_at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS sound_map_xy ON sound_map (x, y);
+"#,
 ];
 
 #[cfg(test)]

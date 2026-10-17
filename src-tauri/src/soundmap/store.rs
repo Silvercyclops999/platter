@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::project::{self, Basis, LAYOUT_VERSION};
 use crate::analysis::features::MIN_SECONDS;
 use crate::db::release::track_unreleased;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 /// A song's analysis, current for its file.
 #[derive(Debug, Clone, PartialEq)]
@@ -18,87 +18,158 @@ pub struct Analysed {
     pub features: Vec<f32>,
 }
 
-const ANALYSED: &str = "SELECT a.track_id, a.part_key, a.features FROM track_analysis a
-     JOIN tracks t ON t.id = a.track_id AND t.part_key = a.part_key
-     WHERE a.status = 'ok' AND a.features IS NOT NULL";
+/// An analysis the map can't use (unreadable, or the wrong shape), marked so
+/// it isn't counted as waiting to be placed. Keyed by the analysis it had.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Skip {
+    pub track_id: String,
+    pub part_key: String,
+    pub analysed_at: i64,
+}
 
-fn analysed_rows(c: &Connection, sql: &str) -> AppResult<Vec<Analysed>> {
-    let mut st = c.prepare(sql)?;
-    let rows = st.query_map([], |r| {
+/// A point to write: song, file, x, y.
+pub type Point = (String, String, f32, f32);
+
+/// Points written per transaction, so other writers aren't held up for long.
+pub const WRITE_CHUNK: usize = 2000;
+
+/// Current analyses (for the song's file as it is now) that aren't marked
+/// as unusable.
+const ANALYSED: &str = "FROM track_analysis a
+     JOIN tracks t ON t.id = a.track_id AND t.part_key = a.part_key
+     WHERE a.status = 'ok' AND a.features IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM sound_map_skip s
+                       WHERE s.track_id = a.track_id AND s.part_key = a.part_key AND s.analysed_at = a.analysed_at)";
+
+const NOT_PLACED: &str = "AND NOT EXISTS (SELECT 1 FROM sound_map m WHERE m.track_id = a.track_id AND m.part_key = a.part_key)";
+
+/// Goes through the analyses one row at a time, handing each usable vector
+/// to `each`. Unusable ones go in `skips` (a corrupt one is logged).
+fn scan(c: &Connection, only_unplaced: bool, skips: &mut Vec<Skip>, mut each: impl FnMut(Analysed)) -> AppResult<()> {
+    let sql = format!(
+        "SELECT a.track_id, a.part_key, a.features, a.analysed_at {ANALYSED} {}",
+        if only_unplaced { NOT_PLACED } else { "" }
+    );
+    let mut st = c.prepare(&sql)?;
+    let mut rows = st.query([])?;
+    while let Some(r) = rows.next()? {
+        let track_id: String = r.get(0)?;
+        let part_key: String = r.get(1)?;
         let f: String = r.get(2)?;
-        Ok(Analysed { track_id: r.get(0)?, part_key: r.get(1)?, features: serde_json::from_str(&f).unwrap_or_default() })
-    })?;
-    let mut out = Vec::new();
-    for r in rows {
-        let a = r?;
-        if project::usable(&a.features) {
-            out.push(a);
+        let features = match serde_json::from_str::<Vec<f32>>(&f) {
+            Ok(v) if project::usable(&v) => Some(v),
+            Ok(_) => None,
+            Err(e) => {
+                tracing::warn!(track = %track_id, "sound map: unreadable analysis, left off the map: {e}");
+                None
+            }
+        };
+        match features {
+            Some(features) => each(Analysed { track_id, part_key, features }),
+            None => skips.push(Skip { track_id, part_key, analysed_at: r.get(3)? }),
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 /// Every song with a usable analysis.
-pub fn analysed(c: &Connection) -> AppResult<Vec<Analysed>> {
-    analysed_rows(c, ANALYSED)
+pub fn each_analysed(c: &Connection, skips: &mut Vec<Skip>, each: impl FnMut(Analysed)) -> AppResult<()> {
+    scan(c, false, skips, each)
 }
 
 /// Analysed songs that aren't on the map yet (or were placed from an older file).
-pub fn unplaced(c: &Connection) -> AppResult<Vec<Analysed>> {
-    analysed_rows(
-        c,
-        &format!("{ANALYSED} AND NOT EXISTS (SELECT 1 FROM sound_map m WHERE m.track_id = a.track_id AND m.part_key = a.part_key)"),
-    )
+pub fn each_unplaced(c: &Connection, skips: &mut Vec<Skip>, each: impl FnMut(Analysed)) -> AppResult<()> {
+    scan(c, true, skips, each)
 }
 
-/// How many songs have an analysis the map can use (roughly: the vector is checked when read).
+/// Every song with a usable analysis, all at once (tests and small libraries).
+pub fn analysed(c: &Connection) -> AppResult<Vec<Analysed>> {
+    let mut out = Vec::new();
+    each_analysed(c, &mut Vec::new(), |a| out.push(a))?;
+    Ok(out)
+}
+
+/// How many songs have an analysis the map can use. One read but not yet
+/// checked counts too, until the map has looked at it.
 pub fn analysed_count(c: &Connection) -> AppResult<usize> {
-    Ok(c.query_row(
-        "SELECT count(*) FROM track_analysis a JOIN tracks t ON t.id = a.track_id AND t.part_key = a.part_key
-         WHERE a.status = 'ok' AND a.features IS NOT NULL",
-        [],
-        |r| r.get::<_, i64>(0),
-    )? as usize)
+    Ok(c.query_row(&format!("SELECT count(*) {ANALYSED}"), [], |r| r.get::<_, i64>(0))? as usize)
 }
 
-/// The projection in use and the version it was made with.
+/// The projection in use and the version it was made with. One that can't
+/// be read is logged and treated as none, so the map is worked out again.
 pub fn basis(c: &Connection) -> AppResult<Option<(Basis, i64)>> {
     let row: Option<(String, i64)> =
         c.query_row("SELECT basis, version FROM sound_map_layout WHERE id = 1", [], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-    Ok(row.and_then(|(b, v)| serde_json::from_str(&b).ok().map(|b| (b, v))))
+    let Some((b, v)) = row else { return Ok(None) };
+    match serde_json::from_str::<Basis>(&b) {
+        Ok(b) if b.whole() => Ok(Some((b, v))),
+        Ok(_) => {
+            tracing::warn!("sound map: stored projection is the wrong shape; working it out again");
+            Ok(None)
+        }
+        Err(e) => {
+            tracing::warn!("sound map: stored projection unreadable ({e}); working it out again");
+            Ok(None)
+        }
+    }
 }
 
-/// A new projection: every point is replaced by `points`.
-pub fn save_layout(c: &mut Connection, b: &Basis, points: &[(String, String, f32, f32)], now: i64) -> AppResult<()> {
+/// Marks analyses the map can't use.
+pub fn skip(c: &mut Connection, skips: &[Skip]) -> AppResult<()> {
     let tx = c.transaction()?;
-    tx.execute("DELETE FROM sound_map", [])?;
+    {
+        let mut st = tx.prepare_cached("INSERT OR REPLACE INTO sound_map_skip (track_id, part_key, analysed_at) VALUES (?1, ?2, ?3)")?;
+        let mut del = tx.prepare_cached("DELETE FROM sound_map WHERE track_id = ?1")?;
+        for s in skips {
+            st.execute(params![s.track_id, s.part_key, s.analysed_at])?;
+            del.execute([&s.track_id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// The last step of a new projection, once its points are written (in
+/// chunks, with [`add_points`]): keeps the projection and drops points of
+/// songs whose analysis is gone, so only the new layout's songs remain.
+pub fn finish_layout(c: &mut Connection, b: &Basis, now: i64) -> AppResult<()> {
+    let basis = serde_json::to_string(b).map_err(|e| AppError::Internal(format!("sound map projection: {e}")))?;
+    let tx = c.transaction()?;
     tx.execute(
         "INSERT OR REPLACE INTO sound_map_layout (id, version, basis, built_at) VALUES (1, ?1, ?2, ?3)",
-        params![LAYOUT_VERSION, serde_json::to_string(b).unwrap_or_default(), now],
+        params![LAYOUT_VERSION, basis, now],
     )?;
-    insert(&tx, points)?;
+    tx.execute(
+        "DELETE FROM sound_map WHERE NOT EXISTS (SELECT 1 FROM track_analysis a
+             WHERE a.track_id = sound_map.track_id AND a.part_key = sound_map.part_key AND a.status = 'ok' AND a.features IS NOT NULL)",
+        [],
+    )?;
     tx.commit()?;
     Ok(())
 }
 
-/// More points with the projection in use.
-pub fn add_points(c: &mut Connection, points: &[(String, String, f32, f32)]) -> AppResult<()> {
+/// Points with the projection in use, in transactions of [`WRITE_CHUNK`].
+/// Each chunk is its own write, so the database is free in between.
+pub fn add_points(c: &mut Connection, points: &[Point]) -> AppResult<()> {
     let tx = c.transaction()?;
-    insert(&tx, points)?;
+    {
+        let mut st = tx.prepare_cached("INSERT OR REPLACE INTO sound_map (track_id, part_key, x, y) VALUES (?1, ?2, ?3, ?4)")?;
+        for (id, pk, x, y) in points {
+            st.execute(params![id, pk, *x as f64, *y as f64])?;
+        }
+    }
     tx.commit()?;
     Ok(())
 }
 
-fn insert(c: &Connection, points: &[(String, String, f32, f32)]) -> AppResult<()> {
-    let mut st = c.prepare_cached("INSERT OR REPLACE INTO sound_map (track_id, part_key, x, y) VALUES (?1, ?2, ?3, ?4)")?;
-    for (id, pk, x, y) in points {
-        st.execute(params![id, pk, *x as f64, *y as f64])?;
-    }
-    Ok(())
-}
-
-/// Drop points whose song left the library or whose file changed.
+/// Drop points whose song left the library or whose file changed, and
+/// unusable marks for analyses that have since been redone.
 pub fn prune(c: &Connection) -> AppResult<usize> {
+    c.execute(
+        "DELETE FROM sound_map_skip WHERE NOT EXISTS (SELECT 1 FROM track_analysis a
+             WHERE a.track_id = sound_map_skip.track_id AND a.part_key = sound_map_skip.part_key AND a.analysed_at = sound_map_skip.analysed_at)",
+        [],
+    )?;
     Ok(c.execute(
         "DELETE FROM sound_map WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = sound_map.track_id AND t.part_key = sound_map.part_key)",
         [],
@@ -164,25 +235,31 @@ fn first_genre(json: Option<String>) -> Option<String> {
 /// `area` when given.
 pub fn points(c: &Connection, after: Option<&str>, limit: usize, area: Option<Area>) -> AppResult<Chunk> {
     let limit = limit.clamp(1, CHUNK_MAX);
-    let mut sql = String::from(
+    let after = after.unwrap_or("").to_string();
+    let mut args: Vec<Box<dyn ToSql>> = vec![Box::new(after)];
+    // An area is picked out of the map alone first (by its x, y index), so
+    // only its points are joined to the library.
+    let from = match area {
+        Some(a) => {
+            for v in [a.min_x, a.max_x, a.min_y, a.max_y] {
+                args.push(Box::new(v as f64));
+            }
+            "(SELECT track_id, x, y FROM sound_map WHERE x >= ?2 AND x <= ?3 AND y >= ?4 AND y <= ?5 AND track_id > ?1)"
+        }
+        None => "sound_map",
+    };
+    let sql = format!(
         "SELECT m.track_id, m.x, m.y, t.genres, al.genres, al.year, t.album_id, coalesce(f.version, f.release),
                 al.format, al.subformats, al.matched, al.studio, mc.found, coalesce(at.version, at.release), al.id IS NOT NULL
-         FROM sound_map m JOIN tracks t ON t.id = m.track_id
+         FROM {from} m JOIN tracks t ON t.id = m.track_id
          LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'
          LEFT JOIN albums al ON al.id = t.album_id
          LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
          LEFT JOIN album_tags at ON at.album_id = t.album_id
-         WHERE m.track_id > ?1",
+         WHERE m.track_id > ?1
+         ORDER BY m.track_id LIMIT {}",
+        limit + 1
     );
-    let after = after.unwrap_or("").to_string();
-    let mut args: Vec<Box<dyn ToSql>> = vec![Box::new(after)];
-    if let Some(a) = area {
-        sql.push_str(" AND m.x >= ?2 AND m.x <= ?3 AND m.y >= ?4 AND m.y <= ?5");
-        for v in [a.min_x, a.max_x, a.min_y, a.max_y] {
-            args.push(Box::new(v as f64));
-        }
-    }
-    sql.push_str(&format!(" ORDER BY m.track_id LIMIT {}", limit + 1));
     let mut st = c.prepare(&sql)?;
     let mut rows = st.query(params_from_iter(args.iter().map(|b| b.as_ref())))?;
     let mut out = Chunk::default();
@@ -193,7 +270,8 @@ pub fn points(c: &Connection, after: Option<&str>, limit: usize, area: Option<Ar
             break;
         }
         let id: String = r.get(0)?;
-        let genre = first_genre(r.get(3)?).or_else(|| first_genre(r.get(4).ok().flatten()));
+        let album_genres: Option<String> = r.get(4)?;
+        let genre = first_genre(r.get(3)?).or_else(|| first_genre(album_genres));
         let g = match genre {
             Some(name) => {
                 let n = names.len() as i32;
