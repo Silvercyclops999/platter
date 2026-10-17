@@ -156,6 +156,9 @@ struct Segment {
     xf_decided: bool,
     /// The Automix blend into the next segment (by its key).
     blend: Option<(u64, BlendPlan)>,
+    /// Its buffers and names, made when it was planned so starting it on
+    /// the output thread allocates nothing.
+    blend_kit: Option<BlendKit>,
     /// Whether that blend was started or given up (a seek resets it).
     bl_decided: bool,
 }
@@ -232,6 +235,7 @@ impl Segment {
             peak: dsp::UNKNOWN_PEAK,
             xf_decided: false,
             blend: None,
+            blend_kit: None,
             bl_decided: false,
         }
     }
@@ -376,6 +380,33 @@ struct Fading {
     blend: Option<Blend>,
 }
 
+/// What a blend needs, made ahead on the engine's caller thread.
+struct BlendKit {
+    rate: u32,
+    ch: usize,
+    beat_ms: f64,
+    echo: Option<Echo>,
+    frame: Vec<f32>,
+    a_tag: String,
+    b_tag: String,
+}
+
+impl BlendKit {
+    fn new(plan: &BlendPlan, rate: u32, ch: usize, a_tag: String, b_tag: String) -> Self {
+        let per_ms = rate as f64 / 1000.0;
+        let echo = (plan.curve == Curve::Echo).then(|| Echo::new((0.75 * plan.beat_ms * per_ms) as usize, ch));
+        Self { rate, ch, beat_ms: plan.beat_ms, echo, frame: vec![0.0; ch], a_tag, b_tag }
+    }
+
+    fn fits(&self, plan: &BlendPlan, rate: u32, ch: usize, b_tag: &str) -> bool {
+        self.rate == rate
+            && self.ch == ch
+            && self.beat_ms == plan.beat_ms
+            && self.echo.is_some() == (plan.curve == Curve::Echo)
+            && self.b_tag == b_tag
+    }
+}
+
 /// A running Automix blend.
 struct Blend {
     plan: BlendPlan,
@@ -388,6 +419,8 @@ struct Blend {
     handover: Option<usize>,
     /// The incoming segment.
     b_key: u64,
+    /// For the events at the handover (taken then).
+    a_tag: String,
     b_tag: String,
     echo: Option<Echo>,
     /// A skip mid-blend: from these gains to (0, 1) over `n` frames from `at`.
@@ -757,7 +790,7 @@ impl Mix {
         let rate = self.format.sample_rate as f64;
         let per_ms = rate / 1000.0;
         let skip = self.ms_to_frames_f(plan.b_start_ms) as usize;
-        let Some(a) = self.segments.pop_front() else { return };
+        let Some(mut a) = self.segments.pop_front() else { return };
         let Some(b) = self.segments.front_mut() else {
             self.segments.push_front(a);
             return;
@@ -768,7 +801,13 @@ impl Mix {
         b.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
         // Audible now, but it only becomes the playing track at the midpoint.
         b.started = true;
-        let (b_key, b_tag) = (b.key, b.tag.clone());
+        let b_key = b.key;
+        // Made when the blend was planned; built here only if the output
+        // changed since.
+        let kit = match a.blend_kit.take() {
+            Some(k) if k.fits(&plan, self.format.sample_rate, ch, &b.tag) => k,
+            _ => BlendKit::new(&plan, self.format.sample_rate, ch, a.tag.clone(), b.tag.clone()),
+        };
         // As long as planned, if the outgoing song has the audio for it.
         let have = (a.samples.len() / ch).saturating_sub(1) as f64 / per_ms;
         let mut len_ms = plan.len_ms;
@@ -781,7 +820,6 @@ impl Mix {
             len_ms = lo;
         }
         let len = ((len_ms * per_ms) as usize).max(1);
-        let echo = (plan.curve == Curve::Echo).then(|| Echo::new((0.75 * plan.beat_ms * per_ms) as usize, ch));
         self.fading = Some(Fading {
             seg: a,
             len,
@@ -794,10 +832,11 @@ impl Mix {
                 frac: 0.0,
                 handover: Some(len / 2),
                 b_key,
-                b_tag,
-                echo,
+                a_tag: kit.a_tag,
+                b_tag: kit.b_tag,
+                echo: kit.echo,
                 hurry: None,
-                frame: vec![0.0; ch],
+                frame: kit.frame,
             }),
         });
     }
@@ -810,12 +849,12 @@ impl Mix {
         }
         events.push(EngineEvent::Ended {
             key: fd.seg.key,
-            tag: fd.seg.tag.clone(),
+            tag: std::mem::take(&mut b.a_tag),
             listened_ms: frame_ms(fd.seg.listened),
         });
         events.push(EngineEvent::Started {
             key: b.b_key,
-            tag: b.b_tag.clone(),
+            tag: std::mem::take(&mut b.b_tag),
         });
     }
 
@@ -1879,8 +1918,19 @@ impl Engine {
     /// blend, the crossfade setting applies). Ignored once that blend began.
     pub fn set_blend(&self, key: u64, next: u64, plan: Option<BlendPlan>) {
         let mut m = self.core().mix.lock();
+        let (rate, ch) = (m.format.sample_rate, m.ch());
+        let b_tag = m
+            .segments
+            .iter()
+            .find(|s| s.key == next)
+            .map(|s| s.tag.clone())
+            .or_else(|| m.next.as_ref().filter(|p| p.key == next).map(|p| p.tag.clone()));
         if let Some(s) = m.seg_mut(key) {
             s.blend = plan.map(|p| (next, p));
+            s.blend_kit = match (plan, b_tag) {
+                (Some(p), Some(b_tag)) => Some(BlendKit::new(&p, rate, ch, s.tag.clone(), b_tag)),
+                _ => None,
+            };
         }
     }
 
