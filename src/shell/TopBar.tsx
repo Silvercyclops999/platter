@@ -61,8 +61,16 @@ function WindowControls() {
       const w = getCurrentWindow() as unknown as AppWindow;
       if (!alive) return;
       setWin(w);
-      setMaximized(await w.isMaximized());
-      un = await w.onResized(async () => setMaximized(await w.isMaximized()));
+      const max = await w.isMaximized();
+      if (!alive) return;
+      setMaximized(max);
+      const off = await w.onResized(async () => {
+        const m = await w.isMaximized();
+        if (alive) setMaximized(m);
+      });
+      // Unmounted while the listener was being added: take it off at once.
+      if (alive) un = off;
+      else off();
     });
     return () => {
       alive = false;
