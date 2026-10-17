@@ -3037,7 +3037,7 @@ export function SettingsPage() {
       group: "Lyrics transcription",
       title: "Transcribe all unreleased songs without lyrics",
       description:
-        "Works through them in the background with fewer processor cores, resting a few seconds between songs. It pauses on battery power and always gives way to playback. Away from home it reads songs while playback has nothing to download, and songs you just played come from this computer.",
+        "Works through them in the background with fewer processor cores, resting a few seconds between songs. It pauses on battery power and always gives way to playback. Pause keeps your place, even after a restart. If you pick another model, songs carry on with the one you have until the new one is downloaded, and Redo does them again with it. Away from home it reads songs while playback has nothing to download, and songs you just played come from this computer.",
       note: <BatchNote />,
       control: () => <BatchControl />,
     },

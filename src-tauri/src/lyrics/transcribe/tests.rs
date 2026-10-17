@@ -171,12 +171,17 @@ struct FakeSongs {
     unreachable: AtomicBool,
     unreadable: AtomicBool,
     reads: AtomicUsize,
+    /// Reads wait while this is set (playback has the connection).
+    hold: AtomicBool,
 }
 
 #[async_trait]
 impl SongReader for FakeSongs {
     async fn read(&self, _track_id: &str, _cancel: &AtomicBool) -> Result<SongAudio, AudioError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        while self.hold.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         if self.unreachable.load(Ordering::Relaxed) {
             return Err(AudioError::Unreachable("offline".into()));
         }
@@ -184,6 +189,9 @@ impl SongReader for FakeSongs {
             return Ok(SongAudio { bytes: b"not audio at all".to_vec(), hint: None });
         }
         Ok(SongAudio { bytes: wav(), hint: Some("wav".into()) })
+    }
+    fn yielding(&self) -> bool {
+        self.hold.load(Ordering::SeqCst)
     }
 }
 
@@ -331,7 +339,12 @@ fn fx_timed(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<g
         ModelStore::new(dir.path().join("models"), specs(), Arc::new(move |_: &Path| *free.lock()))
     };
     let rec = FakeRecognizer::new(Behaviour::Words(vec![words("hello there", 1000), words("second line", 4000)]));
-    let songs = Arc::new(FakeSongs { unreachable: AtomicBool::new(false), unreadable: AtomicBool::new(false), reads: AtomicUsize::new(0) });
+    let songs = Arc::new(FakeSongs {
+        unreachable: AtomicBool::new(false),
+        unreadable: AtomicBool::new(false),
+        reads: AtomicUsize::new(0),
+        hold: AtomicBool::new(false),
+    });
     let other = Arc::new(FakeOther::default());
     let cond = Arc::new(FakeConditions::default());
     let events = Arc::new(FakeEvents::default());
@@ -990,6 +1003,88 @@ async fn transcriptions_with_the_first_timing_are_moved_once_at_idle() {
 ");
 }
 
+// ---------------------------------------------------------------- pause, playback, model switch
+
+#[tokio::test]
+async fn the_batch_pauses_and_resumes_and_a_pause_survives_a_restart() {
+    let f = fx();
+    install(&f).await;
+    // The second song runs until it's stopped.
+    f.rec.hold_after.store(1, Ordering::SeqCst);
+    assert_eq!(f.t.transcribe_unreleased().await.unwrap(), 3);
+    until(&f.t, "second song", |s| f.rec.runs.load(Ordering::SeqCst) == 2 && s.current.is_some()).await;
+    f.t.pause();
+    let s = until(&f.t, "paused", |s| s.user_paused && s.current.is_none()).await;
+    assert_eq!((s.batch.done, s.batch.total, s.queued), (1, 3, 2), "the stopped song went back in the queue");
+    // Kept for a restart.
+    let kept = f.db.read(|c| crate::db::store::kv_get(c, PAUSED_KEY)).unwrap().unwrap();
+    let p: PausedBatch = serde_json::from_str(&kept).unwrap();
+    assert_eq!((p.ids.len(), p.done, p.total), (2, 1, 3));
+    // A song asked for still runs while paused.
+    *f.rec.behaviour.lock() = Behaviour::Words(vec![words("hello there", 1000)]);
+    f.rec.hold_after.store(usize::MAX, Ordering::SeqCst);
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "501", |s| s.current.is_none() && f.events.done.lock().iter().any(|d| d.0 == "501")).await;
+    let s = f.t.status();
+    assert!(s.user_paused);
+    assert_eq!(s.queued, 2, "the batch still waits");
+    // A restart: another transcriber on the same database comes back paused.
+    let g = fx();
+    g.db.write(|c| crate::db::store::kv_set(c, PAUSED_KEY, &kept)).unwrap();
+    g.t.restore_pause().await;
+    let s = g.t.status();
+    assert!(s.user_paused);
+    assert_eq!((s.batch.done, s.batch.total, s.queued), (1, 3, 2));
+    // Resume: the rest is done and nothing is kept any more.
+    f.t.resume();
+    until(&f.t, "batch done", |s| idle(s) && !s.user_paused && f.events.done.lock().len() == 4).await;
+    let kept = f.db.read(|c| crate::db::store::kv_get(c, PAUSED_KEY)).unwrap().unwrap_or_default();
+    assert!(kept.is_empty());
+}
+
+#[tokio::test]
+async fn reading_a_song_says_when_it_waits_for_playback() {
+    let f = fx();
+    install(&f).await;
+    f.songs.hold.store(true, Ordering::SeqCst);
+    f.t.transcribe_track("801").unwrap();
+    let s = until(&f.t, "waiting", |s| s.current.as_ref().is_some_and(|c| c.waiting_for_playback)).await;
+    let c = s.current.unwrap();
+    assert_eq!((c.stage, c.title.as_deref()), (Stage::Reading, Some("Tape One")));
+    f.songs.hold.store(false, Ordering::SeqCst);
+    until(&f.t, "done", |s| idle(s) && f.events.done.lock().len() == 1).await;
+}
+
+#[tokio::test]
+async fn while_a_new_model_downloads_the_installed_one_carries_on_and_its_songs_can_be_redone() {
+    let fetch = Arc::new(FakeFetch {
+        body: Mutex::new(model_body()),
+        fail_after: Mutex::new(None),
+        refuse: AtomicBool::new(false),
+        gap: Duration::from_millis(40),
+    });
+    let f = fx_with(fetch);
+    f.t.download_model(ModelKind::Small).unwrap();
+    until(&f.t, "small", |s| s.models[0].installed && !s.models[0].downloading).await;
+    // Medium is picked: it downloads, and songs meanwhile use Small.
+    f.t.set_options(true, Some(ModelKind::Medium));
+    f.t.transcribe_track("801").unwrap();
+    until(&f.t, "801", |s| idle(s) && f.events.done.lock().len() == 1).await;
+    assert!(f.t.status().models[1].downloading, "{:?}", f.t.status().models);
+    let own = f.db.read(|c| user::get(c, "801")).unwrap().unwrap();
+    assert_eq!(own.auto.as_deref(), Some("small"));
+    assert_eq!(f.t.status().redo, vec![RedoInfo { model: ModelKind::Small, count: 1 }]);
+    assert!(f.t.redo_other_model().is_err(), "not before Medium is here");
+    // Medium arrives: the next song uses it, and 801 can be done again.
+    until(&f.t, "medium", |s| s.models[1].installed).await;
+    f.t.transcribe_track("802").unwrap();
+    until(&f.t, "802", |s| idle(s) && f.events.done.lock().len() == 2).await;
+    assert_eq!(f.db.read(|c| user::get(c, "802")).unwrap().unwrap().auto.as_deref(), Some("medium"));
+    assert_eq!(f.t.redo_other_model().unwrap(), 1);
+    until(&f.t, "redone", |s| idle(s) && s.redo.is_empty()).await;
+    assert_eq!(f.db.read(|c| user::get(c, "801")).unwrap().unwrap().auto.as_deref(), Some("medium"));
+}
+
 // ---------------------------------------------------------------- audio
 
 #[test]
@@ -1429,17 +1524,17 @@ async fn without_a_graphics_card_small_stays_the_default_and_every_model_is_offe
 }
 
 #[tokio::test]
-async fn on_the_graphics_card_a_song_uses_one_or_two_processor_threads() {
+async fn on_the_graphics_card_a_song_uses_a_few_processor_threads() {
     let f = fx_gpu(vec![card("Radeon Graphics", gpu::DeviceKind::Integrated)]);
     f.t.set_options(true, None);
     install_kind(&f, ModelKind::Turbo).await;
     f.t.transcribe_track("501").unwrap();
     until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
-    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 1, "Light");
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 3, "Light: enough to keep the card fed");
     f.t.set_pace(pace::ProcessorUse::Fast, true, true);
     f.t.transcribe_track("502").unwrap();
     until(&f.t, "502 done", |_| f.events.done.lock().iter().any(|d| d.0 == "502")).await;
-    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 2, "Fast, still only feeding the card");
+    assert_eq!(f.rec.last_threads.load(Ordering::SeqCst), 4, "Fast: still a few, the card does the work");
     let own = f.db.read(|c| user::get(c, "502")).unwrap().unwrap();
     assert_eq!(own.auto.as_deref(), Some("turbo"));
 }
@@ -1491,8 +1586,8 @@ fn the_default_model_follows_the_graphics_card() {
     assert_eq!(ModelKind::chosen(None, true), ModelKind::Turbo);
     assert_eq!(ModelKind::chosen(None, false), ModelKind::Small);
     assert_eq!(ModelKind::chosen(Some(ModelKind::Medium), true), ModelKind::Medium);
-    assert_eq!(pace::gpu_thread_budget(16, pace::ProcessorUse::Light), 1);
-    assert_eq!(pace::gpu_thread_budget(16, pace::ProcessorUse::Balanced), 2);
+    assert_eq!(pace::gpu_thread_budget(16, pace::ProcessorUse::Light), 3);
+    assert_eq!(pace::gpu_thread_budget(16, pace::ProcessorUse::Balanced), 4);
     assert_eq!(pace::gpu_thread_budget(2, pace::ProcessorUse::Fast), 1, "never more than half the cores");
 }
 

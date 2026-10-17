@@ -5,11 +5,14 @@ import type { Settings, TranscribeGpu, TranscribeModel, TranscribeModelInfo, Tra
 import { updateSettings } from "../stores/settings";
 import { modelSize, transcribe, useTranscribe } from "../stores/transcribe";
 
-const MODEL_LABEL: Record<TranscribeModel, string> = {
-  small: "Small (faster)",
-  medium: "Medium (slower, much harder on the processor)",
-  turbo: "Turbo (best, for the graphics card)",
+/** Short names for the picker; size and speed go in the line under it. */
+export const MODEL_LABEL: Record<TranscribeModel, string> = {
+  small: "Small",
+  medium: "Medium",
+  turbo: "Turbo (best for graphics cards)",
 };
+
+const MODEL_NAME: Record<TranscribeModel, string> = { small: "small", medium: "medium", turbo: "turbo" };
 
 export const GPU_OPTIONS: { value: TranscribeGpu; label: string }[] = [
   { value: "auto", label: "Auto" },
@@ -17,7 +20,7 @@ export const GPU_OPTIONS: { value: TranscribeGpu; label: string }[] = [
 ];
 
 /** "about 8 seconds" or "about 3 minutes". */
-function aboutTime(secs: number): string {
+export function aboutTime(secs: number): string {
   if (secs < 90) {
     const s = Math.max(1, Math.round(secs));
     return `about ${s} ${s === 1 ? "second" : "seconds"}`;
@@ -63,11 +66,18 @@ const PAUSED: Record<NonNullable<TranscribeStatus["paused"]>, string> = {
   busy: "Paused while your computer is busy.",
 };
 
-/** "about 3 minutes per song" for a long run, once a song is done. */
+/** "about 20 seconds per song" for a long run, once a song is done (measured, breather included). */
 export function paceNote(secs: number | undefined): string | undefined {
   if (secs === undefined) return undefined;
-  const min = Math.max(1, Math.round(secs / 60));
-  return `about ${min} ${min === 1 ? "minute" : "minutes"} per song`;
+  return `${aboutTime(secs)} per song`;
+}
+
+/** The line under the model picker: its size and speed here, and a nudge toward Turbo on a graphics card. */
+export function modelNote(s: TranscribeStatus): string | undefined {
+  const m = s.models.find((x) => x.kind === s.model);
+  if (!m) return undefined;
+  const line = `${modelSize(m.sizeBytes)}, ${speedNote(m, s)}.`;
+  return s.gpu && s.model !== "turbo" ? `${line} Turbo is faster and more accurate on your graphics card.` : line;
 }
 
 /** The line under the switch: why it can't run, the last failure, or the model's state. */
@@ -102,12 +112,14 @@ export function TranscribeNote() {
 export function ModelControl({ s, ids }: { s: Settings | null; ids: { title: string; desc: string } }) {
   const status = useTranscribe((st) => st.status);
   if (!s || !status) return null;
-  const options = status.models.map((m) => ({ value: m.kind, label: `${MODEL_LABEL[m.kind]}, ${modelSize(m.sizeBytes)}, ${speedNote(m, status)}` }));
+  const options = status.models.map((m) => ({ value: m.kind, label: MODEL_LABEL[m.kind] }));
+  const note = modelNote(status);
   // The model in use: the one picked, else this computer's default.
   const m = status.models.find((x) => x.kind === status.model);
   const busy = status.current !== undefined && m?.installed;
   return (
     <div className="transcribe-model">
+      {note && <span className="transcribe-model__note">{note}</span>}
       <Select
         value={status.model}
         options={options}
@@ -132,15 +144,35 @@ export function ModelControl({ s, ids }: { s: Settings | null; ids: { title: str
   );
 }
 
-/** The batch's progress line. */
+/** Songs done with another model that can be done again with the chosen one, once it's installed. */
+export function redoCount(s: TranscribeStatus | null): number {
+  if (!s || !s.models.find((x) => x.kind === s.model)?.installed) return 0;
+  return (s.redo ?? []).reduce((n, r) => n + r.count, 0);
+}
+
+/** The batch's progress line: what it's doing now, the model it uses meanwhile, and songs to redo. */
 export function batchNote(s: TranscribeStatus | null): string | undefined {
   if (!s || !s.enabled) return undefined;
   if (s.error?.kind === "transcribe") return s.error.message;
-  if (s.batch.total === 0) return undefined;
+  const redo = redoCount(s);
+  const redoText =
+    redo > 0
+      ? `${redo === 1 ? "1 song was" : `${redo} songs were`} done with the ${MODEL_NAME[s.redo![0].model]} model while the ${MODEL_NAME[s.model]} model downloaded. Redo does ${redo === 1 ? "it" : "them"} again with it.`
+      : undefined;
+  if (s.batch.total === 0) return redoText;
   const of = `${s.batch.done} of ${s.batch.total} songs`;
-  if (s.paused) return `${of}. ${PAUSED[s.paused]}`;
+  const tail = redoText ? ` ${redoText}` : "";
+  if (s.userPaused) return `${of}. Paused.${tail}`;
+  if (s.paused) return `${of}. ${PAUSED[s.paused]}${tail}`;
+  const c = s.current;
+  const meanwhile =
+    c && c.model && c.model !== s.model
+      ? ` Using the ${MODEL_NAME[c.model]} model until the ${MODEL_NAME[s.model]} model finishes downloading, then the rest switch to it.`
+      : "";
+  if (c?.waitingForPlayback) return `Waiting: music is playing. ${of}.${meanwhile}${tail}`;
+  const doing = c?.title ? `Transcribing “${c.title}”` : "Transcribing";
   const pace = paceNote(s.secsPerSong);
-  return pace ? `Transcribing: ${of}, ${pace}.` : `Transcribing: ${of}.`;
+  return `${doing}: ${of}${pace ? `, ${pace}` : ""}.${meanwhile}${tail}`;
 }
 
 export function BatchNote() {
@@ -152,18 +184,39 @@ export function BatchNote() {
   ) : null;
 }
 
-/** "Transcribe now" for every unreleased song without lyrics, or Cancel while it runs. */
+/** "Transcribe now" for every unreleased song without lyrics, or Pause (Resume) and Cancel while it runs; Redo for songs done with an older model. */
 export function BatchControl() {
   const status = useTranscribe((s) => s.status);
   if (!status) return null;
   const running = status.batch.total > 0;
-  return running ? (
-    <Button size="sm" onClick={() => void transcribe.cancel()}>
-      Cancel
-    </Button>
-  ) : (
-    <Button size="sm" disabled={!status.enabled || !status.available} onClick={() => void transcribe.unreleased()}>
-      Transcribe now
-    </Button>
+  const redo = redoCount(status);
+  return (
+    <div className="transcribe-batch">
+      {redo > 0 && (
+        <Button size="sm" onClick={() => void transcribe.redo()}>
+          Redo {redo === 1 ? "1 song" : `${redo} songs`}
+        </Button>
+      )}
+      {running ? (
+        <>
+          {status.userPaused ? (
+            <Button size="sm" onClick={() => void transcribe.resume()}>
+              Resume
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => void transcribe.pause()}>
+              Pause
+            </Button>
+          )}
+          <Button size="sm" onClick={() => void transcribe.cancel()}>
+            Cancel
+          </Button>
+        </>
+      ) : (
+        <Button size="sm" disabled={!status.enabled || !status.available} onClick={() => void transcribe.unreleased()}>
+          Transcribe now
+        </Button>
+      )}
+    </div>
   );
 }

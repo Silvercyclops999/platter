@@ -80,6 +80,10 @@ impl SongReader for AppSongs {
         let bytes = audio::read_whole_up_to(&self.reader, &src, cancel, max_bytes).await?;
         Ok(bytes.map(|bytes| SongAudio { bytes, hint }))
     }
+    fn yielding(&self) -> bool {
+        // The playing or next song is downloading: reads wait for it.
+        self.player.transfer_gate().holder_priority().is_some_and(|p| p <= crate::audio::gate::Priority::Next as u8)
+    }
 }
 
 /// A song from the pre-cache: None when it isn't there, Some(None) when
@@ -157,6 +161,22 @@ pub async fn transcribe_album(t: State<'_, Transcriber>, album_id: String) -> Ap
 #[tauri::command]
 pub async fn transcribe_unreleased(t: State<'_, Transcriber>) -> AppResult<usize> {
     t.transcribe_unreleased().await
+}
+
+#[tauri::command]
+pub async fn transcribe_pause(t: State<'_, Transcriber>, paused: bool) -> AppResult<()> {
+    if paused {
+        t.pause()
+    } else {
+        t.resume()
+    }
+    Ok(())
+}
+
+/// Songs done with another model while the chosen one downloaded, again with it.
+#[tauri::command]
+pub async fn transcribe_redo(t: State<'_, Transcriber>) -> AppResult<usize> {
+    t.redo_other_model()
 }
 
 #[tauri::command]

@@ -2012,6 +2012,12 @@ export interface TranscribeStatus {
     background: boolean;
     /** Seconds since the stage or percent last moved, once that has been a while. */
     quietSecs?: number;
+    /** The song's title, when the library has it. */
+    title?: string;
+    /** Reading the song waits while music is playing. */
+    waitingForPlayback?: boolean;
+    /** The model this song uses (an installed one while the chosen one downloads). */
+    model?: TranscribeModel;
   };
   queued: number;
   /** The song that goes next. */
@@ -2021,6 +2027,10 @@ export interface TranscribeStatus {
   secsPerSong?: number;
   paused?: "battery" | "offline" | "busy";
   error?: { kind: "download" | "checksum" | "disk" | "transcribe"; message: string; trackId?: string };
+  /** The user paused the batch (songs asked for one at a time still run). */
+  userPaused?: boolean;
+  /** Songs done with another model while the chosen one downloaded. */
+  redo?: { model: TranscribeModel; count: number }[];
 }
 
 // ---------------------------------------------------------------- sharing lyrics

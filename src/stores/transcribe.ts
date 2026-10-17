@@ -65,6 +65,12 @@ export const transcribe = {
     if (n === 0) toast.info("No unreleased songs are waiting for lyrics.");
   },
   cancel: (trackId?: string) => run(() => backend.transcribeCancel(trackId)),
+  pause: () => run(() => backend.transcribePause(true)),
+  resume: () => run(() => backend.transcribePause(false)),
+  redo: async () => {
+    const n = await run(() => backend.transcribeRedo());
+    if (n) toast.info(n === 1 ? "Transcribing 1 song again" : `Transcribing ${n} songs again`);
+  },
   download: (model: TranscribeModel) => run(() => backend.transcribeModelDownload(model)),
   cancelDownload: () => run(() => backend.transcribeModelCancel()),
   deleteModel: (model: TranscribeModel) => run(() => backend.transcribeModelDelete(model)),

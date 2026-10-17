@@ -716,6 +716,10 @@ export interface Backend {
   transcribeUnreleased(): Promise<number>;
   /** Cancel one song, or everything (no id). */
   transcribeCancel(trackId?: string): Promise<void>;
+  /** Pause or resume the batch (kept across a restart). */
+  transcribePause(paused: boolean): Promise<void>;
+  /** Songs done with another model while the chosen one downloaded, again with it. */
+  transcribeRedo(): Promise<number>;
   /** The song was transcribed and no words were found. */
   transcribeFoundNothing(trackId: string): Promise<boolean>;
 
@@ -1401,6 +1405,8 @@ export function createTauriBackend(): Backend {
     transcribeAlbum: (albumId) => call("transcribe_album", { albumId }),
     transcribeUnreleased: () => call("transcribe_unreleased"),
     transcribeCancel: (trackId) => call("transcribe_cancel", { trackId: trackId ?? null }),
+    transcribePause: (paused) => call("transcribe_pause", { paused }),
+    transcribeRedo: () => call("transcribe_redo"),
     transcribeFoundNothing: (trackId) => call("transcribe_found_nothing", { trackId }),
     lyricsShareInfo: (trackId) => call("lyrics_share_info", { trackId }),
     lyricsShareReviewed: (trackId) => call("lyrics_share_reviewed", { trackId }),

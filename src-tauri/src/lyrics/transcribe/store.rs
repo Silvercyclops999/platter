@@ -151,6 +151,11 @@ pub fn is_unreleased(c: &Connection, track_id: &str) -> AppResult<bool> {
     Ok(crate::db::release::track_unreleased(track_id, &album, format.as_deref(), &subs, matched, studio.as_deref(), version.as_deref(), mb))
 }
 
+/// The song's title, when it's in the library.
+pub fn title(c: &Connection, track_id: &str) -> AppResult<Option<String>> {
+    Ok(c.query_row("SELECT title FROM tracks WHERE id = ?1", params![track_id], |r| r.get(0)).optional()?)
+}
+
 /// A transcribed song was looked at for official synced lyrics now.
 pub fn official_checked(c: &Connection, track_id: &str, now: i64) -> AppResult<()> {
     c.execute(

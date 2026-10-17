@@ -74,6 +74,11 @@ pub struct RawToken {
     pub dtw_ms: Option<u32>,
 }
 
+/// Candidates decoded when a window is tried again at a higher temperature.
+pub const FALLBACK_CANDIDATES: i32 = 2;
+/// Temperature added per retry: 0.4 and 0.8, so at most two retries.
+pub const FALLBACK_STEP: f32 = 0.4;
+
 /// How stored transcriptions were timed. 1: a word started at its first
 /// token's attention time, which marks where that token ends (late by about
 /// one token). 2: [`token_times`].
@@ -258,7 +263,10 @@ pub mod whisper {
     use super::super::gpu;
     use super::super::lines::Segment;
     use super::super::model::ModelKind;
-    use super::{Progress, RawToken, RecognizeError, Recognizer, Step, Stop, segments_from_tokens, unavailable_here};
+    use super::{
+        FALLBACK_CANDIDATES, FALLBACK_STEP, Progress, RawToken, RecognizeError, Recognizer, Step, Stop, segments_from_tokens,
+        unavailable_here,
+    };
 
     /// whisper.cpp, keeping the last model loaded between songs.
     #[derive(Default)]
@@ -344,7 +352,11 @@ pub mod whisper {
             let mut state = ctx.create_state().map_err(|e| RecognizeError::Failed(e.to_string()))?;
             progress(Step::Percent(0));
 
-            let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
+            // A window the model is unsure of is decoded again hotter; on
+            // music that happens often, so it's capped at two more tries with
+            // two candidates each (the library's default is five of five).
+            let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: FALLBACK_CANDIDATES });
+            p.set_temperature_inc(FALLBACK_STEP);
             p.set_n_threads(threads as i32);
             p.set_language(Some(language));
             p.set_token_timestamps(true);
@@ -370,7 +382,14 @@ pub mod whisper {
             }
             p.set_progress_callback_safe(move |pct: i32| progress(Step::Percent(pct.clamp(0, 100) as u8)));
 
+            let started = std::time::Instant::now();
             let res = state.full(p, pcm);
+            tracing::info!(
+                audio_s = pcm.len() / 16_000,
+                full_ms = started.elapsed().as_millis() as u64,
+                threads,
+                "speech model run"
+            );
             if cancel.load(Ordering::Relaxed) {
                 return Err(RecognizeError::Cancelled);
             }

@@ -17,6 +17,8 @@ export interface MockTranscribeHooks {
   save: (trackId: string, text: string, model: TranscribeModel) => void;
   albumTracks: (albumId: string) => string[];
   unreleasedTracks: () => string[];
+  /** A song's title. */
+  title?: (trackId: string) => string | undefined;
 }
 
 const SIZES: Record<TranscribeModel, number> = { small: 190_098_681, medium: 539_225_533, turbo: 574_041_195 };
@@ -50,10 +52,16 @@ export class MockTranscribe {
   gpuCard: string | undefined = undefined;
   /** Seconds per song measured here, by model and device. */
   speeds: Partial<Record<`${TranscribeModel}/${"gpu" | "cpu"}`, number>> = {};
+  /** Music is playing: reading a song waits for it (test hook). */
+  playing = false;
+  /** The batch is paused by the user. */
+  userPaused = false;
+  /** Songs done with a model other than the chosen one. */
+  private otherModel = new Map<string, TranscribeModel>();
 
   private installed = new Set<TranscribeModel>();
   private download: { kind: TranscribeModel; done: number; cancelled: boolean } | null = null;
-  private queue: { trackId: string; background: boolean }[] = [];
+  private queue: { trackId: string; background: boolean; redo?: boolean; now?: boolean }[] = [];
   private current: TranscribeStatus["current"];
   private batch = { done: 0, total: 0 };
   private error: TranscribeStatus["error"];
@@ -81,6 +89,23 @@ export class MockTranscribe {
     this.secsPerSong = undefined;
     this.gpuCard = undefined;
     this.speeds = {};
+    this.playing = false;
+    this.userPaused = false;
+    this.otherModel.clear();
+  }
+
+  /** Installs a model straight away (tests). */
+  install(kind: TranscribeModel) {
+    this.installed.add(kind);
+    this.emit();
+  }
+
+  /** The model a song uses now: the chosen one, else an installed one while it downloads. */
+  private runModel(): TranscribeModel | undefined {
+    const chosen = this.model();
+    if (this.installed.has(chosen)) return chosen;
+    if (this.download?.kind !== chosen) return undefined;
+    return (["turbo", "medium", "small"] as const).find((k) => this.installed.has(k));
   }
 
   /** The card in use: one was found and the setting is Auto. */
@@ -117,7 +142,40 @@ export class MockTranscribe {
       secsPerSong: this.batch.total > 1 ? this.secsPerSong : undefined,
       paused: this.busy && this.batch.total > 0 ? "busy" : undefined,
       error: this.error,
+      userPaused: this.userPaused,
+      redo: this.redoInfo(),
     };
+  }
+
+  private redoInfo(): NonNullable<TranscribeStatus["redo"]> {
+    const chosen = this.model();
+    const out: NonNullable<TranscribeStatus["redo"]> = [];
+    for (const m of this.otherModel.values()) {
+      if (m === chosen) continue;
+      const r = out.find((x) => x.model === m);
+      if (r) r.count++;
+      else out.push({ model: m, count: 1 });
+    }
+    return out;
+  }
+
+  pause(paused: boolean) {
+    this.userPaused = paused;
+    this.emit();
+    this.pump();
+  }
+
+  redo(): number {
+    this.usable();
+    const chosen = this.model();
+    if (!this.installed.has(chosen)) this.refuse("Wait for the model download to finish first.");
+    const ids = [...this.otherModel.entries()].filter(([, m]) => m !== chosen).map(([id]) => id);
+    const fresh = ids.filter((id) => !this.queue.some((j) => j.trackId === id) && this.current?.trackId !== id);
+    this.queue.push(...fresh.map((trackId) => ({ trackId, background: true, redo: true })));
+    this.batch.total += fresh.length;
+    this.emit();
+    this.pump();
+    return fresh.length;
   }
 
   private emit() {
@@ -206,7 +264,7 @@ export class MockTranscribe {
     const model = this.model();
     if (!this.installed.has(model) && !this.download) this.downloadModel(model);
     const fresh = ids.filter((id) => this.current?.trackId !== id && !this.queue.some((j) => j.trackId === id));
-    const jobs = fresh.map((trackId) => ({ trackId, background }));
+    const jobs = fresh.map((trackId) => ({ trackId, background, now: front }));
     if (front) this.queue.unshift(...jobs);
     else if (background) this.queue.push(...jobs);
     else {
@@ -247,19 +305,28 @@ export class MockTranscribe {
 
   private pump() {
     if (this.running) return;
-    const model = this.model();
+    const model = this.runModel() ?? this.model();
     let job: { trackId: string; background: boolean } | undefined;
     if (this.current?.stage === "waitingForModel") {
       if (!this.installed.has(model)) return;
       job = { trackId: this.current.trackId, background: this.current.background };
     } else if (this.current) return;
-    else job = this.queue.shift();
+    else {
+      // Paused: only songs asked for one at a time.
+      const at = this.userPaused ? this.queue.findIndex((j) => j.now) : this.queue.length ? 0 : -1;
+      job = at < 0 ? undefined : this.queue.splice(at, 1)[0];
+      if (!job && this.userPaused && this.queue.length) {
+        this.emit();
+        return;
+      }
+    }
     if (!job) {
       this.batch = { done: 0, total: 0 };
       this.emit();
       return;
     }
-    this.current = { trackId: job.trackId, stage: "reading", percent: 0, background: job.background };
+    this.current = { trackId: job.trackId, stage: "reading", percent: 0, background: job.background, model, title: this.hooks.title?.(job.trackId) };
+    if (this.playing) this.current.waitingForPlayback = true;
     if (!this.installed.has(model)) {
       this.current.stage = "waitingForModel";
       this.emit();
@@ -277,15 +344,19 @@ export class MockTranscribe {
         this.pump();
         return;
       }
-      if (pct > 100) return this.finish(job.trackId, job.background);
-      this.current = { ...this.current, stage: "transcribing", percent: pct };
+      if (this.playing) {
+        this.hooks.later(this.stepMs, () => step(pct));
+        return;
+      }
+      if (pct > 100) return this.finish(job.trackId, job.background, model);
+      this.current = { ...this.current, stage: "transcribing", percent: pct, waitingForPlayback: undefined };
       this.emit();
       this.hooks.later(this.stepMs, () => step(pct + 25));
     };
     this.hooks.later(this.stepMs, () => step(0));
   }
 
-  private finish(trackId: string, background: boolean) {
+  private finish(trackId: string, background: boolean, model: TranscribeModel) {
     this.running = false;
     this.current = undefined;
     this.batch.done = Math.min(this.batch.total, this.batch.done + 1);
@@ -295,8 +366,10 @@ export class MockTranscribe {
       this.error = { kind: "transcribe", message: "Transcription failed for this song.", trackId };
     } else if (!skip) {
       const found = !this.silent.has(trackId);
-      if (found) this.hooks.save(trackId, CANNED_LRC, this.model());
+      if (found) this.hooks.save(trackId, CANNED_LRC, model);
       else this.empty.add(trackId);
+      if (model !== this.model()) this.otherModel.set(trackId, model);
+      else this.otherModel.delete(trackId);
       this.hooks.emitDone(trackId, found);
     }
     this.emit();

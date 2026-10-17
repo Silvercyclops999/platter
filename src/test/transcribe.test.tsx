@@ -17,7 +17,7 @@ import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { LyricsPane } from "../shell/LyricsView";
 import { stageText } from "../shell/TranscribeOffer";
 import { SettingsPage } from "../pages/SettingsPage";
-import { batchNote, gpuNote, speedNote, transcribeNote } from "../pages/TranscribeSettings";
+import { batchNote, gpuNote, modelNote, paceNote, speedNote, transcribeNote } from "../pages/TranscribeSettings";
 import { clearLyricsCache, lyricsSourceLabel } from "../shell/lyrics";
 import { LyricsEditorHost } from "../shell/LyricsEditor";
 import { useLyricsEditor } from "../stores/lyricsEditor";
@@ -109,7 +109,7 @@ describe("Settings", () => {
     mock.transcribe.stepMs = 30;
     render(<SettingsPage />);
     await userEvent.click(await within(settingRow("transcribeUnreleased")).findByRole("button", { name: "Transcribe now" }));
-    await within(settingRow("transcribeUnreleased")).findByText(/Transcribing: \d+ of \d+ songs\./);
+    await within(settingRow("transcribeUnreleased")).findByText(/Transcribing( “.+”)?: \d+ of \d+ songs\./);
     await userEvent.click(within(settingRow("transcribeUnreleased")).getByRole("button", { name: "Cancel" }));
     await within(settingRow("transcribeUnreleased")).findByRole("button", { name: "Transcribe now" });
   });
@@ -158,7 +158,7 @@ describe("Settings", () => {
     // The model picker says Medium is slower and harder on the processor; nothing is picked by default.
     expect(DEFAULT_SETTINGS.transcribeModel).toBe(null);
     expect(settingRow("transcribeModel")).toHaveTextContent(/Medium is .*much slower and works the processor much harder/);
-    expect(within(settingRow("transcribeModel")).getByRole("option", { name: /Medium \(slower, much harder on the processor\)/ })).toBeInTheDocument();
+    expect(within(settingRow("transcribeModel")).getByRole("option", { name: "Medium" })).toBeInTheDocument();
     await mock.settingsSet({ transcribeProcessor: "light", transcribePauseBusy: true });
   });
 
@@ -175,14 +175,16 @@ describe("Settings", () => {
     expect(row).toHaveTextContent("This device only.");
     const model = within(settingRow("transcribeModel")).getByRole("combobox", { name: "Speech model" });
     await waitFor(() => expect(model).toHaveValue("turbo"));
-    expect(within(model).getByRole("option", { name: /^Turbo .*a few seconds per song on your graphics card$/ })).toBeInTheDocument();
+    expect(within(model).getByRole("option", { name: "Turbo (best for graphics cards)" })).toBeInTheDocument();
+    expect(settingRow("transcribeModel")).toHaveTextContent("a few seconds per song on your graphics card.");
     expect(within(settingRow("transcribeModel")).getByRole("button", { name: `Download ${modelSize(574_041_195)}` })).toBeInTheDocument();
     // Off: the processor, Small by default, and the card named as unused.
     await userEvent.selectOptions(use, "off");
     await waitFor(async () => expect((await mock.settingsGet()).transcribeGpu).toBe("off"));
     await within(row).findByText("Uses the processor. Your graphics card (NVIDIA GeForce RTX 5090) isn't used.");
     await waitFor(() => expect(model).toHaveValue("small"));
-    expect(within(model).getByRole("option", { name: /^Small .*a few minutes per song on the processor$/ })).toBeInTheDocument();
+    expect(within(model).getByRole("option", { name: "Small" })).toBeInTheDocument();
+    await within(settingRow("transcribeModel")).findByText(/a few minutes per song on the processor\./);
   });
 
   it("keeps Small on a computer without a graphics card and a model someone picked", async () => {
@@ -230,9 +232,94 @@ describe("Settings", () => {
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "offline" })).toMatch(/can't be reached/);
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "busy" })).toBe("2 of 9 songs. Paused while your computer is busy.");
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 170 })).toBe("Transcribing: 2 of 9 songs, about 3 minutes per song.");
-    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 40 })).toBe("Transcribing: 2 of 9 songs, about 1 minute per song.");
+    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 40 })).toBe("Transcribing: 2 of 9 songs, about 40 seconds per song.");
+    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 20 })).toBe("Transcribing: 2 of 9 songs, about 20 seconds per song.");
     expect(modelSize(539_225_533)).toBe("514 MB");
     expect(modelSize(1_600_000_000)).toBe("1.5 GB");
+  });
+});
+
+describe("Settings: batch pause, model switch and speed", () => {
+  it("keeps the model picker's labels short and puts size and speed under it", async () => {
+    mock.transcribe.gpuCard = "NVIDIA GeForce RTX 5090";
+    mock.transcribe.speeds = { "medium/gpu": 12 };
+    await turnOn({ transcribeModel: "medium" });
+    render(<SettingsPage />);
+    const model = await within(await waitFor(() => settingRow("transcribeModel"))).findByRole("combobox", { name: "Speech model" });
+    expect(within(model).getAllByRole("option").map((o) => o.textContent)).toEqual(["Small", "Medium", "Turbo (best for graphics cards)"]);
+    await within(settingRow("transcribeModel")).findByText(
+      `${modelSize(539_225_533)}, about 12 seconds per song on your graphics card. Turbo is faster and more accurate on your graphics card.`,
+    );
+    const base = useTranscribe.getState().status!;
+    expect(modelNote({ ...base, gpu: undefined, model: "small" })).toBe(`${modelSize(190_098_681)}, a few minutes per song on the processor.`);
+    expect(paceNote(20)).toBe("about 20 seconds per song");
+    expect(paceNote(170)).toBe("about 3 minutes per song");
+  });
+
+  it("pauses and resumes the batch, keeping its progress and queue", async () => {
+    await turnOn();
+    mock.transcribe.install("small");
+    mock.transcribe.stepMs = 20;
+    render(<SettingsPage />);
+    const row = await waitFor(() => settingRow("transcribeUnreleased"));
+    await userEvent.click(await within(row).findByRole("button", { name: "Transcribe now" }));
+    await userEvent.click(await within(row).findByRole("button", { name: "Pause" }));
+    await within(row).findByText(/\d+ of \d+ songs\. Paused\./);
+    const held = useTranscribe.getState().status!;
+    expect(held.userPaused).toBe(true);
+    expect(held.batch.total).toBeGreaterThan(1);
+    // Nothing more is done while paused.
+    await waitFor(() => expect(useTranscribe.getState().status?.current).toBeUndefined());
+    const done = useTranscribe.getState().status!.batch.done;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(useTranscribe.getState().status!.batch.done).toBe(done);
+    expect(within(row).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    await userEvent.click(within(row).getByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(useTranscribe.getState().status!.batch.done).toBeGreaterThan(done));
+    await userEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+    await within(row).findByRole("button", { name: "Transcribe now" });
+  });
+
+  it("says which song it's on, and when it waits for music that's playing", async () => {
+    await turnOn();
+    mock.transcribe.install("small");
+    mock.transcribe.stepMs = 20;
+    mock.transcribe.playing = true;
+    render(<SettingsPage />);
+    const row = await waitFor(() => settingRow("transcribeUnreleased"));
+    await userEvent.click(await within(row).findByRole("button", { name: "Transcribe now" }));
+    await within(row).findByText(/^Waiting: music is playing\. \d+ of \d+ songs\./);
+    mock.transcribe.playing = false;
+    await waitFor(() => {
+      const c = useTranscribe.getState().status?.current;
+      const title = mock.fx.tracks.find((t) => t.id === c?.trackId)?.title;
+      expect(title).toBeTruthy();
+      expect(row).toHaveTextContent(`Transcribing “${title}”:`);
+    });
+    await userEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+  });
+
+  it("keeps going with the installed model while a new one downloads, then switches and offers a redo", async () => {
+    await turnOn({ transcribeModel: "small" });
+    mock.transcribe.install("small");
+    mock.transcribe.stepMs = 15;
+    render(<SettingsPage />);
+    const row = await waitFor(() => settingRow("transcribeUnreleased"));
+    await userEvent.click(await within(row).findByRole("button", { name: "Transcribe now" }));
+    // A bigger model is picked and downloads; songs keep coming with Small.
+    await mock.settingsSet({ transcribeModel: "medium" });
+    await loadSettings();
+    await mock.transcribeModelDownload("medium");
+    await within(row).findByText(/Using the small model until the medium model finishes downloading, then the rest switch to it\./);
+    await waitFor(() => expect(useTranscribe.getState().status?.models.find((m) => m.kind === "medium")?.installed).toBe(true), { timeout: 3000 });
+    await waitFor(() => expect(useTranscribe.getState().status?.current?.model).toBe("medium"), { timeout: 3000 });
+    // Songs done with Small can be done again with Medium.
+    const redo = await within(row).findByRole("button", { name: /^Redo \d+ songs?$/ });
+    expect(row).toHaveTextContent(/done with the small model while the medium model downloaded/);
+    await userEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(redo);
+    await waitFor(() => expect(useTranscribe.getState().status?.batch.total).toBeGreaterThan(0));
+    await waitFor(() => expect(useTranscribe.getState().status?.redo ?? []).toEqual([]), { timeout: 5000 });
   });
 });
 

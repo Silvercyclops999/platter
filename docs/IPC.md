@@ -1562,6 +1562,8 @@ nothing. There's no default service.
 | `transcribe_album` | `{ albumId }` | songs queued (number) |
 | `transcribe_unreleased` | – | songs queued (number) |
 | `transcribe_cancel` | `{ trackId: string \| null }` | – |
+| `transcribe_pause` | `{ paused: bool }` | – |
+| `transcribe_redo` | – | songs queued (number) |
 | `transcribe_found_nothing` | `{ trackId }` | bool |
 
 Events: `transcribe://status` → `TranscribeStatus` on every change (progress
@@ -1581,7 +1583,7 @@ installer.
 
 `TranscribeStatus = { enabled, available, unavailableReason?, model,
 modelPicked, gpu?, gpuFound?, models, current?, queued, upNext?, batch,
-secsPerSong?, paused?, error? }`. `available` is false in a build
+secsPerSong?, paused?, error?, userPaused, redo }`. `available` is false in a build
 without the recognizer, or on an x86 processor without AVX2. `model` is the
 model used: `transcribeModel` when one is picked (`modelPicked`), else
 `turbo` while a graphics card is in use and `small` without. `gpu` names the
@@ -1591,7 +1593,7 @@ for each model, so the size shows before downloading; `secsPerSong` is how
 long a 3.5 minute song took lately with that model on the device used now
 (the graphics card or the processor), from songs of 30 seconds or more
 transcribed here (kept in `<app data>/models/speeds.json`). `current = { trackId, stage, percent,
-background, quietSecs? }`, stage one of `waitingForModel`, `reading`,
+background, quietSecs?, title?, waitingForPlayback?, model }`, stage one of `waitingForModel`, `reading`,
 `decoding`, `loading` (the helper is loading the model), `transcribing`
 (percent counts the last; the speech library reports it once per 30 s
 stretch of the song). `quietSecs` appears once the stage and percent haven't
@@ -1602,7 +1604,42 @@ song of a run of more than one takes, the rest between songs included, once
 one is done. `paused` is `battery`, `offline` or `busy` (songs nobody is
 waiting on only; `battery` for the background batch only). `error = { kind,
 message, trackId? }` with kind `download`, `checksum`, `disk` or
-`transcribe`; it clears when something new starts.
+`transcribe`; it clears when something new starts. `title` is the song's
+title. `waitingForPlayback` is true while reading the song waits because the
+playing or next song is downloading. `model` is the model the song uses: the
+chosen one, or while that one downloads, an installed one (the bigger first),
+so the batch keeps going instead of waiting. `redo` lists `{ model, count }`
+for songs done this session with a model other than the chosen one;
+`transcribe_redo` queues them again with the chosen model once it's installed
+(it fails with `invalid` before). Results from the older model stay until the
+new ones replace them.
+
+`transcribe_pause` with `paused: true` pauses the batch (`userPaused`): the
+song in progress stops at the speech library's next check and goes back in
+the queue, and the queue and `batch` stay. Songs asked for one at a time
+still run. A paused batch is kept in the database and comes back paused after
+a restart. `paused: false` carries on. `transcribe_cancel` without a track
+clears it.
+
+Before transcribing any song, when `lyricsOfficialFirst` is on and the check
+against the recording can run, the core gathers the song's synced lyrics
+(the server's, files next to the song, LRCLIB's lookup and search hits) and
+checks those not judged yet. If one matches, the song isn't transcribed: the
+match is what the lyrics view shows. A song whose lyrics choice is the
+transcription is always transcribed. Each week, at idle, transcribed songs
+are looked at again the same way; a match then shows in place of the
+transcription, which stays under "Wrong lyrics?". A transcription is also
+given to the check, which measures its timing against a window of the song,
+and a steady offset is corrected like any checked lyrics.
+
+Word times come from whisper.cpp's attention alignment, which marks where
+each token ends; a word starts about one token's length earlier, never
+before the word before it. Transcriptions stored with the first timing
+(words at their first token's end, about a quarter second late) are moved
+into place once, at idle, from the stored word times without hearing the
+songs again; the timing each one was made with is kept in
+`lyrics_auto_timing`. Words the check heard with the old timing, and the
+offsets measured from them, were dropped in the same update.
 
 `transcribe_track` puts the song first and runs it now, battery or busy or
 not. A background song in progress is paused, not run beside it: it stops at
@@ -1695,8 +1732,10 @@ card fails. A helper that crashes while on the card moves transcription to the
 processor until Platter restarts. Vulkan comes with the graphics driver: the
 binary doesn't link the Vulkan loader, the helper opens it (`vulkan-1.dll`
 from System32, or `libvulkan.so.1`) only when allowed, and without it Platter
-starts and transcribes on the processor. On the card the processor only feeds
-it: one thread on `light`, two otherwise, at the same low priority, and the
+starts and transcribes on the processor. On the card the processor still makes the
+model's input, picks the words and lines them up with the audio: three
+threads on `light`, four otherwise (one starved the card), at the same low
+priority, and the
 busy pause (fullscreen games included) still applies. The lyrics check uses
 the transcription helper while on the card, so only one model is ever loaded
 on it and runs take turns. macOS works the same way with Metal (the card
@@ -3434,6 +3473,7 @@ The rest of the fields, with their defaults:
 | `lyricsCheckAudio` | bool, true | Check lyrics against the song with the speech model, once it's installed. Off shows lyrics as not checked. This device only. |
 | `lyricsFixTiming` | bool, true | Checked lyrics are moved or stretched to the timing measured in the song. This device only. |
 | `lyricsReleasedForVersions` | bool, false | Other versions (unreleased, alternate, live, version tag) take lyrics found for the released version without asking. |
+| `lyricsOfficialFirst` | bool, true | Before a song is transcribed, its synced lyrics from every source are checked against it, and a match is shown instead. Transcribed songs are looked at again weekly. |
 | `fullWindowHideControls` | bool, true | The expanded view fades its header after 3 s without mouse movement or a key. |
 | `readFileTags` | bool, true | Read explicit, version and edition tags from the files in the background. Off stops the scan; tags already read stay. This device only. See File tags above. |
 | `musicFolder` | string, `""` | Where this computer sees the server's music files. Empty: tag details are view only. Set with `tagedit_pick_music_folder` or `tagedit_set_music_folder`, not `settings_set`. This device only. |

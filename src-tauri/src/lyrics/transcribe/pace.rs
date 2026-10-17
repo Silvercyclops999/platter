@@ -47,10 +47,13 @@ pub fn thread_budget(cores: usize, usage: ProcessorUse, now: bool) -> usize {
     want.clamp(1, half)
 }
 
-/// Threads for a run on the graphics card, where the processor only feeds
-/// it: one on Light, two otherwise (never more than half the cores).
+/// Threads for a run on the graphics card. The processor still turns the
+/// audio into the model's input, picks each word and lines the words up
+/// with the audio; with one thread that starved the card (a song took 10
+/// to 20 s on a fast card). The work is short, so a few threads at idle
+/// priority: three on Light, four otherwise (never more than half the cores).
 pub fn gpu_thread_budget(cores: usize, usage: ProcessorUse) -> usize {
-    let want = if usage == ProcessorUse::Light { 1 } else { 2 };
+    let want = if usage == ProcessorUse::Light { 3 } else { 4 };
     want.clamp(1, (cores / 2).max(1))
 }
 

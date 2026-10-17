@@ -136,6 +136,14 @@ pub struct CurrentJob {
     /// long enough to say so (the computer may be busy).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quiet_secs: Option<u32>,
+    /// The song's title, when the library has it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Reading the song waits while music is playing (playback's downloads come first).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub waiting_for_playback: bool,
+    /// The model this song uses (another than the chosen one while that downloads).
+    pub model: ModelKind,
 }
 
 /// Progress through the songs asked for since the queue was last empty.
@@ -182,6 +190,19 @@ pub struct TranscribeStatus {
     pub paused: Option<PauseReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<Failure>,
+    /// The user paused the batch (songs asked for one at a time still run).
+    pub user_paused: bool,
+    /// Songs done with another model than the chosen one since this run
+    /// started (it was downloading): "Redo" offers them again.
+    pub redo: Vec<RedoInfo>,
+}
+
+/// Songs transcribed with a model other than the one chosen now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedoInfo {
+    pub model: ModelKind,
+    pub count: usize,
 }
 
 /// A song's file, ready to decode.
@@ -202,6 +223,22 @@ pub trait SongReader: Send + Sync {
         let a = self.read(track_id, cancel).await?;
         Ok((a.bytes.len() as u64 <= max_bytes).then_some(a))
     }
+
+    /// Playback is using the connection, so reads wait for it.
+    fn yielding(&self) -> bool {
+        false
+    }
+}
+
+/// Where a paused batch is kept so it survives a restart.
+const PAUSED_KEY: &str = "transcribe.pausedBatch";
+
+/// A paused batch as kept.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+struct PausedBatch {
+    ids: Vec<String>,
+    done: usize,
+    total: usize,
 }
 
 /// Whether a song already has lyrics from another source (Plex, LRCLIB when
@@ -270,6 +307,8 @@ struct Job {
     check_other: bool,
     /// The single song someone is waiting on ("Transcribe this song").
     now: bool,
+    /// Done again with the chosen model (it was done with another).
+    redo: bool,
 }
 
 struct Download {
@@ -309,6 +348,12 @@ struct State {
     /// A background song's decoded audio, kept when a song someone asked
     /// for stopped it, so it needn't be read again.
     held: Option<(String, Arc<Vec<f32>>)>,
+    /// The user paused the batch.
+    user_paused: bool,
+    /// Songs done this session with a model other than the chosen one.
+    other_model: Vec<(String, ModelKind)>,
+    /// The paused batch as last kept in the database.
+    pause_kept: Option<String>,
 }
 
 /// The parts the service works with.
@@ -409,7 +454,10 @@ impl Transcriber {
     /// Start the worker on the current runtime.
     pub fn spawn(&self) {
         let me = self.clone();
-        tokio::spawn(async move { me.run().await });
+        tokio::spawn(async move {
+            me.restore_pause().await;
+            me.run().await
+        });
         let me = self.clone();
         tokio::spawn(async move { me.upkeep().await });
     }
@@ -576,6 +624,96 @@ impl Transcriber {
         }
         st.batch = BatchProgress::default();
         st.paused = None;
+        st.user_paused = false;
+    }
+
+    /// Pause the batch: the song in progress stops at the speech library's
+    /// next check and goes back in the queue; the queue and progress stay,
+    /// across a restart too. Songs asked for one at a time still run.
+    pub fn pause(&self) {
+        self.inner.st.lock().user_paused = true;
+        self.inner.wake.notify_one();
+        self.emit(true);
+    }
+
+    /// Carry on with a paused batch.
+    pub fn resume(&self) {
+        self.inner.st.lock().user_paused = false;
+        self.inner.wake.notify_one();
+        self.emit(true);
+    }
+
+    /// The batch as kept while paused (None: nothing to keep).
+    fn pause_snapshot(st: &State) -> Option<PausedBatch> {
+        if !st.user_paused {
+            return None;
+        }
+        let mut ids: Vec<String> = st.current.iter().map(|r| r.job.track_id.clone()).collect();
+        ids.extend(st.queue.iter().filter(|j| !j.now).map(|j| j.track_id.clone()));
+        ids.dedup();
+        (!ids.is_empty()).then_some(PausedBatch { ids, done: st.batch.done, total: st.batch.total })
+    }
+
+    /// Keeps the paused batch in the database when it changed.
+    fn keep_pause(&self) {
+        let body = {
+            let mut st = self.inner.st.lock();
+            let body = Self::pause_snapshot(&st).and_then(|p| serde_json::to_string(&p).ok()).unwrap_or_default();
+            if st.pause_kept.as_deref() == Some(body.as_str()) {
+                return;
+            }
+            st.pause_kept = Some(body.clone());
+            body
+        };
+        if let Err(e) = self.inner.deps.db.write(|c| crate::db::store::kv_set(c, PAUSED_KEY, &body)) {
+            tracing::warn!("paused transcription batch not kept: {e}");
+        }
+    }
+
+    /// A batch paused before the last restart comes back, still paused.
+    async fn restore_pause(&self) {
+        let kept = self.inner.deps.db.read_async(|c| crate::db::store::kv_get(c, PAUSED_KEY)).await.ok().flatten();
+        let Some(p) = kept.filter(|b| !b.is_empty()).and_then(|b| serde_json::from_str::<PausedBatch>(&b).ok()) else { return };
+        {
+            let mut st = self.inner.st.lock();
+            for id in &p.ids {
+                if !st.queue.iter().any(|j| &j.track_id == id) {
+                    st.queue.push_back(Job { track_id: id.clone(), background: true, check_other: true, now: false, redo: false });
+                }
+            }
+            st.batch = BatchProgress { done: p.done.min(p.total), total: p.total.max(p.ids.len()) };
+            st.user_paused = true;
+            st.pause_kept = serde_json::to_string(&p).ok();
+        }
+        self.inner.wake.notify_one();
+        self.emit(true);
+    }
+
+    /// Songs done with another model than the chosen one go again with it.
+    /// Returns how many were queued.
+    pub fn redo_other_model(&self) -> AppResult<usize> {
+        self.check_background()?;
+        let added = {
+            let mut st = self.inner.st.lock();
+            let chosen = self.model(&st);
+            if self.inner.deps.models.installed(chosen).is_none() {
+                return Err(AppError::Invalid("Wait for the model download to finish first.".into()));
+            }
+            let ids: Vec<String> = st.other_model.iter().filter(|(_, k)| *k != chosen).map(|(id, _)| id.clone()).collect();
+            let mut added = 0;
+            for id in ids {
+                if st.queue.iter().any(|j| j.track_id == id) || st.current.as_ref().is_some_and(|r| r.job.track_id == id) {
+                    continue;
+                }
+                st.queue.push_back(Job { track_id: id, background: true, check_other: false, now: false, redo: true });
+                added += 1;
+            }
+            st.batch.total += added;
+            added
+        };
+        self.inner.wake.notify_one();
+        self.emit(true);
+        Ok(added)
     }
 
     pub fn status(&self) -> TranscribeStatus {
@@ -622,6 +760,18 @@ impl Transcriber {
             secs_per_song: (st.batch.total > 1 && st.pace.1 > 0).then(|| (st.pace.0.as_secs() / st.pace.1 as u64) as u32),
             paused: st.paused,
             error: st.error.clone(),
+            user_paused: st.user_paused,
+            redo: {
+                let chosen = ModelKind::chosen(st.model, on_gpu);
+                let mut out: Vec<RedoInfo> = Vec::new();
+                for (_, k) in st.other_model.iter().filter(|(_, k)| *k != chosen) {
+                    match out.iter_mut().find(|r| r.model == *k) {
+                        Some(r) => r.count += 1,
+                        None => out.push(RedoInfo { model: *k, count: 1 }),
+                    }
+                }
+                out
+            },
         }
     }
 
@@ -637,6 +787,7 @@ impl Transcriber {
             st.last_emit = Some(now);
             st.dirty = false;
         }
+        self.keep_pause();
         let s = self.status();
         self.inner.st.lock().quiet_said = s.current.as_ref().and_then(|c| c.quiet_secs).map(|q| q / 60);
         self.inner.deps.events.status(&s);
@@ -810,7 +961,7 @@ impl Transcriber {
                     st.queue.remove(pos);
                     st.batch.total = st.batch.total.saturating_sub(1);
                 }
-                let job = Job { track_id: id, background, check_other, now: front };
+                let job = Job { track_id: id, background, check_other, now: front, redo: false };
                 if front {
                     fronts.push(job);
                 } else if background {
@@ -945,7 +1096,15 @@ impl Transcriber {
             }
             let job = {
                 let mut st = self.inner.st.lock();
-                let job = if st.enabled { st.queue.pop_front() } else { None };
+                // Paused: only songs asked for one at a time.
+                let at = if !st.enabled {
+                    None
+                } else if st.user_paused {
+                    st.queue.iter().position(|j| j.now)
+                } else {
+                    (!st.queue.is_empty()).then_some(0)
+                };
+                let job = at.and_then(|i| st.queue.remove(i));
                 job.map(|j| {
                     let background_left = !j.now || st.queue.iter().any(|q| !q.now);
                     (j, background_left)
@@ -977,6 +1136,21 @@ impl Transcriber {
                     notified.await;
                 }
             }
+        }
+    }
+
+    /// Whether reading the song waits for playback (said while reading only).
+    fn set_waiting(&self, yielding: bool) {
+        let changed = {
+            let mut st = self.inner.st.lock();
+            let Some(r) = st.current.as_mut() else { return };
+            let w = yielding && r.job.stage == Stage::Reading;
+            let changed = r.job.waiting_for_playback != w;
+            r.job.waiting_for_playback = w;
+            changed
+        };
+        if changed {
+            self.emit(true);
         }
     }
 
@@ -1019,6 +1193,9 @@ impl Transcriber {
                 percent: 0,
                 background: job.background,
                 quiet_secs: None,
+                title: self.inner.deps.db.read(|c| store::title(c, &job.track_id)).ok().flatten(),
+                waiting_for_playback: false,
+                model: self.model(&st),
             };
             st.current = Some(Running { job: current, cancel: cancel.clone(), moved: Instant::now() });
         }
@@ -1074,7 +1251,10 @@ impl Transcriber {
             if cancel.is_set() {
                 return Waited::Cancelled;
             }
-            let asked_for = self.inner.st.lock().queue.front().is_some_and(|j| j.now);
+            let asked_for = {
+                let st = self.inner.st.lock();
+                st.user_paused || st.queue.front().is_some_and(|j| j.now)
+            };
             if asked_for {
                 self.inner.st.lock().paused = None;
                 return Waited::GiveWay;
@@ -1126,8 +1306,11 @@ impl Transcriber {
                     } else if cancel.is_set() {
                         stop.give_way();
                     }
-                    let asked_for = !now
-                        && (me.inner.st.lock().queue.front().is_some_and(|j| j.now) || me.inner.deps.recognizer.wanted());
+                    let asked_for = !now && {
+                        let st = me.inner.st.lock();
+                        st.user_paused || st.queue.front().is_some_and(|j| j.now)
+                    } || !now && me.inner.deps.recognizer.wanted();
+                    me.set_waiting(me.inner.deps.songs.yielding());
                     let back = boosted.load(Ordering::Relaxed) && !me.inner.deps.pacer.away();
                     if (asked_for || back) && !stop.is_set() {
                         if back {
@@ -1159,7 +1342,7 @@ impl Transcriber {
             let id = id.clone();
             d.db.read_async(move |c| store::done(c, &id)).await.unwrap_or(false)
         };
-        if done_before {
+        if done_before && !job.redo {
             return Outcome::Skipped;
         }
         // Transcribed on another of the user's devices for this file.
@@ -1181,6 +1364,16 @@ impl Transcriber {
             if let Some(p) = d.models.installed(kind) {
                 break (p, kind);
             }
+            // While the chosen model downloads, an installed one carries on.
+            if downloading
+                && !job.redo
+                && let Some(other) = [ModelKind::Turbo, ModelKind::Medium, ModelKind::Small]
+                    .into_iter()
+                    .filter(|k| *k != kind)
+                    .find_map(|k| d.models.installed(k).map(|p| (p, k)))
+            {
+                break other;
+            }
             if !downloading {
                 // A failed download already said why; keep that message.
                 let said = self.inner.st.lock().error.as_ref().is_some_and(|e| e.kind != FailureKind::Transcribe);
@@ -1196,6 +1389,9 @@ impl Transcriber {
             }
         };
         let (model_path, kind) = path;
+        if let Some(r) = self.inner.st.lock().current.as_mut() {
+            r.job.model = kind;
+        }
         if !job.now {
             match self.wait_conditions(cancel, job.background).await {
                 Waited::Go => {}
@@ -1359,6 +1555,14 @@ impl Transcriber {
         };
         match saved {
             Ok(true) => {
+                {
+                    let mut st = self.inner.st.lock();
+                    let chosen = self.model(&st);
+                    st.other_model.retain(|(t, _)| *t != id);
+                    if kind != chosen {
+                        st.other_model.push((id.clone(), kind));
+                    }
+                }
                 // Official lyrics were looked for just before.
                 let (id2, now) = (id.clone(), now_s());
                 let _ = d.db.write_async(move |c| store::official_checked(c, &id2, now)).await;

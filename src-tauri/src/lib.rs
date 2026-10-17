@@ -1471,6 +1471,8 @@ pub fn run() {
             lyrics::transcribe::commands::transcribe_album,
             lyrics::transcribe::commands::transcribe_unreleased,
             lyrics::transcribe::commands::transcribe_cancel,
+            lyrics::transcribe::commands::transcribe_pause,
+            lyrics::transcribe::commands::transcribe_redo,
             lyrics::transcribe::commands::transcribe_found_nothing,
             db::commands::sync_status,
             db::commands::sync_now,

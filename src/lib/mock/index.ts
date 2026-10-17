@@ -551,6 +551,7 @@ export class MockBackend implements Backend {
       emitStatus: (s) => this.emit("transcribe://status", s),
       emitDone: (trackId, found) => this.emit("transcribe://done", { trackId, found }),
       later: (ms, fn) => this.later(ms, fn),
+      title: (id) => this.trackById(id)?.title,
       hasLyrics: (id) => {
         const t = this.trackById(id);
         const own = this.own.get(id);
@@ -4234,6 +4235,12 @@ export class MockBackend implements Backend {
   }
   transcribeCancel(trackId?: string) {
     return this.delay(() => this.transcribe.cancel(trackId));
+  }
+  transcribePause(paused: boolean) {
+    return this.delay(() => this.transcribe.pause(paused));
+  }
+  transcribeRedo() {
+    return this.delay(() => this.transcribe.redo());
   }
   transcribeFoundNothing(trackId: string) {
     return this.delay(() => this.transcribe.foundNothing(trackId));
