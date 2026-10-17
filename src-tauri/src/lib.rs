@@ -1500,6 +1500,8 @@ pub fn run() {
             db::commands::recents,
             stats::commands::stats_overview, stats::commands::stats_span, stats::commands::stats_moments, stats::commands::stats_days, stats::commands::stats_item, stats::commands::stats_month_recap, stats::commands::stats_play_ids, stats::commands::stats_compare_summary, stats::commands::stats_compare, stats::commands::stats_friends, stats::commands::stats_friend_remove, stats::commands::top_songs_index, stats::commands::top_songs_list, stats::commands::stats_wrapped,
             db::commands::playlist_page,
+            stats::commands::home_on_this_day,
+            stats::commands::home_time_travel,
             mixes::commands::mixes_home,
             mixes::commands::mix_page,
             mixes::commands::mix_refresh,

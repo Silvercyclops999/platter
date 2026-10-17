@@ -1,0 +1,54 @@
+/* On this day and Time travel: the cards share the mix art; the strip holds a year. */
+.history-art .mix-art__name {
+  font-size: clamp(13px, 11cqi, 22px);
+  letter-spacing: 0.01em;
+}
+
+/* The On this day page: one section per year, a plain numbered list. */
+.otd-page__sub { margin-top: calc(-1 * var(--space-2)); margin-bottom: var(--space-6); font-size: var(--font-size-md); color: var(--color-text-secondary); }
+.otd-page__empty { color: var(--color-text-secondary); }
+.otd-page__loading { width: 180px; }
+.otd-year + .otd-year { margin-top: var(--space-8); }
+.otd-year__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-3); }
+.otd-year__title { margin: 0; font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); font-variant-numeric: tabular-nums; }
+.otd-year__sub { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.otd-year__head > :last-child { margin-left: auto; align-self: center; }
+.otd-list { margin: 0; padding: 0; list-style: none; }
+.otd-row {
+  display: grid;
+  grid-template-columns: 28px 40px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+}
+.otd-row:hover { background: var(--color-bg-raised); }
+.otd-row__n { text-align: right; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.otd-row__text { display: flex; flex-direction: column; min-width: 0; }
+.otd-row__title {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.otd-row__title:hover { text-decoration: underline; }
+.otd-row__artist { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.otd-row__plays { color: var(--color-text-secondary); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+.otd-row__missing {
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--color-bg-raised);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+.otd-row.is-missing .otd-row__title,
+.otd-row.is-missing .art { opacity: 0.55; cursor: default; }
+.otd-row.is-missing .otd-row__title:hover { text-decoration: none; }
+@media (max-width: 560px) {
+  .otd-row { grid-template-columns: 24px 40px minmax(0, 1fr) auto; }
+  .otd-row__plays { display: none; }
+}

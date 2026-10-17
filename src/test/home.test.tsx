@@ -185,10 +185,13 @@ describe("home page", () => {
     await user.click(screen.getByRole("button", { name: "Albums" }));
     expect(shelfTitles()).toEqual(["Recently played", "Jump back in", "Recently added"]);
     await user.click(screen.getByRole("button", { name: "All" }));
-    // Five shelves, the three mix shelves, the release radar and New to you (those show on All only).
-    await waitFor(() => expect(shelfTitles()).toHaveLength(10));
+    // Five shelves, the three mix shelves, the release radar, New to you and Time travel (those show on All only).
+    // On this day depends on the demo history having plays on today's date, so it isn't counted.
+    const counted = () => shelfTitles().filter((t) => t !== "On this day");
+    await waitFor(() => expect(counted()).toHaveLength(11));
     expect(shelfTitles()).toContain("New to you");
     expect(shelfTitles()).toContain("Release radar");
+    expect(shelfTitles()).toContain("Time travel");
   });
 
   it("a chip with nothing to show says so", async () => {

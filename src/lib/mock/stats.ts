@@ -10,7 +10,11 @@ import type { Settings, Track } from "../types";
 import type {
   CompareResult,
   CompareSummary,
+  HistoryMix,
   ItemStats,
+  OnThisDay,
+  OnThisDayYear,
+  TimeTravel,
   MonthRecap,
   StatsItemKind,
   StatsMoments,
@@ -466,6 +470,84 @@ export class MockStats {
       out.set(y, (out.get(y) ?? 0) + 1);
     }
     return out;
+  }
+
+  /** Album covers for songs, distinct, at most four. */
+  private covers(ids: string[]): string[] {
+    const out: string[] = [];
+    for (const id of ids) {
+      const t = this.track(id);
+      const thumb = this.fx.albums.find((a) => a.id === t?.albumId)?.thumb ?? t?.thumb ?? null;
+      if (thumb && !out.includes(thumb)) out.push(thumb);
+      if (out.length >= 4) break;
+    }
+    return out;
+  }
+
+  /** The core's On this day: today's month and day in earlier years, busiest first (Feb 29 rules left to the core). */
+  onThisDay(today = localDay(new Date())): OnThisDay {
+    if (this.settings().homeOnThisDay === false) return { shown: false, date: today, years: [] };
+    const [ty, tm, td] = today.split("-").map(Number);
+    const byYear = new Map<number, MockPlay[]>();
+    for (const p of this.plays()) {
+      const d = new Date(p.at);
+      if (d.getMonth() + 1 !== tm || d.getDate() !== td || d.getFullYear() >= ty) continue;
+      byYear.set(d.getFullYear(), [...(byYear.get(d.getFullYear()) ?? []), p]);
+    }
+    const years = [...byYear.entries()].map(([year, plays]): OnThisDayYear => {
+      const t = this.tops(plays);
+      const songs = t.songs.slice(0, 50).map(([id, x]) => this.song(id, x));
+      // A song from another app's history that the library doesn't have.
+      if (year === Math.max(...byYear.keys())) {
+        songs.push({ key: "n:the night shift|paper moons", trackId: null, title: "Paper Moons", artist: "The Night Shift", album: "Lights Out", plays: 1, ms: 3 * MIN, unreleased: false, track: null });
+      }
+      const trackIds = songs.flatMap((s) => (s.trackId ? [s.trackId] : []));
+      return {
+        year,
+        date: `${year}-${String(tm).padStart(2, "0")}-${String(td).padStart(2, "0")}`,
+        plays: plays.length,
+        ms: plays.reduce((n, p) => n + p.ms, 0),
+        songs,
+        albums: t.albums.slice(0, 10).map(([id, x]) => this.album(id, x)),
+        trackIds,
+        covers: this.covers(trackIds),
+      };
+    });
+    years.sort((a, b) => b.plays - a.plays || b.ms - a.ms || b.year - a.year);
+    return { shown: true, date: today, years };
+  }
+
+  /** The core's Time travel: a mix per release decade from your most played, plus your busiest year. */
+  timeTravel(): TimeTravel {
+    if (this.settings().homeTimeTravel === false) return { shown: false, yourYear: null, decades: [] };
+    const albumYear = new Map(this.fx.albums.map((a) => [a.id, a.year ?? 0]));
+    const ranked = this.tops(this.plays()).songs;
+    const decades = new Map<number, { ids: string[]; plays: number }>();
+    for (const a of this.fx.albums) if (a.year && a.year >= 1900) decades.set(Math.floor(a.year / 10) * 10, { ids: [], plays: 0 });
+    for (const [id, x] of ranked) {
+      const y = albumYear.get(this.track(id)?.albumId ?? "") ?? 0;
+      const slot = y >= 1900 ? decades.get(Math.floor(y / 10) * 10) : undefined;
+      if (slot && slot.ids.length < 50) {
+        slot.ids.push(id);
+        slot.plays += x.plays;
+      }
+    }
+    const mixes: HistoryMix[] = [];
+    for (const [dec, slot] of [...decades.entries()].sort((a, b) => a[0] - b[0])) {
+      for (const t of this.fx.tracks) {
+        if (slot.ids.length >= 50) break;
+        const y = albumYear.get(t.albumId) ?? 0;
+        if (y >= dec && y <= dec + 9 && !slot.ids.includes(t.id)) slot.ids.push(t.id);
+      }
+      if (slot.ids.length) mixes.push({ id: `decade:${dec}`, kind: "decade", year: dec, plays: slot.plays, trackIds: slot.ids, covers: this.covers(slot.ids) });
+    }
+    const best = [...this.years().entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
+    let yourYear: HistoryMix | null = null;
+    if (best) {
+      const ids = this.playIds({ from: `${best[0]}-01-01`, to: `${best[0]}-12-31` }, "songs", 50);
+      if (ids.length) yourYear = { id: `year:${best[0]}`, kind: "year", year: best[0], plays: best[1], trackIds: ids, covers: this.covers(ids) };
+    }
+    return { shown: true, yourYear, decades: mixes };
   }
 
   /** The core's rules: lists from 30 plays, this year from December 1, Home from December to January 15. */

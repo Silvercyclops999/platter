@@ -1050,6 +1050,10 @@ export interface Settings {
   deviceDeleteRemoved: boolean;
   /** Home shows the made-for-you and mood and genre mix shelves. */
   homeMixes: boolean;
+  /** Home's On this day shelf: what you played on this date in earlier years. */
+  homeOnThisDay: boolean;
+  /** Home's Time travel shelf: a mix per decade and your year. */
+  homeTimeTravel: boolean;
   /** How much of a mix is favourites. */
   mixVariety: MixVariety;
   /** Artist ids left out of mixes and radio. */
@@ -1611,6 +1615,8 @@ export const DEFAULT_SETTINGS: Settings = {
   deviceFormat: "original",
   deviceDeleteRemoved: false,
   homeMixes: true,
+  homeOnThisDay: true,
+  homeTimeTravel: true,
   mixVariety: "balanced",
   mixExcludeArtists: [],
   mixExcludeGenres: [],

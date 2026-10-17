@@ -18,6 +18,7 @@ import { LikedTile, ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
 import { MixCard } from "./MixCard";
 import { RadarShelf } from "./ReleaseRadar";
 import { NewToYouShelf } from "./NewToYou";
+import { OnThisDayShelf, TimeTravelShelf } from "./HistoryShelves";
 import { TopSongsPromo } from "./TopSongsPromo";
 import { useLikes } from "../stores/likes";
 import "./home.css";
@@ -287,6 +288,8 @@ export function HomePage() {
               })}
           {data && radarOn && filter === "all" && <RadarShelf />}
           {data && filter === "all" && <NewToYouShelf />}
+          {data && filter === "all" && <OnThisDayShelf />}
+          {data && filter === "all" && <TimeTravelShelf />}
         </>
       )}
     </div>

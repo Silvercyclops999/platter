@@ -2425,6 +2425,28 @@ State is kept in the library cache's `kv` table (`circle.state`).
 | `top_songs_index` | – | `{ years, allTime, promoted, wrappedYears, currentYear }`, or `invalid` while Wrapped and Top Songs are off |
 | `top_songs_list` | `{ year? }` (no year: All-Time) | `TopSongsList`; `notFound` for a year without a list |
 | `stats_wrapped` | `{ year }` | `Wrapped` |
+| `home_on_this_day` | – | `{ shown, date, years: OnThisDayYear[] }`; `shown` is false (and the rest empty) while `homeOnThisDay` is off |
+| `home_time_travel` | – | `{ shown, yourYear: HistoryMix \| null, decades: HistoryMix[] }`; `shown` is false while `homeTimeTravel` is off |
+
+Home's On this day lists what was played on today's date in each earlier
+year with plays on it: `OnThisDayYear = { year, date, plays, ms, songs, albums, trackIds, covers }`.
+`songs` (up to 50) and `albums` (up to 10) are top songs and albums for that
+day, most played first. A song no longer in the library has no `trackId`;
+`trackIds` holds only library songs, which is what a card plays. Years come
+busiest first, ties to the later year. Feb 29 matches only Feb 29; Feb 28 in
+a year without one also takes in Feb 29 of earlier leap years.
+
+Time travel has one `HistoryMix = { id, kind: "decade"|"year", year, plays, trackIds, covers }`
+per decade the library has music from (by album year, oldest first): up to
+50 of the decade's library songs played most, filled up from the songs the
+server counts as played most when there are fewer. `yourYear` is the
+calendar year with the most plays (ties to the later year) as a mix of its
+50 most played library songs, or null when none of them is in the library.
+`covers` are up to four album covers for the card.
+
+Both read the stats day tables, so a play the listen log and an import both
+know about counts once. Each answer is kept until the day changes or the
+counted plays do.
 
 Stats count every play that wasn't a skip, from the listen log and imported
 plays together (see Play history from before Platter and other apps below). A range is two local dates ("YYYY-MM-DD"), both included; no
@@ -3530,6 +3552,8 @@ The rest of the fields, with their defaults:
 | `deviceFormat` | `"original"`, `"flac"`, `"mp3-320"`, `"mp3-v0"` or `"opus"`, `"original"` | What songs become on a device that doesn't pick its own format. Synced. |
 | `deviceDeleteRemoved` | bool, false | Syncing a device removes Platter's own files for songs no longer chosen. Synced. |
 | `homeMixes` | bool, true | Home shows Made for you, Your mixes by mood and Your genre mixes. |
+| `homeOnThisDay` | bool, true | Home shows On this day: what you played on today's date in earlier years. Synced. |
+| `homeTimeTravel` | bool, true | Home shows Time travel: a mix per decade and your year. Synced. |
 | `mixVariety` | `"balanced"`, `"familiar"` or `"adventurous"`, `"balanced"` | The share of favourites in a mix: 70%, 85% or 50%. |
 | `mixExcludeArtists` | string[], `[]` | Artist ids never in mixes or radio. |
 | `mixExcludeGenres` | string[], `[]` | Genre, style or mood names (any case) never in mixes or radio. |

@@ -275,6 +275,8 @@ import type {
   TopSongsIndex,
   TopSongsList,
   Wrapped,
+  OnThisDay,
+  TimeTravel,
 } from "./statsTypes";
 
 export type Unlisten = () => void;
@@ -1133,6 +1135,10 @@ export interface Backend {
   statsPlayIds(range: StatsRange, kind: StatsTopKind, limit?: number): Promise<string[]>;
   /** Which Top Songs lists and Wrapped years there are (Wrapped and Top Songs must be on). */
   topSongsIndex(): Promise<TopSongsIndex>;
+  /** Home's On this day: today's date in earlier years (shown false while off). */
+  homeOnThisDay(): Promise<OnThisDay>;
+  /** Home's Time travel: a mix per decade plus your year (shown false while off). */
+  homeTimeTravel(): Promise<TimeTravel>;
   /** A year's Top Songs list, or All-Time for null. */
   topSongsList(year: number | null): Promise<TopSongsList>;
   /** A year's Wrapped. */
@@ -1607,6 +1613,8 @@ export function createTauriBackend(): Backend {
     statsMonthRecap: (month) => call("stats_month_recap", { month }),
     statsPlayIds: (range, kind, limit) => call("stats_play_ids", { range, kind, limit: limit ?? null }),
     topSongsIndex: () => call("top_songs_index"),
+    homeOnThisDay: () => call("home_on_this_day"),
+    homeTimeTravel: () => call("home_time_travel"),
     topSongsList: (year) => call("top_songs_list", { year }),
     statsWrapped: (year) => call("stats_wrapped", { year }),
     statsCompareSummary: (unreleasedOk, theirUnreleasedOk) => call("stats_compare_summary", { unreleasedOk, theirUnreleasedOk }),

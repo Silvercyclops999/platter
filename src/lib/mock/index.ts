@@ -3877,6 +3877,12 @@ export class MockBackend implements Backend {
   topSongsIndex() {
     return this.delay(() => this.stats.topSongsIndex(this.opts.today));
   }
+  homeOnThisDay() {
+    return this.delay(() => this.stats.onThisDay(this.opts.today));
+  }
+  homeTimeTravel() {
+    return this.delay(() => this.stats.timeTravel());
+  }
   topSongsList(year: number | null) {
     return this.delay(() => this.stats.topSongsList(year, this.opts.today));
   }

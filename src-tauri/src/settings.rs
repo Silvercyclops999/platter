@@ -485,6 +485,10 @@ pub struct Settings {
     pub device_delete_removed: bool,
     /// Home shows the Made for you and mood and genre mix shelves.
     pub home_mixes: bool,
+    /// Home's On this day shelf: what you played on this date in earlier years.
+    pub home_on_this_day: bool,
+    /// Home's Time travel shelf: a mix per decade and your year.
+    pub home_time_travel: bool,
     /// How much of a mix is favourites.
     pub mix_variety: crate::mixes::Variety,
     /// Artist ids left out of mixes and radio.
@@ -948,6 +952,8 @@ impl Default for Settings {
             device_format: crate::devices::DeviceFormat::Original,
             device_delete_removed: false,
             home_mixes: true,
+            home_on_this_day: true,
+            home_time_travel: true,
             mix_variety: crate::mixes::Variety::Balanced,
             mix_exclude_artists: Vec::new(),
             mix_exclude_genres: Vec::new(),
@@ -1142,6 +1148,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "shareTranscriptions",
     "shareTranscriptionsUnreleased",
     "homeMixes",
+    "homeOnThisDay",
+    "homeTimeTravel",
     "mixVariety",
     "mixExcludeArtists",
     "mixExcludeGenres",
@@ -1452,6 +1460,8 @@ pub struct SettingsPatch {
     pub device_format: Option<crate::devices::DeviceFormat>,
     pub device_delete_removed: Option<bool>,
     pub home_mixes: Option<bool>,
+    pub home_on_this_day: Option<bool>,
+    pub home_time_travel: Option<bool>,
     pub mix_variety: Option<crate::mixes::Variety>,
     pub mix_exclude_artists: Option<Vec<String>>,
     pub mix_exclude_genres: Option<Vec<String>>,
@@ -1772,6 +1782,8 @@ impl Settings {
         set(&mut self.device_format, p.device_format);
         set(&mut self.device_delete_removed, p.device_delete_removed);
         set(&mut self.home_mixes, p.home_mixes);
+        set(&mut self.home_on_this_day, p.home_on_this_day);
+        set(&mut self.home_time_travel, p.home_time_travel);
         set(&mut self.mix_variety, p.mix_variety);
         set(&mut self.mix_unreleased, p.mix_unreleased);
         set(&mut self.queue_end, p.queue_end);
@@ -3743,6 +3755,19 @@ mod tests {
         assert_eq!((p.monthly_stats, report.applied), (Some(false), 1));
         // Off by default never: a fresh install shows the recaps.
         assert!(Settings::default().monthly_stats);
+    }
+
+    #[test]
+    fn history_shelf_settings_default_on_sync_and_apply() {
+        let mut s = Settings::default();
+        assert!(s.home_on_this_day && s.home_time_travel, "both shelves start on");
+        for k in ["homeOnThisDay", "homeTimeTravel"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+            assert!(!DEVICE_SETTINGS.contains(&k), "{k} is not per device");
+        }
+        let p: SettingsPatch = serde_json::from_str(r#"{"homeOnThisDay":false,"homeTimeTravel":false}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.home_on_this_day && !s.home_time_travel);
     }
 
     #[test]

@@ -19,6 +19,7 @@ import { BlendCreatePage } from "../pages/BlendCreatePage";
 import { RecentsPage } from "../pages/RecentsPage";
 import { SearchPage } from "../pages/SearchPage";
 import { NewToYouPage } from "../pages/NewToYou";
+import { OnThisDayPage } from "../pages/HistoryShelves";
 import { ShelfPage } from "../pages/ShelfPage";
 import { useApp } from "../stores/app";
 import { useCurrentEntry, type Route } from "../stores/router";
@@ -116,6 +117,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   whatsNew: "What's New",
   releaseRadar: "Release radar",
   newToYou: "New to you",
+  onThisDay: "On this day",
   shelf: "Your shelf",
   stats: "Stats",
   profile: "Your profile",
@@ -177,6 +179,8 @@ function Page({ route }: { route: Route }) {
       return <AlbumPage id={route.id} catalogue />;
     case "newToYou":
       return <NewToYouPage />;
+    case "onThisDay":
+      return <OnThisDayPage />;
     case "shelf":
       return <ShelfPage />;
     case "playlist":

@@ -63,6 +63,49 @@ export interface TopAlbum {
   unreleased: boolean;
 }
 
+/** One earlier year's plays on today's date (`home_on_this_day`). */
+export interface OnThisDayYear {
+  year: number;
+  /** "YYYY-MM-DD". */
+  date: string;
+  plays: number;
+  ms: number;
+  /** Most played first; songs no longer in the library have no trackId. */
+  songs: TopSong[];
+  albums: TopAlbum[];
+  /** What the card plays: library songs only. */
+  trackIds: string[];
+  covers: string[];
+}
+
+export interface OnThisDay {
+  /** False while the setting is off. */
+  shown: boolean;
+  /** Today, "YYYY-MM-DD". */
+  date: string;
+  /** The most played day first. */
+  years: OnThisDayYear[];
+}
+
+/** A Time travel card: a decade's mix or your year's (`home_time_travel`). */
+export interface HistoryMix {
+  /** "decade:1990" or "year:2021". */
+  id: string;
+  kind: "decade" | "year";
+  /** The decade's first year, or the year. */
+  year: number;
+  plays: number;
+  trackIds: string[];
+  covers: string[];
+}
+
+export interface TimeTravel {
+  shown: boolean;
+  yourYear: HistoryMix | null;
+  /** Oldest first. */
+  decades: HistoryMix[];
+}
+
 export interface TopGenre {
   name: string;
   plays: number;

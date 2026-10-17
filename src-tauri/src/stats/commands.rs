@@ -4,6 +4,7 @@
 use tauri::State;
 
 use super::compare::{self, CompareResult, CompareSummary};
+use super::throwback::{self, OnThisDay, TimeTravel};
 use super::wrapped::{self, TopSongsIndex, TopSongsList, Wrapped};
 use super::{ItemKind, ItemStats, Moments, MonthRecap, Point, StatsOverview, StatsRange, StatsSpan, TopKind};
 use crate::db::DbHandle;
@@ -84,6 +85,51 @@ pub async fn stats_play_ids(db: State<'_, DbHandle>, range: StatsRange, kind: To
         super::play_ids(c, d, kind, limit.unwrap_or(50))
     })
     .await
+}
+
+/// One answer kept for the rest of its day, until the counted plays change.
+type DayCache<T> = parking_lot::Mutex<Option<(i64, throwback::Stamp, T)>>;
+static ON_THIS_DAY: DayCache<OnThisDay> = parking_lot::const_mutex(None);
+static TIME_TRAVEL: DayCache<TimeTravel> = parking_lot::const_mutex(None);
+
+/// Today and what the counted plays look like, for the day caches.
+async fn day_and_stamp(db: &DbHandle) -> AppResult<(i64, throwback::Stamp)> {
+    fresh(db).await?;
+    db.read_async(|c| Ok((super::today(c)?, throwback::stamp(c)?))).await
+}
+
+fn cached<T: Clone>(cache: &DayCache<T>, today: i64, stamp: throwback::Stamp) -> Option<T> {
+    cache.lock().as_ref().filter(|(d, s, _)| *d == today && *s == stamp).map(|(_, _, v)| v.clone())
+}
+
+/// Home's On this day shelf (empty with `shown: false` while it's off).
+#[tauri::command]
+pub async fn home_on_this_day(db: State<'_, DbHandle>) -> AppResult<OnThisDay> {
+    if !crate::settings::load(&db).home_on_this_day {
+        return Ok(OnThisDay::default());
+    }
+    let (today, stamp) = day_and_stamp(&db).await?;
+    if let Some(v) = cached(&ON_THIS_DAY, today, stamp) {
+        return Ok(v);
+    }
+    let v = db.read_async(move |c| throwback::on_this_day(c, today)).await?;
+    *ON_THIS_DAY.lock() = Some((today, stamp, v.clone()));
+    Ok(v)
+}
+
+/// Home's Time travel shelf (empty with `shown: false` while it's off).
+#[tauri::command]
+pub async fn home_time_travel(db: State<'_, DbHandle>) -> AppResult<TimeTravel> {
+    if !crate::settings::load(&db).home_time_travel {
+        return Ok(TimeTravel::default());
+    }
+    let (today, stamp) = day_and_stamp(&db).await?;
+    if let Some(v) = cached(&TIME_TRAVEL, today, stamp) {
+        return Ok(v);
+    }
+    let v = db.read_async(move |c| throwback::time_travel(c, today)).await?;
+    *TIME_TRAVEL.lock() = Some((today, stamp, v.clone()));
+    Ok(v)
 }
 
 fn compare_on(db: &DbHandle) -> AppResult<crate::settings::Settings> {

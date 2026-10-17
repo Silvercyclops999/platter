@@ -1397,6 +1397,8 @@ export function SettingsPage() {
           <Skeleton width={40} height={24} radius="pill" />
         ),
     },
+    { key: "homeOnThisDay", section: "Home", title: "On this day", description: "What you played on today's date in earlier years, from your plays and imported history.", control: (ids) => toggle(s, "homeOnThisDay", ids) },
+    { key: "homeTimeTravel", section: "Home", title: "Time travel", description: "A mix of your most played songs from each decade, plus the year you listened most.", control: (ids) => toggle(s, "homeTimeTravel", ids) },
     // Mixes
     {
       key: "homeMixes",
