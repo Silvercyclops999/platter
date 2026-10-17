@@ -2089,6 +2089,8 @@ export function SettingsPage() {
       title: "Include unreleased songs in what I share",
       description: "Off, demos and other unreleased songs stay out of your shared playlists, your taste summary and your Blends.",
       control: (ids) => toggle(s, "shareUnreleased", ids),
+    },
+    {
       key: "shareOfferServer",
       section: "Social",
       group: "Listening sessions",
