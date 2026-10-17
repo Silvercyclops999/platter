@@ -8,7 +8,7 @@
 //! and lowers the thread's priority).
 
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use flacenc::component::BitRepr;
@@ -132,11 +132,6 @@ impl Pcm {
 
 pub const STOPPED: &str = "stopped";
 
-fn write_file(dest: &Path, bytes: &[u8]) -> Result<(), String> {
-    let mut f = File::create(dest).map_err(|e| format!("couldn't write the file ({e})"))?;
-    f.write_all(bytes).map_err(|e| format!("couldn't write the file ({e})"))
-}
-
 // ---------------------------------------------------------------------- FLAC
 
 struct FlacSource<'a> {
@@ -181,24 +176,60 @@ impl Source for FlacSource<'_> {
     }
 }
 
+/// The file's header: the FLAC marker and the stream info block (always
+/// the same length, so it's written again in place at the end).
+fn flac_header(info: &flacenc::component::StreamInfo) -> Result<Vec<u8>, String> {
+    let stream = flacenc::component::Stream::with_stream_info(info.clone());
+    let mut sink = flacenc::bitsink::ByteSink::new();
+    stream.write(&mut sink).map_err(|e| format!("couldn't make the FLAC file ({e:?})"))?;
+    Ok(sink.as_slice().to_vec())
+}
+
+/// Encodes frame by frame straight into the file, so a long song never sits
+/// whole in memory.
 fn flac(src: &Path, hint: &str, dest: &Path, bits: u32, stop: &(dyn Fn() -> bool + Sync)) -> Result<(), String> {
+    use flacenc::source::{Context, FrameBuf};
     let pcm = Pcm::open(src, hint, |r| r, |c| c.min(8))?;
     let bits = bits.clamp(16, 24) as usize;
     let mut source = FlacSource { pcm, bits, pending: Vec::new(), stop, err: None };
     let config = flacenc::config::Encoder::default().into_verified().map_err(|(_, e)| format!("FLAC settings ({e:?})"))?;
     let block = config.block_size;
-    let mut stream = flacenc::encode_with_fixed_block_size(&config, &mut source, block).map_err(|e| format!("couldn't make the FLAC file ({e:?})"))?;
+    let fe = |e: &dyn std::fmt::Debug| format!("couldn't make the FLAC file ({e:?})");
+    let (channels, rate) = (source.channels(), source.sample_rate());
+    let mut info = flacenc::component::StreamInfo::new(rate, channels, bits).map_err(|e| fe(&e))?;
+    info.set_block_sizes(block, block).map_err(|e| fe(&e))?;
+    let io_err = |e: std::io::Error| format!("couldn't write the file ({e})");
+    let mut out = BufWriter::new(File::create(dest).map_err(io_err)?);
+    out.write_all(&flac_header(&info)?).map_err(io_err)?;
+    let mut buf = (FrameBuf::with_size(channels, block).map_err(|e| fe(&e))?, Context::new(bits, channels));
+    let mut sink = flacenc::bitsink::ByteSink::new();
+    let mut frames = 0usize;
+    loop {
+        let n = source.read_samples(block, &mut buf).map_err(|e| fe(&e))?;
+        if n == 0 {
+            break;
+        }
+        let number = buf.1.current_frame_number().unwrap_or(frames);
+        let frame = flacenc::encode_fixed_size_frame(&config, &buf.0, number, &info).map_err(|e| fe(&e))?;
+        info.update_frame_info(&frame);
+        sink.clear();
+        frame.write(&mut sink).map_err(|e| fe(&e))?;
+        out.write_all(sink.as_slice()).map_err(io_err)?;
+        frames += 1;
+    }
     if let Some(e) = source.err {
         return Err(e);
     }
+    info.set_md5_digest(&buf.1.md5_digest());
     // A fixed block size stream: the shorter last block doesn't count as
     // the smallest (decoders read a smaller minimum as variable blocks).
-    if stream.frame_count() > 1 {
-        let _ = stream.stream_info_mut().set_block_sizes(block, block);
+    if frames > 1 {
+        info.set_block_sizes(block, block).map_err(|e| fe(&e))?;
     }
-    let mut sink = flacenc::bitsink::ByteSink::new();
-    stream.write(&mut sink).map_err(|e| format!("couldn't make the FLAC file ({e:?})"))?;
-    write_file(dest, sink.as_slice())
+    let mut f = out.into_inner().map_err(|e| io_err(e.into_error()))?;
+    f.seek(SeekFrom::Start(0)).map_err(io_err)?;
+    f.write_all(&flac_header(&info)?).map_err(io_err)?;
+    f.flush().map_err(io_err)
 }
 
 // ----------------------------------------------------------------------- MP3
@@ -230,27 +261,40 @@ fn mp3(src: &Path, hint: &str, dest: &Path, vbr: bool, stop: &(dyn Fn() -> bool 
     }
     b.set_to_write_vbr_tag(true).map_err(e("tag"))?;
     let mut enc = b.build().map_err(e("settings"))?;
-    let mut out: Vec<u8> = Vec::new();
     let ee = |x: mp3lame_encoder::EncodeError| format!("couldn't make the MP3 file ({x:?})");
+    let io_err = |e: std::io::Error| format!("couldn't write the file ({e})");
+    // Each stretch goes straight into the file, so a long song never sits
+    // whole in memory.
+    let mut file = BufWriter::new(File::create(dest).map_err(io_err)?);
+    let mut out: Vec<u8> = Vec::new();
+    let mut written = 0usize;
     while let Some(block) = pcm.next(stop)? {
         let frames = block.len() / pcm.channels;
+        out.clear();
         out.reserve(mp3lame_encoder::max_required_buffer_size(frames));
         if pcm.channels == 1 {
             enc.encode_to_vec(MonoPcm(&block[..]), &mut out).map_err(ee)?;
         } else {
             enc.encode_to_vec(InterleavedPcm(&block[..]), &mut out).map_err(ee)?;
         }
+        file.write_all(&out).map_err(io_err)?;
+        written += out.len();
     }
+    out.clear();
     out.reserve(7200);
     enc.flush_to_vec::<FlushNoGap>(&mut out).map_err(ee)?;
+    file.write_all(&out).map_err(io_err)?;
+    written += out.len();
+    let mut f = file.into_inner().map_err(|e| io_err(e.into_error()))?;
     // The LAME tag (length and gapless info) replaces the first frame.
     let mut tag = Vec::with_capacity(enc.lame_tag_size());
     if let Some(n) = enc.lame_tag_encode_to_vec(&mut tag)
-        && n.get() <= out.len()
+        && n.get() <= written
     {
-        out[..n.get()].copy_from_slice(&tag[..n.get()]);
+        f.seek(SeekFrom::Start(0)).map_err(io_err)?;
+        f.write_all(&tag[..n.get()]).map_err(io_err)?;
     }
-    write_file(dest, &out)
+    f.flush().map_err(io_err)
 }
 
 // ---------------------------------------------------------------------- Opus
@@ -414,5 +458,26 @@ mod tests {
         let out = d.path().join("a.flac");
         flac(&src, "wav", &out, 16, &|| false).unwrap();
         assert_eq!(frames_in(&out, "flac"), 13_230);
+        // The header written again at the end holds the length and checksum.
+        let b = std::fs::read(&out).unwrap();
+        assert_eq!(&b[..4], b"fLaC");
+        let total = u64::from_be_bytes([0, 0, 0, b[21] & 0x0F, b[22], b[23], b[24], b[25]]);
+        assert_eq!(total, 13_230);
+        assert_ne!(&b[26..42], &[0u8; 16]);
+    }
+
+    #[test]
+    fn mp3_files_stream_out_with_their_lame_tag() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("a.wav");
+        sine_wav(&src, 44_100);
+        let out = d.path().join("a.mp3");
+        mp3(&src, "wav", &out, true, &|| false).unwrap();
+        let b = std::fs::read(&out).unwrap();
+        // The first frame is the tag with the length and gapless details.
+        assert!(b[..400].windows(4).any(|w| w == b"Xing" || w == b"Info"));
+        assert!(b[..400].windows(4).any(|w| w == b"LAME"));
+        let n = frames_in(&out, "mp3");
+        assert!(n > 40_000, "{n}");
     }
 }
