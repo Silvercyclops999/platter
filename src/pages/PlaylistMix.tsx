@@ -6,7 +6,7 @@
  * analysed.
  */
 import { Blend } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { Dialog } from "../components/Dialog";
@@ -18,19 +18,20 @@ import type { MenuItem } from "../stores/ui";
 
 export const SORT_ASK = "Mixing will change your sort order to custom order";
 export const SORT_LOCKED = "Turn off mix to change the sort order";
+/** The locked sort button's name. */
+export const sortLockedLabel = (sort: string) => `Sort songs: ${sort}, locked by Mix`;
+/** How long analysis news settles before the rows are read again. */
+export const VIEW_SETTLE_MS = 300;
 export const SHUFFLE_ASK = "Mixed playlists sound better in order. Some transitions may not play while shuffled.";
 
-/** Whether a playlist is mixed (loads the list the first time). */
+/**
+ * Whether a playlist is mixed (loads the list the first time; the app
+ * keeps it current after that, see `watchMixed`).
+ */
 export function useMix(id: string): boolean {
   const mixed = useMixed((s) => !!s.mixed[id]);
   useEffect(() => {
     if (!useMixed.getState().loaded) void loadMixed();
-    const un = backend.listen("syncstore://changed", (c) => {
-      if (c.remote && c.namespaces.includes("mixedPlaylists")) void loadMixed();
-    });
-    return () => {
-      un.then((f) => f());
-    };
   }, []);
   return mixed;
 }
@@ -72,10 +73,11 @@ export function useMixSwitch(id: string, sorted: boolean, toCustom: () => void) 
 }
 
 /** Your own playlist: the Mix pill under the action row. */
+export const MIX_TIP = "Transitions between songs";
+
 export function MixPill({ mixed, onToggle }: { mixed: boolean; onToggle: () => void }) {
-  const tip = mixed ? "Turn off mixing" : "Turn on mixing";
   return (
-    <Tooltip label={tip} describe>
+    <Tooltip label={MIX_TIP} describe>
       <button type="button" className={`pl-mix-pill ${mixed ? "is-on" : ""}`} aria-pressed={mixed} aria-label="Mix" onClick={onToggle}>
         <Blend size={16} aria-hidden="true" />
         <span>Mix</span>
@@ -113,7 +115,7 @@ export function useShuffleAsk() {
       <p className="confirm__body">{SHUFFLE_ASK}</p>
       <div className="confirm__actions">
         <Button variant="ghost" onClick={close}>
-          Turn off shuffle
+          Don't shuffle
         </Button>
         <Button
           variant="primary"
@@ -131,31 +133,47 @@ export function useShuffleAsk() {
   return { ask, dialog };
 }
 
-/** Tempo and transitions for the rows shown, read again as songs get analysed. */
+/**
+ * Tempo and transitions for the rows shown, read again as songs get
+ * analysed (news settles for a moment first, and only the newest answer is
+ * shown).
+ */
 export function useAutomixView(id: string, mixed: boolean, trackIds: string[]): AutomixView | null {
   const [view, setView] = useState<AutomixView | null>(null);
-  const key = trackIds.join("\n");
+  // The rows by content: a new array with the same songs reads nothing again.
+  const key = useMemo(() => trackIds.join("\n"), [trackIds]);
+  // A picked transition shows from the core's answer: read again when one changes.
   const styles = useMixed((s) => s.mixed[id]?.styles);
   useEffect(() => {
-    if (!mixed || !trackIds.length) {
+    if (!mixed || !key) {
       setView(null);
       return;
     }
+    const ids = key.split("\n");
+    const shown = new Set(ids);
     let alive = true;
-    const load = () =>
-      backend.automixView(id, trackIds).then(
-        (v) => alive && setView(v),
-        () => {},
+    let asked = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = () => {
+      const n = ++asked;
+      backend.automixView(id, ids).then(
+        (v) => {
+          if (alive && n === asked) setView(v);
+        },
+        (e) => console.warn("Couldn't read the playlist's transitions", e),
       );
-    void load();
-    const un = backend.listen("analysis://changed", (ids) => {
-      if (ids.some((t) => trackIds.includes(t))) void load();
+    };
+    load();
+    const un = backend.listen("analysis://changed", (changed) => {
+      if (!changed.some((t) => shown.has(t))) return;
+      clearTimeout(timer);
+      timer = setTimeout(load, VIEW_SETTLE_MS);
     });
     return () => {
       alive = false;
+      clearTimeout(timer);
       un.then((f) => f());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, mixed, key, styles]);
   return view;
 }
@@ -166,8 +184,12 @@ export function bpmNote(view: AutomixView | null, trackId: string): string[] | u
   return bpm ? [`${bpm} BPM`] : undefined;
 }
 
-/** The transition between two rows: what it'll do, and a picker. */
-export function GapMarker({ playlistId, gap, from, to }: { playlistId: string; gap: AutomixView["gaps"][number]; from: string; to: string }) {
+/**
+ * The transition between two rows: what it'll do, and a picker. Its one
+ * cell spans the list's columns (the list sets `aria-colspan`); the picker
+ * is an ordinary button, so Tab reaches it.
+ */
+export const GapMarker = memo(function GapMarker({ playlistId, gap, from, to }: { playlistId: string; gap: AutomixView["gaps"][number]; from: string; to: string }) {
   const can = !gap.reason;
   const what = !can
     ? "Can't be mixed"
@@ -194,7 +216,7 @@ export function GapMarker({ playlistId, gap, from, to }: { playlistId: string; g
     );
   return (
     <div className={`pl-gap ${can ? "" : "pl-gap--no"}`} role="row">
-      <div role="gridcell" className="pl-gap__cell">
+      <div role="gridcell" className="pl-gap__cell" data-spans-row="">
         {can ? (
           <button type="button" className="pl-gap__btn" aria-haspopup="menu" aria-label={label} onClick={(e) => pick(e.currentTarget)}>
             <Blend size={12} aria-hidden="true" />
@@ -210,4 +232,4 @@ export function GapMarker({ playlistId, gap, from, to }: { playlistId: string; g
       </div>
     </div>
   );
-}
+});

@@ -714,7 +714,11 @@ export function TrackList({
     if (rowCount === undefined) rows.forEach((r, i) => r.setAttribute("aria-rowindex", String(i + 1)));
     grid.setAttribute("aria-rowcount", String(rowCount === undefined ? rows.length : rowCount + (header ? 1 : 0)));
     const cells = (body.find((r) => r.classList.contains("track-row")) ?? rows[0])?.querySelectorAll(':scope > [role="gridcell"], :scope > [role="columnheader"]').length;
-    if (cells) grid.setAttribute("aria-colcount", String(cells));
+    if (cells) {
+      grid.setAttribute("aria-colcount", String(cells));
+      // Rows of one cell between songs (a playlist's transitions) span them all.
+      grid.querySelectorAll('[role="gridcell"][data-spans-row]').forEach((c) => c.setAttribute("aria-colspan", String(cells)));
+    }
     // Nothing to read yet (loading): say so rather than show an empty grid.
     if (body.length) grid.removeAttribute("aria-busy");
     else grid.setAttribute("aria-busy", "true");

@@ -30,7 +30,7 @@ import type { MenuItem } from "../stores/ui";
 import { useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { PlaylistFinder } from "./PlaylistFinder";
-import { GapMarker, MixPill, MixToggle, SORT_LOCKED, bpmNote, mixMenuItem, useAutomixView, useMix, useMixSwitch, useShuffleAsk } from "./PlaylistMix";
+import { GapMarker, MixPill, MixToggle, SORT_LOCKED, bpmNote, mixMenuItem, sortLockedLabel, useAutomixView, useMix, useMixSwitch, useShuffleAsk } from "./PlaylistMix";
 import { Tooltip } from "../components/Tooltip";
 import "./playlist.css";
 
@@ -130,7 +130,10 @@ export function PlaylistPage({ id }: { id: string }) {
   usePageBar(pl?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(pl?.title);
   const empty = !!shown && shown.tracks.length === 0;
-  const [sort, setSort] = useState<PlaylistSort>("custom");
+  const [chosenSort, setSort] = useState<PlaylistSort>("custom");
+  // Mix on (here or on another device): the playlist's own order.
+  const mixed = useMix(id);
+  const sort: PlaylistSort = mixed ? "custom" : chosenSort;
   // The song finder: open by itself on an empty playlist, and it stays open
   // while you add to it.
   const [finderOpen, setFinderOpen] = useState(false);
@@ -154,14 +157,10 @@ export function PlaylistPage({ id }: { id: string }) {
   const canDrag = own && sort === "custom" && rows.length > 1;
   // Mix: on here, its switch (asking first when sorted), shuffle asking
   // first, and the rows' tempo and transitions.
-  const mixed = useMix(id);
   const mixSwitch = useMixSwitch(id, sort !== "custom", () => setSort("custom"));
   const shuffleAsk = useShuffleAsk();
-  const automix = useAutomixView(id, mixed, mixed ? view.map((r) => r.track.id) : []);
-  // Turned on elsewhere (another device): back to the playlist's own order.
-  useEffect(() => {
-    if (mixed && sort !== "custom") setSort("custom");
-  }, [mixed, sort]);
+  const mixIds = useMemo(() => (mixed ? view.map((r) => r.track.id) : []), [mixed, view]);
+  const automix = useAutomixView(id, mixed, mixIds);
 
   // Deleted on another device while open: say so and go Home.
   useEffect(() => {
@@ -399,7 +398,7 @@ export function PlaylistPage({ id }: { id: string }) {
             pl &&
             (mixed ? (
               <Tooltip label={SORT_LOCKED} describe>
-                <button type="button" className="pl-sort pl-sort--locked" aria-disabled="true" aria-label={`Sort songs: ${SORT_LABEL[sort]}`}>
+                <button type="button" className="pl-sort pl-sort--locked" aria-disabled="true" aria-label={sortLockedLabel(SORT_LABEL[sort])}>
                   <span>{SORT_LABEL[sort]}</span>
                   <ArrowDownUp size={16} aria-hidden="true" />
                 </button>
