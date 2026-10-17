@@ -200,6 +200,7 @@ import type {
   LidarrWork,
   LidarrRequest,
   LidarrBatchItem,
+  BringInStatus,
   LidarrRequestInput,
   LidarrStatus,
   RadarPage,
@@ -951,6 +952,12 @@ export interface Backend {
   lidarrRequests(refresh: boolean): Promise<LidarrRequest[]>;
   /** "Request these": up to 10 albums the user confirmed at once, each with the full check. */
   lidarrRequestBatch(inputs: LidarrRequestInput[]): Promise<LidarrBatchItem[]>;
+  /** "Bring in my listening": waves, today's count, why it's paused, what needs you. */
+  bringInStatus(): Promise<BringInStatus>;
+  /** Pause it, or carry on. */
+  bringInPause(paused: boolean): Promise<BringInStatus>;
+  /** A "Needs you" album: try it again, or leave it be. */
+  bringInNeedsYou(key: string, retry: boolean): Promise<BringInStatus>;
   /** Cancel a waiting request, or clear a finished one. */
   lidarrRequestCancel(id: string): Promise<LidarrRequest[]>;
   /** An artist's official releases the library lacks, for the artist page. */
@@ -1569,6 +1576,9 @@ export function createTauriBackend(): Backend {
     lidarrRequest: (input) => call("lidarr_request", { input }),
     lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),
     lidarrRequestBatch: (inputs) => call("lidarr_request_batch", { inputs }),
+    bringInStatus: () => call("bring_in_status"),
+    bringInPause: (paused) => call("bring_in_pause", { paused }),
+    bringInNeedsYou: (key, retry) => call("bring_in_needs_you", { key, retry }),
     lidarrRequestCancel: (id) => call("lidarr_request_cancel", { id }),
     lidarrMissingReleases: (artistId, artist) => call("lidarr_missing_releases", { artistId, artist }),
     lidarrUpgradeAlbum: (albumId) => call("lidarr_upgrade_album", { albumId }),

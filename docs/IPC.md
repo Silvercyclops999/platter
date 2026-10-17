@@ -2659,6 +2659,20 @@ Each `import_overview` report has `history: { plays, playsMatched, songs, songsM
 
 Settings (synced): `showPlayedALot` (on), `playedMinPlays` (5, from 1 to 1000), `playedPeriod` (`all`).
 
+### Bring in my listening
+
+With `bringIn` on, Platter asks Lidarr for albums from Played a lot in waves while it's open: albums with at least the first wave's plays, most played first, then the next wave, at most `bringInPerDay` a local day. Each album is picked on MusicBrainz and sent the way a request by hand is, full setup check included; in practice mode it's only listed. Albums that can't be picked, or that a check refuses, go to Needs you with the reason. It pauses while Lidarr's queue holds more than `bringInMaxQueue`, while less than `bringInMinFreeGb` is free on the root folder Lidarr downloads into, while Lidarr can't be reached or its check is red, and after three failed requests in a row, and carries on once that clears. Progress is kept on the device. Requests, pauses and practice runs go to the Changes log, and a notification sums up each day.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `bring_in_status` | – | `BringInStatus` |
+| `bring_in_pause` | `{ paused }` | `BringInStatus`. Pauses it, or carries on |
+| `bring_in_needs_you` | `{ key, retry }` | `BringInStatus`. Takes an album off Needs you; with `retry` the next pass looks at it again |
+
+`BringInStatus = { on, practice, ready, waves, wave, threshold, done, remaining, today, perDay, paused, userPaused, finished, requestedTotal, needsYou: { key, artist, album, plays, reason, at }[], practiced: { key, artist, album, releaseGroupId, at }[] }`.
+
+Settings (synced): `bringIn` (off), `bringInWaves` (`[100, 50, 20]`, 1 to 5 different counts), `bringInPerDay` (30), `bringInMinFreeGb` (50), `bringInMaxQueue` (20).
+
 ## Physical collection
 
 Albums the user owns on vinyl, CD, cassette or another format, with notes on each copy. Marks live in the sync store's `physical` namespace (keyed by album id, synced with the library group). The optional Discogs import reads the user's own collection with their personal token, which is kept in the keychain under `discogs-token` and never returned, logged or put in a URL. Discogs is asked at most once a second; a 429 pauses it.

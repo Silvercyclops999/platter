@@ -1206,6 +1206,16 @@ export interface Settings {
   playedMinPlays: number;
   /** Which plays that list counts. Synced. */
   playedPeriod: PlayedPeriod;
+  /** "Bring in my listening": request albums from Played a lot in waves through Lidarr. Synced. */
+  bringIn: boolean;
+  /** The waves' fewest plays, highest first (1 to 5 of them). Synced. */
+  bringInWaves: number[];
+  /** Most albums asked for in a day. Synced. */
+  bringInPerDay: number;
+  /** Pause while less than this many GB are free where Lidarr downloads. Synced. */
+  bringInMinFreeGb: number;
+  /** Pause while Lidarr's queue holds more than this. Synced. */
+  bringInMaxQueue: number;
   /** Folder names on a song's path that hint it's unreleased (they only add weight). */
   archiveFolderKeywords: string[];
   /** The tag a file's release status is read from: "" for Auto (ARCHIVE_VERSION, STATUS, RELEASESTATUS, RELEASETYPE), else a tag name. */
@@ -1666,6 +1676,11 @@ export const DEFAULT_SETTINGS: Settings = {
   showPlayedALot: true,
   playedMinPlays: 5,
   playedPeriod: "all",
+  bringIn: false,
+  bringInWaves: [100, 50, 20],
+  bringInPerDay: 30,
+  bringInMinFreeGb: 50,
+  bringInMaxQueue: 20,
   archiveFolderKeywords: ["Unreleased", "Leaks", "Demos", "Sessions", "Snippets"],
   releaseStatusTag: "",
   releaseStatusValues: [],
@@ -2572,6 +2587,51 @@ export interface LidarrHuntItem {
 }
 
 /** Where a Lidarr request stands. */
+/** An album "Bring in my listening" couldn't ask for on its own. */
+export interface BringInNeedsYou {
+  key: string;
+  artist: string;
+  album: string;
+  plays: number;
+  reason: string;
+  /** Unix seconds. */
+  at: number;
+}
+
+/** What practice mode would have asked for. */
+export interface BringInPracticed {
+  key: string;
+  artist: string;
+  album: string;
+  releaseGroupId: string;
+  at: number;
+}
+
+/** `bring_in_status`: the progress card. */
+export interface BringInStatus {
+  on: boolean;
+  /** Practice mode: albums are only listed. */
+  practice: boolean;
+  /** Lidarr is set up and its last check passed. */
+  ready: boolean;
+  waves: number[];
+  wave: number;
+  /** The current wave's fewest plays; null once every wave is done. */
+  threshold: number | null;
+  done: number;
+  /** Albums left in the current wave. */
+  remaining: number;
+  today: number;
+  perDay: number;
+  /** Why a guard paused it. */
+  paused: string | null;
+  userPaused: boolean;
+  finished: boolean;
+  requestedTotal: number;
+  needsYou: BringInNeedsYou[];
+  practiced: BringInPracticed[];
+}
+
 /** Which plays "Played a lot" counts. */
 export type PlayedPeriod = "all" | "year" | "days90";
 

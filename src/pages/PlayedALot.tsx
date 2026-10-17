@@ -20,6 +20,7 @@ import type { LidarrPreview, LidarrRequestInput, LidarrRequestState, PlayedPerio
 import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
+import { BringInCard, BringInSettings } from "./BringIn";
 import { errText } from "./importShared";
 import { STATE_LABEL, useLidarrReady } from "./lidarrShared";
 import "./lidarr-request.css";
@@ -160,6 +161,7 @@ export function PlayedALot() {
         Played a lot, not in your library
       </h2>
       <p className="import-page__sub">Songs and albums from your imported listening history that aren't in your library, the most played first.</p>
+      {s?.bringIn && <BringInCard />}
       <div className="played__filters">
         <div className="chips" role="radiogroup" aria-label="Show">
           {(["song", "album"] as const).map((k) => (
@@ -501,6 +503,7 @@ export function PlayedSettings() {
   const id = useId();
   if (!s) return null;
   return (
+    <>
     <div className="setting-row played-settings" data-setting="showPlayedALot">
       <div className="setting-row__text">
         <div id={`${id}-t`} className="setting-row__title">
@@ -529,5 +532,7 @@ export function PlayedSettings() {
         </div>
       )}
     </div>
+    {s.showPlayedALot && <BringInSettings />}
+    </>
   );
 }

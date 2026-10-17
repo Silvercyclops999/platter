@@ -2750,7 +2750,12 @@ export class MockBackend implements Backend {
         next[k] = u;
       }
       // Known sources only, each once, in their listed order (as the core).
-      if (patch.importSources) next.importSources = ["streaming", "transfer", "lists"].filter((id) => patch.importSources!.includes(id));
+      if (patch.bringInWaves) {
+        const w = [...new Set(patch.bringInWaves)].filter((n) => Number.isInteger(n) && n >= 1 && n <= 100_000).sort((a, b) => b - a);
+        if (!w.length || w.length !== patch.bringInWaves.length || w.length > 5) throw { kind: "invalid", message: "Waves are 1 to 5 different play counts, like 100, 50, 20." };
+        next.bringInWaves = w;
+      }
+      if (patch.importSources) next.importSources =["streaming", "transfer", "lists"].filter((id) => patch.importSources!.includes(id));
       if (patch.nowPlayingFeedPort !== undefined) {
         const port = patch.nowPlayingFeedPort;
         if (!Number.isInteger(port) || port < 1024 || port > 65535) throw { kind: "invalid", message: "Pick a port from 1024 to 65535." };
@@ -3621,6 +3626,44 @@ export class MockBackend implements Backend {
   }
   lidarrRequests(_refresh: boolean) {
     return this.delay(() => this.lidarr.list());
+  }
+  /** Mock "Bring in my listening": made-up progress while the setting is on. */
+  bringIn = { userPaused: false, paused: null as string | null, needsYou: [{ key: "album:mira vale\u001fsecond bloom", artist: "Mira Vale", album: "Second Bloom", plays: 9, reason: "MusicBrainz lists this only as a bootleg or promo, not an official release. Platter never asks Lidarr for those.", at: 0 }] };
+  private bringInStatus_() {
+    const s = this.settings;
+    return {
+      on: s.bringIn,
+      practice: false,
+      ready: !!(s.lidarrUrl || s.lidarrAwayUrl),
+      waves: s.bringInWaves,
+      wave: 0,
+      threshold: s.bringInWaves[0] ?? null,
+      done: 12,
+      remaining: 339,
+      today: 7,
+      perDay: s.bringInPerDay,
+      paused: this.bringIn.paused,
+      userPaused: this.bringIn.userPaused,
+      finished: false,
+      requestedTotal: 11,
+      needsYou: this.bringIn.needsYou,
+      practiced: [],
+    };
+  }
+  bringInStatus() {
+    return this.delay(() => this.bringInStatus_());
+  }
+  bringInPause(paused: boolean) {
+    return this.delay(() => {
+      this.bringIn.userPaused = paused;
+      return this.bringInStatus_();
+    });
+  }
+  bringInNeedsYou(key: string, _retry: boolean) {
+    return this.delay(() => {
+      this.bringIn.needsYou = this.bringIn.needsYou.filter((n) => n.key !== key);
+      return this.bringInStatus_();
+    });
   }
   lidarrRequestBatch(inputs: LidarrRequestInput[]) {
     return this.delay(() => {
