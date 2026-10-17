@@ -134,6 +134,10 @@ pub struct Core {
     search_lists_all: Mutex<Option<bool>>,
     /// Songs gathered album by album, while a sync pages through them.
     album_walk: Mutex<Option<(String, Vec<Track>)>>,
+    /// Where the next page of songs starts on the server: (section, songs
+    /// handed out so far, server offset). Entries that aren't songs are
+    /// skipped, so the two offsets drift apart.
+    song_cursor: Mutex<Option<(String, u64, u64)>>,
     /// Change polling: what the server said last time.
     last_modified: Mutex<Option<u64>>,
     last_scan: Mutex<Option<String>>,
@@ -166,6 +170,7 @@ impl Core {
             artists: Mutex::new(None),
             search_lists_all: Mutex::new(None),
             album_walk: Mutex::new(None),
+            song_cursor: Mutex::new(None),
             last_modified: Mutex::new(None),
             last_scan: Mutex::new(None),
         }
@@ -399,23 +404,52 @@ impl Core {
         self.get("getAlbum", &[("id", key(id).to_string())], "album").await
     }
 
-    async fn song_page(&self, section: &str, offset: u64, size: u64) -> AppResult<Vec<Song>> {
+    /// One page of `search3` songs at a server offset: the songs, and how
+    /// many entries the server sent (videos and folders included), which is
+    /// what tells the end of the list.
+    async fn song_page(&self, section: &str, offset: u64, size: u64) -> AppResult<(Vec<Song>, u64)> {
         let mut q = p(&[("query", ""), ("artistCount", "0"), ("albumCount", "0")]);
         q.push(("songCount", size.min(PAGE).to_string()));
         q.push(("songOffset", offset.to_string()));
         q.extend(Self::folder(section));
-        Ok(self.get::<Found>("search3", &q, "searchResult3").await?.song.into_iter().filter(map::is_song).collect())
+        let raw = self.get::<Found>("search3", &q, "searchResult3").await?.song;
+        let n = raw.len() as u64;
+        Ok((raw.into_iter().filter(map::is_song).collect(), n))
     }
 
     /// Whether `search3` lists songs for an empty query: asked once, by
     /// comparing with the album list.
-    async fn songs_by_search(&self, section: &str, first: &[Song]) -> AppResult<bool> {
+    async fn songs_by_search(&self, section: &str, first_raw: u64) -> AppResult<bool> {
         if let Some(v) = *self.search_lists_all.lock() {
             return Ok(v);
         }
-        let ok = !first.is_empty() || self.album_page(section, "alphabeticalByName", 0, 1).await?.is_empty();
+        let ok = first_raw > 0 || self.album_page(section, "alphabeticalByName", 0, 1).await?.is_empty();
         *self.search_lists_all.lock() = Some(ok);
         Ok(ok)
+    }
+
+    /// `size` songs from the `start`th, by search. Entries that aren't songs
+    /// don't count, so a page is only short at the real end of the list.
+    async fn search_songs(&self, section: &str, start: u64, size: u64) -> AppResult<(Vec<Song>, u64)> {
+        let mut raw = match self.song_cursor.lock().as_ref() {
+            _ if start == 0 => 0,
+            Some((s, handed, raw)) if s == section && *handed == start => *raw,
+            _ => start,
+        };
+        let mut out = Vec::new();
+        let mut first_raw = None;
+        while (out.len() as u64) < size {
+            let want = (size - out.len() as u64).min(PAGE);
+            let (page, n) = self.song_page(section, raw, want).await?;
+            first_raw.get_or_insert(n);
+            raw += n;
+            out.extend(page);
+            if n < want {
+                break;
+            }
+        }
+        *self.song_cursor.lock() = Some((section.to_string(), start + out.len() as u64, raw));
+        Ok((out, first_raw.unwrap_or(0)))
     }
 
     /// Every song, album by album (for servers whose search can't list them).
@@ -432,8 +466,8 @@ impl Core {
     async fn tracks_page(&self, section: &str, start: u64, size: u64) -> AppResult<Vec<Track>> {
         let by_search = *self.search_lists_all.lock();
         if by_search != Some(false) {
-            let page = self.song_page(section, start, size).await?;
-            if start > 0 || self.songs_by_search(section, &page).await? {
+            let (page, first_raw) = self.search_songs(section, start, size).await?;
+            if start > 0 || self.songs_by_search(section, first_raw).await? {
                 return Ok(page.iter().map(|s| map::track(&self.tag, s)).collect());
             }
         }

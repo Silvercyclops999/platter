@@ -579,6 +579,52 @@ async fn library_sync_requests() {
     );
 }
 
+/// `search3` over a long list where every tenth entry is a video.
+struct LongSearch;
+
+impl wiremock::Respond for LongSearch {
+    fn respond(&self, r: &Request) -> ResponseTemplate {
+        let p = params(r);
+        let num = |k: &str| one(&p, k).and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+        let (from, count) = (num("songOffset"), num("songCount"));
+        let entries: Vec<serde_json::Value> = (from..1200.min(from + count))
+            .map(|i| {
+                let mut s = song(&format!("s{i}"), 1);
+                if i % 10 == 0 {
+                    s["type"] = json!("video");
+                }
+                s
+            })
+            .collect();
+        ok(json!({"searchResult3": {"song": entries}}))
+    }
+}
+
+#[tokio::test]
+async fn videos_in_a_full_page_of_songs_do_not_end_the_list_early() {
+    let s = subsonic(Some(all_ext()), true).await;
+    Mock::given(path("/rest/search3")).and(Authed).respond_with(LongSearch).with_priority(1).mount(&s).await;
+    let core = open_core(&s);
+    let lib = SubsonicLibrary::all(core.clone());
+    let t = tag_of(&s);
+    let ids = lib.all_ids("1", ItemKind::Track).await.unwrap();
+    assert_eq!(ids.len(), 1080, "every song, none of the videos");
+    assert_eq!(ids.iter().collect::<std::collections::HashSet<_>>().len(), 1080, "no song twice");
+    assert_eq!(ids.last(), Some(&format!("{t}:s1199")));
+    // Paged the way a sync pages: full pages until the real end.
+    let mut start = 0u64;
+    let mut sizes = Vec::new();
+    loop {
+        let page = lib.tracks("1", start, 500).await.unwrap();
+        sizes.push(page.len());
+        start += page.len() as u64;
+        if page.len() < 500 {
+            break;
+        }
+    }
+    assert_eq!(sizes, [500, 500, 80]);
+}
+
 #[tokio::test]
 async fn a_server_whose_search_lists_nothing_gives_songs_album_by_album() {
     let s = subsonic(Some(all_ext()), true).await;
