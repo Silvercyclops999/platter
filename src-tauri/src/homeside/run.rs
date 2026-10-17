@@ -263,7 +263,8 @@ impl Bridge {
             }
             Msg::Get { .. } | Msg::Write { .. } => {
                 let home = self.home_route();
-                if let Some(answer) = route::serve(home.as_ref(), &msg).await {
+                let staging = crate::settings::load(&self.p.db).lidarr_staging_folder;
+                if let Some(answer) = route::serve(home.as_ref(), &staging, &msg).await {
                     let _ = self.wire.send(link, &answer).await;
                 }
             }

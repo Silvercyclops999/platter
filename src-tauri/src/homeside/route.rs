@@ -19,6 +19,7 @@ use super::wire::Msg;
 use crate::artistinfo::http::HttpResponse;
 use crate::error::{AppError, AppResult};
 use crate::lidarr::api::{DirectRoute, LidarrGet, Route};
+use crate::lidarr::relayed;
 use crate::lidarr::write::{LidarrWrite, RelayedWrite, WriteCall};
 use crate::social::listen::seal;
 
@@ -111,8 +112,11 @@ fn ok_path(p: &str) -> bool {
 }
 
 /// On the Bridge: answer one request from a paired desktop. None for
-/// anything that isn't a request.
-pub async fn serve(home: Option<&DirectRoute>, msg: &Msg) -> Option<Msg> {
+/// anything that isn't a request. Reads are limited to the pages Platter
+/// asks for, with keys and passwords taken out of the answer. Every write's
+/// body is checked against Lidarr and `staging` (Lidarr's staging folder)
+/// and rebuilt from only what Platter sends (`lidarr::relayed`).
+pub async fn serve(home: Option<&DirectRoute>, staging: &str, msg: &Msg) -> Option<Msg> {
     let id = match msg {
         Msg::Get { id, .. } | Msg::Write { id, .. } => *id,
         _ => return None,
@@ -120,24 +124,33 @@ pub async fn serve(home: Option<&DirectRoute>, msg: &Msg) -> Option<Msg> {
     let Some(home) = home else {
         return Some(Msg::Failed { id, message: "Your Bridge doesn't know Lidarr's address yet.".into() });
     };
+    let refused = || Some(Msg::Failed { id, message: "Your Bridge didn't pass that on.".into() });
     let r = match msg {
         Msg::Get { path, query, .. } => {
-            if !ok_path(path) || query.len() > 20 {
-                return Some(Msg::Failed { id, message: "Your Bridge didn't pass that on.".into() });
+            if !ok_path(path) || !relayed::read_allowed(path, query) {
+                return refused();
+            }
+            match relayed::folder_read_ok(home, path, query, staging).await {
+                Ok(true) => {}
+                Ok(false) => return refused(),
+                Err(e) => return Some(Msg::Failed { id, message: e.to_string() }),
             }
             let q: Vec<(&str, &str)> = query.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-            home.get(path, &q).await
+            home.get(path, &q).await.map(|mut resp| {
+                resp.body = relayed::strip_secrets(&resp.body);
+                resp
+            })
         }
-        Msg::Write { method, path, body, .. } => match RelayedWrite::check(method, path, body) {
-            Ok(w) => {
-                // A release-switch write must match the album as Lidarr has it now.
-                if let Err(e) = w.confirm_with(home).await {
-                    return Some(Msg::Failed { id, message: e.to_string() });
-                }
-                home.send_write(&WriteCall::Relayed(w)).await
+        Msg::Write { method, path, body, .. } => {
+            let checked = match RelayedWrite::check(method, path, body) {
+                Ok(w) => relayed::vet(&w, home, staging).await,
+                Err(e) => Err(e),
+            };
+            match checked {
+                Ok(w) => home.send_write(&WriteCall::Relayed(w)).await,
+                Err(e) => return Some(Msg::Failed { id, message: e.to_string() }),
             }
-            Err(e) => return Some(Msg::Failed { id, message: e.to_string() }),
-        },
+        }
         _ => return None,
     };
     Some(match r {

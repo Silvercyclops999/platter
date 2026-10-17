@@ -24,6 +24,7 @@ pub mod promote;
 pub mod provenance;
 pub mod quality;
 pub mod rematch;
+pub mod relayed;
 pub mod request;
 pub mod shared;
 pub mod status;

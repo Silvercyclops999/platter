@@ -693,6 +693,10 @@ impl LidarrClient {
         self.transport.route()
     }
 
+    pub fn transport(&self) -> &dyn LidarrGet {
+        self.transport.as_ref()
+    }
+
     /// A settings page (or any object) as Lidarr sent it, so it can be
     /// written back whole with one value changed.
     pub async fn get_raw(&self, path: &str) -> AppResult<serde_json::Value> {

@@ -317,6 +317,23 @@ impl RelayedWrite {
         Ok(Self { method: m, path: path.to_string(), body: body.to_string() })
     }
 
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+
+    /// The same write with its body rebuilt (see `relayed::vet`).
+    pub(super) fn with_body(&self, body: String) -> Self {
+        Self { method: self.method.clone(), path: self.path.clone(), body }
+    }
+
     /// The album a release-switch write is for, if it is one.
     pub fn switch_off_album(&self) -> Option<i64> {
         if self.method == "PUT" && numbered(&self.path, "/album/") { self.path.trim_start_matches("/album/").parse().ok() } else { None }

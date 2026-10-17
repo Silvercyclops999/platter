@@ -316,21 +316,27 @@ async fn the_bridge_passes_on_only_lidarr_reads_and_platters_fixed_writes() {
     let web = Arc::new(FakeWeb::new());
     web.route("/api/v1/", None, 200, "{}");
     let home = crate::lidarr::api::DirectRoute::new(web.clone(), LIDARR_URL, Token::new(LIDARR_KEY).unwrap(), vec![], crate::lidarr::api::Route::Home).unwrap();
+    web.route("/api/v1/notification", None, 200, r#"[{"id": 1, "name": "Plex", "fields": [{"name": "authToken", "value": "plex-secret"}]}]"#);
     let ask = |m: Msg| {
         let home = &home;
-        async move { super::route::serve(Some(home), &m).await }
+        async move { super::route::serve(Some(home), "/data/staging/music", &m).await }
     };
     let get = |p: &str| Msg::Get { id: 1, path: p.into(), query: vec![] };
     let write = |m: &str, p: &str, b: &str| Msg::Write { id: 2, method: m.into(), path: p.into(), body: b.into() };
     assert!(matches!(ask(get("/artist")).await, Some(Msg::Answer { status: 200, .. })));
-    for p in ["/../config", "artist", "/artist?x=1", "//evil"] {
+    for p in ["/../config", "artist", "/artist?x=1", "//evil", "/config/host", "/system/backup", "/log/file"] {
         assert!(matches!(ask(get(p)).await, Some(Msg::Failed { .. })), "{p}");
     }
-    assert!(matches!(ask(write("PUT", "/album/monitor", r#"{"albumIds": [1], "monitored": false}"#)).await, Some(Msg::Answer { .. })));
+    // Keys never travel back.
+    let Some(Msg::Answer { body, .. }) = ask(get("/notification")).await else { panic!("no answer") };
+    assert!(!String::from_utf8_lossy(&super::route::response(200, &body).body).contains("plex-secret"));
+    assert!(matches!(ask(write("PUT", "/album/monitor", r#"{"albumIds": [1], "monitored": false, "extra": 1}"#)).await, Some(Msg::Answer { .. })));
     assert!(matches!(ask(write("DELETE", "/artist/3", "")).await, Some(Msg::Failed { .. })));
     assert!(matches!(ask(write("POST", "/command", r#"{"name": "RescanFolders"}"#)).await, Some(Msg::Failed { .. })));
+    assert!(matches!(ask(write("POST", "/rootfolder", r#"{"path": "/", "defaultQualityProfileId": 1, "defaultMetadataProfileId": 1}"#)).await, Some(Msg::Failed { .. })));
     let sent: Vec<String> = web.log.lock().iter().map(|r| r.url.clone()).collect();
-    assert_eq!(sent, [format!("{LIDARR_URL}/api/v1/artist"), format!("{LIDARR_URL}/api/v1/album/monitor")]);
-    assert!(super::route::serve(None, &get("/artist")).await.is_some_and(|m| matches!(m, Msg::Failed { .. })));
-    assert!(super::route::serve(Some(&home), &Msg::Unpair).await.is_none());
+    assert_eq!(sent, [format!("{LIDARR_URL}/api/v1/artist"), format!("{LIDARR_URL}/api/v1/notification"), format!("{LIDARR_URL}/api/v1/album/monitor")]);
+    assert_eq!(web.bodies("/album/monitor"), [r#"{"albumIds":[1],"monitored":false}"#], "rebuilt from only what Platter sends");
+    assert!(super::route::serve(None, "", &get("/artist")).await.is_some_and(|m| matches!(m, Msg::Failed { .. })));
+    assert!(super::route::serve(Some(&home), "", &Msg::Unpair).await.is_none());
 }

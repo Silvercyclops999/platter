@@ -240,9 +240,10 @@ impl Lidarr {
             self.inner.shared.get(&format!("ask:{id}")).ok_or_else(|| AppError::NotFound("That change isn't waiting any more.".into()))?;
         let relayed = RelayedWrite::check(&q.method, &q.path, &q.body)?;
         let (client, writer) = self.connection().await?;
-        if let Some(album) = relayed.switch_off_album() {
-            relayed.confirm_against(&client.get_raw(&format!("/album/{album}")).await?)?;
-        }
+        // What the Bridge queued is checked field by field against Lidarr
+        // now, as the Bridge checks what desktops send it.
+        let staging = crate::settings::load(&self.inner.db).lidarr_staging_folder;
+        let relayed = super::relayed::vet(&relayed, client.transport(), &staging).await?;
         writer.send_call(WriteCall::Relayed(relayed)).await?;
         self.log_change(&q.what, "", "Done, after you said yes to what the Bridge queued", true, None)?;
         self.dismiss_queued(id)
