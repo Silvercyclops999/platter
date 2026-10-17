@@ -40,6 +40,85 @@ pub fn open_reader(path: &Path) -> AppResult<Connection> {
     Ok(conn)
 }
 
+/// Why [`probe`] couldn't read a database file.
+#[derive(Debug)]
+pub enum ProbeError {
+    /// The file is damaged or isn't a database: safe to set aside.
+    Damaged(String),
+    /// Locked by another process, no permission, a disk error: the file may
+    /// be fine, so it is left alone.
+    Unavailable(crate::error::AppError),
+}
+
+/// Reads the schema version of the database at `path` (0 when there is no
+/// file yet), touching every page of the schema so a damaged file shows.
+pub fn probe(path: &Path) -> Result<i64, ProbeError> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let classify = |e: rusqlite::Error| match e.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) => ProbeError::Damaged(e.to_string()),
+        _ => ProbeError::Unavailable(e.into()),
+    };
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+        .map_err(classify)?;
+    conn.busy_timeout(BUSY_TIMEOUT).map_err(classify)?;
+    conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0)).map_err(classify)?;
+    conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(classify)
+}
+
+/// Whether an open failed because the file couldn't be reached (rather
+/// than because it is damaged): those are never set aside.
+pub fn is_unavailable(e: &crate::error::AppError) -> bool {
+    use crate::error::AppError;
+    match e {
+        AppError::Io(_) => true,
+        AppError::Internal(m) => {
+            let m = m.to_ascii_lowercase();
+            ["database is locked", "database table is locked", "unable to open", "readonly", "disk is full", "disk i/o error", "permission denied", "busy"]
+                .iter()
+                .any(|s| m.contains(s))
+        }
+        _ => false,
+    }
+}
+
+/// `PRAGMA quick_check` of a file that failed to open, for the log.
+pub fn quick_check(path: &Path) -> String {
+    let run = || -> rusqlite::Result<String> {
+        let c = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        c.query_row("PRAGMA quick_check(5)", [], |r| r.get(0))
+    };
+    run().unwrap_or_else(|e| e.to_string())
+}
+
+/// Moves a damaged database (and its WAL files) to
+/// `<name>.broken-<unix time>`. Returns the new path of the main file.
+pub fn quarantine(path: &Path) -> AppResult<std::path::PathBuf> {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "library.sqlite".into());
+    let mut to = path.with_file_name(format!("{name}.broken-{ts}"));
+    let mut n = 1;
+    while to.exists() {
+        to = path.with_file_name(format!("{name}.broken-{ts}-{n}"));
+        n += 1;
+    }
+    std::fs::rename(path, &to)?;
+    for ext in ["-wal", "-shm"] {
+        let side = path.with_file_name(format!("{name}{ext}"));
+        if side.exists() {
+            let dest = to.with_file_name(format!("{}{ext}", to.file_name().unwrap_or_default().to_string_lossy()));
+            if std::fs::rename(&side, &dest).is_err() {
+                let _ = std::fs::remove_file(&side);
+            }
+        }
+    }
+    Ok(to)
+}
+
 /// Apply every migration newer than the stored `user_version`.
 pub fn migrate(conn: &mut Connection) -> AppResult<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;

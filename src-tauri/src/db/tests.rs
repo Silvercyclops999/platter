@@ -2366,3 +2366,69 @@ async fn songs_without_art_of_their_own_show_their_albums_cover() {
     assert_eq!(looked_up[0].thumb.as_deref(), Some(album_cover.as_str()));
     assert_eq!(looked_up[2].thumb.as_deref(), Some(artist_photo.as_str()));
 }
+
+// ---- a database that won't open -------------------------------------------------
+
+#[test]
+fn a_damaged_cache_is_set_aside_and_a_fresh_one_opens() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("library.sqlite");
+    let junk = b"this is not a database, just bytes that went wrong on disk".repeat(200);
+    std::fs::write(&path, &junk).unwrap();
+    let (db, rec) = DbHandle::open_or_recover(&path).unwrap();
+    let Some(Recovery::Fresh { broken, .. }) = rec else { panic!("expected a fresh cache, got {rec:?}") };
+    assert!(broken.file_name().unwrap().to_string_lossy().starts_with("library.sqlite.broken-"));
+    assert_eq!(std::fs::read(&broken).unwrap(), junk, "the old file is kept as it was");
+    let v: i64 = db.read(|c| Ok(c.pragma_query_value(None, "user_version", |r| r.get(0))?)).unwrap();
+    assert_eq!(v, schema::SCHEMA_VERSION);
+    drop(db);
+    // The next start is a plain open.
+    let (_db, rec) = DbHandle::open_or_recover(&path).unwrap();
+    assert_eq!(rec, None);
+}
+
+#[test]
+fn a_cache_that_fails_to_migrate_is_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("library.sqlite");
+    {
+        // Says it is at version 5 but has none of the tables.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.pragma_update(None, "user_version", 5).unwrap();
+    }
+    let (db, rec) = DbHandle::open_or_recover(&path).unwrap();
+    assert!(matches!(rec, Some(Recovery::Fresh { .. })), "{rec:?}");
+    db.read(|c| Ok(c.query_row("SELECT count(*) FROM tracks", [], |r| r.get::<_, i64>(0))?)).unwrap();
+}
+
+#[test]
+fn a_cache_from_a_newer_version_is_kept_with_a_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("library.sqlite");
+    {
+        let db = DbHandle::open(&path).unwrap();
+        db.write(|c| {
+            c.execute("CREATE TABLE later_feature (x INTEGER)", [])?;
+            c.pragma_update(None, "user_version", schema::SCHEMA_VERSION + 3)?;
+            Ok(())
+        })
+        .unwrap();
+    }
+    let (db, rec) = DbHandle::open_or_recover(&path).unwrap();
+    assert_eq!(rec, Some(Recovery::Newer { found: schema::SCHEMA_VERSION + 3 }));
+    assert!(rec.unwrap().message().contains("newer version"));
+    let n: i64 = db.read(|c| Ok(c.query_row("SELECT count(*) FROM later_feature", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(n, 0, "the same file, not a new one");
+    assert!(std::fs::read_dir(dir.path()).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().contains("broken")));
+}
+
+#[test]
+fn a_locked_or_unreachable_cache_is_never_set_aside() {
+    use crate::error::AppError;
+    for m in ["db: database is locked", "db: unable to open database file", "db: disk I/O error", "db: attempt to write a readonly database"] {
+        assert!(schema::is_unavailable(&AppError::Internal(m.into())), "{m}");
+    }
+    assert!(schema::is_unavailable(&AppError::Io("access denied".into())));
+    assert!(!schema::is_unavailable(&AppError::Internal("db: database disk image is malformed".into())));
+    assert!(!schema::is_unavailable(&AppError::Internal("db: no such table: tracks".into())));
+}

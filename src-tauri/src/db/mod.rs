@@ -110,6 +110,29 @@ struct Inner {
     ranks: Mutex<std::collections::HashMap<String, merge::Rank>>,
 }
 
+/// What [`DbHandle::open_or_recover`] had to do.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Recovery {
+    /// The old file was damaged and now sits at `broken`; this is a new cache.
+    Fresh { broken: PathBuf, reason: String },
+    /// The file was made by a newer version (schema `found`); it is used as is.
+    Newer { found: i64 },
+}
+
+impl Recovery {
+    /// What the user is told.
+    pub fn message(&self) -> String {
+        match self {
+            Recovery::Fresh { .. } => "Your library cache was damaged, so Platter started a new one and is reading your library again. \
+                 Likes and playlists are on your server; some settings on this computer may be back to their defaults."
+                .into(),
+            Recovery::Newer { .. } => "Your library cache was made by a newer version of Platter. \
+                 Update Platter if anything looks wrong."
+                .into(),
+        }
+    }
+}
+
 impl DbHandle {
     /// Open (or create) the database at `path` and run migrations.
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
@@ -143,6 +166,40 @@ impl DbHandle {
                 ranks: Mutex::new(std::collections::HashMap::new()),
             }),
         })
+    }
+
+    /// [`Self::open`] for app start. A database file that is damaged or
+    /// won't migrate is moved aside to `<name>.broken-<unix time>` (kept,
+    /// not deleted) and a fresh cache starts in its place, so the app always
+    /// opens; the library fills again on the next sync. A file another
+    /// process holds, or a disk error, still fails as before. Returns what
+    /// happened when it wasn't a plain open, for a message.
+    pub fn open_or_recover(path: impl AsRef<Path>) -> AppResult<(Self, Option<Recovery>)> {
+        let path = path.as_ref().to_path_buf();
+        let found = match schema::probe(&path) {
+            Ok(v) => v,
+            Err(schema::ProbeError::Unavailable(e)) => return Err(e),
+            Err(schema::ProbeError::Damaged(reason)) => return Self::start_fresh(&path, reason),
+        };
+        match Self::open(&path) {
+            Ok(h) if found > schema::SCHEMA_VERSION => {
+                tracing::warn!(found, ours = schema::SCHEMA_VERSION, "library cache is from a newer Platter; using it as is");
+                Ok((h, Some(Recovery::Newer { found })))
+            }
+            Ok(h) => Ok((h, None)),
+            Err(e) if schema::is_unavailable(&e) => Err(e),
+            Err(e) => {
+                let check = schema::quick_check(&path);
+                Self::start_fresh(&path, format!("{e} (integrity check: {check})"))
+            }
+        }
+    }
+
+    fn start_fresh(path: &Path, reason: String) -> AppResult<(Self, Option<Recovery>)> {
+        let broken = schema::quarantine(path)?;
+        tracing::error!(%reason, broken = %broken.display(), "library cache could not be opened; starting a fresh one");
+        let h = Self::open(path)?;
+        Ok((h, Some(Recovery::Fresh { broken, reason })))
     }
 
     /// The included libraries besides the main one. Takes effect on the

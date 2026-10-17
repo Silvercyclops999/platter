@@ -426,7 +426,17 @@ pub fn run() {
                 plex.plex_tv().clone(),
                 Arc::new(plex::home::KeyringProfiles),
             ));
-            let db = DbHandle::open(data_dir.join("library.sqlite"))?;
+            let (db, recovered) = DbHandle::open_or_recover(data_dir.join("library.sqlite"))?;
+            if let Some(r) = recovered {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri::Emitter;
+                    // Once the window is up and listening.
+                    tokio::time::sleep(Duration::from_secs(4)).await;
+                    let toast = plex::types::Toast { kind: "error".into(), message: r.message() };
+                    let _ = handle.emit(plex::types::EVENT_TOAST, toast);
+                });
+            }
             // A cache from before server-qualified ids: rewrite it now for
             // the server it came from (saved with the server choice), before
             // the queue, downloads or a sync read it. Otherwise the first

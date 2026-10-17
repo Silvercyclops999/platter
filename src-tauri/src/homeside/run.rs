@@ -502,7 +502,8 @@ impl Bridge {
 /// The real parts, from the environment.
 pub fn build(env: Env) -> AppResult<Parts> {
     std::fs::create_dir_all(&env.data).map_err(|_| AppError::Internal(format!("Can't use the data folder {}.", env.data.display())))?;
-    let db = DbHandle::open(env.data.join("bridge.db"))?;
+    // A damaged file is set aside (logged) so the bridge still starts.
+    let (db, _) = DbHandle::open_or_recover(env.data.join("bridge.db"))?;
     let keys: Arc<dyn TokenStore> = Arc::new(FileKeys::new(env.data.join("keys.json")));
     let device = match db.read(|c| kv_get(c, DEVICE_KEY))? {
         Some(d) => d,
