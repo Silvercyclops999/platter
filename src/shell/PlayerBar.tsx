@@ -60,7 +60,10 @@ export function SeekBar() {
   const hasTrack = trackId !== null;
   const loopOn = useSettings((s) => s.settings?.abLoopHandles ?? true);
   const loop = usePlayer((s) => s.state?.abLoop ?? null);
-  const [drag, setDrag] = useState<number | null>(null);
+  // The time held while dragging, for the song it was dragged on.
+  const [held, setHeld] = useState<{ v: number; id: string | null } | null>(null);
+  const drag = held && held.id === trackId ? held.v : null;
+  const setDrag = (v: number | null) => setHeld(v === null ? null : { v, id: trackId });
   // A-B loop: the first right-click (or Alt+click) picks A, the second B.
   const [pendingA, setPendingA] = useState<number | null>(null);
   useEffect(() => setPendingA(null), [trackId, loopOn]);
@@ -101,6 +104,7 @@ export function SeekBar() {
           step={SEEK_KEY_STEP}
           pageStep={SEEK_PAGE_STEP}
           disabled={!hasTrack}
+          resetKey={trackId}
           valueText={(v) => (hasTrack ? `${formatDuration(v)} of ${formatDuration(durationMs)}` : "Nothing playing")}
           // Pressing seeks at once; while held the time stays at the pointer,
           // and letting go commits where it ended. A press outside a loop's

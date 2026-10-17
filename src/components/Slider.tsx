@@ -35,6 +35,12 @@ export interface SliderProps {
   onAltPress?: (v: number) => void;
   /** Keys the slider doesn't handle itself (e.g. Escape). */
   onOtherKey?: (e: KeyboardEvent<HTMLDivElement>) => void;
+  /**
+   * What the value is of (the seek bar: the song). A drag in progress when it
+   * changes, or when the range changes, is dropped rather than applied to
+   * the new one.
+   */
+  resetKey?: string | number | null;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -61,9 +67,13 @@ export function Slider({
   buffered,
   onAltPress,
   onOtherKey,
+  resetKey = null,
 }: SliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const [drag, setDrag] = useState<number | null>(null);
+  const [held, setHeld] = useState<{ v: number; key: string | number | null; min: number; max: number } | null>(null);
+  // A drag only counts for the song and range it started on.
+  const drag = held && held.key === resetKey && held.min === min && held.max === max ? held.v : null;
+  const setDrag = (v: number | null) => setHeld(v === null ? null : { v, key: resetKey, min, max });
   const shown = drag ?? value;
   const range = max - min || 1;
   const pct = clamp(((shown - min) / range) * 100, 0, 100);
@@ -96,7 +106,11 @@ export function Slider({
     onChange?.(v);
   };
   const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
-    if (drag == null) return;
+    if (drag == null) {
+      // A drag dropped by a song change: let go without seeking.
+      if (held) setHeld(null);
+      return;
+    }
     const v = fromPointer(e.clientX);
     setDrag(null);
     onCommit?.(v, "release");

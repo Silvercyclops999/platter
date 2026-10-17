@@ -90,3 +90,36 @@ describe("Slider", () => {
     expect(onCommit).toHaveBeenCalledWith(150, "release");
   });
 });
+
+describe("Slider drag across a song change", () => {
+  const box = (s: HTMLElement) => {
+    const track = s.querySelector(".slider__track") as HTMLElement;
+    track.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 4, right: 100, bottom: 4, x: 0, y: 0, toJSON() {} });
+  };
+
+  it("drops the drag when the song changes, so letting go doesn't seek the new song", () => {
+    const onCommit = vi.fn();
+    const { rerender } = render(<Slider label="Seek" value={0} max={200} resetKey="a" onCommit={onCommit} />);
+    const s = screen.getByRole("slider", { name: "Seek" });
+    box(s);
+    fireEvent.pointerDown(s, { button: 0, clientX: 25, pointerId: 1 });
+    fireEvent.pointerMove(s, { clientX: 60, pointerId: 1 });
+    expect(s).toHaveAttribute("aria-valuenow", "120");
+    // Same length, new song.
+    rerender(<Slider label="Seek" value={3} max={200} resetKey="b" onCommit={onCommit} />);
+    expect(s).toHaveAttribute("aria-valuenow", "3");
+    fireEvent.pointerUp(s, { clientX: 60, pointerId: 1 });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("drops the drag when the range changes", () => {
+    const onCommit = vi.fn();
+    const { rerender } = render(<Slider label="Seek" value={0} max={200} onCommit={onCommit} />);
+    const s = screen.getByRole("slider", { name: "Seek" });
+    box(s);
+    fireEvent.pointerDown(s, { button: 0, clientX: 25, pointerId: 1 });
+    rerender(<Slider label="Seek" value={0} max={300} onCommit={onCommit} />);
+    fireEvent.pointerUp(s, { clientX: 60, pointerId: 1 });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+});
