@@ -877,9 +877,14 @@ Errors: `invalid` for a wrong size or a body that isn't a PNG, `internal`
 | --- | --- | --- |
 | `miniplayer_state` | – | `{ open }` |
 | `miniplayer_set` | `{ open }` | `{ open }` |
+| `miniplayer_go` | `{ kind: "album"\|"artist", id }` | – |
 
 Event `miniplayer://changed` → `{ open }` when the window opens or closes
 (from either window, or because the main window closed).
+
+`miniplayer_go` is the queue menu's Go to album: it brings the main window
+forward and sends it event `miniplayer://go` → `{ kind, id }`, and the main
+window opens that page. An empty `id` fails with `invalid`.
 
 The miniplayer is a second window, label `miniplayer`, with no frame and its
 own capability (`capabilities/miniplayer.json`: dragging and resizing only).
@@ -890,6 +895,10 @@ when that place is still on a screen (`miniplayerBounds`, saved a moment
 after it stops moving and when it closes). It is always on top while
 `miniplayerOnTop` is on; changing that setting applies at once. A change to
 any `miniplayer*` setting is sent to both windows as `settings://changed`.
+Turning `miniplayerQueue` on while the window is shorter than 500 makes it
+500 tall, moved up when that would run off the bottom of its screen. The
+window can be resized from 240 x 260 up to 1000 x 1000, and it has the
+system's file drop turned off so the queue's rows can be dragged to reorder.
 When the window can't be made, `miniplayer_set` fails with `internal` ("The
 miniplayer couldn't open.").
 
@@ -3573,8 +3582,9 @@ The rest of the fields, with their defaults:
 | `aiProvider` | `"none"` (default), `"anthropic"` | The AI provider for prompted playlists. None hides them. This device only (the key is in this computer's keychain). |
 | `aiModel` | string, `"claude-opus-5-5"` | The provider's model. Letters, numbers, dots, dashes; empty goes back to the default. |
 | `miniplayerOnTop` | bool, true | The miniplayer window stays above other windows. This device only. |
-| `miniplayerTint` | bool, true | The miniplayer's card takes a colour from the cover. This device only. |
-| `miniplayerQueue` | bool, false | The miniplayer lists the next songs when it's at least 480 tall. This device only. |
+| `miniplayerTint` | bool, true | The whole miniplayer takes a dark shade of the cover's colour; off, the colour is on a card behind the cover. This device only. |
+| `miniplayerQueue` | bool, false | The miniplayer lists the next songs when it's at least 500 tall, or beside the art when it's side by side. This device only. |
+| `miniplayerSideBySide` | bool, true | A miniplayer more than 1.4 times as wide as it is tall (and at least 480 wide) puts the title, progress and queue beside the art. This device only. |
 | `miniplayerBounds` | `{ x, y, width, height }` or null, read only | Where the miniplayer was last, in logical pixels. Kept by the core. This device only. |
 | `powerKeys` | bool, false | Keyboard power mode in the main window: jump hints, j / k, g g, G, Enter and /. Handled in the UI (`src/shell/powerKeys.ts`); the core only stores it. |
 | `hintKey` | `"f"` (default), `"h"`, `";"`, `"'"` | The key that shows the jump hints. |

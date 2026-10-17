@@ -37,6 +37,7 @@ import type { Backend, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
 import type {
   IsrcRelease,
+  MiniplayerGo,
   TagCheckScope,
   TagFixKind,
   TagSaveRequest,
@@ -3401,6 +3402,14 @@ export class MockBackend implements Backend {
         this.emit("miniplayer://changed", { open });
       }
       return { open };
+    });
+  }
+  /** Pages the miniplayer asked the main window to open, in order. */
+  miniplayerWent: MiniplayerGo[] = [];
+  miniplayerGo(kind: MiniplayerGo["kind"], id: string) {
+    return this.delay(() => {
+      this.miniplayerWent.push({ kind, id });
+      this.emit("miniplayer://go", { kind, id });
     });
   }
   /** `?view=miniplayer` shows the miniplayer page in the browser. */

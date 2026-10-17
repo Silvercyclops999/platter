@@ -1860,6 +1860,7 @@ pub fn run() {
             radar::commands::radar_auto_set,
             platform::miniplayer::miniplayer_state,
             platform::miniplayer::miniplayer_set,
+            platform::miniplayer::miniplayer_go,
             platform::reveal::window_ready,
         ])
         .on_window_event(|window, event| {

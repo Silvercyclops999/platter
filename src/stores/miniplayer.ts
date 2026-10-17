@@ -5,6 +5,7 @@
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
+import { nav } from "./router";
 import { toast } from "./toasts";
 
 /** Said when the window couldn't be made. */
@@ -42,17 +43,22 @@ export const miniplayer = {
   },
 };
 
-/** Follow the window opening and closing. Returns a cleanup. */
+/**
+ * Follow the window opening and closing, and open the pages it asks for
+ * (Go to album from its queue). Returns a cleanup.
+ */
 export function connectMiniplayer(b: Backend = backend): () => void {
   let alive = true;
-  let un: (() => void) | null = null;
+  const uns: (() => void)[] = [];
+  const keep = (u: () => void) => (alive ? uns.push(u) : u());
   b.miniplayerState().then(
     (s) => alive && useMiniplayer.getState().set(s.open),
     () => {},
   );
-  b.listen("miniplayer://changed", (s) => useMiniplayer.getState().set(s.open)).then((u) => (alive ? (un = u) : u()));
+  b.listen("miniplayer://changed", (s) => useMiniplayer.getState().set(s.open)).then(keep);
+  b.listen("miniplayer://go", (g) => nav.go({ name: g.kind, id: g.id })).then(keep);
   return () => {
     alive = false;
-    un?.();
+    uns.forEach((u) => u());
   };
 }

@@ -626,6 +626,8 @@ pub struct Settings {
     pub miniplayer_tint: bool,
     /// The miniplayer lists what's up next when it's tall enough (this device only).
     pub miniplayer_queue: bool,
+    /// A wide miniplayer puts the title and queue beside the art (this device only).
+    pub miniplayer_side_by_side: bool,
     /// Where the miniplayer was last, in logical pixels. Kept by the core,
     /// read only here.
     pub miniplayer_bounds: Option<crate::platform::miniplayer::WindowBounds>,
@@ -1006,6 +1008,7 @@ impl Default for Settings {
             miniplayer_on_top: true,
             miniplayer_tint: true,
             miniplayer_queue: false,
+            miniplayer_side_by_side: true,
             miniplayer_bounds: None,
             power_keys: false,
             hint_key: HintKey::F,
@@ -1310,6 +1313,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "miniplayerOnTop",
     "miniplayerTint",
     "miniplayerQueue",
+    "miniplayerSideBySide",
     "miniplayerBounds",
     "nowPlayingFeed",
     "nowPlayingFeedPort",
@@ -1510,6 +1514,7 @@ pub struct SettingsPatch {
     pub miniplayer_on_top: Option<bool>,
     pub miniplayer_tint: Option<bool>,
     pub miniplayer_queue: Option<bool>,
+    pub miniplayer_side_by_side: Option<bool>,
     pub power_keys: Option<bool>,
     pub hint_key: Option<HintKey>,
     pub now_playing_feed: Option<bool>,
@@ -1566,7 +1571,9 @@ pub struct SettingsPatch {
 impl SettingsPatch {
     /// Whether the patch changes the miniplayer (both windows hear about it).
     pub fn touches_miniplayer(&self) -> bool {
-        self.miniplayer_on_top.is_some() || self.miniplayer_tint.is_some() || self.miniplayer_queue.is_some()
+        self.miniplayer_on_top.is_some() || self.miniplayer_tint.is_some()
+            || self.miniplayer_queue.is_some()
+            || self.miniplayer_side_by_side.is_some()
     }
 }
 
@@ -1690,6 +1697,7 @@ impl Settings {
         set(&mut self.miniplayer_on_top, p.miniplayer_on_top);
         set(&mut self.miniplayer_tint, p.miniplayer_tint);
         set(&mut self.miniplayer_queue, p.miniplayer_queue);
+        set(&mut self.miniplayer_side_by_side, p.miniplayer_side_by_side);
         set(&mut self.power_keys, p.power_keys);
         set(&mut self.hint_key, p.hint_key);
         set(&mut self.now_playing_feed, p.now_playing_feed);
@@ -2693,11 +2701,15 @@ pub async fn settings_set(
     patch: SettingsPatch,
 ) -> AppResult<()> {
     let mini = patch.touches_miniplayer();
+    let queue_on = patch.miniplayer_queue == Some(true);
     apply_patch(&settings, &player, &downloads, &mixes, patch).await?;
     if mini {
         // The miniplayer has its own window; tell both, and keep it on top or not.
         let s = settings.get().await?;
         crate::platform::miniplayer::settings_changed(&app, &s);
+        if queue_on {
+            crate::platform::miniplayer::grow_for_queue(&app);
+        }
     }
     Ok(())
 }

@@ -2747,7 +2747,8 @@ export function SettingsPage() {
       section: "Appearance",
       group: "Miniplayer",
       title: "Miniplayer background colour",
-      description: "The miniplayer's card takes a colour from the cover. Also in the miniplayer's own settings. This device only.",
+      description:
+        "The whole miniplayer takes a dark shade of the cover's colour. Off, it stays dark with the colour on a card behind the cover. Also in the miniplayer's own settings. This device only.",
       control: (ids) => toggle(s, "miniplayerTint", ids),
     },
     {
@@ -2755,8 +2756,16 @@ export function SettingsPage() {
       section: "Appearance",
       group: "Miniplayer",
       title: "Show the queue in the miniplayer",
-      description: "Lists the next few songs under the art when the miniplayer is tall enough, or beside it when it is wide. Bigger windows list more. This device only.",
+      description: "Lists what's next under the art when the miniplayer is at least 500 tall (turning it on makes a shorter window taller), or beside it when it is wide. Bigger windows list more. This device only.",
       control: (ids) => toggle(s, "miniplayerQueue", ids),
+    },
+    {
+      key: "miniplayerSideBySide",
+      section: "Appearance",
+      group: "Miniplayer",
+      title: "Miniplayer side by side when wide",
+      description: "A miniplayer much wider than it is tall puts the art on the left and the title, progress and queue beside it. This device only.",
+      control: (ids) => toggle(s, "miniplayerSideBySide", ids),
     },
     // Library: the tag editor (the only part that writes to files)
     {

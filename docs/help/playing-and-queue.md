@@ -61,7 +61,7 @@ Settings, Equalizer, Headphone correction evens out the sound of your headphones
 
 ## Miniplayer
 
-The miniplayer is a small window with the cover and controls. Open it from the player bar or the app menu. It stays above other windows unless you turn off Settings, Appearance, Miniplayer, Miniplayer always on top. Settings, Appearance, Miniplayer, Show the queue in the miniplayer lists the next few songs when the window is big enough.
+The miniplayer is a small window with the cover and controls. Open it from the player bar or the app menu. It stays above other windows unless you turn off Settings, Appearance, Miniplayer, Miniplayer always on top. Settings, Appearance, Miniplayer, Show the queue in the miniplayer lists what's next when the window is at least 500 tall, and makes a shorter window taller when you turn it on. Click a song to play it, drag songs to reorder them, or right-click one to play it next, remove it or go to its album. With the keyboard, the arrow keys move through the list, Enter plays, Delete removes and Alt with the up or down arrow moves a song. Space plays and pauses. A window much wider than it is tall puts the title, progress and queue beside the cover; turn off Miniplayer side by side when wide to keep it stacked.
 
 ## Keyboard shortcuts
 

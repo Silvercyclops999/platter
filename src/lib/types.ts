@@ -1188,6 +1188,8 @@ export interface Settings {
   miniplayerTint: boolean;
   /** The miniplayer lists what's up next when it's tall enough (this device only). */
   miniplayerQueue: boolean;
+  /** A wide miniplayer puts the title and queue beside the art (this device only). */
+  miniplayerSideBySide: boolean;
   /** Where the miniplayer was last (logical pixels). Kept by the core; read only. */
   miniplayerBounds?: WindowBounds | null;
   /** Keyboard power mode: jump hints, j / k, g g, G and / in the main window. */
@@ -1359,6 +1361,12 @@ export interface CardQr {
 /** Whether the miniplayer window is open. */
 export interface MiniplayerState {
   open: boolean;
+}
+
+/** A page the miniplayer asks the main window to open (`miniplayer_go`). */
+export interface MiniplayerGo {
+  kind: "album" | "artist";
+  id: string;
 }
 
 export type DownloadQuality = "original" | "320" | "192" | "128";
@@ -1675,6 +1683,7 @@ export const DEFAULT_SETTINGS: Settings = {
   miniplayerOnTop: true,
   miniplayerTint: true,
   miniplayerQueue: false,
+  miniplayerSideBySide: true,
   miniplayerBounds: null,
   powerKeys: false,
   hintKey: "f",
@@ -3858,6 +3867,8 @@ export interface EventMap {
   "playhistory://status": PlayHistoryStatus;
   /** The miniplayer window opened or closed. */
   "miniplayer://changed": MiniplayerState;
+  /** The miniplayer asked the main window to open a page. */
+  "miniplayer://go": MiniplayerGo;
   /** A menu bar item was picked (macOS): the UI action to run. */
   "menu://action": { action: string };
 }

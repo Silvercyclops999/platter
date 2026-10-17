@@ -27,7 +27,10 @@ pub const DEFAULT_SIZE: (f64, f64) = (340.0, 365.0);
 pub const MIN_SIZE: (f64, f64) = (240.0, 260.0);
 /// Largest size the window can be resized to (and kept). It's a small
 /// player; past this the main window does the job better.
-pub const MAX_SIZE: (f64, f64) = (900.0, 900.0);
+pub const MAX_SIZE: (f64, f64) = (1000.0, 1000.0);
+/// Height the queue needs. Turning the queue on in a shorter window grows it
+/// to this (the UI hides the queue below it).
+pub const QUEUE_HEIGHT: f64 = 500.0;
 /// Gap from the screen edges when it opens in the corner.
 const CORNER_GAP: f64 = 24.0;
 /// How long the window has to sit still before its place is saved.
@@ -107,6 +110,42 @@ pub fn place(saved: Option<WindowBounds>, screens: &[ScreenRect], main: Option<&
     (w, h, main.map(|m| corner(m, w, h)))
 }
 
+/// Where the window goes when the queue is turned on: as tall as the queue
+/// needs, growing upwards when that would run past the bottom of its screen
+/// (but never above the screen's top). None when it's tall enough already.
+pub fn grown_for_queue(b: WindowBounds, screen: Option<&ScreenRect>) -> Option<WindowBounds> {
+    if !b.height.is_finite() || b.height >= QUEUE_HEIGHT {
+        return None;
+    }
+    let mut g = WindowBounds { height: QUEUE_HEIGHT, ..b };
+    if let Some(s) = screen {
+        // Running off the bottom: grow upwards instead, keeping the bottom
+        // edge where it was (the corner it opens in stays its corner).
+        if g.y + g.height > s.y + s.height {
+            g.y = (b.y + b.height - g.height).min(s.y + s.height - g.height).max(s.y);
+        }
+    }
+    Some(g)
+}
+
+/// The queue was turned on: grow the open window to fit it.
+pub fn grow_for_queue<R: Runtime>(app: &AppHandle<R>) {
+    let Some(w) = app.get_webview_window(LABEL) else { return };
+    let Ok(scale) = w.scale_factor() else { return };
+    let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) else { return };
+    let (pos, size) = (pos.to_logical::<f64>(scale), size.to_logical::<f64>(scale));
+    let b = WindowBounds { x: pos.x, y: pos.y, width: size.width, height: size.height };
+    let screen = w.current_monitor().ok().flatten().map(|m| rect_of(&m));
+    let Some(g) = grown_for_queue(b, screen.as_ref()) else { return };
+    if let Err(e) = w.set_size(tauri::LogicalSize::new(g.width, g.height)) {
+        tracing::warn!("miniplayer grow: {e}");
+        return;
+    }
+    if g.y != b.y {
+        let _ = w.set_position(tauri::LogicalPosition::new(g.x, g.y));
+    }
+}
+
 /// Live state: the last place seen, and a counter so only the last move saves.
 #[derive(Default, Clone)]
 pub struct Miniplayer {
@@ -114,23 +153,25 @@ pub struct Miniplayer {
     moves: Arc<AtomicU64>,
 }
 
+/// A monitor's usable area in logical pixels.
+fn rect_of(m: &tauri::Monitor) -> ScreenRect {
+    let scale = m.scale_factor();
+    let area = m.work_area();
+    ScreenRect {
+        x: area.position.x as f64 / scale,
+        y: area.position.y as f64 / scale,
+        width: area.size.width as f64 / scale,
+        height: area.size.height as f64 / scale,
+    }
+}
+
 fn screens<R: Runtime>(app: &AppHandle<R>) -> (Vec<ScreenRect>, Option<ScreenRect>) {
-    let to_rect = |m: &tauri::Monitor| {
-        let scale = m.scale_factor();
-        let area = m.work_area();
-        ScreenRect {
-            x: area.position.x as f64 / scale,
-            y: area.position.y as f64 / scale,
-            width: area.size.width as f64 / scale,
-            height: area.size.height as f64 / scale,
-        }
-    };
-    let all = app.available_monitors().unwrap_or_default().iter().map(to_rect).collect();
+    let all = app.available_monitors().unwrap_or_default().iter().map(rect_of).collect();
     let main = app
         .get_webview_window("main")
         .and_then(|w| w.current_monitor().ok().flatten())
         .or_else(|| app.primary_monitor().ok().flatten())
-        .map(|m| to_rect(&m));
+        .map(|m| rect_of(&m));
     (all, main)
 }
 
@@ -169,6 +210,8 @@ pub async fn open<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
         // No maximize: a double click on the top strip (the drag region)
         // would otherwise fill the screen.
         .maximizable(false)
+        // The queue's rows drag to reorder (the page's own drag and drop).
+        .disable_drag_drop_handler()
         .always_on_top(s.miniplayer_on_top)
         .background_color(super::reveal::background(app))
         .visible(true)
@@ -282,6 +325,36 @@ pub async fn miniplayer_set(app: AppHandle, open: bool) -> AppResult<MiniplayerS
     Ok(MiniplayerState { open: is_open(&app) })
 }
 
+/// A page the miniplayer can open in the main window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GoKind {
+    Album,
+    Artist,
+}
+
+/// What the main window is told to open (`miniplayer://go`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MiniplayerGo {
+    pub kind: GoKind,
+    pub id: String,
+}
+
+/// Open a page in the main window (from the miniplayer's queue menu): bring
+/// the main window forward and tell it which page.
+#[tauri::command]
+pub async fn miniplayer_go(app: AppHandle, kind: GoKind, id: String) -> AppResult<()> {
+    if id.is_empty() {
+        return Err(AppError::Invalid("Nothing to open.".into()));
+    }
+    crate::share::commands::focus_main(&app);
+    if let Err(e) = app.emit_to("main", "miniplayer://go", MiniplayerGo { kind, id }) {
+        tracing::warn!("emit miniplayer://go: {e}");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,6 +415,36 @@ mod tests {
     #[test]
     fn no_screens_known_lets_the_system_place_it() {
         assert_eq!(place(None, &[], None), (DEFAULT_SIZE.0, DEFAULT_SIZE.1, None));
+    }
+
+    #[test]
+    fn turning_the_queue_on_grows_a_short_window() {
+        let screen = ScreenRect { x: 0.0, y: 0.0, width: 1920.0, height: 1040.0 };
+        let b = WindowBounds { x: 100.0, y: 100.0, width: 340.0, height: 365.0 };
+        let g = grown_for_queue(b, Some(&screen)).unwrap();
+        assert_eq!((g.x, g.y, g.width, g.height), (100.0, 100.0, 340.0, QUEUE_HEIGHT));
+        // Tall enough already: left alone.
+        assert_eq!(grown_for_queue(WindowBounds { height: 600.0, ..b }, Some(&screen)), None);
+    }
+
+    #[test]
+    fn a_window_in_the_bottom_corner_grows_upwards() {
+        let screen = ScreenRect { x: 0.0, y: 0.0, width: 1920.0, height: 1040.0 };
+        let (x, y) = corner(&screen, 340.0, 365.0);
+        let g = grown_for_queue(WindowBounds { x, y, width: 340.0, height: 365.0 }, Some(&screen)).unwrap();
+        assert_eq!(g.y + g.height, y + 365.0);
+        // A screen shorter than the queue keeps the top strip on it.
+        let small = ScreenRect { height: 400.0, ..screen };
+        let g = grown_for_queue(WindowBounds { x: 0.0, y: 50.0, width: 340.0, height: 300.0 }, Some(&small)).unwrap();
+        assert_eq!(g.y, 0.0);
+    }
+
+    #[test]
+    fn go_reads_page_kinds_in_camel_case() {
+        let k: GoKind = serde_json::from_str("\"album\"").unwrap();
+        assert_eq!(k, GoKind::Album);
+        let v = serde_json::to_value(MiniplayerGo { kind: GoKind::Artist, id: "7".into() }).unwrap();
+        assert_eq!(v, serde_json::json!({ "kind": "artist", "id": "7" }));
     }
 
     #[test]

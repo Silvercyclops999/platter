@@ -1,5 +1,7 @@
-/* The miniplayer window: a top strip, the art on a tinted card, and the
-   controls over the art while it's pointed at. Sized from the window. */
+/* The miniplayer window: a top strip, the art on a card coloured from the
+   cover, the title under it (or beside it when wide), and the queue. The
+   controls show over the art while it's pointed at. Sized from the window;
+   the numbers here match the ones miniLayout works from. */
 
 html:has(.mini),
 body:has(.mini) {
@@ -15,9 +17,19 @@ body:has(.mini) {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background: var(--color-bg-base);
+  background-color: var(--color-bg-base);
   color: var(--color-text-primary);
   user-select: none;
+  transition: background-color var(--motion-long) var(--motion-easing);
+}
+
+/* Background colour on: the whole window takes a dark shade of the cover
+   colour and the quieter text is tinted to match. The card behind the
+   cover goes away. */
+.mini.is-tinted {
+  background-color: color-mix(in srgb, var(--mini-tint) 40%, #0b0a09);
+  --color-text-secondary: color-mix(in srgb, var(--mini-tint) 35%, #e6ddd2);
+  --color-text-muted: color-mix(in srgb, var(--mini-tint) 30%, #a49b91);
 }
 
 .mini__strip {
@@ -27,7 +39,6 @@ body:has(.mini) {
   align-items: center;
   height: 28px;
   padding: 0 var(--space-1);
-  background: #000;
   -webkit-app-region: drag;
 }
 .mini__strip .icon-btn { -webkit-app-region: no-drag; color: var(--color-text-secondary); }
@@ -45,27 +56,27 @@ body:has(.mini) {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-2);
+  padding: 0 var(--space-2) var(--space-2);
 }
 
+/* Background colour off: the cover sits on a rounded card with a gradient
+   of its colour, inset from the window edges. */
 .mini__card {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-3) var(--space-2);
+  padding: var(--space-3);
   border-radius: var(--radius-card);
-  background: var(--color-bg-raised);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mini-tint) 75%, transparent), color-mix(in srgb, var(--mini-tint) 30%, var(--color-bg-raised)));
   transition: background-color var(--motion-long) var(--motion-easing);
 }
-.mini.is-tinted .mini__card {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--mini-tint) 70%, transparent), color-mix(in srgb, var(--mini-tint) 35%, var(--color-bg-raised)));
-}
+.mini__card:not(.is-fill) { flex-grow: 0; flex-shrink: 0; }
+.mini.is-tinted .mini__card { background: none; }
 
 .mini__art-area {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   align-items: center;
@@ -77,8 +88,29 @@ body:has(.mini) {
   border-radius: var(--radius-row);
   overflow: hidden;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  container-type: inline-size;
 }
 .mini__art .art { border-radius: var(--radius-row); }
+
+/* How far through the song: a thin line on the art's bottom edge at rest.
+   The full bar takes over while the controls show. */
+.mini__edge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+  transition: opacity var(--motion-very-quick) linear;
+}
+.mini__edge-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-text-primary);
+}
+.mini__art.is-active .mini__edge,
+.mini__art:focus-within .mini__edge { opacity: 0; }
 
 /* Controls: hidden at rest, at once on hover (a very quick fade). */
 .mini__scrim {
@@ -107,21 +139,25 @@ body:has(.mini) {
 }
 .mini__row .icon-btn:not(.mini__play) { color: var(--color-text-primary); }
 .mini__row .icon-btn.is-active:not(.mini__play) { color: var(--color-accent); }
-.mini__row .mini__play.icon-btn {
+.mini .mini__play.icon-btn {
   width: 56px;
   height: 56px;
   margin: 0 var(--space-1);
 }
-.mini__row .mini__play.icon-btn:hover:not([aria-disabled="true"]) { transform: scale(calc(1 + 0.04 * var(--motion-move))); }
+.mini .mini__play.icon-btn:hover:not([aria-disabled="true"]) { transform: scale(calc(1 + 0.04 * var(--motion-move))); }
 
-/* Narrow windows: tighter buttons so the row still fits. */
+/* Narrow art: tighter buttons so the row still fits. */
 @container (max-width: 260px) {
   .mini__row .mini__play.icon-btn { width: 44px; height: 44px; }
 }
-.mini__art { container-type: inline-size; }
 @container (max-width: 250px) {
   .mini__row { gap: 0; }
   .mini__row .icon-btn:not(.mini__play) { width: 28px; height: 28px; }
+}
+/* The medium art above the queue: copy link gives way so the row fits. */
+@container (max-width: 230px) {
+  .mini__row .mini__share { display: none; }
+  .mini__row .mini__play.icon-btn { width: 40px; height: 40px; }
 }
 
 .mini__progress {
@@ -194,12 +230,15 @@ body:has(.mini) {
   transform: translate(-50%, 50%);
 }
 
+/* Title, artist and like: one line each, the same side padding as the queue. */
 .mini__meta {
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  min-height: 48px;
+  padding: 0 var(--space-2);
 }
 .mini__text { flex: 1; min-width: 0; }
 .mini__title {
@@ -215,7 +254,22 @@ body:has(.mini) {
   line-height: 1.4;
 }
 .mini__like { flex: none; }
-.mini__empty { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-md); }
+
+/* Nothing playing. */
+.mini__idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+.mini__empty { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-md); }
+.mini__art.is-idle .art { filter: brightness(0.4) saturate(0.7); }
+.mini__idle-scrim {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
 
 .mini__grip {
   position: absolute;
@@ -233,45 +287,112 @@ body:has(.mini) {
   -webkit-app-region: no-drag;
 }
 
-/* Wide windows: the art on the left, the title, like and up next beside it. */
-.mini__body--wide .mini__card {
-  flex-direction: row;
-  align-items: stretch;
-  gap: var(--space-6);
-  padding: var(--space-4);
-}
+/* Side by side: the art at full height on the left; the title, progress
+   and queue beside it. */
+.mini--side .mini__body { flex-direction: row; }
+.mini--side .mini__card { min-height: auto; }
 .mini__side {
-  flex: 0 0 clamp(200px, 38%, 360px);
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: var(--space-6);
+  gap: var(--space-2);
+  padding-top: var(--space-2);
 }
-.mini__body--wide .mini__title { font-size: var(--font-size-2xl); line-height: 1.2; }
-.mini__body--wide .mini__artist { font-size: var(--font-size-md); }
-.mini__side .mini-queue { padding: 0; }
+.mini__side:not(:has(.mini-q)) { justify-content: center; padding-top: 0; }
+.mini--side .mini__title { font-size: var(--font-size-xl); line-height: 1.25; }
+.mini--side .mini__artist { font-size: var(--font-size-md); }
+.mini__side-progress { flex: none; padding: 0 var(--space-2) var(--space-1); }
+.mini__side-progress .mini__times { color: var(--color-text-muted); }
+.mini__side-progress .mini__bar { height: 3px; background: color-mix(in srgb, var(--color-text-primary) 18%, transparent); }
 
-/* Up next, under the card when the window is tall enough. */
-.mini-queue { flex: none; padding: 0 var(--space-1); }
-.mini-queue__title {
-  margin: 0 0 var(--space-1);
+/* The queue: a heading on a thin rule, then one line per song. */
+.mini-q {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mini-q__heading {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 28px;
+  margin: 0;
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+}
+.mini-q__heading::before,
+.mini-q__heading::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+}
+.mini-q__list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.mini-q__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-row);
+  cursor: default;
   font-size: var(--font-size-sm);
-  font-weight: 700;
-  color: var(--color-text-secondary);
+  transition: background-color var(--motion-very-quick) linear;
 }
-.mini-queue__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-.mini-queue__row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.mini-queue__text { display: flex; flex-direction: column; min-width: 0; }
-.mini-queue__song { font-size: var(--font-size-sm); }
-.mini-queue__artist { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.mini-q__row:hover { background-color: color-mix(in srgb, var(--color-text-primary) 9%, transparent); }
+.mini-q__row:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+.mini-q__row.is-drop-before { box-shadow: inset 0 2px 0 var(--color-accent); }
+.mini-q__row.is-drop-after { box-shadow: inset 0 -2px 0 var(--color-accent); }
+.mini-q__text { flex: 1; min-width: 0; }
+.mini-q__song { color: var(--color-text-primary); }
+.mini-q__artist { color: var(--color-text-secondary); }
+.mini-q__end {
+  flex: none;
+  display: grid;
+  justify-items: end;
+  min-width: 32px;
+}
+.mini-q__end > * { grid-area: 1 / 1; }
+.mini-q__dur { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.mini-q__play { opacity: 0; color: var(--color-text-primary); }
+.mini-q__row:hover .mini-q__dur,
+.mini-q__row:focus-visible .mini-q__dur { opacity: 0; }
+.mini-q__row:hover .mini-q__play,
+.mini-q__row:focus-visible .mini-q__play { opacity: 1; }
+.mini-q__empty {
+  margin: 0;
+  padding: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
 
-/* The settings panel swaps in for the content. */
+/* The settings panel swaps in for the content, centred in the window. */
 .mini-settings {
   flex: 1;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: var(--space-3);
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
   padding: var(--space-4);
 }
 .mini-settings__title { margin: 0 0 var(--space-1); font-size: var(--font-size-lg); font-weight: 700; }
@@ -283,7 +404,7 @@ body:has(.mini) {
   font-size: var(--font-size-md);
 }
 .mini-settings__note { margin: 0; font-size: var(--font-size-xs); color: var(--color-text-muted); }
-.mini-settings__done { align-self: flex-start; margin-top: auto; }
+.mini-settings__done { align-self: flex-start; margin-top: var(--space-2); }
 
 /* Toasts in a small window sit across the bottom. */
 .mini .toaster { left: var(--space-2); right: var(--space-2); bottom: var(--space-2); transform: none; }

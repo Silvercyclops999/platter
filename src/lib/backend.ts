@@ -94,6 +94,7 @@ import type {
   KeyedInfoSource,
   LibraryItem,
   CardQr,
+  MiniplayerGo,
   MiniplayerState,
   LikedPage,
   Lyrics,
@@ -1149,6 +1150,8 @@ export interface Backend {
   miniplayerState(): Promise<MiniplayerState>;
   /** Open or close the miniplayer; answers whether it's open now. */
   miniplayerSet(open: boolean): Promise<MiniplayerState>;
+  /** Bring the main window forward on an album or artist (the miniplayer's queue menu). */
+  miniplayerGo(kind: MiniplayerGo["kind"], id: string): Promise<void>;
   /** Which window this UI is in ("main" or "miniplayer"). */
   windowLabel(): string;
   /** Start resizing this window from its bottom-right corner (the grip). */
@@ -1660,6 +1663,7 @@ export function createTauriBackend(): Backend {
     radarAutoSet: (id, name, on) => call("radar_auto_set", { id, name, on }),
     miniplayerState: () => call("miniplayer_state"),
     miniplayerSet: (open) => call("miniplayer_set", { open }),
+    miniplayerGo: (kind, id) => call("miniplayer_go", { kind, id }),
     windowLabel: () => getCurrentWindow().label,
     windowResizeFromCorner: () => getCurrentWindow().startResizeDragging("SouthEast"),
     windowReady: (background) => call("window_ready", { background }),
