@@ -19,40 +19,72 @@ pub fn mix_channels(input: &[f32], cin: usize, cout: usize, out: &mut Vec<f32>) 
         out.extend_from_slice(input);
         return;
     }
-    const M3DB: f32 = std::f32::consts::FRAC_1_SQRT_2;
     out.reserve(input.len() / cin * cout);
+    let fold = (cout == 2 && cin > 2).then(|| stereo_fold(cin));
     for frame in input.chunks_exact(cin) {
         if cin == 1 {
             out.extend(std::iter::repeat_n(frame[0], cout));
         } else if cout == 1 {
             out.push(frame.iter().sum::<f32>() / cin as f32);
-        } else if cout == 2 {
-            // Standard order: FL FR FC LFE BL BR SL SR. LFE is dropped.
-            let c = frame.get(2).copied().unwrap_or(0.0);
-            let (bl, br) = (
-                frame.get(4).copied().unwrap_or(0.0),
-                frame.get(5).copied().unwrap_or(0.0),
-            );
-            let (sl, sr) = (
-                frame.get(6).copied().unwrap_or(0.0),
-                frame.get(7).copied().unwrap_or(0.0),
-            );
-            let mut l = frame[0];
-            let mut r = frame[1];
-            if cin > 2 {
-                l += M3DB * (c + bl + sl);
-                r += M3DB * (c + br + sr);
-                let norm = 1.0 / (1.0 + M3DB * 2.0);
-                l *= norm;
-                r *= norm;
+        } else if let Some((gains, norm)) = &fold {
+            let (mut l, mut r) = (0.0, 0.0);
+            for (x, (gl, gr)) in frame.iter().zip(gains) {
+                l += x * gl;
+                r += x * gr;
             }
-            out.push(l);
-            out.push(r);
+            out.push(l * norm);
+            out.push(r * norm);
         } else {
             // Stereo (or more) into a wider layout: copy what matches, silence the rest.
             out.extend(frame.iter().copied().chain(std::iter::repeat(0.0)).take(cout));
         }
     }
+}
+
+/// Speaker positions, for folding surround down to stereo.
+#[derive(Clone, Copy)]
+enum Pos {
+    L,
+    R,
+    C,
+    Lfe,
+    /// A rear or side speaker on the left / right.
+    BackL,
+    BackR,
+    BackC,
+}
+
+/// The usual channel order for each channel count (WAV and FLAC agree on
+/// these): quad, 5.0, 5.1, 6.1 and 7.1.
+fn layout(cin: usize) -> &'static [Pos] {
+    use Pos::*;
+    match cin {
+        3 => &[L, R, C],
+        4 => &[L, R, BackL, BackR],
+        5 => &[L, R, C, BackL, BackR],
+        6 => &[L, R, C, Lfe, BackL, BackR],
+        7 => &[L, R, C, Lfe, BackC, BackL, BackR],
+        _ => &[L, R, C, Lfe, BackL, BackR, BackL, BackR],
+    }
+}
+
+/// Left and right gain per input channel, and the level that keeps the
+/// fold from clipping. Channels past the eighth are left out.
+fn stereo_fold(cin: usize) -> ([(f32, f32); 8], f32) {
+    const M3DB: f32 = std::f32::consts::FRAC_1_SQRT_2;
+    let mut gains = [(0.0, 0.0); 8];
+    for (g, p) in gains.iter_mut().zip(layout(cin)) {
+        *g = match p {
+            Pos::L => (1.0, 0.0),
+            Pos::R => (0.0, 1.0),
+            Pos::C | Pos::BackC => (M3DB, M3DB),
+            Pos::Lfe => (0.0, 0.0),
+            Pos::BackL => (M3DB, 0.0),
+            Pos::BackR => (0.0, M3DB),
+        };
+    }
+    let sum_l: f32 = gains.iter().map(|g| g.0).sum();
+    (gains, 1.0 / sum_l.max(1.0))
 }
 
 const CHUNK: usize = 1024;
@@ -81,19 +113,17 @@ pub struct Converter {
 }
 
 impl Converter {
-    pub fn new(in_rate: u32, in_channels: usize, out_rate: u32, out_channels: usize) -> Self {
-        let rs = (in_rate != out_rate && in_rate > 0).then(|| {
-            let rs = Fft::<f32>::new(
-                in_rate as usize,
-                out_rate as usize,
-                CHUNK,
-                out_channels,
-                FixedSync::Input,
-            )
-            .expect("valid resampler parameters");
+    /// Fails for formats the resampler can't take (no channels, no rate).
+    pub fn new(in_rate: u32, in_channels: usize, out_rate: u32, out_channels: usize) -> Result<Self, String> {
+        if in_channels == 0 || out_channels == 0 || in_rate == 0 || out_rate == 0 {
+            return Err(format!("can't convert {in_rate} Hz x{in_channels} to {out_rate} Hz x{out_channels}"));
+        }
+        let rs = if in_rate != out_rate {
+            let rs = Fft::<f32>::new(in_rate as usize, out_rate as usize, CHUNK, out_channels, FixedSync::Input)
+                .map_err(|e| format!("can't resample {in_rate} Hz to {out_rate} Hz: {e}"))?;
             let to_trim = rs.output_delay();
             let out_cap = rs.output_frames_max();
-            Rs {
+            Some(Rs {
                 rs,
                 pending: Vec::with_capacity(CHUNK * out_channels),
                 out_buf: vec![0.0; out_cap * out_channels],
@@ -103,14 +133,16 @@ impl Converter {
                 out_frames: 0,
                 in_rate,
                 out_rate,
-            }
-        });
-        Self {
+            })
+        } else {
+            None
+        };
+        Ok(Self {
             cin: in_channels,
             cout: out_channels,
             rs,
             mixed: Vec::new(),
-        }
+        })
     }
 
     pub fn is_passthrough(&self) -> bool {
@@ -146,15 +178,29 @@ impl Converter {
             rs.pending.resize(frames_in * ch, 0.0);
         }
         let out_frames_cap = rs.out_buf.len() / ch;
-        let input = InterleavedSlice::new(&rs.pending[..], ch, frames_in).expect("input layout");
-        let mut output =
-            InterleavedSlice::new_mut(&mut rs.out_buf[..], ch, out_frames_cap).expect("output layout");
         let mut idx = Indexing::new();
         idx.partial_len = partial;
-        let (_, written) = rs
-            .rs
-            .process_into_buffer(&input, &mut output, Some(&idx))
-            .expect("resample");
+        let done = match (
+            InterleavedSlice::new(&rs.pending[..], ch, frames_in),
+            InterleavedSlice::new_mut(&mut rs.out_buf[..], ch, out_frames_cap),
+        ) {
+            (Ok(input), Ok(mut output)) => rs
+                .rs
+                .process_into_buffer(&input, &mut output, Some(&idx))
+                .map_err(|e| e.to_string()),
+            (Err(e), _) | (_, Err(e)) => Err(e.to_string()),
+        };
+        let written = match done {
+            Ok((_, written)) => written,
+            Err(e) => {
+                // Shouldn't happen; silence of the right length keeps the
+                // clock and the join honest.
+                tracing::warn!("resampler: {e}");
+                let n = rs.rs.output_frames_next().min(out_frames_cap);
+                rs.out_buf[..n * ch].fill(0.0);
+                n
+            }
+        };
         let mut start = 0;
         if rs.to_trim > 0 {
             start = rs.to_trim.min(written);
@@ -243,6 +289,44 @@ mod tests {
     }
 
     #[test]
+    fn quad_and_five_channel_fold_down_keep_every_speaker() {
+        // Quad: FL FR BL BR. The rear right speaker lands on the right.
+        let mut out = Vec::new();
+        mix_channels(&[0.0, 0.0, 0.0, 1.0], 4, 2, &mut out);
+        assert!(out[0] == 0.0 && out[1] > 0.3, "{out:?}");
+        // 5.0: FL FR FC BL BR. Rear right isn't dropped as if it were LFE.
+        out.clear();
+        mix_channels(&[0.0, 0.0, 0.0, 0.0, 1.0], 5, 2, &mut out);
+        assert!(out[0] == 0.0 && out[1] > 0.2, "{out:?}");
+        // 5.1: the LFE (fourth) is left out; the centre goes to both.
+        out.clear();
+        mix_channels(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0], 6, 2, &mut out);
+        assert_eq!(out, vec![0.0, 0.0]);
+        out.clear();
+        mix_channels(&[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], 6, 2, &mut out);
+        assert!(out[0] > 0.2 && out[0] == out[1], "{out:?}");
+        // Full scale everywhere never clips, for any count.
+        for cin in 3..=10 {
+            out.clear();
+            mix_channels(&vec![1.0; cin], cin, 2, &mut out);
+            assert!(out.iter().all(|s| *s <= 1.0001 && *s > 0.5), "{cin}: {out:?}");
+        }
+    }
+
+    #[test]
+    fn formats_the_resampler_cant_take_are_errors_not_crashes() {
+        assert!(Converter::new(0, 2, 48_000, 2).is_err());
+        assert!(Converter::new(44_100, 0, 48_000, 2).is_err());
+        assert!(Converter::new(44_100, 2, 48_000, 0).is_err());
+        // Odd but real rates and channel counts work.
+        let mut c = Converter::new(11_025, 3, 48_000, 2).unwrap();
+        let mut out = Vec::new();
+        c.push(&[0.1; 3 * 5_000], &mut out);
+        c.finish(&mut out);
+        assert_eq!(out.len() / 2, (5_000 * 48_000 + 11_025 / 2) / 11_025);
+    }
+
+    #[test]
     fn surround_downmix_stays_in_range() {
         let mut out = Vec::new();
         mix_channels(&[1.0; 6], 6, 2, &mut out);
@@ -263,7 +347,7 @@ mod tests {
                 .collect()
         };
         let (na, nb) = (50_000usize, 40_000usize);
-        let mut c = Converter::new(rin, 2, rout, 2);
+        let mut c = Converter::new(rin, 2, rout, 2).unwrap();
         let mut a_out = Vec::new();
         for p in sine(0, na).chunks(2 * 4096) {
             c.push(p, &mut a_out);
@@ -297,7 +381,7 @@ mod tests {
                     [s, s]
                 })
                 .collect();
-            let mut c = Converter::new(rin, 2, rout, 2);
+            let mut c = Converter::new(rin, 2, rout, 2).unwrap();
             let mut out = Vec::new();
             // Feed in odd-sized pieces.
             for piece in input.chunks(2 * 333) {

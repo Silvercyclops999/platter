@@ -77,7 +77,7 @@ pub async fn read_whole_up_to(reader: &Reader, src: &StreamSource, cancel: &Atom
 pub fn to_16k_mono(bytes: Vec<u8>, hint: Option<&str>, cancel: &AtomicBool) -> Result<Vec<f32>, AudioError> {
     let bad = |e: DecodeError| AudioError::Unreadable(e.to_string());
     let mut dec = TrackDecoder::open(Box::new(Cursor::new(bytes)), hint).map_err(bad)?;
-    let mut conv = Converter::new(dec.rate, dec.channels, RATE, 1);
+    let mut conv = Converter::new(dec.rate, dec.channels, RATE, 1).map_err(AudioError::Unreadable)?;
     let mut out = Vec::new();
     let cap = MAX_SECONDS * RATE as usize;
     while let Some(block) = dec.next_block().map_err(bad)? {

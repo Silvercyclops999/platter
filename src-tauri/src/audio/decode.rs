@@ -73,6 +73,10 @@ pub struct TrackDecoder {
     /// After a seek: drop decoded frames before this timestamp.
     skip_until: Option<Timestamp>,
     errors_in_row: u32,
+    /// The first decoded block, read at open to learn the real format.
+    primed: Option<Vec<f32>>,
+    /// The stream ended while priming.
+    primed_end: bool,
 }
 
 impl TrackDecoder {
@@ -107,7 +111,7 @@ impl TrackDecoder {
                 "stream does not declare sample rate/channels".into(),
             ));
         }
-        Ok(Self {
+        let mut d = Self {
             format,
             decoder,
             track_id,
@@ -118,18 +122,52 @@ impl TrackDecoder {
             buf: Vec::new(),
             skip_until: None,
             errors_in_row: 0,
-        })
+            primed: None,
+            primed_end: false,
+        };
+        d.prime()?;
+        Ok(d)
+    }
+
+    /// Decodes the first block now: the container's rate and channel count
+    /// can be wrong (an AAC file whose header gives half the real rate), and
+    /// everything downstream is set up from these.
+    fn prime(&mut self) -> Result<(), DecodeError> {
+        let declared = self.rate;
+        match self.decode_next(true)? {
+            true => self.primed = Some(std::mem::take(&mut self.buf)),
+            false => self.primed_end = true,
+        }
+        if self.rate != declared
+            && let Some(n) = self.total_frames.as_mut()
+        {
+            *n = *n * self.rate as u64 / declared.max(1) as u64;
+        }
+        Ok(())
     }
 
     /// Next block of interleaved f32 at the source rate; `None` at the end.
     pub fn next_block(&mut self) -> Result<Option<&[f32]>, DecodeError> {
+        if let Some(b) = self.primed.take() {
+            self.buf = b;
+            return Ok(Some(&self.buf));
+        }
+        if std::mem::take(&mut self.primed_end) {
+            return Ok(None);
+        }
+        Ok(self.decode_next(false)?.then_some(&self.buf[..]))
+    }
+
+    /// Decodes the next block into `buf`; false at the end. `first` takes
+    /// the format from the decoded audio.
+    fn decode_next(&mut self, first: bool) -> Result<bool, DecodeError> {
         loop {
             let packet = match self.format.next_packet() {
                 Ok(Some(p)) => p,
-                Ok(None) => return Ok(None),
-                Err(SymError::ResetRequired) => return Ok(None),
+                Ok(None) => return Ok(false),
+                Err(SymError::ResetRequired) => return Ok(false),
                 Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    return Ok(None);
+                    return Ok(false);
                 }
                 Err(e) => return Err(map_err(e)),
             };
@@ -145,6 +183,13 @@ impl TrackDecoder {
                         continue;
                     }
                     let ch = decoded.spec().channels().count();
+                    if ch == 0 {
+                        continue;
+                    }
+                    if first && decoded.spec().rate() > 0 {
+                        self.rate = decoded.spec().rate();
+                        self.channels = ch;
+                    }
                     decoded.copy_to_vec_interleaved(&mut self.buf);
                     if ch != self.channels {
                         // Channel layout changed mid-stream: remix to the declared one.
@@ -158,10 +203,10 @@ impl TrackDecoder {
                             continue;
                         }
                         self.skip_until = None;
-                        let n = drop_frames as usize * self.channels;
+                        let n = (drop_frames as usize * self.channels).min(self.buf.len());
                         self.buf.drain(..n);
                     }
-                    return Ok(Some(&self.buf));
+                    return Ok(true);
                 }
                 Err(SymError::DecodeError(m)) => {
                     // A bad packet: skip it, unless the stream is hopeless.
@@ -207,6 +252,8 @@ impl TrackDecoder {
             )
             .map_err(map_err)?;
         self.decoder.reset();
+        self.primed = None;
+        self.primed_end = false;
         self.skip_until = (seeked.required_ts > seeked.actual_ts).then_some(seeked.required_ts);
         // Frame index we'll resume at.
         let frame = (ms as u128 * self.rate as u128 / 1000) as u64;

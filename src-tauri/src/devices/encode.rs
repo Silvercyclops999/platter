@@ -97,7 +97,7 @@ impl Pcm {
         let dec = TrackDecoder::open(Box::new(f), Some(hint)).map_err(|e| format!("couldn't read the song ({e})"))?;
         let (out_rate, out_ch) = (rate(dec.rate), channels(dec.channels));
         Ok(Self {
-            conv: Converter::new(dec.rate, dec.channels, out_rate, out_ch),
+            conv: Converter::new(dec.rate, dec.channels, out_rate, out_ch).map_err(|e| format!("couldn't read the song ({e})"))?,
             source_rate: dec.rate,
             dec,
             ended: false,

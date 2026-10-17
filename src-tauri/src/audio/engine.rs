@@ -2050,6 +2050,11 @@ impl Drop for Engine {
     }
 }
 
+/// A converter from the decoder's format to the output's.
+fn converter(dec: &TrackDecoder, fmt: OutputFormat) -> AppResult<Converter> {
+    Converter::new(dec.rate, dec.channels, fmt.sample_rate, fmt.channels as usize).map_err(AppError::Decode)
+}
+
 fn take_pending(m: &mut Mix) -> Option<(u64, Track, Arc<LoaderCtl>)> {
     let p = m.next.take()?;
     let seg = Segment::new(p.key, p.tag, p.track.clone(), 0, Priority::Next);
@@ -2366,12 +2371,10 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             }
         }
     }
-    let mut conv = Converter::new(
-        opened.dec.rate,
-        opened.dec.channels,
-        out_fmt.sample_rate,
-        out_fmt.channels as usize,
-    );
+    let mut conv = match converter(&opened.dec, out_fmt) {
+        Ok(c) => c,
+        Err(e) => return fail(&env, key, &track, e),
+    };
     // Continue the previous track's resampler if it was parked for us, so
     // the join has no filter edge transients. Its first output frames are
     // the previous track's delayed tail and are routed back to it.
@@ -2424,12 +2427,10 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             let base = ms * out_fmt.sample_rate as u64 / 1000;
             meter = SilenceMeter::new(out_fmt.sample_rate, out_fmt.channels as usize, base);
             head_known = false;
-            conv = Converter::new(
-                opened.dec.rate,
-                opened.dec.channels,
-                out_fmt.sample_rate,
-                out_fmt.channels as usize,
-            );
+            conv = match converter(&opened.dec, out_fmt) {
+                Ok(c) => c,
+                Err(e) => return fail(&env, key, &track, e),
+            };
             if let Err(e) = opened.dec.seek_ms(ms) {
                 tracing::warn!("seek failed on {}: {e}", track.id);
                 // Reopen from scratch and try once more.
@@ -2491,18 +2492,15 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 out.clear();
                 // If a next track is queued, park the resampler for it
                 // instead of flushing (see `Handoff`).
-                let parked = !conv.is_passthrough() && {
+                // The replacement is built before taking the lock the
+                // output thread needs.
+                let fresh = (!conv.is_passthrough()).then(|| converter(&opened.dec, out_fmt).ok()).flatten();
+                let parked = fresh.is_some_and(|fresh| {
                     let mut m = core.mix.lock();
                     let ok = m.next.is_some()
                         && m.handoff.is_none()
                         && m.segments.back().map(|s| (s.key, s.generation)) == Some((key, generation));
                     if ok {
-                        let fresh = Converter::new(
-                            opened.dec.rate,
-                            opened.dec.channels,
-                            out_fmt.sample_rate,
-                            out_fmt.channels as usize,
-                        );
                         m.handoff = Some(Handoff {
                             prev_key: key,
                             conv: std::mem::replace(&mut conv, fresh),
@@ -2510,7 +2508,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                         });
                     }
                     ok
-                };
+                });
                 if !parked {
                     conv.finish(&mut out);
                 }
@@ -2562,12 +2560,10 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     match open_track(&env, &track, true, &ctl.prio) {
                         Ok(o) => {
                             opened = o;
-                            conv = Converter::new(
-                                opened.dec.rate,
-                                opened.dec.channels,
-                                out_fmt.sample_rate,
-                                out_fmt.channels as usize,
-                            );
+                            conv = match converter(&opened.dec, out_fmt) {
+                                Ok(c) => c,
+                                Err(e) => return fail(&env, key, &track, e),
+                            };
                             if start_ms > 0 {
                                 seek_to = Some(start_ms);
                             }
