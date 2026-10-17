@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
+import { ContextMenuHost } from "../components/ContextMenu";
+import shellCss from "../shell/shell.css?raw";
+import { useUi } from "../stores/ui";
 import { PlayerBar, SEEK_PAGE_STEP, wheelVolumeDelta } from "../shell/PlayerBar";
 import { QueuePanel } from "../shell/QueuePanel";
 import { connectPlayer, resetVolumeNudge, usePlayer } from "../stores/player";
@@ -221,5 +224,32 @@ describe("clear queue", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     const next = screen.getByRole("region", { name: `Next from: ${album.title}` });
     expect(body(within(next).getAllByRole("row"))).toHaveLength(tracks.length - 1);
+  });
+});
+
+describe("narrow windows", () => {
+  it("fold the miniplayer and expanded view buttons into a More menu", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <PlayerBar />
+        <ContextMenuHost />
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "More player options" }));
+    const menu = await screen.findByRole("menu", { name: "More player options" });
+    const items = within(menu).getAllByRole("menuitem").map((i) => i.textContent);
+    expect(items).toEqual(expect.arrayContaining(["Open miniplayer", "Expanded view"]));
+    act(() => useUi.setState({ menu: null }));
+  });
+
+  it("show the More button and a hover volume slider only below 1000 px", () => {
+    const at = shellCss.indexOf("@media (max-width: 999px)");
+    expect(at).toBeGreaterThan(-1);
+    const block = shellCss.slice(at, shellCss.indexOf("\n}", at));
+    expect(block).toMatch(/\.player-bar__fold \{ display: none; \}/);
+    expect(block).toMatch(/\.player-bar__more \{ display: inline-flex; \}/);
+    expect(block).toMatch(/\.volume:focus-within \.volume__bar/);
+    expect(shellCss).toMatch(/\.player-bar__more \{ display: none; \}/);
   });
 });

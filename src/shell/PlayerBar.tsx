@@ -6,6 +6,7 @@ import {
   Maximize2,
   MicVocal,
   MonitorSpeaker,
+  MoreHorizontal,
   PictureInPicture2,
   Pause,
   Play,
@@ -324,6 +325,36 @@ function MiniplayerButton() {
   );
 }
 
+/**
+ * On a narrow window the miniplayer and expanded view buttons fold into this
+ * menu (the CSS shows one or the other), so the right side never runs over
+ * the play controls.
+ */
+function MoreButton({ buttons, hasTrack }: { buttons: readonly string[]; hasTrack: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const folds = buttons.filter((b) => b === "miniplayer" || b === "fullWindow");
+  if (!folds.length) return null;
+  const open = () => {
+    const items = folds.map((b) =>
+      b === "miniplayer"
+        ? { label: useMiniplayer.getState().open ? "Close miniplayer" : "Open miniplayer", icon: PictureInPicture2, onSelect: () => void miniplayer.toggle() }
+        : {
+            label: useFullWindow.getState().open ? "Close expanded view" : "Expanded view",
+            icon: Maximize2,
+            disabled: !hasTrack && !useFullWindow.getState().open,
+            onSelect: fullWindow.toggle,
+          },
+    );
+    const btn = ref.current?.querySelector("button");
+    if (btn) openContextMenu("More player options", items, btn);
+  };
+  return (
+    <span className="player-bar__more" ref={ref}>
+      <IconButton label="More player options" icon={<MoreHorizontal size={18} />} onClick={open} />
+    </span>
+  );
+}
+
 /** The queue button; songs dropped on it go to the end of the queue. */
 function QueueButton() {
   const queueOpen = useUi((s) => s.queueOpen);
@@ -474,12 +505,17 @@ export function PlayerBar() {
             ) : id === "volume" ? (
               <Volume />
             ) : id === "miniplayer" ? (
-              <MiniplayerButton />
+              <span className="player-bar__fold">
+                <MiniplayerButton />
+              </span>
             ) : id === "fullWindow" ? (
-              <ExpandButton disabled={!track} />
+              <span className="player-bar__fold">
+                <ExpandButton disabled={!track} />
+              </span>
             ) : null}
           </Fragment>
         ))}
+        <MoreButton buttons={buttons} hasTrack={!!track} />
       </div>
     </aside>
   );

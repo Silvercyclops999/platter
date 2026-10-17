@@ -830,6 +830,8 @@
 }
 .volume { display: flex; align-items: center; gap: var(--space-1); }
 .volume__slider { width: 96px; }
+.player-bar__fold { display: contents; }
+.player-bar__more { display: none; }
 
 /* ---------------------------------------------------------------- Command palette */
 .palette { width: min(640px, calc(100vw - 48px)); overflow: hidden; display: flex; flex-direction: column; }
@@ -872,6 +874,30 @@
 @media (max-width: 1100px) {
   .player-bar { grid-template-columns: minmax(160px, 1fr) minmax(300px, 1.6fr) minmax(150px, 1fr); }
   .volume__slider { width: 72px; }
+}
+/* Below 1000 px the right side folds: the miniplayer and expanded view
+   buttons move into a More menu, and the volume slider shows above the mute
+   button while it's hovered or focused. */
+@media (max-width: 999px) {
+  .player-bar { grid-template-columns: minmax(140px, 1fr) minmax(280px, 1.6fr) minmax(120px, auto); }
+  .player-bar__fold { display: none; }
+  .player-bar__more { display: inline-flex; }
+  .volume { position: relative; }
+  .volume .volume__bar {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + var(--space-2));
+    z-index: var(--z-popover);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-row);
+    background: var(--color-bg-overlay);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    visibility: hidden;
+    opacity: 0;
+  }
+  .volume:hover .volume__bar,
+  .volume:focus-within .volume__bar { visibility: visible; opacity: 1; }
+  .volume__slider { width: 112px; }
 }
 .np-lyrics-credit {
   margin-top: var(--space-6);
