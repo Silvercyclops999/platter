@@ -81,6 +81,7 @@ describe("hidden without the capability", () => {
     render(<TopBar />);
     expect(screen.getByRole("button", { name: "Friend activity" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^App menu/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "Switch account" }));
     expect(await screen.findByRole("group", { name: "Switch Plex Home user" })).toBeInTheDocument();
   });
 
@@ -92,6 +93,7 @@ describe("hidden without the capability", () => {
     await user.click(screen.getByRole("button", { name: /^App menu/ }));
     await screen.findByRole("menu");
     expect(screen.queryByRole("group", { name: "Switch Plex Home user" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Switch account" })).toBeNull();
   });
 
   it("Settings leaves out rows the servers can't use", async () => {

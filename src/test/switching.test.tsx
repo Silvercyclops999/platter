@@ -59,6 +59,8 @@ async function openMenu() {
     </>,
   );
   await user.click(screen.getByRole("button", { name: /^App menu/ }));
+  // Home users fold out under "Switch account".
+  await user.click(await screen.findByRole("menuitem", { name: "Switch account" }));
   return user;
 }
 
