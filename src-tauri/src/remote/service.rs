@@ -822,14 +822,8 @@ impl RemoteService {
                 tracks.extend(st.queue.user_queue.iter().map(|i| i.track.clone()));
                 tracks.extend(st.queue.next_up.iter().map(|i| i.track.clone()));
                 let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+                let token = cast::plan::device_token(cast::plan::transient_token(&self.inner.http, &server).await, &name)?;
                 let pq = playqueue::create(&self.inner.http, &server, &ids, &track.id, st.repeat).await?;
-                let token = match cast::plan::transient_token(&self.inner.http, &server).await {
-                    Some(t) => t,
-                    None => {
-                        tracing::info!("no transient token from the server; the cast device gets the server token");
-                        server.token.clone()
-                    }
-                };
                 let at = self.position_now(&track.id, st.position_ms).await;
                 let plan = cast::plan::plan(&server, &token, &self.inner.own_id, &pq.id, &tracks, at, st.repeat);
                 let link = CastLink::start(&dev, &plan, lan.tls.clone(), self.inner.cfg.timeout)
@@ -850,10 +844,7 @@ impl RemoteService {
                 let mut tracks = vec![track.clone()];
                 tracks.extend(st.queue.user_queue.iter().map(|i| i.track.clone()));
                 tracks.extend(st.queue.next_up.iter().map(|i| i.track.clone()));
-                let token = match cast::plan::transient_token(&self.inner.http, &server).await {
-                    Some(t) => t,
-                    None => server.token.clone(),
-                };
+                let token = cast::plan::device_token(cast::plan::transient_token(&self.inner.http, &server).await, &name)?;
                 let items = super::dlna::plan(&server, &token, &self.inner.own_id, &dev, &tracks);
                 let soap = super::dlna::soap::Soap::new(self.inner.http.clone(), self.inner.cfg.timeout);
                 let at = self.position_now(&track.id, st.position_ms).await;

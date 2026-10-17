@@ -7,6 +7,7 @@ use url::Url;
 
 use super::link::{CastPlan, DirectItem, PlexLoad};
 use crate::audio::queue::Repeat;
+use crate::error::{AppError, AppResult};
 use crate::model::Track;
 use crate::plex::Token;
 use crate::remote::service::ServerCtx;
@@ -15,8 +16,8 @@ use crate::remote::service::ServerCtx;
 pub const MAX_ITEMS: usize = 100;
 
 /// The server's transient token for handing to another device, from
-/// `GET /security/token?type=delegation&scope=all`. None when the server
-/// doesn't give one.
+/// `GET /security/token?type=delegation&scope=all` (Plex offers no narrower
+/// scope; the token expires on its own). None when the server doesn't give one.
 pub async fn transient_token(http: &reqwest::Client, server: &ServerCtx) -> Option<Token> {
     let mut u = server.url("/security/token").ok()?;
     u.set_query(Some("type=delegation&scope=all"));
@@ -32,6 +33,17 @@ pub async fn transient_token(http: &reqwest::Client, server: &ServerCtx) -> Opti
     }
     let body = resp.text().await.ok()?;
     token_from(&body)
+}
+
+/// The sign-in a Cast device or DLNA renderer gets: only ever the server's
+/// short-lived one (`transient`). Those devices see the URLs in the clear
+/// (DLNA is plain HTTP), so without one nothing is sent.
+pub fn device_token(transient: Option<Token>, name: &str) -> AppResult<Token> {
+    transient.ok_or_else(|| {
+        AppError::Invalid(format!(
+            "Can't play on {name}: your Plex server didn't give Platter a short-lived sign-in for it, and Platter won't hand over your own Plex sign-in. Try again in a moment."
+        ))
+    })
 }
 
 /// The token in a `/security/token` answer (JSON or XML).
@@ -156,6 +168,14 @@ pub fn plan(
 mod tests {
     use super::*;
     use crate::audio::testutil::track;
+
+    #[test]
+    fn devices_never_get_the_full_sign_in() {
+        let e = device_token(None, "Kitchen speaker").unwrap_err();
+        assert!(e.message().contains("Kitchen speaker"), "{e}");
+        let t = Token::new("short-lived").unwrap();
+        assert_eq!(device_token(Some(t.clone()), "x").unwrap(), t);
+    }
 
     fn server() -> ServerCtx {
         ServerCtx {
