@@ -6,7 +6,7 @@
  */
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
@@ -50,6 +50,25 @@ describe("adding a Jellyfin server", () => {
     expect(mock.jellyfin.servers[0].url).toBe("http://jellyfin.local:8096");
   });
 
+  it("adds the server once, even when an answer is slower than the next check", async () => {
+    const user = userEvent.setup();
+    let asked = 0;
+    const poll = vi.spyOn(mock, "jellyfinQuickPoll").mockImplementation(() => {
+      asked++;
+      // Every answer says approved, each taking several poll ticks.
+      return new Promise((r) => setTimeout(() => r({ state: "done", server: mock.jellyfin.servers[0] ?? ({ tag: "f00d0001" } as never) }), POLL * 4));
+    });
+    const added = flow();
+    await typeAddress(user);
+    await waitFor(() => expect(added).toHaveLength(1));
+    // Wait as long as a few more ticks would take: no second add, no new questions.
+    const after = asked;
+    await new Promise((r) => setTimeout(r, POLL * 10));
+    expect(added).toHaveLength(1);
+    expect(asked).toBe(after);
+    poll.mockRestore();
+  });
+
   it("goes to the password form when Quick Connect is turned off", async () => {
     const user = userEvent.setup();
     mock.jellyfin.failure = "quickConnectOff";
@@ -62,8 +81,10 @@ describe("adding a Jellyfin server", () => {
     await user.type(pw, "wrong");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(WRONG_PASSWORD);
-    // The password left the form; it isn't kept there either.
-    expect(pw).toHaveValue("");
+    // A failed try keeps what was typed, to fix rather than type again.
+    expect(pw).toHaveValue("wrong");
+    expect(screen.getByLabelText("User name on Den")).toHaveValue("me");
+    await user.clear(pw);
     await user.type(pw, "right");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(added).toHaveLength(1));
@@ -112,7 +133,7 @@ describe("adding a Jellyfin server", () => {
     expect(plexButton).toBeDisabled();
     expect(plexButton).toHaveTextContent("Signed in");
     expect(screen.queryByText(/coming soon/i)).toBeNull();
-    expect(screen.getByRole("button", { name: /Navidrome or another Subsonic server/ })).toHaveTextContent("In beta");
+    expect(screen.getByRole("button", { name: /Navidrome or another Subsonic server/ })).toHaveTextContent("Beta");
     await user.click(screen.getByRole("button", { name: /Jellyfin/ }));
     expect(screen.getByLabelText("Jellyfin server address")).toBeInTheDocument();
     expect(plex).toBe(0);

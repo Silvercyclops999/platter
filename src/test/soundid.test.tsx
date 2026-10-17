@@ -89,8 +89,10 @@ describe("identify by sound settings", () => {
     const field = await within(row("acoustidKey")).findByLabelText("AcoustID application key");
     await user.type(field, "not a key!");
     await user.click(within(row("acoustidKey")).getByRole("button", { name: "Save key" }));
-    await waitFor(() => expect(useToasts.getState().toasts.some((t) => /Couldn't save the key/.test(t.message))).toBe(true));
+    await waitFor(() => expect(useToasts.getState().toasts.some((t) => /Couldn't save the AcoustID key/.test(t.message))).toBe(true));
     expect(mock.soundId.userKey).toBeNull();
+    // What was typed stays, to fix rather than type again.
+    expect(field).toHaveValue("not a key!");
   });
 
   it("notes progress, a refused key and trouble", () => {

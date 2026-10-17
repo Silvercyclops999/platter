@@ -2,6 +2,7 @@
  * Identify by sound settings: the progress note, the user's own AcoustID
  * key (kept in the keychain) and which songs to identify.
  */
+import { failText } from "../lib/errorText";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import type { SelectOption } from "../components/Select";
@@ -43,7 +44,7 @@ export function useSoundIdStatus() {
       setStatus(st);
       return st;
     } catch (e) {
-      toast.error(`Couldn't save the key${e && typeof e === "object" && "message" in e ? `: ${String(e.message)}` : ""}`);
+      toast.error(failText(key ? "Couldn't save the AcoustID key" : "Couldn't remove the AcoustID key", e));
       return null;
     }
   };
@@ -86,9 +87,10 @@ export function AcoustIdKeyControl({
   const save = async () => {
     if (!text.trim()) return;
     setBusy(true);
-    await setKey(text.trim());
+    const saved = await setKey(text.trim());
     setBusy(false);
-    setText("");
+    // A failed save keeps the key in the field to try again.
+    if (saved) setText("");
   };
   return (
     <form

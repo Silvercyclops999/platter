@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { backend } from "../lib/backend";
 import type { AppError, SavedServer, ServerCheck, SubsonicCheck } from "../lib/types";
@@ -66,16 +67,25 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
   useEffect(() => {
     if (step.kind !== "code") return;
     let alive = true;
+    // One question at a time: a slow answer can't overlap the next tick, so
+    // an approval adds the server once.
+    let asking = false;
     const t = setInterval(() => {
+      if (!alive || asking) return;
+      asking = true;
       backend.jellyfinQuickPoll().then(
         (r) => {
+          asking = false;
           if (alive && r.state === "done") {
+            alive = false;
             clearInterval(t);
             done.current(r.server);
           }
         },
         (e) => {
+          asking = false;
           if (!alive) return;
+          alive = false;
           clearInterval(t);
           setError(message(e, "Quick Connect stopped."));
           setStep({ kind: "address" });
@@ -116,11 +126,11 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
     if (step.kind !== "password") return;
     setBusy(true);
     setError(null);
-    // The password leaves this form now; it isn't kept anywhere.
-    const pw = password;
-    setPassword("");
     try {
-      onDone(await backend.jellyfinSignInPassword(step.server.url, user, pw));
+      const server = await backend.jellyfinSignInPassword(step.server.url, user, password);
+      // Signed in: the password isn't kept anywhere. A failed try keeps it to fix.
+      setPassword("");
+      onDone(server);
     } catch (e) {
       setError(message(e, "Platter couldn't sign in."));
     } finally {
@@ -148,10 +158,12 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
     setError(null);
     // The key or password goes to the core, which keeps it in the keychain.
     const creds = step.useKey ? { apiKey } : { user, password };
-    setApiKey("");
-    setPassword("");
     try {
-      onDone(await backend.subsonicSignIn(step.server.url, creds));
+      const server = await backend.subsonicSignIn(step.server.url, creds);
+      // Only once it worked: a failed try keeps what was typed to fix.
+      setApiKey("");
+      setPassword("");
+      onDone(server);
     } catch (e) {
       setError(message(e, "Platter couldn't sign in."));
     } finally {
@@ -175,12 +187,16 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
             <span className="add-server__kind-note">{plexSignedIn ? "Signed in" : "Sign in with your Plex account"}</span>
           </button>
           <button type="button" className="add-server__kind" onClick={() => setStep({ kind: "address" })}>
-            <span className="add-server__kind-name">Jellyfin</span>
-            <span className="add-server__kind-note">Your server's address. In beta</span>
+            <span className="add-server__kind-name">
+              Jellyfin <Badge tone="accent">Beta</Badge>
+            </span>
+            <span className="add-server__kind-note">Your server's address</span>
           </button>
           <button type="button" className="add-server__kind" onClick={() => setStep({ kind: "osAddress" })}>
-            <span className="add-server__kind-name">Navidrome or another Subsonic server</span>
-            <span className="add-server__kind-note">Your server's address. In beta</span>
+            <span className="add-server__kind-name">
+              Navidrome or another Subsonic server <Badge tone="accent">Beta</Badge>
+            </span>
+            <span className="add-server__kind-note">Your server's address</span>
           </button>
         </div>
         {onCancel && (

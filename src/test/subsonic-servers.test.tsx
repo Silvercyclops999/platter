@@ -38,7 +38,7 @@ async function typeAddress(user: ReturnType<typeof userEvent.setup>, url = "navi
 }
 
 describe("adding a Navidrome or other Subsonic server", () => {
-  it("asks for an API key first and keeps nothing in the form", async () => {
+  it("asks for an API key first, and keeps a refused one to fix", async () => {
     const user = userEvent.setup();
     const added = flow();
     await typeAddress(user);
@@ -48,7 +48,8 @@ describe("adding a Navidrome or other Subsonic server", () => {
     await user.type(key, "old-key");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(KEY_REFUSED);
-    expect(key).toHaveValue("");
+    expect(key).toHaveValue("old-key");
+    await user.clear(key);
     await user.type(key, "good-key");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(added).toEqual(["5ab50001"]));
@@ -66,7 +67,8 @@ describe("adding a Navidrome or other Subsonic server", () => {
     await user.type(pw, "wrong");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(WRONG_PASSWORD);
-    expect(pw).toHaveValue("");
+    expect(pw).toHaveValue("wrong");
+    await user.clear(pw);
     await user.type(pw, "right");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(added).toHaveLength(1));
@@ -101,7 +103,7 @@ describe("adding a Navidrome or other Subsonic server", () => {
     const user = userEvent.setup();
     flow({ choose: true });
     const os = screen.getByRole("button", { name: /Navidrome or another Subsonic server/ });
-    expect(os).toHaveTextContent("In beta");
+    expect(os).toHaveTextContent("Beta");
     await user.click(os);
     expect(screen.getByLabelText("Server address")).toHaveAttribute("placeholder", "http://navidrome.local:4533");
   });

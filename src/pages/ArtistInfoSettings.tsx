@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { failText } from "../lib/errorText";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
@@ -57,7 +58,8 @@ export function useInfoKeys() {
       }
       return st;
     } catch (e) {
-      toast.error(`Couldn't save the key${e && typeof e === "object" && "message" in e ? `: ${String(e.message)}` : ""}`);
+      const what = OPTIONAL_KEY.has(source) ? "token" : "key";
+      toast.error(failText(key ? `Couldn't save the ${INFO_SOURCE_NAME[source]} ${what}` : `Couldn't remove the ${INFO_SOURCE_NAME[source]} ${what}`, e));
       return null;
     }
   };
@@ -94,9 +96,10 @@ export function InfoKeyControl({
     const save = async () => {
       if (!text.trim()) return;
       setBusy(true);
-      await setKey(source, text.trim());
+      const saved = (await setKey(source, text.trim())) as { rejected?: boolean } | null;
       setBusy(false);
-      setText("");
+      // A failed or refused key stays in the field to fix.
+      if (saved && !saved.rejected) setText("");
     };
     return (
       <form
