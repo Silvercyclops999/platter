@@ -37,7 +37,7 @@ describe("Managed and protected artists", () => {
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Mode for Quiet Hours" }), "managed");
     await screen.findByText("Let Lidarr manage Quiet Hours?");
     await userEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await screen.findByText("Are you sure?");
+    await screen.findByText("Let Lidarr replace files for Quiet Hours?");
     expect(mock.lidarrMock.prefs).toEqual({});
     await userEvent.click(screen.getByRole("button", { name: "Switch to Managed" }));
     await screen.findByText(/Managed: you chose Managed \(Auto would protect it/);

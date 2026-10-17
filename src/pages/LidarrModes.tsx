@@ -262,7 +262,13 @@ export function LidarrArtistsList() {
   }, []);
   useReload(load);
   if (!modes) return <Skeleton height={56} radius="card" />;
-  if (!modes.length) return <p className="lidarr-work__note">No artists yet.</p>;
+  if (!modes.length)
+    return (
+      <div className="lidarr-work__note" role="status">
+        <p>No artists yet</p>
+        <p>Artists show up here once Lidarr knows about them. Add one in Lidarr, or request an album from Platter.</p>
+      </div>
+    );
   const set = async (a: LidarrArtistMode, mode: LidarrModeSetting, confirmations = 0) => {
     if (mode === "managed" && confirmations < 2) {
       setManaging({ artist: a, step: 1 });
@@ -272,7 +278,7 @@ export function LidarrArtistsList() {
       await backend.lidarrModeSet(a.key, a.name, mode, confirmations);
       changed();
     } catch (e) {
-      toast.error(errText(e) || "Couldn't change that.");
+      toast.error(errText(e) || `Couldn't change how Platter treats ${a.name}`);
     }
   };
   const choose = async (a: LidarrArtistMode, p: Partial<LidarrArtistPrefs>) => {
@@ -282,7 +288,7 @@ export function LidarrArtistsList() {
       const next = await backend.lidarrArtistChoicesSet(a.key, a.name, cur.autoAdd, cur.hunt, cur.target);
       setPrefs({ ...prefs, [a.key]: next });
     } catch (e) {
-      toast.error(errText(e) || "Couldn't save that.");
+      toast.error(errText(e) || `Couldn't save the choices for ${a.name}`);
     }
   };
   return (
@@ -361,7 +367,7 @@ export function LidarrArtistsList() {
         )}
         {managing && managing.step === 2 && (
           <>
-            <h2 className="confirm__title">Are you sure?</h2>
+            <h2 className="confirm__title">Let Lidarr replace files for {managing.artist.name}?</h2>
             <p className="confirm__body">
               Platter stops protecting {managing.artist.name}. You can switch back to Protected later, but files Lidarr changed in the meantime stay changed.
             </p>
