@@ -63,7 +63,7 @@ describe("Settings > Library import", () => {
     render(<LibraryImportSettings />);
     const section = await screen.findByTestId("library-import-settings");
     expect(within(section).getByRole("heading", { name: "Library import" })).toBeInTheDocument();
-    const switches = (await within(section).findAllByRole("switch")).filter((s) => !s.closest("[data-setting='showPlayedALot']"));
+    const switches = (await within(section).findAllByRole("switch")).filter((s) => !s.closest("[data-setting='showPlayedALot'], [data-setting='bringIn']"));
     expect(switches).toHaveLength(3);
     for (const s of switches) expect(s).toHaveAttribute("aria-checked", "false");
     expect(within(section).getByText(/Account > Privacy settings/)).toBeInTheDocument();

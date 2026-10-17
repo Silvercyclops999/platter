@@ -518,7 +518,7 @@ export function PlayedSettings() {
       </div>
       {s.showPlayedALot && (
         <div className="setting-row__block played-settings__choices">
-          <span data-setting="playedMinPlays">
+          <span>
             <Select
               label="Fewest plays"
               value={String(s.playedMinPlays)}
@@ -526,7 +526,7 @@ export function PlayedSettings() {
               onChange={(v) => void updateSettings({ playedMinPlays: Number(v) })}
             />
           </span>
-          <span data-setting="playedPeriod">
+          <span>
             <Select label="Period" value={s.playedPeriod} options={PERIOD_OPTIONS} onChange={(v) => void updateSettings({ playedPeriod: v })} />
           </span>
         </div>

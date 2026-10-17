@@ -56,6 +56,8 @@ const NOT_A_ROW: Record<string, string> = {
   lidarrPracticeUntil: "lidarrWork",
   miniplayerBounds: "kept by the core",
   importSources: "the Library import section",
+  playedMinPlays: "showPlayedALot",
+  playedPeriod: "showPlayedALot",
   lookStepDone: "kept by the first-run step",
 };
 
