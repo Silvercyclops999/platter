@@ -541,6 +541,45 @@ async fn remove_all_and_moving_the_folder() {
     assert!(r.d.status().unwrap().items.is_empty());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_move_that_fails_halfway_puts_the_files_back() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    let to = r.dir.parent().unwrap().join("elsewhere");
+    // Something in the way of the second file.
+    std::fs::create_dir_all(to.join("a2.flac").join("x")).unwrap();
+    assert!(r.d.move_to(to.clone()).await.is_err());
+    assert!(r.dir.join("a1.flac").is_file() && r.dir.join("a2.flac").is_file(), "both back where they were");
+    assert!(!to.join("a1.flac").exists());
+    assert_eq!(r.d.dir(), r.dir);
+    assert_eq!(r.d.path(&albums().2[0]), Some(r.dir.join("a1.flac")));
+    assert_eq!(r.d.downloaded_ids(), ["a1", "a2"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unplugged_downloads_drive_marks_nothing_missing() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    // The folder can't be reached (and can't be made again).
+    let away = r.dir.with_file_name("unplugged");
+    std::fs::rename(&r.dir, &away).unwrap();
+    std::fs::write(&r.dir, b"not a folder").unwrap();
+    assert_eq!(r.d.check_files(), 0);
+    assert_eq!(r.d.path(&albums().2[0]), None, "plays from the server meanwhile");
+    assert_eq!(r.d.blocked().await, Some(PauseReason::FolderMissing));
+    let st = r.d.status().unwrap();
+    let a = item(&st, ItemKind::Album, "a");
+    assert_eq!((a.state, a.missing), (ItemState::Downloaded, 0));
+    // Plugged back in: everything is still there.
+    std::fs::remove_file(&r.dir).unwrap();
+    std::fs::rename(&away, &r.dir).unwrap();
+    assert_eq!(r.d.check_files(), 0);
+    assert_eq!(r.d.path(&albums().2[0]), Some(r.dir.join("a1.flac")));
+    assert_eq!(r.d.blocked().await, None);
+}
+
 #[test]
 fn quality_and_file_names() {
     let (_, _, tracks) = albums();

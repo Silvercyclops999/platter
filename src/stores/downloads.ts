@@ -206,6 +206,8 @@ export function pauseText(p: DownloadPause | null | undefined): string | null {
       return "Stopped: your downloads reached the storage limit.";
     case "noSpace":
       return "Stopped: this computer is out of space.";
+    case "folderMissing":
+      return "Waiting for the downloads folder. Is its drive connected?";
     default:
       return null;
   }

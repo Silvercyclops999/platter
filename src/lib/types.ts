@@ -1818,7 +1818,7 @@ export interface SyncStoreChanged {
 export type DownloadKind = "album" | "playlist" | "liked" | "mix";
 export type DownloadItemState = "queued" | "downloading" | "downloaded" | "error";
 /** Why the download queue is waiting. */
-export type DownloadPause = "offline" | "notHome" | "full" | "noSpace";
+export type DownloadPause = "offline" | "notHome" | "full" | "noSpace" | "folderMissing";
 
 export interface DownloadItem {
   kind: DownloadKind;

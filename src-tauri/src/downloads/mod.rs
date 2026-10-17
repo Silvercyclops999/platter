@@ -164,6 +164,8 @@ pub enum PauseReason {
     Full,
     /// The disk has no room left.
     NoSpace,
+    /// The downloads folder can't be reached (its drive is unplugged).
+    FolderMissing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -257,6 +259,11 @@ struct Inner {
     /// The song that turned out too big for the room left: (track, limit,
     /// bytes used) when it did. It isn't fetched again until one changes.
     too_big: Mutex<Option<(String, u64, u64)>>,
+    /// Held by each queue step and by a folder move, so a move never runs
+    /// while a song is being saved.
+    step_lock: tokio::sync::Mutex<()>,
+    /// A folder move is under way: fetches stop and wait for it.
+    moving: AtomicBool,
 }
 
 /// Cheap to clone; clones share state.
@@ -320,6 +327,8 @@ impl Downloads {
                 files: RwLock::new(HashMap::new()),
                 last_progress: Mutex::new(None),
                 too_big: Mutex::new(None),
+                step_lock: tokio::sync::Mutex::new(()),
+                moving: AtomicBool::new(false),
             }),
         };
         me.reload_files();
@@ -535,6 +544,12 @@ impl Downloads {
     /// Finished files that are gone from disk become "missing" (offered
     /// again in the UI). Returns how many.
     pub fn check_files(&self) -> usize {
+        // The whole folder gone is an unplugged drive or a network folder
+        // not there yet, not every file deleted: leave them be.
+        if !self.dir().is_dir() {
+            tracing::warn!("downloads folder unavailable; not checking its files");
+            return 0;
+        }
         let gone: Vec<String> = self
             .inner
             .files
@@ -561,43 +576,35 @@ impl Downloads {
         n
     }
 
-    /// Moves every file to `to` and uses it from now on.
+    /// Moves every file to `to` and uses it from now on. The queue waits
+    /// meanwhile. If a file can't be moved, the ones already moved go back
+    /// and the folder stays as it was.
     pub async fn move_to(&self, to: PathBuf) -> AppResult<()> {
         let from = self.dir();
         if from == to {
             return Ok(());
         }
-        std::fs::create_dir_all(&to)?;
-        let names: Vec<String> = self
-            .inner
-            .db
-            .read_async(store::done_files)
-            .await?
-            .into_iter()
-            .map(|(_, f)| f)
-            .collect();
-        let (f2, t2) = (from.clone(), to.clone());
-        tokio::task::spawn_blocking(move || -> AppResult<()> {
-            for n in names {
-                move_file(&f2.join(&n), &t2.join(&n))?;
-            }
-            let art_from = f2.join(art::ART_DIR);
-            if art_from.is_dir() {
-                let art_to = t2.join(art::ART_DIR);
-                std::fs::create_dir_all(&art_to)?;
-                for e in std::fs::read_dir(&art_from)?.flatten() {
-                    move_file(&e.path(), &art_to.join(e.file_name()))?;
-                }
-                let _ = std::fs::remove_dir(&art_from);
-            }
+        self.inner.moving.store(true, Ordering::SeqCst);
+        let res = async {
+            // Waits for a song being fetched to stop (keep_going says no).
+            let _step = self.inner.step_lock.lock().await;
+            std::fs::create_dir_all(&to)?;
+            let mut names: Vec<String> =
+                self.inner.db.read_async(store::done_files).await?.into_iter().map(|(_, f)| f).collect();
+            names.sort();
+            let (f2, t2) = (from.clone(), to.clone());
+            tokio::task::spawn_blocking(move || move_all(&f2, &t2, &names))
+                .await
+                .map_err(|e| AppError::Internal(e.to_string()))??;
+            *self.inner.dir.write() = to;
+            self.inner.epoch.fetch_add(1, Ordering::SeqCst);
             Ok(())
-        })
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))??;
-        *self.inner.dir.write() = to;
-        self.inner.epoch.fetch_add(1, Ordering::SeqCst);
+        }
+        .await;
+        self.inner.moving.store(false, Ordering::SeqCst);
         self.files_changed();
-        Ok(())
+        self.inner.wake.notify_one();
+        res
     }
 
     // ---------------------------------------------------------------- status
@@ -700,6 +707,10 @@ impl Downloads {
         if p.offline {
             return Some(PauseReason::Offline);
         }
+        let dir = self.dir();
+        if !dir.is_dir() && std::fs::create_dir_all(&dir).is_err() {
+            return Some(PauseReason::FolderMissing);
+        }
         match self.inner.source.connection().await {
             None => Some(PauseReason::Offline),
             Some(ConnectionKind::Local) => None,
@@ -775,6 +786,10 @@ impl Downloads {
 
     /// Fetches the next queued song, if any. Public for tests.
     pub async fn step(&self) -> AppResult<Step> {
+        let _step = self.inner.step_lock.lock().await;
+        if self.inner.moving.load(Ordering::SeqCst) {
+            return Ok(Step::Idle);
+        }
         let Some(track_id) = self.inner.db.read_async(|c| store::next_queued(c, now())).await? else {
             return Ok(Step::Idle);
         };
@@ -905,7 +920,7 @@ impl Downloads {
     /// Whether a fetch in flight should carry on.
     fn keep_going(&self, epoch: u64, track_id: &str) -> bool {
         let p = self.prefs();
-        if p.offline {
+        if p.offline || self.inner.moving.load(Ordering::SeqCst) {
             return false;
         }
         if self.inner.epoch.load(Ordering::SeqCst) != epoch && !self.still_wanted(track_id) {
@@ -921,6 +936,57 @@ pub enum Step {
     Idle,
     Worked,
     Paused(PauseReason),
+}
+
+/// Moves the named files, the art folder and any partial files from `from`
+/// to `to`. On a failure the files already moved go back.
+fn move_all(from: &Path, to: &Path, names: &[String]) -> AppResult<()> {
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let go = |a: PathBuf, b: PathBuf, moved: &mut Vec<(PathBuf, PathBuf)>| -> std::io::Result<()> {
+        if !a.exists() {
+            return Ok(());
+        }
+        move_file(&a, &b)?;
+        moved.push((a, b));
+        Ok(())
+    };
+    let mut result = Ok(());
+    for n in names {
+        if let Err(e) = go(from.join(n), to.join(n), &mut moved) {
+            result = Err(AppError::Io(format!("Couldn't move {n}: {e}")));
+            break;
+        }
+    }
+    let art_from = from.join(art::ART_DIR);
+    if result.is_ok() && art_from.is_dir() {
+        let art_to = to.join(art::ART_DIR);
+        result = std::fs::create_dir_all(&art_to).map_err(AppError::from);
+        if result.is_ok() {
+            for e in std::fs::read_dir(&art_from).into_iter().flatten().flatten() {
+                if let Err(err) = go(e.path(), art_to.join(e.file_name()), &mut moved) {
+                    result = Err(AppError::Io(format!("Couldn't move album art: {err}")));
+                    break;
+                }
+            }
+        }
+    }
+    if let Err(e) = result {
+        for (a, b) in moved.iter().rev() {
+            if let Err(err) = move_file(b, a) {
+                tracing::warn!("download not moved back to {}: {err}", a.display());
+            }
+        }
+        return Err(e);
+    }
+    let _ = std::fs::remove_dir(&art_from);
+    // Half-fetched songs carry on in the new folder; losing one only means
+    // fetching it again.
+    for e in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        if e.path().extension().is_some_and(|x| x == "part") {
+            let _ = move_file(&e.path(), &to.join(e.file_name()));
+        }
+    }
+    Ok(())
 }
 
 fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -940,6 +1006,10 @@ impl LocalAudio for Downloads {
         let p = self.inner.files.read().get(&track.id).cloned()?;
         if p.is_file() {
             return Some(p);
+        }
+        // The whole folder away (an unplugged drive): nothing to mark.
+        if !p.parent().is_some_and(Path::is_dir) {
+            return None;
         }
         // Gone from disk: say so (the UI offers to download it again).
         let id = track.id.clone();
