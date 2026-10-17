@@ -245,10 +245,34 @@ pub fn find_root(d: &Device, volumes: &[Volume], io: &dyn DeviceIo) -> Option<Vo
 
 pub fn music_dir(root: &Path, folder: &str) -> PathBuf {
     let mut p = root.to_path_buf();
-    for part in folder.split('/').filter(|s| !s.is_empty()) {
+    // Parts that could climb out or replace the path are skipped, so the
+    // result always stays below `root`.
+    for part in folder.split('/').filter(|s| !s.is_empty() && *s != "." && *s != ".." && !s.contains([':', '\\', '\0'])) {
         p.push(part);
     }
     p
+}
+
+/// Refuses a write or delete when anything between the music folder and
+/// `path` is a symbolic link or junction, so a crafted drive can't point
+/// Platter at files elsewhere.
+fn guard(music: &Path, path: &Path) -> std::io::Result<()> {
+    let Ok(rest) = path.strip_prefix(music) else {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "path outside the music folder"));
+    };
+    let mut at = music.to_path_buf();
+    for c in rest.components() {
+        at.push(c);
+        match std::fs::symlink_metadata(&at) {
+            Ok(m) if m.file_type().is_symlink() => {
+                tracing::warn!(path = %at.display(), "device sync: refusing to follow a link on the device");
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "link on the device"));
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    Ok(())
 }
 
 fn rel_path(music: &Path, rel: &str) -> PathBuf {
@@ -699,6 +723,7 @@ impl Devices {
                 break;
             }
             let path = rel_path(&music, rel);
+            guard(&music, &path).map_err(dev_err)?;
             io.remove(&path).map_err(dev_err)?;
             man.files.remove(rel);
             if let Some(dir) = path.parent() {
@@ -766,7 +791,8 @@ impl Devices {
                 let file = r.file.clone();
                 let dest = dest.clone();
                 let ctl = ctl.clone();
-                tokio::task::spawn_blocking(move || io.copy_in(&file, &dest, &|| ctl.cancelled(), &mut |_| {}))
+                let music = music.clone();
+                tokio::task::spawn_blocking(move || guard(&music, &dest).and_then(|()| io.copy_in(&file, &dest, &|| ctl.cancelled(), &mut |_| {})))
                     .await
                     .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())))
             };
@@ -792,7 +818,7 @@ impl Devices {
                 man.files.iter().filter(|(p, e)| e.track_id == w.track.id && **p != r.placed.rel).map(|(p, _)| p.clone()).collect();
             for rel in old {
                 let path = rel_path(&music, &rel);
-                if io.remove(&path).is_ok() {
+                if guard(&music, &path).is_ok() && io.remove(&path).is_ok() {
                     man.files.remove(&rel);
                     if let Some(dir) = path.parent() {
                         io.prune(dir, &music);
@@ -907,6 +933,7 @@ impl Devices {
             let hash = manifest::hash_text(&text);
             let path = rel_path(music, &rel);
             if man.playlists.get(&rel) != Some(&hash) || io.size(&path).is_none() {
+                guard(music, &path)?;
                 io.write_bytes(&path, text.as_bytes())?;
                 man.playlists.insert(rel, hash);
             }
@@ -918,6 +945,7 @@ impl Devices {
             if io.size(&path).is_none() {
                 man.playlists.remove(&rel);
             } else if delete_removed {
+                guard(music, &path)?;
                 io.remove(&path)?;
                 man.playlists.remove(&rel);
             }

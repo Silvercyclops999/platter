@@ -604,3 +604,11 @@ fn a_cancelled_flag_is_seen() {
     c.cancel();
     assert!(c.cancelled());
 }
+
+#[test]
+fn music_dir_never_climbs_out() {
+    let root = Path::new("/media/usb");
+    let p = super::run::music_dir(root, "../../etc/C:/x\\..\\y/./Music");
+    assert!(p.starts_with(root));
+    assert_eq!(p, root.join("etc").join("Music"));
+}

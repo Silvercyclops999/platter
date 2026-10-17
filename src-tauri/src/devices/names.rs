@@ -105,11 +105,16 @@ pub fn key(rel: &str) -> String {
 
 /// The file extension of a song's original file, from its path on the
 /// server, else its codec or container.
+/// Extensions a copied song may get on the device; anything else falls back
+/// to the codec's, so a server can't put a program or shortcut on the drive.
+const AUDIO_EXTS: &[&str] =
+    &["flac", "mp3", "m4a", "m4b", "aac", "alac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wma", "ape", "wv", "dsf", "dff", "mka", "mpc"];
+
 pub fn original_ext(part_key: &str, codec: Option<&str>, container: Option<&str>) -> String {
     let name = part_key.rsplit('/').next().unwrap_or_default();
     if let Some((_, ext)) = name.rsplit_once('.') {
         let ext = ext.split(['?', '&']).next().unwrap_or_default().to_ascii_lowercase();
-        if (1..=5).contains(&ext.len()) && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        if AUDIO_EXTS.contains(&ext.as_str()) {
             return ext;
         }
     }
@@ -185,5 +190,6 @@ mod tests {
         assert_eq!(original_ext("/library/parts/1/2/file", Some("mp3"), None), "mp3");
         assert_eq!(original_ext("/rest/stream?id=3", Some("aac"), Some("mp4")), "m4a");
         assert_eq!(original_ext("x", None, None), "audio");
+        assert_eq!(original_ext("/library/parts/1/evil.lnk", Some("mp3"), None), "mp3");
     }
 }

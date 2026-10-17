@@ -44,9 +44,16 @@ impl Manifest {
         Self { version: VERSION, device_id: device_id.to_string(), files: BTreeMap::new(), playlists: BTreeMap::new() }
     }
 
+    /// Reads a manifest from the device. The file comes from removable media,
+    /// so any entry whose path could leave the music folder is dropped.
     pub fn parse(bytes: &[u8]) -> Option<Self> {
-        let m: Self = serde_json::from_slice(bytes).ok()?;
-        (m.version <= VERSION).then_some(m)
+        let mut m: Self = serde_json::from_slice(bytes).ok()?;
+        if m.version > VERSION {
+            return None;
+        }
+        m.files.retain(|k, _| safe_rel(k));
+        m.playlists.retain(|k, _| safe_rel(k));
+        Some(m)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -55,8 +62,16 @@ impl Manifest {
 
     /// Bytes of every song file Platter wrote.
     pub fn bytes(&self) -> u64 {
-        self.files.values().map(|e| e.size).sum()
+        self.files.values().fold(0u64, |a, e| a.saturating_add(e.size))
     }
+}
+
+/// True for a plain relative path below the music folder: `/`-separated
+/// parts, none empty, `.` or `..`, and no drive letters or backslashes.
+pub fn safe_rel(rel: &str) -> bool {
+    !rel.is_empty()
+        && rel.len() <= 1024
+        && rel.split('/').all(|p| !p.is_empty() && p != "." && p != ".." && !p.contains([':', '\\', '\0']))
 }
 
 /// What a song file is made from: the song, its file on the server and
@@ -121,5 +136,23 @@ mod tests {
         let mut t2 = t.clone();
         t2.part_key = "/library/parts/9/1/new.flac".into();
         assert_ne!(a, fingerprint(&t2, DeviceFormat::Flac));
+    }
+
+    #[test]
+    fn manifest_entries_that_leave_the_folder_are_dropped() {
+        let json = r#"{"version":1,"deviceId":"d","files":{
+            "A/B/01 Song.flac":{"trackId":"1","source":"s","format":"original","size":3},
+            "../../Users/x/doc.docx":{"trackId":"2","source":"s","format":"original","size":3},
+            "C:/Windows/x.mp3":{"trackId":"3","source":"s","format":"original","size":3},
+            "A/./x.mp3":{"trackId":"4","source":"s","format":"original","size":3},
+            "A\\..\\x.mp3":{"trackId":"5","source":"s","format":"original","size":3},
+            "/abs.mp3":{"trackId":"6","source":"s","format":"original","size":3}},
+            "playlists":{"Mix.m3u8":"h","../evil.m3u8":"h"}}"#;
+        let m = Manifest::parse(json.as_bytes()).expect("parses");
+        assert_eq!(m.files.keys().collect::<Vec<_>>(), vec!["A/B/01 Song.flac"]);
+        assert_eq!(m.playlists.keys().collect::<Vec<_>>(), vec!["Mix.m3u8"]);
+        assert!(safe_rel("Artist/Album/01 Title.flac"));
+        assert!(!safe_rel(""));
+        assert!(!safe_rel("a//b"));
     }
 }

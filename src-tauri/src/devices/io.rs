@@ -9,6 +9,9 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 /// How the device is written (a temp folder in tests, with faults).
+/// The most Platter reads back from a device (its manifest).
+const MAX_READ: u64 = 16 * 1024 * 1024;
+
 pub trait DeviceIo: Send + Sync {
     /// Copies a local file onto the device at `to`. `stop` is checked
     /// between chunks (an Interrupted error when it says stop).
@@ -88,6 +91,11 @@ impl DeviceIo for StdIo {
     }
 
     fn read(&self, p: &Path) -> io::Result<Vec<u8>> {
+        // Only small regular files (the manifest) are read back from a device.
+        let m = fs::symlink_metadata(p)?;
+        if !m.is_file() || m.len() > MAX_READ {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "not a small regular file"));
+        }
         fs::read(p)
     }
 
