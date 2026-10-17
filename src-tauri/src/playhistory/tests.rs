@@ -435,6 +435,8 @@ async fn tautulli_keeps_the_users_plays_long_enough_to_count() {
     );
     let url = web.log.lock()[0].url.clone();
     assert!(url.contains("cmd=get_history") && url.contains("media_type=track") && url.contains("user=rue"));
+    assert!(!url.contains("abc123"), "the key stays out of the address");
+    assert_eq!(crate::web::fake::body_text(&web.log.lock()[0]), "apikey=abc123");
     let st = ph.status().await.unwrap();
     assert_eq!((st.sources[0].plays, st.sources[0].short_plays), (2, 1));
     // The key never shows in a request's debug text.

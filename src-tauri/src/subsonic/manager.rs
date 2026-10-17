@@ -132,6 +132,9 @@ impl Subsonic {
     }
 
     fn unsigned(&self, url: &str) -> AppResult<SubsonicClient> {
+        if let Some(why) = crate::web::plain_http_warning(url) {
+            tracing::warn!("{why}");
+        }
         SubsonicClient::new(self.inner.http.clone(), url)
     }
 

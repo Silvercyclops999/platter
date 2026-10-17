@@ -208,8 +208,7 @@ impl Feed for Tautulli {
         let tag = self.plex.tag().await;
         let query = {
             let mut q = url::form_urlencoded::Serializer::new(String::new());
-            q.append_pair("apikey", key.expose())
-                .append_pair("cmd", "get_history")
+            q.append_pair("cmd", "get_history")
                 .append_pair("media_type", "track")
                 .append_pair("user", &user)
                 .append_pair("grouping", "0")
@@ -224,7 +223,12 @@ impl Feed for Tautulli {
             }
             q.finish()
         };
-        let req = WebRequest::get(format!("{}/api/v2?{query}", url.trim_end_matches('/')));
+        // The key goes in the form body, never the address, so it stays out
+        // of proxy and server logs (Tautulli reads it from either).
+        let req = WebRequest::post_form(format!("{}/api/v2?{query}", url.trim_end_matches('/')), vec![("apikey".into(), key.expose().to_string())]);
+        if let Some(why) = crate::web::plain_http_warning(&url) {
+            tracing::warn!("{why}");
+        }
         let resp = self.web.send(req).await.map_err(|_| AppError::Network(UNREACHABLE.into()))?;
         if resp.status == 401 || resp.status == 403 {
             return Err(AppError::Auth(BAD_KEY.into()));

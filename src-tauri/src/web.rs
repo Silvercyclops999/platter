@@ -94,6 +94,16 @@ pub fn same_origin_redirects() -> reqwest::redirect::Policy {
     })
 }
 
+/// A warning when `url` is plain http to an address outside this computer
+/// and the home network: keys and passwords sent to it can be read on the
+/// way. None for https or a home address.
+pub fn plain_http_warning(url: &str) -> Option<&'static str> {
+    let u = url::Url::parse(url.trim()).ok()?;
+    let host = u.host_str()?;
+    (u.scheme() == "http" && !crate::lidarr::paths::is_private_host(host))
+        .then_some("A service is set up with a plain http address on the internet, so its key or password can be read on the way. Use its https address.")
+}
+
 /// What an answer too big to read says.
 pub const TOO_BIG: &str = "The answer was larger than Platter reads, so it was left unread.";
 
@@ -290,6 +300,15 @@ mod tests {
         assert!(elsewhere.received_requests().await.unwrap().is_empty());
         let r = web.send(WebRequest::get(format!("{}/move", home.uri())).header("x-api-key", "secret")).await.unwrap();
         assert_eq!((r.status, &r.body[..]), (200, &b"ok"[..]), "the same host is fine");
+    }
+
+    #[test]
+    fn plain_http_is_flagged_only_off_the_home_network() {
+        assert!(plain_http_warning("http://tautulli.example.org:8181").is_some());
+        assert!(plain_http_warning("http://203.0.113.9:4533").is_some());
+        for ok in ["https://tautulli.example.org", "http://10.0.0.4:8181", "http://nas.local:4533", "http://localhost:8096", "nonsense"] {
+            assert!(plain_http_warning(ok).is_none(), "{ok}");
+        }
     }
 
     #[tokio::test]
