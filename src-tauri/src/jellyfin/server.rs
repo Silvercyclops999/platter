@@ -778,7 +778,7 @@ impl ArtFetcher for Core {
         };
         super::client::check(resp.status())?;
         let declared = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(str::to_string);
-        let bytes = resp.bytes().await.map_err(|_| AppError::Network(OFFLINE.into()))?;
+        let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
         let content_type = declared
             .filter(|t| t.starts_with("image/"))
             .unwrap_or_else(|| crate::db::artcache::sniff_content_type(&bytes).to_string());

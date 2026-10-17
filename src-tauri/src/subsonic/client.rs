@@ -127,6 +127,8 @@ pub fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(6))
         .timeout(Duration::from_secs(60))
+        // The sign-in rides on every request: never to another host.
+        .redirect(crate::web::same_origin_redirects())
         .build()
         .unwrap_or_default()
 }
@@ -249,7 +251,7 @@ impl SubsonicClient {
     /// The answer's `key` part as `T` (`None`: only check it succeeded).
     pub async fn get<T: DeserializeOwned + Default>(&self, method: &str, params: &[(&str, String)], key: Option<&str>) -> AppResult<T> {
         let resp = self.send(method, params).await?;
-        let bytes = resp.bytes().await.map_err(|_| AppError::Network(OFFLINE.into()))?;
+        let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
         let (status, body) = envelope(&bytes)?;
         check_status(&status, self.secret.as_ref())?;
         let Some(key) = key else { return Ok(T::default()) };
@@ -267,7 +269,7 @@ impl SubsonicClient {
     /// The envelope of `ping` (status, product, version), signed in or not.
     pub async fn ping(&self) -> AppResult<Status> {
         let resp = self.send("ping", &[]).await?;
-        let bytes = resp.bytes().await.map_err(|_| AppError::Network(OFFLINE.into()))?;
+        let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
         let (status, _) = envelope(&bytes)?;
         check_status(&status, self.secret.as_ref())?;
         Ok(status)
@@ -281,7 +283,7 @@ impl SubsonicClient {
             AppError::NotFound(_) | AppError::Auth(_) | AppError::Server(_) => AppError::Invalid(NOT_SUBSONIC.into()),
             other => other,
         })?;
-        let bytes = resp.bytes().await.map_err(|_| AppError::Network(OFFLINE.into()))?;
+        let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
         let (status, _) = envelope(&bytes).map_err(|_| AppError::Invalid(NOT_SUBSONIC.into()))?;
         if status.status != "ok" && status.status != "failed" {
             return Err(AppError::Invalid(NOT_SUBSONIC.into()));

@@ -45,6 +45,9 @@ pub trait InfoHttp: Send + Sync {
     async fn get(&self, url: &str, headers: &[(&'static str, String)]) -> AppResult<HttpResponse>;
 }
 
+/// Most an artist info answer (or picture) may be.
+const INFO_MAX: usize = 32 * 1024 * 1024;
+
 /// The real client (rustls, gzip, 15 s timeout).
 pub struct ReqwestHttp {
     client: reqwest::Client,
@@ -97,7 +100,7 @@ impl InfoHttp for ReqwestHttp {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
-        let body = resp.bytes().await.map_err(|e| AppError::Network(e.without_url().to_string()))?;
+        let body = crate::web::body_capped(resp, INFO_MAX, |e| AppError::Network(e.without_url().to_string())).await?;
         Ok(HttpResponse { status, body, retry_after, max_age, content_type })
     }
 }

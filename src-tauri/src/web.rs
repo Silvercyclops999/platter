@@ -77,6 +77,48 @@ impl WebRequest {
     }
 }
 
+/// Redirects for clients that send a key, token or password with every
+/// request: followed only to the same host and port (and from http to https
+/// there), so a server can't send them on to somewhere else.
+pub fn same_origin_redirects() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 5 {
+            return attempt.stop();
+        }
+        let Some(first) = attempt.previous().first() else { return attempt.stop() };
+        let next = attempt.url();
+        let scheme_ok = next.scheme() == first.scheme() || (first.scheme() == "http" && next.scheme() == "https");
+        let same_host = next.host_str().map(str::to_ascii_lowercase) == first.host_str().map(str::to_ascii_lowercase);
+        let same_port = next.port_or_known_default() == first.port_or_known_default() || (first.scheme() == "http" && next.scheme() == "https" && next.port().is_none());
+        if scheme_ok && same_host && same_port { attempt.follow() } else { attempt.stop() }
+    })
+}
+
+/// What an answer too big to read says.
+pub const TOO_BIG: &str = "The answer was larger than Platter reads, so it was left unread.";
+
+/// Read a body as it streams in, stopping past `max` bytes (after
+/// decompression), so a small compressed answer can't fill memory.
+pub async fn body_capped(mut resp: reqwest::Response, max: usize, net: impl Fn(reqwest::Error) -> AppError) -> AppResult<bytes::Bytes> {
+    if resp.content_length().is_some_and(|n| n > max as u64) {
+        return Err(AppError::Decode(TOO_BIG.into()));
+    }
+    let mut out = bytes::BytesMut::new();
+    while let Some(chunk) = resp.chunk().await.map_err(&net)? {
+        if out.len() + chunk.len() > max {
+            return Err(AppError::Decode(TOO_BIG.into()));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out.freeze())
+}
+
+/// Most one answer from a music server (Jellyfin, OpenSubsonic) may be.
+pub const SERVER_MAX: usize = 256 * 1024 * 1024;
+
+/// Most a web service's answer may be.
+pub const WEB_MAX: usize = 64 * 1024 * 1024;
+
 #[async_trait]
 pub trait Web: Send + Sync {
     async fn send(&self, req: WebRequest) -> AppResult<HttpResponse>;
@@ -92,6 +134,8 @@ impl ReqwestWeb {
         let client = reqwest::Client::builder()
             .user_agent(user_agent())
             .connect_timeout(Duration::from_secs(8))
+            // Lidarr's key and proxy headers ride on these requests.
+            .redirect(same_origin_redirects())
             .build()
             .map_err(|e| AppError::Internal(format!("http client: {e}")))?;
         Ok(Self { client })
@@ -129,7 +173,7 @@ impl Web for ReqwestWeb {
             .get(reqwest::header::RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse().ok());
-        let body = resp.bytes().await.map_err(|e| AppError::Network(e.without_url().to_string()))?;
+        let body = body_capped(resp, WEB_MAX, |e| AppError::Network(e.without_url().to_string())).await?;
         Ok(HttpResponse { status, body, retry_after, ..Default::default() })
     }
 }
@@ -226,6 +270,39 @@ pub mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn keys_never_follow_a_redirect_to_another_host() {
+        use wiremock::matchers::{header_exists, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let elsewhere = MockServer::start().await;
+        Mock::given(path("/grab")).respond_with(ResponseTemplate::new(200).set_body_string("got it")).mount(&elsewhere).await;
+        let home = MockServer::start().await;
+        Mock::given(path("/away"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", format!("{}/grab", elsewhere.uri())))
+            .mount(&home)
+            .await;
+        Mock::given(path("/move")).respond_with(ResponseTemplate::new(302).insert_header("location", "/here")).mount(&home).await;
+        Mock::given(path("/here")).and(header_exists("x-api-key")).respond_with(ResponseTemplate::new(200).set_body_string("ok")).mount(&home).await;
+        let web = ReqwestWeb::new().unwrap();
+        let r = web.send(WebRequest::get(format!("{}/away", home.uri())).header("x-api-key", "secret")).await.unwrap();
+        assert_eq!(r.status, 302, "not followed");
+        assert!(elsewhere.received_requests().await.unwrap().is_empty());
+        let r = web.send(WebRequest::get(format!("{}/move", home.uri())).header("x-api-key", "secret")).await.unwrap();
+        assert_eq!((r.status, &r.body[..]), (200, &b"ok"[..]), "the same host is fine");
+    }
+
+    #[tokio::test]
+    async fn an_answer_past_the_cap_is_left_unread() {
+        use wiremock::matchers::path;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let s = MockServer::start().await;
+        Mock::given(path("/big")).respond_with(ResponseTemplate::new(200).set_body_bytes(vec![b'x'; 4096])).mount(&s).await;
+        let get = || async { reqwest::get(format!("{}/big", s.uri())).await.unwrap() };
+        let net = |e: reqwest::Error| AppError::Network(e.to_string());
+        assert!(matches!(body_capped(get().await, 1024, net).await, Err(AppError::Decode(m)) if m == TOO_BIG));
+        assert_eq!(body_capped(get().await, 8192, net).await.unwrap().len(), 4096);
+    }
 
     #[test]
     fn debug_never_shows_keys_or_bodies() {

@@ -108,6 +108,8 @@ pub fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(6))
         .timeout(Duration::from_secs(30))
+        // The sign-in rides on every request: never to another host.
+        .redirect(crate::web::same_origin_redirects())
         .build()
         .unwrap_or_default()
 }
@@ -191,13 +193,13 @@ impl JellyfinClient {
 
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> AppResult<T> {
         let resp = self.send(Method::GET, path, query, None).await?;
-        let bytes = resp.bytes().await.map_err(|_| AppError::Network(OFFLINE.into()))?;
+        let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
         serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))
     }
 
     pub async fn post_json<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)], body: &serde_json::Value) -> AppResult<T> {
         let resp = self.send(Method::POST, path, query, Some(body)).await?;
-        let bytes = resp.bytes().await.map_err(|_| AppError::Network(OFFLINE.into()))?;
+        let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
         serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))
     }
 
@@ -213,7 +215,7 @@ impl JellyfinClient {
             AppError::NotFound(_) | AppError::Auth(_) | AppError::Server(_) => AppError::Invalid(NOT_JELLYFIN.into()),
             other => other,
         })?;
-        let bytes = resp.bytes().await.map_err(|_| AppError::Network(OFFLINE.into()))?;
+        let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
         let info: PublicInfo = serde_json::from_slice(&bytes).map_err(|_| AppError::Invalid(NOT_JELLYFIN.into()))?;
         check_info(&info)?;
         Ok(info)

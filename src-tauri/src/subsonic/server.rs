@@ -837,7 +837,7 @@ impl ArtFetcher for Core {
         };
         super::client::check_http(resp.status())?;
         let declared = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(str::to_string);
-        let bytes = resp.bytes().await.map_err(|_| AppError::Network(OFFLINE.into()))?;
+        let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
         if declared.as_deref().is_some_and(|t| t.contains("json") || t.contains("xml")) {
             // An error answer instead of a picture.
             let (status, _) = super::client::envelope(&bytes)?;

@@ -25,6 +25,8 @@ use crate::model::{Album, Artist, Playlist, ReleaseSection, Track};
 /// Page size used for full-library listing (docs/PLEX-API.md).
 pub const PAGE_SIZE: u64 = 500;
 const LIBRARY_IDENTIFIER: &str = "com.plexapp.plugins.library";
+/// Most one answer from the server may be (pages are 500 items).
+const PLEX_MAX: usize = 256 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Error mapping (shared with auth.rs)
@@ -863,6 +865,8 @@ impl PlexClient {
             .default_headers(headers)
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
+            // The token rides on every request: never to another host.
+            .redirect(crate::web::same_origin_redirects())
             .build()
             .map_err(|e| AppError::Internal(format!("http client: {e}")))?;
         Ok(PlexClient {
@@ -1033,7 +1037,7 @@ impl PlexClient {
                 .header("x-plex-container-size", size.to_string());
         }
         let resp = self.send(rb).await?;
-        let bytes = resp.bytes().await.map_err(map_send_error)?;
+        let bytes = crate::web::body_capped(resp, PLEX_MAX, map_send_error).await?;
         serde_json::from_slice(&bytes)
             .map_err(|e| AppError::Decode(format!("{}: {e}", path.split('?').next().unwrap_or(""))))
     }
@@ -1043,7 +1047,7 @@ impl PlexClient {
     pub(crate) async fn get_bytes(&self, path: &str, query: &[(&str, String)]) -> AppResult<Bytes> {
         let rb = self.request(Method::GET, path)?.query(query);
         let resp = self.send(rb).await?;
-        resp.bytes().await.map_err(map_send_error)
+        crate::web::body_capped(resp, PLEX_MAX, map_send_error).await
     }
 
     async fn container(
@@ -1474,7 +1478,7 @@ impl PlexClient {
             ("uri", uri.as_str()),
         ]);
         let resp = self.send(rb).await?;
-        let bytes = resp.bytes().await.map_err(map_send_error)?;
+        let bytes = crate::web::body_capped(resp, PLEX_MAX, map_send_error).await?;
         let mut env: Envelope<Container> =
             serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
         self.qualify_container(&mut env.media_container);
@@ -1496,7 +1500,7 @@ impl PlexClient {
             ("uri", uri),
         ]);
         let resp = self.send(rb).await?;
-        let bytes = resp.bytes().await.map_err(map_send_error)?;
+        let bytes = crate::web::body_capped(resp, PLEX_MAX, map_send_error).await?;
         let mut env: Envelope<Container> =
             serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
         self.qualify_container(&mut env.media_container);
@@ -1615,7 +1619,7 @@ impl PlexClient {
             ("upscale", "1".to_string()),
         ]);
         let resp = self.send(rb.header("accept", "image/*")).await?;
-        resp.bytes().await.map_err(map_send_error)
+        crate::web::body_capped(resp, PLEX_MAX, map_send_error).await
     }
 
     /// Direct-play request for a part key (`/library/parts/…`). Supports
