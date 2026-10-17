@@ -257,6 +257,9 @@ struct Inner {
     /// (private session, unreleased), and its queue item.
     current: Mutex<Option<(String, Listen)>>,
     sending: tokio::sync::Mutex<()>,
+    /// Held while the saved queue is read, changed and written back, so an
+    /// add during a slow send isn't overwritten.
+    queue_lock: Mutex<()>,
 }
 
 /// Cheap to clone.
@@ -283,6 +286,7 @@ impl Scrobbler {
                 rejected: Mutex::new(rejected),
                 current: Mutex::new(None),
                 sending: Default::default(),
+                queue_lock: Mutex::new(()),
             }),
         }
     }
@@ -341,10 +345,17 @@ impl Scrobbler {
             .collect()
     }
 
-    /// Whether this song may go out at all right now.
-    fn allowed(&self, t: &Track) -> bool {
-        !self.inner.switches.private_session.load(Ordering::Relaxed)
-            && (self.inner.switches.unreleased.load(Ordering::Relaxed) || !self.inner.unreleased.unreleased(t))
+    /// Whether this song may go out at all right now. The unreleased check
+    /// reads the library cache, off the async threads.
+    async fn allowed(&self, t: &Track) -> bool {
+        if self.inner.switches.private_session.load(Ordering::Relaxed) {
+            return false;
+        }
+        if self.inner.switches.unreleased.load(Ordering::Relaxed) {
+            return true;
+        }
+        let (u, t) = (self.inner.unreleased.clone(), t.clone());
+        tokio::task::spawn_blocking(move || !u.unreleased(&t)).await.unwrap_or(false)
     }
 
     // ---- the queue -------------------------------------------------------------
@@ -360,14 +371,42 @@ impl Scrobbler {
     }
 
     fn enqueue(&self, items: Vec<Queued>) {
-        let mut q = self.queued().unwrap_or_default();
-        q.extend(items);
-        if q.len() > QUEUE_MAX {
-            let drop = q.len() - QUEUE_MAX;
-            q.drain(..drop);
+        {
+            let _q = self.inner.queue_lock.lock();
+            let mut q = self.queued().unwrap_or_default();
+            q.extend(items);
+            if q.len() > QUEUE_MAX {
+                let drop = q.len() - QUEUE_MAX;
+                q.drain(..drop);
+            }
+            if let Err(e) = self.save_queue(&q) {
+                tracing::warn!("scrobble queue: {e}");
+            }
         }
-        if let Err(e) = self.save_queue(&q) {
-            tracing::warn!("scrobble queue: {e}");
+        self.emit_status();
+    }
+
+    /// Takes `gone` (in queue order) out of the saved queue as it is now,
+    /// keeping anything added meanwhile.
+    fn remove_queued(&self, gone: &[Queued]) {
+        {
+            let _q = self.inner.queue_lock.lock();
+            let Ok(cur) = self.queued() else { return };
+            let mut i = 0;
+            let left: Vec<Queued> = cur
+                .into_iter()
+                .filter(|x| {
+                    if i < gone.len() && *x == gone[i] {
+                        i += 1;
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+            if let Err(e) = self.save_queue(&left) {
+                tracing::warn!("scrobble queue: {e}");
+            }
         }
         self.emit_status();
     }
@@ -383,7 +422,7 @@ impl Scrobbler {
     pub async fn handle(&self, ev: &TrackingEvent) {
         match ev {
             TrackingEvent::TrackStarted { track, item_id, at, .. } => {
-                if !self.allowed(track) {
+                if !self.allowed(track).await {
                     *self.inner.current.lock() = None;
                     return;
                 }
@@ -401,7 +440,7 @@ impl Scrobbler {
                 let cur = self.inner.current.lock().take();
                 let Some((cur_item, listen)) = cur else { return };
                 // A private session that started mid-song still keeps it out.
-                if cur_item != *item_id || !counts(track.duration_ms, *listened_ms) || !self.allowed(track) {
+                if cur_item != *item_id || !counts(track.duration_ms, *listened_ms) || !self.allowed(track).await {
                     return;
                 }
                 self.scrobble(listen).await;
@@ -453,49 +492,70 @@ impl Scrobbler {
     pub async fn replay(&self) {
         let _one = self.inner.sending.lock().await;
         let now = self.now();
-        let Ok(mut q) = self.queued() else { return };
+        let Ok(q) = self.queued() else { return };
         // Nothing waiting: don't touch the services (and their keychain entries).
         if q.is_empty() {
             return;
         }
-        let before = q.len();
-        q.retain(|x| now - x.listen.started_at <= QUEUE_MAX_AGE_S);
+        // What's sent (or too old) comes out of the queue afterwards; scrobbles
+        // added while sending stay.
+        let mut gone: Vec<bool> = q.iter().map(|x| now - x.listen.started_at > QUEUE_MAX_AGE_S).collect();
         for s in self.targets() {
             let svc = s.service();
-            loop {
-                let batch: Vec<Listen> = q.iter().filter(|x| x.service == svc).take(50).map(|x| x.listen.clone()).collect();
-                if batch.is_empty() {
+            let mine: Vec<usize> = (0..q.len()).filter(|&i| !gone[i] && q[i].service == svc).collect();
+            for chunk in mine.chunks(50) {
+                let batch: Vec<Listen> = chunk.iter().map(|&i| q[i].listen.clone()).collect();
+                let n = self.send_batch(s.as_ref(), &batch).await;
+                for &i in &chunk[..n] {
+                    gone[i] = true;
+                }
+                if n < chunk.len() {
                     break;
                 }
-                let done = match s.scrobble(&batch).await {
-                    Ok(()) => true,
-                    Err(SendError::Refused(why)) => {
-                        tracing::info!("{} refused waiting scrobbles: {why}", svc.display());
-                        true
-                    }
-                    Err(SendError::Rejected) => {
-                        self.reject(svc);
-                        false
-                    }
-                    Err(_) => false,
-                };
-                if !done {
-                    break;
-                }
-                let mut n = batch.len();
-                q.retain(|x| {
-                    if n > 0 && x.service == svc {
-                        n -= 1;
-                        false
-                    } else {
-                        true
-                    }
-                });
             }
         }
-        if q.len() != before {
-            let _ = self.save_queue(&q);
-            self.emit_status();
+        if gone.iter().any(|g| *g) {
+            let gone: Vec<Queued> = q.into_iter().zip(gone).filter(|(_, g)| *g).map(|(x, _)| x).collect();
+            self.remove_queued(&gone);
+        }
+    }
+
+    /// Sends waiting scrobbles to one service; returns how many from the
+    /// front are done with (sent, or refused for good). When a batch is
+    /// refused they go one at a time, so one bad scrobble doesn't take the
+    /// others with it.
+    async fn send_batch(&self, s: &dyn ScrobbleService, batch: &[Listen]) -> usize {
+        let svc = s.service();
+        match s.scrobble(batch).await {
+            Ok(()) => batch.len(),
+            Err(SendError::Refused(why)) if batch.len() == 1 => {
+                tracing::info!("{} refused a waiting scrobble: {why}", svc.display());
+                1
+            }
+            Err(SendError::Refused(why)) => {
+                tracing::info!("{} refused waiting scrobbles ({why}); sending one at a time", svc.display());
+                let mut n = 0;
+                for l in batch {
+                    match s.scrobble(std::slice::from_ref(l)).await {
+                        Ok(()) => n += 1,
+                        Err(SendError::Refused(why)) => {
+                            tracing::info!("{} refused a waiting scrobble: {why}", svc.display());
+                            n += 1;
+                        }
+                        Err(SendError::Rejected) => {
+                            self.reject(svc);
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                n
+            }
+            Err(SendError::Rejected) => {
+                self.reject(svc);
+                0
+            }
+            Err(_) => 0,
         }
     }
 

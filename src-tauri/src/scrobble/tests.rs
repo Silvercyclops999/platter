@@ -316,3 +316,87 @@ async fn nothing_waiting_means_no_keychain_reads() {
     }
     assert_eq!(keys.total_reads(), 0);
 }
+
+/// A service whose sends can be held open, and that refuses any batch
+/// holding a song titled "Song bad".
+#[derive(Default)]
+struct Held {
+    hold: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+    sent: Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl ScrobbleService for Held {
+    fn service(&self) -> Service {
+        Service::Lastfm
+    }
+    fn signed_in(&self) -> bool {
+        true
+    }
+    async fn now_playing(&self, _: &Listen) -> Result<(), SendError> {
+        Ok(())
+    }
+    async fn scrobble(&self, ls: &[Listen]) -> Result<(), SendError> {
+        if self.hold.swap(false, Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        if ls.iter().any(|l| l.title == "Song bad") {
+            return Err(SendError::Refused("bad".into()));
+        }
+        self.sent.lock().extend(ls.iter().map(|l| l.title.clone()));
+        Ok(())
+    }
+}
+
+fn held_rig() -> (Scrobbler, Arc<Held>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("s.db")).unwrap();
+    let held = Arc::new(Held::default());
+    let switches = ScrobbleSwitches::default();
+    switches.lastfm.store(true, Ordering::Relaxed);
+    let s = Scrobbler::new(ScrobbleDeps {
+        db,
+        services: vec![held.clone()],
+        switches,
+        unreleased: Arc::new(Unrel(vec![])),
+        notice: Arc::new(Notices::default()),
+        events: Arc::new(NoEvents),
+        clock: Arc::new(|| NOW),
+    });
+    (s, held, dir)
+}
+
+fn waiting(id: &str) -> Queued {
+    Queued { service: Service::Lastfm, listen: Listen::from_track(&track(id, 200_000), NOW - 100) }
+}
+
+#[tokio::test]
+async fn a_scrobble_added_while_waiting_ones_go_out_is_kept() {
+    let (s, held, _dir) = held_rig();
+    s.enqueue(vec![waiting("1")]);
+    held.hold.store(true, Ordering::SeqCst);
+    let replay = tokio::spawn({
+        let s = s.clone();
+        async move { s.replay().await }
+    });
+    held.entered.notified().await;
+    // A song ends while the slow send is out.
+    s.enqueue(vec![waiting("2")]);
+    held.release.notify_one();
+    replay.await.unwrap();
+    let left: Vec<String> = s.queued().unwrap().into_iter().map(|q| q.listen.title).collect();
+    assert_eq!(left, vec!["Song 2"]);
+    assert_eq!(*held.sent.lock(), vec!["Song 1"]);
+}
+
+#[tokio::test]
+async fn one_refused_scrobble_doesnt_take_the_rest_of_its_batch_with_it() {
+    let (s, held, _dir) = held_rig();
+    s.enqueue(vec![waiting("1"), waiting("bad"), waiting("3")]);
+    s.replay().await;
+    assert!(s.queued().unwrap().is_empty());
+    assert_eq!(*held.sent.lock(), vec!["Song 1", "Song 3"]);
+}
