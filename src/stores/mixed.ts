@@ -24,7 +24,7 @@ export const MIX_STYLES: { style: MixStyle; label: string; hint: string }[] = [
   { style: "none", label: "No transition", hint: "Straight on to the next song" },
   { style: "blend", label: "Blend", hint: "Both songs cross evenly" },
   { style: "lift", label: "Lift", hint: "The next song comes up first, then this one goes" },
-  { style: "drop", label: "Drop", hint: "The next song waits underneath and takes over on the last bar" },
+  { style: "drop", label: "Drop", hint: "The next song waits, then takes over on the bar" },
   { style: "echo", label: "Echo out", hint: "This song echoes away as the next one comes in" },
 ];
 
