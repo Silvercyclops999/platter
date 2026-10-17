@@ -2456,10 +2456,15 @@ impl Actor {
         if self.ticks.is_multiple_of(per_sec)
             && let Some(t) = self.current_track()
         {
+            let listened_ms = match (self.cur_key, self.engine.position()) {
+                (Some(k), Some(p)) if p.key == k => p.listened_ms,
+                _ => 0,
+            };
             self.track_event(TrackingEvent::Progress {
                 track_id: t.id.clone(),
                 position_ms: self.position_ms(),
                 duration_ms: t.duration_ms,
+                listened_ms,
             });
         }
         // Save the position every ~5 s while playing.

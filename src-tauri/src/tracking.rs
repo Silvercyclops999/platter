@@ -335,9 +335,10 @@ impl Tracker {
                 cur.play_id =
                     Some(self.db.write_async(move |c| listens::start_play_with(c, &start, Some(&snap))).await?);
             }
-            TrackingEvent::Progress { track_id, position_ms, .. } if *track_id == cur.track_id => {
+            // Time listened, not the position: a seek to the end isn't a play.
+            TrackingEvent::Progress { track_id, listened_ms, .. } if *track_id == cur.track_id => {
                 if let Some(id) = cur.play_id {
-                    let ms = *position_ms;
+                    let ms = *listened_ms;
                     let upd = self.db.write_async(move |c| listens::progress(c, id, ms)).await?;
                     if upd.scrobble_now {
                         self.scrobble(Some(id), cur.track_id.clone()).await;
@@ -448,7 +449,8 @@ mod tests {
         let started = TrackingEvent::TrackStarted { track: t.clone(), item_id: "q1".into(), at: 0, context: None };
         assert_eq!(states(&reports_for(&mut cur, &started)), vec![(PlaybackState::Playing, 0)]);
 
-        let progress = |ms| TrackingEvent::Progress { track_id: "1".into(), position_ms: ms, duration_ms: 200_000 };
+        let progress =
+            |ms| TrackingEvent::Progress { track_id: "1".into(), position_ms: ms, duration_ms: 200_000, listened_ms: ms };
         assert!(reports_for(&mut cur, &progress(5_000)).is_empty());
         assert_eq!(states(&reports_for(&mut cur, &progress(10_000))), vec![(PlaybackState::Playing, 10_000)]);
         assert!(reports_for(&mut cur, &progress(15_000)).is_empty());
@@ -535,7 +537,12 @@ mod tests {
         let tr = track("7");
         let evs = [
             TrackingEvent::TrackStarted { track: tr.clone(), item_id: "q1".into(), at: 1_000_000, context: None },
-            TrackingEvent::Progress { track_id: "7".into(), position_ms: 150_000, duration_ms: 200_000 },
+            TrackingEvent::Progress {
+                track_id: "7".into(),
+                position_ms: 150_000,
+                duration_ms: 200_000,
+                listened_ms: 150_000,
+            },
             TrackingEvent::TrackEnded {
                 track: tr,
                 item_id: "q1".into(),
@@ -560,6 +567,36 @@ mod tests {
         assert_eq!(listen_rows(&r.db), 1);
         assert_eq!(*r.rec.scrobbles.lock(), vec!["7".to_string()]);
         assert!(!r.rec.timelines.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn seeking_near_the_end_and_finishing_is_not_a_play() {
+        // 5 s heard, then a seek to 80% and on to the end: the position
+        // passes every threshold, the time listened doesn't.
+        let r = rig(false, true);
+        let mut cur = Current::default();
+        let tr = track("7");
+        let evs = [
+            TrackingEvent::TrackStarted { track: tr.clone(), item_id: "q1".into(), at: 1_000_000, context: None },
+            TrackingEvent::Progress { track_id: "7".into(), position_ms: 5_000, duration_ms: 200_000, listened_ms: 5_000 },
+            TrackingEvent::Seeked { track_id: "7".into(), from_ms: 5_000, to_ms: 160_000 },
+            TrackingEvent::Progress { track_id: "7".into(), position_ms: 161_000, duration_ms: 200_000, listened_ms: 6_000 },
+            TrackingEvent::Progress { track_id: "7".into(), position_ms: 199_000, duration_ms: 200_000, listened_ms: 44_000 },
+            TrackingEvent::TrackEnded {
+                track: tr,
+                item_id: "q1".into(),
+                listened_ms: 45_000,
+                completed: true,
+                skipped_at_ms: None,
+            },
+        ];
+        for ev in &evs {
+            r.tracker.handle(&mut cur, ev).await;
+        }
+        assert!(r.rec.scrobbles.lock().is_empty());
+        let heard: i64 =
+            r.db.read(|c| Ok(c.query_row("SELECT ms_listened FROM listen_log", [], |r| r.get(0))?)).unwrap();
+        assert_eq!(heard, 45_000);
     }
 
     #[tokio::test]

@@ -306,7 +306,7 @@ async fn ordinary_progress_ticks_send_nothing() {
     wait(2.0).await;
     for s in 2..40u64 {
         r.events
-            .send(TrackingEvent::Progress { track_id: "1".into(), position_ms: s * 1000, duration_ms: 200_000 })
+            .send(TrackingEvent::Progress { track_id: "1".into(), position_ms: s * 1000, duration_ms: 200_000, listened_ms: s * 1000 })
             .unwrap();
         wait(1.0).await;
     }
@@ -411,7 +411,7 @@ async fn discord_closing_mid_song_never_touches_playback_and_reconnects() {
     // Discord quits. Player events keep flowing without blocking.
     for s in 0..100u64 {
         r.events
-            .send(TrackingEvent::Progress { track_id: "1".into(), position_ms: 3000 + s, duration_ms: 200_000 })
+            .send(TrackingEvent::Progress { track_id: "1".into(), position_ms: 3000 + s, duration_ms: 200_000, listened_ms: 3000 + s })
             .expect("the player's events never fail because of Discord");
     }
     r.events.send(TrackingEvent::Seeked { track_id: "1".into(), from_ms: 3_000, to_ms: 60_000 }).unwrap();

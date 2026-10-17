@@ -211,6 +211,10 @@ pub enum TrackingEvent {
         track_id: String,
         position_ms: u64,
         duration_ms: u64,
+        /// Audible time played so far (seeks excluded), which is what
+        /// counts towards a play.
+        #[serde(default)]
+        listened_ms: u64,
     },
     #[serde(rename_all = "camelCase")]
     Paused { track_id: String, position_ms: u64 },

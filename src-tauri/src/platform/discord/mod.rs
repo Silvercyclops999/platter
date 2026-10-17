@@ -502,7 +502,7 @@ impl Runner {
                 self.lookups();
                 self.mark();
             }
-            TrackingEvent::Progress { track_id, position_ms, duration_ms } => {
+            TrackingEvent::Progress { track_id, position_ms, duration_ms, .. } => {
                 let Some(c) = self.cur.as_mut().filter(|c| c.track_id == track_id) else { return };
                 if c.song.duration_ms == 0 && duration_ms > 0 {
                     c.song.duration_ms = duration_ms;
