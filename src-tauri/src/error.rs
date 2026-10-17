@@ -75,9 +75,28 @@ impl From<rusqlite::Error> for AppError {
 
 pub type AppResult<T> = Result<T, AppError>;
 
+/// Runs per-file parsing (tags, pictures, audio) that a damaged or crafted
+/// file could make panic inside a decoder library. A panic becomes an error
+/// for that one file instead of ending the app (releases unwind on panic
+/// for this). `what` names the file in the message.
+pub fn no_panic<T>(what: &std::path::Path, f: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| {
+        let name = what.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        Err(AppError::Decode(format!("{name} looks damaged, so Platter couldn't read it.")))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panic_while_reading_one_file_is_an_error_for_that_file() {
+        let p = std::path::Path::new("/music/a/01 Track.flac");
+        let r: AppResult<()> = no_panic(p, || panic!("decoder bug"));
+        assert!(matches!(&r, Err(AppError::Decode(m)) if m.contains("01 Track.flac")), "{r:?}");
+        assert_eq!(no_panic(p, || Ok(3)).unwrap(), 3);
+    }
 
     #[test]
     fn serializes_kind_and_message() {

@@ -150,7 +150,9 @@ debug = "line-tables-only"
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# Unwind, so a panic inside a decoder on one damaged file is caught
+# (`catch_unwind` around per-file parsing) instead of ending the app.
+panic = "unwind"
 strip = true
 
 # The Bridge's container image: release, with a lighter link-time pass so

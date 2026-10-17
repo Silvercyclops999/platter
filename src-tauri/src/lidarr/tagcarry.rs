@@ -143,6 +143,10 @@ fn from_generic(t: &Tag, bag: &mut Bag) {
 }
 
 fn read_raw(path: &Path) -> AppResult<(Kind, Bag, Raw)> {
+    crate::error::no_panic(path, || read_raw_unguarded(path))
+}
+
+fn read_raw_unguarded(path: &Path) -> AppResult<(Kind, Bag, Raw)> {
     let t = file_type(path)?;
     let kind = kind_of(t)?;
     let opts = ParseOptions::new();
@@ -225,7 +229,7 @@ pub fn read(path: &Path) -> AppResult<Bag> {
 /// The audio's codec, bit rate and bit depth.
 pub fn audio(path: &Path) -> AppResult<AudioInfo> {
     let t = file_type(path)?;
-    let tf = lofty::read_from_path(path).map_err(parse_err(path))?;
+    let tf = crate::error::no_panic(path, || lofty::read_from_path(path).map_err(parse_err(path)))?;
     let p = tf.properties();
     let bit_depth = p.bit_depth().map(u32::from);
     let codec = match t {

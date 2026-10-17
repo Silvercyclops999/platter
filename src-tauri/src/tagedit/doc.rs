@@ -71,6 +71,10 @@ const ITUNES: &str = "com.apple.iTunes";
 impl Doc {
     /// Reads a file's tags (not its audio).
     pub fn read(path: &Path) -> AppResult<Doc> {
+        crate::error::no_panic(path, || Self::read_unguarded(path))
+    }
+
+    fn read_unguarded(path: &Path) -> AppResult<Doc> {
         let probe = lofty::probe::Probe::open(path).map_err(|e| io_err(path, e))?;
         let probe = probe.guess_file_type().map_err(|e| io_err(path, e))?;
         let ty = probe.file_type();

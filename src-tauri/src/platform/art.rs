@@ -6,6 +6,27 @@ use std::path::{Path, PathBuf};
 use crate::db::ArtCache;
 use crate::error::AppResult;
 
+/// Largest picture side Platter decodes; covers are far smaller.
+pub const MAX_DECODE_SIDE: u32 = 8192;
+/// Most memory one picture's decode may take.
+pub const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
+
+/// Decode a picture from a file's tags or a server, with limits on its size
+/// and memory, so a crafted picture can't take all memory (or panic the
+/// decoder and end the app).
+pub fn decode_limited(bytes: &[u8]) -> Result<image::DynamicImage, String> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_DECODE_SIDE);
+    limits.max_image_height = Some(MAX_DECODE_SIDE);
+    limits.max_alloc = Some(MAX_DECODE_ALLOC);
+    let run = || {
+        let mut r = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
+        r.limits(limits);
+        r.decode().map_err(|e| e.to_string())
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)).unwrap_or_else(|_| Err("the picture looks damaged".into()))
+}
+
 /// Size requested from the art cache for the OS controls.
 pub const COVER_PX: u32 = 512;
 const PREFIX: &str = "cover-";
@@ -75,6 +96,18 @@ mod tests {
     use crate::db::ArtFetcher;
     use crate::db::source::ArtBytes;
     use crate::error::AppError;
+
+    #[test]
+    fn huge_or_broken_pictures_are_refused() {
+        let png = |w: u32, h: u32| {
+            let mut out = Vec::new();
+            image::DynamicImage::ImageRgb8(image::RgbImage::new(w, h)).write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+            out
+        };
+        assert!(decode_limited(&png(MAX_DECODE_SIDE + 1, 1)).is_err());
+        assert_eq!(decode_limited(&png(64, 32)).unwrap().width(), 64);
+        assert!(decode_limited(b"\x89PNG\r\n\x1a\nnot really").is_err());
+    }
     use std::sync::Arc;
 
     struct Png;

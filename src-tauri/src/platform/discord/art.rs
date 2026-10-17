@@ -199,8 +199,8 @@ pub fn prepare_cover(bytes: Vec<u8>, content_type: String) -> (Vec<u8>, String) 
     }
 }
 
-fn reencode(bytes: &[u8]) -> Result<Vec<u8>, image::ImageError> {
-    let img = image::load_from_memory(bytes)?;
+fn reencode(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let img = crate::platform::art::decode_limited(bytes)?;
     let img = if img.width().max(img.height()) > COVER_PX {
         img.resize(COVER_PX, COVER_PX, image::imageops::FilterType::Lanczos3)
     } else {
@@ -208,7 +208,7 @@ fn reencode(bytes: &[u8]) -> Result<Vec<u8>, image::ImageError> {
     };
     let rgb = image::DynamicImage::ImageRgb8(img.to_rgb8());
     let mut out = Vec::new();
-    rgb.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY))?;
+    rgb.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY)).map_err(|e| e.to_string())?;
     Ok(out)
 }
 

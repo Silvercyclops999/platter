@@ -186,7 +186,7 @@ fn temp_path(path: &Path) -> PathBuf {
 /// The length of a file's audio, in ms.
 fn length_ms(path: &Path) -> Option<u128> {
     use lofty::file::AudioFile;
-    lofty::read_from_path(path).ok().map(|f| f.properties().duration().as_millis())
+    crate::error::no_panic(path, || Ok(lofty::read_from_path(path).ok().map(|f| f.properties().duration().as_millis()))).ok().flatten()
 }
 
 /// Writes `edits` to the file at `path` when it's still as `expected` says.

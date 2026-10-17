@@ -4,10 +4,8 @@
 //! when the file lacks them, and one front cover made small enough for
 //! small players.
 
-use std::io::Cursor;
 use std::path::Path;
 
-use image::ImageReader;
 use image::codecs::jpeg::JpegEncoder;
 use lofty::config::WriteOptions;
 use lofty::id3::v2::Id3v2Tag;
@@ -73,7 +71,7 @@ pub fn cover(pictures: &[Picture], fallback: Option<&[u8]>, px: u32) -> Option<P
 
 /// A JPEG no bigger than `px` on its longest side.
 pub fn shrink(data: &[u8], px: u32) -> Option<Vec<u8>> {
-    let img = ImageReader::new(Cursor::new(data)).with_guessed_format().ok()?.decode().ok()?;
+    let img = crate::platform::art::decode_limited(data).ok()?;
     let img = if img.width().max(img.height()) > px { img.resize(px, px, image::imageops::FilterType::Triangle) } else { img };
     let rgb = img.to_rgb8();
     let mut out = Vec::new();
@@ -94,6 +92,11 @@ fn grouped(pairs: &[(String, String)]) -> Vec<(String, Vec<String>)> {
 
 /// Writes the tags onto `dest`, replacing whatever tags it has.
 pub fn write(dest: &Path, kind: Kind, pairs: &[(String, String)], cover: Option<Picture>) -> Result<(), String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| write_unguarded(dest, kind, pairs, cover)))
+        .unwrap_or_else(|_| Err("the tags couldn't be written (the file looks damaged)".into()))
+}
+
+fn write_unguarded(dest: &Path, kind: Kind, pairs: &[(String, String)], cover: Option<Picture>) -> Result<(), String> {
     fn err(e: impl std::fmt::Display) -> String {
         format!("the tags couldn't be written ({e})")
     }
@@ -136,6 +139,7 @@ pub fn write(dest: &Path, kind: Kind, pairs: &[(String, String)], cover: Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     fn png(w: u32, h: u32) -> Vec<u8> {
         let img = image::RgbImage::from_pixel(w, h, image::Rgb([200, 30, 30]));

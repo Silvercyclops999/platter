@@ -29,6 +29,10 @@ fn decode_err(p: &Path, e: impl std::fmt::Display) -> AppError {
 
 /// Up to [`SECONDS`] of a file, mono, at [`RATE`].
 pub fn load(path: &Path) -> AppResult<Vec<f32>> {
+    crate::error::no_panic(path, || load_unguarded(path))
+}
+
+fn load_unguarded(path: &Path) -> AppResult<Vec<f32>> {
     let file = std::fs::File::open(path).map_err(|e| decode_err(path, e))?;
     let hint = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase());
     let mut dec = TrackDecoder::open(Box::new(file), hint.as_deref()).map_err(|e| decode_err(path, e))?;
