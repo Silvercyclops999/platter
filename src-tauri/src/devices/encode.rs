@@ -207,7 +207,7 @@ fn flac(src: &Path, hint: &str, dest: &Path, bits: u32, stop: &(dyn Fn() -> bool
 fn mp3_rate(r: u32) -> u32 {
     match r {
         32_000 | 44_100 | 48_000 => r,
-        r if r % 11_025 == 0 => 44_100,
+        r if r.is_multiple_of(11_025) => 44_100,
         _ => 48_000,
     }
 }
