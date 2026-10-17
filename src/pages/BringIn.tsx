@@ -229,7 +229,7 @@ export function BringInSettings() {
         <div className="setting-row__block played-settings__choices">
           <label
             className="bring-in-settings__waves"
-            data-setting="bringInWaves"
+           
           >
             <span>Waves (plays)</span>
             <input
@@ -244,7 +244,7 @@ export function BringInSettings() {
               }}
             />
           </label>
-          <span data-setting="bringInPerDay">
+          <span>
             <Select
               label="Albums a day"
               value={String(s.bringInPerDay)}
@@ -258,7 +258,7 @@ export function BringInSettings() {
               }
             />
           </span>
-          <span data-setting="bringInMinFreeGb">
+          <span>
             <Select
               label="Pause below free space"
               value={String(s.bringInMinFreeGb)}
@@ -272,7 +272,7 @@ export function BringInSettings() {
               }
             />
           </span>
-          <span data-setting="bringInMaxQueue">
+          <span>
             <Select
               label="Pause above Lidarr's queue"
               value={String(s.bringInMaxQueue)}
