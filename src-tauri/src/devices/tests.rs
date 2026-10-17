@@ -5,7 +5,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 
@@ -103,11 +103,13 @@ struct FaultyIo {
     /// The drive's top: once it's gone nothing can be written (a pulled-out
     /// drive can't be made again by creating folders).
     root: PathBuf,
+    /// Set when the test pulls the drive out.
+    pulled: Arc<AtomicBool>,
 }
 
 impl FaultyIo {
     fn gone(&self) -> io::Result<()> {
-        if self.root.is_dir() { Ok(()) } else { Err(io::Error::from(io::ErrorKind::NotFound)) }
+        if self.pulled.load(Ordering::SeqCst) || !self.root.is_dir() { Err(io::Error::from(io::ErrorKind::NotFound)) } else { Ok(()) }
     }
 }
 
@@ -145,6 +147,9 @@ impl DeviceIo for FaultyIo {
         StdIo.prune(dir, top)
     }
     fn is_dir(&self, p: &Path) -> bool {
+        if p == self.root && self.pulled.load(Ordering::SeqCst) {
+            return false;
+        }
         StdIo.is_dir(p)
     }
 }
@@ -168,6 +173,10 @@ fn wav_track(id: &str, title: &str, al: &crate::model::Album, n: u32) -> Track {
 }
 
 fn world_with(files: FakeFiles, fault: Fault) -> World {
+    world_pulled(files, fault, Arc::default())
+}
+
+fn world_pulled(files: FakeFiles, fault: Fault, pulled: Arc<AtomicBool>) -> World {
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("lib.db")).unwrap();
     let ar = fake::artist("ar1", "The Band");
@@ -202,7 +211,7 @@ fn world_with(files: FakeFiles, fault: Fault) -> World {
         db: db.clone(),
         files: Arc::new(files),
         volumes: Arc::new(FakeVolumes { root: root.clone() }),
-        io: Arc::new(FaultyIo { fault, copies: AtomicUsize::new(0), root: root.clone() }),
+        io: Arc::new(FaultyIo { fault, copies: AtomicUsize::new(0), root: root.clone(), pulled }),
         pace: Arc::new(NoPace),
         scratch: dir.path().join("scratch"),
     });
@@ -412,20 +421,17 @@ async fn a_full_device_keeps_what_got_there() {
 
 #[tokio::test]
 async fn a_device_pulled_out_mid_sync_says_it_was_removed() {
-    let dir_slot: Arc<parking_lot::Mutex<Option<PathBuf>>> = Arc::default();
-    let slot = dir_slot.clone();
+    let pulled: Arc<AtomicBool> = Arc::default();
+    let pull = pulled.clone();
     let files = FakeFiles {
         on_fetch: Box::new(move |n| {
-            if n == 2
-                && let Some(p) = slot.lock().clone()
-            {
-                let _ = std::fs::remove_dir_all(p);
+            if n == 2 {
+                pull.store(true, Ordering::SeqCst);
             }
         }),
         ..FakeFiles::new()
     };
-    let w = world_with(files, Fault::None);
-    *dir_slot.lock() = Some(w.root.clone());
+    let w = world_pulled(files, Fault::None, pulled);
     let s = w.sync(opts(DeviceFormat::Original, false)).await;
     assert_eq!(s.phase, Phase::Failed);
     let e = s.error.unwrap();

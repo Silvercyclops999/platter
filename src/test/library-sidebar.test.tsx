@@ -375,7 +375,7 @@ describe("library sidebar", () => {
     expect(play).toHaveBeenCalledWith(expect.objectContaining({ context: expect.objectContaining({ kind: "album" }) }));
     fireEvent.contextMenu(rows()[0]);
     const menu = await screen.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Play", "Add to queue", "Add to playlist", "Go to artist", "Download", "Start a listening session", "Share", "Pin"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Play", "Add to queue", "Add to playlist", "Go to artist", "Download", "Send to device", "Start a listening session", "Share", "Pin"]);
     await user.click(within(menu).getByRole("menuitem", { name: "Pin" }));
     expect(usePins.getState().pins).toHaveLength(1);
     // The pin glyph shows, and the pin stays first.
