@@ -82,6 +82,10 @@ struct State {
     down: bool,
     /// Album list reads that come back empty after an add.
     albums_delay: usize,
+    /// Command list reads that still show the new artist's refresh running.
+    /// While it runs the new albums have no length; when it ends Lidarr
+    /// applies "monitor none" to them, as a real Lidarr does.
+    refresh_polls: usize,
     /// Lidarr also has the staging root.
     staging: bool,
     /// Artists on the import list exclusions (MusicBrainz ids).
@@ -183,6 +187,10 @@ impl FakeLidarr {
                     let nid = st.next_id;
                     st.albums.push(json!({"id": nid, "title": title, "foreignAlbumId": rg, "artistId": id,
                         "monitored": extra && rg == RG_EP, "statistics": {"trackFileCount": 0, "trackCount": 10, "percentOfTracks": 0}}));
+                if st.refresh_polls > 0 {
+                    let last = st.albums.len() - 1;
+                    st.albums[last]["duration"] = json!(0);
+                }
                 }
                 (201, artist)
             }
@@ -197,6 +205,22 @@ impl FakeLidarr {
                 (202, json!([]))
             }
             (Method::Post, "/command") => (201, json!({"id": 1, "name": "AlbumSearch"})),
+            (Method::Get, "/command") => {
+                let Some(artist) = st.artists.last().and_then(|a| a["id"].as_i64()) else {
+                    return (200, json!([]));
+                };
+                if st.refresh_polls == 0 {
+                    return (200, json!([{"name": "RefreshArtist", "status": "completed", "body": {"artistId": artist}}]));
+                }
+                st.refresh_polls -= 1;
+                if st.refresh_polls == 0 {
+                    for a in st.albums.iter_mut().filter(|a| a["artistId"] == artist) {
+                        a["duration"] = json!(3_153_000);
+                        a["monitored"] = json!(false);
+                    }
+                }
+                (200, json!([{"name": "RefreshArtist", "status": "started", "body": {"artistId": artist}}]))
+            }
             (Method::Get, "/importlistexclusion") => {
                 (200, Value::Array(st.exclusions.iter().map(|id| json!({"foreignId": id, "artistName": "Northlight"})).collect()))
             }
@@ -288,6 +312,35 @@ fn assert_only_allowed_writes(web: &FakeLidarr) {
         };
         assert!(ok, "Lidarr was sent {m:?} {p}");
     }
+}
+
+/// Measured on a real Lidarr: searching a new artist's album before its
+/// refresh ended rejected every result ("duration is 0"), and the refresh
+/// then turned the album's monitoring back off. Platter waits it out.
+#[tokio::test]
+async fn a_new_artists_album_is_monitored_and_searched_only_after_lidarr_finishes_reading_it() {
+    let r = rig();
+    r.web.st.lock().refresh_polls = 3;
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    assert_eq!(rec.state, RequestState::Searching, "{:?}", rec.message);
+    let log = r.web.log.lock().clone();
+    let monitor = log.iter().position(|(m, p, _)| *m == Method::Put && p == "/api/v1/album/monitor").unwrap();
+    let search = log.iter().position(|(m, p, _)| *m == Method::Post && p == "/api/v1/command").unwrap();
+    let last_refresh_read = log.iter().rposition(|(m, p, _)| *m == Method::Get && p == "/api/v1/command").unwrap();
+    assert!(last_refresh_read < monitor && monitor < search, "monitor and search only after the refresh ended");
+    let st = r.web.st.lock();
+    let album = st.albums.iter().find(|a| a["foreignAlbumId"] == RG_SECOND).unwrap();
+    assert_eq!(album["monitored"], true);
+    assert!(album["duration"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn a_refresh_that_never_ends_queues_the_request_instead_of_searching() {
+    let r = rig();
+    r.web.st.lock().refresh_polls = 10_000;
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    assert_eq!(rec.state, RequestState::Queued);
+    assert!(!r.web.writes().iter().any(|(m, p, _)| *m == Method::Post && p == "/api/v1/command"), "no search");
 }
 
 #[tokio::test]

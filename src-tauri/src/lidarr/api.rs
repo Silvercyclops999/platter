@@ -291,10 +291,40 @@ pub struct Album {
     pub artist_id: i64,
     #[serde(default)]
     pub monitored: bool,
+    /// Length in ms. 0 while Lidarr is still reading a new artist's albums;
+    /// a search then rejects every result ("duration is 0").
+    #[serde(default)]
+    pub duration: Option<i64>,
     #[serde(default)]
     pub statistics: Option<AlbumStatistics>,
     #[serde(default)]
     pub artist: Option<Artist>,
+}
+
+/// One of Lidarr's commands (read only, to see a refresh still running).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Command {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub body: Option<serde_json::Value>,
+}
+
+impl Command {
+    /// A RefreshArtist for this artist that hasn't finished.
+    pub fn refreshing(&self, artist_id: i64) -> bool {
+        let running = matches!(self.status.to_ascii_lowercase().as_str(), "queued" | "started");
+        let refresh = self.name.eq_ignore_ascii_case("RefreshArtist");
+        let ours = self.body.as_ref().is_none_or(|b| {
+            b.get("artistId").and_then(serde_json::Value::as_i64) == Some(artist_id)
+                || b.get("artistIds").and_then(serde_json::Value::as_array).is_some_and(|a| a.iter().any(|x| x.as_i64() == Some(artist_id)))
+                || (b.get("artistId").is_none() && b.get("artistIds").is_none())
+        });
+        running && refresh && ours
+    }
 }
 
 /// One download in Lidarr's queue.
@@ -660,6 +690,11 @@ impl LidarrClient {
     /// An artist's albums as Lidarr has them.
     pub async fn albums_of(&self, artist_id: i64) -> AppResult<Vec<Album>> {
         self.get("/album", &[("artistId", &artist_id.to_string())]).await
+    }
+
+    /// Lidarr's recent and running commands.
+    pub async fn commands(&self) -> AppResult<Vec<Command>> {
+        self.get("/command", &[]).await
     }
 
     /// Every album Lidarr has, for every artist.

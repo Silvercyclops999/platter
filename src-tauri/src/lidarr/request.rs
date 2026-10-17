@@ -658,11 +658,45 @@ impl Lidarr {
                 tokio::time::sleep(self.inner.album_wait).await;
             }
         }
-        let Some(album) = album else {
+        let Some(mut album) = album else {
             rec.state = RequestState::Queued;
             rec.message = Some("Lidarr is still reading the artist's albums. Platter will finish the request shortly.".into());
             return Ok(rec);
         };
+
+        // A new artist's refresh keeps running after the album appears: until
+        // it ends, the album has no length (a search rejects everything as
+        // "duration is 0") and the refresh's own "monitor none" can undo the
+        // monitoring. So wait for it to finish before monitoring or searching.
+        if rec.added_artist {
+            let mut ready = false;
+            for i in 0..ALBUM_TRIES {
+                let refreshing = match c.client.commands().await {
+                    Ok(cmds) => cmds.iter().any(|x| x.refreshing(artist_id)),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "lidarr request: couldn't read Lidarr's commands; going by the album alone");
+                        false
+                    }
+                };
+                albums = c.client.albums_of(artist_id).await?;
+                if let Some(a) = albums.iter().find(|a| a.id == album.id) {
+                    album = a.clone();
+                }
+                if !refreshing && album.duration != Some(0) {
+                    ready = true;
+                    break;
+                }
+                if i + 1 < ALBUM_TRIES {
+                    tokio::time::sleep(self.inner.album_wait).await;
+                }
+            }
+            if !ready {
+                tracing::info!(album = album.id, "lidarr request: artist still refreshing, queued");
+                rec.state = RequestState::Queued;
+                rec.message = Some("Lidarr is still reading the artist's albums. Platter will finish the request shortly.".into());
+                return Ok(rec);
+            }
+        }
 
         // Read back: only this album may be monitored on an artist Platter
         // added, and the artist's folder must not be in a Plex music folder.
@@ -727,6 +761,7 @@ impl Lidarr {
             return Ok(rec);
         }
         c.writer.search(vec![album.id]).await?;
+        tracing::info!(album = album.id, added_artist = rec.added_artist, "lidarr request: monitored and search sent");
         rec.state = RequestState::Searching;
         rec.message = None;
         Ok(rec)
