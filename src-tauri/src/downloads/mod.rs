@@ -19,7 +19,7 @@
 pub mod art;
 pub mod commands;
 pub mod store;
-mod transfer;
+pub(crate) mod transfer;
 
 #[cfg(test)]
 mod tests;

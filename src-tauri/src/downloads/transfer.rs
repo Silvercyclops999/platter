@@ -18,7 +18,7 @@ use crate::audio::gate::{Priority, TransferGate};
 const TRIES: u32 = 3;
 const IDLE_POLL: Duration = Duration::from_millis(250);
 
-pub(super) struct Ctx<'a> {
+pub(crate) struct Ctx<'a> {
     pub client: &'a reqwest::Client,
     pub gate: &'a std::sync::Arc<TransferGate>,
     pub host: Option<&'a dyn PrecacheHost>,
@@ -30,7 +30,7 @@ pub(super) struct Ctx<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum Outcome {
+pub(crate) enum Outcome {
     /// The whole file is in the partial file; its size.
     Done(u64),
     Failed(String),
@@ -52,7 +52,7 @@ fn idle(ctx: &Ctx<'_>) -> bool {
     ctx.host.is_none_or(|h| h.precache_allowed())
 }
 
-pub(super) async fn fetch_file(ctx: &Ctx<'_>, fetch: &Fetch, part: &Path) -> Outcome {
+pub(crate) async fn fetch_file(ctx: &Ctx<'_>, fetch: &Fetch, part: &Path) -> Outcome {
     let prio = Priority::Background.cell();
     let mut failures = 0u32;
     loop {

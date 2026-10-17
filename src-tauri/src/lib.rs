@@ -6,6 +6,7 @@ pub mod backend;
 pub mod bookmarks;
 pub mod bridge;
 pub mod db;
+pub mod devices;
 pub mod discover;
 pub mod doctor;
 pub mod downloads;
@@ -633,6 +634,28 @@ pub fn run() {
                     }
                 });
             }
+            // Sync to a device: songs through the same transfer gate, at
+            // background priority, converted on this computer.
+            let devices = devices::run::Devices::new(devices::run::Deps {
+                db: db.clone(),
+                files: Arc::new(devices::commands::ServerFiles {
+                    source: Arc::new(backend::routed::RoutedDownloads(backends.clone())),
+                    local: Arc::new(downloads.clone()),
+                    gate: player.transfer_gate(),
+                    host: player.transfer_host(),
+                    client: audio::http::http_client(),
+                    art: Some(Arc::new(backend::routed::RoutedArt(backends.clone()))),
+                }),
+                volumes: Arc::new(devices::commands::SystemVolumes),
+                io: Arc::new(devices::io::StdIo),
+                pace: Arc::new(devices::commands::SystemPace {
+                    host: player.transfer_host(),
+                    load: Default::default(),
+                }),
+                scratch: cache_dir.join("device-sync"),
+            });
+            devices.set_events(Arc::new(app.handle().clone()));
+            app.manage(devices);
             // File tags (explicit, versions, editions), read behind playback.
             let tag_scanner = tags::scan::TagScanner::new(
                 db.clone(),
@@ -1580,6 +1603,16 @@ pub fn run() {
             downloads::commands::downloads_retry,
             downloads::commands::downloads_remove_all,
             downloads::commands::downloads_choose_folder,
+            devices::commands::devices_list,
+            devices::commands::devices_add,
+            devices::commands::devices_choose_folder,
+            devices::commands::devices_update,
+            devices::commands::devices_select,
+            devices::commands::devices_forget,
+            devices::commands::devices_sync,
+            devices::commands::devices_pause,
+            devices::commands::devices_cancel,
+            devices::commands::devices_status,
             updates::update_check,
             updates::update_install_on_restart,
             share::commands::share_info,

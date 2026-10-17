@@ -474,6 +474,12 @@ pub struct Settings {
     /// Go offline: no network use at all, only music on this computer plays
     /// (this device only).
     pub go_offline: bool,
+    /// Sync to a device: what songs become on a device that doesn't pick
+    /// its own format (synced).
+    pub device_format: crate::devices::DeviceFormat,
+    /// Sync to a device: Platter's own files for songs no longer chosen are
+    /// removed from the device (synced).
+    pub device_delete_removed: bool,
     /// Home shows the Made for you and mood and genre mix shelves.
     pub home_mixes: bool,
     /// How much of a mix is favourites.
@@ -906,6 +912,8 @@ impl Default for Settings {
             download_home_only: true,
             download_liked: false,
             go_offline: false,
+            device_format: crate::devices::DeviceFormat::Original,
+            device_delete_removed: false,
             home_mixes: true,
             mix_variety: crate::mixes::Variety::Balanced,
             mix_exclude_artists: Vec::new(),
@@ -1022,6 +1030,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showFormatBadge",
     "resumeContexts",
     "popularSource",
+    "deviceFormat",
+    "deviceDeleteRemoved",
     "artworkColours",
     "reduceMotion",
     "theme",
@@ -1375,6 +1385,8 @@ pub struct SettingsPatch {
     pub download_home_only: Option<bool>,
     pub download_liked: Option<bool>,
     pub go_offline: Option<bool>,
+    pub device_format: Option<crate::devices::DeviceFormat>,
+    pub device_delete_removed: Option<bool>,
     pub home_mixes: Option<bool>,
     pub mix_variety: Option<crate::mixes::Variety>,
     pub mix_exclude_artists: Option<Vec<String>>,
@@ -1675,6 +1687,8 @@ impl Settings {
         set(&mut self.download_home_only, p.download_home_only);
         set(&mut self.download_liked, p.download_liked);
         set(&mut self.go_offline, p.go_offline);
+        set(&mut self.device_format, p.device_format);
+        set(&mut self.device_delete_removed, p.device_delete_removed);
         set(&mut self.home_mixes, p.home_mixes);
         set(&mut self.mix_variety, p.mix_variety);
         set(&mut self.mix_unreleased, p.mix_unreleased);
