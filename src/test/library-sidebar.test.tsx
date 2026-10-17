@@ -418,6 +418,38 @@ describe("library sidebar", () => {
     expect(route().name).not.toBe("home");
   });
 
+  it("Home and End jump to the ends; PageDown and PageUp move a page", async () => {
+    const user = userEvent.setup();
+    // jsdom doesn't scroll: give the list a scroll height and make scrollTo
+    // move it, so far-off rows render.
+    const had = HTMLElement.prototype.scrollTo;
+    const tall = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight");
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => 100_000 });
+    HTMLElement.prototype.scrollTo = function (this: HTMLElement, a?: ScrollToOptions | number) {
+      Object.defineProperty(this, "scrollTop", { configurable: true, writable: true, value: typeof a === "object" ? (a.top ?? 0) : 0 });
+      this.dispatchEvent(new Event("scroll"));
+    } as typeof had;
+    try {
+      await renderSidebar();
+      const buttons = () => list().querySelectorAll<HTMLButtonElement>(".lib-row__open");
+      const count = Number(buttons()[0].closest("[aria-setsize]")?.getAttribute("aria-setsize"));
+      expect(count).toBeGreaterThan(buttons().length);
+      buttons()[0].focus();
+      await user.keyboard("{End}");
+      await waitFor(() => expect(document.activeElement).toHaveAttribute("data-index", String(count - 1)));
+      await user.keyboard("{Home}");
+      await waitFor(() => expect(document.activeElement).toHaveAttribute("data-index", "0"));
+      await user.keyboard("{PageDown}");
+      await waitFor(() => expect(Number((document.activeElement as HTMLElement).dataset.index)).toBeGreaterThan(1));
+      await user.keyboard("{PageUp}");
+      await waitFor(() => expect(document.activeElement).toHaveAttribute("data-index", "0"));
+    } finally {
+      HTMLElement.prototype.scrollTo = had;
+      delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+      if (tall) Object.defineProperty(Element.prototype, "scrollHeight", tall);
+    }
+  });
+
   it("collapses to the rail and opens again", async () => {
     const user = userEvent.setup();
     const { unmount } = await renderSidebar();

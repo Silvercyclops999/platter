@@ -478,9 +478,21 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   const want = Math.min(cursor ?? (selectedIndex >= 0 ? selectedIndex : 0), n - 1);
   const tabStop = want >= firstShown && want <= lastShown ? want : firstShown;
 
+  // A new filter, search, sort or folder is a new list: a remembered spot
+  // in the old one means nothing there.
+  const listKey = `${model.filter}|${model.sub ?? ""}|${model.sort}|${query}|${model.drill?.id ?? ""}|${view}`;
+  useEffect(() => {
+    pending.current = null;
+    setCursor(null);
+  }, [listKey]);
+
   useEffect(() => {
     const i = pending.current;
     if (i === null) return;
+    if (i >= n) {
+      pending.current = null;
+      return;
+    }
     const el = root.current?.querySelector<HTMLElement>(`[data-index="${i}"]`);
     if (el) {
       el.focus();
@@ -513,6 +525,18 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
     if (ev.key === "ContextMenu" || (ev.key === "F10" && ev.shiftKey)) {
       ev.preventDefault();
       onMenu(entries[i], t);
+      return;
+    }
+    if (ev.key === "Home" || ev.key === "End") {
+      ev.preventDefault();
+      focusIndex(ev.key === "Home" ? 0 : n - 1);
+      return;
+    }
+    if (ev.key === "PageDown" || ev.key === "PageUp") {
+      // A page is as many rows as fit in the view.
+      ev.preventDefault();
+      const perPage = Math.max(1, Math.floor((scrollEl?.clientHeight || 600) / g.rowHeight)) * g.cols;
+      focusIndex(Math.max(0, Math.min(n - 1, i + (ev.key === "PageDown" ? perPage : -perPage))));
       return;
     }
     const step = { ArrowDown: g.cols, ArrowUp: -g.cols, ArrowRight: grid ? 1 : 0, ArrowLeft: grid ? -1 : 0 }[ev.key];
