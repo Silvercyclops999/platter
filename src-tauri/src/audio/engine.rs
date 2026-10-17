@@ -38,7 +38,8 @@ use super::decode::{DecodeError, TrackDecoder, extension_hint};
 use super::dsp::{self, Chain, Crossfade, DspSettings, SilenceMeter, TrackAudio, level_gain};
 use super::gate::{Priority, PriorityCell, TransferGate};
 use super::http::{HttpConfig, HttpSource, HttpStats};
-use super::output::{AudioOutput, OutputCallback, OutputEvent, OutputFormat, OutputState, Renderer};
+use super::devguard::GuardedOutput;
+use super::output::{OutputCallback, OutputEvent, OutputFormat, OutputState, Renderer};
 use super::source::{LocalFiles, StreamSource, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
@@ -55,6 +56,9 @@ pub struct EngineConfig {
     /// Fade-out/in applied around seeks and skips (0 disables).
     pub declick_ms: u64,
     pub http: HttpConfig,
+    /// Longest the player waits on the audio device (open, close, list)
+    /// before giving up on it for now.
+    pub device_timeout: Duration,
 }
 
 impl Default for EngineConfig {
@@ -64,6 +68,7 @@ impl Default for EngineConfig {
             ramp_ms: 10,
             declick_ms: 5,
             http: HttpConfig::default(),
+            device_timeout: Duration::from_secs(8),
         }
     }
 }
@@ -1343,7 +1348,7 @@ pub struct EngineDeps {
     pub local: Option<LocalFiles>,
     pub client: reqwest::Client,
     pub rt: Handle,
-    pub output: Box<dyn AudioOutput>,
+    pub output: Box<dyn super::output::AudioOutput>,
     pub config: EngineConfig,
     /// Shared with the pre-cacher: one HTTP body transfer at a time.
     pub gate: Arc<TransferGate>,
@@ -1383,7 +1388,7 @@ pub struct EnginePosition {
 
 pub struct Engine {
     env: Arc<Env>,
-    output: Mutex<Box<dyn AudioOutput>>,
+    output: GuardedOutput,
     next_key: AtomicU64,
     /// The output stream is held still while nothing plays.
     output_idle: AtomicBool,
@@ -1392,6 +1397,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(deps: EngineDeps) -> (Self, UnboundedReceiver<EngineEvent>) {
         let (tx, rx) = unbounded_channel();
+        let device_timeout = deps.config.device_timeout;
         let core = Arc::new(Core {
             mix: Mutex::new(Mix {
                 format: OutputFormat {
@@ -1435,7 +1441,7 @@ impl Engine {
         (
             Self {
                 env,
-                output: Mutex::new(deps.output),
+                output: GuardedOutput::new(deps.output, device_timeout),
                 next_key: AtomicU64::new(1),
                 output_idle: AtomicBool::new(false),
             },
@@ -1461,7 +1467,7 @@ impl Engine {
     fn ensure_output(&self) -> AppResult<bool> {
         if self.core().mix.lock().output_open {
             if self.output_idle.swap(false, Ordering::SeqCst) {
-                self.output.lock().set_idle(false);
+                self.output.quick(|o| o.set_idle(false));
             }
             return Ok(false);
         }
@@ -1483,11 +1489,22 @@ impl Engine {
             let _ = core.events.send(ev);
         });
         let renderer: Arc<dyn Renderer> = self.env.core.clone();
-        let (fmt, exclusive) = {
-            let mut out = self.output.lock();
-            let fmt = out.open(renderer, cb)?;
-            (fmt, out.exclusive())
+        // An open that comes back after we stopped waiting is closed again,
+        // so no stream runs that the engine doesn't know about.
+        let gave_up = Arc::new(AtomicBool::new(false));
+        let late = gave_up.clone();
+        let opened = self.output.slow("opening", move |o| {
+            let r = o.open(renderer, cb).map(|fmt| (fmt, o.exclusive()));
+            if late.load(Ordering::SeqCst) && r.is_ok() {
+                o.close();
+            }
+            r
+        });
+        let Some(opened) = opened else {
+            gave_up.store(true, Ordering::SeqCst);
+            return Err(AppError::Io("The audio device isn't responding.".into()));
         };
+        let (fmt, exclusive) = opened?;
         let bit_perfect = exclusive.is_on();
         let mut m = self.core().mix.lock();
         let changed = m.format != fmt;
@@ -1546,14 +1563,16 @@ impl Engine {
     /// change applies at once, keeping position and play state.
     pub fn set_exclusive_devices(&self, ids: Vec<String>) -> AppResult<()> {
         let rate = self.core().mix.lock().segments.front().and_then(|s| s.track.sample_rate);
-        let (was, now) = {
-            let mut out = self.output.lock();
-            let was = out.exclusive_wanted();
-            out.set_exclusive_devices(ids);
-            let now = out.exclusive_wanted();
-            out.set_preferred_rate(if now { rate } else { None });
-            (was, now)
-        };
+        let (was, now) = self
+            .output
+            .slow("checking bit-perfect", move |out| {
+                let was = out.exclusive_wanted();
+                out.set_exclusive_devices(ids);
+                let now = out.exclusive_wanted();
+                out.set_preferred_rate(if now { rate } else { None });
+                (was, now)
+            })
+            .ok_or_else(|| AppError::Io("The audio device isn't responding.".into()))?;
         let open = self.core().mix.lock().output_open;
         if was != now && open {
             self.reopen_output()?;
@@ -1565,12 +1584,15 @@ impl Engine {
     /// another rate, the output closes so it reopens at the new one.
     fn match_rate(&self, track: &Track) {
         let rate = track.sample_rate.filter(|r| (8_000..=768_000).contains(r));
-        {
-            let mut out = self.output.lock();
-            if !out.exclusive_wanted() {
-                return;
+        let wanted = self.output.slow("checking bit-perfect", move |out| {
+            let wanted = out.exclusive_wanted();
+            if wanted {
+                out.set_preferred_rate(rate);
             }
-            out.set_preferred_rate(rate);
+            wanted
+        });
+        if wanted != Some(true) {
+            return;
         }
         let reopen = {
             let m = self.core().mix.lock();
@@ -1615,22 +1637,28 @@ impl Engine {
 
     /// Releases the device (after it was lost, or on shutdown).
     pub fn close_output(&self) {
-        self.output.lock().close();
+        self.output.slow("closing", |o| o.close());
         self.core().mix.lock().output_open = false;
     }
 
     /// The output devices, the choice and the device in use.
     pub fn output_state(&self) -> OutputState {
-        let out = self.output.lock();
-        let mut s = OutputState::build(out.devices(), out.selected(), out.opened());
-        s.exclusive = out.exclusive();
-        s
+        let devices = self.output.devices();
+        self.output
+            .quick(|out| {
+                let mut s = OutputState::build(devices.clone(), out.selected(), out.opened());
+                s.exclusive = out.exclusive();
+                s
+            })
+            .unwrap_or_else(|| OutputState::build(devices, None, None))
     }
 
     /// Chooses the output device (None follows the system default). An open
     /// stream moves there at once, keeping position and play state.
     pub fn select_output(&self, id: Option<String>) -> AppResult<()> {
-        self.output.lock().select(id);
+        if self.output.quick(|o| o.select(id)).is_none() {
+            return Err(AppError::Io("The audio device isn't responding.".into()));
+        }
         if self.core().mix.lock().output_open {
             self.reopen_output()?;
         }
@@ -1792,7 +1820,7 @@ impl Engine {
         if self.core().mix.lock().playing || self.output_idle.swap(true, Ordering::SeqCst) {
             return;
         }
-        self.output.lock().set_idle(true);
+        self.output.quick(|o| o.set_idle(true));
     }
 
     /// Whether the output is held still (or there's nothing to hold).
@@ -2018,7 +2046,7 @@ impl Drop for Engine {
     fn drop(&mut self) {
         self.core().mix.lock().cancel_all();
         self.core().cv.notify_all();
-        self.output.lock().close();
+        self.output.slow("closing", |o| o.close());
     }
 }
 

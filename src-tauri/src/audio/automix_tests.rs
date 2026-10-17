@@ -36,7 +36,7 @@ async fn rig(paced: bool) -> Rig {
         client: http_client(),
         rt: tokio::runtime::Handle::current(),
         output: Box::new(out),
-        config: EngineConfig { buffer_ahead_ms: 2_000, ramp_ms: 0, declick_ms: 0, http: HttpConfig::default() },
+        config: EngineConfig { buffer_ahead_ms: 2_000, ramp_ms: 0, declick_ms: 0, http: HttpConfig::default(), ..Default::default() },
         gate: TransferGate::new(),
     });
     Rig { server, engine, events, cap }
@@ -383,7 +383,7 @@ mod player {
             Box::new(out),
             Arc::new(Quiet),
             PlayerConfig {
-                engine: super::super::engine::EngineConfig { buffer_ahead_ms: 2_000, ramp_ms: 0, declick_ms: 0, http: Default::default() },
+                engine: super::super::engine::EngineConfig { buffer_ahead_ms: 2_000, ramp_ms: 0, declick_ms: 0, http: Default::default(), ..Default::default() },
                 seed: Some(1),
                 position_interval: Duration::from_millis(50),
                 automix: AutomixOptions { on: true, reach: Reach::PlaylistsAndMixes, feel: Feel::Smooth, fade_ms: 0 },

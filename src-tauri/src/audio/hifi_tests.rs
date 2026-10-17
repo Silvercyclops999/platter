@@ -137,7 +137,7 @@ async fn rig() -> Rig {
         client: http_client(),
         rt: tokio::runtime::Handle::current(),
         output: Box::new(out),
-        config: EngineConfig { buffer_ahead_ms: 2_000, ramp_ms: 0, declick_ms: 0, http: HttpConfig::default() },
+        config: EngineConfig { buffer_ahead_ms: 2_000, ramp_ms: 0, declick_ms: 0, http: HttpConfig::default(), ..Default::default() },
         gate: TransferGate::new(),
     });
     Rig { server, engine, events, cap }

@@ -77,6 +77,7 @@ async fn rig(paced: bool) -> Rig {
             ramp_ms: 0,
             declick_ms: 0,
             http: HttpConfig::default(),
+            ..Default::default()
         },
         gate: TransferGate::new(),
     });

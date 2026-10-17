@@ -16,6 +16,7 @@ pub mod commands;
 pub mod compare;
 pub mod convert;
 pub mod decode;
+mod devguard;
 pub mod dsp;
 pub mod engine;
 pub mod eqprofile;

@@ -70,11 +70,22 @@ fn engine_cfg() -> EngineConfig {
             retry_window: Duration::from_secs(2),
             ..Default::default()
         },
+        ..Default::default()
     }
 }
 
 /// Tracks "a".."" each `secs` long (distinct tones), served at /t/{id}.
 async fn rig(ids: &[&str], secs: f32, realtime: bool, config: PlayerConfig) -> Rig {
+    rig_with(ids, secs, config, |out| Box::new(if realtime { out.realtime() } else { out })).await
+}
+
+/// Like [`rig`], with the capture output wrapped as the test needs.
+async fn rig_with(
+    ids: &[&str],
+    secs: f32,
+    config: PlayerConfig,
+    wrap: impl FnOnce(CaptureOutput) -> Box<dyn super::output::AudioOutput>,
+) -> Rig {
     let server = TestServer::start().await;
     let resolver = FakeResolver::new(&server);
     let mut bodies = Vec::new();
@@ -91,16 +102,15 @@ async fn rig(ids: &[&str], secs: f32, realtime: bool, config: PlayerConfig) -> R
         sample_rate: RATE,
         channels: 2,
     });
-    let out = if realtime { out.realtime() } else { out };
     let sink = Arc::new(Sink::default());
     let player = PlayerHandle::spawn(
         tokio::runtime::Handle::current(),
         resolver.clone(),
         resolver.clone(),
-        Box::new(out),
+        wrap(out),
         sink.clone(),
         PlayerConfig {
-            engine: engine_cfg(),
+            engine: EngineConfig { device_timeout: config.engine.device_timeout, ..engine_cfg() },
             seed: Some(1),
             position_interval: Duration::from_millis(50),
             persist_debounce: Duration::from_millis(20),
@@ -957,6 +967,63 @@ async fn wait_position_past(r: &Rig, ms: u64) -> u64 {
     wait_state(&r.player, |s| s.status == PlayerStatus::Playing && s.position_ms > ms)
         .await
         .position_ms
+}
+
+/// A device whose open hangs until the test lets it go (a DAC pulled out
+/// in the middle of opening).
+struct Hanging {
+    inner: CaptureOutput,
+    go: Arc<(Mutex<bool>, parking_lot::Condvar)>,
+}
+
+impl super::output::AudioOutput for Hanging {
+    fn open(
+        &mut self,
+        renderer: Arc<dyn super::output::Renderer>,
+        on_event: super::output::OutputCallback,
+    ) -> crate::error::AppResult<OutputFormat> {
+        let (lock, cv) = &*self.go;
+        let mut go = lock.lock();
+        while !*go {
+            cv.wait(&mut go);
+        }
+        drop(go);
+        self.inner.open(renderer, on_event)
+    }
+    fn close(&mut self) {
+        self.inner.close();
+    }
+    fn is_open(&self) -> bool {
+        self.inner.is_open()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_device_that_hangs_on_open_doesnt_freeze_the_player() {
+    let go = Arc::new((Mutex::new(false), parking_lot::Condvar::new()));
+    let g = go.clone();
+    let config = PlayerConfig {
+        engine: EngineConfig { device_timeout: Duration::from_millis(300), ..Default::default() },
+        ..Default::default()
+    };
+    let mut r = rig_with(&["a"], 0.3, config, move |out| Box::new(Hanging { inner: out, go: g })).await;
+    let t0 = Instant::now();
+    let err = r.player.play_context(ctx(&["a"]), None, None).await.unwrap_err();
+    assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
+    assert_eq!(err.kind(), "io");
+    // Still answering while the device is stuck.
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "a");
+    assert!(r.player.output_state().await.is_ok());
+    // The device comes back: play works again.
+    *go.0.lock() = true;
+    go.1.notify_all();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while r.player.resume().await.is_err() {
+        assert!(Instant::now() < deadline, "the device never came back");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    next_tracking(&mut r.tracking, ended("a")).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

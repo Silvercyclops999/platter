@@ -503,6 +503,8 @@ pub fn null_output() -> CaptureOutput {
 pub struct CpalOutput {
     stop_tx: Option<mpsc::Sender<StreamCtl>>,
     thread: Option<JoinHandle<()>>,
+    /// Closes when the stream thread ends.
+    done_rx: Option<mpsc::Receiver<()>>,
     /// Name and sample format of the last opened device (diagnostics).
     pub last_device: Arc<Mutex<Option<(String, String)>>>,
     selected: Arc<Mutex<Option<String>>>,
@@ -607,15 +609,26 @@ fn cpal_list() -> Vec<OutputDevice> {
     list_outputs(all, default)
 }
 
+/// How long opening a device may take before giving up on it.
+const OPEN_WAIT: Duration = Duration::from_secs(6);
+/// How long closing or listing may take; a stuck driver is left to finish
+/// on its own.
+const CLOSE_WAIT: Duration = Duration::from_secs(3);
+
 /// Lists on a short-lived thread, so COM setup on Windows stays off the
-/// caller's (async runtime) thread.
+/// caller's (async runtime) thread, and a stuck driver can't hold it.
 fn cpal_list_isolated() -> Vec<OutputDevice> {
-    std::thread::Builder::new()
-        .name("audio-devices".into())
-        .spawn(cpal_list)
-        .ok()
-        .and_then(|t| t.join().ok())
-        .unwrap_or_default()
+    let (tx, rx) = mpsc::channel();
+    let spawned = std::thread::Builder::new().name("audio-devices".into()).spawn(move || {
+        let _ = tx.send(cpal_list());
+    });
+    if spawned.is_err() {
+        return Vec::new();
+    }
+    rx.recv_timeout(CLOSE_WAIT).unwrap_or_else(|_| {
+        tracing::warn!("listing audio devices didn't return in time");
+        Vec::new()
+    })
 }
 
 struct StreamCtx {
@@ -709,6 +722,7 @@ impl AudioOutput for CpalOutput {
         self.close();
         let (ready_tx, ready_rx) = mpsc::channel::<AppResult<OutputFormat>>();
         let (stop_tx, stop_rx) = mpsc::channel::<StreamCtl>();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
         let last = self.last_device.clone();
         let selected = self.selected.clone();
         let opened = self.opened.clone();
@@ -719,6 +733,8 @@ impl AudioOutput for CpalOutput {
         let thread = std::thread::Builder::new()
             .name("audio-output".into())
             .spawn(move || {
+                // Dropped when this thread ends, however it ends.
+                let _done = done_tx;
                 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
                 let host = cpal::default_host();
                 let want = selected.lock().clone();
@@ -830,14 +846,17 @@ impl AudioOutput for CpalOutput {
                 drop(stream);
             })
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        match ready_rx.recv_timeout(Duration::from_secs(10)) {
+        match ready_rx.recv_timeout(OPEN_WAIT) {
             Ok(Ok(fmt)) => {
                 self.stop_tx = Some(stop_tx);
                 self.thread = Some(thread);
+                self.done_rx = Some(done_rx);
                 Ok(fmt)
             }
             Ok(Err(e)) => {
-                let _ = thread.join();
+                if done_rx.recv_timeout(CLOSE_WAIT).is_err_and(|e| e == mpsc::RecvTimeoutError::Disconnected) {
+                    let _ = thread.join();
+                }
                 *self.opened.lock() = None;
                 Err(e)
             }
@@ -854,7 +873,16 @@ impl AudioOutput for CpalOutput {
             let _ = tx.send(StreamCtl::Stop);
         }
         if let Some(t) = self.thread.take() {
-            let _ = t.join();
+            let ended = self
+                .done_rx
+                .take()
+                .is_none_or(|rx| rx.recv_timeout(CLOSE_WAIT) != Err(mpsc::RecvTimeoutError::Timeout));
+            if ended {
+                let _ = t.join();
+            } else {
+                // A driver stuck in its teardown: let it finish on its own.
+                tracing::warn!("audio stream didn't close in time; left to finish");
+            }
         }
         *self.opened.lock() = None;
     }

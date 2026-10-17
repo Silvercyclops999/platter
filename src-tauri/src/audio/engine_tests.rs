@@ -29,6 +29,7 @@ fn cfg() -> EngineConfig {
             retry_window: Duration::from_secs(5),
             ..Default::default()
         },
+        ..Default::default()
     }
 }
 
