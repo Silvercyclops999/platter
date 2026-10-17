@@ -96,23 +96,56 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
+/// The featured artists a song credits, from its title and track artist.
+fn featured(s: &Song) -> Vec<String> {
+    let mut f = fold::featured(&s.title);
+    if let Some(ta) = s.track_artist.as_deref() {
+        f.extend(fold::featured(ta));
+    }
+    f.sort();
+    f.dedup();
+    f
+}
+
+/// Two songs with the same name can still be different songs: when both
+/// credit featured artists and none are shared ("Home (feat. John Legend)"
+/// and "Home (feat. Ant Clemons)"), the name alone doesn't join them. A song
+/// with no featured artist (a demo, a solo take) joins either.
+fn features_agree(a: &[String], b: &[String]) -> bool {
+    a.is_empty() || b.is_empty() || a.iter().any(|x| b.contains(x))
+}
+
 /// The group key of each song, same order. Songs sharing any key are in one
-/// group.
+/// group, except that a shared name ("t" key) only joins songs whose
+/// featured artists agree ([`features_agree`]).
 pub fn group(songs: &[Song]) -> Vec<String> {
     let mut parent: Vec<usize> = (0..songs.len()).collect();
     let mut first: HashMap<String, usize> = HashMap::new();
+    let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+    let feats: Vec<Vec<String>> = songs.iter().map(featured).collect();
     let mut own: Vec<String> = Vec::with_capacity(songs.len());
+    let union = |parent: &mut Vec<usize>, i: usize, j: usize| {
+        let (a, b) = (find(parent, i), find(parent, j));
+        if a != b {
+            parent[a.max(b)] = a.min(b);
+        }
+    };
     for (i, s) in songs.iter().enumerate() {
         let ks = keys(s);
         own.push(ks[0].clone());
         for k in ks {
-            match first.get(&k) {
-                Some(&j) => {
-                    let (a, b) = (find(&mut parent, i), find(&mut parent, j));
-                    if a != b {
-                        parent[a.max(b)] = a.min(b);
+            if k.starts_with('t') {
+                let members = by_name.entry(k).or_default();
+                for &j in members.iter() {
+                    if features_agree(&feats[i], &feats[j]) {
+                        union(&mut parent, i, j);
                     }
                 }
+                members.push(i);
+                continue;
+            }
+            match first.get(&k) {
+                Some(&j) => union(&mut parent, i, j),
                 None => {
                     first.insert(k, i);
                 }
@@ -127,7 +160,27 @@ pub fn group(songs: &[Song]) -> Vec<String> {
             *e = o.clone();
         }
     }
-    (0..songs.len()).map(|i| name[&find(&mut parent, i)].clone()).collect()
+    // Groups the featured-artist rule kept apart can share a name ("Home"
+    // twice): those get their smallest song id added, so they stay apart.
+    let mut count: HashMap<String, usize> = HashMap::new();
+    for n in name.values() {
+        *count.entry(n.clone()).or_default() += 1;
+    }
+    let mut least: HashMap<usize, String> = HashMap::new();
+    for (i, s) in songs.iter().enumerate() {
+        let r = find(&mut parent, i);
+        let e = least.entry(r).or_insert_with(|| s.id.clone());
+        if s.id < *e {
+            *e = s.id.clone();
+        }
+    }
+    (0..songs.len())
+        .map(|i| {
+            let r = find(&mut parent, i);
+            let n = &name[&r];
+            if count[n] > 1 { format!("{n}\u{1f}{}", least[&r]) } else { n.clone() }
+        })
+        .collect()
 }
 
 /// Each song's own status and, for a probable alternate (or an unreleased

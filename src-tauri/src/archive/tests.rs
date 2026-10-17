@@ -762,3 +762,36 @@ fn lineage_of_an_unknown_song_is_not_found() {
     let (_d, c) = db();
     assert!(super::lineage::lineage_of(&c, "nope", false).is_err());
 }
+
+#[test]
+fn same_name_songs_with_different_featured_artists_are_different_songs() {
+    use super::versions::{Song, group};
+    let s = |id: &str, title: &str, album: &str| Song {
+        id: id.into(),
+        artist_id: "ar1".into(),
+        album_id: format!("al-{album}"),
+        title: title.into(),
+        album_title: album.into(),
+        album_artist: "Northlight".into(),
+        ..Default::default()
+    };
+    let songs = vec![
+        s("1", "Home (feat. Ana Reed)", "First Light"),
+        s("2", "Home (feat. Cole Varga)", "Second Wind"),
+        s("3", "Home (feat. Ana Reed) [Demo]", "Sessions"),
+        s("4", "Home ft. Cole Varga", "Live"),
+        s("5", "Lanterns (feat. Ana Reed)", "First Light"),
+        s("6", "Lanterns (Demo)", "Sessions"),
+    ];
+    let g = group(&songs);
+    assert_ne!(g[0], g[1], "different featured artists: different songs");
+    assert_eq!(g[0], g[2], "same featured artist: a version");
+    assert_eq!(g[1], g[3], "a shared featured artist joins");
+    assert_eq!(g[4], g[5], "no featured artist joins its song");
+    // A recording id links them whatever the credits say.
+    let mut linked = songs.clone();
+    linked[0].recording_mbid = Some("rec-1".into());
+    linked[1].recording_mbid = Some("rec-1".into());
+    let g = group(&linked);
+    assert_eq!(g[0], g[1]);
+}

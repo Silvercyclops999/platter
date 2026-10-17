@@ -546,3 +546,13 @@ fn lookups_stay_fast_at_100k_songs() {
     println!("song index lookup at 100k: p50 {:.3} ms, p95 {p95:.3} ms", times[times.len() / 2]);
     assert!(p95 < 10.0, "p95 {p95} ms");
 }
+
+#[test]
+fn featured_artists_come_out_of_titles() {
+    use super::fold::featured;
+    assert_eq!(featured("Home (feat. Ana Reed)"), vec!["ana reed".to_string()]);
+    assert_eq!(featured("Home ft. Cole Varga"), vec!["cole varga".to_string()]);
+    assert_eq!(featured("Song (feat. A & B) [Demo]"), vec!["a".to_string(), "b".to_string()]);
+    assert!(featured("Home (Demo)").is_empty());
+    assert!(featured("Home (prod. Someone)").is_empty());
+}

@@ -195,6 +195,44 @@ pub fn fold_artist(s: &str) -> String {
     if NO_ARTIST.contains(&out.as_str()) { String::new() } else { out }
 }
 
+/// The featured artists a title credits ("Home (feat. John Legend)",
+/// "Song ft. A & B"), folded, sorted. Producer credits don't count.
+pub fn featured(title: &str) -> Vec<String> {
+    let f = fold_text(title);
+    let mut parts: Vec<String> = Vec::new();
+    let mut rest = f.as_str();
+    while let Some(open) = rest.find(['(', '[', '{']) {
+        let close_ch = match rest.as_bytes()[open] {
+            b'(' => ')',
+            b'[' => ']',
+            _ => '}',
+        };
+        let Some(len) = rest[open + 1..].find(close_ch) else { break };
+        let inner = &rest[open + 1..open + 1 + len];
+        let w = words(inner);
+        if w.first().is_some_and(|x| matches!(x.as_str(), "feat" | "ft" | "featuring" | "with")) {
+            parts.push(join(&w[1..]));
+        }
+        rest = &rest[open + len + 2..];
+    }
+    for m in [" feat. ", " feat ", " ft. ", " ft ", " featuring "] {
+        if let Some(i) = f.find(m) {
+            let tail = &f[i + m.len()..];
+            let end = tail.find(['(', '[', '{', '-']).unwrap_or(tail.len());
+            parts.push(tail[..end].to_string());
+        }
+    }
+    let mut out: Vec<String> = parts
+        .iter()
+        .flat_map(|p| p.split([',', '&', '/', '+']).flat_map(|x| x.split(" and ")).flat_map(|x| x.split(" x ")).map(str::to_string).collect::<Vec<_>>())
+        .map(|n| fold_artist(&n))
+        .filter(|n| !n.is_empty())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// A title split into its parts.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Title {
