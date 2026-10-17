@@ -226,7 +226,7 @@ impl Tracker {
         }
         let sent = self.plex.scrobble(&track_id, None).await.is_ok();
         let db = self.db.clone();
-        let _ = db
+        let saved = db
             .write_async(move |c| {
                 if sent {
                     if let Some(id) = play_id {
@@ -249,6 +249,9 @@ impl Tracker {
                 Ok(())
             })
             .await;
+        if let Err(e) = saved {
+            tracing::warn!("listen log: the scrobble couldn't be recorded: {e}");
+        }
         if !sent {
             self.queued.notify_one();
         }
@@ -285,10 +288,9 @@ impl Tracker {
         }
         let all = sent.len() == total && total < BATCH as usize;
         if !sent.is_empty() {
-            let _ = self
-                .db
-                .write_async(move |c| listens::mark_sent(c, &sent, now_s()))
-                .await;
+            if let Err(e) = self.db.write_async(move |c| listens::mark_sent(c, &sent, now_s())).await {
+                tracing::warn!("listen log: sent scrobbles couldn't be marked: {e}");
+            }
         }
         !all
     }

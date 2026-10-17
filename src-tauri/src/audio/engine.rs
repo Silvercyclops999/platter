@@ -594,7 +594,11 @@ impl Mix {
             }
             None => (0.0, 1.0, 0.0),
         };
-        let mut tail = VecDeque::with_capacity(avail * ch);
+        // The last tail's buffer is reused: no allocating while the
+        // output thread waits for the lock.
+        let mut tail = std::mem::take(&mut self.tail);
+        tail.clear();
+        tail.reserve(avail * ch);
         for f in 0..avail {
             let g = 1.0 - (f + 1) as f32 / (avail + 1) as f32;
             for c in 0..ch {
@@ -2535,8 +2539,18 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     Ok(o) => {
                         opened = o;
                         if opened.dec.seek_ms(ms).is_err() {
-                            mark_done(&env, key, generation);
-                            continue 'decode;
+                            // Can't get there: the song ends here (not
+                            // played on from its start under the new
+                            // position).
+                            end_early(&env, key, generation, AppError::Decode("couldn't seek in this file".into()));
+                            match idle_until_seek(&core, &ctl) {
+                                Some((g, ms)) => {
+                                    generation = g;
+                                    seek_to = Some(ms);
+                                    continue 'decode;
+                                }
+                                None => return,
+                            }
                         }
                     }
                     Err(OpenFail::Fatal(e) | OpenFail::Retry(e)) => {
