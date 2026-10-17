@@ -1,6 +1,8 @@
 /**
- * The Missing list: every imported song that isn't in the library, the most
- * wanted first, with store searches. When Lidarr is set up and its check is
+ * The Missing page. Its first tab is the Missing list: every imported song
+ * that isn't in the library, the most wanted first, with store searches.
+ * Its second, "Played a lot" (PlayedALot.tsx), is listening history with no
+ * library match. When Lidarr is set up and its check is
  * green, each row also gets Request: Platter finds the official album the
  * song comes from, then the usual request preview and confirm.
  */
@@ -19,6 +21,8 @@ import { toast } from "../stores/toasts";
 import { IMPORT_ROW_H } from "./ImportListView";
 import { clearMissingFocus, errText, missingFocusKey, missingKey } from "./importShared";
 import { STATE_LABEL, useLidarrReady } from "./lidarrShared";
+import { PlayedALot } from "./PlayedALot";
+import { useSettings } from "../stores/settings";
 import "./lidarr-request.css";
 
 /** The request preview and confirm, loaded on the first Request. */
@@ -26,8 +30,42 @@ const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ 
 
 const n = (v: number) => v.toLocaleString();
 
-/** `songs` false (library import is off): only the albums added by hand. */
-export function MissingView({ songs: withSongs = true }: { songs?: boolean }) {
+/**
+ * The Missing page: songs from imports (and albums added by hand), and
+ * "Played a lot" when that setting is on. `played` opens on that tab.
+ */
+export function MissingPage({ songs, played }: { songs: boolean; played: boolean }) {
+  const show = useSettings((s) => s.settings?.showPlayedALot !== false);
+  if (!show) return <MissingView songs={songs} />;
+  const tab = (id: "missing" | "played", label: string) => (
+    <button
+      type="button"
+      role="tab"
+      id={`missing-tab-${id}`}
+      aria-selected={(id === "played") === played}
+      aria-controls="missing-panel"
+      className={`chip ${(id === "played") === played ? "is-selected" : ""}`}
+      onClick={() => nav.go({ name: "import", view: id })}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <>
+      <h1 className="page-title">Missing</h1>
+      <div className="chips missing-tabs" role="tablist" aria-label="What's missing">
+        {tab("missing", songs ? "From your imports" : "Albums you added")}
+        {tab("played", "Played a lot")}
+      </div>
+      <div id="missing-panel" role="tabpanel" aria-labelledby={`missing-tab-${played ? "played" : "missing"}`}>
+        {played ? <PlayedALot /> : <MissingView songs={songs} titled={false} />}
+      </div>
+    </>
+  );
+}
+
+/** `songs` false (library import is off): only the albums added by hand. `titled` false: the page has its own title. */
+export function MissingView({ songs: withSongs = true, titled = true }: { songs?: boolean; titled?: boolean }) {
   const [songs, setSongs] = useState<MissingSong[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [focus] = useState(missingFocusKey);
@@ -78,7 +116,7 @@ export function MissingView({ songs: withSongs = true }: { songs?: boolean }) {
   if (!withSongs)
     return (
       <>
-        <h1 className="page-title">Missing</h1>
+        {titled && <h1 className="page-title">Missing</h1>}
         <p className="import-page__sub">Albums you added from pages for music that isn't in your library.</p>
         {albums}
         {asking && (
@@ -99,7 +137,7 @@ export function MissingView({ songs: withSongs = true }: { songs?: boolean }) {
 
   return (
     <>
-      <h1 className="page-title">Missing songs</h1>
+      {titled && <h1 className="page-title">Missing songs</h1>}
       <p className="import-page__sub">Songs from your imported playlists and likes that aren't in your library, the most wanted first.</p>
       {albums}
       {err && (

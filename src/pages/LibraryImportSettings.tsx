@@ -13,10 +13,12 @@ import { backend } from "../lib/backend";
 import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
-import { countParts, errText, importChanged, importFrom, songsLine, useImportOverview } from "./importShared";
+import { countParts, errText, importChanged, importFrom, reportLine, useImportOverview } from "./importShared";
+import { ImportHistoryLinks } from "./ImportHistoryLinks";
+import { PlayedSettings } from "./PlayedALot";
 import "./library-import.css";
 
-const SECTION_WORDS = "library import services playlists liked songs history csv m3u transfer";
+const SECTION_WORDS = "library import services playlists liked songs history csv m3u transfer played a lot missing plays period";
 
 /** Whether the settings search shows this section. */
 export function importMatches(query: string): boolean {
@@ -86,13 +88,14 @@ function SourceRow({ src, on, report }: { src: ImportSourceText; on: boolean | n
           </div>
           {report && (
             <div className="import-source__report" data-testid={`import-report-${src.id}`}>
-              <span className="import-source__found">{songsLine(report)}</span>
+              <span className="import-source__found">{reportLine(report)}</span>
               {countParts(report).map((p) => (
                 <span key={p} className="import-source__count">
                   {p}
                 </span>
               ))}
               <span className="import-source__when">Imported {when(report.importedAt)}</span>
+              <ImportHistoryLinks r={report} />
               <span className="import-source__links">
                 <Button size="sm" variant="ghost" onClick={() => nav.go({ name: "import" })}>
                   See report
@@ -132,6 +135,7 @@ export function LibraryImportSettings() {
           report={overview?.reports.find((r) => r.source === src.id)}
         />
       ))}
+      <PlayedSettings />
     </section>
   );
 }

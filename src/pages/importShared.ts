@@ -17,14 +17,60 @@ export function songsLine(r: ImportReport): string {
   return `${n(r.songs.matched)} of ${plural(r.songs.total, "song")} found`;
 }
 
-/** The counts after the songs line: liked, playlists, albums, plays. */
+/** "2020 to 2026", or "in 2024" for one year. */
+function years(first: number, last: number): string {
+  const a = new Date(first).getFullYear();
+  const b = new Date(last).getFullYear();
+  return a === b ? `in ${a}` : `${a} to ${b}`;
+}
+
+/** "153,497 plays imported, 2020 to 2026. 509 of 14,572 songs are in your library." Null without history. */
+export function historyLine(r: ImportReport): string | null {
+  const h = r.history;
+  if (!h?.plays) return null;
+  const when = h.firstPlayed != null && h.lastPlayed != null ? `, ${years(h.firstPlayed, h.lastPlayed)}` : "";
+  const songs = r.songs.total ? "played songs" : h.songs === 1 ? "song" : "songs";
+  const are = h.songs === 1 && !r.songs.total ? "is" : "are";
+  return `${plural(h.plays, "play")} imported${when}. ${n(h.songsMatched)} of ${n(h.songs)} ${songs} ${are} in your library.`;
+}
+
+/** Whether an import brought in nothing to show. */
+export function reportEmpty(r: ImportReport): boolean {
+  return !r.songs.total && !r.history?.plays && !r.albums.total && !r.playlists && !r.liked.total;
+}
+
+/**
+ * The one-line summary of an import: songs found from playlists and likes,
+ * the listening history, or both. Says so plainly when nothing was usable.
+ */
+export function reportLine(r: ImportReport): string {
+  const history = historyLine(r);
+  if (r.songs.total && history) return `${songsLine(r)}. ${history}`;
+  if (history) return history;
+  if (r.songs.total) return songsLine(r);
+  if (r.albums.total) return `${n(r.albums.matched)} of ${plural(r.albums.total, "saved album")} in your library`;
+  return "Nothing in that file could be used: no songs, playlists or plays.";
+}
+
+/** How much of the import is in the library, 0 to 100 (songs, else played songs). */
+export function reportPercent(r: ImportReport): number {
+  if (r.songs.total) return Math.round((r.songs.matched / r.songs.total) * 100);
+  if (r.history?.songs) return Math.round((r.history.songsMatched / r.history.songs) * 100);
+  return 0;
+}
+
+/** The counts after the summary: liked, playlists, albums. Plays are in the summary. */
 export function countParts(r: ImportReport): string[] {
   const out: string[] = [];
   if (r.liked.total) out.push(`${n(r.liked.matched)} of ${n(r.liked.total)} liked`);
   if (r.playlists) out.push(plural(r.playlists, "playlist"));
-  if (r.albums.total) out.push(`${n(r.albums.matched)} of ${plural(r.albums.total, "saved album")} in your library`);
-  if (r.plays.total) out.push(plural(r.plays.total, "play"));
+  if (r.albums.total && r.songs.total) out.push(`${n(r.albums.matched)} of ${plural(r.albums.total, "saved album")} in your library`);
   return out;
+}
+
+/** Open the Missing page on "Played a lot". */
+export function showPlayedALot() {
+  nav.go({ name: "import", view: "played" });
 }
 
 /** What was left out, in words, or null. */
@@ -112,10 +158,13 @@ export async function importFrom(source: ImportSourceId, folder: boolean): Promi
   try {
     const r = await backend.importRun(source, path);
     importChanged();
+    const historyOnly = !!r.history?.plays && !r.songs.total;
     useToasts.getState().push({
       kind: "info",
-      message: `${importSourceName(r.source)}: ${songsLine(r)}`,
-      action: { label: "See report", run: () => nav.go({ name: "import" }) },
+      message: `${importSourceName(r.source)}: ${reportLine(r)}`,
+      action: historyOnly
+        ? { label: "See Played a lot", run: showPlayedALot }
+        : { label: "See report", run: () => nav.go({ name: "import" }) },
     });
     return r;
   } catch (e) {

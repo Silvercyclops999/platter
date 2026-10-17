@@ -157,7 +157,7 @@ import {
 import { mockBio } from "./bio";
 import { MOCK_CLOUD_FOLDERS, MockSync } from "./sync";
 import { MockImport, importLinkAllowed } from "./importData";
-import type { ImportDecision, ImportSourceId } from "../importTypes";
+import type { ImportDecision, ImportSourceId, PlayedHidden, PlayedQuery } from "../importTypes";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { mockAlbumCredits } from "./albumCredits";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
@@ -3622,6 +3622,21 @@ export class MockBackend implements Backend {
   lidarrRequests(_refresh: boolean) {
     return this.delay(() => this.lidarr.list());
   }
+  lidarrRequestBatch(inputs: LidarrRequestInput[]) {
+    return this.delay(() => {
+      const once = inputs.filter((x, i) => inputs.findIndex((y) => y.releaseGroupId.toLowerCase() === x.releaseGroupId.toLowerCase()) === i);
+      if (!once.length) throw { kind: "invalid", message: "Pick at least one album to request." };
+      if (once.length > 10) throw { kind: "invalid", message: "Request up to 10 albums at a time." };
+      const now = Math.floor(Date.now() / 1000);
+      return once.map((input) => {
+        try {
+          return { releaseGroupId: input.releaseGroupId, title: input.title, record: this.lidarr.request(this.settings, input, now), error: null };
+        } catch (e) {
+          return { releaseGroupId: input.releaseGroupId, title: input.title, record: null, error: (e as { message?: string }).message ?? "Not sent" };
+        }
+      });
+    });
+  }
   lidarrRequestCancel(id: string) {
     return this.delay(() => this.lidarr.cancel(id));
   }
@@ -3865,7 +3880,7 @@ export class MockBackend implements Backend {
   discogsImport() {
     return this.delay(() => this.physical.import());
   }
-  importChoose(folder: boolean) {
+  importChoose(folder: boolean): Promise<string | null> {
     return this.delay(() => (folder ? "Downloads/my_data" : "Downloads/my_data.zip"));
   }
   importRun(source: ImportSourceId, path: string) {
@@ -3891,6 +3906,19 @@ export class MockBackend implements Backend {
   }
   importListRemove(listId: string, songId: number) {
     return this.delay(() => this.importMock.removeFromList(listId, songId));
+  }
+  importPlayed(query: PlayedQuery) {
+    return this.delay(() => {
+      const f = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+      const reqs = this.lidarr.list();
+      return this.importMock.played(query, (artist, album) => reqs.find((r) => f(r.artist) === f(artist) && f(r.title) === f(album))?.state ?? null);
+    });
+  }
+  importPlayedHide(kind: PlayedHidden["kind"], artist: string, name: string | null, hide: boolean) {
+    return this.delay(() => this.importMock.hide(kind, artist, name, hide));
+  }
+  importPlayedHidden() {
+    return this.delay(() => this.importMock.hiddenList());
   }
   importForget(source: ImportSourceId) {
     return this.delay(() => this.importMock.forget(source));

@@ -8,7 +8,7 @@ import { Button } from "../components/Button";
 import { Switch } from "../components/Switch";
 import type { Settings } from "../lib/types";
 import { IMPORT_SOURCES } from "../lib/importStrings";
-import type { ImportSourceId } from "../lib/importTypes";
+import type { ImportReport, ImportSourceId } from "../lib/importTypes";
 import { useApp } from "../stores/app";
 import { help } from "../stores/help";
 import { nav } from "../stores/router";
@@ -21,7 +21,8 @@ import { LookCards } from "../pages/looks/LookCards";
 import { discordNote, useDiscordStatus } from "../pages/DiscordSettings";
 import { LidarrCheckButton, LidarrFindings, LidarrKeyControl, LidarrUrlField, useLidarr } from "../pages/LidarrSettings";
 import { StagingFolderField } from "../pages/LidarrUpgrade";
-import { importFrom, songsLine, useImportOverview } from "../pages/importShared";
+import { importFrom, reportLine, useImportOverview } from "../pages/importShared";
+import { ImportHistoryLinks } from "../pages/ImportHistoryLinks";
 import { DeckPairing, DeckPluginRow, useDeckPlugin, useDeckStatus } from "../pages/StreamDeckSettings";
 import type { HelpRef } from "../pages/settingsMeta";
 
@@ -200,13 +201,13 @@ function ImportGetFile() {
 function ImportChoose() {
   const s = useSettings((x) => x.settings);
   const [busy, setBusy] = useState(false);
-  const [line, setLine] = useState<string | null>(null);
+  const [last, setLast] = useState<ImportReport | null>(null);
   const enabled = IMPORT_SOURCES.filter((src) => s?.importSources.includes(src.id));
   const pick = async (id: ImportSourceId, folder: boolean) => {
     setBusy(true);
     const r = await importFrom(id, folder);
     setBusy(false);
-    if (r) setLine(songsLine(r));
+    if (r) setLast(r);
   };
   return (
     <>
@@ -222,10 +223,13 @@ function ImportChoose() {
         </div>
       ))}
       {busy && <p className="guide-state">Importing and matching to your library…</p>}
-      {line && (
-        <p className="guide-state" role="status">
-          {line}
-        </p>
+      {last && (
+        <>
+          <p className="guide-state" role="status">
+            {reportLine(last)}
+          </p>
+          <ImportHistoryLinks r={last} />
+        </>
       )}
     </>
   );

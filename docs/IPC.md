@@ -2499,6 +2499,7 @@ Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` setting
 | `lidarr_pick` | `{ artist, artistId?, title, song: boolean, isrc? }` | `{ group: { id, title, primary, secondary, firstRelease }\|null, artist, refusal, reason }`: the release group to request for an album or song, or why there is none |
 | `lidarr_request_preview` | `{ input: LidarrRequestInput }` | `LidarrPreview`; reads only. `invalid` for a red check, a refused release group (bootleg, promo, someone else's, a title already in the library) or "Lidarr doesn't know this album"; `server` when Lidarr's metadata service is down |
 | `lidarr_request` | `{ input: LidarrRequestInput }` | `LidarrRequest`. Kept waiting (`state: "queued"`) when Lidarr can't be reached; the first request ever needs `typed` to be the album's name |
+| `lidarr_request_batch` | `{ inputs: LidarrRequestInput[] }` | `{ releaseGroupId, title, record, error }[]`. Up to 10 albums the user confirmed at once, each sent like `lidarr_request` (full check and every guard), one after another; one that fails doesn't stop the rest. More than 10 is refused before anything is asked |
 | `lidarr_requests` | `{ refresh: boolean }` | `LidarrRequest[]`, newest first; `refresh` reads their state from Lidarr's queue and history |
 | `lidarr_request_cancel` | `{ id }` | `LidarrRequest[]`; only waiting or finished requests, else `invalid` |
 | `lidarr_missing_releases` | `{ artistId, artist }` | `{ shown, items: { releaseGroupId, title, kind: "album"\|"ep", year, request, thumb }[] }`; `thumb` is the small front cover as an art path (`/ext/https://coverartarchive.org/release-group/<id>/front-250`), which fails to load when the archive has none; `shown` is false unless the setting is on, Lidarr is set up and its last check passed |
@@ -2637,6 +2638,26 @@ Music that isn't in the library, from MusicBrainz (the shared one-a-second limit
 `CatalogueAlbumPage = { album, tracks: { disc, number, title, artist, durationMs }[], released, label, links: { bandcamp, qobuz, itunes }, artistLibraryId }`. The tracks are the earliest official release's.
 
 Requests from these pages use `lidarr_request_preview` and `lidarr_request` with `artistMbid` in the input, so the artist is known without a name search. Store links open through `import_open_link`. Artists marked "Not interested" are the synced `dismissedArtists` setting (`{ mbid, name }[]`).
+
+## Played a lot, not in your library
+
+The Missing page's second tab lists what imported listening history (any source in `imported_plays`) played that has no match in the library. Plays count when they lasted 30 seconds or more. Sources left out of every count are left out here too.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `import_played` | `{ query: { kind: "song"\|"album", offset, minPlays, period: "all"\|"year"\|"days90" } }` | `PlayedPage`, 100 rows at a time, most plays first, then most time |
+| `import_played_hide` | `{ kind: "song"\|"album"\|"artist", artist, name, hide }` | `PlayedHidden[]`. Hides a row or a whole artist, or brings it back. Kept in the sync store's `playedHidden` namespace |
+| `import_played_hidden` | – | `PlayedHidden[]`, newest first |
+
+`PlayedPage = { kind, total, offset, rows: PlayedRow[], hasHistory }`.
+`PlayedRow = { kind, key, artist, title, album, plays, ms, firstPlayed, lastPlayed, songs, inLibrary, links, thumb, request }`. Songs group by folded artist and title, albums by folded artist and album. For an album, `songs` is how many of its songs were played and `inLibrary` how many of its tracks the library already has. `request` is the state of a Lidarr request made for the album on this device.
+`PlayedHidden = { kind, artist, name, hiddenAt }`.
+
+Before the list loads, and after every library sync, plays whose song the library now has are matched to it, so their rows leave the list and stats count them as that song. Request on a row picks the album with `lidarr_pick` (a song asks for its album) and goes through `lidarr_request_preview` and `lidarr_request` as usual. "Request these" previews each picked album, then sends them with `lidarr_request_batch` after one confirm.
+
+Each `import_overview` report has `history: { plays, playsMatched, songs, songsMatched, firstPlayed, lastPlayed }` for the listening history a source brought in, so a history-only import reads as plays and songs rather than "0 of 0 songs". An import with nothing usable fails with a message naming what was left out.
+
+Settings (synced): `showPlayedALot` (on), `playedMinPlays` (5, from 1 to 1000), `playedPeriod` (`all`).
 
 ## Physical collection
 

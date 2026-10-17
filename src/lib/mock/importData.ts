@@ -6,6 +6,11 @@
  */
 import type {
   ImportDecision,
+  ImportHistory,
+  PlayedHidden,
+  PlayedPage,
+  PlayedQuery,
+  PlayedRow,
   ImportOverview,
   ImportReport,
   ImportReviewItem,
@@ -45,8 +50,33 @@ interface Run {
   albums: { total: number; matched: number };
   plays: { total: number; matched: number };
   playsAdded: number;
+  history: ImportHistory;
   skipped: ImportSkipped;
 }
+
+const NO_HISTORY: ImportHistory = { plays: 0, playsMatched: 0, songs: 0, songsMatched: 0, firstPlayed: null, lastPlayed: null };
+const DAY = 86_400_000;
+
+/**
+ * Songs from the made-up listening history that aren't in the fixture
+ * library: plays over all time, the last year and the last 90 days, the
+ * average play length, and days since the first and last play.
+ */
+const PLAYED: { artist: string; title: string; album: string; plays: [number, number, number]; avgMs: number; first: number; last: number }[] = [
+  { artist: "Harbor Lights", title: "Paper Boats", album: "Low Water", plays: [48, 12, 4], avgMs: 214_000, first: 2100, last: 12 },
+  { artist: "The Long Weekends", title: "Neon Driveway", album: "Night Errands", plays: [31, 2, 0], avgMs: 188_000, first: 1900, last: 200 },
+  { artist: "Cass Morrow", title: "Thin Ice Waltz", album: "Winter Rooms", plays: [22, 22, 9], avgMs: 241_000, first: 300, last: 3 },
+  { artist: "Harbor Lights", title: "Undertow", album: "Low Water", plays: [17, 5, 1], avgMs: 199_000, first: 1500, last: 40 },
+  { artist: "Mira Vale", title: "Glass Orchard", album: "Second Bloom", plays: [9, 0, 0], avgMs: 176_000, first: 1700, last: 900 },
+  { artist: "Osa Lind", title: "Field Notes", album: "Field Notes", plays: [6, 6, 6], avgMs: 305_000, first: 60, last: 1 },
+  { artist: "Paper Boats", title: "Quiet Rooms", album: "Low Water (Deluxe)", plays: [3, 1, 0], avgMs: 150_000, first: 800, last: 100 },
+];
+/** Songs the fixture library already has from these albums. */
+const IN_LIBRARY: Record<string, number> = { "harbor lights\u001flow water": 1 };
+
+const fold = (s: string) => s.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+export const playedKey = (kind: PlayedHidden["kind"], artist: string, name: string) =>
+  kind === "artist" ? `artist:${fold(artist)}` : `${kind}:${fold(artist)}\u001f${fold(name)}`;
 
 const NONE: ImportSkipped = { privatePlays: 0, podcasts: 0, noMetadata: 0, shortPlays: 0, incompleteRows: 0, unknownFiles: 0 };
 
@@ -68,6 +98,10 @@ export class MockImport {
   private songs: Song[] = [];
   private lists: List[] = [];
   private runs = new Map<ImportSourceId, Run>();
+  /** History was imported (the made-up plays above are in). */
+  private history = false;
+  private hidden = new Map<string, PlayedHidden>();
+  private seeds = PLAYED.map((s) => ({ ...s }));
   private seq = 1;
   /** Test hook: the next import fails with this message. */
   failNext: string | null = null;
@@ -80,6 +114,9 @@ export class MockImport {
     this.songs = [];
     this.lists = [];
     this.runs.clear();
+    this.history = false;
+    this.hidden.clear();
+    this.seeds = PLAYED.map((s) => ({ ...s }));
     this.seq = 1;
     this.failNext = null;
   }
@@ -147,6 +184,24 @@ export class MockImport {
     });
     const pick = (from: number, n: number) => t.slice(from, from + n);
     const fileName = path.split(/[\\/]/).pop() ?? null;
+    const now = Date.now();
+    const history: ImportHistory = { plays: 5210, playsMatched: 4870, songs: 1240, songsMatched: 610, firstPlayed: now - 2200 * DAY, lastPlayed: now - DAY };
+    if (source === "streaming" && /history|extended/i.test(fileName ?? "")) {
+      // A listening history download alone: plays, no playlists or likes.
+      if (/empty/i.test(fileName ?? "")) invalid("Those files had no songs Platter could use. Left out: 212 podcast or audiobook records, 640 plays under 30 seconds.");
+      const before = this.runs.get(source);
+      this.history = true;
+      this.runs.set(source, {
+        importedAt: now,
+        fileName,
+        albums: before?.albums ?? { total: 0, matched: 0 },
+        plays: { total: history.plays, matched: history.playsMatched },
+        playsAdded: before?.history.plays ? 0 : history.plays,
+        history,
+        skipped: { ...NONE, podcasts: 212, shortPlays: 640, privatePlays: 37 },
+      });
+      return this.report(source)!;
+    }
     if (source === "streaming") {
       const found = pick(0, 10).map((x) => this.matched(source, x));
       const road = [...found.slice(0, 3), this.missing(source, 0), ...found.slice(3, 7), this.missing(source, 1), ...found.slice(7)];
@@ -162,16 +217,17 @@ export class MockImport {
         albums: { total: 14, matched: 11 },
         plays: { total: 5210, matched: 4870 },
         playsAdded: before ? 0 : 5210,
+        history,
         skipped: { ...NONE, privatePlays: 37, podcasts: 212, noMetadata: 9, shortPlays: 640, unknownFiles: 4 },
       });
     } else if (source === "transfer") {
       const workout = [...pick(60, 8).map((x) => this.matched(source, x)), this.missing(source, 3), this.missing(source, 4)];
       this.putList(source, "Workout", false, workout);
-      this.runs.set(source, { importedAt: Date.now(), fileName, albums: { total: 0, matched: 0 }, plays: { total: 0, matched: 0 }, playsAdded: 0, skipped: { ...NONE, incompleteRows: 2 } });
+      this.runs.set(source, { importedAt: Date.now(), fileName, albums: { total: 0, matched: 0 }, plays: { total: 0, matched: 0 }, playsAdded: 0, history: NO_HISTORY, skipped: { ...NONE, incompleteRows: 2 } });
     } else {
       const list = [...pick(80, 4).map((x) => this.matched(source, x)), this.missing(source, 5)];
       this.putList(source, (fileName ?? "List").replace(/\.[^.]+$/, ""), false, list);
-      this.runs.set(source, { importedAt: Date.now(), fileName, albums: { total: 0, matched: 0 }, plays: { total: 0, matched: 0 }, playsAdded: 0, skipped: NONE });
+      this.runs.set(source, { importedAt: Date.now(), fileName, albums: { total: 0, matched: 0 }, plays: { total: 0, matched: 0 }, playsAdded: 0, history: NO_HISTORY, skipped: NONE });
     }
     // Songs nothing wants any more.
     const wanted = new Set(this.lists.flatMap((l) => l.songIds));
@@ -182,6 +238,7 @@ export class MockImport {
   private report(source: ImportSourceId): ImportReport | null {
     const run = this.runs.get(source);
     if (!run) return null;
+    if (source === "streaming" && run.history.plays) this.history = true;
     const own = this.songs.filter((s) => s.source === source);
     const liked = this.lists.find((l) => l.id === `liked:${source}`);
     const likedSongs = (liked?.songIds ?? []).map((id) => this.songs.find((s) => s.songId === id)!);
@@ -200,6 +257,7 @@ export class MockImport {
       albums: run.albums,
       plays: run.plays,
       playsAdded: run.playsAdded,
+      history: run.history,
       skipped: run.skipped,
     };
   }
@@ -297,7 +355,93 @@ export class MockImport {
       .sort((a, b) => b.wants - a.wants || a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
   }
 
+  /** A page of "Played a lot", as the core ranks it. */
+  played(q: PlayedQuery, requestFor: (artist: string, album: string) => PlayedRow["request"]): PlayedPage {
+    const p = q.period === "year" ? 1 : q.period === "days90" ? 2 : 0;
+    const min = Math.min(1000, Math.max(1, Math.round(q.minPlays)));
+    const now = Date.now();
+    const artistHidden = (a: string) => this.hidden.has(playedKey("artist", a, ""));
+    const seeds = this.history ? this.seeds.filter((s) => s.plays[p] > 0 && !artistHidden(s.artist)) : [];
+    const links = (artist: string, name: string, type: "t" | "a") => {
+      const e = encodeURIComponent(`${artist} ${name}`);
+      return { bandcamp: `https://bandcamp.com/search?q=${e}&item_type=${type}`, qobuz: `https://www.qobuz.com/search?q=${e}`, itunes: `https://music.apple.com/search?term=${e}` };
+    };
+    let rows: PlayedRow[];
+    if (q.kind === "song") {
+      rows = seeds.map((s) => ({
+        kind: "song",
+        key: playedKey("song", s.artist, s.title),
+        artist: s.artist,
+        title: s.title,
+        album: s.album,
+        plays: s.plays[p],
+        ms: s.plays[p] * s.avgMs,
+        firstPlayed: now - s.first * DAY,
+        lastPlayed: now - s.last * DAY,
+        songs: null,
+        inLibrary: null,
+        links: links(s.artist, s.title, "t"),
+        thumb: null,
+        request: requestFor(s.artist, s.album),
+      }));
+    } else {
+      const by = new Map<string, PlayedRow>();
+      for (const s of seeds) {
+        const k = playedKey("album", s.artist, s.album);
+        const r = by.get(k);
+        if (r) {
+          r.plays += s.plays[p];
+          r.ms += s.plays[p] * s.avgMs;
+          r.songs! += 1;
+          r.firstPlayed = Math.min(r.firstPlayed, now - s.first * DAY);
+          r.lastPlayed = Math.max(r.lastPlayed, now - s.last * DAY);
+        } else {
+          by.set(k, {
+            kind: "album",
+            key: k,
+            artist: s.artist,
+            title: s.album,
+            album: null,
+            plays: s.plays[p],
+            ms: s.plays[p] * s.avgMs,
+            firstPlayed: now - s.first * DAY,
+            lastPlayed: now - s.last * DAY,
+            songs: 1,
+            inLibrary: IN_LIBRARY[`${fold(s.artist)}\u001f${fold(s.album)}`] ?? 0,
+            links: links(s.artist, s.album, "a"),
+            thumb: null,
+            request: requestFor(s.artist, s.album),
+          });
+        }
+      }
+      rows = [...by.values()];
+    }
+    rows = rows
+      .filter((r) => r.plays >= min && !this.hidden.has(r.key))
+      .sort((a, b) => b.plays - a.plays || b.ms - a.ms || a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
+    return { kind: q.kind, total: rows.length, offset: q.offset, rows: rows.slice(q.offset, q.offset + 100), hasHistory: this.history };
+  }
+
+  hide(kind: PlayedHidden["kind"], artist: string, name: string | null, hide: boolean): PlayedHidden[] {
+    if (!["song", "album", "artist"].includes(kind)) invalid("Only songs, albums and artists can be hidden.");
+    const key = playedKey(kind, artist, name ?? "");
+    if (hide) this.hidden.set(key, { kind, artist, name: kind === "artist" ? "" : (name ?? ""), hiddenAt: Math.floor(Date.now() / 1000) });
+    else this.hidden.delete(key);
+    return this.hiddenList();
+  }
+
+  hiddenList(): PlayedHidden[] {
+    return [...this.hidden.values()].sort((a, b) => b.hiddenAt - a.hiddenAt);
+  }
+
+  /** Test hook: the library gained a song, so its row leaves the list. */
+  libraryGained(artist: string, title: string) {
+    const i = this.seeds.findIndex((s) => fold(s.artist) === fold(artist) && fold(s.title) === fold(title));
+    if (i >= 0) this.seeds.splice(i, 1);
+  }
+
   forget(source: ImportSourceId) {
+    if (source === "streaming") this.history = false;
     this.lists = this.lists.filter((l) => l.source !== source);
     this.songs = this.songs.filter((s) => s.source !== source);
     this.runs.delete(source);

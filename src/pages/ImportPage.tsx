@@ -18,9 +18,10 @@ import type { Track } from "../lib/types";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
-import { countParts, errText, importChanged, skippedLine, songsLine, useImportOverview } from "./importShared";
+import { countParts, errText, importChanged, reportLine, reportPercent, skippedLine, useImportOverview } from "./importShared";
+import { ImportHistoryLinks } from "./ImportHistoryLinks";
 import { ListView } from "./ImportListView";
-import { MissingView } from "./ImportMissing";
+import { MissingPage } from "./ImportMissing";
 import "./library-import.css";
 
 const n = (v: number) => v.toLocaleString();
@@ -36,12 +37,12 @@ function artistOf(t: Track): string {
 // ------------------------------------------------------------------ reports
 
 function ReportCard({ r }: { r: ImportReport }) {
-  const pct = r.songs.total ? Math.round((r.songs.matched / r.songs.total) * 100) : 0;
+  const pct = reportPercent(r);
   const skipped = skippedLine(r.skipped);
   return (
     <article className="import-report" aria-label={`${importSourceName(r.source)} import`} data-testid={`report-${r.source}`}>
       <span className="import-report__source">{importSourceName(r.source)}</span>
-      <span className="import-report__found">{songsLine(r)}</span>
+      <span className="import-report__found">{reportLine(r)}</span>
       <div className="import-report__bar" role="img" aria-label={`${pct}% found`}>
         <span style={{ width: `${pct}%` }} />
       </div>
@@ -51,8 +52,9 @@ function ReportCard({ r }: { r: ImportReport }) {
         {countParts(r).map((p) => (
           <li key={p}>{p}</li>
         ))}
-        {r.plays.total > 0 && <li>{n(r.playsAdded)} new plays added</li>}
+        {r.history?.plays > 0 && <li>{r.playsAdded ? `${n(r.playsAdded)} new plays added` : "No new plays this time"}</li>}
       </ul>
+      <ImportHistoryLinks r={r} />
       {skipped && <p className="import-report__skipped">{skipped}</p>}
       <p className="import-report__when">
         Imported {when(r.importedAt)}
@@ -216,9 +218,9 @@ export function ImportPage({ view }: { view?: string }) {
   const on = (s?.importSources ?? []).length > 0;
   return (
     <div className="page-pad import-page" data-testid="import-page">
-      {view === "missing" ? (
+      {view === "missing" || view === "played" ? (
         // Albums added by hand live here too, so Missing opens with library import off (albums only).
-        <MissingView songs={!(s && !on)} />
+        <MissingPage songs={!(s && !on)} played={view === "played"} />
       ) : s && !on ? (
         <>
           <h1 className="page-title">Library import</h1>

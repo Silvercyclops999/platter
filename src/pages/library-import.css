@@ -163,3 +163,23 @@
 .missing-albums { margin: var(--space-4) 0 0; }
 .missing-albums .import-rows { margin-bottom: var(--space-6); }
 .missing-albums__songs { margin-bottom: var(--space-2); }
+
+/* ---------------------------------------------------------------- Missing tabs and "Played a lot" */
+.missing-tabs { margin: var(--space-2) 0 var(--space-4); }
+.played__filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-4); }
+.played__filters .chips { margin-right: var(--space-2); }
+.played__count { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.played-row .import-row__n { display: flex; justify-content: flex-end; }
+.played-row__pick { width: 16px; height: 16px; accent-color: var(--color-accent); cursor: pointer; }
+.played-row .missing-row__wants { font-variant-numeric: tabular-nums; }
+.played__more { margin: var(--space-3) 0; }
+.played__hidden { margin: var(--space-4) 0; }
+.played__hidden-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.played__hidden-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.played-batch__list { list-style: none; margin: var(--space-3) 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); max-height: 50vh; overflow: auto; }
+.played-batch__list li { display: flex; flex-direction: column; gap: 2px; }
+.played-batch__list li.is-skipped { color: var(--color-text-secondary); }
+.played-batch__where { font-size: var(--font-size-sm); color: var(--color-text-secondary); word-break: break-all; }
+.import-history-links { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
+.import-report .import-history-links { margin-top: var(--space-2); }
+.played-settings__choices { display: flex; flex-wrap: wrap; gap: var(--space-3); }

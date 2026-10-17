@@ -13,7 +13,19 @@ import { DEFAULT_SETTINGS } from "../lib/types";
 import { importSourceName, storeLinks } from "../lib/importStrings";
 import { ImportPage } from "../pages/ImportPage";
 import { LibraryImportSettings, importMatches } from "../pages/LibraryImportSettings";
-import { countParts, missingFocusKey, missingKey, resetImportListeners, showInMissing, skippedLine, songsLine } from "../pages/importShared";
+import {
+  countParts,
+  historyLine,
+  missingFocusKey,
+  missingKey,
+  reportEmpty,
+  reportLine,
+  reportPercent,
+  resetImportListeners,
+  showInMissing,
+  skippedLine,
+  songsLine,
+} from "../pages/importShared";
 import { listHeaderLine } from "../pages/ImportListView";
 import { player } from "../stores/player";
 import { useUi } from "../stores/ui";
@@ -51,7 +63,7 @@ describe("Settings > Library import", () => {
     render(<LibraryImportSettings />);
     const section = await screen.findByTestId("library-import-settings");
     expect(within(section).getByRole("heading", { name: "Library import" })).toBeInTheDocument();
-    const switches = await within(section).findAllByRole("switch");
+    const switches = (await within(section).findAllByRole("switch")).filter((s) => !s.closest("[data-setting='showPlayedALot']"));
     expect(switches).toHaveLength(3);
     for (const s of switches) expect(s).toHaveAttribute("aria-checked", "false");
     expect(within(section).getByText(/Account > Privacy settings/)).toBeInTheDocument();
@@ -75,8 +87,9 @@ describe("Settings > Library import", () => {
     expect(report).toHaveTextContent("17 of 20 liked");
     expect(report).toHaveTextContent("2 playlists");
     expect(report).toHaveTextContent("11 of 14 saved albums in your library");
-    expect(report).toHaveTextContent("5,210 plays");
-    expect(toasts()).toContain(`${importSourceName("streaming")}: 33 of 38 songs found`);
+    expect(report).toHaveTextContent("5,210 plays imported");
+    expect(report).toHaveTextContent("610 of 1,240 played songs are in your library");
+    expect(toasts().some((t) => t.startsWith(`${importSourceName("streaming")}: 33 of 38 songs found. 5,210 plays imported`))).toBe(true);
     fireEvent.click(within(report).getByRole("button", { name: "See report" }));
     expect(route()).toEqual({ name: "import" });
   });
@@ -444,11 +457,63 @@ describe("report wording", () => {
       albums: { total: 0, matched: 0 },
       plays: { total: 1, matched: 1 },
       playsAdded: 1,
+      history: { plays: 0, playsMatched: 0, songs: 0, songsMatched: 0, firstPlayed: null, lastPlayed: null },
       skipped: { privatePlays: 1, podcasts: 0, noMetadata: 0, shortPlays: 2, incompleteRows: 0, unknownFiles: 0 },
     };
     expect(songsLine(r)).toBe("812 of 900 songs found");
-    expect(countParts(r)).toEqual(["100 of 120 liked", "1 playlist", "1 play"]);
+    expect(reportLine(r)).toBe("812 of 900 songs found");
+    expect(countParts(r)).toEqual(["100 of 120 liked", "1 playlist"]);
     expect(skippedLine(r.skipped)).toBe("Left out: 1 private play, 2 plays under 30 seconds.");
     expect(skippedLine({ ...r.skipped, privatePlays: 0, shortPlays: 0 })).toBeNull();
+  });
+
+  const empty = {
+    source: "streaming" as const,
+    importedAt: 0,
+    fileName: null,
+    songs: { total: 0, matched: 0, unsure: 0, missing: 0 },
+    liked: { total: 0, matched: 0 },
+    playlists: 0,
+    albums: { total: 0, matched: 0 },
+    plays: { total: 0, matched: 0 },
+    playsAdded: 0,
+    history: { plays: 0, playsMatched: 0, songs: 0, songsMatched: 0, firstPlayed: null, lastPlayed: null },
+    skipped: { privatePlays: 0, podcasts: 0, noMetadata: 0, shortPlays: 0, incompleteRows: 0, unknownFiles: 0 },
+  };
+  const history = {
+    plays: 153_497,
+    playsMatched: 20_000,
+    songs: 14_572,
+    songsMatched: 509,
+    firstPlayed: new Date(2020, 2, 1).getTime(),
+    lastPlayed: new Date(2026, 4, 1).getTime(),
+  };
+
+  it("describes a history-only import by plays, years and songs, never as 0 of 0", () => {
+    const r = { ...empty, plays: { total: 153_497, matched: 20_000 }, playsAdded: 153_497, history };
+    const line = reportLine(r);
+    expect(line).toBe(`${(153_497).toLocaleString()} plays imported, 2020 to 2026. 509 of ${(14_572).toLocaleString()} songs are in your library.`);
+    expect(line).not.toContain("0 of 0");
+    expect(historyLine(r)).toBe(line);
+    expect(reportPercent(r)).toBe(3);
+    expect(countParts(r)).toEqual([]);
+    expect(reportEmpty(r)).toBe(false);
+    // One year, one song.
+    const one = { ...r, history: { ...history, plays: 3, songs: 1, songsMatched: 0, lastPlayed: new Date(2020, 5, 1).getTime() } };
+    expect(reportLine(one)).toBe("3 plays imported, in 2020. 0 of 1 song is in your library.");
+  });
+
+  it("shows both songs and plays when an import has both", () => {
+    const r = { ...empty, songs: { total: 900, matched: 812, unsure: 10, missing: 78 }, history };
+    expect(reportLine(r)).toBe(
+      `812 of 900 songs found. ${(153_497).toLocaleString()} plays imported, 2020 to 2026. 509 of ${(14_572).toLocaleString()} played songs are in your library.`,
+    );
+    expect(reportPercent(r)).toBe(90);
+  });
+
+  it("says plainly when nothing was usable", () => {
+    expect(reportEmpty(empty)).toBe(true);
+    expect(reportLine(empty)).toBe("Nothing in that file could be used: no songs, playlists or plays.");
+    expect(historyLine(empty)).toBeNull();
   });
 });

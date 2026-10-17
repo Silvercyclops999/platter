@@ -1,5 +1,5 @@
 /** Library import (docs/IPC.md, import_* commands). */
-import type { Track } from "./types";
+import type { LidarrRequestState, PlayedPeriod, Track } from "./types";
 
 export type ImportSourceId = "streaming" | "transfer" | "lists";
 
@@ -36,7 +36,23 @@ export interface ImportReport {
   plays: ImportCounts;
   /** New plays the last import added. */
   playsAdded: number;
+  /** The listening history this source brought in. */
+  history: ImportHistory;
   skipped: ImportSkipped;
+}
+
+/** What a source's imported listening history holds. */
+export interface ImportHistory {
+  plays: number;
+  /** Plays of songs in the library. */
+  playsMatched: number;
+  /** Different songs played. */
+  songs: number;
+  /** Of those, songs in the library. */
+  songsMatched: number;
+  /** Unix ms; null without plays. */
+  firstPlayed: number | null;
+  lastPlayed: number | null;
 }
 
 /** An imported playlist, or a source's liked songs. */
@@ -98,4 +114,59 @@ export interface MissingSong {
   wantedBy: string[];
   sources: ImportSourceId[];
   links: { bandcamp: string; qobuz: string; itunes: string };
+}
+
+export type PlayedKind = "song" | "album";
+
+/** `import_played`: one page of "Played a lot, not in your library". */
+export interface PlayedQuery {
+  kind: PlayedKind;
+  offset: number;
+  minPlays: number;
+  period: PlayedPeriod;
+}
+
+export interface PlayedRow {
+  kind: PlayedKind;
+  /** Its hide key, also a stable id. */
+  key: string;
+  artist: string;
+  /** The song's title, or the album's. */
+  title: string;
+  /** A song's album, when the history named it. */
+  album: string | null;
+  plays: number;
+  /** Total time played, ms. */
+  ms: number;
+  /** Unix ms. */
+  firstPlayed: number;
+  lastPlayed: number;
+  /** An album's songs that were played. */
+  songs: number | null;
+  /** An album's songs already in the library. */
+  inLibrary: number | null;
+  links: { bandcamp: string; qobuz: string; itunes: string };
+  thumb: string | null;
+  /** The Lidarr request made for its album, if any. */
+  request: LidarrRequestState | null;
+}
+
+export interface PlayedPage {
+  kind: PlayedKind;
+  /** Rows matching the filters, over every page. */
+  total: number;
+  offset: number;
+  rows: PlayedRow[];
+  /** Any listening history was imported at all. */
+  hasHistory: boolean;
+}
+
+/** A row hidden from "Played a lot" (synced). */
+export interface PlayedHidden {
+  kind: "song" | "album" | "artist";
+  artist: string;
+  /** The song or album; empty for an artist. */
+  name: string;
+  /** Unix seconds. */
+  hiddenAt: number;
 }

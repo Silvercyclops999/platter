@@ -1200,6 +1200,12 @@ export interface Settings {
   allowStreamDeck: boolean;
   /** Library import sources turned on ("streaming", "transfer", "lists"). All off until picked. */
   importSources: string[];
+  /** The Missing page lists songs and albums from imported listening history that aren't in the library. Synced. */
+  showPlayedALot: boolean;
+  /** Fewest plays a song or album needs to be on that list (1 to 1000). Synced. */
+  playedMinPlays: number;
+  /** Which plays that list counts. Synced. */
+  playedPeriod: PlayedPeriod;
   /** Folder names on a song's path that hint it's unreleased (they only add weight). */
   archiveFolderKeywords: string[];
   /** The tag a file's release status is read from: "" for Auto (ARCHIVE_VERSION, STATUS, RELEASESTATUS, RELEASETYPE), else a tag name. */
@@ -1657,6 +1663,9 @@ export const DEFAULT_SETTINGS: Settings = {
   nowPlayingFeedPort: 32540,
   allowStreamDeck: false,
   importSources: [],
+  showPlayedALot: true,
+  playedMinPlays: 5,
+  playedPeriod: "all",
   archiveFolderKeywords: ["Unreleased", "Leaks", "Demos", "Sessions", "Snippets"],
   releaseStatusTag: "",
   releaseStatusValues: [],
@@ -2563,6 +2572,18 @@ export interface LidarrHuntItem {
 }
 
 /** Where a Lidarr request stands. */
+/** Which plays "Played a lot" counts. */
+export type PlayedPeriod = "all" | "year" | "days90";
+
+/** How one album of a "Request these" went. */
+export interface LidarrBatchItem {
+  releaseGroupId: string;
+  title: string;
+  record: LidarrRequest | null;
+  /** Why it wasn't sent. */
+  error: string | null;
+}
+
 export type LidarrRequestState = "queued" | "requested" | "searching" | "downloading" | "imported" | "failed";
 
 /** What a request needs: the release group and what it's called. */

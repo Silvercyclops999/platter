@@ -199,6 +199,7 @@ import type {
   LidarrTarget,
   LidarrWork,
   LidarrRequest,
+  LidarrBatchItem,
   LidarrRequestInput,
   LidarrStatus,
   RadarPage,
@@ -245,6 +246,9 @@ import type {
   ImportReport,
   ImportReviewItem,
   ImportSourceId,
+  PlayedHidden,
+  PlayedPage,
+  PlayedQuery,
   ImportedListPage,
   MissingSong,
 } from "./importTypes";
@@ -945,6 +949,8 @@ export interface Backend {
   lidarrRequest(input: LidarrRequestInput): Promise<LidarrRequest>;
   /** Requests on this device, newest first; refresh reads their state from Lidarr. */
   lidarrRequests(refresh: boolean): Promise<LidarrRequest[]>;
+  /** "Request these": up to 10 albums the user confirmed at once, each with the full check. */
+  lidarrRequestBatch(inputs: LidarrRequestInput[]): Promise<LidarrBatchItem[]>;
   /** Cancel a waiting request, or clear a finished one. */
   lidarrRequestCancel(id: string): Promise<LidarrRequest[]>;
   /** An artist's official releases the library lacks, for the artist page. */
@@ -1066,6 +1072,12 @@ export interface Backend {
   importForget(source: ImportSourceId): Promise<void>;
   /** Take one song out of an imported list. */
   importListRemove(listId: string, songId: number): Promise<void>;
+  /** A page of "Played a lot, not in your library": imported history with no library match. */
+  importPlayed(query: PlayedQuery): Promise<PlayedPage>;
+  /** Hide (or bring back) a song, an album or a whole artist on "Played a lot". Synced. */
+  importPlayedHide(kind: PlayedHidden["kind"], artist: string, name: string | null, hide: boolean): Promise<PlayedHidden[]>;
+  /** What's hidden from "Played a lot", newest first. */
+  importPlayedHidden(): Promise<PlayedHidden[]>;
 
   // Listening stats (docs/IPC.md)
   /** Totals, chart, streak, busiest times and top lists for a range of days. */
@@ -1535,6 +1547,9 @@ export function createTauriBackend(): Backend {
     importOpenLink: (url) => call("import_open_link", { url }),
     importForget: (source) => call("import_forget", { source }),
     importListRemove: (listId, songId) => call("import_list_remove", { listId, songId }),
+    importPlayed: (query) => call("import_played", { query }),
+    importPlayedHide: (kind, artist, name, hide) => call("import_played_hide", { kind, artist, name, hide }),
+    importPlayedHidden: () => call("import_played_hidden"),
     lidarrPick: ({ artist, artistId, title, song, isrc }) => call("lidarr_pick", { artist, artistId: artistId ?? null, title, song, isrc: isrc ?? null }),
     statsOverview: (range, limit) => call("stats_overview", { range, limit: limit ?? null }),
     statsSpan: () => call("stats_span"),
@@ -1553,6 +1568,7 @@ export function createTauriBackend(): Backend {
     lidarrRequestPreview: (input) => call("lidarr_request_preview", { input }),
     lidarrRequest: (input) => call("lidarr_request", { input }),
     lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),
+    lidarrRequestBatch: (inputs) => call("lidarr_request_batch", { inputs }),
     lidarrRequestCancel: (id) => call("lidarr_request_cancel", { id }),
     lidarrMissingReleases: (artistId, artist) => call("lidarr_missing_releases", { artistId, artist }),
     lidarrUpgradeAlbum: (albumId) => call("lidarr_upgrade_album", { albumId }),
