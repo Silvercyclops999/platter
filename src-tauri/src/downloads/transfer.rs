@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use reqwest::StatusCode;
-use reqwest::header::RANGE;
+use reqwest::header::{CONTENT_RANGE, HeaderMap, RANGE};
 use tokio::io::AsyncWriteExt;
 
 use super::Fetch;
@@ -123,12 +123,22 @@ async fn attempt(ctx: &Ctx<'_>, fetch: &Fetch, part: &Path, permit: &crate::audi
     };
     let status = resp.status();
     if status == StatusCode::RANGE_NOT_SATISFIABLE && have > 0 {
-        return Attempt::Done(have);
+        // Nothing past what we have: complete only if the server says the
+        // file is exactly that long. Otherwise the partial file is from
+        // something else (the file changed on the server): start over.
+        if crate::audio::http::parse_total(resp.headers()) == Some(have) {
+            return Attempt::Done(have);
+        }
+        return restart(part, "The file changed on the server; starting it again.").await;
     }
     if !status.is_success() {
         return status_error(status);
     }
     let append = status == StatusCode::PARTIAL_CONTENT;
+    // A partial answer must start where the file stops.
+    if append && range_start(resp.headers()) != Some(have) {
+        return restart(part, "The server sent the wrong part of the file; starting it again.").await;
+    }
     let total = crate::audio::http::parse_total(resp.headers())
         .or_else(|| resp.content_length().map(|n| if append { n + have } else { n }));
     let file = if append {
@@ -183,6 +193,44 @@ async fn attempt(ctx: &Ctx<'_>, fetch: &Fetch, part: &Path, permit: &crate::audi
     }
     match total {
         Some(t) if written < t => Attempt::Retry("The download stopped early.".into()),
-        _ => Attempt::Done(written),
+        Some(t) if written > t => restart(part, "The download came out longer than the file; starting it again.").await,
+        Some(_) => Attempt::Done(written),
+        None if written == 0 => Attempt::Retry("The server sent an empty file.".into()),
+        // No length given: ask for anything past the end. "Nothing more"
+        // with the same length confirms it.
+        None if fetch.resumable => confirm_end(ctx, fetch, written).await,
+        None => Attempt::Done(written),
+    }
+}
+
+/// The first byte of a `Content-Range: bytes A-B/N` answer.
+fn range_start(h: &HeaderMap) -> Option<u64> {
+    let v = h.get(CONTENT_RANGE)?.to_str().ok()?;
+    v.trim().strip_prefix("bytes")?.trim().split('-').next()?.trim().parse().ok()
+}
+
+/// Drops the partial file so the next try starts from the beginning.
+async fn restart(part: &Path, why: &str) -> Attempt {
+    let _ = tokio::fs::remove_file(part).await;
+    Attempt::Retry(why.into())
+}
+
+/// For a file whose length the server didn't give: whether there is more
+/// after `have` bytes.
+async fn confirm_end(ctx: &Ctx<'_>, fetch: &Fetch, have: u64) -> Attempt {
+    let mut req = ctx.client.get(&fetch.src.url).header(RANGE, format!("bytes={have}-"));
+    for (k, v) in &fetch.src.headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    match req.send().await {
+        Ok(r) if r.status() == StatusCode::PARTIAL_CONTENT => Attempt::Retry("The download stopped early.".into()),
+        Ok(r) if r.status() == StatusCode::RANGE_NOT_SATISFIABLE
+            && crate::audio::http::parse_total(r.headers()).is_some_and(|t| t != have) =>
+        {
+            Attempt::Retry("The download came out the wrong size.".into())
+        }
+        // Nothing more, or a server that can't say: keep what came.
+        Ok(_) => Attempt::Done(have),
+        Err(e) => Attempt::Retry(format!("Network trouble: {}", e.without_url())),
     }
 }

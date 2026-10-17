@@ -658,3 +658,126 @@ fn the_app_pokes_downloads_on_library_and_like_changes() {
     assert_eq!(FOLLOW_EVENTS, ["library://changed", "likes://changed"]);
     assert_eq!(crate::likes::EVENT_LIKES_CHANGED, FOLLOW_EVENTS[1]);
 }
+
+// ---- resuming a partial file -------------------------------------------------
+
+/// A bare HTTP server: `answer` gets each request's Range start and returns
+/// the whole response (head and body); the connection closes after it.
+async fn raw_server(answer: impl Fn(Option<u64>) -> Vec<u8> + Send + Sync + 'static) -> (String, Arc<Mutex<Vec<Option<u64>>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/file.flac", listener.local_addr().unwrap());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (answer, log) = (Arc::new(answer), seen.clone());
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                match sock.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                }
+            }
+            let head = String::from_utf8_lossy(&buf).to_ascii_lowercase();
+            let range = head
+                .lines()
+                .find_map(|l| l.strip_prefix("range: bytes="))
+                .and_then(|r| r.trim().trim_end_matches('-').parse::<u64>().ok());
+            log.lock().push(range);
+            let _ = sock.write_all(&answer(range)).await;
+            let _ = sock.shutdown().await;
+        }
+    });
+    (url, seen)
+}
+
+fn response(status: &str, headers: &[String], body: &[u8]) -> Vec<u8> {
+    let mut out = format!("HTTP/1.1 {status}\r\nConnection: close\r\n").into_bytes();
+    for h in headers {
+        out.extend_from_slice(format!("{h}\r\n").as_bytes());
+    }
+    out.extend_from_slice(b"\r\n");
+    out.extend_from_slice(body);
+    out
+}
+
+/// Serves `body` with Range support; `full` answers a request without a
+/// Range.
+fn ranged(body: Vec<u8>, full: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static) -> impl Fn(Option<u64>) -> Vec<u8> + Send + Sync + 'static {
+    move |range| match range {
+        None => full(&body),
+        Some(from) if (from as usize) < body.len() => response(
+            "206 Partial Content",
+            &[format!("Content-Range: bytes {from}-{}/{}", body.len() - 1, body.len()), format!("Content-Length: {}", body.len() - from as usize)],
+            &body[from as usize..],
+        ),
+        Some(_) => response("416 Range Not Satisfiable", &[format!("Content-Range: bytes */{}", body.len()), "Content-Length: 0".into()], b""),
+    }
+}
+
+async fn fetch_to(url: &str, part: &Path) -> transfer::Outcome {
+    let client = crate::audio::http::http_client();
+    let gate = TransferGate::new();
+    let ctx = transfer::Ctx {
+        client: &client,
+        gate: &gate,
+        host: None,
+        room: u64::MAX,
+        keep_going: &|| true,
+        progress: &|_, _| {},
+    };
+    let fetch = Fetch { src: StreamSource { url: url.into(), ..Default::default() }, resumable: true, session: None };
+    transfer::fetch_file(&ctx, &fetch, part).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_partial_file_that_does_not_match_the_server_starts_over() {
+    let body = body_of("new");
+    let (url, seen) = raw_server(ranged(body.clone(), |b| {
+        response("200 OK", &[format!("Content-Length: {}", b.len())], b)
+    }))
+    .await;
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("x.flac.part");
+    // Longer than the file now on the server: "nothing past that" isn't done.
+    std::fs::write(&part, vec![9u8; BODY + 10]).unwrap();
+    assert_eq!(fetch_to(&url, &part).await, transfer::Outcome::Done(BODY as u64));
+    assert_eq!(std::fs::read(&part).unwrap(), body);
+    assert_eq!(seen.lock().clone(), [Some(BODY as u64 + 10), None]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_resume_answered_from_the_wrong_place_starts_over() {
+    let body = body_of("shifted");
+    let b2 = body.clone();
+    let (url, seen) = raw_server(move |range| match range {
+        // Says partial, but sends from the start.
+        Some(_) => response(
+            "206 Partial Content",
+            &[format!("Content-Range: bytes 0-{}/{}", b2.len() - 1, b2.len()), format!("Content-Length: {}", b2.len())],
+            &b2,
+        ),
+        None => response("200 OK", &[format!("Content-Length: {}", b2.len())], &b2),
+    })
+    .await;
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("x.flac.part");
+    std::fs::write(&part, &body[..1000]).unwrap();
+    assert_eq!(fetch_to(&url, &part).await, transfer::Outcome::Done(BODY as u64));
+    assert_eq!(std::fs::read(&part).unwrap(), body, "not the start glued on twice");
+    assert_eq!(seen.lock().clone(), [Some(1000), None]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_download_without_a_length_is_checked_before_it_counts() {
+    let body = body_of("nolength");
+    // No length, and the connection drops halfway.
+    let (url, seen) = raw_server(ranged(body.clone(), |b| response("200 OK", &[], &b[..b.len() / 2]))).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("x.flac.part");
+    assert_eq!(fetch_to(&url, &part).await, transfer::Outcome::Done(BODY as u64));
+    assert_eq!(std::fs::read(&part).unwrap(), body);
+    let half = BODY as u64 / 2;
+    assert_eq!(seen.lock().clone(), [None, Some(half), Some(half)], "asked past the end, then fetched the rest");
+}
