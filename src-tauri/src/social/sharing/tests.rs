@@ -466,19 +466,25 @@ async fn a_share_link_carries_the_request_through_the_sealed_relay_once() {
     assert!(!link.link.contains(MACHINE) && !link.link.contains("sam_hosts"));
     tokio::time::sleep(Duration::from_millis(200)).await;
     let got = friend.sharing.open_link(&link.link, "Alex").await.unwrap();
-    assert_eq!(got, LinkResult::Invited { host: "sam_hosts".into() });
+    assert_eq!(got, LinkResult::Asked { host: "sam_hosts".into() });
+    // Nothing is shared until the host says yes.
+    assert!(share_bodies(&host_tv).await.is_empty());
+    assert!(host.events.0.lock().iter().any(|(e, v)| e == EVENT_NOTICE && v["message"].as_str().unwrap().starts_with("Alex (alex_on_plex) opened your share link")));
+    let asks = host.sharing.link_asks();
+    assert_eq!(asks.iter().map(|a| (a.name.as_str(), a.user.as_str())).collect::<Vec<_>>(), [("Alex", "alex_on_plex")]);
+    assert!(host.sharing.approve_link_ask(&asks[0].id).await.unwrap().starts_with("Shared with Alex"));
     let body = &share_bodies(&host_tv).await[0];
     assert_eq!(body["shared_server"]["invited_email"], "alex_on_plex");
     assert_eq!(body["shared_server"]["library_section_ids"], serde_json::json!([903]));
-    assert!(host.events.0.lock().iter().any(|(e, v)| e == EVENT_NOTICE && v["message"].as_str().unwrap().starts_with("Alex opened your share link")));
     // Nothing readable went through the relay.
     for m in relay.published() {
         assert!(!m.body.contains("alex_on_plex") && !m.body.contains("Alex") && !m.body.contains(MACHINE), "{}", m.body);
     }
-    // The same answer if asked again by the same attempt; someone else is turned away.
+    // Used: someone else is turned away.
     let other = rig_with(&friend_tv, "casey_on_plex", Some(&relay));
     let again = other.sharing.open_link(&link.link, "Casey").await.unwrap();
     assert!(matches!(again, LinkResult::Failed { ref message } if message.contains("already used")), "{again:?}");
+    assert!(host.sharing.link_asks().is_empty());
     assert_eq!(share_bodies(&host_tv).await.len(), 1);
     // The friend looks for the invite it was promised.
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -490,4 +496,24 @@ async fn a_share_link_carries_the_request_through_the_sealed_relay_once() {
     .unwrap();
     // Not a share link, or run out.
     assert_eq!(friend.sharing.open_link("platter://join/AAAA", "Alex").await.unwrap_err().kind(), "invalid");
+}
+
+#[tokio::test]
+async fn a_share_link_answers_the_same_for_any_username_and_closes_after_failures() {
+    let relay = FakeNtfy::start().await;
+    let host_tv = plex_tv(true).await;
+    // Plex turns every share away (as for a username that doesn't exist).
+    Mock::given(method("POST")).and(path(format!("/api/servers/{MACHINE}/shared_servers"))).respond_with(ResponseTemplate::new(404)).mount(&host_tv).await;
+    let host = rig_with(&host_tv, "sam_hosts", Some(&relay));
+    let friend_tv = invites_tv().await;
+    let link = host.sharing.make_link(opts(&["7"], true), 24).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    for (i, user) in ["no_such_user", "maybe_real", "guess_three"].iter().enumerate() {
+        let f = rig_with(&friend_tv, user, Some(&relay));
+        // The same answer whoever asks: nothing says whether the name exists.
+        assert_eq!(f.sharing.open_link(&link.link, "X").await.unwrap(), LinkResult::Asked { host: "sam_hosts".into() });
+        let id = host.sharing.link_asks()[0].id.clone();
+        assert!(host.sharing.approve_link_ask(&id).await.unwrap().contains("didn't work"));
+        assert_eq!(host.sharing.open_links(), if i < 2 { 1 } else { 0 }, "closes after three failures");
+    }
 }

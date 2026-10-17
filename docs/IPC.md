@@ -2141,7 +2141,10 @@ of music libraries only.
 | `sharing_people` | – | `{ id, name, libraries, allowDownloads, unreleasedHidden, pending, lastSeenAt }[]` |
 | `sharing_remove` | `{ id }` | – |
 | `sharing_link` | `{ options }` | `{ link, qr, expiresAt }`: `platter://share/<token>` (the invite token), one person, once |
-| `sharing_open_link` | `{ link }` | `{ status: "invited" \| "alreadyShared", host } \| { status: "failed", message }` |
+| `sharing_open_link` | `{ link }` | `{ status: "asked" \| "invited" \| "alreadyShared", host } \| { status: "failed", message }` |
+| `sharing_link_asks` | – | `{ id, user, name, at }[]`: people who opened your share links, waiting for a yes |
+| `sharing_link_approve` | `{ id }` | the result in words: shares with them as the link was made |
+| `sharing_link_deny` | `{ id }` | – |
 | `sharing_invites` | `{ fresh? }` | `ReceivedInvite[]`: `{ id, from, servers, friend, home, server, createdAt }`, server invites only |
 | `sharing_accept` | `{ id }` | `{ servers, libraries }`: their music libraries are added to `libraries` and read |
 
@@ -2151,12 +2154,15 @@ label `platter-unreleased` and the share's music filter is
 shared (`needsPlexPass`). A failed label write shares nothing.
 
 Events: `sharing://invites` (`ReceivedInvite[]`, when the list changes; new
-ones also get a desktop notification while `shareAcceptInvites` is on) and
-`sharing://notice` (`{ message }`, someone used your share link).
+ones also get a desktop notification while `shareAcceptInvites` is on),
+`sharing://notice` (`{ message }`, someone used your share link) and
+`sharing://link-asks` (the waiting requests, when they change).
 
 A share link: the friend's Platter seals `{ n, u: <Plex username>, name, x }`
-for the link's `share up` topic; the host's answers `{ n, s: "invited" |
-"already" | "used" | "expired" | "failed", msg?, host }` on `share down`.
+for the link's `share up` topic; the host's answers `{ n, s: "asked" |
+"used" | "expired", host }` on `share down`. Nothing is shared until the
+host says yes, and the answer is the same whatever username was sent. A link
+holds three requests at once and closes after three shares that fail.
 `deep_link_take` hands a share link over as `shareAsk`.
 
 ## Smart playlists, hide, bookmarks and scrobbling

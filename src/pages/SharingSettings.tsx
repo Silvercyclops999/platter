@@ -6,7 +6,7 @@ import type { PersonWithAccess } from "../lib/types";
 import { InviteCallout, unreleasedLabel } from "../shell/ShareMusic";
 import { PersonFace } from "../shell/ListenStrip";
 import { updateSettings, useSettings } from "../stores/settings";
-import { lastActive, loadInvites, loadOverview, loadPeople, openShareDialog, removeAccess, useSharing } from "../stores/sharing";
+import { approveLinkAsk, denyLinkAsk, lastActive, loadInvites, loadLinkAsks, loadOverview, loadPeople, openShareDialog, removeAccess, useSharing } from "../stores/sharing";
 import "../shell/share-music.css";
 
 /** "Share my music": the button that opens the share dialog for anyone. */
@@ -48,6 +48,32 @@ function PersonRow({ p }: { p: PersonWithAccess }) {
   );
 }
 
+/** People who opened a share link: nothing is shared until you say yes. */
+function LinkAsks() {
+  const asks = useSharing((s) => s.asks);
+  useEffect(() => void loadLinkAsks(), []);
+  if (!asks.length) return null;
+  return (
+    <ul className="share-people" aria-label="Asking for your music">
+      {asks.map((a) => (
+        <li key={a.id} className="share-person">
+          <PersonFace person={{ name: a.name, avatar: null }} size={32} />
+          <span className="share-person__text">
+            <span className="share-person__name truncate">{a.name}</span>
+            <span className="share-person__meta">Plex username {a.user} · opened your share link and asks for your music</span>
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => void denyLinkAsk(a)}>
+            No
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => void approveLinkAsk(a)}>
+            Share
+          </Button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** People with access: what each can see, when they were last on, remove. */
 export function PeopleWithAccess() {
   const people = useSharing((s) => s.people);
@@ -57,13 +83,22 @@ export function PeopleWithAccess() {
   }, []);
   if (people === null) return <Skeleton width="100%" height={56} radius="card" />;
   if (overview && !overview.owner) return <p className="share-empty">Only the server's owner can share it. {overview.serverName ?? "This server"} is shared with you.</p>;
-  if (!people.length) return <p className="share-empty">Nobody else has access to your server yet.</p>;
+  if (!people.length)
+    return (
+      <>
+        <LinkAsks />
+        <p className="share-empty">Nobody else has access to your server yet.</p>
+      </>
+    );
   return (
-    <ul className="share-people" aria-label="People with access">
-      {people.map((p) => (
-        <PersonRow key={p.id} p={p} />
-      ))}
-    </ul>
+    <>
+      <LinkAsks />
+      <ul className="share-people" aria-label="People with access">
+        {people.map((p) => (
+          <PersonRow key={p.id} p={p} />
+        ))}
+      </ul>
+    </>
   );
 }
 

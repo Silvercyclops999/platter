@@ -5,7 +5,7 @@
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
-import type { AppError, PersonWithAccess, ReceivedInvite, ShareLinkView, ShareOptions, ShareStatus, SharingOverview } from "../lib/types";
+import type { AppError, PersonWithAccess, ReceivedInvite, ShareLinkAsk, ShareLinkView, ShareOptions, ShareStatus, SharingOverview } from "../lib/types";
 import { useSettings } from "./settings";
 import { useSocial } from "./social";
 import { copyText, toast } from "./toasts";
@@ -23,6 +23,8 @@ interface SharingState {
   /** The share dialog, and who it's for. */
   dialog: ShareTarget | null;
   link: ShareLinkView | null;
+  /** People who opened your share links and wait for a yes. */
+  asks: ShareLinkAsk[];
 }
 
 export const useSharing = create<SharingState>()(() => ({
@@ -32,6 +34,7 @@ export const useSharing = create<SharingState>()(() => ({
   accepting: new Set(),
   dialog: null,
   link: null,
+  asks: [],
 }));
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
@@ -52,6 +55,7 @@ export async function startSharing(b: Backend = backend): Promise<void> {
   started = b;
   unsubs.push(await b.listen("sharing://invites", takeInvites));
   unsubs.push(await b.listen("sharing://notice", (n) => toast.info(n.message)));
+  unsubs.push(await b.listen("sharing://link-asks", (asks) => useSharing.setState({ asks })));
   try {
     useSharing.setState({ invites: await b.sharingInvites(false) });
   } catch {
@@ -201,10 +205,39 @@ export async function openShareLink(link: string, b: Backend = backend): Promise
   try {
     const r = await b.sharingOpenLink(link);
     if (r.status === "failed") toast.error(r.message);
+    else if (r.status === "asked") toast.info(`Asked ${r.host} for their music. Their invite shows here once they say yes.`);
     else toast.info(r.status === "invited" ? `Asked ${r.host} for their music. Their invite shows here in a moment.` : `You already have access to ${r.host}'s server.`);
   } catch (e) {
     toast.error(errText(e) || "Couldn't open that link");
   }
+}
+
+/** The share link requests waiting for a yes. */
+export async function loadLinkAsks(b: Backend = backend): Promise<void> {
+  try {
+    useSharing.setState({ asks: await b.sharingLinkAsks() });
+  } catch {
+    /* not the owner, or signed out */
+  }
+}
+
+/** Say yes to someone who opened your share link. */
+export async function approveLinkAsk(a: ShareLinkAsk, b: Backend = backend): Promise<void> {
+  try {
+    toast.info(await b.sharingLinkApprove(a.id));
+  } catch (e) {
+    toast.error(errText(e) || "Couldn't share");
+  }
+  await loadLinkAsks(b);
+}
+
+export async function denyLinkAsk(a: ShareLinkAsk, b: Backend = backend): Promise<void> {
+  try {
+    await b.sharingLinkDeny(a.id);
+  } catch {
+    /* already gone */
+  }
+  await loadLinkAsks(b);
 }
 
 /** Accept an invite: their server joins your library and the connection race. */

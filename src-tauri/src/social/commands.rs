@@ -299,7 +299,7 @@ pub async fn listen_offer_server(listen: State<'_, ListenAlong>, person_id: Stri
 
 // ---- sharing ----------------------------------------------------------------------
 
-use super::sharing::links::{LinkResult, LinkView};
+use super::sharing::links::{LinkAsk, LinkResult, LinkView};
 use super::sharing::{Accepted, PersonWithAccess, ShareOptions, ShareStatus, Sharing, SharingOverview};
 use crate::plex::sharing::ReceivedInvite;
 
@@ -331,6 +331,24 @@ pub async fn sharing_remove(sharing: State<'_, Sharing>, id: String) -> AppResul
 pub async fn sharing_link(sharing: State<'_, Sharing>, settings: State<'_, crate::settings::SettingsState>, options: ShareOptions) -> AppResult<LinkView> {
     let hours = settings.get().await?.listen_invite_hours;
     sharing.make_link(options, hours).await
+}
+
+/// People who opened my share links and wait for a yes.
+#[tauri::command]
+pub async fn sharing_link_asks(sharing: State<'_, Sharing>) -> AppResult<Vec<LinkAsk>> {
+    Ok(sharing.link_asks())
+}
+
+/// Say yes to one: share as the link was made. Returns what happened.
+#[tauri::command]
+pub async fn sharing_link_approve(sharing: State<'_, Sharing>, id: String) -> AppResult<String> {
+    sharing.approve_link_ask(&id).await
+}
+
+#[tauri::command]
+pub async fn sharing_link_deny(sharing: State<'_, Sharing>, id: String) -> AppResult<()> {
+    sharing.deny_link_ask(&id);
+    Ok(())
 }
 
 /// Open a share link someone gave me.

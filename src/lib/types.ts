@@ -3178,7 +3178,18 @@ export interface ShareLinkView {
 }
 
 /** What opening someone's share link did. */
-export type ShareLinkResult = { status: "invited" | "alreadyShared"; host: string } | { status: "failed"; message: string };
+export type ShareLinkResult = { status: "asked" | "invited" | "alreadyShared"; host: string } | { status: "failed"; message: string };
+
+/** Someone who opened your share link and waits for your yes. */
+export interface ShareLinkAsk {
+  id: string;
+  /** Their Plex username. */
+  user: string;
+  /** The name they go by in Platter. */
+  name: string;
+  /** Unix ms. */
+  at: number;
+}
 
 /** What a guest asks the host to do (`listen_control`). */
 export type ListenOp =
@@ -3827,6 +3838,8 @@ export interface EventMap {
   "sharing://invites": ReceivedInvite[];
   /** Someone used your share link. */
   "sharing://notice": { message: string };
+  /** The share link requests waiting for your yes changed. */
+  "sharing://link-asks": ShareLinkAsk[];
   /** The sync file's state changed. */
   "sync-file://status": SyncFileStatus;
   /** Pins, folders or other app-only state changed (here or from the sync file). */

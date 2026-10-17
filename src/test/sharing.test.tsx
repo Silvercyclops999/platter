@@ -8,7 +8,7 @@
 import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { MOCK_INVITE } from "../lib/mock/social";
@@ -219,6 +219,21 @@ describe("Settings, Sharing", () => {
     );
     return screen.findByRole("region", { name: "Sharing" });
   }
+
+  it("someone who opened a share link waits for a yes", async () => {
+    const asks = vi.spyOn(backend, "sharingLinkAsks").mockResolvedValue([{ id: "a1", user: "alex_on_plex", name: "Alex", at: 1 }]);
+    const approve = vi.spyOn(backend, "sharingLinkApprove").mockResolvedValue("Shared with Alex. Plex sent them an invite.");
+    const sec = await sharingSection();
+    const list = await within(sec).findByRole("list", { name: "Asking for your music" });
+    expect(list).toHaveTextContent("Plex username alex_on_plex");
+    expect(approve).not.toHaveBeenCalled();
+    asks.mockResolvedValue([]);
+    await userEvent.click(within(list).getByRole("button", { name: "Share" }));
+    await waitFor(() => expect(approve).toHaveBeenCalledWith("a1"));
+    await waitFor(() => expect(within(sec).queryByRole("list", { name: "Asking for your music" })).toBeNull());
+    expect(toasts()).toContain("Shared with Alex. Plex sent them an invite.");
+    vi.restoreAllMocks();
+  });
 
   it("shares with a Plex username, lists people with access, and removes one", async () => {
     const sec = await sharingSection();

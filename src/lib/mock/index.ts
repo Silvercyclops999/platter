@@ -57,6 +57,7 @@ import type {
   UpgradeUnder,
   CachedLibrary,
   ListenOp,
+  ShareLinkAsk,
   ShareOptions,
   DownloadKind,
   AbLoop,
@@ -3332,6 +3333,15 @@ export class MockBackend implements Backend {
   }
   sharingOpenLink(link: string) {
     return this.delay(() => this.sharing.openLink(link));
+  }
+  sharingLinkAsks() {
+    return this.delay(() => [] as ShareLinkAsk[]);
+  }
+  sharingLinkApprove(_id: string) {
+    return this.delay(() => "Shared.");
+  }
+  sharingLinkDeny(_id: string) {
+    return this.delay(() => undefined);
   }
   sharingInvites() {
     return this.delay(() => this.sharing.invitesList());

@@ -81,6 +81,8 @@ pub struct LinkView {
 pub enum LinkResult {
     /// The host shared; the invite shows in Platter shortly.
     Invited { host: String },
+    /// The request waits for the host's yes; an invite follows if they say it.
+    Asked { host: String },
     AlreadyShared { host: String },
     Failed { message: String },
 }
@@ -90,8 +92,35 @@ struct Open {
     down: Channel,
     expires_ms: u64,
     opts: ShareOptions,
-    /// The attempt that used it and the answer (sent again if asked).
-    used: Option<(String, Answer)>,
+    /// The host said yes to someone and sharing worked: done.
+    used: bool,
+    /// Requests waiting for the host's yes.
+    asks: Vec<LinkAsk>,
+    /// Shares that didn't work; the link closes after [`MAX_FAILURES`].
+    failures: u32,
+}
+
+/// Requests one link holds at once.
+const MAX_ASKS: usize = 3;
+/// Shares from one link that may fail before it closes.
+const MAX_FAILURES: u32 = 3;
+
+/// The requests waiting for a yes changed (a list of [`LinkAsk`]).
+pub const EVENT_LINK_ASKS: &str = "sharing://link-asks";
+
+/// Someone who opened a share link and asks for the host's music.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkAsk {
+    pub id: String,
+    #[serde(skip)]
+    n: String,
+    /// Their Plex username.
+    pub user: String,
+    /// The name they go by in Platter.
+    pub name: String,
+    /// Unix ms.
+    pub at: u64,
 }
 
 pub(super) struct Links {
@@ -160,7 +189,7 @@ impl Sharing {
             while open.len() >= MAX_LINKS {
                 open.remove(0);
             }
-            open.push(Open { up, down, expires_ms, opts, used: None });
+            open.push(Open { up, down, expires_ms, opts, used: false, asks: Vec::new(), failures: 0 });
         }
         l.refresh();
         let start = !std::mem::replace(&mut *l.running.lock(), true);
@@ -216,15 +245,15 @@ impl Sharing {
         }
     }
 
+    /// Someone opened a link: their request waits for the host's yes
+    /// ([`Self::approve_link_ask`]). The answer is always "asked", whoever
+    /// they say they are, so a link can't be used to try out usernames.
     async fn on_ask(&self, relay: &Arc<dyn Relay>, topic: &str, body: &str) {
         let l = self.links();
         let now = now_ms();
         let host = self.inner.host.username().await.unwrap_or_default();
-        enum Do {
-            Reply(Channel, Answer),
-            Share(Channel, String, ShareOptions, String, String),
-        }
-        let todo = {
+        let mut asked: Option<LinkAsk> = None;
+        let (down, answer) = {
             let mut open = l.open.lock();
             let Some(o) = open.iter_mut().find(|o| o.up.topic == topic) else { return };
             let Ok(ask) = seal::open_value::<Ask>(&o.up, body) else { return };
@@ -232,43 +261,28 @@ impl Sharing {
                 return;
             }
             let u = ask.u.trim().chars().filter(|c| !c.is_control()).take(200).collect::<String>();
-            match &o.used {
-                Some((n, a)) if *n == ask.n => Do::Reply(o.down.clone(), a.clone()),
-                Some(_) => Do::Reply(o.down.clone(), Answer { n: ask.n, s: "used".into(), msg: None, host: host.clone() }),
-                None if o.expires_ms <= now => Do::Reply(o.down.clone(), Answer { n: ask.n, s: "expired".into(), msg: None, host: host.clone() }),
-                None if u.is_empty() => return,
-                None => {
-                    o.used = Some((ask.n.clone(), Answer { n: ask.n.clone(), s: "failed".into(), msg: Some("Still sharing. Try again in a moment.".into()), host: host.clone() }));
+            let reply = |s: &str| Answer { n: ask.n.clone(), s: s.into(), msg: None, host: host.clone() };
+            let a = if o.used {
+                reply("used")
+            } else if o.expires_ms <= now {
+                reply("expired")
+            } else if u.is_empty() {
+                return;
+            } else {
+                if !o.asks.iter().any(|a| a.n == ask.n) && o.asks.len() < MAX_ASKS {
                     let name: String = ask.name.chars().filter(|c| !c.is_control()).take(40).collect();
-                    Do::Share(o.down.clone(), ask.n, o.opts.clone(), u, name)
+                    let a = LinkAsk { id: hex(&seal::random16()[..8]), n: ask.n.clone(), user: u, name: if name.trim().is_empty() { "Someone".into() } else { name }, at: now };
+                    o.asks.push(a.clone());
+                    asked = Some(a);
                 }
-            }
+                reply("asked")
+            };
+            (o.down.clone(), a)
         };
-        let (down, answer) = match todo {
-            Do::Reply(down, a) => (down, a),
-            Do::Share(down, n, opts, user, name) => {
-                let st = self.share(&user, &opts).await;
-                let (s, msg) = match &st {
-                    Ok(ShareStatus::Invited { .. }) => ("invited", None),
-                    Ok(ShareStatus::AlreadyShared) => ("already", None),
-                    Ok(other) => ("failed", Some(Self::status_text(other))),
-                    Err(e) => ("failed", Some(e.to_string().split_once(": ").map(|x| x.1.to_string()).unwrap_or_default())),
-                };
-                let who = if name.trim().is_empty() { "Someone".to_string() } else { name };
-                let words = match s {
-                    "invited" => format!("{who} opened your share link. Plex sent them an invite."),
-                    "already" => format!("{who} opened your share link. They already have access."),
-                    _ => format!("{who} opened your share link, but sharing didn't work: {}", msg.clone().unwrap_or_default()),
-                };
-                self.notice(words);
-                let a = Answer { n: n.clone(), s: s.into(), msg, host };
-                // Used for good, unless it failed (then the same person may try again).
-                if let Some(o) = l.open.lock().iter_mut().find(|o| o.down.topic == down.topic) {
-                    o.used = if a.s == "failed" { None } else { Some((n, a.clone())) };
-                }
-                (down, a)
-            }
-        };
+        if let Some(a) = asked {
+            self.notice(format!("{} ({}) opened your share link and asks for your music. Say yes in Settings, Sharing.", a.name, a.user));
+            self.inner.events.emit(EVENT_LINK_ASKS, serde_json::to_value(self.link_asks()).unwrap_or_default());
+        }
         match seal::seal_value(&down, &answer) {
             Ok(text) => {
                 if let Err(e) = relay.publish(&down.topic, &text).await {
@@ -325,17 +339,70 @@ impl Sharing {
         };
         let host = if answer.host.trim().is_empty() { "They".to_string() } else { answer.host.chars().take(60).collect() };
         let out = match answer.s.as_str() {
+            "asked" => LinkResult::Asked { host: host.clone() },
             "invited" => LinkResult::Invited { host: host.clone() },
             "already" => LinkResult::AlreadyShared { host: host.clone() },
             "used" => LinkResult::Failed { message: "That link was already used. Ask for a new one.".into() },
             "expired" => LinkResult::Failed { message: "That link has expired. Ask for a new one.".into() },
             _ => LinkResult::Failed { message: answer.msg.unwrap_or_else(|| "Sharing didn't work on their side.".into()) },
         };
-        if matches!(out, LinkResult::Invited { .. } | LinkResult::AlreadyShared { .. }) {
+        if matches!(out, LinkResult::Asked { .. } | LinkResult::Invited { .. } | LinkResult::AlreadyShared { .. }) {
             let me = self.clone();
             tokio::spawn(async move { crate::social::listen::ServerOffer::shared(&me, &host).await });
         }
         Ok(out)
+    }
+
+    /// Requests waiting for the host's yes, oldest first.
+    pub fn link_asks(&self) -> Vec<LinkAsk> {
+        self.links().refresh();
+        let mut all: Vec<LinkAsk> = self.links().open.lock().iter().flat_map(|o| o.asks.clone()).collect();
+        all.sort_by_key(|a| a.at);
+        all
+    }
+
+    fn take_ask(&self, id: &str) -> Option<(LinkAsk, ShareOptions, String)> {
+        let mut open = self.links().open.lock();
+        let o = open.iter_mut().find(|o| o.asks.iter().any(|a| a.id == id))?;
+        let i = o.asks.iter().position(|a| a.id == id)?;
+        let a = o.asks.remove(i);
+        (!o.used).then(|| (a, o.opts.clone(), o.down.topic.clone()))
+    }
+
+    /// The host said no (or let it be): the request goes away.
+    pub fn deny_link_ask(&self, id: &str) {
+        let _ = self.take_ask(id);
+        self.inner.events.emit(EVENT_LINK_ASKS, serde_json::to_value(self.link_asks()).unwrap_or_default());
+    }
+
+    /// The host said yes: share with them, as the link was made. Returns
+    /// what happened, in words.
+    pub async fn approve_link_ask(&self, id: &str) -> AppResult<String> {
+        let (a, opts, topic) = self.take_ask(id).ok_or_else(|| AppError::NotFound("That request isn't waiting any more.".into()))?;
+        let st = self.share(&a.user, &opts).await;
+        let ok = matches!(st, Ok(ShareStatus::Invited { .. } | ShareStatus::AlreadyShared));
+        {
+            let mut open = self.links().open.lock();
+            if let Some(i) = open.iter().position(|o| o.down.topic == topic) {
+                if ok {
+                    open[i].used = true;
+                    open[i].asks.clear();
+                } else {
+                    open[i].failures += 1;
+                    if open[i].failures >= MAX_FAILURES {
+                        open.remove(i);
+                    }
+                }
+            }
+        }
+        self.links().refresh();
+        self.inner.events.emit(EVENT_LINK_ASKS, serde_json::to_value(self.link_asks()).unwrap_or_default());
+        Ok(match st {
+            Ok(ShareStatus::Invited { .. }) => format!("Shared with {}. Plex sent them an invite.", a.name),
+            Ok(ShareStatus::AlreadyShared) => format!("{} already has access.", a.name),
+            Ok(other) => format!("Sharing with {} didn't work: {}", a.name, Self::status_text(&other)),
+            Err(e) => format!("Sharing with {} didn't work: {}", a.name, e.message()),
+        })
     }
 
     /// Open share links (host), for tests and the UI's count.

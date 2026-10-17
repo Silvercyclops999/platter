@@ -162,6 +162,7 @@ import type {
   InviteAccepted,
   PersonWithAccess,
   ReceivedInvite,
+  ShareLinkAsk,
   ShareLinkResult,
   ShareLinkView,
   ShareOptions,
@@ -818,6 +819,11 @@ export interface Backend {
   sharingLink(options: ShareOptions): Promise<ShareLinkView>;
   /** Open someone's share link. */
   sharingOpenLink(link: string): Promise<ShareLinkResult>;
+  /** People who opened your share links, waiting for a yes. */
+  sharingLinkAsks(): Promise<ShareLinkAsk[]>;
+  /** Share with one of them, as the link was made; the result in words. */
+  sharingLinkApprove(id: string): Promise<string>;
+  sharingLinkDeny(id: string): Promise<void>;
   /** Server invites you received (`fresh` asks Plex). */
   sharingInvites(fresh?: boolean): Promise<ReceivedInvite[]>;
   /** Accept one: their server and its music join your library. */
@@ -1519,6 +1525,9 @@ export function createTauriBackend(): Backend {
     sharingRemove: (id) => call("sharing_remove", { id }),
     sharingLink: (options) => call("sharing_link", { options }),
     sharingOpenLink: (link) => call("sharing_open_link", { link }),
+    sharingLinkAsks: () => call("sharing_link_asks"),
+    sharingLinkApprove: (id) => call("sharing_link_approve", { id }),
+    sharingLinkDeny: (id) => call("sharing_link_deny", { id }),
     sharingInvites: (fresh) => call("sharing_invites", { fresh: fresh ?? true }),
     sharingAccept: (id) => call("sharing_accept", { id }),
     hiddenList: () => call("hidden_list"),
