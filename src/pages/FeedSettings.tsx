@@ -37,7 +37,7 @@ export function FeedNote({ status }: { status: FeedStatus | null }) {
   if (status.state === "failed")
     return (
       <span className="info-key__error" role="alert">
-        Couldn't open port {status.port}: {status.message}
+        Couldn't open port {status.port}: {status.message}. Another app may be using it. Choose another port.
       </span>
     );
   const page = status.url.replace(/\.json$/, ".html");

@@ -55,7 +55,7 @@ describe("now-playing feed settings", () => {
     const { rerender } = render(<FeedNote status={{ state: "portInUse", port: 32540 }} />);
     expect(screen.getByRole("alert")).toHaveTextContent("Port 32540 is in use by another program. Pick another port below.");
     rerender(<FeedNote status={{ state: "failed", port: 40000, message: "access denied" }} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't open port 40000: access denied");
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't open port 40000: access denied. Another app may be using it. Choose another port.");
     rerender(<FeedNote status={{ state: "off" }} />);
     expect(screen.queryByRole("alert")).toBeNull();
   });
