@@ -13,6 +13,9 @@ import { artPixelSize } from "./artSize";
 import { createMockBackend } from "./mock";
 import type {
   DiscogsReport,
+  AutomixView,
+  MixStyle,
+  MixedPlaylists,
   DiscogsStatus,
   PlayHistorySource,
   PlayHistoryStatus,
@@ -824,6 +827,14 @@ export interface Backend {
   pinsToggle(pin: PinRecord): Promise<PinRecord[]>;
   /** Pins an older build kept in the window's storage (taken once). */
   pinsImport(pins: PinRecord[]): Promise<PinRecord[]>;
+  /** Playlists with Mix on, and the transitions picked for their gaps. */
+  automixMixedGet(): Promise<MixedPlaylists>;
+  /** Mix on or off for a playlist; resolves to every mixed playlist. */
+  automixMixSet(id: string, on: boolean): Promise<MixedPlaylists>;
+  /** The transition between two songs of a mixed playlist ("auto" clears the pick). */
+  automixStyleSet(id: string, fromId: string, toId: string, style: MixStyle): Promise<MixedPlaylists>;
+  /** Tempo per song and what each gap does, for songs in the order shown. */
+  automixView(playlistId: string | null, trackIds: string[]): Promise<AutomixView>;
   foldersGet(): Promise<LibraryFolders>;
   /** A new folder ("New Folder" unless named), at the top or inside `parent`. */
   folderCreate(name?: string | null, parent?: string | null): Promise<LibraryFolder>;
@@ -1356,6 +1367,10 @@ export function createTauriBackend(): Backend {
     pinsGet: () => call("pins_get"),
     pinsToggle: (pin) => call("pins_toggle", { pin }),
     pinsImport: (pins) => call("pins_import", { pins }),
+    automixMixedGet: () => call("automix_mixed_get"),
+    automixMixSet: (id, on) => call("automix_mix_set", { id, on }),
+    automixStyleSet: (id, fromId, toId, style) => call("automix_style_set", { id, fromId, toId, style }),
+    automixView: (playlistId, trackIds) => call("automix_view", { playlistId, trackIds }),
     foldersGet: () => call("folders_get"),
     folderCreate: (name, parent) => call("folder_create", { name: name ?? null, parent: parent ?? null }),
     folderRename: (id, name) => call("folder_rename", { id, name }),

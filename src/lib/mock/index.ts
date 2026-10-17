@@ -98,6 +98,7 @@ import type {
   LyricsVerdict,
   KeyKind,
   PinRecord,
+  MixStyle,
   Track,
   TranscribeModel,
   QueueAt,
@@ -193,6 +194,7 @@ import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "..
 import { MockArchive } from "./archive";
 import { MockDoctor } from "./doctor";
 import { MockPhysical } from "./physical";
+import { MockAutomix } from "./automix";
 import { MockJellyfin, plexRecord } from "./jellyfin";
 import { MockSubsonic } from "./subsonic";
 
@@ -377,6 +379,8 @@ export class MockBackend implements Backend {
   readonly catalogue: MockCatalogue;
   /** The physical collection and the faked Discogs (test hooks: refuse, fail, reset). */
   readonly physical: MockPhysical;
+  /** Mixed playlists and made-up tempos (test hook: reset). */
+  readonly automix: MockAutomix;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -506,6 +510,10 @@ export class MockBackend implements Backend {
     );
     this.doctor = new MockDoctor(this.fx, () => this.settings);
     this.physical = new MockPhysical(this.fx, () => this.settings, () => this.later(0, () => this.emit("physical://changed", {})));
+    this.automix = new MockAutomix(
+      (id) => this.trackById(id) ?? undefined,
+      () => this.later(0, () => this.emit("syncstore://changed", { namespaces: ["mixedPlaylists"], remote: false })),
+    );
     this.tags = new MockFileTags(
       this.fx,
       () => this.settings,
@@ -2380,6 +2388,9 @@ export class MockBackend implements Backend {
       crossfade: d.crossfade,
       crossfadeSeconds: d.crossfadeSeconds,
       crossfadeSkipAlbums: d.crossfadeSkipAlbums,
+      automix: d.automix,
+      automixWhere: d.automixWhere,
+      automixStyle: d.automixStyle,
       leveling: d.leveling,
       preampDb: d.preampDb,
       limiter: d.limiter,
@@ -3442,6 +3453,18 @@ export class MockBackend implements Backend {
   }
   pinsImport(pins: PinRecord[]) {
     return this.delay(() => this.syncFile.pinsImport(pins));
+  }
+  automixMixedGet() {
+    return this.delay(() => this.automix.list());
+  }
+  automixMixSet(id: string, on: boolean) {
+    return this.delay(() => this.automix.set(id, on));
+  }
+  automixStyleSet(id: string, fromId: string, toId: string, style: MixStyle) {
+    return this.delay(() => this.automix.setStyle(id, fromId, toId, style));
+  }
+  automixView(playlistId: string | null, trackIds: string[]) {
+    return this.delay(() => this.automix.view(playlistId, trackIds));
   }
   foldersGet() {
     return this.delay(() => this.syncFile.tree());

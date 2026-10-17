@@ -152,3 +152,64 @@
 .setting-text::placeholder { color: var(--color-text-muted); }
 .setting-text:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 32%, transparent); }
 .setting-text:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
+
+/* ---------------------------------------------------------------- mix */
+.pl-mixed {
+  font-size: 0.42em;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.pl-sort--locked { cursor: default; opacity: 0.55; }
+.pl-sort--locked:hover { color: var(--color-text-secondary); background: none; }
+.pl-mix-row { display: flex; gap: var(--space-2); margin: calc(-1 * var(--space-2)) 0 var(--space-4); padding: 0 var(--space-2); }
+.pl-mix-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 24%, transparent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  transition: color var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing),
+    background-color var(--motion-fast) var(--motion-easing);
+}
+.pl-mix-pill:hover { color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-text-primary); }
+.pl-mix-pill.is-on { color: var(--color-bg-base); background: var(--color-accent); box-shadow: none; }
+.pl-mix-pill.is-on:hover { background: var(--color-accent-hover); }
+
+/* The transition between two rows of a mixed playlist: a quiet dashed
+   line with what happens in the middle. */
+.pl-gap { display: block; height: 20px; }
+.pl-gap__cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding: 0 var(--space-4) 0 56px;
+}
+.pl-gap__cell::before,
+.pl-gap__cell::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed color-mix(in srgb, var(--color-ink) 14%, transparent);
+}
+.pl-gap__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  transition: color var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing);
+}
+button.pl-gap__btn:hover { color: var(--color-text-primary); background: var(--color-state-hover); }
+.pl-gap--no .pl-gap__btn { font-style: italic; cursor: default; }

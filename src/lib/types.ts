@@ -894,6 +894,12 @@ export interface Settings {
   crossfadeSeconds: number;
   /** Songs of one album in album order never crossfade. */
   crossfadeSkipAlbums: boolean;
+  /** DJ-style transitions where Automix applies. */
+  automix: boolean;
+  /** Where Automix plays transitions. */
+  automixWhere: AutomixWhere;
+  /** Longer, gentler blends or shorter ones on the bar. */
+  automixStyle: AutomixStyle;
   /** Loudness leveling with Plex's gain values. */
   leveling: Leveling;
   /** dB added to every track, -12 to 12. This device only. */
@@ -1333,6 +1339,25 @@ export type QueueEnd = "keepPlaying" | "stop";
 export type ExplicitContent = "allowed" | "filtered";
 
 export type CrossfadeMode = "smart" | "fixed" | "off";
+export type AutomixWhere = "playlistsAndMixes" | "allButAlbums";
+export type AutomixStyle = "smooth" | "energetic";
+
+/** One transition's style on a mixed playlist ("auto": Platter picks). */
+export type MixStyle = "auto" | "none" | "blend" | "lift" | "drop" | "echo";
+
+/** A playlist with Mix on, and the transitions picked for its gaps ("<fromId>><toId>"). */
+export interface MixedPlaylist {
+  styles: Record<string, MixStyle>;
+}
+
+/** Mixed playlists by id (`automix_mixed_get`). */
+export type MixedPlaylists = Record<string, MixedPlaylist>;
+
+/** Tempo and transitions for songs in the order shown (`automix_view`). */
+export interface AutomixView {
+  songs: { id: string; bpm?: number | null; key?: string | null }[];
+  gaps: { fromId: string; toId: string; reason?: string | null; style: MixStyle; beatmatched: boolean }[];
+}
 export type Leveling = "smart" | "track" | "album" | "off";
 export interface EqProfile {
   name: string;
@@ -1410,6 +1435,9 @@ export const DEFAULT_SETTINGS: Settings = {
   crossfade: "smart",
   crossfadeSeconds: 6,
   crossfadeSkipAlbums: true,
+  automix: true,
+  automixWhere: "playlistsAndMixes",
+  automixStyle: "smooth",
   leveling: "smart",
   preampDb: 0,
   limiter: true,
@@ -3430,6 +3458,8 @@ export interface EventMap {
   "physical://changed": Record<string, never>;
   /** Identify by sound found something or moved on (read sound_id_status). */
   "soundid://changed": null;
+  /** Songs analysed for Automix (their ids). */
+  "analysis://changed": string[];
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;

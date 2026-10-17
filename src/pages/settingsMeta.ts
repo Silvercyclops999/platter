@@ -26,6 +26,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "computerName",
   // Transitions and Loudness: fine tuning of an everyday choice.
   "crossfadeSkipAlbums",
+  "automixWhere",
   "preampDb",
   "limiter",
   // Library: how lists and rows behave, beyond the defaults.

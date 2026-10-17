@@ -30,6 +30,8 @@ import type { MenuItem } from "../stores/ui";
 import { useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { PlaylistFinder } from "./PlaylistFinder";
+import { GapMarker, MixPill, MixToggle, SORT_LOCKED, bpmNote, mixMenuItem, useAutomixView, useMix, useMixSwitch, useShuffleAsk } from "./PlaylistMix";
+import { Tooltip } from "../components/Tooltip";
 import "./playlist.css";
 
 export type PlaylistSort = "custom" | "title" | "artist" | "album" | "addedBy" | "duration";
@@ -150,6 +152,16 @@ export function PlaylistPage({ id }: { id: string }) {
   const order = rows.map((r) => r.itemId);
   const have = useMemo(() => new Set(rows.map((r) => r.track.id)), [rows]);
   const canDrag = own && sort === "custom" && rows.length > 1;
+  // Mix: on here, its switch (asking first when sorted), shuffle asking
+  // first, and the rows' tempo and transitions.
+  const mixed = useMix(id);
+  const mixSwitch = useMixSwitch(id, sort !== "custom", () => setSort("custom"));
+  const shuffleAsk = useShuffleAsk();
+  const automix = useAutomixView(id, mixed, mixed ? view.map((r) => r.track.id) : []);
+  // Turned on elsewhere (another device): back to the playlist's own order.
+  useEffect(() => {
+    if (mixed && sort !== "custom") setSort("custom");
+  }, [mixed, sort]);
 
   // Deleted on another device while open: say so and go Home.
   useEffect(() => {
@@ -262,6 +274,7 @@ export function PlaylistPage({ id }: { id: string }) {
       [
         { label: "Add to queue", disabled: empty, onSelect: () => void player.addToQueue(shown!.tracks, pl.thumb) },
         ...(pl.smart ? [{ label: "Edit rules", onSelect: () => void editSmartPlaylist(pl.id, pl.title) }] : []),
+        ...(!own && !empty ? [mixMenuItem(mixed, mixSwitch.toggle)] : []),
         ...playlistEditItems(pl),
         bookmarkPageItem("playlist", pl.id, pl.title, { thumb: pl.thumb }),
         ...(empty ? [] : downloadMenuItems({ kind: "playlist", id: pl.id, title: pl.title })),
@@ -324,10 +337,12 @@ export function PlaylistPage({ id }: { id: string }) {
                   <button type="button" className="pl-title__button" title="Edit details" onClick={() => editDetails(pl)}>
                     {pl.title}
                   </button>
+                  {mixed && <span className="pl-mixed"> · Mixed</span>}
                 </h1>
               ) : (
                 <h1 className="detail-header__title" data-step={step}>
                   {pl.title}
+                  {mixed && <span className="pl-mixed"> · Mixed</span>}
                 </h1>
               )}
               {pl.summary && <p className="pl-summary">{pl.summary}</p>}
@@ -360,7 +375,8 @@ export function PlaylistPage({ id }: { id: string }) {
                 icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
                 onClick={play}
               />
-              <ContextShuffleButton id={id} kind="playlist" name={pl?.title} />
+              <ContextShuffleButton id={id} kind="playlist" name={pl?.title} beforeShuffle={mixed ? shuffleAsk.ask : undefined} />
+              {!own && pl && <MixToggle mixed={mixed} onToggle={mixSwitch.toggle} name={pl.title} />}
               <DownloadButton kind="playlist" id={id} title={pl?.title ?? "this playlist"} disabled={!pl} />
             </>
           )}
@@ -379,19 +395,33 @@ export function PlaylistPage({ id }: { id: string }) {
             disabled={!pl}
             onClick={(e) => pageMenu(e.currentTarget)}
           />
-          {!empty && pl && (
-            <button
-              type="button"
-              className="pl-sort"
-              aria-haspopup="menu"
-              aria-label={`Sort songs: ${SORT_LABEL[sort]}`}
-              onClick={(e) => sortMenu(e.currentTarget)}
-            >
-              <span>{SORT_LABEL[sort]}</span>
-              <ArrowDownUp size={16} aria-hidden="true" />
-            </button>
-          )}
+          {!empty &&
+            pl &&
+            (mixed ? (
+              <Tooltip label={SORT_LOCKED} describe>
+                <button type="button" className="pl-sort pl-sort--locked" aria-disabled="true" aria-label={`Sort songs: ${SORT_LABEL[sort]}`}>
+                  <span>{SORT_LABEL[sort]}</span>
+                  <ArrowDownUp size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            ) : (
+              <button
+                type="button"
+                className="pl-sort"
+                aria-haspopup="menu"
+                aria-label={`Sort songs: ${SORT_LABEL[sort]}`}
+                onClick={(e) => sortMenu(e.currentTarget)}
+              >
+                <span>{SORT_LABEL[sort]}</span>
+                <ArrowDownUp size={16} aria-hidden="true" />
+              </button>
+            ))}
         </div>
+        {own && pl && !empty && (
+          <div className="pl-mix-row">
+            <MixPill mixed={mixed} onToggle={mixSwitch.toggle} />
+          </div>
+        )}
         {empty && pl ? (
           !own && (
             <div className="empty-state">
@@ -404,21 +434,28 @@ export function PlaylistPage({ id }: { id: string }) {
           <div ref={listRef} onKeyDownCapture={onListKeys} onDragLeave={(e) => dragLeft(e) && setInsertAt(null)}>
             <TrackList label={pl ? `${pl.title} tracks` : "Tracks"} multiMenu={multiMenu} byColumn={!!shared}>
               {shown
-                ? view.map((r, i) => (
-                    <TrackRow
-                      key={r.itemId}
-                      rowKey={r.itemId}
-                      track={r.track}
-                      index={i + 1}
-                      showArt
-                      active={r.track.id === nowTrackId}
-                      playing={r.track.id === nowTrackId && status === "playing"}
-                      onPlay={() => player.playPlaylist(id, r.track.id)}
-                      menuItems={rowMenu(r)}
-                      addedBy={shared ? (info?.addedBy[r.itemId] ?? null) : undefined}
-                      {...dragProps(r, i)}
-                    />
-                  ))
+                ? view.flatMap((r, i) => {
+                    const row = (
+                      <TrackRow
+                        key={r.itemId}
+                        rowKey={r.itemId}
+                        track={r.track}
+                        index={i + 1}
+                        showArt
+                        active={r.track.id === nowTrackId}
+                        playing={r.track.id === nowTrackId && status === "playing"}
+                        onPlay={() => player.playPlaylist(id, r.track.id)}
+                        menuItems={rowMenu(r)}
+                        addedBy={shared ? (info?.addedBy[r.itemId] ?? null) : undefined}
+                        notes={mixed ? bpmNote(automix, r.track.id) : undefined}
+                        {...dragProps(r, i)}
+                      />
+                    );
+                    const next = view[i + 1];
+                    const gap = mixed && next ? automix?.gaps[i] : undefined;
+                    if (!gap || gap.fromId !== r.track.id || gap.toId !== next.track.id) return [row];
+                    return [row, <GapMarker key={`gap-${r.itemId}`} playlistId={id} gap={gap} from={r.track.title} to={next.track.title} />];
+                  })
                 : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showArt />)}
             </TrackList>
           </div>
@@ -435,6 +472,8 @@ export function PlaylistPage({ id }: { id: string }) {
           </div>
         )}
       </div>
+      {mixSwitch.dialog}
+      {shuffleAsk.dialog}
     </div>
   );
 }

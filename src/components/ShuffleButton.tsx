@@ -20,11 +20,23 @@ export function ShuffleIcon({ smart, size }: { smart: boolean; size: number }) {
  * A page's shuffle toggle for a context, playing or not (the same control as
  * the player bar's). Playlists and Liked Songs also offer smart shuffle.
  */
-export function ContextShuffleButton({ id, kind, name }: { id: string; kind: PlayContextKind; name?: string | null }) {
+export function ContextShuffleButton({
+  id,
+  kind,
+  name,
+  beforeShuffle,
+}: {
+  id: string;
+  kind: PlayContextKind;
+  name?: string | null;
+  /** Asked before shuffle goes on (a mixed playlist); calls `go` to carry on. */
+  beforeShuffle?: (go: () => void) => void;
+}) {
   const mode = usePlayer((s) => contextShuffleMode(s.state, id));
   const smartAllowed = useSettings((s) => !!s.settings?.smartShuffle);
   const smart = smartAllowed && smartOffered(kind);
   const label = shuffleLabel(mode, smart || mode === "smart", name);
+  const go = () => player.cycleContextShuffle(id, kind, smartAllowed);
   return (
     <IconButton
       label={label}
@@ -32,7 +44,7 @@ export function ContextShuffleButton({ id, kind, name }: { id: string; kind: Pla
       size="lg"
       pressed={mode !== "off"}
       icon={<ShuffleIcon smart={mode === "smart"} size={22} />}
-      onClick={() => player.cycleContextShuffle(id, kind, smartAllowed)}
+      onClick={() => (mode === "off" && beforeShuffle ? beforeShuffle(go) : go())}
     />
   );
 }

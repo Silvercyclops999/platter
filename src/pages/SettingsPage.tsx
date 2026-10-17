@@ -153,6 +153,14 @@ const HINT_KEYS = [
   { value: ";", label: ";" },
   { value: "'", label: "'" },
 ] as const satisfies SelectOption<Settings["hintKey"]>[];
+const AUTOMIX_WHERE = [
+  { value: "playlistsAndMixes", label: "Playlists and mixes" },
+  { value: "allButAlbums", label: "Everywhere except albums" },
+] as const satisfies SelectOption<Settings["automixWhere"]>[];
+const AUTOMIX_STYLE = [
+  { value: "smooth", label: "Smooth" },
+  { value: "energetic", label: "Energetic" },
+] as const satisfies SelectOption<Settings["automixStyle"]>[];
 const QUEUE_END = [
   { value: "keepPlaying", label: "Keep playing similar music" },
   { value: "stop", label: "Stop" },
@@ -1819,6 +1827,30 @@ export function SettingsPage() {
       title: "Never crossfade within an album",
       description: "Songs from the same album played in album order run straight into each other, with no gap and no fade.",
       control: (ids) => toggle(s, "crossfadeSkipAlbums", ids),
+    },
+    {
+      key: "automix",
+      section: "Transitions",
+      title: "Automix",
+      description:
+        "DJ-style transitions on playlists you turn Mix on for, mixes and radio. When two songs have a steady beat at close tempos they meet on the beat, otherwise they fade into each other. Platter works out each song's tempo and key on this computer while it's idle. Never on albums.",
+      control: (ids) => toggle(s, "automix", ids),
+    },
+    {
+      key: "automixWhere",
+      section: "Transitions",
+      title: "Where Automix plays",
+      description: "Playlists and mixes covers playlists with Mix on, mixes, radio and what plays after a list ends. Everywhere except albums adds songs, artists and Liked Songs.",
+      note: s && !s.automix ? "Turn on Automix to use this." : undefined,
+      control: (ids) => select(s, (x) => x.automixWhere, AUTOMIX_WHERE, ids, (v) => updateSettings({ automixWhere: v })),
+    },
+    {
+      key: "automixStyle",
+      section: "Transitions",
+      title: "Transition style",
+      description: "Smooth blends for longer. Energetic keeps blends short and swaps songs on the bar.",
+      note: s && !s.automix ? "Turn on Automix to use this." : undefined,
+      control: (ids) => select(s, (x) => x.automixStyle, AUTOMIX_STYLE, ids, (v) => updateSettings({ automixStyle: v })),
     },
     // Loudness
     {
