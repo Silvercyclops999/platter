@@ -1,4 +1,4 @@
-import { Lock } from "lucide-react";
+import { ChevronDown, Lock } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -35,41 +35,102 @@ export function switchHomeUser(user: HomeUser, askPin: (u: HomeUser) => void) {
   if (user.protected) return askPin(user);
   // The switching screen covers the window until the app restarts as them.
   beginSwitch(user);
-  backend.homeSwitch(user.uuid).then(switchDone, (e: AppError) => switchFailed(e.message));
+  backend
+    .homeSwitch(user.uuid)
+    .then(switchDone, (e: AppError) => switchFailed(e.message));
 }
 
 /**
  * The other Home users in the app menu, under the current one: one row
  * each with their picture; a lock marks those with a PIN.
  */
-export function HomeUserItems({ users, onPick }: { users: HomeUser[]; onPick: (u: HomeUser) => void }) {
+export function HomeUserItems({
+  users,
+  onPick,
+}: {
+  users: HomeUser[];
+  onPick: (u: HomeUser) => void;
+}) {
+  // One "Switch account" row; the other Home users fold out under it, so the
+  // menu stays short however many people share the server.
+  const [open, setOpen] = useState(false);
+  const listId = useId();
   const others = users.filter((u) => !u.current);
   if (users.length < 2 || !others.length) return null;
   return (
-    <div role="group" aria-label="Switch Plex Home user" className="appmenu__users">
-      {others.map((u) => (
-        <button
-          key={u.uuid}
-          type="button"
-          role="menuitem"
-          aria-label={`Switch to ${u.name}${u.protected ? ", needs a PIN" : ""}`}
-          className="appmenu__item appmenu__user"
-          onClick={() => onPick(u)}
+    <>
+      <button
+        type="button"
+        role="menuitem"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-controls={listId}
+        className="appmenu__item appmenu__switch"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight" && !open) {
+            e.preventDefault();
+            setOpen(true);
+          } else if (e.key === "ArrowLeft" && open) {
+            e.preventDefault();
+            setOpen(false);
+          }
+        }}
+      >
+        <span>Switch account</span>
+        <ChevronDown
+          size={16}
+          className={`appmenu__glyph appmenu__chev ${open ? "is-open" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
+      {open && (
+        <div
+          role="group"
+          id={listId}
+          aria-label="Switch Plex Home user"
+          className="appmenu__users"
         >
-          <span className="appmenu__user-who">
-            <AvatarFace path={u.avatar} size={24} className="appmenu__user-face" fallback={u.name.trim().charAt(0).toUpperCase()} />
-            <span className="appmenu__user-name">{u.name}</span>
-          </span>
-          {u.protected && <Lock size={14} className="appmenu__hint" aria-hidden="true" />}
-        </button>
-      ))}
-      <div className="appmenu__sep" role="separator" />
-    </div>
+          {others.map((u) => (
+            <button
+              key={u.uuid}
+              type="button"
+              role="menuitem"
+              aria-label={`Switch to ${u.name}${u.protected ? ", needs a PIN" : ""}`}
+              className="appmenu__item appmenu__user"
+              onClick={() => onPick(u)}
+            >
+              <span className="appmenu__user-who">
+                <AvatarFace
+                  path={u.avatar}
+                  size={24}
+                  className="appmenu__user-face"
+                  fallback={u.name.trim().charAt(0).toUpperCase()}
+                />
+                <span className="appmenu__user-name">{u.name}</span>
+              </span>
+              {u.protected && (
+                <Lock size={14} className="appmenu__hint" aria-hidden="true" />
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
 /** Asks for a Home user's PIN; the PIN goes to plex.tv once and is never kept. */
-export function HomePinDialog({ user, onClose }: { user: HomeUser | null; onClose: () => void }) {
+export function HomePinDialog({
+  user,
+  onClose,
+}: {
+  user: HomeUser | null;
+  onClose: () => void;
+}) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,7 +163,13 @@ export function HomePinDialog({ user, onClose }: { user: HomeUser | null; onClos
     );
   };
   return (
-    <Dialog open onClose={onClose} label={`Enter ${user.name}'s PIN`} className="confirm home-pin" initialFocus={input}>
+    <Dialog
+      open
+      onClose={onClose}
+      label={`Enter ${user.name}'s PIN`}
+      className="confirm home-pin"
+      initialFocus={input}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -111,7 +178,8 @@ export function HomePinDialog({ user, onClose }: { user: HomeUser | null; onClos
       >
         <h2 className="confirm__title">Enter {user.name}'s PIN</h2>
         <p className="confirm__body" id={`${id}-hint`}>
-          Platter switches to {user.name}'s music, likes and settings. The PIN goes to Plex and isn't saved.
+          Platter switches to {user.name}'s music, likes and settings. The PIN
+          goes to Plex and isn't saved.
         </p>
         <input
           ref={input}
@@ -140,7 +208,11 @@ export function HomePinDialog({ user, onClose }: { user: HomeUser | null; onClos
           <Button variant="ghost" type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" disabled={busy || pin.length !== 4}>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={busy || pin.length !== 4}
+          >
             Switch
           </Button>
         </div>

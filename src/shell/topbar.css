@@ -443,3 +443,10 @@
 .offline-callout p.offline-callout__title { font-weight: var(--font-weight-bold); margin-bottom: var(--space-1); }
 @keyframes offline-callout-in { from { opacity: 0; transform: translateY(-4px); } }
 @media (prefers-reduced-motion: reduce) { .topbar__offline, .offline-callout { animation: none; } }
+
+/* "Switch account": one row, the Home users fold out under it, indented. */
+.appmenu__switch { display: flex; justify-content: space-between; align-items: center; }
+.appmenu__chev { transition: transform var(--motion-fast, 120ms) ease; }
+.appmenu__chev.is-open { transform: rotate(180deg); }
+.appmenu__users .appmenu__user { padding-left: calc(var(--space-3) + var(--space-2)); }
+@media (prefers-reduced-motion: reduce) { .appmenu__chev { transition: none; } }

@@ -27,6 +27,12 @@ async function openMenu() {
   const user = userEvent.setup();
   render(<TopBar />);
   await user.click(screen.getByRole("button", { name: /^App menu/ }));
+  // The Home users fold out under one "Switch account" row.
+  const toggle = await screen.findByRole("menuitem", { name: "Switch account" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("group", { name: "Switch Plex Home user" })).toBeNull();
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
   const group = await screen.findByRole("group", { name: "Switch Plex Home user" });
   return { user, group };
 }
