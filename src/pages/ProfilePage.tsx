@@ -28,6 +28,7 @@ import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { wrapped } from "../stores/wrapped";
 import "./profile.css";
+import { LoadError } from "../components/LoadError";
 
 const NONE_YET = new Promise<never>(() => {});
 
@@ -178,7 +179,7 @@ export function ProfilePage() {
               ))}
             </ul>
           ) : o.topArtists.length === 0 ? (
-            <p className="profile-muted">No plays yet this month.</p>
+            <p className="profile-muted">No plays yet this month. Play some music and your top artists show up here.</p>
           ) : (
             <ul className="profile-cards" aria-label="Top artists this month">
               {o.topArtists.slice(0, 6).map((a) => (
@@ -198,14 +199,14 @@ export function ProfilePage() {
           note="Only visible to you"
           action={wrappedOn ? <ShowAll label="Your Top Songs" onClick={() => nav.go({ name: "topSongs", year })} /> : undefined}
         >
-          {!o ? <Skeleton width="100%" height={240} radius="card" /> : o.topSongs.length === 0 ? <p className="profile-muted">No plays yet this month.</p> : <TopTracks o={o} />}
+          {!o ? <Skeleton width="100%" height={240} radius="card" /> : o.topSongs.length === 0 ? <p className="profile-muted">No plays yet this month. Play some music and your top songs show up here.</p> : <TopTracks o={o} />}
         </Section>
       ) : null,
     playlists: (
       <Section id="playlists" title="Playlists" action={lists && lists.length > 6 ? <ShowAll label="Show all" onClick={() => nav.go({ name: "library", tab: "playlists" })} /> : undefined}>
         {!lists ? (
           playlists.error ? (
-            <p className="profile-muted">Couldn't load your playlists.</p>
+            <LoadError what="your playlists" error={playlists.error} onRetry={playlists.retry} inline />
           ) : (
             <Skeleton width="100%" height={200} radius="card" />
           )
