@@ -28,6 +28,7 @@ pub mod swap;
 pub mod tagcarry;
 pub mod upgrade;
 pub mod upmatch;
+pub mod waves;
 pub mod write;
 
 #[cfg(test)]
@@ -38,6 +39,8 @@ mod changes_tests;
 mod modes_tests;
 #[cfg(test)]
 mod request_tests;
+#[cfg(test)]
+mod waves_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -355,3 +355,29 @@ impl super::catchup::Announcer for AppAnnouncer {
         let _ = self.app.notification().builder().title("New in your library").body(text).show();
     }
 }
+
+// ---------------------------------------------------------------- bring in my listening
+
+use super::waves::{Waves, WavesStatus};
+
+/// "Bring in my listening": the waves, today's count, why it's paused,
+/// what needs the user and what practice mode listed.
+#[tauri::command]
+pub async fn bring_in_status(waves: State<'_, Waves>) -> AppResult<WavesStatus> {
+    let w = waves.inner().clone();
+    blocking(move || w.status()).await
+}
+
+/// Pause it, or carry on (a pass runs soon).
+#[tauri::command]
+pub async fn bring_in_pause(waves: State<'_, Waves>, paused: bool) -> AppResult<WavesStatus> {
+    let w = waves.inner().clone();
+    blocking(move || w.set_paused(paused)).await
+}
+
+/// A "Needs you" album: try it again (`retry`), or leave it be.
+#[tauri::command]
+pub async fn bring_in_needs_you(waves: State<'_, Waves>, key: String, retry: bool) -> AppResult<WavesStatus> {
+    let w = waves.inner().clone();
+    blocking(move || w.needs_you(&key, retry)).await
+}

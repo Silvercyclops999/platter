@@ -646,6 +646,17 @@ pub struct Settings {
     pub played_min_plays: u32,
     /// Which plays that list counts: `all`, `year` or `days90`.
     pub played_period: String,
+    /// "Bring in my listening": request albums from "Played a lot" in
+    /// waves through Lidarr, a few a day.
+    pub bring_in: bool,
+    /// The waves' fewest plays, highest first.
+    pub bring_in_waves: Vec<u32>,
+    /// Most albums it asks for in a day.
+    pub bring_in_per_day: u32,
+    /// Pause while the music share has less free space than this (GB).
+    pub bring_in_min_free_gb: u32,
+    /// Pause while Lidarr's queue holds more than this.
+    pub bring_in_max_queue: u32,
     /// Folder names on a song's path that hint it's unreleased. They only
     /// add weight to "Why?", never decide on their own.
     pub archive_folder_keywords: Vec<String>,
@@ -994,6 +1005,11 @@ impl Default for Settings {
             show_played_a_lot: true,
             played_min_plays: crate::import::played::MIN_PLAYS_DEFAULT,
             played_period: "all".into(),
+            bring_in: false,
+            bring_in_waves: crate::lidarr::waves::DEFAULT_WAVES.to_vec(),
+            bring_in_per_day: crate::lidarr::waves::DEFAULT_PER_DAY,
+            bring_in_min_free_gb: crate::lidarr::waves::DEFAULT_MIN_FREE_GB,
+            bring_in_max_queue: crate::lidarr::waves::DEFAULT_MAX_QUEUE,
             archive_folder_keywords: crate::db::release::default_folder_keywords(),
             release_status_tag: String::new(),
             release_status_values: Vec::new(),
@@ -1157,6 +1173,11 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showPlayedALot",
     "playedMinPlays",
     "playedPeriod",
+    "bringIn",
+    "bringInWaves",
+    "bringInPerDay",
+    "bringInMinFreeGb",
+    "bringInMaxQueue",
     "archiveFolderKeywords",
     "releaseStatusTag",
     "releaseStatusValues",
@@ -1476,6 +1497,11 @@ pub struct SettingsPatch {
     pub show_played_a_lot: Option<bool>,
     pub played_min_plays: Option<u32>,
     pub played_period: Option<String>,
+    pub bring_in: Option<bool>,
+    pub bring_in_waves: Option<Vec<u32>>,
+    pub bring_in_per_day: Option<u32>,
+    pub bring_in_min_free_gb: Option<u32>,
+    pub bring_in_max_queue: Option<u32>,
     pub archive_folder_keywords: Option<Vec<String>>,
     pub release_status_tag: Option<String>,
     pub release_status_values: Option<Vec<crate::tags::provenance::ValueMap>>,
@@ -1958,6 +1984,13 @@ impl Settings {
             }
             self.played_period = period.clone();
         }
+        set(&mut self.bring_in, p.bring_in);
+        if let Some(w) = &p.bring_in_waves {
+            self.bring_in_waves = crate::lidarr::waves::clean_waves(w)?;
+        }
+        set(&mut self.bring_in_per_day, p.bring_in_per_day);
+        set(&mut self.bring_in_min_free_gb, p.bring_in_min_free_gb);
+        set(&mut self.bring_in_max_queue, p.bring_in_max_queue);
         eqprofile::apply_patch(self, p)?;
         self.clamp();
         Ok(())
@@ -1968,6 +2001,12 @@ impl Settings {
         self.played_min_plays = self.played_min_plays.clamp(crate::import::played::MIN_PLAYS_LOW, crate::import::played::MIN_PLAYS_HIGH);
         if crate::import::played::Period::parse(&self.played_period).is_none() {
             self.played_period = "all".into();
+        }
+        self.bring_in_per_day = self.bring_in_per_day.clamp(1, crate::lidarr::waves::MAX_PER_DAY);
+        self.bring_in_min_free_gb = self.bring_in_min_free_gb.min(100_000);
+        self.bring_in_max_queue = self.bring_in_max_queue.clamp(1, 1_000);
+        if crate::lidarr::waves::clean_waves(&self.bring_in_waves).is_err() {
+            self.bring_in_waves = crate::lidarr::waves::DEFAULT_WAVES.to_vec();
         }
         self.precache_count = self.precache_count.clamp(PRECACHE_MIN, PRECACHE_MAX);
         self.art_cache_mb = self.art_cache_mb.clamp(ART_CACHE_MIN_MB, ART_CACHE_MAX_MB);

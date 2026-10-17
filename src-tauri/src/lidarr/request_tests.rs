@@ -64,38 +64,42 @@ const ROOT: &str = "/downloads/lidarr";
 const STAGING: &str = "/data/staging/music";
 
 #[derive(Default)]
-struct State {
-    artists: Vec<Value>,
-    albums: Vec<Value>,
-    next_id: i64,
+pub(super) struct State {
+    pub(super) artists: Vec<Value>,
+    pub(super) albums: Vec<Value>,
+    pub(super) next_id: i64,
     /// Lidarr's metadata service is down.
-    lookup_down: bool,
+    pub(super) lookup_down: bool,
     /// Lidarr's metadata has no such album.
-    lookup_empty: bool,
+    pub(super) lookup_empty: bool,
     /// A Lidarr that monitors more than it was told to on add.
-    monitor_extra_on_add: bool,
-    new_items_all: bool,
-    queue: Vec<Value>,
-    history: Vec<Value>,
+    pub(super) monitor_extra_on_add: bool,
+    pub(super) new_items_all: bool,
+    pub(super) queue: Vec<Value>,
+    pub(super) history: Vec<Value>,
     /// The root folder is the Plex music folder.
-    red: bool,
-    down: bool,
+    pub(super) red: bool,
+    pub(super) down: bool,
     /// Album list reads that come back empty after an add.
-    albums_delay: usize,
+    pub(super) albums_delay: usize,
     /// Command list reads that still show the new artist's refresh running.
     /// While it runs the new albums have no length; when it ends Lidarr
     /// applies "monitor none" to them, as a real Lidarr does.
-    refresh_polls: usize,
+    pub(super) refresh_polls: usize,
     /// Lidarr also has the staging root.
-    staging: bool,
+    pub(super) staging: bool,
     /// Artists on the import list exclusions (MusicBrainz ids).
-    exclusions: Vec<String>,
+    pub(super) exclusions: Vec<String>,
+    /// Items in the whole download queue.
+    pub(super) queue_total: u64,
+    /// Free bytes on the root folder, when Lidarr says.
+    pub(super) free_space: Option<i64>,
 }
 
 /// A faked Lidarr that keeps artists and albums. Logs method, path and body.
-struct FakeLidarr {
-    st: Mutex<State>,
-    log: Mutex<Vec<(Method, String, String)>>,
+pub(super) struct FakeLidarr {
+    pub(super) st: Mutex<State>,
+    pub(super) log: Mutex<Vec<(Method, String, String)>>,
 }
 
 impl FakeLidarr {
@@ -103,7 +107,7 @@ impl FakeLidarr {
         Arc::new(Self { st: Mutex::new(State { next_id: 100, ..Default::default() }), log: Mutex::new(vec![]) })
     }
 
-    fn writes(&self) -> Vec<(Method, String, String)> {
+    pub(super) fn writes(&self) -> Vec<(Method, String, String)> {
         self.log.lock().iter().filter(|(m, _, _)| *m != Method::Get).cloned().collect()
     }
 
@@ -127,7 +131,7 @@ impl FakeLidarr {
                 }
                 let p = ROOT;
                 let mut roots = vec![json!({"id": 1, "path": p, "accessible": true, "unmappedFolders": [{"name": "Elsewhere", "path": format!("{p}/Elsewhere")}],
-                              "defaultQualityProfileId": 2, "defaultMetadataProfileId": 3})];
+                              "defaultQualityProfileId": 2, "defaultMetadataProfileId": 3, "freeSpace": st.free_space})];
                 if st.staging {
                     roots.push(json!({"id": 2, "path": STAGING, "accessible": true, "defaultQualityProfileId": 2, "defaultMetadataProfileId": 3}));
                 }
@@ -171,6 +175,7 @@ impl FakeLidarr {
                 }
             }
             (Method::Get, "/queue/details") => (200, Value::Array(st.queue.clone())),
+            (Method::Get, "/queue") => (200, json!({"page": 1, "pageSize": 1, "totalRecords": st.queue_total, "records": []})),
             (Method::Get, "/history") => (200, json!({"records": st.history.clone()})),
             (Method::Post, "/artist") => {
                 let b: Value = serde_json::from_str(body).unwrap();
@@ -249,15 +254,15 @@ impl Web for FakeLidarr {
     }
 }
 
-struct Rig {
-    _dir: tempfile::TempDir,
-    db: DbHandle,
-    web: Arc<FakeLidarr>,
-    mb: Arc<FakeMb>,
-    lidarr: Lidarr,
+pub(super) struct Rig {
+    pub(super) _dir: tempfile::TempDir,
+    pub(super) db: DbHandle,
+    pub(super) web: Arc<FakeLidarr>,
+    pub(super) mb: Arc<FakeMb>,
+    pub(super) lidarr: Lidarr,
 }
 
-fn rig() -> Rig {
+pub(super) fn rig() -> Rig {
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("r.db")).unwrap();
     let s = crate::settings::Settings { lidarr_url: "http://10.20.30.40:8686".into(), ..Default::default() };
@@ -290,7 +295,7 @@ fn rig() -> Rig {
     Rig { _dir: dir, db, web, mb, lidarr }
 }
 
-fn input(rgid: &str, title: &str, typed: Option<&str>) -> RequestInput {
+pub(super) fn input(rgid: &str, title: &str, typed: Option<&str>) -> RequestInput {
     RequestInput {
         release_group_id: rgid.into(),
         title: title.into(),
@@ -302,7 +307,7 @@ fn input(rgid: &str, title: &str, typed: Option<&str>) -> RequestInput {
 }
 
 /// Every write that reached Lidarr is one of the three allowed, by method and path.
-fn assert_only_allowed_writes(web: &FakeLidarr) {
+pub(super) fn assert_only_allowed_writes(web: &FakeLidarr) {
     for (m, p, _) in web.log.lock().iter() {
         let ok = match m {
             Method::Get => p.starts_with("/api/v1/"),

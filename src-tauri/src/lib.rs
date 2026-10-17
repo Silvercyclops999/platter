@@ -765,6 +765,20 @@ pub fn run() {
                 plex_server: Arc::new(lidarr::plexside::PlexLive(plex.clone())),
             });
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
+            // Bring in my listening: albums from Played a lot, a few a day.
+            let bring_in = {
+                let (day_db, hidden_store) = (db.clone(), sync_store.clone());
+                lidarr::waves::Waves::new(lidarr::waves::WavesDeps {
+                    lidarr: lidarr_service.clone(),
+                    notifier: Arc::new(social::commands::OsNotifier(app.handle().clone())),
+                    day_of: Arc::new(move |at| lidarr::waves::local_day(&day_db, at)),
+                    hidden: Arc::new(move || {
+                        hidden_store.list(&sync::store::PLAYED_HIDDEN).map(|v| v.into_iter().map(|(k, _)| k).collect()).unwrap_or_default()
+                    }),
+                })
+            };
+            tauri::async_runtime::spawn(lidarr::waves::watch(bring_in.clone()));
+            app.manage(bring_in);
             // Upgrades: better copies through the staging folder, swapped on this computer.
             let upgrades = lidarr::upgrade::Upgrades::new(lidarr::upgrade::UpgradeDeps {
                 lidarr: lidarr_service.clone(),
@@ -1760,6 +1774,9 @@ pub fn run() {
             lidarr::commands::lidarr_request_preview,
             lidarr::commands::lidarr_request,
             lidarr::commands::lidarr_request_batch,
+            lidarr::commands::bring_in_status,
+            lidarr::commands::bring_in_pause,
+            lidarr::commands::bring_in_needs_you,
             lidarr::commands::lidarr_requests,
             lidarr::commands::lidarr_request_cancel,
             lidarr::commands::lidarr_missing_releases,

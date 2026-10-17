@@ -253,7 +253,7 @@ struct Plan {
 }
 
 impl Lidarr {
-    fn records(&self) -> Vec<RequestRecord> {
+    pub(super) fn records(&self) -> Vec<RequestRecord> {
         self.inner.db.read(|c| kv_get(c, REQUESTS_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
@@ -265,7 +265,7 @@ impl Lidarr {
         self.inner.db.write(|c| kv_set(c, REQUESTS_KEY, &json))
     }
 
-    fn upsert(&self, r: &RequestRecord) -> AppResult<()> {
+    pub(super) fn upsert(&self, r: &RequestRecord) -> AppResult<()> {
         let mut list = self.records();
         match list.iter_mut().find(|x| x.id == r.id) {
             Some(x) => *x = r.clone(),
@@ -573,7 +573,7 @@ impl Lidarr {
     /// Send one request: check MusicBrainz and the whole setup again, then
     /// the writes. Network failures come back as errors so the caller keeps
     /// the request waiting.
-    async fn send(&self, rec: RequestRecord) -> AppResult<RequestRecord> {
+    pub(super) async fn send(&self, rec: RequestRecord) -> AppResult<RequestRecord> {
         self.send_to(rec, &Dest::Library).await
     }
 

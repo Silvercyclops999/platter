@@ -69,6 +69,9 @@ pub struct RootFolder {
     /// Whether new albums get monitored by default (`all`, `none`, `new`).
     #[serde(default)]
     pub default_new_item_monitor_option: Option<String>,
+    /// Free space on the folder's drive, bytes (read only).
+    #[serde(default)]
+    pub free_space: Option<i64>,
 }
 
 /// An artist Lidarr's import lists must never add (`GET /importlistexclusion`).
@@ -726,6 +729,12 @@ impl LidarrClient {
         let ids = album_ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
         let p: Paged<QueueItem> = self.get("/queue/details", &[("albumIds", ids.as_str())]).await?;
         Ok(p.into_vec())
+    }
+
+    /// How many items Lidarr's download queue holds.
+    pub async fn queue_total(&self) -> AppResult<u64> {
+        let v: serde_json::Value = self.get("/queue", &[("page", "1"), ("pageSize", "1")]).await?;
+        Ok(v.get("totalRecords").and_then(serde_json::Value::as_u64).or_else(|| v.as_array().map(|a| a.len() as u64)).unwrap_or(0))
     }
 
     /// The newest history events for one album.
