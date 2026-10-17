@@ -265,19 +265,29 @@ impl Events {
 
 /// A fake player's timeline answer, changeable mid-test.
 #[derive(Clone)]
-struct Timeline(Arc<Mutex<(u16, String)>>);
+struct Timeline(Arc<Mutex<(u16, String)>>, Arc<Mutex<Vec<String>>>);
 
 impl Timeline {
     fn new() -> Self {
-        Self(Arc::new(Mutex::new((200, timeline("stopped", None, 0)))))
+        Self(Arc::new(Mutex::new((200, timeline("stopped", None, 0)))), Arc::default())
     }
     fn set(&self, status: u16, body: String) {
         *self.0.lock() = (status, body);
+    }
+    /// Answers the next poll with `body`, then goes back to the set one.
+    fn once(&self, body: String) {
+        self.1.lock().push(body);
+    }
+    fn once_left(&self) -> usize {
+        self.1.lock().len()
     }
 }
 
 impl Respond for Timeline {
     fn respond(&self, _: &Request) -> ResponseTemplate {
+        if let Some(b) = self.1.lock().pop() {
+            return ResponseTemplate::new(200).set_body_string(b);
+        }
         let (s, b) = self.0.lock().clone();
         ResponseTemplate::new(s).set_body_string(b)
     }
@@ -666,6 +676,48 @@ async fn stopped_by_someone_else_says_so_and_controls_come_back() {
     // A later return or move clears the note.
     r.remote.return_here().await.unwrap();
     assert_eq!(r.remote.state().stopped_on, None);
+}
+
+#[tokio::test]
+async fn one_stopped_answer_between_songs_doesnt_end_the_session() {
+    let r = rig().await;
+    r.remote.move_to("amp").await.unwrap();
+    r.tl.set(200, timeline("playing", Some("a"), 65_000));
+    wait_for("playing", || r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+    r.tl.once(timeline("stopped", None, 0));
+    wait_for("the stopped answer", || r.tl.once_left() == 0).await;
+    // A few more polls go by, playing.
+    let before = requests(&r.player, "/player/timeline/poll").await.len();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while requests(&r.player, "/player/timeline/poll").await.len() < before + 4 {
+        assert!(std::time::Instant::now() < deadline, "the player was never polled");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let st = r.remote.state();
+    assert!(st.session.is_some());
+    assert_eq!(st.stopped_on, None);
+    assert!(!r.local.log().iter().any(|l| l.starts_with("jump")), "{:?}", r.local.log());
+}
+
+#[tokio::test]
+async fn a_new_queue_the_player_refuses_keeps_the_session_it_has() {
+    let r = rig().await;
+    r.remote.move_to("amp").await.unwrap();
+    r.tl.set(200, timeline("playing", Some("a"), 65_000));
+    wait_for("playing", || r.remote.state().session.is_some_and(|s| s.status == RemoteStatus::Playing)).await;
+    Mock::given(method("GET"))
+        .and(path("/player/playback/playMedia"))
+        .respond_with(ResponseTemplate::new(500))
+        .with_priority(1)
+        .mount(&r.player)
+        .await;
+    let ctx = PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(vec!["x".into(), "y".into()]) };
+    assert!(r.remote.play_context(ctx, None).await.is_err());
+    // Still following what plays there.
+    let st = r.remote.state();
+    assert_eq!(st.session.and_then(|s| s.track).map(|t| t.id).as_deref(), Some("a"));
+    r.tl.set(200, timeline("playing", Some("b"), 1_000));
+    wait_for("following", || r.remote.state().session.and_then(|s| s.track).is_some_and(|t| t.id == "b")).await;
 }
 
 #[tokio::test]

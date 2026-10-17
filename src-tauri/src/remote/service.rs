@@ -185,7 +185,12 @@ struct Active {
     started: Instant,
     seen_playing: bool,
     misses: u32,
+    /// "Stopped" answers in a row (one alone is often a song change).
+    stops: u32,
 }
+
+/// "Stopped" answers in a row before the player counts as stopped there.
+const STOPS_IN_ROW: u32 = 3;
 
 struct Inner {
     env: Arc<dyn RemoteEnv>,
@@ -825,7 +830,8 @@ impl RemoteService {
                         server.token.clone()
                     }
                 };
-                let plan = cast::plan::plan(&server, &token, &self.inner.own_id, &pq.id, &tracks, st.position_ms, st.repeat);
+                let at = self.position_now(&track.id, st.position_ms).await;
+                let plan = cast::plan::plan(&server, &token, &self.inner.own_id, &pq.id, &tracks, at, st.repeat);
                 let link = CastLink::start(&dev, &plan, lan.tls.clone(), self.inner.cfg.timeout)
                     .await
                     .map_err(|e| {
@@ -850,7 +856,8 @@ impl RemoteService {
                 };
                 let items = super::dlna::plan(&server, &token, &self.inner.own_id, &dev, &tracks);
                 let soap = super::dlna::soap::Soap::new(self.inner.http.clone(), self.inner.cfg.timeout);
-                let link = super::dlna::DlnaLink::start(*dev, items, 0, st.position_ms, st.repeat, soap).await.map_err(|e| match e {
+                let at = self.position_now(&track.id, st.position_ms).await;
+                let link = super::dlna::DlnaLink::start(*dev, items, 0, at, st.repeat, soap).await.map_err(|e| match e {
                     AppError::Invalid(why) => AppError::Invalid(format!("Can't play on {name}: {}.", why.to_lowercase())),
                     other => {
                         tracing::info!(kind = other.kind(), "renderer didn't start");
@@ -912,6 +919,7 @@ impl RemoteService {
             started: Instant::now(),
             seen_playing: false,
             misses: 0,
+            stops: 0,
         });
         *self.inner.stopped_on.lock() = None;
         let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -921,14 +929,24 @@ impl RemoteService {
     }
 
     async fn resend(&self, found: Found) -> AppResult<RemoteState> {
-        // The old follow loop stops; the player gets the new queue.
-        self.inner.generation.fetch_add(1, Ordering::SeqCst);
-        self.inner.active.lock().take();
+        // The player gets the new queue. The session it has now stays (and
+        // is followed) until the new one has started, so a failed send
+        // doesn't leave it playing with nothing here following it.
         let r = self.start_on(found).await;
         if r.is_err() {
             self.emit_state();
         }
         r
+    }
+
+    /// Where playback here is now, read again just before the player is
+    /// told to start (getting the queue ready can take a few seconds while
+    /// the song plays on here). `fallback` if the song changed meanwhile.
+    async fn position_now(&self, track_id: &str, fallback: u64) -> u64 {
+        match self.inner.local.state().await {
+            Ok(s) if s.track.as_ref().is_some_and(|t| t.id == track_id) => s.position_ms,
+            _ => fallback,
+        }
     }
 
     /// Send Platter's queue to `found` and start following it.
@@ -962,7 +980,7 @@ impl RemoteService {
             user_queue: st.queue.user_queue.iter().map(|i| i.track.id.clone()).take(peer::MAX_SONGS).collect(),
             next_up: st.queue.next_up.iter().map(|i| i.track.id.clone()).take(peer::MAX_SONGS).collect(),
             context: st.queue.context.clone(),
-            position_ms: st.position_ms,
+            position_ms: self.position_now(&track.id, st.position_ms).await,
             shuffle: st.shuffle,
             repeat: st.repeat,
             play: true,
@@ -1022,6 +1040,7 @@ impl RemoteService {
             started: Instant::now(),
             seen_playing: false,
             misses: 0,
+            stops: 0,
         });
         *self.inner.stopped_on.lock() = None;
         let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1056,7 +1075,7 @@ impl RemoteService {
             ("port", port),
             ("token", server.token.expose().to_string()),
             ("key", format!("/library/metadata/{}", crate::sid::key(&track.id))),
-            ("offset", st.position_ms.to_string()),
+            ("offset", self.position_now(&track.id, st.position_ms).await.to_string()),
             ("containerKey", format!("/playQueues/{}?window=100&own=1", pq.id)),
             ("type", "music".to_string()),
         ];
@@ -1108,6 +1127,7 @@ impl RemoteService {
             started: Instant::now(),
             seen_playing: false,
             misses: 0,
+            stops: 0,
         });
         *self.inner.stopped_on.lock() = None;
         let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1607,8 +1627,9 @@ impl RemoteService {
                 Ok(tl) => {
                     a.misses = 0;
                     let stopped = tl.as_ref().is_none_or(|t| t.state == "stopped");
+                    a.stops = if stopped { a.stops + 1 } else { 0 };
                     if stopped {
-                        if a.seen_playing || a.started.elapsed() >= self.inner.cfg.grace {
+                        if a.stops >= STOPS_IN_ROW && (a.seen_playing || a.started.elapsed() >= self.inner.cfg.grace) {
                             // Stopped there by someone else: control comes back here.
                             self.inner.generation.fetch_add(1, Ordering::SeqCst);
                             self.inner.active.lock().take();
