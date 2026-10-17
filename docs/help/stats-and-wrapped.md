@@ -1,18 +1,26 @@
 # Stats and recaps
 
-What the Stats page shows, how monthly recaps and comparing with a friend work, and how to bring in plays from before Platter.
+What your profile and the Stats page show, how monthly recaps and comparing with a friend work, and how to bring in plays from before Platter.
 
 ![The Stats page for the last 4 weeks](images/stats.png)
 
+## Your profile
+
+Choose Profile at the top of the app menu (your picture in the top bar). It shows your Plex picture and name, how many playlists you have and how many plays this month, then this month's minutes, plays and longest streak. Under that come your top artists and top tracks this month, your playlists and your friends, with links to all your stats and to Wrapped. Show all opens Stats on this month, and Compare on a friend opens the Compare tab with them.
+
+Your top artists and tracks are only visible to you. Your playlists and friends are meant for the people you share your music with. Nothing on the profile is public or sent anywhere: it's drawn on this computer.
+
 ## Opening Stats
 
-Open Stats from the app menu or the Stats row in Your Library. Everything is counted on this computer, from what you've played in Platter and any history you brought in. Skips don't count. To hide the page, turn off Settings, Library, Stats, Stats page.
+Open Stats from the app menu, the Stats row in Your Library, or Your profile. Everything is counted on this computer, from what you've played in Platter and any history you brought in. Skips don't count. To hide the page, turn off Settings, Library, Stats, Stats page.
 
 ## Picking a range
 
 The chips at the top pick the days to count: 4 weeks, 6 months, This year, A year, A month, All time or Custom. A year and A month add a picker, and Custom lets you choose two dates.
 
-The top of the page sums up the range: minutes listened, plays, songs, artists, albums and days, your top artist, your top song, your longest streak and how many new artists you found.
+Under the range are three tabs: Overview, Recaps and Compare. Arrow keys move between them.
+
+Overview starts by summing up the range: minutes listened, plays, songs, artists, albums and days, the share your top artist took, your longest streak and how many new artists you found. Your top song and artist lead the top lists just below.
 
 ## Top lists
 
@@ -34,7 +42,7 @@ Moments are small stories from the range: your first song, On repeat (the day yo
 
 ## Monthly recaps
 
-With Settings, Library, Stats, Show monthly stats on, each past month gets a card with its minutes, the change on the month before, and its top artist and song. Choose Share to make an image in Story or Square shape, then Copy image or Save image. Unreleased songs are left off the card and nothing is uploaded.
+Recaps shows a card for each month in the range (up to 12, newest first), then Wrapped and your Top Songs lists. With Settings, Library, Stats, Show monthly recaps on, each month gets a card with its minutes, the change on the month before, and its top artist and song. Choose Share to make an image in Story or Square shape, then Copy image or Save image. Unreleased songs are left off the card and nothing is uploaded.
 
 ## A whole year
 
@@ -48,7 +56,7 @@ Settings, Library, Stats, Stats strip on song, artist and album pages shows your
 
 ## Compare with a friend
 
-Turn on Settings, Library, Stats, Compare stats with friends (it starts off). When a Platter friend shares their stats with you, the Stats page shows your taste overlap, artists in common, and their songs you haven't played. Only a summary is shared: up to 50 top artists and songs from about the last six months, never your history. Unreleased songs stay out unless you both agree.
+Turn on Settings, Library, Stats, Compare stats with friends (it starts off). When a Platter friend shares their stats with you, the Compare tab shows your taste overlap, artists in common, and their songs you haven't played. Only a summary is shared: up to 50 top artists and songs from about the last six months, never your history. Unreleased songs stay out unless you both agree.
 
 <!-- TODO: how a friend's summary reaches this computer is unclear; the code stores and compares summaries but nothing in the app sends or receives them yet. -->
 

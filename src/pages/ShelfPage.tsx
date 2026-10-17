@@ -2,8 +2,8 @@
  * Your shelf: the albums you own on vinyl, CD, cassette or another format,
  * the Discogs import with what it found ("On the shelf, not in your
  * library", each with Request and store links), and "Missing from the
- * shelf" (albums you play most and don't own) while its setting is on.
- * The Stats page shows a short version of the same.
+ * shelf" (albums you play most and don't own) while its setting is on,
+ * and the shelf in numbers (copies by format, owned albums played most).
  */
 import { Disc3, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -101,33 +101,29 @@ export function MissingList({ albums, limit }: { albums: ShelfAlbum[]; limit?: n
   );
 }
 
-/** The Stats page's shelf. Hidden while the setting is off or nothing's owned. */
-export function ShelfStatsSection() {
-  const s = useShelfStats();
-  if (!s || (s.albums === 0 && !s.missing?.length)) return null;
+/** The shelf in numbers: albums by format and the owned albums played most. Hidden until something's owned. */
+export function ShelfStatsSection({ stats }: { stats: ShelfStats | null }) {
+  const s = stats;
+  if (!s || s.albums === 0) return null;
   return (
-    <section className="stats-section shelf-stats" aria-labelledby="stats-shelf">
-      <div className="stats-section__head">
-        <h2 id="stats-shelf" className="stats-section__title">
-          On your shelf
-        </h2>
-        <span className="stats-section__actions">
-          <Button size="sm" variant="ghost" onClick={() => nav.go({ name: "shelf" })}>
-            Open your shelf
-          </Button>
-        </span>
-      </div>
-      <dl className="stats-tiles shelf-tiles">
-        <div className="stats-tile">
-          <dt className="stats-tile__label">Albums</dt>
-          <dd className="stats-tile__value">{s.albums}</dd>
+    <section className="shelf-section" aria-labelledby="shelf-numbers" data-testid="shelf-numbers">
+      <h2 id="shelf-numbers" className="section-title">
+        Your shelf in numbers
+      </h2>
+      <dl className="shelf-tiles">
+        <div className="shelf-tile">
+          <dt className="shelf-tile__label">Albums</dt>
+          <dd className="shelf-tile__value">{s.albums}</dd>
         </div>
         {s.byFormat.map((f) => (
-          <div key={f.format} className="stats-tile">
-            <dt className="stats-tile__label">{FORMAT_LABEL[f.format]}</dt>
-            <dd className="stats-tile__value">
+          <div key={f.format} className="shelf-tile">
+            <dt className="shelf-tile__label">{FORMAT_LABEL[f.format]}</dt>
+            <dd className="shelf-tile__value">
               {f.copies}
-              <span className="stats-tile__sub">{f.copies === 1 ? "copy" : "copies"}{f.copies !== f.albums && ` of ${plural(f.albums, "album")}`}</span>
+              <span className="shelf-tile__sub">
+                {f.copies === 1 ? "copy" : "copies"}
+                {f.copies !== f.albums && ` of ${plural(f.albums, "album")}`}
+              </span>
             </dd>
           </div>
         ))}
@@ -140,12 +136,6 @@ export function ShelfStatsSection() {
               <AlbumRow key={a.albumId} a={a} sub={plural(a.plays, "play")} />
             ))}
           </ol>
-        </>
-      )}
-      {s.missing && (
-        <>
-          <h3 className="shelf-subtitle">Missing from the shelf</h3>
-          <MissingList albums={s.missing} limit={5} />
         </>
       )}
     </section>
@@ -247,6 +237,7 @@ export function ShelfPage() {
           : "Albums you own on vinyl, CD, cassette or another format. Mark one from an album's menu."}
       </p>
       <DiscogsPanel st={discogs} />
+      <ShelfStatsSection stats={stats} />
 
       {unmatched.length > 0 && (
         <section className="shelf-section" aria-labelledby="shelf-only">

@@ -10,7 +10,7 @@ import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
 import { barFractions, change, minutes, monthName } from "../lib/stats";
-import type { MonthRecap, StatsSpan } from "../lib/statsTypes";
+import type { MonthRecap, StatsRange, StatsSpan } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
 
 const RecapCardDialog = lazy(() => import("./RecapCardDialog").then((m) => ({ default: m.RecapCardDialog })));
@@ -89,20 +89,29 @@ function RecapCard({ month, onShare }: { month: string; onShare: (r: MonthRecap)
   );
 }
 
-export function MonthlySection({ span }: { span: StatsSpan }) {
+/** The months with plays that touch a range, newest first, at most `max`. */
+export function monthsIn(span: StatsSpan, range: StatsRange | null, max = 12): string[] {
+  const from = range?.from?.slice(0, 7) ?? null;
+  const to = range?.to?.slice(0, 7) ?? null;
+  return span.months.filter((m) => (!from || m >= from) && (!to || m <= to)).slice(0, max);
+}
+
+export function MonthlySection({ months }: { months: string[] }) {
   const [sharing, setSharing] = useState<MonthRecap | null>(null);
-  const months = span.months.slice(0, 12);
-  if (!months.length) return null;
   return (
     <section className="stats-section" aria-labelledby="stats-months" data-shot="recaps">
       <h2 id="stats-months" className="stats-section__title">
         Monthly recaps
       </h2>
-      <ul className="recap-cards">
-        {months.map((m) => (
-          <RecapCard key={m} month={m} onShare={setSharing} />
-        ))}
-      </ul>
+      {months.length === 0 ? (
+        <p className="stats-muted">No month in this range has plays. Pick a longer range to see more months.</p>
+      ) : (
+        <ul className="recap-cards">
+          {months.map((m) => (
+            <RecapCard key={m} month={m} onShare={setSharing} />
+          ))}
+        </ul>
+      )}
       {sharing && (
         <Suspense fallback={null}>
           <RecapCardDialog recap={sharing} onClose={() => setSharing(null)} />

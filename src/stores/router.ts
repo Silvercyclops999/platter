@@ -8,6 +8,9 @@ import { fullWindow, useFullWindow } from "./fullWindow";
 
 export type LibraryTab = "artists" | "albums" | "playlists";
 
+/** The Stats page's tabs. */
+export type StatsTab = "overview" | "recaps" | "compare";
+
 export type Route =
   | { name: "home" }
   | { name: "search"; query?: string }
@@ -44,8 +47,10 @@ export type Route =
   | { name: "radio"; seed: string }
   /** Bookmarked songs and pages. */
   | { name: "bookmarks" }
-  /** Listening stats for a range of days. */
-  | { name: "stats" }
+  /** Listening stats: a tab, optionally one month's range, or a friend to compare with. */
+  | { name: "stats"; tab?: StatsTab; month?: string; friend?: string }
+  /** Your profile: who you are, this month's listening, playlists and friends. */
+  | { name: "profile" }
   /** A year's Top Songs list, or All-Time without a year. */
   | { name: "topSongs"; year?: number }
   /** Library import: the reports and review queue, one imported list (`list:<id>`), or the Missing songs (`missing`). */

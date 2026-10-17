@@ -110,7 +110,7 @@ describe("app menu", () => {
     await screen.findByRole("menuitem", { name: "Sound map" });
     // The library doctor's count (when it has loaded) is a badge after its name.
     const items = [...menu.querySelectorAll('[role^="menuitem"]')].map((i) => i.textContent?.replace(/^(Library doctor)\d+$/, "$1"));
-    expect(items).toEqual(["Create playlist", "Recents", "Stats", `${new Date().getFullYear()} Wrapped`, "Library doctor", "Devices", "Sound map", "Miniplayer", `Settings${"Ctrl+,"}`, `Keyboard shortcuts${"Ctrl+/"}`, "Help", "Private session", "Go offline", "Check for updates", "Sign out"]);
+    expect(items).toEqual(["Profile", "Create playlist", "Recents", "Stats", `${new Date().getFullYear()} Wrapped`, "Library doctor", "Devices", "Sound map", "Miniplayer", `Settings${"Ctrl+,"}`, `Keyboard shortcuts${"Ctrl+/"}`, "Help", "Private session", "Go offline", "Check for updates", "Sign out"]);
   });
 
   it("Escape closes it and returns focus to the avatar", async () => {
@@ -144,6 +144,8 @@ describe("app menu", () => {
     screen.getByRole("button", { name: /^App menu/ }).focus();
     await user.keyboard("{Enter}");
     await screen.findByRole("menuitem", { name: "Sound map" });
+    expect(screen.getByRole("menuitem", { name: "Profile" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Create playlist" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Recents" })).toHaveFocus();
@@ -167,7 +169,7 @@ describe("app menu", () => {
     expect(screen.getByRole("menuitem", { name: "Help" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemcheckbox", { name: "Private session" })).toHaveFocus();
-    await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}");
+    await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toHaveFocus();
   });
 

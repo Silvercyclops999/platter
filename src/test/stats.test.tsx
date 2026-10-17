@@ -167,8 +167,10 @@ describe("Stats page", () => {
     const hero = await screen.findByTestId("stats-hero");
     const o = await backend.statsOverview(toRange({ kind: "4w" }, (await backend.statsSpan()).today));
     expect(within(hero).getByTestId("hero-sentence")).toHaveTextContent(`You listened for ${duration(o.totals.ms)} on ${o.totals.days} days. ${o.topArtists[0].name} took`);
-    expect(within(hero).getByText("Top artist")).toBeInTheDocument();
-    expect(within(hero).getAllByText(o.topArtists[0].name)).toHaveLength(2);
+    // The top artist and song lead the top lists; the hero doesn't repeat them.
+    expect(within(hero).queryByText("Top artist")).toBeNull();
+    expect(within(hero).queryByText("Top song")).toBeNull();
+    expect(within(hero).getAllByText(o.topArtists[0].name)).toHaveLength(1);
     expect(within(hero).getByText("Longest streak")).toBeInTheDocument();
     expect(within(hero).getByText("New artists found")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Last 4 weeks/ })).toBeInTheDocument();
@@ -187,7 +189,8 @@ describe("Stats page", () => {
     expect(screen.getByTestId("stats-feature")).toHaveAccessibleName(/^Your top artist: /);
     await user.click(screen.getByRole("tab", { name: "Genres" }));
     // Every row has artwork: a cover, or a lettered tile for a genre without one.
-    const rows = within(screen.getByRole("tabpanel")).getAllByRole("listitem");
+    const lists = screen.getAllByRole("tabpanel").find((p) => p.classList.contains("stats-section__panel"))!;
+    const rows = within(lists).getAllByRole("listitem");
     for (const r of rows) expect(r.querySelector(".art, .stats-genre-tile")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "A month" }));
     expect(await screen.findByRole("combobox", { name: "Month" })).toBeInTheDocument();
@@ -210,6 +213,9 @@ describe("Stats page", () => {
   it("monthly recaps show while that setting is on and open a share card", async () => {
     const user = userEvent.setup();
     const { unmount } = render(<StatsPage />);
+    await user.click(await screen.findByRole("tab", { name: "Recaps" }));
+    // The range picks the months: All time shows up to 12.
+    await user.click(screen.getByRole("button", { name: "All time" }));
     const cards = await screen.findAllByTestId("recap-card");
     expect(cards.length).toBeGreaterThan(3);
     const share = await within(cards[1]).findByRole("button", { name: /^Share / });
@@ -217,20 +223,24 @@ describe("Stats page", () => {
     expect(await screen.findByTestId("recap-share")).toBeInTheDocument();
     expect(screen.getByText("Unreleased songs are left off the card. Nothing is uploaded.")).toBeInTheDocument();
     unmount();
-    await settings({ monthlyStatsOnProfile: false });
-    render(<StatsPage />);
-    await screen.findByTestId("stats-hero");
+    await settings({ monthlyStats: false });
+    render(<StatsPage tab="recaps" />);
+    await screen.findByTestId("stats-panel-recaps");
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Monthly recaps" })).toBeNull());
     expect(screen.queryByTestId("recap-card")).toBeNull();
   });
 
   it("compare is off by default, and shows the overlap with a friend when on", async () => {
+    const user = userEvent.setup();
     const { unmount } = render(<StatsPage />);
     await screen.findByTestId("stats-hero");
+    await user.click(screen.getByRole("tab", { name: "Compare" }));
+    expect(await screen.findByText("Compare is off")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Compare with a friend" })).toBeNull();
     await expect(backend.statsFriends()).rejects.toMatchObject({ kind: "invalid" });
     unmount();
     await settings({ statsCompare: true });
-    render(<StatsPage />);
+    render(<StatsPage tab="compare" />);
     expect(await screen.findByRole("heading", { name: "Compare with a friend" })).toBeInTheDocument();
     const view = await screen.findByTestId("compare-view");
     expect(within(view).getByText(/% taste overlap/)).toBeInTheDocument();

@@ -1,0 +1,112 @@
+/* Your profile: a big name beside a round photo, a quiet row of this
+   month's numbers, then sections between hairlines. Colours come from
+   theme tokens only. */
+.profile {
+  --profile-line: color-mix(in srgb, var(--color-ink) 9%, transparent);
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-bottom: var(--space-16);
+  container-type: inline-size;
+  container-name: profile;
+}
+
+.profile-head { display: flex; align-items: flex-end; gap: var(--space-8); padding-top: var(--space-6); }
+.profile-head__face {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 192px;
+  height: 192px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: 80px;
+  font-weight: var(--font-weight-bold);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.profile-head__text { min-width: 0; padding-bottom: var(--space-2); }
+.profile-head__eyebrow { margin: 0; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.profile-head__name {
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: clamp(40px, 8cqi, 96px);
+  font-weight: var(--font-weight-display);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.profile-head__meta { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+
+.profile-actions { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-6) 0 var(--space-2); }
+
+.profile-numbers { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-12); margin: var(--space-4) 0 0; padding: var(--space-4) 0; border-top: 1px solid var(--profile-line); border-bottom: 1px solid var(--profile-line); }
+.profile-number { display: flex; flex-direction: column-reverse; gap: 2px; }
+.profile-number__label { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.profile-number__value { margin: 0; font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
+
+.profile-section { margin-top: var(--space-12); }
+.profile-section__head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
+.profile-section__title { margin: 0; }
+.profile-section__note { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.profile-section__link {
+  flex: none;
+  padding: var(--space-1) 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+.profile-section__link:hover { color: var(--color-text-primary); text-decoration: underline; }
+.profile-section__link:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: 4px; }
+.profile-muted { margin: var(--space-2) 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+.profile-cards { list-style: none; margin: 0 calc(-1 * var(--space-3)); padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.profile-plays { font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.profile-gone { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-2) var(--space-4); }
+.profile-gone__num { width: 16px; text-align: right; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.profile-gone__text { display: flex; flex-direction: column; min-width: 0; color: var(--color-text-primary); }
+.profile-gone__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+.profile-friends { list-style: none; margin: 0 calc(-1 * var(--space-3)); padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.profile-friend { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: 0; padding: var(--space-3); border-radius: var(--radius-card); }
+.profile-friend:hover { background: var(--color-state-hover); }
+.profile-friend__face {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  color: var(--color-text-secondary);
+  font-size: 44px;
+  font-weight: var(--font-weight-bold);
+}
+.profile-friend__name { max-width: 100%; font-size: var(--font-size-lg); color: var(--color-text-primary); }
+.profile-friend__sub { font-size: var(--font-size-md); color: var(--color-text-secondary); }
+.profile-friend .btn { margin-left: calc(-1 * var(--space-3)); }
+
+.profile-links { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-12); padding-top: var(--space-6); border-top: 1px solid var(--profile-line); }
+
+.profile-empty { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4) var(--space-6); margin-top: var(--space-6); padding: var(--space-6); border-radius: var(--radius-card); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+.profile-empty > div { flex: 1; min-width: 220px; }
+.profile-empty__title { margin: 0 0 var(--space-1); font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); }
+.profile-empty__text { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+@container profile (max-width: 640px) {
+  .profile-head { flex-direction: column; align-items: flex-start; gap: var(--space-4); }
+  .profile-head__face { width: 128px; height: 128px; font-size: 52px; }
+  .profile-numbers { gap: var(--space-3) var(--space-8); }
+  .profile-cards,
+  .profile-friends { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); }
+}

@@ -188,31 +188,34 @@ describe("library", () => {
 });
 
 describe("stats", () => {
-  it("counts the shelf by format, with the owned albums played most", async () => {
-    render(<ShelfStatsSection />);
-    const section = await screen.findByRole("region", { name: "On your shelf" }, SLOW);
+  it("the shelf page counts the shelf by format, with the owned albums played most", async () => {
+    render(<ShelfPage />);
+    const section = await screen.findByRole("region", { name: "Your shelf in numbers" }, SLOW);
     expect(within(section).getByText("Vinyl").closest("div")).toHaveTextContent("Vinyl2");
     expect(within(section).getByText("Cassette")).toBeInTheDocument();
     const most = within(section).getByRole("list", { name: "Owned albums you play most" });
     expect(within(most).getAllByRole("listitem")[0]).toHaveTextContent(played()[0].title);
+    // The page's own list is the only Missing from the shelf.
     expect(within(section).queryByText("Missing from the shelf")).toBeNull();
-    await userEvent.click(within(section).getByRole("button", { name: "Open your shelf" }));
-    expect(route()).toEqual({ name: "shelf" });
   });
 
-  it("lists what's missing from the shelf once that's turned on", async () => {
+  it("lists what's missing on the shelf page once that's turned on, once", async () => {
     await setUp({ shelfMissingList: true });
-    render(<ShelfStatsSection />);
+    render(<ShelfPage />);
     const list = await screen.findByRole("list", { name: "Missing from the shelf" }, SLOW);
     expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent(played()[1].title);
+    await screen.findByRole("region", { name: "Your shelf in numbers" }, SLOW);
+    expect(screen.getAllByRole("list", { name: "Missing from the shelf" })).toHaveLength(1);
   });
 
-  it("is hidden while Show physical collection is off", async () => {
+  it("is hidden with nothing owned, and while Show physical collection is off", async () => {
+    render(<ShelfStatsSection stats={{ albums: 0, copies: 0, byFormat: [], mostPlayed: [], missing: null }} />);
+    expect(screen.queryByRole("region", { name: "Your shelf in numbers" })).toBeNull();
     await setUp({ showPhysicalCollection: false });
     const spy = vi.spyOn(mock, "physicalStats");
-    render(<ShelfStatsSection />);
-    await new Promise((r) => setTimeout(r, 300));
-    expect(screen.queryByRole("region", { name: "On your shelf" })).toBeNull();
+    render(<ShelfPage />);
+    expect(await screen.findByText("Your physical collection is hidden")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Your shelf in numbers" })).toBeNull();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });

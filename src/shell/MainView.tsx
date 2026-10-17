@@ -32,6 +32,7 @@ const ImportPage = lazy(() => import("../pages/ImportPage").then((m) => ({ defau
 const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((m) => ({ default: m.SmartPlaylistPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
+const ProfilePage = lazy(() => import("../pages/ProfilePage").then((m) => ({ default: m.ProfilePage })));
 const TopSongsPage = lazy(() => import("../pages/TopSongsPage").then((m) => ({ default: m.TopSongsPage })));
 const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
 const ReleaseRadarPage = lazy(() => import("../pages/ReleaseRadar").then((m) => ({ default: m.ReleaseRadarPage })));
@@ -117,6 +118,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   newToYou: "New to you",
   shelf: "Your shelf",
   stats: "Stats",
+  profile: "Your profile",
   devices: "Devices",
   soundMap: "Sound map",
 };
@@ -187,7 +189,9 @@ function Page({ route }: { route: Route }) {
     case "bookmarks":
       return <BookmarksPage />;
     case "stats":
-      return <StatsPage />;
+      return <StatsPage tab={route.tab} month={route.month} friend={route.friend} />;
+    case "profile":
+      return <ProfilePage />;
     case "topSongs":
       return <TopSongsPage key={route.year ?? "all"} year={route.year ?? null} />;
     case "doctor":

@@ -1027,7 +1027,7 @@ export interface Backend {
   physicalList(): Promise<OwnedAlbum[]>;
   /** Mark an album as owned with these copies; no copies takes the mark off. */
   physicalSet(albumId: string, owned: SetOwned): Promise<OwnedAlbum | null>;
-  /** The shelf for the Stats page. */
+  /** The shelf in numbers (the shelf page). */
   physicalStats(): Promise<ShelfStats>;
   /** The MusicBrainz album a record on the shelf is (to request it); null when MusicBrainz doesn't know it. */
   physicalFindRelease(artist: string, title: string): Promise<CatAlbum | null>;

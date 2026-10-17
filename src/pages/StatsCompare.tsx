@@ -94,9 +94,9 @@ function CompareView({ friend, unreleasedOk }: { friend: CompareSummary; unrelea
   );
 }
 
-export function CompareSection() {
+export function CompareSection({ friend: initialFriend }: { friend?: string } = {}) {
   const { data: friends, error } = useLoad(() => backend.statsFriends(), []);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(initialFriend ?? null);
   const [unreleasedOk, setUnreleasedOk] = useState(false);
   const friend = friends?.find((f) => f.name === picked) ?? friends?.[0] ?? null;
   return (

@@ -1,38 +1,44 @@
 /**
  * Stats: your listening for a range of days. Range chips (4 weeks, 6
  * months, this year, a picked year or month, all time, custom dates), then
- * the range in a sentence (time, days, top artist) with headline facts,
- * top songs, artists, albums and genres with Play these and Save as
- * playlist, when you listened (listening days, minutes per day or month,
- * your day by hour, each led by a sentence), moments, monthly recaps you
- * can share as a card, and comparing with a friend when that's on. Everything is counted on this computer.
+ * three tabs. Overview: the range in a sentence with two facts, top songs,
+ * artists, albums and genres with Play these and Save as playlist, when you
+ * listened (each chart led by a sentence) and moments. Recaps: the range's
+ * monthly recaps you can share as a card, then Wrapped and the Top Songs
+ * lists. Compare: comparing with a friend when that's on. Everything is
+ * counted on this computer.
  */
-import { RotateCw } from "lucide-react";
+import { RotateCw, UserRound } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
-import { ShelfStatsSection } from "./ShelfPage";
 import { Button } from "../components/Button";
 import { LikedCover } from "../components/LikedCover";
 import { Select } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
-import { ChipRow } from "../components/Tabs";
+import { ChipRow, Tabs } from "../components/Tabs";
 import { backend } from "../lib/backend";
 import { monthName, rangeLabel, toRange, type RangeChoice } from "../lib/stats";
 import type { StatsMoments, StatsOverview, StatsSpan } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
-import { nav } from "../stores/router";
+import { nav, useRouter, type StatsTab } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { WhenYouListened } from "./StatsCharts";
 import { CompareSection } from "./StatsCompare";
 import { WrappedSection } from "./StatsWrapped";
 import { StatsHero, StatsHeroSkeleton } from "./StatsHero";
 import { MomentsSection } from "./StatsMoments";
-import { MonthlySection } from "./StatsRecaps";
+import { MonthlySection, monthsIn } from "./StatsRecaps";
 import { TopLists } from "./StatsTopLists";
 import "./stats.css";
 
 export { BarChart } from "./StatsCharts";
 
 type ChipId = RangeChoice["kind"];
+
+const TABS: { id: StatsTab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "recaps", label: "Recaps" },
+  { id: "compare", label: "Compare" },
+];
 const CHIPS: { id: ChipId; label: string }[] = [
   { id: "4w", label: "4 weeks" },
   { id: "6m", label: "6 months" },
@@ -138,11 +144,18 @@ function LoadingBody() {
   );
 }
 
-export function StatsPage() {
+/** The range the page opens on: a month when asked, else the last 4 weeks. */
+function firstChoice(month: string | undefined): RangeChoice {
+  return month && /^\d{4}-\d{2}$/.test(month) ? { kind: "pickMonth", month } : { kind: "4w" };
+}
+
+export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; month?: string; friend?: string } = {}) {
   const on = useSettings((s) => s.settings?.statsPage !== false);
-  const monthly = useSettings((s) => s.settings?.monthlyStatsOnProfile !== false);
+  const monthly = useSettings((s) => s.settings?.monthlyStats !== false);
+  const wrappedOn = useSettings((s) => s.settings?.wrappedTopSongs !== false);
   const compare = useSettings((s) => !!s.settings?.statsCompare);
-  const [choice, setChoice] = useState<RangeChoice>({ kind: "4w" });
+  const [tab, setTab] = useState<StatsTab>(openTab ?? (friend ? "compare" : "overview"));
+  const [choice, setChoice] = useState<RangeChoice>(() => firstChoice(month));
   const [attempt, setAttempt] = useState(0);
   const { data: span } = useLoad(() => backend.statsSpan(), [attempt]);
   const today = span?.today ?? null;
@@ -153,6 +166,19 @@ export function StatsPage() {
   const isAll = choice.kind === "all";
   const isYear = choice.kind === "year" || choice.kind === "pickYear";
 
+  const pickTab = (t: StatsTab) => {
+    setTab(t);
+    // Back and Forward come back to the same tab.
+    const r = useRouter.getState();
+    if (r.entries[r.index]?.route.name === "stats") r.replace({ name: "stats", tab: t });
+  };
+
+  const profileLink = (
+    <Button size="sm" variant="ghost" icon={<UserRound size={14} />} onClick={() => nav.go({ name: "profile" })}>
+      Your profile
+    </Button>
+  );
+
   if (!on)
     return (
       <div className="page-pad stats" data-testid="stats">
@@ -162,10 +188,58 @@ export function StatsPage() {
     );
 
   const empty = span && !span.first;
+  const panel = (() => {
+    if (tab === "compare")
+      return compare ? (
+        <CompareSection friend={friend} />
+      ) : (
+        <StatsState
+          title="Compare is off"
+          text="Turn on Compare stats with friends in Settings to see your taste overlap with a friend who shares theirs. Only a summary is shared, never your history."
+          action={<Button onClick={() => nav.go({ name: "settings" })}>Open Settings</Button>}
+        />
+      );
+    if (tab === "recaps") {
+      if (!monthly && !wrappedOn)
+        return <StatsState title="Recaps are off" text="Turn on monthly recaps or Wrapped in Settings to see them here." action={<Button onClick={() => nav.go({ name: "settings" })}>Open Settings</Button>} />;
+      return (
+        <>
+          {monthly && span && <MonthlySection months={monthsIn(span, range)} />}
+          <WrappedSection />
+        </>
+      );
+    }
+    if (error && !o)
+      return (
+        <StatsState
+          tone="error"
+          title="Couldn't count your stats"
+          text={error.message}
+          action={
+            <Button icon={<RotateCw size={14} />} onClick={() => setAttempt((n) => n + 1)}>
+              Try again
+            </Button>
+          }
+        />
+      );
+    if (!o || !range) return <LoadingBody />;
+    return (
+      <>
+        <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
+        <TopLists key={`${range.from}:${range.to}`} o={o} range={range} title={title} />
+        <WhenYouListened o={o} title={title} today={span?.today ?? o.to} />
+        <MomentsSection moments={moments.data} rangeTitle={title} isYear={isYear} year={o.to.slice(0, 4)} error={!!moments.error} />
+      </>
+    );
+  })();
+
   return (
     <div className="page-pad stats" data-testid="stats">
       <header className="stats__header">
-        <h1 className="stats__title">Stats</h1>
+        <div className="stats__head-row">
+          <h1 className="stats__title">Stats</h1>
+          {profileLink}
+        </div>
         <p className="stats__lede">Counted on this computer from everything you've played here and the history you imported.</p>
       </header>
       {empty ? (
@@ -176,35 +250,22 @@ export function StatsPage() {
         />
       ) : (
         <>
-          <RangePicker choice={choice} span={span} onChange={setChoice} />
-          <h2 className="sr-only" aria-live="polite">
-            {title}
-          </h2>
-          {error && !o ? (
-            <StatsState
-              tone="error"
-              title="Couldn't count your stats"
-              text={error.message}
-              action={
-                <Button icon={<RotateCw size={14} />} onClick={() => setAttempt((n) => n + 1)}>
-                  Try again
-                </Button>
-              }
-            />
-          ) : !o || !range ? (
-            <LoadingBody />
+          {tab === "compare" ? (
+            <div className="stats-range">
+              <p className="stats-range__note">Compare looks at your top artists and songs from the last six months.</p>
+            </div>
           ) : (
-            <>
-              <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
-              <TopLists key={`${range.from}:${range.to}`} o={o} range={range} title={title} />
-              <WhenYouListened o={o} title={title} today={span?.today ?? o.to} />
-              <MomentsSection moments={moments.data} rangeTitle={title} isYear={isYear} year={o.to.slice(0, 4)} error={!!moments.error} />
-            </>
+            <RangePicker choice={choice} span={span} onChange={setChoice} />
           )}
-          <ShelfStatsSection />
-          {monthly && span && <MonthlySection span={span} />}
-          <WrappedSection />
-          {compare && <CompareSection />}
+          <Tabs label="Stats" items={TABS} value={tab} onChange={pickTab} idPrefix="stats-tabs" className="stats-tabs" />
+          <div id="stats-tabs-panel" role="tabpanel" aria-labelledby={`stats-tabs-tab-${tab}`} className="stats-panel" tabIndex={0} data-testid={`stats-panel-${tab}`}>
+            {tab !== "compare" && (
+              <h2 className="sr-only" aria-live="polite">
+                {title}
+              </h2>
+            )}
+            {panel}
+          </div>
         </>
       )}
     </div>

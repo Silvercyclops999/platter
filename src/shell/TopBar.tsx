@@ -247,6 +247,9 @@ export function AppMenu() {
               <span className="appmenu__who-name">{username}</span>
             </div>
           )}
+          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "profile" }))}>
+            <span>Profile</span>
+          </button>
           <HomeUserItems users={homeUsers} onPick={(u) => run(() => switchHomeUser(u, setPinFor))()} />
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => void createPlaylist())}>
             <span>Create playlist</span>
