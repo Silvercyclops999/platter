@@ -251,6 +251,20 @@ function FindingRow({
         {f.detail && <p className="lidarr-finding__detail">{f.detail}</p>}
         {f.fix && <p className="lidarr-finding__fix">{f.fix}</p>}
         {f.action && <FixButton action={f.action} onDone={onFixed} />}
+        {f.suggestedStaging && (
+          <div className="lidarr-finding__actions">
+            <Button
+              size="sm"
+              onClick={() =>
+                void updateSettings({ lidarrStagingFolder: f.suggestedStaging })
+                  .then(() => onFixed())
+                  .catch((e: AppError) => toast.error(e.message))
+              }
+            >
+              Use {f.suggestedStaging}
+            </Button>
+          </div>
+        )}
         {f.emptyRoot && (
           <div className="lidarr-finding__actions">
             {f.emptyRoot.confirmed ? (

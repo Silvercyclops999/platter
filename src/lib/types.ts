@@ -2207,6 +2207,8 @@ export interface LidarrFinding {
   protectedOnly: boolean;
   /** A fix Platter can make; it shows the exact change and asks first. */
   action: LidarrFixAction | null;
+  /** A Lidarr root folder no Plex library scans, offered as the staging folder (a Platter setting). */
+  suggestedStaging?: string;
 }
 
 /** A one-click fix (a Lidarr write that asks first). */

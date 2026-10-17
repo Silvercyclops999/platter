@@ -156,11 +156,15 @@ pub struct Finding {
     pub protected_only: bool,
     /// A fix Platter can make (it shows the exact change and asks first).
     pub action: Option<FixAction>,
+    /// A Lidarr root folder that no Plex library scans, offered as Platter's
+    /// staging folder (a Platter setting, not a change in Lidarr).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_staging: Option<String>,
 }
 
 impl Finding {
     pub fn new(id: &str, level: Level, title: impl Into<String>, detail: impl Into<String>, fix: Option<String>) -> Self {
-        Self { id: id.into(), level, title: title.into(), detail: detail.into(), fix, empty_root: None, protected_only: false, action: None }
+        Self { id: id.into(), level, title: title.into(), detail: detail.into(), fix, empty_root: None, protected_only: false, action: None, suggested_staging: None }
     }
 
     fn protected_only(mut self) -> Self {
@@ -634,16 +638,28 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
             ok.push(Finding::new("staging", Level::Ok, format!("Staging folder: {st}"), "Outside every Plex music folder.", None));
         }
     } else if protected {
-        red.push(
-            Finding::new(
-                "stagingMissing",
-                Level::Red,
-                "No staging folder for protected artists",
-                "Lidarr only ever downloads protected artists into a staging folder no Plex library scans. Until one is set, Platter won't request anything for them.",
-                Some(STAGING_FIX.into()),
-            )
-            .protected_only(),
-        );
+        // A Lidarr root that no Plex library scans (and that holds no Plex
+        // folder) is almost certainly the staging folder: offer it.
+        let candidates: Vec<&str> = lidarr
+            .roots
+            .iter()
+            .map(|r| r.path.as_str())
+            .filter(|p| inside_any(p, plex_locs.iter().copied()).is_none())
+            .filter(|p| !plex_locs.iter().any(|l| inside_any(l, [*p]).is_some()))
+            .collect();
+        let mut f = Finding::new(
+            "stagingMissing",
+            Level::Red,
+            "No staging folder for protected artists",
+            "Lidarr only ever downloads protected artists into a staging folder no Plex library scans. Until one is set, Platter won't request anything for them.",
+            Some(STAGING_FIX.into()),
+        )
+        .protected_only();
+        if let [only] = candidates.as_slice() {
+            f.fix = Some(format!("{only} is a Lidarr root folder that no Plex library scans. Use it as the staging folder?"));
+            f.suggested_staging = Some((*only).to_string());
+        }
+        red.push(f);
     }
 
     // ---- Exclusions: protected artists stay out of Lidarr's import lists

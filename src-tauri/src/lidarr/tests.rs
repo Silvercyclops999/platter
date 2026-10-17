@@ -273,6 +273,17 @@ fn the_staging_folder_must_exist_and_stay_out_of_plex_while_artists_are_protecte
     let r = run(&p, l.clone(), &c, &no_disk());
     assert_eq!(ids(&r, Level::Red), vec!["stagingMissing"]);
     assert!(r.managed_ok);
+    // The one Lidarr root no Plex library scans is offered as the staging folder.
+    let staging_roots: Vec<String> = l.roots.iter().map(|r| r.path.clone()).filter(|p| !p.starts_with("/data/media")).collect();
+    let f = r.findings.iter().find(|f| f.id == "stagingMissing").unwrap();
+    if let [only] = staging_roots.as_slice() {
+        assert_eq!(f.suggested_staging.as_deref(), Some(only.as_str()));
+    }
+    // Two candidates: nothing is guessed.
+    let mut l3 = l.clone();
+    l3.roots.push(RootFolder { id: 9, ..root("/data/other/music", &[]) });
+    let r3 = run(&p, l3, &c, &no_disk());
+    assert_eq!(r3.findings.iter().find(|f| f.id == "stagingMissing").unwrap().suggested_staging, None);
     // Nobody protected: no staging folder is fine.
     let r = run(&p, l.clone(), &CheckContext { protected: vec![], ..c.clone() }, &no_disk());
     assert!(r.passed, "{r:?}");
