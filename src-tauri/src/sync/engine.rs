@@ -66,7 +66,7 @@ impl Groups {
             ]);
         }
         if self.follows {
-            out.extend([store::FOLLOWS.name(), store::HIDDEN.name(), store::BOOKMARKS.name()]);
+            out.extend([store::FOLLOWS.name(), store::HIDDEN.name(), store::PLAYED_HIDDEN.name(), store::BOOKMARKS.name()]);
         }
         if self.lyrics {
             out.extend([

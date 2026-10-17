@@ -251,6 +251,8 @@ pub struct SourceReport {
     pub plays: Counts,
     /// New plays the last import added.
     pub plays_added: u64,
+    /// The listening history this source brought in: plays, songs, years.
+    pub history: super::played::HistoryCounts,
     pub skipped: Skipped,
 }
 
@@ -287,7 +289,9 @@ pub fn reports(c: &Connection) -> AppResult<Vec<SourceReport>> {
             params![format!("{source}:"), source.len() as i64 + 1],
             |r| Ok(Counts { total: r.get::<_, i64>(0)? as u64, matched: r.get::<_, i64>(1)? as u64 }),
         )?;
+        let history = super::played::history_counts(c, &source)?;
         out.push(SourceReport {
+            history,
             source,
             imported_at,
             file_name,

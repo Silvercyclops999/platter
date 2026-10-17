@@ -72,6 +72,13 @@ pub async fn lidarr_request(lidarr: State<'_, Lidarr>, input: RequestInput) -> A
     lidarr.request(input).await
 }
 
+/// "Request these": up to 10 albums confirmed at once, each with the full
+/// check and every guard. One that fails doesn't stop the rest.
+#[tauri::command]
+pub async fn lidarr_request_batch(lidarr: State<'_, Lidarr>, inputs: Vec<RequestInput>) -> AppResult<Vec<super::request::BatchItem>> {
+    lidarr.request_batch(inputs).await
+}
+
 /// Requests on this device, newest first, with their latest state.
 #[tauri::command]
 pub async fn lidarr_requests(lidarr: State<'_, Lidarr>, refresh: bool) -> AppResult<Vec<RequestRecord>> {

@@ -1399,7 +1399,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove,
+            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove, import::commands::import_played, import::commands::import_played_hide, import::commands::import_played_hidden,
             plex::commands::auth_status,
             plex::commands::auth_start,
             plex::commands::auth_cancel,
@@ -1759,6 +1759,7 @@ pub fn run() {
             lidarr::commands::lidarr_pick,
             lidarr::commands::lidarr_request_preview,
             lidarr::commands::lidarr_request,
+            lidarr::commands::lidarr_request_batch,
             lidarr::commands::lidarr_requests,
             lidarr::commands::lidarr_request_cancel,
             lidarr::commands::lidarr_missing_releases,

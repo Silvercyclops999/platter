@@ -639,6 +639,13 @@ pub struct Settings {
     pub allow_stream_deck: bool,
     /// Library import sources turned on (ids from `import::sources`).
     pub import_sources: Vec<String>,
+    /// The Missing page lists songs and albums from imported listening
+    /// history that aren't in the library ("Played a lot").
+    pub show_played_a_lot: bool,
+    /// Fewest plays a song or album needs to be on that list.
+    pub played_min_plays: u32,
+    /// Which plays that list counts: `all`, `year` or `days90`.
+    pub played_period: String,
     /// Folder names on a song's path that hint it's unreleased. They only
     /// add weight to "Why?", never decide on their own.
     pub archive_folder_keywords: Vec<String>,
@@ -984,6 +991,9 @@ impl Default for Settings {
             now_playing_feed_port: crate::feed::DEFAULT_PORT,
             allow_stream_deck: false,
             import_sources: Vec::new(),
+            show_played_a_lot: true,
+            played_min_plays: crate::import::played::MIN_PLAYS_DEFAULT,
+            played_period: "all".into(),
             archive_folder_keywords: crate::db::release::default_folder_keywords(),
             release_status_tag: String::new(),
             release_status_values: Vec::new(),
@@ -1144,6 +1154,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "powerKeys",
     "hintKey",
     "importSources",
+    "showPlayedALot",
+    "playedMinPlays",
+    "playedPeriod",
     "archiveFolderKeywords",
     "releaseStatusTag",
     "releaseStatusValues",
@@ -1460,6 +1473,9 @@ pub struct SettingsPatch {
     pub now_playing_feed_port: Option<u16>,
     pub allow_stream_deck: Option<bool>,
     pub import_sources: Option<Vec<String>>,
+    pub show_played_a_lot: Option<bool>,
+    pub played_min_plays: Option<u32>,
+    pub played_period: Option<String>,
     pub archive_folder_keywords: Option<Vec<String>>,
     pub release_status_tag: Option<String>,
     pub release_status_values: Option<Vec<crate::tags::provenance::ValueMap>>,
@@ -1934,6 +1950,14 @@ impl Settings {
             self.import_sources =
                 crate::import::sources::SOURCES.iter().map(|s| s.id).filter(|id| ids.iter().any(|x| x == id)).map(String::from).collect();
         }
+        set(&mut self.show_played_a_lot, p.show_played_a_lot);
+        set(&mut self.played_min_plays, p.played_min_plays);
+        if let Some(period) = &p.played_period {
+            if crate::import::played::Period::parse(period).is_none() {
+                return Err(AppError::Invalid("Pick all time, the last year or the last 90 days.".into()));
+            }
+            self.played_period = period.clone();
+        }
         eqprofile::apply_patch(self, p)?;
         self.clamp();
         Ok(())
@@ -1941,6 +1965,10 @@ impl Settings {
 
     /// Keep ranged values in range (also fixes hand-edited stored values).
     fn clamp(&mut self) {
+        self.played_min_plays = self.played_min_plays.clamp(crate::import::played::MIN_PLAYS_LOW, crate::import::played::MIN_PLAYS_HIGH);
+        if crate::import::played::Period::parse(&self.played_period).is_none() {
+            self.played_period = "all".into();
+        }
         self.precache_count = self.precache_count.clamp(PRECACHE_MIN, PRECACHE_MAX);
         self.art_cache_mb = self.art_cache_mb.clamp(ART_CACHE_MIN_MB, ART_CACHE_MAX_MB);
         self.download_limit_gb = self.download_limit_gb.clamp(downloads::LIMIT_MIN_GB, downloads::LIMIT_MAX_GB);

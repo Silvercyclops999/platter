@@ -7,6 +7,7 @@
 //! - [`matching`] every imported song through `identity::` (ISRC, then names
 //!   and length, then names alone) into matched, unsure or missing
 //! - [`store`]    the import tables, the review queue and the Missing list
+//! - [`played`]   history plays with no library match ("Played a lot")
 //! - [`commands`] Tauri commands
 //!
 //! Nothing here writes to Plex. Saving an imported playlist to Plex or liking
@@ -21,11 +22,14 @@
 pub mod commands;
 pub mod files;
 pub mod matching;
+pub mod played;
 pub mod sources;
 pub mod store;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod played_tests;
 
 use serde::Serialize;
 

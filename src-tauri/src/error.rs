@@ -36,7 +36,8 @@ impl AppError {
         }
     }
 
-    fn message(&self) -> String {
+    /// The message alone, as the UI shows it.
+    pub fn message(&self) -> String {
         match self {
             AppError::Network(m)
             | AppError::Auth(m)

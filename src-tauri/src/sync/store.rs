@@ -106,10 +106,13 @@ pub const PHYSICAL: Ns<crate::physical::Owned> = Ns::new("physical");
 /// Lidarr state every device shares: per-artist modes and choices, the
 /// catch-up cursor and claims, the changes log (`crate::lidarr::shared`).
 pub const LIDARR: Ns<Value> = Ns::new("lidarr");
+/// Rows hidden from the Missing page's "Played a lot" list (a song, an album
+/// or a whole artist), keyed by `import::played::hide_key`.
+pub const PLAYED_HIDDEN: Ns<crate::import::played::HiddenRow> = Ns::new("playedHidden");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 18] = [
+pub const NAMESPACES: [&str; 19] = [
     MIXED.name(),
     TRANSCRIPTS.name(),
     LYRICS_SHARED.name(),
@@ -124,6 +127,7 @@ pub const NAMESPACES: [&str; 18] = [
     FOLDER_ITEMS.name(),
     FOLLOWS.name(),
     HIDDEN.name(),
+    PLAYED_HIDDEN.name(),
     BOOKMARKS.name(),
     LYRICS.name(),
     LYRICS_CHOICES.name(),

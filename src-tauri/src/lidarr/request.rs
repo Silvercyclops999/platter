@@ -80,6 +80,45 @@ pub struct RequestRecord {
     pub protected: bool,
 }
 
+/// Most albums one "Request these" sends.
+pub const BATCH_MAX: usize = 10;
+
+/// Requests saved on this device, read straight from the database (for
+/// lists that show each row's request state).
+pub fn saved_requests(c: &rusqlite::Connection) -> Vec<RequestRecord> {
+    kv_get(c, REQUESTS_KEY).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+/// The albums of a "Request these", once each, or why not: none, or more
+/// than [`BATCH_MAX`].
+pub fn batch_inputs(inputs: Vec<RequestInput>) -> AppResult<Vec<RequestInput>> {
+    let mut out: Vec<RequestInput> = Vec::new();
+    for i in inputs {
+        let rg = i.release_group_id.trim().to_ascii_lowercase();
+        if !out.iter().any(|x| x.release_group_id.trim().eq_ignore_ascii_case(&rg)) {
+            out.push(i);
+        }
+    }
+    if out.is_empty() {
+        return Err(AppError::Invalid("Pick at least one album to request.".into()));
+    }
+    if out.len() > BATCH_MAX {
+        return Err(AppError::Invalid(format!("Request up to {BATCH_MAX} albums at a time.")));
+    }
+    Ok(out)
+}
+
+/// How one album of a "Request these" went.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchItem {
+    pub release_group_id: String,
+    pub title: String,
+    pub record: Option<RequestRecord>,
+    /// Why it wasn't sent.
+    pub error: Option<String>,
+}
+
 /// What the UI sends to request (or preview) an album.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -464,6 +503,22 @@ impl Lidarr {
         };
         self.upsert(&out)?;
         self.inner.db.write(|c| kv_set(c, TYPED_KEY, "1"))?;
+        Ok(out)
+    }
+
+    /// "Request these": up to [`BATCH_MAX`] albums the user confirmed at
+    /// once, each sent like a single request (full check and every guard,
+    /// one after another). One that fails doesn't stop the rest.
+    pub async fn request_batch(&self, inputs: Vec<RequestInput>) -> AppResult<Vec<BatchItem>> {
+        let inputs = batch_inputs(inputs)?;
+        let mut out = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            let (release_group_id, title) = (input.release_group_id.clone(), input.title.clone());
+            match self.request(input).await {
+                Ok(r) => out.push(BatchItem { release_group_id, title, record: Some(r), error: None }),
+                Err(e) => out.push(BatchItem { release_group_id, title, record: None, error: Some(e.message()) }),
+            }
+        }
         Ok(out)
     }
 

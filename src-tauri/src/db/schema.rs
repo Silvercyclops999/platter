@@ -71,6 +71,10 @@ pub(crate) fn migrate_to(conn: &mut Connection, version: usize) -> AppResult<()>
     Ok(())
 }
 
+/// The migrations, for tests that find one by what it does.
+#[cfg(test)]
+pub(crate) const MIGRATIONS_FOR_TESTS: &[&str] = MIGRATIONS;
+
 const MIGRATIONS: &[&str] = &[
     // v1 — library cache, search index, listen log, settings.
     // FTS tables: case- and diacritic-insensitive, prefix indexes for
@@ -1153,6 +1157,21 @@ CREATE TABLE IF NOT EXISTS sound_map_skip (
     analysed_at INTEGER NOT NULL
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS sound_map_xy ON sound_map (x, y);
+"#,
+    // v41: imported plays keep their folded artist, title and album
+    // (identity::fold, filled on insert; older rows are filled by
+    // import::played::fill_folds), so plays with no library match can be
+    // grouped by song and by album. The two partial indexes cover those
+    // groupings; the third finds rows still to fold.
+    r#"
+ALTER TABLE imported_plays ADD COLUMN artist_fold TEXT;
+ALTER TABLE imported_plays ADD COLUMN title_fold TEXT;
+ALTER TABLE imported_plays ADD COLUMN album_fold TEXT;
+CREATE INDEX IF NOT EXISTS imported_plays_unmatched_song
+    ON imported_plays (artist_fold, title_fold, played_at, ms_played, source, rating_key) WHERE rating_key IS NULL;
+CREATE INDEX IF NOT EXISTS imported_plays_unmatched_album
+    ON imported_plays (artist_fold, album_fold, title_fold, played_at, ms_played, source, rating_key) WHERE rating_key IS NULL;
+CREATE INDEX IF NOT EXISTS imported_plays_unfolded ON imported_plays (id) WHERE title_fold IS NULL;
 "#,
 ];
 

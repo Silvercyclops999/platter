@@ -10,7 +10,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use super::store::{self, Decision, ImportedList, ImportedListPage, MissingSong, ReviewItem, SourceReport};
-use super::{files, sources};
+use super::{Skipped, files, played, sources};
 use crate::db::DbHandle;
 use crate::error::{AppError, AppResult};
 use crate::settings::SettingsState;
@@ -31,6 +31,13 @@ pub struct ImportOverview {
 
 #[tauri::command]
 pub async fn import_overview(db: State<'_, DbHandle>) -> AppResult<ImportOverview> {
+    // History imported before plays were folded counts its songs once folded.
+    let unfolded = db
+        .read_async(|c| Ok(c.query_row("SELECT EXISTS (SELECT 1 FROM imported_plays WHERE title_fold IS NULL)", [], |r| r.get::<_, bool>(0))?))
+        .await?;
+    if unfolded {
+        db.write_async(played::fill_folds).await?;
+    }
     db.read_async(|c| {
         let (review_count, songs_missing) = store::queue_counts(c)?;
         let missing_count = songs_missing + store::wanted_albums(c)?.len() as u64;
@@ -72,6 +79,32 @@ pub async fn import_run(db: State<'_, DbHandle>, settings: State<'_, SettingsSta
         .map_err(|e| AppError::Internal(format!("import task: {e}")))?
 }
 
+/// What to say when files had nothing to import, with what was left out.
+pub fn nothing_usable(s: &Skipped) -> String {
+    let plural = |n: u64, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let mut parts = Vec::new();
+    if s.podcasts > 0 {
+        parts.push(plural(s.podcasts, "podcast or audiobook record", "podcast or audiobook records"));
+    }
+    if s.short_plays > 0 {
+        parts.push(plural(s.short_plays, "play under 30 seconds", "plays under 30 seconds"));
+    }
+    if s.private_plays > 0 {
+        parts.push(plural(s.private_plays, "private play", "private plays"));
+    }
+    if s.no_metadata > 0 {
+        parts.push(plural(s.no_metadata, "record with no song name", "records with no song name"));
+    }
+    if s.incomplete_rows > 0 {
+        parts.push(plural(s.incomplete_rows, "row without an artist or title", "rows without an artist or title"));
+    }
+    if parts.is_empty() {
+        "Those files had no songs, playlists or plays in them.".into()
+    } else {
+        format!("Those files had no songs Platter could use. Left out: {}.", parts.join(", "))
+    }
+}
+
 /// Reads, matches and stores one import (blocking).
 pub fn run(db: &DbHandle, src: &sources::Source, path: &std::path::Path, now: i64) -> AppResult<SourceReport> {
     let input = files::read_input(path)?;
@@ -80,13 +113,18 @@ pub fn run(db: &DbHandle, src: &sources::Source, path: &std::path::Path, now: i6
     }
     let parsed = src.parser.parse(&input)?;
     if parsed.is_empty() {
-        return Err(AppError::Invalid("Those files had no songs in them.".into()));
+        return Err(AppError::Invalid(nothing_usable(&parsed.skipped)));
     }
     let ranks = db.source_ranks();
     let id = src.id;
     let prepared = db.read(|c| store::prepare(c, id, parsed, ranks))?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
     db.write(|c| store::write(c, id, name.as_deref(), prepared, id == "streaming", now))?;
+    let ranks = db.source_ranks();
+    db.write(|c| {
+        played::keep_up(c, ranks, now);
+        Ok(())
+    })?;
     db.read(store::reports)?
         .into_iter()
         .find(|r| r.source == id)
@@ -150,4 +188,64 @@ pub async fn import_forget(db: State<'_, DbHandle>, source: String) -> AppResult
 #[tauri::command]
 pub async fn import_list_remove(db: State<'_, DbHandle>, list_id: String, song_id: i64) -> AppResult<()> {
     db.write_async(move |c| store::remove_from_list(c, &list_id, song_id)).await
+}
+
+// ------------------------------------------------------------------ played a lot
+
+fn sync_store(app: &AppHandle) -> Option<crate::sync::SyncStore> {
+    use tauri::Manager;
+    app.try_state::<crate::sync::commands::SyncService>().map(|s| s.store.clone())
+}
+
+/// The hidden rows of "Played a lot" (synced), by key.
+async fn hidden(app: &AppHandle) -> Vec<(String, played::HiddenRow)> {
+    let Some(s) = sync_store(app) else { return Vec::new() };
+    s.run(|s| s.list(&crate::sync::store::PLAYED_HIDDEN)).await.unwrap_or_default()
+}
+
+/// A page of "Played a lot, not in your library": imported history plays
+/// with no library match, by song or by album, most played first.
+#[tauri::command]
+pub async fn import_played(app: AppHandle, db: State<'_, DbHandle>, query: played::Query) -> AppResult<played::PlayedPage> {
+    let ranks = db.source_ranks();
+    let now = now_ms();
+    db.write_async(move |c| {
+        played::keep_up(c, ranks, now);
+        Ok(())
+    })
+    .await?;
+    let keys: Vec<String> = hidden(&app).await.into_iter().map(|(k, _)| k).collect();
+    db.read_async(move |c| played::list(c, &query, &keys, now)).await
+}
+
+/// Hide a song, an album or a whole artist from "Played a lot" (synced),
+/// or bring it back with `hide` false. Returns what's hidden.
+#[tauri::command]
+pub async fn import_played_hide(app: AppHandle, kind: String, artist: String, name: Option<String>, hide: bool) -> AppResult<Vec<played::HiddenRow>> {
+    let name = name.unwrap_or_default();
+    let key = played::hide_key_for(&kind, &artist, &name)?;
+    let s = sync_store(&app).ok_or_else(|| AppError::Internal("the sync store isn't ready".into()))?;
+    let row = played::HiddenRow {
+        kind: kind.clone(),
+        artist: artist.chars().take(200).collect(),
+        name: if kind == "artist" { String::new() } else { name.chars().take(200).collect() },
+        hidden_at: now_ms() / 1000,
+    };
+    s.run(move |s| {
+        if hide {
+            s.put(&crate::sync::store::PLAYED_HIDDEN, &key, &row)
+        } else {
+            s.remove(&crate::sync::store::PLAYED_HIDDEN, &key).map(|_| ())
+        }
+    })
+    .await?;
+    import_played_hidden(app).await
+}
+
+/// What's hidden from "Played a lot", newest first.
+#[tauri::command]
+pub async fn import_played_hidden(app: AppHandle) -> AppResult<Vec<played::HiddenRow>> {
+    let mut all: Vec<played::HiddenRow> = hidden(&app).await.into_iter().map(|(_, h)| h).collect();
+    all.sort_by_key(|h| std::cmp::Reverse(h.hidden_at));
+    Ok(all)
 }

@@ -327,10 +327,12 @@ pub fn insert_imported(c: &mut Connection, plays: &[ImportedPlay], now_ms: i64) 
     {
         let mut st = tx.prepare_cached(
             "INSERT OR IGNORE INTO imported_plays
-               (source, source_id, played_at, ms_played, title, artist, album, rating_key, matched_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+               (source, source_id, played_at, ms_played, title, artist, album, rating_key, matched_at,
+                artist_fold, title_fold, album_fold)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )?;
         for p in plays {
+            let k = play_folds(&p.title, p.artist.as_deref(), p.album.as_deref());
             added += st.execute(params![
                 p.source.as_str(),
                 p.source_id,
@@ -340,12 +342,22 @@ pub fn insert_imported(c: &mut Connection, plays: &[ImportedPlay], now_ms: i64) 
                 p.artist,
                 p.album,
                 p.rating_key,
-                p.rating_key.as_ref().map(|_| now_ms)
+                p.rating_key.as_ref().map(|_| now_ms),
+                k.0,
+                k.1,
+                k.2
             ])?;
         }
     }
     tx.commit()?;
     Ok(added)
+}
+
+/// The folded artist, title and album an imported play is grouped by (the
+/// same folding the song index uses).
+pub fn play_folds(title: &str, artist: Option<&str>, album: Option<&str>) -> (String, String, String) {
+    let k = crate::identity::SongKey::from_names(artist.unwrap_or(""), title, album.unwrap_or(""), 0);
+    (k.artist_fold, k.title_fold, k.album_fold)
 }
 
 /// Record (or clear) the library song an imported play matches.

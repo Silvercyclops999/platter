@@ -181,6 +181,15 @@ async fn run_inner(
     let res = run_ctx(&ctx, prev, full).await;
     if res.as_ref().is_ok_and(|o| !matches!(o, SyncOutcome::Cancelled)) {
         sync_extra_libraries(&db, main_tag.as_deref(), full, &cancel).await;
+        // Imported plays of songs the library just gained count as theirs.
+        let ranks = db.source_ranks();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        let _ = db
+            .write_async(move |c| {
+                crate::import::played::keep_up(c, ranks, now);
+                Ok(())
+            })
+            .await;
     }
     // Always settle back to idle, even on error.
     let last = db.read_async(store::sync_state).await.ok().flatten().and_then(|s| s.last_sync_at);

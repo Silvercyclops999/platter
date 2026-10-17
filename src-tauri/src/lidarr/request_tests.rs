@@ -772,3 +772,33 @@ async fn an_album_plex_matched_to_the_release_group_is_never_requested() {
     assert!(e.contains("already in your library"), "{e}");
     assert!(r.web.writes().is_empty());
 }
+
+#[tokio::test]
+async fn request_these_takes_at_most_ten_and_runs_each_request_on_its_own() {
+    let r = rig();
+    // Eleven albums: refused before Lidarr or MusicBrainz is asked anything.
+    let many: Vec<RequestInput> = (0..11).map(|i| input(&format!("20000000-0000-0000-0000-0000000000{i:02}"), "X", None)).collect();
+    let e = r.lidarr.request_batch(many).await.unwrap_err();
+    assert!(e.message().contains("up to 10"), "{e}");
+    assert!(r.web.log.lock().is_empty());
+    assert!(r.lidarr.request_batch(vec![]).await.is_err());
+    // The same album twice counts once; ten different ones are fine.
+    let ten: Vec<RequestInput> = (0..10).map(|i| input(&format!("20000000-0000-0000-0000-0000000000{i:02}"), "X", None)).collect();
+    assert_eq!(super::request::batch_inputs(ten).unwrap().len(), 10);
+    let twice = vec![input(RG_SECOND, "Second Wind", None), input(&RG_SECOND.to_uppercase(), "Second Wind", None)];
+    assert_eq!(super::request::batch_inputs(twice).unwrap().len(), 1);
+    // Still one request at a time: the first ever needs the name typed, so
+    // without it nothing is written and each says why.
+    let out = r.lidarr.request_batch(vec![input(RG_SECOND, "Second Wind", None), input(RG_EP, "Small Hours", None)]).await.unwrap();
+    assert_eq!(out.len(), 2);
+    assert!(out.iter().all(|i| i.record.is_none() && i.error.as_deref().is_some_and(|m| m.contains("Type the album's name"))));
+    assert!(r.web.writes().is_empty());
+    // After one typed request, a batch sends each, with every guard.
+    r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    let out = r.lidarr.request_batch(vec![input(RG_EP, "Small Hours", None), input(RG_BOOT, "Bootleg", None)]).await.unwrap();
+    assert_eq!(out[0].record.as_ref().map(|x| x.state), Some(RequestState::Searching));
+    assert!(out[1].record.is_none() && out[1].error.is_some(), "the bootleg is refused, the rest still went");
+    assert_only_allowed_writes(&r.web);
+    let saved = r.db.read(|c| Ok(super::request::saved_requests(c))).unwrap();
+    assert_eq!(saved.len(), 2);
+}
