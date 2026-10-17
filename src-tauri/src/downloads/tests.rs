@@ -415,6 +415,26 @@ async fn storage_limit_stops_the_queue_with_a_reason() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_bigger_than_its_estimate_is_not_fetched_again_and_again() {
+    let r = rig().await;
+    // Estimated at about 1 KB, really 96 KB; room for 50 KB.
+    r.db.write(|c| Ok(c.execute("UPDATE tracks SET duration_ms = 1000, bitrate = 8", [])?)).unwrap();
+    r.d.set_prefs(Prefs { limit_bytes: 50_000, ..Prefs::default() });
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::Full));
+    let fetched = r.hits.lock().len();
+    assert_eq!(fetched, 1);
+    for _ in 0..3 {
+        assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::Full));
+    }
+    assert_eq!(r.hits.lock().len(), fetched, "stays paused without fetching it again");
+    // More room: it goes.
+    r.d.set_prefs(Prefs::default());
+    drain(&r.d).await;
+    assert_eq!(r.d.downloaded_ids(), ["a1", "a2"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_full_disk_stops_the_queue() {
     let r = rig_in(tempfile::tempdir().unwrap(), Some(1024)).await;
     r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();

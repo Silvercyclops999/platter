@@ -254,6 +254,9 @@ struct Inner {
     /// Finished files by track id (the play path reads this).
     files: RwLock<HashMap<String, PathBuf>>,
     last_progress: Mutex<Option<Instant>>,
+    /// The song that turned out too big for the room left: (track, limit,
+    /// bytes used) when it did. It isn't fetched again until one changes.
+    too_big: Mutex<Option<(String, u64, u64)>>,
 }
 
 /// Cheap to clone; clones share state.
@@ -316,6 +319,7 @@ impl Downloads {
                 paused: Mutex::new(None),
                 files: RwLock::new(HashMap::new()),
                 last_progress: Mutex::new(None),
+                too_big: Mutex::new(None),
             }),
         };
         me.reload_files();
@@ -798,6 +802,11 @@ impl Downloads {
         if used + estimate > prefs.limit_bytes {
             return Ok(Step::Paused(PauseReason::Full));
         }
+        // Fetched before and found too big for this room: wait for more room.
+        let room_key = (track.id.clone(), prefs.limit_bytes, used);
+        if self.inner.too_big.lock().as_ref() == Some(&room_key) {
+            return Ok(Step::Paused(PauseReason::Full));
+        }
         let dir = self.dir();
         if (self.inner.free_space)(&dir).is_some_and(|free| free < estimate + DISK_MARGIN) {
             return Ok(Step::Paused(PauseReason::NoSpace));
@@ -874,6 +883,7 @@ impl Downloads {
             }
             transfer::Outcome::Full => {
                 let _ = tokio::fs::remove_file(&part).await;
+                *self.inner.too_big.lock() = Some(room_key);
                 Ok(Step::Paused(PauseReason::Full))
             }
             transfer::Outcome::Stopped => {
