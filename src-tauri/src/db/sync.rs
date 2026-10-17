@@ -70,15 +70,26 @@ pub(crate) fn spawn(db: DbHandle, source: Arc<dyn LibrarySource>, full: bool) ->
     }
     let cancel = Arc::new(AtomicBool::new(false));
     *db.inner.sync.cancel.lock() = Some(cancel.clone());
+    let running = Running(db.clone());
     tokio::spawn(async move {
+        let _running = running;
         let res = run_inner(db.clone(), source, full, cancel).await;
         if let Err(e) = res {
             tracing::warn!("library sync failed: {e}");
         }
-        db.inner.sync.running.store(false, Ordering::Release);
-        *db.inner.sync.cancel.lock() = None;
     });
     true
+}
+
+/// Clears the running flag when a sync ends, however it ends (a panic
+/// too), so a later sync can start.
+struct Running(DbHandle);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.0.inner.sync.running.store(false, Ordering::Release);
+        *self.0.inner.sync.cancel.lock() = None;
+    }
 }
 
 /// Run a sync to completion on the current task.
@@ -92,10 +103,8 @@ pub(crate) async fn run(
         return Err(AppError::Invalid("a sync is already running".into()));
     }
     *db.inner.sync.cancel.lock() = Some(cancel.clone());
-    let res = run_inner(db.clone(), source, full, cancel).await;
-    db.inner.sync.running.store(false, Ordering::Release);
-    *db.inner.sync.cancel.lock() = None;
-    res
+    let _running = Running(db.clone());
+    run_inner(db.clone(), source, full, cancel).await
 }
 
 struct Ctx {
@@ -352,21 +361,27 @@ async fn run_ctx(ctx: &Ctx, prev: Option<SyncState>, full: bool) -> AppResult<Sy
         }
     };
 
+    // The library pass is done: remember it now, so trouble with history
+    // or playlists below doesn't send every later sync back to a full pass.
+    state.last_sync_at = Some(started);
+    let (s, src) = (state.clone(), ctx.src.clone());
+    ctx.db.write_async(move |c| store::put_sync_state_in(c, &src, &s)).await?;
+
     if ctx.cancelled() {
         return Ok(SyncOutcome::Cancelled);
     }
-    sync_history(ctx, &section.id).await?;
-    if let Some(owner) = &ctx.playlists {
-        sync_playlists(ctx, do_full, owner.as_deref()).await?;
+    if let Err(e) = sync_history(ctx, &section.id).await {
+        tracing::warn!("play history not synced: {e}");
+    }
+    if let Some(owner) = &ctx.playlists
+        && let Err(e) = sync_playlists(ctx, do_full, owner.as_deref()).await
+    {
+        tracing::warn!("playlists not synced: {e}");
     }
     // Ratings changed in other Plex apps don't always show in updatedAt.
     if let Err(e) = sync_ratings(ctx, &section.id).await {
         tracing::warn!("ratings not synced: {e}");
     }
-
-    state.last_sync_at = Some(started);
-    let (s, src) = (state.clone(), ctx.src.clone());
-    ctx.db.write_async(move |c| store::put_sync_state_in(c, &src, &s)).await?;
     ctx.changed(true);
     // Build the typo vocabulary now so the first search doesn't pay for it.
     let db = ctx.db.clone();
@@ -590,15 +605,28 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool, owner: Option<&str>) -> Ap
         let items = match ctx.source.playlist_entries(&id).await {
             Ok(items) => items,
             // Orphaned smart playlists (left over from a deleted library)
-            // answer 500. Drop them instead of failing the whole sync.
-            Err(AppError::Server(_) | AppError::NotFound(_)) => {
-                tracing::warn!("playlist {id} can't be listed by the server; skipping it");
-                ctx.db
+            // answer 500 every time; a server having a bad moment answers
+            // 500 once. Gone, or failing on two syncs in a row: drop it
+            // (unless it has edits made here). Otherwise keep it as it was.
+            Err(e @ (AppError::Server(_) | AppError::NotFound(_))) => {
+                let gone = matches!(e, AppError::NotFound(_));
+                let pid = id.clone();
+                let dropped = ctx
+                    .db
                     .write_async(move |c| {
-                        c.execute("DELETE FROM playlists WHERE id = ?1", [&id])?;
-                        Ok(())
+                        let tx = c.transaction()?;
+                        let failed_before = store::playlist_failed(&tx, &pid, true)?;
+                        let local = store::playlists_with_local_changes(&tx)?.contains(&pid);
+                        let drop = (gone || failed_before) && !local;
+                        if drop {
+                            tx.execute("DELETE FROM playlists WHERE id = ?1", [&pid])?;
+                            store::playlist_failed(&tx, &pid, false)?;
+                        }
+                        tx.commit()?;
+                        Ok(drop)
                     })
                     .await?;
+                tracing::warn!(dropped, "playlist {id} can't be listed by the server ({})", e.kind());
                 continue;
             }
             Err(e) => return Err(e),
@@ -606,6 +634,7 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool, owner: Option<&str>) -> Ap
         ctx.db
             .write_async(move |c| {
                 let tx = c.transaction()?;
+                store::playlist_failed(&tx, &id, false)?;
                 // An edit made here while the items were loading wins.
                 if !store::playlists_with_local_changes(&tx)?.contains(&id) {
                     store::set_playlist_items(&tx, &id, &items)?;

@@ -2134,9 +2134,88 @@ async fn a_playlist_the_server_cannot_list_is_dropped_not_fatal() {
     lib.broken_playlists.push("orphan".into());
     let src = Arc::new(FakeSource::new(lib));
     sync(&t.db, &src, false).await;
-    let lists = t.db.read(queries::playlists).unwrap();
-    assert_eq!(lists.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["ok"]);
     assert_eq!(count(&t.db, "tracks"), 12, "the rest of the sync still lands");
+    let ids = |db: &DbHandle| db.read(queries::playlists).unwrap().into_iter().map(|p| p.id).collect::<Vec<_>>();
+    assert_eq!(ids(&t.db), ["ok", "orphan"], "one failure could be the server having a bad moment");
+    // It fails again on the next sync: gone.
+    sync(&t.db, &src, false).await;
+    assert_eq!(ids(&t.db), ["ok"]);
+}
+
+#[tokio::test]
+async fn a_playlist_that_fails_once_keeps_its_songs() {
+    let t = open();
+    let mut lib = fake::generated(2, 2, 3);
+    let ids: Vec<String> = lib.tracks.iter().map(|t| t.id.clone()).collect();
+    lib.playlists.push((fake::playlist("road", "Road", 2), vec![ids[0].clone(), ids[1].clone()]));
+    let src = Arc::new(FakeSource::new(lib));
+    sync(&t.db, &src, false).await;
+    let songs = |db: &DbHandle| db.read(|c| queries::playlist_page(c, "road")).unwrap().tracks.len();
+    assert_eq!(songs(&t.db), 2);
+    // Edited on the server, which then answers 500 for its songs once.
+    {
+        let mut l = src.lib.lock();
+        l.playlists[0] = (fake::playlist("road", "Road", 3), vec![ids[0].clone(), ids[1].clone(), ids[2].clone()]);
+        l.broken_playlists.push("road".into());
+    }
+    sync(&t.db, &src, false).await;
+    assert_eq!(songs(&t.db), 2, "kept as it was");
+    src.lib.lock().broken_playlists.clear();
+    sync(&t.db, &src, false).await;
+    assert_eq!(songs(&t.db), 3, "read again on the next sync");
+    // Failing once more later starts the count again.
+    src.lib.lock().broken_playlists.push("road".into());
+    sync(&t.db, &src, false).await;
+    assert_eq!(songs(&t.db), 3);
+}
+
+#[tokio::test]
+async fn an_empty_playlist_list_deletes_nothing_until_it_repeats() {
+    let t = open();
+    let mut lib = fake::generated(2, 2, 3);
+    let ids: Vec<String> = lib.tracks.iter().map(|t| t.id.clone()).collect();
+    lib.playlists.push((fake::playlist("a", "A", 1), vec![ids[0].clone()]));
+    lib.playlists.push((fake::playlist("b", "B", 1), vec![ids[1].clone()]));
+    let src = Arc::new(FakeSource::new(lib));
+    sync(&t.db, &src, false).await;
+    *src.no_playlists.lock() = true;
+    sync(&t.db, &src, false).await;
+    assert_eq!(t.db.read(queries::playlists).unwrap().len(), 2, "one empty answer deletes nothing");
+    sync(&t.db, &src, false).await;
+    assert!(t.db.read(queries::playlists).unwrap().is_empty(), "the same answer twice: they really went");
+}
+
+#[tokio::test]
+async fn history_trouble_after_the_library_pass_still_saves_the_sync() {
+    let t = open();
+    let src = Arc::new(FakeSource::new(fake::generated(2, 2, 3)));
+    *src.fail_history.lock() = true;
+    assert!(matches!(sync(&t.db, &src, false).await, SyncOutcome::Full { .. }));
+    assert!(t.db.read(store::sync_state).unwrap().unwrap().last_sync_at.is_some());
+    assert!(matches!(sync(&t.db, &src, false).await, SyncOutcome::Incremental { .. }), "not a full pass again");
+}
+
+#[tokio::test]
+async fn a_sync_that_panics_lets_the_next_one_start() {
+    let t = open();
+    let src = Arc::new(FakeSource::new(fake::generated(2, 2, 3)));
+    *src.panic_history.lock() = true;
+    let (db, s) = (t.db.clone(), src.clone());
+    let res = tokio::spawn(async move { db.sync_once(s, false).await }).await;
+    assert!(res.is_err(), "the sync panicked");
+    *src.panic_history.lock() = false;
+    assert!(matches!(sync(&t.db, &src, false).await, SyncOutcome::Incremental { .. }));
+    // The background path too.
+    *src.panic_history.lock() = true;
+    t.db.set_source(src.clone());
+    assert!(t.db.start_sync(false).unwrap());
+    let mut tries = 0;
+    while t.db.sync_running() && tries < 500 {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        tries += 1;
+    }
+    *src.panic_history.lock() = false;
+    assert!(t.db.start_sync(false).unwrap(), "not stuck as running");
 }
 
 // ------------------------------------------------- popular: which copy

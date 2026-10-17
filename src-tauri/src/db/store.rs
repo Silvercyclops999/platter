@@ -458,7 +458,8 @@ pub fn replace_playlists_in(
         for p in &items {
             let old: Option<(u32, i64, Option<i64>)> =
                 prev.query_row([&p.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
-            if force_all || old != Some((p.track_count, p.duration_ms as i64, p.updated_at)) {
+            let failed = kv_get(tx, &playlist_failed_key(&p.id))?.is_some();
+            if force_all || failed || old != Some((p.track_count, p.duration_ms as i64, p.updated_at)) {
                 stale.push(p.id.clone());
             }
         }
@@ -468,13 +469,42 @@ pub fn replace_playlists_in(
         let mut st = tx.prepare("SELECT id FROM playlists")?;
         st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
     };
-    for id in existing.iter().filter(|id| mine(id) && !keep.contains(id.as_str()) && !local.contains(*id)) {
-        tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
+    let gone: Vec<&String> = existing.iter().filter(|id| mine(id) && !keep.contains(id.as_str()) && !local.contains(*id)).collect();
+    let total = existing.iter().filter(|id| mine(id)).count() as u64;
+    // An empty or much shorter list is far more often a failed answer than
+    // playlists really deleted: hold back until the next sync says the same.
+    if !gone.is_empty()
+        && refuses_mass_delete(total, gone.len() as u64, items.is_empty())
+        && !confirmed_twice(tx, &format!("massdelete:playlists:{}", owner.unwrap_or("")), gone.len() as u64)?
+    {
+        tracing::warn!(total, gone = gone.len(), "sync: playlist list would remove most playlists; kept them");
+    } else {
+        for id in gone {
+            tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
+        }
     }
     for p in items {
         upsert_playlist(tx, p)?;
     }
     Ok(stale)
+}
+
+fn playlist_failed_key(id: &str) -> String {
+    format!("playlistFailed:{id}")
+}
+
+/// Marks (or, with `failed` false, clears) a playlist whose songs the
+/// server couldn't list on the last sync. Returns whether it was marked
+/// before. A marked playlist is read again on the next sync.
+pub fn playlist_failed(c: &Connection, id: &str, failed: bool) -> AppResult<bool> {
+    let key = playlist_failed_key(id);
+    let before = kv_get(c, &key)?.is_some();
+    if failed {
+        kv_set(c, &key, "1")?;
+    } else if before {
+        c.execute("DELETE FROM kv WHERE key = ?1", [&key])?;
+    }
+    Ok(before)
 }
 
 /// Remove the playlists of servers not in `tags` (no library of theirs is

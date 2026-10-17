@@ -45,6 +45,12 @@ pub struct FakeSource {
     pub fail_items: Mutex<bool>,
     /// The server tag its ids carry (`crate::sid`); None: plain ids.
     pub tag: Mutex<Option<String>>,
+    /// Make `history` fail (server trouble after the library pass).
+    pub fail_history: Mutex<bool>,
+    /// Make `history` panic (a bug mid-sync).
+    pub panic_history: Mutex<bool>,
+    /// Make `playlists` answer an empty list.
+    pub no_playlists: Mutex<bool>,
 }
 
 impl FakeSource {
@@ -132,10 +138,17 @@ impl LibrarySource for FakeSource {
     }
 
     async fn history(&self, _s: &str, start: u64, size: u64) -> AppResult<Vec<HistoryEntry>> {
+        assert!(!*self.panic_history.lock(), "history blew up");
+        if *self.fail_history.lock() {
+            return Err(AppError::Server("history: 500".into()));
+        }
         Ok(page(&self.lib.lock().history, start, size))
     }
 
     async fn playlists(&self) -> AppResult<Vec<Playlist>> {
+        if *self.no_playlists.lock() {
+            return Ok(Vec::new());
+        }
         Ok(self.lib.lock().playlists.iter().map(|(p, _)| p.clone()).collect())
     }
 
