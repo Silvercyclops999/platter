@@ -61,14 +61,60 @@ fn err(e: tauri_plugin_updater::Error) -> AppError {
     AppError::Network(format!("update: {e}"))
 }
 
+/// What a check means for the update already downloaded, if any.
+#[derive(Debug, PartialEq, Eq)]
+enum Next {
+    /// The one waiting is still the newest.
+    Keep,
+    /// The release went away: the one waiting is dropped.
+    Forget,
+    /// Something newer (or the first one): download it.
+    Download,
+    Nothing,
+}
+
+fn next(waiting: Option<&str>, found: Option<&str>) -> Next {
+    match (waiting, found) {
+        (Some(w), Some(f)) if w == f => Next::Keep,
+        (_, Some(_)) => Next::Download,
+        (Some(_), None) => Next::Forget,
+        (None, None) => Next::Nothing,
+    }
+}
+
+/// Takes what is in `slot` and installs it; if installing fails it goes
+/// back, so the user can try again without downloading it again.
+fn install_or_keep<T>(slot: &Mutex<Option<T>>, install: impl FnOnce(&T) -> AppResult<()>) -> AppResult<()> {
+    let Some(item) = slot.lock().take() else {
+        return Err(AppError::Invalid("no update has been downloaded".into()));
+    };
+    install(&item).inspect_err(|_| *slot.lock() = Some(item))
+}
+
 /// Check, and download if there's something new. Returns what was found.
 async fn check_and_download(app: &AppHandle) -> AppResult<UpdateInfo> {
     let state = app.state::<Updates>();
     *state.last.lock() = Some(Instant::now());
-    if let Some((u, _)) = state.ready.lock().as_ref() {
-        return Ok(UpdateInfo { available: true, version: Some(u.version.clone()), notes: u.body.clone() });
+    let waiting = state
+        .ready
+        .lock()
+        .as_ref()
+        .map(|(u, _)| UpdateInfo { available: true, version: Some(u.version.clone()), notes: u.body.clone() });
+    let found = match app.updater().map_err(err)?.check().await {
+        Ok(f) => f,
+        // Can't ask now: the one already downloaded still stands.
+        Err(e) => return waiting.ok_or_else(|| err(e)),
+    };
+    match next(waiting.as_ref().and_then(|w| w.version.as_deref()), found.as_ref().map(|u| u.version.as_str())) {
+        Next::Keep => return Ok(waiting.unwrap_or(UpdateInfo { available: false, version: None, notes: None })),
+        Next::Forget => {
+            *state.ready.lock() = None;
+            return Ok(UpdateInfo { available: false, version: None, notes: None });
+        }
+        Next::Nothing => return Ok(UpdateInfo { available: false, version: None, notes: None }),
+        Next::Download => {}
     }
-    let Some(update) = app.updater().map_err(err)?.check().await.map_err(err)? else {
+    let Some(update) = found else {
         return Ok(UpdateInfo { available: false, version: None, notes: None });
     };
     let info = UpdateInfo { available: true, version: Some(update.version.clone()), notes: update.body.clone() };
@@ -126,13 +172,13 @@ pub async fn update_check(app: AppHandle) -> AppResult<UpdateInfo> {
 /// "Restart to install"; on Windows the installer exits the app itself.
 #[tauri::command]
 pub async fn update_install_on_restart(app: AppHandle, state: State<'_, Updates>) -> AppResult<()> {
-    let Some((update, bytes)) = state.ready.lock().take() else {
+    if state.ready.lock().is_none() {
         return Err(AppError::Invalid("no update has been downloaded".into()));
-    };
+    }
     if let Some(player) = app.try_state::<crate::audio::player::PlayerHandle>() {
         player.flush().await;
     }
-    update.install(bytes).map_err(err)?;
+    install_or_keep(&state.ready, |(update, bytes)| update.install(bytes).map_err(err))?;
     app.restart();
 }
 
@@ -147,5 +193,31 @@ mod tests {
         assert!(!is_stale(Some(now), now));
         assert!(!is_stale(Some(now - Duration::from_secs(59 * 60)), now));
         assert!(is_stale(Some(now - STALE), now));
+    }
+
+    #[test]
+    fn a_failed_install_keeps_the_update_for_another_try() {
+        let slot = Mutex::new(Some(("1.4.0", vec![1u8, 2, 3])));
+        let failed = install_or_keep(&slot, |_| Err(AppError::Io("the installer couldn't start".into())));
+        assert!(failed.is_err());
+        assert_eq!(slot.lock().as_ref().map(|(v, b)| (*v, b.len())), Some(("1.4.0", 3)), "still there");
+        let mut got = None;
+        install_or_keep(&slot, |(v, _)| {
+            got = Some(*v);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(got, Some("1.4.0"));
+        assert!(slot.lock().is_none(), "installed: taken");
+        assert!(install_or_keep(&slot, |_: &(&str, Vec<u8>)| Ok(())).is_err(), "nothing to install");
+    }
+
+    #[test]
+    fn a_downloaded_update_is_checked_again_against_the_newest_release() {
+        assert_eq!(next(Some("1.4.0"), Some("1.4.0")), Next::Keep);
+        assert_eq!(next(Some("1.4.0"), Some("1.5.0")), Next::Download, "a newer one replaces it");
+        assert_eq!(next(Some("1.4.0"), None), Next::Forget, "the release was pulled");
+        assert_eq!(next(None, Some("1.4.0")), Next::Download);
+        assert_eq!(next(None, None), Next::Nothing);
     }
 }
