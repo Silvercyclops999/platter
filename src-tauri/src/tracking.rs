@@ -287,10 +287,10 @@ impl Tracker {
             sent.push(r.id);
         }
         let all = sent.len() == total && total < BATCH as usize;
-        if !sent.is_empty() {
-            if let Err(e) = self.db.write_async(move |c| listens::mark_sent(c, &sent, now_s())).await {
-                tracing::warn!("listen log: sent scrobbles couldn't be marked: {e}");
-            }
+        if !sent.is_empty()
+            && let Err(e) = self.db.write_async(move |c| listens::mark_sent(c, &sent, now_s())).await
+        {
+            tracing::warn!("listen log: sent scrobbles couldn't be marked: {e}");
         }
         !all
     }
