@@ -259,8 +259,21 @@ impl Op {
     }
 }
 
-fn row_entry(value: Option<String>, ts: i64, device: String) -> Entry {
-    Entry { value: value.and_then(|v| serde_json::from_str(&v).ok()), ts: ts.max(0) as u64, device }
+/// A stored row as an entry. A value that isn't JSON (a damaged row) gives
+/// None: it is left out, never read as a deletion that would spread to the
+/// user's other devices.
+fn row_entry(value: Option<String>, ts: i64, device: String) -> Option<Entry> {
+    let value = match value {
+        None => None,
+        Some(v) => match serde_json::from_str(&v) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::warn!("skipping an unreadable sync entry: {e}");
+                return None;
+            }
+        },
+    };
+    Some(Entry { value, ts: ts.max(0) as u64, device })
 }
 
 fn get_entry(c: &Connection, ns: &str, key: &str) -> AppResult<Option<Entry>> {
@@ -268,7 +281,8 @@ fn get_entry(c: &Connection, ns: &str, key: &str) -> AppResult<Option<Entry>> {
         .query_row("SELECT value, ts, device FROM sync_entries WHERE ns = ?1 AND key = ?2", params![ns, key], |r| {
             Ok(row_entry(r.get(0)?, r.get(1)?, r.get(2)?))
         })
-        .optional()?)
+        .optional()?
+        .flatten())
 }
 
 fn set_entry(c: &Connection, ns: &str, key: &str, e: &Entry) -> AppResult<()> {
@@ -518,6 +532,7 @@ impl SyncStore {
             })?;
             for row in rows {
                 let (ns, key, e) = row?;
+                let Some(e) = e else { continue };
                 if wanted.contains(&ns) {
                     out.entry(ns).or_default().insert(key, e);
                 }

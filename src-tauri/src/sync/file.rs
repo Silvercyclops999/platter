@@ -142,9 +142,26 @@ pub fn merge_into(base: &mut EntryMap, other: &EntryMap) -> bool {
     changed
 }
 
-/// Drop tombstones older than `TOMBSTONE_MS` before `now`.
-pub fn prune(map: &mut EntryMap, now: u64) {
-    let before = now.saturating_sub(TOMBSTONE_MS);
+/// A device not seen for this long no longer holds tombstones back (it
+/// was most likely retired).
+pub const FORGET_DEVICE_MS: u64 = 365 * 24 * 60 * 60 * 1000;
+
+/// The time before which tombstones may go: older than [`TOMBSTONE_MS`],
+/// and older than the last time every other device wrote the file (a device
+/// merges the file before it writes, so it has seen them). Devices not
+/// seen for [`FORGET_DEVICE_MS`] don't count. Otherwise a device away for
+/// a long time would bring deleted things back.
+pub fn prune_before(devices: &BTreeMap<String, DeviceSeen>, me: &str, now: u64) -> u64 {
+    let forgotten = now.saturating_sub(FORGET_DEVICE_MS);
+    devices
+        .iter()
+        .filter(|(id, d)| id.as_str() != me && d.last_seen >= forgotten)
+        .map(|(_, d)| d.last_seen)
+        .fold(now.saturating_sub(TOMBSTONE_MS), u64::min)
+}
+
+/// Drop tombstones older than `before` (from [`prune_before`]).
+pub fn prune(map: &mut EntryMap, before: u64) {
     for m in map.values_mut() {
         m.retain(|_, e| !(e.is_tombstone() && e.ts < before));
     }

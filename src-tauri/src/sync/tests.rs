@@ -23,6 +23,7 @@ const TAG: &str = "0123456789abcdef";
 /// A device: its own database, store and clock.
 struct Dev {
     store: SyncStore,
+    db: DbHandle,
     clock: Arc<AtomicU64>,
     _dir: TempDir,
 }
@@ -33,8 +34,8 @@ impl Dev {
         let db = DbHandle::open(dir.path().join("lib.db")).unwrap();
         let clock = Arc::new(AtomicU64::new(1_000_000));
         let c = clock.clone();
-        let store = SyncStore::with_clock(db, id, Arc::new(move || c.load(Ordering::SeqCst)));
-        Dev { store, clock, _dir: dir }
+        let store = SyncStore::with_clock(db.clone(), id, Arc::new(move || c.load(Ordering::SeqCst)));
+        Dev { store, db, clock, _dir: dir }
     }
 
     fn at(&self, ms: u64) {
@@ -190,6 +191,9 @@ fn deletions_travel_and_old_tombstones_go() {
     assert!(mac.store.get(&HIDDEN, "album:9").unwrap().is_none());
     let text = std::fs::read_to_string(file_path(cloud.path())).unwrap();
     assert!(text.contains("album:9"), "the tombstone is kept for now");
+    // The Mac writes the file again a while later (so it has seen it).
+    mac.at(2_000_000 + 2 * 60 * 60 * 1000);
+    mac.pass(cloud.path()).unwrap();
     // 90 days on, the tombstone is gone from the file and the stores.
     let later = 2_000_000 + file::TOMBSTONE_MS + 1;
     pc.at(later);
@@ -198,6 +202,74 @@ fn deletions_travel_and_old_tombstones_go() {
     let text = std::fs::read_to_string(file_path(cloud.path())).unwrap();
     assert!(!text.contains("album:9"));
     assert!(!pc.store.has_entry(&HIDDEN, "album:9").unwrap());
+}
+
+#[test]
+fn a_device_away_for_months_does_not_bring_deleted_things_back() {
+    let cloud = tempfile::tempdir().unwrap();
+    let (pc, laptop) = (Dev::new("pc"), Dev::new("laptop"));
+    pc.store.put(&HIDDEN, "album:9", &Hidden { kind: "album".into(), title: "t".into(), ..Default::default() }).unwrap();
+    pc.pass(cloud.path()).unwrap();
+    laptop.pass(cloud.path()).unwrap();
+    assert!(laptop.store.get(&HIDDEN, "album:9").unwrap().is_some());
+    // The laptop goes in a drawer; the PC deletes it.
+    pc.at(2_000_000);
+    pc.store.remove(&HIDDEN, "album:9").unwrap();
+    pc.pass(cloud.path()).unwrap();
+    // 100 days on, the PC keeps the tombstone: the laptop hasn't seen it.
+    let later = 2_000_000 + file::TOMBSTONE_MS + 10 * 24 * 60 * 60 * 1000;
+    pc.at(later);
+    pc.store.put(&FOLLOWS, "touch", &follow("t")).unwrap();
+    pc.pass(cloud.path()).unwrap();
+    assert!(std::fs::read_to_string(file_path(cloud.path())).unwrap().contains("album:9"));
+    // The laptop comes back: the deletion reaches it, nothing comes back.
+    laptop.at(later + 1000);
+    laptop.pass(cloud.path()).unwrap();
+    assert!(laptop.store.get(&HIDDEN, "album:9").unwrap().is_none());
+    pc.at(later + 2000);
+    pc.pass(cloud.path()).unwrap();
+    assert!(pc.store.get(&HIDDEN, "album:9").unwrap().is_none());
+    // Now every device has seen it, it can go.
+    pc.at(later + 3000);
+    pc.store.put(&FOLLOWS, "touch2", &follow("t2")).unwrap();
+    pc.pass(cloud.path()).unwrap();
+    assert!(!std::fs::read_to_string(file_path(cloud.path())).unwrap().contains("album:9"));
+}
+
+#[test]
+fn a_device_retired_long_ago_does_not_hold_tombstones_forever() {
+    let seen = |at: u64| file::DeviceSeen { name: "x".into(), last_seen: at };
+    let now = 3 * file::FORGET_DEVICE_MS;
+    let mut devices = std::collections::BTreeMap::new();
+    devices.insert("me".to_string(), seen(0));
+    assert_eq!(file::prune_before(&devices, "me", now), now - file::TOMBSTONE_MS, "this device doesn't count");
+    devices.insert("away".to_string(), seen(now - file::TOMBSTONE_MS - 5));
+    assert_eq!(file::prune_before(&devices, "me", now), now - file::TOMBSTONE_MS - 5);
+    devices.insert("retired".to_string(), seen(now - file::FORGET_DEVICE_MS - 1));
+    assert_eq!(file::prune_before(&devices, "me", now), now - file::TOMBSTONE_MS - 5);
+}
+
+#[test]
+fn a_damaged_entry_is_skipped_not_spread_as_a_deletion() {
+    let cloud = tempfile::tempdir().unwrap();
+    let (pc, mac) = (Dev::new("pc"), Dev::new("mac"));
+    pc.store.put(&HIDDEN, "album:9", &Hidden { kind: "album".into(), title: "t".into(), ..Default::default() }).unwrap();
+    pc.pass(cloud.path()).unwrap();
+    mac.pass(cloud.path()).unwrap();
+    // The PC's row is damaged, with a newer time.
+    pc.at(2_000_000);
+    pc.db
+        .write(|c| {
+            c.execute("UPDATE sync_entries SET value = '{not json', ts = 2000000 WHERE ns = 'hidden' AND key = 'album:9'", [])?;
+            Ok(())
+        })
+        .unwrap();
+    let mine = pc.store.entries(&["hidden"]).unwrap();
+    assert!(mine.get("hidden").is_none_or(|m| !m.contains_key("album:9")), "left out, not a tombstone");
+    pc.pass(cloud.path()).unwrap();
+    mac.at(2_000_000);
+    mac.pass(cloud.path()).unwrap();
+    assert!(mac.store.get(&HIDDEN, "album:9").unwrap().is_some(), "still there on the other device");
 }
 
 #[test]

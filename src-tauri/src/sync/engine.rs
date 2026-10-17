@@ -241,10 +241,11 @@ pub fn pass(store: &SyncStore, folder: &Path, tag: &str, groups: Groups, device_
     let local = store.entries(&namespaces).map_err(|e| PassError::Io(e.to_string()))?;
     let mut out = combined;
     file::merge_into(&mut out, &local);
-    file::prune(&mut out, now);
-    let _ = store.prune(now.saturating_sub(file::TOMBSTONE_MS));
-
     let me = store.device().to_string();
+    let prune_at = file::prune_before(&devices, &me, now);
+    file::prune(&mut out, prune_at);
+    let _ = store.prune(prune_at);
+
     let stale = devices
         .get(&me)
         .is_none_or(|d| d.name != device_name || now.saturating_sub(d.last_seen) >= SEEN_EVERY_MS);
