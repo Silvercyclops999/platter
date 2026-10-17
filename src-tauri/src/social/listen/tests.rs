@@ -34,6 +34,10 @@ impl Events {
     fn last(&self, name: &str) -> Option<serde_json::Value> {
         self.0.lock().iter().rev().find(|(e, _)| e == name).map(|(_, v)| v.clone())
     }
+
+    fn notices(&self) -> Vec<String> {
+        self.0.lock().iter().filter(|(e, _)| e == EVENT_NOTICE).map(|(_, v)| v["message"].as_str().unwrap_or_default().to_string()).collect()
+    }
 }
 
 /// A player: the song, the rest of what's playing, and the user queue.
@@ -467,6 +471,17 @@ fn invite_links_carry_only_random_tokens() {
     }
 }
 
+#[tokio::test]
+async fn each_guest_has_a_request_budget() {
+    let relay = FakeNtfy::start().await;
+    let h = peer("Sam", &relay);
+    for _ in 0..GUEST_OPS {
+        assert!(h.listen.guest_op_allowed("g1"));
+    }
+    assert!(!h.listen.guest_op_allowed("g1"), "the next one waits");
+    assert!(h.listen.guest_op_allowed("g2"), "others aren't held up");
+}
+
 #[test]
 fn a_link_cant_point_platter_at_the_home_network_or_plain_http() {
     assert!(invite::link_relay_ok(None, ""), "the usual relay");
@@ -564,6 +579,18 @@ async fn a_session_from_start_to_end_through_the_relay() {
     eventually("host seeked", || h.player.p.lock().pos == 90_000).await;
 
     // The guest adds songs: they're queued at the host with the guest's name on them.
+    for (id, n) in [("z1", "Zed One"), ("z2", "Zed Two"), ("z3", "Zed Three"), ("x9", "Private Demo")] {
+        h.lib.song(id, song(None, n, "The Demo Band"));
+    }
+    for (id, n) in [("z1", "Zed One"), ("z2", "Zed Two"), ("z3", "Zed Three")] {
+        g.lib.song(id, song(None, n, "The Demo Band"));
+    }
+    // An id the guest can't describe (it isn't in a library it has) is
+    // turned away, the same as one the host doesn't have.
+    g.listen.add(vec!["x9".into()]).await.unwrap();
+    g.listen.add(vec!["nope".into()]).await.unwrap();
+    let denied = || h.player.user().is_empty() && g.events.notices().iter().filter(|m| m.contains("couldn't be added")).count() == 2;
+    eventually("both refused alike", denied).await;
     g.listen.add(vec!["z1".into(), "z2".into()]).await.unwrap();
     eventually("host queued them", || h.player.user() == ["z1", "z2"]).await;
     let gid = g.listen.view().people.iter().find(|p| p.me).unwrap().id.clone();

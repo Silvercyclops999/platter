@@ -656,6 +656,24 @@ struct Inner {
     /// The host's "Let them listen from my server" (read when hosting starts
     /// and on [`ListenAlong::settings_changed`]).
     offered: AtomicBool,
+    /// When each guest last asked for something (the host's side).
+    op_rate: Mutex<HashMap<String, Vec<std::time::Instant>>>,
+}
+
+/// Requests one guest may make per [`GUEST_OPS_WINDOW`].
+const GUEST_OPS: usize = 20;
+const GUEST_OPS_WINDOW: Duration = Duration::from_secs(10);
+
+/// The same song by title and artist (folded), or by MusicBrainz id.
+fn same_song(here: &Song, theirs: &Song) -> bool {
+    if here.mb.is_some() && here.mb == theirs.mb {
+        return true;
+    }
+    let both = |a: &Option<String>, b: &Option<String>| match (a, b) {
+        (Some(a), Some(b)) => !a.trim().is_empty() && crate::db::merge::norm(a) == crate::db::merge::norm(b),
+        _ => false,
+    };
+    both(&here.n, &theirs.n) && both(&here.a, &theirs.a)
 }
 
 /// Listen along on this computer. Cheap to clone.
@@ -684,6 +702,7 @@ impl ListenAlong {
                 poke: Notify::new(),
                 party: watch::channel(None).0,
                 offered: AtomicBool::new(false),
+                op_rate: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -1308,8 +1327,27 @@ impl ListenAlong {
     }
 
     /// Do what a guest asked. Err: why not, in words for them.
+    /// A guest's request fits the rate: [`GUEST_OPS`] per [`GUEST_OPS_WINDOW`].
+    fn guest_op_allowed(&self, gid: &str) -> bool {
+        let now = std::time::Instant::now();
+        let mut rate = self.inner.op_rate.lock();
+        if rate.len() > 256 {
+            rate.retain(|_, v| v.iter().any(|t| now.duration_since(*t) < GUEST_OPS_WINDOW));
+        }
+        let times = rate.entry(gid.to_string()).or_default();
+        times.retain(|t| now.duration_since(*t) < GUEST_OPS_WINDOW);
+        if times.len() >= GUEST_OPS {
+            return false;
+        }
+        times.push(now);
+        true
+    }
+
     async fn run_op(&self, gid: &str, op: Op) -> Result<(), String> {
         let host = self.my_name();
+        if gid != HOST_ID && !self.guest_op_allowed(gid) {
+            return Err("Too many requests at once. Try again in a moment.".into());
+        }
         if !self.can_control() && !matches!(op, Op::Add { .. }) {
             return Err(format!("{host} only lets others add songs."));
         }
@@ -1321,9 +1359,23 @@ impl ListenAlong {
             Op::Next => p.next().await.map_err(failed),
             Op::Previous => p.previous().await.map_err(failed),
             Op::Seek { ms } => p.seek(ms).await.map_err(failed),
-            Op::Add { ids } => {
+            Op::Add { ids, songs } => {
+                let refused = || "Those songs couldn't be added.".to_string();
                 if ids.is_empty() || ids.len() > MAX_ADD || !ids.iter().all(|t| ok_song(t)) {
-                    return Err("Those songs couldn't be added.".into());
+                    return Err(refused());
+                }
+                // A guest says who each song is in its own library; only ids
+                // this library describes the same way go in. Someone trying
+                // ids learns nothing: any mismatch, or an id that isn't
+                // here, gets the same answer.
+                if gid != HOST_ID {
+                    if songs.len() != ids.len() {
+                        return Err(refused());
+                    }
+                    let here = self.inner.deps.library.songs(ids.clone()).await;
+                    if !ids.iter().zip(&songs).all(|(id, s)| here.get(id).is_some_and(|h| same_song(h, s))) {
+                        return Err(refused());
+                    }
                 }
                 p.queue_add(ids.clone()).await.map_err(|_| "Those songs couldn't be added.".to_string())?;
                 if let Mode::Host(h) = &mut *self.inner.mode.lock() {
@@ -1940,7 +1992,7 @@ impl ListenAlong {
 
     /// Ask the host to do something (guest), or do it (host).
     pub async fn control(&self, op: Op) -> AppResult<()> {
-        if let Op::Add { ids } = &op
+        if let Op::Add { ids, .. } = &op
             && (ids.is_empty() || ids.len() > MAX_ADD || !ids.iter().all(|t| ok_song(t)))
         {
             return Err(AppError::Invalid("Bad song ids.".into()));
@@ -1956,12 +2008,22 @@ impl ListenAlong {
         if !ctl && !matches!(op, Op::Add { .. }) {
             return Err(AppError::Invalid(format!("{host} only lets others add songs.")));
         }
+        // Say who each added song is here, so the host can tell it's one it
+        // has too.
+        let op = match op {
+            Op::Add { ids, .. } => {
+                let known = self.inner.deps.library.songs(ids.clone()).await;
+                let songs = ids.iter().map(|id| known.get(id).cloned().unwrap_or_default()).collect();
+                Op::Add { ids, songs }
+            }
+            other => other,
+        };
         self.send(&relay, &up, Sender::Guest, &me, Msg::Cmd(op), &[]).await.map_err(relay_err)
     }
 
     /// Add songs to the shared queue (a guest's go through the host).
     pub async fn add(&self, track_ids: Vec<String>) -> AppResult<()> {
-        self.control(Op::Add { ids: track_ids }).await
+        self.control(Op::Add { ids: track_ids, songs: Vec::new() }).await
     }
 }
 

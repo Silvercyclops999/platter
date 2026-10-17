@@ -87,7 +87,14 @@ pub enum Op {
     Next,
     Previous,
     Seek { ms: u64 },
-    Add { ids: Vec<String> },
+    /// `songs`: who each id is in the guest's own library, in order. The
+    /// host adds only ids it describes the same way, so a guest can add
+    /// songs it can play but can't learn what other ids are.
+    Add {
+        ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        songs: Vec<Song>,
+    },
     /// Move the song at `from` in the up next list to `to`.
     Move { from: usize, to: usize },
 }
