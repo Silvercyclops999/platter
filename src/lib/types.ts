@@ -1368,6 +1368,8 @@ export interface SoundMapInfo {
   analysing: boolean;
   /** The map is being updated right now. */
   building: boolean;
+  /** Goes up each time the map changes; the same number means the loaded points are current. */
+  revision: number;
 }
 
 /** Part of the map, in map units (most songs sit within -1 to 1). */

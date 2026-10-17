@@ -1907,13 +1907,16 @@ keeps, on this computer, and caches it in the database, so it works offline.
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `soundmap_info` | – | `{ placed, analysed, total, analysing, building }` |
+| `soundmap_info` | – | `{ placed, analysed, total, analysing, building, revision }` |
 | `soundmap_points` | `{ after: string \| null, limit: number \| null, area: { minX, minY, maxX, maxY } \| null }` | `Chunk` |
 | `soundmap_find` | `{ query }` | `{ kind: "song" \| "artist", id, title, sub, x, y }[]` |
 | `soundmap_song` | `{ id }` | `{ id, title, artist, albumTitle, thumb }` |
 
 `placed` is songs on the map, `analysed` songs with an analysis and `total`
-songs that can be analysed. `analysing` is true while Automix is on. Asking
+songs that can be analysed (an analysis the map can't read is left out of
+`analysed`). `analysing` is true while Automix is on. `revision` goes up each
+time the map changes while the app runs, so the same `placed` and `revision`
+mean the points already loaded are current. Asking
 for the info also places any songs analysed since the last update.
 
 `Chunk = { ids, x, y, genre, genres, year, unreleased, next }` holds the
@@ -1931,7 +1934,8 @@ plain text, so `%` and `_` match themselves.
 Event `soundmap://changed` (no payload) fires when points were added, moved
 or removed. Songs analysed later are placed with the projection already in
 use, so the map holds still; it's worked out again, moving every point, when
-the number of analysed songs has grown by half.
+the number of analysed songs has grown by half, and then turned to match the
+old layout so the map doesn't flip over.
 
 ## Friend activity, following and listening sessions
 

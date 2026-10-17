@@ -499,6 +499,10 @@ async fn refresh_says_its_done_building_afterwards() {
     analysed(&db, "t0", "al", &[0.5; DIMS]);
     let map = super::SoundMap::new(db);
     assert!(!map.building());
+    assert_eq!(map.revision(), 0);
     assert_eq!(map.refresh().await.unwrap().placed, 1);
     assert!(!map.building());
+    assert_eq!(map.revision(), 1, "a change moves the revision on");
+    assert!(!map.refresh().await.unwrap().changed());
+    assert_eq!(map.revision(), 1, "nothing changed, same revision");
 }

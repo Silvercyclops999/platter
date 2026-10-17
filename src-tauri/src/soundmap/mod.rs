@@ -22,7 +22,7 @@ pub mod store;
 mod tests;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -232,12 +232,14 @@ struct Inner {
     worker: Worker,
     wake: Notify,
     building: AtomicUsize,
+    /// Bumped each time the map changes, so the page can tell whether to load it again.
+    revision: AtomicU64,
     on_changed: Mutex<Option<OnChanged>>,
 }
 
 impl SoundMap {
     pub fn new(db: DbHandle) -> Self {
-        Self(Arc::new(Inner { db, worker: Worker::start(), wake: Notify::new(), building: AtomicUsize::new(0), on_changed: Mutex::new(None) }))
+        Self(Arc::new(Inner { db, worker: Worker::start(), wake: Notify::new(), building: AtomicUsize::new(0), revision: AtomicU64::new(0), on_changed: Mutex::new(None) }))
     }
 
     pub fn db(&self) -> &DbHandle {
@@ -257,6 +259,11 @@ impl SoundMap {
         self.0.building.load(Ordering::Acquire) > 0
     }
 
+    /// Goes up each time an update changes the map (from 0 at start).
+    pub fn revision(&self) -> u64 {
+        self.0.revision.load(Ordering::Acquire)
+    }
+
     /// One update on the low priority thread; tells listeners when it changed something.
     pub async fn refresh(&self) -> AppResult<Update> {
         let u = {
@@ -264,10 +271,11 @@ impl SoundMap {
             let db = self.0.db.clone();
             self.0.worker.run(move || update(&db)).await??
         };
-        if u.changed()
-            && let Some(f) = self.0.on_changed.lock().clone()
-        {
-            f();
+        if u.changed() {
+            self.0.revision.fetch_add(1, Ordering::AcqRel);
+            if let Some(f) = self.0.on_changed.lock().clone() {
+                f();
+            }
         }
         Ok(u)
     }

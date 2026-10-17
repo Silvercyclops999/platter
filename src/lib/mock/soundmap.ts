@@ -34,6 +34,8 @@ export class MockSoundMap {
   limit: number | null = null;
   /** Song analysis running (test hook). */
   analysing = true;
+  /** Goes up when the map changes (test hook). */
+  revision = 0;
   private cache: Pt[] | null = null;
 
   constructor(
@@ -82,7 +84,7 @@ export class MockSoundMap {
 
   info(): SoundMapInfo {
     const placed = this.placed().length;
-    return { placed, analysed: placed, total: this.fx.tracks.length, analysing: this.analysing, building: false };
+    return { placed, analysed: placed, total: this.fx.tracks.length, analysing: this.analysing, building: false, revision: this.revision };
   }
 
   points(after: string | null | undefined, limit: number | undefined, area: SoundMapArea | null | undefined): SoundMapChunk {

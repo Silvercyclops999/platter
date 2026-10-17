@@ -18,6 +18,9 @@ pub struct Info {
     pub analysing: bool,
     /// The map is being updated right now.
     pub building: bool,
+    /// Goes up each time the map changes, so the same number means the
+    /// points already loaded are current.
+    pub revision: u64,
 }
 
 /// Progress, and a nudge to place any songs analysed since the last update.
@@ -27,7 +30,7 @@ pub async fn soundmap_info(map: State<'_, SoundMap>) -> AppResult<Info> {
     if counts.analysed > counts.placed {
         map.kick();
     }
-    Ok(Info { counts, analysing: crate::analysis::enabled(), building: map.building() })
+    Ok(Info { counts, analysing: crate::analysis::enabled(), building: map.building(), revision: map.revision() })
 }
 
 /// Up to `limit` points (default and most [`store::CHUNK_MAX`]) after
