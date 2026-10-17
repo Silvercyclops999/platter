@@ -27,6 +27,7 @@ side for the stuff that never got an official release.
 
 - Plays your original files (FLAC, ALAC, MP3, AAC, WAV and so on), gapless when an album plays in order.
 - Crossfade that only blends the quiet ends of songs, loudness leveling and a 10-band EQ.
+- Automix blends songs on playlists and mixes on the beat, matching tempo and key when it can, and leaves albums alone.
 - Headphone correction from the AutoEq project, applied before your own EQ and kept per output device.
 - Bit-perfect output takes the device for itself (exclusive mode on Windows, hog mode on Mac) and plays each song at its own sample rate.
 - A queue with drag and drop, a Recently played tab, an A-B loop and a "Next:" hint near the end of a song.
@@ -47,6 +48,7 @@ side for the stuff that never got an official release.
 - More than one Plex server, Plex Home users, and editing covers, details and matches on servers you own.
 - A library doctor that finds duplicates, missing covers and split albums, and asks before fixing anything.
 - Identify by sound fingerprints untagged or mislabelled songs and suggests tags (off until you turn it on).
+- A sound map lays your library out by how songs sound. Zoom around, click a dot to play it, or draw around a patch to make a playlist.
 - Jellyfin and Subsonic servers (Navidrome and other OpenSubsonic servers) work alongside Plex or on their own, both in beta.
 
 ![An album](docs/screenshots/album.png)
@@ -86,10 +88,12 @@ The tagging rules are in [docs/TAGGING.md](docs/TAGGING.md).
 - Listen along with friends on your server or theirs, through an encrypted relay where nobody sees anyone's address.
 - Server owners can see what others on the server are playing.
 - Settings, pins, follows and your own lyrics can sync through a cloud folder you already use.
+- Sync playlists, albums and Liked Songs to a USB drive, SD card or Rockbox player, as the original files or converted, copying only what changed.
 
 ### Stats
 
 - A Stats page for any range, with minutes, top songs, artists, albums and genres, streaks and your busiest hours.
+- A Profile page with your top artists and tracks this month, your playlists and your friends.
 - Artist and album pages show your plays, first and last listen and all-time rank.
 - Monthly recap cards and song share cards you can save as images.
 - Your Plex play history, Tautulli and Last.fm scrobbles can count too, each play once.
