@@ -1,5 +1,5 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { VIRTUAL_ROWS_FROM, VirtualRows } from "../components/VirtualRows";
 
 function list(count: number) {
@@ -40,5 +40,29 @@ describe("VirtualRows", () => {
     // The rows not drawn still take their space, so the scrollbar is right.
     const after = parseFloat(spacers[1].style.height);
     expect(after).toBe((count - rows.length) * 60);
+  });
+});
+
+describe("VirtualRows when the page above changes", () => {
+  it("watches the page's content as well as the scroller, so a taller header moves the window", () => {
+    const watched: Element[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe(el: Element) {
+          watched.push(el);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    try {
+      const { container } = list(VIRTUAL_ROWS_FROM + 50);
+      const sc = container.querySelector(".main__scroll")!;
+      expect(watched).toContain(sc);
+      expect(watched).toContain(sc.firstElementChild);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

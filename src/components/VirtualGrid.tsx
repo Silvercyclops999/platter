@@ -46,6 +46,12 @@ export function VirtualGrid({
     if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    // Content above the grid changing height moves where it starts.
+    if (sc) {
+      ro.observe(sc);
+      const content = sc.firstElementChild;
+      if (content && content !== el) ro.observe(content);
+    }
     return () => ro.disconnect();
   }, []);
 

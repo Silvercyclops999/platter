@@ -47,6 +47,10 @@ function Windowed({ count, rowHeight, renderRow, spacer = "li" }: VirtualRowsPro
     if (typeof ResizeObserver === "undefined" || !sc) return;
     const ro = new ResizeObserver(measure);
     ro.observe(sc);
+    // The page's content changing height above the list (a header that
+    // loads, a banner) moves where the list starts.
+    const content = sc.firstElementChild;
+    if (content && content !== el) ro.observe(content);
     return () => ro.disconnect();
   }, []);
 
