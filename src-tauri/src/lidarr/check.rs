@@ -122,6 +122,22 @@ pub struct LidarrSnapshot {
     pub unmapped: Vec<TrackFile>,
     /// Lidarr's Connect entries.
     pub notifications: Vec<super::api::Notification>,
+    /// Managed albums whose folders hold files Lidarr couldn't match.
+    pub album_folders: Vec<AlbumFolders>,
+}
+
+/// A Managed album in Lidarr: where its files are, and whether Lidarr may
+/// switch its edition on its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumFolders {
+    pub album_id: i64,
+    pub title: String,
+    /// The artist's folder in Lidarr.
+    pub artist_path: String,
+    /// "Automatically Switch Release" is on.
+    pub any_release_ok: bool,
+    /// The folders its imported files are in.
+    pub folders: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -194,6 +210,16 @@ pub enum FixAction {
     AddStagingRoot { path: String },
     /// Re-match unmatched files, one album folder at a time.
     Rematch { folders: Vec<String> },
+    /// Turn off "Automatically Switch Release" for these albums.
+    ReleaseSwitchOff { albums: Vec<AlbumTarget> },
+}
+
+/// A Lidarr album a fix is for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumTarget {
+    pub id: i64,
+    pub title: String,
 }
 
 /// A protected artist, as the check needs it.
@@ -705,15 +731,28 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         push(&mut amber, &mut ok, f);
     }
     {
+        // Renaming only touches files under Lidarr's root folders, so it
+        // matters only when a protected artist's folder is under one.
         let on = lidarr.naming.rename_tracks;
+        let risky = on && !any_under_root.is_empty();
         let mut f = Finding::new(
             "renameTracks",
-            level(on),
+            if risky { Level::Amber } else { Level::Ok },
             if on { "Lidarr renames the files it imports" } else { "Track renaming is off" },
-            if on { "Files keep Lidarr's own names. With protected artists, Platter names files itself when adding them, and it can't re-match unmatched files safely while renaming is on." } else { "" },
-            on.then(|| "In Lidarr, turn off Settings > Media Management > Rename Tracks, or let Platter do it.".to_string()),
+            if risky {
+                format!(
+                    "{} {} under a Lidarr root folder, so Lidarr could rename curated files there. Platter also doesn't re-match unmatched files while renaming is on.",
+                    list_names(&any_under_root, 3),
+                    if any_under_root.len() == 1 { "is" } else { "are" }
+                )
+            } else if on {
+                "That's fine: no protected artist's folder is under a Lidarr root folder, so only Managed albums get Lidarr's names. Platter doesn't re-match unmatched files while renaming is on.".to_string()
+            } else {
+                String::new()
+            },
+            risky.then(|| "In Lidarr, turn off Settings > Media Management > Rename Tracks, or let Platter do it.".to_string()),
         );
-        if on {
+        if risky {
             f.action = Some(FixAction::RenameOff);
         }
         push(&mut amber, &mut ok, f);
@@ -851,6 +890,32 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         }
     }
 
+    // ---- Managed albums with files on another edition (bonus discs, extra
+    // tracks Lidarr doesn't track) that Lidarr may switch on its own: a
+    // switch detaches the files it does track.
+    let switching = switching_albums(lidarr, ctx);
+    if !switching.is_empty() {
+        let names: Vec<String> = switching.iter().map(|a| a.title.clone()).collect();
+        let mut f = Finding::new(
+            "releaseSwitch",
+            Level::Amber,
+            if names.len() == 1 {
+                format!("Lidarr may switch {} to another edition", names[0])
+            } else {
+                format!("Lidarr may switch {} albums to other editions", names.len())
+            },
+            format!(
+                "{} {} files Lidarr doesn't track (extra discs or bonus tracks) and Automatically Switch Release on. At its daily refresh Lidarr can move {} to another edition, and the files it tracks now stop counting. Nothing changes on disk.",
+                list_names(&names, 3),
+                if names.len() == 1 { "has" } else { "have" },
+                if names.len() == 1 { "it" } else { "them" }
+            ),
+            Some("Turn off Automatically Switch Release for this album (in Lidarr, Edit album), or let Platter do it. The edition it's on now stays.".into()),
+        );
+        f.action = Some(FixAction::ReleaseSwitchOff { albums: switching.iter().map(|a| AlbumTarget { id: a.album_id, title: a.title.clone() }).collect() });
+        amber.push(f);
+    }
+
     // ---- A root folder inside another: removing the outer one in Lidarr
     // detaches every file under the inner one.
     let mut nested: Vec<String> = Vec::new();
@@ -905,6 +970,34 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         },
         wanted,
     )
+}
+
+/// Managed albums with unmatched files in their folders (or in a disc
+/// folder next to theirs) and "Automatically Switch Release" on.
+fn switching_albums<'a>(l: &'a LidarrSnapshot, ctx: &CheckContext) -> Vec<&'a AlbumFolders> {
+    let protected: Vec<&str> =
+        l.artists.iter().filter(|a| ctx.protected.iter().any(|p| p.lidarr_id == Some(a.id))).map(|a| a.path.as_str()).collect();
+    let unmapped: Vec<NormPath> = l
+        .unmapped
+        .iter()
+        .filter(|f| inside_any(&f.path, protected.iter().copied()).is_none())
+        .filter_map(|f| NormPath::parse(&f.path).parent())
+        .collect();
+    let mut out: Vec<&AlbumFolders> = l
+        .album_folders
+        .iter()
+        .filter(|a| a.any_release_ok && inside_any(&a.artist_path, protected.iter().copied()).is_none())
+        .filter(|a| {
+            let artist = NormPath::parse(&a.artist_path);
+            let dirs: Vec<NormPath> = a.folders.iter().map(|d| NormPath::parse(d)).collect();
+            // A disc folder's parent is the album's folder (never the artist's).
+            let homes: Vec<NormPath> = dirs.iter().filter_map(NormPath::parent).filter(|p| *p != artist && p.starts_with(&artist)).collect();
+            unmapped.iter().any(|u| dirs.contains(u) || u.parent().is_some_and(|p| homes.contains(&p)) || homes.contains(u))
+        })
+        .collect();
+    out.sort_by(|a, b| a.title.cmp(&b.title).then(a.album_id.cmp(&b.album_id)));
+    out.dedup_by_key(|a| a.album_id);
+    out
 }
 
 /// Amber findings go with the amber ones, the rest with the OK ones.

@@ -245,6 +245,9 @@ pub struct TrackFile {
     pub quality_cutoff_not_met: bool,
     #[serde(default)]
     pub quality: Option<serde_json::Value>,
+    /// The album it's linked to (absent on unmatched files).
+    #[serde(default)]
+    pub album_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -344,6 +347,13 @@ pub struct Album {
     pub images: Vec<LookupImage>,
     #[serde(default)]
     pub ratings: Option<Ratings>,
+    /// "Automatically Switch Release": Lidarr may move the album to another
+    /// edition on its own at a refresh.
+    #[serde(default)]
+    pub any_release_ok: Option<bool>,
+    /// Its editions, when Lidarr sends them with the list.
+    #[serde(default)]
+    pub releases: Vec<AlbumRelease>,
 }
 
 /// One of Lidarr's commands (read only, to see a refresh still running).
@@ -428,6 +438,9 @@ pub struct AlbumRelease {
     pub monitored: bool,
     #[serde(default)]
     pub track_count: i64,
+    /// MusicBrainz's note that tells editions apart ("Newsletter Edit").
+    #[serde(default)]
+    pub disambiguation: String,
 }
 
 /// An album with its releases (`GET /album/{id}`).
@@ -450,6 +463,8 @@ pub struct AlbumDetail {
     pub release_date: Option<String>,
     #[serde(default)]
     pub releases: Vec<AlbumRelease>,
+    #[serde(default)]
+    pub any_release_ok: Option<bool>,
 }
 
 impl AlbumDetail {
@@ -834,6 +849,11 @@ impl LidarrClient {
     /// An album's imported files.
     pub async fn track_files(&self, album_id: i64) -> AppResult<Vec<TrackFile>> {
         self.get("/trackfile", &[("albumId", album_id.to_string().as_str())]).await
+    }
+
+    /// Every imported file of an artist, each with its album.
+    pub async fn artist_track_files(&self, artist_id: i64) -> AppResult<Vec<TrackFile>> {
+        self.get("/trackfile", &[("artistId", artist_id.to_string().as_str())]).await
     }
 
     /// Artists Lidarr's import lists exclude.

@@ -14,6 +14,8 @@ pub mod hunt;
 pub mod lookup;
 pub mod homeside;
 pub mod conventions;
+pub mod editions;
+pub mod grabbed;
 pub mod mbpick;
 pub mod modes;
 pub mod paths;
@@ -451,6 +453,7 @@ impl Lidarr {
             profiles,
             lists,
             listings: HashMap::new(),
+            album_folders: Vec::new(),
         })
     }
 
@@ -501,6 +504,8 @@ impl Lidarr {
         let ((client, mut snap, route), plex) = futures::try_join!(connect, self.inner.plex.music_files())?;
         let index = PlexIndex::new(&plex);
         let modes = self.modes_with(&client, &snap).await?;
+        let protected_ids: Vec<i64> = modes.iter().filter(|m| m.protected()).filter_map(|m| m.lidarr_id).collect();
+        snap.album_folders = self.album_folders(&client, &snap, &protected_ids).await;
         let share = crate::musicshare::load(&self.inner.db);
         let prefs = self.inner.plex_server.prefs().await.ok();
         let ctx = CheckContext {

@@ -81,18 +81,25 @@ pub async fn lidarr_request_batch(lidarr: State<'_, Lidarr>, inputs: Vec<Request
 
 /// Requests on this device, newest first, with their latest state.
 #[tauri::command]
-pub async fn lidarr_requests(lidarr: State<'_, Lidarr>, refresh: bool) -> AppResult<Vec<RequestRecord>> {
+pub async fn lidarr_requests(lidarr: State<'_, Lidarr>, refresh: bool) -> AppResult<Vec<super::grabbed::RequestView>> {
     if refresh {
         let _ = lidarr.refresh_statuses().await;
+        if let Err(e) = lidarr.note_grabs().await {
+            tracing::debug!("lidarr grabs: {e}");
+        }
     }
-    Ok(lidarr.requests())
+    Ok(lidarr.request_views())
 }
 
 /// Cancel a waiting request, or clear a finished one.
 #[tauri::command]
-pub async fn lidarr_request_cancel(lidarr: State<'_, Lidarr>, id: String) -> AppResult<Vec<RequestRecord>> {
+pub async fn lidarr_request_cancel(lidarr: State<'_, Lidarr>, id: String) -> AppResult<Vec<super::grabbed::RequestView>> {
     let l = lidarr.inner().clone();
-    blocking(move || l.cancel(&id)).await
+    blocking(move || {
+        l.cancel(&id)?;
+        Ok(l.request_views())
+    })
+    .await
 }
 
 /// An artist's official releases the library lacks, for the artist page.
@@ -285,8 +292,8 @@ pub async fn lidarr_rematch_preview(lidarr: State<'_, Lidarr>, folder: String) -
 
 /// Re-match an album folder the user confirmed.
 #[tauri::command]
-pub async fn lidarr_rematch_apply(lidarr: State<'_, Lidarr>, folder: String) -> AppResult<super::rematch::RematchPlan> {
-    lidarr.rematch_apply(&folder).await
+pub async fn lidarr_rematch_apply(lidarr: State<'_, Lidarr>, folder: String, release_id: Option<i64>) -> AppResult<super::rematch::RematchPlan> {
+    lidarr.rematch_apply(&folder, release_id).await
 }
 
 /// What the Lidarr work is doing: who did it last, practice mode, albums

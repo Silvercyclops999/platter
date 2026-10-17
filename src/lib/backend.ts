@@ -1013,7 +1013,7 @@ export interface Backend {
   lidarrChanges(): Promise<LidarrChange[]>;
   lidarrChangePutBack(id: string): Promise<LidarrChange>;
   lidarrRematchPreview(folder: string): Promise<LidarrRematchPlan>;
-  lidarrRematchApply(folder: string): Promise<LidarrRematchPlan>;
+  lidarrRematchApply(folder: string, releaseId: number | null): Promise<LidarrRematchPlan>;
   lidarrWork(): Promise<LidarrWork>;
   lidarrCatchUp(): Promise<LidarrCatchUpReport>;
   lidarrResumeProtected(): Promise<void>;
@@ -1635,7 +1635,7 @@ export function createTauriBackend(): Backend {
     lidarrChanges: () => call("lidarr_changes"),
     lidarrChangePutBack: (id) => call("lidarr_change_put_back", { id }),
     lidarrRematchPreview: (folder) => call("lidarr_rematch_preview", { folder }),
-    lidarrRematchApply: (folder) => call("lidarr_rematch_apply", { folder }),
+    lidarrRematchApply: (folder, releaseId) => call("lidarr_rematch_apply", { folder, releaseId }),
     lidarrWork: () => call("lidarr_work"),
     lidarrCatchUp: () => call("lidarr_catch_up"),
     lidarrResumeProtected: () => call("lidarr_resume_protected"),

@@ -11,6 +11,8 @@
 //!   take either away again when nothing uses it)
 //! - free imported files inside the staging folder ([`StagingFiles`])
 //! - a manual import onto an album's current release
+//! - turn off one album's "Automatically Switch Release" ([`SwitchOff`]),
+//!   with the album otherwise written back exactly as Lidarr sent it
 //!
 //! Writes to Lidarr's settings, profiles, roots and exclusions always show
 //! the exact change and wait for a yes (`changes`). Nothing here renames,
@@ -191,6 +193,46 @@ pub struct ImportFile {
     pub disable_release_switching: bool,
 }
 
+/// One album written back with only "Automatically Switch Release"
+/// (`anyReleaseOk`) turned off. Only [`SwitchOff::from_current`] makes one,
+/// from the album as Lidarr just sent it, so nothing else about the album
+/// (its edition, monitoring, profile) can change through it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwitchOff {
+    id: i64,
+    body: serde_json::Value,
+}
+
+impl SwitchOff {
+    /// `current` is `GET /album/{id}`'s answer, untouched.
+    pub fn from_current(id: i64, current: &serde_json::Value) -> AppResult<Self> {
+        if id <= 0 || !current.is_object() || current.get("id").and_then(serde_json::Value::as_i64) != Some(id) {
+            return Err(AppError::Invalid("Lidarr's answer wasn't that album, so Platter didn't change anything.".into()));
+        }
+        if current.get("anyReleaseOk").and_then(serde_json::Value::as_bool) != Some(true) {
+            return Err(AppError::Invalid("Automatically Switch Release is already off for this album.".into()));
+        }
+        let mut body = current.clone();
+        body["anyReleaseOk"] = serde_json::Value::Bool(false);
+        Ok(Self { id, body })
+    }
+
+    pub fn id(&self) -> i64 {
+        self.id
+    }
+}
+
+/// Whether `body` is `current` with only `anyReleaseOk` turned off (for a
+/// write that came over the relay, checked against a fresh read).
+pub fn only_switch_off(current: &serde_json::Value, body: &serde_json::Value) -> bool {
+    let (Some(a), Some(b)) = (current.as_object(), body.as_object()) else { return false };
+    if b.get("anyReleaseOk") != Some(&serde_json::Value::Bool(false)) || a.get("anyReleaseOk") != Some(&serde_json::Value::Bool(true)) {
+        return false;
+    }
+    let rest = |m: &serde_json::Map<String, serde_json::Value>| m.iter().filter(|(k, _)| *k != "anyReleaseOk").map(|(k, v)| (k.clone(), v.clone())).collect::<std::collections::BTreeMap<_, _>>();
+    rest(a) == rest(b)
+}
+
 /// One write. The method and path come from the variant.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteCall {
@@ -211,6 +253,8 @@ pub enum WriteCall {
     /// Lidarr's manual import, moving files in place onto the album's
     /// current release, never switching it.
     ManualImport(Vec<ImportFile>),
+    /// One album's "Automatically Switch Release" turned off.
+    SwitchOff(SwitchOff),
     /// One of the writes above as it arrived through a Bridge (the home
     /// Platter route) or from the Bridge's queue, checked again here.
     Relayed(RelayedWrite),
@@ -249,9 +293,17 @@ impl RelayedWrite {
                 _ => false,
             },
             "PUT" => {
-                (path == "/album/monitor"
-                    || ["/config/naming/", "/config/metadataprovider/", "/config/mediamanagement/"].iter().any(|p| numbered(path, p)))
-                    && json().is_some()
+                if numbered(path, "/album/") {
+                    // Only the release switch turned off, for the album the
+                    // path names; the Bridge also checks it against a fresh
+                    // read of the album before passing it on.
+                    let id = path.trim_start_matches("/album/").parse::<i64>().ok();
+                    json().is_some_and(|v| v["anyReleaseOk"] == serde_json::Value::Bool(false) && v["id"].as_i64() == id)
+                } else {
+                    (path == "/album/monitor"
+                        || ["/config/naming/", "/config/metadataprovider/", "/config/mediamanagement/"].iter().any(|p| numbered(path, p)))
+                        && json().is_some()
+                }
             }
             "DELETE" => {
                 (path == "/trackfile/bulk" && json().is_some())
@@ -263,6 +315,35 @@ impl RelayedWrite {
             return Err(refuse());
         }
         Ok(Self { method: m, path: path.to_string(), body: body.to_string() })
+    }
+
+    /// The album a release-switch write is for, if it is one.
+    pub fn switch_off_album(&self) -> Option<i64> {
+        if self.method == "PUT" && numbered(&self.path, "/album/") { self.path.trim_start_matches("/album/").parse().ok() } else { None }
+    }
+
+    /// A release-switch write must be the album as Lidarr has it now with
+    /// only that switch turned off. Reads the album (GET) to make sure;
+    /// every other write passes as it is.
+    pub async fn confirm_with(&self, get: &dyn super::api::LidarrGet) -> AppResult<()> {
+        let Some(id) = self.switch_off_album() else { return Ok(()) };
+        let refuse = || AppError::Invalid("That album changed in Lidarr, or the change would touch more than its release switch, so it wasn't sent.".into());
+        let resp = get.get(&format!("/album/{id}"), &[]).await.map_err(|_| AppError::Network(UNREACHABLE.into()))?;
+        if !(200..=299).contains(&resp.status) {
+            return Err(refuse());
+        }
+        let current: serde_json::Value = serde_json::from_slice(&resp.body).map_err(|_| refuse())?;
+        self.confirm_against(&current)
+    }
+
+    /// [`Self::confirm_with`] against an album already read.
+    pub fn confirm_against(&self, current: &serde_json::Value) -> AppResult<()> {
+        if self.switch_off_album().is_none() {
+            return Ok(());
+        }
+        let refuse = || AppError::Invalid("That album changed in Lidarr, or the change would touch more than its release switch, so it wasn't sent.".into());
+        let body: serde_json::Value = serde_json::from_str(&self.body).map_err(|_| refuse())?;
+        if only_switch_off(current, &body) { Ok(()) } else { Err(refuse()) }
     }
 }
 
@@ -278,8 +359,11 @@ impl WriteCall {
             | WriteCall::AddRootFolder(_)
             | WriteCall::RemoveRootFolder { .. }
             | WriteCall::AddQualityProfile(_)
-            | WriteCall::RemoveQualityProfile { .. } => true,
-            WriteCall::Relayed(r) => ["/importlistexclusion", "/config/", "/rootfolder", "/qualityprofile"].iter().any(|p| r.path.starts_with(p)),
+            | WriteCall::RemoveQualityProfile { .. }
+            | WriteCall::SwitchOff(_) => true,
+            WriteCall::Relayed(r) => {
+                ["/importlistexclusion", "/config/", "/rootfolder", "/qualityprofile"].iter().any(|p| r.path.starts_with(p)) || r.switch_off_album().is_some()
+            }
             _ => false,
         }
     }
@@ -331,7 +415,7 @@ impl WriteCall {
                 "DELETE" => WriteMethod::Delete,
                 _ => WriteMethod::Post,
             },
-            WriteCall::Monitor { .. } | WriteCall::PutConfig { .. } => WriteMethod::Put,
+            WriteCall::Monitor { .. } | WriteCall::PutConfig { .. } | WriteCall::SwitchOff(_) => WriteMethod::Put,
             WriteCall::RemoveExclusion { .. } | WriteCall::RemoveRootFolder { .. } | WriteCall::RemoveQualityProfile { .. } | WriteCall::FreeStaging(_) => {
                 WriteMethod::Delete
             }
@@ -352,6 +436,7 @@ impl WriteCall {
             WriteCall::AddQualityProfile(_) => "/qualityprofile".into(),
             WriteCall::RemoveQualityProfile { id } => format!("/qualityprofile/{id}"),
             WriteCall::FreeStaging(_) => "/trackfile/bulk".into(),
+            WriteCall::SwitchOff(s) => format!("/album/{}", s.id),
             WriteCall::Relayed(r) => r.path.clone(),
         }
     }
@@ -364,6 +449,7 @@ impl WriteCall {
             WriteCall::AlbumSearch { album_ids } => serde_json::to_string(&CommandBody { name: "AlbumSearch", album_ids }),
             WriteCall::AddExclusion { foreign_id, artist_name } => serde_json::to_string(&json!({"foreignId": foreign_id, "artistName": artist_name})),
             WriteCall::PutConfig { body, .. } | WriteCall::AddQualityProfile(body) => serde_json::to_string(body),
+            WriteCall::SwitchOff(s) => serde_json::to_string(&s.body),
             WriteCall::AddRootFolder(r) => serde_json::to_string(r),
             WriteCall::FreeStaging(f) => serde_json::to_string(&json!({"trackFileIds": f.ids})),
             WriteCall::ManualImport(files) => {
@@ -538,5 +624,61 @@ mod tests {
         assert!(!WriteCall::Relayed(RelayedWrite::check("PUT", "/album/monitor", "{}").unwrap()).is_settings_write());
         assert!(WriteCall::PutConfig { kind: ConfigKind::Naming, id: 1, body: json!({}) }.is_settings_write());
         assert!(!WriteCall::Monitor { album_ids: vec![1], monitored: false }.is_settings_write());
+    }
+
+    #[test]
+    fn the_release_switch_write_changes_that_one_field_and_nothing_else() {
+        let album = json!({"id": 9, "title": "Panes", "monitored": true, "anyReleaseOk": true, "qualityProfileId": 2,
+            "releases": [{"id": 90, "monitored": true, "trackCount": 13}, {"id": 91, "monitored": false, "trackCount": 19}]});
+        let s = SwitchOff::from_current(9, &album).unwrap();
+        let call = WriteCall::SwitchOff(s);
+        assert_eq!((call.method(), call.path().as_str()), (WriteMethod::Put, "/album/9"));
+        assert!(call.is_settings_write(), "asked first, never on a Bridge's own");
+        let body: Value = serde_json::from_str(&call.body()).unwrap();
+        assert_eq!(body["anyReleaseOk"], false);
+        let mut back = body.clone();
+        back["anyReleaseOk"] = json!(true);
+        assert_eq!(back, album, "everything else is the album as Lidarr sent it");
+        assert!(only_switch_off(&album, &body));
+        // Not the album asked for, or already off: nothing is built.
+        assert!(SwitchOff::from_current(8, &album).is_err());
+        assert!(SwitchOff::from_current(9, &json!({"id": 9, "anyReleaseOk": false})).is_err());
+        // Anything else changed alongside is refused.
+        for (k, v) in [("monitored", json!(false)), ("qualityProfileId", json!(5)), ("releases", json!([{"id": 91, "monitored": true}])), ("extra", json!(1))] {
+            let mut bad = body.clone();
+            bad[k] = v;
+            assert!(!only_switch_off(&album, &bad), "{k}");
+        }
+        assert!(!only_switch_off(&album, &album), "the switch itself must go off");
+    }
+
+    #[tokio::test]
+    async fn a_relayed_release_switch_is_checked_against_a_fresh_read() {
+        use super::super::api::{LidarrGet, Route};
+        struct One(Value);
+        #[async_trait]
+        impl LidarrGet for One {
+            async fn get(&self, path: &str, _q: &[(&str, &str)]) -> AppResult<HttpResponse> {
+                assert_eq!(path, "/album/9");
+                Ok(HttpResponse { status: 200, body: bytes::Bytes::from(self.0.to_string()), ..Default::default() })
+            }
+            fn route(&self) -> Route {
+                Route::Home
+            }
+        }
+        let album = json!({"id": 9, "monitored": true, "anyReleaseOk": true, "releases": [{"id": 90, "monitored": true}]});
+        let good = WriteCall::SwitchOff(SwitchOff::from_current(9, &album).unwrap()).body();
+        let r = RelayedWrite::check("PUT", "/album/9", &good).unwrap();
+        assert!(WriteCall::Relayed(r.clone()).is_settings_write());
+        r.confirm_with(&One(album.clone())).await.unwrap();
+        // Lidarr moved the album to another edition since: refused.
+        let moved = json!({"id": 9, "monitored": true, "anyReleaseOk": true, "releases": [{"id": 91, "monitored": true}]});
+        assert!(r.confirm_with(&One(moved)).await.is_err());
+        // A body that changes monitoring too, or names another album, never passes.
+        let sneaky = json!({"id": 9, "monitored": false, "anyReleaseOk": false, "releases": [{"id": 90, "monitored": true}]}).to_string();
+        assert!(RelayedWrite::check("PUT", "/album/9", &sneaky).unwrap().confirm_with(&One(album.clone())).await.is_err());
+        assert!(RelayedWrite::check("PUT", "/album/8", &good).is_err(), "the path and body name the same album");
+        assert!(RelayedWrite::check("PUT", "/album/9", r#"{"id": 9, "anyReleaseOk": true}"#).is_err(), "only ever turned off");
+        assert!(RelayedWrite::check("DELETE", "/album/9", "").is_err());
     }
 }

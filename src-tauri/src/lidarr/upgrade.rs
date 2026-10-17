@@ -443,6 +443,9 @@ struct Worked {
     offer: Offer,
     /// Track id → (Plex path, Lidarr path, the note to add) for each song that upgrades.
     paths: HashMap<String, (String, String, Option<NoteEdit>)>,
+    /// The Lidarr album and the edition the offer was worked out on, to read
+    /// again right before a swap.
+    edition: Option<(super::api::LidarrClient, i64, Option<i64>)>,
 }
 
 impl Upgrades {
@@ -755,7 +758,7 @@ impl Upgrades {
     async fn work(&self, r: &UpgradeRecord) -> AppResult<Worked> {
         let a = self.album(&r.album_id).await.ok();
         let mut offer = self.base_offer(r, a.as_ref());
-        let empty = |offer| Ok(Worked { offer, paths: HashMap::new() });
+        let empty = |offer| Ok(Worked { offer, paths: HashMap::new(), edition: None });
         if let Some(s) = r.last_swap() {
             offer.status = OfferStatus::Swapped;
             offer.summary = Some(s.summary.clone());
@@ -786,13 +789,17 @@ impl Upgrades {
         let lidarr_unreachable = |mut offer: Offer, e: AppError| {
             offer.status = OfferStatus::Unreachable;
             offer.message = Some(e.to_string());
-            Ok(Worked { offer, paths: HashMap::new() })
+            Ok(Worked { offer, paths: HashMap::new(), edition: None })
         };
         let client = match self.lidarr().routes().map(Lidarr::connect) {
             Ok(f) => match f.await {
                 Ok((c, _, _)) => c,
                 Err(e) => return lidarr_unreachable(offer, e),
             },
+            Err(e) => return lidarr_unreachable(offer, e),
+        };
+        let release = match self.lidarr().release_now(&client, lidarr_album).await {
+            Ok((_, r)) => r.map(|r| r.id),
             Err(e) => return lidarr_unreachable(offer, e),
         };
         let (tracks, files) = match futures::try_join!(client.tracks(lidarr_album), client.track_files(lidarr_album)) {
@@ -802,9 +809,11 @@ impl Upgrades {
         let h = host.clone();
         let s = crate::settings::load(&self.inner.db);
         let cx = CompareCtx { prefix: s.upgrade_official_prefix, today: ymd(self.now()), status: self.inner.status.clone() };
-        tokio::task::spawn_blocking(move || compare(h.as_ref(), offer, &a, &tracks, &files, &cx))
+        let mut w = tokio::task::spawn_blocking(move || compare(h.as_ref(), offer, &a, &tracks, &files, &cx))
             .await
-            .map_err(|e| AppError::Internal(e.to_string()))
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        w.edition = Some((client, lidarr_album, release));
+        Ok(w)
     }
 
     // ------------------------------------------------------------ the swap
@@ -852,6 +861,11 @@ impl Upgrades {
             return Err(self.fail(r, Failure::PlexUnreachable));
         }
         let Some(host) = self.inner.hosts.host() else { return Err(self.fail(r, Failure::NoMapping)) };
+        // Lidarr can switch the album's edition at any moment, and with it
+        // which files belong to it: read it once more before touching a file.
+        if let Some((client, album, planned)) = &worked.edition {
+            self.lidarr().same_release(client, *album, *planned, "Platter didn't swap anything.").await?;
+        }
         let swap_id = uuid::Uuid::new_v4().to_string();
         let folder = swap::backup_folder(&offer.artist, &offer.title, &swap_id);
         let (h, b, it) = (host.clone(), folder.clone(), items.clone());
@@ -983,12 +997,12 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
     let unreachable = |mut offer: Offer, path: &Path| {
         offer.status = OfferStatus::Unreachable;
         offer.message = Some(format!("Platter can't reach {} from {}. Check the share is connected.", path.to_string_lossy(), host.label()));
-        Worked { offer, paths: HashMap::new() }
+        Worked { offer, paths: HashMap::new(), edition: None }
     };
     let needs_mapping = |mut offer: Offer, what: &str| {
         offer.status = OfferStatus::NeedsMapping;
         offer.message = Some(format!("The share mapping doesn't cover {what}. Set it in Settings > Integrations > Lidarr."));
-        Worked { offer, paths: HashMap::new() }
+        Worked { offer, paths: HashMap::new(), edition: None }
     };
 
     // The old files, and anything else in their folders.
@@ -1128,7 +1142,7 @@ fn compare(host: &dyn SwapHost, mut offer: Offer, a: &AlbumFiles, tracks: &[supe
         offer.to = to;
         offer.summary = Some(summary_words(offer.upgrade.len(), Some(total), &offer.from, &offer.to, false));
     }
-    Worked { offer, paths }
+    Worked { offer, paths, edition: None }
 }
 
 /// The background loop: waiting upgrades are sent, sent ones followed, and

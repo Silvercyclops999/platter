@@ -65,7 +65,11 @@ export function ChangeDialog({ proposal, onClose, onDone }: { proposal: LidarrPr
         <dt>After</dt>
         <dd>{proposal.after}</dd>
       </dl>
-      <p className="confirm__body">Platter changes only this in Lidarr, logs it, and can put it back from the changes log.</p>
+      <p className="confirm__body">
+        {proposal.canPutBack
+          ? "Platter changes only this in Lidarr, logs it, and can put it back from the changes log."
+          : "Platter changes only this in Lidarr and logs it. To undo it later, change it back in Lidarr."}
+      </p>
       <div className="confirm__actions">
         <Button variant="ghost" onClick={onClose}>
           Cancel
@@ -145,7 +149,7 @@ function RematchDialog({ plan, onClose, onDone }: { plan: LidarrRematchPlan | nu
   const go = async () => {
     setBusy(true);
     try {
-      await backend.lidarrRematchApply(plan.folder);
+      await backend.lidarrRematchApply(plan.folder, plan.releaseId);
       changed();
       toast.info(`Lidarr matched ${plan.files.length} ${plan.files.length === 1 ? "file" : "files"} to ${plan.album}.`);
       onClose();
@@ -513,7 +517,7 @@ export function LidarrChangesList() {
             </p>
             <p className="lidarr-changes__meta">
               {when(c.at)} on {c.device}
-              {c.asked ? "" : ", part of a request you made"}
+              {c.byLidarr ? ", made by Lidarr on its own" : c.asked ? "" : ", part of a request you made"}
               {c.putBackAt ? `, put back ${when(c.putBackAt)}` : ""}
             </p>
             {(c.before || c.after) && (

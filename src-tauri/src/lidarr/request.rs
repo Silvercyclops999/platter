@@ -863,6 +863,8 @@ impl Lidarr {
                 ));
             }
         }
+        // The edition the request goes ahead with; Lidarr may switch it.
+        let planned = self.release_now(&c.client, album.id).await?.1.map(|r| r.id);
         c.writer.monitor(vec![album.id], true).await?;
         tracing::info!(album = album.id, "lidarr request: monitored");
         rec.lidarr_album_id = Some(album.id);
@@ -885,6 +887,14 @@ impl Lidarr {
         if let Err(e) = gate(&after.report, protected) {
             rec.state = RequestState::Failed;
             rec.message = Some(format!("{e} Platter stopped before searching."));
+            return Ok(rec);
+        }
+        if let Err(e) = self.same_release(&c.client, album.id, planned, "Platter didn't search for it. It's still marked for download in Lidarr.").await {
+            if e.kind() == "network" {
+                return Err(e);
+            }
+            rec.state = RequestState::Failed;
+            rec.message = Some(e.to_string());
             return Ok(rec);
         }
         c.writer.search(vec![album.id]).await?;

@@ -160,11 +160,13 @@ pub fn classify(ev: &HistoryItem, protected: bool) -> EventKind {
     }
 }
 
+const RENAME_ON: &str = "Rename Tracks was turned on";
+
 /// Changes toward unsafe while protected artists exist.
 pub fn unsafe_changes(was: &Baseline, now: &Baseline) -> Vec<&'static str> {
     let mut out = Vec::new();
     if now.rename_tracks && !was.rename_tracks {
-        out.push("Rename Tracks was turned on");
+        out.push(RENAME_ON);
     }
     let tags = |t: &str| !t.trim().is_empty() && !t.trim().eq_ignore_ascii_case("no");
     if tags(&now.write_audio_tags) && !tags(&was.write_audio_tags) {
@@ -441,7 +443,21 @@ impl Lidarr {
             shared.put(&bkey, &current)?;
             return Ok(self.paused().map(|p| p.reason));
         };
-        let worse = unsafe_changes(&was, &current);
+        let mut worse = unsafe_changes(&was, &current);
+        // Renaming only reaches files under Lidarr's root folders: it matters
+        // only while a protected artist's folder is under one (as the setup
+        // check says).
+        let roots: Vec<&str> = cx.snap.roots.iter().map(|r| r.path.as_str()).collect();
+        let share: Vec<(String, String)> = crate::musicshare::load(&self.inner.db).music.iter().map(|p| (p.server.clone(), p.local.clone())).collect();
+        let rename_matters = cx
+            .modes
+            .iter()
+            .filter(|m| m.protected())
+            .filter_map(|m| m.folder.as_deref())
+            .any(|f| super::paths::inside_any(&super::paths::to_server(f, &share), roots.iter().copied()).is_some());
+        if !rename_matters {
+            worse.retain(|w| *w != RENAME_ON);
+        }
         if protected && !worse.is_empty() {
             let reason = format!(
                 "Protected work is paused: in Lidarr, {}. Change it back, or look at Settings > Lidarr and resume.",

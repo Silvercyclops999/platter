@@ -72,6 +72,8 @@ fn tags_of(path: &Path) -> Vec<(String, String)> {
 
 #[derive(Default)]
 struct State {
+    /// Lidarr also has a root folder holding the protected folder.
+    wide_root: bool,
     history: Vec<Value>,
     /// The oldest event Lidarr still keeps (none: the first in `history`).
     oldest: Option<Value>,
@@ -106,10 +108,16 @@ impl Fake {
         }
         match (m, path.as_str()) {
             (Method::Get, "/system/status") => (200, json!({"appName": "Lidarr", "version": "2.8.2"})),
-            (Method::Get, "/rootfolder") => (200, json!([
-                {"id": 3, "path": "/data/media/Music/Lidarr", "accessible": true, "defaultQualityProfileId": 1, "defaultMetadataProfileId": 1},
-                {"id": 2, "path": STAGING, "accessible": true, "defaultQualityProfileId": 1, "defaultMetadataProfileId": 1}
-            ])),
+            (Method::Get, "/rootfolder") => {
+                let mut roots = vec![
+                    json!({"id": 3, "path": "/data/media/Music/Lidarr", "accessible": true, "defaultQualityProfileId": 1, "defaultMetadataProfileId": 1}),
+                    json!({"id": 2, "path": STAGING, "accessible": true, "defaultQualityProfileId": 1, "defaultMetadataProfileId": 1}),
+                ];
+                if st.wide_root {
+                    roots.push(json!({"id": 4, "path": "/data/media/Music", "accessible": true}));
+                }
+                (200, Value::Array(roots))
+            }
             (Method::Get, "/artist") => (200, Value::Array(st.artists.clone())),
             (Method::Get, "/config/naming") => (200, json!({"id": 1, "renameTracks": st.rename})),
             (Method::Get, "/config/metadataprovider") => (200, json!({"id": 1, "writeAudioTags": "no"})),
@@ -474,6 +482,14 @@ async fn history_that_no_longer_reaches_back_says_so_and_checks_plex() {
 async fn turning_on_an_unsafe_setting_pauses_protected_work() {
     let r = rig();
     r.a.lidarr.catch_up().await.unwrap();
+    // Renaming can't reach the protected folder outside Lidarr's root folders.
+    r.web.st.lock().rename = true;
+    let rep = r.a.lidarr.catch_up().await.unwrap();
+    assert!(rep.paused.is_none(), "{rep:?}");
+    r.web.st.lock().rename = false;
+    r.a.lidarr.catch_up().await.unwrap();
+    // With a root folder holding it, it can.
+    r.web.st.lock().wide_root = true;
     r.web.st.lock().rename = true;
     let rep = r.a.lidarr.catch_up().await.unwrap();
     assert!(rep.paused.as_deref().unwrap().contains("Rename Tracks was turned on"), "{rep:?}");

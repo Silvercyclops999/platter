@@ -94,6 +94,9 @@ pub(super) struct State {
     pub(super) queue_total: u64,
     /// Free bytes on the root folder, when Lidarr says.
     pub(super) free_space: Option<i64>,
+    /// Lidarr moves an album to its other edition after this many reads of it.
+    pub(super) switch_after: Option<usize>,
+    pub(super) album_reads: usize,
 }
 
 /// A faked Lidarr that keeps artists and albums. Logs method, path and body.
@@ -166,6 +169,20 @@ impl FakeLidarr {
                     return (200, json!([]));
                 }
                 (200, Value::Array(st.albums.iter().filter(|a| a["artistId"] == aid).cloned().collect()))
+            }
+            (Method::Get, p) if p.starts_with("/album/") && p[7..].bytes().all(|b| b.is_ascii_digit()) => {
+                let id: i64 = p[7..].parse().unwrap_or(-1);
+                st.album_reads += 1;
+                let switched = st.switch_after.is_some_and(|n| st.album_reads > n);
+                match st.albums.iter().find(|a| a["id"] == id) {
+                    Some(a) => {
+                        let mut a = a.clone();
+                        a["releases"] = json!([{"id": id * 10, "title": a["title"], "monitored": !switched, "trackCount": 10},
+                                               {"id": id * 10 + 1, "title": a["title"], "monitored": switched, "trackCount": 14}]);
+                        (200, a)
+                    }
+                    None => (404, json!({})),
+                }
             }
             (Method::Get, p) if p.starts_with("/artist/") => {
                 let id: i64 = p.trim_start_matches("/artist/").parse().unwrap_or(-1);
@@ -823,4 +840,23 @@ async fn request_these_takes_at_most_ten_and_runs_each_request_on_its_own() {
     assert_only_allowed_writes(&r.web);
     let saved = r.db.read(|c| Ok(super::request::saved_requests(c))).unwrap();
     assert_eq!(saved.len(), 2);
+}
+
+/// Lidarr can move an album to another edition at any moment (its daily
+/// refresh with "Automatically Switch Release" on). The request reads the
+/// edition before monitoring and again before searching, and stops when it
+/// changed in between.
+#[tokio::test]
+async fn a_request_stops_before_searching_when_lidarr_switches_the_edition() {
+    let r = rig();
+    // The first read (before monitoring) sees the 10-track edition; later ones the 14-track one.
+    r.web.st.lock().switch_after = Some(1);
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    assert_eq!(rec.state, RequestState::Failed, "{:?}", rec.message);
+    let m = rec.message.unwrap();
+    assert!(m.contains("Lidarr moved Second Wind to the 14-track edition") && m.contains("didn't search"), "{m}");
+    assert!(!r.web.writes().iter().any(|(m, p, _)| *m == Method::Post && p == "/api/v1/command"), "no search was sent");
+    let seen = r.lidarr.changes().into_iter().find(|c| c.by_lidarr).expect("logged");
+    assert_eq!(seen.what, "Lidarr switched Second Wind to the 14-track edition");
+    assert_only_allowed_writes(&r.web);
 }

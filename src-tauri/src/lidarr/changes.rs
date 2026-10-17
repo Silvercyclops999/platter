@@ -16,9 +16,9 @@ use serde_json::Value;
 
 use super::Lidarr;
 use super::api::LidarrClient;
-use super::check::{ExclusionTarget, FixAction};
+use super::check::{AlbumTarget, ExclusionTarget, FixAction};
 use super::paths::{NormPath, inside_any, to_server};
-use super::write::{ConfigKind, LidarrWriter, NewRoot, WriteCall};
+use super::write::{ConfigKind, LidarrWriter, NewRoot, SwitchOff, WriteCall};
 use crate::error::{AppError, AppResult};
 
 /// How long a shown proposal can be applied.
@@ -64,6 +64,9 @@ pub struct ChangeEntry {
     /// Practice mode: what Platter would have done, not done.
     #[serde(default)]
     pub practice: bool,
+    /// Lidarr made this change on its own; Platter only noticed it.
+    #[serde(default)]
+    pub by_lidarr: bool,
 }
 
 /// A change waiting for a yes.
@@ -86,6 +89,8 @@ enum Plan {
     Config { config: ConfigKind, field: &'static str, before: Value, after: Value },
     StagingRoot(NewRoot),
     HiResProfile(Value),
+    /// Albums to turn "Automatically Switch Release" off for.
+    SwitchOff(Vec<AlbumTarget>),
 }
 
 fn shown(v: &Value) -> String {
@@ -165,15 +170,21 @@ impl Lidarr {
 
     /// Log a change (asked or part of a request).
     pub fn log_change(&self, what: &str, before: &str, after: &str, asked: bool, undo: Option<Undo>) -> AppResult<ChangeEntry> {
-        self.log_entry(what, before, after, asked, undo, false)
+        self.log_entry(what, before, after, asked, undo, false, false)
     }
 
     /// Log what practice mode would have done.
     pub fn log_practice(&self, what: &str, before: &str, after: &str) -> AppResult<ChangeEntry> {
-        self.log_entry(what, before, after, false, None, true)
+        self.log_entry(what, before, after, false, None, true, false)
     }
 
-    fn log_entry(&self, what: &str, before: &str, after: &str, asked: bool, undo: Option<Undo>, practice: bool) -> AppResult<ChangeEntry> {
+    /// Log a change Lidarr made on its own, that Platter noticed.
+    pub fn log_by_lidarr(&self, what: &str, before: &str, after: &str) -> AppResult<ChangeEntry> {
+        self.log_entry(what, before, after, false, None, false, true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn log_entry(&self, what: &str, before: &str, after: &str, asked: bool, undo: Option<Undo>, practice: bool, by_lidarr: bool) -> AppResult<ChangeEntry> {
         let at = (self.inner.clock)();
         let e = ChangeEntry {
             id: format!("{at:012}-{}", uuid::Uuid::new_v4().simple()),
@@ -186,6 +197,7 @@ impl Lidarr {
             undo,
             put_back_at: None,
             practice,
+            by_lidarr,
         };
         self.inner.shared.put(&format!("change:{}", e.id), &e)?;
         let all = self.changes();
@@ -275,6 +287,27 @@ impl Lidarr {
                 )
             }
             FixAction::Rematch { .. } => return Err(AppError::Invalid("Re-match an album from its own row.".into())),
+            FixAction::ReleaseSwitchOff { albums } => {
+                // Only albums Lidarr still has with the switch on.
+                let mut on = Vec::new();
+                for a in albums.into_iter().filter(|a| a.id > 0).take(50) {
+                    let raw = client.get_raw(&format!("/album/{}", a.id)).await?;
+                    if raw["anyReleaseOk"] == Value::Bool(true) {
+                        let title = raw["title"].as_str().map(str::to_string).unwrap_or(a.title);
+                        on.push(AlbumTarget { id: a.id, title });
+                    }
+                }
+                if on.is_empty() {
+                    return Err(AppError::Invalid("Automatically Switch Release is already off for those albums.".into()));
+                }
+                let names: Vec<&str> = on.iter().map(|a| a.title.as_str()).collect();
+                (
+                    if on.len() == 1 { format!("Turn off Automatically Switch Release for {}", names[0]) } else { format!("Turn off Automatically Switch Release for {} albums", on.len()) },
+                    format!("On for {}: Lidarr may move them to another edition at its daily refresh", names.join(", ")),
+                    format!("Off for {}. Each keeps the edition it's on now; nothing else about the albums changes.", names.join(", ")),
+                    Plan::SwitchOff(on),
+                )
+            }
         };
         Ok(self.keep_proposal(what, before, after, plan))
     }
@@ -297,7 +330,9 @@ impl Lidarr {
     }
 
     fn keep_proposal(&self, what: String, before: String, after: String, plan: Plan) -> Proposal {
-        let p = Proposal { id: uuid::Uuid::new_v4().to_string(), what, before, after, can_put_back: true, plan };
+        // Turning release switching back on is left to Lidarr's own page.
+        let can_put_back = !matches!(plan, Plan::SwitchOff(_));
+        let p = Proposal { id: uuid::Uuid::new_v4().to_string(), what, before, after, can_put_back, plan };
         let now = (self.inner.clock)();
         let mut all = self.proposals.lock();
         all.retain(|_, (at, _)| now - *at < PROPOSAL_TTL_S);
@@ -345,6 +380,18 @@ impl Lidarr {
             Plan::HiResProfile(body) => {
                 let id = writer.send_call(WriteCall::AddQualityProfile(body.clone())).await?;
                 (id > 0).then_some(Undo::RemoveQualityProfile { id })
+            }
+            Plan::SwitchOff(albums) => {
+                // Each album as Lidarr has it right now, written back with
+                // only the switch off. One already off is left alone.
+                for a in albums {
+                    let raw = client.get_raw(&format!("/album/{}", a.id)).await?;
+                    if raw["anyReleaseOk"] == Value::Bool(false) {
+                        continue;
+                    }
+                    writer.send_call(WriteCall::SwitchOff(SwitchOff::from_current(a.id, &raw)?)).await?;
+                }
+                None
             }
         };
         *self.modes_cache.lock() = None;

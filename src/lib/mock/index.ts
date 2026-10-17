@@ -3810,7 +3810,7 @@ export class MockBackend implements Backend {
   lidarrRematchPreview(folder: string) {
     return this.delay(() => this.lidarrMock.rematch(folder));
   }
-  lidarrRematchApply(folder: string) {
+  lidarrRematchApply(folder: string, _releaseId: number | null) {
     return this.delay(() => this.lidarrMock.rematch(folder));
   }
   lidarrWork() {

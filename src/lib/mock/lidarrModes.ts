@@ -255,8 +255,15 @@ export class MockLidarrWork {
         break;
       case "rematch":
         throw invalid("Re-match an album from its own row.");
+      case "releaseSwitchOff": {
+        const names = action.albums.map((a) => a.title).join(", ");
+        what = action.albums.length === 1 ? `Turn off Automatically Switch Release for ${names}` : `Turn off Automatically Switch Release for ${action.albums.length} albums`;
+        before = `On for ${names}: Lidarr may move them to another edition at its daily refresh`;
+        after = `Off for ${names}. Each keeps the edition it's on now; nothing else about the albums changes.`;
+        break;
+      }
     }
-    const p: LidarrProposal = { id: `p${++this.n}`, what, before, after, canPutBack: true };
+    const p: LidarrProposal = { id: `p${++this.n}`, what, before, after, canPutBack: action.kind !== "releaseSwitchOff" };
     this.proposals.set(p.id, p);
     return p;
   }
@@ -277,7 +284,7 @@ export class MockLidarrWork {
     const p = this.proposals.get(id);
     if (!p) throw invalid("That change was shown a while ago. Look at it again first.");
     this.proposals.delete(id);
-    return this.log(p.what, p.before, p.after, true, { kind: "demo" });
+    return this.log(p.what, p.before, p.after, true, p.canPutBack ? { kind: "demo" } : null);
   }
 
   putBack(id: string): LidarrChange {
@@ -295,6 +302,7 @@ export class MockLidarrWork {
       albumId: 10,
       album: "First Light",
       release: "CD",
+      releaseId: 100,
       files: [`${folder}/1-02 Noon.flac`],
       kept: [{ path: `${folder}/3-01 Bonus.flac`, why: "not on the album's current edition (a bonus track); kept as it is" }],
       otherEdition: 0,

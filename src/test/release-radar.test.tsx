@@ -289,4 +289,30 @@ describe("settings", () => {
     expect(await screen.findByText("Auto-request couldn't request it.")).toBeInTheDocument();
     expect(screen.getByText(/only as a bootleg or promo/)).toBeInTheDocument();
   });
+
+  it("an imported request says what Lidarr got, and that a lossy copy gets replaced", async () => {
+    mock.lidarr.requests = [
+      {
+        id: "g1",
+        releaseGroupId: "y",
+        title: "Panes",
+        artist: "Glasshouse",
+        artistId: null,
+        state: "imported",
+        destination: null,
+        lidarrAlbumId: 9,
+        addedArtist: false,
+        alreadyInLidarr: false,
+        createdAt: 1,
+        updatedAt: 1,
+        message: null,
+        notes: [],
+        auto: false,
+        protected: false,
+        grabbed: { line: "MP3 320, Newsletter Edit", upgradeNote: "Lidarr will replace it with FLAC when one turns up." },
+      },
+    ];
+    render(<LidarrRequestsList />);
+    expect((await screen.findByTestId("lidarr-grabbed")).textContent).toBe("MP3 320, Newsletter Edit. Lidarr will replace it with FLAC when one turns up.");
+  });
 });

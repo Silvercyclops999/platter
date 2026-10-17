@@ -31,6 +31,11 @@ struct State {
     unmapped: Vec<Value>,
     /// The import drops one of the album's files (the edition-switch trap).
     import_drops: bool,
+    /// The album as Lidarr has it (its editions and release switch).
+    album: Value,
+    /// Lidarr moves the album to its other edition after this many reads of it.
+    switch_after: Option<usize>,
+    album_reads: usize,
     next: i64,
 }
 
@@ -57,6 +62,10 @@ impl Fake {
                 album_files: vec![json!({"id": 1, "path": format!("{DIR}/1-01 Dawn.flac")})],
                 unmapped: vec![json!({"id": 0, "path": format!("{DIR}/1-02 Noon.flac")})],
                 import_drops: false,
+                album: json!({"id": 10, "title": "First Light", "artistId": 9, "anyReleaseOk": true, "monitored": true,
+                    "releases": [{"id": 100, "title": "CD", "monitored": true, "trackCount": 12}, {"id": 101, "title": "Deluxe", "monitored": false, "trackCount": 19}]}),
+                switch_after: None,
+                album_reads: 0,
                 next: 50,
             }),
             log: Mutex::new(vec![]),
@@ -138,10 +147,18 @@ impl Fake {
                     "albumReleaseId": 100, "tracks": [{"id": 77, "mediumNumber": 1, "absoluteTrackNumber": 2}],
                     "quality": {"quality": {"id": 6, "name": "FLAC"}}, "rejections": [{"reason": "Has missing tracks", "type": "permanent"}]}]),
             ),
-            (Method::Get, "/album/10") => (
-                200,
-                json!({"id": 10, "title": "First Light", "artistId": 9, "releases": [{"id": 100, "title": "CD", "monitored": true}, {"id": 101, "title": "Deluxe", "monitored": false}]}),
-            ),
+            (Method::Get, "/album/10") => {
+                st.album_reads += 1;
+                if st.switch_after.is_some_and(|n| st.album_reads > n) {
+                    st.album["releases"][0]["monitored"] = json!(false);
+                    st.album["releases"][1]["monitored"] = json!(true);
+                }
+                (200, st.album.clone())
+            }
+            (Method::Put, "/album/10") => {
+                st.album = b;
+                (202, st.album.clone())
+            }
             (Method::Get, "/track") => (200, json!([{"id": 501, "mediumNumber": 1, "absoluteTrackNumber": 1, "hasFile": true}, {"id": 502, "mediumNumber": 1, "absoluteTrackNumber": 2, "hasFile": false}])),
             (Method::Post, "/command") if b["name"] == "ManualImport" => {
                 for f in b["files"].as_array().unwrap() {
@@ -308,7 +325,8 @@ async fn a_rematch_needs_renaming_off_and_imports_explicit_tracks_on_the_current
     assert_eq!(plan.files.len(), 1);
     assert!(r.web.writes().is_empty());
     assert!(r.web.log.lock().iter().any(|(_, p, _)| p.starts_with("/api/v1/manualimport?") && p.contains("filterExistingFiles=false")));
-    r.lidarr.rematch_apply(DIR).await.unwrap();
+    assert_eq!(plan.release_id, Some(100));
+    r.lidarr.rematch_apply(DIR, plan.release_id).await.unwrap();
     let w = r.web.writes();
     assert_eq!(w.len(), 1);
     let body: Value = serde_json::from_str(&w[0].2).unwrap();
@@ -326,7 +344,57 @@ async fn a_rematch_that_unlinks_a_file_stops_and_says_so() {
         st.naming["renameTracks"] = json!(false);
         st.import_drops = true;
     }
-    let e = r.lidarr.rematch_apply(DIR).await.unwrap_err().to_string();
+    let e = r.lidarr.rematch_apply(DIR, None).await.unwrap_err().to_string();
     assert!(e.contains("no longer linked"), "{e}");
     assert!(r.lidarr.changes()[0].what.ends_with("stopped"));
+}
+
+#[tokio::test]
+async fn a_rematch_stops_when_lidarr_switched_the_edition_since_it_was_shown() {
+    let r = rig();
+    r.web.st.lock().naming["renameTracks"] = json!(false);
+    let plan = r.lidarr.rematch_preview(DIR).await.unwrap();
+    // Lidarr's daily refresh moves the album to its 19-track edition.
+    r.web.st.lock().switch_after = Some(0);
+    let e = r.lidarr.rematch_apply(DIR, plan.release_id).await.unwrap_err().to_string();
+    assert!(e.contains("another edition") && e.contains("didn't import anything"), "{e}");
+    assert!(r.web.writes().is_empty(), "nothing imported");
+    let log = r.lidarr.changes();
+    let seen = log.iter().find(|c| c.by_lidarr).expect("the switch is logged");
+    assert_eq!(seen.what, "Lidarr switched First Light to the 19-track edition");
+    assert!(!seen.asked && seen.undo.is_none());
+}
+
+#[tokio::test]
+async fn a_rematch_reads_the_edition_again_right_before_importing() {
+    let r = rig();
+    r.web.st.lock().naming["renameTracks"] = json!(false);
+    // The plan reads the album once; Lidarr switches before the import.
+    r.web.st.lock().switch_after = Some(1);
+    let e = r.lidarr.rematch_apply(DIR, None).await.unwrap_err().to_string();
+    assert!(e.contains("Lidarr moved First Light to the 19-track edition"), "{e}");
+    assert!(r.web.writes().is_empty());
+    let reads = r.web.log.lock().iter().filter(|(m, p, _)| *m == Method::Get && p == "/api/v1/album/10").count();
+    assert_eq!(reads, 2);
+}
+
+#[tokio::test]
+async fn release_switching_goes_off_for_one_album_after_a_yes_and_nothing_else_changes() {
+    let r = rig();
+    let before = r.web.st.lock().album.clone();
+    let action = FixAction::ReleaseSwitchOff { albums: vec![super::check::AlbumTarget { id: 10, title: "First Light".into() }] };
+    let p = r.lidarr.propose(action.clone(), None).await.unwrap();
+    assert!(p.what.contains("Automatically Switch Release for First Light"), "{}", p.what);
+    assert!(!p.can_put_back);
+    assert!(r.web.writes().is_empty(), "showing it writes nothing");
+    let e = r.lidarr.apply(&p.id).await.unwrap();
+    assert!(e.asked && e.undo.is_none());
+    let w = r.web.writes();
+    assert_eq!(w.len(), 1);
+    assert_eq!((w[0].0, w[0].1.as_str()), (Method::Put, "/api/v1/album/10"));
+    let mut sent: Value = serde_json::from_str(&w[0].2).unwrap();
+    assert_eq!(sent["anyReleaseOk"], false);
+    sent["anyReleaseOk"] = json!(true);
+    assert_eq!(sent, before, "the album is written back exactly as Lidarr sent it");
+    assert!(r.lidarr.propose(action, None).await.is_err(), "already off");
 }

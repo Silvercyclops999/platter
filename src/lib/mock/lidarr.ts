@@ -358,6 +358,17 @@ export class MockLidarr {
           action: { kind: "renameOff" },
         },
         {
+          id: "releaseSwitch",
+          level: "amber",
+          title: "Lidarr may switch First Light to another edition",
+          detail:
+            "First Light has files Lidarr doesn't track (extra discs or bonus tracks) and Automatically Switch Release on. At its daily refresh Lidarr can move it to another edition, and the files it tracks now stop counting. Nothing changes on disk.",
+          fix: "Turn off Automatically Switch Release for this album (in Lidarr, Edit album), or let Platter do it. The edition it's on now stays.",
+          emptyRoot: null,
+          protectedOnly: false,
+          action: { kind: "releaseSwitchOff", albums: [{ id: 10, title: "First Light" }] },
+        },
+        {
           id: "recycleBin",
           level: "amber",
           title: "Lidarr deletes files for good",

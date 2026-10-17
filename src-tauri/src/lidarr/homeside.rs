@@ -238,9 +238,12 @@ impl Lidarr {
         }
         let q: QueuedWrite =
             self.inner.shared.get(&format!("ask:{id}")).ok_or_else(|| AppError::NotFound("That change isn't waiting any more.".into()))?;
-        let call = WriteCall::Relayed(RelayedWrite::check(&q.method, &q.path, &q.body)?);
-        let (_, writer) = self.connection().await?;
-        writer.send_call(call).await?;
+        let relayed = RelayedWrite::check(&q.method, &q.path, &q.body)?;
+        let (client, writer) = self.connection().await?;
+        if let Some(album) = relayed.switch_off_album() {
+            relayed.confirm_against(&client.get_raw(&format!("/album/{album}")).await?)?;
+        }
+        writer.send_call(WriteCall::Relayed(relayed)).await?;
         self.log_change(&q.what, "", "Done, after you said yes to what the Bridge queued", true, None)?;
         self.dismiss_queued(id)
     }

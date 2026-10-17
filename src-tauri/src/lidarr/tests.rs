@@ -77,6 +77,7 @@ fn lidarr(roots: Vec<RootFolder>) -> LidarrSnapshot {
         exclusions: vec![],
         unmapped: vec![],
         notifications: vec![],
+        album_folders: vec![],
     }
 }
 
@@ -330,7 +331,8 @@ fn a_normal_library_stays_calm() {
     let mut l3 = l;
     excluded(&mut l3);
     let r = run(&p, l3, &CheckContext { plex_auto_scan: Some(true), ..pc }, &no_disk());
-    assert_eq!(ids(&r, Level::Amber), vec!["recycleBin", "renameTracks"]);
+    // Renaming stays calm: the protected artist isn't under a Lidarr root folder.
+    assert_eq!(ids(&r, Level::Amber), vec!["recycleBin"]);
     assert_eq!(r.findings.iter().find(|f| f.id == "recycleBin").unwrap().action, Some(FixAction::SetRecycleBin));
 }
 
@@ -376,6 +378,61 @@ fn unmatched_files_under_managed_artists_are_offered_only_with_renaming_off() {
     let f = r.findings.iter().find(|f| f.id == "unmappedManaged").unwrap();
     assert_eq!(f.action, None);
     assert!(f.detail.contains("doesn't offer it"), "{}", f.detail);
+}
+
+#[test]
+fn renaming_is_amber_only_when_a_protected_folder_is_under_a_lidarr_root() {
+    // Measured layout: the protected folder sits beside Lidarr's root, not in it.
+    let (p, mut l, c) = green();
+    l.naming.rename_tracks = true;
+    let r = run(&p, l.clone(), &c, &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "renameTracks").unwrap();
+    assert_eq!(f.level, Level::Ok, "{f:?}");
+    assert_eq!(f.action, None);
+    assert!(f.detail.contains("re-match"), "{}", f.detail);
+    // A protected folder inside the Lidarr root: renaming could reach it.
+    let inside = with_protected(Some("/data/staging/music"), vec![prot("Quiet Hours", "/data/media/Music/Lidarr/Quiet Hours", None)]);
+    let r = run(&p, l, &inside, &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "renameTracks").unwrap();
+    assert_eq!(f.level, Level::Amber);
+    assert_eq!(f.action, Some(FixAction::RenameOff));
+    assert!(f.detail.contains("Quiet Hours"), "{}", f.detail);
+}
+
+fn album_folders(id: i64, title: &str, on: bool, folders: &[&str]) -> check::AlbumFolders {
+    check::AlbumFolders {
+        album_id: id,
+        title: title.into(),
+        artist_path: "/data/media/Music/Lidarr/Northlight".into(),
+        any_release_ok: on,
+        folders: folders.iter().map(|f| f.to_string()).collect(),
+    }
+}
+
+#[test]
+fn albums_lidarr_may_switch_while_holding_untracked_files_are_amber() {
+    const A: &str = "/data/media/Music/Lidarr/Northlight/First Light (2019)";
+    let (p, mut l, c) = green();
+    l.unmapped = vec![super::api::TrackFile { path: format!("{A}/2-01 Bonus.flac"), ..Default::default() }];
+    l.album_folders = vec![album_folders(10, "First Light", true, &[A]), album_folders(11, "Second Wind", true, &["/data/media/Music/Lidarr/Northlight/Second Wind (2021)"])];
+    let r = run(&p, l.clone(), &c, &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "releaseSwitch").expect("found");
+    assert_eq!(f.level, Level::Amber);
+    assert!(f.title.contains("First Light") && !f.detail.contains("Second Wind"), "{f:?}");
+    assert_eq!(f.action, Some(FixAction::ReleaseSwitchOff { albums: vec![check::AlbumTarget { id: 10, title: "First Light".into() }] }));
+    assert!(r.passed, "a warning, never a block");
+    // Old disc folders: the bonus disc beside a tracked disc folder counts too.
+    let mut l2 = l.clone();
+    l2.unmapped = vec![super::api::TrackFile { path: format!("{A}/Disc 3/01 Extra.flac"), ..Default::default() }];
+    l2.album_folders = vec![album_folders(10, "First Light", true, &[&format!("{A}/Disc 1"), &format!("{A}/Disc 2")])];
+    assert!(run(&p, l2, &c, &no_disk()).findings.iter().any(|f| f.id == "releaseSwitch"));
+    // With the switch off, or nothing untracked, nothing to say.
+    let mut off = l.clone();
+    off.album_folders[0].any_release_ok = false;
+    assert!(!run(&p, off, &c, &no_disk()).findings.iter().any(|f| f.id == "releaseSwitch"));
+    let mut clean = l;
+    clean.unmapped.clear();
+    assert!(!run(&p, clean, &c, &no_disk()).findings.iter().any(|f| f.id == "releaseSwitch"));
 }
 
 #[test]
@@ -440,7 +497,7 @@ fn only_plain_http_to_a_public_host_is_a_warning() {
 #[test]
 fn red_comes_first() {
     let (p, mut l, mut c) = green();
-    l.naming.rename_tracks = true;
+    l.media.recycle_bin = String::new();
     c.staging = None;
     let r = run(&p, l, &c, &no_disk());
     assert_eq!(r.findings[0].level, Level::Red);

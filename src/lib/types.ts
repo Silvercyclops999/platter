@@ -2445,7 +2445,8 @@ export type LidarrFixAction =
   | { kind: "writeTagsOff" }
   | { kind: "renameOff" }
   | { kind: "addStagingRoot"; path: string }
-  | { kind: "rematch"; folders: string[] };
+  | { kind: "rematch"; folders: string[] }
+  | { kind: "releaseSwitchOff"; albums: { id: number; title: string }[] };
 
 /** `lidarr_check`: the read-only setup check. */
 export interface LidarrReport {
@@ -2525,6 +2526,8 @@ export interface LidarrChange {
   putBackAt: number | null;
   /** Practice mode: what Platter would have done. */
   practice: boolean;
+  /** Lidarr made this change on its own; Platter only noticed it. */
+  byLidarr?: boolean;
 }
 
 export interface LidarrRematchPlan {
@@ -2532,6 +2535,8 @@ export interface LidarrRematchPlan {
   albumId: number | null;
   album: string;
   release: string;
+  /** The edition shown; the re-match stops if Lidarr has moved the album since. */
+  releaseId: number | null;
   files: string[];
   kept: { path: string; why: string }[];
   otherEdition: number;
@@ -2750,6 +2755,8 @@ export interface LidarrRequest {
   searches?: number;
   /** When Lidarr is asked to search again while nothing was grabbed. */
   nextSearchAt?: number | null;
+  /** Once imported: what Lidarr got ("FLAC, 13 tracks"), and whether it keeps looking for better. */
+  grabbed?: { line: string; upgradeNote: string | null } | null;
 }
 
 /** Why a swap or its undo stopped. Every one leaves the old files in place. */

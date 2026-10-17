@@ -591,6 +591,9 @@ struct State {
     exclusions: Vec<String>,
     /// Lidarr puts added artists here instead of the root asked for.
     misplace_artists: Option<String>,
+    /// Lidarr moves albums to their other edition after this many reads of one.
+    switch_after: Option<usize>,
+    album_reads: usize,
 }
 
 struct FakeLidarr {
@@ -668,6 +671,20 @@ impl FakeLidarr {
             (Method::Get, p) if p.starts_with("/artist/") => {
                 let id: i64 = p.trim_start_matches("/artist/").parse().unwrap_or(-1);
                 (200, st.artists.iter().find(|a| a["id"] == id).cloned().unwrap_or(json!({})))
+            }
+            (Method::Get, p) if p.strip_prefix("/album/").is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit())) => {
+                let id: i64 = p.trim_start_matches("/album/").parse().unwrap_or(-1);
+                st.album_reads += 1;
+                let switched = st.switch_after.is_some_and(|n| st.album_reads > n);
+                match st.albums.iter().find(|a| a["id"] == id) {
+                    Some(a) => {
+                        let mut a = a.clone();
+                        a["releases"] = json!([{"id": id * 10, "title": a["title"], "monitored": !switched, "trackCount": 2},
+                                               {"id": id * 10 + 1, "title": a["title"], "monitored": switched, "trackCount": 3}]);
+                        (200, a)
+                    }
+                    None => (404, json!({})),
+                }
             }
             (Method::Get, "/queue/details") => (200, json!([])),
             (Method::Get, "/history") => (200, json!({"records": []})),
@@ -1200,4 +1217,19 @@ async fn the_album_menu_shows_the_action_only_when_it_can_run() {
     assert!(!r.up.for_album("a2").await.unwrap().available, "never for an unreleased album");
     assert_eq!(super::upgrade::ymd(1_800_000_000), "2027-01-15");
     let _ = (&r.mb, NoMbid);
+}
+
+/// Lidarr can move the album to another edition between the offer and the
+/// swap; the swap reads it again first and touches no file if it moved.
+#[tokio::test]
+async fn a_swap_stops_when_lidarr_switched_the_edition_since_the_offer() {
+    let r = rig();
+    let id = imported(&r).await;
+    let reads = r.web.st.lock().album_reads;
+    // The offer the swap works out reads the album once more; the read after it sees the switch.
+    r.web.st.lock().switch_after = Some(reads + 1);
+    let e = r.up.swap(&id, Some(vec!["t1".into()])).await.unwrap_err().to_string();
+    assert!(e.contains("Lidarr moved First Light to the 3-track edition") && e.contains("didn't swap anything"), "{e}");
+    assert!(r.up.records()[0].swaps.is_empty() && r.up.records()[0].failure.is_none(), "nothing swapped, nothing to undo");
+    assert!(r.lidarr.changes().iter().any(|c| c.by_lidarr && c.what == "Lidarr switched First Light to the 3-track edition"));
 }

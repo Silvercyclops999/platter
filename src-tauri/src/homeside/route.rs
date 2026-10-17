@@ -129,7 +129,13 @@ pub async fn serve(home: Option<&DirectRoute>, msg: &Msg) -> Option<Msg> {
             home.get(path, &q).await
         }
         Msg::Write { method, path, body, .. } => match RelayedWrite::check(method, path, body) {
-            Ok(w) => home.send_write(&WriteCall::Relayed(w)).await,
+            Ok(w) => {
+                // A release-switch write must match the album as Lidarr has it now.
+                if let Err(e) = w.confirm_with(home).await {
+                    return Some(Msg::Failed { id, message: e.to_string() });
+                }
+                home.send_write(&WriteCall::Relayed(w)).await
+            }
             Err(e) => return Some(Msg::Failed { id, message: e.to_string() }),
         },
         _ => return None,

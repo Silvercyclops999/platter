@@ -55,7 +55,7 @@ describe("Managed and protected artists", () => {
   it("a fix shows the exact change, waits for yes, and lands in the log with Put it back", async () => {
     render(<SettingsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Check setup" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Fix this" }));
+    await userEvent.click((await screen.findAllByRole("button", { name: "Fix this" }))[0]);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Turn off Rename Tracks")).toBeTruthy();
     expect(within(dialog).getByText("On")).toBeTruthy();
@@ -72,6 +72,52 @@ describe("Managed and protected artists", () => {
     await userEvent.click(within(changes).getByRole("button", { name: "Put it back" }));
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Put it back" }));
     await waitFor(() => expect(mock.lidarrMock.changes[0].putBackAt).not.toBeNull());
+  });
+
+  it("turning off release switching for an album asks first, says how to undo it, and is logged without Put it back", async () => {
+    render(<SettingsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Check setup" }));
+    await screen.findByText("Lidarr may switch First Light to another edition");
+    await userEvent.click((await screen.findAllByRole("button", { name: "Fix this" }))[1]);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Turn off Automatically Switch Release for First Light")).toBeTruthy();
+    expect(within(dialog).getByText(/change it back in Lidarr/)).toBeTruthy();
+    expect(mock.lidarrMock.changes).toHaveLength(0);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Make this change" }));
+    await waitFor(() => expect(mock.lidarrMock.changes).toHaveLength(1));
+    const changes = await waitFor(() => {
+      const r = row("lidarrChanges");
+      expect(r).not.toBeNull();
+      return r!;
+    });
+    await within(changes).findByText("Turn off Automatically Switch Release for First Light");
+    expect(within(changes).queryByRole("button", { name: "Put it back" })).toBeNull();
+  });
+
+  it("an edition switch Lidarr made on its own shows as Lidarr's, with nothing to put back", async () => {
+    mock.lidarrMock.changes.push({
+      id: "seen1",
+      at: 1_800_000_000,
+      device: "This computer",
+      what: "Lidarr switched Panes to the 19-track edition",
+      before: "Panes, 13 tracks",
+      after: "Panes, 19 tracks. Platter didn't change anything.",
+      asked: false,
+      undo: null,
+      putBackAt: null,
+      practice: false,
+      byLidarr: true,
+    });
+    render(<SettingsPage />);
+    const changes = await waitFor(() => {
+      const r = row("lidarrChanges");
+      expect(r).not.toBeNull();
+      return r!;
+    });
+    await within(changes).findByText("Lidarr switched Panes to the 19-track edition");
+    expect(within(changes).getByText(/made by Lidarr on its own/)).toBeTruthy();
+    expect(within(changes).queryByText(/part of a request you made/)).toBeNull();
+    expect(within(changes).queryByRole("button", { name: "Put it back" })).toBeNull();
   });
 
   it("a waiting album shows its names and tags, is added on yes, and Undo asks about Plex's trash", async () => {

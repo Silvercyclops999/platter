@@ -499,6 +499,12 @@ impl super::Lidarr {
             a.mbid = m;
         }
         let albums = client.all_albums().await.unwrap_or_default();
+        // Editions Lidarr sends with the list are compared with the last seen.
+        let editions: Vec<(i64, String, Vec<super::api::AlbumRelease>)> =
+            albums.iter().filter(|a| !a.releases.is_empty()).map(|a| (a.id, a.title.clone(), a.releases.clone())).collect();
+        if !editions.is_empty() {
+            self.observe_releases(&editions);
+        }
         let inp = ModeInputs {
             library,
             lidarr_artists: snap

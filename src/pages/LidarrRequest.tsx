@@ -218,6 +218,12 @@ export function LidarrRequestsList() {
               </p>
               {r.auto && <p className="lidarr-requests__meta">{r.state === "failed" ? "Auto-request couldn't request it." : "Requested by auto-request."}</p>}
               {r.destination && <p className="lidarr-requests__meta">{r.destination}</p>}
+              {r.grabbed && (
+                <p className="lidarr-requests__meta" data-testid="lidarr-grabbed">
+                  {r.grabbed.line}
+                  {r.grabbed.upgradeNote ? `. ${r.grabbed.upgradeNote}` : ""}
+                </p>
+              )}
               {r.message && <p className="lidarr-requests__meta">{r.message}</p>}
               {r.notes.map((n) => (
                 <p key={n} className="lidarr-requests__meta">

@@ -52,6 +52,8 @@ pub struct RematchPlan {
     pub album: String,
     /// The album's current release (edition).
     pub release: String,
+    /// Its id: the re-match stops if the album is on another one by then.
+    pub release_id: Option<i64>,
     /// Files that will be linked, with the tracks they go to.
     pub files: Vec<String>,
     pub kept: Vec<KeptFile>,
@@ -99,6 +101,7 @@ pub fn plan(
         album_id,
         album: detail.map(|d| d.title.clone()).unwrap_or_default(),
         release: current.map(|r| r.title.clone()).unwrap_or_default(),
+        release_id: current.map(|r| r.id),
         files: Vec::new(),
         kept: Vec::new(),
         other_edition: 0,
@@ -204,7 +207,7 @@ impl Lidarr {
         let mut albums = HashMap::new();
         let mut tracks = HashMap::new();
         for id in proposals.iter().filter_map(|p| p.album.as_ref().map(|a| a.id)).filter(|id| *id > 0).collect::<BTreeSet<_>>() {
-            let d = client.album_detail(id).await?;
+            let (d, _) = self.release_now(client, id).await?;
             if let Some(r) = d.current_release() {
                 tracks.insert(r.id, client.release_tracks(r.id).await?);
             }
@@ -225,14 +228,23 @@ impl Lidarr {
     }
 
     /// Re-match an album folder the user confirmed: the plan is made again
-    /// from what Lidarr has now, imported, then checked.
-    pub async fn rematch_apply(&self, folder: &str) -> AppResult<RematchPlan> {
+    /// from what Lidarr has now, imported, then checked. `release_id` is the
+    /// edition the user was shown; if Lidarr has moved the album to another
+    /// one since, nothing is imported.
+    pub async fn rematch_apply(&self, folder: &str, release_id: Option<i64>) -> AppResult<RematchPlan> {
         let _one = self.lock.lock().await;
         let (client, writer) = self.connection().await?;
         let (p, before) = self.rematch_plan(&client, folder).await?;
+        let stopped = "Platter didn't import anything.";
+        if release_id.is_some() && release_id != p.release_id {
+            return Err(AppError::Invalid(format!("Lidarr moved {} to another edition since you looked at it, so {stopped} Look at it again.", p.album)));
+        }
         let Some(album_id) = p.album_id.filter(|_| !p.imports.is_empty()) else {
             return Err(AppError::Invalid("Nothing in this folder can be re-matched safely.".into()));
         };
+        // Lidarr can switch the edition at any moment: read it once more
+        // right before the import.
+        self.same_release(&client, album_id, p.release_id, stopped).await?;
         writer.send_call(WriteCall::ManualImport(p.imports.clone())).await?;
         let mut last = String::new();
         for i in 0..VERIFY_TRIES {

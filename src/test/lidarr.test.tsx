@@ -65,7 +65,7 @@ describe("Lidarr settings", () => {
     const items = within(row("lidarrCheck")!).getAllByRole("listitem");
     const levels = items.map((li) => li.className.match(/lidarr-finding--(\w+)/)?.[1]);
     expect(levels.filter((l) => l === "red")).toHaveLength(1);
-    expect(levels.filter((l) => l === "amber")).toHaveLength(2);
+    expect(levels.filter((l) => l === "amber")).toHaveLength(3);
     expect(levels.indexOf("amber")).toBeGreaterThan(levels.indexOf("red"));
     expect(levels.lastIndexOf("amber")).toBeLessThan(levels.indexOf("ok"));
     expect(screen.getByText(/a protected artist in your Plex music/)).toBeTruthy();
