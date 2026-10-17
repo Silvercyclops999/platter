@@ -552,6 +552,31 @@ async fn queue_and_position_survive_a_restart() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_damaged_queue_file_doesnt_stop_the_player_starting() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("queue.json");
+    let cfg = || PlayerConfig { persist_path: Some(path.clone()), ..Default::default() };
+    {
+        let mut r = rig(&["a", "b", "c"], 0.3, false, cfg()).await;
+        r.player.play_context(ctx(&["a", "b", "c"]), Some("b".into()), Some(false)).await.unwrap();
+        next_tracking(&mut r.tracking, started("b")).await;
+        r.player.pause().await.unwrap();
+        r.player.flush().await;
+    }
+    // Indices past the end and a position far out of range.
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    v["queue"]["order"] = serde_json::json!([9, 0, 0]);
+    v["queue"]["pos"] = 40.into();
+    std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+    let mut r = rig(&["a", "b", "c"], 0.3, false, cfg()).await;
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "b");
+    assert_eq!(next_ids(&s), vec!["c"]);
+    r.player.resume().await.unwrap();
+    next_tracking(&mut r.tracking, ended("c")).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn persistence_is_debounced_to_disk_on_changes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("queue.json");

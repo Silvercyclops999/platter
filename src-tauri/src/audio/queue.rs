@@ -694,22 +694,60 @@ impl Queue {
     /// Upcoming items in play order (user queue, then context, wrapping
     /// with repeat-all), at most `n`. Used for pre-caching.
     pub fn upcoming(&self, n: usize) -> Vec<QueueItem> {
-        let mut out: Vec<QueueItem> = self.user.iter().take(n).cloned().collect();
+        self.upcoming_iter().take(n).cloned().collect()
+    }
+
+    /// Upcoming items in play order, without copying any.
+    pub fn upcoming_iter(&self) -> impl Iterator<Item = &QueueItem> + '_ {
         let len = self.order.len();
-        let mut p = self.pos + 1;
-        let mut guard = 0;
-        while out.len() < n && len > 0 && guard < len {
-            if p as usize >= len {
-                if self.repeat == Repeat::Off {
-                    break;
+        let start = (self.pos + 1).max(0) as usize;
+        let wrap = self.repeat != Repeat::Off;
+        let ctx = (0..len)
+            .map_while(move |k| {
+                let p = start + k;
+                if p < len {
+                    Some(p)
+                } else if wrap {
+                    Some(p - len)
+                } else {
+                    None
                 }
-                p = 0;
-            }
-            out.push(self.items[self.order[p as usize]].clone());
-            p += 1;
-            guard += 1;
+            })
+            .filter_map(|p| self.order.get(p).and_then(|&i| self.items.get(i)));
+        self.user.iter().chain(ctx)
+    }
+
+    /// How many entries are still to come (user queue and context).
+    pub fn upcoming_len(&self) -> usize {
+        self.user.len() + self.remaining()
+    }
+
+    /// Puts a queue read from disk right if it doesn't hold together (a
+    /// damaged or hand-edited file): the play order is rebuilt and the
+    /// position kept in range, so nothing indexes past the end. True if
+    /// anything was fixed.
+    pub fn repair(&mut self) -> bool {
+        let len = self.items.len();
+        let mut seen = vec![false; len];
+        let order_ok = self.order.len() == len
+            && self.order.iter().all(|&i| i < len && !std::mem::replace(&mut seen[i], true));
+        let mut fixed = false;
+        if !order_ok {
+            self.order = (0..len).collect();
+            // The current entry keeps its place if it's from the context.
+            self.pos = self
+                .current
+                .as_ref()
+                .and_then(|c| self.items.iter().position(|i| i.item_id == c.item_id))
+                .map_or(-1, |p| p as isize);
+            fixed = true;
         }
-        out
+        let max = self.order.len() as isize - 1;
+        if self.pos < -1 || self.pos > max {
+            self.pos = self.pos.clamp(-1, max);
+            fixed = true;
+        }
+        fixed
     }
 
     fn step(&mut self, push_history: bool) -> Option<QueueItem> {

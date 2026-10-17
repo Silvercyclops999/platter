@@ -24,7 +24,7 @@ use super::events::{
     SKIPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE, perceptual_gain,
 };
 use super::output::{AudioOutput, OutputState};
-use super::persist::{self, Persisted};
+use super::persist::{self, PersistedRef};
 use super::queue::{AddAt, ContextInfo, ItemSource, Queue, QueueItem, Repeat, ShuffleStyle};
 use super::dsp::DspSettings;
 use super::automix::{self, AutomixOptions, MixInfoSource, MixMemory, MixStyle, Mixed, MixedPlaylist, PlanOptions, Reach};
@@ -374,6 +374,7 @@ impl PlayerHandle {
             failures_in_row: 0,
             unreachable_at: None,
             next_unreachable: None,
+            writer: config.persist_path.as_ref().and_then(|_| persist::Writer::spawn()),
             sink,
             tracking: tracking.clone(),
             problems: problems.clone(),
@@ -869,6 +870,8 @@ struct Actor {
     /// The preloaded next entry couldn't reach the server: it isn't
     /// preloaded again, but is tried once more when its turn comes.
     next_unreachable: Option<String>,
+    /// Writes the queue file off the player's thread.
+    writer: Option<persist::Writer>,
     sink: Arc<dyn EventSink>,
     tracking: broadcast::Sender<TrackingEvent>,
     problems: Arc<Mutex<Vec<Problem>>>,
@@ -934,6 +937,9 @@ impl Actor {
                     Some(cmd) => self.handle(cmd),
                     None => {
                         self.persist_now();
+                        if let Some(w) = &self.writer {
+                            w.wait();
+                        }
                         return;
                     }
                 },
@@ -991,15 +997,28 @@ impl Actor {
         }
         self.dirty = false;
         let Some(path) = self.config.persist_path.clone() else { return };
-        let p = Persisted {
+        let p = PersistedRef {
             version: persist::VERSION,
-            queue: self.queue.clone(),
+            queue: &self.queue,
             position_ms: self.position_ms(),
             volume: self.volume,
             muted: self.muted,
         };
-        if let Err(e) = persist::save(&path, &p) {
-            tracing::warn!("could not save queue: {e}");
+        let bytes = match persist::to_bytes(&p) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("could not save queue: {e}");
+                return;
+            }
+        };
+        // The file is written on its own thread.
+        match &self.writer {
+            Some(w) => w.write(path, bytes),
+            None => {
+                if let Err(e) = persist::save_bytes(&path, &bytes) {
+                    tracing::warn!("could not save queue: {e}");
+                }
+            }
         }
     }
 
@@ -1162,11 +1181,10 @@ impl Actor {
         if self.queue.repeat() == Repeat::One {
             return self.queue.current().cloned();
         }
-        let n = self.queue.view().user_queue.len() + self.queue.view().next_up.len() + 1;
         self.queue
-            .upcoming(n.max(1))
-            .into_iter()
+            .upcoming_iter()
             .find(|i| !self.skip_ids.contains(&i.item_id))
+            .cloned()
     }
 
     /// Tells the engine which album is playing in album order (leveling's
@@ -1611,7 +1629,12 @@ impl Actor {
             Cmd::Flush(tx) => {
                 self.dirty = true;
                 self.persist_now();
-                let _ = tx.send(());
+                match &self.writer {
+                    Some(w) => w.ack(tx),
+                    None => {
+                        let _ = tx.send(());
+                    }
+                }
                 return;
             }
             Cmd::SetContext {
@@ -2236,21 +2259,18 @@ impl Actor {
                 });
                 self.skip_ids.insert(tag.clone());
                 self.failures_in_row += 1;
-                let limit = self.queue.view().next_up.len() + self.queue.view().user_queue.len() + 1;
+                let limit = self.queue.upcoming_len() + 1;
                 if Some(key) == self.cur_key {
                     if self.failures_in_row > limit {
                         self.end_of_queue();
                     } else {
                         // Skip the broken current entry (even with repeat-one).
                         self.cur_ended = true;
-                        let n = self.queue.view().user_queue.len()
-                            + self.queue.view().next_up.len()
-                            + 1;
                         let target = self
                             .queue
-                            .upcoming(n)
-                            .into_iter()
-                            .find(|i| !self.skip_ids.contains(&i.item_id));
+                            .upcoming_iter()
+                            .find(|i| !self.skip_ids.contains(&i.item_id))
+                            .cloned();
                         match target {
                             Some(t) if self.queue.advance_auto_to(&t.item_id) => {
                                 let _ = self.start_current(true, 0);
@@ -2377,11 +2397,10 @@ impl Actor {
             return;
         }
         let target = playable.and_then(|ok| {
-            let n = self.queue.view().user_queue.len() + self.queue.view().next_up.len() + 1;
             self.queue
-                .upcoming(n)
-                .into_iter()
+                .upcoming_iter()
                 .find(|i| ok.contains(&i.track.id) && !self.skip_ids.contains(&i.item_id))
+                .cloned()
         });
         let message = match target {
             Some(t) => {
