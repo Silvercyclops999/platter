@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
 import { buildArtistLookup, type ArtistLookup } from "../lib/credits";
 import type { ArtistName, AuthStatus, Health, Playlist, SavedServer, SyncStatus } from "../lib/types";
+import { watchMixed } from "./mixed";
 import { outputLostMessage, useOutput } from "./output";
 import { loadSettings, useSettings } from "./settings";
 import { useToasts } from "./toasts";
@@ -98,6 +99,7 @@ export function connectApp(b: Backend = backend): () => void {
   void loadFolders(b);
   const loadPlaylists = () => b.playlists().then((p) => alive && useApp.getState().setPlaylists(p)).catch(() => {});
   loadPlaylists();
+  keep(watchMixed(b));
   const loadArtistNames = () =>
     b.artistNames().then((n) => alive && useApp.getState().setArtistNames(n)).catch(() => {});
   loadArtistNames();
