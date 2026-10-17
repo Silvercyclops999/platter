@@ -16,6 +16,9 @@ pub const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// Deepest folder looked into.
 const MAX_DEPTH: usize = 6;
+/// Entries a zip may hold before Platter refuses it (account data downloads
+/// have a few dozen).
+const MAX_ZIP_ENTRIES: usize = 10_000;
 
 /// One file from the pick: its name (the path inside the zip or folder) and
 /// its bytes.
@@ -114,19 +117,27 @@ fn read_dir(root: &Path, dir: &Path, depth: usize, budget: &mut Budget, out: &mu
 /// Reads the usable files inside a zip. `prefix` goes before each name.
 fn read_zip<R: Read + std::io::Seek>(r: R, prefix: &str, budget: &mut Budget, out: &mut Vec<InputFile>) -> AppResult<()> {
     let mut z = zip::ZipArchive::new(r).map_err(|e| AppError::Decode(format!("That zip couldn't be opened ({e}).")))?;
+    if z.len() > MAX_ZIP_ENTRIES {
+        return Err(AppError::Invalid("That zip has too many files to import.".into()));
+    }
     for i in 0..z.len() {
         let mut f = z.by_index(i).map_err(|e| AppError::Decode(format!("zip entry: {e}")))?;
-        if f.is_dir() || !wanted(f.name()) {
+        // A name that isn't valid text is nothing an import reads.
+        let Ok(entry) = f.name().map(|n| n.into_owned()) else { continue };
+        if f.is_dir() || !wanted(&entry) {
             continue;
         }
-        let name = format!("{prefix}{}", f.name());
-        budget.take(f.size())?;
-        let mut bytes = Vec::with_capacity(f.size().min(MAX_FILE_BYTES) as usize);
-        // The size in the header can lie; never read past the cap.
-        (&mut f).take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
+        let name = format!("{prefix}{entry}");
+        // The size in the header can lie (a zip bomb says 1 byte and holds
+        // gigabytes): read at most what's left of the budget, then charge
+        // what was really read.
+        let cap = budget.left.min(MAX_FILE_BYTES);
+        let mut bytes = Vec::with_capacity(f.size().min(cap) as usize);
+        (&mut f).take(cap + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(AppError::Invalid("A file in that zip is too large to import.".into()));
         }
+        budget.take(bytes.len() as u64)?;
         out.push(InputFile::new(name, bytes));
     }
     Ok(())
