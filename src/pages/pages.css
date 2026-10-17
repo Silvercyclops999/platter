@@ -468,7 +468,7 @@
 .server-item__state.is-online { color: var(--color-success); }
 
 /* Transcription model: picker and its download or delete button. */
-.transcribe-model { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: 100%; }
+.transcribe-model { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: min(100%, 20rem); }
 /* A long model name never pushes over the row's description. */
 .transcribe-model .select { max-width: 16rem; min-width: 0; }
 .transcribe-model .select__input { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
