@@ -499,7 +499,11 @@ impl Downloads {
                 let tx = c.transaction()?;
                 let mut changed = false;
                 for item in store::items(&tx)? {
+                    // An empty answer is far more likely a half-read library
+                    // than an item the user emptied, so its files stay until
+                    // the library lists songs for it again.
                     if let Some(now_ids) = store::tracks_of_library_item(&tx, &item.key, liked_min)?
+                        && !now_ids.is_empty()
                         && now_ids != store::item_tracks(&tx, &item.key)?
                     {
                         store::set_tracks(&tx, &item.key, &now_ids)?;

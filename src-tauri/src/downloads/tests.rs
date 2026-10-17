@@ -339,6 +339,32 @@ async fn playlists_follow_the_library_and_shared_songs_stay() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_empty_library_answer_keeps_downloaded_files() {
+    let r = rig().await;
+    r.db.write(|c| {
+        c.execute("UPDATE tracks SET user_rating = 10, rated_at = 5 WHERE id = 'a2'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    r.d.add(key(ItemKind::Playlist, "p"), "Mix".into(), None).await.unwrap();
+    r.d.add(key(ItemKind::Liked, ""), "Liked Songs".into(), None).await.unwrap();
+    drain(&r.d).await;
+    assert_eq!(r.d.downloaded_ids(), ["a1", "a2", "b1"]);
+    // A short read leaves the album, the playlist and the likes empty.
+    r.db.write(|c| {
+        c.execute("DELETE FROM playlist_items", [])?;
+        c.execute("UPDATE tracks SET album_id = 'elsewhere' WHERE album_id = 'a'", [])?;
+        c.execute("UPDATE tracks SET user_rating = NULL", [])?;
+        Ok(())
+    })
+    .unwrap();
+    r.d.resync().await.unwrap();
+    assert_eq!(r.d.downloaded_ids(), ["a1", "a2", "b1"]);
+    assert!(r.dir.join("a1.flac").is_file() && r.dir.join("b1.flac").is_file());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn liked_songs_download_new_likes() {
     let r = rig().await;
     r.db.write(|c| {
