@@ -195,6 +195,14 @@ fn text(r: Result<Vec<Segment>, RecognizeError>) -> String {
 }
 
 #[test]
+fn the_helper_never_starts_a_program_found_on_path() {
+    for exe in ["", "platter"] {
+        let l = ProcessLaunch { exe: std::path::PathBuf::from(exe) };
+        assert!(l.launch(false).is_err(), "{exe:?}");
+    }
+}
+
+#[test]
 fn a_run_goes_through_the_helper_and_back() {
     let f = fx(IDLE_EXIT);
     assert!(!f.helper.running(), "nothing starts before work arrives");

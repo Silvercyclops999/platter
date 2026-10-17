@@ -440,9 +440,11 @@ pub struct ProcessLaunch {
 }
 
 impl ProcessLaunch {
-    /// This binary.
+    /// This binary. When the system can't say where it is, the path stays
+    /// empty and starting the helper fails: never a bare name looked up on
+    /// PATH, which could start some other program.
     pub fn current() -> Self {
-        Self { exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("platter")) }
+        Self { exe: std::env::current_exe().unwrap_or_default() }
     }
 }
 
@@ -476,6 +478,9 @@ impl Launch for ProcessLaunch {
     }
 
     fn launch_with(&self, lowest: bool, gpu: bool) -> io::Result<Worker> {
+        if !self.exe.is_absolute() {
+            return Err(io::Error::other("Platter couldn't find its own program file"));
+        }
         let mut cmd = Command::new(&self.exe);
         cmd.arg(WORKER_FLAG).env(super::gpu::GPU_ENV, if gpu { "1" } else { "0" }).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         crate::platform::cpu::lower_command(&mut cmd, lowest);
