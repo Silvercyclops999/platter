@@ -46,6 +46,12 @@ use crate::model::Track;
 
 /// How long a loader waits for a track's loudness data.
 const INFO_WAIT: Duration = Duration::from_millis(1500);
+/// How long the loudness data of a song that isn't playing yet may take;
+/// its level is set when it comes.
+const LATE_INFO_WAIT: Duration = Duration::from_secs(20);
+/// The next song is opened (connection, format) this long before the
+/// playing one's decoded audio runs out, so a slow link has time.
+const PREOPEN_MS: u64 = 45_000;
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -2214,7 +2220,8 @@ enum Push {
     Cancelled,
 }
 
-fn push_samples(core: &Core, key: u64, generation: u64, ctl: &LoaderCtl, data: &[f32]) -> Push {
+fn push_samples(env: &Arc<Env>, key: u64, generation: u64, ctl: &LoaderCtl, data: &[f32]) -> Push {
+    let core = &env.core;
     let mut m = core.mix.lock();
     loop {
         if ctl.cancel.load(Ordering::SeqCst) {
@@ -2231,7 +2238,49 @@ fn push_samples(core: &Core, key: u64, generation: u64, ctl: &LoaderCtl, data: &
         }
         if buffered < cap || seg.samples.is_empty() {
             seg.samples.extend(data.iter().copied());
+            let early = open_next_early(&mut m, key);
+            drop(m);
+            if let Some((k, t, ctl)) = early {
+                spawn_loader(env.clone(), k, t, 0, ctl);
+            }
             return Push::Ok;
+        }
+        core.cv.wait_for(&mut m, DECODER_IDLE_WAIT);
+    }
+}
+
+/// The last segment's decoded audio reaches within [`PREOPEN_MS`] of its
+/// end: the next song's loader starts now. It opens its stream, then waits
+/// for this one to finish decoding before it decodes (see
+/// [`wait_for_prev`]).
+fn open_next_early(m: &mut Mix, key: u64) -> Option<(u64, Track, Arc<LoaderCtl>)> {
+    if m.next.is_none() || m.segments.back().map(|s| s.key) != Some(key) {
+        return None;
+    }
+    let ch = m.ch() as u64;
+    let seg = m.segments.back()?;
+    if seg.track.duration_ms == 0 {
+        return None;
+    }
+    let decoded_end = seg.samples_start() + seg.samples.len() as u64 / ch.max(1);
+    let end = m.ms_to_frames(seg.track.duration_ms);
+    if decoded_end + m.ms_to_frames(PREOPEN_MS) < end {
+        return None;
+    }
+    take_pending(m)
+}
+
+/// A song opened ahead waits here until the one before it is decoded to its
+/// end (so a parked resampler can carry on into it). False if cancelled.
+fn wait_for_prev(core: &Core, key: u64, ctl: &LoaderCtl) -> bool {
+    let mut m = core.mix.lock();
+    loop {
+        if ctl.cancel.load(Ordering::SeqCst) {
+            return false;
+        }
+        let Some(idx) = m.segments.iter().position(|s| s.key == key) else { return false };
+        if idx == 0 || m.segments[idx - 1].done {
+            return true;
         }
         core.cv.wait_for(&mut m, DECODER_IDLE_WAIT);
     }
@@ -2248,6 +2297,8 @@ fn mark_done(env: &Arc<Env>, key: u64, generation: u64) {
         }
         if is_last { take_pending(&mut m) } else { None }
     };
+    // A next song opened ahead may be waiting for this.
+    env.core.cv.notify_all();
     if let Some((k, t, ctl)) = spawn {
         spawn_loader(env.clone(), k, t, 0, ctl);
     }
@@ -2267,6 +2318,12 @@ fn end_early(env: &Arc<Env>, key: u64, generation: u64, error: AppError) {
         if stop_here {
             if let Some(seg) = m.seg_mut(key) {
                 seg.done = true;
+            }
+            // A next song opened ahead doesn't follow on either.
+            while m.segments.back().is_some_and(|s| s.key != key) {
+                if let Some(s) = m.segments.pop_back() {
+                    s.ctl.cancel.store(true, Ordering::SeqCst);
+                }
             }
             m.next = None;
             m.flush_handoff();
@@ -2342,17 +2399,24 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             }
         }
     };
-    if ctl.cancel.load(Ordering::SeqCst) {
+    if ctl.cancel.load(Ordering::SeqCst) || !wait_for_prev(&core, key, &ctl) {
         return;
     }
     // Its gain must be known before the track is heard; without an answer
-    // in time it plays with the preamp only.
-    let info = env
-        .rt
-        .block_on(async { tokio::time::timeout(INFO_WAIT, info_task).await })
-        .ok()
-        .and_then(|r| r.ok())
-        .flatten();
+    // in time it plays with the preamp only. A song that isn't playing yet
+    // doesn't wait: its level is set when the answer comes.
+    let front = core.mix.lock().segments.front().is_some_and(|s| s.key == key);
+    let mut late_info = None;
+    let info = if front || info_task.is_finished() {
+        env.rt
+            .block_on(async { tokio::time::timeout(INFO_WAIT, info_task).await })
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten()
+    } else {
+        late_info = Some(info_task);
+        None
+    };
     let mut generation = 0u64;
     let mut seek_to = (start_ms > 0).then_some(start_ms);
     let mut out_fmt;
@@ -2370,6 +2434,14 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 seek_to = Some(ms);
             }
         }
+    }
+    if let Some(task) = late_info {
+        let core = core.clone();
+        env.rt.spawn(async move {
+            if let Ok(Ok(Some(info))) = tokio::time::timeout(LATE_INFO_WAIT, task).await {
+                core.mix.lock().set_audio(key, Some(info));
+            }
+        });
     }
     let mut conv = match converter(&opened.dec, out_fmt) {
         Ok(c) => c,
@@ -2468,7 +2540,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 if slice.is_empty() {
                     continue;
                 }
-                match push_samples(&core, key, generation, &ctl, slice) {
+                match push_samples(&env, key, generation, &ctl, slice) {
                     Push::Ok => {
                         pushed_any = true;
                         meter.push(slice);
@@ -2497,9 +2569,12 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 let fresh = (!conv.is_passthrough()).then(|| converter(&opened.dec, out_fmt).ok()).flatten();
                 let parked = fresh.is_some_and(|fresh| {
                     let mut m = core.mix.lock();
-                    let ok = m.next.is_some()
-                        && m.handoff.is_none()
-                        && m.segments.back().map(|s| (s.key, s.generation)) == Some((key, generation));
+                    // A next song follows: queued, or opened ahead and
+                    // waiting for this one.
+                    let idx = m.segments.iter().position(|s| s.key == key);
+                    let mine = idx.is_some_and(|i| m.segments[i].generation == generation);
+                    let last = idx.is_some_and(|i| i + 1 == m.segments.len());
+                    let ok = mine && m.handoff.is_none() && (!last || m.next.is_some());
                     if ok {
                         m.handoff = Some(Handoff {
                             prev_key: key,
@@ -2513,7 +2588,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     conv.finish(&mut out);
                 }
                 if !out.is_empty() {
-                    match push_samples(&core, key, generation, &ctl, &out) {
+                    match push_samples(&env, key, generation, &ctl, &out) {
                         Push::Cancelled => return,
                         Push::Stale => {
                             if let Some((g, ms)) = ctl.seek.lock().take() {

@@ -483,8 +483,9 @@ async fn precache_count_setting_limits_how_far_ahead_is_fetched() {
         .await
         .unwrap();
     next_tracking(&mut r.tracking, started("a")).await;
-    wait_for(&["b"]).await;
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    // b is fetched ahead by the player itself (it opens the next song
+    // early), so nothing more is pre-cached while a plays.
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
     assert!(!cached("c"), "only one track ahead");
 
     r.player.set_precache_count(3).await.unwrap();

@@ -842,3 +842,45 @@ async fn seeking_during_a_replay_lands_on_the_right_audio() {
     assert!(got.len() >= want.len());
     assert_same(&got[got.len() - want.len()..], want);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_next_song_opens_well_before_the_playing_one_is_decoded() {
+    // Played in real time, a 20 s song is decoded only 2 s ahead, so it's
+    // far from decoded when the next song's stream should already be open.
+    let r = rig_paced(RATE, cfg()).await;
+    let a = wav_tone(RATE, 2, RATE as usize * 20, 440.0, 0.5);
+    let b = wav_tone(RATE, 2, RATE as usize, 660.0, 0.5);
+    r.server.add("/t/a", Route { body: a, ..Default::default() });
+    r.server.add("/t/b", Route { body: b, ..Default::default() });
+    let mut ta = t("a");
+    ta.duration_ms = 20_000;
+    let key = r.engine.load(ta, "ia".into(), 0, true).unwrap();
+    r.engine.set_next(Some((t("b"), "ib".into())), key);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while r.server.state.ranges_for("/t/b").is_empty() {
+        assert!(Instant::now() < deadline, "the next song was never opened");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // Opened while a is still decoding (two segments, not all done).
+    assert_eq!(r.engine.decoded(), (2, false));
+    r.engine.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_opened_ahead_still_joins_gaplessly() {
+    // 30 s and 1 s at full speed: b opens ahead, waits for a, and the join
+    // stays sample exact.
+    let mut r = rig().await;
+    let a = wav_tone(RATE, 2, RATE as usize * 30, 440.0, 0.5);
+    let b = wav_tone(RATE, 2, RATE as usize, 660.0, 0.4);
+    r.server.add("/t/a", Route { body: a.clone(), ..Default::default() });
+    r.server.add("/t/b", Route { body: b.clone(), ..Default::default() });
+    let mut ta = t("a");
+    ta.duration_ms = 30_000;
+    let key = r.engine.load(ta, "ia".into(), 0, true).unwrap();
+    r.engine.set_next(Some((t("b"), "ib".into())), key);
+    collect_until(&mut r.events, is_drained, Duration::from_secs(30)).await;
+    let mut want = decode_all(&a, "wav").0;
+    want.extend(decode_all(&b, "wav").0);
+    assert_same(&settled_samples(&r.cap, want.len()).await, &want);
+}
