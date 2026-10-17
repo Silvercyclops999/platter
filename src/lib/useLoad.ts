@@ -8,12 +8,19 @@ export interface LoadState<T> {
   loading: boolean;
 }
 
+export interface Loaded<T> extends LoadState<T> {
+  /** Ask again (a Try again button), keeping what's shown meanwhile. */
+  retry: () => void;
+}
+
 /**
  * Load data from the backend. Keeps the previous data while refetching (no
  * flash back to skeletons) and refetches when the library changes.
  */
-export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): LoadState<T> {
+export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): Loaded<T> {
   const libraryVersion = useApp((s) => s.libraryVersion);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const [state, setState] = useState<LoadState<T>>({ data: undefined, error: undefined, loading: true });
   const keyRef = useRef<string>("");
   const key = JSON.stringify(deps);
@@ -32,9 +39,9 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): LoadState<T> 
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, libraryVersion]);
+  }, [key, libraryVersion, attempt]);
 
-  return state;
+  return { ...state, retry };
 }
 
 /**

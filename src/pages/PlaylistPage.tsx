@@ -111,7 +111,7 @@ function dropPoint(e: DragEvent, index: number): number {
 export function PlaylistPage({ id }: { id: string }) {
   // A shared playlist reads again when a member's change lands.
   const circleVersion = useCircle((s) => (s.view.playlists.some((p) => p.id === id) ? s.version : 0));
-  const { data, error } = useLoad(() => backend.playlistPage(id), [id, circleVersion]);
+  const { data, error, retry } = useLoad(() => backend.playlistPage(id), [id, circleVersion]);
   // An edit shows at once; the next load from the core replaces it.
   const [optimistic, setOptimistic] = useState<PlaylistData | null>(null);
   useEffect(() => setOptimistic(null), [data]);
@@ -170,7 +170,7 @@ export function PlaylistPage({ id }: { id: string }) {
     }
   }, [error, data]);
 
-  if (error && !data) return <PageMissing what="playlist" error={error} />;
+  if (error && !data) return <PageMissing what="playlist" error={error} onRetry={retry} />;
 
   /** Apply a new row order now, then ask the core. */
   const move = (ids: string[], after: string | null | undefined) => {

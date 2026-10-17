@@ -21,6 +21,7 @@ import { NewToYouShelf } from "./NewToYou";
 import { TopSongsPromo } from "./TopSongsPromo";
 import { useLikes } from "../stores/likes";
 import "./home.css";
+import { LoadError } from "../components/LoadError";
 
 /**
  * Colour for the wash at the top of Home: the artwork's most vivid tone
@@ -150,7 +151,7 @@ function MixShelf({ title, mixes }: { title: string; mixes: MixSummary[] }) {
 }
 
 export function HomePage() {
-  const { data: full, error } = useLoad(() => backend.home(), []);
+  const { data: full, error, retry } = useLoad(() => backend.home(), []);
   const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
   const lib = useCachedLibrary();
   // Offline: Home keeps to what can still play, and comes back whole on reconnect.
@@ -199,7 +200,7 @@ export function HomePage() {
       <h1 className={look.homeGreeting ? "home__greeting" : "sr-only"}>{greeting()}</h1>
       <HomeChips value={filter} onChange={pick} />
       {error && !data ? (
-        <p className="page-error">Couldn't load Home: {error.message}</p>
+        <LoadError what="Home" error={error} onRetry={retry} inline />
       ) : libraryEmpty && cachedOnly ? (
         <div className="empty-state" role="status">
           <WifiOff size={40} strokeWidth={1.5} aria-hidden="true" />

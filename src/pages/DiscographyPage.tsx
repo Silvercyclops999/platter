@@ -29,6 +29,7 @@ import {
   type SectionId,
 } from "./discography";
 import "./discography.css";
+import { LoadError } from "../components/LoadError";
 
 /** Starts over (type filter) for each artist; sort and view are remembered on this device. */
 export function DiscographyPage({ id, type }: { id: string; type?: SectionId }) {
@@ -36,7 +37,7 @@ export function DiscographyPage({ id, type }: { id: string; type?: SectionId }) 
 }
 
 function DiscographyView({ id, type: startType }: { id: string; type?: SectionId }) {
-  const { data, error } = useLoad(() => backend.artistPage(id), [id]);
+  const { data, error, retry } = useLoad(() => backend.artistPage(id), [id]);
   const [type, setType] = useState<DiscographyType>(startType ?? "all");
   const [prefs, setPrefs] = useState<DiscographyPrefs>(loadDiscographyPrefs);
   const choose = (p: Partial<DiscographyPrefs>) => {
@@ -45,7 +46,7 @@ function DiscographyView({ id, type: startType }: { id: string; type?: SectionId
     saveDiscographyPrefs(next);
   };
 
-  if (error && !data) return <p className="page-pad page-error">Couldn't load this discography: {error.message}</p>;
+  if (error && !data) return <LoadError what="this discography" error={error} onRetry={retry} />;
 
   const sections = data?.sections ?? [];
   const shownType = data ? validType(sections, type) : type;

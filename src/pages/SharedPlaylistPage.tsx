@@ -92,7 +92,7 @@ export function MissingRow({ row, index, byColumn = true }: { row: Pick<SharedRo
 
 export function SharedPlaylistPage({ id }: { id: string }) {
   const version = useCircle((s) => s.version);
-  const { data, error } = useLoad(() => backend.collabPage(id), [id, version]);
+  const { data, error, retry } = useLoad(() => backend.collabPage(id), [id, version]);
   const live = useShared(id);
   const s = live ?? data?.summary ?? null;
   const [sort, setSort] = useState<PlaylistSort>("custom");
@@ -116,7 +116,7 @@ export function SharedPlaylistPage({ id }: { id: string }) {
   usePageBar(s?.title, playing, () => play());
   const { header, column, step, compact } = useTitleStep(s?.title);
 
-  if (error && !data) return <PageMissing what="playlist" error={error} />;
+  if (error && !data) return <PageMissing what="playlist" error={error} onRetry={retry} />;
 
   const you = s?.people.find((p) => p.you);
   const role = s?.role ?? "listener";

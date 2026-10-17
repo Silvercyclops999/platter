@@ -12,6 +12,7 @@ import { nav } from "../stores/router";
 import { isFollowing, setFollow, startSessionItem } from "../stores/social";
 import { useContextState } from "./cards";
 import "../shell/social.css";
+import { LoadError } from "../components/LoadError";
 
 /** "Album", "EP", "Single". */
 export function releaseType(a: Pick<Album, "format">): string {
@@ -90,8 +91,10 @@ function Group({ title, items }: { title: string; items: NewRelease[] }) {
 export function WhatsNewPage() {
   const [data, setData] = useState<WhatsNew | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
+    setError(null);
     backend.whatsNew().then(
       (w) => {
         if (!alive) return;
@@ -104,7 +107,7 @@ export function WhatsNewPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [attempt]);
 
   return (
     <div className="page-pad whats-new">
@@ -114,7 +117,7 @@ export function WhatsNewPage() {
           ? "New in your library. Follow artists to see only their releases here."
           : "The latest releases from artists you follow."}
       </p>
-      {error && <p className="page-error">Couldn't load What's New: {error}</p>}
+      {error && <LoadError what="What's New" error={error} onRetry={() => setAttempt((n) => n + 1)} inline />}
       {!data && !error && (
         <ul className="release-list" aria-hidden="true">
           {[0, 1, 2].map((i) => (

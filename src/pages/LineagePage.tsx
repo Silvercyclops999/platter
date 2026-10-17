@@ -26,6 +26,7 @@ import { useSettings } from "../stores/settings";
 import { usePageBar, useTitleStep } from "./detail";
 import { formatArchiveDate, SONG_STATUS_LABEL } from "./era";
 import "./lineage.css";
+import { LoadError } from "../components/LoadError";
 
 export const STAGE_LABEL: Record<LineageStage, string> = {
   demo: "Demo",
@@ -63,7 +64,7 @@ function nodeMenu(n: LineageNode) {
 }
 
 export function LineagePage({ id }: { id: string }) {
-  const { data, error } = useLoad(() => backend.trackLineage(id), [id]);
+  const { data, error, retry } = useLoad(() => backend.trackLineage(id), [id]);
   const on = useSettings((s) => s.settings?.showLineage !== false);
   const nowId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
@@ -87,7 +88,7 @@ export function LineagePage({ id }: { id: string }) {
       </div>
     );
   }
-  if (error && !data) return <p className="page-pad page-error">Couldn't load this song's lineage: {error.message}</p>;
+  if (error && !data) return <LoadError what="this song's lineage" error={error} onRetry={retry} />;
 
   const pick = (trackId: string) =>
     setPicked((p) => (p.includes(trackId) ? p.filter((x) => x !== trackId) : p.length >= 2 ? [p[1], trackId] : [...p, trackId]));

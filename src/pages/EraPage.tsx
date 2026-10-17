@@ -15,6 +15,7 @@ import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { usePageBar, useTitleStep } from "./detail";
 import { eraRange, formatArchiveDate } from "./era";
+import { LoadError } from "../components/LoadError";
 
 /** A copy in random order (Fisher-Yates). */
 function shuffled<T>(list: T[]): T[] {
@@ -32,7 +33,7 @@ function shuffled<T>(list: T[]): T[] {
  * released and unreleased alike.
  */
 export function EraPage({ artistId, name }: { artistId: string; name: string }) {
-  const { data: loaded, error } = useLoad(() => backend.eraPage(artistId, name), [artistId, name]);
+  const { data: loaded, error, retry } = useLoad(() => backend.eraPage(artistId, name), [artistId, name]);
   const { data, reload } = useReload(loaded, () => backend.eraPage(artistId, name));
   useEffect(() => {
     const uns = [backend.listen("tags://changed", reload), backend.listen("library://changed", reload)];
@@ -48,7 +49,7 @@ export function EraPage({ artistId, name }: { artistId: string; name: string }) 
   usePageBar(era ? `${era.name} era` : undefined, playingHere, play);
   const { header, column, step, compact } = useTitleStep(era?.name);
 
-  if (error && !data) return <p className="page-pad page-error">Couldn't load this era: {error.message}</p>;
+  if (error && !data) return <LoadError what="this era" error={error} onRetry={retry} />;
 
   const range = era ? eraRange(era) : null;
   return (

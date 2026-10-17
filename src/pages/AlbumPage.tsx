@@ -60,7 +60,7 @@ export function AlbumPage({ id, catalogue }: { id: string; catalogue?: boolean }
 }
 
 function LibraryAlbumView({ id }: { id: string }) {
-  const { data, error } = useLoad(() => backend.albumPage(id), [id]);
+  const { data, error, retry } = useLoad(() => backend.albumPage(id), [id]);
   const album = data?.album;
   useArtTint(album?.tint, album?.thumb);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
@@ -95,7 +95,7 @@ function LibraryAlbumView({ id }: { id: string }) {
       el,
     );
 
-  if (error && !data) return <PageMissing what="album" error={error} />;
+  if (error && !data) return <PageMissing what="album" error={error} onRetry={retry} />;
 
   const firstTrack = data?.tracks[0];
   const untagged = album && album.format === null;
@@ -318,7 +318,7 @@ function LibraryAlbumView({ id }: { id: string }) {
  */
 function CatalogueAlbumView({ rgid }: { rgid: string }) {
   const [version, setVersion] = useState(0);
-  const { data, error } = useLoad(() => backend.catalogueAlbum(rgid), [rgid, version]);
+  const { data, error, retry } = useLoad(() => backend.catalogueAlbum(rgid), [rgid, version]);
   const lidarrReady = useLidarrReady();
   const album = data?.album;
   useArtTint(null, album?.thumb ?? undefined);
@@ -328,7 +328,7 @@ function CatalogueAlbumView({ rgid }: { rgid: string }) {
     if (owned) useRouter.getState().replace({ name: "album", id: owned });
   }, [owned]);
 
-  if (error && !data) return <PageMissing what="album" error={error} missing="Couldn't find this album" />;
+  if (error && !data) return <PageMissing what="album" error={error} missing="Couldn't find this album" onRetry={retry} />;
   const reload = () => setVersion((v) => v + 1);
   const total = data?.tracks.reduce((n, t) => n + (t.durationMs ?? 0), 0) ?? 0;
   const goArtist = () => {

@@ -12,6 +12,7 @@ import { useLoad } from "../lib/useLoad";
 import { bookmarkPageItem, deleteSmartPlaylist, editSmartPlaylist } from "../stores/curate";
 import { player, usePlayer } from "../stores/player";
 import "../components/smart-editor.css";
+import { PageMissing } from "../components/PageMissing";
 
 const OP_WORDS: Record<string, string> = {
   is: "is",
@@ -54,7 +55,7 @@ function updateLine(p: SmartPage["playlist"]): string | null {
 /** A Platter smart playlist: songs its rules find on this computer. */
 export function SmartPlaylistPage({ id }: { id: string }) {
   const [version, setVersion] = useState(0);
-  const { data, error } = useLoad(() => backend.smartPage(id), [id, version]);
+  const { data, error, retry } = useLoad(() => backend.smartPage(id), [id, version]);
   useEffect(() => {
     let un: (() => void) | undefined;
     let alive = true;
@@ -70,7 +71,7 @@ export function SmartPlaylistPage({ id }: { id: string }) {
   const playing = !!nowTrackId && ids.includes(nowTrackId) && status === "playing";
   const play = (start?: string) => void player.playTracks(ids, start);
 
-  if (error && !data) return <p className="page-pad page-error">{error.kind === "notFound" ? "This smart playlist isn't here any more." : `Couldn't load this smart playlist: ${error.message}`}</p>;
+  if (error && !data) return <PageMissing what="smart playlist" error={error} missing="This smart playlist isn't here any more" onRetry={retry} />;
 
   const pl = data?.playlist;
   const menu = (el: HTMLElement) =>

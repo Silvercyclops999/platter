@@ -35,6 +35,7 @@ import {
   type LikedView,
 } from "./liked";
 import "./liked.css";
+import { LoadError } from "../components/LoadError";
 
 export const LIKED_ID = "liked";
 const TITLE = "Liked Songs";
@@ -64,7 +65,7 @@ function useLikesVersion(): number {
 
 export function LikedPage() {
   const version = useLikesVersion();
-  const { data, error } = useLoad(() => backend.likedPage(), [LIKED_ID, version]);
+  const { data, error, retry } = useLoad(() => backend.likedPage(), [LIKED_ID, version]);
   const liked = useLikes((s) => s.ids);
   const owner = useApp((s) => s.auth?.username ?? null);
   const colours = useSettings((s) => s.settings?.artworkColours !== false);
@@ -162,7 +163,7 @@ export function LikedPage() {
 
   const openFind = () => setFindOpen(true);
 
-  if (error && !data) return <p className="page-pad page-error">Couldn't load Liked Songs: {error.message}</p>;
+  if (error && !data) return <LoadError what="Liked Songs" error={error} onRetry={retry} />;
 
   return (
     <div className="detail liked">

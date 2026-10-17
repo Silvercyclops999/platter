@@ -15,6 +15,7 @@ import type { CompareSummary } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
 import { player } from "../stores/player";
 import { nav } from "../stores/router";
+import { LoadError } from "../components/LoadError";
 
 function CompareView({ friend, unreleasedOk }: { friend: CompareSummary; unreleasedOk: boolean }) {
   const { data: r, error } = useLoad(() => backend.statsCompare(friend, unreleasedOk), [friend.name, unreleasedOk]);
@@ -95,7 +96,7 @@ function CompareView({ friend, unreleasedOk }: { friend: CompareSummary; unrelea
 }
 
 export function CompareSection({ friend: initialFriend }: { friend?: string } = {}) {
-  const { data: friends, error } = useLoad(() => backend.statsFriends(), []);
+  const { data: friends, error, retry } = useLoad(() => backend.statsFriends(), []);
   const [picked, setPicked] = useState<string | null>(initialFriend ?? null);
   const [unreleasedOk, setUnreleasedOk] = useState(false);
   const friend = friends?.find((f) => f.name === picked) ?? friends?.[0] ?? null;
@@ -105,7 +106,7 @@ export function CompareSection({ friend: initialFriend }: { friend?: string } = 
         Compare with a friend
       </h2>
       {error ? (
-        <p className="page-error">Couldn't load your friends' stats: {error.message}</p>
+        <LoadError what="your friends' stats" error={error} onRetry={retry} inline />
       ) : !friends ? null : friends.length === 0 || !friend ? (
         <div className="compare__empty">
           <UsersRound size={28} strokeWidth={1.5} aria-hidden="true" />

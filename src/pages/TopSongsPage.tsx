@@ -30,6 +30,7 @@ import { usePageBar } from "./detail";
 import { toneStyle, YearBanner } from "./TopSongsTile";
 import "./liked.css";
 import "./top-songs.css";
+import { LoadError } from "../components/LoadError";
 
 /** The play context for a list (also its download id). */
 export const topSongsKey = (year: number | null) => (year == null ? "topSongs:all" : `topSongs:${year}`);
@@ -92,7 +93,7 @@ export function TopSongsPage({ year }: { year: number | null }) {
   const key = topSongsKey(year);
   const on = useSettings((s) => s.settings?.wrappedTopSongs !== false);
   const showPlays = useSettings((s) => !!s.settings?.topSongsShowPlays);
-  const { data: list, error } = useLoad(() => backend.topSongsList(year), [year, on]);
+  const { data: list, error, retry } = useLoad(() => backend.topSongsList(year), [year, on]);
   const user = useApp((s) => s.auth?.username ?? null);
   const { isContext, playing } = useContextState("mix", key);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
@@ -114,10 +115,14 @@ export function TopSongsPage({ year }: { year: number | null }) {
       </p>
     );
   if (error && !list)
-    return (
+    return error.kind === "notFound" ? (
       <p className="page-pad page-error" data-testid="top-songs">
-        {error.kind === "notFound" ? `There's no Top Songs list for ${year}. A year needs 30 plays for one.` : `Couldn't load this list: ${error.message}`}
+        {`There's no Top Songs list for ${year}. A year needs 30 plays for one.`}
       </p>
+    ) : (
+      <div data-testid="top-songs">
+        <LoadError what={`Top Songs ${year}`} error={error} onRetry={retry} />
+      </div>
     );
 
   const save = async () => {

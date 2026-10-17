@@ -65,7 +65,7 @@ export function ArtistPage({ id, era, catalogue }: { id: string; era?: string; c
 }
 
 function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
-  const { data: loaded, error } = useLoad(() => backend.artistPage(id), [id]);
+  const { data: loaded, error, retry } = useLoad(() => backend.artistPage(id), [id]);
   // The header's play count matches the stats strip: imported history counts
   // too, so an artist played elsewhere doesn't read "0 plays".
   const itemStats = useItemStats("artist", id);
@@ -118,7 +118,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
   usePageBar(artist?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(artist?.title);
 
-  if (error && !data) return <PageMissing what="artist" error={error} />;
+  if (error && !data) return <PageMissing what="artist" error={error} onRetry={retry} />;
 
   // A library artist keeps About without a bio; a credited name needs something to say.
   const sections = data
@@ -558,7 +558,7 @@ function FansAlsoLike({ id, artists, more = [] }: { id: string; artists: Artist[
  */
 function CatalogueArtistView({ mbid }: { mbid: string }) {
   const [version, setVersion] = useState(0);
-  const { data, error } = useLoad(() => backend.catalogueArtist(mbid), [mbid, version]);
+  const { data, error, retry } = useLoad(() => backend.catalogueArtist(mbid), [mbid, version]);
   const lidarrReady = useLidarrReady();
   const [getting, setGetting] = useState(false);
   const dismissed = useSettings((s) => s.settings?.dismissedArtists?.some((d) => d.mbid === mbid)) ?? false;
@@ -569,7 +569,7 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
   }, [libraryId]);
   useArtTint(null, data?.artist.photo ?? undefined);
 
-  if (error && !data) return <PageMissing what="artist" error={error} missing="Couldn't find this artist" />;
+  if (error && !data) return <PageMissing what="artist" error={error} missing="Couldn't find this artist" onRetry={retry} />;
   const artist = data?.artist;
   const meta = data ? [data.artist.disambiguation, data.area, data.lifeSpan].filter(Boolean).join(" · ") : "";
   const reload = () => setVersion((v) => v + 1);

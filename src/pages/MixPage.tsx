@@ -21,6 +21,7 @@ import { useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { daylistGradient } from "./MixCard";
 import "./mixes.css";
+import { PageMissing } from "../components/PageMissing";
 
 const TYPE_LABEL: Record<MixSummary["kind"], string> = {
   daily: "Made for you",
@@ -114,7 +115,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
   // A radio keeps its songs while the page is open; "Make a new radio" picks again.
   const [salt, setSalt] = useState(() => Date.now() % 1_000_000_007);
   useEffect(() => setSteer(null), [key]);
-  const { data, error } = useLoad(
+  const { data, error, retry } = useLoad(
     () => (radio ? backend.radioPage(key, steer, salt) : backend.mixPage(key, steer)),
     [key, steer, version, salt],
   );
@@ -160,7 +161,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
   const { header, column, step, compact } = useTitleStep(mix?.title);
 
   if (error && !page) {
-    return <p className="page-pad page-error">{error.kind === "notFound" ? "This mix isn't here any more. Mixes are made again each day." : `Couldn't load this mix: ${error.message}`}</p>;
+    return <PageMissing what="mix" error={error} missing="This mix isn't here any more. Mixes are made again each day." onRetry={retry} />;
   }
 
   const saveAsPlaylist = async () => {

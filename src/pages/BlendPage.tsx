@@ -22,6 +22,7 @@ import { copyText, toast } from "../stores/toasts";
 import { usePageBar, useTitleStep } from "./detail";
 import { MissingRow } from "./SharedPlaylistPage";
 import "./playlist.css";
+import { PageMissing } from "../components/PageMissing";
 
 /** Everyone's pictures in one square: halves, a third each, or quarters. */
 export function BlendCover({ people, size }: { people: Pick<CirclePerson, "id" | "name" | "avatar">[]; size: number }) {
@@ -39,7 +40,7 @@ export function BlendCover({ people, size }: { people: Pick<CirclePerson, "id" |
 export function BlendPage({ id }: { id: string }) {
   const version = useCircle((s) => s.version);
   const [refreshed, setRefreshed] = useState(0);
-  const { data, error } = useLoad(() => backend.blendPage(id), [id, version, refreshed]);
+  const { data, error, retry } = useLoad(() => backend.blendPage(id), [id, version, refreshed]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const live = useCircle((s) => s.view.blends.find((b) => b.id === id) ?? null);
   const summary: BlendSummary | null = live ?? data?.summary ?? null;
@@ -55,7 +56,7 @@ export function BlendPage({ id }: { id: string }) {
   const { header, column, step, compact } = useTitleStep(summary?.title);
 
   if (error && !data) {
-    return <p className="page-pad page-error">{error.kind === "notFound" ? "This Blend isn't here any more." : `Couldn't load this Blend: ${error.message}`}</p>;
+    return <PageMissing what="Blend" error={error} missing="This Blend isn't here any more" onRetry={retry} />;
   }
 
   const hide = async (trackId: string, title: string) => {

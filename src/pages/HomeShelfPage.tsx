@@ -7,6 +7,7 @@ import { AlbumCard, ArtistCard, HomeItemCard, homeItemInfo } from "./cards";
 import { shelfTitle } from "./home";
 import { CatalogueArtistCard, useCatalogueFans } from "./catalogue";
 import "./home.css";
+import { LoadError } from "../components/LoadError";
 
 /**
  * A shelf's "Show all": a plain page with the shelf's title and the same
@@ -19,9 +20,11 @@ export function ShowAllGrid({
   empty,
   skeletonKind = "album",
   children,
+  onRetry,
 }: {
   title: string;
   error?: { message: string } | null;
+  onRetry?: () => void;
   /** Loaded with nothing in it. */
   empty?: boolean;
   skeletonKind?: "album" | "artist";
@@ -32,13 +35,12 @@ export function ShowAllGrid({
     <div className="page-pad shelf-page">
       <h1 className="page-title">{title}</h1>
       {error && !children ? (
-        <p className="page-error">
-          Couldn't load {title}: {error.message}
-        </p>
+        <LoadError what={title} error={error} onRetry={onRetry} inline />
       ) : empty ? (
-        <p className="home__empty" role="status">
-          Nothing here yet.
-        </p>
+        <div className="empty-state" role="status">
+          <h2 className="empty-state__title">Nothing here yet</h2>
+          <p className="empty-state__text">Play music from your library and this fills in.</p>
+        </div>
       ) : (
         <div className="shelf-page__grid" role="list" aria-label={title} aria-busy={!children || undefined}>
           {children ??
@@ -55,9 +57,9 @@ export function ShowAllGrid({
 
 /** A Home shelf's "Show all". Recently played stays a grid for now. */
 export function HomeShelfPage({ shelf }: { shelf: HomeShelfId }) {
-  const { data, error } = useLoad(() => backend.homeShelf(shelf), [shelf]);
+  const { data, error, retry } = useLoad(() => backend.homeShelf(shelf), [shelf]);
   return (
-    <ShowAllGrid title={shelfTitle(shelf)} error={error} empty={data?.length === 0} skeletonKind={shelf === "topArtists" ? "artist" : "album"}>
+    <ShowAllGrid title={shelfTitle(shelf)} error={error} onRetry={retry} empty={data?.length === 0} skeletonKind={shelf === "topArtists" ? "artist" : "album"}>
       {data?.map((item) => (
         <div role="listitem" key={homeItemInfo(item).key}>
           <HomeItemCard item={item} />
@@ -76,7 +78,7 @@ export const ARTIST_SHELF_TITLES: Record<ArtistShelfId, string> = {
 
 /** An artist page shelf's "Show all": albums keep their artist line, artists their round art. */
 export function ArtistShelfPage({ id, shelf }: { id: string; shelf: ArtistShelfId }) {
-  const { data, error } = useLoad(() => backend.artistPage(id), [id]);
+  const { data, error, retry } = useLoad(() => backend.artistPage(id), [id]);
   const more = useCatalogueFans(shelf === "fansAlsoLike" ? id : null, data?.artist.title);
   const title = ARTIST_SHELF_TITLES[shelf];
   const cards =
@@ -100,7 +102,7 @@ export function ArtistShelfPage({ id, shelf }: { id: string; shelf: ArtistShelfI
           )),
         ]);
   return (
-    <ShowAllGrid title={title} error={error} empty={cards?.length === 0} skeletonKind={shelf === "fansAlsoLike" ? "artist" : "album"}>
+    <ShowAllGrid title={title} error={error} onRetry={retry} empty={cards?.length === 0} skeletonKind={shelf === "fansAlsoLike" ? "artist" : "album"}>
       {cards}
     </ShowAllGrid>
   );

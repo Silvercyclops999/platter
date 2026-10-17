@@ -13,6 +13,7 @@ import { nav } from "../stores/router";
 import { useAlbumActions, useArtistActions, useContextState, usePlaylistActions, type ItemActions } from "./cards";
 import { entryKey, entryLines, groupByDay } from "./recents";
 import "./recents.css";
+import { LoadError } from "../components/LoadError";
 
 /** What a row's play button and title do. */
 interface RowActions {
@@ -134,13 +135,13 @@ function EntryRow({ entry }: { entry: RecentsEntry }) {
 export function RecentsPage() {
   const trackId = usePlayer((s) => s.state?.track?.id ?? null);
   // Reloads as songs change, so the page keeps up while it's open.
-  const { data, error } = useLoad(() => backend.recents(), [trackId]);
+  const { data, error, retry } = useLoad(() => backend.recents(), [trackId]);
   const groups = data ? groupByDay(data) : [];
   return (
     <div className="page-pad recents" data-testid="recents">
       <h1 className="recents__title">Recents</h1>
       {error && !data ? (
-        <p className="page-error">Couldn't load your recents: {error.message}</p>
+        <LoadError what="your recents" error={error} onRetry={retry} inline />
       ) : !data ? (
         <div aria-hidden="true">
           <Skeleton width={120} height={24} style={{ margin: "24px 0 12px" }} />
