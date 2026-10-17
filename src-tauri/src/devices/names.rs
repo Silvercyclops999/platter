@@ -50,8 +50,21 @@ pub fn component(s: &str, fallback: &str, max: usize) -> String {
     out
 }
 
+/// Most file systems cap a name at 255 bytes of UTF-8. A name stays below
+/// that with room for its extension and a ` (n)` suffix.
+pub const MAX_COMPONENT_BYTES: usize = 240;
+
+/// At most `max` characters and [`MAX_COMPONENT_BYTES`] bytes, cut on a
+/// character.
 fn truncate(s: &str, max: usize) -> String {
-    s.chars().take(max).collect()
+    let mut out = String::new();
+    for c in s.chars().take(max) {
+        if out.len() + c.len_utf8() > MAX_COMPONENT_BYTES {
+            break;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Where a song goes below the music folder: `Artist/Album/NN Title.ext`,
@@ -154,6 +167,21 @@ mod tests {
         let long = "é".repeat(200);
         let c = component(&long, "x", 80);
         assert_eq!(c.chars().count(), 80);
+    }
+
+    #[test]
+    fn long_names_stay_under_255_bytes() {
+        // Four bytes a character: 80 of them would be 320 bytes.
+        let wide = "\u{1F3B5}".repeat(200);
+        let c = component(&wide, "x", MAX_COMPONENT);
+        assert!(c.len() <= MAX_COMPONENT_BYTES, "{}", c.len());
+        assert_eq!(c.chars().count(), MAX_COMPONENT_BYTES / 4);
+        let cjk = "\u{97F3}".repeat(200);
+        let p = track_path(&cjk, &cjk, 1, false, 12, &cjk, "flac");
+        for part in p.split('/') {
+            assert!(part.len() <= 255, "{} bytes", part.len());
+        }
+        assert!(with_suffix(&p, 9999).split('/').all(|part| part.len() <= 255));
     }
 
     #[test]
