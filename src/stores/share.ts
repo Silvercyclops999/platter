@@ -7,6 +7,7 @@
  * until that song plays (from the toast's Play button or its row), then the
  * player seeks there once.
  */
+import { create } from "zustand";
 import { joinCircle } from "./circle";
 import { backend, type Backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
@@ -146,22 +147,65 @@ async function songTitle(albumId: string, trackId: string, b: Backend): Promise<
   }
 }
 
-/** Show what a link points at. */
-export async function openDeepLink(o: DeepLinkOpen, b: Backend = backend): Promise<void> {
-  if (o.circle) {
-    await joinCircle(o.circle, b);
-    return;
+/**
+ * An invite or share link waiting for a yes. Any web page can open a
+ * platter:// link, so these never act on their own: the dialog says what
+ * the link does and which relay it uses first.
+ */
+export interface LinkAsk {
+  what: "join" | "circle" | "share";
+  link: string;
+  /** The relay the link names; null for the usual one. */
+  relay: string | null;
+}
+
+export const useLinkAsk = create<{ ask: LinkAsk | null }>(() => ({ ask: null }));
+
+/** The relay as the dialog names it. */
+export function relayName(relay: string | null): string {
+  if (!relay) return "Platter's usual relay";
+  try {
+    return new URL(relay).host || relay;
+  } catch {
+    return relay;
   }
-  if (o.join) {
+}
+
+/** The user said yes to the waiting link. */
+export async function confirmLink(b: Backend = backend): Promise<void> {
+  const a = useLinkAsk.getState().ask;
+  useLinkAsk.setState({ ask: null });
+  if (!a) return;
+  if (a.what === "circle") {
+    await joinCircle(a.link, b);
+  } else if (a.what === "join") {
     if (!listenAlong.enabled) {
       toast.info("Listening sessions are coming back in an update soon.");
       return;
     }
-    await joinSession(o.join, b);
+    await joinSession(a.link, b);
+  } else {
+    await openShareLink(a.link, b);
+  }
+}
+
+export function declineLink() {
+  useLinkAsk.setState({ ask: null });
+}
+
+/** Show what a link points at. */
+export async function openDeepLink(o: DeepLinkOpen, b: Backend = backend): Promise<void> {
+  const relay = o.relay ?? null;
+  if (o.circle) {
+    useLinkAsk.setState({ ask: { what: "circle", link: o.circle, relay } });
+    return;
+  }
+  if (o.join) {
+    useLinkAsk.setState({ ask: { what: "join", link: o.join, relay } });
     return;
   }
   if (o.shareAsk) {
-    await openShareLink(o.shareAsk, b);
+    useLinkAsk.setState({ ask: { what: "share", link: o.shareAsk, relay } });
     return;
   }
   if (o.status === "notInLibrary") {

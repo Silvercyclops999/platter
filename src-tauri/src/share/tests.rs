@@ -378,6 +378,7 @@ async fn opening_links_resolves_against_the_library() {
             join: None,
             circle: None,
             share_ask: None,
+            relay: None,
         }
     );
     // A listening session invite is handed over to join.

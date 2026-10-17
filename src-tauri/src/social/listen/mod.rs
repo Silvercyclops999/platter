@@ -1519,6 +1519,9 @@ impl ListenAlong {
         if u64::from(token.expires) * 1000 <= now_ms() {
             return Err(AppError::Invalid("That invite has expired. Ask for a new one.".into()));
         }
+        if !invite::link_relay_ok(token.relay.as_deref(), &self.inner.deps.settings.relay.read()) {
+            return Err(AppError::Invalid(invite::UNSAFE_RELAY.into()));
+        }
         let now = match &*self.inner.mode.lock() {
             Mode::Host(_) => Err("End your own listening session first."),
             Mode::Joining { .. } => Err("Already joining a listening session."),

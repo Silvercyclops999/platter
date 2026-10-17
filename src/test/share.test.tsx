@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenuHost, openContextMenu } from "../components/ContextMenu";
+import { LinkAskDialog } from "../components/LinkAskDialog";
 import { shareItem } from "../components/ShareMenu";
 import { TrackList, TrackRow } from "../components/TrackRow";
 import { backend } from "../lib/backend";
@@ -223,6 +224,23 @@ describe("opening platter:// links", () => {
     await waitFor(() => expect(toasts().map((t) => t.message)).toEqual(["This isn't in your library"]));
     expect(route()).toEqual({ name: "home" });
     stop();
+  });
+
+  it("an invite link asks first, naming its relay, and does nothing on Not now", async () => {
+    const join = vi.spyOn(backend, "circleJoin");
+    render(<LinkAskDialog />);
+    const link = "platter://collab/AQEBAQEBAQEBAQEBAQEBAQECAgICAgICAgICAgICAgIC_____w";
+    await act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, circle: link, relay: "https://ntfy.example.org" }));
+    const dialog = await screen.findByRole("dialog", { name: "Join a shared playlist?" });
+    expect(dialog).toHaveTextContent("connecting through ntfy.example.org");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(join).not.toHaveBeenCalled();
+    await act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, circle: link }));
+    const again = await screen.findByRole("dialog", { name: "Join a shared playlist?" });
+    expect(again).toHaveTextContent("Platter's usual relay");
+    await userEvent.click(within(again).getByRole("button", { name: "Join" }));
+    await waitFor(() => expect(join).toHaveBeenCalledWith(link));
   });
 
   it("a malformed link says it can't be opened", async () => {

@@ -2,6 +2,7 @@ import { PanelRightOpen } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { DragAnnouncer } from "../components/DragAnnouncer";
+import { LinkAskDialog } from "../components/LinkAskDialog";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
 import { CircleDialogs } from "../components/CircleDialogs";
 import { FolderDialogs } from "./FolderMenus";
@@ -256,6 +257,7 @@ export function AppShell() {
       <SavedInHost />
       <Toaster />
       <PlaylistDialogs />
+      <LinkAskDialog />
       <CircleDialogs />
       <ArchiveDialogs />
       <PhysicalDialogHost />

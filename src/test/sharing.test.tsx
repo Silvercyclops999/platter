@@ -17,7 +17,7 @@ import { SettingsPage } from "../pages/SettingsPage";
 import { ListenMark, ListenStrip } from "../shell/ListenStrip";
 import { ShareMusicDialog } from "../shell/ShareMusic";
 import { loadSettings, useSettings } from "../stores/settings";
-import { openDeepLink } from "../stores/share";
+import { confirmLink, openDeepLink } from "../stores/share";
 import { resetSharing, startSharing, useSharing } from "../stores/sharing";
 import { listenAlong, resetSocial, startSocial } from "../stores/social";
 import { useToasts } from "../stores/toasts";
@@ -166,7 +166,11 @@ describe("Let them listen from my server", () => {
 });
 
 describe("the guest's invite", () => {
-  const join = () => act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE }));
+  const join = () =>
+    act(async () => {
+      await openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE });
+      await confirmLink();
+    });
 
   it("shows as a card in Listen along, and accepting plays the host's copy", async () => {
     session();
@@ -196,7 +200,10 @@ describe("the guest's invite", () => {
   });
 
   it("a share link asks for someone's music, and their invite follows", async () => {
-    await act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, shareAsk: "platter://share/AV8MKp57HUw4puL5CxfT5EXMOOHwS3stlqDkyLHT9XopaPBRgA" }));
+    await act(async () => {
+      await openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, shareAsk: "platter://share/AV8MKp57HUw4puL5CxfT5EXMOOHwS3stlqDkyLHT9XopaPBRgA" });
+      await confirmLink();
+    });
     expect(toasts()).toContain("Asked Morgan for their music. Their invite shows here in a moment.");
     await waitFor(() => expect(useSharing.getState().invites.map((i) => i.from)).toEqual(["Morgan"]), { timeout: 3000 });
   });

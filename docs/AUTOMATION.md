@@ -20,21 +20,20 @@ You can put them in a shortcut, a launcher or a script (`start` on Windows,
     platter://toggle
     platter://next
     platter://previous
-    platter://like
     platter://play?playlist=Road%20Trip
     platter://play?playlist=Road%20Trip&shuffle=1
     platter://search?q=night%20drive
     platter://open/liked
 
-`like` likes the playing song, or unlikes it if it's already liked. A
-playlist can be named by its id or its name; a name matches exactly first,
+A playlist can be named by its id or its name; a name matches exactly first,
 then the playlist whose name starts with it. `open` knows home, search,
 library, liked, settings, stats, recents, bookmarks, lyrics, release-radar and
 whats-new. Playback links leave the window where it is; search and open bring
 it forward.
 
 If automation is off, the app says so and does nothing. Links don't need
-pairing, since only something already on your computer can open them.
+pairing, but a web page can open them too, so they only control playback.
+Liking a song is on the command line (`--like`), which needs pairing.
 
 ## Command line
 

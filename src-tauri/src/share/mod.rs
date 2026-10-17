@@ -115,11 +115,15 @@ pub struct DeepLinkOpen {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// A share link (`platter://share/...`): ask that person for their music.
     pub share_ask: Option<String>,
+    /// For an invite or share link: the relay it names (None: the usual
+    /// one), shown when Platter asks before acting on it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay: Option<String>,
 }
 
 impl DeepLinkOpen {
     fn failed(status: DeepLinkStatus) -> Self {
-        Self { status, kind: None, id: None, album_id: None, at_seconds: None, join: None, circle: None, share_ask: None }
+        Self { status, kind: None, id: None, album_id: None, at_seconds: None, join: None, circle: None, share_ask: None, relay: None }
     }
 }
 
@@ -347,14 +351,18 @@ impl ShareService {
 
     /// Work out what a `platter://` link opens.
     pub async fn resolve(&self, raw: &str) -> DeepLinkOpen {
+        use crate::social::listen::invite::parse_as;
+        let relay = ["join", "collab", "blend", "share"].iter().find_map(|w| parse_as(raw, w)).and_then(|t| t.relay);
+        let invite = |o: DeepLinkOpen| DeepLinkOpen { relay: relay.clone(), ..o };
+        let link = Some(raw.trim().to_string());
         if crate::social::listen::parse_invite(raw).is_some() {
-            return DeepLinkOpen { join: Some(raw.trim().to_string()), ..DeepLinkOpen::failed(DeepLinkStatus::Open) };
+            return invite(DeepLinkOpen { join: link, ..DeepLinkOpen::failed(DeepLinkStatus::Open) });
         }
         if crate::social::circle::is_invite(raw) {
-            return DeepLinkOpen { circle: Some(raw.trim().to_string()), ..DeepLinkOpen::failed(DeepLinkStatus::Open) };
+            return invite(DeepLinkOpen { circle: link, ..DeepLinkOpen::failed(DeepLinkStatus::Open) });
         }
-        if crate::social::listen::invite::parse_as(raw, "share").is_some() {
-            return DeepLinkOpen { share_ask: Some(raw.trim().to_string()), ..DeepLinkOpen::failed(DeepLinkStatus::Open) };
+        if parse_as(raw, "share").is_some() {
+            return invite(DeepLinkOpen { share_ask: link, ..DeepLinkOpen::failed(DeepLinkStatus::Open) });
         }
         let Some(l) = link::parse(raw) else {
             return DeepLinkOpen::failed(DeepLinkStatus::Invalid);
@@ -398,7 +406,7 @@ impl ShareService {
             Item::Track { album_id, .. } => Some(album_id),
             _ => None,
         };
-        DeepLinkOpen { status: DeepLinkStatus::Open, kind: Some(l.kind), id: Some(id), album_id, at_seconds: l.t, join: None, circle: None, share_ask: None }
+        DeepLinkOpen { status: DeepLinkStatus::Open, kind: Some(l.kind), id: Some(id), album_id, at_seconds: l.t, join: None, circle: None, share_ask: None, relay: None }
     }
 
     /// A link was opened: keep it for the UI and tell it.

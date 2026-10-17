@@ -1,12 +1,14 @@
 //! `platter://` command links, for launchers, shortcuts and scripts:
 //!
 //! - `platter://play`, `platter://pause`, `platter://toggle`,
-//!   `platter://next`, `platter://previous`, `platter://like`
+//!   `platter://next`, `platter://previous`
 //! - `platter://play?playlist=<name or id>` (`&shuffle=1` to shuffle)
 //! - `platter://search?q=<text>`
 //! - `platter://open/<page>` (see [`page_route`])
 //!
-//! They run only while Allow automation is on. Links to music
+//! They run only while Allow automation is on. Any web page can open a
+//! link, so there is no `like` link: liking stays on the paired local API.
+//! Links to music
 //! (`platter://album/...` and the rest) are sharing's, not these.
 
 use super::Command;
@@ -55,7 +57,6 @@ pub fn parse_link(raw: &str) -> Option<Command> {
         ("toggle" | "play-pause", 1) => Command::PlayPause,
         ("next", 1) => Command::Next,
         ("previous" | "prev", 1) => Command::Previous,
-        ("like", 1) => Command::Like,
         ("search", 1) => Command::Search { query: query("q").unwrap_or_default() },
         ("open", 2) => Command::Open { page: parts[1].clone() },
         _ => return None,
@@ -98,7 +99,7 @@ mod tests {
         assert_eq!(parse_link("platter:toggle"), Some(Command::PlayPause));
         assert_eq!(parse_link("PLATTER://Previous"), Some(Command::Previous));
         assert_eq!(parse_link("platter://play"), Some(Command::Play));
-        assert_eq!(parse_link("platter://like/"), Some(Command::Like));
+        assert_eq!(parse_link("platter://like"), None, "a web page could like songs");
         assert_eq!(
             parse_link("platter://play?playlist=Road%20Trip&shuffle=1"),
             Some(Command::PlayPlaylist { playlist: "Road Trip".into(), shuffle: true })

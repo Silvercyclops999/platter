@@ -86,6 +86,23 @@ pub fn relay_url(raw: &str) -> Option<String> {
     ok.then(|| raw.to_string())
 }
 
+/// Whether a relay named in someone else's link may be used: the default
+/// relay (none named), the same relay this user set, or any relay once this
+/// user has set a relay of their own (they chose custom relays). Otherwise
+/// only `https` to a public address, so a link can't point Platter at
+/// something on this computer or the home network.
+pub fn link_relay_ok(relay: Option<&str>, own: &str) -> bool {
+    let Some(r) = relay else { return true };
+    if relay_url(own).is_some() {
+        return true;
+    }
+    url::Url::parse(r).is_ok_and(|u| u.scheme() == "https" && u.host_str().is_some_and(|h| !crate::lidarr::paths::is_private_host(h)))
+}
+
+/// What a link that names an unsafe relay says.
+pub const UNSAFE_RELAY: &str =
+    "That link uses a relay Platter won't connect to (it isn't a secure public address). If you run your own relay, set it under Listening sessions in Settings first.";
+
 /// Read an invite link. None when it isn't one.
 pub fn parse(raw: &str) -> Option<Token> {
     parse_as(raw, "join")

@@ -286,6 +286,9 @@ impl Sharing {
         if u64::from(token.expires) * 1000 <= now_ms() {
             return Ok(LinkResult::Failed { message: "That link has expired. Ask for a new one.".into() });
         }
+        if !invite::link_relay_ok(token.relay.as_deref(), &self.links().deps.relay.read()) {
+            return Ok(LinkResult::Failed { message: invite::UNSAFE_RELAY.into() });
+        }
         let user = self.inner.host.username().await.ok_or_else(|| AppError::Auth("Sign in to Plex first.".into()))?;
         let l = self.links();
         let base = token.relay.clone().unwrap_or_else(|| l.deps.default_relay.clone());

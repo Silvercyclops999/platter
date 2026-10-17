@@ -17,14 +17,13 @@ With automation on, opening a `platter://` link controls the running app. You ca
 
 - `platter://play`, `platter://pause` and `platter://toggle` play, pause, or switch between the two.
 - `platter://next` and `platter://previous` skip.
-- `platter://like` likes the playing song, or unlikes it if it's already liked.
 - `platter://play?playlist=Road%20Trip` plays a playlist. Add `&shuffle=1` to shuffle it.
 - `platter://search?q=night%20drive` searches.
 - `platter://open/liked` opens a page. It knows home, search, library, liked, settings, stats, recents, bookmarks, lyrics, release-radar and whats-new.
 
 A playlist can be named by its name. An exact match wins, then a playlist whose name starts with what you typed. Links that play or skip leave the window where it is; search and open bring it to the front.
 
-Links don't need pairing, since only something already on your computer can open them. If automation is off, Platter says so and does nothing.
+Links don't need pairing, but a web page can open them too, so they only control playback. To like the playing song from a script, use `--like` on the command line, which needs pairing. If automation is off, Platter says so and does nothing.
 
 ## Command line
 

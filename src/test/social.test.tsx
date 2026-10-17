@@ -28,7 +28,7 @@ import { useApp } from "../stores/app";
 import { useLibraryView } from "../stores/library";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
-import { openDeepLink } from "../stores/share";
+import { confirmLink, openDeepLink } from "../stores/share";
 import { resetSocial, startSocial, useSocial } from "../stores/social";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
@@ -253,7 +253,11 @@ describe("What's New", () => {
   });
 });
 
-const join = (link = MOCK_INVITE) => act(() => openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: link }));
+const join = (link = MOCK_INVITE) =>
+  act(async () => {
+    await openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: link });
+    await confirmLink();
+  });
 
 describe("listening sessions", () => {
   it("the host starts from the queue card, gets a one-time invite with a QR code, sees who joins, removes them, and ends it", async () => {
@@ -355,7 +359,7 @@ describe("listening sessions", () => {
   it("a join that fails says why: a used invite or a full session", async () => {
     for (const why of ["That invite was already used. Ask for a new one.", "That listening session is full."]) {
       mock.social.failNextJoin = why;
-      await openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, join: MOCK_INVITE });
+      await join();
       expect(toasts()).toContain(why);
       expect(useSocial.getState().listen.role).toBe("none");
     }

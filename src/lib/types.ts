@@ -2187,6 +2187,8 @@ export interface DeepLinkOpen {
   circle?: string | null;
   /** A share link (platter://share/...): ask that person for their music. */
   shareAsk?: string | null;
+  /** For an invite or share link: the relay it names (absent: the usual one). */
+  relay?: string | null;
 }
 
 // ---------------------------------------------------------------- social

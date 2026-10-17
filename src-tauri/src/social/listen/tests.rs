@@ -467,6 +467,17 @@ fn invite_links_carry_only_random_tokens() {
     }
 }
 
+#[test]
+fn a_link_cant_point_platter_at_the_home_network_or_plain_http() {
+    assert!(invite::link_relay_ok(None, ""), "the usual relay");
+    assert!(invite::link_relay_ok(Some("https://ntfy.example.org"), ""));
+    for bad in ["http://ntfy.example.org", "https://10.0.0.5", "https://127.0.0.1:8080", "https://localhost", "https://nas.local", "https://[::1]", "https://router"] {
+        assert!(!invite::link_relay_ok(Some(bad), ""), "{bad}");
+    }
+    // Someone who set a relay of their own has chosen custom relays.
+    assert!(invite::link_relay_ok(Some("http://10.0.0.5:8080"), "http://10.0.0.5:8080"));
+}
+
 // ---- following ------------------------------------------------------------------
 
 fn st(track: Option<&str>, pos: u64, playing: bool) -> State {
@@ -955,7 +966,15 @@ async fn a_self_hosted_relay_goes_in_the_invite_and_the_default_sees_nothing() {
     *h.settings.relay.write() = own.url.clone();
     let link = h.listen.start().await.unwrap().invite.unwrap().link;
     assert_eq!(invite::parse(&link).unwrap().relay.as_deref(), Some(own.url.as_str()));
-    let g = joined(&default, "Alex", &link).await;
+    // A guest who hasn't chosen custom relays won't follow a link to a
+    // plain-http relay on the home network.
+    let wary = peer("Robin", &default);
+    assert!(wary.listen.join(&link).await.unwrap_err().message().contains("relay"));
+    // One who set a relay of their own has.
+    let g = peer("Alex", &default);
+    *g.settings.relay.write() = own.url.clone();
+    g.listen.join(&link).await.unwrap();
+    eventually("guest live", || status(&g) == Some(SessionStatus::Live)).await;
     assert_eq!(g.player.track().as_deref(), Some("a"));
     assert!(default.requests().is_empty(), "{:?}", default.requests());
     assert!(!own.published().is_empty());
