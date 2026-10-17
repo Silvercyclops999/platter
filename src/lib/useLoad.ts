@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../stores/app";
 import type { AppError } from "./types";
 
@@ -35,4 +35,42 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): LoadState<T> 
   }, [key, libraryVersion]);
 
   return state;
+}
+
+/**
+ * `useLoad`'s data plus reloads asked for in the background (an event said
+ * the page changed). Only the newest answer counts: a reload that finishes
+ * after a later one, or after `useLoad` itself brought new data, is dropped,
+ * and nothing is set once the page has gone.
+ */
+export function useReload<T>(loaded: T | undefined, fetch: () => Promise<T>): { data: T | undefined; reload: () => void } {
+  const seq = useRef(0);
+  const alive = useRef(true);
+  const fetchRef = useRef(fetch);
+  fetchRef.current = fetch;
+  // A reload's answer counts only on top of the data it was asked over.
+  const [fresh, setFresh] = useState<{ data: T; over: T | undefined } | null>(null);
+  const base = useRef(loaded);
+  base.current = loaded;
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  // New data from useLoad is the latest: reloads still on their way are dropped.
+  useEffect(() => {
+    seq.current++;
+  }, [loaded]);
+  const reload = useCallback(() => {
+    const n = ++seq.current;
+    const over = base.current;
+    fetchRef.current().then(
+      (data) => {
+        if (alive.current && n === seq.current && over === base.current) setFresh({ data, over });
+      },
+      () => {},
+    );
+  }, []);
+  return { data: fresh && fresh.over === loaded ? fresh.data : loaded, reload };
 }

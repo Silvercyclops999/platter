@@ -1,5 +1,5 @@
 import { Ellipsis, Pause, Play, Shuffle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Art } from "../components/Art";
 import { Badge } from "../components/Badge";
 import { IconButton } from "../components/Button";
@@ -9,8 +9,7 @@ import { tagEraItems } from "../components/TagEditMenu";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { plural, releaseTypeLabel } from "../lib/format";
-import type { EraPage as EraPageData } from "../lib/types";
-import { useLoad } from "../lib/useLoad";
+import { useLoad, useReload } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
@@ -34,17 +33,11 @@ function shuffled<T>(list: T[]): T[] {
  */
 export function EraPage({ artistId, name }: { artistId: string; name: string }) {
   const { data: loaded, error } = useLoad(() => backend.eraPage(artistId, name), [artistId, name]);
-  const [fresh, setFresh] = useState<EraPageData | null>(null);
+  const { data, reload } = useReload(loaded, () => backend.eraPage(artistId, name));
   useEffect(() => {
-    const reload = () =>
-      backend.eraPage(artistId, name).then(
-        (p) => setFresh(p),
-        () => {},
-      );
     const uns = [backend.listen("tags://changed", reload), backend.listen("library://changed", reload)];
     return () => uns.forEach((un) => un.then((f) => f()));
-  }, [artistId, name]);
-  const data = fresh ?? loaded;
+  }, [artistId, name, reload]);
   const era = data?.era;
   useArtTint(null, era?.cover ?? undefined);
   const ids = data ? data.groups.flatMap((g) => g.tracks.map((t) => t.id)) : [];

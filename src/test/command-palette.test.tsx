@@ -83,7 +83,7 @@ describe("command palette", () => {
       await screen.findByRole("combobox");
       for (let i = 0; i < 5; i++) await user.keyboard("{ArrowDown}");
       expect(activeOption()).toBe(options()[5]);
-      expect(seen.at(-1)).toBe(options()[5].textContent);
+      expect(seen[seen.length - 1]).toBe(options()[5].textContent);
     } finally {
       Element.prototype.scrollIntoView = had;
     }

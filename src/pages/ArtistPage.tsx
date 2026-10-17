@@ -18,7 +18,7 @@ import { FilterChips } from "../components/Tabs";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { artUrl, backend } from "../lib/backend";
 import { isCreditId } from "../lib/credits";
-import { useLoad } from "../lib/useLoad";
+import { useLoad, useReload } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
 import type { Album, Artist, ArtistPage as ArtistPageData, ArtistPageSection, Era } from "../lib/types";
 import { useSettings } from "../stores/settings";
@@ -73,18 +73,14 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
   const headerPlays = { plays: allPlays, history: allPlays > (loaded?.plays ?? 0) };
   // Similar artists and the global Popular list arrive in the background
   // after the page opened; the page is asked again when they do.
-  const [fresh, setFresh] = useState<ArtistPageData | null>(null);
+  const { data: page, reload: reloadPage } = useReload(loaded, () => backend.artistPage(id));
   // While the global Popular list is on its way, Popular shows placeholder
   // rows; plays order shows only if the fetch fails or takes too long.
   const [gaveUp, setGaveUp] = useState(false);
   useEffect(() => {
     let alive = true;
     const reload = (e: { id: string }) => {
-      if (e.id !== id) return;
-      backend.artistPage(id).then(
-        (p) => alive && setFresh(p),
-        () => {},
-      );
+      if (e.id === id) reloadPage();
     };
     const done = (e: { id: string }) => {
       if (e.id !== id) return;
@@ -103,8 +99,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
       clearTimeout(timer);
       uns.forEach((un) => un.then((f) => f()));
     };
-  }, [id]);
-  const page = fresh ?? loaded;
+  }, [id, reloadPage]);
   const eraCardsOn = useSettings((s) => s.settings?.showEraCards);
   const era = (eraName && page?.eras?.find((e) => e.name === eraName)) || null;
   // The era filter covers Popular, every section and Appears on.

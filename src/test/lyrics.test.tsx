@@ -145,14 +145,14 @@ describe("lyrics cache", () => {
     const old = mockLyrics(words)!;
     let finish: (l: Lyrics | null) => void = () => {};
     const ask = vi.spyOn(mock, "lyrics").mockImplementationOnce(() => new Promise((r) => (finish = r)));
-    const first = loadLyricsInfo(words);
+    const first = loadLyricsInfo(words.id);
     clearLyricsCache();
     finish(old);
     expect(await first).toEqual(old);
-    expect(lyricsSeen(words)).toBe(false);
+    expect(lyricsSeen(words.id)).toBe(false);
     // The next look-up asks the core again rather than reading the old answer.
     ask.mockResolvedValueOnce(null);
-    expect(await loadLyricsInfo(words)).toBeNull();
+    expect(await loadLyricsInfo(words.id)).toBeNull();
     expect(ask).toHaveBeenCalledTimes(2);
     ask.mockRestore();
     clearLyricsCache();
