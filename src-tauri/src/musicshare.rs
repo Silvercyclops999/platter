@@ -121,15 +121,22 @@ impl ShareMap {
     }
 }
 
-/// A folder or file name that stays where it's put on every system: not
-/// `.` or `..`, no drive or stream (`:`), no NUL or control character, not
-/// a Windows device name (`CON`, `NUL`, `COM1`...), and no space or dot at
-/// an end (Windows drops those, so the name would mean another file).
+/// A folder or file name that stays where it's put: not `.` or `..`, no
+/// NUL. On Windows also no drive or stream (`:`), no control character,
+/// not a device name (`CON`, `NUL`, `COM1`...), and no space or dot at an
+/// end (Windows drops those, so the name would mean another file).
 pub fn plain_segment(s: &str) -> bool {
-    if s.is_empty() || s == "." || s == ".." || s.trim() != s || s.ends_with('.') {
+    plain_segment_on(s, cfg!(windows))
+}
+
+pub fn plain_segment_on(s: &str, windows: bool) -> bool {
+    if s.is_empty() || s == "." || s == ".." || s.contains('\0') {
         return false;
     }
-    if s.chars().any(|c| c == ':' || c.is_control()) {
+    if !windows {
+        return true;
+    }
+    if s.trim() != s || s.ends_with('.') || s.chars().any(|c| c == ':' || c.is_control()) {
         return false;
     }
     let stem = s.split('.').next().unwrap_or(s).to_ascii_uppercase();
@@ -206,21 +213,23 @@ mod tests {
     #[test]
     fn names_that_could_leave_the_mapped_folder_are_refused() {
         let m = map();
-        for bad in [
-            "/data/music/Band/../../etc/x.flac",
-            "/data/music/C:/Windows/x.flac",
-            "/data/music/Band/x.flac:stream",
-            "/data/music/Band /x.flac",
-            "/data/music/Band./x.flac",
-            "/data/music/CON/x.flac",
-            "/data/music/Band/nul.flac",
-            "/data/music/Band/com1.txt",
-            "/data/music/Band/x\0.flac",
-        ] {
+        for bad in ["/data/music/Band/../../etc/x.flac", "/data/music/Band/x\0.flac"] {
             assert_eq!(m.music_path(bad), None, "{bad:?}");
         }
+        // What Windows reads as another place (a drive, a stream, a device,
+        // a name it trims) is refused there; elsewhere those are plain names.
+        for bad in ["C:", "x.flac:stream", "Band ", " lead", "Band.", "CON", "nul.flac", "com1.txt", "a\u{1}b"] {
+            assert!(!plain_segment_on(bad, true), "{bad:?}");
+        }
+        for ok in ["01 Song.flac", "Console", "Content.flac", "COM10", "Vol. 2"] {
+            assert!(plain_segment_on(ok, true), "{ok:?}");
+        }
+        assert!(plain_segment_on("Greatest Hits Vol.", false) && !plain_segment_on("..", false));
+        if cfg!(windows) {
+            assert_eq!(m.music_path("/data/music/CON/x.flac"), None);
+            assert_eq!(m.music_path("/data/music/C:/Windows/x.flac"), None);
+        }
         assert!(m.music_path("/data/music/Console/Content.flac").is_some(), "only whole device names");
-        assert!(plain_segment("01 Song.flac") && !plain_segment("..") && !plain_segment(" lead"));
     }
 
     #[test]
