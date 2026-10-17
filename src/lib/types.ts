@@ -2818,7 +2818,7 @@ export interface UpgradeRecord extends LidarrRequest {
   failure: UpgradeFailure | null;
 }
 
-/** `lidarr_upgrade_album`: whether the album menu offers "Look for a better copy". */
+/** `lidarr_upgrade_album`: whether the album menu offers "Find a better copy". */
 export interface AlbumUpgrade {
   available: boolean;
   record: UpgradeRecord | null;

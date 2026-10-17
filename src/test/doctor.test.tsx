@@ -177,13 +177,13 @@ describe("the library doctor page", () => {
     render(<DoctorPage />);
     await screen.findByText("15 things to fix");
     const low = within(section(/^Low-quality copies/)).getAllByRole("listitem")[0];
-    expect(within(low).queryByRole("button", { name: "Look for a better copy" })).not.toBeInTheDocument();
+    expect(within(low).queryByRole("button", { name: "Find a better copy" })).not.toBeInTheDocument();
     const f = mock.doctor.report().findings.find((x) => x.kind === "lowQuality")!;
     await user.click(within(low).getByRole("button", { name: "Open the better copy" }));
     expect(lastRoute()).toEqual({ name: "album", id: f.others[0].id });
   });
 
-  it("with Lidarr ready, Look for a better copy goes through the request picker", async () => {
+  it("with Lidarr ready, Find a better copy goes through the request picker", async () => {
     const user = userEvent.setup();
     mock.lidarr.reset("ready");
     await settings({ lidarrUrl: "http://lidarr.test:8686" });
@@ -191,7 +191,7 @@ describe("the library doctor page", () => {
     render(<DoctorPage />);
     await screen.findByText("15 things to fix");
     const low = within(section(/^Low-quality copies/)).getAllByRole("listitem")[0];
-    await user.click(await within(low).findByRole("button", { name: "Look for a better copy" }));
+    await user.click(await within(low).findByRole("button", { name: "Find a better copy" }));
     const f = mock.doctor.report().findings.find((x) => x.kind === "lowQuality")!;
     expect(pick).toHaveBeenCalledWith({ artist: f.artist, artistId: f.artistId, title: f.album, song: false });
     await waitFor(() => expect(useToasts.getState().toasts.some((t) => t.message === "You have an album by that name already.")).toBe(true));

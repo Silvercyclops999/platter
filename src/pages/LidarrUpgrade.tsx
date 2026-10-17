@@ -1,5 +1,5 @@
 /**
- * Lidarr upgrades in the UI: "Look for a better copy" in the album menu, the
+ * Lidarr upgrades in the UI: "Find a better copy" in the album menu, the
  * offer card on the album page (which songs upgrade, which are kept and
  * why), the swap dialog, the Undo toast, and the Settings parts (the staging
  * folder, the music share mapping, the upgrades list and the bulk action).
@@ -63,12 +63,12 @@ export function useAlbumUpgrade(albumId: string | null) {
   return { info, offer, reload };
 }
 
-/** "Look for a better copy" for the album menu, when it can run. */
+/** "Find a better copy" for the album menu, when it can run. */
 export function upgradeMenuItems(info: AlbumUpgrade | null, open: () => void) {
   const r = info?.record;
   const busy = r && r.state !== "failed" && !(r.swaps.length && r.swaps.every((s) => s.undone));
   if (!info?.available || busy) return [];
-  return [{ label: "Look for a better copy", onSelect: open }];
+  return [{ label: "Find a better copy", onSelect: open }];
 }
 
 const fmtLen = (ms: number | null | undefined) => {
@@ -78,7 +78,7 @@ const fmtLen = (ms: number | null | undefined) => {
 };
 
 /**
- * Look for a better copy: first the user confirms which MusicBrainz release
+ * Find a better copy: first the user confirms which MusicBrainz release
  * the album is (its official tracklist beside the album's songs), then
  * Platter asks Lidarr for it, into the staging folder.
  */
@@ -148,7 +148,7 @@ export function LookForBetterDialog({
     setError(null);
     try {
       const r = await backend.lidarrUpgradeRequest(albumId);
-      toast.info(r.state === "queued" ? `Saved. Platter asks for a better copy of ${title} when it can reach Lidarr` : `Lidarr is looking for a better copy of ${title}`);
+      toast.info(r.state === "queued" ? `Will ask Lidarr for a better copy of ${title} when it's reachable` : `Lidarr is looking for a better copy of ${title}`);
       onDone();
     } catch (e) {
       setError(errText(e) || "That didn't go through. Try again.");
@@ -158,8 +158,8 @@ export function LookForBetterDialog({
   };
   const chosen = cands?.candidates.find((c) => c.group.id === pick);
   return (
-    <Dialog open={open} onClose={onClose} label={`Look for a better copy of ${title}`} className="confirm lidarr-request upgrade-dialog upgrade-dialog--wide">
-      <h2 className="confirm__title">{choosing ? `Which release is ${title}?` : `Look for a better copy of ${title}?`}</h2>
+    <Dialog open={open} onClose={onClose} label={`Find a better copy of ${title}`} className="confirm lidarr-request upgrade-dialog upgrade-dialog--wide">
+      <h2 className="confirm__title">{choosing ? `Which release is ${title}?` : `Find a better copy of ${title}?`}</h2>
       {choosing ? (
         <>
           <p className="confirm__body">
@@ -574,7 +574,7 @@ export function OfficialPrefixField({ ids }: { ids: Ids }) {
       className="setting-text"
       value={value}
       maxLength={60}
-      placeholder="Official"
+      placeholder="Official (default)"
       spellCheck={false}
       autoComplete="off"
       aria-labelledby={ids.title}
@@ -672,7 +672,7 @@ export function ShareMapEditor() {
           <input
             className="setting-text"
             value={map.backup}
-            placeholder="Empty: _to_delete in your music folder"
+            placeholder="Default: _to_delete in your music folder"
             spellCheck={false}
             onChange={(e) => edit({ backup: e.target.value })}
           />
@@ -757,7 +757,7 @@ export function UpgradesList() {
       {!list ? (
         <Skeleton height={44} radius="card" />
       ) : !list.length ? (
-        <p className="lidarr-requests__empty">No upgrades yet. An album's menu has Look for a better copy.</p>
+        <p className="lidarr-requests__empty">No upgrades yet. An album's menu has Find a better copy.</p>
       ) : (
         <ul className="lidarr-requests" aria-label="Upgrades">
           {list.map((r) => {

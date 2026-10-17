@@ -336,7 +336,7 @@ function FindingRow({
           </Button>
           {f.kind === "lowQuality" && lidarr && (
             <Button variant="secondary" size="sm" onClick={() => onBetterCopy(f)}>
-              Look for a better copy
+              Find a better copy
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={() => onIgnore(f, true)}>

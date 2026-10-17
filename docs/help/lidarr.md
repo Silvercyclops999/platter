@@ -49,7 +49,7 @@ For the first week after setup, Platter only writes down what it would add or sw
 
 ## Upgrades
 
-With a staging folder set, an album's menu has **Look for a better copy**. When the copy arrives, the album page shows what would change. Swaps run on this computer, so fill in **Where this computer reaches your music** first. Replaced files go to a _to_delete folder Plex ignores, never deleted, and **Undo** puts them back. **Upgrades: ask before each swap** decides if Platter waits for you.
+With a staging folder set, an album's menu has **Find a better copy**. When the copy arrives, the album page shows what would change. Swaps run on this computer, so fill in **Where this computer reaches your music** first. Replaced files go to a _to_delete folder Plex ignores, never deleted, and **Undo** puts them back. **Upgrades: ask before each swap** decides if Platter waits for you.
 
 ## Requests
 

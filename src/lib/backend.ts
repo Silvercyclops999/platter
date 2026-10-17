@@ -984,7 +984,7 @@ export interface Backend {
   lidarrRequestCancel(id: string): Promise<LidarrRequest[]>;
   /** An artist's official releases the library lacks, for the artist page. */
   lidarrMissingReleases(artistId: string, artist: string): Promise<LidarrMissing>;
-  /** Upgrades: whether the album menu offers "Look for a better copy", and the album's upgrade. */
+  /** Upgrades: whether the album menu offers "Find a better copy", and the album's upgrade. */
   lidarrUpgradeAlbum(albumId: string): Promise<AlbumUpgrade>;
   /** Ask Lidarr for a better copy of an album, into the staging folder (full setup check first). */
   lidarrUpgradeRequest(albumId: string): Promise<UpgradeRecord>;

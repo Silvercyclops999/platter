@@ -1,5 +1,5 @@
 /**
- * Lidarr upgrades in the UI: "Look for a better copy" in the album menu
+ * Lidarr upgrades in the UI: "Find a better copy" in the album menu
  * (confirming the release first), the offer card on the album page with
  * what upgrades and what is kept, the swap dialog (all at once, or song by
  * song when the album needs it), Undo, the failure messages, and the
@@ -52,7 +52,7 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: `More options for ${album().title}` }));
 }
 
-describe("Look for a better copy", () => {
+describe("Find a better copy", () => {
   it("confirms the release with its tracklist, then asks Lidarr into staging", async () => {
     const user = userEvent.setup();
     album = lossy;
@@ -64,8 +64,8 @@ describe("Look for a better copy", () => {
       </>,
     );
     await openMenu(user);
-    await user.click(await screen.findByRole("menuitem", { name: "Look for a better copy" }));
-    const dialog = await screen.findByRole("dialog", { name: `Look for a better copy of ${album().title}` });
+    await user.click(await screen.findByRole("menuitem", { name: "Find a better copy" }));
+    const dialog = await screen.findByRole("dialog", { name: `Find a better copy of ${album().title}` });
     expect(within(dialog).getByRole("heading", { level: 2 })).toHaveTextContent(`Which release is ${album().title}?`);
     // The album's songs beside the official tracklist; the deluxe edition has one more.
     const first = mock.fx.tracksByAlbum.get(album().id)![0].title;
@@ -97,7 +97,7 @@ describe("Look for a better copy", () => {
     );
     await openMenu(user);
     await screen.findByRole("menuitem", { name: "Add to queue" });
-    expect(screen.queryByRole("menuitem", { name: "Look for a better copy" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Find a better copy" })).toBeNull();
   });
 
   it("can't be asked for before the release is confirmed", async () => {
