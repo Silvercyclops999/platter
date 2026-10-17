@@ -237,7 +237,7 @@ fn the_map_comes_back_in_chunks_and_areas() {
     let (_d, db) = db();
     let data = clusters(10);
     for (i, (_, v)) in data.iter().enumerate() {
-        analysed(&db, &format!("t{i:02}"), if i % 10 == 0 { "demos" } else { "al" }, v);
+        analysed(&db, &format!("t{i:02}"), if i.is_multiple_of(10) { "demos" } else { "al" }, v);
     }
     update(&db).unwrap();
     let all = all_points(&db);
