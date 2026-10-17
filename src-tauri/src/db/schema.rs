@@ -49,12 +49,38 @@ pub fn migrate(conn: &mut Connection) -> AppResult<()> {
             continue;
         }
         let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
+        tx.execute_batch(&skip_existing_columns(&tx, sql)?)?;
         tx.pragma_update(None, "user_version", version)?;
         tx.commit()?;
         tracing::info!(version, "db migrated");
     }
     Ok(())
+}
+
+/// A migration with its one-line `ALTER TABLE t ADD COLUMN c ...` statements
+/// left out when the column is already there, so a migration that adds
+/// columns can run again (a database moved back to an older version, a
+/// test re-running migrations) without "duplicate column name".
+fn skip_existing_columns(c: &Connection, sql: &str) -> AppResult<String> {
+    let mut out = String::with_capacity(sql.len());
+    for line in sql.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let adds = words.len() >= 6
+            && words[0].eq_ignore_ascii_case("ALTER")
+            && words[1].eq_ignore_ascii_case("TABLE")
+            && words[3].eq_ignore_ascii_case("ADD")
+            && words[4].eq_ignore_ascii_case("COLUMN");
+        if adds {
+            let (table, column) = (words[2], words[5].trim_end_matches(';'));
+            let mut st = c.prepare(&format!("SELECT 1 FROM pragma_table_info('{}') WHERE name = ?1", table.replace('\'', "")))?;
+            if st.exists([column])? {
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    Ok(out)
 }
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
