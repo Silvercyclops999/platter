@@ -28,8 +28,11 @@ and your own Plex server.
   their pages, once music you don't have is on): your Lidarr's own search when
   it's set up, then Wikidata's picture on Wikimedia Commons, then TheAudioDB's
   free tier when you have no key of your own. Each gets the artist's
-  MusicBrainz id, nothing else. With Lidarr set up, search for music you don't
-  have sends what you typed to your Lidarr, which asks its own metadata service.
+  MusicBrainz id, nothing else.
+- Search for music you don't have is on unless you turn it off (Settings >
+  Search). What you type goes to your Lidarr when it's set up, which asks its
+  own metadata service, or to MusicBrainz when it isn't. Nothing else about you
+  is sent with it.
 - ListenBrainz, for an artist's most played songs worldwide (the Popular
   list; off until you turn it on in Settings or the Get started guide). The request carries
   the artist's MusicBrainz id, and your ListenBrainz user token if you choose

@@ -262,7 +262,8 @@ describe("settings", () => {
   });
 
   it("New to you, Fans also like and catalogue search start off, since they ask other services", () => {
-    expect(DEFAULT_SETTINGS.catalogueSearch || DEFAULT_SETTINGS.fansAlsoLikeCatalogue || DEFAULT_SETTINGS.homeNewToYou).toBe(false);
+    expect(DEFAULT_SETTINGS.catalogueSearch).toBe(true);
+    expect(DEFAULT_SETTINGS.fansAlsoLikeCatalogue || DEFAULT_SETTINGS.homeNewToYou).toBe(false);
     expect(DEFAULT_SETTINGS.dismissedArtists).toEqual([]);
     expect([DEFAULT_SETTINGS.catalogueSource, DEFAULT_SETTINGS.askBeforeGet, DEFAULT_SETTINGS.getAlbumsKinds]).toEqual(["lidarr", false, ["studio"]]);
   });

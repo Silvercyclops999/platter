@@ -1715,7 +1715,7 @@ export const DEFAULT_SETTINGS: Settings = {
   soundIdScope: "untagged",
   subsonicCheckMinutes: 5,
   saveQueueOnServer: false,
-  catalogueSearch: false,
+  catalogueSearch: true,
   fansAlsoLikeCatalogue: false,
   homeNewToYou: false,
   dismissedArtists: [],

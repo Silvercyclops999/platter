@@ -1037,7 +1037,10 @@ impl Default for Settings {
             sound_id_scope: crate::soundid::Scope::Untagged,
             subsonic_check_minutes: crate::subsonic::manager::DEFAULT_POLL_MINUTES,
             save_queue_on_server: false,
-            catalogue_search: false,
+            // On by default (Adam, 2026-10-17): search finds music you don't
+            // have. What you type goes to your Lidarr, or MusicBrainz without
+            // it (PRIVACY.md says so); Settings > Search turns it off.
+            catalogue_search: true,
             fans_also_like_catalogue: false,
             home_new_to_you: false,
             dismissed_artists: Vec::new(),
@@ -3009,7 +3012,6 @@ mod tests {
             "discordUploadCovers",
             "shareActivity",
             "sharePublicLinks",
-            "catalogueSearch",
             "fansAlsoLikeCatalogue",
             "homeNewToYou",
             "releaseRadar",
@@ -4352,7 +4354,8 @@ mod tests {
     #[test]
     fn discover_settings_defaults_and_where_they_live() {
         let s = Settings::default();
-        assert!(!s.catalogue_search && !s.fans_also_like_catalogue && !s.home_new_to_you, "they ask other services (safe defaults)");
+        assert!(s.catalogue_search, "search finds music you don't have by default (Adam's choice)");
+        assert!(!s.fans_also_like_catalogue && !s.home_new_to_you, "they ask other services (safe defaults)");
         assert!(s.dismissed_artists.is_empty());
         assert_eq!(s.catalogue_source, "lidarr");
         assert!(!s.ask_before_get);

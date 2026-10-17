@@ -53,7 +53,7 @@ Get on an album sends it to Lidarr in one click, with all of Platter's checks, a
 
 An artist's page has Get albums, which asks which kinds you want (studio albums to start with; EPs, live albums and compilations if you like), says how many, and sends them a few at a time, most popular first.
 
-It's off until you turn it on in Settings, Search, Show music you don't have in search. See [Privacy](privacy.md) for what goes where.
+It's on unless you turn it off in Settings, Search, Show music you don't have in search. What you type goes to your Lidarr, or to MusicBrainz without Lidarr. See [Privacy](privacy.md) for what goes where.
 
 ## Searching while offline
 
