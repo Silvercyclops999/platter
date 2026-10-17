@@ -176,8 +176,9 @@ describe("Stats page", () => {
     expect(screen.getByRole("heading", { name: /Last 4 weeks/ })).toBeInTheDocument();
     expect(screen.getByRole("figure", { name: /Minutes listened per day/ })).toBeInTheDocument();
     // When you listened: every story opens with its sentence.
-    expect(within(screen.getByTestId("story-days")).getByText(/^You listened on \d+ of these 28 days/)).toBeInTheDocument();
-    expect(within(screen.getByTestId("story-minutes")).getByText(/^Your biggest day was \w+day, /)).toBeInTheDocument();
+    // The stories load after the totals: wait for them rather than reading the skeleton.
+    expect(await within(screen.getByTestId("story-days")).findByText(/^You listened on \d+ of these 28 days/)).toBeInTheDocument();
+    expect(await within(screen.getByTestId("story-minutes")).findByText(/^Your biggest day was \w+day, /)).toBeInTheDocument();
     expect(within(screen.getByTestId("story-day")).getByText(/^You're an? \w+ listener: /)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Your top songs" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "All time" }));
