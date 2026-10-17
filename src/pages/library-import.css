@@ -203,3 +203,9 @@
 .bring-in__needs-actions { display: flex; flex: none; gap: var(--space-1); }
 .bring-in-settings__waves { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .bring-in-settings__waves .setting-text { width: 120px; }
+/* Many actions per row: let them wrap so the title keeps its room. */
+.played-row { grid-template-columns: 32px minmax(160px, 3fr) minmax(0, 2fr) minmax(0, 4fr); }
+.played-row .missing-row__links { flex-wrap: wrap; row-gap: 0; }
+@container main (max-width: 640px) {
+  .played-row { grid-template-columns: 24px minmax(0, 1fr); }
+}
