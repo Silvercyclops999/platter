@@ -1,27 +1,154 @@
 /**
- * Search's "Not in your library" section: artists, albums and songs from
- * MusicBrainz below the library's results. It asks only once typing has
- * paused, and only when the library found little or the user opens the
- * section. Hidden while offline or with its setting off.
+ * Music you don't have, in with search's library results: artists, albums
+ * and songs, each kind asked for on its own and shown as it arrives
+ * (artists and albums from Lidarr's search when it's set up, songs and the
+ * rest from MusicBrainz), kept a while per query. Rows look like library
+ * rows, with Get on albums and "Get the album" on songs. Hidden while
+ * offline or with its setting off.
  */
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { openContextMenu } from "../components/ContextMenu";
 import { Skeleton } from "../components/Skeleton";
+import { useArtistPhoto } from "../lib/artistPhotos";
 import { backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
-import type { CatAlbum, CatArtist, CatSong, CatalogueSearch, SearchFilter } from "../lib/types";
+import type { CatAlbum, CatArtist, CataloguePart, CataloguePartKind, CatSong, SearchFilter } from "../lib/types";
 import type { MenuItem } from "../stores/ui";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
-import { NOT_IN_LIBRARY, addToMissing, catalogueKind, dismissArtist, useOnline } from "./catalogue";
+import { addToMissing, catalogueKind, dismissArtist, useOnline } from "./catalogue";
+import { GetButton } from "./GetButton";
 import "./catalogue.css";
 
-/** Typing must pause this long before MusicBrainz is asked. */
-export const CATALOGUE_PAUSE_MS = 700;
-/** Fewer library results than this and the section loads by itself. */
-export const FEW_RESULTS = 5;
+/** Typing must pause this long before the catalogue is asked. */
+export const CATALOGUE_PAUSE_MS = 300;
+/** How long a query's results are kept in this window. */
+const KEEP_MS = 5 * 60_000;
+
+const kept = new Map<string, { at: number; part: CataloguePart }>();
+/** Answers on their way, so the same question isn't asked twice at once. */
+const asking = new Map<string, Promise<CataloguePart>>();
+
+/** Forget kept results (tests). */
+export function resetCatalogueCache() {
+  kept.clear();
+  asking.clear();
+}
+
+export interface CatalogueResults {
+  artists: CatArtist[];
+  albums: CatAlbum[];
+  songs: CatSong[];
+  /** Library artists and albums a catalogue result folded into. */
+  inLibrary: Set<string>;
+  /** Kinds still on their way. */
+  pending: CataloguePartKind[];
+  /** Where artists and albums came from. */
+  source: "lidarr" | "musicBrainz" | "";
+  failed: boolean;
+}
+
+const PARTS_FOR: Record<SearchFilter, CataloguePartKind[]> = {
+  all: ["artists", "albums", "songs"],
+  artists: ["artists"],
+  albums: ["albums"],
+  songs: ["songs"],
+  playlists: [],
+};
+
+/** Whether search shows music you don't have right now. */
+export function useCatalogueOn(): boolean {
+  const on = useSettings((s) => s.settings?.catalogueSearch !== false);
+  const online = useOnline();
+  return on && online;
+}
+
+/**
+ * The catalogue's answers for a query, filled in kind by kind as they
+ * arrive. Null while it's off, offline, or the query is too short.
+ */
+export function useCatalogueSearch(query: string, filter: SearchFilter): CatalogueResults | null {
+  const on = useCatalogueOn();
+  const q = query.trim();
+  const parts = PARTS_FOR[filter];
+  const want = on && q.length >= 2 && parts.length > 0;
+  const [res, setRes] = useState<{ key: string; r: CatalogueResults } | null>(null);
+  const seq = useRef(0);
+  const key = `${filter}|${q.toLowerCase()}`;
+
+  useEffect(() => {
+    const mine = ++seq.current;
+    if (!want) return;
+    const start: CatalogueResults = { artists: [], albums: [], songs: [], inLibrary: new Set(), pending: [...parts], source: "", failed: false };
+    const apply = (p: CataloguePart | null, kind: CataloguePartKind) =>
+      setRes((prev) => {
+        if (mine !== seq.current) return prev;
+        const base = prev && prev.key === key ? prev.r : start;
+        const next: CatalogueResults = { ...base, pending: base.pending.filter((k) => k !== kind) };
+        if (!p) return { key, r: { ...next, failed: true } };
+        if (!p.shown) return { key, r: next };
+        next.inLibrary = new Set([...base.inLibrary, ...p.inLibrary]);
+        if (kind === "artists") next.artists = p.artists;
+        if (kind === "albums") next.albums = p.albums;
+        if (kind === "songs") next.songs = p.songs;
+        if (kind !== "songs" && p.source) next.source = p.source;
+        return { key, r: next };
+      });
+    // What this window kept shows at once.
+    const now = Date.now();
+    const fresh = parts.map((k) => kept.get(`${k}|${q.toLowerCase()}`)).map((x) => (x && now - x.at < KEEP_MS ? x.part : null));
+    setRes({ key, r: start });
+    fresh.forEach((p, i) => p && apply(p, parts[i]));
+    const missing = parts.filter((_, i) => !fresh[i]);
+    if (!missing.length) return;
+    // Only once typing has paused, so each keystroke doesn't ask.
+    const t = setTimeout(() => {
+      for (const kind of missing) {
+        const k = `${kind}|${q.toLowerCase()}`;
+        let p = asking.get(k);
+        if (!p) {
+          p = backend.catalogueSearchPart(q, kind).then((part) => {
+            kept.set(k, { at: Date.now(), part });
+            return part;
+          });
+          asking.set(k, p);
+          p.then(
+            () => asking.delete(k),
+            () => asking.delete(k),
+          );
+        }
+        p.then(
+          (part) => apply(part, kind),
+          () => apply(null, kind),
+        );
+      }
+    }, CATALOGUE_PAUSE_MS);
+    return () => clearTimeout(t);
+    // `parts` follows `filter`.
+  }, [key, want]);
+
+  if (!want) return null;
+  return res && res.key === key ? res.r : { artists: [], albums: [], songs: [], inLibrary: new Set(), pending: [...parts], source: "", failed: false };
+}
+
+/** Whether a catalogue answer has anything to show. */
+export function hasCatalogue(c: CatalogueResults | null): boolean {
+  return !!c && c.artists.length + c.albums.length + c.songs.length > 0;
+}
+
+/** Folded the way the library's top result is compared with the query. */
+export const foldName = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/^the\s+/, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+// ---------------------------------------------------------------- rows
 
 interface Row {
   key: string;
@@ -32,6 +159,10 @@ interface Row {
   round: boolean;
   open: () => void;
   menu: MenuItem[];
+  /** For an artist: their id, so a photo is looked up as the row shows. */
+  artist?: CatArtist;
+  album?: CatAlbum;
+  song?: CatSong;
 }
 
 function artistRow(a: CatArtist): Row {
@@ -39,11 +170,12 @@ function artistRow(a: CatArtist): Row {
   return {
     key: `ar-${a.mbid}`,
     title: a.name,
-    byline: [a.kind === "Person" ? "Artist" : a.kind === "Group" ? "Band" : "Artist", a.disambiguation].filter(Boolean).join(" · "),
+    byline: [a.kind === "Group" ? "Band" : "Artist", a.disambiguation].filter(Boolean).join(" · "),
     type: "Artist",
     thumb: a.photo,
     round: true,
     open,
+    artist: a,
     menu: [
       { label: "Open", onSelect: open },
       { label: "Not interested", onSelect: () => dismissArtist({ mbid: a.mbid, name: a.name }) },
@@ -61,6 +193,7 @@ function albumRow(a: CatAlbum): Row {
     thumb: a.thumb,
     round: false,
     open,
+    album: a,
     menu: [
       { label: "Open", onSelect: open },
       ...(a.artistMbid ? [{ label: "Go to artist", onSelect: () => nav.go({ name: "catalogueArtist", mbid: a.artistMbid! }) }] : []),
@@ -79,6 +212,7 @@ function songRow(s: CatSong): Row {
     thumb: s.thumb,
     round: false,
     open,
+    song: s,
     menu: [
       { label: s.releaseGroupId ? "Go to album" : "Open", onSelect: open },
       ...(s.artistMbid ? [{ label: "Go to artist", onSelect: () => nav.go({ name: "catalogueArtist", mbid: s.artistMbid! }) }] : []),
@@ -86,22 +220,59 @@ function songRow(s: CatSong): Row {
   };
 }
 
-function CatalogueRow({ row }: { row: Row }) {
+/** The picture for a row: an artist's photo is looked up as it shows. */
+function RowArt({ row, box, size }: { row: Row; box: RefObject<HTMLElement | null>; size: number }) {
+  const { photo } = useArtistPhoto(box, row.artist?.mbid, row.title, row.artist ? row.artist.photo : row.thumb);
+  return <Art path={row.artist ? photo : row.thumb} size={size} round={row.round} kind={row.round ? "artist" : "album"} monogram={row.artist ? row.title : undefined} />;
+}
+
+/** Get (albums) or "Get the album" (songs). */
+function RowGet({ row, lidarrReady }: { row: Row; lidarrReady: boolean }) {
+  if (row.album) {
+    const a = row.album;
+    return (
+      <GetButton
+        album={{ releaseGroupId: a.releaseGroupId, title: a.title, artist: a.artist, artistMbid: a.artistMbid }}
+        known={a.request}
+        libraryAlbumId={a.libraryAlbumId}
+        refusal={a.refusal}
+        lidarrReady={lidarrReady}
+      />
+    );
+  }
+  if (row.song?.releaseGroupId && row.song.album) {
+    const s = row.song;
+    return (
+      <GetButton
+        album={{ releaseGroupId: s.releaseGroupId!, title: s.album!, artist: s.artist, artistMbid: s.artistMbid }}
+        lidarrReady={lidarrReady}
+        idleLabel="Get the album"
+      />
+    );
+  }
+  return null;
+}
+
+export function CatalogueRow({ row, lidarrReady }: { row: Row; lidarrReady: boolean }) {
   const more = useRef<HTMLButtonElement>(null);
+  const box = useRef<HTMLLIElement>(null);
   const menu = (e: MouseEvent<HTMLElement>, at?: HTMLElement) => {
     e.preventDefault();
     openContextMenu(`Options for ${row.title}`, row.menu, at ?? e);
   };
   return (
-    <li className="sr-row" aria-label={`${row.title}, ${row.type}, ${row.byline ? `${row.byline}, ` : ""}${NOT_IN_LIBRARY.toLowerCase()}`} onContextMenu={(e) => menu(e)} onDoubleClick={row.open}>
+    <li ref={box} className="sr-row sr-row--catalogue" aria-label={`${row.title}, ${row.type}${row.byline ? `, ${row.byline}` : ""}, not in your library`} onContextMenu={(e) => menu(e)} onDoubleClick={row.open}>
       <span className="sr-row__art">
-        <Art path={row.thumb} size={48} round={row.round} kind={row.round ? "artist" : "album"} />
+        <RowArt row={row} box={box} size={48} />
       </span>
       <span className="sr-row__text">
         <button type="button" className="sr-row__title" onClick={row.open}>
           <span className="truncate">{row.title}</span>
         </button>
         <span className="sr-row__by truncate">{row.byline || row.type}</span>
+      </span>
+      <span className="sr-row__action">
+        <RowGet row={row} lidarrReady={lidarrReady} />
       </span>
       <span className="sr-type sr-row__type">{row.type}</span>
       <button ref={more} type="button" className="sr-row__more" aria-label={`More options for ${row.title}`} onClick={(e) => menu(e, more.current ?? undefined)}>
@@ -111,93 +282,67 @@ function CatalogueRow({ row }: { row: Row }) {
   );
 }
 
-/** Which kinds a filter chip shows. */
-function rowsFor(res: CatalogueSearch, filter: SearchFilter): Row[] {
-  const artists = filter === "all" || filter === "artists" ? res.artists.map(artistRow) : [];
-  const albums = filter === "all" || filter === "albums" ? res.albums.map(albumRow) : [];
-  const songs = filter === "all" || filter === "songs" ? res.songs.map(songRow) : [];
+/** A catalogue artist as the top result: big photo, name, and their page a click away. */
+export function CatalogueTopResult({ artist }: { artist: CatArtist }) {
+  const box = useRef<HTMLElement>(null);
+  const { photo } = useArtistPhoto(box, artist.mbid, artist.name, artist.photo);
+  const open = () => nav.go({ name: "catalogueArtist", mbid: artist.mbid });
+  return (
+    <section ref={box} className="sr-top" aria-label="Top result">
+      <span className="sr-row__art sr-top__art">
+        <Art path={photo} size={92} round kind="artist" monogram={artist.name} />
+      </span>
+      <div className="sr-top__text">
+        <button type="button" className="sr-top__title" onClick={open}>
+          <span className="truncate">{artist.name}</span>
+        </button>
+        <div className="sr-top__sub truncate">
+          <span className="sr-type">Artist</span>
+          {artist.disambiguation && <> · {artist.disambiguation}</>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Rows for a filter, catalogue kinds in order. */
+export function catalogueRows(c: CatalogueResults, filter: SearchFilter, skipArtist?: string): Row[] {
+  const artists = filter === "all" || filter === "artists" ? c.artists.filter((a) => a.mbid !== skipArtist).map(artistRow) : [];
+  const albums = filter === "all" || filter === "albums" ? c.albums.map(albumRow) : [];
+  const songs = filter === "all" || filter === "songs" ? c.songs.map(songRow) : [];
   return [...artists, ...albums, ...songs];
 }
 
-export function SearchCatalogue({ query, filter, localCount }: { query: string; filter: SearchFilter; localCount: number }) {
-  const on = useSettings((s) => s.settings?.catalogueSearch !== false);
-  const online = useOnline();
-  const few = localCount < FEW_RESULTS;
-  const [opened, setOpened] = useState(false);
-  const [shown, setShown] = useState<{ query: string; res: CatalogueSearch } | null>(null);
-  const [failed, setFailed] = useState(false);
-  const seq = useRef(0);
-  const want = on && online && filter !== "playlists" && (few || opened);
-
-  useEffect(() => {
-    const mine = ++seq.current;
-    setFailed(false);
-    if (!want || query.trim().length < 2) return;
-    // Only once typing has paused, so each keystroke doesn't ask MusicBrainz.
-    const t = setTimeout(() => {
-      backend.catalogueSearch(query).then(
-        (res) => mine === seq.current && setShown({ query, res }),
-        () => mine === seq.current && setFailed(true),
-      );
-    }, CATALOGUE_PAUSE_MS);
-    return () => clearTimeout(t);
-  }, [query, want]);
-
-  // A new search starts closed again.
-  useEffect(() => setOpened(false), [query]);
-
-  if (!on || !online || filter === "playlists" || query.trim().length < 2) return null;
-  const headingId = "sr-catalogue-title";
-  if (!few && !opened) {
-    return (
-      <section className="sr-catalogue" aria-labelledby={headingId}>
-        <h2 id={headingId} className="sr-only">
-          {NOT_IN_LIBRARY}
-        </h2>
-        <button type="button" className="btn btn--secondary btn--sm sr-catalogue__open" onClick={() => setOpened(true)}>
-          Show music that isn't in your library
-        </button>
-      </section>
-    );
-  }
-  const res = shown && shown.query === query ? shown.res : null;
-  if (res && !res.shown) return null;
-  const rows = res ? rowsFor(res, filter) : [];
+/** Rows on their way: a couple of skeletons where the next kind will land. */
+export function CatalogueSkeleton() {
   return (
-    <section className="sr-catalogue" aria-labelledby={headingId} aria-busy={!res && !failed}>
-      <div className="sr-catalogue__head">
-        <h2 id={headingId} className="section-title">
-          {NOT_IN_LIBRARY}
-        </h2>
-        <span className="sr-catalogue__note">From MusicBrainz</span>
-      </div>
-      {failed ? (
-        <p className="sr-catalogue__note" role="status">
-          MusicBrainz isn't answering right now. Try again in a minute.
-        </p>
-      ) : !res ? (
-        <div aria-hidden="true">
-          {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} className="sr-row sr-row--skeleton">
-              <Skeleton width={48} height={48} />
-              <span className="sr-row__text">
-                <Skeleton width={180} height={14} />
-                <Skeleton width={110} height={12} />
-              </span>
-            </div>
-          ))}
+    <div aria-hidden="true">
+      {Array.from({ length: 2 }, (_, i) => (
+        <div key={i} className="sr-row sr-row--skeleton">
+          <Skeleton width={48} height={48} />
+          <span className="sr-row__text">
+            <Skeleton width={180} height={14} />
+            <Skeleton width={110} height={12} />
+          </span>
         </div>
-      ) : rows.length === 0 ? (
-        <p className="sr-catalogue__note" role="status">
-          Nothing else found on MusicBrainz.
-        </p>
-      ) : (
-        <ul className="sr-list" aria-label={NOT_IN_LIBRARY}>
+      ))}
+    </div>
+  );
+}
+
+/** Catalogue rows as their own list (the Songs chip, and searches the library found nothing for). */
+export function CatalogueList({ c, filter, lidarrReady, skipArtist, label = "Music you don't have" }: { c: CatalogueResults; filter: SearchFilter; lidarrReady: boolean; skipArtist?: string; label?: string }) {
+  const rows = catalogueRows(c, filter, skipArtist);
+  return (
+    <>
+      {rows.length > 0 && (
+        <ul className="sr-list" aria-label={label}>
           {rows.map((r) => (
-            <CatalogueRow key={r.key} row={r} />
+            <CatalogueRow key={r.key} row={r} lidarrReady={lidarrReady} />
           ))}
         </ul>
       )}
-    </section>
+      {c.pending.length > 0 && <CatalogueSkeleton />}
+    </>
   );
 }

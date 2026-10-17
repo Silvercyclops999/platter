@@ -6,7 +6,7 @@
  * confirm. Rows leave on their own when the library gains the song.
  */
 import { CircleAlert, Clock, Download } from "lucide-react";
-import { Suspense, lazy, useCallback, useEffect, useId, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -20,6 +20,8 @@ import type { LidarrPreview, LidarrRequestInput, LidarrRequestState, PlayedPerio
 import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
+import { upsertRequest } from "../stores/requests";
+import { GET_UNDO_MS } from "./GetButton";
 import { BringInCard, BringInSettings } from "./BringIn";
 import { errText } from "./importShared";
 import { STATE_LABEL, useLidarrReady } from "./lidarrShared";
@@ -116,11 +118,28 @@ export function PlayedALot() {
 
   const open = (url: string) => backend.importOpenLink(url).catch((e) => toast.error(`Couldn't open the link${errText(e) ? `: ${errText(e)}` : ""}`));
 
+  // One-click Get: the album is picked, then sent with every check. The
+  // dialog opens only for the first request ever, when a check says no (it
+  // shows why), or when "Ask before each Get" is on.
   const request = async (r: PlayedRow) => {
     try {
       const p = await pick(r);
-      if ("reason" in p) toast.info(p.reason);
-      else setAsking({ key: r.key, input: p.input });
+      if ("reason" in p) {
+        toast.info(p.reason);
+        return;
+      }
+      if (useSettings.getState().settings?.askBeforeGet) {
+        setAsking({ key: r.key, input: p.input });
+        return;
+      }
+      const out = await backend.lidarrGet(p.input);
+      if (out.record) {
+        const rec = out.record;
+        upsertRequest(rec);
+        setStates((m) => ({ ...m, [r.key]: rec.state }));
+      } else {
+        setAsking({ key: r.key, input: p.input });
+      }
     } catch (e) {
       toast.error(errText(e) || "Couldn't look this up. Try again.");
     }
@@ -284,7 +303,29 @@ function PlayedLine({
   onHideArtist: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [undoable, setUndoable] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
   const requested = state && state !== "failed";
+  const get = () => {
+    setUndoable(true);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setUndoable(false);
+      setBusy(true);
+      void onRequest().finally(() => setBusy(false));
+    }, GET_UNDO_MS);
+  };
+  const undo = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    setUndoable(false);
+  };
   const detail =
     r.kind === "album"
       ? `${n(r.songs ?? 0)} ${r.songs === 1 ? "song" : "songs"} played${r.inLibrary ? ` · ${n(r.inLibrary)} already in your library` : ""}`
@@ -337,17 +378,18 @@ function PlayedLine({
               {state === "queued" ? <Clock size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
               {STATE_LABEL[state]}
             </span>
+          ) : undoable ? (
+            <>
+              <span className="lidarr-state lidarr-state--checking" role="status">
+                Checking
+              </span>
+              <Button size="sm" variant="ghost" onClick={undo} aria-label={`Undo Get ${r.title}`}>
+                Undo
+              </Button>
+            </>
           ) : (
-            <Button
-              size="sm"
-              disabled={busy}
-              aria-label={`Request ${r.title}`}
-              onClick={() => {
-                setBusy(true);
-                void onRequest().finally(() => setBusy(false));
-              }}
-            >
-              {busy ? "Finding…" : "Request"}
+            <Button size="sm" variant="primary" disabled={busy} aria-label={`Get ${r.title}`} onClick={get}>
+              {busy ? "Checking…" : "Get"}
             </Button>
           ))}
         <Button size="sm" variant="ghost" onClick={onHide} aria-label={`Hide ${r.title}`}>

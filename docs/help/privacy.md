@@ -21,7 +21,7 @@ Everything else that sends something off your computer, writes to your server or
 ## Off until you turn them on
 
 - Artist bios and facts from Wikipedia and Wikidata, Popular songs and listener numbers from ListenBrainz, and release dates and credits from MusicBrainz (Settings, Integrations, Artist info). They get an artist's or album's name or MusicBrainz id, and MusicBrainz never looks up unreleased albums. The Get started guide turns these on with one switch.
-- Music that isn't in your library, in search (Settings, Search), Fans also like and New to you (Settings, Social, Discover), and the release radar. MusicBrainz and ListenBrainz get only what you typed, or artists' MusicBrainz ids.
+- Music that isn't in your library, in search (Settings, Search), Fans also like and New to you (Settings, Social, Discover), and the release radar. MusicBrainz and ListenBrainz get only what you typed, or artists' MusicBrainz ids. With Lidarr set up, what you typed goes to your Lidarr instead for artists and albums. Photos of artists you don't have come from Lidarr, Wikimedia Commons or TheAudioDB's free tier, which get only the artist's MusicBrainz id.
 - Public share links (Settings, Sharing, Public links for released music). When you copy one, iTunes Search gets the artist and title. Unreleased music never gets one.
 - Show this computer to my other devices (Settings, Playback), which opens a network port so your own computers can play here.
 - Keep my queue on the server, and Share my activity with Platter friends, which write to your server.

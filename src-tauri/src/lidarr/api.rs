@@ -107,6 +107,36 @@ pub struct Artist {
     pub folder: Option<String>,
     #[serde(default)]
     pub quality_profile_id: Option<i64>,
+    /// Pictures from Lidarr's metadata service (lookups carry `remoteUrl`).
+    #[serde(default)]
+    pub images: Vec<LookupImage>,
+    #[serde(default)]
+    pub disambiguation: Option<String>,
+    /// `Person`, `Group`...
+    #[serde(default)]
+    pub artist_type: Option<String>,
+}
+
+/// One picture in a lookup answer.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LookupImage {
+    /// `poster`, `fanart`, `banner`, `logo`, `cover`, `disc`...
+    #[serde(default)]
+    pub cover_type: String,
+    /// Where the metadata service keeps it.
+    #[serde(default)]
+    pub remote_url: Option<String>,
+}
+
+/// Lookup ratings (how many people rated it, as a popularity hint).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ratings {
+    #[serde(default)]
+    pub votes: i64,
+    #[serde(default)]
+    pub value: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -302,6 +332,18 @@ pub struct Album {
     pub statistics: Option<AlbumStatistics>,
     #[serde(default)]
     pub artist: Option<Artist>,
+    /// `Album`, `EP`, `Single`... (lookups).
+    #[serde(default)]
+    pub album_type: Option<String>,
+    /// `Live`, `Compilation`... (lookups).
+    #[serde(default)]
+    pub secondary_types: Vec<String>,
+    #[serde(default)]
+    pub release_date: Option<String>,
+    #[serde(default)]
+    pub images: Vec<LookupImage>,
+    #[serde(default)]
+    pub ratings: Option<Ratings>,
 }
 
 /// One of Lidarr's commands (read only, to see a refresh still running).
@@ -346,6 +388,9 @@ pub struct QueueItem {
     pub size: Option<f64>,
     #[serde(default)]
     pub sizeleft: Option<f64>,
+    /// Why a download failed or is stuck, as Lidarr words it.
+    #[serde(default)]
+    pub error_message: Option<String>,
 }
 
 /// One event in Lidarr's history.
@@ -722,6 +767,27 @@ impl LidarrClient {
             404 => Ok(Vec::new()),
             _ => Err(AppError::Server(METADATA_DOWN.into())),
         }
+    }
+
+    /// A lookup by search words on Lidarr's metadata service (reads only).
+    async fn lookup_term<T: DeserializeOwned>(&self, path: &str, term: &str) -> AppResult<Vec<T>> {
+        let resp = self.transport.get(path, &[("term", term)]).await.map_err(|_| AppError::Network(UNREACHABLE.into()))?;
+        match resp.status {
+            200..=299 => serde_json::from_slice(&resp.body).map_err(|_| AppError::Decode(NOT_LIDARR.into())),
+            401 | 403 => Err(AppError::Auth(BAD_KEY.into())),
+            404 => Ok(Vec::new()),
+            _ => Err(AppError::Server(METADATA_DOWN.into())),
+        }
+    }
+
+    /// Artists matching search words, from Lidarr's metadata service.
+    pub async fn artist_search(&self, term: &str) -> AppResult<Vec<Artist>> {
+        self.lookup_term("/artist/lookup", term).await
+    }
+
+    /// Albums matching search words, from Lidarr's metadata service.
+    pub async fn album_search(&self, term: &str) -> AppResult<Vec<Album>> {
+        self.lookup_term("/album/lookup", term).await
     }
 
     /// Downloads in Lidarr's queue for these albums.

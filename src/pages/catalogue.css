@@ -2,6 +2,7 @@
 
 .cat-card { gap: 0; }
 .cat-card .missing-release__action:empty { display: none; }
+.cat-card__action { min-height: 32px; }
 .cat-blocked { color: var(--color-text-secondary); }
 
 /* "Not in your library" next to a page's type line. */
@@ -20,8 +21,6 @@
   vertical-align: middle;
 }
 
-/* A catalogue page's header photo and cover sit back like the cards. */
-.cat-page .detail-header__art { opacity: 0.6; }
 .cat-page .detail-header__meta { flex-wrap: wrap; }
 
 .cat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
@@ -30,7 +29,7 @@
 .cat-stores { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-2) 0 var(--space-6); }
 .cat-stores__label { margin-right: var(--space-1); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 
-/* The tracklist: plain rows, dimmed, nothing to play. */
+/* The tracklist: plain rows, nothing to play yet. */
 .cat-tracks { display: flex; flex-direction: column; margin: 0 0 var(--space-4); padding: 0; list-style: none; }
 .cat-track {
   display: grid;
@@ -42,9 +41,7 @@
   border-radius: var(--radius-row);
   color: var(--color-text-primary);
 }
-.cat-track > * { opacity: 0.55; }
 .cat-track:hover { background: var(--color-state-hover); }
-.cat-track:hover > * { opacity: 0.75; }
 .cat-track__n { text-align: right; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .cat-track__text { display: flex; flex-direction: column; min-width: 0; }
 .cat-track__title { font-size: var(--font-size-md); }
@@ -62,10 +59,20 @@
 .sr-catalogue__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 .sr-catalogue__note { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .sr-catalogue__open { align-self: flex-start; }
-.sr-catalogue .sr-row > :not(.sr-row__more):not(.sr-row__action) { opacity: 0.55; }
-.sr-catalogue .sr-row:hover > :not(.sr-row__more):not(.sr-row__action),
-.sr-catalogue .sr-row:focus-within > :not(.sr-row__more):not(.sr-row__action) { opacity: 0.8; }
-.sr-row__action { display: flex; align-items: center; }
+.sr-row__action { display: flex; flex: none; align-items: center; }
+.sr-row__action:empty { display: none; }
+/* A library result the catalogue had too. */
+.sr-owned {
+  flex: none;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--color-state-pressed);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+@media (max-width: 640px) { .sr-owned { display: none; } }
 
 /* "New to you" on its own page. */
 .ntu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--space-5) var(--space-4); }
@@ -75,3 +82,4 @@
 .dismissed-list { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: var(--space-2) 0 0; list-style: none; }
 .dismissed-list__item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-radius: var(--radius-card); background: var(--color-bg-raised); }
 .dismissed-list__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-owned--top { margin-left: var(--space-2); vertical-align: middle; }

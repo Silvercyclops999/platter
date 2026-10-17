@@ -90,3 +90,21 @@
   .missing-release__title,
   .missing-release__sub { transition: none; }
 }
+
+/* One-click Get: the state it's in, Undo, and what to do when nothing turned up. */
+.get-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.lidarr-state--importing { color: var(--color-text-primary); }
+.lidarr-state--checking { color: var(--color-text-primary); }
+.lidarr-state--notFound { color: var(--color-text-secondary); }
+:root:not([data-reduced-motion="true"]) .get-spin { animation: get-spin 900ms linear infinite; }
+@keyframes get-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .get-spin { animation: none; } }
+
+/* Get albums: the kinds, the count and the first titles. */
+.get-albums__kinds { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: 0 0 var(--space-3); padding: 0; border: 0; }
+.get-albums__kinds legend { width: 100%; margin-bottom: var(--space-2); padding: 0; }
+.get-albums__kind { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); cursor: pointer; }
+.get-albums__plan { display: flex; flex-direction: column; gap: var(--space-2); }
+.get-albums__list { margin: 0; padding-left: var(--space-5); color: var(--color-text-primary); font-size: var(--font-size-sm); line-height: 1.7; }
+.get-albums__year, .get-albums__more { color: var(--color-text-secondary); }
+.get-albums__more { list-style: none; margin-left: calc(var(--space-5) * -1); }

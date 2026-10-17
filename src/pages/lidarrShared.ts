@@ -11,10 +11,12 @@ import { useSettings } from "../stores/settings";
 export const STATE_LABEL: Record<LidarrRequestState, string> = {
   queued: "Waiting to send",
   requested: "Requested",
-  searching: "Searching",
+  searching: "Looking on your indexers",
   downloading: "Downloading",
-  imported: "Imported",
+  importing: "Importing",
+  imported: "In your library",
   failed: "Failed",
+  notFound: "Not found yet",
 };
 
 /**

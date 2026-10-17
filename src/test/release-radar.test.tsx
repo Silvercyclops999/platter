@@ -136,7 +136,7 @@ describe("the page", () => {
     await user.click(await within(dialog).findByRole("button", { name: "Request" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const card = screen.getByLabelText(`Paper Moon by ${mock.fx.artists[0].title}`);
-    expect(await within(card).findByText("Searching")).toBeInTheDocument();
+    expect(await within(card).findByText("Looking on your indexers")).toBeInTheDocument();
   });
 
   it("filters by type and looks again on Check now", async () => {

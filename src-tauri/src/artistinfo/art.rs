@@ -30,6 +30,12 @@ const ALLOWED_HOSTS: &[&str] = &[
     "coverartarchive.org",
     // Covers of records in a Discogs collection the library doesn't have.
     "i.discogs.com",
+    // Photos of artists outside the library: Wikidata's image on Commons
+    // (answered by a redirect to the upload host), and the image cache of
+    // Lidarr's metadata service.
+    "commons.wikimedia.org",
+    "upload.wikimedia.org",
+    "imagecache.lidarr.audio",
 ];
 
 /// Largest image accepted from a source.

@@ -1258,6 +1258,12 @@ export interface Settings {
   homeNewToYou: boolean;
   /** Artists marked "Not interested" (never suggested again). */
   dismissedArtists: DismissedArtist[];
+  /** Where search finds music you don't have: Lidarr when it's set up, or MusicBrainz. */
+  catalogueSource: "lidarr" | "musicbrainz";
+  /** Get opens the request dialog every time. */
+  askBeforeGet: boolean;
+  /** The kinds "Get albums" offers ticked. */
+  getAlbumsKinds: string[];
   /** Badges, the On the shelf filter and the Stats shelf for albums owned on vinyl, CD, cassette or another format. */
   showPhysicalCollection: boolean;
   /** "Missing from the shelf": albums played most that aren't owned. */
@@ -1713,6 +1719,9 @@ export const DEFAULT_SETTINGS: Settings = {
   fansAlsoLikeCatalogue: false,
   homeNewToYou: false,
   dismissedArtists: [],
+  catalogueSource: "lidarr",
+  askBeforeGet: false,
+  getAlbumsKinds: ["studio"],
   showPhysicalCollection: true,
   shelfMissingList: false,
   theme: "dark",
@@ -2643,6 +2652,17 @@ export interface BringInStatus {
   requestedTotal: number;
   needsYou: BringInNeedsYou[];
   practiced: BringInPracticed[];
+  /** Albums "Get albums" queued and not asked for yet, in order. */
+  queued?: QueuedGet[];
+}
+
+/** An album "Get albums" queued. */
+export interface QueuedGet {
+  releaseGroupId: string;
+  title: string;
+  artist: string;
+  artistMbid: string | null;
+  artistId: string | null;
 }
 
 /** Which plays "Played a lot" counts. */
@@ -2657,7 +2677,14 @@ export interface LidarrBatchItem {
   error: string | null;
 }
 
-export type LidarrRequestState = "queued" | "requested" | "searching" | "downloading" | "imported" | "failed";
+export type LidarrRequestState = "queued" | "requested" | "searching" | "downloading" | "importing" | "imported" | "failed" | "notFound";
+
+/** `lidarr_get`: the request one-click Get made, or why it needs the user. */
+export interface LidarrGetOutcome {
+  record: LidarrRequest | null;
+  /** `firstTime`: the first request ever is confirmed by typing the album's name; `refused`: a check said no. */
+  needs: { kind: "firstTime" | "refused"; reason: string } | null;
+}
 
 /** What a request needs: the release group and what it's called. */
 export interface LidarrRequestInput {
@@ -2715,6 +2742,14 @@ export interface LidarrRequest {
   auto: boolean;
   /** For a protected artist: lands in the staging folder and waits there. */
   protected: boolean;
+  /** How far the download has got (0 to 100) while it downloads. */
+  progress?: number | null;
+  /** When the first search went out (unix seconds). */
+  searchedAt?: number | null;
+  /** Searches sent so far. */
+  searches?: number;
+  /** When Lidarr is asked to search again while nothing was grabbed. */
+  nextSearchAt?: number | null;
 }
 
 /** Why a swap or its undo stopped. Every one leaves the old files in place. */
@@ -3902,6 +3937,36 @@ export interface CatArtist {
   photo: string | null;
   /** The library artist they are, if any. */
   libraryId: string | null;
+  /** Where the photo is from, when it needs a credit. */
+  photoCredit?: string | null;
+}
+
+/** `catalogue_artist_photo`. */
+export interface CataloguePhoto {
+  photo: string | null;
+  credit: string | null;
+}
+
+export type CataloguePartKind = "artists" | "albums" | "songs";
+
+/** `catalogue_search_part`: one kind of results, as it arrives. */
+export interface CataloguePart {
+  shown: boolean;
+  part: CataloguePartKind;
+  source: "lidarr" | "musicBrainz" | "";
+  artists: CatArtist[];
+  albums: CatAlbum[];
+  songs: CatSong[];
+  /** Library artists and albums a catalogue result folded into. */
+  inLibrary: string[];
+}
+
+/** `catalogue_get_albums_plan`: what "Get albums" would queue, most popular first. */
+export interface GetAlbumsPlan {
+  artist: string;
+  artistMbid: string;
+  kinds: string[];
+  albums: CatAlbum[];
 }
 
 /** A release group from MusicBrainz. */
@@ -3961,6 +4026,8 @@ export interface CatalogueArtistPage {
   sections: CatSection[];
   similar: CatArtist[];
   dismissed: boolean;
+  /** Their most popular albums and EPs. */
+  popular?: CatAlbum[];
 }
 
 export interface CatTrack {

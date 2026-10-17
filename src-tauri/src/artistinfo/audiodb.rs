@@ -9,6 +9,27 @@ use super::limit::Limiter;
 use super::{AudioDbData, Fetch, FetchError, clean_text, fold_name, is_mbid};
 
 pub const API: &str = "https://www.theaudiodb.com/api/v2/json/";
+/// The free tier (v1, its public test key), used only for photos of artists
+/// outside the library when the user has no key of their own.
+pub const FREE_API: &str = "https://www.theaudiodb.com/api/v1/json/123/";
+
+/// An artist by MusicBrainz id on the free tier.
+pub async fn free_lookup(http: &dyn InfoHttp, limiter: &Limiter, mbid: &str) -> Fetch<AudioDbData> {
+    if !is_mbid(mbid) {
+        return Ok(None);
+    }
+    let url = format!("{FREE_API}artist-mb.php?i={}", mbid.to_ascii_lowercase());
+    let resp = limiter.get(http, &url, &[]).await?;
+    match resp.status {
+        404 => Ok(None),
+        s if (200..300).contains(&s) => {
+            // An unknown artist comes back as `{"artists": null}`.
+            let v: Value = resp.json()?;
+            Ok(rows(&v).first().and_then(|r| to_data(r)))
+        }
+        s => Err(FetchError::Unavailable(format!("TheAudioDB answered {s}"))),
+    }
+}
 
 pub struct AudioDb<'a> {
     pub http: &'a dyn InfoHttp,

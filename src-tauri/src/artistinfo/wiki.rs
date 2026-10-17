@@ -200,6 +200,17 @@ impl Wiki<'_> {
         })
     }
 
+    /// The picture (P18, a file on Wikimedia Commons) of the item with this
+    /// MusicBrainz artist id, as a Commons URL.
+    pub async fn image(&self, mbid: &str) -> Fetch<String> {
+        if !is_mbid(mbid) {
+            return Ok(None);
+        }
+        let Some(qid) = self.qid_by_mbid(mbid).await? else { return Ok(None) };
+        let ents = self.entities(std::slice::from_ref(&qid), "claims").await?;
+        Ok(ents.get(&qid).and_then(|e| claim_string(e, "P18")).filter(|f| !f.trim().is_empty()).map(|f| commons_file_url(&f)))
+    }
+
     /// Name search: the single item labelled with the name that is a music
     /// artist, or None when there are none or several.
     async fn qid_by_name(&self, name: &str) -> Result<Option<(String, Value)>, FetchError> {
@@ -351,9 +362,27 @@ impl Wiki<'_> {
     }
 }
 
+/// A Commons file's image, sized for a photo (Commons answers with a
+/// redirect to its upload host).
+pub fn commons_file_url(file: &str) -> String {
+    let name = file.trim().replace(' ', "_");
+    let enc = percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC)
+        .to_string()
+        .replace("%5F", "_")
+        .replace("%2E", ".")
+        .replace("%2D", "-");
+    format!("https://commons.wikimedia.org/wiki/Special:FilePath/{enc}?width=600")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commons_file_urls() {
+        assert_eq!(commons_file_url("Cold Coast live.jpg"), "https://commons.wikimedia.org/wiki/Special:FilePath/Cold_Coast_live.jpg?width=600");
+        assert_eq!(commons_file_url("A&B (2019).png"), "https://commons.wikimedia.org/wiki/Special:FilePath/A%26B_%282019%29.png?width=600");
+    }
 
     #[test]
     fn formats_years_active() {

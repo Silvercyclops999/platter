@@ -18,6 +18,9 @@
 //!   Lidarr already has, or that the library gained (those leave the list).
 //! - Pauses, resumes, requests and practice runs go to the Changes log; a
 //!   notification sums up each day.
+//! - "Get albums" on an artist's page queues that artist's albums here; a
+//!   pass asks for queued albums first, with the same guards and daily
+//!   pace, whether or not Bring in my listening is on.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,6 +76,39 @@ pub struct NeedsYou {
     pub reason: String,
     /// Unix seconds.
     pub at: i64,
+    /// For a "Get albums" album: what to ask for again on a retry.
+    #[serde(default)]
+    pub get: Option<QueuedGet>,
+}
+
+/// An album "Get albums" queued.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedGet {
+    pub release_group_id: String,
+    pub title: String,
+    pub artist: String,
+    #[serde(default)]
+    pub artist_mbid: Option<String>,
+    #[serde(default)]
+    pub artist_id: Option<String>,
+}
+
+impl QueuedGet {
+    fn key(&self) -> String {
+        format!("get:{}", self.release_group_id.to_ascii_lowercase())
+    }
+
+    fn input(&self) -> RequestInput {
+        RequestInput {
+            release_group_id: self.release_group_id.clone(),
+            title: self.title.clone(),
+            artist: self.artist.clone(),
+            artist_id: self.artist_id.clone(),
+            artist_mbid: self.artist_mbid.clone(),
+            typed: None,
+        }
+    }
 }
 
 /// What practice mode would have asked for.
@@ -112,6 +148,8 @@ pub struct WaveState {
     /// The last day a summary went out for.
     pub summary_day: i64,
     pub requested_total: u32,
+    /// Albums "Get albums" queued, in the order they go out.
+    pub queued: Vec<QueuedGet>,
 }
 
 /// What the progress card shows.
@@ -139,6 +177,8 @@ pub struct WavesStatus {
     pub requested_total: u32,
     pub needs_you: Vec<NeedsYou>,
     pub practiced: Vec<Practiced>,
+    /// Albums "Get albums" queued and not asked for yet.
+    pub queued: Vec<QueuedGet>,
 }
 
 /// What one pass did.
@@ -266,7 +306,49 @@ impl Waves {
             requested_total: st.requested_total,
             needs_you: st.needs_you.clone(),
             practiced: st.practiced.clone(),
+            queued: st.queued.clone(),
         })
+    }
+
+    /// "Get albums": queue albums to ask Lidarr for, paced like the waves.
+    /// Albums already queued, or asked for before (and not failed), are
+    /// left out. Returns how many were added.
+    pub fn enqueue(&self, albums: Vec<QueuedGet>, artist: &str) -> AppResult<usize> {
+        let records = self.l().records();
+        let mut st = self.state();
+        let mut added = 0;
+        for a in albums {
+            let rg = a.release_group_id.trim().to_ascii_lowercase();
+            if !crate::artistinfo::is_mbid(&rg)
+                || st.queued.iter().any(|q| q.release_group_id.eq_ignore_ascii_case(&rg))
+                || records.iter().any(|r| r.release_group_id == rg && r.state != RequestState::Failed)
+            {
+                continue;
+            }
+            st.needs_you.retain(|n| n.key != a.key());
+            st.queued.push(QueuedGet { release_group_id: rg, ..a });
+            added += 1;
+        }
+        if added > 0 {
+            self.save(&st)?;
+            let what = format!("Queued {added} album{} by {artist} (Get albums)", if added == 1 { "" } else { "s" });
+            self.l().log_change(&what, "", "", true, None)?;
+            tracing::info!(added, "get albums: queued");
+            self.poke();
+        }
+        Ok(added)
+    }
+
+    /// Take albums off the "Get albums" queue (all of them when `rgids` is empty).
+    pub fn unqueue(&self, rgids: &[String]) -> AppResult<WavesStatus> {
+        let mut st = self.state();
+        if rgids.is_empty() {
+            st.queued.clear();
+        } else {
+            st.queued.retain(|q| !rgids.iter().any(|r| r.eq_ignore_ascii_case(&q.release_group_id)));
+        }
+        self.save(&st)?;
+        self.status()
     }
 
     /// Pause it, or carry on.
@@ -287,7 +369,11 @@ impl Waves {
     /// A "Needs you" album: try it again on the next pass, or leave it be.
     pub fn needs_you(&self, key: &str, retry: bool) -> AppResult<WavesStatus> {
         let mut st = self.state();
+        let get = st.needs_you.iter().find(|n| n.key == key).and_then(|n| n.get.clone());
         st.needs_you.retain(|n| n.key != key);
+        if let (true, Some(g)) = (retry, get) {
+            st.queued.insert(0, g);
+        }
         if retry {
             st.done.retain(|k| k != key);
             st.finished = false;
@@ -407,11 +493,15 @@ impl Waves {
             st.today_needs = 0;
         }
         let waves = clean_waves(&s.bring_in_waves).unwrap_or_else(|_| DEFAULT_WAVES.to_vec());
-        if !s.bring_in || st.user_paused || st.finished && st.wave >= waves.len() {
+        // Bring in my listening's own albums; "Get albums" goes on regardless.
+        let bring = s.bring_in && !st.user_paused && !(st.finished && st.wave >= waves.len());
+        if !bring && st.queued.is_empty() {
             self.save(&st)?;
             return Ok(out);
         }
-        st.finished = false;
+        if bring {
+            st.finished = false;
+        }
         if !self.l().status().ready {
             self.pause(&mut st, "Lidarr isn't set up, or its setup check hasn't passed.".into())?;
             out.paused = st.paused.clone();
@@ -441,6 +531,16 @@ impl Waves {
                 self.summary(&mut st, today, practice);
                 break;
             }
+            if let Some(q) = st.queued.first().cloned() {
+                if !self.queued_album(&q, practice, &mut st, &mut out).await? {
+                    break;
+                }
+                self.save(&st)?;
+                continue;
+            }
+            if !bring {
+                break;
+            }
             let Some(row) = self.next(&waves, &mut st)? else { break };
             if !self.album(&row, practice, &mut st, &mut out).await? {
                 break;
@@ -458,7 +558,7 @@ impl Waves {
     async fn album(&self, row: &PlayedRow, practice: bool, st: &mut WaveState, out: &mut PassOutcome) -> AppResult<bool> {
 
         let needs = |st: &mut WaveState, out: &mut PassOutcome, reason: String| {
-            st.needs_you.insert(0, NeedsYou { key: row.key.clone(), artist: row.artist.clone(), album: row.title.clone(), plays: row.plays, reason, at: self.now() });
+            st.needs_you.insert(0, NeedsYou { key: row.key.clone(), artist: row.artist.clone(), album: row.title.clone(), plays: row.plays, reason, at: self.now(), get: None });
             st.today_needs += 1;
             out.needs_you.push(row.title.clone());
         };
@@ -540,6 +640,49 @@ impl Waves {
         }
     }
 
+    /// One "Get albums" album. False stops the pass.
+    async fn queued_album(&self, q: &QueuedGet, practice: bool, st: &mut WaveState, out: &mut PassOutcome) -> AppResult<bool> {
+        let take = |st: &mut WaveState| st.queued.retain(|x| x.release_group_id != q.release_group_id);
+        let needs = |st: &mut WaveState, out: &mut PassOutcome, reason: String| {
+            st.queued.retain(|x| x.release_group_id != q.release_group_id);
+            st.needs_you.insert(0, NeedsYou { key: q.key(), artist: q.artist.clone(), album: q.title.clone(), plays: 0, reason, at: self.now(), get: Some(q.clone()) });
+            st.today_needs += 1;
+            out.needs_you.push(q.title.clone());
+        };
+        if practice {
+            match self.l().preview(&q.input()).await {
+                Ok(p) => {
+                    take(st);
+                    if p.existing.is_none() {
+                        let to = p.destination.clone().unwrap_or_default();
+                        self.l().log_practice(&format!("Would request {} by {} (Get albums)", q.title, q.artist), "", &to)?;
+                        st.practiced.insert(0, Practiced { key: q.key(), artist: q.artist.clone(), album: q.title.clone(), release_group_id: q.release_group_id.clone(), at: self.now() });
+                        st.today += 1;
+                        out.practiced.push(q.title.clone());
+                    }
+                    st.fails = 0;
+                    Ok(true)
+                }
+                Err(e) => self.after_error(classify(&e), st, out, needs),
+            }
+        } else {
+            match self.send(q.input()).await {
+                Sent::Done(rec) => {
+                    take(st);
+                    st.fails = 0;
+                    if !rec.already_in_lidarr && rec.auto {
+                        st.today += 1;
+                        out.requested.push(rec.title.clone());
+                        let to = rec.destination.clone().unwrap_or_default();
+                        self.l().log_change(&format!("Requested {} by {} (Get albums)", rec.title, rec.artist), "", &to, false, None)?;
+                    }
+                    Ok(true)
+                }
+                other => self.after_error(other, st, out, needs),
+            }
+        }
+    }
+
     fn after_error(
         &self,
         sent: Sent,
@@ -589,7 +732,7 @@ fn classify(e: &AppError) -> Sent {
 pub async fn watch(w: Waves) {
     tokio::time::sleep(Duration::from_secs(90)).await;
     loop {
-        if crate::settings::load(&w.l().inner.db).bring_in
+        if (crate::settings::load(&w.l().inner.db).bring_in || !w.state().queued.is_empty())
             && let Err(e) = w.pass().await
         {
             tracing::warn!("bring in my listening: {e}");

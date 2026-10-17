@@ -20,7 +20,10 @@ import { ArtistPage } from "../pages/ArtistPage";
 import { DismissedArtists } from "../pages/DiscoverSettings";
 import { ImportPage } from "../pages/ImportPage";
 import { NewToYouPage, NewToYouShelf } from "../pages/NewToYou";
-import { SearchPage } from "../pages/SearchPage";
+import { SearchPage, interleave } from "../pages/SearchPage";
+import { resetCatalogueCache } from "../pages/SearchCatalogue";
+import { resetArtistPhotos } from "../lib/artistPhotos";
+import { resetRequests } from "../stores/requests";
 import { SettingsPage } from "../pages/SettingsPage";
 import { useApp } from "../stores/app";
 import { useRouter } from "../stores/router";
@@ -45,62 +48,103 @@ beforeEach(async () => {
   useToasts.setState({ toasts: [] });
   useRouter.getState().reset();
   mock.catalogue.searches.length = 0;
+  mock.catalogue.parts.length = 0;
+  mock.catalogue.photos.length = 0;
+  resetCatalogueCache();
+  resetArtistPhotos();
+  resetRequests();
   await setUp();
 });
 
 describe("search", () => {
-  it("shows music that isn't in the library once typing pauses, when the library found nothing", async () => {
+  it("shows music you don't have as the results when the library found nothing, an exact artist on top", async () => {
     render(<SearchPage query="cold coast" />);
-    const section = await screen.findByRole("region", { name: "Not in your library" }, SLOW);
-    const list = await within(section).findByRole("list", { name: "Not in your library" }, SLOW);
-    expect(within(list).getByRole("button", { name: "Cold Coast" })).toBeInTheDocument();
-    expect(within(list).getByRole("button", { name: "Low Tide Radio" })).toBeInTheDocument();
-    expect(mock.catalogue.searches).toEqual(["cold coast"]);
-    await userEvent.click(within(list).getByRole("button", { name: "Cold Coast" }));
+    const top = await screen.findByRole("region", { name: "Top result" }, SLOW);
+    expect(within(top).getByRole("button", { name: "Cold Coast" })).toBeInTheDocument();
+    const list = await screen.findByRole("list", { name: "Results" }, SLOW);
+    expect(await within(list).findByRole("button", { name: "Low Tide Radio" }, SLOW)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /No results for/ })).toBeNull();
+    await waitFor(() => expect(mock.catalogue.parts.map((p) => p.split(":")[0]).sort()).toEqual(["albums", "artists", "songs"]), SLOW);
+    expect(mock.catalogue.parts.every((p) => p.endsWith(":musicBrainz")), "no Lidarr set up: MusicBrainz").toBe(true);
+    await userEvent.click(within(top).getByRole("button", { name: "Cold Coast" }));
     expect(route()).toEqual({ name: "catalogueArtist", mbid: COLD });
   });
 
-  it("waits to be opened when the library already found plenty", async () => {
+  it("weaves music you don't have in with the library's results, with an In your library cue", async () => {
     render(<SearchPage query="tide" />);
-    const open = await screen.findByRole("button", { name: "Show music that isn't in your library" }, SLOW);
-    await new Promise((r) => setTimeout(r, 900));
-    expect(mock.catalogue.searches).toEqual([]);
-    await userEvent.click(open);
-    await screen.findByRole("heading", { name: "Not in your library" }, SLOW);
-    await waitFor(() => expect(mock.catalogue.searches).toEqual(["tide"]), SLOW);
+    const list = await screen.findByRole("list", { name: "Results" }, SLOW);
+    const catalogueRow = await within(list).findByLabelText(/^Low Tide Radio, Album.*not in your library$/, {}, SLOW);
+    const rows = within(list).getAllByRole("listitem");
+    // Woven in after every few library rows, the library's first.
+    const kinds = rows.map((r) => (r.classList.contains("sr-row--catalogue") ? "cat" : "lib"));
+    expect(kinds.slice(0, 4)).toEqual(["lib", "lib", "lib", "cat"]);
+    expect(rows.indexOf(catalogueRow)).toBeGreaterThan(3);
+    // The library artist the catalogue also has folds into it, with a small cue.
+    await waitFor(() => expect(screen.getAllByText("In your library").length).toBeGreaterThan(0), SLOW);
+    expect(screen.queryByRole("button", { name: "Show music that isn't in your library" })).toBeNull();
   });
 
+  it("uses Lidarr's search when it's set up, each kind showing as it arrives", async () => {
+    await setUp({}, "ready");
+    render(<SearchPage query="low tide" />);
+    const list = await screen.findByRole("list", { name: /Results/ }, SLOW);
+    await within(list).findByLabelText(/^Low Tide Radio, Album/, {}, SLOW);
+    await waitFor(() => expect(mock.catalogue.parts).toContain("songs:low tide:musicBrainz"), SLOW);
+    // Only this query's (an earlier test's slow answer can still land).
+    const parts = mock.catalogue.parts.filter((p) => p.includes(":low tide:"));
+    expect([...parts].sort()).toEqual(["albums:low tide:lidarr", "artists:low tide:lidarr", "songs:low tide:musicBrainz"]);
+    expect(parts.indexOf("songs:low tide:musicBrainz"), "songs come from MusicBrainz, later").toBe(2);
+    expect(await within(list).findByRole("button", { name: /^Get the album, Low Tide Radio/ }, SLOW)).toBeInTheDocument();
+  });
+
+  it("weaves one catalogue row after every few library rows", () => {
+    const out = interleave([1, 2, 3, 4, 5, 6, 7], ["a", "b", "c", "d"]);
+    expect(out.map((x) => x.lib ?? x.cat)).toEqual([1, 2, 3, "a", 4, 5, 6, "b", 7, "c", "d"]);
+    expect(interleave([], ["a"]).map((x) => x.cat)).toEqual(["a"]);
+  });
+
+  it("keeps a query's results for the session", async () => {
+    const { unmount } = render(<SearchPage query="saltmarsh" />);
+    await screen.findByLabelText(/^Saltmarsh, Album/, {}, SLOW);
+    const asked = mock.catalogue.parts.length;
+    unmount();
+    render(<SearchPage query="saltmarsh" />);
+    await screen.findByLabelText(/^Saltmarsh, Album/, {}, SLOW);
+    expect(mock.catalogue.parts.length).toBe(asked);
+  });
   it("asks nothing with the setting off or while offline", async () => {
     await setUp({ catalogueSearch: false });
     const { unmount } = render(<SearchPage query="cold coast" />);
     await screen.findByRole("heading", { name: /No results for/ }, SLOW);
     await new Promise((r) => setTimeout(r, 900));
-    expect(screen.queryByRole("region", { name: "Not in your library" })).toBeNull();
-    expect(mock.catalogue.searches).toEqual([]);
+    expect(screen.queryByLabelText(/not in your library$/)).toBeNull();
+    expect(mock.catalogue.parts).toEqual([]);
     unmount();
 
     await setUp();
     act(() => useApp.setState({ health: { ...(useApp.getState().health as Health), status: "offline", cachedOnly: true } }));
     render(<SearchPage query="cold coast" />);
     await new Promise((r) => setTimeout(r, 900));
-    expect(screen.queryByRole("region", { name: "Not in your library" })).toBeNull();
-    expect(mock.catalogue.searches).toEqual([]);
+    expect(screen.queryByLabelText(/not in your library$/)).toBeNull();
+    expect(mock.catalogue.parts).toEqual([]);
     act(() => useApp.setState({ health: { ...(useApp.getState().health as Health), status: "local", cachedOnly: false } }));
   });
 });
 
 describe("catalogue artist page", () => {
-  it("lists official releases by type, dimmed, with the bio's source", async () => {
+  it("looks like a normal page: photo, popular albums, releases by type, the bio's source", async () => {
     render(<ArtistPage id={COLD} catalogue />);
     expect(await screen.findByRole("heading", { level: 1, name: "Cold Coast" })).toBeInTheDocument();
     expect(screen.getAllByText("Not in your library").length).toBeGreaterThan(0);
-    for (const t of ["Albums", "EPs", "Singles", "Live albums and compilations"]) {
+    for (const t of ["Popular", "Albums", "EPs", "Singles", "Live albums and compilations"]) {
       expect(screen.getByRole("heading", { name: t })).toBeInTheDocument();
     }
-    const card = screen.getByLabelText("Low Tide Radio by Cold Coast, not in your library");
-    expect(card.className).toContain("missing-release");
-    // No Lidarr: no Request, a note says how.
-    expect(within(card).queryByRole("button", { name: /Request/ })).toBeNull();
+    const cards = screen.getAllByLabelText("Low Tide Radio by Cold Coast");
+    expect(cards[0].className).not.toContain("missing-release");
+    expect(document.querySelector(".detail-header__art img"), "the header has a photo").not.toBeNull();
+    // No Lidarr: no Get, a note says how.
+    expect(within(cards[0]).queryByRole("button", { name: /Get/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Get albums" })).toBeNull();
     expect(screen.getByText(/Set up Lidarr in Settings/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "From Wikipedia" })).toBeInTheDocument();
     // Similar artists: the library one opens its own page.
@@ -120,13 +164,13 @@ describe("catalogue artist page", () => {
     await waitFor(() => expect(useSettings.getState().settings?.dismissedArtists).toEqual([]));
   });
 
-  it("offers Request through Lidarr's preview, naming the artist by MusicBrainz id", async () => {
+  it("the first Get goes through Lidarr's preview, naming the artist by MusicBrainz id", async () => {
     await setUp({}, "ready");
     const preview = vi.spyOn(mock, "lidarrRequestPreview");
     render(<ArtistPage id={COLD} catalogue />);
-    const card = await screen.findByLabelText("Low Tide Radio by Cold Coast, not in your library");
-    await userEvent.click(await within(card).findByRole("button", { name: "Request Low Tide Radio" }, SLOW));
-    const dialog = await screen.findByRole("dialog", {}, SLOW);
+    const card = (await screen.findAllByLabelText("Low Tide Radio by Cold Coast"))[0];
+    await userEvent.click(await within(card).findByRole("button", { name: "Get Low Tide Radio" }, SLOW));
+    const dialog = await screen.findByRole("dialog", {}, { timeout: 8000 });
     expect(within(dialog).getByText(/Low Tide Radio/)).toBeInTheDocument();
     // The open dialog asks for the preview from an effect, which can run after it shows.
     await waitFor(() => expect(preview).toHaveBeenCalledWith(expect.objectContaining({ releaseGroupId: LOW_TIDE, artist: "Cold Coast", artistMbid: COLD })));
@@ -163,13 +207,15 @@ describe("catalogue album page", () => {
 });
 
 describe("Fans also like and New to you", () => {
-  it("adds artists outside the library to Fans also like, dimmed, unless turned off", async () => {
+  it("adds artists outside the library to Fans also like, with photos, unless turned off", async () => {
     const a = mock.fx.artists[0];
     const { unmount } = render(<ArtistPage id={a.id} />);
     const h = await screen.findByRole("heading", { name: "Fans also like" }, SLOW);
     const shelf = h.closest("section")!;
     const card = await within(shelf).findByLabelText("Cold Coast, not in your library", {}, SLOW);
-    expect(card.className).toContain("missing-release");
+    expect(card.className).not.toContain("missing-release");
+    await waitFor(() => expect(card.querySelector("img"), "a photo, not the blank icon").not.toBeNull(), SLOW);
+    expect(mock.catalogue.photos).toContain(COLD);
     unmount();
 
     await setUp({ fansAlsoLikeCatalogue: false });
@@ -203,7 +249,7 @@ describe("settings", () => {
   it("has all four, and the dismissed list undoes one at a time", async () => {
     await setUp({ dismissedArtists: [{ mbid: COLD, name: "Cold Coast" }] });
     render(<SettingsPage />);
-    for (const k of ["catalogueSearch", "fansAlsoLikeCatalogue", "homeNewToYou", "dismissedArtists"]) {
+    for (const k of ["catalogueSearch", "catalogueSource", "askBeforeGet", "getAlbumsKinds", "fansAlsoLikeCatalogue", "homeNewToYou", "dismissedArtists"]) {
       expect(await screen.findByText((_, el) => el?.getAttribute("data-setting") === k, {}, SLOW)).toBeInTheDocument();
     }
     await userEvent.click(screen.getByRole("button", { name: "Show Cold Coast in suggestions again" }));
@@ -218,5 +264,6 @@ describe("settings", () => {
   it("New to you, Fans also like and catalogue search start off, since they ask other services", () => {
     expect(DEFAULT_SETTINGS.catalogueSearch || DEFAULT_SETTINGS.fansAlsoLikeCatalogue || DEFAULT_SETTINGS.homeNewToYou).toBe(false);
     expect(DEFAULT_SETTINGS.dismissedArtists).toEqual([]);
+    expect([DEFAULT_SETTINGS.catalogueSource, DEFAULT_SETTINGS.askBeforeGet, DEFAULT_SETTINGS.getAlbumsKinds]).toEqual(["lidarr", false, ["studio"]]);
   });
 });

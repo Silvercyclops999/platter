@@ -260,6 +260,32 @@ pub(super) struct Rig {
     pub(super) web: Arc<FakeLidarr>,
     pub(super) mb: Arc<FakeMb>,
     pub(super) lidarr: Lidarr,
+    /// The clock every Lidarr of this rig reads (starts at 1,800,000,000).
+    pub(super) now: Arc<Mutex<i64>>,
+    keys: Arc<MemoryStore>,
+}
+
+impl Rig {
+    /// Platter started again: a new Lidarr on the same database, keychain and server.
+    pub(super) fn restart(&self) -> Lidarr {
+        lidarr_on(&self.db, &self.web, &self.mb, &self.keys, &self.now)
+    }
+}
+
+fn lidarr_on(db: &DbHandle, web: &Arc<FakeLidarr>, mb: &Arc<FakeMb>, keys: &Arc<MemoryStore>, now: &Arc<Mutex<i64>>) -> Lidarr {
+    let n = now.clone();
+    Lidarr::new(LidarrDeps {
+        web: web.clone(),
+        keys: keys.clone(),
+        db: db.clone(),
+        plex: Arc::new(Plex),
+        clock: Arc::new(move || *n.lock()),
+        mb: mb.clone(),
+        artist_mbid: Arc::new(Mbid),
+        album_wait: std::time::Duration::ZERO,
+        shared: super::shared::tests::on(db),
+        plex_server: Arc::new(super::plexside::fake::FakePlex::default()),
+    })
 }
 
 pub(super) fn rig() -> Rig {
@@ -279,20 +305,11 @@ pub(super) fn rig() -> Rig {
     .unwrap();
     let web = FakeLidarr::new();
     let mb = FakeMb::northlight();
-    let lidarr = Lidarr::new(LidarrDeps {
-        web: web.clone(),
-        keys: Arc::new(MemoryStore::new()),
-        db: db.clone(),
-        plex: Arc::new(Plex),
-        clock: Arc::new(|| 1_800_000_000),
-        mb: mb.clone(),
-        artist_mbid: Arc::new(Mbid),
-        album_wait: std::time::Duration::ZERO,
-        shared: super::shared::tests::on(&db),
-        plex_server: Arc::new(super::plexside::fake::FakePlex::default()),
-    });
+    let keys = Arc::new(MemoryStore::new());
+    let now = Arc::new(Mutex::new(1_800_000_000));
+    let lidarr = lidarr_on(&db, &web, &mb, &keys, &now);
     lidarr.set_key(Some("abc123")).unwrap();
-    Rig { _dir: dir, db, web, mb, lidarr }
+    Rig { _dir: dir, db, web, mb, lidarr, now, keys }
 }
 
 pub(super) fn input(rgid: &str, title: &str, typed: Option<&str>) -> RequestInput {

@@ -28,6 +28,11 @@ import type {
   CatalogueAlbumPage,
   CatalogueArtistPage,
   CatalogueSearch,
+  CataloguePart,
+  CataloguePartKind,
+  CataloguePhoto,
+  GetAlbumsPlan,
+  LidarrGetOutcome,
   MissingAlbum,
   NewToYou,
   WantedAlbum,
@@ -952,6 +957,12 @@ export interface Backend {
   lidarrRequestPreview(input: LidarrRequestInput): Promise<LidarrPreview>;
   /** Send a request to Lidarr (or keep it waiting when Lidarr can't be reached). */
   lidarrRequest(input: LidarrRequestInput): Promise<LidarrRequest>;
+  /** One-click Get: the request with every check, or why it needs the user (first request ever, or a check said no). */
+  lidarrGet(input: LidarrRequestInput): Promise<LidarrGetOutcome>;
+  /** "Search again" for an album nothing turned up for (one AlbumSearch; the schedule starts over). */
+  lidarrSearchAgain(id: string): Promise<LidarrRequest>;
+  /** Take albums off the "Get albums" queue (all of them when the list is empty). */
+  getAlbumsUnqueue(releaseGroupIds: string[]): Promise<BringInStatus>;
   /** Requests on this device, newest first; refresh reads their state from Lidarr. */
   lidarrRequests(refresh: boolean): Promise<LidarrRequest[]>;
   /** "Request these": up to 10 albums the user confirmed at once, each with the full check. */
@@ -1028,6 +1039,14 @@ export interface Backend {
   // Discover: music that isn't in the library (MusicBrainz and ListenBrainz, paced and cached in the core)
   /** Artists, albums and songs from MusicBrainz the library lacks; `shown` false while off or offline. */
   catalogueSearch(query: string): Promise<CatalogueSearch>;
+  /** One kind of music the library lacks, from Lidarr's search when it's set up (else MusicBrainz); asked for all three at once. */
+  catalogueSearchPart(query: string, part: CataloguePartKind): Promise<CataloguePart>;
+  /** A photo for an artist outside the library (Lidarr, Wikimedia Commons, TheAudioDB); empty when none has one. */
+  catalogueArtistPhoto(mbid: string, name: string): Promise<CataloguePhoto>;
+  /** "Get albums": what it would queue for an artist, most popular first. */
+  catalogueGetAlbumsPlan(mbid: string, name: string, kinds: string[]): Promise<GetAlbumsPlan>;
+  /** "Get albums": queue them, paced like Bring in my listening. */
+  catalogueGetAlbums(mbid: string, name: string, kinds: string[]): Promise<{ queued: number; plan: GetAlbumsPlan }>;
   /** A page for an artist outside the library. `artist.libraryId` set: open their library page instead. */
   catalogueArtist(mbid: string): Promise<CatalogueArtistPage>;
   /** A page for an album outside the library (MusicBrainz release group id). */
@@ -1540,6 +1559,10 @@ export function createTauriBackend(): Backend {
     importMissingAlbumAdd: (album) => call("import_missing_album_add", { album }),
     importMissingAlbumRemove: (releaseGroupId) => call("import_missing_album_remove", { releaseGroupId }),
     catalogueSearch: (query) => call("catalogue_search", { query }),
+    catalogueSearchPart: (query, part) => call("catalogue_search_part", { query, part }),
+    catalogueArtistPhoto: (mbid, name) => call("catalogue_artist_photo", { mbid, name }),
+    catalogueGetAlbumsPlan: (mbid, name, kinds) => call("catalogue_get_albums_plan", { mbid, name, kinds }),
+    catalogueGetAlbums: (mbid, name, kinds) => call("catalogue_get_albums", { mbid, name, kinds }),
     catalogueArtist: (mbid) => call("catalogue_artist", { mbid }),
     catalogueAlbum: (releaseGroupId) => call("catalogue_album", { releaseGroupId }),
     catalogueFansAlsoLike: (artistId, name) => call("catalogue_fans_also_like", { artistId, name }),
@@ -1580,6 +1603,9 @@ export function createTauriBackend(): Backend {
     statsFriendRemove: (name) => call("stats_friend_remove", { name }),
     lidarrRequestPreview: (input) => call("lidarr_request_preview", { input }),
     lidarrRequest: (input) => call("lidarr_request", { input }),
+    lidarrGet: (input) => call("lidarr_get", { input }),
+    lidarrSearchAgain: (id) => call("lidarr_search_again", { id }),
+    getAlbumsUnqueue: (releaseGroupIds) => call("get_albums_unqueue", { releaseGroupIds }),
     lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),
     lidarrRequestBatch: (inputs) => call("lidarr_request_batch", { inputs }),
     bringInStatus: () => call("bring_in_status"),

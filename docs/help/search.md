@@ -45,9 +45,15 @@ Recent searches are kept on this computer only. To stop remembering them, turn o
 
 ## Music that isn't in your library
 
-Below your own results, search can show artists, albums and songs from MusicBrainz that you don't have. They're dimmed, and you can open them to see the details, or request or buy them. Platter only asks MusicBrainz once you stop typing, and only sends what you typed.
+Search can also show artists, albums and songs you don't have, in with your own results. They look like your other results, and an artist you don't have can even be the top result. When something is in your library and the wider catalogue too, your copy comes first with a small "In your library" note. Each kind shows as soon as it arrives.
 
-It's off until you turn it on in Settings, Search, Show music that isn't in your library. See [Privacy](privacy.md) for what goes where.
+When Lidarr is set up, artists and albums come from Lidarr's own search, which is quick and has pictures. Otherwise, and for songs, they come from MusicBrainz, which answers one question a second. Platter only asks once you stop typing, and only sends what you typed. You can pick the source in Settings, Search, Where music you don't have comes from.
+
+Get on an album sends it to Lidarr in one click, with all of Platter's checks, and you have a few seconds to undo it. The button then follows it: Looking on your indexers, Downloading, Importing, and In your library. If nothing turns up, Platter asks Lidarr to search again after an hour, six hours and a day, then once a day for a week, before it says Not found yet with Search again and Try another edition. Your very first request asks you to type the album's name, and an album a check won't allow says Needs you with the reason. Turn on Ask before each Get to see every request first. On a song, Get the album asks for the album it's on.
+
+An artist's page has Get albums, which asks which kinds you want (studio albums to start with; EPs, live albums and compilations if you like), says how many, and sends them a few at a time, most popular first.
+
+It's off until you turn it on in Settings, Search, Show music you don't have in search. See [Privacy](privacy.md) for what goes where.
 
 ## Searching while offline
 

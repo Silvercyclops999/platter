@@ -832,6 +832,68 @@ impl ArtistInfoService {
         Some(out)
     }
 
+    /// A photo of an artist outside the library, with where it's from:
+    /// Wikidata's picture on Wikimedia Commons (found through the artist's
+    /// MusicBrainz id), else TheAudioDB (the user's key, else its free
+    /// tier). Cached like the other answers; None when neither has one.
+    pub async fn catalogue_photo(&self, mbid: &str, name: &str) -> Option<crate::discover::CataloguePhoto> {
+        use crate::discover::CataloguePhoto;
+        if !is_mbid(mbid) {
+            return None;
+        }
+        let key = format!("mb:{}", mbid.to_ascii_lowercase());
+        let now = now_s();
+        let k = key.clone();
+        let row = self.inner.db.read_async(move |c| cache::get(c, &k, "cataloguePhoto")).await.ok().flatten();
+        if let Some(r) = &row
+            && !r.stale(now)
+        {
+            return r.parse::<CataloguePhoto>().filter(|p| p.photo.is_some());
+        }
+        let http = self.inner.http.as_ref();
+        let l = &self.inner.limits;
+        let mut out = CataloguePhoto::default();
+        let mut failed = false;
+        if self.usable(InfoSource::Wikipedia) {
+            match (Wiki { http, limiter: &l.wiki, lang: self.inner.lang.as_str() }).image(mbid).await {
+                Ok(Some(url)) => {
+                    out.photo = Some(super::ext_art_path(&url));
+                    out.credit = Some("Wikimedia Commons".into());
+                }
+                Ok(None) => {}
+                Err(_) => failed = true,
+            }
+        }
+        // The free tier needs no switch of its own: this only runs for the
+        // music-you-don't-have features, which are off until turned on.
+        if out.photo.is_none() && !self.is_rejected(InfoSource::Audiodb) {
+            let found = match self.key(InfoSource::Audiodb) {
+                Some(k) => AudioDb { http, limiter: &l.audiodb, key: k.expose() }.lookup(Some(mbid), name).await,
+                None => super::audiodb::free_lookup(http, &l.audiodb, mbid).await,
+            };
+            match found {
+                Ok(Some(d)) => {
+                    out.photo = d.thumb.as_deref().map(super::ext_art_path);
+                    out.credit = out.photo.as_ref().map(|_| "TheAudioDB".to_string());
+                }
+                Ok(None) => {}
+                Err(_) => failed = true,
+            }
+        }
+        if failed && out.photo.is_none() {
+            // Offline or busy: keep what was there, and ask again next time.
+            return row.and_then(|r| r.parse::<CataloguePhoto>()).filter(|p| p.photo.is_some());
+        }
+        let found = out.photo.is_some();
+        let stored = out.clone();
+        let _ = self
+            .inner
+            .db
+            .write_async(move |c| cache::put(c, &key, "cataloguePhoto", Some(&stored), now, cache::ttl_for(None, found)))
+            .await;
+        found.then_some(out)
+    }
+
     // ------------------------------------------------------------ albums
 
     /// An album's MusicBrainz credits from the cache, at once. A missing or

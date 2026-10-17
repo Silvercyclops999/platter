@@ -709,6 +709,13 @@ pub struct Settings {
     pub home_new_to_you: bool,
     /// Artists the user said "Not interested" to (never suggested again).
     pub dismissed_artists: Vec<crate::discover::Dismissed>,
+    /// Where search finds music the library lacks: `lidarr` (Lidarr's own
+    /// search when it's set up, else MusicBrainz) or `musicbrainz`.
+    pub catalogue_source: String,
+    /// Get shows the request dialog every time instead of sending at once.
+    pub ask_before_get: bool,
+    /// The kinds "Get albums" offers ticked: `studio`, `ep`, `live`, `compilation`.
+    pub get_albums_kinds: Vec<String>,
     /// Badges, the On the shelf filter and the Stats shelf for albums the
     /// user owns on vinyl, CD, cassette or another format.
     pub show_physical_collection: bool,
@@ -1034,6 +1041,9 @@ impl Default for Settings {
             fans_also_like_catalogue: false,
             home_new_to_you: false,
             dismissed_artists: Vec::new(),
+            catalogue_source: "lidarr".into(),
+            ask_before_get: false,
+            get_albums_kinds: crate::discover::DEFAULT_GET_KINDS.iter().map(|k| k.to_string()).collect(),
             show_physical_collection: true,
             shelf_missing_list: false,
             show_dlna_devices: true,
@@ -1200,6 +1210,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "fansAlsoLikeCatalogue",
     "homeNewToYou",
     "dismissedArtists",
+    "catalogueSource",
+    "askBeforeGet",
+    "getAlbumsKinds",
     "showPhysicalCollection",
     "shelfMissingList",
     "showDlnaDevices",
@@ -1528,6 +1541,9 @@ pub struct SettingsPatch {
     pub fans_also_like_catalogue: Option<bool>,
     pub home_new_to_you: Option<bool>,
     pub dismissed_artists: Option<Vec<crate::discover::Dismissed>>,
+    pub catalogue_source: Option<String>,
+    pub ask_before_get: Option<bool>,
+    pub get_albums_kinds: Option<Vec<String>>,
     pub show_physical_collection: Option<bool>,
     pub shelf_missing_list: Option<bool>,
     pub show_dlna_devices: Option<bool>,
@@ -1848,6 +1864,16 @@ impl Settings {
         set(&mut self.catalogue_search, p.catalogue_search);
         set(&mut self.fans_also_like_catalogue, p.fans_also_like_catalogue);
         set(&mut self.home_new_to_you, p.home_new_to_you);
+        if let Some(src) = &p.catalogue_source {
+            if !matches!(src.as_str(), "lidarr" | "musicbrainz") {
+                return Err(AppError::Invalid("Pick Lidarr or MusicBrainz.".into()));
+            }
+            self.catalogue_source = src.clone();
+        }
+        set(&mut self.ask_before_get, p.ask_before_get);
+        if let Some(k) = &p.get_albums_kinds {
+            self.get_albums_kinds = crate::discover::clean_kinds(k);
+        }
         set(&mut self.show_dlna_devices, p.show_dlna_devices);
         set(&mut self.allow_automation, p.allow_automation);
         if let Some(l) = &p.translate_to { self.translate_to = crate::lyrics::translate::language(l).ok_or_else(|| AppError::Invalid("Pick a language to translate into.".into()))?; }
@@ -4326,9 +4352,12 @@ mod tests {
     #[test]
     fn discover_settings_defaults_and_where_they_live() {
         let s = Settings::default();
-        assert!(!s.catalogue_search && !s.fans_also_like_catalogue && !s.home_new_to_you, "they ask other services");
+        assert!(!s.catalogue_search && !s.fans_also_like_catalogue && !s.home_new_to_you, "they ask other services (safe defaults)");
         assert!(s.dismissed_artists.is_empty());
-        for k in ["catalogueSearch", "fansAlsoLikeCatalogue", "homeNewToYou", "dismissedArtists"] {
+        assert_eq!(s.catalogue_source, "lidarr");
+        assert!(!s.ask_before_get);
+        assert_eq!(s.get_albums_kinds, ["studio"]);
+        for k in ["catalogueSearch", "fansAlsoLikeCatalogue", "homeNewToYou", "dismissedArtists", "catalogueSource", "askBeforeGet", "getAlbumsKinds"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
         }
         let mut s = s;
@@ -4344,6 +4373,14 @@ mod tests {
         assert!(!s.catalogue_search && !s.fans_also_like_catalogue && !s.home_new_to_you);
         assert_eq!(s.dismissed_artists.len(), 1, "one entry per artist, real ids only");
         assert_eq!(s.dismissed_artists[0].mbid, a);
+        s.apply(&serde_json::from_value(serde_json::json!({"catalogueSource": "musicbrainz", "askBeforeGet": true, "getAlbumsKinds": ["live", "bogus", "EP"]})).unwrap())
+            .unwrap();
+        assert_eq!(s.catalogue_source, "musicbrainz");
+        assert!(s.ask_before_get);
+        assert_eq!(s.get_albums_kinds, ["ep", "live"], "known kinds only, in order");
+        assert!(s.apply(&serde_json::from_value(serde_json::json!({"catalogueSource": "elsewhere"})).unwrap()).is_err());
+        s.apply(&serde_json::from_value(serde_json::json!({"getAlbumsKinds": []})).unwrap()).unwrap();
+        assert_eq!(s.get_albums_kinds, ["studio"], "none ticked means studio albums");
     }
 
     #[test]

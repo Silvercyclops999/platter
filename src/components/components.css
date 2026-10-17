@@ -169,6 +169,15 @@
   justify-content: center;
   color: var(--color-text-muted);
 }
+/* Initials for an artist no source has a picture of. */
+.art__monogram {
+  background: var(--color-state-pressed);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  user-select: none;
+}
 
 /* ---------------------------------------------------------------- Badge */
 .badge {

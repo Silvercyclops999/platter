@@ -26,6 +26,21 @@ export interface ArtProps {
   alt?: string;
   className?: string;
   onLoad?: (img: HTMLImageElement) => void;
+  /** A name whose initials stand in when there's no picture (instead of the blank icon). */
+  monogram?: string;
+}
+
+/** Up to two initials of a name ("Cold Coast" is CC, "Ostra" is O). */
+export function initials(name: string): string {
+  const words = name
+    .replace(/^the\s+/i, "")
+    .split(/[\s&+/-]+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
+    .filter(Boolean);
+  return words
+    .slice(0, 2)
+    .map((w) => w[0]!.toLocaleUpperCase())
+    .join("");
 }
 
 /**
@@ -38,7 +53,7 @@ export interface ArtProps {
  * rounded up to a shared step (see lib/artSize), since decoded art is most of
  * the WebView's memory.
  */
-export function Art({ path, size = 48, fluid, requestSize, round, kind = "album", alt = "", className = "", onLoad }: ArtProps) {
+export function Art({ path, size = 48, fluid, requestSize, round, kind = "album", alt = "", className = "", onLoad, monogram }: ArtProps) {
   const fluidSize = useContext(FluidArtSize);
   const cssSize = fluid ? (fluidSize ?? requestSize ?? 200) : size;
   const active = useContext(ArtActive);
@@ -72,11 +87,16 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
 
   return (
     <span className={`art ${round ? "art--round" : ""} ${loaded ? "is-loaded" : ""} ${loaded && fadeSrc === src ? "is-fading" : ""} ${className}`} style={style}>
-      {(!wanted || failed) && (
-        <span className="art__fallback" aria-hidden="true">
-          <Fallback size={fluid ? 40 : Math.max(16, Math.round(size * 0.38))} strokeWidth={1.5} />
-        </span>
-      )}
+      {(!wanted || failed) &&
+        (monogram && initials(monogram) ? (
+          <span className="art__fallback art__monogram" aria-hidden="true" style={{ fontSize: Math.max(12, Math.round(cssSize * 0.36)) }}>
+            {initials(monogram)}
+          </span>
+        ) : (
+          <span className="art__fallback" aria-hidden="true">
+            <Fallback size={fluid ? 40 : Math.max(16, Math.round(size * 0.38))} strokeWidth={1.5} />
+          </span>
+        ))}
       {wanted && !failed && !loaded && <span className="art__skeleton skeleton" aria-hidden="true" />}
       {src && !failed && (
         <img

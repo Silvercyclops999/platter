@@ -1,4 +1,4 @@
-import { CircleAlert, Clock, Download } from "lucide-react";
+import { CircleAlert, Clock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
@@ -7,6 +7,7 @@ import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
 import type { AppError, LidarrMissingItem, LidarrPreview, LidarrRequest, LidarrRequestInput } from "../lib/types";
 import { STATE_LABEL } from "./lidarrShared";
+import { GetButton } from "./GetButton";
 import { toast } from "../stores/toasts";
 import "./lidarr-request.css";
 
@@ -14,7 +15,7 @@ const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? 
 
 const KIND_LABEL: Record<string, string> = { album: "Album", ep: "EP" };
 
-/** A dimmed card for a release the library lacks, with Request (or where its request stands). */
+/** A card for a release the library lacks, with one-click Get (or where its request stands). */
 export function MissingReleaseCard({
   item,
   artist,
@@ -26,45 +27,25 @@ export function MissingReleaseCard({
   artistId: string;
   onChanged: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const kind = KIND_LABEL[item.kind] ?? "Album";
   return (
-    <div className="card card--album missing-release" aria-label={`${item.title}, not in your library`}>
-      <div className="card__art missing-release__art">
+    <div className="card card--album cat-card" aria-label={`${item.title}, not in your library`}>
+      <div className="card__art">
         <Art path={item.thumb} fluid kind="album" />
       </div>
-      <span className="card__title missing-release__title truncate">{item.title}</span>
-      <span className="card__subtitle missing-release__sub">
+      <span className="card__title truncate">{item.title}</span>
+      <span className="card__subtitle">
         {item.year ? `${item.year} · ` : ""}
         {kind} · Not in your library
       </span>
       <div className="missing-release__action">
-        {item.request && item.request !== "failed" ? (
-          <span className={`lidarr-state lidarr-state--${item.request}`}>
-            {item.request === "queued" ? <Clock size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
-            {STATE_LABEL[item.request]}
-          </span>
-        ) : (
-          <Button size="sm" onClick={() => setOpen(true)} aria-label={`Request ${item.title}`}>
-            Request
-          </Button>
-        )}
+        <GetButton album={{ releaseGroupId: item.releaseGroupId, title: item.title, artist, artistId }} known={item.request} lidarrReady onChanged={onChanged} />
       </div>
-      <LidarrRequestDialog
-        open={open}
-        input={{ releaseGroupId: item.releaseGroupId, title: item.title, artist, artistId }}
-        onClose={() => setOpen(false)}
-        onDone={() => {
-          setOpen(false);
-          onChanged();
-        }}
-      />
     </div>
   );
 }
 
-/**
- * Request confirmation: where the files will land (read from Lidarr after a
+/** * Request confirmation: where the files will land (read from Lidarr after a
  * full check), whether the artist is new to Lidarr, and for the very first
  * request the album's name typed out. When Lidarr can't be reached the
  * request is kept and sent later.

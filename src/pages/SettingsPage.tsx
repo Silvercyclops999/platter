@@ -396,6 +396,14 @@ function toggle(s: Settings | null, key: keyof Settings, ids: { title: string; d
   );
 }
 
+/** The kinds Get albums starts with, as the choices Settings offers. */
+const GET_KIND_CHOICES: { value: string; label: string; kinds: string[] }[] = [
+  { value: "studio", label: "Studio albums", kinds: ["studio"] },
+  { value: "studio-ep", label: "Studio albums and EPs", kinds: ["studio", "ep"] },
+  { value: "studio-ep-live", label: "Studio albums, EPs and live albums", kinds: ["studio", "ep", "live"] },
+  { value: "all", label: "Everything but singles", kinds: ["studio", "ep", "live", "compilation"] },
+];
+
 function select<T extends string>(
   s: Settings | null,
   value: (s: Settings) => T,
@@ -1189,10 +1197,51 @@ export function SettingsPage() {
     {
       key: "catalogueSearch",
       section: "Search",
-      title: "Show music that isn't in your library",
+      title: "Show music you don't have in search",
       description:
-        "Below your library's results, artists, albums and songs from MusicBrainz you don't have, to open, request or buy. Only asked once you stop typing, and only the search text is sent.",
+        "In with your library's results, artists, albums and songs you don't have, to open, get or buy. Only asked once you stop typing, and only the search text is sent.",
       control: (ids) => toggle(s, "catalogueSearch", ids),
+    },
+    {
+      key: "catalogueSource",
+      section: "Search",
+      title: "Where music you don't have comes from",
+      description: "Lidarr's own search is quick and has pictures; MusicBrainz is used when Lidarr isn't set up or can't answer. Songs always come from MusicBrainz.",
+      control: (ids) =>
+        select(
+          s,
+          (x) => x.catalogueSource ?? "lidarr",
+          [
+            { value: "lidarr", label: "Lidarr when it's set up" },
+            { value: "musicbrainz", label: "MusicBrainz" },
+          ] as const,
+          ids,
+          (v) => void updateSettings({ catalogueSource: v }),
+        ),
+    },
+    {
+      key: "askBeforeGet",
+      section: "Search",
+      title: "Ask before each Get",
+      description: "Show where an album will land and wait for your OK each time, instead of sending it at once with a few seconds to undo.",
+      control: (ids) => toggle(s, "askBeforeGet", ids),
+    },
+    {
+      key: "getAlbumsKinds",
+      section: "Search",
+      title: "Album kinds for Get albums",
+      description: "Which kinds Get albums on an artist's page ticks to start with. You can change them each time.",
+      control: (ids) =>
+        select(
+          s,
+          (x) => GET_KIND_CHOICES.find((c) => c.kinds.join(",") === (x.getAlbumsKinds ?? ["studio"]).join(","))?.value ?? "custom",
+          [...GET_KIND_CHOICES.map((c) => ({ value: c.value, label: c.label })), ...(GET_KIND_CHOICES.some((c) => c.kinds.join(",") === (s?.getAlbumsKinds ?? ["studio"]).join(",")) ? [] : [{ value: "custom", label: "Your own mix" }])],
+          ids,
+          (v) => {
+            const c = GET_KIND_CHOICES.find((x) => x.value === v);
+            if (c) void updateSettings({ getAlbumsKinds: c.kinds });
+          },
+        ),
     },
     // Appearance
     {

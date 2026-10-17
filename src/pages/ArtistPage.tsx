@@ -1,4 +1,4 @@
-import { Ellipsis, Pause, Pin, PinOff, Play, Shuffle, X } from "lucide-react";
+import { Download, Ellipsis, Pause, Pin, PinOff, Play, Shuffle, X } from "lucide-react";
 import { PageMissing } from "../components/PageMissing";
 import { Suspense, lazy, useEffect, useId, useState, type RefObject } from "react";
 import { Art } from "../components/Art";
@@ -34,6 +34,7 @@ import { AboutCard, useArtistInfo } from "./ArtistAbout";
 import { missingFor, useLidarrReady, useMissingReleases } from "./lidarrShared";
 import { useAutoOn, useAutoRequest } from "../stores/radar";
 import { AutoRequestDialog } from "./AutoRequestDialog";
+import { GetAlbumsDialog } from "./GetAlbumsDialog";
 import { CatalogueAlbumCard, CatalogueArtistCard, NOT_IN_LIBRARY, SECTION_TITLE, dismissArtist, undismissArtist, useCatalogueFans } from "./catalogue";
 import type { CatArtist, CatalogueArtistPage } from "../lib/types";
 
@@ -555,14 +556,16 @@ function FansAlsoLike({ id, artists, more = [] }: { id: string; artists: Artist[
 
 /**
  * The same page for an artist the library doesn't have: header photo and
- * bio from the artist info sources, the discography of official releases
- * by type (dimmed, with Request), and similar artists. An artist the
- * library turns out to have opens their own page instead.
+ * bio from the artist info sources, their popular albums, the discography
+ * of official releases by type (each with Get), "Get albums", and similar
+ * artists. An artist the library turns out to have opens their own page
+ * instead.
  */
 function CatalogueArtistView({ mbid }: { mbid: string }) {
   const [version, setVersion] = useState(0);
   const { data, error } = useLoad(() => backend.catalogueArtist(mbid), [mbid, version]);
   const lidarrReady = useLidarrReady();
+  const [getting, setGetting] = useState(false);
   const dismissed = useSettings((s) => s.settings?.dismissedArtists?.some((d) => d.mbid === mbid)) ?? false;
   const { header, column, step, compact } = useTitleStep(data?.artist.name);
   const libraryId = data?.artist.libraryId;
@@ -606,7 +609,7 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
       ) : (
         <header ref={header} className={`detail-header detail-header--artist ${compact ? "detail-header--compact" : ""}`} data-variant="photo">
           <div className="detail-header__art">
-            {artist ? <Art path={artist.photo} size={232} round kind="artist" /> : <Skeleton width={232} height={232} radius="circle" />}
+            {artist ? <Art path={artist.photo} size={232} round kind="artist" monogram={artist.name} /> : <Skeleton width={232} height={232} radius="circle" />}
           </div>
           <div ref={column} className="detail-header__text">
             {text}
@@ -615,6 +618,11 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
       )}
       <div className="detail-body">
         <div className="action-row cat-actions">
+          {lidarrReady && artist && (
+            <Button variant="primary" icon={<Download size={16} />} onClick={() => setGetting(true)}>
+              Get albums
+            </Button>
+          )}
           <button
             type="button"
             className="follow-pill"
@@ -646,9 +654,19 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
               )
             }
           />
-          {!lidarrReady && data && <span className="cat-actions__note">Set up Lidarr in Settings to request albums, or buy them from a store.</span>}
+          {!lidarrReady && data && <span className="cat-actions__note">Set up Lidarr in Settings to get albums, or buy them from a store.</span>}
         </div>
+        {artist && getting && <GetAlbumsDialog mbid={artist.mbid} name={artist.name} open onClose={() => setGetting(false)} />}
         {!data && <Shelf title="Discography" loading />}
+        {data?.popular && data.popular.length > 0 && (
+          <Shelf title="Popular">
+            {data.popular.map((a) => (
+              <ShelfItem key={`p-${a.releaseGroupId}`}>
+                <CatalogueAlbumCard album={a} lidarrReady={lidarrReady} onChanged={reload} />
+              </ShelfItem>
+            ))}
+          </Shelf>
+        )}
         {data && data.sections.length === 0 && <p className="cat-bio__none">MusicBrainz has no official albums for this artist yet.</p>}
         {data?.sections.map((s) => (
           <Shelf key={s.kind} title={SECTION_TITLE[s.kind] ?? "Albums"}>
@@ -695,6 +713,7 @@ function CatalogueAbout({ page }: { page: CatalogueArtistPage }) {
       ) : (
         <p className="cat-bio__none">There's no biography for {page.artist.name} yet.</p>
       )}
+      {page.artist.photoCredit && <p className="cat-bio__credit">Photo from {page.artist.photoCredit}</p>}
     </section>
   );
 }

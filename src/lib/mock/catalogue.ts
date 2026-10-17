@@ -8,7 +8,11 @@ import type {
   CatArtist,
   CatalogueAlbumPage,
   CatalogueArtistPage,
+  CataloguePart,
+  CataloguePartKind,
+  CataloguePhoto,
   CatalogueSearch,
+  GetAlbumsPlan,
   CatSong,
   CatTrack,
   LidarrRequest,
@@ -24,7 +28,17 @@ export interface CatalogueHooks {
   settings: () => Settings;
   offline: () => boolean;
   requests: () => LidarrRequest[];
+  /** Lidarr has an address and a key (its search can be asked). */
+  lidarrSetUp?: () => boolean;
 }
+
+/** A made-up photo for most catalogue artists; Ostra (5) has none anywhere, so her card shows a monogram. */
+const photoOf = (n: number): CataloguePhoto =>
+  n === 5
+    ? { photo: null, credit: null }
+    : n % 2 === 0
+      ? { photo: `/ext/https://commons.wikimedia.org/wiki/Special:FilePath/Catalogue_${n}.jpg?width=600`, credit: "Wikimedia Commons" }
+      : { photo: `/ext/https://assets.fanart.tv/fanart/music/catalogue-${n}.jpg`, credit: null };
 
 interface Rel {
   n: number;
@@ -110,6 +124,10 @@ export class MockCatalogue {
   private wanted: WantedAlbum[] = [];
   /** Every search asked (tests read it). */
   readonly searches: string[] = [];
+  /** Every search part asked, as "part:query:source" (tests read it). */
+  readonly parts: string[] = [];
+  /** Every photo asked for, by MusicBrainz id (tests read it). */
+  readonly photos: string[] = [];
 
   constructor(
     private fx: Fixtures,
@@ -189,6 +207,73 @@ export class MockCatalogue {
     return { shown: true, artists: artists.slice(0, 6), albums: albums.slice(0, 6), songs: songs.slice(0, 6) };
   }
 
+  /** Where search parts come from now: Lidarr's search when it's set up and the setting allows. */
+  source(part: CataloguePartKind): "lidarr" | "musicBrainz" {
+    const s = this.hooks.settings();
+    return part !== "songs" && s.catalogueSource !== "musicbrainz" && !!this.hooks.lidarrSetUp?.() ? "lidarr" : "musicBrainz";
+  }
+
+  /** One kind of results. Lidarr's answers carry the artist's photo; the library twin folds in. */
+  searchPart(query: string, part: CataloguePartKind): CataloguePart {
+    const s = this.hooks.settings();
+    const empty: CataloguePart = { shown: false, part, source: "", artists: [], albums: [], songs: [], inLibrary: [] };
+    if (!s.catalogueSearch || this.hooks.offline()) return empty;
+    const source = this.source(part);
+    this.parts.push(`${part}:${query}:${source}`);
+    const all = this.search(query);
+    this.searches.pop();
+    const twin = this.libraryTwin;
+    const inLibrary = part === "artists" && fold(twin.title).includes(fold(query)) && fold(query).length >= 2 ? [twin.id] : [];
+    // Lidarr's answer carries the fanart.tv pictures; the rest are asked for as the rows show.
+    const fromLidarr = (a: CatArtist) => {
+      const p = photoOf(this.nOf(a.mbid));
+      return p.photo && !p.credit ? p.photo : null;
+    };
+    const artists = part === "artists" ? all.artists.map((a) => (source === "lidarr" ? { ...a, photo: fromLidarr(a) } : a)) : [];
+    return {
+      shown: true,
+      part,
+      source,
+      artists,
+      albums: part === "albums" ? all.albums : [],
+      songs: part === "songs" ? all.songs : [],
+      inLibrary,
+    };
+  }
+
+  private nOf(id: string): number {
+    return WORLD.find((w) => mbid(w.n) === id)?.n ?? 0;
+  }
+
+  /** A photo for a catalogue artist (Lidarr, Commons or TheAudioDB in the real app). */
+  photo(id: string): CataloguePhoto {
+    this.photos.push(id);
+    if (this.hooks.offline()) return { photo: null, credit: null };
+    return photoOf(this.nOf(id));
+  }
+
+  /** "Get albums": the artist's albums of these kinds the library lacks and nobody asked for, the oldest first here. */
+  getAlbumsPlan(id: string, kinds: string[]): GetAlbumsPlan {
+    if (this.hooks.offline()) throw { kind: "network", message: "You're offline." };
+    const w = WORLD.find((x) => mbid(x.n) === id);
+    if (!w) throw { kind: "notFound", message: "MusicBrainz doesn't know this artist." };
+    const k = kinds.length ? kinds : ["studio"];
+    const wanted = (r: Rel) =>
+      r.secondary?.includes("live")
+        ? k.includes("live")
+        : r.secondary?.includes("compilation")
+          ? k.includes("compilation")
+          : r.kind === "album"
+            ? k.includes("studio")
+            : r.kind === "ep" && k.includes("ep");
+    const requested = new Set(this.hooks.requests().filter((q) => q.state !== "failed").map((q) => q.releaseGroupId));
+    const albums = w.releases
+      .filter((r) => wanted(r) && !requested.has(rgid(r.n)))
+      .sort((a, b) => a.year - b.year)
+      .map((r) => this.album(w, r));
+    return { artist: w.name, artistMbid: mbid(w.n), kinds: k, albums };
+  }
+
   /** The catalogue album with this artist and title (a record on the shelf), whatever the search setting. */
   findAlbum(artist: string, title: string): CatAlbum | null {
     if (this.hooks.offline()) throw { kind: "network", message: "You're offline." };
@@ -220,8 +305,14 @@ export class MockCatalogue {
       { mbid: mbid(99), name: twin.title, disambiguation: null, kind: "Group", photo: null, libraryId: twin.id },
       ...WORLD.filter((x) => x.n !== w.n && !dismissed.has(mbid(x.n))).map((x) => this.artist(x)),
     ];
+    const pic = photoOf(w.n);
+    const popular = w.releases
+      .filter((r) => !r.secondary?.length && (r.kind === "album" || r.kind === "ep"))
+      .slice(0, 5)
+      .map((r) => this.album(w, r));
     return {
-      artist: this.artist(w),
+      artist: { ...this.artist(w), photo: pic.photo, photoCredit: pic.credit },
+      popular,
       area: w.area,
       lifeSpan: w.since,
       bio:

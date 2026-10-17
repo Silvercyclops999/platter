@@ -2540,6 +2540,8 @@ Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` setting
 | `lidarr_request` | `{ input: LidarrRequestInput }` | `LidarrRequest`. Kept waiting (`state: "queued"`) when Lidarr can't be reached; the first request ever needs `typed` to be the album's name |
 | `lidarr_request_batch` | `{ inputs: LidarrRequestInput[] }` | `{ releaseGroupId, title, record, error }[]`. Up to 10 albums the user confirmed at once, each sent like `lidarr_request` (full check and every guard), one after another; one that fails doesn't stop the rest. More than 10 is refused before anything is asked |
 | `lidarr_requests` | `{ refresh: boolean }` | `LidarrRequest[]`, newest first; `refresh` reads their state from Lidarr's queue and history |
+| `lidarr_get` | `{ input: LidarrRequestInput }` | `{ record: LidarrRequest \| null, needs: { kind: "firstTime" \| "refused", reason } \| null }`. One-click Get: `lidarr_request` with every check. `needs.kind` is `firstTime` when no request was ever made (the dialog asks for the typed name) and `refused` when MusicBrainz or a check says no (`invalid` and `notFound` errors), with the reason; nothing is sent then |
+| `lidarr_search_again` | `{ id }` | `LidarrRequest`. For a request that's `searching` or `notFound`: one `AlbumSearch` for that album now, and the searches again start over. Needs a passed setup check and the album still monitored |
 | `lidarr_request_cancel` | `{ id }` | `LidarrRequest[]`; only waiting or finished requests, else `invalid` |
 | `lidarr_missing_releases` | `{ artistId, artist }` | `{ shown, items: { releaseGroupId, title, kind: "album"\|"ep", year, request, thumb }[] }`; `thumb` is the small front cover as an art path (`/ext/https://coverartarchive.org/release-group/<id>/front-250`), which fails to load when the archive has none; `shown` is false unless the setting is on, Lidarr is set up and its last check passed |
 
@@ -2662,6 +2664,10 @@ Music that isn't in the library, from MusicBrainz (the shared one-a-second limit
 | Command | Args | Returns |
 | --- | --- | --- |
 | `catalogue_search` | `{ query }` | `CatalogueSearch`; `shown` is false while `catalogueSearch` is off or offline |
+| `catalogue_search_part` | `{ query, part: "artists" \| "albums" \| "songs" }` | `CataloguePart`. One kind, so the UI asks for all three at once and shows each as it arrives. Artists and albums come from Lidarr's own search (`GET /artist/lookup` and `/album/lookup`, no limit) when `catalogueSource` is `lidarr` and Lidarr has an address and a key, and from MusicBrainz when it isn't or fails; songs always from MusicBrainz. Kept 15 minutes per kind, source and query |
+| `catalogue_artist_photo` | `{ mbid, name }` | `{ photo, credit }` art path and credit, both null when no source has one. Lidarr's lookup first, then Wikidata's picture on Wikimedia Commons, then TheAudioDB (the user's key, else the free tier). Kept 30 days, a miss 3 days |
+| `catalogue_get_albums_plan` | `{ mbid, name, kinds: string[] }` | `GetAlbumsPlan = { artist, artistMbid, kinds, albums: CatAlbum[] }`: the artist's official albums of these kinds (`studio`, `ep`, `live`, `compilation`; studio when none) the library lacks and nobody asked for, most editions first, then oldest |
+| `catalogue_get_albums` | `{ mbid, name, kinds }` | `{ queued, plan }`. Works the plan out again and puts it on the waves' queue (see Bring in my listening): sent a few at a time with the same guards and daily pace, each through the full request path |
 | `catalogue_artist` | `{ mbid }` | `CatalogueArtistPage`; `notFound` for an unknown id, `network` offline |
 | `catalogue_album` | `{ releaseGroupId }` | `CatalogueAlbumPage` |
 | `catalogue_fans_also_like` | `{ artistId, name }` | `CatArtist[]` outside the library for a library artist (empty while `fansAlsoLikeCatalogue` is off) |
@@ -2671,7 +2677,11 @@ Music that isn't in the library, from MusicBrainz (the shared one-a-second limit
 | `import_missing_album_remove` | `{ releaseGroupId }` | the list |
 
 `CatalogueSearch = { shown, artists: CatArtist[], albums: CatAlbum[], songs: CatSong[] }`. Anything the library has is left out: artists by MusicBrainz id or folded name, albums by folded title under that artist, songs by folded artist and title. Albums need an official release and to be an album, EP or single not credited to Various Artists.
-`CatArtist = { mbid, name, disambiguation, kind, photo, libraryId }`; `libraryId` is set for an artist the library has (open their page instead).
+`CatArtist = { mbid, name, disambiguation, kind, photo, libraryId, photoCredit }`; `libraryId` is set for an artist the library has (open their page instead).
+`CataloguePart = { shown, part, source: "lidarr" | "musicBrainz", artists, albums, songs, inLibrary: string[] }`; `inLibrary` holds the library artist and album ids a catalogue result folded into (the "In your library" cue).
+`CatalogueArtistPage` also has `popular: CatAlbum[]`, their albums and EPs with the most editions.
+
+`LidarrRequest` states: `queued`, `requested`, `searching`, `downloading` (with `progress` 0 to 100 from the queue's sizes), `importing`, `imported`, `failed` (with the queue's error message when it has one) and `notFound`. While anything is in flight the core reads Lidarr's queue and history every 15 seconds. An album with nothing grabbed gets `AlbumSearch` again 1 hour, 6 hours and 24 hours after the first search, then daily for 7 days (`searchedAt`, `searches`, `nextSearchAt` are kept with the request, so the schedule survives a restart); a day after the last one it's `notFound`. Nothing else is ever sent for it.
 `CatAlbum = { releaseGroupId, title, artist, artistMbid, kind, secondary, year, thumb, libraryAlbumId, request, refusal, inMissing }`. `refusal` says why it can't be requested (the same rules a Lidarr request checks).
 `CatalogueArtistPage = { artist, area, lifeSpan, bio, bioCredit, bioUrl, banner, sections: { kind: "album"|"ep"|"single"|"other", albums }[], similar, dismissed }`.
 `CatalogueAlbumPage = { album, tracks: { disc, number, title, artist, durationMs }[], released, label, links: { bandcamp, qobuz, itunes }, artistLibraryId }`. The tracks are the earliest official release's.
@@ -2706,7 +2716,8 @@ With `bringIn` on, Platter asks Lidarr for albums from Played a lot in waves whi
 | --- | --- | --- |
 | `bring_in_status` | – | `BringInStatus` |
 | `bring_in_pause` | `{ paused }` | `BringInStatus`. Pauses it, or carries on |
-| `bring_in_needs_you` | `{ key, retry }` | `BringInStatus`. Takes an album off Needs you; with `retry` the next pass looks at it again |
+| `bring_in_needs_you` | `{ key, retry }` | `BringInStatus`. Takes an album off Needs you; with `retry` the next pass looks at it again (a "Get albums" album goes back on its queue) |
+| `get_albums_unqueue` | `{ releaseGroupIds: string[] }` | `BringInStatus`. Takes albums off the "Get albums" queue, all of them when the list is empty |
 
 `BringInStatus = { on, practice, ready, waves, wave, threshold, done, remaining, today, perDay, paused, userPaused, finished, requestedTotal, needsYou: { key, artist, album, plays, reason, at }[], practiced: { key, artist, album, releaseGroupId, at }[] }`.
 

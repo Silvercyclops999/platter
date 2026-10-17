@@ -48,7 +48,7 @@ import {
   type AlbumView,
 } from "./album";
 import "./album.css";
-import { CatalogueAction, MissingButton, NOT_IN_LIBRARY, RequestDialog, StoreLinks, catalogueKind, requestInput } from "./catalogue";
+import { CatalogueAction, MissingButton, NOT_IN_LIBRARY, StoreLinks, catalogueKind } from "./catalogue";
 import { useLidarrReady } from "./lidarrShared";
 import { LookForBetterDialog, UpgradeCard, upgradeMenuItems, useAlbumUpgrade } from "./LidarrUpgrade";
 import { useRouter } from "../stores/router";
@@ -313,14 +313,13 @@ function LibraryAlbumView({ id }: { id: string }) {
 
 /**
  * The same page for an album the library doesn't have: its cover and the
- * tracklist of its first official release, dimmed with nothing to play,
- * then Request (Lidarr), Add to Missing and store links. No previews.
+ * tracklist of its first official release (nothing to play yet), then Get
+ * (Lidarr), Add to Missing and store links. No previews.
  */
 function CatalogueAlbumView({ rgid }: { rgid: string }) {
   const [version, setVersion] = useState(0);
   const { data, error } = useLoad(() => backend.catalogueAlbum(rgid), [rgid, version]);
   const lidarrReady = useLidarrReady();
-  const [asking, setAsking] = useState(false);
   const album = data?.album;
   useArtTint(null, album?.thumb ?? undefined);
   const { header, column, step, compact } = useTitleStep(album?.title);
@@ -371,7 +370,7 @@ function CatalogueAlbumView({ rgid }: { rgid: string }) {
       </header>
       <div className="detail-body">
         <div className="action-row cat-actions">
-          {album && <CatalogueAction album={album} lidarrReady={lidarrReady} onRequest={() => setAsking(true)} />}
+          {album && <CatalogueAction album={album} lidarrReady={lidarrReady} artistLibraryId={data?.artistLibraryId} onChanged={reload} size="md" />}
           {album && <MissingButton album={album} onChanged={reload} />}
           <IconButton
             label={`More options for ${album?.title ?? "album"}`}
@@ -424,14 +423,6 @@ function CatalogueAlbumView({ rgid }: { rgid: string }) {
         )}
         {data && <AlbumFooter released={data.released} studio={data.label} year={data.album.year} />}
       </div>
-      <RequestDialog
-        input={asking && album ? requestInput(album, data?.artistLibraryId) : null}
-        onClose={() => setAsking(false)}
-        onDone={() => {
-          setAsking(false);
-          reload();
-        }}
-      />
     </div>
   );
 }

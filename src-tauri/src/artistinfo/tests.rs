@@ -737,3 +737,40 @@ async fn prefetch_targets_home_and_most_played_artists() {
     let ids = r.db.read(|c| super::service::prefetch_targets(c, now_s())).unwrap();
     assert_eq!(ids, ["77"]);
 }
+
+#[tokio::test]
+async fn catalogue_photos_come_from_commons_then_theaudiodbs_free_tier() {
+    let r = rig(None, None);
+    let other = "99999999-2222-3333-4444-555555555555";
+    let none = "88888888-2222-3333-4444-555555555555";
+    let mut entity = band_entity(MBID);
+    entity["claims"]["P18"] = json!([{"rank": "normal", "mainsnak": {"datavalue": {"value": "The Band live.jpg"}}}]);
+    r.http.route(&format!("P434%3D{MBID}"), 200, &json!({"query": {"search": [{"title": "Q1"}]}}).to_string());
+    r.http.route(&format!("P434%3D{other}"), 200, &json!({"query": {"search": []}}).to_string());
+    r.http.route(&format!("P434%3D{none}"), 200, &json!({"query": {"search": []}}).to_string());
+    r.http.route("props=claims", 200, &json!({"entities": {"Q1": entity}}).to_string());
+    r.http.route(
+        &format!("artist-mb.php?i={other}"),
+        200,
+        &json!({"artists": [{"idArtist": "5", "strArtist": "Other", "strArtistThumb": "https://r2.theaudiodb.com/images/media/artist/thumb/o.jpg"}]}).to_string(),
+    );
+    r.http.route(&format!("artist-mb.php?i={none}"), 200, r#"{"artists": null}"#);
+
+    let p = r.svc.catalogue_photo(MBID, "The Band").await.unwrap();
+    assert_eq!(p.photo.as_deref(), Some("/ext/https://commons.wikimedia.org/wiki/Special:FilePath/The_Band_live.jpg?width=600"));
+    assert_eq!(p.credit.as_deref(), Some("Wikimedia Commons"));
+    assert_eq!(r.http.calls("theaudiodb"), 0, "Commons had one: TheAudioDB isn't asked");
+
+    let p = r.svc.catalogue_photo(other, "Other").await.unwrap();
+    assert_eq!(p.photo.as_deref(), Some("/ext/https://r2.theaudiodb.com/images/media/artist/thumb/o.jpg"));
+    assert_eq!(p.credit.as_deref(), Some("TheAudioDB"));
+    assert!(r.http.urls().iter().any(|u| u.contains("/api/v1/json/123/artist-mb.php")), "no key: the free tier");
+
+    assert!(r.svc.catalogue_photo(none, "Nobody").await.is_none());
+    let asked = r.http.urls().len();
+    assert!(r.svc.catalogue_photo(none, "Nobody").await.is_none());
+    assert!(r.svc.catalogue_photo(MBID, "The Band").await.is_some());
+    assert_eq!(r.http.urls().len(), asked, "answers and misses are kept");
+    assert!(art::ext_url("/ext/https://commons.wikimedia.org/wiki/Special:FilePath/x.jpg").is_some());
+    assert!(art::ext_url("/ext/https://upload.wikimedia.org/wikipedia/commons/a/ab/x.jpg").is_some());
+}

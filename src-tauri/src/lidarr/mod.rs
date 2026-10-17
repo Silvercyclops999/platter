@@ -11,6 +11,7 @@ pub mod check;
 pub mod catchup;
 pub mod commands;
 pub mod hunt;
+pub mod lookup;
 pub mod homeside;
 pub mod conventions;
 pub mod mbpick;
@@ -35,6 +36,8 @@ pub mod write;
 mod catchup_tests;
 #[cfg(test)]
 mod changes_tests;
+#[cfg(test)]
+mod get_tests;
 #[cfg(test)]
 mod modes_tests;
 #[cfg(test)]

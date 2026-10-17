@@ -190,18 +190,19 @@ describe("Played a lot", () => {
 });
 
 describe("requesting from Played a lot", () => {
-  it("requests a song's album through the preview and confirm, then shows its state", async () => {
+  it("Get on a song asks for its album, the first one through the typed confirm, then shows its state", async () => {
     await withHistory({ lidarrUrl: "http://192.168.x.x:8686" });
     const user = userEvent.setup();
     render(<ImportPage view="played" />);
     const row = await waitFor(() => rows()[0]);
-    await user.click(await within(row).findByRole("button", { name: "Request Paper Boats" }));
-    const dialog = await screen.findByRole("dialog", { name: "Request Low Water" });
+    await user.click(await within(row).findByRole("button", { name: "Get Paper Boats" }));
+    // A few seconds to undo, then the first request ever opens the dialog.
+    const dialog = await screen.findByRole("dialog", { name: "Request Low Water" }, { timeout: 8000 });
     expect(await within(dialog).findByText("/downloads/lidarr/Harbor Lights")).toBeInTheDocument();
     // The first request ever needs the album's name typed.
     await user.type(within(dialog).getByRole("textbox"), "Low Water");
     await user.click(within(dialog).getByRole("button", { name: /^Request/ }));
-    await waitFor(() => expect(within(rows()[0]).getByText("Searching")).toBeInTheDocument());
+    await waitFor(() => expect(within(rows()[0]).getByText("Looking on your indexers")).toBeInTheDocument());
     expect(mock.lidarr.list()[0].title).toBe("Low Water");
   });
 
@@ -210,8 +211,8 @@ describe("requesting from Played a lot", () => {
     render(<ImportPage view="played" />);
     await waitFor(() => expect(rows()).toHaveLength(6));
     const glass = rows().find((r) => r.getAttribute("aria-label") === "Glass Orchard by Mira Vale")!;
-    fireEvent.click(await within(glass).findByRole("button", { name: "Request Glass Orchard" }));
-    await waitFor(() => expect(toasts().some((t) => t.message.includes("bootleg"))).toBe(true));
+    fireEvent.click(await within(glass).findByRole("button", { name: "Get Glass Orchard" }));
+    await waitFor(() => expect(toasts().some((t) => t.message.includes("bootleg"))).toBe(true), { timeout: 8000 });
     expect(mock.lidarr.list()).toHaveLength(0);
   });
 
@@ -224,7 +225,7 @@ describe("requesting from Played a lot", () => {
     await waitFor(() => expect(rows()).toHaveLength(6));
     // Field Notes shows its request already.
     const field = rows().find((r) => r.getAttribute("aria-label") === "Field Notes by Osa Lind")!;
-    expect(within(field).getByText("Searching")).toBeInTheDocument();
+    expect(within(field).getByText("Looking on your indexers")).toBeInTheDocument();
     fireEvent.click(within(rows()[1]).getByRole("checkbox", { name: "Pick Neon Driveway to request" }));
     fireEvent.click(within(rows()[2]).getByRole("checkbox", { name: "Pick Thin Ice Waltz to request" }));
     fireEvent.click(within(rows()[4]).getByRole("checkbox", { name: "Pick Glass Orchard to request" }));
@@ -240,7 +241,7 @@ describe("requesting from Played a lot", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(batch).toHaveBeenCalledTimes(1);
     expect(batch.mock.calls[0][0].map((i) => i.title)).toEqual(["Night Errands", "Winter Rooms"]);
-    await waitFor(() => expect(within(rows()[1]).getByText("Searching")).toBeInTheDocument());
+    await waitFor(() => expect(within(rows()[1]).getByText("Looking on your indexers")).toBeInTheDocument());
     expect(toasts().some((t) => t.message === "Requested 2 albums from Lidarr")).toBe(true);
   });
 

@@ -381,3 +381,24 @@ pub async fn bring_in_needs_you(waves: State<'_, Waves>, key: String, retry: boo
     let w = waves.inner().clone();
     blocking(move || w.needs_you(&key, retry)).await
 }
+
+/// One-click Get: the request with every check, or why it needs the user
+/// (the first request ever, or a check that says no).
+#[tauri::command]
+pub async fn lidarr_get(lidarr: State<'_, Lidarr>, input: RequestInput) -> AppResult<super::request::GetOutcome> {
+    lidarr.get(input).await
+}
+
+/// "Search again" for an album nothing turned up for: one AlbumSearch for
+/// it now, and the searches again start over.
+#[tauri::command]
+pub async fn lidarr_search_again(lidarr: State<'_, Lidarr>, id: String) -> AppResult<RequestRecord> {
+    lidarr.search_again(&id).await
+}
+
+/// Take albums off the "Get albums" queue (all of them when `releaseGroupIds` is empty).
+#[tauri::command]
+pub async fn get_albums_unqueue(waves: State<'_, Waves>, release_group_ids: Vec<String>) -> AppResult<WavesStatus> {
+    let w = waves.inner().clone();
+    blocking(move || w.unqueue(&release_group_ids)).await
+}

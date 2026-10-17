@@ -24,6 +24,12 @@ and your own Plex server.
 - Last.fm, Fanart.tv and TheAudioDB, only if you enter your own API key for
   them in Settings. They get the artist's name or MusicBrainz id and your key.
   Their images are fetched from their own image servers.
+- Photos of artists you don't have (in search, Fans also like, New to you and
+  their pages, once music you don't have is on): your Lidarr's own search when
+  it's set up, then Wikidata's picture on Wikimedia Commons, then TheAudioDB's
+  free tier when you have no key of your own. Each gets the artist's
+  MusicBrainz id, nothing else. With Lidarr set up, search for music you don't
+  have sends what you typed to your Lidarr, which asks its own metadata service.
 - ListenBrainz, for an artist's most played songs worldwide (the Popular
   list; off until you turn it on in Settings or the Get started guide). The request carries
   the artist's MusicBrainz id, and your ListenBrainz user token if you choose

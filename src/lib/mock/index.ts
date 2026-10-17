@@ -48,6 +48,8 @@ import type {
   CompareSide,
   LidarrPickInput,
   LidarrRequestInput,
+  CataloguePartKind,
+  QueuedGet,
   LidarrFixAction,
   LidarrModeSetting,
   LidarrTarget,
@@ -735,6 +737,10 @@ export class MockBackend implements Backend {
       settings: () => this.settings,
       offline: () => !!this.healthState?.cachedOnly,
       requests: () => this.lidarr.list(),
+      lidarrSetUp: () => {
+        const st = this.lidarr.status(this.settings);
+        return (st.urlSet || st.awaySet) && st.hasKey;
+      },
     });
     this.scrobble = new MockScrobble((queued) => this.emit("scrobble://status", { queued }));
     this.playHistory = new MockPlayHistory(
@@ -3628,6 +3634,39 @@ export class MockBackend implements Backend {
   lidarrRequests(_refresh: boolean) {
     return this.delay(() => this.lidarr.list());
   }
+  lidarrGet(input: LidarrRequestInput) {
+    return this.delay(() => this.lidarr.get(this.settings, input, Math.floor(Date.now() / 1000)));
+  }
+  lidarrSearchAgain(id: string) {
+    return this.delay(() => this.lidarr.searchAgain(id, Math.floor(Date.now() / 1000)));
+  }
+  /** "Get albums" in the mock: queued albums, sent at once when Lidarr is ready. */
+  getQueued: QueuedGet[] = [];
+  getAlbumsUnqueue(releaseGroupIds: string[]) {
+    return this.delay(() => {
+      this.getQueued = releaseGroupIds.length ? this.getQueued.filter((q) => !releaseGroupIds.includes(q.releaseGroupId)) : [];
+      return this.bringInStatus_();
+    });
+  }
+  catalogueSearchPart(query: string, part: CataloguePartKind) {
+    // Lidarr answers at once; MusicBrainz is paced, so its parts come later.
+    const slow = this.catalogue.source(part) === "musicBrainz" ? (part === "songs" ? 500 : 250) : 0;
+    return new Promise<void>((r) => setTimeout(r, slow)).then(() => this.delay(() => this.catalogue.searchPart(query, part)));
+  }
+  catalogueArtistPhoto(mbid: string, _name: string) {
+    return this.delay(() => this.catalogue.photo(mbid));
+  }
+  catalogueGetAlbumsPlan(mbid: string, _name: string, kinds: string[]) {
+    return this.delay(() => this.catalogue.getAlbumsPlan(mbid, kinds));
+  }
+  catalogueGetAlbums(mbid: string, _name: string, kinds: string[]) {
+    return this.delay(() => {
+      const plan = this.catalogue.getAlbumsPlan(mbid, kinds);
+      const fresh = plan.albums.filter((a) => !this.getQueued.some((q) => q.releaseGroupId === a.releaseGroupId));
+      this.getQueued.push(...fresh.map((a) => ({ releaseGroupId: a.releaseGroupId, title: a.title, artist: plan.artist, artistMbid: plan.artistMbid, artistId: null })));
+      return { queued: fresh.length, plan };
+    });
+  }
   /** Mock "Bring in my listening": made-up progress while the setting is on. */
   bringIn = { userPaused: false, paused: null as string | null, needsYou: [{ key: "album:mira vale\u001fsecond bloom", artist: "Mira Vale", album: "Second Bloom", plays: 9, reason: "MusicBrainz lists this only as a bootleg or promo, not an official release. Platter never asks Lidarr for those.", at: 0 }] };
   private bringInStatus_() {
@@ -3649,6 +3688,7 @@ export class MockBackend implements Backend {
       requestedTotal: 11,
       needsYou: this.bringIn.needsYou,
       practiced: [],
+      queued: this.getQueued,
     };
   }
   bringInStatus() {

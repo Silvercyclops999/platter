@@ -1,11 +1,11 @@
 /**
- * Pieces shared by the pages for music that isn't in the library: dimmed
- * album and artist cards that open catalogue pages, Request (through the
- * usual Lidarr preview and confirm), Add to Missing, store links and
- * "Not interested".
+ * Pieces shared by the pages for music that isn't in the library: album
+ * and artist cards that open catalogue pages (they look like any other
+ * card, with photos), one-click Get (through Lidarr, every check in the
+ * core), Add to Missing, store links and "Not interested".
  */
-import { Ban, Check, Clock, Download, ExternalLink, ListPlus } from "lucide-react";
-import { Suspense, lazy, useEffect, useState, type MouseEvent } from "react";
+import { ExternalLink, ListPlus, Check } from "lucide-react";
+import { Suspense, lazy, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
@@ -18,7 +18,8 @@ import type { MenuItem } from "../stores/ui";
 import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast, useToasts } from "../stores/toasts";
-import { STATE_LABEL } from "./lidarrShared";
+import { useArtistPhoto } from "../lib/artistPhotos";
+import { GetButton } from "./GetButton";
 import "./lidarr-request.css";
 import "./catalogue.css";
 
@@ -113,41 +114,20 @@ export function requestInput(a: CatAlbum, artistLibraryId?: string | null): Lida
   return { releaseGroupId: a.releaseGroupId, title: a.title, artist: a.artist, artistId: artistLibraryId ?? null, artistMbid: a.artistMbid };
 }
 
-/** Where a catalogue album stands: in the library, requested, can't be requested, or Request. */
-export function CatalogueAction({ album, lidarrReady, onRequest }: { album: CatAlbum; lidarrReady: boolean; onRequest: () => void }) {
-  if (album.libraryAlbumId) {
-    return (
-      <span className="lidarr-state lidarr-state--imported">
-        <Check size={14} aria-hidden="true" />
-        In your library
-      </span>
-    );
-  }
-  if (album.request && album.request !== "failed") {
-    return (
-      <span className={`lidarr-state lidarr-state--${album.request}`}>
-        {album.request === "queued" ? <Clock size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
-        {STATE_LABEL[album.request]}
-      </span>
-    );
-  }
-  if (album.refusal) {
-    return (
-      <span className="lidarr-state cat-blocked" title={album.refusal}>
-        <Ban size={14} aria-hidden="true" />
-        Can't request
-        <span className="sr-only">. {album.refusal}</span>
-      </span>
-    );
-  }
-  if (!lidarrReady) return null;
+/** Where a catalogue album stands, with one-click Get. */
+export function CatalogueAction({ album, lidarrReady, artistLibraryId, onChanged, size = "sm" }: { album: CatAlbum; lidarrReady: boolean; artistLibraryId?: string | null; onChanged?: () => void; size?: "sm" | "md" }) {
   return (
-    <Button size="sm" onClick={onRequest} aria-label={`Request ${album.title}`}>
-      {album.request === "failed" ? "Request again" : "Request"}
-    </Button>
+    <GetButton
+      album={{ releaseGroupId: album.releaseGroupId, title: album.title, artist: album.artist, artistMbid: album.artistMbid, artistId: artistLibraryId ?? null }}
+      known={album.request}
+      libraryAlbumId={album.libraryAlbumId}
+      refusal={album.refusal}
+      lidarrReady={lidarrReady}
+      onChanged={onChanged}
+      size={size}
+    />
   );
 }
-
 /** The request preview and confirm for one catalogue album. */
 export function RequestDialog({ input, onClose, onDone }: { input: LidarrRequestInput | null; onClose: () => void; onDone: () => void }) {
   if (!input) return null;
@@ -163,7 +143,7 @@ function openAlbum(a: CatAlbum) {
   else nav.go({ name: "catalogueAlbum", id: a.releaseGroupId });
 }
 
-/** A dimmed album card (unless the library has it) with its action below. */
+/** An album card for music you may not have, with Get below. */
 export function CatalogueAlbumCard({
   album,
   lidarrReady,
@@ -176,7 +156,6 @@ export function CatalogueAlbumCard({
   /** "year": year and type (an artist's page); "artist": the artist (search, Home). */
   subtitle?: "year" | "artist";
 }) {
-  const [asking, setAsking] = useState(false);
   const owned = !!album.libraryAlbumId;
   const kind = catalogueKind(album);
   const sub = subtitle === "artist" ? album.artist : `${album.year ? `${album.year} · ` : ""}${kind}`;
@@ -187,43 +166,30 @@ export function CatalogueAlbumCard({
       ...(album.artistMbid ? [{ label: "Go to artist", onSelect: () => nav.go({ name: "catalogueArtist", mbid: album.artistMbid! }) }] : []),
       ...(!owned && !album.inMissing ? [{ label: "Add to Missing", onSelect: () => void addToMissing(album).then((ok) => ok && onChanged?.()) }] : []),
       ...(!owned && album.inMissing ? [{ label: "Remove from Missing", onSelect: () => void removeFromMissing(album).then((ok) => ok && onChanged?.()) }] : []),
-      ...(!owned && lidarrReady && !album.refusal && !album.request ? [{ label: "Request", onSelect: () => setAsking(true) }] : []),
     ];
     openContextMenu(`Options for ${album.title}`, items, e);
   };
   return (
-    <div
-      className={`card card--album cat-card ${owned ? "" : "missing-release"}`}
-      aria-label={owned ? `${album.title} by ${album.artist}` : `${album.title} by ${album.artist}, ${NOT_IN_LIBRARY.toLowerCase()}`}
-      onContextMenu={menu}
-    >
-      <div className="card__art missing-release__art">
+    <div className="card card--album cat-card" aria-label={`${album.title} by ${album.artist}`} onContextMenu={menu}>
+      <div className="card__art">
         <Art path={album.thumb} fluid kind="album" />
       </div>
       <button type="button" className="card__link" onClick={() => openAlbum(album)} title={album.title}>
-        <span className="card__title missing-release__title truncate">{album.title}</span>
+        <span className="card__title truncate">{album.title}</span>
       </button>
-      <span className="card__subtitle missing-release__sub truncate">
-        {sub}
-      </span>
-      <div className="missing-release__action">
-        <CatalogueAction album={album} lidarrReady={lidarrReady} onRequest={() => setAsking(true)} />
+      <span className="card__subtitle truncate">{sub}</span>
+      <div className="missing-release__action cat-card__action">
+        <CatalogueAction album={album} lidarrReady={lidarrReady} onChanged={onChanged} />
       </div>
-      <RequestDialog
-        input={asking ? requestInput(album) : null}
-        onClose={() => setAsking(false)}
-        onDone={() => {
-          setAsking(false);
-          onChanged?.();
-        }}
-      />
     </div>
   );
 }
 
-/** An artist card: a library artist opens their page as usual; one outside it is dimmed and opens their catalogue page. */
+/** An artist card: a library artist opens their page as usual; one outside it opens their catalogue page. Photos load as the card comes into view. */
 export function CatalogueArtistCard({ artist, because, onDismiss }: { artist: CatArtist; because?: string | null; onDismiss?: () => void }) {
   const owned = !!artist.libraryId;
+  const box = useRef<HTMLDivElement>(null);
+  const { photo } = useArtistPhoto(box, owned ? null : artist.mbid, artist.name, artist.photo);
   const open = () => (owned ? nav.go({ name: "artist", id: artist.libraryId! }) : nav.go({ name: "catalogueArtist", mbid: artist.mbid }));
   const dismiss = () => {
     dismissArtist({ mbid: artist.mbid, name: artist.name });
@@ -238,14 +204,14 @@ export function CatalogueArtistCard({ artist, because, onDismiss }: { artist: Ca
     );
   };
   return (
-    <div className={`card card--artist cat-card ${owned ? "" : "missing-release"}`} onContextMenu={menu} aria-label={owned ? artist.name : `${artist.name}, ${NOT_IN_LIBRARY.toLowerCase()}`}>
-      <div className="card__art missing-release__art">
-        <Art path={artist.photo} fluid round kind="artist" />
+    <div ref={box} className="card card--artist cat-card" onContextMenu={menu} aria-label={owned ? artist.name : `${artist.name}, ${NOT_IN_LIBRARY.toLowerCase()}`}>
+      <div className="card__art">
+        <Art path={photo} fluid round kind="artist" monogram={artist.name} />
       </div>
       <button type="button" className="card__link" onClick={open} title={artist.name}>
-        <span className="card__title missing-release__title truncate">{artist.name}</span>
+        <span className="card__title truncate">{artist.name}</span>
       </button>
-      <span className="card__subtitle missing-release__sub truncate">{owned ? "Artist" : because ? `Because you play ${because}` : NOT_IN_LIBRARY}</span>
+      <span className="card__subtitle truncate">{owned ? "Artist" : because ? `Because you play ${because}` : "Artist"}</span>
       {!owned && onDismiss !== undefined && (
         <div className="missing-release__action">
           <Button size="sm" variant="ghost" onClick={dismiss} aria-label={`Not interested in ${artist.name}`}>
@@ -256,7 +222,6 @@ export function CatalogueArtistCard({ artist, because, onDismiss }: { artist: Ca
     </div>
   );
 }
-
 /** "Add to Missing" / "On your Missing list" for a catalogue album page. */
 export function MissingButton({ album, onChanged }: { album: CatAlbum; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);

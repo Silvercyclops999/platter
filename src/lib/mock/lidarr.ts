@@ -7,6 +7,7 @@ import type {
   LidarrPreview,
   LidarrReport,
   LidarrRequest,
+  LidarrGetOutcome,
   LidarrRequestInput,
   LidarrRequestState,
   LidarrStatus,
@@ -98,6 +99,12 @@ const OK_SETTINGS: LidarrFinding[] = [
 
 const ROOT_FIX =
   "In Lidarr, open Settings > Media Management > Root Folders and add a separate, empty folder for downloads (for example a Lidarr folder next to your music, added to the Plex music library as a second folder). Then remove this root folder from Lidarr. Platter never changes Lidarr's folders itself.";
+
+/** Albums a check refuses in the mock (by release group), with why. */
+export const REFUSED: Record<string, string> = {
+  "c0ffee11-0000-4000-8000-000000000062":
+    "Lowlight shares its title with an unreleased album in your library, so Platter won't ask Lidarr for it. Buy it from a store instead.",
+};
 
 export class MockLidarr {
   private hasKey = false;
@@ -232,6 +239,44 @@ export class MockLidarr {
     this.typedOnce = true;
     return r;
   }
+
+  /** One-click Get: the request, or why it needs the user. */
+  get(s: Settings, input: LidarrRequestInput, now: number): LidarrGetOutcome {
+    if (!this.typedOnce && !input.typed) {
+      return { record: null, needs: { kind: "firstTime", reason: "Your first request is confirmed by typing the album's name, once." } };
+    }
+    if (REFUSED[input.releaseGroupId]) return { record: null, needs: { kind: "refused", reason: REFUSED[input.releaseGroupId] } };
+    try {
+      return { record: this.request(s, input, now), needs: null };
+    } catch (e) {
+      const err = e as { kind?: string; message?: string };
+      if (err.kind === "invalid" || err.kind === "notFound") return { record: null, needs: { kind: "refused", reason: err.message ?? "" } };
+      throw e;
+    }
+  }
+
+  /** Test hook: what Lidarr is doing with a request now. */
+  advance(releaseGroupId: string, state: LidarrRequestState, progress: number | null = null) {
+    this.requests = this.requests.map((r) =>
+      r.releaseGroupId === releaseGroupId
+        ? { ...r, state, progress, message: state === "notFound" ? "Nothing turned up on your indexers yet. Search again, or try another edition." : null }
+        : r,
+    );
+  }
+
+  /** "Search again": one search now, the schedule starts over. */
+  searchAgain(id: string, now: number): LidarrRequest {
+    const r = this.requests.find((x) => x.id === id);
+    if (!r) throw { kind: "notFound", message: "That request isn't on this device any more." };
+    if (r.state !== "searching" && r.state !== "notFound") throw invalid("Lidarr is already working on this album.");
+    const next = { ...r, state: "searching" as const, message: null, searchedAt: now, searches: 1, nextSearchAt: now + 3600, updatedAt: now };
+    this.requests = this.requests.map((x) => (x.id === id ? next : x));
+    this.searchesAgain.push(id);
+    return next;
+  }
+
+  /** Every "Search again" sent (tests read it). */
+  readonly searchesAgain: string[] = [];
 
   list(): LidarrRequest[] {
     return [...this.requests];

@@ -10,7 +10,7 @@ import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { isOffline, OFFLINE_SEARCH } from "../lib/offline";
 import { modKey } from "../lib/platform";
-import type { SearchFilter, SearchHit, SearchResults } from "../lib/types";
+import type { CatArtist, SearchFilter, SearchHit, SearchResults } from "../lib/types";
 import { useApp } from "../stores/app";
 import { player, usePlayer } from "../stores/player";
 import { MAX_QUERY } from "../shell/SearchBox";
@@ -19,7 +19,9 @@ import { hitInfo, hitMenuItems, hitOf, mixedHits, openHit, playHit, rememberHit,
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
 import { otherVersionsText } from "./era";
 import { TopSongsResults, useTopSongsFound } from "./TopSongsResults";
-import { SearchCatalogue } from "./SearchCatalogue";
+import { CatalogueList, CatalogueRow, CatalogueSkeleton, CatalogueTopResult, catalogueRows, foldName, hasCatalogue, useCatalogueSearch, type CatalogueResults } from "./SearchCatalogue";
+import { CatalogueAlbumCard, CatalogueArtistCard } from "./catalogue";
+import { useLidarrReady } from "./lidarrShared";
 import type { HelpHit } from "../help/pages";
 import { help } from "../stores/help";
 import "./search.css";
@@ -104,7 +106,7 @@ function useHitActions(h: SearchHit, songIds?: string[]) {
 }
 
 /** The highlighted first result: taller, larger art, a big play button. */
-function TopResult({ hit, songIds }: { hit: SearchHit; songIds: string[] }) {
+function TopResult({ hit, songIds, owned }: { hit: SearchHit; songIds: string[]; owned?: boolean }) {
   const { i, playing, toggle, open, menu } = useHitActions(hit, songIds);
   const more = useRef<HTMLButtonElement>(null);
   const PlayIcon = playing ? Pause : Play;
@@ -126,6 +128,7 @@ function TopResult({ hit, songIds }: { hit: SearchHit; songIds: string[] }) {
         <div className="sr-top__sub truncate">
           <span className="sr-type">{i.typeLabel}</span>
           {i.byline && <> · {i.byline}</>}
+          {owned && <span className="sr-owned sr-owned--top">In your library</span>}
         </div>
       </div>
       {hit.track && (
@@ -143,8 +146,8 @@ function TopResult({ hit, songIds }: { hit: SearchHit; songIds: string[] }) {
   );
 }
 
-/** One plain result row: art, title and byline, a grey type label, more options. */
-export function ResultRow({ hit, songIds }: { hit: SearchHit; songIds?: string[] }) {
+/** One plain result row: art, title and byline, a grey type label, more options. `owned`: the catalogue had it too (a small "In your library" cue). */
+export function ResultRow({ hit, songIds, owned }: { hit: SearchHit; songIds?: string[]; owned?: boolean }) {
   const { i, current, playing, toggle, open, menu } = useHitActions(hit, songIds);
   const more = useRef<HTMLButtonElement>(null);
   return (
@@ -175,6 +178,7 @@ export function ResultRow({ hit, songIds }: { hit: SearchHit; songIds?: string[]
           <SaveButton track={hit.track} place="row" />
         </>
       )}
+      {owned && <span className="sr-owned">In your library</span>}
       <span className="sr-type sr-row__type">{i.typeLabel}</span>
       <button ref={more} type="button" className="sr-row__more" aria-label={`More options for ${i.title}`} onClick={(e) => menu(e, more.current ?? undefined)}>
         <MoreHorizontal size={18} aria-hidden="true" />
@@ -240,6 +244,49 @@ function ResultsSkeleton({ filter }: { filter: SearchFilter }) {
   );
 }
 
+// ---------------------------------------------------------------- music you don't have
+
+/** Library results with music you don't have woven in: one after every few library rows, the rest at the end. */
+export const WOVEN_EVERY = 3;
+
+export function interleave<A, B>(lib: A[], cat: B[], every = WOVEN_EVERY): { lib?: A; cat?: B }[] {
+  const out: { lib?: A; cat?: B }[] = [];
+  let c = 0;
+  lib.forEach((x, i) => {
+    out.push({ lib: x });
+    if ((i + 1) % every === 0 && c < cat.length) out.push({ cat: cat[c++] });
+  });
+  while (c < cat.length) out.push({ cat: cat[c++] });
+  return out;
+}
+
+/** Where the music you don't have came from, for the meta line. */
+function catalogueNote(c: CatalogueResults): string {
+  return c.source === "lidarr" ? "Music you don't have from Lidarr and MusicBrainz" : "Music you don't have from MusicBrainz";
+}
+
+/** The artist to put on top: the one named exactly, unless the library's top result is named exactly. */
+function catalogueTop(q: string, c: CatalogueResults | null, libTop: SearchHit | null | undefined): CatArtist | null {
+  if (!c) return null;
+  const want = foldName(q);
+  const exact = c.artists.find((a) => foldName(a.name) === want);
+  const libExact = libTop && foldName(hitInfo(libTop)?.title ?? "") === want;
+  if (exact && !libExact) return exact;
+  return !libTop ? (c.artists[0] ?? null) : null;
+}
+
+/** A search the library found nothing for: the music you don't have, with its own top result. */
+function CatalogueOnly({ q, c, filter, lidarrReady }: { q: string; c: CatalogueResults; filter: SearchFilter; lidarrReady: boolean }) {
+  const top = filter === "all" ? catalogueTop(q, c, null) : null;
+  return (
+    <div className="sr-all" aria-busy={c.pending.length > 0}>
+      {top && <CatalogueTopResult artist={top} />}
+      <CatalogueList c={c} filter={filter} lidarrReady={lidarrReady} skipArtist={top?.mbid} label="Results" />
+      {hasCatalogue(c) && <p className="sr-meta">Nothing in your library yet · {catalogueNote(c)}</p>}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- page
 
 interface Shown {
@@ -260,6 +307,9 @@ export function SearchPage({ query }: { query: string }) {
   const offline = useApp((s) => isOffline(s.health));
   const helpHits = useHelpHits(q);
   const topSongs = useTopSongsFound(q);
+  // Music you don't have, in with the library's results as it arrives.
+  const cat = useCatalogueSearch(q, filter === "help" ? "playlists" : filter);
+  const lidarrReady = useLidarrReady();
 
   // Each request gets a sequence number and only the newest one may update
   // the screen, so a slow answer to an older query never replaces a newer one.
@@ -324,17 +374,7 @@ export function SearchPage({ query }: { query: string }) {
       </div>
     );
 
-  const localCount = !res
-    ? 0
-    : filter === "all"
-      ? res.songs.length + res.albums.length + res.artists.length + res.playlists.length
-      : filter === "songs"
-        ? res.songs.length
-        : filter === "albums"
-          ? res.albums.length
-          : filter === "artists"
-            ? res.artists.length
-            : res.playlists.length;
+  const catTop = filter === "all" && res ? catalogueTop(q, cat, res.top) : null;
 
   const empty =
     res &&
@@ -369,21 +409,23 @@ export function SearchPage({ query }: { query: string }) {
         ) : (
           <ResultsSkeleton filter={filter} />
         )
-      ) : empty && topSongs.length && (filter === "all" || filter === "playlists") ? null : empty ? (
+      ) : empty && topSongs.length && (filter === "all" || filter === "playlists") ? null : empty && (hasCatalogue(cat) || (cat && cat.pending.length > 0)) ? (
+        // Nothing in the library: what you don't have is the answer.
+        <CatalogueOnly q={q} c={cat!} filter={filter} lidarrReady={lidarrReady} />
+      ) : empty ? (
         <>
           <div className="sr-empty">
             <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
             <p>Check the spelling or try fewer words.</p>
           </div>
-          <SearchCatalogue query={q} filter={filter} localCount={0} />
           {filter === "all" && <HelpResults hits={helpHits?.slice(0, 3) ?? null} />}
         </>
       ) : (
         <>
           {filter === "all" && (
             <div className="sr-all">
-              {res.top && <TopResult hit={res.top} songIds={songIds} />}
-              {res.top?.kind === "track" && res.top.track && !!res.versions?.[res.top.track.id]?.length && (
+              {catTop ? <CatalogueTopResult artist={catTop} /> : res.top && <TopResult hit={res.top} songIds={songIds} owned={!!cat?.inLibrary.has(hitInfo(res.top)?.id ?? "")} />}
+              {!catTop && res.top?.kind === "track" && res.top.track && !!res.versions?.[res.top.track.id]?.length && (
                 <ul className="sr-list sr-list--top-versions" aria-label={`Other versions of ${res.top.track.title}`}>
                   <VersionsToggle
                     id={res.top.track.id}
@@ -404,14 +446,17 @@ export function SearchPage({ query }: { query: string }) {
                 </ul>
               )}
               <ul className="sr-list" aria-label="Results">
-                {rows.map((h) => {
+                {interleave(catTop && res.top ? [res.top, ...rows] : rows, cat ? catalogueRows(cat, "all", catTop?.mbid) : []).map((item) => {
+                  if (item.cat) return <CatalogueRow key={item.cat.key} row={item.cat} lidarrReady={lidarrReady} />;
+                  const h = item.lib!;
                   const others = h.kind === "track" && h.track ? res.versions?.[h.track.id] : undefined;
-                  if (!others?.length) return <ResultRow key={hitInfo(h)!.key} hit={h} songIds={songIds} />;
+                  const owned = !!cat?.inLibrary.has(hitInfo(h)!.id);
+                  if (!others?.length) return <ResultRow key={hitInfo(h)!.key} hit={h} songIds={songIds} owned={owned} />;
                   const id = h.track!.id;
                   const open = expanded.has(id);
                   return (
                     <Fragment key={hitInfo(h)!.key}>
-                      <ResultRow hit={h} songIds={songIds} />
+                      <ResultRow hit={h} songIds={songIds} owned={owned} />
                       <VersionsToggle id={id} count={others.length} open={open} onToggle={() => toggle(id)} as="li" />
                       {open && (
                         <li id={`versions-${id}`} className="sr-versions__list">
@@ -426,6 +471,7 @@ export function SearchPage({ query }: { query: string }) {
                   );
                 })}
               </ul>
+              {cat && cat.pending.length > 0 && <CatalogueSkeleton />}
             </div>
           )}
           {filter === "songs" && (
@@ -469,6 +515,7 @@ export function SearchPage({ query }: { query: string }) {
               })}
             </TrackList>
           )}
+          {filter === "songs" && cat && <CatalogueList c={cat} filter="songs" lidarrReady={lidarrReady} label="Songs you don't have" />}
           {filter === "albums" && (
             <div className="sr-grid" role="list" aria-label="Albums">
               {res.albums.map((a) => (
@@ -476,6 +523,11 @@ export function SearchPage({ query }: { query: string }) {
                   <Remember hit={hitOf.album(a)}>
                     <AlbumCard album={a} />
                   </Remember>
+                </div>
+              ))}
+              {cat?.albums.map((a) => (
+                <div role="listitem" key={`mb-${a.releaseGroupId}`}>
+                  <CatalogueAlbumCard album={a} lidarrReady={lidarrReady} subtitle="artist" />
                 </div>
               ))}
             </div>
@@ -487,6 +539,11 @@ export function SearchPage({ query }: { query: string }) {
                   <Remember hit={hitOf.artist(a)}>
                     <ArtistCard artist={a} />
                   </Remember>
+                </div>
+              ))}
+              {cat?.artists.map((a) => (
+                <div role="listitem" key={`mb-${a.mbid}`}>
+                  <CatalogueArtistCard artist={a} />
                 </div>
               ))}
             </div>
@@ -504,8 +561,8 @@ export function SearchPage({ query }: { query: string }) {
           )}
           <p className="sr-meta">
             {res.source === "local" ? "From your library" : "From your server while your library finishes syncing"} · {Math.round(res.tookMs)} ms
+            {hasCatalogue(cat) && <> · {catalogueNote(cat!)}</>}
           </p>
-          <SearchCatalogue query={q} filter={filter} localCount={localCount} />
           {filter === "all" && <HelpResults hits={helpHits?.slice(0, 3) ?? null} />}
         </>
       )}

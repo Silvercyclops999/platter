@@ -101,6 +101,7 @@ fn artist_of(v: &Value) -> Option<CatArtist> {
         kind: Some(s(v, "type").trim().to_string()).filter(|d| !d.is_empty()),
         photo: None,
         library_id: None,
+        photo_credit: None,
     })
 }
 
