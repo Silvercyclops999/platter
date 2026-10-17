@@ -20,8 +20,11 @@ import { useUi } from "../stores/ui";
 const CACHE_SIZE = 30;
 const cache = new Map<string, Lyrics | null>();
 const pending = new Map<string, Promise<Lyrics | null>>();
+/** Moves on each clear, so a fetch from before it can't put stale lyrics back. */
+let generation = 0;
 
 export function clearLyricsCache() {
+  generation++;
   cache.clear();
   pending.clear();
 }
@@ -49,16 +52,23 @@ export function loadLyricsInfo(trackId: string): Promise<Lyrics | null> {
   if (cache.has(trackId)) return Promise.resolve(cache.get(trackId) ?? null);
   let p = pending.get(trackId);
   if (!p) {
+    const gen = generation;
+    const settle = () => {
+      if (gen === generation && pending.get(trackId) === p) pending.delete(trackId);
+    };
     p = backend.lyrics(trackId).then(
       (l) => {
         const v = l && (hasWords(l) || l.notice) ? l : null;
-        cache.set(trackId, v);
-        if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
-        pending.delete(trackId);
+        // Cleared while asking (a setting or an edit changed): don't cache the old answer.
+        if (gen === generation) {
+          cache.set(trackId, v);
+          if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
+        }
+        settle();
         return v;
       },
       () => {
-        pending.delete(trackId);
+        settle();
         return null;
       },
     );

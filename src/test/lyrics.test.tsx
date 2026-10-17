@@ -20,6 +20,8 @@ import {
   interpolate,
   lineState,
   loadLyrics,
+  loadLyricsInfo,
+  lyricsSeen,
   timedLines,
   useLyricsAutoShow,
 } from "../shell/lyrics";
@@ -134,6 +136,26 @@ describe("mock lyrics", () => {
     expect(l.synced && l.timed!.every((x) => !x.words)).toBe(true);
     expect(mockLyrics(plain)!.synced).toBe(false);
     expect(mockLyrics(none)).toBeNull();
+  });
+});
+
+describe("lyrics cache", () => {
+  it("a fetch that finishes after the cache was cleared doesn't put its old answer back", async () => {
+    clearLyricsCache();
+    const old = mockLyrics(words)!;
+    let finish: (l: Lyrics | null) => void = () => {};
+    const ask = vi.spyOn(mock, "lyrics").mockImplementationOnce(() => new Promise((r) => (finish = r)));
+    const first = loadLyricsInfo(words);
+    clearLyricsCache();
+    finish(old);
+    expect(await first).toEqual(old);
+    expect(lyricsSeen(words)).toBe(false);
+    // The next look-up asks the core again rather than reading the old answer.
+    ask.mockResolvedValueOnce(null);
+    expect(await loadLyricsInfo(words)).toBeNull();
+    expect(ask).toHaveBeenCalledTimes(2);
+    ask.mockRestore();
+    clearLyricsCache();
   });
 });
 
