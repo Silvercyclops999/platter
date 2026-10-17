@@ -143,9 +143,13 @@ export function artistSections(
   return out;
 }
 
-/** "1,204 plays in your library". */
-export function playsLine(plays: number): string {
-  return `${plays.toLocaleString("en-US")} ${plays === 1 ? "play" : "plays"} in your library`;
+/**
+ * "1,204 plays in your library", or "8,043 plays" when the count also takes
+ * in imported listening history (so it matches the stats strip below).
+ */
+export function playsLine(plays: number, withHistory = false): string {
+  const n = `${plays.toLocaleString("en-US")} ${plays === 1 ? "play" : "plays"}`;
+  return withHistory ? n : `${n} in your library`;
 }
 
 /** Said in the About card and dialog when no source has a bio. */

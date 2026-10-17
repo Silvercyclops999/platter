@@ -11,7 +11,7 @@ import { plexEditItem } from "../components/PlexEditMenu";
 import { tagArtistItem } from "../components/TagEditMenu";
 import { bookmarkPageItem, dontPlayArtistItem } from "../stores/curate";
 import { yourStatsItem } from "../stores/stats";
-import { StatsStrip } from "../components/StatsStrip";
+import { StatsStrip, useItemStats } from "../components/StatsStrip";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
@@ -65,6 +65,11 @@ export function ArtistPage({ id, era, catalogue }: { id: string; era?: string; c
 
 function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
   const { data: loaded, error } = useLoad(() => backend.artistPage(id), [id]);
+  // The header's play count matches the stats strip: imported history counts
+  // too, so an artist played elsewhere doesn't read "0 plays".
+  const itemStats = useItemStats("artist", id);
+  const allPlays = itemStats && itemStats !== "error" ? itemStats.plays : 0;
+  const headerPlays = { plays: allPlays, history: allPlays > (loaded?.plays ?? 0) };
   // Similar artists and the global Popular list arrive in the background
   // after the page opened; the page is asked again when they do.
   const [fresh, setFresh] = useState<ArtistPageData | null>(null);
@@ -142,7 +147,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
         {artist.title}
       </h1>
       <div className="detail-header__meta">
-        <span>{playsLine(data!.plays)}</span>
+        <span>{headerPlays.history ? playsLine(headerPlays.plays, true) : playsLine(data!.plays)}</span>
         {info?.listeners != null && <span className="artist-listeners">{listenersLine(info.listeners, info.listenersFrom)}</span>}
       </div>
     </>
