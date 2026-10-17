@@ -23,5 +23,8 @@
 .device-input:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 32%, transparent); }
 .device-input:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
 
-.device-picker { display: flex; flex-direction: column; min-width: 220px; }
+.context-menu__sub:has(.device-picker) { width: 280px; max-width: 280px; }
+.device-picker { display: flex; flex-direction: column; }
+.device-picker .context-menu__item { justify-content: flex-start; gap: var(--space-3); }
+.device-picker .context-menu__item svg { flex: none; color: var(--color-text-secondary); }
 .device-picker__state { margin-left: auto; padding-left: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); white-space: nowrap; }
