@@ -1,9 +1,10 @@
 import { Sparkles, X } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Tabs } from "../components/Tabs";
 import { TrackList, TrackRow, queueable, trackMenuItems } from "../components/TrackRow";
+import { VIRTUAL_ROWS_FROM, VirtualRows, type VirtualRowsHandle } from "../components/VirtualRows";
 import { backend } from "../lib/backend";
 import type { QueueItem, Track } from "../lib/types";
 import { dragLeft, dropOnQueue, isSongDrag, useDrag } from "../stores/drag";
@@ -43,6 +44,7 @@ function QueueRow({
   current,
   removable,
   reorder,
+  rowIndex,
 }: {
   item: QueueItem;
   index: number;
@@ -51,6 +53,8 @@ function QueueRow({
   removable?: boolean;
   /** Drop wiring (user queue rows only). */
   reorder?: Reorder;
+  /** Position for screen readers when the list only has some rows on the page. */
+  rowIndex?: number;
 }) {
   const playing = usePlayer((s) => current && s.state?.status === "playing");
   // Listening along: whose song this is, when a guest added it.
@@ -63,6 +67,7 @@ function QueueRow({
       track={item.track}
       rowKey={item.itemId}
       index={index + 1}
+      rowIndex={rowIndex}
       active={current}
       playing={!!playing}
       showAlbum={false}
@@ -167,6 +172,39 @@ function RecentlyPlayed() {
   );
 }
 
+/** Queue rows are this tall (compact rows). */
+const QUEUE_ROW_PX = 64;
+
+/**
+ * One queue section's songs. A long queue only puts the rows near the
+ * panel's view on the page; selection and keys still cover all of it.
+ */
+function QueueList({ label, items, reorder }: { label: string; items: QueueItem[]; reorder?: Reorder }) {
+  const rows = useRef<VirtualRowsHandle>(null);
+  const model = useMemo(() => ({ keys: items.map((i) => i.itemId), tracks: items.map((i) => i.track) }), [items]);
+  const scrollToIndex = useCallback((i: number) => rows.current?.scrollToIndex(i), []);
+  const windowed = items.length > VIRTUAL_ROWS_FROM;
+  return (
+    <TrackList
+      label={label}
+      header={false}
+      multiMenu={queueMultiMenu}
+      rowCount={windowed ? items.length : undefined}
+      model={windowed ? model : undefined}
+      scrollToIndex={windowed ? scrollToIndex : undefined}
+    >
+      <VirtualRows
+        handle={rows}
+        count={items.length}
+        rowHeight={QUEUE_ROW_PX}
+        spacer="div"
+        scroller=".queue-panel__body"
+        renderRow={(i) => <QueueRow key={items[i].itemId} item={items[i]} index={i} removable reorder={reorder} rowIndex={windowed ? i + 1 : undefined} />}
+      />
+    </TrackList>
+  );
+}
+
 /** Right panel: Now playing, Next in queue (user), Next from (context); Recently played. */
 export function QueuePanel() {
   const queue = usePlayer((s) => s.state?.queue);
@@ -264,11 +302,7 @@ export function QueuePanel() {
                     Clear queue
                   </button>
                 </div>
-                <TrackList label="Next in queue" header={false} multiMenu={queueMultiMenu}>
-                  {queue.userQueue.map((it, i) => (
-                    <QueueRow key={it.itemId} item={it} index={i} removable reorder={reorder} />
-                  ))}
-                </TrackList>
+                <QueueList label="Next in queue" items={queue.userQueue} reorder={reorder} />
               </section>
             )}
 
@@ -284,11 +318,7 @@ export function QueuePanel() {
                     "Next up"
                   )}
                 </h3>
-                <TrackList label="Next up" header={false} multiMenu={queueMultiMenu}>
-                  {queue.nextUp.map((it, i) => (
-                    <QueueRow key={it.itemId} item={it} index={i} removable />
-                  ))}
-                </TrackList>
+                <QueueList label="Next up" items={queue.nextUp} />
               </section>
             )}
           </>

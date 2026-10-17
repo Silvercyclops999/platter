@@ -253,3 +253,30 @@ describe("narrow windows", () => {
     expect(shellCss).toMatch(/\.player-bar__more \{ display: none; \}/);
   });
 });
+
+describe("a long queue", () => {
+  it("puts only the rows near the view on the page, and Ctrl+A still takes every song", async () => {
+    const user = userEvent.setup();
+    const ids = Array.from({ length: 600 }, (_, i) => mock.fx.tracks[i % mock.fx.tracks.length].id);
+    await act(() => mock.queueClear());
+    await act(() => mock.queueAdd(ids, "end"));
+    await waitFor(() => expect(usePlayer.getState().state!.queue.userQueue).toHaveLength(600));
+    render(
+      <>
+        <QueuePanel />
+        <ContextMenuHost />
+      </>,
+    );
+    const list = screen.getByRole("grid", { name: "Next in queue" });
+    const rows = body(within(list).getAllByRole("row"));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.length).toBeLessThan(100);
+    expect(list).toHaveAttribute("aria-rowcount", "600");
+    await user.click(rows[0]);
+    await user.keyboard("{Control>}a{/Control}");
+    await user.pointer({ keys: "[MouseRight]", target: rows[1] });
+    expect(await screen.findByRole("menu", { name: "Options for 600 songs" })).toBeInTheDocument();
+    act(() => useUi.setState({ menu: null }));
+    await act(() => mock.queueClear());
+  });
+});

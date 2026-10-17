@@ -1,5 +1,5 @@
 import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 
 /** The scroller's size, ignoring a zero height (no layout yet, or tests). */
 function observeNonEmptyRect(instance: Virtualizer<HTMLElement, Element>, cb: (rect: { width: number; height: number }) => void) {
@@ -18,6 +18,14 @@ export interface VirtualRowsProps {
   renderRow: (index: number) => ReactNode;
   /** The element that wraps spacers (`li` inside a `ul`). */
   spacer?: "li" | "div";
+  /** The scrolling element the rows sit in (closest match); the main view by default. */
+  scroller?: string;
+  /** Lets the list's owner bring a row onto the page (keyboard jumps). */
+  handle?: Ref<VirtualRowsHandle>;
+}
+
+export interface VirtualRowsHandle {
+  scrollToIndex: (index: number) => void;
 }
 
 /**
@@ -32,7 +40,7 @@ export function VirtualRows(props: VirtualRowsProps) {
   return <Windowed {...props} />;
 }
 
-function Windowed({ count, rowHeight, renderRow, spacer = "li" }: VirtualRowsProps) {
+function Windowed({ count, rowHeight, renderRow, spacer = "li", scroller = ".main__scroll", handle }: VirtualRowsProps) {
   const top = useRef<HTMLElement | null>(null);
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
   const [offset, setOffset] = useState(0);
@@ -40,7 +48,7 @@ function Windowed({ count, rowHeight, renderRow, spacer = "li" }: VirtualRowsPro
   useLayoutEffect(() => {
     const el = top.current;
     if (!el) return;
-    const sc = el.closest<HTMLElement>(".main__scroll") ?? (document.scrollingElement as HTMLElement | null);
+    const sc = el.closest<HTMLElement>(scroller) ?? (document.scrollingElement as HTMLElement | null);
     setScrollEl(sc);
     const measure = () => sc && setOffset(el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop);
     measure();
@@ -52,7 +60,7 @@ function Windowed({ count, rowHeight, renderRow, spacer = "li" }: VirtualRowsPro
     const content = sc.firstElementChild;
     if (content && content !== el) ro.observe(content);
     return () => ro.disconnect();
-  }, []);
+  }, [scroller]);
 
   const v = useVirtualizer({
     count,
@@ -63,6 +71,7 @@ function Windowed({ count, rowHeight, renderRow, spacer = "li" }: VirtualRowsPro
     initialRect: { width: 1024, height: 900 },
     observeElementRect: observeNonEmptyRect,
   });
+  useImperativeHandle(handle, () => ({ scrollToIndex: (i: number) => v.scrollToIndex(i, { align: "auto" }) }), [v]);
   const items = v.getVirtualItems();
   const first = items[0]?.index ?? 0;
   const last = items.length ? items[items.length - 1].index : -1;
