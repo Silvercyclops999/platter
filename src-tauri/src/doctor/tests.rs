@@ -205,6 +205,44 @@ fn an_album_in_two_halves_is_split() {
     assert!(f.evidence.iter().any(|e| e.contains("songs 1 to 4")) && f.evidence.iter().any(|e| e.contains("songs 5 to 6")));
 }
 
+/// Where a song's file is, on the server.
+fn at(c: &Connection, id: &str, file: &str) {
+    c.execute("UPDATE tracks SET file = ?2 WHERE id = ?1", params![id, file]).unwrap();
+}
+
+#[test]
+fn albums_whose_files_share_one_folder_are_split_whatever_their_titles() {
+    let (_d, c) = db();
+    const DIR: &str = "/data/media/Music/Lidarr/Ana/Night Drive (2016)";
+    album(&c, "a1", "Ana", "Night Drive", Some(2016));
+    album(&c, "a2", "Ana", "Night Drive (Bonus)", Some(2017));
+    for n in 1..=3 {
+        song(&c, &format!("x{n}"), "a1", "Ana", &format!("Song {n}"), n, 200_000, "flac", 900);
+        at(&c, &format!("x{n}"), &format!("{DIR}/{n:02} - Song {n}.flac"));
+    }
+    song(&c, "y1", "a2", "Ana", "Hidden", 1, 200_000, "flac", 900);
+    at(&c, "y1", &format!("{DIR}/04 - Hidden.flac"));
+    let found = check(&c, "Ana");
+    let f = of(&found, Kind::SplitAlbum);
+    assert_eq!(f.len(), 1, "{found:#?}");
+    assert_eq!((f[0].album_id.as_str(), f[0].others[0].id.as_str(), f[0].fix), ("a1", "a2", Fix::MergeAlbums));
+    assert!(f[0].evidence.iter().any(|e| e.contains("one folder") && e.contains(DIR)), "{:?}", f[0].evidence);
+    // Old disc folders count as the album's folder.
+    at(&c, "y1", &format!("{DIR}/Disc 2/01 - Hidden.flac"));
+    assert_eq!(of(&check(&c, "Ana"), Kind::SplitAlbum).len(), 1);
+    // In another folder, with another title: two albums.
+    at(&c, "y1", "/data/media/Music/Lidarr/Ana/Other (2017)/01 - Hidden.flac");
+    assert!(of(&check(&c, "Ana"), Kind::SplitAlbum).is_empty());
+    // One folder, but the same songs twice: copies, not halves.
+    at(&c, "y1", &format!("{DIR}/04 - Hidden.flac"));
+    c.execute("UPDATE tracks SET title = 'Song 1' WHERE id = 'y1'", []).unwrap();
+    assert!(of(&check(&c, "Ana"), Kind::SplitAlbum).is_empty());
+    // An edition tag keeps them apart even in one folder.
+    c.execute("UPDATE tracks SET title = 'Hidden' WHERE id = 'y1'", []).unwrap();
+    c.execute("INSERT INTO album_tags (album_id, edition) VALUES ('a2', 'Build v2')", []).unwrap();
+    assert!(of(&check(&c, "Ana"), Kind::SplitAlbum).is_empty());
+}
+
 #[test]
 fn editions_copies_other_years_and_unreleased_builds_are_not_split() {
     let setup = |c: &Connection| {

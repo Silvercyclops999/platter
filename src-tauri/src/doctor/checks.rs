@@ -19,7 +19,7 @@ use crate::identity::{Context, MatchKind, SongKey, Tier, compare};
 use crate::tags::CACHE_VERSION;
 
 /// Raised when the checks change, so every artist is checked again.
-pub const CHECKS_VERSION: u32 = 1;
+pub const CHECKS_VERSION: u32 = 2;
 
 /// A lossy copy at most this bitrate (kbps), and this much below the other
 /// copy, counts as low quality next to another lossy copy.
@@ -65,6 +65,9 @@ pub struct SongRow {
     pub tag_album_artist: Option<String>,
     pub tag_year: Option<i32>,
     pub unreleased: bool,
+    /// The folder its file is in, on the server (a disc folder counts as
+    /// its album's folder).
+    pub folder: Option<String>,
 }
 
 /// An album with the same title under another album artist (for the album
@@ -125,7 +128,7 @@ pub fn load(c: &Connection, artist_id: &str) -> AppResult<ArtistData> {
         let mut st = c.prepare_cached(
             "SELECT t.id, t.title, t.album_id, t.album_title, t.artist_title, t.track_artist, t.disc_number, t.track_number,
                     t.duration_ms, t.codec, t.bitrate, t.bit_depth, t.sample_rate, t.mbid,
-                    f.status, f.ver, f.isrc, f.recording_mbid, f.album, f.album_artist, f.year, v.status
+                    f.status, f.ver, f.isrc, f.recording_mbid, f.album, f.album_artist, f.year, v.status, t.file
              FROM tracks t
              LEFT JOIN file_tags f ON f.part_key = t.part_key
              LEFT JOIN versions v ON v.track_id = t.id
@@ -164,6 +167,7 @@ pub fn load(c: &Connection, artist_id: &str) -> AppResult<ArtistData> {
                 tag_album_artist: if ok { r.get(19)? } else { None },
                 tag_year: if ok { r.get(20)? } else { None },
                 unreleased,
+                folder: r.get::<_, Option<String>>(22)?.as_deref().and_then(album_folder),
                 album_id,
             });
         }
@@ -231,6 +235,9 @@ pub fn signature(d: &ArtistData) -> String {
             s.tag_year,
             s.unreleased
         ));
+        if let Some(f) = &s.folder {
+            h.add(f);
+        }
     }
     let mut keys: Vec<_> = d.elsewhere.iter().collect();
     keys.sort_by(|a, b| a.0.cmp(b.0));
@@ -712,23 +719,88 @@ fn range_text(songs: &[&SongRow]) -> String {
     }
 }
 
-/// Albums with the same title and album artist that look like one album in two.
-pub fn split_albums(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Vec<&SongRow>>) -> Vec<Finding> {
-    let mut by_title: BTreeMap<String, Vec<&AlbumRow>> = BTreeMap::new();
-    for a in &d.albums {
-        let k = fold_text(&a.title);
-        if !k.is_empty() {
-            by_title.entry(k).or_default().push(a);
+/// The album folder a file is in: its folder, or the folder above a disc
+/// folder ("Disc 2", "CD2"), folded for comparing.
+pub fn album_folder(file: &str) -> Option<String> {
+    let parts: Vec<&str> = file.split(['/', '\\']).collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let mut dir = &parts[..parts.len() - 1];
+    if let Some(last) = dir.last() {
+        let l = last.trim().to_lowercase();
+        let rest = l.trim_start_matches("disc").trim_start_matches("disk").trim_start_matches("cd").trim();
+        if rest.len() < l.len() && !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) && dir.len() > 1 {
+            dir = &dir[..dir.len() - 1];
         }
     }
+    let f = dir.join("/");
+    (!f.trim_matches('/').is_empty()).then_some(f)
+}
+
+/// The one folder all of an album's files are in, if they share one.
+fn only_folder(songs: &[&SongRow]) -> Option<String> {
+    let mut it = songs.iter().map(|s| s.folder.clone());
+    let first = it.next()??;
+    it.all(|f| f.as_deref() == Some(first.as_str())).then_some(first)
+}
+
+/// Two albums whose files share one folder: Plex shows one album in two
+/// (a bonus track tagged a little differently, say), whatever their titles.
+fn same_folder_halves(a: &AlbumRow, b: &AlbumRow, sa: &[&SongRow], sb: &[&SongRow]) -> bool {
+    if a.status.is_unreleased() != b.status.is_unreleased() {
+        return false;
+    }
+    if !same_opt(&a.edition, &b.edition) || !same_opt(&a.version, &b.version) || !same_opt(&a.group, &b.group) {
+        return false;
+    }
+    let (Some(fa), Some(fb)) = (only_folder(sa), only_folder(sb)) else { return false };
+    if fa != fb {
+        return false;
+    }
+    // Two copies of the same songs in one folder are duplicates, not halves.
+    let titles = |s: &[&SongRow]| -> HashSet<String> { s.iter().map(|x| fold_title(&x.title).title).filter(|t| !t.is_empty()).collect() };
+    titles(sa).is_disjoint(&titles(sb))
+}
+
+/// Albums with the same title and album artist that look like one album in
+/// two, and albums whose files share one folder.
+pub fn split_albums(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Vec<&SongRow>>) -> Vec<Finding> {
     let empty: Vec<&SongRow> = Vec::new();
     let songs_of = |id: &str| by_album.get(id).unwrap_or(&empty);
+    // Albums group by title, and albums sharing a folder join one group.
+    let n = d.albums.len();
+    let mut group_of: Vec<usize> = (0..n).collect();
+    {
+        let mut first_by_title: HashMap<String, usize> = HashMap::new();
+        let mut first_by_folder: HashMap<String, usize> = HashMap::new();
+        for (i, a) in d.albums.iter().enumerate() {
+            let k = fold_text(&a.title);
+            if !k.is_empty() {
+                let g = *first_by_title.entry(k).or_insert(i);
+                let (ri, rg) = (find(&mut group_of, i), find(&mut group_of, g));
+                group_of[ri] = rg;
+            }
+            if let Some(f) = only_folder(songs_of(&a.id)) {
+                let g = *first_by_folder.entry(f).or_insert(i);
+                let (ri, rg) = (find(&mut group_of, i), find(&mut group_of, g));
+                group_of[ri] = rg;
+            }
+        }
+    }
+    let mut groups: BTreeMap<usize, Vec<&AlbumRow>> = BTreeMap::new();
+    for i in 0..n {
+        let r = find(&mut group_of, i);
+        groups.entry(r).or_default().push(&d.albums[i]);
+    }
     let mut out = Vec::new();
-    for group in by_title.values().filter(|g| g.len() > 1) {
+    for group in groups.values().filter(|g| g.len() > 1) {
         let mut parent: Vec<usize> = (0..group.len()).collect();
         for i in 0..group.len() {
             for j in i + 1..group.len() {
-                if halves(group[i], group[j], songs_of(&group[i].id), songs_of(&group[j].id)) {
+                let (si, sj) = (songs_of(&group[i].id), songs_of(&group[j].id));
+                let titled = fold_text(&group[i].title) == fold_text(&group[j].title) && halves(group[i], group[j], si, sj);
+                if titled || same_folder_halves(group[i], group[j], si, sj) {
                     let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
                     if ri != rj {
                         parent[rj] = ri;
@@ -759,11 +831,24 @@ pub fn split_albums(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Ve
                 ),
                 Fix::MergeAlbums,
             );
-            f.evidence.push(format!("{} albums are called \u{201c}{}\u{201d} by {}.", n, main.title, main.artist));
-            for p in &parts {
-                f.evidence.push(format!("One has {}.", range_text(songs_of(&p.id))));
+            let one_title = parts.iter().all(|p| fold_text(&p.title) == fold_text(&main.title));
+            if one_title {
+                f.evidence.push(format!("{} albums are called \u{201c}{}\u{201d} by {}.", n, main.title, main.artist));
+                for p in &parts {
+                    f.evidence.push(format!("One has {}.", range_text(songs_of(&p.id))));
+                }
+            } else {
+                f.evidence.push(format!("Plex shows {} albums by {}:", n, main.artist));
+                for p in &parts {
+                    f.evidence.push(format!("\u{201c}{}\u{201d} has {}.", p.title, range_text(songs_of(&p.id))));
+                }
             }
-            f.evidence.push("They share no songs, and none is tagged as another edition or version.".into());
+            let folders: Vec<Option<String>> = parts.iter().map(|p| only_folder(songs_of(&p.id))).collect();
+            let shared = folders.first().cloned().flatten().filter(|f0| folders.iter().all(|f| f.as_deref() == Some(f0.as_str())));
+            match &shared {
+                Some(folder) => f.evidence.push(format!("Their files are all in one folder ({folder}), so they're one album on disk.")),
+                None => f.evidence.push("They share no songs, and none is tagged as another edition or version.".into()),
+            }
             f.others = parts[1..].iter().map(|p| OtherAlbum { id: p.id.clone(), title: p.title.clone(), thumb: p.thumb.clone() }).collect();
             out.push(f);
         }
