@@ -74,27 +74,84 @@ pub struct RawToken {
     pub dtw_ms: Option<u32>,
 }
 
-/// A segment's tokens to words. A word starts at a token beginning with a
-/// space; its bytes are joined first and decoded once, so a character
-/// split across tokens comes out whole.
-pub fn words_from_tokens(tokens: &[RawToken]) -> Vec<Word> {
+/// How stored transcriptions were timed. 1: a word started at its first
+/// token's attention time, which marks where that token ends (late by about
+/// one token). 2: [`token_times`].
+pub const TIMING_VERSION: i64 = 2;
+
+/// A token's sung length when the next one doesn't say.
+const TOKEN_MS: u32 = 250;
+/// Bounds on a token's length taken from the next token's time.
+const TOKEN_MIN_MS: u32 = 80;
+const TOKEN_MAX_MS: u32 = 600;
+/// How much of the next token's length is taken off the attention time.
+/// Measured on spoken lines over a music bed: line starts land within about
+/// 0.2 s of the truth, with no lean either way.
+const LEAD: f32 = 0.75;
+
+/// When each token starts and ends, in ms.
+///
+/// whisper.cpp's attention time for a token is when the alignment moves on
+/// from it, so it marks the token's end. A token's start is that time less
+/// about its length (taken from the gap to the next token), never before the
+/// previous token's end. Without attention times the token's own guesses
+/// are used.
+pub fn token_times(tokens: &[RawToken]) -> Vec<(u32, u32)> {
+    let mut out = Vec::with_capacity(tokens.len());
+    for (i, t) in tokens.iter().enumerate() {
+        let Some(at) = t.dtw_ms else {
+            out.push((t.start_ms, t.end_ms.max(t.start_ms)));
+            continue;
+        };
+        let next = tokens.get(i + 1).and_then(|n| n.dtw_ms).filter(|n| *n > at && n - at <= 2000);
+        let prev = if i > 0 { tokens[i - 1].dtw_ms.filter(|p| *p <= at) } else { None };
+        let len = next.map_or(TOKEN_MS, |n| (n - at).clamp(TOKEN_MIN_MS, TOKEN_MAX_MS));
+        let start = at.saturating_sub((len as f32 * LEAD).round() as u32).max(prev.unwrap_or(0));
+        out.push((start, at));
+    }
+    out
+}
+
+/// Tokens to words. A word starts at a token beginning with a space; its
+/// bytes are joined first and decoded once, so a character split across
+/// tokens comes out whole. `times` are [`token_times`].
+fn words_timed(tokens: &[RawToken], times: &[(u32, u32)]) -> Vec<Word> {
     let mut raw: Vec<(u32, u32, Vec<u8>)> = Vec::new();
-    for t in tokens {
+    for (t, &(start, end)) in tokens.iter().zip(times) {
         let new_word = raw.is_empty() || t.bytes.first() == Some(&b' ');
         match raw.last_mut() {
             Some(w) if !new_word => {
                 w.2.extend_from_slice(&t.bytes);
-                w.1 = w.1.max(t.end_ms);
+                w.1 = w.1.max(end);
             }
-            _ => {
-                let start = t.dtw_ms.unwrap_or(t.start_ms);
-                raw.push((start, t.end_ms.max(start), t.bytes.clone()));
-            }
+            _ => raw.push((start, end.max(start), t.bytes.clone())),
         }
     }
     raw.into_iter()
         .map(|(start_ms, end_ms, bytes)| Word { start_ms, end_ms, text: String::from_utf8_lossy(&bytes).into_owned() })
         .collect()
+}
+
+/// One segment's tokens to words (no neighbours to time against).
+pub fn words_from_tokens(tokens: &[RawToken]) -> Vec<Word> {
+    words_timed(tokens, &token_times(tokens))
+}
+
+/// Every segment's tokens to segments of words. Tokens are timed across
+/// segment edges, since one alignment covers each stretch of the song.
+pub fn segments_from_tokens(segments: &[Vec<RawToken>]) -> Vec<Segment> {
+    let flat: Vec<RawToken> = segments.iter().flatten().cloned().collect();
+    let times = token_times(&flat);
+    let mut out = Vec::new();
+    let mut at = 0;
+    for seg in segments {
+        let words = words_timed(seg, &times[at..at + seg.len()]);
+        at += seg.len();
+        if !words.is_empty() {
+            out.push(Segment { words });
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,7 +258,7 @@ pub mod whisper {
     use super::super::gpu;
     use super::super::lines::Segment;
     use super::super::model::ModelKind;
-    use super::{Progress, RawToken, RecognizeError, Recognizer, Step, Stop, unavailable_here, words_from_tokens};
+    use super::{Progress, RawToken, RecognizeError, Recognizer, Step, Stop, segments_from_tokens, unavailable_here};
 
     /// whisper.cpp, keeping the last model loaded between songs.
     #[derive(Default)]
@@ -320,7 +377,7 @@ pub mod whisper {
             res.map_err(|e| RecognizeError::Failed(e.to_string()))?;
 
             let eot = ctx.token_eot();
-            let mut out = Vec::new();
+            let mut all = Vec::new();
             for seg in state.as_iter() {
                 let mut tokens = Vec::new();
                 for i in 0..seg.n_tokens() {
@@ -339,12 +396,9 @@ pub mod whisper {
                         dtw_ms: (d.t_dtw >= 0).then(|| (d.t_dtw * 10) as u32),
                     });
                 }
-                let words = words_from_tokens(&tokens);
-                if !words.is_empty() {
-                    out.push(Segment { words });
-                }
+                all.push(tokens);
             }
-            Ok(out)
+            Ok(segments_from_tokens(&all))
         }
 
         fn unload(&self) {
@@ -373,9 +427,10 @@ mod tests {
     }
 
     #[test]
-    fn the_attention_time_starts_a_word_when_known() {
+    fn the_attention_time_ends_a_word_when_known() {
+        // The attention time is where the token ends; it starts about a token before.
         let words = words_from_tokens(&[RawToken { bytes: b" hey".to_vec(), start_ms: 500, end_ms: 900, dtw_ms: Some(620) }]);
-        assert_eq!((words[0].start_ms, words[0].end_ms), (620, 900));
+        assert_eq!((words[0].start_ms, words[0].end_ms), (432, 620));
     }
 
     #[test]

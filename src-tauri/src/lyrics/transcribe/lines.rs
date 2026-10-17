@@ -222,6 +222,69 @@ pub fn to_lrc(lines: &[Line]) -> String {
     out
 }
 
+/// `mm:ss.xx` to ms.
+fn parse_stamp(s: &str) -> Option<u32> {
+    let (m, rest) = s.split_once(':')?;
+    let (sec, cs) = rest.split_once('.').unwrap_or((rest, "0"));
+    let cs: u32 = format!("{:0<2}", &cs[..cs.len().min(2)]).parse().ok()?;
+    Some(m.parse::<u32>().ok()? * 60_000 + sec.parse::<u32>().ok()? * 1000 + cs * 10)
+}
+
+/// One stored line with word times: its words as (time, text).
+fn timed_words(line: &str) -> Option<Vec<(u32, String)>> {
+    let rest = line.strip_prefix('[')?;
+    let (_, rest) = rest.split_once(']')?;
+    if !rest.starts_with('<') {
+        return None;
+    }
+    let mut out = Vec::new();
+    for part in rest.split('<').skip(1) {
+        let (t, text) = part.split_once('>')?;
+        out.push((parse_stamp(t)?, text.trim_end().to_owned()));
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// A transcription stored with the first timing (each word at its first
+/// token's attention time, which is where that token ends) moved to the
+/// current rule without hearing the song again: a word starts about one
+/// token earlier, never before the word before it. Words stand in for
+/// tokens (most sung words are one token). Gap lines and lines without word
+/// times stay. None when there's nothing to move.
+pub fn retime_v1(lrc: &str) -> Option<String> {
+    let rows: Vec<Option<Vec<(u32, String)>>> = lrc.lines().map(timed_words).collect();
+    let old: Vec<u32> = rows.iter().flatten().flatten().map(|w| w.0).collect();
+    if old.is_empty() {
+        return None;
+    }
+    let mut new = Vec::with_capacity(old.len());
+    for (i, &at) in old.iter().enumerate() {
+        let next = old.get(i + 1).copied().filter(|n| *n > at && n - at <= 2000);
+        let len = next.map_or(250, |n| (n - at).clamp(80, 600));
+        let prev = if i > 0 { old[i - 1].min(at) } else { 0 };
+        new.push(at.saturating_sub((len as f32 * 0.75).round() as u32).max(prev));
+    }
+    let mut k = 0;
+    let mut out = String::new();
+    for (line, row) in lrc.lines().zip(&rows) {
+        match row {
+            Some(words) => {
+                out.push_str(&format!("[{}]", stamp(new[k])));
+                for (j, (_, text)) in words.iter().enumerate() {
+                    if j > 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&format!("<{}>{}", stamp(new[k]), text));
+                    k += 1;
+                }
+            }
+            None => out.push_str(line),
+        }
+        out.push('\n');
+    }
+    (out.trim_end() != lrc.trim_end()).then(|| out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

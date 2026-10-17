@@ -1405,3 +1405,38 @@ fn real_model_speed() {
         println!("{:>7} ms  {}", l.start_ms, l.text());
     }
 }
+
+/// Line timing with real models against spoken lines at known times.
+/// `PLATTER_TIMING_AUDIO`: the audio; `PLATTER_TIMING_TRUTH`: JSON
+/// `[["line text", start ms], ...]`; `PLATTER_MODELS`: a folder holding any of
+/// the three model files (missing ones are skipped). Two threads, processor
+/// unless `PLATTER_SPEECH_GPU=1`. `cargo test --lib --features transcribe
+/// real_model_timing -- --ignored --nocapture`
+#[cfg(feature = "transcribe")]
+#[test]
+#[ignore]
+fn real_model_timing() {
+    let (Ok(clip), Ok(truth), Ok(dir)) =
+        (std::env::var("PLATTER_TIMING_AUDIO"), std::env::var("PLATTER_TIMING_TRUTH"), std::env::var("PLATTER_MODELS"))
+    else {
+        println!("skipped: set PLATTER_TIMING_AUDIO, PLATTER_TIMING_TRUTH and PLATTER_MODELS");
+        return;
+    };
+    gpu::allow_from_env();
+    let truth: Vec<(String, u32)> = serde_json::from_str(&std::fs::read_to_string(truth).unwrap()).unwrap();
+    let never = AtomicBool::new(false);
+    let pcm = audio::to_16k_mono(std::fs::read(&clip).unwrap(), None, &never).unwrap();
+    let rec = engine::in_process();
+    for spec in model::catalogue() {
+        let path = Path::new(&dir).join(&spec.file);
+        if !path.is_file() {
+            println!("{:?}: not here, skipped", spec.kind);
+            continue;
+        }
+        let segs = rec.transcribe(&path, spec.kind, &pcm, 2, engine::LANGUAGE, Stop::new(), Arc::new(|_| {})).unwrap();
+        let e = super::timing_tests::errors(&truth, &super::timing_tests::line_starts(&lines::to_lines(&segs)));
+        println!("{:?}: line start errors {e:?} ms", spec.kind);
+        assert!(e.iter().all(|x| x.abs() <= 300), "{:?}: {e:?}", spec.kind);
+        rec.unload();
+    }
+}

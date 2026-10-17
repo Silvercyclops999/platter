@@ -32,6 +32,8 @@ pub mod store;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod timing_tests;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
