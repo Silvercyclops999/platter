@@ -126,6 +126,11 @@ import type {
   DevicePatch,
   DeviceSyncStatus,
   DevicesView,
+  SoundMapArea,
+  SoundMapChunk,
+  SoundMapFound,
+  SoundMapInfo,
+  SoundMapSong,
   ShareInfo,
   ShareKind,
   SyncStatus,
@@ -748,6 +753,16 @@ export interface Backend {
   devicesPause(on: boolean): Promise<void>;
   devicesCancel(): Promise<void>;
   devicesStatus(): Promise<DeviceSyncStatus | null>;
+
+  // Sound map (docs/IPC.md "Sound map")
+  /** How far along the map is; also places songs analysed since the last update. */
+  soundmapInfo(): Promise<SoundMapInfo>;
+  /** Up to `limit` points after `after` (song id order), within `area` when given. */
+  soundmapPoints(after?: string | null, limit?: number, area?: SoundMapArea | null): Promise<SoundMapChunk>;
+  /** Artists and songs on the map matching `query`. */
+  soundmapFind(query: string): Promise<SoundMapFound[]>;
+  /** Title, artist and cover for the hover card. */
+  soundmapSong(id: string): Promise<SoundMapSong>;
 
   // Social (docs/IPC.md "Friend activity, following and listening sessions")
   /** Who else on the server listened lately (owner only). `fresh` skips the 20 s cache. */
@@ -1389,6 +1404,10 @@ export function createTauriBackend(): Backend {
     devicesPause: (on) => call("devices_pause", { on }),
     devicesCancel: () => call("devices_cancel"),
     devicesStatus: () => call("devices_status"),
+    soundmapInfo: () => call("soundmap_info"),
+    soundmapPoints: (after, limit, area) => call("soundmap_points", { after: after ?? null, limit: limit ?? null, area: area ?? null }),
+    soundmapFind: (query) => call("soundmap_find", { query }),
+    soundmapSong: (id) => call("soundmap_song", { id }),
     friendActivity: (fresh) => call("friend_activity", { fresh: fresh ?? null }),
     followsList: () => call("follows_list"),
     syncFileStatus: () => call("sync_file_status"),

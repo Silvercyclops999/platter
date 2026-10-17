@@ -1,0 +1,215 @@
+/* Sound map page */
+.soundmap {
+  /* Dot colours: nine genres, seven eras (old to new), and the rest. */
+  --sm-genre-0: #F0957A;
+  --sm-genre-1: #E8C468;
+  --sm-genre-2: #8FCB9B;
+  --sm-genre-3: #6FB7E0;
+  --sm-genre-4: #B79CEB;
+  --sm-genre-5: #E58FB6;
+  --sm-genre-6: #5FC9C0;
+  --sm-genre-7: #D9A86C;
+  --sm-genre-8: #A3C46A;
+  --sm-era-0: #8A6FD0;
+  --sm-era-1: #6A86DA;
+  --sm-era-2: #4AA2CF;
+  --sm-era-3: #3DB59F;
+  --sm-era-4: #82C46C;
+  --sm-era-5: #CFC65C;
+  --sm-era-6: #F2AE5B;
+  --sm-other: #6E665D;
+  --sm-ring: var(--color-text-primary);
+  --sm-highlight: var(--color-ink);
+}
+:root[data-theme-base="light"] .soundmap {
+  --sm-genre-0: #C2573A;
+  --sm-genre-1: #A97C12;
+  --sm-genre-2: #3E8A52;
+  --sm-genre-3: #2F78A8;
+  --sm-genre-4: #7457B8;
+  --sm-genre-5: #B04F7E;
+  --sm-genre-6: #22867E;
+  --sm-genre-7: #96652A;
+  --sm-genre-8: #627F23;
+  --sm-era-0: #5E3FA8;
+  --sm-era-1: #3F5DB5;
+  --sm-era-2: #23789F;
+  --sm-era-3: #1E8572;
+  --sm-era-4: #4C8A35;
+  --sm-era-5: #8C8417;
+  --sm-era-6: #B86A12;
+  --sm-other: #A39A8C;
+  --sm-ring: var(--color-text-primary);
+  --sm-highlight: var(--color-text-primary);
+}
+
+.soundmap__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.soundmap__titles .page-title { margin: 0 0 var(--space-2); }
+.soundmap__sub { margin: 0; font-size: var(--font-size-md); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.soundmap__tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.soundmap__note { margin: 0 0 var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.soundmap__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.soundmap__link:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: 2px; }
+
+/* Two-way switches: Genre / Era, Move / Lasso. */
+.soundmap__seg { display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--color-bg-raised2); }
+.soundmap__seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-easing), color var(--motion-fast) var(--motion-easing);
+}
+.soundmap__seg-btn:hover { color: var(--color-text-primary); }
+.soundmap__seg-btn[aria-checked="true"] { background: var(--color-accent); color: var(--color-text-on-accent); }
+.soundmap__seg-btn:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+
+/* The map. */
+.soundmap__stage {
+  position: relative;
+  height: clamp(360px, calc(100vh - 440px), 1100px);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--color-ink) 4%, transparent), transparent 70%),
+    var(--color-bg-raised);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  overflow: hidden;
+}
+.soundmap__canvas-wrap { position: absolute; inset: 0; }
+.soundmap__canvas { display: block; touch-action: none; cursor: grab; }
+.soundmap__canvas:active { cursor: grabbing; }
+.soundmap__canvas--lasso, .soundmap__canvas--lasso:active { cursor: crosshair; }
+.soundmap__canvas:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; border-radius: var(--radius-card); }
+
+/* The hover card sits just above and right of the pointer. */
+.soundmap__card {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 280px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  transform: translate(14px, calc(-100% - 10px));
+  pointer-events: none;
+  z-index: 2;
+}
+.soundmap__card-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.soundmap__card-title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.soundmap__card-sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.soundmap__card-tag { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+
+.soundmap__focus, .soundmap__selection {
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: calc(100% - 2 * var(--space-4));
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 2;
+}
+.soundmap__focus { padding-left: var(--space-2); }
+.soundmap__selection-count { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); font-variant-numeric: tabular-nums; margin-right: var(--space-2); }
+
+/* Legend */
+.soundmap__legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: 0 0 var(--space-3); padding: 0; list-style: none; }
+.soundmap__legend-item { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-primary); }
+.soundmap__legend-count { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.soundmap__swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.soundmap__swatch--ring { box-shadow: 0 0 0 1.5px var(--sm-ring); background: var(--sm-other); }
+.soundmap__hint { margin: var(--space-3) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+
+/* Search */
+.soundmap__find { position: relative; width: 260px; }
+.soundmap__results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  border-radius: var(--radius-card);
+  background: var(--color-bg-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: var(--z-popover);
+}
+.soundmap__results-none { padding: var(--space-2) var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.soundmap__result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-row);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.soundmap__result:hover, .soundmap__result:focus-visible { background: var(--color-state-hover); outline: none; }
+.soundmap__result-title { font-size: var(--font-size-md); color: var(--color-text-primary); }
+.soundmap__result-sub { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+
+/* Empty and partial */
+.soundmap__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: 560px;
+  margin-top: var(--space-4);
+  padding: var(--space-6);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+}
+.soundmap__empty p { margin: 0; }
+.soundmap__empty-title { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+
+/* Name dialog */
+.soundmap-dialog { width: min(440px, calc(100vw - 48px)); }
+.soundmap-dialog__form { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-4); }
+.soundmap-dialog__label { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); }
+.soundmap-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-overlay);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 16%, transparent);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-md);
+}
+.soundmap-input:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }

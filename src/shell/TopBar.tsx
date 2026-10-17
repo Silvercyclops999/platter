@@ -12,6 +12,7 @@ import { updateSettings, useSettings } from "../stores/settings";
 import { help } from "../stores/help";
 import { createPlaylist } from "../stores/playlists";
 import { badgeText, useDoctorCount } from "../stores/doctor";
+import { useSoundMapEntry } from "../stores/soundmap";
 import { toast, useToasts } from "../stores/toasts";
 import { offlineCallout } from "./bannerView";
 import { useUi } from "../stores/ui";
@@ -154,6 +155,7 @@ export function AppMenu() {
   const wrappedOn = useSettings((s) => s.settings?.wrappedTopSongs !== false);
   const doctorOn = useSettings((s) => s.settings?.libraryDoctor !== false);
   const doctorCount = useDoctorCount();
+  const soundMapOn = useSoundMapEntry();
   const miniOpen = useMiniplayer((s) => s.open);
   const [open, setOpen] = useState(false);
   const confirmSignOut = useUi((s) => s.signOutOpen);
@@ -282,6 +284,11 @@ export function AppMenu() {
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "devices" }))}>
             <span>Devices</span>
           </button>
+          {soundMapOn && (
+            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "soundMap" }))}>
+              <span>Sound map</span>
+            </button>
+          )}
           <button
             type="button"
             role="menuitemcheckbox"

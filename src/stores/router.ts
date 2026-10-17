@@ -54,6 +54,8 @@ export type Route =
   | { name: "doctor" }
   /** Sync to a device: drives and players music is copied to. */
   | { name: "devices" }
+  /** The sound map: songs placed by how they sound. */
+  | { name: "soundMap" }
   /** An artist that isn't in the library (MusicBrainz artist id). */
   | { name: "catalogueArtist"; mbid: string }
   /** An album that isn't in the library (MusicBrainz release group id). */

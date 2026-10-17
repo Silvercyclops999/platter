@@ -1886,6 +1886,39 @@ on. Writing stops with `error.kind` `full`, `writeProtected` or `removed`
 (the drive went away mid-sync); what was copied by then stays and is in the
 manifest. `notConnected` means the device isn't plugged in.
 
+## Sound map
+Every analysed song as a point on a flat map, placed so songs that sound
+alike sit together. The core makes it from the feature vectors song analysis
+keeps, on this computer, and caches it in the database, so it works offline.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `soundmap_info` | – | `{ placed, analysed, total, analysing, building }` |
+| `soundmap_points` | `{ after: string \| null, limit: number \| null, area: { minX, minY, maxX, maxY } \| null }` | `Chunk` |
+| `soundmap_find` | `{ query }` | `{ kind: "song" \| "artist", id, title, sub, x, y }[]` |
+| `soundmap_song` | `{ id }` | `{ id, title, artist, albumTitle, thumb }` |
+
+`placed` is songs on the map, `analysed` songs with an analysis and `total`
+songs that can be analysed. `analysing` is true while Automix is on. Asking
+for the info also places any songs analysed since the last update.
+
+`Chunk = { ids, x, y, genre, genres, year, unreleased, next }` holds the
+points in columns, one entry per song in each, in song id order. `genre`
+indexes `genres` (-1 for none), `year` is 0 when unknown, and `unreleased`
+follows the archive release status. Pass `next` back as `after` for the next
+chunk; it's null after the last. `limit` defaults to and tops out at 20,000.
+With `area` only points inside it come back. Most of the map sits within -1
+to 1 on both axes.
+
+`soundmap_find` returns up to three artists (placed at the middle of their
+songs, `sub` is "N songs") and six songs (`sub` is the artist). The search is
+plain text, so `%` and `_` match themselves.
+
+Event `soundmap://changed` (no payload) fires when points were added, moved
+or removed. Songs analysed later are placed with the projection already in
+use, so the map holds still; it's worked out again, moving every point, when
+the number of analysed songs has grown by half.
+
 ## Friend activity, following and listening sessions
 
 | Command | Args | Returns |

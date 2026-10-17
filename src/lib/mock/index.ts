@@ -123,6 +123,7 @@ import type {
   ThemeFile,
   DeviceItemKind,
   DevicePatch,
+  SoundMapArea,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { exportSettings, importSettings, type SettingsFile } from "../settingsFile";
@@ -198,6 +199,7 @@ import { MockDoctor } from "./doctor";
 import { MockPhysical } from "./physical";
 import { MockAutomix } from "./automix";
 import { MockDevices } from "./devices";
+import { MockSoundMap } from "./soundmap";
 import { MockJellyfin, plexRecord } from "./jellyfin";
 import { MockSubsonic } from "./subsonic";
 
@@ -386,6 +388,8 @@ export class MockBackend implements Backend {
   readonly automix: MockAutomix;
   /** Sync to a device (test hooks: plugged, fail, stepMs, reset). */
   readonly devices: MockDevices;
+  /** The sound map (test hooks: limit, analysing). */
+  readonly soundmap: MockSoundMap;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -518,6 +522,9 @@ export class MockBackend implements Backend {
     this.automix = new MockAutomix(
       (id) => this.trackById(id) ?? undefined,
       () => this.later(0, () => this.emit("syncstore://changed", { namespaces: ["mixedPlaylists"], remote: false })),
+    );
+    this.soundmap = new MockSoundMap(this.fx, (a) =>
+      mockUnreleased(a, this.settings.countUnmatchedUnreleased !== false, mockMbCheckOn(this.settings) && mockPlexMissed(this.fx.albums, a)),
     );
     this.devices = new MockDevices(
       this.fx,
@@ -4237,6 +4244,24 @@ export class MockBackend implements Backend {
   }
   devicesStatus() {
     return this.delay(() => this.devices.status);
+  }
+
+  // ---------------------------------------------------------------- sound map
+
+  soundmapInfo() {
+    return this.delay(() => this.soundmap.info());
+  }
+  soundmapPoints(after?: string | null, limit?: number, area?: SoundMapArea | null) {
+    return this.delay(() => this.soundmap.points(after, limit, area));
+  }
+  soundmapFind(query: string) {
+    return this.delay(() => this.soundmap.find(query));
+  }
+  soundmapSong(id: string) {
+    return this.delay(() => {
+      const t = this.trackById(id);
+      return this.soundmap.song(t, t ? (this.fx.albums.find((a) => a.id === t.albumId)?.thumb ?? null) : null);
+    });
   }
 }
 

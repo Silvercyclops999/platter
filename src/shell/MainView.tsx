@@ -39,6 +39,7 @@ const LineagePage = lazy(() => import("../pages/LineagePage").then((m) => ({ def
 const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
 const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
 const DevicesPage = lazy(() => import("../pages/DevicesPage").then((m) => ({ default: m.DevicesPage })));
+const SoundMapPage = lazy(() => import("../pages/SoundMapPage").then((m) => ({ default: m.SoundMapPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
@@ -117,6 +118,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   shelf: "Your shelf",
   stats: "Stats",
   devices: "Devices",
+  soundMap: "Sound map",
 };
 
 /**
@@ -192,6 +194,8 @@ function Page({ route }: { route: Route }) {
       return <DoctorPage />;
     case "devices":
       return <DevicesPage />;
+    case "soundMap":
+      return <SoundMapPage />;
     case "import":
       return <ImportPage key={route.view ?? "home"} view={route.view} />;
     case "liked":

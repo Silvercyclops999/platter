@@ -2888,6 +2888,17 @@ export function SettingsPage() {
         "Type what you want, like \"chill late-night stuff from 2016 I haven't played lately\", and it becomes smart playlist rules you can change before saving. It's read on this computer from your library's own names; nothing is sent anywhere.",
       control: (ids) => toggle(s, "showDescribePlaylist", ids),
     },
+    // Library: the sound map
+    {
+      key: "showSoundMap",
+      section: "Library",
+      group: "Sound map",
+      title: "Show sound map",
+      description:
+        "A map of your library where songs that sound alike sit together, in the app menu once songs are analysed. It fills in as Automix analyses songs on this computer and works offline.",
+      note: s && !s.automix ? "Songs are analysed while Automix is on." : undefined,
+      control: (ids) => toggle(s, "showSoundMap", ids),
+    },
     // Library: the library doctor
     {
       key: "libraryDoctor",

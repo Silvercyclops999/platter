@@ -1148,6 +1148,8 @@ export interface Settings {
   showLineage: boolean;
   /** "Describe a playlist" in the create menu and the smart playlist editor. */
   showDescribePlaylist: boolean;
+  /** The sound map page and its entries (shown once songs are analysed). */
+  showSoundMap: boolean;
   /** Compare plays both versions at matched loudness when the server has it. */
   compareLevelMatch: boolean;
   /** Scrobble to Last.fm (once signed in). */
@@ -1352,6 +1354,64 @@ export type MixStyle = "auto" | "none" | "blend" | "lift" | "drop" | "echo";
 /** A playlist with Mix on, and the transitions picked for its gaps ("<fromId>><toId>"). */
 export interface MixedPlaylist {
   styles: Record<string, MixStyle>;
+}
+
+/** How far along the sound map is (`soundmap_info`). */
+export interface SoundMapInfo {
+  /** Songs on the map. */
+  placed: number;
+  /** Songs with an analysis. */
+  analysed: number;
+  /** Songs that can be analysed. */
+  total: number;
+  /** Song analysis is running (Automix on), so more songs will come. */
+  analysing: boolean;
+  /** The map is being updated right now. */
+  building: boolean;
+}
+
+/** Part of the map, in map units (most songs sit within -1 to 1). */
+export interface SoundMapArea {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/**
+ * Points in columns, one entry per song in each (`soundmap_points`).
+ * `genre` indexes `genres` (-1: none); `year` 0 is unknown.
+ */
+export interface SoundMapChunk {
+  ids: string[];
+  x: number[];
+  y: number[];
+  genre: number[];
+  genres: string[];
+  year: number[];
+  unreleased: boolean[];
+  /** Pass back as `after` for the next chunk; null after the last. */
+  next: string | null;
+}
+
+/** A song or an artist to fly to (`soundmap_find`). */
+export interface SoundMapFound {
+  kind: "song" | "artist";
+  id: string;
+  title: string;
+  /** The artist for a song, "N songs" for an artist. */
+  sub: string;
+  x: number;
+  y: number;
+}
+
+/** The hover card (`soundmap_song`). */
+export interface SoundMapSong {
+  id: string;
+  title: string;
+  artist: string;
+  albumTitle: string;
+  thumb: string | null;
 }
 
 /** Mixed playlists by id (`automix_mixed_get`). */
@@ -1569,6 +1629,7 @@ export const DEFAULT_SETTINGS: Settings = {
   topSongsShowPlays: false,
   showLineage: true,
   showDescribePlaylist: true,
+  showSoundMap: true,
   compareLevelMatch: true,
   scrobbleLastfm: false,
   scrobbleListenbrainz: false,
@@ -3548,6 +3609,8 @@ export interface EventMap {
   "soundid://changed": null;
   /** Songs analysed for Automix (their ids). */
   "analysis://changed": string[];
+  /** Points on the sound map were added, moved or removed. */
+  "soundmap://changed": null;
   "player://state": PlayerState;
   "player://position": PlayerPosition;
   "player://error": PlayerError;
