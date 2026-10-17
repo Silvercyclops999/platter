@@ -871,10 +871,17 @@ impl PlexState {
         };
         self.stop_background();
         let token = self.server_token(&server, &account);
-        if token != account {
-            let _ = self.inner.store.set(SERVER_TOKEN, &token);
+        // The token stays in memory for this run either way; a keychain
+        // that won't take it only matters at the next start, so say so.
+        let kept = if token != account {
+            self.inner.store.set(SERVER_TOKEN, &token)
         } else {
-            let _ = self.inner.store.delete(SERVER_TOKEN);
+            self.inner.store.delete(SERVER_TOKEN)
+        };
+        let mut not_saved = false;
+        if let Err(e) = kept {
+            tracing::warn!(kind = e.kind(), "server sign-in not saved to the keychain");
+            not_saved = true;
         }
         self.inner
             .health
@@ -901,7 +908,19 @@ impl PlexState {
             if let Some(p) = &probe {
                 s.cache.record_winner(&server.machine_id, p);
             }
-            let _ = s.cache.save(&self.inner.data_dir);
+            if let Err(e) = s.cache.save(&self.inner.data_dir) {
+                tracing::warn!("server choice not saved: {e}");
+                not_saved = true;
+            }
+        }
+        if not_saved {
+            self.toast(
+                "error",
+                format!(
+                    "Platter couldn't save your choice of {} on this computer. It works for now, but you may need to choose it again after a restart.",
+                    server.name
+                ),
+            );
         }
         match &probe {
             Some(p) => {
@@ -1976,6 +1995,48 @@ mod tests {
         }
         assert_eq!(st.tag().await, Some(crate::sid::tag("m1")));
         (m1, m2, tv, dir, st)
+    }
+
+    /// A keychain that won't write the server token.
+    struct StuckKeychain(MemoryStore);
+    impl TokenStore for StuckKeychain {
+        fn get(&self, account: &str) -> AppResult<Option<Token>> {
+            self.0.get(account)
+        }
+        fn set(&self, account: &str, token: &Token) -> AppResult<()> {
+            if account == SERVER_TOKEN {
+                return Err(AppError::Internal("keychain locked".into()));
+            }
+            self.0.set(account, token)
+        }
+        fn delete(&self, account: &str) -> AppResult<()> {
+            if account == SERVER_TOKEN {
+                return Err(AppError::Internal("keychain locked".into()));
+            }
+            self.0.delete(account)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_server_choice_that_cannot_be_saved_says_so_and_still_works() {
+        let m1 = pms("m1", true).await;
+        let tv = plex_tv(serde_json::json!([resource("m1", &m1.uri())])).await;
+        let dir = tempfile::tempdir().unwrap();
+        let inner = MemoryStore::new();
+        inner.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+        let st = PlexState::with_parts(dir.path().to_path_buf(), Arc::new(StuckKeychain(inner)), &tv.uri(), cfg()).unwrap();
+        let rec = Arc::new(Recorder::default());
+        st.set_event_sink(rec.clone());
+        st.restore().await.unwrap();
+        // The cache file can't be written either.
+        let cache = DiscoveryCache::path(dir.path());
+        let _ = std::fs::remove_file(&cache);
+        std::fs::create_dir_all(cache.join("in-the-way")).unwrap();
+        st.select_server("m1").await.unwrap();
+        assert!(rec.toasts().iter().any(|t| t.contains("couldn't save your choice of Home")), "{:?}", rec.toasts());
+        assert!(st.client().await.is_ok(), "connected anyway");
+        assert!(!rec.all_text().contains(ACCT));
+        st.sign_out().await.unwrap();
     }
 
     #[tokio::test]
