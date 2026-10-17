@@ -407,6 +407,10 @@ struct Joining {
     expires: u64,
     sent: u64,
     done: Option<oneshot::Sender<AppResult<String>>>,
+    /// Who a doorbell ring said the invite was from. Rings aren't signed
+    /// (anyone who knows the server's id and your name can ring), so this
+    /// is checked against the owner the welcome names.
+    claimed: Option<String>,
 }
 
 struct St {
@@ -1166,9 +1170,11 @@ impl Circle {
         }
         let from = clean_name(&from);
         let title = clean_name(&title);
+        // Not confirmed: a ring isn't signed, so the name is checked when
+        // the owner answers the join.
         let what = match kind {
-            Kind::Playlist => format!("{from} invited you to the playlist {title}."),
-            Kind::Blend => format!("{from} invited you to a Blend."),
+            Kind::Playlist => format!("An invite that says it's from {from}: the playlist {title}."),
+            Kind::Blend => format!("An invite that says it's from {from}: a Blend."),
         };
         st.saved.incoming.push(Incoming { id: rid(), from, kind, title, link, at: self.now() });
         self.notice(what);
@@ -1275,7 +1281,14 @@ impl Circle {
             _ => return,
         };
         let j = st.joining.remove(ji);
-        let res = result.and_then(|w| self.welcomed(st, j.kind, w));
+        let res = result.and_then(|w| {
+            let owner = clean_name(&w.owner.name);
+            let id = self.welcomed(st, j.kind, w)?;
+            if let Some(c) = j.claimed.as_deref().filter(|c| !c.eq_ignore_ascii_case(&owner)) {
+                self.notice(format!("That invite said it was from {c}, but it's from {owner}. If you don't know {owner}, leave it."));
+            }
+            Ok(id)
+        });
         if let Err(e) = &res {
             self.notice(e.to_string());
         }
@@ -1693,6 +1706,11 @@ impl Circle {
     /// Join from an invite link: waits a little for the answer, else keeps
     /// asking in the background while the owner is offline.
     pub async fn join(&self, raw: &str) -> AppResult<JoinResult> {
+        self.join_claimed(raw, None).await
+    }
+
+    /// [`Self::join`], checking the owner against who a ring said it was from.
+    async fn join_claimed(&self, raw: &str, claimed: Option<String>) -> AppResult<JoinResult> {
         let (token, kind) = if let Some(t) = invite::parse_as(raw, WORD_PLAYLIST) {
             (t, Kind::Playlist)
         } else if let Some(t) = invite::parse_as(raw, WORD_BLEND) {
@@ -1722,7 +1740,18 @@ impl Circle {
             let n = rid();
             let (tx, rx) = oneshot::channel();
             let m = Msg::Join { n: n.clone(), pake: seal::b64(&msg_a), name: (self.inner.deps.name)(), av: clean_avatar((self.inner.deps.avatar)()) };
-            st.joining.push(Joining { kind, n: n.clone(), msg_a, pake: Some(pake), up: up.clone(), down, expires: u64::from(token.expires) * 1000, sent: now, done: Some(tx) });
+            st.joining.push(Joining {
+                kind,
+                n: n.clone(),
+                msg_a,
+                pake: Some(pake),
+                up: up.clone(),
+                down,
+                expires: u64::from(token.expires) * 1000,
+                sent: now,
+                done: Some(tx),
+                claimed: claimed.clone(),
+            });
             st.saved.incoming.retain(|i| i.link != raw.trim());
             self.after(&st);
             (rx, Packet { f: n, c: 0, fl: 0, m })
@@ -1768,11 +1797,16 @@ impl Circle {
 
     /// Join the invite that arrived on the doorbell.
     pub async fn accept(&self, id: &str) -> AppResult<JoinResult> {
-        let link = {
+        let (link, from) = {
             let st = self.inner.st.lock().await;
-            st.saved.incoming.iter().find(|i| i.id == id).map(|i| i.link.clone()).ok_or_else(|| AppError::NotFound("That invite isn't here any more.".into()))?
+            st.saved
+                .incoming
+                .iter()
+                .find(|i| i.id == id)
+                .map(|i| (i.link.clone(), i.from.clone()))
+                .ok_or_else(|| AppError::NotFound("That invite isn't here any more.".into()))?
         };
-        self.join(&link).await
+        self.join_claimed(&link, Some(from)).await
     }
 
     /// The owner's view of their shared playlist.

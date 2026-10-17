@@ -648,7 +648,7 @@ export class MockCircle {
 
   ring(from: string, kind: "playlist" | "blend", title: string) {
     this.incoming.push({ id: `in${seq++}`, from, kind, title, at: Date.now() });
-    this.h.notice(kind === "playlist" ? `${from} invited you to the playlist ${title}.` : `${from} invited you to a Blend.`);
+    this.h.notice(kind === "playlist" ? `An invite that says it's from ${from}: the playlist ${title}.` : `An invite that says it's from ${from}: a Blend.`);
     this.changed();
   }
 

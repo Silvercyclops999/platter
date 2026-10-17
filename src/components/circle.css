@@ -190,6 +190,7 @@
 }
 .incoming__text { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .incoming__text strong { color: var(--color-text-primary); }
+.incoming__note { display: block; margin-top: var(--space-1); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .incoming__actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: var(--space-2); }
 
 /* ---------------------------------------------------------------- Blends */

@@ -618,6 +618,35 @@ async fn people_on_the_server_are_invited_without_a_link() {
     assert!(jules.c.join("platter://collab/AAAA").await.is_err());
 }
 
+#[tokio::test]
+async fn a_ring_is_unconfirmed_and_a_borrowed_name_is_called_out_on_joining() {
+    let ntfy = FakeNtfy::start().await;
+    let robin_acct = Account { key: "home:robin-uuid".into(), name: "Robin".into(), avatar: None, home: true };
+    let jules = node(&ntfy, "Jules", &["home:jules-uuid"], vec![robin_acct]).await;
+    let mallory = node(&ntfy, "Mallory", &[], vec![]).await;
+    mallory.lib.add("aaaaaaaa:1", "First Light", "The Demo Band", false);
+    jules.lib.add("aaaaaaaa:1", "First Light", "The Demo Band", false);
+    mallory.pl.make("aaaaaaaa:p9", "Free Songs", &["aaaaaaaa:1"]);
+    let link = mallory.c.invite_link("aaaaaaaa:p9", Role::Listener).await.unwrap().link;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Anyone who knows the server's id and Jules's key can ring, under any name.
+    let ch = doorbell(SERVER, "home:jules-uuid");
+    let p = Packet { f: String::new(), c: 0, fl: 0, m: Msg::Ring { link, from: "Robin".into(), kind: Kind::Playlist, title: "Road Trip".into() } };
+    let relay = Ntfy::new().unwrap().relay(&ntfy.url);
+    for b in link::seal_packet(&ch, &p).unwrap() {
+        relay.publish(&ch.topic, &b).await.unwrap();
+    }
+    until("it rings", || async { jules.c.view().incoming.len() == 1 }).await;
+    assert!(jules.events.notices().iter().any(|n| n == "An invite that says it's from Robin: the playlist Road Trip."), "{:?}", jules.events.notices());
+    let inc = jules.c.view().incoming[0].clone();
+    joined_id(jules.c.accept(&inc.id).await.unwrap());
+    assert!(
+        jules.events.notices().iter().any(|n| n.contains("said it was from Robin, but it's from Mallory")),
+        "{:?}",
+        jules.events.notices()
+    );
+}
+
 // ---- Blends -------------------------------------------------------------------------------
 
 /// A computer with plays of `n` songs by `artist`, `shared` of them on the demo server.

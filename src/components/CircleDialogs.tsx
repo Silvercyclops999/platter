@@ -347,6 +347,7 @@ function IncomingInvites() {
           <Face person={{ name: i.from, avatar: null }} size={32} />
           <p className="incoming__text">
             <strong>{i.from}</strong> {i.kind === "playlist" ? `invited you to ${i.title}` : "invited you to a Blend"}
+            <span className="incoming__note">Not confirmed yet. Platter checks who sent it when you join.</span>
           </p>
           <div className="incoming__actions">
             <Button variant="ghost" size="sm" onClick={() => void backend.circleDismiss(i.id)}>
