@@ -98,7 +98,7 @@ export function LidarrRequestDialog({
         ...(artistMbid ? { artistMbid } : {}),
         typed: preview.needsTyped ? typed : null,
       });
-      toast.info(r.state === "queued" ? `Saved. ${preview.title} sends when Platter can reach Lidarr.` : `Requested ${preview.title} from Lidarr`);
+      toast.info(r.state === "queued" ? `Saved. ${preview.title} sends when Platter can reach Lidarr` : `Requested ${preview.title} from Lidarr`);
       onDone(r);
     } catch (e) {
       setError(errText(e) || "The request didn't go through. Try again.");
@@ -203,7 +203,7 @@ export function LidarrRequestsList() {
     try {
       setList(await backend.lidarrRequestCancel(r.id));
     } catch (e) {
-      toast.error(errText(e) || "Couldn't cancel that.");
+      toast.error(errText(e) || "Couldn't cancel that");
     }
   };
   return (

@@ -57,12 +57,12 @@ export const transcribe = {
   track: (trackId: string) => run(() => backend.transcribeTrack(trackId)),
   album: async (albumId: string) => {
     const n = await run(() => backend.transcribeAlbum(albumId));
-    if (n === 0) toast.info("Every song on this album already has lyrics.");
+    if (n === 0) toast.info("Every song on this album already has lyrics");
     else if (n) toast.info(n === 1 ? "Transcribing 1 song" : `Transcribing ${n} songs`);
   },
   unreleased: async () => {
     const n = await run(() => backend.transcribeUnreleased());
-    if (n === 0) toast.info("No unreleased songs are waiting for lyrics.");
+    if (n === 0) toast.info("No unreleased songs are waiting for lyrics");
   },
   cancel: (trackId?: string) => run(() => backend.transcribeCancel(trackId)),
   pause: () => run(() => backend.transcribePause(true)),

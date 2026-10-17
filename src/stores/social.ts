@@ -60,10 +60,10 @@ function takeListen(v: ListenView) {
   if (v.role === "none") useSocial.setState({ inviteOpen: false });
   if (v.role !== "guest" || before.status === v.status) return;
   const host = v.hostName ?? "The host";
-  if (v.status === "hostGone") toast.error(`${host} stopped answering. You're no longer listening along.`);
-  if (v.status === "live" && before.status === "hostGone") toast.info(`${host} is back.`);
-  if (v.status === "ended") toast.info("The listening session ended.");
-  if (v.status === "removed") toast.info(`${host} removed you from the listening session.`);
+  if (v.status === "hostGone") toast.error(`${host} stopped answering. You're no longer listening along`);
+  if (v.status === "live" && before.status === "hostGone") toast.info(`${host} is back`);
+  if (v.status === "ended") toast.info("The listening session ended");
+  if (v.status === "removed") toast.info(`${host} removed you from the listening session`);
 }
 
 let started: Backend | null = null;

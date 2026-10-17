@@ -54,7 +54,7 @@ export function MusicFolderControl() {
       const c = await fn();
       if (c) said(c);
     } catch (e) {
-      toast.error(errText(e) || "Couldn't check that folder.");
+      toast.error(errText(e) || "Couldn't check that folder");
     } finally {
       setBusy(false);
     }
@@ -83,7 +83,7 @@ export function MusicFolderPath() {
     try {
       said(await backend.tagEditSetMusicFolder(path));
     } catch (e) {
-      toast.error(errText(e) || "Couldn't check that folder.");
+      toast.error(errText(e) || "Couldn't check that folder");
     } finally {
       setBusy(false);
     }
@@ -174,7 +174,7 @@ export async function firstConnectLibraryCheck(): Promise<void> {
   try {
     const sections = await backend.tagEditLibrarySettings();
     const off = sections.flatMap((s) => s.items.filter((i) => i.ok === false).map((i) => `${i.label} (${s.title})`));
-    if (off.length) toast.error(`Plex library settings need a look: ${off.join(", ")}. Settings, Library has the steps.`);
+    if (off.length) toast.error(`Plex library settings need a look: ${off.join(", ")}. Settings, Library has the steps`);
   } catch {
     // Not connected yet: Settings shows it later.
   }

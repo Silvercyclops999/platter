@@ -35,7 +35,7 @@ import {
 } from "../../design/themes";
 import { artUrl, backend } from "../../lib/backend";
 import { headerColorsFromImageUrl } from "../../lib/color";
-import type { AppError, ThemeFile } from "../../lib/types";
+import type { ThemeFile } from "../../lib/types";
 import { lookPatch, looks, useLooks, type BuilderTab } from "../../stores/looks";
 import { usePlayer } from "../../stores/player";
 import { updateSettings, useSettings } from "../../stores/settings";
@@ -43,6 +43,7 @@ import { useTheme } from "../../stores/theme";
 import { toast } from "../../stores/toasts";
 import { PreviewFrame, type ReorderList } from "./LookPreview";
 import "./look-builder.css";
+import { failText } from "../../lib/errorText";
 
 /** What the builder edits. */
 export interface Draft {
@@ -92,7 +93,6 @@ const TOKEN_LABEL: Record<string, string> = {
 };
 
 const tokenLabel = (t: string) => TOKEN_LABEL[t] ?? t.replace(/^color-|^radius-/, "").replace(/-/g, " ");
-const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
 /** The look a draft saves as. */
 export function draftToLook(d: Draft): ThemeFile {
@@ -365,7 +365,7 @@ function LayoutEditor({ d, change }: { d: Draft; change: (key: string, fn: (d: D
           onClick={() =>
             void updateSettings({ layout: d.layout }).then(
               () => toast.info("Layout applied"),
-              (e) => toast.error(`Couldn't apply the layout${errText(e) ? `: ${errText(e)}` : ""}`),
+              (e) => toast.error(failText(`Couldn't apply the layout`, e)),
             )
           }
         >
@@ -616,7 +616,7 @@ export function LookBuilder({ tab, onTab, onClose }: { tab: BuilderTab; onTab: (
       if (use) await updateSettings(lookPatch(saved));
       toast.info(copy ? `Saved a copy: ${saved.name}` : use ? `Using ${saved.name}` : `Saved ${saved.name}`);
     } catch (e) {
-      toast.error(`Couldn't save the look${errText(e) ? `: ${errText(e)}` : ""}`);
+      toast.error(failText(`Couldn't save the look`, e));
     } finally {
       busy.current = false;
     }
@@ -628,7 +628,7 @@ export function LookBuilder({ tab, onTab, onClose }: { tab: BuilderTab; onTab: (
       const file = await backend.themesExport(draftToLook(d));
       if (file) toast.info(`Exported ${file}`);
     } catch (e) {
-      toast.error(`Couldn't export the look${errText(e) ? `: ${errText(e)}` : ""}`);
+      toast.error(failText(`Couldn't export the look`, e));
     }
   };
 

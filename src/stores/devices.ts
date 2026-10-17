@@ -54,7 +54,7 @@ function takeProgress(s: DeviceSyncStatus) {
   const was = before.sync;
   useDevices.setState({ view: { ...before, sync: s } });
   if (was?.phase !== s.phase) {
-    if (s.phase === "done") toast.info(`${s.deviceName} is synced. Safe to unplug.`);
+    if (s.phase === "done") toast.info(`${s.deviceName} is synced. Safe to unplug`);
     if (s.phase === "failed" && s.error) toast.error(s.error.message);
   }
 }
@@ -111,9 +111,9 @@ export async function sendToDevice(deviceId: string, t: DeviceTarget): Promise<v
   if (plugged && !running(view?.sync)) {
     if (await devices.sync(deviceId)) toast.info(`Sending ${t.title} to ${d.name}`);
   } else if (plugged) {
-    toast.info(`Added ${t.title} to ${d.name}. It goes on with the next sync.`);
+    toast.info(`Added ${t.title} to ${d.name}. It goes on with the next sync`);
   } else {
-    toast.info(`Added ${t.title} to ${d.name}. Plug it in and sync to copy it.`);
+    toast.info(`Added ${t.title} to ${d.name}. Plug it in and sync to copy it`);
   }
 }
 

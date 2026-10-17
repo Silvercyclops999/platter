@@ -22,6 +22,7 @@ import { useArtistPhoto } from "../lib/artistPhotos";
 import { GetButton } from "./GetButton";
 import "./lidarr-request.css";
 import "./catalogue.css";
+import { failText } from "../lib/errorText";
 
 const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.LidarrRequestDialog })));
 
@@ -72,7 +73,7 @@ export function undismissArtist(mbid: string) {
 // ---------------------------------------------------------------- store links and Missing
 
 export function openStore(url: string) {
-  return backend.importOpenLink(url).catch((e) => toast.error(`Couldn't open the link${errText(e) ? `: ${errText(e)}` : ""}`));
+  return backend.importOpenLink(url).catch((e) => toast.error(failText(`Couldn't open the link`, e)));
 }
 
 export function StoreLinks({ links, title }: { links: StoreLinkSet; title: string }) {

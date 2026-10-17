@@ -63,7 +63,7 @@ export async function undoTagEdit(id: string): Promise<TagSaveResult | null> {
     else toast.info(r.message);
     return r;
   } catch (e) {
-    toast.error(errText(e) || "Couldn't undo that edit.");
+    toast.error(errText(e) || "Couldn't undo that edit");
     return null;
   }
 }
@@ -90,7 +90,7 @@ export async function saveTags(request: TagSaveRequest): Promise<TagSaveResult |
     }
     return r;
   } catch (e) {
-    toast.error(errText(e) || "Couldn't save the tags.");
+    toast.error(errText(e) || "Couldn't save the tags");
     return null;
   }
 }

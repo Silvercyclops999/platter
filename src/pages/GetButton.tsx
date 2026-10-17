@@ -113,7 +113,7 @@ export function GetButton({
         if (out.needs.kind === "firstTime") setDialog(true);
       }
     } catch (e) {
-      toast.error(errText(e) || `Couldn't get ${name}. Try again in a moment.`);
+      toast.error(errText(e) || `Couldn't get ${name}. Try again in a moment`);
     } finally {
       setPhase("idle");
     }
@@ -140,7 +140,7 @@ export function GetButton({
     try {
       upsertRequest(await backend.lidarrSearchAgain(rec.id));
     } catch (e) {
-      toast.error(errText(e) || "Lidarr didn't take the search. Try again later.");
+      toast.error(errText(e) || "Lidarr didn't take the search. Try again later");
     }
   };
 

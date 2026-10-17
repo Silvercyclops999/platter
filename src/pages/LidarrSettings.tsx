@@ -11,6 +11,7 @@ import { toast } from "../stores/toasts";
 import "./artist-info-settings.css";
 import { FixButton } from "./LidarrModes";
 import "./lidarr-settings.css";
+import { failText } from "../lib/errorText";
 
 type Ids = { title: string; desc: string };
 
@@ -66,7 +67,7 @@ export function useLidarr() {
       apply(await backend.lidarrKeySet(key));
       return true;
     } catch (e) {
-      toast.error(`Couldn't save the key${errText(e) ? `: ${errText(e)}` : ""}`);
+      toast.error(failText(`Couldn't save the key`, e));
       return false;
     }
   };
@@ -76,7 +77,7 @@ export function useLidarr() {
       apply(await backend.lidarrHeadersSet(text));
       return true;
     } catch (e) {
-      toast.error(`Couldn't save the headers${errText(e) ? `: ${errText(e)}` : ""}`);
+      toast.error(failText(`Couldn't save the headers`, e));
       return false;
     }
   };
@@ -86,7 +87,7 @@ export function useLidarr() {
       await backend.lidarrConfirmRoot(path, confirmed);
       await check();
     } catch (e) {
-      toast.error(errText(e) || "Couldn't save that.");
+      toast.error(errText(e) || `Couldn't save your answer for ${path}`);
     }
   };
 

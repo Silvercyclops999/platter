@@ -61,7 +61,7 @@ describe("Allow automation", () => {
     fireEvent.click(btn);
     await waitFor(() => expect(screen.getByTestId("automation-pairing")).toHaveTextContent(/platter --pair/));
     expect((await backend.deckStatus()).automationCode).not.toBe(before);
-    expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Scripts were unpaired. Pair again with the new code.");
+    expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Scripts were unpaired. Pair again with the new code");
   });
 
   it("is found by search for scripts, Home Assistant and the command line", () => {

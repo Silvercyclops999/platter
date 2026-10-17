@@ -26,6 +26,7 @@ import { errText } from "./importShared";
 import { STATE_LABEL, useLidarrReady } from "./lidarrShared";
 import { openSettingsAt } from "./SoundMapPage";
 import "./lidarr-request.css";
+import { failText } from "../lib/errorText";
 
 const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.LidarrRequestDialog })));
 
@@ -123,7 +124,7 @@ export function PlayedALot() {
     }
   };
 
-  const open = (url: string) => backend.importOpenLink(url).catch((e) => toast.error(`Couldn't open the link${errText(e) ? `: ${errText(e)}` : ""}`));
+  const open = (url: string) => backend.importOpenLink(url).catch((e) => toast.error(failText(`Couldn't open the link`, e)));
 
   // One-click Get: the album is picked, then sent with every check. The
   // dialog opens only for the first request ever, when a check says no (it
@@ -148,7 +149,7 @@ export function PlayedALot() {
         setAsking({ key: r.key, input: p.input });
       }
     } catch (e) {
-      toast.error(errText(e) || "Couldn't look this up. Try again.");
+      toast.error(errText(e) || "Couldn't look this up. Try again");
     }
   };
 

@@ -140,7 +140,7 @@ export function ReleaseRadarPage() {
     try {
       await backend.releaseRadarCheck();
     } catch (e) {
-      toast.error(errText(e) || "Couldn't look for new releases. Try again later.");
+      toast.error(errText(e) || "Couldn't look for new releases. Try again later");
     } finally {
       setChecking(false);
     }

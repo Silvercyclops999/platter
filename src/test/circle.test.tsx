@@ -440,7 +440,7 @@ describe("joining and failure states", () => {
     mock.circle.joinWaits(true);
     const r = await joinCircle(MOCK_COLLAB_INVITE);
     expect(r?.state).toBe("waiting");
-    expect(toasts()).toContain("Asked to join. You're in once the owner is online.");
+    expect(toasts()).toContain("Asked to join. You're in once the owner is online");
     mock.circle.joinWaits(false);
     const ok = await joinCircle(MOCK_COLLAB_INVITE);
     expect(route()).toEqual({ name: "playlist", id: ok?.state === "joined" ? ok.id : "" });

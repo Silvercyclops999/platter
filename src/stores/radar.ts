@@ -64,7 +64,7 @@ export const useAutoRequest = create<AutoState>()((set, get) => ({
       toast.info(on ? `Auto-request is on for ${name}` : `Auto-request is off for ${name}`);
       return true;
     } catch (e) {
-      toast.error(errText(e) || "Couldn't change auto-request.");
+      toast.error(errText(e) || "Couldn't change auto-request");
       void get().load();
       return false;
     }

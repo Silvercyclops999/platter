@@ -29,7 +29,7 @@ import { failText } from "../lib/errorText";
 /** Put a song you don't have on the Missing list (its album, as the list keeps albums). */
 export async function addSongToMissing(r: { album: string | null; artist: string; releaseGroupId: string | null; title: string }) {
   if (!r.releaseGroupId) {
-    toast.info(`Platter doesn't know which album ${r.title} is on, so it can't go on the Missing list.`);
+    toast.info(`Platter doesn't know which album ${r.title} is on, so it can't go on the Missing list`);
     return;
   }
   try {

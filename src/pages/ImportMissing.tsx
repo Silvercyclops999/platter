@@ -24,6 +24,7 @@ import { STATE_LABEL, useLidarrReady } from "./lidarrShared";
 import { PlayedALot } from "./PlayedALot";
 import { useSettings } from "../stores/settings";
 import "./lidarr-request.css";
+import { failText } from "../lib/errorText";
 
 /** The request preview and confirm, loaded on the first Request. */
 const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.LidarrRequestDialog })));
@@ -95,7 +96,7 @@ export function MissingView({ songs: withSongs = true, titled = true }: { songs?
     if (sc && listRef.current) sc.scrollTop += listRef.current.getBoundingClientRect().top - sc.getBoundingClientRect().top + i * IMPORT_ROW_H;
   }, [songs, focus]);
 
-  const open = (url: string) => backend.importOpenLink(url).catch((e) => toast.error(`Couldn't open the link${errText(e) ? `: ${errText(e)}` : ""}`));
+  const open = (url: string) => backend.importOpenLink(url).catch((e) => toast.error(failText(`Couldn't open the link`, e)));
 
   /** Find the official album the song comes from, then ask. */
   const request = async (s: MissingSong) => {
@@ -103,12 +104,12 @@ export function MissingView({ songs: withSongs = true, titled = true }: { songs?
     try {
       const picked = await backend.lidarrPick({ artist: s.artist, title: s.title, song: true });
       if (!picked.group) {
-        toast.info(picked.reason ?? "There's no official release of this song for Lidarr to get.");
+        toast.info(picked.reason ?? "There's no official release of this song for Lidarr to get");
         return;
       }
       setAsking({ key, input: { releaseGroupId: picked.group.id, title: picked.group.title, artist: s.artist } });
     } catch (e) {
-      toast.error(errText(e) || "Couldn't look this song up. Try again.");
+      toast.error(errText(e) || "Couldn't look this song up. Try again");
     }
   };
 

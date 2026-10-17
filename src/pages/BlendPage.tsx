@@ -16,13 +16,14 @@ import { formatLongDuration, plural } from "../lib/format";
 import type { BlendSummary, CirclePerson } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { useApp } from "../stores/app";
-import { errText, openCircleDialog, playBlend, useCircle } from "../stores/circle";
+import { openCircleDialog, playBlend, useCircle } from "../stores/circle";
 import { player, usePlayer } from "../stores/player";
 import { copyText, toast } from "../stores/toasts";
 import { usePageBar, useTitleStep } from "./detail";
 import { MissingRow } from "./SharedPlaylistPage";
 import "./playlist.css";
 import { PageMissing } from "../components/PageMissing";
+import { failText } from "../lib/errorText";
 
 /** Everyone's pictures in one square: halves, a third each, or quarters. */
 export function BlendCover({ people, size }: { people: Pick<CirclePerson, "id" | "name" | "avatar">[]; size: number }) {
@@ -70,7 +71,7 @@ export function BlendPage({ id }: { id: string }) {
         n.delete(trackId);
         return n;
       });
-      toast.error(`Couldn't hide it: ${errText(e)}`);
+      toast.error(failText(`Couldn't hide ${title}`, e));
     }
   };
   const saveAsPlaylist = async () => {
@@ -79,14 +80,14 @@ export function BlendPage({ id }: { id: string }) {
       const pl = await backend.playlistCreate(summary.title, ids);
       toast.info(`Saved as a playlist: ${pl.title}`);
     } catch (e) {
-      toast.error(`Couldn't save the playlist: ${errText(e)}`);
+      toast.error(failText(`Couldn't save the playlist`, e));
     }
   };
   const invite = async () => {
     try {
       copyText((await backend.blendInviteLink(id)).link);
     } catch (e) {
-      toast.error(`Couldn't make an invite link: ${errText(e)}`);
+      toast.error(failText(`Couldn't make an invite link`, e));
     }
   };
   const refresh = async () => {
@@ -94,7 +95,7 @@ export function BlendPage({ id }: { id: string }) {
       await backend.blendRefresh(id);
       setRefreshed((n) => n + 1);
     } catch (e) {
-      toast.error(`Couldn't refresh: ${errText(e)}`);
+      toast.error(failText(`Couldn't refresh the Blend`, e));
     }
   };
   const pageMenu = (el: HTMLElement) =>

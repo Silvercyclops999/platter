@@ -31,6 +31,7 @@ import { toneStyle, YearBanner } from "./TopSongsTile";
 import "./liked.css";
 import "./top-songs.css";
 import { LoadError } from "../components/LoadError";
+import { failText } from "../lib/errorText";
 
 /** The play context for a list (also its download id). */
 export const topSongsKey = (year: number | null) => (year == null ? "topSongs:all" : `topSongs:${year}`);
@@ -131,7 +132,7 @@ export function TopSongsPage({ year }: { year: number | null }) {
       const pl = await backend.playlistCreate(title, ids);
       toast.info(`Saved to Plex as a playlist: ${pl.title}`);
     } catch (e) {
-      toast.error(`Couldn't save the playlist: ${(e as { message?: string })?.message ?? "something went wrong"}`);
+      toast.error(failText(`Couldn't save the playlist`, e));
     }
   };
 

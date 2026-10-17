@@ -125,7 +125,7 @@ export function ReleaseStatusLabel({ status }: { status: AlbumReleaseStatus | nu
       await backend.releaseMarkSet("album", status.id, m);
       toast.info(m === "unreleased" ? "Marked as unreleased" : m === "released" ? "Marked as released" : "Mark cleared");
     } catch {
-      toast.error("Couldn't save that");
+      toast.error("Couldn't save the release mark");
     } finally {
       setBusy(false);
     }

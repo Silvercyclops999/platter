@@ -138,7 +138,7 @@ export async function setHidden(item: HideRequest, on: boolean, b: Backend = bac
         : "Hidden. Mixes, radio and shuffle will skip this song.";
     useToasts.getState().push({ kind: "info", message, action: { label: "Undo", run: () => void setHidden(item, false, b) } }, 6000);
   } catch (e) {
-    toast.error(errText(e) || "Couldn't change that");
+    toast.error(failText(on ? `Couldn't hide ${item.title}` : `Couldn't unhide ${item.title}`, e));
   }
 }
 

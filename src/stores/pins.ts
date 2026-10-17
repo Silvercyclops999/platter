@@ -54,7 +54,7 @@ export const usePins = create<PinState>()((set, get) => ({
     const before = get().pins;
     const pinned = get().isPinned(p.kind, p.id);
     if (!pinned && before.length >= MAX_PINS) {
-      toast.error(`You can pin up to ${MAX_PINS} items. Unpin one first.`);
+      toast.error(`You can pin up to ${MAX_PINS} items. Unpin one first`);
       return;
     }
     const pins = pinned ? before.filter((x) => !(x.kind === p.kind && x.id === p.id)) : [p, ...before];

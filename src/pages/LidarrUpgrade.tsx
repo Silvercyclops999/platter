@@ -148,7 +148,7 @@ export function LookForBetterDialog({
     setError(null);
     try {
       const r = await backend.lidarrUpgradeRequest(albumId);
-      toast.info(r.state === "queued" ? `Saved. Platter asks for a better copy of ${title} when it can reach Lidarr.` : `Lidarr is looking for a better copy of ${title}`);
+      toast.info(r.state === "queued" ? `Saved. Platter asks for a better copy of ${title} when it can reach Lidarr` : `Lidarr is looking for a better copy of ${title}`);
       onDone();
     } catch (e) {
       setError(errText(e) || "That didn't go through. Try again.");
@@ -285,7 +285,7 @@ function swappedToast(summary: string, id: string, onChanged: () => void) {
               toast.info("The old files are back");
               onChanged();
             },
-            (e) => toast.error(errText(e) || "Couldn't undo that."),
+            (e) => toast.error(errText(e) || "Couldn't undo that"),
           );
         },
       },
@@ -387,7 +387,7 @@ export function UpgradeCard({ upgrade, onChanged }: { upgrade: ReturnType<typeof
       toast.info("The old files are back");
       onChanged();
     } catch (e) {
-      toast.error(errText(e) || "Couldn't undo that.");
+      toast.error(errText(e) || "Couldn't undo that");
       onChanged();
     } finally {
       setBusy(false);
@@ -399,7 +399,7 @@ export function UpgradeCard({ upgrade, onChanged }: { upgrade: ReturnType<typeof
       const res = await backend.lidarrUpgradeSwap(r.id, null);
       swappedToast(res.summary, r.id, onChanged);
     } catch (e) {
-      toast.error(errText(e) || "The swap didn't happen. Every file is as it was.");
+      toast.error(errText(e) || "The swap didn't happen. Every file is as it was");
     } finally {
       setBusy(false);
       onChanged();
@@ -410,7 +410,7 @@ export function UpgradeCard({ upgrade, onChanged }: { upgrade: ReturnType<typeof
       await backend.lidarrUpgradeClear(r.id);
       onChanged();
     } catch (e) {
-      toast.error(errText(e) || "Couldn't clear that.");
+      toast.error(errText(e) || "Couldn't clear that");
     }
   };
 
@@ -626,7 +626,7 @@ export function ShareMapEditor() {
       setMap(m.music.length ? m : { ...m, music: [{ server: "", local: "" }] });
       setSaved(true);
     } catch (e) {
-      setError(errText(e) || "Couldn't save that.");
+      setError(errText(e) || "Couldn't save the music folders");
     }
   };
   return (
@@ -729,7 +729,7 @@ export function UpgradesList() {
       setAsking(false);
       load();
     } catch (e) {
-      toast.error(errText(e) || "That didn't go through.");
+      toast.error(errText(e) || "That didn't go through");
     } finally {
       setBusy(false);
     }
@@ -738,7 +738,7 @@ export function UpgradesList() {
     try {
       setList(await backend.lidarrUpgradeClear(r.id));
     } catch (e) {
-      toast.error(errText(e) || "Couldn't clear that.");
+      toast.error(errText(e) || "Couldn't clear that");
     }
   };
   return (

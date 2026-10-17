@@ -119,7 +119,7 @@ export async function installDeckPlugin(): Promise<boolean> {
   try {
     await updateSettings({ allowStreamDeck: true });
     await backend.deckPluginInstall();
-    toast.info("The Stream Deck app is adding Platter's keys. Then press any Platter key and choose Allow here.");
+    toast.info("The Stream Deck app is adding Platter's keys. Then press any Platter key and choose Allow here");
     return true;
   } catch {
     toast.error("Couldn't open the Stream Deck plugin");
@@ -191,7 +191,7 @@ export function StreamDeckSettings() {
     backend.deckRevoke().then(
       (st) => {
         setStatus(st);
-        toast.info("The Stream Deck was unpaired. Pair it again with the new code.");
+        toast.info("The Stream Deck was unpaired. Pair it again with the new code");
       },
       () => toast.error("Couldn't unpair the Stream Deck"),
     );
@@ -271,7 +271,7 @@ export function AutomationSettings() {
     backend.automationRevoke().then(
       (st) => {
         setStatus(st);
-        toast.info("Scripts were unpaired. Pair again with the new code.");
+        toast.info("Scripts were unpaired. Pair again with the new code");
       },
       () => toast.error("Couldn't unpair"),
     );

@@ -57,3 +57,25 @@ describe("toasts", () => {
     expect(toasts()).toHaveLength(1);
   });
 });
+
+describe("failure wording", () => {
+  it("names what failed, adds the reason, and cuts a long reason short", async () => {
+    const { failText, TOAST_REASON_MAX } = await import("../lib/errorText");
+    expect(failText("Couldn't save the playlist", { message: "Offline" })).toBe("Couldn't save the playlist: Offline");
+    expect(failText("Couldn't save the playlist", {})).toBe("Couldn't save the playlist");
+    const long = failText("Couldn't save the playlist", { message: "word ".repeat(60) });
+    expect(long.length).toBeLessThanOrEqual("Couldn't save the playlist: ".length + TOAST_REASON_MAX);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("an Undo toast carries the Undo button", async () => {
+    const { toast, useToasts } = await import("../stores/toasts");
+    let undone = false;
+    toast.undo("Deleted Road Trip", () => (undone = true));
+    const t = useToasts.getState().toasts.find((x) => x.message === "Deleted Road Trip")!;
+    expect(t.action?.label).toBe("Undo");
+    t.action!.run();
+    expect(undone).toBe(true);
+    useToasts.getState().dismiss(t.id);
+  });
+});

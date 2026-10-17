@@ -185,7 +185,7 @@ describe("the guest's invite", () => {
     await userEvent.click(within(card).getByRole("button", { name: "Accept" }));
     await waitFor(() => expect(screen.queryByRole("group", { name: "Invite from Jules" })).toBeNull());
     await waitFor(() => expect(screen.queryByText(/Not in your library/)).toBeNull());
-    expect(toasts()).toContain("Added Jules's Music. Their music joins your library as it's read.");
+    expect(toasts()).toContain("Added Jules's Music. Their music joins your library as it's read");
   });
 
   it("stays out of the way with Accept invites inside Platter off", async () => {
@@ -204,7 +204,7 @@ describe("the guest's invite", () => {
       await openDeepLink({ status: "open", kind: null, id: null, albumId: null, atSeconds: null, shareAsk: "platter://share/AV8MKp57HUw4puL5CxfT5EXMOOHwS3stlqDkyLHT9XopaPBRgA" });
       await confirmLink();
     });
-    expect(toasts()).toContain("Asked Morgan for their music. Their invite shows here in a moment.");
+    expect(toasts()).toContain("Asked Morgan for their music. Their invite shows here in a moment");
     await waitFor(() => expect(useSharing.getState().invites.map((i) => i.from)).toEqual(["Morgan"]), { timeout: 3000 });
   });
 });

@@ -109,18 +109,18 @@ export function DoctorPage() {
     try {
       await backend.doctorIgnore(f.id, f.kind, f.title, on);
       reload();
-      if (on) toast.info("Ignored. It stays out of the count on every device.");
+      if (on) toast.info("Ignored. It stays out of the count on every device");
     } catch (e) {
-      toast.error(errText(e) || "Couldn't do that. Try again.");
+      toast.error(errText(e) || (on ? `Couldn't ignore ${f.title}. Try again` : `Couldn't bring back ${f.title}. Try again`));
     }
   };
 
   const checkNow = async () => {
     try {
       await backend.doctorRun();
-      toast.info("Checking your library again. Findings update as it goes.");
+      toast.info("Checking your library again. Findings update as it goes");
     } catch (e) {
-      toast.error(errText(e) || "Couldn't start a check.");
+      toast.error(errText(e) || "Couldn't start a check");
     }
   };
 
@@ -128,12 +128,12 @@ export function DoctorPage() {
     try {
       const picked = await backend.lidarrPick({ artist: f.artist, artistId: f.artistId, title: f.album, song: false });
       if (!picked.group) {
-        toast.info(picked.reason ?? "There's no official release of this album for Lidarr to get.");
+        toast.info(picked.reason ?? "There's no official release of this album for Lidarr to get");
         return;
       }
       setAsking({ releaseGroupId: picked.group.id, title: picked.group.title, artist: f.artist, artistId: f.artistId });
     } catch (e) {
-      toast.error(errText(e) || "Couldn't look this album up. Try again.");
+      toast.error(errText(e) || "Couldn't look this album up. Try again");
     }
   };
 

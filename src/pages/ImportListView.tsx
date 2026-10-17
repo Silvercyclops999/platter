@@ -27,6 +27,7 @@ import { nav, useRouter } from "../stores/router";
 import { toast, useToasts } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
 import { errText, importChanged, missingKey, showInMissing } from "./importShared";
+import { failText } from "../lib/errorText";
 
 /** About how tall an import row is (56 px minimum plus the reason line). */
 export const IMPORT_ROW_H = 60;
@@ -289,7 +290,7 @@ export function ListView({ id }: { id: string }) {
         load();
         toast.info(`Removed from ${list.name}`);
       },
-      (e) => toast.error(`Couldn't remove that${errText(e) ? `: ${errText(e)}` : ""}`),
+      (e) => toast.error(failText(`Couldn't remove ${row.title} from ${list.name}`, e)),
     );
   };
 
@@ -299,7 +300,7 @@ export function ListView({ id }: { id: string }) {
   const menuFor = (row: ImportedRow): MenuItem[] => {
     if (row.track) return trackMenuItems(row.track, { afterPlaylist: [removeItem(row)] });
     const links = storeLinks(row.artist, row.title);
-    const open = (url: string) => backend.importOpenLink(url).catch((e) => toast.error(`Couldn't open the link${errText(e) ? `: ${errText(e)}` : ""}`));
+    const open = (url: string) => backend.importOpenLink(url).catch((e) => toast.error(failText(`Couldn't open the link`, e)));
     const items: MenuItem[] = [];
     if (row.status === "unsure") items.push({ label: "Check the match", onSelect: () => nav.go({ name: "import" }) });
     else items.push({ label: "Find in Missing", onSelect: () => showInMissing(row.artist, row.title) });

@@ -51,7 +51,7 @@ export function BringInCard() {
   }, [load]);
   if (!s || !s.on) return null;
   const act = (p: Promise<BringInStatus>) =>
-    p.then(setS, (e) => toast.error(errText(e) || "Couldn't change that"));
+    p.then(setS, (e) => toast.error(errText(e) || "Couldn't change Bring in my listening"));
   return (
     <section className="bring-in" aria-label="Bring in my listening">
       <div className="bring-in__head">
@@ -197,7 +197,7 @@ export function BringInSettings() {
   const saveWaves = () => {
     const w = parseWaves(text);
     if (!w) {
-      toast.error("Waves are 1 to 5 different play counts, like 100, 50, 20.");
+      toast.error("Waves are 1 to 5 different play counts, like 100, 50, 20");
       setText(s.bringInWaves.join(", "));
       return;
     }

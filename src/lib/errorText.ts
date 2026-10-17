@@ -22,7 +22,7 @@ export function capReason(msg: string, max = TOAST_REASON_MAX): string {
  * A toast line: what failed, then the error's own reason (shortened) when it
  * has one. "Couldn't save the playlist: The server is offline".
  */
-export function failText(what: string, e: unknown): string {
+export function failText(what: string, e: unknown, max = TOAST_REASON_MAX): string {
   const m = errorMessage(e);
-  return m ? `${what}: ${capReason(m)}` : what;
+  return m ? `${what}: ${capReason(m, max)}` : what;
 }

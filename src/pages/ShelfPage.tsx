@@ -204,7 +204,7 @@ export function ShelfPage() {
   const request = async (item: ShelfOnly) => {
     try {
       const found = await backend.physicalFindRelease(item.artist, item.title);
-      if (!found) return toast.error(`MusicBrainz doesn't know ${item.title} yet, so it can't be requested.`);
+      if (!found) return toast.error(`MusicBrainz doesn't know ${item.title} yet, so it can't be requested`);
       if (found.libraryAlbumId) return nav.go({ name: "album", id: found.libraryAlbumId });
       if (found.refusal) return toast.error(found.refusal);
       setAsking(requestInput(found));

@@ -33,6 +33,7 @@ import { PlaylistFinder } from "./PlaylistFinder";
 import { GapMarker, MixPill, MixToggle, SORT_LOCKED, bpmNote, mixMenuItem, sortLockedLabel, useAutomixView, useMix, useMixSwitch, useShuffleAsk } from "./PlaylistMix";
 import { Tooltip } from "../components/Tooltip";
 import "./playlist.css";
+import { failText } from "../lib/errorText";
 
 export type PlaylistSort = "custom" | "title" | "artist" | "album" | "addedBy" | "duration";
 export const SORT_LABEL: Record<PlaylistSort, string> = {
@@ -165,7 +166,7 @@ export function PlaylistPage({ id }: { id: string }) {
   // Deleted on another device while open: say so and go Home.
   useEffect(() => {
     if (error?.kind === "notFound" && data) {
-      toast.info("This playlist was deleted.");
+      toast.info("This playlist was deleted");
       nav.go({ name: "home" });
     }
   }, [error, data]);
@@ -183,7 +184,7 @@ export function PlaylistPage({ id }: { id: string }) {
     setOptimistic({ ...shown, tracks: next.map((r) => r.track), itemIds: next.map((r) => r.itemId) });
     backend.playlistMove(pl.id, ids, after).catch((e) => {
       setOptimistic(null);
-      toast.error(`Couldn't move: ${e?.message ?? "something went wrong"}`);
+      toast.error(failText(ids.length === 1 ? "Couldn't move the song" : `Couldn't move ${ids.length} songs`, e));
     });
   };
 

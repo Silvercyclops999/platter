@@ -298,7 +298,7 @@ describe("Discogs", () => {
     await usePhysical.getState().loadDiscogs();
     render(<ShelfPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Request Basement Tapes Vol. 2" }, SLOW));
-    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("MusicBrainz doesn't know Basement Tapes Vol. 2 yet, so it can't be requested."));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("MusicBrainz doesn't know Basement Tapes Vol. 2 yet, so it can't be requested"));
   });
 
   it("points to Settings when there's no token", async () => {

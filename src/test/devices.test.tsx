@@ -126,7 +126,7 @@ describe("the Devices page", () => {
     const c = await screen.findByRole("region", { name: "Car stereo" });
     await user.click(within(c).getByRole("button", { name: "Sync now" }));
     expect(await within(c).findByText(`Done: ${albumSongs} songs copied. Safe to unplug.`)).toBeInTheDocument();
-    expect(toasts()).toContain("Car stereo is synced. Safe to unplug.");
+    expect(toasts()).toContain("Car stereo is synced. Safe to unplug");
     expect(mock.devices.devices[0].lastSync).not.toBeNull();
   });
 
@@ -224,7 +224,7 @@ describe("Send to device", () => {
     await startDevices();
     await sendToDevice(d.id, { kind: "liked", id: "", title: "Liked Songs" });
     expect(mock.devices.devices[0].selection).toEqual([{ kind: "liked", id: "", title: "Liked Songs" }]);
-    expect(toasts()).toContain("Added Liked Songs to Car stereo. Plug it in and sync to copy it.");
+    expect(toasts()).toContain("Added Liked Songs to Car stereo. Plug it in and sync to copy it");
     expect(mock.devices.status).toBeNull();
   });
 });

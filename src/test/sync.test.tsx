@@ -253,7 +253,7 @@ describe("pins of every kind", () => {
     act(() => usePins.getState().toggle({ kind: "album", id: "x9", title: "T9", subtitle: "", thumb: null }));
     expect(usePins.getState().pins).toHaveLength(4);
     expect(toggle).toHaveBeenCalledTimes(4);
-    expect(await screen.findByText("You can pin up to 4 items. Unpin one first.")).toBeInTheDocument();
+    expect(await screen.findByText("You can pin up to 4 items. Unpin one first")).toBeInTheDocument();
     // The core says the same if asked directly.
     await expect(backend.pinsToggle({ kind: "album", id: "x9", title: "T9", subtitle: "", thumb: null })).rejects.toMatchObject({ kind: "invalid" });
   });

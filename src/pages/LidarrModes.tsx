@@ -47,11 +47,11 @@ export function ChangeDialog({ proposal, onClose, onDone }: { proposal: LidarrPr
     try {
       await backend.lidarrChangeApply(proposal.id);
       changed();
-      toast.info("Done. It's in the changes log.");
+      toast.info("Done. It's in the changes log");
       onClose();
       onDone?.();
     } catch (e) {
-      toast.error(errText(e) || "Lidarr didn't take the change.");
+      toast.error(errText(e) || "Lidarr didn't take the change");
     } finally {
       setBusy(false);
     }
@@ -93,7 +93,7 @@ export function FixButton({ action, onDone }: { action: LidarrFixAction; onDone:
       setProposal(await backend.lidarrChangePreview(action, input));
       setAsking(false);
     } catch (e) {
-      toast.error(errText(e) || "Platter couldn't read Lidarr.");
+      toast.error(errText(e) || "Platter couldn't read Lidarr");
     }
   };
   if (action.kind === "rematch") {
@@ -104,7 +104,7 @@ export function FixButton({ action, onDone }: { action: LidarrFixAction; onDone:
             key={f}
             size="sm"
             onClick={() =>
-              void backend.lidarrRematchPreview(f).then(setPlan, (e) => toast.error(errText(e) || "Platter couldn't read Lidarr."))
+              void backend.lidarrRematchPreview(f).then(setPlan, (e) => toast.error(errText(e) || "Platter couldn't read Lidarr"))
             }
           >
             Re-match {f.split(/[\\/]/).pop()}
@@ -151,11 +151,11 @@ function RematchDialog({ plan, onClose, onDone }: { plan: LidarrRematchPlan | nu
     try {
       await backend.lidarrRematchApply(plan.folder, plan.releaseId);
       changed();
-      toast.info(`Lidarr matched ${plan.files.length} ${plan.files.length === 1 ? "file" : "files"} to ${plan.album}.`);
+      toast.info(`Lidarr matched ${plan.files.length} ${plan.files.length === 1 ? "file" : "files"} to ${plan.album}`);
       onClose();
       onDone();
     } catch (e) {
-      toast.error(errText(e) || "The re-match didn't go through.");
+      toast.error(errText(e) || "The re-match didn't go through");
     } finally {
       setBusy(false);
     }
@@ -256,7 +256,7 @@ export function LidarrArtistsList() {
   const load = useCallback(() => {
     backend.lidarrModes().then(setModes, (e) => {
       setModes([]);
-      toast.error(errText(e) || "Platter couldn't read Lidarr.");
+      toast.error(errText(e) || "Platter couldn't read Lidarr");
     });
     backend.lidarrArtistChoices().then(setPrefs, () => {});
   }, []);
@@ -412,22 +412,22 @@ export function LidarrWaitingList() {
   const add = async (s: LidarrStaged) => {
     try {
       await backend.lidarrStagedAdd(s.id, !!always[s.id]);
-      toast.info(`${s.title} is in your library.`);
+      toast.info(`${s.title} is in your library`);
       changed();
     } catch (e) {
-      toast.error(errText(e) || "Couldn't add it.");
+      toast.error(errText(e) || "Couldn't add it");
     }
   };
   const undo = async (s: LidarrStaged, trashOk: boolean) => {
     try {
       await backend.lidarrStagedUndo(s.id, trashOk);
-      toast.info(`${s.title} is out of your library, in the backup folder.`);
+      toast.info(`${s.title} is out of your library, in the backup folder`);
       setTrashAsk(null);
       changed();
     } catch (e) {
       const m = errText(e);
       if (!trashOk && m.includes("empties its trash")) setTrashAsk(s);
-      else toast.error(m || "Couldn't take it out.");
+      else toast.error(m || "Couldn't take it out");
     }
   };
   return (
@@ -562,10 +562,10 @@ export function LidarrChangesList() {
               if (c)
                 void backend.lidarrChangePutBack(c.id).then(
                   () => {
-                    toast.info("Put back.");
+                    toast.info("Put back");
                     changed();
                   },
-                  (e) => toast.error(errText(e) || "Couldn't put it back."),
+                  (e) => toast.error(errText(e) || "Couldn't put it back"),
                 );
             }}
           >

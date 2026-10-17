@@ -124,7 +124,7 @@ function DeviceCard({ d, sync, busy }: { d: DeviceView; sync: DeviceSyncStatus |
       const f = await backend.devicesChooseFolder(d.root);
       if (f !== null) await devices.update(d.id, { folder: f });
     } catch (e) {
-      toast.error((e as AppError)?.message ?? "Couldn't use that folder.");
+      toast.error((e as AppError)?.message ?? "Couldn't use that folder");
     }
   };
 

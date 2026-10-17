@@ -8,16 +8,16 @@ import { Select, type SelectOption } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { ACCENT_PRESETS, accentColour, accentProblem, isCustomAccent } from "../design/themes";
 import { backend } from "../lib/backend";
-import type { AppError, Settings, ThemeFile, ThemeFolder, ThemeSetting } from "../lib/types";
+import type { Settings, ThemeFile, ThemeFolder, ThemeSetting } from "../lib/types";
 import { updateSettings } from "../stores/settings";
 import { useTheme } from "../stores/theme";
 import { toast } from "../stores/toasts";
 import { lookPatch, useLooks } from "../stores/looks";
 import "./theme-settings.css";
+import { failText } from "../lib/errorText";
 
 type Ids = { title: string; desc: string };
 
-const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
 export const THEMES: SelectOption<ThemeSetting>[] = [
   { value: "dark", label: "Dark" },
@@ -158,7 +158,7 @@ export function ThemeFileControl({ s, ids, folder, reload }: { s: Settings; ids:
           void updateSettings(lookPatch(t));
         }
       },
-      (e) => toast.error(`Couldn't add that theme${errText(e) ? `: ${errText(e)}` : ""}`),
+      (e) => toast.error(failText(`Couldn't add that theme`, e)),
     );
   return (
     <>
@@ -166,7 +166,7 @@ export function ThemeFileControl({ s, ids, folder, reload }: { s: Settings; ids:
       <Button size="sm" onClick={() => void importFile()}>
         Import
       </Button>
-      <Button size="sm" onClick={() => void backend.themesOpenFolder().catch((e) => toast.error(`Couldn't open the folder${errText(e) ? `: ${errText(e)}` : ""}`))}>
+      <Button size="sm" onClick={() => void backend.themesOpenFolder().catch((e) => toast.error(failText(`Couldn't open the folder`, e)))}>
         Open themes folder
       </Button>
     </>

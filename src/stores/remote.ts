@@ -57,7 +57,7 @@ const kind = (e: unknown) => (e && typeof e === "object" && "kind" in e ? String
 export async function moveTo(player: RemotePlayer, b: Backend = backend): Promise<void> {
   if (useRemote.getState().busy !== undefined) return;
   if (player.unsupported) {
-    toast.error(`Can't play on ${player.name}: ${player.unsupported}.`);
+    toast.error(`Can't play on ${player.name}: ${player.unsupported}`);
     return;
   }
   if (player.via === "airplay" && player.needsPassword) {

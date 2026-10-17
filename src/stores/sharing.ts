@@ -205,8 +205,8 @@ export async function openShareLink(link: string, b: Backend = backend): Promise
   try {
     const r = await b.sharingOpenLink(link);
     if (r.status === "failed") toast.error(r.message);
-    else if (r.status === "asked") toast.info(`Asked ${r.host} for their music. Their invite shows here once they say yes.`);
-    else toast.info(r.status === "invited" ? `Asked ${r.host} for their music. Their invite shows here in a moment.` : `You already have access to ${r.host}'s server.`);
+    else if (r.status === "asked") toast.info(`Asked ${r.host} for their music. Their invite shows here once they say yes`);
+    else toast.info(r.status === "invited" ? `Asked ${r.host} for their music. Their invite shows here in a moment` : `You already have access to ${r.host}'s server`);
   } catch (e) {
     toast.error(errText(e) || "Couldn't open that link");
   }
@@ -248,7 +248,7 @@ export async function acceptInvite(inv: ReceivedInvite, b: Backend = backend): P
   try {
     const a = await b.sharingAccept(inv.id);
     useSharing.setState({ invites: useSharing.getState().invites.filter((i) => i.id !== inv.id) });
-    toast.info(a.libraries ? `Added ${a.servers[0] ?? `${inv.from}'s server`}. Their music joins your library as it's read.` : `Accepted. ${inv.from}'s server shows up once Plex lists it.`);
+    toast.info(a.libraries ? `Added ${a.servers[0] ?? `${inv.from}'s server`}. Their music joins your library as it's read` : `Accepted. ${inv.from}'s server shows up once Plex lists it`);
   } catch (e) {
     toast.error(errText(e) || "Couldn't accept the invite");
   } finally {

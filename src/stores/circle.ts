@@ -11,6 +11,7 @@ import { useLibraryView } from "./library";
 import { player } from "./player";
 import { nav, useRouter } from "./router";
 import { copyText, toast } from "./toasts";
+import { failText } from "../lib/errorText";
 
 export const NO_CIRCLE: CircleView = { relay: "ok", playlists: [], blends: [], incoming: [], joining: 0 };
 
@@ -109,9 +110,9 @@ export async function playShared(id: string, start?: string, b: Backend = backen
     const p = await b.collabPage(id);
     const ids = p.rows.flatMap((r) => (r.track ? [r.track.id] : []));
     if (ids.length) await player.playTracks(ids, start);
-    else toast.info("None of these songs are in your library.");
+    else toast.info("None of these songs are in your library");
   } catch (e) {
-    toast.error(`Couldn't play it: ${errText(e)}`);
+    toast.error(failText("Couldn't play the shared playlist", e));
   }
 }
 
@@ -121,7 +122,7 @@ export async function playBlend(id: string, start?: string, b: Backend = backend
     const p = await b.blendPage(id);
     if (p.rows.length) await player.playTracks(p.rows.map((r) => r.track.id), start);
   } catch (e) {
-    toast.error(`Couldn't play the Blend: ${errText(e)}`);
+    toast.error(failText(`Couldn't play the Blend`, e));
   }
 }
 
@@ -130,7 +131,7 @@ export async function copyInviteLink(playlistId: string, role: "collaborator" | 
     const l = await b.collabInviteLink(playlistId, role);
     copyText(l.link);
   } catch (e) {
-    toast.error(`Couldn't make an invite link: ${errText(e)}`);
+    toast.error(failText(`Couldn't make an invite link`, e));
   }
 }
 
@@ -140,7 +141,7 @@ export async function invitePerson(playlistId: string, key: string, name: string
     toast.info(`Invited ${name}`);
     return true;
   } catch (e) {
-    toast.error(`Couldn't invite ${name}: ${errText(e)}`);
+    toast.error(failText(`Couldn't invite ${name}`, e));
     return false;
   }
 }
@@ -150,7 +151,7 @@ export async function setRole(playlistId: string, p: CirclePerson, role: "collab
     await b.collabSetRole(playlistId, p.id, role);
     toast.info(role === "collaborator" ? `${p.name} can add songs now` : `${p.name} can listen only now`);
   } catch (e) {
-    toast.error(`Couldn't change ${p.name}'s role: ${errText(e)}`);
+    toast.error(failText(`Couldn't change ${p.name}'s role`, e));
   }
 }
 
@@ -159,7 +160,7 @@ export async function removePerson(playlistId: string, p: CirclePerson, b: Backe
     await b.collabRemovePerson(playlistId, p.id);
     toast.info(`Removed ${p.name} from the playlist`);
   } catch (e) {
-    toast.error(`Couldn't remove ${p.name}: ${errText(e)}`);
+    toast.error(failText(`Couldn't remove ${p.name}`, e));
   }
 }
 
@@ -168,7 +169,7 @@ export async function setPublic(playlistId: string, on: boolean, b: Backend = ba
     await b.collabSetPublic(playlistId, on);
     toast.info(on ? "The playlist is public" : "The playlist is private");
   } catch (e) {
-    toast.error(`Couldn't change that: ${errText(e)}`);
+    toast.error(failText(on ? "Couldn't make the playlist public" : "Couldn't make the playlist private", e));
   }
 }
 
@@ -181,7 +182,7 @@ export async function leavePlaylist(id: string, b: Backend = backend): Promise<v
     const r = here();
     if (s && !s.public && r?.name === "playlist" && r.id === id) nav.go({ name: "home" });
   } catch (e) {
-    toast.error(`Couldn't leave: ${errText(e)}`);
+    toast.error(failText(`Couldn't leave ${s?.title ?? "the playlist"}`, e));
   }
 }
 
@@ -190,7 +191,7 @@ export async function setInLibrary(id: string, on: boolean, b: Backend = backend
     await b.collabSetInLibrary(id, on);
     toast.info(on ? "Added to Your Library" : "Removed from Your Library");
   } catch (e) {
-    toast.error(`Couldn't change that: ${errText(e)}`);
+    toast.error(failText(on ? "Couldn't add it to Your Library" : "Couldn't remove it from Your Library", e));
   }
 }
 
@@ -200,9 +201,9 @@ export async function addToShared(p: Pick<Playlist, "id" | "title">, trackIds: s
     await b.collabAdd(p.id, trackIds);
     const s = sharedNow(p.id);
     const n = trackIds.length;
-    toast.info(s?.ownerUnreachable ? `Added to ${p.title}. It goes to ${s.owner.name} when they're back online.` : n === 1 ? `Added to ${p.title}` : `Added ${n} songs to ${p.title}`);
+    toast.info(s?.ownerUnreachable ? `Added to ${p.title}. It goes to ${s.owner.name} when they're back online` : n === 1 ? `Added to ${p.title}` : `Added ${n} songs to ${p.title}`);
   } catch (e) {
-    toast.error(`Couldn't add to ${p.title}: ${errText(e)}`);
+    toast.error(failText(`Couldn't add to ${p.title}`, e));
   }
 }
 
@@ -213,7 +214,7 @@ export async function leaveBlend(id: string, title: string, b: Backend = backend
     const r = here();
     if (r?.name === "playlist" && r.id === id) nav.go({ name: "home" });
   } catch (e) {
-    toast.error(`Couldn't leave the Blend: ${errText(e)}`);
+    toast.error(failText(`Couldn't leave the Blend`, e));
   }
 }
 
@@ -222,7 +223,7 @@ export async function joinCircle(link: string, b: Backend = backend): Promise<Jo
   try {
     const r = await b.circleJoin(link);
     if (r.state === "joined") nav.go({ name: "playlist", id: r.id });
-    else toast.info(r.kind === "blend" ? "Asked to join. You're in once whoever invited you is online." : "Asked to join. You're in once the owner is online.");
+    else toast.info(r.kind === "blend" ? "Asked to join. You're in once whoever invited you is online" : "Asked to join. You're in once the owner is online");
     return r;
   } catch (e) {
     toast.error(errText(e, "Couldn't join"));

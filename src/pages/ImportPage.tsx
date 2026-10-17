@@ -18,11 +18,12 @@ import type { Track } from "../lib/types";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
-import { countParts, errText, historyParts, importChanged, reportLine, reportPercent, skippedLine, songsLine, useImportOverview } from "./importShared";
+import { countParts, historyParts, importChanged, reportLine, reportPercent, skippedLine, songsLine, useImportOverview } from "./importShared";
 import { ImportHistoryLinks } from "./ImportHistoryLinks";
 import { ListView } from "./ImportListView";
 import { MissingPage } from "./ImportMissing";
 import "./library-import.css";
+import { failText } from "../lib/errorText";
 
 const n = (v: number) => v.toLocaleString();
 
@@ -82,7 +83,7 @@ function ReviewRow({ item, onDone }: { item: ImportReviewItem; onDone: () => voi
       },
       (e) => {
         setBusy(false);
-        toast.error(`Couldn't save that${errText(e) ? `: ${errText(e)}` : ""}`);
+        toast.error(failText(`Couldn't save your choice for ${item.title}`, e));
       },
     );
   };

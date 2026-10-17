@@ -116,6 +116,7 @@ import { HelpButton, LearnMore } from "../help/HelpButton";
 import { ADVANCED, GROUP_HELP, advancedView, helpFor, resetPatch, settingsOfRows } from "./settingsMeta";
 import { GUIDES } from "../guides/guides";
 import { GuideButton } from "../guides/GuideButton";
+import { failText } from "../lib/errorText";
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
@@ -671,10 +672,10 @@ export function SettingsPage() {
         toast.info(freed > 0 ? `Cleared ${formatBytes(freed)} of artwork` : "The artwork cache was already empty");
         return backend.artCacheInfo().then(setArt);
       },
-      (e) => toast.error(`Couldn't clear the cache${errText(e) ? `: ${errText(e)}` : ""}`),
+      (e) => toast.error(failText(`Couldn't clear the cache`, e)),
     );
   const resync = () =>
-    backend.syncNow(true).catch((e) => toast.error(`Couldn't start a resync${errText(e) ? `: ${errText(e)}` : ""}`));
+    backend.syncNow(true).catch((e) => toast.error(failText(`Couldn't start a resync`, e)));
   const checkUpdates = () => {
     setUpdate({ kind: "checking" });
     backend.updateCheck().then(
@@ -685,17 +686,17 @@ export function SettingsPage() {
   const clearArtistInfo = () =>
     backend.artistInfoCacheClear().then(
       () => toast.info("Artist info cleared"),
-      (e) => toast.error(`Couldn't clear artist info${errText(e) ? `: ${errText(e)}` : ""}`),
+      (e) => toast.error(failText(`Couldn't clear artist info`, e)),
     );
   const clearRecentSearches = () =>
     backend.searchRecentsClear().then(
       () => toast.info("Recent searches cleared"),
-      (e) => toast.error(`Couldn't clear recent searches${errText(e) ? `: ${errText(e)}` : ""}`),
+      (e) => toast.error(failText(`Couldn't clear recent searches`, e)),
     );
   const exportSettings = () =>
     backend.settingsExport().then(
       (path) => path && toast.info("Settings exported"),
-      (e) => toast.error(`Couldn't export settings${errText(e) ? `: ${errText(e)}` : ""}`),
+      (e) => toast.error(failText(`Couldn't export settings`, e)),
     );
   const importSettings = () =>
     backend.settingsImport().then(
@@ -707,9 +708,9 @@ export function SettingsPage() {
           `Imported ${report.applied} ${report.applied === 1 ? "setting" : "settings"}${skipped ? `. ${skipped} this version can't use ${skipped === 1 ? "was" : "were"} left out` : ""}`,
         );
       },
-      (e) => toast.error(`Couldn't import settings${errText(e) ? `: ${errText(e)}` : ""}`),
+      (e) => toast.error(failText(`Couldn't import settings`, e)),
     );
-  const signOut = () => backend.authSignOut().catch((e) => toast.error(`Couldn't sign out${errText(e) ? `: ${errText(e)}` : ""}`));
+  const signOut = () => backend.authSignOut().catch((e) => toast.error(failText(`Couldn't sign out`, e)));
 
   const artOptions: SelectOption<string>[] = [...new Set([...ART_SIZES_MB, ...(artMb ? [artMb] : [])])]
     .sort((a, b) => a - b)
@@ -3151,7 +3152,7 @@ export function SettingsPage() {
       await updateSettings(resetPatch(sectionSettings(section), defaults));
       toast.info(`${section} settings are back to how they start`);
     } catch (e) {
-      toast.error(`Couldn't reset ${section}${errText(e) ? `: ${errText(e)}` : ""}`);
+      toast.error(failText(`Couldn't reset ${section}`, e));
     }
   };
   // About stays last; later sections (Integrations) go in before it.

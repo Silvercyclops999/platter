@@ -91,7 +91,7 @@ function Problem({ text, onClose }: { text: string; onClose: () => void }) {
 function goSetUp(onClose: () => void) {
   onClose();
   nav.go({ name: "settings" });
-  toast.info("Set the music folder under Library, Tag editor.");
+  toast.info("Set the music folder under Library, Tag editor");
 }
 
 /** "This changes 120 files." before a save that big, when Settings asks for it. */
@@ -597,7 +597,7 @@ function CheckDialog({ scope, title, onClose }: { scope: Parameters<typeof backe
       await backend.tagEditCheckFine(f.id, true);
       setHidden(new Set(hidden).add(f.id));
     } catch (e) {
-      toast.error(errText(e) || "Couldn't save that.");
+      toast.error(errText(e) || "Couldn't mark it as fine");
     }
   };
   const fix = (f: TagFinding) => {

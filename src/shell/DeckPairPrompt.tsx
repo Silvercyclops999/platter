@@ -29,8 +29,8 @@ export function DeckPairPrompt() {
     setId(null);
     backend.deckPairAnswer(id, allow).then(
       (done) => {
-        if (allow && done) toast.info("Stream Deck paired. Its keys control Platter now.");
-        else if (allow) toast.info("That request had already gone. Press a Platter key on the Stream Deck to ask again.");
+        if (allow && done) toast.info("Stream Deck paired. Its keys control Platter now");
+        else if (allow) toast.info("That request had already gone. Press a Platter key on the Stream Deck to ask again");
       },
       () => toast.error("Couldn't pair the Stream Deck"),
     );

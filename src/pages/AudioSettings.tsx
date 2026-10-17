@@ -17,6 +17,7 @@ import { loadOutput, useOutput } from "../stores/output";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./audio-settings.css";
+import { failText } from "../lib/errorText";
 
 type Ids = { title: string; desc: string };
 
@@ -345,10 +346,10 @@ export function EqEditor() {
   const others = s.eqOutputs.filter((o) => o.deviceId !== device?.id);
   const off = !s.eqEnabled;
 
-  const fail = (what: string) => (e: unknown) => toast.error(`${what}${(e as AppError)?.message ? `: ${(e as AppError).message}` : ""}`);
+  const fail = (what: string) => (e: unknown) => toast.error(failText(what, e));
   const apply = (p: Promise<Settings>) => p.then((next) => useSettings.getState().setLocal(next));
   const bind = (on: boolean) => {
-    void apply(backend.eqUseForOutput(on)).catch(fail("Couldn't change that"));
+    void apply(backend.eqUseForOutput(on)).catch(fail(on ? "Couldn't keep this EQ for this output" : "Couldn't stop using this EQ for this output"));
   };
 
   return (

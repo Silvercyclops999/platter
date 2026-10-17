@@ -13,10 +13,11 @@ import { backend } from "../lib/backend";
 import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
-import { countParts, errText, importChanged, importFrom, reportLine, useImportOverview } from "./importShared";
+import { countParts, importChanged, importFrom, reportLine, useImportOverview } from "./importShared";
 import { ImportHistoryLinks } from "./ImportHistoryLinks";
 import { PlayedSettings } from "./PlayedALot";
 import "./library-import.css";
+import { failText } from "../lib/errorText";
 
 const SECTION_WORDS = "library import services playlists liked songs history csv m3u transfer played a lot missing plays period";
 
@@ -51,7 +52,7 @@ function SourceRow({ src, on, report }: { src: ImportSourceText; on: boolean | n
         importChanged();
         toast.info(`Removed what was imported from ${src.name}`);
       },
-      (e) => toast.error(`Couldn't remove it${errText(e) ? `: ${errText(e)}` : ""}`),
+      (e) => toast.error(failText(`Couldn't remove what was imported from ${src.name}`, e)),
     );
   return (
     <div className="setting-row import-source" data-setting={`import-${src.id}`}>

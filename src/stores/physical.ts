@@ -11,6 +11,7 @@ import { backend } from "../lib/backend";
 import type { DiscogsStatus, OwnedAlbum, OwnedCopy, PhysicalFormat, SetOwned } from "../lib/types";
 import { useSettings } from "./settings";
 import { toast } from "./toasts";
+import { failText } from "../lib/errorText";
 
 export const FORMATS: PhysicalFormat[] = ["vinyl", "cd", "cassette", "other"];
 
@@ -106,7 +107,7 @@ export async function saveOwned(albumId: string, s: SetOwned): Promise<boolean> 
     toast.info(o ? `${shelfLabel(o.formats)}: ${s.title}` : `${s.title} is off your shelf`);
     return true;
   } catch (e) {
-    toast.error((e as { message?: string })?.message || "Couldn't save that");
+    toast.error(failText(`Couldn't update your shelf for ${s.title}`, e));
     return false;
   }
 }

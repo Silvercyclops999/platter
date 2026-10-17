@@ -345,7 +345,7 @@ describe("listening sessions", () => {
 
     act(() => mock.social.hostGone());
     await waitFor(() => expect(strip).toHaveTextContent(`${MOCK_FRIENDS[1]} stopped answering`));
-    expect(toasts()).toContain(`${MOCK_FRIENDS[1]} stopped answering. You're no longer listening along.`);
+    expect(toasts()).toContain(`${MOCK_FRIENDS[1]} stopped answering. You're no longer listening along`);
     expect(within(strip).getByRole("button", { name: "Close" })).toBeInTheDocument();
     await userEvent.click(within(strip).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Listening session" })).toBeNull());
@@ -353,13 +353,13 @@ describe("listening sessions", () => {
     await join();
     act(() => mock.social.hostEnds());
     await waitFor(() => expect(screen.getByRole("region", { name: "Listening session" })).toHaveTextContent("ended the listening session"));
-    expect(toasts()).toContain("The listening session ended.");
+    expect(toasts()).toContain("The listening session ended");
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
 
     await join();
     act(() => mock.social.removedByHost());
     await waitFor(() => expect(screen.getByRole("region", { name: "Listening session" })).toHaveTextContent("removed you from the listening session"));
-    expect(toasts()).toContain(`${MOCK_FRIENDS[1]} removed you from the listening session.`);
+    expect(toasts()).toContain(`${MOCK_FRIENDS[1]} removed you from the listening session`);
   });
 
   it("a join that fails says why: a used invite or a full session", async () => {

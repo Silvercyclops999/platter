@@ -15,11 +15,11 @@ const dialogOpen = () => !!document.querySelector(".dialog-backdrop");
 /** Read one dropped file and add it. Exported for tests. */
 export async function addDroppedFile(file: File): Promise<void> {
   if (!isLookFileName(file.name)) {
-    toast.error("Drop a .platter-look file to add a look.");
+    toast.error("Drop a .platter-look file to add a look");
     return;
   }
   if (file.size > THEME_FILE_MAX_BYTES) {
-    toast.error("Couldn't add that look: the file is too big for a look (64 KB at most).");
+    toast.error("Couldn't add that look: the file is too big for a look (64 KB at most)");
     return;
   }
   await importLookText(await file.text());

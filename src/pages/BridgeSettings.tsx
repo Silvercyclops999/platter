@@ -12,6 +12,7 @@ import { timeAgo } from "../lib/relativeTime";
 import type { BridgeInfo, BridgeMusicAccess, BridgeOverview } from "../lib/types";
 import { toast } from "../stores/toasts";
 import "./feed-settings.css";
+import { failText } from "../lib/errorText";
 
 export const BRIDGE_DESCRIPTION =
   "Optional. A small Docker container for your server that does Platter's Lidarr work while no computer has Platter open: catching up after downloads, scanning just the new folders, and adding protected albums when it can reach your music folder. Platter works fully without it, and nothing is installed on your server unless you set it up. It talks to Platter only through the same sealed relay as Listen along, and opens no ports.";
@@ -100,13 +101,13 @@ export function BridgeSettings() {
     backend.bridgeUnpair(b.id).then(
       (o) => {
         setOv(o);
-        toast.info(`${b.name} was unpaired. Remove its container if you don't need it any more.`);
+        toast.info(`${b.name} was unpaired. Remove its container if you don't need it any more`);
       },
       () => toast.error("Couldn't unpair the Bridge"),
     );
   const answer = (id: string, yes: boolean) =>
     (yes ? backend.bridgeQueuedApply(id) : backend.bridgeQueuedDismiss(id)).then(setOv, (e: unknown) =>
-      toast.error(e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Couldn't do that"),
+      toast.error(failText(yes ? "Couldn't apply the Bridge's queued change" : "Couldn't dismiss the Bridge's queued change", e)),
     );
   return (
     <section className="settings__group" aria-labelledby="settings-bridge" data-testid="bridge-settings">

@@ -111,7 +111,7 @@ export function checkForUpdates() {
   toast.info("Checking for updates…");
   backend.updateCheck().then(
     (u) => {
-      if (!u.available) return toast.info("You're up to date.");
+      if (!u.available) return toast.info("You're up to date");
       useToasts.getState().push(
         {
           kind: "info",

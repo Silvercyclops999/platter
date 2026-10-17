@@ -7,9 +7,10 @@ import { create } from "zustand";
 import type { ReadyLook } from "../design/looks/readymade";
 import { LOOK_EXT } from "../design/themes/validate";
 import { backend } from "../lib/backend";
-import type { AppError, Settings, ThemeFile } from "../lib/types";
+import type { Settings, ThemeFile } from "../lib/types";
 import { updateSettings, useSettings } from "./settings";
 import { toast, useToasts } from "./toasts";
+import { failText } from "../lib/errorText";
 
 export type BuilderTab = "colours" | "shape" | "layout";
 
@@ -24,7 +25,6 @@ interface LooksState {
 
 export const useLooks = create<LooksState>()(() => ({ builder: null, pick: false, folderVersion: 0 }));
 
-const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
 export const looks = {
   openBuilder(tab: BuilderTab = "colours") {
@@ -84,7 +84,7 @@ export async function importLookText(text: string): Promise<ThemeFile | null> {
     useToasts.getState().push({ kind: "info", message: `Added ${look.name} to your looks.${left}`, action: { label: "Use it", run: () => void updateSettings(lookPatch(look)) } }, 8000);
     return look;
   } catch (e) {
-    toast.error(`Couldn't add that look${errText(e) ? `: ${errText(e)}` : ""}`);
+    toast.error(failText(`Couldn't add that look`, e));
     return null;
   }
 }

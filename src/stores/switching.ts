@@ -46,7 +46,7 @@ function watch() {
     if (!useSwitching.getState().shown) return;
     const to = useSwitching.getState().to;
     hide();
-    toast.error(to ? `Couldn't switch to ${to.name}. You're still using Platter as before.` : "Couldn't switch users.");
+    toast.error(to ? `Couldn't switch to ${to.name}. You're still using Platter as before` : "Couldn't switch users");
   }, STUCK_AFTER_MS);
 }
 
@@ -75,7 +75,7 @@ export function switchFailed(message: string | null | undefined): void {
   const to = useSwitching.getState().to;
   hide();
   const why = message?.trim();
-  toast.error(to ? `Couldn't switch to ${to.name}${why ? `: ${why}` : "."}` : why || "Couldn't switch users.");
+  toast.error(to ? `Couldn't switch to ${to.name}${why ? `: ${why}` : "."}` : why || "Couldn't switch users");
 }
 
 /** What the switching screen says. */

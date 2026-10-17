@@ -26,7 +26,7 @@ export function runDeckListen(): Promise<void> {
   const role = useSocial.getState().listen.role;
   if (role === "host") return openInvite();
   if (role === "guest") {
-    toast.info("You're listening along with someone. Leave that session to host your own.");
+    toast.info("You're listening along with someone. Leave that session to host your own");
     return Promise.resolve();
   }
   return startSession();

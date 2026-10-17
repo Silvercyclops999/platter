@@ -9,9 +9,9 @@ import { Button } from "../components/Button";
 import { Face } from "../components/Faces";
 import { backend } from "../lib/backend";
 import type { BlendCreated, CircleAccount } from "../lib/types";
-import { errText } from "../stores/circle";
 import { nav } from "../stores/router";
 import { copyText, toast } from "../stores/toasts";
+import { failText } from "../lib/errorText";
 
 /** People in one Blend, you included. */
 export const BLEND_MAX = 10;
@@ -39,7 +39,7 @@ export function BlendCreatePage() {
       setMade(await backend.blendCreate(picked));
       toast.info(picked.length ? `Invited ${picked.length === 1 ? "1 person" : `${picked.length} people`}` : "Your Blend is ready to share");
     } catch (e) {
-      toast.error(`Couldn't make the Blend: ${errText(e)}`);
+      toast.error(failText(`Couldn't make the Blend`, e));
     } finally {
       setBusy(false);
     }

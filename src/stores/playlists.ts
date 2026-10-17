@@ -7,11 +7,12 @@
 import { create } from "zustand";
 import { addToShared, isShared } from "./circle";
 import { backend } from "../lib/backend";
-import type { AppError, Playlist, RemovedItem } from "../lib/types";
+import type { Playlist, RemovedItem } from "../lib/types";
 import { useLibraryView } from "./library";
 import { nav, useRouter } from "./router";
 import { useSettings } from "./settings";
 import { toast, useToasts } from "./toasts";
+import { failText } from "../lib/errorText";
 
 export interface DuplicateAsk {
   playlist: Playlist;
@@ -52,10 +53,6 @@ export const usePlaylistUi = create<PlaylistUi>()((set) => ({
 
 const UNDO_MS = 8000;
 
-function errorText(e: unknown): string {
-  const m = e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "";
-  return m || "Something went wrong";
-}
 
 const songs = (n: number) => (n === 1 ? "1 song" : `${n} songs`);
 
@@ -75,7 +72,7 @@ export async function createPlaylist(opts: { trackIds?: string[]; title?: string
     if (ids.length) toast.info(`Added to ${p.title}`, { path: p.thumb, kind: "playlist" });
     return p;
   } catch (e) {
-    toast.error(`Couldn't create the playlist: ${errorText(e)}`);
+    toast.error(failText(`Couldn't create the playlist`, e));
     return null;
   }
 }
@@ -109,7 +106,7 @@ export async function addNow(playlist: Pick<Playlist, "id" | "title" | "thumb">,
     toast.info(`Added to ${p.title}`, { path: p.thumb ?? playlist.thumb, kind: "playlist" });
     return true;
   } catch (e) {
-    toast.error(`Couldn't add to ${playlist.title}: ${errorText(e)}`);
+    toast.error(failText(`Couldn't add to ${playlist.title}`, e));
     return false;
   }
 }
@@ -156,14 +153,14 @@ export async function removeRows(playlist: Playlist, itemIds: string[], order: s
         action: {
           label: "Undo",
           run: () => {
-            restoreRows(playlist.id, removed, order).catch((e) => toast.error(`Couldn't put them back: ${errorText(e)}`));
+            restoreRows(playlist.id, removed, order).catch((e) => toast.error(failText(`Couldn't put them back`, e)));
           },
         },
       },
       UNDO_MS,
     );
   } catch (e) {
-    toast.error(`Couldn't remove from ${playlist.title}: ${errorText(e)}`);
+    toast.error(failText(`Couldn't remove from ${playlist.title}`, e));
   }
 }
 
@@ -179,7 +176,7 @@ export async function confirmRemove() {
   try {
     await backend.playlistRemove(ask.playlist.id, ask.itemIds);
   } catch (e) {
-    toast.error(`Couldn't remove from ${ask.playlist.title}: ${errorText(e)}`);
+    toast.error(failText(`Couldn't remove from ${ask.playlist.title}`, e));
   }
 }
 
@@ -199,7 +196,7 @@ export async function confirmDelete() {
     await backend.playlistDelete(p.id);
     toast.info(`Deleted ${p.title}`);
   } catch (e) {
-    toast.error(`Couldn't delete ${p.title}: ${errorText(e)}`);
+    toast.error(failText(`Couldn't delete ${p.title}`, e));
   }
 }
 
@@ -211,7 +208,7 @@ export async function duplicatePlaylist(p: Playlist): Promise<void> {
     useLibraryView.getState().touch("playlist", copy.id);
     toast.info(`Made ${copy.title}`);
   } catch (e) {
-    toast.error(`Couldn't copy ${p.title}: ${errorText(e)}`);
+    toast.error(failText(`Couldn't copy ${p.title}`, e));
   }
 }
 
@@ -225,7 +222,7 @@ export async function savePlaylistDetails(p: Playlist, details: { title?: string
     await backend.playlistUpdate(p.id, details);
     return true;
   } catch (e) {
-    toast.error(`Couldn't save: ${errorText(e)}`);
+    toast.error(failText(`Couldn't save`, e));
     return false;
   }
 }

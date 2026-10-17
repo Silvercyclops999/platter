@@ -14,6 +14,7 @@ import type { AppError, CloudFolder, KeyKind, KeyReceiveState, Settings, SyncFil
 import { loadSettings, updateSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./sync-settings.css";
+import { failText } from "../lib/errorText";
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
@@ -74,7 +75,7 @@ function FolderChoice({ open, onClose }: { open: boolean; onClose: () => void })
       },
       (e) => {
         setBusy(false);
-        toast.error(`Couldn't use that folder${errText(e) ? `: ${errText(e)}` : ""}`);
+        toast.error(failText(`Couldn't use that folder`, e));
       },
     );
   };
@@ -157,7 +158,7 @@ export function SyncNowControl({ status, onStatus }: { status: SyncFileStatus | 
       },
       (e) => {
         setBusy(false);
-        toast.error(`Couldn't sync${errText(e) ? `: ${errText(e)}` : ""}`);
+        toast.error(failText(`Couldn't sync`, e));
       },
     );
   };

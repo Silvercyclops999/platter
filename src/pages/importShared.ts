@@ -6,6 +6,7 @@ import { importSourceName } from "../lib/importStrings";
 import type { AppError } from "../lib/types";
 import { nav } from "../stores/router";
 import { toast, useToasts } from "../stores/toasts";
+import { failText } from "../lib/errorText";
 
 export const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
@@ -157,7 +158,7 @@ export async function importFrom(source: ImportSourceId, folder: boolean): Promi
   try {
     path = await backend.importChoose(folder);
   } catch (e) {
-    toast.error(`Couldn't open the picker${errText(e) ? `: ${errText(e)}` : ""}`);
+    toast.error(failText(`Couldn't open the picker`, e));
     return null;
   }
   if (!path) return null;
@@ -174,7 +175,8 @@ export async function importFrom(source: ImportSourceId, folder: boolean): Promi
     });
     return r;
   } catch (e) {
-    toast.error(`Couldn't import from ${importSourceName(source)}${errText(e) ? `: ${errText(e)}` : ""}`);
+    // The core says what it left out and why: worth reading in full.
+    toast.error(failText(`Couldn't import from ${importSourceName(source)}`, e, 400));
     return null;
   }
 }

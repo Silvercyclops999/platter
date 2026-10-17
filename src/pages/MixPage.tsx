@@ -22,6 +22,7 @@ import { usePageBar, useTitleStep } from "./detail";
 import { daylistGradient } from "./MixCard";
 import "./mixes.css";
 import { PageMissing } from "../components/PageMissing";
+import { failText } from "../lib/errorText";
 
 const TYPE_LABEL: Record<MixSummary["kind"], string> = {
   daily: "Made for you",
@@ -170,7 +171,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
       const pl = await backend.playlistCreate(mix.kind === "daylist" ? `daylist: ${mix.title}` : mix.title, page.tracks.map((t) => t.id));
       toast.info(`Saved as a playlist: ${pl.title}`);
     } catch (e) {
-      toast.error(`Couldn't save the playlist: ${(e as { message?: string })?.message ?? "something went wrong"}`);
+      toast.error(failText(`Couldn't save the playlist`, e));
     }
   };
 
@@ -183,7 +184,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
       setShown(await backend.mixRefresh(key));
       setSteer(null);
     } catch (e) {
-      toast.error(`Couldn't refresh: ${(e as { message?: string })?.message ?? "something went wrong"}`);
+      toast.error(failText(`Couldn't refresh this mix`, e));
     }
   };
 

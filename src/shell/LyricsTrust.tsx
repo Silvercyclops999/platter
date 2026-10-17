@@ -623,9 +623,9 @@ export function LyricsChoicesControl({ labelledBy }: { labelledBy?: string }) {
       const was = await backend.lyricsChoicesClear();
       setN(0);
       lyricsChanged();
-      toast.info(was === 1 ? "Lyrics choices reset for 1 song." : `Lyrics choices reset for ${was} songs.`);
+      toast.info(was === 1 ? "Lyrics choices reset for 1 song" : `Lyrics choices reset for ${was} songs`);
     } catch {
-      toast.error("Couldn't reset the lyrics choices.");
+      toast.error("Couldn't reset the lyrics choices");
     }
   };
   return (

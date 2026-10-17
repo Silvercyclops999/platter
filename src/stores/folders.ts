@@ -13,6 +13,7 @@ import type { LibraryFolder, LibraryFolders, SyncStoreChanged } from "../lib/typ
 import type { LibEntry } from "./library";
 import { loadPins, usePins } from "./pins";
 import { toast } from "./toasts";
+import { failText } from "../lib/errorText";
 
 const EMPTY: LibraryFolders = { folders: [], items: {} };
 
@@ -30,7 +31,6 @@ interface FolderState {
 
 export const useFolders = create<FolderState>()(() => ({ tree: EMPTY, drill: null, expanded: [], renaming: null, deleting: null }));
 
-const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "");
 
 export async function loadFolders(b: Backend = backend): Promise<void> {
   try {
@@ -54,7 +54,7 @@ async function run<T>(what: string, f: () => Promise<T>): Promise<T | null> {
     await loadFolders();
     return out;
   } catch (e) {
-    toast.error(`${what}${errText(e) ? `: ${errText(e)}` : ""}`);
+    toast.error(failText(`${what}`, e));
     return null;
   }
 }

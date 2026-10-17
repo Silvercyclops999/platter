@@ -478,6 +478,6 @@ describe("app states", () => {
     await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(1));
     act(() => mock.pl.deleteElsewhere(p.id));
     await waitFor(() => expect(route().name).toBe("home"));
-    expect(toastText()).toContain("This playlist was deleted.");
+    expect(toastText()).toContain("This playlist was deleted");
   });
 });

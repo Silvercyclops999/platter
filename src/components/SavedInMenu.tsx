@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { createPortal } from "react-dom";
 import { backend } from "../lib/backend";
 import { plural } from "../lib/format";
-import type { AppError, Playlist } from "../lib/types";
+import type { Playlist } from "../lib/types";
 import { useApp } from "../stores/app";
 import { isLiked, likedMinRating, ratingHint, setLiked, useLikes, type SavedInAsk } from "../stores/likes";
 import { createPlaylist } from "../stores/playlists";
@@ -13,6 +13,7 @@ import { Button } from "./Button";
 import { placeMenu } from "./ContextMenu";
 import { LikedCover } from "./LikedCover";
 import "./likes.css";
+import { failText } from "../lib/errorText";
 
 /** Mounted once in the shell: shows the saved-in menu when one is asked for. */
 export function SavedInHost() {
@@ -21,7 +22,6 @@ export function SavedInHost() {
   return <SavedInMenu key={ask.track.id} ask={ask} />;
 }
 
-const errorText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "") || "something went wrong";
 
 /** Playlists the song is in when the menu opened (null while loading). */
 function usePlaylistsWith(trackId: string): Set<string> | null {
@@ -178,7 +178,7 @@ export function SavedInMenu({ ask }: { ask: SavedInAsk }) {
         if (ok === false) failed.push(c.label);
       } catch (e) {
         failed.push(c.label);
-        toast.error(`Couldn't change ${c.label}: ${errorText(e)}`);
+        toast.error(failText(`Couldn't change ${c.label}`, e));
       }
     }
     if (list.length && failed.length < list.length) toast.info(doneMessage(added.filter((a) => !failed.includes(a)), removed.filter((r) => !failed.includes(r))));

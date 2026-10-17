@@ -6,9 +6,10 @@
  */
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
-import type { AppError, Track } from "../lib/types";
+import type { Track } from "../lib/types";
 import { useSettings } from "./settings";
 import { toast, useToasts } from "./toasts";
+import { failText } from "../lib/errorText";
 
 /** The saved-in menu: the song and where it opens. */
 export interface SavedInAsk {
@@ -56,10 +57,6 @@ export const isLiked = (trackId: string) => useLikes.getState().ids.has(trackId)
 
 const UNDO_MS = 8000;
 
-function errorText(e: unknown): string {
-  const m = e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "";
-  return m || "Something went wrong";
-}
 
 const songs = (n: number) => (n === 1 ? "1 song" : `${n} songs`);
 
@@ -108,7 +105,7 @@ export async function setLiked(tracks: Track[], liked: boolean, opts: SetLikedOp
     await backend.likesSet(ids, liked);
   } catch (e) {
     undoLocal();
-    toast.error(`${liked ? "Couldn't add to Liked Songs" : "Couldn't remove from Liked Songs"}: ${errorText(e)}`);
+    toast.error(failText(`${liked ? "Couldn't add to Liked Songs" : "Couldn't remove from Liked Songs"}`, e));
     return false;
   }
   if (opts.toast === false) return true;

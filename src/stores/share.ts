@@ -180,7 +180,7 @@ export async function confirmLink(b: Backend = backend): Promise<void> {
     await joinCircle(a.link, b);
   } else if (a.what === "join") {
     if (!listenAlong.enabled) {
-      toast.info("Listening sessions are coming back in an update soon.");
+      toast.info("Listening sessions are coming back in an update soon");
       return;
     }
     await joinSession(a.link, b);
