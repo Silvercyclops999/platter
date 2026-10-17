@@ -46,6 +46,26 @@ pub fn volume_of(path: &std::path::Path, volumes: &[Volume]) -> Option<Volume> {
         .cloned()
 }
 
+/// Volume ids already looked up, by where each volume is mounted and its
+/// device number, so listing the drives doesn't run a program for every
+/// drive every time. Volumes no longer mounted are forgotten.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Default)]
+struct IdCache {
+    ids: std::collections::HashMap<(PathBuf, u64), Option<String>>,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl IdCache {
+    fn get(&mut self, key: (PathBuf, u64), look: impl FnOnce() -> Option<String>) -> Option<String> {
+        self.ids.entry(key).or_insert_with(look).clone()
+    }
+
+    fn keep_only(&mut self, mounted: &std::collections::HashSet<(PathBuf, u64)>) {
+        self.ids.retain(|k, _| mounted.contains(k));
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     use super::Volume;
@@ -107,8 +127,11 @@ mod imp {
     }
 
     pub fn list() -> Vec<Volume> {
+        static IDS: std::sync::LazyLock<parking_lot::Mutex<super::IdCache>> = std::sync::LazyLock::new(Default::default);
         let boot = std::fs::metadata("/").map(|m| m.dev()).ok();
         let Ok(rd) = std::fs::read_dir("/Volumes") else { return vec![] };
+        let mut ids = IDS.lock();
+        let mut mounted = std::collections::HashSet::new();
         let mut out = Vec::new();
         for e in rd.flatten() {
             let root = e.path();
@@ -116,15 +139,18 @@ mod imp {
             if !meta.is_dir() || Some(meta.dev()) == boot {
                 continue;
             }
+            let key = (root.clone(), meta.dev());
+            mounted.insert(key.clone());
             out.push(Volume {
                 label: e.file_name().to_string_lossy().into_owned(),
-                id: uuid(&root),
+                id: ids.get(key, || uuid(&root)),
                 root,
                 removable: true,
                 free: None,
                 total: None,
             });
         }
+        ids.keep_only(&mounted);
         out
     }
 }
@@ -168,6 +194,25 @@ mod tests {
         let vols = [vol("/Volumes/A"), vol("/Volumes/AB"), vol("/")];
         assert_eq!(volume_of(std::path::Path::new("/Volumes/AB/Music"), &vols).unwrap().root, PathBuf::from("/Volumes/AB"));
         assert_eq!(volume_of(std::path::Path::new("/home/x"), &vols).unwrap().root, PathBuf::from("/"));
+    }
+
+    #[test]
+    fn volume_ids_are_looked_up_once_while_mounted() {
+        let mut c = IdCache::default();
+        let mut looks = 0;
+        let key = (PathBuf::from("/Volumes/USB"), 7);
+        for _ in 0..3 {
+            assert_eq!(c.get(key.clone(), || {
+                looks += 1;
+                Some("U1".into())
+            }), Some("U1".into()));
+        }
+        assert_eq!(looks, 1);
+        // Unplugged: forgotten, so another drive at the same place is asked about.
+        c.keep_only(&Default::default());
+        assert_eq!(c.get(key, || Some("U2".into())), Some("U2".into()));
+        // The same place with another device number is another volume.
+        assert_eq!(c.get((PathBuf::from("/Volumes/USB"), 8), || None), None);
     }
 
     #[test]
