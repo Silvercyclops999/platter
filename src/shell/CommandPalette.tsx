@@ -36,8 +36,8 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "help", label: "Help", icon: <CircleHelp size={16} />, group: "Navigation", run: () => help.open("") },
   { id: "toggle-queue", label: "Toggle queue", hint: shortcutLabel("queue"), icon: <ListMusic size={16} />, group: "Playback", run: () => useUi.getState().toggleQueue() },
   { id: "play-pause", label: "Play / pause", hint: "Space", icon: <Music size={16} />, group: "Playback", run: () => player.toggle() },
-  { id: "next", label: "Next track", hint: `${modKey}+→`, icon: <Music size={16} />, group: "Playback", run: () => player.next() },
-  { id: "previous", label: "Previous track", hint: `${modKey}+←`, icon: <Music size={16} />, group: "Playback", run: () => player.previous() },
+  { id: "next", label: "Next song", hint: `${modKey}+→`, icon: <Music size={16} />, group: "Playback", run: () => player.next() },
+  { id: "previous", label: "Previous song", hint: `${modKey}+←`, icon: <Music size={16} />, group: "Playback", run: () => player.previous() },
   { id: "shuffle", label: "Shuffle on / off", hint: `${modKey}+S`, icon: <Shuffle size={16} />, group: "Playback", run: () => player.toggleShuffle(!!useSettings.getState().settings?.smartShuffle) },
   { id: "repeat", label: "Repeat: off, all, one", hint: `${modKey}+R`, icon: <Repeat size={16} />, group: "Playback", run: () => player.cycleRepeatNow() },
   { id: "volume-up", label: "Volume up", hint: `${modKey}+↑`, icon: <Volume2 size={16} />, group: "Playback", run: () => player.nudgeVolume(VOLUME_KEY_STEP) },
@@ -49,7 +49,8 @@ export function CommandPalette() {
   const open = useUi((s) => s.paletteOpen);
   const setOpen = useUi((s) => s.setPaletteOpen);
   const [q, setQ] = useState("");
-  const [results, setResults] = useState<SearchResults | null>(null);
+  // Each answer keeps the query it was for, so a slow one never shows under a newer query.
+  const [found, setFound] = useState<{ query: string; results: SearchResults } | null>(null);
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const listId = useId();
@@ -57,7 +58,7 @@ export function CommandPalette() {
   useEffect(() => {
     if (!open) {
       setQ("");
-      setResults(null);
+      setFound(null);
       setActive(0);
     }
   }, [open]);
@@ -65,12 +66,12 @@ export function CommandPalette() {
   useEffect(() => {
     const query = q.trim();
     if (query.length < 2) {
-      setResults(null);
+      setFound(null);
       return;
     }
     let alive = true;
     const t = setTimeout(() => {
-      backend.search({ query, filter: "all", limit: 4 }).then((r) => alive && setResults(r), () => {});
+      backend.search({ query, filter: "all", limit: 4 }).then((results) => alive && setFound({ query, results }), () => {});
     }, 80);
     return () => {
       alive = false;
@@ -78,6 +79,7 @@ export function CommandPalette() {
     };
   }, [q]);
 
+  const results = found && found.query === q.trim() ? found.results : null;
   const commands = useMemo(() => {
     const ql = q.trim().toLowerCase();
     const navs = NAV_COMMANDS.filter((c) => !ql || c.label.toLowerCase().includes(ql));
@@ -98,7 +100,16 @@ export function CommandPalette() {
     return all;
   }, [q, results]);
 
-  useEffect(() => setActive(0), [commands.length]);
+  // New results start at the top, even when there are as many as before.
+  const ids = commands.map((c) => c.id).join("\n");
+  useEffect(() => setActive(0), [ids]);
+
+  // Keep the highlighted row in view as the arrows move it.
+  const activeId = commands[active]?.id;
+  useEffect(() => {
+    if (!activeId) return;
+    document.getElementById(`${listId}-${activeId}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeId, listId]);
 
   const run = (c: Cmd | undefined) => {
     if (!c) return;
