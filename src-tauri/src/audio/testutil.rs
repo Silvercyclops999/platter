@@ -145,6 +145,9 @@ pub struct Route {
     pub status: Option<u16>,
     /// Pause between 16 KiB body chunks (a slow transfer).
     pub chunk_delay: Option<std::time::Duration>,
+    /// Once the `drops` are used up, answer every open-ended request with
+    /// this status (a server that went away part way through a song).
+    pub then_status: Option<u16>,
 }
 
 #[derive(Default)]
@@ -217,7 +220,13 @@ impl TestServer {
                         let mut routes = st.routes.lock();
                         match routes.get_mut(&path) {
                             Some(r) => {
-                                let snapshot = r.clone();
+                                let mut snapshot = r.clone();
+                                // A request for a closed range (the file's
+                                // tail) still gets through.
+                                let closed = range.as_deref().is_some_and(|r| !r.ends_with('-'));
+                                if r.drops == 0 && r.then_status.is_some() && !closed {
+                                    snapshot.status = r.then_status;
+                                }
                                 if r.drops > 0 {
                                     r.drops -= 1;
                                 }
@@ -336,6 +345,9 @@ pub struct FakeResolver {
     pub more_calls: Mutex<Vec<super::source::MoreRequest>>,
     /// Hidden songs and artists (shuffle play skips them).
     pub hidden: Mutex<Option<Arc<crate::hidden::HiddenSet>>>,
+    /// Track ids whose server can't be reached (stream and transcode fail
+    /// with a network error).
+    pub unreachable: Mutex<std::collections::HashSet<String>>,
 }
 
 impl FakeResolver {
@@ -349,6 +361,7 @@ impl FakeResolver {
             more_batches: Mutex::new(Vec::new()),
             more_calls: Mutex::new(Vec::new()),
             hidden: Mutex::new(None),
+            unreachable: Mutex::new(std::collections::HashSet::new()),
         })
     }
 }
@@ -356,6 +369,9 @@ impl FakeResolver {
 #[async_trait]
 impl TrackResolver for FakeResolver {
     async fn stream(&self, track: &Track) -> AppResult<StreamSource> {
+        if self.unreachable.lock().contains(&track.id) {
+            return Err(AppError::Network("server unreachable".into()));
+        }
         Ok(StreamSource {
             url: format!("{}/t/{}", self.base, track.id),
             headers: vec![("X-Plex-Token".into(), "test-token".into())],
@@ -365,6 +381,9 @@ impl TrackResolver for FakeResolver {
     }
     async fn transcode(&self, track: &Track) -> AppResult<StreamSource> {
         self.transcode_calls.fetch_add(1, Ordering::SeqCst);
+        if self.unreachable.lock().contains(&track.id) {
+            return Err(AppError::Network("server unreachable".into()));
+        }
         Ok(StreamSource {
             url: format!("{}/x/{}", self.base, track.id),
             headers: vec![],

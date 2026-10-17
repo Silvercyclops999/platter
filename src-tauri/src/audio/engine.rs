@@ -73,10 +73,12 @@ impl Default for EngineConfig {
 pub enum EngineEvent {
     /// The segment's first sample just played (track became audible).
     Started { key: u64, tag: String },
-    /// The segment played to its end.
-    Ended { key: u64, tag: String, listened_ms: u64 },
+    /// The segment played to its end, or to where its audio ran out when
+    /// `early` says the rest couldn't be fetched or decoded.
+    Ended { key: u64, tag: String, listened_ms: u64, early: Option<EndedEarly> },
     /// The track could not be played (after the transcode fallback).
-    Failed { key: u64, tag: String, track_id: String, error: AppError },
+    /// `at_ms` is where it was meant to start.
+    Failed { key: u64, tag: String, track_id: String, error: AppError, at_ms: u64 },
     /// Nothing left to play.
     Drained,
     /// Output underran while playing (true) / recovered (false).
@@ -92,6 +94,20 @@ pub enum EngineEvent {
     OutputReset(String),
     /// The output moved to another device by itself.
     OutputChanged,
+}
+
+/// A track whose audio stopped before its end.
+#[derive(Debug)]
+pub struct EndedEarly {
+    pub error: AppError,
+    /// Where the audio ran out.
+    pub at_ms: u64,
+}
+
+/// Whether an error means the server can't be reached right now (the
+/// network, or the sign-in), rather than something wrong with one file.
+pub fn unreachable(e: &AppError) -> bool {
+    matches!(e, AppError::Network(_) | AppError::Auth(_))
 }
 
 /// What the loader reports about where the audio came from.
@@ -161,6 +177,8 @@ struct Segment {
     blend_kit: Option<BlendKit>,
     /// Whether that blend was started or given up (a seek resets it).
     bl_decided: bool,
+    /// Decoding stopped before the end of the track (reported with its end).
+    early: Option<AppError>,
 }
 
 /// Most samples an A-B loop keeps for gapless replay (about a minute of
@@ -237,6 +255,7 @@ impl Segment {
             blend: None,
             blend_kit: None,
             bl_decided: false,
+            early: None,
         }
     }
 
@@ -847,10 +866,12 @@ impl Mix {
         if b.handover.take().is_none() {
             return;
         }
+        let at_ms = frame_ms(fd.seg.pos());
         events.push(EngineEvent::Ended {
             key: fd.seg.key,
             tag: std::mem::take(&mut b.a_tag),
             listened_ms: frame_ms(fd.seg.listened),
+            early: fd.seg.early.take().map(|error| EndedEarly { error, at_ms }),
         });
         events.push(EngineEvent::Started {
             key: b.b_key,
@@ -888,7 +909,7 @@ impl Mix {
     fn start_crossfade(&mut self, events: &mut Vec<EngineEvent>) {
         let ch = self.ch();
         let rate = self.format.sample_rate as u64;
-        let Some(a) = self.segments.pop_front() else { return };
+        let Some(mut a) = self.segments.pop_front() else { return };
         let len = a.samples.len() / ch;
         let head = self.segments.front().and_then(|b| b.head_frames(rate)).unwrap_or(0);
         let (a_fade, b_fade) = match self.dsp.crossfade {
@@ -898,10 +919,12 @@ impl Mix {
                 head.min(len as u64) as usize,
             ),
         };
+        let at_ms = self.frames_to_ms(a.pos() + len as u64);
         events.push(EngineEvent::Ended {
             key: a.key,
             tag: a.tag.clone(),
             listened_ms: self.frames_to_ms(a.listened + len as u64),
+            early: a.early.take().map(|error| EndedEarly { error, at_ms }),
         });
         if let Some(b) = self.segments.front_mut() {
             b.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
@@ -1035,7 +1058,7 @@ impl Mix {
                 return Fetch::Got;
             }
             if front.done {
-                let seg = self.segments.pop_front().expect("front exists");
+                let mut seg = self.segments.pop_front().expect("front exists");
                 seg.ctl.cancel.store(true, Ordering::SeqCst);
                 if !seg.started {
                     events.push(EngineEvent::Started {
@@ -1049,10 +1072,12 @@ impl Mix {
                     next.ctl.prio.store(Priority::Current as u8, Ordering::SeqCst);
                 }
                 let listened_ms = self.frames_to_ms(seg.listened);
+                let at_ms = self.frames_to_ms(seg.pos());
                 events.push(EngineEvent::Ended {
                     key: seg.key,
                     tag: seg.tag,
                     listened_ms,
+                    early: seg.early.take().map(|error| EndedEarly { error, at_ms }),
                 });
                 continue;
             }
@@ -1100,6 +1125,7 @@ impl Mix {
         front.start_frame = target;
         front.consumed = 0;
         front.done = false;
+        front.early = None;
         *front.ctl.seek.lock() = Some((front.generation, ms));
         self.drained_sent = false;
     }
@@ -1902,6 +1928,16 @@ impl Engine {
         }
     }
 
+    /// Counts `ms` as already listened on segment `key`: a play carried on
+    /// after the song had to be loaded again.
+    pub fn credit_listened(&self, key: u64, ms: u64) {
+        let mut m = self.core().mix.lock();
+        let frames = m.ms_to_frames(ms);
+        if let Some(s) = m.seg_mut(key) {
+            s.listened += frames;
+        }
+    }
+
     /// Key of the preloaded next segment (if it exists yet).
     pub fn next_key(&self) -> Option<u64> {
         let m = self.core().mix.lock();
@@ -2184,6 +2220,32 @@ fn mark_done(env: &Arc<Env>, key: u64, generation: u64) {
     }
 }
 
+/// Decoding stopped part way: what's buffered plays, and its end carries
+/// the error. When the server is out of reach the next song isn't chained
+/// on, so playback stops where the audio ran out.
+fn end_early(env: &Arc<Env>, key: u64, generation: u64, error: AppError) {
+    let stop_here = unreachable(&error);
+    {
+        let mut m = env.core.mix.lock();
+        match m.seg_mut(key) {
+            Some(seg) if seg.generation == generation => seg.early = Some(error),
+            _ => return,
+        }
+        if stop_here {
+            if let Some(seg) = m.seg_mut(key) {
+                seg.done = true;
+            }
+            m.next = None;
+            m.flush_handoff();
+        }
+    }
+    if stop_here {
+        env.core.cv.notify_all();
+    } else {
+        mark_done(env, key, generation);
+    }
+}
+
 /// Drops a segment that couldn't load and reports it. The event is sent
 /// under the mix lock: once the segment is gone the output can run dry and
 /// report `Drained`, and the player must see the failure first or it would
@@ -2193,11 +2255,13 @@ fn fail(env: &Env, key: u64, track: &Track, error: AppError) {
         let mut m = env.core.mix.lock();
         let Some(idx) = m.segments.iter().position(|s| s.key == key) else { return };
         let seg = m.segments.remove(idx).expect("index valid");
+        let at_ms = m.frames_to_ms(seg.start_frame);
         let _ = env.core.events.send(EngineEvent::Failed {
             key,
             tag: seg.tag,
             track_id: track.id.clone(),
             error,
+            at_ms,
         });
     }
     env.core.cv.notify_all();
@@ -2234,6 +2298,8 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
     let mut opened = match open_track(&env, &track, false, &ctl.prio) {
         Ok(o) => o,
         Err(OpenFail::Fatal(e)) => return fail(&env, key, &track, e),
+        // Out of reach: the transcoder is on the same server.
+        Err(OpenFail::Retry(e)) if unreachable(&e) => return fail(&env, key, &track, e),
         Err(OpenFail::Retry(e)) => {
             tracing::info!("track {} not playable directly ({e}); trying transcode", track.id);
             transcoded = true;
@@ -2491,9 +2557,15 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     };
                     return fail(&env, key, &track, err);
                 }
-                // Mid-track failure: play what we have, then move on.
+                // Mid-track failure: play what we have. A file that's bad
+                // from here moves on to the next song; a lost connection
+                // stops there, so the song isn't lost with it.
                 tracing::warn!("track {} ended early: {e}", track.id);
-                mark_done(&env, key, generation);
+                let err = match e {
+                    DecodeError::Io(m) => AppError::Network(m),
+                    other => AppError::Decode(other.to_string()),
+                };
+                end_early(&env, key, generation, err);
                 if let Some((g, ms)) = idle_until_seek(&core, &ctl) {
                     generation = g;
                     seek_to = Some(ms);

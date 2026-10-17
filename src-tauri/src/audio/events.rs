@@ -24,6 +24,8 @@ pub struct OutputLost {
 
 /// The message shown when a track can't be played.
 pub const SKIPPED_MESSAGE: &str = "Skipped: file unavailable";
+/// Playback paused on a song because the server couldn't be reached.
+pub const UNREACHABLE_MESSAGE: &str = "Paused: can't reach your server. Press play to try again.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

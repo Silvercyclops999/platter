@@ -119,7 +119,8 @@ export function connectPlayer(b: Backend = backend): () => void {
     }),
   );
   b.listen("player://error", (e) => {
-    if (!useApp.getState().health?.cachedOnly) return toast.error(e.message);
+    // A pause because the server can't be reached is said as it is.
+    if (!useApp.getState().health?.cachedOnly || !e.message.startsWith("Skipped")) return toast.error(e.message);
     if (offlineSkipShown) return;
     offlineSkipShown = true;
     toast.error(OFFLINE_SKIPPED);

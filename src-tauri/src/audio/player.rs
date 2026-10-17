@@ -17,11 +17,11 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::cache::{DiskCache, PrecacheHost, Precacher, cache_key};
-use super::engine::{Engine, EngineConfig, EngineDeps, EngineEvent};
+use super::engine::{EndedEarly, Engine, EngineConfig, EngineDeps, EngineEvent, unreachable};
 use super::gate::TransferGate;
 use super::events::{
     AbLoop, ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload, Problem,
-    SKIPPED_MESSAGE, TrackingEvent, perceptual_gain,
+    SKIPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE, perceptual_gain,
 };
 use super::output::{AudioOutput, OutputState};
 use super::persist::{self, Persisted};
@@ -216,6 +216,10 @@ enum Cmd {
     MixInfos { infos: HashMap<String, Analysis>, fit: bool },
     /// Analyses couldn't be looked up: these may be asked about again.
     MixInfosFailed(Vec<String>),
+    /// Paused because the server was out of reach. When the app knows it's
+    /// offline (`playable`: the songs that can play), move on to one of
+    /// those; otherwise say why it paused.
+    Unreachable { item_id: String, track_id: String, kind: &'static str, playable: Option<HashSet<String>> },
     /// These songs were analysed since they were asked about.
     Analysed(Vec<String>),
     /// Take over a queue from another device (see `Queue::adopt`).
@@ -368,6 +372,8 @@ impl PlayerHandle {
             restore_pos,
             skip_ids: HashSet::new(),
             failures_in_row: 0,
+            unreachable_at: None,
+            next_unreachable: None,
             sink,
             tracking: tracking.clone(),
             problems: problems.clone(),
@@ -857,6 +863,12 @@ struct Actor {
     /// Queue entries that failed to load this context (skipped).
     skip_ids: HashSet<String>,
     failures_in_row: usize,
+    /// Paused because the server couldn't be reached while this entry was
+    /// loading or playing: Play tries it again from where it stopped.
+    unreachable_at: Option<Unreachable>,
+    /// The preloaded next entry couldn't reach the server: it isn't
+    /// preloaded again, but is tried once more when its turn comes.
+    next_unreachable: Option<String>,
     sink: Arc<dyn EventSink>,
     tracking: broadcast::Sender<TrackingEvent>,
     problems: Arc<Mutex<Vec<Problem>>>,
@@ -877,6 +889,14 @@ struct Actor {
     /// The loaded entry carries on a play that was already reported: when
     /// it's audible again that's a resume, not a new play.
     continuing: bool,
+}
+
+/// The entry a lost connection paused on.
+struct Unreachable {
+    item_id: String,
+    /// Its play had been reported as started, with this much listened.
+    started: bool,
+    listened_ms: u64,
 }
 
 /// Everything about the user's listening that Compare could change.
@@ -1332,7 +1352,10 @@ impl Actor {
         self.maybe_refill();
         self.sync_album_context();
         if let Some(cur) = self.cur_key {
-            let next = self.pick_next().map(|i| (i.track, i.item_id));
+            let next = self
+                .pick_next()
+                .filter(|i| self.next_unreachable.as_deref() != Some(i.item_id.as_str()))
+                .map(|i| (i.track, i.item_id));
             self.next_key = self.engine.set_next(next, cur);
         }
         self.plan_blend();
@@ -1466,7 +1489,12 @@ impl Actor {
             && !self.cur_ended
             && let Some(item) = self.queue.current().cloned()
         {
-            let (pos, listened) = p.map_or((0, 0), |p| (p.position_ms, p.listened_ms));
+            let (pos, listened) = match (p, &self.unreachable_at) {
+                (Some(p), _) => (p.position_ms, p.listened_ms),
+                // Paused where the connection was lost.
+                (None, Some(u)) => (self.restore_pos, u.listened_ms),
+                (None, None) => (0, 0),
+            };
             self.track_event(TrackingEvent::TrackEnded {
                 track: item.track,
                 item_id: item.item_id,
@@ -1490,6 +1518,8 @@ impl Actor {
         self.cur_ended = false;
         self.continuing = false;
         self.next_key = None;
+        self.unreachable_at = None;
+        self.next_unreachable = None;
         self.restore_pos = start_ms;
         self.sync_album_context();
         match self
@@ -1761,6 +1791,9 @@ impl Actor {
                 }
                 self.update_next();
             }
+            Cmd::Unreachable { item_id, track_id, kind, playable } => {
+                self.on_unreachable(&item_id, track_id, kind, playable);
+            }
             Cmd::MixInfosFailed(ids) => {
                 // Asked again next time a blend is planned, not straight away.
                 self.mix.unask(&ids);
@@ -2010,9 +2043,20 @@ impl Actor {
             return Ok(());
         }
         if self.cur_key.is_none() || self.engine.position().is_none() {
-            // Nothing loaded (fresh start / restored / ended): load here.
+            // Nothing loaded (fresh start / restored / ended / lost
+            // connection): load here.
             let pos = self.restore_pos;
-            return self.start_current(true, pos);
+            let lost = self.unreachable_at.take();
+            let r = self.start_current(true, pos);
+            // After a lost connection the same play carries on.
+            if let (Ok(()), Some(u), Some(key)) = (&r, lost, self.cur_key)
+                && u.started
+                && self.queue.current().is_some_and(|c| c.item_id == u.item_id)
+            {
+                self.continuing = true;
+                self.engine.credit_listened(key, u.listened_ms);
+            }
+            return r;
         }
         match self.engine.play() {
             Ok(_) => {
@@ -2110,18 +2154,35 @@ impl Actor {
                     return;
                 }
             }
-            EngineEvent::Ended { key, listened_ms, .. } => {
+            EngineEvent::Ended { key, tag, listened_ms, early } => {
                 if Some(key) != self.cur_key || self.cur_ended {
                     return;
                 }
+                let early = match early {
+                    Some(EndedEarly { error, at_ms }) if unreachable(&error) => {
+                        // The rest of the song couldn't be fetched: wait
+                        // here instead of running through the queue.
+                        if let Some(id) = self.current_track().map(|t| t.id.clone()) {
+                            self.record_problem(&tag, &id, &error);
+                        }
+                        self.pause_unreachable(&error, at_ms, listened_ms);
+                        self.emit_state();
+                        return;
+                    }
+                    other => other,
+                };
                 self.cur_ended = true;
                 if let Some(item) = self.queue.current().cloned() {
+                    if let Some(e) = &early {
+                        self.record_problem(&item.item_id, &item.track.id, &e.error);
+                    }
                     self.track_event(TrackingEvent::TrackEnded {
                         track: item.track,
                         item_id: item.item_id,
                         listened_ms,
-                        completed: true,
-                        skipped_at_ms: None,
+                        // A song cut short didn't play to its end.
+                        completed: early.is_none(),
+                        skipped_at_ms: early.map(|e| e.at_ms),
                     });
                 }
                 return;
@@ -2138,6 +2199,34 @@ impl Actor {
                 tag,
                 track_id,
                 error,
+                at_ms,
+            } if unreachable(&error) => {
+                // Out of reach: nothing is wrong with the song, so it isn't
+                // skipped (that would run through the whole queue).
+                if Some(key) == self.cur_key {
+                    self.record_problem(&tag, &track_id, &error);
+                    // A reload after a seek: the play had started already.
+                    let listened = if self.cur_started { self.unreachable_listened() } else { 0 };
+                    self.pause_unreachable(&error, at_ms, listened);
+                } else if Some(key) == self.next_key {
+                    self.next_key = None;
+                    self.next_unreachable = Some(tag);
+                    if self.engine.position().is_some() {
+                        self.update_next();
+                    } else {
+                        // The current track already finished: try it now.
+                        self.continue_after_gap();
+                    }
+                } else {
+                    return;
+                }
+            }
+            EngineEvent::Failed {
+                key,
+                tag,
+                track_id,
+                error,
+                ..
             } => {
                 self.record_problem(&tag, &track_id, &error);
                 self.sink.error(&ErrorPayload {
@@ -2229,6 +2318,87 @@ impl Actor {
         } else {
             self.end_of_queue();
         }
+    }
+
+    /// What was listened of the current entry before its audio went away.
+    fn unreachable_listened(&self) -> u64 {
+        self.unreachable_at.as_ref().map_or(0, |u| u.listened_ms)
+    }
+
+    /// The server couldn't be reached for the current entry: pause on it at
+    /// `at_ms`, say so, and keep it to try again on Play. When the app knows
+    /// it's offline, playback moves on to songs on this computer instead.
+    fn pause_unreachable(&mut self, error: &AppError, at_ms: u64, listened_ms: u64) {
+        let Some(item) = self.queue.current().cloned() else {
+            self.end_of_queue();
+            return;
+        };
+        let was_active = self.is_active();
+        self.ab = None;
+        self.engine.stop();
+        self.cur_key = None;
+        self.next_key = None;
+        self.restore_pos = at_ms;
+        self.status = PlayerStatus::Paused;
+        let started = self.cur_started && !self.cur_ended;
+        if started && was_active {
+            self.track_event(TrackingEvent::Paused {
+                track_id: item.track.id.clone(),
+                position_ms: at_ms,
+            });
+        }
+        self.unreachable_at = Some(Unreachable {
+            item_id: item.item_id.clone(),
+            started,
+            listened_ms,
+        });
+        tracing::info!("paused: server out of reach ({error})");
+        self.mark_dirty();
+        let (item_id, track_id, kind) = (item.item_id, item.track.id, error.kind());
+        let Some(tx) = self.self_tx.upgrade() else {
+            self.on_unreachable(&item_id, track_id, kind, None);
+            return;
+        };
+        // Offline and known to be: songs on this computer can still play.
+        let lookup = self.lookup.clone();
+        tokio::spawn(async move {
+            let playable = lookup.playable_now().await;
+            let _ = tx.send(Cmd::Unreachable { item_id, track_id, kind, playable });
+        });
+    }
+
+    /// After pausing for a lost connection: offline, on to the next song on
+    /// this computer if there is one; otherwise say why it paused.
+    fn on_unreachable(&mut self, item_id: &str, track_id: String, kind: &str, playable: Option<HashSet<String>>) {
+        if self.unreachable_at.as_ref().is_none_or(|u| u.item_id != item_id)
+            || self.cur_key.is_some()
+            || self.status != PlayerStatus::Paused
+        {
+            return;
+        }
+        let target = playable.and_then(|ok| {
+            let n = self.queue.view().user_queue.len() + self.queue.view().next_up.len() + 1;
+            self.queue
+                .upcoming(n)
+                .into_iter()
+                .find(|i| ok.contains(&i.track.id) && !self.skip_ids.contains(&i.item_id))
+        });
+        let message = match target {
+            Some(t) => {
+                self.end_current_as_skip();
+                if !self.queue.advance_auto_to(&t.item_id) {
+                    return;
+                }
+                let _ = self.start_current(true, 0);
+                SKIPPED_MESSAGE
+            }
+            None => UNREACHABLE_MESSAGE,
+        };
+        self.sink.error(&ErrorPayload {
+            track_id: Some(track_id),
+            kind: kind.into(),
+            message: message.into(),
+        });
     }
 
     fn on_track_audible(&mut self) {

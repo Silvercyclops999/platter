@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 use super::engine::EngineConfig;
 use super::events::{
     AbLoop, ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload,
-    SKIPPED_MESSAGE, TrackingEvent,
+    SKIPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE,
 };
 use super::http::HttpConfig;
 use super::output::{CaptureHandle, CaptureOutput, OutputDevice, OutputFormat, OutputState};
@@ -1607,4 +1607,102 @@ async fn compare_from_a_paused_song_comes_back_paused() {
     // Nothing held: unhold does nothing.
     r.player.unhold().await.unwrap();
     assert_eq!(tid(&r.player.state().await.unwrap().track), "a");
+}
+
+async fn wait_errors(r: &Rig, n: usize) -> Vec<ErrorPayload> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let errs = r.sink.errors.lock().clone();
+        if errs.len() >= n {
+            return errs;
+        }
+        assert!(Instant::now() < deadline, "only {} errors", errs.len());
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unreachable_server_pauses_on_the_song_and_keeps_the_queue() {
+    // The server goes away after the first song: the next one isn't
+    // skipped (nor the rest after it), playback waits on it with a notice.
+    let mut r = rig(&["a", "b", "c"], 0.3, false, PlayerConfig::default()).await;
+    r.resolver.unreachable.lock().extend(["b".to_string(), "c".to_string()]);
+    r.player
+        .play_context(ctx(&["a", "b", "c"]), None, Some(false))
+        .await
+        .unwrap();
+    let s = wait_state(&r.player, |s| s.status == PlayerStatus::Paused && tid(&s.track) == "b").await;
+    assert_eq!(s.position_ms, 0);
+    assert_eq!(next_ids(&s), vec!["c"]);
+    let errs = wait_errors(&r, 1).await;
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert_eq!((errs[0].kind.as_str(), errs[0].message.as_str()), ("network", UNREACHABLE_MESSAGE));
+    assert_eq!(errs[0].track_id.as_deref(), Some("b"));
+    // Back: Play picks up the same song and carries on.
+    r.resolver.unreachable.lock().clear();
+    r.player.resume().await.unwrap();
+    next_tracking(&mut r.tracking, ended("c")).await;
+    let want = concat(&r, &["a", "b", "c"]);
+    assert_eq!(settled_samples(&r.cap, want.len()).await, want);
+    assert_eq!(r.sink.errors.lock().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unreachable_server_while_offline_moves_on_to_songs_on_this_computer() {
+    let mut r = rig(&["a", "b", "c"], 0.3, false, PlayerConfig::default()).await;
+    // The app thinks a and c are here, but a turns out not to be.
+    r.resolver.unreachable.lock().insert("a".into());
+    *r.resolver.playable.lock() = Some(["a".to_string(), "c".to_string()].into_iter().collect());
+    r.player
+        .play_context(ctx(&["a", "b", "c"]), None, Some(false))
+        .await
+        .unwrap();
+    next_tracking(&mut r.tracking, ended("c")).await;
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert_eq!((errs[0].kind.as_str(), errs[0].message.as_str()), ("network", SKIPPED_MESSAGE));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_cut_short_by_a_lost_connection_pauses_where_it_stopped() {
+    let mut r = rig(&["a", "b"], 8.0, false, PlayerConfig::default()).await;
+    let body = r.bodies[1].1.clone();
+    // About 1.7 s of b arrives, then the server answers nothing but errors.
+    r.server.add(
+        "/t/b",
+        Route {
+            body: body.clone(),
+            drop_after: Some(300_000),
+            drops: 1,
+            then_status: Some(503),
+            ..Default::default()
+        },
+    );
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    let paused = next_tracking(&mut r.tracking, |e| {
+        matches!(e, TrackingEvent::Paused { .. } | TrackingEvent::TrackEnded { .. })
+    })
+    .await;
+    let TrackingEvent::Paused { track_id, position_ms } = paused else {
+        panic!("a song cut short isn't a finished play: {paused:?}");
+    };
+    assert_eq!(track_id, "b");
+    assert!((1_500..=1_750).contains(&position_ms), "{position_ms}");
+    let s = wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    assert_eq!((tid(&s.track), s.position_ms), ("b".into(), position_ms));
+    let errs = wait_errors(&r, 1).await;
+    assert_eq!(errs[0].message, UNREACHABLE_MESSAGE);
+    // Back: the same play carries on from there to the end.
+    r.server.add("/t/b", Route { body, ..Default::default() });
+    r.player.resume().await.unwrap();
+    let ev = next_tracking(&mut r.tracking, |e| {
+        matches!(e, TrackingEvent::Resumed { .. } | TrackingEvent::TrackStarted { .. })
+    })
+    .await;
+    assert!(matches!(&ev, TrackingEvent::Resumed { track_id, .. } if track_id == "b"), "{ev:?}");
+    let end = next_tracking(&mut r.tracking, ended("b")).await;
+    let TrackingEvent::TrackEnded { completed, listened_ms, .. } = end else { unreachable!() };
+    assert!(completed);
+    assert!((7_950..=8_050).contains(&listened_ms), "{listened_ms}");
 }
