@@ -563,8 +563,8 @@ pub struct Settings {
     pub stats_page: bool,
     /// The stats strip on song, artist and album pages.
     pub stats_strip: bool,
-    /// This month's and last month's stats show (the Stats page's monthly section).
-    pub monthly_stats_on_profile: bool,
+    /// Monthly recaps on the Stats page (saved as `monthlyStatsOnProfile` by earlier builds).
+    pub monthly_stats: bool,
     /// Compare stats with friends (a summary only, never the history).
     pub stats_compare: bool,
     /// Wrapped and the yearly Top Songs lists.
@@ -952,7 +952,7 @@ impl Default for Settings {
             bookmarks_in_library: true,
             stats_page: true,
             stats_strip: true,
-            monthly_stats_on_profile: true,
+            monthly_stats: true,
             stats_compare: false,
             wrapped_top_songs: true,
             top_songs_show_plays: false,
@@ -1122,7 +1122,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "bookmarksInLibrary",
     "statsPage",
     "statsStrip",
-    "monthlyStatsOnProfile",
+    "monthlyStats",
     "statsCompare",
     "wrappedTopSongs",
     "topSongsShowPlays",
@@ -1428,7 +1428,8 @@ pub struct SettingsPatch {
     pub bookmarks_in_library: Option<bool>,
     pub stats_page: Option<bool>,
     pub stats_strip: Option<bool>,
-    pub monthly_stats_on_profile: Option<bool>,
+    #[serde(alias = "monthlyStatsOnProfile")]
+    pub monthly_stats: Option<bool>,
     pub stats_compare: Option<bool>,
     pub wrapped_top_songs: Option<bool>,
     pub top_songs_show_plays: Option<bool>,
@@ -1871,7 +1872,7 @@ impl Settings {
         set(&mut self.bookmarks_in_library, p.bookmarks_in_library);
         set(&mut self.stats_page, p.stats_page);
         set(&mut self.stats_strip, p.stats_strip);
-        set(&mut self.monthly_stats_on_profile, p.monthly_stats_on_profile);
+        set(&mut self.monthly_stats, p.monthly_stats);
         set(&mut self.stats_compare, p.stats_compare);
         set(&mut self.wrapped_top_songs, p.wrapped_top_songs);
         set(&mut self.top_songs_show_plays, p.top_songs_show_plays);
@@ -2128,7 +2129,7 @@ pub fn load(db: &DbHandle) -> Settings {
 
 /// Settings saved under an earlier name keep their value under the new one.
 pub fn migrate_names(mut v: serde_json::Value) -> serde_json::Value {
-    const RENAMED: &[(&str, &str)] = &[("discordUploadCatbox", "discordUploadCovers")];
+    const RENAMED: &[(&str, &str)] = &[("discordUploadCatbox", "discordUploadCovers"), ("monthlyStatsOnProfile", "monthlyStats")];
     if let Some(o) = v.as_object_mut() {
         for (old, new) in RENAMED {
             if let Some(val) = o.remove(*old)
@@ -3534,15 +3535,37 @@ mod tests {
     #[test]
     fn stats_settings_default_sync_and_apply() {
         let mut s = Settings::default();
-        assert!(s.stats_page && s.stats_strip && s.monthly_stats_on_profile);
+        assert!(s.stats_page && s.stats_strip && s.monthly_stats);
         assert!(!s.stats_compare, "comparing with friends is opt-in");
-        for k in ["statsPage", "statsStrip", "monthlyStatsOnProfile", "statsCompare"] {
+        for k in ["statsPage", "statsStrip", "monthlyStats", "statsCompare"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
         }
         let p: SettingsPatch =
-            serde_json::from_str(r#"{"statsPage":false,"statsStrip":false,"monthlyStatsOnProfile":false,"statsCompare":true}"#).unwrap();
+            serde_json::from_str(r#"{"statsPage":false,"statsStrip":false,"monthlyStats":false,"statsCompare":true}"#).unwrap();
         s.apply(&p).unwrap();
-        assert!(!s.stats_page && !s.stats_strip && !s.monthly_stats_on_profile && s.stats_compare);
+        assert!(!s.stats_page && !s.stats_strip && !s.monthly_stats && s.stats_compare);
+    }
+
+    #[test]
+    fn monthly_stats_on_profile_carries_over_as_monthly_stats() {
+        let (db, _d) = db();
+        db.write(|c| kv_set(c, KEY, r#"{"monthlyStatsOnProfile":false,"statsPage":false}"#)).unwrap();
+        let s = load(&db);
+        assert!(!s.monthly_stats && !s.stats_page, "the stored value carries over");
+        let saved = serde_json::to_value(&s).unwrap();
+        assert_eq!(saved["monthlyStats"], false);
+        assert!(saved.get("monthlyStatsOnProfile").is_none(), "saved under the new name only");
+        // The new name wins if both are there.
+        let v = migrate_names(serde_json::json!({ "monthlyStatsOnProfile": false, "monthlyStats": true }));
+        assert_eq!(v, serde_json::json!({ "monthlyStats": true }));
+        // A settings file or patch from an earlier build still sets it.
+        let p: SettingsPatch = serde_json::from_str(r#"{"monthlyStatsOnProfile":false}"#).unwrap();
+        assert_eq!(p.monthly_stats, Some(false));
+        let doc = serde_json::json!({ "kind": EXPORT_KIND, "version": 1, "settings": { "monthlyStatsOnProfile": false } });
+        let (p, report) = import_patch(&doc).unwrap();
+        assert_eq!((p.monthly_stats, report.applied), (Some(false), 1));
+        // Off by default never: a fresh install shows the recaps.
+        assert!(Settings::default().monthly_stats);
     }
 
     #[test]

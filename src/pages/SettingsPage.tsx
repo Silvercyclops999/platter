@@ -1579,12 +1579,12 @@ export function SettingsPage() {
       control: (ids) => toggle(s, "statsStrip", ids),
     },
     {
-      key: "monthlyStatsOnProfile",
+      key: "monthlyStats",
       section: "Library",
       group: "Stats",
-      title: "Show monthly stats",
-      description: "Monthly recaps on the Stats page: minutes, top artist and song, and a card you can share for any past month.",
-      control: (ids) => toggle(s, "monthlyStatsOnProfile", ids),
+      title: "Show monthly recaps",
+      description: "A recap for each month in the Stats page's Recaps tab: minutes, top artist and song, and a card you can share.",
+      control: (ids) => toggle(s, "monthlyStats", ids),
     },
     {
       key: "statsCompare",

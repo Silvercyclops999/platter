@@ -21,6 +21,23 @@ export const NOT_EXPORTED: readonly string[] = [
 
 export const EXPORT_KIND = "platter-settings";
 
+/** Settings saved under an earlier name, and their name now (settings.rs `migrate_names`). */
+export const RENAMED_SETTINGS: readonly (readonly [string, string])[] = [
+  ["discordUploadCatbox", "discordUploadCovers"],
+  ["monthlyStatsOnProfile", "monthlyStats"],
+];
+
+/** The same settings under today's names; the new name wins when both are there. */
+export function migrateSettingNames(o: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...o };
+  for (const [old, now] of RENAMED_SETTINGS) {
+    if (!(old in out)) continue;
+    if (!(now in out)) out[now] = out[old];
+    delete out[old];
+  }
+  return out;
+}
+
 export interface SettingsFile {
   kind: typeof EXPORT_KIND;
   version: 1;
@@ -42,7 +59,7 @@ export function importSettings(doc: unknown): { patch: Partial<Settings>; report
   const patch: Record<string, unknown> = {};
   const report: SettingsImportReport = { applied: 0, skipped: [] };
   const defaults = DEFAULT_SETTINGS as unknown as Record<string, unknown>;
-  for (const [k, v] of Object.entries(d.settings)) {
+  for (const [k, v] of Object.entries(migrateSettingNames(d.settings as Record<string, unknown>))) {
     if (NOT_EXPORTED.includes(k)) continue;
     const want = defaults[k];
     const fits = k in defaults && (want === null || v === null || typeof want === typeof v);

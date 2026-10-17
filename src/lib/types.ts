@@ -1136,8 +1136,8 @@ export interface Settings {
   statsPage: boolean;
   /** The stats strip on song, artist and album pages (and "Your stats" in menus). */
   statsStrip: boolean;
-  /** This month's and last month's stats show on the Stats page. */
-  monthlyStatsOnProfile: boolean;
+  /** Monthly recaps on the Stats page (saved as `monthlyStatsOnProfile` by earlier builds). */
+  monthlyStats: boolean;
   /** Compare stats with friends: a summary only, never the history. */
   statsCompare: boolean;
   /** Wrapped and the yearly Top Songs lists. */
@@ -1625,7 +1625,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showHelpButtons: true,
   statsPage: true,
   statsStrip: true,
-  monthlyStatsOnProfile: true,
+  monthlyStats: true,
   statsCompare: false,
   wrappedTopSongs: true,
   topSongsShowPlays: false,
@@ -3973,7 +3973,7 @@ export interface ShelfAlbum {
   formats: PhysicalFormat[];
 }
 
-/** `physical_stats`: the shelf on the Stats page. */
+/** `physical_stats`: the shelf in numbers, on the shelf page. */
 export interface ShelfStats {
   albums: number;
   copies: number;

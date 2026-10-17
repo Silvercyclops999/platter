@@ -40,7 +40,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "pinsInLibrary",
   "likeControlRows",
   "statsStrip",
-  "monthlyStatsOnProfile",
+  "monthlyStats",
   "shelfMissingList",
   "dragAndDrop",
   "showDescribePlaylist",

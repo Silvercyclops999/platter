@@ -14,7 +14,7 @@ use crate::settings::{SYNCED_SETTINGS, Settings, SettingsPatch};
 
 /// Settings renamed since the sync file began keep their first name in the
 /// store, so devices on older builds still share them.
-const STORE_NAMES: &[(&str, &str)] = &[("reportPlays", "reportToPlex")];
+const STORE_NAMES: &[(&str, &str)] = &[("reportPlays", "reportToPlex"), ("monthlyStats", "monthlyStatsOnProfile")];
 
 /// The store key for a setting.
 fn store_key(name: &str) -> &str {
@@ -97,5 +97,11 @@ mod tests {
         let p = patch_from_store(&store, &off).unwrap().unwrap();
         assert_eq!(p.report_plays, Some(true));
         assert_eq!(store_key("volumePercent"), "volumePercent");
+        // Monthly recaps too.
+        let no_recaps = Settings { monthly_stats: false, ..Settings::default() };
+        push(&store, &no_recaps).unwrap();
+        assert_eq!(store.get(&SETTINGS, "monthlyStatsOnProfile").unwrap(), Some(Value::Bool(false)));
+        store.put(&SETTINGS, "monthlyStatsOnProfile", &Value::Bool(true)).unwrap();
+        assert_eq!(patch_from_store(&store, &no_recaps).unwrap().unwrap().monthly_stats, Some(true));
     }
 }
