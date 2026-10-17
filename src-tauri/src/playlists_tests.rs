@@ -23,6 +23,8 @@ struct FakePlex {
     fail_next: Mutex<Option<AppError>>,
     /// Every write fails with this error while set.
     fail_all: Mutex<Option<AppError>>,
+    /// The next add lands, but its answer is lost (a timeout).
+    lose_add_answer: Mutex<bool>,
 }
 
 impl FakePlex {
@@ -105,6 +107,9 @@ impl PlaylistRemote for FakePlex {
         self.write(format!("add {id} {}", track_ids.join(",")))?;
         let rows: Vec<(String, String)> = track_ids.iter().map(|t| (t.clone(), self.id())).collect();
         self.lists.lock().get_mut(id).ok_or_else(not_found)?.1.extend(rows);
+        if std::mem::take(&mut *self.lose_add_answer.lock()) {
+            return Err(AppError::Network("Timed out.".into()));
+        }
         Ok(())
     }
     async fn remove(&self, id: &str, item_id: &str) -> AppResult<()> {
@@ -369,6 +374,41 @@ async fn network_errors_keep_the_edit_without_counting() {
     *r.plex.fail_all.lock() = None;
     r.pl.replay().await;
     assert_eq!(r.plex.tracks("50"), ["1", "2"]);
+}
+
+#[tokio::test]
+async fn an_add_that_landed_without_an_answer_is_not_sent_twice() {
+    let r = rig();
+    r.existing("50", "Road", &["1"]);
+    r.pl.add("50".into(), s(&["2", "3"]), Place::End).await.unwrap();
+    *r.plex.lose_add_answer.lock() = true;
+    r.pl.replay().await;
+    assert_eq!(r.queued(), 1, "no answer: kept");
+    r.pl.replay().await;
+    assert_eq!(r.queued(), 0);
+    assert_eq!(r.plex.tracks("50"), ["1", "2", "3"], "added once");
+    assert_eq!(r.plex.calls().iter().filter(|c| c.starts_with("add ")).count(), 1);
+    assert!(r.events.errors.lock().is_empty());
+}
+
+#[tokio::test]
+async fn an_edit_that_cannot_leave_the_queue_does_not_loop() {
+    let r = rig();
+    r.existing("50", "Road", &["1"]);
+    r.pl.add("50".into(), s(&["2"]), Place::End).await.unwrap();
+    r.db
+        .write(|c| {
+            Ok(c.execute_batch(
+                "CREATE TRIGGER stuck BEFORE DELETE ON playlist_ops BEGIN SELECT RAISE(ABORT, 'stuck'); END;",
+            )?)
+        })
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(30), r.pl.replay()).await.expect("replay returns");
+    assert_eq!(r.queued(), 1);
+    r.db.write(|c| Ok(c.execute_batch("DROP TRIGGER stuck;")?)).unwrap();
+    r.pl.replay().await;
+    assert_eq!(r.queued(), 0);
+    assert_eq!(r.plex.tracks("50"), ["1", "2"], "the retry saw it had landed");
 }
 
 #[tokio::test]

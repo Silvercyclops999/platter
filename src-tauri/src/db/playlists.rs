@@ -361,7 +361,13 @@ pub enum Op {
     Create,
     /// Append songs; `item_ids` are the local ids the new rows got here.
     #[serde(rename_all = "camelCase")]
-    Add { track_ids: Vec<String>, item_ids: Vec<String> },
+    Add {
+        track_ids: Vec<String>,
+        item_ids: Vec<String>,
+        /// Sent once already without a clear answer: it may have landed.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        sent: bool,
+    },
     Remove { item: ItemRef },
     Move { item: ItemRef, after: Option<ItemRef> },
     Update { title: Option<String>, summary: Option<String> },
@@ -434,6 +440,20 @@ pub fn drop_ops_after_create(c: &Connection, playlist_id: &str) -> AppResult<()>
     for s in seqs {
         drop_op(c, s)?;
     }
+    Ok(())
+}
+
+/// Marks a queued add as sent, before it goes out: if no clear answer comes
+/// back, the next try looks before adding again.
+pub fn mark_sent(c: &Connection, seq: i64) -> AppResult<()> {
+    let json: Option<String> = c.query_row("SELECT op FROM playlist_ops WHERE seq = ?1", [seq], |r| r.get(0)).optional()?;
+    let Some(json) = json else { return Ok(()) };
+    let mut op: Op = serde_json::from_str(&json).map_err(|e| AppError::Internal(e.to_string()))?;
+    if let Op::Add { sent, .. } = &mut op {
+        *sent = true;
+    }
+    let json = serde_json::to_string(&op).map_err(|e| AppError::Internal(e.to_string()))?;
+    c.execute("UPDATE playlist_ops SET op = ?2 WHERE seq = ?1", params![seq, json])?;
     Ok(())
 }
 
@@ -588,7 +608,7 @@ mod tests {
     fn ops_round_trip_through_the_queue() {
         let (db, _d) = db();
         db.write(|c| {
-            enqueue(c, "1", &Op::Add { track_ids: vec!["t1".into()], item_ids: vec!["local:x".into()] })?;
+            enqueue(c, "1", &Op::Add { track_ids: vec!["t1".into()], item_ids: vec!["local:x".into()], sent: false })?;
             enqueue(c, "1", &Op::Update { title: Some("N".into()), summary: None })?;
             enqueue(c, "2", &Op::Delete)?;
             let q = queued(c)?;

@@ -254,7 +254,7 @@ impl Playlists {
                 let p = local::editable(&tx, &id)?;
                 let new_ids = local::add(&tx, &p.id, &track_ids, &place)?;
                 if !local::is_local_only(&tx, &p.id)? {
-                    local::enqueue(&tx, &p.id, &Op::Add { track_ids: track_ids.clone(), item_ids: new_ids.clone() })?;
+                    local::enqueue(&tx, &p.id, &Op::Add { track_ids: track_ids.clone(), item_ids: new_ids.clone(), sent: false })?;
                     if place != Place::End {
                         // Plex appends; then each new row moves into place.
                         let rows = local::items(&tx, &p.id)?;
@@ -407,6 +407,9 @@ impl Playlists {
             return;
         }
         let mut waiting: HashSet<String> = HashSet::new();
+        // Edits already handled this round: one that comes round again
+        // couldn't be taken off the queue, so stop rather than loop.
+        let mut handled: HashSet<i64> = HashSet::new();
         let mut touched: Vec<String> = Vec::new();
         let mut changed = false;
         loop {
@@ -418,10 +421,17 @@ impl Playlists {
                 }
             };
             let Some(q) = queue.into_iter().find(|q| !waiting.contains(&q.playlist_id)) else { break };
+            if !handled.insert(q.seq) {
+                tracing::warn!("playlist edit {} is still queued after it was handled; trying again later", q.seq);
+                break;
+            }
             match self.replay_one(&q).await {
                 Ok(Replayed::Done(id)) => {
                     let seq = q.seq;
-                    let _ = self.db().write_async(move |c| local::drop_op(c, seq)).await;
+                    if let Err(e) = self.db().write_async(move |c| local::drop_op(c, seq)).await {
+                        tracing::warn!("sent playlist edit not taken off the queue: {e}");
+                        break;
+                    }
                     if let Some(id) = id
                         && !touched.contains(&id)
                     {
@@ -468,10 +478,23 @@ impl Playlists {
         let pid = q.playlist_id.as_str();
         match &q.op {
             Op::Create => self.replay_create(q).await,
-            Op::Add { track_ids, item_ids } => {
-                remote.add(pid, track_ids).await?;
+            Op::Add { track_ids, item_ids, sent } => {
+                // An earlier send that got no clear answer may have landed:
+                // if the playlist already ends with these songs, don't add
+                // them twice.
+                let landed = *sent && {
+                    let (_, rows) = remote.fetch(pid).await?;
+                    let start = rows.len().saturating_sub(track_ids.len());
+                    rows.len() >= track_ids.len() && rows[start..].iter().map(|r| &r.track_id).eq(track_ids.iter())
+                };
+                if !landed {
+                    let seq = q.seq;
+                    self.db().write_async(move |c| local::mark_sent(c, seq)).await?;
+                    remote.add(pid, track_ids).await?;
+                }
                 // Plex appends: the last rows are the new ones. Learn their ids
-                // so queued removes and moves can name them.
+                // so queued removes and moves can name them. The add is done
+                // either way; without the ids those edits look them up.
                 if let Ok((_, rows)) = remote.fetch(pid).await {
                     let start = rows.len().saturating_sub(item_ids.len());
                     let pairs: Vec<(String, String)> = item_ids
@@ -482,14 +505,18 @@ impl Playlists {
                             (row.track_id == *track).then(|| row.item_id.clone().map(|r| (local_id.clone(), r)))?
                         })
                         .collect();
-                    self.db()
+                    let mapped = self
+                        .db()
                         .write_async(move |c| {
                             for (l, r) in &pairs {
                                 local::map_id(c, l, r)?;
                             }
                             Ok(())
                         })
-                        .await?;
+                        .await;
+                    if let Err(e) = mapped {
+                        tracing::warn!("new playlist rows not matched to their ids: {e}");
+                    }
                 }
                 Ok(Replayed::Done(Some(pid.to_string())))
             }
