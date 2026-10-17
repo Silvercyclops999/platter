@@ -379,6 +379,7 @@ async fn run_ctx(ctx: &Ctx, prev: Option<SyncState>, full: bool) -> AppResult<Sy
 /// Returns `None` when cancelled.
 async fn full_pass(ctx: &Ctx, section_id: &str, gen_: i64) -> AppResult<Option<(u64, u64, u64, u64)>> {
     let mut counts = [0u64; 3];
+    let mut short = false;
     for (i, kind) in [ItemKind::Artist, ItemKind::Album, ItemKind::Track].into_iter().enumerate() {
         let phase = match kind {
             ItemKind::Artist => SyncPhase::Artists,
@@ -404,6 +405,12 @@ async fn full_pass(ctx: &Ctx, section_id: &str, gen_: i64) -> AppResult<Option<(
             }
         }
         counts[i] = done;
+        if done < total {
+            // The server said there were more than it handed over (still
+            // scanning, a capped page): nothing gets deleted this time.
+            tracing::warn!(?kind, done, total, "sync: server returned fewer items than it counted; skipping deletions");
+            short = true;
+        }
         if kind == ItemKind::Album {
             ctx.db
                 .write_async(|c| {
@@ -417,6 +424,9 @@ async fn full_pass(ctx: &Ctx, section_id: &str, gen_: i64) -> AppResult<Option<(
     }
     if ctx.cancelled() {
         return Ok(None);
+    }
+    if short {
+        return Ok(Some((counts[0], counts[1], counts[2], 0)));
     }
     let src = ctx.src.clone();
     let deleted = ctx

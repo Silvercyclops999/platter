@@ -210,6 +210,32 @@ async fn deletions_are_detected_incrementally_and_on_full_sync() {
     assert_eq!(count(&t.db, "artists"), 2);
 }
 
+/// A server mid-scan answering with almost nothing must not empty the
+/// library (downloads follow the library, so they'd go too). The same big
+/// drop on two syncs in a row is real and goes ahead.
+#[tokio::test]
+async fn a_server_answer_missing_most_of_the_library_deletes_nothing_until_it_repeats() {
+    let t = open();
+    let src = Arc::new(FakeSource::new(fake::generated(12, 5, 20)));
+    sync(&t.db, &src, false).await;
+    assert_eq!(count(&t.db, "tracks"), 1200);
+    src.lib.lock().tracks.truncate(100);
+    let out = sync(&t.db, &src, false).await;
+    assert_eq!(out, SyncOutcome::Incremental { changed: 0, deleted: 0 }, "held back");
+    assert_eq!(count(&t.db, "tracks"), 1200);
+    let _ = sync(&t.db, &src, false).await;
+    assert_eq!(count(&t.db, "tracks"), 100, "the same drop twice is real");
+}
+
+#[test]
+fn mass_delete_rule() {
+    assert!(store::refuses_mass_delete(10, 10, true), "an empty answer never deletes");
+    assert!(!store::refuses_mass_delete(10, 3, false), "small libraries delete normally");
+    assert!(store::refuses_mass_delete(1200, 1100, false));
+    assert!(!store::refuses_mass_delete(1200, 40, false));
+    assert!(!store::refuses_mass_delete(0, 0, true));
+}
+
 #[tokio::test]
 async fn failed_full_sync_keeps_existing_rows() {
     let t = open();

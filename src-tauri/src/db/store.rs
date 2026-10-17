@@ -305,12 +305,45 @@ pub fn delete_missing_in(tx: &Transaction<'_>, kind: ItemKind, keep: &HashSet<St
         let mut st = tx.prepare(&format!("SELECT id FROM {table} WHERE src = ?1"))?;
         st.query_map([src], |r| r.get(0))?.collect::<Result<_, _>>()?
     };
+    let gone: Vec<&String> = existing.iter().filter(|id| !keep.contains(*id)).collect();
+    if refuses_mass_delete(existing.len() as u64, gone.len() as u64, keep.is_empty())
+        && !confirmed_twice(tx, &format!("massdelete:{table}:{src}"), gone.len() as u64)?
+    {
+        tracing::warn!(table, src, existing = existing.len(), gone = gone.len(), "sync: server answer would remove most of the library; kept everything");
+        return Ok(0);
+    }
     let mut del = tx.prepare_cached(&format!("DELETE FROM {table} WHERE id = ?1"))?;
     let mut n = 0;
-    for id in existing.iter().filter(|id| !keep.contains(*id)) {
+    for id in gone {
         n += del.execute([id])? as u64;
     }
     Ok(n)
+}
+
+/// A big deletion goes ahead when the very same number showed up on the
+/// sync before too (the music really went); otherwise it's remembered and
+/// held back. Any deletion that goes ahead clears the memory.
+fn confirmed_twice(tx: &Transaction<'_>, key: &str, gone: u64) -> AppResult<bool> {
+    let before = kv_get(tx, key)?.and_then(|v| v.parse::<u64>().ok());
+    if before == Some(gone) {
+        tx.execute("DELETE FROM kv WHERE key = ?1", [key])?;
+        return Ok(true);
+    }
+    kv_set(tx, key, &gone.to_string())?;
+    Ok(false)
+}
+
+/// A deletion this big is almost always a short or failed answer from the
+/// server (mid-scan, a capped page), not music really gone: deleting would
+/// empty the library and take downloads with it. Below this many rows the
+/// half-rule doesn't apply, except that an empty answer never deletes.
+pub const MASS_DELETE_MIN: u64 = 50;
+
+/// True when removing `gone` of `total` rows should be refused: an empty
+/// answer for a library that has rows, or more than half of a library of
+/// at least [`MASS_DELETE_MIN`] rows.
+pub fn refuses_mass_delete(total: u64, gone: u64, empty_answer: bool) -> bool {
+    (empty_answer && total > 0) || (gone >= MASS_DELETE_MIN && gone.saturating_mul(2) > total)
 }
 
 /// Delete items of `kind` not stamped with `gen_` (not seen in a full pass).
@@ -321,6 +354,15 @@ pub fn delete_unseen(tx: &Transaction<'_>, kind: ItemKind, gen_: i64) -> AppResu
 /// [`delete_unseen`] among the rows of library `src`.
 pub fn delete_unseen_in(tx: &Transaction<'_>, kind: ItemKind, gen_: i64, src: &str) -> AppResult<u64> {
     let table = table_for(kind);
+    let (total, gone): (u64, u64) = tx.query_row(
+        &format!("SELECT count(*), coalesce(sum(seen_gen <> ?1), 0) FROM {table} WHERE src = ?2"),
+        params![gen_, src],
+        |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
+    )?;
+    if refuses_mass_delete(total, gone, total > 0 && gone == total) && !confirmed_twice(tx, &format!("massdelete:{table}:{src}"), gone)? {
+        tracing::warn!(table, src, total, gone, "sync: full pass would remove most of the library; kept everything");
+        return Ok(0);
+    }
     Ok(tx.execute(&format!("DELETE FROM {table} WHERE src = ?2 AND seen_gen <> ?1"), params![gen_, src])? as u64)
 }
 
