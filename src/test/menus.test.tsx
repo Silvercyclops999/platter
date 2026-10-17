@@ -115,3 +115,19 @@ describe("now-playing menu", () => {
     expect(labels()).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title", "Edit tags…"]);
   });
 });
+
+describe("menu and scrolling", () => {
+  it("closes when the page scrolls under it, not when it scrolls itself", () => {
+    render(
+      <>
+        <div className="main__scroll" data-testid="main" />
+        <ContextMenuHost />
+      </>,
+    );
+    act(() => useUi.getState().openMenu({ label: "Options", items: [{ label: "Add to queue", onSelect: () => {} }], x: 10, y: 10 }));
+    fireEvent.scroll(screen.getByRole("menu"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.scroll(screen.getByTestId("main"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+});

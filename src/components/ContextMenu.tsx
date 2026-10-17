@@ -53,11 +53,19 @@ export function ContextMenuHost() {
     };
     const onBlur = () => close();
     const onResize = () => close();
+    // The page scrolling under it would leave the menu floating over other rows.
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      if (t instanceof Element && (ref.current?.contains(t) || t.closest(".context-menu"))) return;
+      close();
+    };
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey);
     window.addEventListener("blur", onBlur);
     window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("mousedown", onDown, true);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onBlur);
