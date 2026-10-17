@@ -254,6 +254,14 @@ describe("Settings, Sharing", () => {
     expect(mock.sharing.shared[0]).toEqual({ invitee: "casey_plays", options: { libraries: ["3"], hideUnreleased: true, allowDownloads: true }, excludesLabel: true });
     await waitFor(() => expect(within(sec).getByRole("list", { name: "People with access" })).toHaveTextContent("casey_plays"));
     await userEvent.click(within(sec).getByRole("button", { name: "Remove robin_listens's access" }));
+    // It asks first; Not now keeps them.
+    let confirm = await screen.findByRole("dialog", { name: "Remove robin_listens's access?" });
+    expect(confirm).toHaveTextContent("won't be able to play music from your server");
+    await userEvent.click(within(confirm).getByRole("button", { name: "Not now" }));
+    expect(within(sec).getByRole("list", { name: "People with access" })).toHaveTextContent("robin_listens");
+    await userEvent.click(within(sec).getByRole("button", { name: "Remove robin_listens's access" }));
+    confirm = await screen.findByRole("dialog", { name: "Remove robin_listens's access?" });
+    await userEvent.click(within(confirm).getByRole("button", { name: "Remove access" }));
     await waitFor(() => expect(within(sec).getByRole("list", { name: "People with access" })).not.toHaveTextContent("robin_listens"));
     expect(toasts()).toContain("robin_listens can't reach your server anymore");
   });

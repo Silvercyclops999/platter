@@ -147,6 +147,8 @@ export function ListenStrip() {
 
 /** Everyone in the session; the host can remove guests. */
 function PeopleList({ v }: { v: ListenView }) {
+  // Removing someone asks once, right in the row.
+  const [asking, setAsking] = useState<string | null>(null);
   return (
     <ul className="listen-people__list" aria-label="People in the session">
       {v.people.map((p) => (
@@ -159,8 +161,26 @@ function PeopleList({ v }: { v: ListenView }) {
             {p.cantHear && <span className="listen-people__tag listen-people__tag--cant"> · can't hear this</span>}
             {v.role === "host" && p.offer && <span className="listen-people__offer">{offerText(p)}</span>}
           </span>
-          {v.role === "host" && !p.host && (
-            <IconButton size="sm" label={`Remove ${p.name}`} icon={<UserMinus size={16} />} onClick={() => void removePerson(p.id)} />
+          {v.role === "host" && !p.host && asking !== p.id && (
+            <IconButton size="sm" label={`Remove ${p.name}`} icon={<UserMinus size={16} />} onClick={() => setAsking(p.id)} />
+          )}
+          {v.role === "host" && !p.host && asking === p.id && (
+            <span className="listen-people__confirm" role="group" aria-label={`Remove ${p.name} from the session?`}>
+              <button
+                type="button"
+                className="listen-strip__btn"
+                autoFocus
+                onClick={() => {
+                  setAsking(null);
+                  void removePerson(p.id);
+                }}
+              >
+                Remove
+              </button>
+              <button type="button" className="listen-strip__btn" onClick={() => setAsking(null)}>
+                Keep
+              </button>
+            </span>
           )}
         </li>
       ))}

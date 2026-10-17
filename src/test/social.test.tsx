@@ -300,6 +300,12 @@ describe("listening sessions", () => {
     const people = within(strip).getByRole("list", { name: "People in the session" });
     expect(people).toHaveTextContent("listener (you) · host");
     await userEvent.click(within(people).getByRole("button", { name: "Remove Casey" }));
+    // Asked once in the row: Keep changes nothing, Remove removes.
+    const ask = within(people).getByRole("group", { name: "Remove Casey from the session?" });
+    await userEvent.click(within(ask).getByRole("button", { name: "Keep" }));
+    expect(people).toHaveTextContent("Casey");
+    await userEvent.click(within(people).getByRole("button", { name: "Remove Casey" }));
+    await userEvent.click(within(within(people).getByRole("group", { name: "Remove Casey from the session?" })).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(strip).toHaveTextContent("waiting for people to join"));
     expect(toasts()).toContain("Casey was removed from the session");
 

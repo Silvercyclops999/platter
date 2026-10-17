@@ -1,6 +1,7 @@
 import { Download, LockKeyhole, Share2, UserMinus } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
+import { Dialog } from "../components/Dialog";
 import { Skeleton } from "../components/Skeleton";
 import type { PersonWithAccess } from "../lib/types";
 import { InviteCallout, unreleasedLabel } from "../shell/ShareMusic";
@@ -19,6 +20,8 @@ export function ShareMyMusic({ ids }: { ids: { title: string; desc: string } }) 
 }
 
 function PersonRow({ p }: { p: PersonWithAccess }) {
+  const [asking, setAsking] = useState(false);
+  const notNow = useRef<HTMLButtonElement>(null);
   return (
     <li className="share-person">
       <PersonFace person={{ name: p.name, avatar: null }} size={32} />
@@ -43,7 +46,28 @@ function PersonRow({ p }: { p: PersonWithAccess }) {
           {p.pending && <span className="share-tag share-tag--pending">Pending</span>}
         </span>
       </span>
-      <IconButton size="sm" label={`Remove ${p.name}'s access`} icon={<UserMinus size={16} />} onClick={() => void removeAccess(p)} />
+      <IconButton size="sm" label={`Remove ${p.name}'s access`} icon={<UserMinus size={16} />} onClick={() => setAsking(true)} />
+      <Dialog open={asking} onClose={() => setAsking(false)} label={`Remove ${p.name}'s access?`} className="confirm" initialFocus={notNow}>
+        <h2 className="confirm__title">Remove {p.name}'s access?</h2>
+        <p className="confirm__body">
+          {p.name} won't be able to play music from your server any more. You can share it with them again later.
+        </p>
+        <div className="confirm__actions">
+          <Button ref={notNow} variant="ghost" onClick={() => setAsking(false)}>
+            Not now
+          </Button>
+          <Button
+            variant="primary"
+            className="btn--danger"
+            onClick={() => {
+              setAsking(false);
+              void removeAccess(p);
+            }}
+          >
+            Remove access
+          </Button>
+        </div>
+      </Dialog>
     </li>
   );
 }
