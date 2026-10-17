@@ -97,8 +97,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
+      # Reviewed and ignored: RUSTSEC-2026-0367/0368/0369 are about symlinks and Unix
+      # permissions when zip 4 extracts archives. Only tauri-plugin-updater still uses
+      # zip 4 (on Windows, even in its newest release), and it only extracts update
+      # packages whose signature it has checked against Platter's own key. Drop these
+      # ignores once the updater moves to zip 9 or later.
       - name: cargo audit
-        run: cargo audit --file src-tauri/Cargo.lock
+        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369
       - uses: actions/setup-node@v4
         with:
           node-version: 22
