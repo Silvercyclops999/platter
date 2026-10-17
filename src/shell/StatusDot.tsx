@@ -28,7 +28,7 @@ export function statusInfo(h: Health | null): { tone: "local" | "remote" | "rela
 
 /** `ts` is Unix ms. */
 function ago(ts: number | null | undefined): string {
-  return ts ? agoText(Date.now() - ts) : "—";
+  return ts ? agoText(Date.now() - ts) : "Unknown";
 }
 
 /** "Remote" / "Relay" badge next to the server name. */
@@ -106,13 +106,13 @@ export function StatusDot({ compact = false }: { compact?: boolean }) {
             </div>
             <dl className="status-popover__list">
               <dt>Server</dt>
-              <dd>{health?.serverName ?? "—"}</dd>
+              <dd>{health?.serverName ?? "Unknown"}</dd>
               <dt>Connection</dt>
-              <dd>{conn ? conn[0].toUpperCase() + conn.slice(1) : "—"}</dd>
+              <dd>{conn ? conn[0].toUpperCase() + conn.slice(1) : "Not connected"}</dd>
               <dt>Response time</dt>
-              <dd className="tabular">{health?.latencyMs != null ? `${health.latencyMs} ms` : "—"}</dd>
+              <dd className="tabular">{health?.latencyMs != null ? `${health.latencyMs} ms` : "Not available"}</dd>
               <dt>Server version</dt>
-              <dd className="tabular">{health?.serverVersion ?? "—"}</dd>
+              <dd className="tabular">{health?.serverVersion ?? "Unknown"}</dd>
               {health?.status === "offline" && (
                 <>
                   <dt>Last seen</dt>
@@ -124,7 +124,7 @@ export function StatusDot({ compact = false }: { compact?: boolean }) {
                 {health?.scan ? `${health.scan.done.toLocaleString()} of ${health.scan.total.toLocaleString()}` : "Idle"}
               </dd>
               <dt>Music files</dt>
-              <dd>{health ? (health.filesAvailable ? "Available" : "Unavailable") : "—"}</dd>
+              <dd>{health ? (health.filesAvailable ? "Available" : "Unavailable") : "Unknown"}</dd>
             </dl>
           </div>,
           document.body,

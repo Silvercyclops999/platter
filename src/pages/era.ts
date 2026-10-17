@@ -14,7 +14,7 @@ export function formatArchiveDate(d: string): string {
   return day ? `${month} ${Number(day)}, ${y}` : `${month} ${y}`;
 }
 
-/** An era's dates for its card: "2019", "Nov 2018 – Feb 2019", or null. */
+/** An era's dates for its card: "2019", "Nov 2018 to Feb 2019", or null. */
 export function eraRange(e: Pick<Era, "start" | "end">): string | null {
   const short = (d: string) => {
     const m = /^(\d{4})(?:-(\d{2}))?/.exec(d);
@@ -24,7 +24,7 @@ export function eraRange(e: Pick<Era, "start" | "end">): string | null {
   if (!e.start) return null;
   const a = short(e.start);
   const b = e.end ? short(e.end) : a;
-  return a === b ? a : `${a} – ${b}`;
+  return a === b ? a : `${a} to ${b}`;
 }
 
 /** Era cards show once an artist has two or more eras (and the setting is on). */

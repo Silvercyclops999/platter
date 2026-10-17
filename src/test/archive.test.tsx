@@ -40,7 +40,7 @@ describe("era and version helpers", () => {
     expect(formatArchiveDate("2019-02")).toBe("Feb 2019");
     expect(formatArchiveDate("2018-11-02")).toBe("Nov 2, 2018");
     expect(formatArchiveDate("Summer 2019")).toBe("Summer 2019");
-    expect(eraRange({ start: "2018-11-02", end: "2019-02" })).toBe("Nov 2018 – Feb 2019");
+    expect(eraRange({ start: "2018-11-02", end: "2019-02" })).toBe("Nov 2018 to Feb 2019");
     expect(eraRange({ start: "2021", end: "2021" })).toBe("2021");
     expect(eraRange({ start: null, end: null })).toBeNull();
   });
@@ -292,7 +292,7 @@ describe("artist page sections and eras", () => {
       .getAllByRole("button", { name: /^(Glass Season|Night Ferry|Paper Kingdom)$/ })
       .map((b) => b.textContent);
     expect(titles).toEqual(["Glass Season", "Night Ferry", "Paper Kingdom"]);
-    expect(within(shelf).getByText(/Sep 2018 – Feb 2019/)).toBeInTheDocument();
+    expect(within(shelf).getByText(/Sep 2018 to Feb 2019/)).toBeInTheDocument();
     // Popular comes first.
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     expect(headings.indexOf("Popular")).toBeLessThan(headings.indexOf("Eras"));
