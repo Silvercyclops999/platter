@@ -29,8 +29,21 @@ pub async fn automix_mixed_get(sync: State<'_, SyncService>) -> AppResult<Mixed>
 #[tauri::command]
 pub async fn automix_mix_set(sync: State<'_, SyncService>, player: State<'_, PlayerHandle>, id: String, on: bool) -> AppResult<Mixed> {
     let m = sync.store.run(move |s| mixed::set(s, &id, on)).await?;
-    player.set_mixed(m.clone()).await?;
-    Ok(m)
+    Ok(saved_then_play(m, |m| async move { player.set_mixed(m).await }).await)
+}
+
+/// The change is saved: the player is told, and if that fails it's logged
+/// (the player picks the change up the next time it's told), not reported,
+/// since the setting did change.
+async fn saved_then_play<F, Fut>(m: Mixed, tell: F) -> Mixed
+where
+    F: FnOnce(Mixed) -> Fut,
+    Fut: std::future::Future<Output = AppResult<()>>,
+{
+    if let Err(e) = tell(m.clone()).await {
+        tracing::warn!("automix: the player didn't take the mixed playlists: {e}");
+    }
+    m
 }
 
 /// The transition between two songs of a mixed playlist.
@@ -44,8 +57,7 @@ pub async fn automix_style_set(
     style: MixStyle,
 ) -> AppResult<Mixed> {
     let m = sync.store.run(move |s| mixed::set_style(s, &id, &from_id, &to_id, style)).await?;
-    player.set_mixed(m.clone()).await?;
-    Ok(m)
+    Ok(saved_then_play(m, |m| async move { player.set_mixed(m).await }).await)
 }
 
 /// One song on a mixed playlist.
@@ -135,6 +147,22 @@ pub async fn automix_view(
 mod tests {
     use super::*;
     use crate::audio::testutil::track;
+
+    #[tokio::test]
+    async fn a_saved_mix_change_succeeds_even_when_the_player_fails() {
+        let mut m = Mixed::new();
+        m.insert("pl".into(), automix::MixedPlaylist::default());
+        let got = saved_then_play(m.clone(), |_| async { Err(crate::error::AppError::Internal("player gone".into())) }).await;
+        assert_eq!(got.keys().collect::<Vec<_>>(), vec!["pl"]);
+        let told = std::sync::Arc::new(parking_lot::Mutex::new(None));
+        let t = told.clone();
+        saved_then_play(m, |m| async move {
+            *t.lock() = Some(m.len());
+            Ok(())
+        })
+        .await;
+        assert_eq!(*told.lock(), Some(1));
+    }
 
     #[test]
     fn rows_show_tempo_and_gaps_say_why_they_cant_mix() {
