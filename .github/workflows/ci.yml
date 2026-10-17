@@ -87,3 +87,20 @@ jobs:
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
           ./gitleaks git --redact --no-banner -c .gitleaks.toml .
+
+  # Known vulnerabilities in the Rust and npm packages Platter ships with.
+  # Fails on advisories (not on "unmaintained" warnings).
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm audit
+        run: npm audit --omit=dev --audit-level=high
