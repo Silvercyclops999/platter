@@ -127,7 +127,8 @@ describe("Played a lot", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Albums" }));
     await waitFor(() => expect(titles()[0]).toBe("Low Water by Harbor Lights"));
     expect(rows()[0]).toHaveTextContent("65 plays");
-    expect(rows()[0]).toHaveTextContent("2 songs played · 1 already in your library");
+    expect(rows()[0]).toHaveTextContent("2 songs played");
+    expect(rows()[0]).toHaveTextContent("1 already in your library");
   });
 
   it("filters by period and fewest plays, kept in the synced settings", async () => {

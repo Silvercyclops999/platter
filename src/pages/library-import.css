@@ -183,3 +183,8 @@
 .import-history-links { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
 .import-report .import-history-links { margin-top: var(--space-2); }
 .played-settings__choices { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+@container main (max-width: 640px) {
+  /* Plays and time are the point of these rows: keep them when narrow. */
+  .played-row .missing-row__wants { display: block; }
+}
+.played-row__album { display: flex; flex-direction: column; min-width: 0; }

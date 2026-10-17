@@ -26,12 +26,18 @@ function years(first: number, last: number): string {
 
 /** "153,497 plays imported, 2020 to 2026. 509 of 14,572 songs are in your library." Null without history. */
 export function historyLine(r: ImportReport): string | null {
+  const p = historyParts(r);
+  return p && `${p.head}. ${p.songs}.`;
+}
+
+/** The two halves of the history line: "153,497 plays imported, 2020 to 2026" and "509 of 14,572 songs are in your library". */
+export function historyParts(r: ImportReport): { head: string; songs: string } | null {
   const h = r.history;
   if (!h?.plays) return null;
   const when = h.firstPlayed != null && h.lastPlayed != null ? `, ${years(h.firstPlayed, h.lastPlayed)}` : "";
   const songs = r.songs.total ? "played songs" : h.songs === 1 ? "song" : "songs";
   const are = h.songs === 1 && !r.songs.total ? "is" : "are";
-  return `${plural(h.plays, "play")} imported${when}. ${n(h.songsMatched)} of ${n(h.songs)} ${songs} ${are} in your library.`;
+  return { head: `${plural(h.plays, "play")} imported${when}`, songs: `${n(h.songsMatched)} of ${n(h.songs)} ${songs} ${are} in your library` };
 }
 
 /** Whether an import brought in nothing to show. */

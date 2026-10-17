@@ -313,9 +313,16 @@ function PlayedLine({
           </span>
         </span>
       </span>
-      <span className="import-row__album truncate" title={r.kind === "song" ? undefined : `First played ${day(r.firstPlayed)}`}>
-        {detail}
-      </span>
+      {r.kind === "album" ? (
+        <span className="import-row__album played-row__album" title={`${detail}. First played ${day(r.firstPlayed)}`}>
+          <span className="truncate">
+            {n(r.songs ?? 0)} {r.songs === 1 ? "song" : "songs"} played
+          </span>
+          {!!r.inLibrary && <span className="truncate">{n(r.inLibrary)} already in your library</span>}
+        </span>
+      ) : (
+        <span className="import-row__album truncate">{detail}</span>
+      )}
       <span className="missing-row__links">
         {STORE_LINKS.map((st) => (
           <Button key={st.key} size="sm" variant="ghost" onClick={() => void open(r.links[st.key])} aria-label={`Search ${st.name} for ${r.title}`}>

@@ -18,7 +18,7 @@ import type { Track } from "../lib/types";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
-import { countParts, errText, importChanged, reportLine, reportPercent, skippedLine, useImportOverview } from "./importShared";
+import { countParts, errText, historyParts, importChanged, reportLine, reportPercent, skippedLine, songsLine, useImportOverview } from "./importShared";
 import { ImportHistoryLinks } from "./ImportHistoryLinks";
 import { ListView } from "./ImportListView";
 import { MissingPage } from "./ImportMissing";
@@ -39,10 +39,13 @@ function artistOf(t: Track): string {
 function ReportCard({ r }: { r: ImportReport }) {
   const pct = reportPercent(r);
   const skipped = skippedLine(r.skipped);
+  const history = historyParts(r);
+  // The headline is short: songs found, or the plays a history brought in.
+  const head = r.songs.total ? songsLine(r) : history ? history.head : reportLine(r);
   return (
     <article className="import-report" aria-label={`${importSourceName(r.source)} import`} data-testid={`report-${r.source}`}>
       <span className="import-report__source">{importSourceName(r.source)}</span>
-      <span className="import-report__found">{reportLine(r)}</span>
+      <span className="import-report__found">{head}</span>
       <div className="import-report__bar" role="img" aria-label={`${pct}% found`}>
         <span style={{ width: `${pct}%` }} />
       </div>
@@ -52,6 +55,8 @@ function ReportCard({ r }: { r: ImportReport }) {
         {countParts(r).map((p) => (
           <li key={p}>{p}</li>
         ))}
+        {history && r.songs.total > 0 && <li>{history.head}</li>}
+        {history && <li>{history.songs}</li>}
         {r.history?.plays > 0 && <li>{r.playsAdded ? `${n(r.playsAdded)} new plays added` : "No new plays this time"}</li>}
       </ul>
       <ImportHistoryLinks r={r} />
