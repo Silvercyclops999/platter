@@ -386,7 +386,7 @@ impl Radar {
         let json = serde_json::to_string(&all).map_err(|e| AppError::Internal(e.to_string()))?;
         self.inner.db.write(|c| kv_set(c, AUTO_KEY, &json))?;
         if on {
-            let s = crate::settings::load(&self.inner.db);
+            let s = crate::settings::try_load(&self.inner.db)?;
             if !s.auto_request {
                 let s = crate::settings::Settings { auto_request: true, ..s };
                 crate::settings::save(&self.inner.db, &s)?;

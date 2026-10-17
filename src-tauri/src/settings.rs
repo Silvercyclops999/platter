@@ -2212,22 +2212,81 @@ impl Settings {
     }
 }
 
-/// Read settings; a missing or unreadable value gives the defaults.
+/// Where the stored settings are copied, as they were, when some of them
+/// couldn't be read.
+pub const UNREADABLE_KEY: &str = "app.settings.unreadable";
+
+/// Read settings for showing and following. When the database can't be
+/// read this gives the defaults; anything that saves uses [`try_load`],
+/// which says so instead, so defaults never overwrite real settings.
 pub fn load(db: &DbHandle) -> Settings {
-    let mut s: Settings = db
-        .read(|c| kv_get(c, KEY))
-        .ok()
-        .flatten()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .map(migrate_names)
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    try_load(db).unwrap_or_else(|e| {
+        tracing::warn!("settings not read, using defaults for now: {e}");
+        let mut s = Settings::default();
+        s.clamp();
+        s
+    })
+}
+
+/// Read settings. A missing value gives the defaults. A value that won't
+/// read whole keeps every field that reads on its own (the rest take their
+/// defaults) and is copied to [`UNREADABLE_KEY`] first. Fails only when
+/// the database itself can't be read.
+pub fn try_load(db: &DbHandle) -> AppResult<Settings> {
+    let raw = db.read(|c| kv_get(c, KEY))?;
+    let mut s = match raw.as_deref().map(parse_stored) {
+        None => Settings::default(),
+        Some((s, None)) => s,
+        Some((s, Some(bad))) => {
+            tracing::warn!(fields = %bad, "some settings couldn't be read; they are back to their defaults");
+            let raw = raw.unwrap_or_default();
+            let kept = db
+                .write(|c| {
+                    if kv_get(c, UNREADABLE_KEY)?.as_deref() != Some(raw.as_str()) {
+                        kv_set(c, UNREADABLE_KEY, &raw)?;
+                    }
+                    Ok(())
+                });
+            if let Err(e) = kept {
+                tracing::warn!("unreadable settings not copied aside: {e}");
+            }
+            s
+        }
+    };
     s.clamp();
     // Ids saved before they carried their server (crate::sid).
     for ids in [&mut s.mix_exclude_artists, &mut s.mix_exclude_albums] {
         *ids = crate::sid::resolve_all(ids);
     }
-    s
+    Ok(s)
+}
+
+/// Stored settings JSON to settings, and the fields left at their defaults
+/// because they didn't read (None when everything read).
+fn parse_stored(raw: &str) -> (Settings, Option<String>) {
+    let v = match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(v) => migrate_names(v),
+        Err(e) => return (Settings::default(), Some(format!("(not JSON: {e})"))),
+    };
+    if let Ok(s) = serde_json::from_value::<Settings>(v.clone()) {
+        return (s, None);
+    }
+    let serde_json::Value::Object(stored) = v else {
+        return (Settings::default(), Some("(not an object)".into()));
+    };
+    // One field at a time (missing fields take their defaults); a field
+    // that breaks the read is left out, so it keeps its default.
+    let mut merged = serde_json::Map::new();
+    let mut bad = Vec::new();
+    for (k, val) in stored {
+        merged.insert(k.clone(), val);
+        if serde_json::from_value::<Settings>(serde_json::Value::Object(merged.clone())).is_err() {
+            merged.remove(&k);
+            bad.push(k);
+        }
+    }
+    let s = serde_json::from_value(serde_json::Value::Object(merged)).unwrap_or_default();
+    (s, Some(bad.join(", ")))
 }
 
 /// Settings saved under an earlier name keep their value under the new one.
@@ -2508,9 +2567,10 @@ impl SettingsState {
 
     pub async fn get(&self) -> AppResult<Settings> {
         let db = self.db.clone();
-        tokio::task::spawn_blocking(move || load(&db))
+        // Saves start from this, so a read error stops them.
+        tokio::task::spawn_blocking(move || try_load(&db))
             .await
-            .map_err(|e| AppError::Internal(e.to_string()))
+            .map_err(|e| AppError::Internal(e.to_string()))?
     }
 
     /// Apply a patch, persist it and publish it.
@@ -4477,5 +4537,41 @@ mod tests {
         s.apply(&serde_json::from_str(r#"{"showDlnaDevices":false}"#).unwrap()).unwrap();
         publish(&s, &live, &db);
         assert!(!live.remote.show_dlna(), "off stops the search");
+    }
+
+    fn stored(db: &DbHandle, json: &str) {
+        db.write(|c| kv_set(c, KEY, json)).unwrap();
+    }
+
+    #[test]
+    fn one_bad_setting_keeps_the_others_and_the_raw_value_is_kept_aside() {
+        let (db, _dir) = db();
+        let raw = r##"{"theme":"neon","downloadLimitGb":77,"accent":"#A1B2C3","reportToPlex":false}"##;
+        stored(&db, raw);
+        let s = try_load(&db).unwrap();
+        assert_eq!(s.theme, Settings::default().theme, "the bad one takes its default");
+        assert_eq!((s.download_limit_gb, s.accent.as_str(), s.report_plays), (77, "#A1B2C3", false));
+        assert_eq!(db.read(|c| kv_get(c, UNREADABLE_KEY)).unwrap().as_deref(), Some(raw));
+        // Not JSON at all: defaults, and the raw text is still kept.
+        stored(&db, "{\"theme\": ");
+        assert_eq!(try_load(&db).unwrap(), load(&db));
+        assert_eq!(db.read(|c| kv_get(c, UNREADABLE_KEY)).unwrap().as_deref(), Some("{\"theme\": "));
+    }
+
+    #[tokio::test]
+    async fn a_settings_read_error_never_saves_defaults_over_real_settings() {
+        let (db, _dir) = db();
+        let st = SettingsState::new(db.clone(), Live::default());
+        let p: SettingsPatch = serde_json::from_str(r#"{"downloadLimitGb":64}"#).unwrap();
+        st.set(p).await.unwrap();
+        let saved = db.read(|c| kv_get(c, KEY)).unwrap();
+        db.write(|c| Ok(c.execute_batch("ALTER TABLE kv RENAME TO kv_away")?)).unwrap();
+        assert!(try_load(&db).is_err());
+        let p: SettingsPatch = serde_json::from_str(r#"{"reportToPlex":false}"#).unwrap();
+        assert!(st.set(p).await.is_err(), "the change is refused, not saved over defaults");
+        assert!(st.modify(|s| { s.volume = 0.1; Ok(true) }).await.is_err());
+        db.write(|c| Ok(c.execute_batch("ALTER TABLE kv_away RENAME TO kv")?)).unwrap();
+        assert_eq!(db.read(|c| kv_get(c, KEY)).unwrap(), saved);
+        assert_eq!(load(&db).download_limit_gb, 64);
     }
 }

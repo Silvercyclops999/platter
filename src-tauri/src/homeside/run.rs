@@ -285,7 +285,7 @@ impl Bridge {
     /// Take what the desktop sent: Lidarr's address and key (unless set in
     /// the environment), the Plex sign-in, and the Lidarr settings.
     pub async fn apply_config(&self, cfg: &BridgeConfig) -> AppResult<()> {
-        let mut s = crate::settings::load(&self.p.db);
+        let mut s = crate::settings::try_load(&self.p.db)?;
         s.lidarr_url = self.p.env.lidarr_url.clone().unwrap_or_else(|| cfg.lidarr_url.clone());
         s.lidarr_away_url = String::new();
         s.lidarr_staging_folder = cfg.staging_folder.clone();
