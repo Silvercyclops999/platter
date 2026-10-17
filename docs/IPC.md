@@ -1814,6 +1814,78 @@ shows `error` until `downloads_retry`. A downloaded file deleted from disk is
 noticed when it would play and at startup, and counts as `missing` until
 retried. The queue survives restarts.
 
+## Devices
+Sync to a device: playlists, albums, artists and Liked Songs copied to a USB
+drive, an SD card or a music player.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `devices_list` | – | `DevicesView` |
+| `devices_add` | `{ root, name, folder }` | `Device` |
+| `devices_choose_folder` | `{ root }` | the picked folder below the drive's top (`/` separated), or null when the picker was cancelled; `invalid` for a folder on another drive |
+| `devices_update` | `{ id, patch: { name?, folder?, format?, budgetGb? } }` | `Device` |
+| `devices_select` | `{ id, kind: "playlist"\|"album"\|"artist"\|"liked", itemId \| null, title \| null, on: bool }` | `Device` |
+| `devices_forget` | `{ id }` | – |
+| `devices_sync` | `{ id }` | `SyncStatus` |
+| `devices_pause` | `{ on: bool }` | – |
+| `devices_cancel` | – | – |
+| `devices_status` | – | `SyncStatus \| null` |
+
+`DevicesView = { devices: DeviceView[], drives: Volume[], sync: SyncStatus | null }`
+
+`Device = { id, name, volumeId, volumeLabel, folder, format: Format | null, budgetGb: number | null, selection: { kind, id, title }[], lastSync, lastRoot }`
+
+`DeviceView` is a `Device` plus `root` (where it's plugged in now, or null),
+`free` and `total` in bytes.
+
+`Volume = { root, label, id, removable, free, total }`
+
+`Format = "original" | "flac" | "mp3-320" | "mp3-v0" | "opus"`
+
+`SyncStatus = { deviceId, deviceName, phase: "planning"|"copying"|"waiting"|"paused"|"done"|"cancelled"|"failed", total, done, kept, removed, current, bytes, failed: { title, error }[], leftOut: { title, songs }[], leftOutSongs, error: { kind: "full"|"writeProtected"|"removed"|"notConnected"|"other", message } | null, safeToUnplug }`
+
+Events: `devices://progress` → `SyncStatus` (at most four times a second, and
+on every phase change), and `devices://changed` (no payload) when the device
+list changes.
+
+A device is a drive plus a music folder on it, remembered on this computer
+only. `devices_list` offers removable drives that aren't a device yet. A
+device is found again by its volume serial number (Windows) or volume UUID
+(macOS), or else by the manifest in its music folder. `format` null follows
+`deviceFormat`; in a patch, `"default"` sets it back to null. `budgetGb` 0
+removes the size limit. The selection keeps the order things were added in.
+
+A sync works out what the device should hold, fills it in selection order up
+to the size limit and the free space (a song that doesn't fit is listed in
+`leftOut`, and smaller songs after it still get their turn), and compares
+that with the manifest `.platter-sync.json` in the music folder, which lists
+every file Platter wrote there. Only new or changed songs are copied. A file
+Platter didn't write is never written over or removed; a song that would take
+its name gets ` (2)`. With `deviceDeleteRemoved` on, Platter's own files for
+songs no longer chosen are removed, and folders left empty go too.
+
+Songs go in `Artist/Album/NN Title.ext` (`D-NN Title` on albums of more than
+one disc), with names safe on FAT32 and exFAT and paths short enough for
+Windows. Each chosen playlist and Liked Songs get an M3U8 file at the top of
+the music folder with paths relative to it. Original copies the file as it
+is. The other formats copy a file already in that codec and convert the rest
+on this computer: FLAC (flacenc), MP3 320 kbps or V0 (LAME), Opus at about
+160 kbps (libopus). Converted files keep the original's tags, take the
+song's basics from the library where the file has none, and get one front
+cover at most 500 pixels across.
+
+Songs come through the same transfer gate as downloads, at background
+priority, or from the downloaded file when it is the original. Two songs are
+made ahead of the copy at most, each on its own low priority thread. The sync
+waits (`waiting`) while playback is still filling its buffers, a fullscreen
+game is in front, the computer runs hot or other programs keep the processor
+busy. Every file is written under a hidden partial name, flushed, and renamed
+into place, so `safeToUnplug` is true once a sync is done or cancelled. A
+song that can't be fetched or converted is listed in `failed` and the rest go
+on. Writing stops with `error.kind` `full`, `writeProtected` or `removed`
+(the drive went away mid-sync); what was copied by then stays and is in the
+manifest. `notConnected` means the device isn't plugged in.
+
 ## Friend activity, following and listening sessions
 
 | Command | Args | Returns |
@@ -3301,6 +3373,8 @@ The rest of the fields, with their defaults:
 | `downloadFolder` | string, `""` | Where downloads go; empty is the app data folder. Changed with `downloads_choose_folder`, not `settings_set`. This device only. |
 | `downloadHomeOnly` | bool, true | Downloads wait while the server is reached over remote access or the relay. This device only. |
 | `downloadLiked` | bool, false | Keep Liked Songs downloaded; new likes download too. The same as the Liked Songs download toggle. This device only. |
+| `deviceFormat` | `"original"`, `"flac"`, `"mp3-320"`, `"mp3-v0"` or `"opus"`, `"original"` | What songs become on a device that doesn't pick its own format. Synced. |
+| `deviceDeleteRemoved` | bool, false | Syncing a device removes Platter's own files for songs no longer chosen. Synced. |
 | `homeMixes` | bool, true | Home shows Made for you, Your mixes by mood and Your genre mixes. |
 | `mixVariety` | `"balanced"`, `"familiar"` or `"adventurous"`, `"balanced"` | The share of favourites in a mix: 70%, 85% or 50%. |
 | `mixExcludeArtists` | string[], `[]` | Artist ids never in mixes or radio. |

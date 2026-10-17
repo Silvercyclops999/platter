@@ -57,6 +57,7 @@ import { coversNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus }
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { CheckTagsButton, MusicFolderControl, MusicFolderNote, MusicFolderPath, PlexLibrarySettings } from "./TagEditorSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
+import { DeviceFormatSetting, DeviceListSetting, OpenDevicesButton } from "./DeviceSyncSettings";
 import { BatchControl, BatchNote, GPU_OPTIONS, GpuNote, ModelControl, PROCESSOR_OPTIONS, TranscribeNote } from "./TranscribeSettings";
 import { ChangeSyncFolder, KeyCopyButton, SyncNowControl, SyncSwitch, syncNote, useSyncFile } from "./SyncSettings";
 import {
@@ -1043,6 +1044,29 @@ export function SettingsPage() {
       description:
         "Platter stops using the network: no server, artist info, lyrics lookups, Discord status, share links or update checks. Only music on this computer plays. Also in the app menu. This device only.",
       control: (ids) => toggle(s, "goOffline", ids),
+    },
+    // Devices (Sync to a device)
+    {
+      key: "devices",
+      section: "Devices",
+      title: "Devices",
+      description: "USB drives, SD cards and music players you sync music to. Add one on the Devices page while it's plugged in. This device only.",
+      control: () => <OpenDevicesButton />,
+      block: () => <DeviceListSetting />,
+    },
+    {
+      key: "deviceFormat",
+      section: "Devices",
+      title: "Default format",
+      description: "What songs become on a device that doesn't pick its own format. Original copies each file as it is; the others convert on this computer, in the background.",
+      control: (ids) => <DeviceFormatSetting ids={ids} />,
+    },
+    {
+      key: "deviceDeleteRemoved",
+      section: "Devices",
+      title: "Delete songs removed from the selection",
+      description: "When you take something off a device, the next sync removes the songs Platter copied for it. Other files on the device are never touched.",
+      control: (ids) => toggle(s, "deviceDeleteRemoved", ids),
     },
     // Sync
     {

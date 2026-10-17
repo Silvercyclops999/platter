@@ -38,6 +38,7 @@ const ReleaseRadarPage = lazy(() => import("../pages/ReleaseRadar").then((m) => 
 const LineagePage = lazy(() => import("../pages/LineagePage").then((m) => ({ default: m.LineagePage })));
 const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
 const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
+const DevicesPage = lazy(() => import("../pages/DevicesPage").then((m) => ({ default: m.DevicesPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
@@ -115,6 +116,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   newToYou: "New to you",
   shelf: "Your shelf",
   stats: "Stats",
+  devices: "Devices",
 };
 
 /**
@@ -188,6 +190,8 @@ function Page({ route }: { route: Route }) {
       return <TopSongsPage key={route.year ?? "all"} year={route.year ?? null} />;
     case "doctor":
       return <DoctorPage />;
+    case "devices":
+      return <DevicesPage />;
     case "import":
       return <ImportPage key={route.view ?? "home"} view={route.view} />;
     case "liked":

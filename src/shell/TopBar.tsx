@@ -279,6 +279,9 @@ export function AppMenu() {
               )}
             </button>
           )}
+          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "devices" }))}>
+            <span>Devices</span>
+          </button>
           <button
             type="button"
             role="menuitemcheckbox"

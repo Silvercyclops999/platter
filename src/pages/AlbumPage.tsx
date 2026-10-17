@@ -16,6 +16,7 @@ import { CoverPopup } from "../components/CoverPopup";
 import { ShelfBadge, physicalItem } from "../components/PhysicalDialog";
 import { DownloadButton } from "../components/DownloadButton";
 import { downloadMenuItems } from "../stores/downloads";
+import { sendToDeviceItem } from "../components/DeviceMenu";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
@@ -193,6 +194,7 @@ function LibraryAlbumView({ id }: { id: string }) {
                   { label: "Add to queue", onSelect: () => void player.addToQueue(data!.tracks, album.thumb) },
                   addToPlaylistItem(() => data?.tracks.map((t) => t.id) ?? []),
                   ...downloadMenuItems({ kind: "album", id: album.id, title: album.title }),
+                  sendToDeviceItem({ kind: "album", id: album.id, title: album.title }),
                   { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
                   { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${album.artistId}` }) },
                   shareItem("album", album.id, album.thumb),

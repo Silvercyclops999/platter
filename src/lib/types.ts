@@ -1042,6 +1042,10 @@ export interface Settings {
   downloadLiked: boolean;
   /** No network use at all; only music on this computer plays. This device only. */
   goOffline: boolean;
+  /** Sync to a device: what songs become on a device without its own format. Synced. */
+  deviceFormat: DeviceFormat;
+  /** Sync to a device: remove Platter's own files for songs no longer chosen. Synced. */
+  deviceDeleteRemoved: boolean;
   /** Home shows the made-for-you and mood and genre mix shelves. */
   homeMixes: boolean;
   /** How much of a mix is favourites. */
@@ -1509,6 +1513,8 @@ export const DEFAULT_SETTINGS: Settings = {
   downloadHomeOnly: true,
   downloadLiked: false,
   goOffline: false,
+  deviceFormat: "original",
+  deviceDeleteRemoved: false,
   homeMixes: true,
   mixVariety: "balanced",
   mixExcludeArtists: [],
@@ -1744,6 +1750,88 @@ export interface DownloadStatus {
   /** Songs waiting to be fetched. */
   queued: number;
   current?: { trackId: string; received: number; total?: number | null } | null;
+}
+
+// ---------------------------------------------------------------- devices
+
+/** What songs become on a device (docs/IPC.md "Devices"). */
+export type DeviceFormat = "original" | "flac" | "mp3-320" | "mp3-v0" | "opus";
+
+export type DeviceItemKind = "playlist" | "album" | "artist" | "liked";
+
+export interface DeviceItem {
+  kind: DeviceItemKind;
+  /** Empty for Liked Songs. */
+  id: string;
+  title: string;
+}
+
+/** A device remembered on this computer. */
+export interface Device {
+  id: string;
+  name: string;
+  volumeId: string | null;
+  volumeLabel: string;
+  /** The music folder below the drive's top, "/" separated ("" is the top). */
+  folder: string;
+  /** null follows the Default format setting. */
+  format: DeviceFormat | null;
+  budgetGb: number | null;
+  selection: DeviceItem[];
+  lastSync: number | null;
+  lastRoot: string | null;
+}
+
+export interface DeviceView extends Device {
+  /** Where it's plugged in now, or null. */
+  root: string | null;
+  free: number | null;
+  total: number | null;
+}
+
+/** A mounted drive. */
+export interface DriveVolume {
+  root: string;
+  label: string;
+  id: string | null;
+  removable: boolean;
+  free: number | null;
+  total: number | null;
+}
+
+export type DeviceSyncPhase = "planning" | "copying" | "waiting" | "paused" | "done" | "cancelled" | "failed";
+
+export interface DeviceSyncStatus {
+  deviceId: string;
+  deviceName: string;
+  phase: DeviceSyncPhase;
+  total: number;
+  done: number;
+  kept: number;
+  removed: number;
+  current: string | null;
+  bytes: number;
+  failed: { title: string; error: string }[];
+  leftOut: { title: string; songs: number }[];
+  leftOutSongs: number;
+  error: { kind: "full" | "writeProtected" | "removed" | "notConnected" | "other"; message: string } | null;
+  safeToUnplug: boolean;
+}
+
+export interface DevicesView {
+  devices: DeviceView[];
+  /** Removable drives that aren't a device yet. */
+  drives: DriveVolume[];
+  sync: DeviceSyncStatus | null;
+}
+
+export interface DevicePatch {
+  name?: string;
+  folder?: string;
+  /** A format, or "default" to follow the Default format setting. */
+  format?: DeviceFormat | "default";
+  /** 0 removes the limit. */
+  budgetGb?: number;
 }
 
 // ---------------------------------------------------------------- mixes
@@ -3510,6 +3598,10 @@ export interface EventMap {
   "downloads://status": DownloadStatus;
   /** The set of downloaded songs changed; ask downloadedTracks again. */
   "downloads://changed": null;
+  /** A sync to a device moved on. */
+  "devices://progress": DeviceSyncStatus;
+  /** The device list changed. */
+  "devices://changed": null;
   /** Mixes were made again (a new day, the next daylist, new settings). */
   "mixes://changed": null;
   /** The follow list changed. */

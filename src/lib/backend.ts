@@ -121,6 +121,11 @@ import type {
   BridgePairStart,
   DownloadKind,
   DownloadStatus,
+  Device,
+  DeviceItemKind,
+  DevicePatch,
+  DeviceSyncStatus,
+  DevicesView,
   ShareInfo,
   ShareKind,
   SyncStatus,
@@ -725,6 +730,24 @@ export interface Backend {
   downloadsRemoveAll(): Promise<number>;
   /** Pick a new folder (the files move there); null when cancelled. */
   downloadsChooseFolder(): Promise<string | null>;
+
+  // Sync to a device (docs/IPC.md "Devices")
+  /** Known devices (and where each is plugged in), new removable drives and the running sync. */
+  devicesList(): Promise<DevicesView>;
+  /** Remember a drive as a device with its music folder. */
+  devicesAdd(root: string, name: string, folder: string): Promise<Device>;
+  /** Pick the music folder on a drive; null when cancelled. */
+  devicesChooseFolder(root: string): Promise<string | null>;
+  devicesUpdate(id: string, patch: DevicePatch): Promise<Device>;
+  /** Add something to a device's selection, or take it off. */
+  devicesSelect(id: string, kind: DeviceItemKind, itemId: string, title: string, on: boolean): Promise<Device>;
+  /** Forget a device on this computer (its files stay on it). */
+  devicesForget(id: string): Promise<void>;
+  /** Start syncing; progress comes as `devices://progress`. */
+  devicesSync(id: string): Promise<DeviceSyncStatus>;
+  devicesPause(on: boolean): Promise<void>;
+  devicesCancel(): Promise<void>;
+  devicesStatus(): Promise<DeviceSyncStatus | null>;
 
   // Social (docs/IPC.md "Friend activity, following and listening sessions")
   /** Who else on the server listened lately (owner only). `fresh` skips the 20 s cache. */
@@ -1356,6 +1379,16 @@ export function createTauriBackend(): Backend {
     downloadsRetry: (kind, id) => call("downloads_retry", { kind: kind ?? null, id: id ?? null }),
     downloadsRemoveAll: () => call("downloads_remove_all"),
     downloadsChooseFolder: () => call("downloads_choose_folder"),
+    devicesList: () => call("devices_list"),
+    devicesAdd: (root, name, folder) => call("devices_add", { root, name, folder }),
+    devicesChooseFolder: (root) => call("devices_choose_folder", { root }),
+    devicesUpdate: (id, patch) => call("devices_update", { id, patch }),
+    devicesSelect: (id, kind, itemId, title, on) => call("devices_select", { id, kind, itemId, title, on }),
+    devicesForget: (id) => call("devices_forget", { id }),
+    devicesSync: (id) => call("devices_sync", { id }),
+    devicesPause: (on) => call("devices_pause", { on }),
+    devicesCancel: () => call("devices_cancel"),
+    devicesStatus: () => call("devices_status"),
     friendActivity: (fresh) => call("friend_activity", { fresh: fresh ?? null }),
     followsList: () => call("follows_list"),
     syncFileStatus: () => call("sync_file_status"),

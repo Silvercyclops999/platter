@@ -121,6 +121,8 @@ import type {
   SoundIdStatus,
   SoundsLike,
   ThemeFile,
+  DeviceItemKind,
+  DevicePatch,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { exportSettings, importSettings, type SettingsFile } from "../settingsFile";
@@ -195,6 +197,7 @@ import { MockArchive } from "./archive";
 import { MockDoctor } from "./doctor";
 import { MockPhysical } from "./physical";
 import { MockAutomix } from "./automix";
+import { MockDevices } from "./devices";
 import { MockJellyfin, plexRecord } from "./jellyfin";
 import { MockSubsonic } from "./subsonic";
 
@@ -381,6 +384,8 @@ export class MockBackend implements Backend {
   readonly physical: MockPhysical;
   /** Mixed playlists and made-up tempos (test hook: reset). */
   readonly automix: MockAutomix;
+  /** Sync to a device (test hooks: plugged, fail, stepMs, reset). */
+  readonly devices: MockDevices;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -513,6 +518,12 @@ export class MockBackend implements Backend {
     this.automix = new MockAutomix(
       (id) => this.trackById(id) ?? undefined,
       () => this.later(0, () => this.emit("syncstore://changed", { namespaces: ["mixedPlaylists"], remote: false })),
+    );
+    this.devices = new MockDevices(
+      this.fx,
+      () => this.likes.ids(),
+      (ms, fn) => this.later(ms, fn),
+      (event, payload) => (event === "devices://progress" ? this.emit(event, payload!) : this.emit("devices://changed", null)),
     );
     this.tags = new MockFileTags(
       this.fx,
@@ -4193,6 +4204,39 @@ export class MockBackend implements Backend {
       this.settings = { ...this.settings, downloadFolder: folder };
       return folder as string | null;
     });
+  }
+
+  // ---------------------------------------------------------------- sync to a device
+
+  devicesList() {
+    return this.delay(() => this.devices.view());
+  }
+  devicesAdd(root: string, name: string, folder: string) {
+    return this.delay(() => this.devices.add(root, name, folder));
+  }
+  devicesChooseFolder(_root: string) {
+    return this.delay(() => "Music" as string | null);
+  }
+  devicesUpdate(id: string, patch: DevicePatch) {
+    return this.delay(() => this.devices.update(id, patch));
+  }
+  devicesSelect(id: string, kind: DeviceItemKind, itemId: string, title: string, on: boolean) {
+    return this.delay(() => this.devices.select(id, kind, itemId, title, on));
+  }
+  devicesForget(id: string) {
+    return this.delay(() => this.devices.forget(id));
+  }
+  devicesSync(id: string) {
+    return this.delay(() => this.devices.sync(id));
+  }
+  devicesPause(on: boolean) {
+    return this.delay(() => this.devices.pause(on));
+  }
+  devicesCancel() {
+    return this.delay(() => this.devices.cancel());
+  }
+  devicesStatus() {
+    return this.delay(() => this.devices.status);
   }
 }
 

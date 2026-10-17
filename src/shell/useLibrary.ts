@@ -9,6 +9,7 @@ import { bookmarkPageItem, deleteSmartPlaylist, editSmartPlaylist } from "../sto
 import { useSettings } from "../stores/settings";
 import { backend } from "../lib/backend";
 import { downloadMenuItems, useDownloads } from "../stores/downloads";
+import { sendToDeviceItem } from "../components/DeviceMenu";
 import { startSessionItem, useSocial } from "../stores/social";
 import { useLikes } from "../stores/likes";
 import type { Playlist } from "../lib/types";
@@ -312,6 +313,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
       play,
       { label: "Add to queue", onSelect: () => void player.addToQueue([...useLikes.getState().ids].map((id) => ({ id, thumb: null }))) },
       ...downloadMenuItems({ kind: "liked", id: "", title: "Liked Songs" }),
+      sendToDeviceItem({ kind: "liked", id: "", title: "Liked Songs" }),
       { label: "Create playlist", separator: true, onSelect: () => void createPlaylist() },
     ];
   const items: MenuItem[] = [play];
@@ -333,6 +335,7 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
     items.push({ label: "Create folder", icon: FolderPlus, onSelect: () => void folders.create(null) });
   }
   if (e.kind === "album" || e.kind === "playlist") items.push(...downloadMenuItems({ kind: e.kind, id: e.id, title: e.title }));
+  items.push(sendToDeviceItem({ kind: e.kind, id: e.id, title: e.title }));
   if (e.kind === "album" || e.kind === "playlist") items.push(startSessionItem(() => void playEntry(e)));
   items.push(shareItem(e.kind, e.id, e.thumb));
   items.push({ ...pin, separator: true });

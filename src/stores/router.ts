@@ -52,6 +52,8 @@ export type Route =
   | { name: "import"; view?: string }
   /** The library doctor: things worth fixing in the library. */
   | { name: "doctor" }
+  /** Sync to a device: drives and players music is copied to. */
+  | { name: "devices" }
   /** An artist that isn't in the library (MusicBrainz artist id). */
   | { name: "catalogueArtist"; mbid: string }
   /** An album that isn't in the library (MusicBrainz release group id). */
