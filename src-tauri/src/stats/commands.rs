@@ -87,19 +87,24 @@ pub async fn stats_play_ids(db: State<'_, DbHandle>, range: StatsRange, kind: To
     .await
 }
 
-/// One answer kept for the rest of its day, until the counted plays change.
-type DayCache<T> = parking_lot::Mutex<Option<(i64, throwback::Stamp, T)>>;
+/// One answer kept for the rest of its day, until the counted plays or the
+/// library change.
+type DayCache<T> = parking_lot::Mutex<Option<(Key, T)>>;
+
+/// Today, what the counted plays look like, and the library's generation.
+type Key = (i64, throwback::Stamp, u64);
 static ON_THIS_DAY: DayCache<OnThisDay> = parking_lot::const_mutex(None);
 static TIME_TRAVEL: DayCache<TimeTravel> = parking_lot::const_mutex(None);
 
-/// Today and what the counted plays look like, for the day caches.
-async fn day_and_stamp(db: &DbHandle) -> AppResult<(i64, throwback::Stamp)> {
+/// The key the day caches are kept under now.
+async fn day_key(db: &DbHandle) -> AppResult<Key> {
     fresh(db).await?;
-    db.read_async(|c| Ok((super::today(c)?, throwback::stamp(c)?))).await
+    let generation = db.generation();
+    db.read_async(move |c| Ok((super::today(c)?, throwback::stamp(c)?, generation))).await
 }
 
-fn cached<T: Clone>(cache: &DayCache<T>, today: i64, stamp: throwback::Stamp) -> Option<T> {
-    cache.lock().as_ref().filter(|(d, s, _)| *d == today && *s == stamp).map(|(_, _, v)| v.clone())
+fn cached<T: Clone>(cache: &DayCache<T>, key: Key) -> Option<T> {
+    cache.lock().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())
 }
 
 /// Home's On this day shelf (empty with `shown: false` while it's off).
@@ -108,12 +113,13 @@ pub async fn home_on_this_day(db: State<'_, DbHandle>) -> AppResult<OnThisDay> {
     if !crate::settings::load(&db).home_on_this_day {
         return Ok(OnThisDay::default());
     }
-    let (today, stamp) = day_and_stamp(&db).await?;
-    if let Some(v) = cached(&ON_THIS_DAY, today, stamp) {
+    let key = day_key(&db).await?;
+    if let Some(v) = cached(&ON_THIS_DAY, key) {
         return Ok(v);
     }
+    let today = key.0;
     let v = db.read_async(move |c| throwback::on_this_day(c, today)).await?;
-    *ON_THIS_DAY.lock() = Some((today, stamp, v.clone()));
+    *ON_THIS_DAY.lock() = Some((key, v.clone()));
     Ok(v)
 }
 
@@ -123,12 +129,13 @@ pub async fn home_time_travel(db: State<'_, DbHandle>) -> AppResult<TimeTravel> 
     if !crate::settings::load(&db).home_time_travel {
         return Ok(TimeTravel::default());
     }
-    let (today, stamp) = day_and_stamp(&db).await?;
-    if let Some(v) = cached(&TIME_TRAVEL, today, stamp) {
+    let key = day_key(&db).await?;
+    if let Some(v) = cached(&TIME_TRAVEL, key) {
         return Ok(v);
     }
+    let today = key.0;
     let v = db.read_async(move |c| throwback::time_travel(c, today)).await?;
-    *TIME_TRAVEL.lock() = Some((today, stamp, v.clone()));
+    *TIME_TRAVEL.lock() = Some((key, v.clone()));
     Ok(v)
 }
 
@@ -219,4 +226,19 @@ pub async fn stats_wrapped(db: State<'_, DbHandle>, year: i64) -> AppResult<Wrap
     wrapped_on(&db)?;
     fresh(&db).await?;
     db.read_async(move |c| wrapped::wrapped(c, year)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_day_cache_misses_when_the_library_changes() {
+        let cache: DayCache<u32> = parking_lot::const_mutex(None);
+        *cache.lock() = Some(((20_000, (5, 40), 1), 7));
+        assert_eq!(cached(&cache, (20_000, (5, 40), 1)), Some(7));
+        assert_eq!(cached(&cache, (20_000, (5, 40), 2)), None, "a library sync since");
+        assert_eq!(cached(&cache, (20_000, (5, 41), 1)), None, "a new play");
+        assert_eq!(cached(&cache, (20_001, (5, 40), 1)), None, "a new day");
+    }
 }

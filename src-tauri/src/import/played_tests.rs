@@ -406,3 +406,18 @@ fn played_settings_default_validate_and_sync() {
     let bad: crate::settings::SettingsPatch = serde_json::from_value(json!({"playedPeriod": "decade"})).unwrap();
     assert!(s.apply(&bad).is_err());
 }
+
+#[test]
+fn a_library_that_swaps_one_song_for_another_is_matched_again() {
+    let (_d, mut c) = db();
+    history(&mut c);
+    assert_eq!(played::rematch(&mut c, HashMap::new(), NOW).unwrap(), 0);
+    let before: i64 = c.query_row("SELECT count(*) FROM song_index", [], |r| r.get(0)).unwrap();
+    // One song goes, the one the plays name comes: the same count.
+    c.execute("DELETE FROM tracks WHERE id = (SELECT min(id) FROM tracks)", []).unwrap();
+    song(&c, "9", "Second Bloom", "Mira Vale", "Glass Orchard");
+    index::rebuild(&c).unwrap();
+    let after: i64 = c.query_row("SELECT count(*) FROM song_index", [], |r| r.get(0)).unwrap();
+    assert_eq!(before, after);
+    assert_eq!(played::rematch(&mut c, HashMap::new(), NOW).unwrap(), 6);
+}

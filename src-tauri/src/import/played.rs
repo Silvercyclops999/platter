@@ -211,13 +211,20 @@ pub fn fill_folds(c: &mut Connection) -> AppResult<usize> {
     }
 }
 
+/// What the library and the unmatched plays look like, for skipping a
+/// rematch. Counts alone miss a library that swapped songs one for one (a
+/// new Plex id is a higher one), so the highest song id and the newest
+/// unmatched play go in too.
+const REMATCH_SIG: &str = "SELECT (SELECT count(*) || '/' || coalesce(max(track_id), '') FROM song_index) || ':' ||
+        (SELECT count(*) || '/' || coalesce(max(id), 0) FROM imported_plays WHERE rating_key IS NULL)";
+
 /// Matches unmatched imported plays whose song the library now has (by
 /// folded names in the song index, then the usual matcher). Skips the work
 /// when neither the library nor the unmatched plays changed since the last
 /// time. Returns how many plays it matched.
 pub fn rematch(c: &mut Connection, ranks: HashMap<String, Rank>, now_ms: i64) -> AppResult<usize> {
     let sig: String = c.query_row(
-        "SELECT (SELECT count(*) FROM song_index) || ':' || (SELECT count(*) FROM imported_plays WHERE rating_key IS NULL)",
+        REMATCH_SIG,
         [],
         |r| r.get(0),
     )?;
@@ -259,7 +266,7 @@ pub fn rematch(c: &mut Connection, ranks: HashMap<String, Rank>, now_ms: i64) ->
         }
     }
     let sig: String = tx.query_row(
-        "SELECT (SELECT count(*) FROM song_index) || ':' || (SELECT count(*) FROM imported_plays WHERE rating_key IS NULL)",
+        REMATCH_SIG,
         [],
         |r| r.get(0),
     )?;
