@@ -12,6 +12,22 @@ use crate::audio::events::{PlayerState, PlayerStatus};
 
 const TRAY_ID: &str = "platter-tray";
 
+/// The tray glyph (icons/tray.svg drawn at 32 px): the app icon's platter
+/// and tonearm, simplified. On macOS the menu bar takes the black template
+/// copy, which the system colours for light and dark menu bars.
+const TRAY_PNG: &[u8] = if cfg!(target_os = "macos") {
+    include_bytes!("../../icons/tray-template.png")
+} else {
+    include_bytes!("../../icons/tray.png")
+};
+
+/// The tray glyph as an image, or None if it can't be read (the app icon is used then).
+fn tray_glyph() -> Option<tauri::image::Image<'static>> {
+    let img = image::load_from_memory_with_format(TRAY_PNG, image::ImageFormat::Png).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    Some(tauri::image::Image::new_owned(img.into_raw(), w, h))
+}
+
 /// What the tray menu shows about playback.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayView {
@@ -132,7 +148,9 @@ impl<R: Runtime> Tray<R> {
                     on_command(OsCommand::Show)
                 }
             });
-        if let Some(icon) = app.default_window_icon() {
+        if let Some(icon) = tray_glyph() {
+            builder = builder.icon(icon).icon_as_template(cfg!(target_os = "macos"));
+        } else if let Some(icon) = app.default_window_icon() {
             builder = builder.icon(icon.clone());
         }
         builder.build(app)?;
@@ -163,6 +181,14 @@ impl<R: Runtime> Tray<R> {
 mod tests {
     use super::*;
     use crate::platform::media::tests::{state, track};
+
+    #[test]
+    fn tray_glyph_reads_at_32_pixels() {
+        let img = tray_glyph().expect("tray glyph");
+        assert_eq!((img.width(), img.height()), (32, 32));
+        // Not blank: some pixels are drawn.
+        assert!(img.rgba().chunks(4).any(|p| p[3] > 0));
+    }
 
     #[test]
     fn tray_label_follows_the_track_and_status() {

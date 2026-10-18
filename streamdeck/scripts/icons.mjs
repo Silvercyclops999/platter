@@ -54,17 +54,42 @@ function chunk(type, data) {
   crc.writeUInt32BE(crc32(td));
   return Buffer.concat([len, td, crc]);
 }
-/** `shapes` in 144 units: { ring: [r, width] } or { dot: r }, all centred. */
+/** Distance from p to the segment a-b. */
+function segment(px, py, [ax, ay, bx, by]) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+}
+
+/**
+ * How far inside a shape a point is (negative outside), in 144 units.
+ * Shapes: { ring: [r, width] } or { dot: r } centred; { oval: [cx, cy, rx, ry, width] }
+ * an ellipse outline and { fill: [cx, cy, rx, ry] } a filled one; { line: [x1, y1, x2, y2, width] }.
+ */
+function inside(s, px, py) {
+  if (s.dot !== undefined) return s.dot - Math.hypot(px - 72, py - 72);
+  if (s.ring) return s.ring[1] / 2 - Math.abs(Math.hypot(px - 72, py - 72) - s.ring[0]);
+  if (s.line) return s.line[4] / 2 - segment(px, py, s.line);
+  const [cx, cy, rx, ry, w] = s.oval ?? [...s.fill, 0];
+  // Distance to the ellipse, near enough for edge smoothing.
+  const n = Math.hypot((px - cx) / rx, (py - cy) / ry);
+  const d = (n - 1) * Math.min(rx, ry);
+  return s.oval ? w / 2 - Math.abs(d) : -d;
+}
+
+/** White on transparent, from `shapes` in 144 units. */
 function png(size, shapes) {
   const scale = size / 144;
   const rows = [];
   for (let y = 0; y < size; y++) {
     const row = Buffer.alloc(1 + size * 4);
     for (let x = 0; x < size; x++) {
-      const d = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2) / scale;
+      const px = (x + 0.5) / scale;
+      const py = (y + 0.5) / scale;
       let a = 0;
       for (const s of shapes) {
-        const edge = s.dot !== undefined ? s.dot - d : s.ring[1] / 2 - Math.abs(d - s.ring[0]);
+        const edge = inside(s, px, py);
         a = Math.max(a, Math.min(1, Math.max(0, edge * scale + 0.5)));
       }
       row.set([255, 255, 255, Math.round(a * 255)], 1 + x * 4);
@@ -82,8 +107,24 @@ function png(size, shapes) {
     chunk("IEND", Buffer.alloc(0)),
   ]);
 }
-const plugin = [{ ring: [56, 8] }, { ring: [36, 3] }, { dot: 10 }];
-const category = [{ ring: [56, 10] }, { dot: 14 }];
+// Platter's icon drawing (src-tauri/app-icon.svg): a platter seen at an
+// angle with its label, and the tonearm from the top right.
+const plugin = [
+  { oval: [64, 84, 56, 34, 8] },
+  { oval: [64, 84, 38, 23, 3] },
+  { fill: [64, 84, 16, 10] },
+  { fill: [120, 28, 8, 8] },
+  { line: [120, 28, 108, 68, 7] },
+  { line: [108, 68, 96, 80, 7] },
+  { line: [96, 80, 90, 86, 12] },
+];
+const category = [
+  { oval: [64, 84, 56, 34, 11] },
+  { fill: [64, 84, 18, 11] },
+  { fill: [120, 28, 10, 10] },
+  { line: [120, 28, 104, 74, 10] },
+  { line: [104, 74, 90, 86, 12] },
+];
 for (const [name, shapes, size] of [
   ["plugin/icon", plugin, 256],
   ["plugin/icon@2x", plugin, 512],

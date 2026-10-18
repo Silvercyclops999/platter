@@ -106,7 +106,54 @@
   from { translate: calc(-40% * var(--motion-move)) 0; opacity: 0; }
 }
 
+/* ---------------------------------------------------------------- Artist banner */
+/* The artist's art stays, a little shorter, and settles into the panel
+   rather than into a band of colour. */
+:root[data-identity] .artist-banner { height: clamp(280px, 24cqw, 380px); background: var(--color-bg-raised); }
+:root[data-identity] .artist-banner::after {
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.28) 0,
+    transparent 30%,
+    transparent 45%,
+    color-mix(in srgb, var(--color-bg-raised) 70%, transparent) 80%,
+    var(--color-bg-raised) 100%
+  );
+  box-shadow: inset 0 -1px 0 var(--engrave-dark);
+}
+:root[data-identity] .artist-banner ~ .detail-body { background: none; }
+:root[data-identity="sleeve"] .artist-banner__text { text-shadow: none; }
+
+/* Big names elsewhere: set in the display face, never poster-sized. */
+:root[data-identity] .profile-head__name { font-size: clamp(36px, 5.5cqi, 56px); letter-spacing: -0.01em; line-height: 1.05; }
+:root[data-identity] .fw__artist-name { font-family: var(--font-headings, var(--font-family)); font-weight: 600; font-size: clamp(40px, 4.5vw, 64px); letter-spacing: -0.005em; }
+
+/* Sleeve: paper takes a soft shadow, not a dark pool. */
+:root[data-identity="sleeve"] .mix-art { box-shadow: 0 4px 14px rgba(43, 33, 23, 0.22); }
+:root[data-identity="sleeve"] .card .art { box-shadow: 0 3px 10px rgba(43, 33, 23, 0.16); }
+:root[data-identity="sleeve"] .card .art--round { box-shadow: none; }
+
 /* ---------------------------------------------------------------- Expanded now playing */
+/* Views drawn over artwork keep dark surfaces on Sleeve too (tokens.css);
+   there they take Studio's brass rather than Classic's ivory. */
+:root[data-identity="sleeve"] :is(.fw, .np-about__heading.on-photo, .mix-header--photo, .pl-cover__hint, .mini),
+:root[data-identity="sleeve"].fw-open :is(.topbar, .player-bar) {
+  --color-accent: #CDAE6E;
+  --color-accent-hover: #DCC28A;
+  --color-accent-pressed: #B4955A;
+  --color-focus-ring: #E2CB95;
+  --color-text-on-accent: #1A1610;
+  --color-playing: #CDAE6E;
+}
+/* Lyrics in the expanded view: the cover's colour mixed into graphite, so
+   the room stays the same and only its light changes. */
+:root[data-identity] .fw--lyrics .fw__shade {
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0.3) 100%),
+    color-mix(in srgb, var(--fw-tint, #2a2520) 58%, #171513);
+}
+:root[data-identity] .fw .lyrics { --lyrics-bg: color-mix(in srgb, var(--fw-tint, #2a2520) 58%, #171513); }
+
 /* With the record player, the room is graphite with a quiet pool of the
    cover's colour under the platter; no blurred art behind it. */
 :root[data-identity] .fw--artwork:has(.turntable) {

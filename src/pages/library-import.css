@@ -31,6 +31,8 @@
 .import-page h2 { margin: var(--space-8) 0 var(--space-3); font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); }
 .import-empty { padding: var(--space-8) 0; color: var(--color-text-secondary); font-size: var(--font-size-lg); }
 .import-empty p + p { margin-top: var(--space-2); font-size: var(--font-size-md); color: var(--color-text-muted); }
+/* The next step sits a beat below the line that explains it. */
+.import-empty .import-empty__go { margin-top: var(--space-4); }
 
 .import-reports { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
 .import-report {
